@@ -9,7 +9,7 @@
         android:layout_height="wrap_content"
         android:padding="16dp"
         android:text="@string/hide_vpn_from"
-        android:textAppearance="?attr/textAppearanceSubtitle1" />
+        android:textAppearance="?android:attr/textAppearanceMedium" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler_view"

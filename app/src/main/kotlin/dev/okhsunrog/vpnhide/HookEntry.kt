@@ -34,7 +34,7 @@ import java.util.Collections
  *   5. NetworkInterface      — getNetworkInterfaces, getByName, getByIndex, getByInetAddress,
  *      hiding any interface whose name looks like a VPN tunnel (tun, ppp, tap, wg, ipsec,
  *      xfrm, utun, l2tp).
- *   6. /proc/net/*           — FileInputStream / FileReader constructors redirected to
+ *   6. /proc/net entries     — FileInputStream / FileReader constructors redirected to
  *      /dev/null for sensitive paths, so reading them yields empty content.
  *
  * It does NOT cover:
@@ -51,7 +51,6 @@ class HookEntry : IXposedHookLoadPackage {
     // classloader, so these Method references are the same across all hooked
     // packages — safe to keep on the singleton HookEntry instance.
     @Volatile private var origHasTransport: Method? = null
-    @Volatile private var origNcGetTransportTypes: Method? = null
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         // Never hook ourselves
@@ -96,7 +95,7 @@ class HookEntry : IXposedHookLoadPackage {
 
         // hasTransport(int): always return false when asked about TRANSPORT_VPN.
         val hasTransport = XposedHelpers.findMethodExact(
-            ncClass, "hasTransport", Int::class.javaPrimitiveType
+            ncClass, "hasTransport", java.lang.Integer.TYPE
         )
         origHasTransport = hasTransport
         XposedBridge.hookMethod(hasTransport, object : XC_MethodHook() {
@@ -109,7 +108,7 @@ class HookEntry : IXposedHookLoadPackage {
 
         // hasCapability(NET_CAPABILITY_NOT_VPN): always return true.
         XposedHelpers.findAndHookMethod(
-            ncClass, "hasCapability", Int::class.javaPrimitiveType,
+            ncClass, "hasCapability", java.lang.Integer.TYPE,
             object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if ((param.args[0] as Int) == NET_CAPABILITY_NOT_VPN) {
@@ -121,16 +120,17 @@ class HookEntry : IXposedHookLoadPackage {
 
         // getTransportTypes(): strip TRANSPORT_VPN from the returned int[].
         runCatching {
-            val m = XposedHelpers.findMethodExact(ncClass, "getTransportTypes")
-            origNcGetTransportTypes = m
-            XposedBridge.hookMethod(m, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val r = param.result as? IntArray ?: return
-                    if (r.contains(TRANSPORT_VPN)) {
-                        param.result = r.filter { it != TRANSPORT_VPN }.toIntArray()
+            XposedHelpers.findAndHookMethod(
+                ncClass, "getTransportTypes",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val r = param.result as? IntArray ?: return
+                        if (r.contains(TRANSPORT_VPN)) {
+                            param.result = r.filter { it != TRANSPORT_VPN }.toIntArray()
+                        }
                     }
                 }
-            })
+            )
         }
     }
 
@@ -268,7 +268,7 @@ class HookEntry : IXposedHookLoadPackage {
         // getNetworkInfo(int type): return null for TYPE_VPN queries.
         runCatching {
             XposedHelpers.findAndHookMethod(
-                cmClass, "getNetworkInfo", Int::class.javaPrimitiveType,
+                cmClass, "getNetworkInfo", java.lang.Integer.TYPE,
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
                         if ((param.args[0] as Int) == TYPE_VPN) param.result = null
@@ -371,7 +371,7 @@ class HookEntry : IXposedHookLoadPackage {
         // getByIndex(int): drop result if the interface is a VPN tunnel.
         runCatching {
             XposedHelpers.findAndHookMethod(
-                niClass, "getByIndex", Int::class.javaPrimitiveType,
+                niClass, "getByIndex", java.lang.Integer.TYPE,
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val iface = param.result as? NetworkInterface ?: return
