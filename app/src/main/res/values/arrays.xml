@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Default scope suggestions shown to the user when they first activate
+      this module in LSPosed/Vector. Empty by default — the user picks
+      target apps via the module's own MainActivity picker, which is then
+      cross-checked at hook time via XSharedPreferences. You can leave this
+      empty and just activate the module against specific apps manually.
+    -->
+    <string-array name="xposedscope"></string-array>
+</resources>

@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">VPN Hide</string>
+    <string name="module_description">Hides active VPN connection from selected apps — NetworkCapabilities, NetworkInfo, NetworkInterface, LinkProperties, /proc/net</string>
+    <string name="hide_vpn_from">Hide VPN status from selected apps:</string>
+    <string name="show_system_apps">Show system apps</string>
+    <string name="show_user_apps_only">Show user apps only</string>
+</resources>
