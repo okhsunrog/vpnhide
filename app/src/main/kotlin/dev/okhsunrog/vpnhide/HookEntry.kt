@@ -151,6 +151,69 @@ class HookEntry : IXposedHookLoadPackage {
                 }
             )
         }
+
+        // toString(): NetworkCapabilities.toString() iterates the internal
+        // mTransportTypes bitmask DIRECTLY, not via getTransportTypes(),
+        // so our hooks above don't affect it. Apps can therefore call
+        // `cm.getNetworkCapabilities(net).toString()` and grep for "VPN"
+        // — the official Russian Ministry of Digital Development VPN
+        // detection methodology lists exactly this output (e.g.
+        // `Transports: WIFI|VPN`, `VpnTransportInfo{...}`) as a direct
+        // sign. Strip the offending tokens from the returned string.
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                ncClass, "toString",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val s = param.result as? String ?: return
+                        param.result = sanitizeNetworkCapabilitiesString(s)
+                    }
+                }
+            )
+        }
+    }
+
+    /**
+     * Strip every textual mention of a VPN transport from the formatted
+     * NetworkCapabilities string. Handles three places where VPN can
+     * appear in stock AOSP output:
+     *
+     *   1. `Transports: WIFI|VPN` — rewrite the pipe-separated list,
+     *      removing any `VPN` element. Falls back to `WIFI` if VPN was
+     *      the only entry, since we don't want to leave a dangling
+     *      `Transports: ` line.
+     *   2. `VpnTransportInfo{type=1, sessionId=..., ...}` — replace the
+     *      whole object dump with `null` so it looks like
+     *      `getTransportInfo()` returned null (which is consistent with
+     *      our getTransportInfo hook).
+     *   3. Any stray `IS_VPN` flag — defensive; some custom ROMs add
+     *      it to the Capabilities list. Drop it from the &-joined list.
+     */
+    private fun sanitizeNetworkCapabilitiesString(s: String): String {
+        var out = s
+
+        // 1. Transports: <pipe-list>
+        // Match the segment from "Transports: " up to the next whitespace.
+        val transportsRe = Regex("""Transports:\s*([^\s\]]+)""")
+        out = transportsRe.replace(out) { mr ->
+            val list = mr.groupValues[1]
+                .split('|')
+                .filter { it.isNotEmpty() && it != "VPN" }
+            val rebuilt = if (list.isEmpty()) "WIFI" else list.joinToString("|")
+            "Transports: $rebuilt"
+        }
+
+        // 2. VpnTransportInfo{...}
+        out = Regex("""VpnTransportInfo\{[^}]*}""").replace(out, "null")
+
+        // 3. IS_VPN flag in any &-separated list (Capabilities, Policies).
+        out = out
+            .replace("&IS_VPN&", "&")
+            .replace("IS_VPN&", "")
+            .replace("&IS_VPN", "")
+            .replace("IS_VPN", "")
+
+        return out
     }
 
     /** Calls the *real* hasTransport, bypassing our own hook, to detect a VPN network. */

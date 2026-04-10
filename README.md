@@ -64,6 +64,40 @@ checkers see the VPN exit IP and flag a mismatch with GeoIP / ASN
 databases. That is a network-layer fact, not something any client-side
 hook can fix.
 
+### Source: official VPN/Proxy detection methodology
+
+Both detection apps above (and any future ones playing the same game)
+implement the **official Russian Ministry of Digital Development
+methodology for identifying VPN/Proxy on user devices**, published as
+an OCR'd Markdown copy here:
+<https://t.me/ruitunion/893>. The Android sections (6.4 / 7.4 / 7.6 /
+7.7) are the canonical reference for which Java APIs we hook and why.
+
+### TODO — methodology coverage gaps
+
+The methodology mentions a few additional vectors that we don't yet
+handle. None of them are triggered by the two detection apps above on
+a Pixel 8 Pro / Android 16, but they're documented signals and future
+detectors will use them. Listed by descending priority:
+
+- [ ] **`Runtime.exec("dumpsys vpn_management")` and `dumpsys activity
+      services VpnService`** — sec. 7.4. On `untrusted_app` these
+      always return `Permission Denial`, which both audited apps treat
+      as a clean signal. Worth covering preemptively in case a future
+      detector decides to interpret a non-empty stdout as positive
+      proof.
+- [ ] **`Runtime.exec("ip route" / "ip rule")` etc.** — same idea,
+      same caveat (also denied for untrusted_app).
+- [ ] **`NetworkScore` / `Score(Policies: IS_VPN)`** — sec. 6.4. Only
+      reachable via reflection on system-internal API; normal apps
+      can't read it. Theoretical leak. Defer until something actually
+      tries.
+
+The complementary native side (`getifaddrs`, `ioctl`, `/proc/net/*`
+read by C/C++/JNI/Flutter that bypasses ART entirely) is the
+responsibility of [vpnhide-zygisk](https://github.com/okhsunrog/vpnhide-zygisk),
+not this module.
+
 ---
 
 ## What problem does this solve?
@@ -98,6 +132,8 @@ uses these, VpnHide should make it blind to the VPN.
 | `hasTransport(TRANSPORT_VPN)` | always returns `false` |
 | `hasCapability(NET_CAPABILITY_NOT_VPN)` | always returns `true` |
 | `getTransportTypes()` | `TRANSPORT_VPN` stripped from the returned `int[]` |
+| `getTransportInfo()` | returns `null` whenever the real value is `VpnTransportInfo` |
+| `toString()` | post-processed: `\|VPN` stripped from `Transports:`, `VpnTransportInfo{…}` replaced with `null`, stray `IS_VPN` flags dropped from `&`-joined lists |
 
 ### 2. `android.net.NetworkInfo` (legacy `ConnectivityManager.getActiveNetworkInfo()` path)
 | Method | Behaviour with VpnHide |
