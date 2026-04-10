@@ -21,6 +21,49 @@ VPN interface is up on the device.
 > install either one alone, but for full coverage of both the Java and
 > native stacks you want both installed together.
 
+### Verified against third-party detection apps
+
+With **this module + [okhsunrog/vpnhide-zygisk](https://github.com/okhsunrog/vpnhide-zygisk)**
+installed, and WireGuard running in **split-tunnel** mode (so the
+detection apps' own HTTPS probes go out through the carrier, not the
+tunnel), the following popular Russian "is there a VPN on this device?"
+apps report **all clean**, with no direct or indirect signals
+triggered:
+
+- [xtclovver/RKNHardering](https://github.com/xtclovver/RKNHardering) —
+  the Kotlin app implementing the Russian Ministry of Digital
+  Development's VPN-detection methodology. All GeoIP, IP comparison,
+  Direct signs (`TRANSPORT_VPN`, HTTP/SOCKS proxy), Indirect signs
+  (`NET_CAPABILITY_NOT_VPN`, interface enumeration, MTU, default route,
+  DNS servers, `dumpsys`), Location signals and Split-tunnel bypass
+  cards come back Clean.
+- [loop-uh/yourvpndead](https://github.com/loop-uh/yourvpndead) — the
+  "no root, no permissions, standard Android API, under one second"
+  detector. Reports `VPN: Не активен`; the only visible interfaces are
+  `dummy0` / `lo` / `rmnet16`; no VPN signals in direct or indirect
+  checks.
+
+Neither module alone covers all of this:
+
+- **This** module handles the Java / Android framework side:
+  `NetworkCapabilities` (`hasTransport` / `hasCapability` /
+  `getTransportInfo`), `NetworkInterface.getNetworkInterfaces`,
+  `LinkProperties` (`getRoutes` / `getDnsServers` / `getHttpProxy`),
+  `System.getProperty` for proxy keys, and redirects `/proc/net/*`
+  reads done through `java.io.FileInputStream` / `FileReader` to
+  `/dev/null`.
+- The **vpnhide-zygisk** companion closes the native side:
+  `libc::ioctl` (`SIOCGIFNAME` / `SIOCGIFFLAGS`) and `libc::getifaddrs`,
+  which is what Flutter / Dart apps and any JNI code would hit
+  bypassing ART entirely.
+
+Split-tunnel is a hard requirement for the cards that compare the
+device-reported public IP against external checkers: the detection
+app's own HTTPS requests must exit through the carrier, otherwise the
+checkers see the VPN exit IP and flag a mismatch with GeoIP / ASN
+databases. That is a network-layer fact, not something any client-side
+hook can fix.
+
 ---
 
 ## What problem does this solve?
