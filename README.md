@@ -8,9 +8,13 @@ Useful if you run a split-tunnel VPN (where only some traffic goes through
 the tunnel) but certain apps still refuse to work when they see that *any*
 VPN interface is up on the device.
 
-> **Status:** experimental / personal-use. Built and tested on crDroid 12.8
+> **Status:** experimental / personal-use. Tested baseline is crDroid 12.8
 > (Android 16) on a Pixel 8 Pro with KernelSU-Next (LKM) + NeoZygisk +
-> JingMatrix Vector. Should work on any LSPosed / Vector v93+ setup.
+> JingMatrix Vector, but the module itself is just an LSPosed/Vector
+> hook plugin and runs on any LSPosed/Vector v93+ deployment regardless
+> of the underlying root provider — Magisk, KernelSU, KernelSU-Next,
+> APatch, with or without ZygiskNext / NeoZygisk / Magisk's built-in
+> Zygisk.
 
 > **Companion module:** this LSPosed module covers the Java / Android
 > framework side. For the **native** detection path — apps that check
@@ -212,12 +216,11 @@ every Java hook in this module. The Linux syscalls that matter are:
 - Direct `socket(AF_NETLINK, ...)` followed by `RTM_GETLINK` messages
   (modern native code tends to use this)
 
-To intercept those you need a **Zygisk native module** that does PLT or
-inline hooks on libc. That's a much bigger project (C++, NDK build, per-arch
-binaries) and isn't included here. Most Russian banking and government apps
-in 2026 still do their VPN checks in Java, so this limitation tends not to
-matter in practice — but if a specific app keeps detecting VPN with this
-module active, native code is the first thing to suspect.
+To intercept those you need a **Zygisk native module** that inline-hooks
+libc. That's exactly what the [vpnhide-zygisk](https://github.com/okhsunrog/vpnhide-zygisk)
+companion does — `libc::ioctl` and `libc::getifaddrs` patched in place
+via ByteDance shadowhook. Install both modules together for full
+coverage of the Java + native stacks.
 
 ### Server-side detection — unfixable client-side
 No client-side module can fix any of this:
