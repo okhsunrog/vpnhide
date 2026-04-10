@@ -25,16 +25,20 @@ import java.util.Collections
  * an active VPN:
  *
  *   1. NetworkCapabilities — hasTransport(TRANSPORT_VPN), hasCapability(NOT_VPN),
- *      getTransportTypes().
+ *      getTransportTypes(), getTransportInfo() (hides VpnTransportInfo on API 31+).
  *   2. NetworkInfo (legacy)  — getType() / getTypeName() returning TYPE_VPN / "VPN".
  *   3. ConnectivityManager   — getAllNetworks / getActiveNetwork / getActiveNetworkInfo /
  *      getAllNetworkInfo / getNetworkInfo(int) / getNetworkInfo(Network).
- *   4. LinkProperties        — getInterfaceName (returning "tun0" etc.), getRoutes (VPN routes).
+ *   4. LinkProperties        — getInterfaceName (returning "tun0" etc.), getRoutes (VPN routes),
+ *      getDnsServers (empty list for VPN LPs), getHttpProxy (null for VPN LPs).
  *   5. NetworkInterface      — getNetworkInterfaces, getByName, getByIndex, getByInetAddress,
  *      hiding any interface whose name looks like a VPN tunnel (tun, ppp, tap, wg, ipsec,
  *      xfrm, utun, l2tp).
  *   6. /proc/net entries     — FileInputStream / FileReader constructors redirected to
  *      /dev/null for sensitive paths, so reading them yields empty content.
+ *   7. System.getProperty    — returns null (or the caller's default) for JVM-level
+ *      proxy keys (http.proxyHost, socksProxyHost, …) that both RKNHardering and
+ *      YourVPNDead use as VPN signals.
  *
  * It does NOT cover:
  *   - Native getifaddrs() / direct ioctl calls from C/C++. Apps that use JNI for
@@ -50,6 +54,7 @@ class HookEntry : IXposedHookLoadPackage {
     // classloader, so these Method references are the same across all hooked
     // packages — safe to keep on the singleton HookEntry instance.
     @Volatile private var origHasTransport: Method? = null
+    @Volatile private var origGetInterfaceName: Method? = null
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         // Never hook ourselves
@@ -69,6 +74,7 @@ class HookEntry : IXposedHookLoadPackage {
         tryHook("LinkProperties")       { hookLinkProperties(cl) }
         tryHook("NetworkInterface")     { hookNetworkInterface() }
         tryHook("ProcNetFiles")         { hookProcNetFiles() }
+        tryHook("SystemProperties")     { hookSystemProperties() }
     }
 
     private inline fun tryHook(name: String, block: () -> Unit) {
@@ -120,6 +126,26 @@ class HookEntry : IXposedHookLoadPackage {
                         val r = param.result as? IntArray ?: return
                         if (r.contains(TRANSPORT_VPN)) {
                             param.result = r.filter { it != TRANSPORT_VPN }.toIntArray()
+                        }
+                    }
+                }
+            )
+        }
+
+        // getTransportInfo() (API 31+): if the real TransportInfo is a
+        // VpnTransportInfo, return null. Apps that know about API 31+ use
+        // this as a direct "am I on a VPN?" probe that bypasses the
+        // hasTransport hook entirely. We detect VpnTransportInfo by class
+        // name via reflection so this file keeps compiling against older
+        // compile SDKs.
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                ncClass, "getTransportInfo",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val ti = param.result ?: return
+                        if (ti.javaClass.name == "android.net.VpnTransportInfo") {
+                            param.result = null
                         }
                     }
                 }
@@ -292,15 +318,14 @@ class HookEntry : IXposedHookLoadPackage {
         val lpClass = XposedHelpers.findClass("android.net.LinkProperties", cl)
 
         // getInterfaceName() — if it's a VPN tunnel, claim it's wlan0.
-        XposedHelpers.findAndHookMethod(
-            lpClass, "getInterfaceName",
-            object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val name = param.result as? String ?: return
-                    if (isVpnInterfaceName(name)) param.result = "wlan0"
-                }
+        val getIfaceName = lpClass.getDeclaredMethod("getInterfaceName")
+        origGetInterfaceName = getIfaceName
+        XposedBridge.hookMethod(getIfaceName, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                val name = param.result as? String ?: return
+                if (isVpnInterfaceName(name)) param.result = "wlan0"
             }
-        )
+        })
 
         // getRoutes() — drop routes whose interface looks like a VPN tunnel.
         runCatching {
@@ -320,6 +345,52 @@ class HookEntry : IXposedHookLoadPackage {
                 }
             )
         }
+
+        // getDnsServers() — if this LinkProperties belongs to a VPN
+        // interface, return an empty list. We check the *real* (un-hooked)
+        // interface name by invoking the original getInterfaceName()
+        // directly, since our own hook above already rewrites it to
+        // "wlan0" and we'd lose the ability to tell.
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                lpClass, "getDnsServers",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (isVpnLinkProperties(param.thisObject)) {
+                            param.result = emptyList<InetAddress>()
+                        }
+                    }
+                }
+            )
+        }
+
+        // getHttpProxy() — some network stacks surface a VPN-installed
+        // HTTP proxy here. Drop it if the LinkProperties is a VPN one.
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                lpClass, "getHttpProxy",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (isVpnLinkProperties(param.thisObject)) {
+                            param.result = null
+                        }
+                    }
+                }
+            )
+        }
+    }
+
+    /** Does this LinkProperties describe a VPN tunnel? Uses the original
+     *  (un-hooked) getInterfaceName so we don't fool ourselves. */
+    private fun isVpnLinkProperties(lp: Any?): Boolean {
+        if (lp == null) return false
+        val m = origGetInterfaceName ?: return false
+        val rawName = try {
+            XposedBridge.invokeOriginalMethod(m, lp, emptyArray<Any>()) as? String
+        } catch (_: Throwable) {
+            null
+        } ?: return false
+        return isVpnInterfaceName(rawName)
     }
 
     // ------------------------------------------------------------------
@@ -449,6 +520,48 @@ class HookEntry : IXposedHookLoadPackage {
                 }
             )
         }
+    }
+
+    // ------------------------------------------------------------------
+    //  System.getProperty — hide JVM-level proxy configuration
+    // ------------------------------------------------------------------
+
+    private fun hookSystemProperties() {
+        // System.getProperty(String) and System.getProperty(String, String)
+        // are the canonical way apps read http.proxyHost, socksProxyHost,
+        // and friends. Both YourVPNDead and RKNHardering use these as VPN
+        // signals. Hiding them by returning null (or the caller-provided
+        // default) defeats that check without affecting non-proxy
+        // properties.
+        val hide = object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val key = param.args[0] as? String ?: return
+                if (isProxyPropertyKey(key)) {
+                    // Match the argument-count of the specific overload:
+                    // 1-arg → null, 2-arg → the caller's default.
+                    param.result = if (param.args.size == 2) param.args[1] else null
+                }
+            }
+        }
+        XposedHelpers.findAndHookMethod(
+            System::class.java, "getProperty", String::class.java, hide
+        )
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                System::class.java, "getProperty",
+                String::class.java, String::class.java, hide
+            )
+        }
+    }
+
+    private fun isProxyPropertyKey(key: String): Boolean = when (key) {
+        "http.proxyHost", "http.proxyPort", "http.nonProxyHosts",
+        "https.proxyHost", "https.proxyPort",
+        "ftp.proxyHost", "ftp.proxyPort", "ftp.nonProxyHosts",
+        "socksProxyHost", "socksProxyPort",
+        "socks.proxyHost", "socks.proxyPort",
+        "proxyHost", "proxyPort" -> true
+        else -> false
     }
 
     // ------------------------------------------------------------------
