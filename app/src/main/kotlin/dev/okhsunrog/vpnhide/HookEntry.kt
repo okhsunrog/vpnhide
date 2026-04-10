@@ -5,14 +5,17 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkInfo
+import android.os.Binder
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileReader
+import java.io.InputStreamReader
 import java.lang.reflect.Method
 import java.net.InetAddress
 import java.net.NetworkInterface
@@ -60,19 +63,22 @@ class HookEntry : IXposedHookLoadPackage {
         // Never hook ourselves
         if (lpparam.packageName == BuildConfig.APPLICATION_ID) return
 
-        // Check if this app bundles the MIR HCE SDK (ru.nspk.mir.hce.sdk).
-        // That SDK has aggressive native anti-tamper that scans ART method
-        // entry points for Xposed/LSPosed trampolines during
-        // ContentProvider.attachInfo() — BEFORE Application.onCreate().
-        // If we install hooks at handleLoadPackage time (the normal path),
-        // MIR SDK sees the trampolines and crashes the process.
-        //
-        // Workaround: defer hook installation until AFTER all
-        // ContentProviders have been initialized. We hook
-        // Application.onCreate() and install our hooks from there.
-        // The timing still catches all VPN-detection code in the app's
-        // normal startup flow (splash screen, login, etc.) because that
-        // runs after onCreate().
+        // system_server: hook ConnectivityService to filter VPN data
+        // from Binder IPC responses for target UIDs. This covers the
+        // Java API side for apps where we can't install in-process
+        // hooks (MIR SDK banking apps).
+        if (lpparam.processName == "android") {
+            XposedBridge.log("VpnHide: system_server detected, installing ConnectivityService hooks")
+            installSystemServerHooks(lpparam.classLoader)
+            return
+        }
+
+        // MIR SDK apps: do NOT install ANY hooks in-process. The SDK
+        // detects the LSPosed framework itself (not just our hooks) via
+        // ELF relocation integrity checks and /proc/self/maps scanning.
+        // Native-side VPN hiding for these apps is handled by
+        // vpnhide-kmod (kernel module). Java-side is handled by the
+        // system_server hooks above.
         val hasMirSdk = try {
             lpparam.classLoader.loadClass("ru.nspk.mir.hce.sdk.LibContentProvider")
             true
@@ -81,37 +87,13 @@ class HookEntry : IXposedHookLoadPackage {
         }
 
         if (hasMirSdk) {
-            XposedBridge.log("VpnHide: MIR SDK detected in ${lpparam.packageName}, deferring hooks to after ContentProvider init")
-            deferHooksToAfterCreate(lpparam.classLoader)
-        } else {
-            XposedBridge.log("VpnHide: installing hooks for ${lpparam.packageName}")
-            installHooks(lpparam.classLoader)
+            XposedBridge.log("VpnHide: MIR SDK in ${lpparam.packageName}, skipping (use vpnhide-kmod + system_server hooks)")
+            return
         }
-    }
 
-    /**
-     * Instead of installing hooks immediately (which triggers MIR SDK's
-     * anti-tamper check during ContentProvider init), hook
-     * [android.app.Application.onCreate] and install our hooks from its
-     * `after` callback. By the time `onCreate()` runs, all
-     * ContentProviders (including MIR SDK's `LibContentProvider`) have
-     * already finished their `attachInfo()` + native integrity checks.
-     */
-    private fun deferHooksToAfterCreate(cl: ClassLoader) {
-        try {
-            XposedHelpers.findAndHookMethod(
-                "android.app.Application", cl, "onCreate",
-                object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        XposedBridge.log("VpnHide: Application.onCreate fired, installing deferred hooks now")
-                        installHooks(cl)
-                    }
-                }
-            )
-        } catch (t: Throwable) {
-            XposedBridge.log("VpnHide: failed to defer hooks: ${t.message}, falling back to immediate install")
-            installHooks(cl)
-        }
+        // Normal apps (no MIR SDK): install hooks directly in the process.
+        XposedBridge.log("VpnHide: installing hooks for ${lpparam.packageName}")
+        installHooks(lpparam.classLoader)
     }
 
     private fun installHooks(cl: ClassLoader) {
@@ -713,6 +695,294 @@ class HookEntry : IXposedHookLoadPackage {
         }
     }
 
+    // ==================================================================
+    //  system_server hooks — ConnectivityService per-UID filtering
+    // ==================================================================
+
+    /**
+     * Target UIDs loaded from /data/adb/vpnhide_kmod/targets.txt.
+     * Resolved lazily on first Binder call in system_server.
+     */
+    @Volatile private var systemServerTargetUids: Set<Int>? = null
+
+    private fun loadTargetUids(): Set<Int> {
+        systemServerTargetUids?.let { return it }
+        val uids = mutableSetOf<Int>()
+        try {
+            val file = File("/data/adb/vpnhide_kmod/targets.txt")
+            if (!file.exists()) {
+                // Fallback to vpnhide_zygisk path
+                val alt = File("/data/adb/vpnhide_zygisk/targets.txt")
+                if (alt.exists()) return loadTargetUidsFromFile(alt)
+            } else {
+                return loadTargetUidsFromFile(file)
+            }
+        } catch (t: Throwable) {
+            XposedBridge.log("VpnHide: failed to load target UIDs: ${t.message}")
+        }
+        systemServerTargetUids = uids
+        return uids
+    }
+
+    private fun loadTargetUidsFromFile(file: File): Set<Int> {
+        val uids = mutableSetOf<Int>()
+        try {
+            val pm = XposedHelpers.callStaticMethod(
+                Class.forName("android.app.ActivityThread"),
+                "currentApplication"
+            )?.let {
+                XposedHelpers.callMethod(it, "getPackageManager")
+            }
+
+            file.readLines().forEach { line ->
+                val pkg = line.trim()
+                if (pkg.isEmpty() || pkg.startsWith("#")) return@forEach
+                try {
+                    // Resolve package name → UID via PackageManager
+                    if (pm != null) {
+                        val appInfo = XposedHelpers.callMethod(
+                            pm, "getApplicationInfo", pkg, 0
+                        )
+                        val uid = XposedHelpers.getIntField(appInfo, "uid")
+                        uids.add(uid)
+                    }
+                } catch (_: Throwable) {
+                    // Package not installed or PM not ready
+                }
+            }
+        } catch (t: Throwable) {
+            XposedBridge.log("VpnHide: error reading targets: ${t.message}")
+        }
+        XposedBridge.log("VpnHide: system_server loaded ${uids.size} target UIDs: $uids")
+        systemServerTargetUids = uids
+        return uids
+    }
+
+    private fun isTargetCaller(): Boolean {
+        val uid = Binder.getCallingUid()
+        return loadTargetUids().contains(uid)
+    }
+
+    /**
+     * Reload target UIDs. Can be triggered by writing to a file or
+     * on next Binder call after clearing the cache.
+     */
+    private fun invalidateTargetUids() {
+        systemServerTargetUids = null
+    }
+
+    private fun installSystemServerHooks(cl: ClassLoader) {
+        tryHook("SS:ConnectivityService") { hookConnectivityService(cl) }
+    }
+
+    private fun hookConnectivityService(cl: ClassLoader) {
+        val csClass = try {
+            XposedHelpers.findClass(
+                "com.android.server.ConnectivityService", cl
+            )
+        } catch (_: Throwable) {
+            XposedBridge.log("VpnHide: ConnectivityService class not found")
+            return
+        }
+
+        // getNetworkCapabilities(Network): strip TRANSPORT_VPN for target UIDs
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                csClass, "getNetworkCapabilities",
+                Network::class.java, String::class.java,
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!isTargetCaller()) return
+                        val nc = param.result ?: return
+                        stripVpnFromNetworkCapabilities(nc)
+                    }
+                }
+            )
+            XposedBridge.log("VpnHide: hooked CS.getNetworkCapabilities(Network,String)")
+        }
+
+        // Fallback: try without the callingPackageName parameter (older Android)
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                csClass, "getNetworkCapabilities",
+                Network::class.java,
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!isTargetCaller()) return
+                        val nc = param.result ?: return
+                        stripVpnFromNetworkCapabilities(nc)
+                    }
+                }
+            )
+            XposedBridge.log("VpnHide: hooked CS.getNetworkCapabilities(Network)")
+        }
+
+        // getAllNetworks(): filter out VPN networks for target UIDs
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                csClass, "getAllNetworks",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!isTargetCaller()) return
+                        val networks = param.result as? Array<*> ?: return
+                        val cs = param.thisObject
+                        val filtered = networks.filterIsInstance<Network>().filter { net ->
+                            val nc = try {
+                                XposedHelpers.callMethod(cs, "getNetworkCapabilities",
+                                    net, "vpnhide") as? NetworkCapabilities
+                            } catch (_: Throwable) { null }
+                            nc == null || !nc.hasTransport(TRANSPORT_VPN)
+                        }.toTypedArray()
+                        param.result = filtered
+                    }
+                }
+            )
+            XposedBridge.log("VpnHide: hooked CS.getAllNetworks()")
+        }
+
+        // getActiveNetwork(): substitute non-VPN for target UIDs
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                csClass, "getActiveNetwork",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!isTargetCaller()) return
+                        val net = param.result as? Network ?: return
+                        val cs = param.thisObject
+                        val nc = try {
+                            XposedHelpers.callMethod(cs, "getNetworkCapabilities",
+                                net, "vpnhide") as? NetworkCapabilities
+                        } catch (_: Throwable) { null }
+                        if (nc != null && nc.hasTransport(TRANSPORT_VPN)) {
+                            // Find a non-VPN network
+                            val all = try {
+                                XposedHelpers.callMethod(cs, "getAllNetworks") as? Array<*>
+                            } catch (_: Throwable) { null }
+                            val alt = all?.filterIsInstance<Network>()?.firstOrNull { candidate ->
+                                val cnc = try {
+                                    XposedHelpers.callMethod(cs, "getNetworkCapabilities",
+                                        candidate, "vpnhide") as? NetworkCapabilities
+                                } catch (_: Throwable) { null }
+                                cnc != null && !cnc.hasTransport(TRANSPORT_VPN)
+                            }
+                            param.result = alt
+                        }
+                    }
+                }
+            )
+            XposedBridge.log("VpnHide: hooked CS.getActiveNetwork()")
+        }
+
+        // getLinkProperties(Network): filter for target UIDs
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                csClass, "getLinkProperties",
+                Network::class.java,
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!isTargetCaller()) return
+                        val lp = param.result as? LinkProperties ?: return
+                        val ifname = lp.interfaceName ?: return
+                        if (isVpnInterfaceName(ifname)) {
+                            // Return the underlying (non-VPN) LinkProperties
+                            param.result = null
+                        }
+                    }
+                }
+            )
+            XposedBridge.log("VpnHide: hooked CS.getLinkProperties()")
+        }
+
+        // getActiveLinkProperties(): legacy
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                csClass, "getActiveLinkProperties",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!isTargetCaller()) return
+                        val lp = param.result as? LinkProperties ?: return
+                        val ifname = lp.interfaceName ?: return
+                        if (isVpnInterfaceName(ifname)) {
+                            param.result = null
+                        }
+                    }
+                }
+            )
+        }
+
+        // getActiveNetworkInfo(): legacy TYPE_VPN filter
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                csClass, "getActiveNetworkInfo",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!isTargetCaller()) return
+                        val info = param.result as? NetworkInfo ?: return
+                        @Suppress("DEPRECATION")
+                        if (info.type == TYPE_VPN) {
+                            param.result = null
+                        }
+                    }
+                }
+            )
+        }
+
+        // getAllNetworkInfo(): filter VPN entries
+        runCatching {
+            XposedHelpers.findAndHookMethod(
+                csClass, "getAllNetworkInfo",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!isTargetCaller()) return
+                        val arr = param.result as? Array<*> ?: return
+                        @Suppress("DEPRECATION")
+                        val filtered = arr.filterIsInstance<NetworkInfo>()
+                            .filter { it.type != TYPE_VPN }
+                            .toTypedArray()
+                        param.result = filtered
+                    }
+                }
+            )
+        }
+
+        XposedBridge.log("VpnHide: system_server hooks installed")
+    }
+
+    /**
+     * Strip TRANSPORT_VPN from a NetworkCapabilities object in-place
+     * via reflection. This modifies the object BEFORE it gets serialized
+     * over Binder, so the app receives an already-clean copy.
+     */
+    private fun stripVpnFromNetworkCapabilities(nc: Any) {
+        try {
+            // Remove TRANSPORT_VPN from mTransportTypes bitmask
+            val transportTypes = XposedHelpers.getLongField(nc, "mTransportTypes")
+            val vpnBit = 1L shl TRANSPORT_VPN
+            if (transportTypes and vpnBit != 0L) {
+                XposedHelpers.setLongField(nc, "mTransportTypes",
+                    transportTypes and vpnBit.inv())
+            }
+
+            // Add NET_CAPABILITY_NOT_VPN to mNetworkCapabilities bitmask
+            val caps = XposedHelpers.getLongField(nc, "mNetworkCapabilities")
+            val notVpnBit = 1L shl NET_CAPABILITY_NOT_VPN
+            if (caps and notVpnBit == 0L) {
+                XposedHelpers.setLongField(nc, "mNetworkCapabilities",
+                    caps or notVpnBit)
+            }
+
+            // Clear TransportInfo if it's VpnTransportInfo
+            try {
+                val ti = XposedHelpers.getObjectField(nc, "mTransportInfo")
+                if (ti != null && ti.javaClass.name == "android.net.VpnTransportInfo") {
+                    XposedHelpers.setObjectField(nc, "mTransportInfo", null)
+                }
+            } catch (_: Throwable) {}
+        } catch (t: Throwable) {
+            XposedBridge.log("VpnHide: stripVpnFromNC failed: ${t.message}")
+        }
+    }
+
     companion object {
         // android.net.NetworkCapabilities.TRANSPORT_VPN
         private const val TRANSPORT_VPN = 4
@@ -722,5 +992,8 @@ class HookEntry : IXposedHookLoadPackage {
         private const val TYPE_VPN = 17
         // android.net.ConnectivityManager.TYPE_WIFI
         private const val TYPE_WIFI = 1
+
+        private const val TARGETS_PATH_KMOD = "/data/adb/vpnhide_kmod/targets.txt"
+        private const val TARGETS_PATH_ZYGISK = "/data/adb/vpnhide_zygisk/targets.txt"
     }
 }
