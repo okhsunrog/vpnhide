@@ -16,7 +16,7 @@ VPN interface is up on the device.
 > APatch, with or without ZygiskNext / NeoZygisk / Magisk's built-in
 > Zygisk.
 
-> **Companion module:** this LSPosed module covers the Java / Android
+> **Companion modules:** this LSPosed module covers the Java / Android
 > framework side. For the **native** detection path — apps that check
 > for a VPN from C/C++/JNI/Flutter via `libc::ioctl`, `getifaddrs()`,
 > `/proc/net/*` and never enter ART — use the matching Zygisk module
@@ -24,10 +24,19 @@ VPN interface is up on the device.
 > The two modules are independent and share no runtime state; you can
 > install either one alone, but for full coverage of both the Java and
 > native stacks you want both installed together.
+>
+> For **banking apps with MIR HCE SDK** (Alfa-Bank, T-Bank, Yandex Bank)
+> where app-process hooks cause crashes or NFC payment degradation, use
+> [okhsunrog/vpnhide-kmod](https://github.com/okhsunrog/vpnhide-kmod)
+> (kernel module) for native-side coverage instead of vpnhide-zygisk,
+> and enable this module's **system_server mode** (see below) for
+> Java API coverage. Neither component places anything in the banking
+> app's process.
 
 ### Verified against third-party detection apps
 
 With **this module + [okhsunrog/vpnhide-zygisk](https://github.com/okhsunrog/vpnhide-zygisk)**
+(or [okhsunrog/vpnhide-kmod](https://github.com/okhsunrog/vpnhide-kmod) for MIR SDK apps)
 installed, and WireGuard running in **split-tunnel** mode (so the
 detection apps' own HTTPS probes go out through the carrier, not the
 tunnel), the following popular Russian "is there a VPN on this device?"
@@ -99,8 +108,59 @@ detectors will use them. Listed by descending priority:
 
 The complementary native side (`getifaddrs`, `ioctl`, `/proc/net/*`
 read by C/C++/JNI/Flutter that bypasses ART entirely) is the
-responsibility of [vpnhide-zygisk](https://github.com/okhsunrog/vpnhide-zygisk),
-not this module.
+responsibility of [vpnhide-zygisk](https://github.com/okhsunrog/vpnhide-zygisk)
+or [vpnhide-kmod](https://github.com/okhsunrog/vpnhide-kmod) (for
+MIR SDK apps), not this module.
+
+---
+
+## system_server mode (for banking apps)
+
+Banking apps that bundle NSPK's MIR HCE SDK (Alfa-Bank, T-Bank,
+Yandex Bank) crash when LSPosed loads any module into their process
+and silently lose NFC contactless payments when vpnhide-zygisk's
+inline hooks are present. The default app-process hooks cannot be
+used for these apps.
+
+**system_server mode** solves this by hooking `writeToParcel()` on
+`NetworkCapabilities`, `NetworkInfo`, and `LinkProperties` inside
+`system_server` — the system process that serializes network state
+over Binder to all apps. VPN-related data is stripped *before* Binder
+serialization, so the banking app's process receives clean data
+without any hooks loaded into it. Per-UID filtering via
+`Binder.getCallingUid()` ensures only target apps see the filtered
+view; everything else (VPN client, NFC subsystem, system services)
+sees the real network state.
+
+### When to use
+
+Use system_server mode when the target app has MIR HCE SDK or other
+anti-tamper that detects app-process hooks. For apps without such
+SDKs, the default app-process hooks provide more complete coverage.
+
+### How to enable
+
+1. In LSPosed/Vector manager, add **"System Framework"** to this
+   module's scope (in addition to or instead of individual apps).
+2. Reboot so the module loads into `system_server`.
+3. Install [vpnhide-kmod](https://github.com/okhsunrog/vpnhide-kmod)
+   for native-side coverage (kernel-level ioctl/getifaddrs/route
+   filtering). The kernel module's WebUI manages the target app list
+   for both components.
+
+### Target management
+
+Target UIDs are managed through
+[vpnhide-kmod](https://github.com/okhsunrog/vpnhide-kmod)'s WebUI.
+The WebUI writes UIDs to `/proc/vpnhide_targets` (kernel module) and
+`/data/system/vpnhide_uids.txt` (system_server hooks). This module
+watches the directory via `FileObserver` (inotify) and reloads the
+UID list immediately when the file changes — no reboot needed.
+
+**Important:** banking apps with MIR SDK must NOT be added to this
+module's LSPosed app-process scope. Only "System Framework" should be
+in scope for these apps. The app-process scope is still used for
+non-MIR-SDK apps where the default hooks provide better coverage.
 
 ---
 
@@ -137,7 +197,7 @@ uses these, VpnHide should make it blind to the VPN.
 | `hasCapability(NET_CAPABILITY_NOT_VPN)` | always returns `true` |
 | `getTransportTypes()` | `TRANSPORT_VPN` stripped from the returned `int[]` |
 | `getTransportInfo()` | returns `null` whenever the real value is `VpnTransportInfo` |
-| `toString()` | post-processed: `\|VPN` stripped from `Transports:`, `VpnTransportInfo{…}` replaced with `null`, stray `IS_VPN` flags dropped from `&`-joined lists |
+| `toString()` | post-processed: `\|VPN` stripped from `Transports:`, `VpnTransportInfo{…}` replaced with `null`, stray `IS_VPN` flags dropped from `&`-joined lists. Uses string manipulation (not regex) to avoid `PatternSyntaxException` on edge cases. |
 
 ### 2. `android.net.NetworkInfo` (legacy `ConnectivityManager.getActiveNetworkInfo()` path)
 | Method | Behaviour with VpnHide |
@@ -161,6 +221,8 @@ uses these, VpnHide should make it blind to the VPN.
 |---|---|
 | `getInterfaceName()` | rewrites VPN interface names (`tun0`, `ppp0`, `wg0`, etc.) to `"wlan0"` |
 | `getRoutes()` | routes whose interface is a VPN tunnel are dropped |
+| `getDnsServers()` | returns empty list for VPN LinkProperties |
+| `getHttpProxy()` | returns `null` for VPN LinkProperties |
 
 ### 5. `java.net.NetworkInterface`
 | Method | Behaviour with VpnHide |
@@ -170,7 +232,20 @@ uses these, VpnHide should make it blind to the VPN.
 | `getByIndex(int)` | returns `null` if the looked-up interface is a VPN tunnel |
 | `getByInetAddress(addr)` | returns `null` if the matched interface is a VPN tunnel |
 
-### 6. `/proc/net/*` file reads
+### 7. `System.getProperty`
+
+Proxy-related system properties that can leak VPN presence:
+
+| Key | Behaviour with VpnHide |
+|---|---|
+| `http.proxyHost` | returns `null` |
+| `http.proxyPort` | returns `null` |
+| `https.proxyHost` | returns `null` |
+| `https.proxyPort` | returns `null` |
+| `socksProxyHost` | returns `null` |
+| `socksProxyPort` | returns `null` |
+
+### 8. `/proc/net/*` file reads
 `FileInputStream` and `FileReader` constructors (both `String` and `File`
 variants) are hooked. When an app tries to open any of the following paths,
 the open is transparently redirected to `/dev/null`, so reads return EOF
@@ -221,6 +296,12 @@ libc. That's exactly what the [vpnhide-zygisk](https://github.com/okhsunrog/vpnh
 companion does — `libc::ioctl` and `libc::getifaddrs` patched in place
 via ByteDance shadowhook. Install both modules together for full
 coverage of the Java + native stacks.
+
+For **MIR SDK apps** (banking apps where vpnhide-zygisk's inline hooks
+cause NFC payment degradation), use
+[vpnhide-kmod](https://github.com/okhsunrog/vpnhide-kmod) instead — a
+kernel module that provides the same native filtering via kretprobes
+without any footprint in the app's process.
 
 ### Server-side detection — unfixable client-side
 No client-side module can fix any of this:
