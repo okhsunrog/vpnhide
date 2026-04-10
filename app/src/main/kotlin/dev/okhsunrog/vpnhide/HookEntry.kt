@@ -779,6 +779,28 @@ class HookEntry : IXposedHookLoadPackage {
         tryHook("SS:NC.writeToParcel") { hookNCWriteToParcel() }
         tryHook("SS:NI.writeToParcel") { hookNIWriteToParcel() }
         tryHook("SS:LP.writeToParcel") { hookLPWriteToParcel() }
+        tryHook("SS:FileObserver")     { watchTargetUidsFile() }
+    }
+
+    /**
+     * Watch /data/system/vpnhide_uids.txt for changes via inotify
+     * (Android FileObserver). When the file is modified (e.g. by
+     * vpnhide-kmod's WebUI), invalidate the cached UID set so the
+     * next writeToParcel call re-reads it. No reboot needed.
+     */
+    private fun watchTargetUidsFile() {
+        val path = "/data/system/vpnhide_uids.txt"
+        val observer = object : android.os.FileObserver(
+            java.io.File(path),
+            MODIFY or CLOSE_WRITE or MOVED_TO
+        ) {
+            override fun onEvent(event: Int, path: String?) {
+                XposedBridge.log("VpnHide: target UIDs file changed, invalidating cache")
+                systemServerTargetUids = null
+            }
+        }
+        observer.startWatching()
+        XposedBridge.log("VpnHide: watching $path for changes (inotify)")
     }
 
     /**
