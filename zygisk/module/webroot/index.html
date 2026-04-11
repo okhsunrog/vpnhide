@@ -159,6 +159,7 @@
   // path also runs `mkdir -p` defensively.
   const PERSIST_DIR = `/data/adb/${MODULE_ID}`;
   const TARGETS_PATH = `${PERSIST_DIR}/targets.txt`;
+  const SS_UIDS_FILE = '/data/system/vpnhide_uids.txt';
 
   const listEl = document.getElementById('list');
   const searchEl = document.getElementById('search');
@@ -285,11 +286,24 @@
       // base64 → shell, so we don't have to worry about shell quoting of
       // package names or newlines.
       const b64 = btoa(body);
-      const cmd = `mkdir -p ${PERSIST_DIR} && echo '${b64}' | base64 -d > ${TARGETS_PATH} && chmod 644 ${TARGETS_PATH}`;
-      const res = await ksuExec(cmd);
-      if (res.errno !== 0) {
-        throw new Error(res.stderr || `errno=${res.errno}`);
-      }
+
+      // Step 1: save package names to targets.txt
+      const step1 = `mkdir -p ${PERSIST_DIR} && echo '${b64}' | base64 -d > ${TARGETS_PATH} && chmod 644 ${TARGETS_PATH}`;
+      const r1 = await ksuExec(step1);
+      if (r1.errno !== 0) throw new Error(r1.stderr || `step1 errno=${r1.errno}`);
+
+      // Step 2: resolve UIDs and write to /data/system/vpnhide_uids.txt
+      // for the LSPosed system_server hooks.
+      const step2 = [
+        `UIDS=""`,
+        ...selected.map(pkg =>
+          `U=$(pm list packages -U '${pkg}' 2>/dev/null | grep '^package:${pkg} ' | sed 's/.*uid://') && [ -n "$U" ] && UIDS="$UIDS$U\\n"`
+        ),
+        `printf "$UIDS" > ${SS_UIDS_FILE}`,
+        `chmod 644 ${SS_UIDS_FILE}`,
+        `chcon u:object_r:system_data_file:s0 ${SS_UIDS_FILE} 2>/dev/null`,
+      ].join(' ; ');
+      await ksuExec(step2);
       toast(`Saved ${selected.length} target(s).`);
     } catch (e) {
       toast('Save failed: ' + e.message, true);
