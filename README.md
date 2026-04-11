@@ -33,7 +33,7 @@ Download the latest release from [Releases](https://github.com/okhsunrog/vpnhide
 
 ## Configuration
 
-Open the module's WebUI in KernelSU-Next or Magisk manager (tap the module → settings/WebUI). Select which apps should not see the VPN, then tap Save. Changes apply immediately — no reboot needed.
+Open the module's WebUI in KernelSU-Next or Magisk manager (tap the module → settings/WebUI). Select which apps should not see the VPN, then tap Save. Force-stop and restart any app whose filtering was changed — the hooks take effect on the next app launch.
 
 ## Verify
 
