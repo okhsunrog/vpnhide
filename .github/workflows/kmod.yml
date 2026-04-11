@@ -35,6 +35,9 @@ jobs:
       CLANG_DIR: /opt/aosp-clang/bin
 
     steps:
+      - name: Add AOSP clang to PATH
+        run: echo "$CLANG_DIR" >> "$GITHUB_PATH"
+
       - uses: actions/checkout@v4
 
       - name: Mark workspace safe
