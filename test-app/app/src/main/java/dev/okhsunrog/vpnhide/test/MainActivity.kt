@@ -59,8 +59,17 @@ fun VpnHideTestApp() {
 
     MaterialTheme(colorScheme = colorScheme) {
         val context = LocalContext.current
+        val cm = context.getSystemService(ConnectivityManager::class.java)
         var results by remember { mutableStateOf<List<CheckResult>>(emptyList()) }
-        var summary by remember { mutableStateOf("Tap 'Run All Checks' to start") }
+        var summary by remember { mutableStateOf("Running...") }
+
+        LaunchedEffect(Unit) {
+            val r = runAllChecks(cm)
+            results = r
+            val scored = r.filter { it.passed != null }
+            val passed = scored.count { it.passed == true }
+            summary = "$passed/${scored.size} passed"
+        }
 
         Scaffold(
             topBar = {
@@ -90,7 +99,7 @@ fun VpnHideTestApp() {
 
                 Button(
                     onClick = {
-                        val cm = context.getSystemService(ConnectivityManager::class.java)
+                        summary = "Running..."
                         val r = runAllChecks(cm)
                         results = r
                         val scored = r.filter { it.passed != null }

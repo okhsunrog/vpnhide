@@ -16,6 +16,7 @@ not already available).
 - Linux host (Arch, Ubuntu, Debian — anything with make, clang, git)
 - `adb` connected to the device
 - `modprobe` on the host (for extracting CRCs from .ko files)
+- [`direnv`](https://direnv.net/) (for automatic env var loading)
 
 ## Step 1: Identify the GKI generation
 
@@ -38,7 +39,63 @@ the Android version running on the device. A Pixel 7 Pro running
 Android 16 still has an `android13-5.10` kernel because the generation
 is frozen at manufacturing time.
 
-## Step 2: Clone the kernel source (shallow, ~500 MB)
+## Step 2: Clone the full Pixel kernel tree
+
+Google ships a single `android14-6.1` kernel covering all Pixels from 6 to
+9a. The full tree includes kernel sources, prebuilt toolchain, device trees,
+and all out-of-tree Google modules — everything needed with no extra downloads:
+
+```bash
+mkdir ~/pixel-kernel && cd ~/pixel-kernel
+
+repo init --depth=1 \
+    -u https://android.googlesource.com/kernel/manifest \
+    -b android-gs-shusky-6.1-android16
+
+repo sync -c --no-tags -j$(nproc)
+```
+
+Then build once to produce all artifacts:
+
+```bash
+./build_shusky.sh   # or build_raviole.sh etc. — same kernel image for all
+```
+
+Set an env var pointing to the tree root — subsequent steps reference it:
+
+```bash
+export PIXEL_KERNEL_TREE=~/pixel-kernel
+```
+
+### Useful paths within the tree
+
+| Path | Purpose |
+|---|---|
+| `$PIXEL_KERNEL_TREE/aosp/` | Full GKI kernel source tree — browse subsystems, understand exported APIs, read in-tree driver implementations |
+| `$PIXEL_KERNEL_TREE/out/shusky/dist/kernel-headers.tar.gz` | Kernel headers for building against (extract and use as `KDIR`) |
+| `$PIXEL_KERNEL_TREE/out/shusky/dist/vmlinux.symvers` | Symbol versions for `modpost` — use instead of extracting CRCs from device .ko files |
+| `$PIXEL_KERNEL_TREE/out/shusky/dist/System.map` | Symbol addresses for debugging |
+| `$PIXEL_KERNEL_TREE/private/google-modules/` | Reference implementations of out-of-tree modules (Kconfig, Makefile patterns) |
+| `$PIXEL_KERNEL_TREE/prebuilts/clang/host/linux-x86/clang-r487747c/bin` | Bundled clang 17.0.2 — exact compiler used to build the kernel |
+
+`raviole/dist/` and `shusky/dist/` contain identical `vmlinux.symvers` and
+`Image` since it's the same kernel build — use either.
+
+### Prepare kernel headers for module builds
+
+```bash
+mkdir -p ~/pixel-kernel-headers
+tar -xzf $PIXEL_KERNEL_TREE/out/shusky/dist/kernel-headers.tar.gz \
+    -C ~/pixel-kernel-headers
+cp $PIXEL_KERNEL_TREE/out/shusky/dist/vmlinux.symvers \
+    ~/pixel-kernel-headers/Module.symvers
+```
+
+Then skip to step 3.
+
+### Alternative: shallow clone (non-Pixel or different GKI generation)
+
+If you don't need the full tree, clone just the kernel source:
 
 ```bash
 BRANCH="android13-5.10"  # ← replace with your generation from step 1
@@ -48,51 +105,97 @@ git clone --depth=1 -b $BRANCH \
     ~/kernel-source
 ```
 
-This clones only the needed branch with no history — fast and small.
+You'll then need to prepare it manually — see [Preparing a standalone kernel source](#preparing-a-standalone-kernel-source) at the end.
 
-## Step 3: Get the Android clang toolchain
+---
 
-If you already have a Pixel kernel tree with prebuilts (e.g. from
-building for another device), reuse it:
+## Step 3: Configure .env
 
-```bash
-CLANG=~/kernel-tree/prebuilts/clang/host/linux-x86/clang-r*/bin
-```
-
-Otherwise, download the standalone toolchain. Google publishes them
-at https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/
-— clone the branch matching your kernel:
+The build system uses `direnv` to load `KERNEL_SRC` and `CLANG_DIR` from
+a `.env` file. Copy the example and fill in your paths:
 
 ```bash
-# This is large (~2 GB). If you already have it, skip.
-git clone --depth=1 \
-    https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
-    ~/android-clang
-CLANG=~/android-clang/clang-r*/bin
+cd kmod/
+cp .env.example .env
 ```
 
-Or use the version bundled with the Pixel kernel tree if you have one.
+Edit `.env`:
 
-## Step 4: Pull .config from the device
+```bash
+# Pixel kernel tree approach (after extracting headers above):
+KERNEL_SRC=~/pixel-kernel-headers
+CLANG_DIR=~/pixel-kernel/prebuilts/clang/host/linux-x86/clang-r487747c/bin
+
+# Or standalone kernel source approach:
+# KERNEL_SRC=~/kernel-source
+# CLANG_DIR=/path/to/clang/bin
+```
+
+Allow direnv to load it:
+
+```bash
+direnv allow
+```
+
+From now on, entering the `kmod/` directory automatically exports
+`KERNEL_SRC` and `CLANG_DIR`. The Makefile reads both from the environment.
+
+## Step 4: Build and package
+
+```bash
+make            # builds vpnhide_kmod.ko
+./build-zip.sh  # builds .ko (if needed) + packages vpnhide-kmod.zip
+```
+
+## Step 5: Install and test
+
+```bash
+adb push vpnhide-kmod.zip /sdcard/Download/
+# Install via KernelSU-Next manager -> Modules -> Install from storage
+# Reboot
+```
+
+After reboot, verify:
+
+```bash
+# Module loaded?
+adb shell "su -c 'lsmod | grep vpnhide'"
+
+# kretprobes registered?
+adb shell "su -c 'dmesg | grep vpnhide'"
+
+# UIDs loaded?
+adb shell "su -c 'cat /proc/vpnhide_targets'"
+```
+
+Pick target apps via the WebUI in KernelSU-Next manager.
+
+---
+
+## Preparing a standalone kernel source
+
+If you used the shallow clone (non-Pixel path), you need to prepare the
+kernel source before building. If you used the Pixel kernel tree with
+extracted headers, skip this section entirely.
+
+### Pull .config from the device
 
 ```bash
 adb shell "su -c 'gzip -d < /proc/config.gz'" > ~/kernel-source/.config
 ```
 
-If `/proc/config.gz` doesn't exist, the kernel was built without
-`CONFIG_IKCONFIG_PROC`. In that case, use the GKI defconfig:
+If `/proc/config.gz` doesn't exist, use the GKI defconfig:
 
 ```bash
 cd ~/kernel-source
-make ARCH=arm64 LLVM=1 CC=$CLANG/clang gki_defconfig
+make ARCH=arm64 LLVM=1 CC=$CLANG_DIR/clang gki_defconfig
 ```
 
-## Step 5: Generate Module.symvers from device's .ko files
+### Generate Module.symvers from device .ko files
 
 The Module.symvers file contains CRC checksums for every exported
 kernel symbol. These must match the running kernel exactly
-(CONFIG_MODVERSIONS). Extract them from the prebuilt .ko modules
-on the device:
+(CONFIG_MODVERSIONS):
 
 ```bash
 # Pull all vendor modules from the device
@@ -112,13 +215,13 @@ echo "Generated Module.symvers with $(wc -l < ~/kernel-source/Module.symvers) sy
 ```
 
 Expect 3000-5000 symbols. If you get 0, check that `modprobe` is
-installed on your host (`apt install kmod` or `pacman -S kmod`).
+installed (`apt install kmod` or `pacman -S kmod`).
 
 Alternative: if the device's ROM has a `-kernels` repo on GitHub
 (e.g. `crdroidandroid/android_device_google_shusky-kernels`), you can
 download the .ko files from there instead of pulling from device.
 
-## Step 6: Prepare the kernel source
+### Prepare headers
 
 ```bash
 cd ~/kernel-source
@@ -128,9 +231,9 @@ touch abi_symbollist.raw
 
 # Generate headers
 make ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-    CC=$CLANG/clang LD=$CLANG/ld.lld AR=$CLANG/llvm-ar \
-    NM=$CLANG/llvm-nm OBJCOPY=$CLANG/llvm-objcopy \
-    OBJDUMP=$CLANG/llvm-objdump STRIP=$CLANG/llvm-strip \
+    CC=$CLANG_DIR/clang LD=$CLANG_DIR/ld.lld AR=$CLANG_DIR/llvm-ar \
+    NM=$CLANG_DIR/llvm-nm OBJCOPY=$CLANG_DIR/llvm-objcopy \
+    OBJDUMP=$CLANG_DIR/llvm-objdump STRIP=$CLANG_DIR/llvm-strip \
     CROSS_COMPILE=aarch64-linux-gnu- \
     olddefconfig prepare
 ```
@@ -139,24 +242,7 @@ make ARCH=arm64 LLVM=1 LLVM_IAS=1 \
 due to host clang version mismatch. This is fine — the module can
 still build without BTF. Ignore this error.
 
-## Step 7: Generate scripts/module.lds
-
-```bash
-cd ~/kernel-source
-
-$CLANG/clang -E -Wp,-MD,scripts/.module.lds.d -nostdinc \
-    -I arch/arm64/include -I arch/arm64/include/generated \
-    -I include -I include/generated \
-    -include include/linux/kconfig.h \
-    -D__KERNEL__ -DCC_USING_PATCHABLE_FUNCTION_ENTRY \
-    --target=aarch64-linux-gnu -x c scripts/module.lds.S \
-    2>/dev/null | grep -v '^#' > scripts/module.lds
-
-# Fix ARM64 page-size literal that ld.lld can't parse
-sed -i 's/((1UL) << 12)/4096/g' scripts/module.lds
-```
-
-## Step 8: Set UTS_RELEASE (vermagic)
+### Set UTS_RELEASE (vermagic)
 
 KernelSU bypasses vermagic checks, so any value works if using KSU.
 For Magisk or manual insmod, the vermagic must match `uname -r`.
@@ -165,100 +251,24 @@ For Magisk or manual insmod, the vermagic must match `uname -r`.
 cd ~/kernel-source
 
 # For KernelSU users (any placeholder works):
-PLACEHOLDER="6.1.999-placeholder-$(printf 'x%.0s' {1..100})"
-echo "#define UTS_RELEASE \"$PLACEHOLDER\"" \
-    > include/generated/utsrelease.h
-echo -n "$PLACEHOLDER" > include/config/kernel.release
+echo '#define UTS_RELEASE "6.1.0-vpnhide"' > include/generated/utsrelease.h
+echo -n "6.1.0-vpnhide" > include/config/kernel.release
 
 # For Magisk users (must match exactly):
 KVER="$(adb shell uname -r | tr -d '\r')"
-echo "#define UTS_RELEASE \"$KVER\"" \
-    > include/generated/utsrelease.h
+echo "#define UTS_RELEASE \"$KVER\"" > include/generated/utsrelease.h
 echo -n "$KVER" > include/config/kernel.release
 ```
 
-## Step 9: Build the module
+Then set `KERNEL_SRC=~/kernel-source` in your `.env` and proceed to step 4.
 
-```bash
-cd /path/to/vpnhide-kmod
-
-make -C ~/kernel-source M=$(pwd) \
-    ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-    CC=$CLANG/clang LD=$CLANG/ld.lld \
-    AR=$CLANG/llvm-ar NM=$CLANG/llvm-nm \
-    OBJCOPY=$CLANG/llvm-objcopy \
-    OBJDUMP=$CLANG/llvm-objdump \
-    STRIP=$CLANG/llvm-strip \
-    CROSS_COMPILE=aarch64-linux-gnu- \
-    modules
-```
-
-Output: `vpnhide_kmod.ko`
-
-If build fails with "undefined symbol" errors, your Module.symvers
-is missing some symbols. Re-extract with more .ko files from the
-device, or check that you pulled from the right kernel version.
-
-## Step 10: Package as KSU module
-
-```bash
-cp vpnhide_kmod.ko module/
-./build-zip.sh
-# Output: vpnhide-kmod.zip
-```
-
-## Step 11: Install and test
-
-```bash
-adb push vpnhide-kmod.zip /sdcard/Download/
-# Install via KernelSU-Next manager → Modules → Install from storage
-# Reboot
-```
-
-After reboot, verify:
-
-```bash
-# Module loaded?
-adb shell "su -c 'lsmod | grep vpnhide'"
-
-# kretprobes registered?
-adb shell "su -c 'dmesg | grep vpnhide'"
-
-# UIDs loaded?
-adb shell "su -c 'cat /proc/vpnhide_targets'"
-```
-
-Pick target apps via the WebUI in KernelSU-Next manager.
-
-## Quick reference: one-shot build script
-
-For repeat builds (e.g. after code changes), once the kernel source
-is prepared:
-
-```bash
-#!/bin/bash
-KSRC=~/kernel-source
-CLANG=~/android-clang/clang-r*/bin  # adjust path
-cd /path/to/vpnhide-kmod
-make -C "$KSRC" M=$(pwd) \
-    ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-    CC=$CLANG/clang LD=$CLANG/ld.lld \
-    AR=$CLANG/llvm-ar NM=$CLANG/llvm-nm \
-    OBJCOPY=$CLANG/llvm-objcopy \
-    OBJDUMP=$CLANG/llvm-objdump \
-    STRIP=$CLANG/llvm-strip \
-    CROSS_COMPILE=aarch64-linux-gnu- \
-    modules
-cp vpnhide_kmod.ko module/
-./build-zip.sh
-adb push vpnhide-kmod.zip /sdcard/Download/
-```
+---
 
 ## Troubleshooting
 
 **`insmod: Exec format error`**
 - Vermagic mismatch (Magisk doesn't bypass it). Set UTS_RELEASE to
-  exact `uname -r` value (step 8, Magisk variant).
+  exact `uname -r` value.
 - Or Module.symvers CRCs don't match — re-extract from device .ko files.
 
 **`insmod: File exists`**
@@ -273,15 +283,9 @@ adb push vpnhide-kmod.zip /sdcard/Download/
 - Ignore — BTF is optional. The module builds without it.
 
 **No `/proc/config.gz`**
-- Use `make gki_defconfig` instead (step 4 alternative).
+- Use `make gki_defconfig` instead.
 
 **kretprobe not firing (ioctl not filtered)**
 - Check `dmesg | grep vpnhide` for registration messages.
 - Check `/proc/vpnhide_targets` has the right UIDs.
 - The target app's UID changes on reinstall — re-resolve via WebUI.
-
-**NFC payment broken with module active**
-- Remove the target app from targets. The kernel module's ioctl
-  filtering can trigger some anti-tamper SDKs' silent integrity
-  degradation. Use system_server hooks (vpnhide LSPosed) for
-  Java-side coverage instead.

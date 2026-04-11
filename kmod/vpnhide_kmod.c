@@ -8,10 +8,9 @@
  * works on stock Android GKI kernels with CONFIG_KPROBES=y.
  *
  * Hooks:
- *   - dev_ioctl: filters SIOCGIFFLAGS / SIOCGIFNAME / SIOCGIFCONF
- *   - rtnl_dump_ifinfo: filters RTM_NEWLINK netlink dumps (getifaddrs)
+ *   - dev_ioctl: filters SIOCGIFFLAGS / SIOCGIFNAME
+ *   - rtnl_fill_ifinfo: filters RTM_NEWLINK netlink dumps (getifaddrs)
  *   - fib_route_seq_show: filters /proc/net/route entries
- *   - tcp4_seq_show: filters /proc/net/tcp entries
  *
  * Target UIDs are written to /proc/vpnhide_targets from userspace.
  */
@@ -165,23 +164,29 @@ static const struct proc_ops targets_proc_ops = {
 
 /* ================================================================== */
 /*  Hook 1: dev_ioctl — SIOCGIFFLAGS / SIOCGIFNAME                   */
+/*                                                                    */
+/*  dev_ioctl() on GKI 6.1:                                          */
+/*    int dev_ioctl(struct net *net, unsigned int cmd,                */
+/*                  struct ifreq *ifr, void __user *data,            */
+/*                  bool *need_copyout)                               */
+/*  arm64: x0=net, x1=cmd, x2=ifr (KERNEL ptr), x3=data (__user)   */
+/*                                                                    */
+/*  Note: SIOCGIFCONF goes through sock_ioctl -> dev_ifconf, not     */
+/*  through dev_ioctl, so it is not covered here.                    */
 /* ================================================================== */
 
 struct dev_ioctl_data {
 	unsigned int cmd;
-	void __user *arg;
+	struct ifreq *kifr; /* kernel pointer, saved from x2 */
 };
 
 static int dev_ioctl_entry(struct kretprobe_instance *ri,
 			   struct pt_regs *regs)
 {
 	struct dev_ioctl_data *data = (void *)ri->data;
-	unsigned int cmd;
 
-	/* arm64: x0=net, x1=cmd, x2=arg */
-	cmd = (unsigned int)regs->regs[1];
-	data->cmd = cmd;
-	data->arg = (void __user *)regs->regs[2];
+	data->cmd = (unsigned int)regs->regs[1];
+	data->kifr = (struct ifreq *)regs->regs[2];
 
 	if (!is_target_uid())
 		data->cmd = 0;
@@ -193,92 +198,27 @@ static int dev_ioctl_ret(struct kretprobe_instance *ri,
 			 struct pt_regs *regs)
 {
 	struct dev_ioctl_data *data = (void *)ri->data;
-	long ret = regs_return_value(regs);
+	char name[IFNAMSIZ];
 
-	if (data->cmd == 0 || ret != 0)
+	if (data->cmd == 0 || regs_return_value(regs) != 0)
+		return 0;
+
+	if (data->cmd != SIOCGIFFLAGS && data->cmd != SIOCGIFNAME)
 		return 0;
 
 	/*
-	 * dev_ioctl() signature on GKI 6.1:
-	 *   int dev_ioctl(struct net *net, unsigned int cmd,
-	 *                 struct ifreq *ifr, void __user *data,
-	 *                 bool *need_copyout)
-	 *
-	 * x2 = ifr is a KERNEL pointer (the caller already did
-	 * copy_from_user into a stack-local ifreq). We must NOT
-	 * use copy_from_user on it — ARM64 PAN would EFAULT.
-	 * Read via direct pointer dereference instead.
-	 *
-	 * x3 = data is the original __user pointer. For SIOCGIFCONF
-	 * we need this to patch the userspace buffer.
+	 * ifr (x2) is a KERNEL pointer — the caller already did
+	 * copy_from_user into a stack-local ifreq. Read via direct
+	 * dereference; copy_from_user would EFAULT under ARM64 PAN.
 	 */
+	if (!data->kifr)
+		return 0;
 
-	switch (data->cmd) {
-	case SIOCGIFFLAGS:
-	case SIOCGIFNAME: {
-		struct ifreq *kifr = (struct ifreq *)data->arg;
-		char name[IFNAMSIZ];
+	memcpy(name, data->kifr->ifr_name, IFNAMSIZ);
+	name[IFNAMSIZ - 1] = '\0';
 
-		if (!kifr)
-			break;
-		memcpy(name, kifr->ifr_name, IFNAMSIZ);
-		name[IFNAMSIZ - 1] = '\0';
-		if (is_vpn_ifname(name))
-			regs_set_return_value(regs, -ENODEV);
-		break;
-	}
-
-	case SIOCGIFCONF: {
-		/*
-		 * SIOCGIFCONF is handled in sock_ioctl → dev_ifconf,
-		 * which has a different call path (not through dev_ioctl
-		 * on GKI 6.1). This case is kept for completeness but
-		 * may not fire. The actual SIOCGIFCONF filtering is
-		 * handled by a separate hook if needed.
-		 *
-		 * For SIOCGIFCONF that DOES come through dev_ioctl on
-		 * some kernels: the ifconf is in userspace, so we use
-		 * the __user pointer from x3.
-		 */
-		void __user *udata = (void __user *)regs->regs[3];
-		struct ifconf ifc;
-		struct ifreq __user *usr_ifr;
-		struct ifreq tmp;
-		int i, n, dst;
-
-		if (!udata)
-			break;
-		if (copy_from_user(&ifc, udata, sizeof(ifc)))
-			break;
-		if (!ifc.ifc_req || ifc.ifc_len <= 0)
-			break;
-
-		n = ifc.ifc_len / (int)sizeof(struct ifreq);
-		usr_ifr = ifc.ifc_req;
-		dst = 0;
-
-		for (i = 0; i < n; i++) {
-			if (copy_from_user(&tmp, &usr_ifr[i], sizeof(tmp)))
-				break;
-			tmp.ifr_name[IFNAMSIZ - 1] = '\0';
-			if (is_vpn_ifname(tmp.ifr_name))
-				continue;
-			if (dst != i) {
-				if (copy_to_user(&usr_ifr[dst], &tmp,
-						 sizeof(tmp)))
-					break;
-			}
-			dst++;
-		}
-
-		if (dst < n) {
-			ifc.ifc_len = dst * (int)sizeof(struct ifreq);
-			if (copy_to_user(udata, &ifc, sizeof(ifc)))
-				break;
-		}
-		break;
-	}
-	}
+	if (is_vpn_ifname(name))
+		regs_set_return_value(regs, -ENODEV);
 
 	return 0;
 }
@@ -349,81 +289,100 @@ static struct kretprobe rtnl_fill_krp = {
 /* ================================================================== */
 /*  Hook 3: fib_route_seq_show — /proc/net/route                      */
 /*                                                                    */
-/*  Each line in /proc/net/route starts with the interface name. If   */
-/*  it's a VPN interface and the caller is a target, skip the line    */
-/*  by returning 0 without printing (SEQ_SKIP equivalent).            */
+/*  fib_route_seq_show(struct seq_file *seq, void *v) writes one or  */
+/*  more tab-separated route lines into seq->buf, each ending with   */
+/*  '\n'. The first field is the interface name.                      */
+/*                                                                    */
+/*  We save seq and seq->count on entry. In the return handler we    */
+/*  scan what was written, compact out VPN lines, and adjust count.  */
 /* ================================================================== */
+
+struct fib_route_data {
+	struct seq_file *seq;
+	size_t start_count;
+	bool target;
+};
 
 static int fib_route_entry(struct kretprobe_instance *ri,
 			   struct pt_regs *regs)
 {
-	/* We only need to filter in the return handler. Mark in entry
-	 * whether this is a target UID to avoid re-checking. */
-	*(bool *)ri->data = is_target_uid();
+	struct fib_route_data *data = (void *)ri->data;
+
+	/*
+	 * arm64: x0 = seq_file*, x1 = v (iterator element).
+	 * Save seq pointer and current buffer position so the
+	 * return handler knows where this call's output begins.
+	 */
+	data->seq = (struct seq_file *)regs->regs[0];
+	data->target = is_target_uid();
+
+	if (data->target && data->seq)
+		data->start_count = data->seq->count;
+	else
+		data->start_count = 0;
+
 	return 0;
 }
 
 static int fib_route_ret(struct kretprobe_instance *ri,
 			 struct pt_regs *regs)
 {
-	bool target = *(bool *)ri->data;
-	struct seq_file *seq;
-	const char *buf;
-	int i;
+	struct fib_route_data *data = (void *)ri->data;
+	struct seq_file *seq = data->seq;
+	char *buf, *src, *dst, *end;
+	char ifname[IFNAMSIZ];
+	int j;
 
-	if (!target)
+	if (!data->target || !seq || !seq->buf)
+		return 0;
+
+	if (seq->count <= data->start_count)
 		return 0;
 
 	/*
-	 * After fib_route_seq_show returns, seq_file has the line in
-	 * seq->buf at position seq->count - (length of last line).
-	 * We check the last written line for a VPN interface name.
+	 * Scan the region [start_count, seq->count) for lines whose
+	 * first tab-separated field is a VPN interface name. Compact
+	 * out matching lines in place and adjust seq->count.
 	 *
-	 * arm64: x0 = seq_file*
+	 * Each route line looks like: "tun0\t08000000\t...\n"
 	 */
-	seq = (struct seq_file *)regs->regs[0];
-	if (!seq || seq->count == 0)
-		return 0;
-
-	/* The route line starts at the beginning of what was just
-	 * written. Find the last newline before seq->count to
-	 * locate the start of the current line. */
 	buf = seq->buf;
-	if (!buf)
-		return 0;
+	src = buf + data->start_count;
+	dst = src;
+	end = buf + seq->count;
 
-	/* Scan the interface name field (first field, tab-separated). */
-	for (i = 0; i < IFNAMSIZ && i < seq->count; i++) {
-		if (buf[seq->count - 1 - i] == '\n' || i == 0) {
-			const char *line_start;
-			char ifname[IFNAMSIZ];
-			int j;
+	while (src < end) {
+		char *nl = memchr(src, '\n', end - src);
+		char *line_end = nl ? nl + 1 : end;
+		size_t line_len = line_end - src;
 
-			if (i == 0 && seq->count > 1)
-				continue;
+		/* Extract the interface name (first field, tab-delimited) */
+		for (j = 0; j < IFNAMSIZ - 1 && j < (int)line_len &&
+		     src[j] != '\t' && src[j] != '\n'; j++)
+			ifname[j] = src[j];
+		ifname[j] = '\0';
 
-			line_start = (i == 0) ? buf : buf + seq->count - i;
-			for (j = 0; j < IFNAMSIZ - 1 && line_start[j] &&
-			     line_start[j] != '\t' && line_start[j] != ' ';
-			     j++)
-				ifname[j] = line_start[j];
-			ifname[j] = '\0';
-
-			if (is_vpn_ifname(ifname)) {
-				/* Rewind seq->count to hide this line */
-				seq->count -= (i == 0) ? seq->count : i;
-			}
-			break;
+		if (is_vpn_ifname(ifname)) {
+			/* Skip this line */
+			src = line_end;
+			continue;
 		}
+
+		/* Keep this line — move it down if there's a gap */
+		if (dst != src)
+			memmove(dst, src, line_len);
+		dst += line_len;
+		src = line_end;
 	}
 
+	seq->count = dst - buf;
 	return 0;
 }
 
 static struct kretprobe fib_route_krp = {
 	.handler	= fib_route_ret,
 	.entry_handler	= fib_route_entry,
-	.data_size	= sizeof(bool),
+	.data_size	= sizeof(struct fib_route_data),
 	.maxactive	= 20,
 	.kp.symbol_name	= "fib_route_seq_show",
 };
