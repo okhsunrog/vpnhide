@@ -8,30 +8,65 @@ Three components work together to cover all detection vectors -- from Java APIs 
 
 | Directory | What | How |
 |-----------|------|-----|
-| **[zygisk/](zygisk/)** | Zygisk module (Rust) | Inline-hooks `libc.so` via [shadowhook](https://github.com/nicknisi/nicknisi): `ioctl`, `getifaddrs`, `openat` (`/proc/net/*`), `recvmsg` (netlink). Catches every caller regardless of load order. |
-| **[lsposed/](lsposed/)** | LSPosed module (Kotlin) | Hooks Java network APIs (`NetworkCapabilities`, `NetworkInterface`, `LinkProperties`, etc.) and `writeToParcel` in `system_server` for cross-process Binder filtering. |
-| **[kmod/](kmod/)** | Kernel module (C) | `kretprobe` hooks on `dev_ioctl`, `rtnl_fill_ifinfo`, `fib_route_seq_show`. Invisible to any userspace anti-tamper SDK. |
-| **[test-app/](test-app/)** | Diagnostic app (Kotlin + C++) | 15 checks (6 native + 9 Java) covering all hook vectors. Logs everything to logcat under tag `VPNHideTest` for automated verification. |
+| **[kmod/](kmod/)** | Kernel module (C) | `kretprobe` hooks in kernel space. Zero footprint in the target app's process -- invisible to any userspace anti-tamper SDK. |
+| **[lsposed/](lsposed/)** | LSPosed module (Kotlin) | Hooks `writeToParcel` in `system_server` for per-UID Binder filtering. Only "System Framework" in LSPosed scope -- no in-process hooks. |
+| **[zygisk/](zygisk/)** | Zygisk module (Rust) | Inline-hooks `libc.so` in the target app's process. Alternative to kmod for users who can't install a kernel module. |
+| **[test-app/](test-app/)** | Diagnostic app (Kotlin + C++) | 22 checks covering all detection vectors. Logs to logcat under tag `VPNHideTest`. |
+
+## Detection coverage
+
+| # | Detection vector | SELinux | kmod | zygisk | lsposed |
+|---|---|---|---|---|---|
+| 1 | `ioctl(SIOCGIFFLAGS)` on tun0 | | x | x | |
+| 2 | `ioctl(SIOCGIFNAME)` resolve index to name | | x | x | |
+| 3 | `ioctl(SIOCGIFCONF)` interface enumeration | | x | x | |
+| 4 | `getifaddrs()` (uses netlink internally) | | x | x | |
+| 5 | netlink `RTM_GETLINK` dump | blocked | x | x | |
+| 6 | netlink `RTM_GETADDR` dump (IPv4 + IPv6) | blocked | x | | |
+| 7 | netlink `RTM_GETROUTE` dump | blocked | | | |
+| 8 | `/proc/net/route` | blocked | x | x | |
+| 9 | `/proc/net/ipv6_route` | blocked | | x | |
+| 10 | `/proc/net/if_inet6` | blocked | | x | |
+| 11 | `/proc/net/tcp`, `tcp6` | blocked | | | |
+| 12 | `/proc/net/udp`, `udp6` | blocked | | | |
+| 13 | `/proc/net/dev` | blocked | | | |
+| 14 | `/proc/net/fib_trie` | blocked | | | |
+| 15 | `/sys/class/net/tun0/` | blocked | | | |
+| 16 | `NetworkCapabilities` (hasTransport, NOT_VPN, transportInfo) | | | | x |
+| 17 | `NetworkInfo` (getType, getTypeName) | | | | x |
+| 18 | `ConnectivityManager` (activeNetwork, allNetworks) | | | | x |
+| 19 | `LinkProperties` (interfaceName, routes, DNS) | | | | x |
+| 20 | `NetworkInterface.getNetworkInterfaces()` | | x | x | |
+| 21 | `System.getProperty` (proxy settings) | | | x | |
+| 22 | `/proc/net/route` via Java `FileInputStream` | blocked | x | x | |
+
+**blocked** = SELinux denies access for untrusted apps (Android 10+). No hook needed.
+
+**x** = actively filtered by this component.
+
+Rows 1-4 and 20 are the only vectors reachable by regular apps. Everything else is either blocked by SELinux or goes through Java APIs (covered by lsposed).
 
 ## Which modules do I need?
 
-- **Most apps**: `zygisk` + `lsposed`. Almost all apps check VPN status through both native and Java APIs, so both modules are needed.
-- **Apps with aggressive anti-tamper SDKs**: `kmod` + `lsposed` (system_server mode). Some SDKs detect userspace hooks via raw `svc #0` syscalls and ELF integrity checks -- only kernel-level filtering is invisible to them.
-- **To verify your setup**: install `test-app`, add it to target lists, run with VPN active -- all checks should be green.
+- **Apps with aggressive anti-tamper SDKs** (banking, government): `kmod` + `lsposed`. Zero in-process footprint -- undetectable by integrity checks.
+- **Other apps**: `zygisk` + `lsposed`. Simpler to install (no kernel module), covers all reachable vectors.
+- **To verify your setup**: install `test-app`, add it to target lists, run with VPN active -- all checks should pass.
 
 ## Configuration
 
-All three modules share a target list. Use the WebUI (KernelSU/Magisk manager -> module settings) to select which apps should not see the VPN. The WebUI writes to:
-- `targets.txt` -- package names (read by zygisk and lsposed)
-- `/proc/vpnhide_targets` -- resolved UIDs (read by kmod)
-- `/data/system/vpnhide_uids.txt` -- resolved UIDs (read by lsposed system_server hooks)
+Both kmod and zygisk modules have a WebUI (KernelSU/Magisk manager -> module settings) to select target apps. On save, the WebUI writes to:
+- `targets.txt` -- persistent package names (survives module updates)
+- `/proc/vpnhide_targets` -- resolved UIDs for the kernel module (kmod only)
+- `/data/system/vpnhide_uids.txt` -- resolved UIDs for the lsposed system_server hooks
+
+All changes apply immediately -- no reboot needed.
 
 ## Building
 
-- **zygisk**: `cd zygisk && ./build-zip.sh` (Rust + NDK + cargo-ndk). See [zygisk/README.md](zygisk/README.md).
-- **lsposed**: `cd lsposed && ./gradlew assembleDebug` (JDK 17). See [lsposed/README.md](lsposed/README.md).
-- **kmod**: `cd kmod && ./build-zip.sh` (kernel source + cross-compiler). See [kmod/BUILDING.md](kmod/BUILDING.md).
-- **test-app**: `cd test-app && ./gradlew assembleDebug` (JDK 17 + NDK for native checks).
+- **kmod**: `cd kmod && make && ./build-zip.sh` (kernel source + clang, see [kmod/BUILDING.md](kmod/BUILDING.md))
+- **zygisk**: `cd zygisk && ./build-zip.sh` (Rust + NDK + cargo-ndk)
+- **lsposed**: `cd lsposed && ./gradlew assembleDebug` (JDK 17)
+- **test-app**: `cd test-app && ./gradlew installDebug` (JDK 17 + NDK)
 
 ## Verified against
 
@@ -44,7 +79,7 @@ Both implement the official Russian Ministry of Digital Development VPN/proxy de
 
 Works correctly with split-tunnel VPN configurations. Only the apps in the target list are affected -- all other apps see normal VPN state.
 
-Note: detection apps that compare device-reported public IP against external checkers require split tunneling -- the detection app's HTTPS requests must exit through the carrier, not the tunnel. That is a network-layer fact, not something any client-side hook can fix.
+Note: detection apps that compare device-reported public IP against external checkers require split tunneling -- the detection app's HTTPS requests must exit through the carrier, not the tunnel.
 
 ## Threat model
 
@@ -60,7 +95,7 @@ It is NOT designed for:
 - `kmod` requires a GKI kernel with `CONFIG_KPROBES=y` (standard on Pixel 6-9a with `android14-6.1`)
 - `lsposed` requires LSPosed or a compatible Xposed framework
 - `zygisk` is arm64 only
-- Direct `svc #0` syscalls bypass zygisk's libc hooks (that is what kmod is for)
+- Direct `svc #0` syscalls bypass zygisk's libc hooks (that's what kmod is for)
 - Server-side detection is unfixable client-side -- use split tunneling
 
 ## License
