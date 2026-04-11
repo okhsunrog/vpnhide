@@ -1,5 +1,4 @@
 <resources>
     <string name="app_name">VPN Hide</string>
     <string name="module_description">Hides active VPN connection from selected apps — NetworkCapabilities, NetworkInfo, NetworkInterface, LinkProperties, /proc/net</string>
-    <string name="status_instructions">This module is controlled entirely from the LSPosed / Vector manager.\n\n1. Open Vector manager → Modules → enable VPN Hide\n\n2. Set the module scope to the apps you want VPN hidden from\n\n3. Force-stop those apps so they re-fork with hooks active\n\n4. Run adb logcat | grep VpnHide to confirm hooks installed\n\nNo in-app configuration is needed — the LSPosed scope is the allowlist.</string>
 </resources>

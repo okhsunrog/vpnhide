@@ -1,6 +1,7 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.compose.compiler)
 }
 
 android {
@@ -11,31 +12,18 @@ android {
         applicationId = "dev.okhsunrog.vpnhide"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "3.0"
     }
 
     buildFeatures {
+        compose = true
         buildConfig = true
     }
-
-    // Debug-signed builds are fine for personal use. To ship a signed release,
-    // uncomment the signingConfigs block below and provide a keystore.
-    /*
-    signingConfigs {
-        create("release") {
-            storeFile = file("release.keystore")
-            storePassword = System.getenv("KEYSTORE_PASSWORD")
-            keyAlias = System.getenv("KEY_ALIAS")
-            keyPassword = System.getenv("KEY_PASSWORD")
-        }
-    }
-    */
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -59,11 +47,14 @@ android {
 
 dependencies {
     // Xposed API — compileOnly so it's not bundled into the APK.
-    // LSPosed/Vector provides the implementation at runtime.
     compileOnly("de.robv.android.xposed:api:82")
 
-    // AppCompat for the minimal status screen activity. That's all the
-    // manager UI needs — no recyclerview, no coroutines, no lifecycle
-    // since the Activity is static.
-    implementation("androidx.appcompat:appcompat:1.7.0")
+    // Compose UI
+    implementation(libs.core.ktx)
+    implementation(libs.activity.compose)
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.ui.tooling.preview)
+    debugImplementation(libs.compose.ui.tooling)
 }
