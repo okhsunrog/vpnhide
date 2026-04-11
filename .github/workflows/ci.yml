@@ -36,108 +36,49 @@ jobs:
 
   kmod:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/${{ github.repository }}/ci:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
     strategy:
       matrix:
-        gki:
-          - branch: android14-6.1
-            symvers: kmod/symvers/android14-6.1.symvers
-
+        kmi:
+          - android12-5.10
+          - android13-5.10
+          - android13-5.15
+          - android14-5.15
+          - android14-6.1
+          - android15-6.6
+          - android16-6.12
+    container:
+      image: ghcr.io/ylarod/ddk-min:${{ matrix.kmi }}-20260313
     env:
-      CLANG_DIR: /opt/aosp-clang/bin
+      KDIR: /opt/ddk/kdir/${{ matrix.kmi }}
+      CLANG: /opt/ddk/clang/clang-r487747c/bin
 
     steps:
-      - name: Add AOSP clang to PATH
-        run: echo "$CLANG_DIR" >> "$GITHUB_PATH"
-
       - uses: actions/checkout@v4
-
-      - name: Mark workspace safe
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Cache kernel source
-        uses: actions/cache@v4
-        id: kernel-cache
-        with:
-          path: kernel-source
-          key: kernel-${{ matrix.gki.branch }}-v2
-
-      - name: Clone kernel source (shallow)
-        if: steps.kernel-cache.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth=1 -b ${{ matrix.gki.branch }} \
-              https://android.googlesource.com/kernel/common \
-              kernel-source
-
-      - name: Prepare kernel source
-        run: |
-          cd kernel-source
-
-          make ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-              CC=$CLANG_DIR/clang LD=$CLANG_DIR/ld.lld \
-              AR=$CLANG_DIR/llvm-ar NM=$CLANG_DIR/llvm-nm \
-              OBJCOPY=$CLANG_DIR/llvm-objcopy \
-              OBJDUMP=$CLANG_DIR/llvm-objdump \
-              STRIP=$CLANG_DIR/llvm-strip \
-              CROSS_COMPILE=aarch64-linux-gnu- \
-              gki_defconfig
-
-          touch abi_symbollist.raw
-
-          make ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-              CC=$CLANG_DIR/clang LD=$CLANG_DIR/ld.lld \
-              AR=$CLANG_DIR/llvm-ar NM=$CLANG_DIR/llvm-nm \
-              OBJCOPY=$CLANG_DIR/llvm-objcopy \
-              OBJDUMP=$CLANG_DIR/llvm-objdump \
-              STRIP=$CLANG_DIR/llvm-strip \
-              CROSS_COMPILE=aarch64-linux-gnu- \
-              olddefconfig prepare || true
-
-          # Generate module.lds (make prepare sometimes skips this)
-          if [ ! -f scripts/module.lds ]; then
-              $CLANG_DIR/clang -E -Wp,-MD,scripts/.module.lds.d -nostdinc \
-                  -I arch/arm64/include -I arch/arm64/include/generated \
-                  -I include -I include/generated \
-                  -include include/linux/kconfig.h \
-                  -D__KERNEL__ -DCC_USING_PATCHABLE_FUNCTION_ENTRY \
-                  --target=aarch64-linux-gnu -x c scripts/module.lds.S \
-                  2>/dev/null | grep -v '^#' > scripts/module.lds
-              sed -i 's/((1UL) << 12)/4096/g' scripts/module.lds
-          fi
-
-          cp "$GITHUB_WORKSPACE/${{ matrix.gki.symvers }}" Module.symvers
-
-          echo '#define UTS_RELEASE "6.1.0-vpnhide-ci"' \
-              > include/generated/utsrelease.h
-          echo -n "6.1.0-vpnhide-ci" > include/config/kernel.release
 
       - name: Build kernel module
         run: |
-          make -C $GITHUB_WORKSPACE/kernel-source M=$GITHUB_WORKSPACE/kmod \
+          make -C $KDIR M=$GITHUB_WORKSPACE/kmod \
               ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-              CC=$CLANG_DIR/clang LD=$CLANG_DIR/ld.lld \
-              AR=$CLANG_DIR/llvm-ar NM=$CLANG_DIR/llvm-nm \
-              OBJCOPY=$CLANG_DIR/llvm-objcopy \
-              OBJDUMP=$CLANG_DIR/llvm-objdump \
-              STRIP=$CLANG_DIR/llvm-strip \
+              CC=$CLANG/clang LD=$CLANG/ld.lld \
+              AR=$CLANG/llvm-ar NM=$CLANG/llvm-nm \
+              OBJCOPY=$CLANG/llvm-objcopy \
+              OBJDUMP=$CLANG/llvm-objdump \
+              STRIP=$CLANG/llvm-strip \
               CROSS_COMPILE=aarch64-linux-gnu- \
               modules
+          llvm-strip -d kmod/vpnhide_kmod.ko
 
       - name: Package KSU module zip
         run: |
           cp kmod/vpnhide_kmod.ko kmod/module/
-          (cd kmod/module && zip -qr "$GITHUB_WORKSPACE/vpnhide-kmod-${{ matrix.gki.branch }}.zip" .)
+          apt-get update -qq && apt-get install -y -qq zip >/dev/null
+          (cd kmod/module && zip -qr "$GITHUB_WORKSPACE/vpnhide-kmod-${{ matrix.kmi }}.zip" .)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vpnhide-kmod-${{ matrix.gki.branch }}
-          path: vpnhide-kmod-${{ matrix.gki.branch }}.zip
+          name: vpnhide-kmod-${{ matrix.kmi }}
+          path: vpnhide-kmod-${{ matrix.kmi }}.zip
           if-no-files-found: error
 
   zygisk:
@@ -251,23 +192,6 @@ jobs:
           path: dist/
           merge-multiple: true
 
-      - name: Rename artifacts
-        run: |
-          cd dist
-          tag="${GITHUB_REF##*/}"
-          # Rename with version tag
-          for f in *.zip *.apk; do
-            [ -f "$f" ] || continue
-            base="${f%.*}"
-            ext="${f##*.}"
-            mv "$f" "${base}-${tag}.${ext}" 2>/dev/null || true
-          done
-          # Generate checksums
-          for f in *.zip *.apk; do
-            [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"
-          done
-          ls -lh
-
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
@@ -276,6 +200,5 @@ jobs:
           files: |
             dist/*.zip
             dist/*.apk
-            dist/*.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
