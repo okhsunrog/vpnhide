@@ -22,7 +22,7 @@ Download the latest release from [Releases](https://github.com/okhsunrog/vpnhide
 
 **Finding your GKI generation:** run `adb shell uname -r`. The output looks like `6.1.75-android14-11-g...` — the generation is `android14-6.1`. Download the matching `vpnhide-kmod-android14-6.1.zip`.
 
-> **Note:** the `android14` in the GKI name is NOT your Android version — it's the kernel generation, frozen at manufacturing time. A Pixel 7 running Android 16 still has an `android13-5.10` kernel.
+> **Note:** the `android14` in the GKI name is NOT your Android version — it's the kernel generation. All Pixels from 6 to 9a share the same `android14-6.1` kernel. Pixel 10 series moves to `android16-6.12`.
 
 ### zygisk + lsposed
 
