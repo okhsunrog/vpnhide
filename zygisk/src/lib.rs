@@ -49,12 +49,8 @@ const LOG_TAG: &str = "vpnhide-zygisk";
 /// it survives module updates (KSU/Magisk wipe `/data/adb/modules/<id>/`
 /// on every install). `customize.sh` is responsible for creating the
 /// directory and migrating the legacy in-module file on first run.
-/// Persistent targets path (survives module updates).
-const TARGETS_FILE: &str = "/data/adb/vpnhide_zygisk/targets.txt";
-/// Module directory copy.
-const TARGETS_FILE_MODULE: &str = "/data/adb/modules/vpnhide_zygisk/targets.txt";
-/// World-readable copy for Magisk where SELinux blocks all /data/adb/ access.
-const TARGETS_FILE_TMP: &str = "/data/local/tmp/vpnhide_targets.txt";
+/// Targets filename within the module directory.
+const TARGETS_FILENAME: &str = "targets.txt";
 
 /// Initialize `android_logger` exactly once. Cheap to call from every
 /// forked process — subsequent calls are no-ops. The compile-time log
@@ -85,43 +81,54 @@ pub struct VpnHide {
 // Single-threaded access by construction.
 unsafe impl Sync for VpnHide {}
 
-/// Cached targets loaded in on_load (zygote context, before any fork).
-/// Survives across fork — child processes inherit the memory.
+/// Cached targets loaded via Zygisk's module dir fd.
 static CACHED_TARGETS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
 
-fn load_targets() -> Vec<String> {
-    let content = fs::read_to_string(TARGETS_FILE)
-        .or_else(|_| fs::read_to_string(TARGETS_FILE_MODULE))
-        .or_else(|_| fs::read_to_string(TARGETS_FILE_TMP));
+fn parse_targets(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                None
+            } else {
+                Some(line.to_string())
+            }
+        })
+        .collect()
+}
 
-    match content {
-        Ok(content) => content
-            .lines()
-            .filter_map(|line| {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') {
-                    None
-                } else {
-                    Some(line.to_string())
-                }
-            })
-            .collect(),
-        Err(e) => {
-            log::warn!("can't read targets ({e}); no targets active");
-            Vec::new()
-        }
+/// Read targets.txt via the module directory fd provided by Zygisk.
+/// This fd is opened by Zygisk with root privileges, bypassing SELinux
+/// restrictions that block direct file access on Magisk.
+fn load_targets_from_dir_fd(dir_fd: std::os::fd::RawFd) -> Vec<String> {
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+    let filename = std::ffi::CString::new(TARGETS_FILENAME).unwrap();
+    let fd = unsafe { libc::openat(dir_fd, filename.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        log::warn!(
+            "can't open {TARGETS_FILENAME} via module dir fd: {}",
+            std::io::Error::last_os_error()
+        );
+        return Vec::new();
     }
+    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+    let mut content = String::new();
+    if let Err(e) = file.read_to_string(&mut content) {
+        log::warn!("can't read {TARGETS_FILENAME}: {e}");
+        return Vec::new();
+    }
+    parse_targets(&content)
 }
 
 impl ZygiskModule for VpnHide {
     type Api = V5;
 
-    fn on_load(&self, _api: ZygiskApi<'_, V5>, _env: JNIEnv<'_>) {
+    fn on_load(&self, api: ZygiskApi<'_, V5>, _env: JNIEnv<'_>) {
         init_logger();
-        // Cache targets while still running as zygote (root, permissive
-        // SELinux context). After fork + setuid, /data/adb/ is no longer
-        // readable on Magisk.
-        CACHED_TARGETS.get_or_init(load_targets);
+        let dir_fd = api.get_module_dir();
+        CACHED_TARGETS.get_or_init(|| load_targets_from_dir_fd(dir_fd));
         debug!(
             "on_load: {} targets cached",
             CACHED_TARGETS.get().map_or(0, |v| v.len())
