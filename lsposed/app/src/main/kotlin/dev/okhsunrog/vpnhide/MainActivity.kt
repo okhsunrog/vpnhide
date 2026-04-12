@@ -274,26 +274,31 @@ private fun buildSaveCommand(body: String, selectedPackages: List<String>): Stri
     // Copy to module dir for Magisk SELinux compat
     parts += "cp $ZYGISK_TARGETS $ZYGISK_MODULE_TARGETS 2>/dev/null; true"
 
-    // Write UIDs to /proc/vpnhide_targets if kmod is loaded
+    // Resolve UIDs and write to /proc/vpnhide_targets + /data/system/vpnhide_uids.txt
+    // Uses the same approach as kmod/service.sh — real newlines in $UIDS via heredoc-style
+    // accumulation, not printf \n escapes.
     if (selectedPackages.isNotEmpty()) {
         val uidResolution = buildString {
-            append("ALL_PKGS=\"\$(pm list packages -U 2>/dev/null)\"; UIDS=\"\"")
+            append("ALL_PKGS=\"\$(pm list packages -U 2>/dev/null)\"")
+            append("; UIDS=\"\"")
             for (pkg in selectedPackages) {
                 append("; U=\$(echo \"\$ALL_PKGS\" | grep '^package:$pkg ' | sed 's/.*uid://')")
-                append("; [ -n \"\$U\" ] && UIDS=\"\${UIDS}\${UIDS:+\\n}\$U\"")
+                append("; if [ -n \"\$U\" ]; then if [ -z \"\$UIDS\" ]; then UIDS=\"\$U\"; else UIDS=\"\$UIDS")
+                // Real newline in the shell string — not \n escape
+                append("\n")
+                append("\$U\"; fi; fi")
             }
-            // Write to /proc/vpnhide_targets if it exists
-            append("; if [ -f $PROC_TARGETS ]; then printf \"\$UIDS\\n\" > $PROC_TARGETS; fi")
-            // Write to /data/system/vpnhide_uids.txt
-            append("; printf \"\$UIDS\\n\" > $SS_UIDS_FILE")
-            append("; chmod 644 $SS_UIDS_FILE")
+            append("; if [ -n \"\$UIDS\" ]; then echo \"\$UIDS\" > $PROC_TARGETS 2>/dev/null; echo \"\$UIDS\" > $SS_UIDS_FILE")
+            append("; else echo > $PROC_TARGETS 2>/dev/null; echo > $SS_UIDS_FILE; fi")
+            append("; chmod 644 $SS_UIDS_FILE 2>/dev/null")
             append("; chcon u:object_r:system_data_file:s0 $SS_UIDS_FILE 2>/dev/null")
         }
         parts += uidResolution
     } else {
-        // No targets — clear the UIDs files
-        parts += "> $SS_UIDS_FILE 2>/dev/null; true"
-        parts += "if [ -f $PROC_TARGETS ]; then > $PROC_TARGETS; fi"
+        // No targets — clear the UIDs files. echo -n writes a zero-length
+        // string which triggers the proc write handler (unlike bare > redirect).
+        parts += "echo > $PROC_TARGETS 2>/dev/null; true"
+        parts += "echo > $SS_UIDS_FILE 2>/dev/null; true"
     }
 
     return parts.joinToString(" ; ")

@@ -298,9 +298,13 @@
       const step2 = [
         `UIDS=""`,
         ...selected.map(pkg =>
-          `U=$(pm list packages -U '${pkg}' 2>/dev/null | grep '^package:${pkg} ' | sed 's/.*uid://') && [ -n "$U" ] && UIDS="$UIDS$U\\n"`
+          [
+            `U=$(pm list packages -U '${pkg}' 2>/dev/null | grep '^package:${pkg} ' | sed 's/.*uid://')`,
+            `if [ -n "$U" ]; then if [ -z "$UIDS" ]; then UIDS="$U"; else UIDS="$UIDS`,
+            `$U"; fi; fi`,
+          ].join('\n')
         ),
-        `printf "$UIDS" > ${SS_UIDS_FILE}`,
+        `if [ -n "$UIDS" ]; then echo "$UIDS" > ${SS_UIDS_FILE}; else echo > ${SS_UIDS_FILE}; fi`,
         `chmod 644 ${SS_UIDS_FILE}`,
         `chcon u:object_r:system_data_file:s0 ${SS_UIDS_FILE} 2>/dev/null`,
       ].join(' ; ');
