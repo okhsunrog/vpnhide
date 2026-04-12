@@ -13,9 +13,15 @@
     <string name="search_placeholder">Search apps&#8230;</string>
     <string name="filter_system">System</string>
 
+    <!-- Root status -->
+    <string name="root_error_title">Root access required</string>
+    <string name="root_error_message">VPN Hide needs root access to manage target apps. Grant root permissions to this app in your root manager (Magisk, KernelSU, etc.) and reopen the app.</string>
+    <string name="root_checking">Checking root access&#8230;</string>
+
     <!-- Save feedback -->
     <string name="save_success">Saved %d target(s)</string>
     <string name="save_failed_exit">Save failed (exit code %d)</string>
     <string name="save_failed_error">Save failed: %s</string>
+    <string name="save_failed_root">Save failed: root access denied</string>
     <string name="save_header_comment"># Managed by VPN Hide app</string>
 </resources>

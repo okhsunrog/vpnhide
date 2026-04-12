@@ -13,8 +13,14 @@
     <string name="search_placeholder">Поиск приложений&#8230;</string>
     <string name="filter_system">Системные</string>
 
+    <!-- Root status -->
+    <string name="root_error_title">Требуется root-доступ</string>
+    <string name="root_error_message">VPN Hide необходим root-доступ для управления целевыми приложениями. Предоставьте root-права этому приложению в менеджере root (Magisk, KernelSU и т.д.) и откройте приложение заново.</string>
+    <string name="root_checking">Проверка root-доступа&#8230;</string>
+
     <!-- Save feedback -->
     <string name="save_success">Сохранено целей: %d</string>
     <string name="save_failed_exit">Ошибка сохранения (код выхода %d)</string>
     <string name="save_failed_error">Ошибка сохранения: %s</string>
+    <string name="save_failed_root">Ошибка сохранения: root-доступ запрещён</string>
 </resources>
