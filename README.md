@@ -6,24 +6,27 @@ Hide an active Android VPN connection from selected apps.
 
 ## Why vpnhide over alternatives?
 
-Existing modules like [NoVPNDetect](https://bitbucket.org/yuri-project/novpndetect) and [NoVPNDetect Enhanced](https://github.com/BlueCat300/NoVPNDetectEnhanced) hook **inside the target app's process** via Xposed. This means any app with anti-tamper protection can detect the injection and refuse to work. The NoVPNDetect Enhanced author explicitly states: *"The module will not work if the target app has LSPosed protection or memory injection checks. For example, MirPay, T-Bank."*
+Existing modules like [NoVPNDetect](https://bitbucket.org/yuri-project/novpndetect) and [NoVPNDetect Enhanced](https://github.com/BlueCat300/NoVPNDetectEnhanced) only cover **Java API** detection and hook **inside the target app's process** via Xposed. This has two critical problems:
 
-vpnhide takes a fundamentally different approach:
+1. **Invisible to anti-tamper** — any app with memory injection checks detects the Xposed hooks and refuses to work. The NoVPNDetect Enhanced author explicitly states: *"The module will not work if the target app has LSPosed protection or memory injection checks. For example, MirPay, T-Bank."*
+2. **No native coverage** — apps using C/C++ code, cross-platform frameworks (Flutter, React Native), or direct syscalls can detect VPN through `ioctl`, `getifaddrs`, netlink sockets, and `/proc/net/*`. These vectors are completely missed by Java-only hooks.
 
-- **lsposed** hooks `system_server` (not the target app) — VPN data is stripped at the Binder level before it ever reaches the app's process. Anti-tamper SDKs inspect their own process and find nothing.
-- **kmod** hooks the kernel itself — ioctl, netlink, and /proc/net responses are filtered before the syscall returns. Zero in-process footprint. No library injection. Nothing to detect.
-- The target app's process is completely untouched — no Xposed, no inline hooks, no modified memory regions.
+vpnhide solves both problems with a two-layer architecture:
 
-This makes vpnhide work with apps like MirPay, T-Bank, Alfa-Bank and other banking/government apps that actively detect and block Xposed-based modules.
+**Layer 1 — Java API (lsposed module):** hooks `system_server`, not the target app. `NetworkCapabilities`, `NetworkInfo`, and `LinkProperties` are filtered at the Binder level *before* data reaches the app's process. The app receives clean data over IPC — no injection into its process, nothing for anti-tamper to detect.
 
-Additionally, vpnhide covers native detection vectors (ioctl, netlink, /proc/net) that the alternatives don't hook at all — these are the vectors used by apps built on cross-platform frameworks and native SDKs.
+**Layer 2 — Native (kmod or zygisk):** covers every native detection path:
+- **kmod** (recommended) — kernel-level `kretprobe` hooks. Filters `ioctl` (SIOCGIFFLAGS, SIOCGIFNAME, SIOCGIFCONF), `getifaddrs`/netlink dumps (RTM_GETLINK, RTM_GETADDR), and `/proc/net/*` reads — all before the syscall returns to userspace. Zero in-process footprint. No library injection. Nothing to detect.
+- **zygisk** (alternative) — inline-hooks `libc.so` inside the app process. Same native coverage as kmod but runs in-process, so it's theoretically detectable by advanced anti-tamper. Use this if your kernel isn't supported by kmod.
+
+The target app's process is completely untouched (with kmod + lsposed) — no Xposed, no inline hooks, no modified memory regions. This makes vpnhide work with MirPay, T-Bank, Alfa-Bank and other banking/government apps that actively detect and block Xposed-based modules.
 
 ## Which modules do I need?
 
-You always need `lsposed` (handles Java API detection) plus one native module:
+You always need **lsposed** (Java API layer) plus one native module:
 
-- **`kmod` + `lsposed`** (recommended) — kernel-level hooks, zero in-process footprint. Invisible to anti-tamper SDKs in banking/government apps. Requires a supported GKI kernel (see below).
-- **`zygisk` + `lsposed`** — in-process libc hooks. Use this if your device's GKI generation isn't covered by the kmod builds, or if you can't install kernel modules.
+- **`kmod` + `lsposed`** (recommended) — fully out-of-process, invisible to anti-tamper. Requires a supported GKI kernel (see below).
+- **`zygisk` + `lsposed`** — use this if your device's GKI generation isn't covered by the kmod builds, or if you can't install kernel modules.
 
 ## Install
 
