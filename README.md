@@ -1,5 +1,7 @@
 # vpnhide
 
+**[Русская версия](README.ru.md)**
+
 Hide an active Android VPN connection from selected apps.
 
 ## Which modules do I need?
