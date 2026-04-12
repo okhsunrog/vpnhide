@@ -1,4 +1,4 @@
-# vpnhide
+# VPN Hide
 
 **[Русская версия](README.ru.md)**
 
