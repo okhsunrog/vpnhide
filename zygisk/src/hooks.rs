@@ -140,7 +140,9 @@ pub unsafe extern "C" fn hooked_ioctl(
     if request == SIOCGIFFLAGS as libc::c_ulong {
         if !arg.is_null() {
             let req = unsafe { &*(arg as *const ifreq) };
-            let name_bytes = unsafe { &*(&req.ifr_name as *const [libc::c_char]) };
+            let name_bytes = unsafe {
+                core::slice::from_raw_parts(req.ifr_name.as_ptr().cast::<u8>(), req.ifr_name.len())
+            };
             if is_vpn_iface_bytes(name_bytes) {
                 set_errno(libc::ENODEV);
                 return -1;
@@ -155,7 +157,9 @@ pub unsafe extern "C" fn hooked_ioctl(
         let ret = unsafe { real(fd, request, arg) };
         if ret == 0 && !arg.is_null() {
             let req = unsafe { &*(arg as *const ifreq) };
-            let name_bytes = unsafe { &*(&req.ifr_name as *const [libc::c_char]) };
+            let name_bytes = unsafe {
+                core::slice::from_raw_parts(req.ifr_name.as_ptr().cast::<u8>(), req.ifr_name.len())
+            };
             if is_vpn_iface_bytes(name_bytes) {
                 set_errno(libc::ENODEV);
                 return -1;
@@ -197,7 +201,9 @@ unsafe fn filter_ifconf(ifc: *mut ifconf) {
 
     for i in 0..n {
         let entry = unsafe { &*ifc.ifc_req.offset(i as isize) };
-        let name_bytes = unsafe { &*(&entry.ifr_name as *const [libc::c_char]) };
+        let name_bytes = unsafe {
+            core::slice::from_raw_parts(entry.ifr_name.as_ptr().cast::<u8>(), entry.ifr_name.len())
+        };
         if is_vpn_iface_bytes(name_bytes) {
             continue;
         }

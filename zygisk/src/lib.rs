@@ -30,7 +30,6 @@ mod filter;
 mod hooks;
 mod shadowhook;
 
-
 use std::sync::Once;
 
 use jni::JNIEnv;
@@ -281,7 +280,12 @@ fn scrub_shadowhook_maps() {
     let maps = {
         use std::io::Read;
         use std::os::fd::FromRawFd;
-        let fd = unsafe { libc::open(c"/proc/self/maps".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+        let fd = unsafe {
+            libc::open(
+                c"/proc/self/maps".as_ptr(),
+                libc::O_RDONLY | libc::O_CLOEXEC,
+            )
+        };
         if fd < 0 {
             log::warn!("scrub_shadowhook_maps: can't open /proc/self/maps");
             return;
