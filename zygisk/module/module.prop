@@ -3,4 +3,4 @@ name=VPN Hide (Zygisk native)
 version=v0.4.2
 versionCode=402
 author=okhsunrog
-description=Hides active VPN interfaces from selected apps by inline-hooking libc ioctl via shadowhook. Covers the native detection path (Flutter, JNI, raw C/C++) that Java-level LSPosed modules can't reach. Manage targets via VPN Hide app or WebUI.
+description=Hides active VPN interfaces from selected apps by inline-hooking libc ioctl via shadowhook. Covers the native detection path (Flutter, JNI, raw C/C++) that Java-level LSPosed modules can't reach. Manage targets via VPN Hide app.

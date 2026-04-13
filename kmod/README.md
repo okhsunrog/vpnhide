@@ -51,8 +51,6 @@ On boot:
 
 **VPN Hide app (recommended):** open the VPN Hide app (the [lsposed](../lsposed/) APK). It lists all installed apps with icons, search, and checkboxes. Saves targets for both kmod and zygisk, resolves UIDs, and writes to `/proc/vpnhide_targets` immediately. Works on both KernelSU and Magisk.
 
-**WebUI:** on KernelSU-Next, open the module in the manager and tap WebUI. Same functionality.
-
 **Shell:**
 ```bash
 # Write package names to the persistent config
@@ -62,7 +60,7 @@ adb shell su -c 'echo "com.example.targetapp" > /data/adb/vpnhide_kmod/targets.t
 adb shell su -c 'echo 10423 > /proc/vpnhide_targets'
 ```
 
-The app and WebUI write to **three places** simultaneously:
+The app writes to **three places** simultaneously:
 1. `targets.txt` -- persistent package names (survives module updates)
 2. `/proc/vpnhide_targets` -- resolved UIDs for the kernel module (live, no reboot)
 3. `/data/system/vpnhide_uids.txt` -- resolved UIDs for the [lsposed](../lsposed/) module's system_server hooks (live reload via inotify)
@@ -80,7 +78,7 @@ Together they provide complete VPN hiding without any hooks in the target app's 
 
 1. Install **vpnhide-kmod** as a KSU module (this module).
 2. Install **[lsposed](../lsposed/)** as an LSPosed/Vector module and add **"System Framework"** to its scope (no other apps in scope).
-3. Pick target apps in the VPN Hide app or vpnhide-kmod's WebUI -- both manage targets for the kernel module and the system_server hooks.
+3. Pick target apps in the VPN Hide app -- it manages targets for both the kernel module and the system_server hooks.
 
 ## Architecture notes
 

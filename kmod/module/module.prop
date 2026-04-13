@@ -3,4 +3,4 @@ name=VPN Hide (kernel)
 version=v0.4.2
 versionCode=402
 author=okhsunrog
-description=Hides VPN interfaces from selected apps at the kernel level via kretprobe. Invisible to anti-tamper SDKs. Manage targets via VPN Hide app or WebUI.
+description=Hides VPN interfaces from selected apps at the kernel level via kretprobe. Invisible to anti-tamper SDKs. Manage targets via VPN Hide app.

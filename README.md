@@ -66,8 +66,6 @@ Alternatively, if you have ADB set up, run `adb shell uname -r` to see the same 
 
 **VPN Hide app (recommended):** open the VPN Hide app (installed as `vpnhide-lsposed.apk`) and grant it root access (Magisk prompts automatically; on KernelSU-Next, grant permission in the manager). It shows all installed apps with icons, names, and search. Check the apps you want to hide VPN from, tap Save. Works with both kmod and zygisk — writes to all target locations automatically via `su`.
 
-**WebUI:** on KernelSU-Next, open the module in the manager and tap WebUI. Same functionality, but only available on KernelSU-Next (Magisk doesn't support WebUI).
-
 **Shell:** edit `/data/adb/vpnhide_kmod/targets.txt` or `/data/adb/vpnhide_zygisk/targets.txt` directly (one package name per line). Reboot for changes to take effect.
 
 After changing targets, force-stop and restart the affected apps — hooks take effect on the next app launch.

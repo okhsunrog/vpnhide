@@ -145,7 +145,7 @@ class HookEntry : IXposedHookLoadPackage {
 
     /**
      * Watch /data/system/vpnhide_uids.txt for changes via inotify.
-     * When modified (e.g. by vpnhide-kmod's WebUI), invalidate the
+     * When modified (e.g. by the VPN Hide app), invalidate the
      * cached UID set so the next writeToParcel call re-reads it.
      */
     private fun watchTargetUidsFile() {

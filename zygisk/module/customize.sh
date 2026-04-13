@@ -37,17 +37,15 @@ if [ ! -f "$PERSIST_TARGETS" ] && [ -f "$LEGACY_TARGETS" ]; then
     ui_print "- Migrated existing targets list from previous install"
 fi
 
-# Seed an empty file on a truly fresh install so the WebUI has something
-# to read on first open.
+# Seed an empty file on a truly fresh install.
 if [ ! -f "$PERSIST_TARGETS" ]; then
     cat > "$PERSIST_TARGETS" <<'EOF'
 # vpnhide-zygisk target allowlist
 # One package name per line. Lines starting with '#' are comments.
-# Managed via the module's WebUI in the KernelSU-Next manager.
+# Managed via the VPN Hide app.
 EOF
 fi
 set_perm "$PERSIST_TARGETS" 0 0 0644
 
 ui_print "- Targets list: $PERSIST_TARGETS (preserved across updates)"
-ui_print "- Pick target apps via the module's WebUI, then reboot or"
-ui_print "  force-stop them to take effect."
+ui_print "- Pick target apps via the VPN Hide app."

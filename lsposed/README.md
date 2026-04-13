@@ -28,7 +28,6 @@ Target UIDs are loaded from `/data/system/vpnhide_uids.txt`. A `FileObserver` (i
 
 This file is written by:
 - The **VPN Hide app** (this APK's target picker UI)
-- The **WebUI** in [kmod](../kmod/) or [zygisk](../zygisk/) modules
 - The module's `service.sh` on boot
 
 ## Target picker app

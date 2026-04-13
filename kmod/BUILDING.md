@@ -86,4 +86,4 @@ adb shell "su -c 'cat /proc/vpnhide_targets'"
 
 **`insmod: File exists`** — module already loaded. `rmmod vpnhide_kmod` first.
 
-**kretprobe not firing** — check `dmesg | grep vpnhide` for registration messages and `/proc/vpnhide_targets` for correct UIDs. Target app UIDs change on reinstall — re-resolve via WebUI.
+**kretprobe not firing** — check `dmesg | grep vpnhide` for registration messages and `/proc/vpnhide_targets` for correct UIDs. Target app UIDs change on reinstall — re-resolve via the VPN Hide app.

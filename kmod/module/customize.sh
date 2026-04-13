@@ -15,7 +15,7 @@ if [ ! -f "$PERSIST_TARGETS" ]; then
     cat > "$PERSIST_TARGETS" <<'EOF'
 # vpnhide-kmod target apps
 # One package name per line. Lines starting with '#' are comments.
-# Managed via the module's WebUI in the KernelSU-Next manager.
+# Managed via the VPN Hide app.
 EOF
 fi
 set_perm "$PERSIST_TARGETS" 0 0 0644
@@ -23,4 +23,4 @@ set_perm "$PERSIST_TARGETS" 0 0 0644
 set_perm "$MODPATH/vpnhide_kmod.ko" 0 0 0644
 
 ui_print "- Targets: $PERSIST_TARGETS (preserved across updates)"
-ui_print "- Pick target apps via WebUI, then reboot."
+ui_print "- Pick target apps via the VPN Hide app."

@@ -651,7 +651,7 @@ static int __init vpnhide_init(void)
 			ok, ARRAY_SIZE(probes));
 
 	/* 0600: root-only read/write. UIDs are written here by service.sh
-	 * and WebUI (both root). Apps must not see the target list. */
+	 * and the VPN Hide app (both root). Apps must not see the target list. */
 	targets_entry =
 		proc_create("vpnhide_targets", 0600, NULL, &targets_proc_ops);
 
