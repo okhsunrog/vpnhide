@@ -44,9 +44,10 @@ echo "  lsposed/native/Cargo.toml"
 REPO="https://github.com/okhsunrog/vpnhide"
 RAW="https://raw.githubusercontent.com/okhsunrog/vpnhide/main"
 
+mkdir -p update-json
 KMOD_KMIS=("android12-5.10" "android13-5.10" "android13-5.15" "android14-5.15" "android14-6.1" "android15-6.6" "android16-6.12")
 for kmi in "${KMOD_KMIS[@]}"; do
-    cat > "update-kmod-${kmi}.json" <<EOJSON
+    cat > "update-json/update-kmod-${kmi}.json" <<EOJSON
 {
   "version": "v${VERSION}",
   "versionCode": ${VERSION_CODE},
@@ -54,10 +55,10 @@ for kmi in "${KMOD_KMIS[@]}"; do
   "changelog": "${REPO}/releases/tag/v${VERSION}"
 }
 EOJSON
-    echo "  update-kmod-${kmi}.json"
+    echo "  update-json/update-kmod-${kmi}.json"
 done
 
-cat > "update-zygisk.json" <<EOJSON
+cat > "update-json/update-zygisk.json" <<EOJSON
 {
   "version": "v${VERSION}",
   "versionCode": ${VERSION_CODE},
@@ -65,4 +66,4 @@ cat > "update-zygisk.json" <<EOJSON
   "changelog": "${REPO}/releases/tag/v${VERSION}"
 }
 EOJSON
-echo "  update-zygisk.json"
+echo "  update-json/update-zygisk.json"
