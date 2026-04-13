@@ -319,15 +319,16 @@ class HookEntry : IXposedHookLoadPackage {
                         savedIfname.set(ifname)
                         XposedHelpers.setObjectField(lp, "mIfaceName", null)
 
-                        // Filter routes that reference VPN interfaces
+                        // Clear ALL routes — this LP belongs to a VPN network,
+                        // so all its routes reference the VPN interface. If we
+                        // leave any, createFromParcel throws
+                        // "Route added with non-matching interface: tun0 vs. null"
+                        // because addRoute validates route.interface == mIfaceName.
                         try {
-                            val routes = XposedHelpers.getObjectField(lp, "mRoutes") as? MutableList<RouteInfo>
+                            val routes = XposedHelpers.getObjectField(lp, "mRoutes") as? MutableList<*>
                             if (routes != null && routes.isNotEmpty()) {
-                                savedRoutes.set(ArrayList(routes))
-                                routes.removeAll { route ->
-                                    val routeIface = route.`interface`
-                                    routeIface != null && isVpnInterfaceName(routeIface)
-                                }
+                                savedRoutes.set(ArrayList(routes) as List<RouteInfo>)
+                                routes.clear()
                             }
                         } catch (_: Throwable) {
                             // mRoutes may not exist on all Android versions
