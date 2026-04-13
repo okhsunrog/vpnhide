@@ -1,0 +1,130 @@
+{
+  "version": "0.5.0",
+  "sections": [
+    {
+      "type": "added",
+      "items": [
+        {
+          "en": "Dashboard with module status, LSPosed config validation, version checks, and live protection verification",
+          "ru": "Панель обзора со статусом модулей, проверкой конфигурации LSPosed, проверкой версий и проверкой защиты в реальном времени"
+        },
+        {
+          "en": "Native module install recommendation — the app detects your kernel and tells you exactly which module to download",
+          "ru": "Рекомендация нативного модуля — приложение определяет ядро и подсказывает, какой модуль скачать"
+        },
+        {
+          "en": "Per-app protection layer toggles (L/K/Z) — control LSPosed, kernel module, and Zygisk independently for each app",
+          "ru": "Раздельное управление уровнями защиты (L/K/Z) — LSPosed, модуль ядра и Zygisk для каждого приложения отдельно"
+        },
+        {
+          "en": "Magisk/KSU auto-update for kmod and zygisk modules",
+          "ru": "Автообновление модулей kmod и zygisk через Magisk/KSU"
+        },
+        {
+          "en": "App update check via GitHub Releases",
+          "ru": "Проверка обновлений приложения через GitHub Releases"
+        },
+        {
+          "en": "Changelog with version history",
+          "ru": "Список изменений с историей версий"
+        }
+      ]
+    },
+    {
+      "type": "fixed",
+      "items": [
+        {
+          "en": "App no longer removes itself from target lists when saving",
+          "ru": "Приложение больше не удаляет себя из списков целей при сохранении"
+        }
+      ]
+    }
+  ],
+  "history": [
+    {
+      "version": "0.4.2",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            {
+              "en": "ioctl SIOCGIFMTU detection and filtering",
+              "ru": "Обнаружение и фильтрация ioctl SIOCGIFMTU"
+            },
+            {
+              "en": "LinkProperties routes filtering in LSPosed hooks",
+              "ru": "Фильтрация маршрутов LinkProperties в хуках LSPosed"
+            }
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            {
+              "en": "Fixed VPN LinkProperties deserialization crash",
+              "ru": "Исправлен краш десериализации VPN LinkProperties"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.4.1",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            {
+              "en": "Russian translation",
+              "ru": "Русский перевод"
+            },
+            {
+              "en": "Root access error screen with clear instructions",
+              "ru": "Экран ошибки root-доступа с инструкциями"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "0.4.0",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            {
+              "en": "VPN Hide app with target picker UI — select apps to hide VPN from",
+              "ru": "Приложение VPN Hide с выбором целевых приложений"
+            },
+            {
+              "en": "Built-in diagnostics — 26 checks covering all detection vectors",
+              "ru": "Встроенная диагностика — 26 проверок по всем векторам обнаружения"
+            },
+            {
+              "en": "Auto-detect VPN and auto-add self to target list",
+              "ru": "Автоопределение VPN и автодобавление себя в список целей"
+            }
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            {
+              "en": "Replaced WebUI with native Compose UI",
+              "ru": "WebUI заменён на нативный Compose UI"
+            }
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            {
+              "en": "Zygisk targets reading on Magisk (SELinux blocking /data/adb/)",
+              "ru": "Чтение целей Zygisk на Magisk (SELinux блокировал /data/adb/)"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

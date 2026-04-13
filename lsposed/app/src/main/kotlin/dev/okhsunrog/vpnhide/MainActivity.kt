@@ -553,7 +553,7 @@ fun AppPickerScreen(modifier: Modifier = Modifier) {
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
-                        .padding(top = 8.dp),
+                        .padding(top = 4.dp),
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
@@ -570,33 +570,25 @@ fun AppPickerScreen(modifier: Modifier = Modifier) {
                 }
             }
 
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text(stringResource(R.string.search_placeholder)) },
-                singleLine = true,
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-
             Row(
                 modifier =
                     Modifier
                         .fillMaxWidth()
-                        .clickable { showSystem = !showSystem }
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Checkbox(
-                    checked = showSystem,
-                    onCheckedChange = { showSystem = it },
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text(stringResource(R.string.search_placeholder)) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = stringResource(R.string.filter_show_system),
-                    style = MaterialTheme.typography.bodyMedium,
+                Spacer(Modifier.width(8.dp))
+                FilterChip(
+                    selected = showSystem,
+                    onClick = { showSystem = !showSystem },
+                    label = { Text(stringResource(R.string.filter_system)) },
                 )
             }
 

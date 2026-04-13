@@ -70,6 +70,18 @@
     <string name="dashboard_issue_zygisk_version_mismatch">Несоответствие версий модуля Zygisk: модуль %1$s, приложение %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
     <string name="dashboard_running_version">Версия запущенного модуля: %s</string>
 
+    <!-- Update -->
+    <string name="update_available_title">Доступно обновление</string>
+    <string name="update_available_subtitle">Доступна версия %1$s</string>
+    <string name="update_download">Скачать</string>
+
+    <!-- Changelog -->
+    <string name="changelog_title">Что нового в v%1$s</string>
+    <string name="changelog_section_added">Добавлено</string>
+    <string name="changelog_section_changed">Изменено</string>
+    <string name="changelog_section_fixed">Исправлено</string>
+    <string name="changelog_section_notes">Заметки</string>
+
     <!-- Diagnostics -->
     <string name="summary_running">Выполняется&#8230;</string>
     <string name="summary_format">%1$d/%2$d пройдено</string>

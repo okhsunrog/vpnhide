@@ -1,9 +1,11 @@
 package dev.okhsunrog.vpnhide
 
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -11,6 +13,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -144,9 +149,32 @@ fun DashboardScreen(
     val cm = context.getSystemService(ConnectivityManager::class.java)
 
     var state by remember { mutableStateOf<DashboardState?>(null) }
+    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+    var showChangelog by remember { mutableStateOf(false) }
+    var changelogData by remember { mutableStateOf<ChangelogData?>(null) }
 
     LaunchedEffect(Unit) {
         state = withContext(Dispatchers.IO) { loadDashboardState(cm, context, selfNeedsRestart) }
+    }
+    LaunchedEffect(Unit) {
+        updateInfo = withContext(Dispatchers.IO) { checkForUpdate(BuildConfig.VERSION_NAME) }
+    }
+    LaunchedEffect(Unit) {
+        if (shouldShowChangelog(context)) {
+            val data = withContext(Dispatchers.IO) { loadChangelog(context) }
+            if (data != null) {
+                changelogData = data
+                showChangelog = true
+            }
+            markChangelogSeen(context)
+        }
+    }
+
+    if (showChangelog && changelogData != null) {
+        ChangelogDialog(
+            data = changelogData!!,
+            onDismiss = { showChangelog = false },
+        )
     }
 
     Column(
@@ -182,6 +210,10 @@ fun DashboardScreen(
         s.nativeInstallRecommendation?.let { recommendation ->
             Spacer(Modifier.height(8.dp))
             NativeInstallRecommendationCard(recommendation)
+        }
+        updateInfo?.let { info ->
+            Spacer(Modifier.height(8.dp))
+            UpdateAvailableCard(info)
         }
 
         // Protection status
@@ -581,6 +613,132 @@ private fun StatusBanner(
     }
 }
 
+// ── Update & Changelog ──────────────────────────────────────────────────
+
+@Composable
+private fun UpdateAvailableCard(info: UpdateInfo) {
+    val context = LocalContext.current
+    val darkTheme = isSystemInDarkTheme()
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = if (darkTheme) Color(0xFF0D47A1).copy(alpha = 0.28f) else Color(0xFFE3F2FD),
+            ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.update_available_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = stringResource(R.string.update_available_subtitle, info.latestVersion),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Button(
+                onClick = {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(info.downloadUrl)),
+                    )
+                },
+            ) {
+                Text(stringResource(R.string.update_download))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChangelogDialog(
+    data: ChangelogData,
+    onDismiss: () -> Unit,
+) {
+    val entries = remember(data) { listOf(data.current) + data.history }
+    var index by remember { mutableIntStateOf(0) }
+    val entry = entries[index]
+    val locale =
+        LocalContext.current.resources.configuration.locales[0]
+            .language
+    val sectionLabels =
+        mapOf(
+            "added" to stringResource(R.string.changelog_section_added),
+            "changed" to stringResource(R.string.changelog_section_changed),
+            "fixed" to stringResource(R.string.changelog_section_fixed),
+            "notes" to stringResource(R.string.changelog_section_notes),
+        )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (entries.size > 1) {
+                    IconButton(
+                        onClick = { index-- },
+                        enabled = index > 0,
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                            contentDescription = null,
+                        )
+                    }
+                }
+                Text(
+                    text = stringResource(R.string.changelog_title, entry.version),
+                    modifier = Modifier.weight(1f),
+                )
+                if (entries.size > 1) {
+                    IconButton(
+                        onClick = { index++ },
+                        enabled = index < entries.size - 1,
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                        )
+                    }
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                for (section in entry.sections) {
+                    if (section.items.isEmpty()) continue
+                    Text(
+                        text = sectionLabels[section.type] ?: section.type,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    for (item in section.items) {
+                        val text = if (locale == "ru") item.ru else item.en
+                        Text(
+                            text = "\u2022 $text",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("OK")
+            }
+        },
+    )
+}
+
 // ── Data loading ─────────────────────────────────────────────────────────
 
 private const val TAG = "VpnHide-Dashboard"
@@ -619,31 +777,6 @@ private fun loadDashboardState(
                 val parts = it.split("=", limit = 2)
                 if (parts.size == 2) parts[0] to parts[1] else null
             }.toMap()
-
-    fun normalizeVersion(version: String): String = version.trim().removePrefix("v")
-
-    fun compareSemver(
-        left: String,
-        right: String,
-    ): Int? {
-        fun parse(version: String): List<Int>? =
-            normalizeVersion(version)
-                .split('.')
-                .map { it.toIntOrNull() }
-                .takeIf { parts ->
-                    parts.isNotEmpty() && parts.all { it != null }
-                }?.map { it!! }
-
-        val l = parse(left) ?: return null
-        val r = parse(right) ?: return null
-        val maxSize = maxOf(l.size, r.size)
-        for (i in 0 until maxSize) {
-            val lv = l.getOrElse(i) { 0 }
-            val rv = r.getOrElse(i) { 0 }
-            if (lv != rv) return lv.compareTo(rv)
-        }
-        return 0
-    }
 
     fun buildModuleVersionIssue(
         kind: NativeModuleKind,
