@@ -152,14 +152,7 @@ class HookEntry : IXposedHookLoadPackage {
         try {
             val bootId = File("/proc/sys/kernel/random/boot_id").readText().trim()
             val timestamp = System.currentTimeMillis() / 1000
-            val version = try {
-                val atClass = Class.forName("android.app.ActivityThread")
-                val currentApp = atClass.getMethod("currentApplication").invoke(null)
-                val pm = currentApp.javaClass.getMethod("getPackageManager").invoke(currentApp)
-                val pi = pm.javaClass.getMethod("getPackageInfo", String::class.java, Int::class.java)
-                    .invoke(pm, "dev.okhsunrog.vpnhide", 0)
-                pi.javaClass.getField("versionName").get(pi) as? String ?: "unknown"
-            } catch (_: Throwable) { "unknown" }
+            val version = BuildConfig.VERSION_NAME
             val content = "version=$version\nboot_id=$bootId\ntimestamp=$timestamp\n"
             val statusFile = File(HOOK_STATUS_FILE)
             statusFile.writeText(content)

@@ -63,6 +63,8 @@
     <string name="dashboard_issue_no_native">No native module installed. Install kmod or zygisk for full protection.</string>
     <string name="dashboard_issue_reboot">LSPosed hooks need a reboot to activate.</string>
     <string name="dashboard_issue_no_targets">No target apps configured. Go to Apps tab to select apps.</string>
+    <string name="dashboard_issue_version_mismatch">Module version mismatch: running %1$s, installed %2$s. Reboot to apply the update.</string>
+    <string name="dashboard_running_version">Running module version: %s</string>
 
     <!-- Native check names -->
     <string name="check_ioctl_flags">ioctl SIOCGIFFLAGS tun0</string>

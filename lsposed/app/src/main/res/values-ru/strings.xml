@@ -47,6 +47,8 @@
     <string name="dashboard_issue_no_native">Нативный модуль не установлен. Установите kmod или zygisk для полной защиты.</string>
     <string name="dashboard_issue_reboot">Хуки LSPosed требуют перезагрузки для активации.</string>
     <string name="dashboard_issue_no_targets">Целевые приложения не настроены. Перейдите во вкладку «Приложения».</string>
+    <string name="dashboard_issue_version_mismatch">Несоответствие версий модуля: запущена %1$s, установлена %2$s. Перезагрузитесь для обновления.</string>
+    <string name="dashboard_running_version">Версия запущенного модуля: %s</string>
 
     <!-- Diagnostics -->
     <string name="summary_running">Выполняется&#8230;</string>

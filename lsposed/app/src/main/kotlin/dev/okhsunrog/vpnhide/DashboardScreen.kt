@@ -3,6 +3,7 @@ package dev.okhsunrog.vpnhide
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
+import dev.okhsunrog.vpnhide.BuildConfig
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -223,10 +224,14 @@ private fun LsposedCard(state: LsposedState) {
             )
         }
         is LsposedState.Active -> {
+            val subtitle = stringResource(R.string.dashboard_active_targets, state.targetCount) +
+                if (state.version != null) {
+                    "\n" + stringResource(R.string.dashboard_running_version, state.version)
+                } else ""
             ModuleCardShell(
                 name = "LSPosed",
                 version = state.version,
-                subtitle = stringResource(R.string.dashboard_active_targets, state.targetCount),
+                subtitle = subtitle,
                 dotColor = Color(0xFF4CAF50),
                 containerColor = if (darkTheme) Color(0xFF1B5E20).copy(alpha = 0.3f) else Color(0xFFE8F5E9),
             )
@@ -534,8 +539,16 @@ private fun loadDashboardState(
     if (lsposed is LsposedState.NeedsReboot) {
         issues += res.getString(R.string.dashboard_issue_reboot)
     }
-    if (lsposed is LsposedState.Active && lsposedTargetCount == 0) {
-        issues += res.getString(R.string.dashboard_issue_no_targets)
+    if (lsposed is LsposedState.Active) {
+        if (lsposedTargetCount == 0) {
+            issues += res.getString(R.string.dashboard_issue_no_targets)
+        }
+        val appVersion = BuildConfig.VERSION_NAME
+        val runningVersion = lsposed.version
+        if (runningVersion != null && runningVersion != appVersion) {
+            Log.w(TAG, "version mismatch: running=$runningVersion app=$appVersion")
+            issues += res.getString(R.string.dashboard_issue_version_mismatch, runningVersion, appVersion)
+        }
     }
 
     // ── Protection checks ──
