@@ -1,29 +1,47 @@
 {
-  "version": "0.5.2",
+  "version": "0.5.3",
   "sections": [
     {
-      "type": "fixed",
+      "type": "added",
       "items": [
         {
-          "en": "Fixed SIOCGIFCONF filtering on kernel 5.10 (tun0 was visible in interface enumeration)",
-          "ru": "Исправлена фильтрация SIOCGIFCONF на ядре 5.10 (tun0 был виден при перечислении интерфейсов)"
+          "en": "Debug log export — open the Diagnostics tab and tap \"Collect debug log\" at the bottom. The app gathers dmesg, check results, device info, module status, kernel symbols, targets, interfaces, routing tables, and logcat into a zip. Save to disk or share directly.",
+          "ru": "Экспорт отладочного лога — откройте вкладку «Диагностика» и нажмите «Собрать отладочный лог» внизу экрана. Приложение собирает dmesg, результаты проверок, информацию об устройстве, статус модулей, символы ядра, список целей, интерфейсы, таблицы маршрутизации и logcat в zip-архив. Можно сохранить на диск или поделиться."
         },
         {
-          "en": "Fixed zygisk first-launch race: dashboard no longer shows false \"inactive\" status",
-          "ru": "Исправлен race при первом запуске zygisk: панель больше не показывает ложный статус «неактивен»"
-        },
-        {
-          "en": "Added recv hook in zygisk for netlink filtering on Android 10",
-          "ru": "Добавлен хук recv в zygisk для фильтрации netlink на Android 10"
-        },
-        {
-          "en": "Fixed hardcoded v0.1.0 in module installer messages",
-          "ru": "Исправлена захардкоженная версия v0.1.0 в сообщениях установщика модулей"
+          "en": "Kernel module debug logging toggle — all 6 kretprobe hooks now log detailed info (UID, target status, interface name, filter decisions) when debug mode is active. Enabled automatically during debug log collection.",
+          "ru": "Переключатель отладочного логирования модуля ядра — все 6 хуков kretprobe теперь логируют подробную информацию (UID, статус цели, имя интерфейса, решения фильтрации) при активном режиме отладки. Включается автоматически при сборе отладочного лога."
         }
       ]
     }
   ],
   "history": [
+    {
+      "version": "0.5.2",
+      "sections": [
+        {
+          "type": "fixed",
+          "items": [
+            {
+              "en": "Fixed SIOCGIFCONF filtering on kernel 5.10 (tun0 was visible in interface enumeration)",
+              "ru": "Исправлена фильтрация SIOCGIFCONF на ядре 5.10 (tun0 был виден при перечислении интерфейсов)"
+            },
+            {
+              "en": "Fixed zygisk first-launch race: dashboard no longer shows false \"inactive\" status",
+              "ru": "Исправлен race при первом запуске zygisk: панель больше не показывает ложный статус «неактивен»"
+            },
+            {
+              "en": "Added recv hook in zygisk for netlink filtering on Android 10",
+              "ru": "Добавлен хук recv в zygisk для фильтрации netlink на Android 10"
+            },
+            {
+              "en": "Fixed hardcoded v0.1.0 in module installer messages",
+              "ru": "Исправлена захардкоженная версия v0.1.0 в сообщениях установщика модулей"
+            }
+          ]
+        }
+      ]
+    },
     {
       "version": "0.5.1",
       "sections": [

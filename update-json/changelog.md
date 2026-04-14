@@ -1,3 +1,9 @@
+## v0.5.3
+
+### Added
+- Debug log export on the Diagnostics screen — tap "Collect debug log" at the bottom of the Diagnostics tab to gather detailed diagnostic data (dmesg, check results, device info, module status, kernel symbols, targets, network interfaces, routing tables, logcat). After collection, save the zip to disk or share it directly. Useful for reporting issues.
+- Kernel module debug logging toggle (`/proc/vpnhide_debug`) — when enabled, all 6 kretprobe hooks log detailed information (UID, target status, interface name, filter decisions). The app enables it automatically during debug log collection and disables it afterwards.
+
 ## v0.5.2
 
 ### Fixes
