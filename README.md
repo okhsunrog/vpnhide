@@ -200,3 +200,7 @@ vpnhide hides an active VPN from specific apps. It is NOT designed for:
 MIT. See [LICENSE](LICENSE).
 
 The kernel module declares `MODULE_LICENSE("GPL")` as required by the Linux kernel to resolve `EXPORT_SYMBOL_GPL` symbols at runtime.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=okhsunrog/vpnhide&type=Date)](https://star-history.com/#okhsunrog/vpnhide&Date)

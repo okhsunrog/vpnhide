@@ -198,3 +198,7 @@ vpnhide скрывает активный VPN от конкретных прил
 MIT. См. [LICENSE](LICENSE).
 
 Модуль ядра объявляет `MODULE_LICENSE("GPL")`, как требуется ядром Linux для разрешения символов `EXPORT_SYMBOL_GPL` во время выполнения.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=okhsunrog/vpnhide&type=Date)](https://star-history.com/#okhsunrog/vpnhide&Date)
