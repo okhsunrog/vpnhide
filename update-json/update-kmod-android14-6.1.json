@@ -2,5 +2,5 @@
   "version": "v0.5.1",
   "versionCode": 501,
   "zipUrl": "https://github.com/okhsunrog/vpnhide/releases/download/v0.5.1/vpnhide-kmod-android14-6.1.zip",
-  "changelog": "https://github.com/okhsunrog/vpnhide/releases/tag/v0.5.1"
+  "changelog": "https://raw.githubusercontent.com/okhsunrog/vpnhide/main/update-json/changelog.md"
 }

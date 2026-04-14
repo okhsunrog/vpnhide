@@ -52,7 +52,7 @@ for kmi in "${KMOD_KMIS[@]}"; do
   "version": "v${VERSION}",
   "versionCode": ${VERSION_CODE},
   "zipUrl": "${REPO}/releases/download/v${VERSION}/vpnhide-kmod-${kmi}.zip",
-  "changelog": "${REPO}/releases/tag/v${VERSION}"
+  "changelog": "${RAW}/update-json/changelog.md"
 }
 EOJSON
     echo "  update-json/update-kmod-${kmi}.json"
@@ -63,7 +63,7 @@ cat > "update-json/update-zygisk.json" <<EOJSON
   "version": "v${VERSION}",
   "versionCode": ${VERSION_CODE},
   "zipUrl": "${REPO}/releases/download/v${VERSION}/vpnhide-zygisk.zip",
-  "changelog": "${REPO}/releases/tag/v${VERSION}"
+  "changelog": "${RAW}/update-json/changelog.md"
 }
 EOJSON
 echo "  update-json/update-zygisk.json"
