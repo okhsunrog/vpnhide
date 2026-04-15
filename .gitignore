@@ -41,3 +41,4 @@ kmod/*.lds
 *.log
 /tmp/
 /*.zip
+scripts/__pycache__/
