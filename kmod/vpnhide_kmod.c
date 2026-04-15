@@ -295,51 +295,64 @@ static struct kretprobe dev_ioctl_krp = {
 };
 
 /* ================================================================== */
-/*  Hook 2: dev_ifconf — SIOCGIFCONF interface enumeration            */
+/*  Hook 2: sock_ioctl — SIOCGIFCONF interface enumeration            */
 /*                                                                    */
-/*  Kernel 5.15+:                                                     */
-/*    dev_ifconf(struct net *net, struct ifconf __user *uifc)         */
-/*    x1 = userspace pointer to struct ifconf                         */
+/*  Why sock_ioctl instead of dev_ifconf?                             */
 /*                                                                    */
-/*  Kernel 5.10 and earlier:                                          */
-/*    dev_ifconf(struct net *net, struct ifconf *ifc, int size)       */
-/*    x1 = kernel pointer to struct ifconf (caller did copy_from_user)*/
-/*    Caller does copy_to_user after dev_ifconf returns.              */
+/*  On GKI 5.10 kernels built with Clang LTO (all stock Android       */
+/*  devices), the linker inlines dev_ifconf() into sock_do_ioctl().   */
+/*  The symbol "dev_ifconf" stays in kallsyms as a dead stub, so      */
+/*  kretprobe registration succeeds but the probe never fires.        */
+/*  Confirmed by disassembly on Xiaomi 13 Lite (5.10.136) and Lenovo  */
+/*  Legion 2 Pro (5.10.101): no `bl dev_ifconf` in sock_do_ioctl.    */
 /*                                                                    */
-/*  In both cases the ifreq array (ifc_buf) is a __user pointer.     */
-/*  We compact out VPN entries and update ifc_len.                    */
+/*  On 6.1+, SIOCGIFCONF was moved out of sock_do_ioctl() into       */
+/*  sock_ioctl() directly (handled in the switch statement), so       */
+/*  hooking sock_do_ioctl would miss it on newer kernels.             */
+/*                                                                    */
+/*  sock_ioctl is the correct hook point because:                     */
+/*  1. It is the file_operations->unlocked_ioctl callback for socket  */
+/*     fds — used as a function pointer, so LTO cannot inline it.     */
+/*  2. ALL socket ioctls, including SIOCGIFCONF, pass through it on   */
+/*     every kernel version (5.10 through 6.12+).                     */
+/*  3. After sock_ioctl returns, the ifconf data (ifreq array +       */
+/*     ifc_len) is already in userspace — we filter it uniformly via  */
+/*     copy_from_user/copy_to_user regardless of kernel version.      */
+/*                                                                    */
+/*  sock_ioctl(struct file *file, unsigned int cmd, unsigned long arg) */
+/*  arm64: x0=file, x1=cmd, x2=arg (__user ptr)                      */
+/*                                                                    */
+/*  Performance: entry handler checks cmd == SIOCGIFCONF first (one   */
+/*  compare), then is_target_uid(). For all other ioctls, overhead    */
+/*  is a single branch. SIOCGIFCONF is rare (once per getifaddrs).    */
 /* ================================================================== */
 
-/*
- * The signature changed in v5.15 (commit "net: dev_ifconf: pass __user
- * pointer directly"). We detect via LINUX_VERSION_CODE at compile time
- * since each kmod build targets a specific GKI generation.
- */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
-#define IFCONF_IS_USER_PTR 1
-#else
-#define IFCONF_IS_USER_PTR 0
-#endif
-
-struct dev_ifconf_data {
-	void *ifconf_ptr; /* __user on 5.15+, kernel on 5.10 */
+struct sock_ioctl_data {
+	void __user *argp;
 	bool target;
 };
 
-static int dev_ifconf_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+static int sock_ioctl_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
-	struct dev_ifconf_data *data = (void *)ri->data;
+	struct sock_ioctl_data *data = (void *)ri->data;
+	unsigned int cmd = (unsigned int)regs->regs[1];
 
-	data->ifconf_ptr = (void *)regs->regs[1];
-	data->target = is_target_uid();
-	vpnhide_dbg("dev_ifconf_entry: uid=%u target=%d ptr=%px\n",
-		    from_kuid(&init_user_ns, current_uid()), data->target,
-		    data->ifconf_ptr);
+	data->target = false;
+
+	if (cmd != SIOCGIFCONF)
+		return 0;
+	if (!is_target_uid())
+		return 0;
+
+	data->target = true;
+	data->argp = (void __user *)regs->regs[2];
+	vpnhide_dbg("sock_ioctl_entry: uid=%u SIOCGIFCONF argp=%px\n",
+		    from_kuid(&init_user_ns, current_uid()), data->argp);
 	return 0;
 }
 
-/* Shared filtering logic: compact VPN entries out of the userspace
- * ifreq array and update ifc_len. */
+/* Compact VPN entries out of the userspace ifreq array and update
+ * ifc_len. */
 static void filter_ifconf_buf(struct ifreq __user *usr_ifr, int n, int *out_len)
 {
 	struct ifreq tmp;
@@ -347,13 +360,13 @@ static void filter_ifconf_buf(struct ifreq __user *usr_ifr, int n, int *out_len)
 
 	for (i = 0; i < n; i++) {
 		if (copy_from_user(&tmp, &usr_ifr[i], sizeof(tmp)))
-			return; /* copy failed — leave buffer untouched */
+			return;
 		tmp.ifr_name[IFNAMSIZ - 1] = '\0';
 		if (is_vpn_ifname(tmp.ifr_name))
 			continue;
 		if (dst != i) {
 			if (copy_to_user(&usr_ifr[dst], &tmp, sizeof(tmp)))
-				return; /* copy failed — stop compacting */
+				return;
 		}
 		dst++;
 	}
@@ -362,66 +375,46 @@ static void filter_ifconf_buf(struct ifreq __user *usr_ifr, int n, int *out_len)
 		*out_len = dst * (int)sizeof(struct ifreq);
 }
 
-static int dev_ifconf_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
+static int sock_ioctl_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
-	struct dev_ifconf_data *data = (void *)ri->data;
+	struct sock_ioctl_data *data = (void *)ri->data;
+	struct ifconf __user *uifc;
+	struct ifconf ifc;
+	int orig_len;
 
 	if (!data->target)
 		return 0;
-	vpnhide_dbg("dev_ifconf_ret: retval=%ld ptr=%px\n",
-		    regs_return_value(regs), data->ifconf_ptr);
-	if (regs_return_value(regs) != 0 || !data->ifconf_ptr)
+
+	vpnhide_dbg("sock_ioctl_ret: retval=%ld argp=%px\n",
+		    regs_return_value(regs), data->argp);
+
+	if (regs_return_value(regs) != 0 || !data->argp)
 		return 0;
 
-#if IFCONF_IS_USER_PTR
-	/* 5.15+: ifconf_ptr is a __user pointer */
-	{
-		struct ifconf __user *uifc = data->ifconf_ptr;
-		struct ifconf ifc;
-		int orig_len;
+	uifc = data->argp;
+	if (copy_from_user(&ifc, uifc, sizeof(ifc)))
+		return 0;
+	if (!ifc.ifc_req || ifc.ifc_len <= 0)
+		return 0;
 
-		if (copy_from_user(&ifc, uifc, sizeof(ifc)))
-			return 0;
-		if (!ifc.ifc_req || ifc.ifc_len <= 0)
-			return 0;
-
-		orig_len = ifc.ifc_len;
-		filter_ifconf_buf(ifc.ifc_req,
-				  ifc.ifc_len / (int)sizeof(struct ifreq),
-				  &ifc.ifc_len);
-		if (ifc.ifc_len != orig_len) {
-			put_user(ifc.ifc_len, &uifc->ifc_len);
-			vpnhide_dbg("ifconf filtered %d -> %d bytes\n",
-				    orig_len, ifc.ifc_len);
-		}
+	orig_len = ifc.ifc_len;
+	filter_ifconf_buf(ifc.ifc_req, ifc.ifc_len / (int)sizeof(struct ifreq),
+			  &ifc.ifc_len);
+	if (ifc.ifc_len != orig_len) {
+		put_user(ifc.ifc_len, &uifc->ifc_len);
+		vpnhide_dbg("ifconf filtered %d -> %d bytes\n", orig_len,
+			    ifc.ifc_len);
 	}
-#else
-	/* 5.10: ifconf_ptr is a kernel pointer; ifc_buf is __user */
-	{
-		struct ifconf *kifc = data->ifconf_ptr;
-		int orig_len;
 
-		if (!kifc->ifc_req || kifc->ifc_len <= 0)
-			return 0;
-
-		orig_len = kifc->ifc_len;
-		filter_ifconf_buf(kifc->ifc_req,
-				  kifc->ifc_len / (int)sizeof(struct ifreq),
-				  &kifc->ifc_len);
-		if (kifc->ifc_len != orig_len)
-			vpnhide_dbg("ifconf filtered %d -> %d bytes\n",
-				    orig_len, kifc->ifc_len);
-	}
-#endif
 	return 0;
 }
 
-static struct kretprobe dev_ifconf_krp = {
-	.handler = dev_ifconf_ret,
-	.entry_handler = dev_ifconf_entry,
-	.data_size = sizeof(struct dev_ifconf_data),
+static struct kretprobe sock_ioctl_krp = {
+	.handler = sock_ioctl_ret,
+	.entry_handler = sock_ioctl_entry,
+	.data_size = sizeof(struct sock_ioctl_data),
 	.maxactive = 20,
-	.kp.symbol_name = "dev_ifconf",
+	.kp.symbol_name = "sock_ioctl",
 };
 
 /* ================================================================== */
@@ -762,7 +755,7 @@ struct kretprobe_reg {
 
 static struct kretprobe_reg probes[] = {
 	{ &dev_ioctl_krp, "dev_ioctl", false },
-	{ &dev_ifconf_krp, "dev_ifconf", false },
+	{ &sock_ioctl_krp, "sock_ioctl", false },
 	{ &rtnl_fill_krp, "rtnl_fill_ifinfo", false },
 	{ &inet6_fill_krp, "inet6_fill_ifaddr", false },
 	{ &inet_fill_krp, "inet_fill_ifaddr", false },
