@@ -23,10 +23,19 @@ CHAIN6="vpnhide_out6"
 
 # Wait for PackageManager so pm list packages -U works. Relevant at boot
 # (service.sh); at Save-time pm is already up, the first iteration wins.
+pm_ready=0
 for i in $(seq 1 30); do
-    pm list packages >/dev/null 2>&1 && break
+    if pm list packages >/dev/null 2>&1; then
+        pm_ready=1
+        break
+    fi
     sleep 1
 done
+
+if [ "$pm_ready" != 1 ]; then
+    log -t vpnhide_ports "pm never became ready after 30s; skipping apply"
+    exit 1
+fi
 
 ALL_PACKAGES="$(pm list packages -U 2>/dev/null)"
 
@@ -38,7 +47,10 @@ if [ -f "$OBSERVERS_FILE" ]; then
         pkg="$(echo "$line" | tr -d '[:space:]')"
         [ -z "$pkg" ] && continue
         case "$pkg" in \#*) continue ;; esac
-        uid="$(echo "$ALL_PACKAGES" | grep "^package:${pkg} " | sed 's/.*uid://')"
+        # Exact match on $1 — grep would treat pkg dots as regex wildcards
+        # and could mis-resolve e.g. "com.x.y" to "comXxXy" if such a package
+        # existed. awk compares fields literally.
+        uid="$(echo "$ALL_PACKAGES" | awk -v p="package:${pkg}" '$1 == p { sub(/uid:/, "", $2); print $2; exit }')"
         [ -z "$uid" ] && continue
         case "$uid" in *[!0-9]*) continue ;; esac
         # System UID guard — don't let user accidentally block localhost

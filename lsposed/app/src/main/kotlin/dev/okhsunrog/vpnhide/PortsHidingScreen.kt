@@ -160,9 +160,7 @@ fun PortsHidingScreen(
         NotInstalledCard(modifier = modifier)
         return
     }
-    if (moduleInstalled == null) {
-        // Still detecting; render nothing yet (loading spinner kicks in below).
-    }
+    // moduleInstalled == null → still detecting; the `loading` spinner below covers it.
 
     val filteredApps =
         remember(allApps, searchQuery, showSystem, showRussianOnly) {
@@ -333,7 +331,7 @@ private fun buildPortsSaveCommand(
     // observers.txt stores package names (one per line). UID resolution lives
     // entirely inside vpnhide_ports_apply.sh so app reinstalls (which rotate
     // the UID) get picked up automatically on the next apply.
-    val body = "$header\n" + observerPkgs.joinToString("\n") + if (observerPkgs.isNotEmpty()) "\n" else ""
+    val body = (listOf(header) + observerPkgs).joinToString(separator = "\n", postfix = "\n")
     val b64 = android.util.Base64.encodeToString(body.toByteArray(), android.util.Base64.NO_WRAP)
     return listOf(
         "mkdir -p /data/adb/vpnhide_ports",
