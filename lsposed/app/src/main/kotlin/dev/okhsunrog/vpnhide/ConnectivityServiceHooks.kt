@@ -1,10 +1,8 @@
 package dev.okhsunrog.vpnhide
 
 import android.net.LinkProperties
-import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkInfo
-import android.os.Binder
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
@@ -12,23 +10,23 @@ import de.robv.android.xposed.XposedHelpers
 /**
  * Server-side ConnectivityService hooks.
  *
- * Replaces the writeToParcel-based approach in HookEntry. Rationale and
- * roadmap are documented in the PR description; in short:
+ * Replaces the writeToParcel-based approach in HookEntry. Rationale:
  *
  *   - writeToParcel runs in many contexts (sticky broadcasts, callback
- *     fan-out, internal persistence) where Binder.getCallingUid() does
- *     NOT correspond to the recipient of the parcel. That is brittle
- *     and may leak modifications to non-target subscribers.
+ *     fan-out, internal persistence) where `Binder.getCallingUid()`
+ *     does NOT correspond to the recipient of the parcel. That's
+ *     brittle and may leak modifications to non-target subscribers.
  *
  *   - Hooking the server-side getters in ConnectivityService is the
  *     standard pattern: each getter runs inside the incoming Binder
- *     transaction from the requesting app, so getCallingUid() is the
- *     real caller, period.
+ *     transaction from the requesting app, so `getCallingUid()` is
+ *     the real caller, period.
  *
- * Status: SKELETON. This file installs hooks but the per-method handlers
- * are not yet wired to actual filtering — see TODO blocks below. The old
- * writeToParcel hooks in HookEntry remain active for the time being so
- * functionality is not regressed during the migration.
+ * The `NetworkSanitizers` object provides the pure sanitization logic;
+ * this file only handles hook installation and result dispatch.
+ *
+ * HookEntry keeps the writeToParcel fallback active in parallel for
+ * callback/broadcast paths these server-side hooks don't cover.
  */
 internal object ConnectivityServiceHooks {
     private const val SERVICE_CLASS = "com.android.server.ConnectivityService"
@@ -123,18 +121,14 @@ internal object ConnectivityServiceHooks {
                                                 original,
                                                 sanitizeNetworkCapabilities,
                                                 sanitizeNetworkInfo,
-                                                sanitizeLinkProperties,
                                             )
                                         }
 
-                                        is Network -> {
-                                            // TODO(refactor): hide VPN Network handle entirely
-                                            // by returning null when the underlying NC has
-                                            // TRANSPORT_VPN. Needs cross-call lookup of NC by
-                                            // Network handle — wire up later.
-                                            null
-                                        }
-
+                                        // Network handles are opaque references;
+                                        // the sanitization happens when the caller
+                                        // queries getNetworkCapabilities(handle) /
+                                        // getLinkProperties(handle), both of which
+                                        // we also hook. No need to swap the handle.
                                         else -> {
                                             null
                                         }
@@ -158,33 +152,58 @@ internal object ConnectivityServiceHooks {
     }
 
     /**
-     * Sanitize an array result (e.g. getAllNetworkInfo, getAllNetworks).
-     * Returns a new array with VPN entries removed/sanitized, or null if
-     * no changes were needed.
+     * Sanitize an array result. Covers:
+     *
+     *   - `NetworkInfo[]`           from `getAllNetworkInfo`
+     *   - `NetworkCapabilities[]`   from `getDefaultNetworkCapabilitiesForUser`
+     *
+     * `Network[]` is deliberately left untouched — handles are opaque,
+     * filtering happens at the follow-up `getNetworkCapabilities(handle)`
+     * / `getLinkProperties(handle)` call.
+     *
+     * Array length is preserved and VPN elements are replaced with their
+     * sanitized copies (WIFI-disguised for NetworkInfo, VPN bits cleared
+     * for NetworkCapabilities). Preserving the length matches the legacy
+     * writeToParcel semantics — callers that index into the array or use
+     * `.size` for UI/state decisions see no surprise.
+     *
+     * Returns a new array with the substitutions applied, or null when
+     * nothing was changed (caller passes through the original).
      */
     private fun sanitizeArray(
         original: Array<*>,
         sanitizeNc: (NetworkCapabilities) -> NetworkCapabilities?,
         sanitizeNi: (NetworkInfo) -> NetworkInfo?,
-        sanitizeLp: (LinkProperties) -> LinkProperties?,
     ): Array<*>? {
-        // TODO(refactor): implement per-element-type filtering.
-        // For NetworkInfo[]: drop VPN entries entirely.
-        // For Network[]: filter out handles that resolve to VPN networks.
-        // For NetworkCapabilities[]: sanitize each element.
-        return null
-    }
+        if (original.isEmpty()) return null
+        val componentType = original.javaClass.componentType ?: return null
 
-    /**
-     * Marker for the "shall I touch this caller" check. Provided by
-     * HookEntry so the cache invalidation path stays in one place.
-     */
-    @Suppress("unused")
-    private fun callerIsTarget(): Boolean =
-        false.also {
-            // Placeholder; real impl is injected via the lambda passed to
-            // install(). Kept here so future readers can grep the file for
-            // the concept.
-            Binder.getCallingUid()
+        var modified = false
+        val replacements = arrayOfNulls<Any?>(original.size)
+        for ((i, element) in original.withIndex()) {
+            val sanitized: Any? =
+                when (element) {
+                    is NetworkInfo -> sanitizeNi(element)
+                    is NetworkCapabilities -> sanitizeNc(element)
+                    else -> null
+                }
+            if (sanitized != null) {
+                replacements[i] = sanitized
+                modified = true
+            } else {
+                replacements[i] = element
+            }
         }
+        if (!modified) return null
+
+        // Build a result array of the correct component type so Android
+        // APIs that cast the Binder reply back to `NetworkInfo[]` etc.
+        // don't hit ClassCastException.
+        @Suppress("UNCHECKED_CAST")
+        val result =
+            java.lang.reflect.Array
+                .newInstance(componentType, original.size) as Array<Any?>
+        for (i in original.indices) result[i] = replacements[i]
+        return result
+    }
 }
