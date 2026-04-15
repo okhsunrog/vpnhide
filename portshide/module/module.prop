@@ -1,6 +1,6 @@
 id=vpnhide_ports
 name=VPN Hide (Ports)
-version=v0.5.3
-versionCode=503
+version=v0.6.0
+versionCode=600
 author=okhsunrog
 description=Blocks selected apps from reaching localhost ports — hides locally-bound VPN/proxy from probe attempts via netfilter. Manage observers via VPN Hide app.
