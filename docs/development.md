@@ -103,6 +103,17 @@ ktlint "lsposed/**/*.kt"
 cd lsposed && ./gradlew :app:lint
 ```
 
+## Build versions
+
+Every module zip and the APK carry a version string derived from git at build time:
+
+- on a release tag `vX.Y.Z` → `X.Y.Z`
+- otherwise → `X.Y.Z-N-gSHA` (commits since the nearest tag + short hash, plus `-dirty` if the working tree has uncommitted changes)
+
+So a locally-built dev APK shows up in Android Settings as e.g. `0.6.1-5-gabc1234-dirty`, and the same string lands in `module.prop` inside the zip. The committed `module.prop` files themselves stay at the last release number — the version is stamped into a staging copy per build.
+
+See [releasing.md](releasing.md#build-versions) for details.
+
 ## More docs
 
 - [releasing.md](releasing.md) — version bump, tag, release flow

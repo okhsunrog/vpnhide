@@ -4,7 +4,7 @@
 
 - `VERSION` file = **the last released version** on `main`. It is only modified by `release.py`.
 - `changelog.json.unreleased` = work in progress. Entries accumulate here via `./scripts/changelog.py` during normal development. See [changelog.md](changelog.md).
-- Intermediate builds (main, feature branches, local) get a version string like `0.6.1-5-gabc1234` derived from `git describe` — propagated into `module.prop` / APK `versionName` at build time. (This is Phase 2 — tracked separately.)
+- Intermediate builds (main, feature branches, local) get a version string derived from `git describe` — propagated into `module.prop` / APK `versionName` at build time. See [build versions](#build-versions) below.
 
 ## Cutting a release
 
@@ -46,3 +46,22 @@ Update-json **must** be committed *after* the GitHub release is live. Magisk and
 - `versionCode` is derived automatically by `release.py` as `major*10000 + minor*100 + patch` (e.g. `0.6.2` → `602`).
 - If `unreleased` has no entries when you run `release.py`, it warns but proceeds — useful for version-only bumps.
 - `release.py` refuses to release a version that already exists in `history[]`.
+
+## Build versions
+
+Every packaging step runs `./scripts/build-version.sh` to compute the version string stamped into the artifact:
+
+- **On a release tag `vX.Y.Z`:** `X.Y.Z`
+- **N commits after the nearest tag:** `X.Y.Z-N-gSHA` (the git describe format)
+- **Working tree dirty:** additional `-dirty` suffix
+- **No git / no tags:** falls back to the `VERSION` file
+
+This string goes into:
+
+- `module.prop` `version=...` (visible in the Magisk/KSU manager app)
+- APK `versionName` (visible in Android Settings → Apps, diagnostic debug zip, `BuildConfig.VERSION_NAME`)
+- Inside the zip filenames (only for release tags; dev artifacts in CI keep a stable name)
+
+The committed `module.prop` files are **not** modified — `build-zip.sh` stages a copy, patches the version there, and zips. `lsposed/app/build.gradle.kts` evaluates `build-version.sh` at configure time and sets `versionName` dynamically.
+
+`versionCode` stays at the value baked in by the last `release.py` run (monotonically increasing integer required by Android/Magisk).

@@ -11,12 +11,27 @@ android {
     namespace = "dev.okhsunrog.vpnhide"
     compileSdk = 35
 
+    // Effective build version from ../scripts/build-version.sh:
+    //   release tag    -> "0.6.2"
+    //   dev build      -> "0.6.1-5-gabc1234" (+"-dirty" if uncommitted)
+    //   no git         -> VERSION file
+    val buildVersion: String =
+        providers
+            .exec {
+                commandLine(
+                    "bash",
+                    rootProject.projectDir.parentFile.resolve("scripts/build-version.sh").absolutePath,
+                )
+            }.standardOutput.asText
+            .get()
+            .trim()
+
     defaultConfig {
         applicationId = "dev.okhsunrog.vpnhide"
         minSdk = 29
         targetSdk = 35
         versionCode = 601
-        versionName = "0.6.1"
+        versionName = buildVersion
 
         ndk {
             abiFilters += listOf("arm64-v8a")

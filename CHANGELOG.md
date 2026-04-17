@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Save button next to Share for full-system logcat recordings — writes the capture via the Storage Access Framework to a user-picked location (previously only Share was available, which didn't always persist the file when sharing to a file manager).
 
+### Changed
+- Module zips and APK now include git provenance in the version string. Official release builds from a tag stay at the clean version (e.g. 0.6.2); intermediate builds from main or a feature branch show up as 0.6.2-5-gabc1234 (or -dirty) in the Magisk/KSU manager and Android Settings, so debug-log submissions identify the exact commit.
+
 ## v0.6.1
 
 ### Added

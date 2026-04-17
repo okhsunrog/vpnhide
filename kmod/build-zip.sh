@@ -9,11 +9,22 @@ if [ ! -f vpnhide_kmod.ko ] || [ vpnhide_kmod.c -nt vpnhide_kmod.ko ]; then
     make
 fi
 
-cp vpnhide_kmod.ko module/vpnhide_kmod.ko
+# Assemble the module staging directory so the committed module.prop
+# stays at its release version while the zip carries the actual build
+# version (git describe).
+STAGING="module-staging"
+rm -rf "$STAGING"
+cp -a module "$STAGING"
+cp vpnhide_kmod.ko "$STAGING/vpnhide_kmod.ko"
+
+BUILD_VERSION="$(../scripts/build-version.sh)"
+sed -i "s|^version=.*|version=v${BUILD_VERSION}|" "$STAGING/module.prop"
+echo "Stamped module.prop version=v${BUILD_VERSION}"
 
 OUT="vpnhide-kmod.zip"
 rm -f "$OUT"
-(cd module && zip -qr "../$OUT" .)
+(cd "$STAGING" && zip -qr "../$OUT" .)
+rm -rf "$STAGING"
 
 echo
 echo "Built: $OUT"

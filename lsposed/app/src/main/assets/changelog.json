@@ -9,6 +9,15 @@
             "ru": "Кнопка «Сохранить» рядом с «Поделиться» для записи полного системного logcat — сохраняет файл через Storage Access Framework в выбранное место (раньше была только «Поделиться», и через диалог «Сохранить в файлы» файл не всегда сохранялся)."
           }
         ]
+      },
+      {
+        "type": "changed",
+        "items": [
+          {
+            "en": "Module zips and APK now include git provenance in the version string. Official release builds from a tag stay at the clean version (e.g. 0.6.2); intermediate builds from main or a feature branch show up as 0.6.2-5-gabc1234 (or -dirty) in the Magisk/KSU manager and Android Settings, so debug-log submissions identify the exact commit.",
+            "ru": "Zip-модули и APK теперь включают git-провенанс в строку версии. Официальные релизные сборки с тега остаются с чистой версией (например, 0.6.2); промежуточные сборки с main или feature-ветки отображаются как 0.6.2-5-gabc1234 (или -dirty) в Magisk/KSU-менеджере и настройках Android — по логам сразу видно, какой именно коммит у пользователя."
+          }
+        ]
       }
     ]
   },
