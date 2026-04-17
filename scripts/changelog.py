@@ -6,14 +6,16 @@
 #   "rich",
 # ]
 # ///
-"""Append a bilingual entry to the upcoming version's changelog.
+"""Append a bilingual entry to the upcoming `unreleased` section.
 
 Usage:
-  changelog-add.py <type> "<EN text>" "<RU text>"
+  changelog.py <type> "<EN text>" "<RU text>"
 
 Types: added, changed, fixed, removed, deprecated, security
 
-Writes both the JSON source and regenerates the markdown.
+Writes the JSON source and regenerates CHANGELOG.md + update-json/changelog.md.
+For the release flow (rotate unreleased into history, bump all version
+files), use `release.py` instead.
 """
 
 from __future__ import annotations
@@ -22,9 +24,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _changelog import (  # type: ignore[import-not-found]
+from changelog_lib import (  # type: ignore[import-not-found]
     VALID_TYPES,
-    append_entry,
+    append_unreleased,
     load_json,
     save_json,
     write_md,
@@ -36,7 +38,7 @@ def main() -> int:
     console = Console()
     if len(sys.argv) != 4:
         console.print(
-            "[red]usage:[/red] changelog-add.py <type> '<EN text>' '<RU text>'",
+            "[red]usage:[/red] changelog.py <type> '<EN text>' '<RU text>'",
         )
         console.print(f"  types: {', '.join(VALID_TYPES)}")
         return 2
@@ -47,13 +49,11 @@ def main() -> int:
         return 2
 
     data = load_json()
-    append_entry(data, type_, en, ru)
+    append_unreleased(data, type_, en, ru)
     save_json(data)
     write_md(data)
 
-    console.print(
-        f"[green]added[/green] \\[{type_}] entry to v{data['version']}",
-    )
+    console.print(f"[green]added[/green] \\[{type_}] entry to unreleased")
     console.print(f"  [cyan]en:[/cyan] {en}")
     console.print(f"  [cyan]ru:[/cyan] {ru}")
     return 0

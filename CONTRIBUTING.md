@@ -27,11 +27,11 @@ Keep messages focused on *why*, not *what* — the diff already shows what chang
 Before opening a PR, add a changelog entry:
 
 ```sh
-./scripts/changelog-add.py <type> "<EN text>" "<RU text>"
+./scripts/changelog.py <type> "<EN text>" "<RU text>"
 # types: added | changed | fixed | removed | deprecated | security
 ```
 
-This writes to `lsposed/app/src/main/assets/changelog.json` and regenerates `CHANGELOG.md` and `update-json/changelog.md`. Commit all three files with your change.
+This appends to the `unreleased` section of `lsposed/app/src/main/assets/changelog.json` and regenerates `CHANGELOG.md` and `update-json/changelog.md`. Commit all three files with your change.
 
 **Skip the entry** for internal refactors with no behaviour change, docs-only, CI-only, and test-only changes.
 

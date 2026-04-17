@@ -1,30 +1,35 @@
 {
-  "version": "0.6.1",
-  "sections": [
+  "unreleased": {
+    "sections": []
+  },
+  "history": [
     {
-      "type": "fixed",
-      "items": [
+      "version": "0.6.1",
+      "sections": [
         {
-          "en": "Magisk versions before v28 failed to install vpnhide-ports and vpnhide-kmod with an unpack error — restored the META-INF/com/google/android/{update-binary,updater-script} entries the older managers expect.",
-          "ru": "Magisk до v28 не мог установить vpnhide-ports и vpnhide-kmod из-за ошибки распаковки — вернул файлы META-INF/com/google/android/{update-binary,updater-script}, которые требуются старыми менеджерами."
+          "type": "fixed",
+          "items": [
+            {
+              "en": "Magisk versions before v28 failed to install vpnhide-ports and vpnhide-kmod with an unpack error — restored the META-INF/com/google/android/{update-binary,updater-script} entries the older managers expect.",
+              "ru": "Magisk до v28 не мог установить vpnhide-ports и vpnhide-kmod из-за ошибки распаковки — вернул файлы META-INF/com/google/android/{update-binary,updater-script}, которые требуются старыми менеджерами."
+            },
+            {
+              "en": "Ozon and other apps with root-detection scanning /proc/self/fd no longer hang when vpnhide-zygisk is installed. The module's zygote-side on_load was leaking the module-dir fd, which every forked app process inherited — root-tamper scans detected a descriptor pointing inside /data/adb/modules/ and refused to continue. The fd is now explicitly closed before any app fork.",
+              "ru": "Ozon и другие приложения, сканирующие /proc/self/fd на признаки root, больше не зависают при установленном vpnhide-zygisk. Модуль утекал fd на /data/adb/modules/ в зиготу, и каждое форкнутое приложение наследовало его — антирут-проверки детектили descriptor внутри /data/adb/ и отказывались запускаться. Теперь fd явно закрывается до первого форка."
+            }
+          ]
         },
         {
-          "en": "Ozon and other apps with root-detection scanning /proc/self/fd no longer hang when vpnhide-zygisk is installed. The module's zygote-side on_load was leaking the module-dir fd, which every forked app process inherited — root-tamper scans detected a descriptor pointing inside /data/adb/modules/ and refused to continue. The fd is now explicitly closed before any app fork.",
-          "ru": "Ozon и другие приложения, сканирующие /proc/self/fd на признаки root, больше не зависают при установленном vpnhide-zygisk. Модуль утекал fd на /data/adb/modules/ в зиготу, и каждое форкнутое приложение наследовало его — антирут-проверки детектили descriptor внутри /data/adb/ и отказывались запускаться. Теперь fd явно закрывается до первого форка."
+          "type": "added",
+          "items": [
+            {
+              "en": "Detect gb.sweetlifecl as a Russian-vendor package in the app picker filter, so it shows up under the Russian-only filter alongside other domestic apps.",
+              "ru": "Пакет gb.sweetlifecl распознаётся как российский в фильтре выбора приложений и показывается в режиме «только российские» вместе с другими отечественными приложениями."
+            }
+          ]
         }
       ]
     },
-    {
-      "type": "added",
-      "items": [
-        {
-          "en": "Detect gb.sweetlifecl as a Russian-vendor package in the app picker filter, so it shows up under the Russian-only filter alongside other domestic apps.",
-          "ru": "Пакет gb.sweetlifecl распознаётся как российский в фильтре выбора приложений и показывается в режиме «только российские» вместе с другими отечественными приложениями."
-        }
-      ]
-    }
-  ],
-  "history": [
     {
       "version": "0.6.0",
       "sections": [
