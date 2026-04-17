@@ -47,6 +47,12 @@ BUILD_VERSION="$(../scripts/build-version.sh)"
 sed -i "s|^version=.*|version=v${BUILD_VERSION}|" "$STAGING/module.prop"
 echo "Stamped module.prop version=v${BUILD_VERSION}"
 
+# CI sets UPDATE_JSON_URL so Magisk/KSU knows where to check for updates;
+# local dev builds leave it unset and ship without updateJson.
+if [ -n "${UPDATE_JSON_URL:-}" ]; then
+    echo "updateJson=${UPDATE_JSON_URL}" >> "$STAGING/module.prop"
+fi
+
 # Zip it
 OUT_ZIP="target/vpnhide-zygisk.zip"
 rm -f "$OUT_ZIP"

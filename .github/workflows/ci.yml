@@ -131,9 +131,10 @@ jobs:
           restore-keys: cargo-${{ runner.os }}-
 
       - name: Build module zip
+        env:
+          UPDATE_JSON_URL: https://raw.githubusercontent.com/okhsunrog/vpnhide/main/update-json/update-zygisk.json
         run: |
           cd zygisk
-          echo "updateJson=https://raw.githubusercontent.com/okhsunrog/vpnhide/main/update-json/update-zygisk.json" >> module/module.prop
           ./build-zip.sh
 
       - name: Upload artifact
@@ -192,9 +193,10 @@ jobs:
           fetch-depth: 0
 
       - name: Package ports module zip
+        env:
+          UPDATE_JSON_URL: https://raw.githubusercontent.com/okhsunrog/vpnhide/main/update-json/update-ports.json
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq zip >/dev/null
-          echo "updateJson=https://raw.githubusercontent.com/okhsunrog/vpnhide/main/update-json/update-ports.json" >> portshide/module/module.prop
           cd portshide
           ./build-zip.sh
           mv vpnhide-ports.zip "$GITHUB_WORKSPACE/vpnhide-ports.zip"
