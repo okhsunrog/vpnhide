@@ -181,7 +181,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: vpnhide
+          name: vpnhide-apk
           path: vpnhide.apk
           if-no-files-found: error
 
@@ -231,12 +231,13 @@ jobs:
           echo "=== release-notes.md ==="
           cat release-notes.md
 
-      - name: Create release
+      - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           body_path: release-notes.md
           generate_release_notes: true
+          draft: true
           files: |
             dist/*.zip
             dist/*.apk

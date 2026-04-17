@@ -168,7 +168,7 @@ def main() -> int:
     console.print("[bold]Next steps:[/bold]")
     console.print(f"  git commit -am \"chore: release v{version}\"")
     console.print(f"  git tag v{version} && git push && git push origin v{version}")
-    console.print("  # wait for CI to publish the GitHub release")
+    console.print("  # CI builds artifacts and creates a DRAFT release — review on the Releases page, click Publish")
     console.print("  ./scripts/update-json.sh")
     console.print(f"  git commit -am \"chore: update-json for v{version}\"")
     console.print("  git push")

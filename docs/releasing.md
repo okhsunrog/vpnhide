@@ -26,7 +26,7 @@
    git push
    git push origin v0.6.2
    ```
-4. Wait for CI to finish the build and publish the GitHub release.
+4. Wait for CI to finish the build. CI creates a **draft** GitHub release with all artifacts attached and release notes extracted from `CHANGELOG.md` — review it on the Releases page and click **Publish release** when you're happy.
 5. Generate update-json files pointing at the new release assets:
    ```sh
    ./scripts/update-json.sh
@@ -39,7 +39,7 @@
 
 ## Why update-json is a separate commit
 
-Update-json **must** be committed *after* the GitHub release is live. Magisk and KSU fetch these files to decide whether an update is available, then download the zip from the URL inside. If update-json lands before the release exists, users see the new version but the download URL 404s.
+Update-json **must** be committed *after* the GitHub release is **published** (i.e. after you promote the draft to public). Magisk and KSU fetch these files to decide whether an update is available, then download the zip from the URL inside. Draft releases are private — their asset URLs require auth — so update-json must not point at them.
 
 ## Notes
 
