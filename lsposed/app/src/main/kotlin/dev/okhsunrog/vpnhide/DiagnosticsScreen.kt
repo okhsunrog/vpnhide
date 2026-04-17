@@ -397,7 +397,7 @@ private fun LogcatRecordCard() {
                     Spacer(Modifier.height(12.dp))
                     Button(
                         onClick = {
-                            scope.launch { LogcatRecorder.stop() }
+                            scope.launch { LogcatRecorder.stop(context) }
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -886,6 +886,14 @@ private suspend fun exportDebugZip(
     selfNeedsRestart: Boolean,
 ): File? =
     withContext(Dispatchers.IO) {
+        // Force-enable app/lsposed/zygisk debug logging while the capture
+        // runs so the dump contains VpnHide-tagged lines even when the
+        // user's persistent toggle is OFF (the default). We restore to
+        // whatever the SharedPreferences say at the end — if the user
+        // happens to flip the UI toggle mid-capture, we honor their
+        // final choice instead of blindly rolling back.
+        val loggingWasForced = !VpnHideLog.enabled
+        if (loggingWasForced) applyDebugLoggingRuntime(true)
         try {
             // 1. Enable kmod debug logging
             suExec("echo 1 > /proc/vpnhide_debug 2>/dev/null")
@@ -1129,5 +1137,10 @@ private suspend fun exportDebugZip(
         } catch (e: Exception) {
             Log.e(TAG, "Debug export failed", e)
             null
+        } finally {
+            if (loggingWasForced) {
+                val target = isEnabledInPrefs(context)
+                if (VpnHideLog.enabled != target) applyDebugLoggingRuntime(target)
+            }
         }
     }

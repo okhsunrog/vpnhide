@@ -30,8 +30,9 @@ internal fun isEnabledInPrefs(context: Context): Boolean =
         .getBoolean(KEY_DEBUG_LOGGING, false)
 
 /**
- * Flip the preference and propagate it to every sink. Runs SU commands,
- * so callers should invoke from a background dispatcher.
+ * Flip the persisted preference and propagate it to every sink. Runs
+ * SU commands, so callers should invoke from a background dispatcher.
+ * Use this for the user-facing toggle in Diagnostics.
  */
 internal fun setDebugLoggingEnabled(
     context: Context,
@@ -42,6 +43,18 @@ internal fun setDebugLoggingEnabled(
         .edit()
         .putBoolean(KEY_DEBUG_LOGGING, enabled)
         .apply()
+    applyDebugLoggingRuntime(enabled)
+}
+
+/**
+ * Push [enabled] to the runtime sinks only, without touching
+ * SharedPreferences. Used by diagnostic capture paths (Collect debug
+ * log button + [LogcatRecorder]) that temporarily force-enable logging
+ * for the duration of a capture and then restore the user's persisted
+ * choice — without this, the user-facing toggle would visually flip
+ * under the user while they collected a bug report.
+ */
+internal fun applyDebugLoggingRuntime(enabled: Boolean) {
     VpnHideLog.enabled = enabled
     writeDebugFlagFiles(enabled)
 }

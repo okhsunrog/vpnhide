@@ -51,6 +51,13 @@ internal object LogcatRecorder {
     private var process: Process? = null
     private var scope: CoroutineScope? = null
 
+    // True while this recording force-enabled debug logging because the
+    // user's persisted preference was OFF. [stop] uses it to decide
+    // whether to restore the original state — we always reconcile against
+    // current SharedPreferences rather than a snapshot, so a user flipping
+    // the UI toggle mid-capture wins over our rollback.
+    private var loggingForcedByRecorder = false
+
     /**
      * Start recording. No-op if already recording.
      *
@@ -58,6 +65,13 @@ internal object LogcatRecorder {
      * all buffers (`main system crash events radio`), written to a file
      * in the app's cache directory. Returns the target file immediately;
      * the process runs in the background until [stop] is called.
+     *
+     * If the user's debug-logging preference is currently OFF, this
+     * temporarily turns logging on for the duration of the recording so
+     * the capture actually contains VpnHide-tagged lines. Without this
+     * forcing, a default-install user pressing Start → reproduce →
+     * Stop → Share would send a logcat with zero VpnHide entries in it,
+     * which is useless for diagnosing bugs.
      */
     fun start(context: Context): File? {
         if (_state.value is State.Recording) return (_state.value as State.Recording).file
@@ -85,6 +99,10 @@ internal object LogcatRecorder {
             }
 
         process = proc
+        if (!VpnHideLog.enabled) {
+            applyDebugLoggingRuntime(true)
+            loggingForcedByRecorder = true
+        }
         val newScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope = newScope
         val startMs = System.currentTimeMillis()
@@ -124,9 +142,11 @@ internal object LogcatRecorder {
 
     /**
      * Stop recording. Returns the captured file, or null if nothing was
-     * recording. Safe to call multiple times.
+     * recording. Safe to call multiple times. [context] is needed to read
+     * the user's persisted debug-logging preference when restoring the
+     * logging state we may have force-enabled in [start].
      */
-    suspend fun stop(): File? {
+    suspend fun stop(context: Context): File? {
         val current = _state.value as? State.Recording ?: return null
 
         process?.destroy()
@@ -138,6 +158,11 @@ internal object LogcatRecorder {
         withContext(Dispatchers.IO) {
             // small grace period for the piping coroutine to finish writing
             delay(120)
+            if (loggingForcedByRecorder) {
+                val target = isEnabledInPrefs(context)
+                if (VpnHideLog.enabled != target) applyDebugLoggingRuntime(target)
+                loggingForcedByRecorder = false
+            }
         }
         val duration = (System.currentTimeMillis() - current.startMs).coerceAtLeast(0L)
         _state.value = State.Stopped(current.file, duration)
