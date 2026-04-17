@@ -50,6 +50,31 @@ thread_local! {
     static IN_GETIFADDRS: Cell<bool> = const { Cell::new(false) };
 }
 
+/// Returns true if `fd` is an `AF_NETLINK` socket.
+///
+/// Used by recv/recvmsg hooks to skip TCP/UDP/Unix sockets entirely —
+/// our netlink filter used to inspect `buf[4..6]` on every recv, which
+/// for a TCP stream is arbitrary TLS ciphertext that occasionally
+/// matches `RTM_NEWLINK` (16) or `RTM_NEWADDR` (20) by chance. When it
+/// did, `filter_netlink_dump` then MUTATED the buffer as if parsing
+/// netlink messages, corrupting the TLS stream and hanging the SSL
+/// socket. On an HTTPS-heavy cold-start path (e.g. Ozon) the per-recv
+/// chance accumulates to near-certain breakage.
+fn is_netlink_fd(fd: c_int) -> bool {
+    let mut domain: c_int = 0;
+    let mut optlen = core::mem::size_of::<c_int>() as libc::socklen_t;
+    let rc = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_DOMAIN,
+            &mut domain as *mut c_int as *mut c_void,
+            &mut optlen,
+        )
+    };
+    rc == 0 && domain == libc::AF_NETLINK
+}
+
 // Android bionic exposes the thread-local errno via `int *__errno()`.
 // The `libc` crate doesn't re-export this symbol for android targets,
 // so declare it ourselves. Matches bionic's prototype exactly.
@@ -686,8 +711,22 @@ pub unsafe extern "C" fn hooked_recvmsg(fd: c_int, msg: *mut libc::msghdr, flags
 
     let ret = unsafe { real(fd, msg, flags) };
 
-    // Need at least one nlmsghdr (16 bytes) to inspect.
     if ret <= 0 || msg.is_null() {
+        return ret;
+    }
+
+    // Skip non-netlink sockets entirely. For TCP/UDP/Unix the first bytes
+    // of the buffer are arbitrary user data (TLS ciphertext, HTTP body,
+    // etc.), and used to randomly match RTM_NEWLINK/RTM_NEWADDR and trip
+    // the mutating filter path — corrupting the receive buffer and
+    // stalling the SSL stream on top.
+    if !is_netlink_fd(fd) {
+        return ret;
+    }
+
+    // Guard against re-entry from bionic's getifaddrs internals calling
+    // recvmsg on its own netlink socket while we're already mid-filter.
+    if IN_GETIFADDRS.with(|f| f.get()) {
         return ret;
     }
 
@@ -762,6 +801,14 @@ pub unsafe extern "C" fn hooked_recv(
     let ret = unsafe { real(fd, buf, len, flags) };
 
     if ret < 16 || buf.is_null() {
+        return ret;
+    }
+
+    // Same socket-family + recursion guards as hooked_recvmsg — see there.
+    if !is_netlink_fd(fd) {
+        return ret;
+    }
+    if IN_GETIFADDRS.with(|f| f.get()) {
         return ret;
     }
 
