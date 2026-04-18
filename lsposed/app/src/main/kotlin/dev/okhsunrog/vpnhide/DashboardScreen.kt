@@ -77,6 +77,20 @@ fun DashboardScreen(
             return@Column
         }
 
+        // Pinned status palette — shared by the Protection status banners
+        // (NeedsRestart) and the Errors / Warnings issue banners below.
+        // Theme.colorScheme.{errorContainer,tertiaryContainer} get remixed
+        // by Material You to whatever the wallpaper suggests, which in
+        // practice landed on "lavender" and "pink" on user devices — those
+        // read as "note", not "problem". Same hardcoded pairs the module-
+        // status cards use for active/inactive.
+        val darkTheme = isSystemInDarkTheme()
+        val errorBg = if (darkTheme) Color(0xFFB71C1C).copy(alpha = 0.3f) else Color(0xFFFFEBEE)
+        val errorHeader = if (darkTheme) Color(0xFFEF9A9A) else Color(0xFFC62828)
+        val warningBg = if (darkTheme) Color(0xFFE65100).copy(alpha = 0.2f) else Color(0xFFFFF3E0)
+        val warningHeader = if (darkTheme) Color(0xFFFFB74D) else Color(0xFFE65100)
+        val onBannerColor = MaterialTheme.colorScheme.onSurface
+
         // Module status cards
         Text(
             text = stringResource(R.string.dashboard_modules),
@@ -122,8 +136,8 @@ fun DashboardScreen(
             is ProtectionCheck.NeedsRestart -> {
                 StatusBanner(
                     text = stringResource(R.string.dashboard_needs_restart),
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    containerColor = warningBg,
+                    contentColor = onBannerColor,
                 )
             }
 
@@ -134,21 +148,46 @@ fun DashboardScreen(
             }
         }
 
-        // Issues
-        if (s.issues.isNotEmpty()) {
+        // Issues — split by severity. Errors first (user attention), then
+        // warnings (working-but-suboptimal). Sections hide themselves when
+        // empty so the Dashboard stays short on a healthy setup. Colors
+        // come from the pinned palette declared at the top of this block.
+        val errors = s.issues.filter { it.severity == IssueSeverity.ERROR }
+        val warnings = s.issues.filter { it.severity == IssueSeverity.WARNING }
+
+        if (errors.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
             Text(
-                text = stringResource(R.string.dashboard_issues, s.issues.size),
+                text = stringResource(R.string.dashboard_issues, errors.size),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.error,
+                color = errorHeader,
             )
             Spacer(Modifier.height(8.dp))
-            for (issue in s.issues) {
+            for (issue in errors) {
                 StatusBanner(
-                    text = issue,
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    text = issue.text,
+                    containerColor = errorBg,
+                    contentColor = onBannerColor,
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+        }
+
+        if (warnings.isNotEmpty()) {
+            Spacer(Modifier.height(20.dp))
+            Text(
+                text = stringResource(R.string.dashboard_warnings, warnings.size),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = warningHeader,
+            )
+            Spacer(Modifier.height(8.dp))
+            for (issue in warnings) {
+                StatusBanner(
+                    text = issue.text,
+                    containerColor = warningBg,
+                    contentColor = onBannerColor,
                 )
                 Spacer(Modifier.height(6.dp))
             }

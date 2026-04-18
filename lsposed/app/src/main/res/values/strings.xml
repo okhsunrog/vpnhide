@@ -33,7 +33,7 @@
     <string name="filter_russian_only">Russian apps only</string>
     <string name="apps_help_title">How it works</string>
     <string name="apps_hint_toggles">Tap L, K, Z to toggle individual layers (LSPosed, Kernel module, Zygisk). Tap the row to toggle all layers at once.</string>
-    <string name="apps_hint_zygisk">Some apps detect Zygisk hooks. For those apps, keep Z disabled and rely on other protection layers.</string>
+    <string name="apps_hint_zygisk">Banking and payment apps detect Zygisk hooks and crash or refuse to work when Z is enabled for them. Keep Z off for such apps and rely on the Kernel module + LSPosed layers instead.</string>
 
     <!-- App hiding -->
     <string name="hiding_chip_hidden" translatable="false">H</string>
@@ -57,9 +57,7 @@
     <string name="save_header_comment" translatable="false"># Managed by VPN Hide app</string>
 
     <!-- Diagnostics -->
-    <string name="summary_running">Running&#8230;</string>
     <string name="summary_format">%1$d/%2$d passed</string>
-    <string name="btn_run_all">Run All Checks</string>
     <string name="btn_export_debug">Collect debug log</string>
     <string name="btn_export_debug_running">Collecting debug info&#8230;</string>
     <string name="btn_save_debug">Save</string>
@@ -77,7 +75,7 @@
     <string name="badge_fail">FAIL</string>
     <string name="badge_info">INFO</string>
     <string name="banner_no_vpn">No active VPN detected. Turn on your VPN connection before running checks.</string>
-    <string name="banner_ready">VPN is active. This app is in the target list. Ready to run checks.</string>
+    <string name="banner_ready">VPN is active. This app is in the target list. Results below.</string>
     <string name="banner_added_self">Added this app to the target list. Restart the app for native-level checks to take effect.</string>
     <string name="banner_adding_self">Adding this app to target list&#8230;</string>
     <string name="banner_network_blocked">Network access is disabled for this app. ioctl checks (SIOCGIFFLAGS, SIOCGIFMTU, SIOCGIFCONF) cannot run without it. Enable in Settings → Apps → VPN Hide → Mobile data &amp; Wi-Fi.</string>
@@ -110,8 +108,13 @@
     <string name="dashboard_install_recommendation_device">Your device: %1$s, kernel %2$s</string>
     <string name="dashboard_install_recommendation_kmod">Kernel module is recommended. Download %1$s.</string>
     <string name="dashboard_install_recommendation_zygisk">Kernel module is not supported for your device. Install %1$s.</string>
-    <string name="dashboard_install_recommendation_zygisk_warning">Some apps can detect Zygisk hooks. For those apps, disable Zygisk protection and use other protection methods instead.</string>
-    <string name="dashboard_issues">Issues (%d)</string>
+    <string name="dashboard_install_recommendation_zygisk_warning">Banking and payment apps detect Zygisk hooks and crash when Z is enabled for them. Leave Z off for those apps and rely on LSPosed (Java-level) hiding — native-level hiding won\'t work for them on a kernel without kmod support.</string>
+    <string name="dashboard_issues">Errors (%d)</string>
+    <string name="dashboard_warnings">Warnings (%d)</string>
+    <string name="dashboard_issue_kmod_capable_but_zygisk">Your kernel supports the kernel module — it hooks in kernel space and is invisible to anti-tamper checks. Zygisk works too, but its hooks can be detected by banking and payment apps, so you\'d have to keep Z off for those apps individually. Install %1$s and uninstall the Zygisk module for cleaner coverage.</string>
+    <string name="dashboard_issue_both_native_active">Kernel module and Zygisk are both active, covering the same native paths. Kmod is invisible to anti-tamper, Zygisk isn\'t — so every time you add a banking or payment app as a target, you have to remember to leave Z off for it. Uninstall the Zygisk module to remove that per-app footgun; kmod keeps the coverage.</string>
+    <string name="dashboard_issue_debug_logging_on">Debug logging is enabled. VPN Hide is writing verbose lines to logcat that anyone with root can read. Turn it off in Diagnostics after you\'ve finished collecting a bug report.</string>
+    <string name="dashboard_issue_selinux_permissive">SELinux is Permissive. Six detection vectors VPN Hide relies on the kernel to block (RTM_GETROUTE, /proc/net/{tcp,udp,dev,fib_trie}, /sys/class/net) are reachable to target apps. Run `setenforce 1` and investigate what disabled it.</string>
     <string name="dashboard_issue_no_native">No native module installed. Install kmod or zygisk for full protection.</string>
     <string name="dashboard_issue_lsposed_not_installed">LSPosed/Vector is not installed. Install it and enable the VPN Hide module for System Framework.</string>
     <string name="dashboard_issue_reboot">LSPosed is configured correctly, but its hooks are not active yet. Reboot the device to activate them.</string>

@@ -31,7 +31,7 @@
     <string name="filter_russian_only">Только российские</string>
     <string name="apps_help_title">Как это работает</string>
     <string name="apps_hint_toggles">Нажимайте L, K, Z для переключения отдельных уровней защиты (LSPosed, модуль ядра, Zygisk). Нажмите на строку, чтобы переключить все уровни сразу.</string>
-    <string name="apps_hint_zygisk">Некоторые приложения обнаруживают хуки Zygisk. Для таких приложений оставьте Z выключенным и используйте другие уровни защиты.</string>
+    <string name="apps_hint_zygisk">Банковские и платёжные приложения обнаруживают Zygisk-хуки и при включённом Z крашатся или отказываются работать. Держите Z выключенным для таких приложений и полагайтесь на модуль ядра + LSPosed.</string>
 
     <!-- App hiding -->
     <string name="hiding_help_title">Как работает скрытие приложений</string>
@@ -77,8 +77,13 @@
     <string name="dashboard_install_recommendation_device">Ваше устройство: %1$s, ядро %2$s</string>
     <string name="dashboard_install_recommendation_kmod">Рекомендуется модуль ядра. Скачайте %1$s.</string>
     <string name="dashboard_install_recommendation_zygisk">Для вашего устройства модуль ядра не поддерживается. Установите %1$s.</string>
-    <string name="dashboard_install_recommendation_zygisk_warning">Некоторые приложения определяют Zygisk-хуки. Для таких приложений отключите Zygisk-защиту и используйте другие методы защиты.</string>
-    <string name="dashboard_issues">Проблемы (%d)</string>
+    <string name="dashboard_install_recommendation_zygisk_warning">Банковские и платёжные приложения обнаруживают Zygisk-хуки и крашатся при включённом Z. Для таких приложений оставьте Z выключенным и полагайтесь на LSPosed (Java-уровень) — native-уровень защиты для них работать не будет без поддержки kmod в ядре.</string>
+    <string name="dashboard_issues">Ошибки (%d)</string>
+    <string name="dashboard_warnings">Предупреждения (%d)</string>
+    <string name="dashboard_issue_kmod_capable_but_zygisk">Ваше ядро поддерживает модуль ядра — он работает в пространстве ядра и невидим для анти-тампер проверок. Zygisk тоже работает, но его хуки обнаруживаются банковскими и платёжными приложениями, так что Z для них придётся вручную держать выключенным. Установите %1$s и удалите Zygisk-модуль.</string>
+    <string name="dashboard_issue_both_native_active">Модуль ядра и Zygisk активны одновременно — оба закрывают одни и те же native-пути. Kmod невидим для анти-тампер-детекции, Zygisk — нет, поэтому при добавлении каждого банковского или платёжного приложения в таргеты Z для него придётся отдельно выключать. Удалите Zygisk-модуль, чтобы не держать это в уме — kmod сохранит покрытие.</string>
+    <string name="dashboard_issue_debug_logging_on">Отладочные логи включены. VPN Hide пишет подробные строки в logcat, которые может прочитать любой с root-доступом. Выключите переключатель в Диагностике после сбора багрепорта.</string>
+    <string name="dashboard_issue_selinux_permissive">SELinux в режиме Permissive. Шесть векторов детекции, которые VPN Hide рассчитывает на блокировку ядром (RTM_GETROUTE, /proc/net/{tcp,udp,dev,fib_trie}, /sys/class/net), стали доступны целевым приложениям. Выполните `setenforce 1` и разберитесь, что его переключило.</string>
     <string name="dashboard_issue_no_native">Нативный модуль не установлен. Установите kmod или zygisk для полной защиты.</string>
     <string name="dashboard_issue_lsposed_not_installed">LSPosed/Vector не установлен. Установите его и включите модуль VPN Hide для System Framework.</string>
     <string name="dashboard_issue_reboot">LSPosed настроен правильно, но его хуки ещё не активны. Перезагрузите устройство, чтобы активировать их.</string>
@@ -126,14 +131,12 @@
     <string name="logcat_btn_share_last">Последний (%1$s)</string>
     <string name="logcat_recording_status">● Запись · %1$s · %2$s</string>
     <string name="logcat_last_recording">Последняя запись · %1$s · %2$s</string>
-    <string name="summary_running">Выполняется&#8230;</string>
     <string name="summary_format">%1$d/%2$d пройдено</string>
-    <string name="btn_run_all">Запустить все проверки</string>
     <string name="badge_pass">ОК</string>
     <string name="badge_fail">ПРОВАЛ</string>
     <string name="badge_info">ИНФО</string>
     <string name="banner_no_vpn">Активное VPN-соединение не обнаружено. Включите VPN перед запуском проверок.</string>
-    <string name="banner_ready">VPN активен. Приложение в списке целевых. Готово к запуску проверок.</string>
+    <string name="banner_ready">VPN активен. Приложение в списке целевых. Результаты проверок ниже.</string>
     <string name="banner_added_self">Приложение добавлено в список целевых. Перезапустите приложение для работы нативных проверок.</string>
     <string name="banner_adding_self">Добавление приложения в список целевых&#8230;</string>
     <string name="banner_network_blocked">Доступ к сети отключён для этого приложения. Проверки ioctl (SIOCGIFFLAGS, SIOCGIFMTU, SIOCGIFCONF) не могут быть выполнены. Включите в Настройки → Приложения → VPN Hide → Мобильный интернет и Wi-Fi.</string>

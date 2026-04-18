@@ -8,7 +8,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
@@ -94,7 +93,6 @@ private fun MainScreen() {
     var showSystem by remember { mutableStateOf(false) }
     var showRussianOnly by remember { mutableStateOf(false) }
     var showFilterMenu by remember { mutableStateOf(false) }
-    var showHelp by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         selfNeedsRestart =
@@ -157,17 +155,28 @@ private fun MainScreen() {
                             }
                             Box {
                                 val anyFilterActive = showSystem || showRussianOnly
-                                IconButton(onClick = { showFilterMenu = true }) {
-                                    Icon(
-                                        Icons.Default.FilterList,
-                                        contentDescription = null,
-                                        tint =
-                                            if (anyFilterActive) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.onPrimaryContainer
-                                            },
-                                    )
+                                // Active-filter indicator: the old `tint = primary`
+                                // did not contrast reliably against the topbar's
+                                // `primaryContainer` on Material You palettes where
+                                // primary and primaryContainer end up close in tone.
+                                // FilledIconButton paints itself with `primary` /
+                                // `onPrimary`, a pair M3 guarantees to contrast,
+                                // so the indicator reads on any dynamic theme.
+                                if (anyFilterActive) {
+                                    FilledIconButton(onClick = { showFilterMenu = true }) {
+                                        Icon(
+                                            Icons.Default.FilterList,
+                                            contentDescription = null,
+                                        )
+                                    }
+                                } else {
+                                    IconButton(onClick = { showFilterMenu = true }) {
+                                        Icon(
+                                            Icons.Default.FilterList,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        )
+                                    }
                                 }
                                 DropdownMenu(
                                     expanded = showFilterMenu,
@@ -194,13 +203,6 @@ private fun MainScreen() {
                                         },
                                     )
                                 }
-                            }
-                            IconButton(onClick = { showHelp = true }) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.HelpOutline,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
                             }
                         }
                     },
@@ -252,8 +254,6 @@ private fun MainScreen() {
                         searchQuery = searchQuery,
                         showSystem = showSystem,
                         showRussianOnly = showRussianOnly,
-                        showHelp = showHelp,
-                        onDismissHelp = { showHelp = false },
                         modifier = Modifier.padding(innerPadding),
                     )
                 }

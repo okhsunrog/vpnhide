@@ -1,11 +1,9 @@
 package dev.okhsunrog.vpnhide
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -15,7 +13,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -27,19 +24,9 @@ fun ProtectionScreen(
     searchQuery: String,
     showSystem: Boolean,
     showRussianOnly: Boolean,
-    showHelp: Boolean,
-    onDismissHelp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var mode by rememberSaveable { mutableStateOf(ProtectionMode.VpnTargets) }
-
-    if (showHelp) {
-        when (mode) {
-            ProtectionMode.VpnTargets -> AppsHelpDialog(onDismiss = onDismissHelp)
-            ProtectionMode.AppHiding -> AppHidingHelpDialog(onDismiss = onDismissHelp)
-            ProtectionMode.PortHiding -> PortsHidingHelpDialog(onDismiss = onDismissHelp)
-        }
-    }
 
     Column(modifier = modifier.fillMaxSize()) {
         ProtectionModeSwitcher(

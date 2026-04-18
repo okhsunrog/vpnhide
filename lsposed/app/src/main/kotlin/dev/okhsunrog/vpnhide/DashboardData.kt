@@ -99,6 +99,13 @@ private sealed interface LsposedConfig {
     ) : LsposedConfig
 }
 
+internal enum class IssueSeverity { ERROR, WARNING }
+
+internal data class Issue(
+    val severity: IssueSeverity,
+    val text: String,
+)
+
 internal data class DashboardState(
     val kmod: ModuleState,
     val zygisk: ModuleState,
@@ -106,7 +113,7 @@ internal data class DashboardState(
     val ports: ModuleState,
     val nativeInstallRecommendation: NativeInstallRecommendation?,
     val protection: ProtectionCheck,
-    val issues: List<String>,
+    val issues: List<Issue>,
 )
 
 internal data class NativeInstallRecommendation(
@@ -124,9 +131,17 @@ internal fun loadDashboardState(
     context: android.content.Context,
     selfNeedsRestart: Boolean,
 ): DashboardState {
-    val issues = mutableListOf<String>()
+    val issues = mutableListOf<Issue>()
     val res = context.resources
     val selfPkg = context.packageName
+
+    fun err(text: String) {
+        issues += Issue(IssueSeverity.ERROR, text)
+    }
+
+    fun warn(text: String) {
+        issues += Issue(IssueSeverity.WARNING, text)
+    }
 
     VpnHideLog.i(TAG, "=== Loading dashboard state ===")
 
@@ -451,13 +466,17 @@ internal fun loadDashboardState(
         }
     VpnHideLog.i(TAG, "ports: $ports")
 
+    // Recommendation based purely on the kernel — used both by the install
+    // card (only shown when nothing's installed) and by the "kmod-capable
+    // kernel, only zygisk installed" warning (fires even after install).
+    val kernelRecommendation = buildNativeInstallRecommendation()
     val nativeInstallRecommendation =
         if (kmod is ModuleState.NotInstalled && zygisk is ModuleState.NotInstalled) {
-            buildNativeInstallRecommendation()
+            kernelRecommendation
         } else {
             null
         }
-    VpnHideLog.i(TAG, "nativeInstallRecommendation=$nativeInstallRecommendation")
+    VpnHideLog.i(TAG, "nativeInstallRecommendation=$nativeInstallRecommendation kernelRec=$kernelRecommendation")
 
     // lsposed hook status
     val (_, hookStatusRaw) = suExec("cat ${HookEntry.HOOK_STATUS_FILE} 2>/dev/null || true")
@@ -529,69 +548,118 @@ internal fun loadDashboardState(
     // ── Issues ──
     val hasNative = kmod is ModuleState.Installed || zygisk is ModuleState.Installed
     if (!hasNative) {
-        issues += res.getString(R.string.dashboard_issue_no_native)
+        err(res.getString(R.string.dashboard_issue_no_native))
     }
     if (lsposedFramework is LsposedFramework.NotInstalled && lsposed !is LsposedState.Active) {
-        issues += res.getString(R.string.dashboard_issue_lsposed_not_installed)
+        err(res.getString(R.string.dashboard_issue_lsposed_not_installed))
     }
     if (lsposed is LsposedState.NeedsReboot) {
-        issues += res.getString(R.string.dashboard_issue_reboot)
+        err(res.getString(R.string.dashboard_issue_reboot))
     }
     // Only report LSPosed config issues when hooks are not already active at runtime —
     // if hooks are active, the config is clearly working regardless of what we detect on disk
     if (lsposed !is LsposedState.Active) {
         when (lsposedConfig) {
             null -> {
-                issues += res.getString(R.string.dashboard_issue_lsposed_config_unreadable)
+                err(res.getString(R.string.dashboard_issue_lsposed_config_unreadable))
             }
 
             LsposedConfig.ModuleNotConfigured -> {
                 if (lsposedFramework is LsposedFramework.Installed) {
-                    issues += res.getString(R.string.dashboard_issue_lsposed_not_enabled)
+                    err(res.getString(R.string.dashboard_issue_lsposed_not_enabled))
                 }
             }
 
             LsposedConfig.Disabled -> {
-                issues += res.getString(R.string.dashboard_issue_lsposed_not_enabled)
+                err(res.getString(R.string.dashboard_issue_lsposed_not_enabled))
             }
 
             is LsposedConfig.Enabled -> {
                 if (!lsposedConfig.hasSystemFramework) {
-                    issues += res.getString(R.string.dashboard_issue_lsposed_no_system_scope)
+                    err(res.getString(R.string.dashboard_issue_lsposed_no_system_scope))
                 }
                 if (lsposedConfig.extraEntries.isNotEmpty()) {
-                    issues +=
+                    // Extra entries work, they're just cosmetic noise — warn.
+                    warn(
                         res.getString(
                             R.string.dashboard_issue_lsposed_extra_scope,
                             lsposedConfig.extraEntries.map(::resolveScopeEntryLabel).joinToString(", "),
-                        )
+                        ),
+                    )
                 }
             }
         }
     }
     val appVersion = BuildConfig.VERSION_NAME
+    // Version mismatches are warnings — modules keep working, user just needs to
+    // update the lagging side. Full coverage is not affected by a patch-level gap.
     if (kmod is ModuleState.Installed && kmod.version != null && normalizeVersion(kmod.version) != normalizeVersion(appVersion)) {
-        issues += buildModuleVersionIssue(NativeModuleKind.Kmod, kmod.version, appVersion)
+        warn(buildModuleVersionIssue(NativeModuleKind.Kmod, kmod.version, appVersion))
     }
     if (zygisk is ModuleState.Installed && zygisk.version != null && normalizeVersion(zygisk.version) != normalizeVersion(appVersion)) {
-        issues += buildModuleVersionIssue(NativeModuleKind.Zygisk, zygisk.version, appVersion)
+        warn(buildModuleVersionIssue(NativeModuleKind.Zygisk, zygisk.version, appVersion))
     }
     if (ports is ModuleState.Installed && ports.version != null && normalizeVersion(ports.version) != normalizeVersion(appVersion)) {
-        issues += buildModuleVersionIssue(NativeModuleKind.Ports, ports.version, appVersion)
+        warn(buildModuleVersionIssue(NativeModuleKind.Ports, ports.version, appVersion))
     }
     val totalTargets = lsposedTargetCount + kmodTargetCount + zygiskTargetCount
     if (totalTargets == 0) {
-        issues += res.getString(R.string.dashboard_issue_no_targets)
+        err(res.getString(R.string.dashboard_issue_no_targets))
     }
     if (ports is ModuleState.Installed && ports.targetCount == 0) {
-        issues += res.getString(R.string.dashboard_issue_ports_no_observers)
+        warn(res.getString(R.string.dashboard_issue_ports_no_observers))
     }
     if (lsposed is LsposedState.Active) {
         val runningVersion = lsposed.version
         if (runningVersion != null && runningVersion != appVersion) {
             VpnHideLog.w(TAG, "version mismatch: running=$runningVersion app=$appVersion")
-            issues += res.getString(R.string.dashboard_issue_version_mismatch, runningVersion, appVersion)
+            warn(res.getString(R.string.dashboard_issue_version_mismatch, runningVersion, appVersion))
         }
+    }
+
+    // ── Warnings: suboptimal-but-working setups ──
+
+    // W1: kernel supports kmod, but user only installed zygisk. Zygisk is
+    // in-process and theoretically detectable by anti-tamper; kmod is strictly
+    // less fingerprinted when available.
+    if (kernelRecommendation?.preferKmod == true &&
+        zygisk is ModuleState.Installed &&
+        kmod is ModuleState.NotInstalled
+    ) {
+        warn(
+            res.getString(
+                R.string.dashboard_issue_kmod_capable_but_zygisk,
+                kernelRecommendation.recommendedArtifact,
+            ),
+        )
+    }
+
+    // W2: kmod and zygisk both active simultaneously — redundant native hooks,
+    // larger fingerprint surface for anti-tamper SDKs (more hooked libc
+    // entrypoints in /proc/self/maps). Zygisk is meant as a fallback only.
+    if (kmod is ModuleState.Installed &&
+        kmod.active &&
+        zygisk is ModuleState.Installed &&
+        zygisk.active
+    ) {
+        warn(res.getString(R.string.dashboard_issue_both_native_active))
+    }
+
+    // W3: user has debug logging turned on — VPN Hide is writing verbose lines
+    // to logcat that a forensic reader with root can see. The flag file is
+    // written by the Diagnostics → Debug logging toggle (separate PR); absent
+    // file ⇒ default off ⇒ no warning.
+    val (debugEnabledExit, debugEnabledRaw) = suExec("cat /data/system/vpnhide_debug_logging 2>/dev/null")
+    if (debugEnabledExit == 0 && debugEnabledRaw.trim() == "1") {
+        warn(res.getString(R.string.dashboard_issue_debug_logging_on))
+    }
+
+    // W4: SELinux Permissive exposes six detection vectors we rely on SELinux
+    // to block (RTM_GETROUTE, /proc/net/{tcp,tcp6,udp,udp6,dev,fib_trie},
+    // /sys/class/net). See the coverage table in the top-level README.
+    val (_, getenforce) = suExec("getenforce 2>/dev/null")
+    if (getenforce.trim().equals("Permissive", ignoreCase = true)) {
+        warn(res.getString(R.string.dashboard_issue_selinux_permissive))
     }
 
     // ── Protection checks ──
