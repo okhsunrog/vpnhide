@@ -239,9 +239,12 @@ class HookEntry : IXposedHookLoadPackage {
     private fun watchTargetUidsFile() {
         val dir = "/data/system"
         val filename = "vpnhide_uids.txt"
+
+        // FileObserver(File, Int) is API 29+; use the String-path form for API 28 compatibility.
+        @Suppress("DEPRECATION")
         val observer =
             object : android.os.FileObserver(
-                File(dir),
+                dir,
                 CREATE or CLOSE_WRITE or MOVED_TO or MODIFY,
             ) {
                 override fun onEvent(
