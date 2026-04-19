@@ -62,12 +62,11 @@ fun AppPickerScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     val cachedApps by AppListCache.apps.collectAsState()
-    val refreshCounter by AppListCache.refreshCounter.collectAsState()
+    val targets by TargetsCache.snapshot.collectAsState()
 
-    var installed by remember { mutableStateOf(InstalledModules()) }
-    var targetSets by remember { mutableStateOf<Triple<Set<String>, Set<String>, Set<String>>?>(null) }
     var allApps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
     var saving by remember { mutableStateOf(false) }
     var dirty by remember { mutableStateOf(false) }
@@ -81,48 +80,25 @@ fun AppPickerScreen(
         }
     }
 
-    // Per-screen state (installed modules + target sets) — re-read on
-    // every cache refresh. Dashboard wants these fresh after the user
-    // taps Refresh in the top bar, not stuck on whatever loaded first.
-    LaunchedEffect(refreshCounter) {
-        withContext(Dispatchers.IO) {
-            val (_, detectOut) =
-                suExec(
-                    "echo kmod=\$([ -d $KMOD_MODULE_DIR ] && echo 1 || echo 0);" +
-                        "echo zygisk=\$([ -d $ZYGISK_MODULE_DIR ] && echo 1 || echo 0)",
-                )
-            val flags =
-                detectOut
-                    .lines()
-                    .filter { it.contains("=") }
-                    .associate {
-                        val (k, v) = it.split("=", limit = 2)
-                        k to (v == "1")
-                    }
-            installed =
-                InstalledModules(
-                    kmod = flags["kmod"] == true,
-                    zygisk = flags["zygisk"] == true,
-                )
-
-            fun readTargets(path: String): Set<String> {
-                val (_, raw) = suExec("cat $path 2>/dev/null || true")
-                return raw
-                    .lines()
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() && !it.startsWith("#") }
-                    .toSet()
-            }
-            targetSets = Triple(readTargets(KMOD_TARGETS), readTargets(ZYGISK_TARGETS), readTargets(LSPOSED_TARGETS))
-        }
-        dirty = false
+    LaunchedEffect(Unit) {
+        TargetsCache.ensureLoaded(scope, context)
     }
 
-    // Merge cached app metadata with per-screen target flags. Runs
-    // cheaply whenever either side changes.
-    LaunchedEffect(cachedApps, targetSets) {
+    val installed =
+        remember(targets) {
+            InstalledModules(
+                kmod = targets?.kmodModuleInstalled == true,
+                zygisk = targets?.zygiskModuleInstalled == true,
+            )
+        }
+
+    // Merge cached app metadata with per-screen target flags. Cheap —
+    // runs whenever either side of the cache changes. Resets local
+    // `dirty` when a fresh snapshot arrives, since that means disk
+    // state just synced (Save finished, or user tapped Refresh).
+    LaunchedEffect(cachedApps, targets) {
         val apps = cachedApps ?: return@LaunchedEffect
-        val (kmodT, zygiskT, lsposedT) = targetSets ?: return@LaunchedEffect
+        val t = targets ?: return@LaunchedEffect
         val selfPkg = context.packageName
         allApps =
             apps
@@ -133,14 +109,15 @@ fun AppPickerScreen(
                         label = app.label,
                         icon = app.icon,
                         isSystem = app.isSystem,
-                        kmod = app.packageName in kmodT,
-                        zygisk = app.packageName in zygiskT,
-                        lsposed = app.packageName in lsposedT,
+                        kmod = app.packageName in t.kmodTargets,
+                        zygisk = app.packageName in t.zygiskTargets,
+                        lsposed = app.packageName in t.lsposedTargets,
                     )
                 }
+        dirty = false
     }
 
-    val loading = cachedApps == null || targetSets == null
+    val loading = cachedApps == null || targets == null
 
     val filteredApps =
         remember(allApps, searchQuery, showSystem, showRussianOnly) {
@@ -341,6 +318,7 @@ fun AppPickerScreen(
                     // invalidate so next open reflects them without a
                     // manual refresh tap.
                     DashboardCache.invalidate()
+                    TargetsCache.refresh(scope, context)
                 } else if (exitCode == -1) {
                     snackMessage = context.getString(R.string.save_failed_root)
                     dirty = true

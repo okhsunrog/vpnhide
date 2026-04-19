@@ -104,6 +104,7 @@ private fun MainScreen() {
     var showRussianOnly by remember { mutableStateOf(false) }
     var showFilterMenu by remember { mutableStateOf(false) }
     val appListLoading by AppListCache.loading.collectAsState()
+    val targetsLoading by TargetsCache.loading.collectAsState()
     val dashboardLoading by DashboardCache.loading.collectAsState()
     val refreshRestart = selfNeedsRestart ?: false
 
@@ -115,11 +116,12 @@ private fun MainScreen() {
             }
     }
 
-    // Kick off the app-list cache load as early as possible so tab
+    // Kick off both Protection caches as early as possible so tab
     // switches into Protection render instantly instead of paying the
-    // per-screen pm + icon cost each time.
+    // per-screen pm + icon + root-shell cost each time.
     LaunchedEffect(Unit) {
         AppListCache.ensureLoaded(scope, context)
+        TargetsCache.ensureLoaded(scope, context)
     }
 
     // Kick the update check once (silently) on first launch, and again
@@ -198,8 +200,11 @@ private fun MainScreen() {
 
                                 Tab.Protection -> {
                                     RefreshContext(
-                                        loading = appListLoading,
-                                        onRefresh = { AppListCache.refresh(scope, context) },
+                                        loading = appListLoading || targetsLoading,
+                                        onRefresh = {
+                                            AppListCache.refresh(scope, context)
+                                            TargetsCache.refresh(scope, context)
+                                        },
                                     )
                                 }
 

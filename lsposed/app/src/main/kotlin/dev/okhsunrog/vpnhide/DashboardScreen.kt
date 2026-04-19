@@ -126,10 +126,15 @@ fun DashboardScreen(
 
         when (val p = s.protection) {
             is ProtectionCheck.NoVpn -> {
-                StatusBanner(
-                    text = stringResource(R.string.dashboard_no_vpn),
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                VpnOffPrompt(
+                    onRetry = {
+                        // Re-read dashboard state (re-runs its own VPN
+                        // + protection probes) and re-run the diag
+                        // cache so both screens move to "Ready" when
+                        // VPN is back.
+                        DashboardCache.refresh(scope, context, selfNeedsRestart)
+                        DiagnosticsCache.retry(scope, context)
+                    },
                 )
             }
 

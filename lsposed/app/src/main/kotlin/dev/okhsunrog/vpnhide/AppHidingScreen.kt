@@ -37,6 +37,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,12 +81,11 @@ fun AppHidingScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     val cachedApps by AppListCache.apps.collectAsState()
-    val refreshCounter by AppListCache.refreshCounter.collectAsState()
+    val targets by TargetsCache.snapshot.collectAsState()
 
-    var hiddenNames by remember { mutableStateOf<Set<String>?>(null) }
-    var observerNames by remember { mutableStateOf<Set<String>?>(null) }
     var allApps by remember { mutableStateOf<List<HidingEntry>>(emptyList()) }
     var saving by remember { mutableStateOf(false) }
     var dirty by remember { mutableStateOf(false) }
@@ -99,35 +99,8 @@ fun AppHidingScreen(
         }
     }
 
-    // Per-screen root-files state (hidden packages + observer UIDs).
-    // Keyed on refreshCounter so the TopBar refresh re-reads these too.
-    LaunchedEffect(refreshCounter) {
-        withContext(Dispatchers.IO) {
-            fun readLines(path: String): Set<String> {
-                val (_, raw) = suExec("cat $path 2>/dev/null || true")
-                return raw
-                    .lines()
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() && !it.startsWith("#") }
-                    .toSet()
-            }
-            val hidden = readLines(SS_HIDDEN_PKGS_FILE)
-            val observerUids = readLines(SS_OBSERVER_UIDS_FILE).mapNotNull { it.toIntOrNull() }.toSet()
-
-            val (_, listing) = suExec("pm list packages -U 2>/dev/null")
-            val uidToPkg =
-                listing
-                    .lines()
-                    .mapNotNull { line ->
-                        val pkgMatch = Regex("^package:(\\S+) uid:(\\d+)").find(line) ?: return@mapNotNull null
-                        pkgMatch.groupValues[1] to pkgMatch.groupValues[2].toInt()
-                    }.associate { (pkg, uid) -> uid to pkg }
-            val observers = observerUids.mapNotNull { uidToPkg[it] }.toSet()
-
-            hiddenNames = hidden
-            observerNames = observers
-        }
-        dirty = false
+    LaunchedEffect(Unit) {
+        TargetsCache.ensureLoaded(scope, context)
     }
 
     // Packages with both roles crash on startup: the app queries its own
@@ -135,10 +108,11 @@ fun AppHidingScreen(
     // (itself) and strip its own package from the result, so frameworks
     // see a self-lookup NameNotFoundException and bail. Collapse to
     // observer-only on load so the next Save persists the fix.
-    LaunchedEffect(cachedApps, hiddenNames, observerNames) {
+    LaunchedEffect(cachedApps, targets) {
         val apps = cachedApps ?: return@LaunchedEffect
-        val hidden = hiddenNames ?: return@LaunchedEffect
-        val observers = observerNames ?: return@LaunchedEffect
+        val t = targets ?: return@LaunchedEffect
+        val hidden = t.hiddenPkgs
+        val observers = t.observerNames
         val selfPkg = context.packageName
         var autoFixedConflict = false
         allApps =
@@ -163,10 +137,10 @@ fun AppHidingScreen(
                         observer = finalObserver,
                     )
                 }
-        if (autoFixedConflict) dirty = true
+        dirty = autoFixedConflict
     }
 
-    val loading = cachedApps == null || hiddenNames == null || observerNames == null
+    val loading = cachedApps == null || targets == null
 
     val filteredApps =
         remember(allApps, searchQuery, showSystem, showRussianOnly) {
@@ -365,6 +339,7 @@ fun AppHidingScreen(
                     snackMessage =
                         context.getString(R.string.hiding_save_success, hiddenPkgs.size, observerPkgs.size)
                     DashboardCache.invalidate()
+                    TargetsCache.refresh(scope, context)
                 } else if (exitCode == -1) {
                     snackMessage = context.getString(R.string.save_failed_root)
                     dirty = true

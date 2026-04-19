@@ -52,14 +52,14 @@ data class CheckResult(
     val detail: String,
 )
 
-private data class CheckResults(
+internal data class CheckResults(
     val native: List<CheckResult>,
     val java: List<CheckResult>,
 ) {
     val all get() = native + java
 }
 
-private suspend fun isVpnActive(): Boolean =
+internal suspend fun isVpnActive(): Boolean =
     withContext(Dispatchers.IO) {
         val (exitCode, output) = suExec("ls /sys/class/net/ 2>/dev/null")
         if (exitCode != 0) return@withContext false
@@ -87,14 +87,21 @@ fun DiagnosticsScreen(
     val cm = context.getSystemService(ConnectivityManager::class.java)
     val scope = rememberCoroutineScope()
 
-    var vpnDetected by remember { mutableStateOf<Boolean?>(null) }
-    var results by remember { mutableStateOf<CheckResults?>(null) }
-    var networkBlocked by remember { mutableStateOf(false) }
-    var summary by remember { mutableStateOf<String?>(null) }
+    val diagState by DiagnosticsCache.state.collectAsState()
     var exporting by remember { mutableStateOf(false) }
     var debugZipFile by remember { mutableStateOf<File?>(null) }
     var kmodTrace by remember { mutableStateOf<String?>(null) }
     val summaryFmt = stringResource(R.string.summary_format)
+
+    // Kick off the diagnostics run once per process. If selfNeedsRestart
+    // is true we skip — hooks aren't applied to this app yet, results
+    // would be meaningless. DiagnosticsCache.run is idempotent: no-op
+    // when Ready/Running.
+    LaunchedEffect(selfNeedsRestart) {
+        if (!selfNeedsRestart) {
+            DiagnosticsCache.run(scope, context)
+        }
+    }
 
     LaunchedEffect(Unit) {
         kmodTrace =
@@ -127,20 +134,14 @@ fun DiagnosticsScreen(
             }
         }
 
-    fun updateResults(r: CheckResults) {
-        results = r
-        networkBlocked = r.all.any { it.detail.startsWith("NETWORK_BLOCKED:") }
-        val scored = r.all.filter { it.passed != null }
-        val passed = scored.count { it.passed == true }
-        summary = String.format(summaryFmt, passed, scored.size)
-    }
-
-    LaunchedEffect(Unit) {
-        vpnDetected = isVpnActive()
-        if (vpnDetected == true && !selfNeedsRestart) {
-            updateResults(runAllChecks(cm, context))
+    val results = (diagState as? DiagnosticsCache.State.Ready)?.results
+    val networkBlocked = results?.all?.any { it.detail.startsWith("NETWORK_BLOCKED:") } == true
+    val summary =
+        results?.let { r ->
+            val scored = r.all.filter { it.passed != null }
+            val passed = scored.count { it.passed == true }
+            String.format(summaryFmt, passed, scored.size)
         }
-    }
 
     Column(
         modifier =
@@ -151,70 +152,83 @@ fun DiagnosticsScreen(
     ) {
         Spacer(Modifier.height(8.dp))
 
-        if (vpnDetected == false) {
-            Box(
-                modifier = Modifier.fillMaxSize().weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
+        // Protection check section — its content depends on cache state,
+        // but the bottom debug-tools section always renders below so
+        // users can collect logs / toggle verbose logging even when
+        // VPN is off or a run is in flight.
+        when {
+            selfNeedsRestart -> {
                 StatusBanner(
-                    text = stringResource(R.string.banner_no_vpn),
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    text = stringResource(R.string.banner_added_self),
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
                 )
             }
-            return@Column
-        }
 
-        if (selfNeedsRestart) {
-            StatusBanner(
-                text = stringResource(R.string.banner_added_self),
-                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            )
-        } else {
-            StatusBanner(
-                text = stringResource(R.string.banner_ready),
-                containerColor = Color(0xFF1B5E20).copy(alpha = 0.15f),
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            )
-        }
+            diagState is DiagnosticsCache.State.VpnOff -> {
+                VpnOffPrompt(
+                    onRetry = {
+                        DiagnosticsCache.retry(scope, context)
+                        DashboardCache.refresh(scope, context, selfNeedsRestart)
+                    },
+                )
+            }
 
-        if (networkBlocked) {
-            Spacer(Modifier.height(6.dp))
-            StatusBanner(
-                text = stringResource(R.string.banner_network_blocked),
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            )
-        }
-
-        if (summary != null) {
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = summary!!,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-
-        results?.let { r ->
-            Spacer(Modifier.height(16.dp))
-
-            SectionHeader(stringResource(R.string.section_native))
-            Spacer(Modifier.height(6.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (check in r.native) {
-                    CheckCard(check)
+            diagState is DiagnosticsCache.State.Running ||
+                diagState is DiagnosticsCache.State.NotRun -> {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            diagState is DiagnosticsCache.State.Ready -> {
+                StatusBanner(
+                    text = stringResource(R.string.banner_ready),
+                    containerColor = Color(0xFF1B5E20).copy(alpha = 0.15f),
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                )
 
-            SectionHeader(stringResource(R.string.section_java))
-            Spacer(Modifier.height(6.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (check in r.java) {
-                    CheckCard(check)
+                if (networkBlocked) {
+                    Spacer(Modifier.height(6.dp))
+                    StatusBanner(
+                        text = stringResource(R.string.banner_network_blocked),
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
+
+                if (summary != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = summary,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                results?.let { r ->
+                    Spacer(Modifier.height(16.dp))
+
+                    SectionHeader(stringResource(R.string.section_native))
+                    Spacer(Modifier.height(6.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (check in r.native) {
+                            CheckCard(check)
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    SectionHeader(stringResource(R.string.section_java))
+                    Spacer(Modifier.height(6.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (check in r.java) {
+                            CheckCard(check)
+                        }
+                    }
                 }
             }
         }
@@ -664,7 +678,7 @@ private fun CheckCard(r: CheckResult) {
 //  Check runner — runs directly in the main process
 // ==========================================================================
 
-private fun runAllChecks(
+internal fun runAllChecks(
     cm: ConnectivityManager,
     context: android.content.Context,
 ): CheckResults {

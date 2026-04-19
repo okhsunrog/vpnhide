@@ -78,6 +78,8 @@
     <string name="dashboard_protection_hooks_inactive">Хуки неактивны</string>
     <string name="dashboard_needs_restart">Приложение только что добавлено в список целей. Перезапустите приложение для проверки защиты.</string>
     <string name="dashboard_no_vpn">VPN не активен. Включите VPN для проверки защиты.</string>
+    <string name="vpn_off_prompt">VPN не активен. Включите его и нажмите «Повторить», чтобы запустить проверку защиты. Результаты кэшируются до перезапуска приложения — повторно гонять не нужно.</string>
+    <string name="vpn_off_retry">Повторить</string>
     <string name="dashboard_install_recommendation_title">Рекомендация по установке</string>
     <string name="dashboard_install_recommendation_device">Ваше устройство: %1$s, ядро %2$s</string>
     <string name="dashboard_install_recommendation_kmod">Рекомендуется модуль ядра. Скачайте %1$s.</string>

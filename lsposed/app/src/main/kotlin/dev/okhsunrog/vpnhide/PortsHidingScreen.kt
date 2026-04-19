@@ -39,6 +39,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,12 +78,11 @@ fun PortsHidingScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     val cachedApps by AppListCache.apps.collectAsState()
-    val refreshCounter by AppListCache.refreshCounter.collectAsState()
+    val targets by TargetsCache.snapshot.collectAsState()
 
-    var moduleInstalled by remember { mutableStateOf<Boolean?>(null) }
-    var observerNames by remember { mutableStateOf<Set<String>?>(null) }
     var allApps by remember { mutableStateOf<List<PortsEntry>>(emptyList()) }
     var saving by remember { mutableStateOf(false) }
     var dirty by remember { mutableStateOf(false) }
@@ -96,35 +96,13 @@ fun PortsHidingScreen(
         }
     }
 
-    LaunchedEffect(refreshCounter) {
-        withContext(Dispatchers.IO) {
-            // Read module.prop rather than [ -d ]: on KSU-Next a pending-removal
-            // module keeps the directory with a `remove` flag file until reboot;
-            // an unreadable module.prop signals "not really installed anymore".
-            val (exitCode, _) = suExec("cat $PORTS_MODULE_DIR/module.prop >/dev/null 2>&1")
-            val installed = exitCode == 0
-            moduleInstalled = installed
-            if (!installed) {
-                observerNames = emptySet()
-                return@withContext
-            }
-
-            // observers.txt stores package names (resolved to UIDs at apply time
-            // inside the module script). Read them directly — no UID mapping needed.
-            val (_, raw) = suExec("cat $PORTS_OBSERVERS_FILE 2>/dev/null || true")
-            observerNames =
-                raw
-                    .lines()
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() && !it.startsWith("#") }
-                    .toSet()
-        }
-        dirty = false
+    LaunchedEffect(Unit) {
+        TargetsCache.ensureLoaded(scope, context)
     }
 
-    LaunchedEffect(cachedApps, observerNames) {
+    LaunchedEffect(cachedApps, targets) {
         val apps = cachedApps ?: return@LaunchedEffect
-        val observers = observerNames ?: return@LaunchedEffect
+        val t = targets ?: return@LaunchedEffect
         val selfPkg = context.packageName
         allApps =
             apps
@@ -135,18 +113,18 @@ fun PortsHidingScreen(
                         label = app.label,
                         icon = app.icon,
                         isSystem = app.isSystem,
-                        observer = app.packageName in observers,
+                        observer = app.packageName in t.portsObservers,
                     )
                 }
+        dirty = false
     }
 
-    val loading = cachedApps == null || observerNames == null
+    val loading = cachedApps == null || targets == null
 
-    if (moduleInstalled == false) {
+    if (targets?.portsModuleInstalled == false) {
         NotInstalledCard(modifier = modifier)
         return
     }
-    // moduleInstalled == null → still detecting; the `loading` spinner below covers it.
 
     val filteredApps =
         remember(allApps, searchQuery, showSystem, showRussianOnly) {
@@ -318,6 +296,7 @@ fun PortsHidingScreen(
                 if (exitCode == 0) {
                     snackMessage = context.getString(R.string.ports_save_success, observerPkgs.size)
                     DashboardCache.invalidate()
+                    TargetsCache.refresh(scope, context)
                 } else if (exitCode == -1) {
                     snackMessage = context.getString(R.string.save_failed_root)
                     dirty = true
