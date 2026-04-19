@@ -718,6 +718,11 @@ private fun checkTransportInfo(
     cm: ConnectivityManager,
     name: String,
 ): CheckResult {
+    // NetworkCapabilities.getTransportInfo() is API 29+; the leak path does
+    // not exist on Android 9, so the check trivially passes.
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        return CheckResult(name, true, "PASS: transportInfo unavailable (API < 29)")
+    }
     val net = cm.activeNetwork ?: return CheckResult(name, true, "PASS: no active network")
     val caps = cm.getNetworkCapabilities(net) ?: return CheckResult(name, true, "PASS: no capabilities")
     val info = caps.transportInfo

@@ -164,8 +164,10 @@ internal object PackageVisibilityHooks {
         }
 
     private fun watchConfigFiles() {
+        // FileObserver(File, Int) is API 29+; use the String-path form for API 28 compatibility.
+        @Suppress("DEPRECATION")
         val observer =
-            object : FileObserver(File("/data/system"), CREATE or CLOSE_WRITE or MOVED_TO or MODIFY) {
+            object : FileObserver("/data/system", CREATE or CLOSE_WRITE or MOVED_TO or MODIFY) {
                 override fun onEvent(
                     event: Int,
                     path: String?,

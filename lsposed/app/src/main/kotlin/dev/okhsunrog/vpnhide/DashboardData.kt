@@ -824,10 +824,16 @@ private fun runJavaProtectionCheck(cm: ConnectivityManager): JavaResult {
     if (!notVpn) failed++
     VpnHideLog.d(TAG, "java: hasCapability(NOT_VPN)=$notVpn")
 
-    val info = caps.transportInfo
-    val isVpnTi = info?.javaClass?.name?.contains("VpnTransportInfo") == true
-    if (isVpnTi) failed++
-    VpnHideLog.d(TAG, "java: transportInfo=${info?.javaClass?.name} isVpn=$isVpnTi")
+    // NetworkCapabilities.getTransportInfo() was introduced in API 29;
+    // on API 28 (Android 9) the leak path does not exist, so skip the check.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val info = caps.transportInfo
+        val isVpnTi = info?.javaClass?.name?.contains("VpnTransportInfo") == true
+        if (isVpnTi) failed++
+        VpnHideLog.d(TAG, "java: transportInfo=${info?.javaClass?.name} isVpn=$isVpnTi")
+    } else {
+        VpnHideLog.d(TAG, "java: transportInfo check skipped (API < 29)")
+    }
 
     val vpnNets =
         cm.allNetworks.count {
