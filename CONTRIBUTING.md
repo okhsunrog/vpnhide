@@ -31,7 +31,7 @@ Before opening a PR, add a changelog entry:
 # types: added | changed | fixed | removed | deprecated | security
 ```
 
-This writes a new TOML fragment to `changelog.d/` and regenerates `CHANGELOG.md`. Commit the new fragment and the regenerated `CHANGELOG.md` with your change. Two PRs adding entries simultaneously get separate files and don't conflict on merge.
+This writes a new Markdown fragment to `changelog.d/`. That's the only file changed — `CHANGELOG.md` is regenerated only at release time, which is what keeps concurrent PRs from conflicting. Commit just the fragment alongside your code change. Run `./scripts/preview-changelog.py` to see the pending entries together.
 
 **Skip the entry** for internal refactors with no behaviour change, docs-only, CI-only, and test-only changes.
 

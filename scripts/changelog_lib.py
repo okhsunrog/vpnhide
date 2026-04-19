@@ -11,30 +11,41 @@ Storage layout:
 
       { "history": [ { "version": "0.6.1", "sections": [...] }, ... ] }
 
-* `changelog.d/*.toml` — one TOML file per pending entry. Each file is
-  a single unreleased item:
+* `changelog.d/*.md` — one Markdown file per pending entry. Filename
+  encodes the type and carries a short hex suffix for collision-proof
+  uniqueness: `<type>-<slug>-<hex4>.md` (e.g.
+  `fixed-dev-version-mismatch-a1b2.md`).
 
-      type = "fixed"
-      en   = "..."
-      ru   = "..."
+  Body is plain Markdown with two language sections — renders nicely
+  straight on GitHub, no frontmatter, no YAML dependency:
+
+      ## English
+
+      App no longer crashes when ...
+
+      ## Русский
+
+      Приложение больше не падает когда ...
 
   Fragments live on disk and are accumulated across PRs. Because each
   entry is its own file, two PRs concurrently adding entries don't
   touch the same bytes and don't conflict. `release.py` rotates all
   fragments into `history[0]` and deletes them.
 
-Generated (overwritten every script run, never hand-edited):
+Generated (overwritten by `release.py` only — never by `changelog.py`,
+so PRs don't write to these files and don't conflict):
 
-* `CHANGELOG.md` at the repo root — Keep a Changelog, full history with
-  an optional `## [Unreleased]` block sourced from the fragments.
+* `CHANGELOG.md` at the repo root — Keep a Changelog, *released*
+  history only. No `[Unreleased]` block — to preview pending fragments,
+  run `./scripts/preview-changelog.py` (prints to stdout, never writes).
 * `update-json/changelog.md` — last MD_RECENT_VERSIONS released
-  versions, no Unreleased. Served to Magisk/KSU update popups.
+  versions. Served to Magisk/KSU update popups.
 """
 
 from __future__ import annotations
 
 import json
-import tomllib
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -67,28 +78,64 @@ def save_json(data: dict) -> None:
     )
 
 
+_FRAGMENT_FILENAME = re.compile(r"^(?P<type>[a-z]+)-(?P<slug>.+)-(?P<hex>[0-9a-f]{4,})\.md$")
+_DATE_LINE = re.compile(r"^_(\d{4}-\d{2}-\d{2})_\s*$", re.M)
+_EN_HEADING = re.compile(r"^##\s+English\s*$", re.M)
+_RU_HEADING = re.compile(r"^##\s+Русский\s*$", re.M)
+
+
+def parse_fragment(path: Path) -> dict:
+    """Parse a single fragment MD file. Raises ValueError on malformed
+    input so callers can surface a meaningful error.
+    """
+    m = _FRAGMENT_FILENAME.match(path.name)
+    if not m:
+        raise ValueError(
+            f"{path.name}: filename must be `<type>-<slug>-<hex>.md` "
+            f"where <type> is one of {VALID_TYPES}",
+        )
+    type_ = m.group("type")
+    if type_ not in VALID_TYPES:
+        raise ValueError(f"{path.name}: type {type_!r} not in {VALID_TYPES}")
+
+    text = path.read_text(encoding="utf-8")
+    date_match = _DATE_LINE.search(text)
+    if date_match is None:
+        raise ValueError(
+            f"{path.name}: body must start with a date line like `_YYYY-MM-DD_`",
+        )
+    date = date_match.group(1)
+
+    en_match = _EN_HEADING.search(text)
+    ru_match = _RU_HEADING.search(text)
+    if en_match is None or ru_match is None:
+        raise ValueError(
+            f"{path.name}: body must contain both `## English` and `## Русский` sections",
+        )
+    if en_match.start() > ru_match.start():
+        raise ValueError(f"{path.name}: `## English` must appear before `## Русский`")
+    if date_match.start() > en_match.start():
+        raise ValueError(f"{path.name}: date line must appear before the language sections")
+
+    en_body = text[en_match.end():ru_match.start()].strip()
+    ru_body = text[ru_match.end():].strip()
+    if not en_body:
+        raise ValueError(f"{path.name}: empty English section")
+    if not ru_body:
+        raise ValueError(f"{path.name}: empty Русский section")
+
+    return {"path": path, "type": type_, "date": date, "en": en_body, "ru": ru_body}
+
+
 def load_fragments() -> list[dict]:
-    """Read every `*.toml` under `changelog.d/`, sorted by filename so
-    the rendered order is deterministic (filenames carry a timestamp
-    prefix, so order ≈ chronological).
+    """Read every `*.md` under `changelog.d/` and sort chronologically
+    by the embedded date (oldest first). Ties (same date) fall back to
+    filename order for determinism.
     """
     if not FRAGMENTS_DIR.is_dir():
         return []
-    fragments: list[dict] = []
-    for path in sorted(FRAGMENTS_DIR.glob("*.toml")):
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-        type_ = data.get("type")
-        en_raw = data.get("en")
-        ru_raw = data.get("ru")
-        if type_ not in VALID_TYPES:
-            raise ValueError(f"{path}: type must be one of {VALID_TYPES}, got {type_!r}")
-        if not isinstance(en_raw, str) or not en_raw.strip():
-            raise ValueError(f"{path}: missing or empty 'en'")
-        if not isinstance(ru_raw, str) or not ru_raw.strip():
-            raise ValueError(f"{path}: missing or empty 'ru'")
-        # Triple-quoted TOML strings keep the trailing \n before the
-        # closing """; strip so rendered markdown doesn't grow blank lines.
-        fragments.append({"path": path, "type": type_, "en": en_raw.strip(), "ru": ru_raw.strip()})
+    fragments = [parse_fragment(p) for p in FRAGMENTS_DIR.glob("*.md") if p.name != "README.md"]
+    fragments.sort(key=lambda f: (f["date"], f["path"].name))
     return fragments
 
 
@@ -133,17 +180,29 @@ def _render_entry(heading: str, entry: dict, out: list[str]) -> None:
         out.append("")
 
 
-def render_full_md(data: dict, fragments: list[dict]) -> str:
-    """Full history (with optional Unreleased block on top from
-    fragments), Keep a Changelog header.
+def render_full_md(data: dict) -> str:
+    """Full *released* history, Keep a Changelog header. The Unreleased
+    block is deliberately NOT included: it would be regenerated by every
+    PR and re-introduce CHANGELOG.md as a merge-conflict hotspot. To see
+    what's pending, read `changelog.d/*.toml` directly or run
+    `./scripts/preview-changelog.py`.
     """
     out: list[str] = []
-    unreleased_sections = fragments_as_sections(fragments)
-    if unreleased_sections:
-        _render_entry("[Unreleased]", {"sections": unreleased_sections}, out)
     for entry in data.get("history", []):
         _render_entry(f"v{entry['version']}", entry, out)
     return _KEEP_A_CHANGELOG_HEADER + "\n".join(out).rstrip() + "\n"
+
+
+def render_unreleased_md(fragments: list[dict]) -> str:
+    """Unreleased-only preview, rendered on demand from fragments.
+    Not written to a checked-in file.
+    """
+    sections = fragments_as_sections(fragments)
+    if not sections:
+        return "(no unreleased fragments)\n"
+    out: list[str] = []
+    _render_entry("[Unreleased]", {"sections": sections}, out)
+    return "\n".join(out).rstrip() + "\n"
 
 
 def render_short_md(data: dict) -> str:
@@ -156,8 +215,12 @@ def render_short_md(data: dict) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def write_md(data: dict, fragments: list[dict]) -> None:
-    FULL_MD_PATH.write_text(render_full_md(data, fragments), encoding="utf-8")
+def write_md(data: dict) -> None:
+    """Regenerate the two checked-in markdown artifacts. Release-only —
+    `changelog.py` (per-PR) does NOT call this, otherwise every PR would
+    touch CHANGELOG.md and reintroduce conflicts.
+    """
+    FULL_MD_PATH.write_text(render_full_md(data), encoding="utf-8")
     SHORT_MD_PATH.write_text(render_short_md(data), encoding="utf-8")
 
 

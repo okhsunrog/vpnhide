@@ -1,7 +1,0 @@
-type = "changed"
-en = """
-Changelog entries now live as per-PR TOML fragments under changelog.d/ instead of a shared JSON section, so concurrent PRs no longer conflict on the changelog.
-"""
-ru = """
-Записи changelog теперь лежат пофайлово в changelog.d/ (TOML-фрагменты) вместо общей секции в JSON — одновременные PR больше не конфликтуют на changelog.
-"""

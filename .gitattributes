@@ -1,6 +1,6 @@
 # Changelog fragments live one-per-file under changelog.d/ so concurrent
-# PRs don't collide on a shared changelog file. Filenames carry a
-# timestamp prefix so collisions on the actual filename are extremely
-# unlikely — `union` is belt-and-suspenders for the edge case where two
-# PRs somehow pick the exact same name.
-changelog.d/*.toml merge=union
+# PRs don't collide on a shared changelog file. Filenames end in a
+# random 4-char hex suffix, so probability of collision is ~1/65536
+# even per pair of identical slugs — `union` is belt-and-suspenders for
+# the astronomically rare filename clash.
+changelog.d/*.md merge=union

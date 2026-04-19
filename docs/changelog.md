@@ -4,7 +4,7 @@
 
 Two locations:
 
-- **`changelog.d/*.toml`** — one TOML file per unreleased entry. Each PR with a user-visible change adds its own file, so concurrent PRs don't touch the same bytes and don't conflict on the changelog. `release.py` rotates these files into the JSON and deletes them.
+- **`changelog.d/*.md`** — one Markdown file per unreleased entry. Each PR with a user-visible change adds its own file, so concurrent PRs don't touch the same bytes and don't conflict on the changelog. `release.py` rotates these files into the JSON and deletes them.
 - **`lsposed/app/src/main/assets/changelog.json`** — bilingual (en/ru), released history only:
 
   ```json
@@ -18,24 +18,38 @@ Two locations:
 
 ### Fragment file format
 
-```toml
-type = "fixed"
-en = """
+Filename: `<type>-<slug>-<hex4>.md` (e.g. `fixed-dev-version-mismatch-a1b2.md`). The type (`added` / `changed` / `fixed` / `removed` / `deprecated` / `security`) is part of the name, so you can tell what a fragment is at a glance. The 4-char random hex keeps filenames collision-proof across concurrent PRs.
+
+Body is plain Markdown — renders straight on GitHub, no YAML/TOML parser dependency:
+
+```markdown
+_2026-04-19_
+
+## English
+
 App no longer crashes when …
-"""
-ru = """
+
+## Русский
+
 Приложение больше не падает когда …
-"""
 ```
 
-Types: `added`, `changed`, `fixed`, `removed`, `deprecated`, `security`. Triple-quoted multiline strings are stripped of leading/trailing whitespace when loaded.
+Date in `YYYY-MM-DD` format wrapped in `_…_` for subtle italic rendering. `changelog.py` writes today's date automatically. Fragments are sorted chronologically by that date for the Unreleased preview (ties → filename order). Leading/trailing whitespace inside each language section is stripped when loaded.
 
 ## Generated files (do NOT edit by hand)
 
-Two markdown files are regenerated from `changelog.d/` + JSON by `scripts/changelog_lib.py`:
+Both markdown files are **only regenerated at release time** by `release.py`. Between releases they contain released versions only — the unreleased entries live in `changelog.d/`. This split is what keeps PRs from conflicting: if every PR regenerated `CHANGELOG.md`, two concurrent PRs would each write a different Unreleased block and collide.
 
-- `CHANGELOG.md` at repo root — full history, Keep a Changelog format. Renders `## [Unreleased]` on top when `changelog.d/` has fragments, then each history entry as `## vX.Y.Z`. CI extracts a single `## vX.Y.Z` block for the **GitHub release body**, so don't edit release notes by hand either.
-- `update-json/changelog.md` — last 5 **released** versions only (no Unreleased block). Shown by Magisk/KSU in the update popup inside the manager app.
+- `CHANGELOG.md` at repo root — released history, Keep a Changelog format. CI extracts a single `## vX.Y.Z` block for the **GitHub release body**. Contains no `## [Unreleased]` block between releases.
+- `update-json/changelog.md` — last 5 released versions only. Shown by Magisk/KSU in the update popup.
+
+To see what's pending (not yet in `CHANGELOG.md`) run:
+
+```sh
+./scripts/preview-changelog.py    # prints to stdout, writes nothing
+```
+
+…or just browse `changelog.d/*.md` directly — each fragment renders as readable Markdown on GitHub.
 
 ## Adding an entry
 
@@ -45,9 +59,9 @@ From a PR branch:
 ./scripts/changelog.py <type> "<EN text>" "<RU text>"
 ```
 
-Writes `changelog.d/<timestamp>-<slug>.toml` and regenerates both markdown files. Commit the new fragment file + `CHANGELOG.md` alongside your code change (the update-json markdown only changes on release).
+Writes a Markdown fragment to `changelog.d/<type>-<slug>-<hex4>.md`. **Nothing else is modified** — no `CHANGELOG.md` regeneration, no `changelog.json` update. Commit just the new fragment alongside your code change. Two PRs doing this simultaneously produce two separate files and never conflict on merge.
 
-Pass `--slug <slug>` if the auto-derived slug collides with an existing fragment — filenames already carry a second-precision timestamp, so collisions are rare.
+Pass `--slug <slug>` to override the auto-derived slug. Filenames already carry a random 4-char hex suffix, so filename collisions are effectively impossible even when two PRs pick the same slug.
 
 ## When to add an entry
 

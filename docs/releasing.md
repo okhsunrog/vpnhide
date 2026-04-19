@@ -3,7 +3,7 @@
 ## Model
 
 - `VERSION` file = **the last released version** on `main`. It is only modified by `release.py`.
-- `changelog.d/*.toml` = work in progress. One TOML file per unreleased entry, accumulated via `./scripts/changelog.py` during normal development. See [changelog.md](changelog.md).
+- `changelog.d/*.md` = work in progress. One Markdown file per unreleased entry, accumulated via `./scripts/changelog.py` during normal development. See [changelog.md](changelog.md).
 - Intermediate builds (main, feature branches, local) get a version string derived from `git describe` — propagated into `module.prop` / APK `versionName` at build time. See [build versions](#build-versions) below.
 
 ## Cutting a release

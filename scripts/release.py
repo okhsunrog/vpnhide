@@ -143,7 +143,7 @@ def main() -> int:
     # Changelog: rotate fragments into history, then delete them.
     rotate_fragments_into_history(data, fragments, version)
     save_json(data)
-    write_md(data, fragments=[])
+    write_md(data)
     console.print(
         f"  [green]✓[/green] changelog: {len(fragments)} fragment(s) → history[0] as v{version}",
     )
