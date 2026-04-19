@@ -28,7 +28,7 @@ android {
 
     defaultConfig {
         applicationId = "dev.okhsunrog.vpnhide"
-        minSdk = 29
+        minSdk = 28
         targetSdk = 35
         versionCode = 602
         versionName = buildVersion

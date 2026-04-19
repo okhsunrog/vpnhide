@@ -4,6 +4,9 @@ import android.os.FileObserver
 import de.robv.android.xposed.XposedBridge
 import java.io.File
 
+// FileObserver(File, Int) requires API 29; we stay compatible with API 28
+// (Android 9) by using the String-path constructor throughout.
+
 /**
  * [XposedBridge.log] wrapper gated by a filesystem flag set from the app.
  * Used by LSPosed hooks running inside `system_server`, where we don't
@@ -26,9 +29,10 @@ internal object HookLog {
     fun install() {
         reload()
         if (watcher != null) return
+        @Suppress("DEPRECATION")
         val observer =
             object : FileObserver(
-                File("/data/system"),
+                "/data/system",
                 CREATE or CLOSE_WRITE or MOVED_TO or MODIFY,
             ) {
                 override fun onEvent(
