@@ -1,7 +1,6 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.Intent
-import android.net.ConnectivityManager
 import android.net.Uri
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -29,18 +28,19 @@ fun DashboardScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val cm = context.getSystemService(ConnectivityManager::class.java)
+    val scope = rememberCoroutineScope()
 
-    var state by remember { mutableStateOf<DashboardState?>(null) }
-    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+    val state by DashboardCache.state.collectAsState()
+    val updateInfo by UpdateCheckCache.info.collectAsState()
     var showChangelog by remember { mutableStateOf(false) }
     var changelogData by remember { mutableStateOf<ChangelogData?>(null) }
 
+    // Both caches are reactive to tab switches without re-doing work:
+    // ensureLoaded / ensureFresh are no-ops if the data is already
+    // populated or an inflight job hasn't finished yet.
     LaunchedEffect(Unit) {
-        state = withContext(Dispatchers.IO) { loadDashboardState(cm, context, selfNeedsRestart) }
-    }
-    LaunchedEffect(Unit) {
-        updateInfo = withContext(Dispatchers.IO) { checkForUpdate(BuildConfig.VERSION_NAME) }
+        DashboardCache.ensureLoaded(scope, context, selfNeedsRestart)
+        UpdateCheckCache.ensureFresh(scope, BuildConfig.VERSION_NAME)
     }
     LaunchedEffect(Unit) {
         if (shouldShowChangelog(context)) {

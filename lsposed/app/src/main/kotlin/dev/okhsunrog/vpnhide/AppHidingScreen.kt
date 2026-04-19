@@ -364,6 +364,7 @@ fun AppHidingScreen(
                 if (exitCode == 0) {
                     snackMessage =
                         context.getString(R.string.hiding_save_success, hiddenPkgs.size, observerPkgs.size)
+                    DashboardCache.invalidate()
                 } else if (exitCode == -1) {
                     snackMessage = context.getString(R.string.save_failed_root)
                     dirty = true

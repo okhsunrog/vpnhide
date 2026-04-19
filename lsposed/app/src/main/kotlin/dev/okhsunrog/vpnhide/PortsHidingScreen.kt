@@ -317,6 +317,7 @@ fun PortsHidingScreen(
                 val (exitCode, _) = suExecAsync(buildPortsSaveCommand(header, observerPkgs))
                 if (exitCode == 0) {
                     snackMessage = context.getString(R.string.ports_save_success, observerPkgs.size)
+                    DashboardCache.invalidate()
                 } else if (exitCode == -1) {
                     snackMessage = context.getString(R.string.save_failed_root)
                     dirty = true

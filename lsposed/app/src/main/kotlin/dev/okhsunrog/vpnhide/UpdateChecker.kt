@@ -57,6 +57,19 @@ internal fun versionsMismatch(
     return baseVersion(moduleVersion) != baseVersion(appVersion)
 }
 
+// True when `remote` is a strictly newer release than `current` — used
+// to decide whether to offer an in-app update prompt. Both sides go
+// through baseVersion() so a dev APK built on top of 0.6.2 still gets
+// prompted when 0.6.3 lands (compareSemver by itself returns null for
+// the dev suffix, which the old code silently treated as "no update").
+internal fun isNewerVersion(
+    remote: String,
+    current: String,
+): Boolean {
+    val cmp = compareSemver(baseVersion(remote), baseVersion(current)) ?: return false
+    return cmp > 0
+}
+
 internal fun compareSemver(
     left: String,
     right: String,
@@ -100,8 +113,7 @@ fun checkForUpdate(currentVersion: String): UpdateInfo? {
             val body = conn.inputStream.bufferedReader().readText()
             val release = JSONObject(body)
             val remoteVersion = normalizeVersion(release.getString("tag_name"))
-            val cmp = compareSemver(remoteVersion, normalizeVersion(currentVersion))
-            if (cmp == null || cmp <= 0) {
+            if (!isNewerVersion(remoteVersion, currentVersion)) {
                 VpnHideLog.d(TAG, "No update: remote=$remoteVersion current=$currentVersion")
                 return null
             }

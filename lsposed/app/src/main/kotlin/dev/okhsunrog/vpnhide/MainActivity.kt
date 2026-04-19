@@ -24,6 +24,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -83,6 +86,11 @@ fun VpnHideApp() {
 
 private enum class Tab { Dashboard, Protection, Diagnostics }
 
+private data class RefreshContext(
+    val loading: Boolean,
+    val onRefresh: () -> Unit,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MainScreen() {
@@ -95,7 +103,9 @@ private fun MainScreen() {
     var showSystem by remember { mutableStateOf(false) }
     var showRussianOnly by remember { mutableStateOf(false) }
     var showFilterMenu by remember { mutableStateOf(false) }
-    val cacheLoading by AppListCache.loading.collectAsState()
+    val appListLoading by AppListCache.loading.collectAsState()
+    val dashboardLoading by DashboardCache.loading.collectAsState()
+    val refreshRestart = selfNeedsRestart ?: false
 
     LaunchedEffect(Unit) {
         selfNeedsRestart =
@@ -110,6 +120,21 @@ private fun MainScreen() {
     // per-screen pm + icon cost each time.
     LaunchedEffect(Unit) {
         AppListCache.ensureLoaded(scope, context)
+    }
+
+    // Kick the update check once (silently) on first launch, and again
+    // on ON_RESUME if it's been a while. Listener lives as long as
+    // MainScreen is composed.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer =
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    UpdateCheckCache.ensureFresh(scope, BuildConfig.VERSION_NAME)
+                }
+            }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(currentTab) {
@@ -155,12 +180,39 @@ private fun MainScreen() {
                             titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                         ),
                     actions = {
-                        if (currentTab == Tab.Protection) {
+                        // Refresh is contextual: Protection refreshes
+                        // the app list, Dashboard refreshes the dashboard
+                        // state + update check. Diagnostics has its own
+                        // run buttons per-check, no top-bar refresh.
+                        val refreshContext =
+                            when (currentTab) {
+                                Tab.Dashboard -> {
+                                    RefreshContext(
+                                        loading = dashboardLoading,
+                                        onRefresh = {
+                                            DashboardCache.refresh(scope, context, refreshRestart)
+                                            UpdateCheckCache.refresh(scope, BuildConfig.VERSION_NAME)
+                                        },
+                                    )
+                                }
+
+                                Tab.Protection -> {
+                                    RefreshContext(
+                                        loading = appListLoading,
+                                        onRefresh = { AppListCache.refresh(scope, context) },
+                                    )
+                                }
+
+                                Tab.Diagnostics -> {
+                                    null
+                                }
+                            }
+                        refreshContext?.let { rc ->
                             IconButton(
-                                onClick = { AppListCache.refresh(scope, context) },
-                                enabled = !cacheLoading,
+                                onClick = rc.onRefresh,
+                                enabled = !rc.loading,
                             ) {
-                                if (cacheLoading) {
+                                if (rc.loading) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(20.dp),
                                         strokeWidth = 2.dp,
@@ -174,6 +226,8 @@ private fun MainScreen() {
                                     )
                                 }
                             }
+                        }
+                        if (currentTab == Tab.Protection) {
                             IconButton(onClick = { searchActive = true }) {
                                 Icon(
                                     Icons.Default.Search,

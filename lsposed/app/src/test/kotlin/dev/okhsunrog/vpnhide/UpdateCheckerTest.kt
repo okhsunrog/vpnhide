@@ -170,3 +170,44 @@ class VersionsMismatchTest {
         assertFalse(versionsMismatch(null, "0.6.2"))
     }
 }
+
+class IsNewerVersionTest {
+    @Test
+    fun `newer release beats older release`() {
+        assertTrue(isNewerVersion("0.6.3", "0.6.2"))
+        assertTrue(isNewerVersion("v0.6.3", "0.6.2"))
+        assertTrue(isNewerVersion("1.0.0", "0.9.9"))
+    }
+
+    @Test
+    fun `equal releases are not newer`() {
+        assertFalse(isNewerVersion("0.6.2", "0.6.2"))
+        assertFalse(isNewerVersion("v0.6.2", "0.6.2"))
+    }
+
+    @Test
+    fun `older remote is not newer`() {
+        assertFalse(isNewerVersion("0.6.1", "0.6.2"))
+    }
+
+    @Test
+    fun `dev build on same release gets prompted for new release`() {
+        // The bug: without baseVersion() the comparator parses the dev
+        // suffix as garbage → returns null → caller treats as "no
+        // update" → dev builds never see release notifications.
+        assertTrue(isNewerVersion("0.6.3", "0.6.2-14-g1f2205e"))
+        assertTrue(isNewerVersion("0.6.3", "0.6.2-14-g1f2205e-dirty"))
+    }
+
+    @Test
+    fun `dev build on current release is not offered that same release`() {
+        // Local is "0.6.2 + 14 commits" — remote 0.6.2 is not newer.
+        assertFalse(isNewerVersion("0.6.2", "0.6.2-14-g1f2205e"))
+    }
+
+    @Test
+    fun `dev build ahead of remote is not offered a downgrade`() {
+        // Local is building toward 0.6.3; remote is still on 0.6.2.
+        assertFalse(isNewerVersion("0.6.2", "0.6.3-1-gabcdef0"))
+    }
+}
