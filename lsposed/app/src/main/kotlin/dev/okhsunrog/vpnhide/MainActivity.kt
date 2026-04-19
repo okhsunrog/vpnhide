@@ -124,6 +124,17 @@ private fun MainScreen() {
         TargetsCache.ensureLoaded(scope, context)
     }
 
+    // Pre-warm the Diagnostics cache once we know we're not in the
+    // selfNeedsRestart "just-added-myself, hooks not in this process
+    // yet" state. By the time the user switches to the Diagnostics
+    // tab, runAllChecks has already produced Ready — no spinner on
+    // first open of the tab.
+    LaunchedEffect(selfNeedsRestart) {
+        if (selfNeedsRestart == false) {
+            DiagnosticsCache.run(scope, context)
+        }
+    }
+
     // Kick the update check once (silently) on first launch, and again
     // on ON_RESUME if it's been a while. Listener lives as long as
     // MainScreen is composed.
