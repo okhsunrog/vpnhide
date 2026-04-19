@@ -1,7 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
@@ -64,11 +62,13 @@ fun AppPickerScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val pm = context.packageManager
 
-    var allApps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
+    val cachedApps by AppListCache.apps.collectAsState()
+    val refreshCounter by AppListCache.refreshCounter.collectAsState()
+
     var installed by remember { mutableStateOf(InstalledModules()) }
-    var loading by remember { mutableStateOf(true) }
+    var targetSets by remember { mutableStateOf<Triple<Set<String>, Set<String>, Set<String>>?>(null) }
+    var allApps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
     var saving by remember { mutableStateOf(false) }
     var dirty by remember { mutableStateOf(false) }
     var snackMessage by remember { mutableStateOf<String?>(null) }
@@ -81,9 +81,11 @@ fun AppPickerScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
+    // Per-screen state (installed modules + target sets) — re-read on
+    // every cache refresh. Dashboard wants these fresh after the user
+    // taps Refresh in the top bar, not stuck on whatever loaded first.
+    LaunchedEffect(refreshCounter) {
         withContext(Dispatchers.IO) {
-            // Detect which native modules are installed
             val (_, detectOut) =
                 suExec(
                     "echo kmod=\$([ -d $KMOD_MODULE_DIR ] && echo 1 || echo 0);" +
@@ -103,7 +105,6 @@ fun AppPickerScreen(
                     zygisk = flags["zygisk"] == true,
                 )
 
-            // Read 3 separate target lists
             fun readTargets(path: String): Set<String> {
                 val (_, raw) = suExec("cat $path 2>/dev/null || true")
                 return raw
@@ -112,45 +113,34 @@ fun AppPickerScreen(
                     .filter { it.isNotEmpty() && !it.startsWith("#") }
                     .toSet()
             }
-            val kmodTargets = readTargets(KMOD_TARGETS)
-            val zygiskTargets = readTargets(ZYGISK_TARGETS)
-            val lsposedTargets = readTargets(LSPOSED_TARGETS)
-
-            val selfPkg = context.packageName
-            val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            val entries =
-                installedApps
-                    .filter { it.packageName != selfPkg }
-                    .map { info ->
-                        val label =
-                            try {
-                                pm.getApplicationLabel(info).toString()
-                            } catch (_: Exception) {
-                                info.packageName
-                            }
-                        val icon =
-                            try {
-                                pm.getApplicationIcon(info)
-                            } catch (_: Exception) {
-                                null
-                            }
-                        val isSystem = (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                        val pkg = info.packageName
-                        AppEntry(
-                            packageName = pkg,
-                            label = label,
-                            icon = icon,
-                            isSystem = isSystem,
-                            kmod = pkg in kmodTargets,
-                            zygisk = pkg in zygiskTargets,
-                            lsposed = pkg in lsposedTargets,
-                        )
-                    }.sortedBy { it.label.lowercase() }
-
-            allApps = entries
-            loading = false
+            targetSets = Triple(readTargets(KMOD_TARGETS), readTargets(ZYGISK_TARGETS), readTargets(LSPOSED_TARGETS))
         }
+        dirty = false
     }
+
+    // Merge cached app metadata with per-screen target flags. Runs
+    // cheaply whenever either side changes.
+    LaunchedEffect(cachedApps, targetSets) {
+        val apps = cachedApps ?: return@LaunchedEffect
+        val (kmodT, zygiskT, lsposedT) = targetSets ?: return@LaunchedEffect
+        val selfPkg = context.packageName
+        allApps =
+            apps
+                .filter { it.packageName != selfPkg }
+                .map { app ->
+                    AppEntry(
+                        packageName = app.packageName,
+                        label = app.label,
+                        icon = app.icon,
+                        isSystem = app.isSystem,
+                        kmod = app.packageName in kmodT,
+                        zygisk = app.packageName in zygiskT,
+                        lsposed = app.packageName in lsposedT,
+                    )
+                }
+    }
+
+    val loading = cachedApps == null || targetSets == null
 
     val filteredApps =
         remember(allApps, searchQuery, showSystem, showRussianOnly) {

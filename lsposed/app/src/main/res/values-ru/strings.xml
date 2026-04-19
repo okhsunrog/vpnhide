@@ -25,6 +25,7 @@
     <!-- App picker -->
     <string name="selected_count">%d выбрано</string>
     <string name="btn_save">Сохранить</string>
+    <string name="action_refresh_apps">Обновить список приложений</string>
     <string name="search_placeholder">Поиск приложений&#8230;</string>
     <string name="filter_system">Системные</string>
     <string name="filter_show_system">Показать системные приложения</string>

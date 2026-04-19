@@ -1,7 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
@@ -37,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,11 +77,13 @@ fun PortsHidingScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val pm = context.packageManager
+
+    val cachedApps by AppListCache.apps.collectAsState()
+    val refreshCounter by AppListCache.refreshCounter.collectAsState()
 
     var moduleInstalled by remember { mutableStateOf<Boolean?>(null) }
+    var observerNames by remember { mutableStateOf<Set<String>?>(null) }
     var allApps by remember { mutableStateOf<List<PortsEntry>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
     var dirty by remember { mutableStateOf(false) }
     var snackMessage by remember { mutableStateOf<String?>(null) }
@@ -95,7 +96,7 @@ fun PortsHidingScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(refreshCounter) {
         withContext(Dispatchers.IO) {
             // Read module.prop rather than [ -d ]: on KSU-Next a pending-removal
             // module keeps the directory with a `remove` flag file until reboot;
@@ -104,53 +105,42 @@ fun PortsHidingScreen(
             val installed = exitCode == 0
             moduleInstalled = installed
             if (!installed) {
-                loading = false
+                observerNames = emptySet()
                 return@withContext
             }
 
             // observers.txt stores package names (resolved to UIDs at apply time
             // inside the module script). Read them directly — no UID mapping needed.
             val (_, raw) = suExec("cat $PORTS_OBSERVERS_FILE 2>/dev/null || true")
-            val observerNames =
+            observerNames =
                 raw
                     .lines()
                     .map { it.trim() }
                     .filter { it.isNotEmpty() && !it.startsWith("#") }
                     .toSet()
-
-            val selfPkg = context.packageName
-            val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            val entries =
-                installedApps
-                    .filter { it.packageName != selfPkg }
-                    .map { info ->
-                        val label =
-                            try {
-                                pm.getApplicationLabel(info).toString()
-                            } catch (_: Exception) {
-                                info.packageName
-                            }
-                        val icon =
-                            try {
-                                pm.getApplicationIcon(info)
-                            } catch (_: Exception) {
-                                null
-                            }
-                        val isSystem = (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                        val pkg = info.packageName
-                        PortsEntry(
-                            packageName = pkg,
-                            label = label,
-                            icon = icon,
-                            isSystem = isSystem,
-                            observer = pkg in observerNames,
-                        )
-                    }.sortedBy { it.label.lowercase() }
-
-            allApps = entries
-            loading = false
         }
+        dirty = false
     }
+
+    LaunchedEffect(cachedApps, observerNames) {
+        val apps = cachedApps ?: return@LaunchedEffect
+        val observers = observerNames ?: return@LaunchedEffect
+        val selfPkg = context.packageName
+        allApps =
+            apps
+                .filter { it.packageName != selfPkg }
+                .map { app ->
+                    PortsEntry(
+                        packageName = app.packageName,
+                        label = app.label,
+                        icon = app.icon,
+                        isSystem = app.isSystem,
+                        observer = app.packageName in observers,
+                    )
+                }
+    }
+
+    val loading = cachedApps == null || observerNames == null
 
     if (moduleInstalled == false) {
         NotInstalledCard(modifier = modifier)

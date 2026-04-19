@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -86,6 +87,7 @@ private enum class Tab { Dashboard, Protection, Diagnostics }
 @Composable
 private fun MainScreen() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var currentTab by remember { mutableStateOf(Tab.Dashboard) }
     var selfNeedsRestart by remember { mutableStateOf<Boolean?>(null) }
     var searchQuery by remember { mutableStateOf("") }
@@ -93,6 +95,7 @@ private fun MainScreen() {
     var showSystem by remember { mutableStateOf(false) }
     var showRussianOnly by remember { mutableStateOf(false) }
     var showFilterMenu by remember { mutableStateOf(false) }
+    val cacheLoading by AppListCache.loading.collectAsState()
 
     LaunchedEffect(Unit) {
         selfNeedsRestart =
@@ -100,6 +103,13 @@ private fun MainScreen() {
                 cleanupStaleZygiskStatus(context)
                 ensureSelfInTargets(context.packageName)
             }
+    }
+
+    // Kick off the app-list cache load as early as possible so tab
+    // switches into Protection render instantly instead of paying the
+    // per-screen pm + icon cost each time.
+    LaunchedEffect(Unit) {
+        AppListCache.ensureLoaded(scope, context)
     }
 
     LaunchedEffect(currentTab) {
@@ -146,6 +156,24 @@ private fun MainScreen() {
                         ),
                     actions = {
                         if (currentTab == Tab.Protection) {
+                            IconButton(
+                                onClick = { AppListCache.refresh(scope, context) },
+                                enabled = !cacheLoading,
+                            ) {
+                                if (cacheLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = stringResource(R.string.action_refresh_apps),
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    )
+                                }
+                            }
                             IconButton(onClick = { searchActive = true }) {
                                 Icon(
                                     Icons.Default.Search,

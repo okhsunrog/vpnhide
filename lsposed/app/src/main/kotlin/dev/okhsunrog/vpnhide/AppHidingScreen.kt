@@ -1,7 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
@@ -35,6 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -81,10 +80,13 @@ fun AppHidingScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val pm = context.packageManager
 
+    val cachedApps by AppListCache.apps.collectAsState()
+    val refreshCounter by AppListCache.refreshCounter.collectAsState()
+
+    var hiddenNames by remember { mutableStateOf<Set<String>?>(null) }
+    var observerNames by remember { mutableStateOf<Set<String>?>(null) }
     var allApps by remember { mutableStateOf<List<HidingEntry>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
     var dirty by remember { mutableStateOf(false) }
     var snackMessage by remember { mutableStateOf<String?>(null) }
@@ -97,9 +99,10 @@ fun AppHidingScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
+    // Per-screen root-files state (hidden packages + observer UIDs).
+    // Keyed on refreshCounter so the TopBar refresh re-reads these too.
+    LaunchedEffect(refreshCounter) {
         withContext(Dispatchers.IO) {
-            // Read hidden packages (by name) and observer UIDs → map back to names.
             fun readLines(path: String): Set<String> {
                 val (_, raw) = suExec("cat $path 2>/dev/null || true")
                 return raw
@@ -108,10 +111,9 @@ fun AppHidingScreen(
                     .filter { it.isNotEmpty() && !it.startsWith("#") }
                     .toSet()
             }
-            val hiddenNames = readLines(SS_HIDDEN_PKGS_FILE)
+            val hidden = readLines(SS_HIDDEN_PKGS_FILE)
             val observerUids = readLines(SS_OBSERVER_UIDS_FILE).mapNotNull { it.toIntOrNull() }.toSet()
 
-            // Resolve observer UIDs → package names via `pm list packages -U`.
             val (_, listing) = suExec("pm list packages -U 2>/dev/null")
             val uidToPkg =
                 listing
@@ -120,58 +122,51 @@ fun AppHidingScreen(
                         val pkgMatch = Regex("^package:(\\S+) uid:(\\d+)").find(line) ?: return@mapNotNull null
                         pkgMatch.groupValues[1] to pkgMatch.groupValues[2].toInt()
                     }.associate { (pkg, uid) -> uid to pkg }
-            val observerNames = observerUids.mapNotNull { uidToPkg[it] }.toSet()
+            val observers = observerUids.mapNotNull { uidToPkg[it] }.toSet()
 
-            val selfPkg = context.packageName
-            val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            // Packages with both roles crash on startup: the app queries its own
-            // PackageInfo/ResolveInfo during init, we detect the observer caller
-            // (itself) and strip its own package from the result, so frameworks
-            // see a self-lookup NameNotFoundException and bail. Collapse to
-            // observer-only on load so the next Save persists the fix.
-            var autoFixedConflict = false
-            val entries =
-                installedApps
-                    .filter { it.packageName != selfPkg } // self is always hidden; managed invisibly
-                    .map { info ->
-                        val label =
-                            try {
-                                pm.getApplicationLabel(info).toString()
-                            } catch (_: Exception) {
-                                info.packageName
-                            }
-                        val icon =
-                            try {
-                                pm.getApplicationIcon(info)
-                            } catch (_: Exception) {
-                                null
-                            }
-                        val isSystem = (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                        val pkg = info.packageName
-                        val rawHidden = pkg in hiddenNames
-                        val rawObserver = pkg in observerNames
-                        val (hidden, observer) =
-                            if (rawHidden && rawObserver) {
-                                autoFixedConflict = true
-                                false to true
-                            } else {
-                                rawHidden to rawObserver
-                            }
-                        HidingEntry(
-                            packageName = pkg,
-                            label = label,
-                            icon = icon,
-                            isSystem = isSystem,
-                            hidden = hidden,
-                            observer = observer,
-                        )
-                    }.sortedBy { it.label.lowercase() }
-
-            allApps = entries
-            if (autoFixedConflict) dirty = true
-            loading = false
+            hiddenNames = hidden
+            observerNames = observers
         }
+        dirty = false
     }
+
+    // Packages with both roles crash on startup: the app queries its own
+    // PackageInfo/ResolveInfo during init, we detect the observer caller
+    // (itself) and strip its own package from the result, so frameworks
+    // see a self-lookup NameNotFoundException and bail. Collapse to
+    // observer-only on load so the next Save persists the fix.
+    LaunchedEffect(cachedApps, hiddenNames, observerNames) {
+        val apps = cachedApps ?: return@LaunchedEffect
+        val hidden = hiddenNames ?: return@LaunchedEffect
+        val observers = observerNames ?: return@LaunchedEffect
+        val selfPkg = context.packageName
+        var autoFixedConflict = false
+        allApps =
+            apps
+                .filter { it.packageName != selfPkg }
+                .map { app ->
+                    val rawHidden = app.packageName in hidden
+                    val rawObserver = app.packageName in observers
+                    val (finalHidden, finalObserver) =
+                        if (rawHidden && rawObserver) {
+                            autoFixedConflict = true
+                            false to true
+                        } else {
+                            rawHidden to rawObserver
+                        }
+                    HidingEntry(
+                        packageName = app.packageName,
+                        label = app.label,
+                        icon = app.icon,
+                        isSystem = app.isSystem,
+                        hidden = finalHidden,
+                        observer = finalObserver,
+                    )
+                }
+        if (autoFixedConflict) dirty = true
+    }
+
+    val loading = cachedApps == null || hiddenNames == null || observerNames == null
 
     val filteredApps =
         remember(allApps, searchQuery, showSystem, showRussianOnly) {

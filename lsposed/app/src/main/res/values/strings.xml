@@ -27,6 +27,7 @@
     <!-- App picker -->
     <string name="selected_count">%d selected</string>
     <string name="btn_save">Save</string>
+    <string name="action_refresh_apps">Refresh app list</string>
     <string name="search_placeholder">Search apps&#8230;</string>
     <string name="filter_system">System</string>
     <string name="filter_show_system">Show system apps</string>
