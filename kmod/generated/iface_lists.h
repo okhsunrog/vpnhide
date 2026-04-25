@@ -2,9 +2,16 @@
 #ifndef VPNHIDE_GENERATED_IFACE_LISTS_H
 #define VPNHIDE_GENERATED_IFACE_LISTS_H
 
-#include <linux/string.h>
-#include <linux/ctype.h>
-#include <linux/types.h>
+#ifdef __KERNEL__
+# include <linux/string.h>
+# include <linux/ctype.h>
+# include <linux/types.h>
+#else
+# include <ctype.h>
+# include <stdbool.h>
+# include <stddef.h>
+# include <string.h>
+#endif
 
 static inline bool vpnhide_iface_starts_with_ci(
 	const char *name, const char *prefix)
@@ -33,6 +40,26 @@ static inline bool vpnhide_iface_starts_with_then_digits_ci(
 		if (name[i] < '0' || name[i] > '9')
 			return false;
 	return true;
+}
+
+static inline bool vpnhide_iface_starts_with_then_digits_optional_ci(
+	const char *name, const char *prefix)
+{
+	size_t i;
+	if (!vpnhide_iface_starts_with_ci(name, prefix))
+		return false;
+	for (i = strlen(prefix); name[i]; i++)
+		if (name[i] < '0' || name[i] > '9')
+			return false;
+	return true;
+}
+
+static inline bool vpnhide_iface_starts_with_then_any_ci(
+	const char *name, const char *prefix)
+{
+	if (!vpnhide_iface_starts_with_ci(name, prefix))
+		return false;
+	return name[strlen(prefix)] != '\0';
 }
 
 static inline bool vpnhide_iface_equals_ci(

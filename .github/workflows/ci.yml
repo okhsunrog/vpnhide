@@ -63,6 +63,11 @@ jobs:
       # C (kernel module)
       - name: clang-format
         run: clang-format --dry-run --Werror kmod/vpnhide_kmod.c
+      - name: kmod iface-list test (host build)
+        run: |
+          cd kmod
+          gcc -O2 -Wall -Werror -o /tmp/test_iface_lists test_iface_lists.c
+          /tmp/test_iface_lists
 
       # Kotlin
       - name: ktlint

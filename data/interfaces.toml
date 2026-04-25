@@ -10,12 +10,18 @@
 # Match grammar (intentionally tiny so all four targets implement it
 # identically without depending on a regex engine — kernel C has none):
 #
-#   { exact   = "lo"     }                  name == "lo"
-#   { prefix  = "rmnet"  }                  name.starts_with("rmnet")
-#   { prefix  = "wlan", suffix = "digits" } starts_with + rest is all ASCII digits
-#   { contains = "vpn"   }                  needle anywhere in name
+#   { exact   = "lo"     }                          name == "lo"
+#   { prefix  = "rmnet"  }                          name.starts_with("rmnet")
+#   { prefix  = "wlan", suffix = "digits" }         starts_with + rest is 1+ ASCII digits
+#   { prefix  = "seth_lte", suffix = "digits_optional" }  starts_with + rest is 0+ ASCII digits
+#   { prefix  = "v4-", suffix = "any" }             starts_with + rest is 1+ any chars
+#   { contains = "vpn"   }                          needle anywhere in name
 #
 # All matches are ASCII case-insensitive.
+#
+# [[test]] entries below feed into the generated unit tests in each
+# language target — they verify that all four matchers agree on a fixed
+# set of inputs. CI runs them on every PR.
 
 [[vpn]]
 match = { prefix = "tun" }
@@ -56,3 +62,165 @@ note = "GRE tunnels"
 [[vpn]]
 match = { contains = "vpn" }
 note = "catch-all for renamed clients (myvpn0, vpn-client, xvpn1, ...)"
+
+
+# ── Test vectors ──────────────────────────────────────────────────────
+# Array of {name, is_vpn} fixtures. Codegen renders these into per-
+# language unit tests so all four matchers stay in lockstep.
+
+[[test]]
+name = "tun0"
+is_vpn = true
+
+[[test]]
+name = "tun"          # bare prefix, no digits — still matches
+is_vpn = true
+
+[[test]]
+name = "tun1234"
+is_vpn = true
+
+[[test]]
+name = "tap0"
+is_vpn = true
+
+[[test]]
+name = "wg0"
+is_vpn = true
+
+[[test]]
+name = "wg-client"    # prefix wg, then any suffix
+is_vpn = true
+
+[[test]]
+name = "ppp0"
+is_vpn = true
+
+[[test]]
+name = "ipsec0"
+is_vpn = true
+
+[[test]]
+name = "xfrm0"
+is_vpn = true
+
+[[test]]
+name = "utun3"
+is_vpn = true
+
+[[test]]
+name = "l2tp0"
+is_vpn = true
+
+[[test]]
+name = "gre0"
+is_vpn = true
+
+# Case-insensitivity
+
+[[test]]
+name = "TUN0"
+is_vpn = true
+
+[[test]]
+name = "Wg99"
+is_vpn = true
+
+[[test]]
+name = "MyVPN"
+is_vpn = true
+
+[[test]]
+name = "custom_VPN_42"
+is_vpn = true
+
+# Substring catch-all
+
+[[test]]
+name = "myvpn0"
+is_vpn = true
+
+[[test]]
+name = "vpn"
+is_vpn = true
+
+[[test]]
+name = "xvpn1"
+is_vpn = true
+
+# Real physical / system interfaces — must NOT match
+
+[[test]]
+name = "lo"
+is_vpn = false
+
+[[test]]
+name = "wlan0"
+is_vpn = false
+
+[[test]]
+name = "wlan"
+is_vpn = false
+
+[[test]]
+name = "rmnet0"
+is_vpn = false
+
+[[test]]
+name = "rmnet_data0"
+is_vpn = false
+
+[[test]]
+name = "rmnet_ipa0"
+is_vpn = false
+
+[[test]]
+name = "eth0"
+is_vpn = false
+
+[[test]]
+name = "ccmni0"
+is_vpn = false
+
+[[test]]
+name = "seth_lte8"
+is_vpn = false
+
+[[test]]
+name = "dummy0"
+is_vpn = false
+
+[[test]]
+name = "bnep0"
+is_vpn = false
+
+[[test]]
+name = "rndis0"
+is_vpn = false
+
+# The renamed-tun trick from issue #86 — name-only matching cannot
+# catch this; here just confirms the matcher does not over-match on a
+# generic prefix.
+
+[[test]]
+name = "if33"
+is_vpn = false
+
+# Edge cases
+
+[[test]]
+name = ""             # empty
+is_vpn = false
+
+[[test]]
+name = "tunl"         # 'tun' prefix matches even with non-digit suffix
+is_vpn = true
+
+[[test]]
+name = "atun0"        # prefix only matches at start of name
+is_vpn = false
+
+[[test]]
+name = "VPN"          # full name is the substring
+is_vpn = true
+
