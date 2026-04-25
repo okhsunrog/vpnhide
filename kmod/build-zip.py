@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from build_lib import get_build_version, make_zip  # type: ignore[import-not-found]
+from build_lib import get_build_version, make_zip, version_sort_key  # type: ignore[import-not-found]
 
 
 # Module file names
@@ -102,7 +102,10 @@ def main() -> int:
             # Auto-detect: In CI, clang is at /opt/ddk/clang/clang-r*/bin
             clang_base = Path("/opt/ddk/clang")
             if clang_base.exists():
-                clang_dirs = sorted(d for d in clang_base.iterdir() if d.is_dir() and d.name.startswith("clang-"))
+                clang_dirs = sorted(
+                    (d for d in clang_base.iterdir() if d.is_dir() and d.name.startswith("clang-")),
+                    key=lambda p: version_sort_key(p.name),
+                )
                 if clang_dirs:
                     clang_dir = str(clang_dirs[-1] / "bin")
                     clang_dir_src = "auto-detected from /opt/ddk/clang"
@@ -112,13 +115,11 @@ def main() -> int:
     else:
         print("Warning: clang-dir not set, using system PATH", file=sys.stderr)
 
-    # Build the kernel module (env vars loaded by direnv from .env)
-    kmod_c = kmod_dir / KMOD_C
-    kmod_ko = kmod_dir / KMOD_KO
-
-    if not kmod_ko.exists() or kmod_c.stat().st_mtime > kmod_ko.stat().st_mtime:
-        print("Building kernel module...")
-        subprocess.run(["make", "strip"], check=True)
+    # Build the kernel module — let make decide whether anything needs
+    # rebuilding; its dependency tracking covers all sources, headers,
+    # and the kernel .config, not just vpnhide_kmod.c.
+    print("Building kernel module...")
+    subprocess.run(["make", "strip"], check=True)
 
     # Assemble the module staging directory so the committed module.prop
     # stays at its release version while the zip carries the actual build

@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from build_lib import get_build_version, make_zip  # type: ignore[import-not-found]
+from build_lib import get_build_version, make_zip, version_sort_key  # type: ignore[import-not-found]
 
 
 def main() -> int:
@@ -31,7 +31,8 @@ def main() -> int:
         ndk_base = Path.home() / "Android" / "Sdk" / "ndk"
         if ndk_base.exists():
             ndk_versions = sorted(
-                d.name for d in ndk_base.iterdir() if d.is_dir()
+                (d.name for d in ndk_base.iterdir() if d.is_dir()),
+                key=version_sort_key,
             )
             if ndk_versions:
                 android_ndk_home = str(ndk_base / ndk_versions[-1])

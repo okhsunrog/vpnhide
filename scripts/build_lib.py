@@ -1,18 +1,20 @@
 """Shared helpers for build scripts.
 
-Used by kmod/build-zip.py, portshide/build-zip.py, and zygisk/build-zip.py.
+Used by kmod/build-zip.py, portshide/build-zip.py, zygisk/build-zip.py,
+and scripts/build-version.py.
+
+Stdlib-only on purpose: scripts/build-version.py is invoked from
+lsposed/app/build.gradle.kts on every Gradle build, so adding pip/uv
+dependencies here would break the APK build for anyone without those
+tools available.
 """
 
 from __future__ import annotations
 
-import os
+import re
+import subprocess
 import zipfile
 from pathlib import Path
-
-
-def get_python_exe() -> str:
-    """Return 'python' on Windows, 'python3' elsewhere."""
-    return "python" if os.name == "nt" else "python3"
 
 
 def make_zip(source_dir: Path, output_zip: Path) -> None:
@@ -24,6 +26,16 @@ def make_zip(source_dir: Path, output_zip: Path) -> None:
                 zf.write(file_path, arcname)
 
 
+def version_sort_key(name: str) -> tuple[int, ...]:
+    """Sort key that orders strings by their embedded integer runs.
+
+    Used to pick the highest version when multiple toolchain directories
+    coexist (NDK 25.0.1 vs 100.0.0, clang-r450b vs clang-r498344b) where
+    plain lexicographic sort gives the wrong answer.
+    """
+    return tuple(int(part) for part in re.findall(r"\d+", name))
+
+
 def get_build_version(repo_root: Path | None = None) -> str:
     """Get the effective build version for vpnhide artifacts.
 
@@ -32,8 +44,6 @@ def get_build_version(repo_root: Path | None = None) -> str:
     - working tree dirty          -> additional "-dirty" suffix
     - no git / no matching tag    -> falls back to VERSION file
     """
-    import subprocess
-
     if repo_root is None:
         repo_root = Path(__file__).resolve().parent.parent
 
