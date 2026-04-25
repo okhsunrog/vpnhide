@@ -341,7 +341,7 @@ fun AppHidingScreen(
                     suExecAsync(buildHidingSaveCommand(header, hiddenPkgs, observerPkgs))
                 if (exitCode == 0) {
                     snackMessage =
-                        context.getString(R.string.hiding_save_success, hiddenPkgs.size, observerPkgs.size)
+                        context.getString(R.string.hiding_save_success, hiddenCount, observerCount)
                     DashboardCache.invalidate()
                     TargetsCache.refresh(scope, context)
                 } else if (exitCode == -1) {
