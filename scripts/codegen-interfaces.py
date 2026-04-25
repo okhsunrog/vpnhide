@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Render the four iface-list matchers + their unit tests from
-data/interfaces.toml.
+"""Render the four iface-list `is_never_hide` matchers + their unit
+tests from data/interfaces.toml.
 
 Generates one match function per target (kmod C, zygisk Rust,
 lsposed/native Rust, lsposed Kotlin) so all four platforms agree on
-which interface names are VPN tunnels, plus per-language test files
-seeded from the same [[test]] vectors so CI catches drift instantly.
+which interface names must NEVER be hidden — even when the kernel
+correctly reports them as tunnel-class (CLAT, Thread BR). Test
+vectors come from the same toml so CI catches drift instantly.
 
 Re-run after editing data/interfaces.toml and commit the regenerated
 files. CI's lint job re-runs the codegen and fails on drift.
@@ -90,11 +91,11 @@ class Rule:
 
 
 class TestVector:
-    __slots__ = ("name", "is_vpn")
+    __slots__ = ("name", "is_never_hide")
 
-    def __init__(self, name: str, is_vpn: bool) -> None:
+    def __init__(self, name: str, is_never_hide: bool) -> None:
         self.name = name
-        self.is_vpn = is_vpn
+        self.is_never_hide = is_never_hide
 
 
 def parse_rule(entry: dict[str, Any]) -> Rule:
@@ -137,20 +138,20 @@ def parse_rule(entry: dict[str, Any]) -> Rule:
 
 
 def parse_test(entry: dict[str, Any]) -> TestVector:
-    if "name" not in entry or "is_vpn" not in entry:
-        raise SystemExit(f"[[test]] entry needs name and is_vpn: {entry!r}")
+    if "name" not in entry or "is_never_hide" not in entry:
+        raise SystemExit(f"[[test]] entry needs name and is_never_hide: {entry!r}")
     name = str(entry["name"])
     if not all(c == "" or 0x20 <= ord(c) < 0x7F for c in name):
         raise SystemExit(f"non-ASCII test name {name!r}; the matcher itself is ASCII-only")
-    return TestVector(name=name, is_vpn=bool(entry["is_vpn"]))
+    return TestVector(name=name, is_never_hide=bool(entry["is_never_hide"]))
 
 
 def load() -> tuple[list[Rule], list[TestVector]]:
     with TOML_PATH.open("rb") as f:
         data = tomllib.load(f)
-    raw_rules = data.get("vpn") or []
+    raw_rules = data.get("never_hide") or []
     if not isinstance(raw_rules, list) or not raw_rules:
-        raise SystemExit(f"{TOML_PATH}: missing or empty [[vpn]] table")
+        raise SystemExit(f"{TOML_PATH}: missing or empty [[never_hide]] table")
     rules = [parse_rule(e) for e in raw_rules]
     tests = [parse_test(e) for e in (data.get("test") or [])]
     return rules, tests
@@ -321,7 +322,7 @@ def emit_kmod(rules: list[Rule]) -> str:
     lines.append("\treturn false;")
     lines.append("}")
     lines.append("")
-    lines.append("static inline bool vpnhide_iface_is_vpn(const char *name)")
+    lines.append("static inline bool vpnhide_iface_is_never_hide(const char *name)")
     lines.append("{")
     lines.append("\tif (!name || !name[0])")
     lines.append("\t\treturn false;")
@@ -374,9 +375,9 @@ def emit_kmod_test(tests: list[TestVector]) -> str:
     lines.append("")
     lines.append("static void check(const char *name, bool expected)")
     lines.append("{")
-    lines.append("\tbool got = vpnhide_iface_is_vpn(name);")
+    lines.append("\tbool got = vpnhide_iface_is_never_hide(name);")
     lines.append("\tif (got != expected) {")
-    lines.append('\t\tfprintf(stderr, "FAIL: vpnhide_iface_is_vpn(\\"%s\\") = %s, expected %s\\n",')
+    lines.append('\t\tfprintf(stderr, "FAIL: vpnhide_iface_is_never_hide(\\"%s\\") = %s, expected %s\\n",')
     lines.append('\t\t\tname, got ? "true" : "false", expected ? "true" : "false");')
     lines.append("\t\tfailures++;")
     lines.append("\t}")
@@ -385,7 +386,7 @@ def emit_kmod_test(tests: list[TestVector]) -> str:
     lines.append("int main(void)")
     lines.append("{")
     for t in tests:
-        expected = "true" if t.is_vpn else "false"
+        expected = "true" if t.is_never_hide else "false"
         lines.append(f"\tcheck({c_str_lit(t.name)}, {expected});")
     lines.append("")
     lines.append("\tif (failures) {")
@@ -470,8 +471,8 @@ def emit_rust(rules: list[Rule], tests: list[TestVector]) -> str:
     lines.append("    false")
     lines.append("}")
     lines.append("")
-    lines.append("/// True if the name matches any VPN-iface rule from data/interfaces.toml.")
-    lines.append("pub fn matches_vpn(name: &[u8]) -> bool {")
+    lines.append("/// True if `name` is in the never-hide whitelist from data/interfaces.toml.")
+    lines.append("pub fn is_never_hide(name: &[u8]) -> bool {")
     lines.append("    if name.is_empty() {")
     lines.append("        return false;")
     lines.append("    }")
@@ -506,10 +507,10 @@ def emit_rust(rules: list[Rule], tests: list[TestVector]) -> str:
     lines.append("    #[test]")
     lines.append("    fn generated_vectors() {")
     for t in tests:
-        expected = "true" if t.is_vpn else "false"
+        expected = "true" if t.is_never_hide else "false"
         lines.append(
-            f"        assert_eq!(matches_vpn({rust_byte_lit(t.name)}), {expected}, "
-            f"\"matches_vpn({t.name!r})\");"
+            f"        assert_eq!(is_never_hide({rust_byte_lit(t.name)}), {expected}, "
+            f"\"is_never_hide({t.name!r})\");"
         )
     lines.append("    }")
     lines.append("")
@@ -546,8 +547,8 @@ def emit_kotlin(rules: list[Rule]) -> str:
     lines.append("package dev.okhsunrog.vpnhide.generated")
     lines.append("")
     lines.append("internal object IfaceLists {")
-    lines.append("    /** True if `name` looks like a VPN tunnel per data/interfaces.toml. */")
-    lines.append("    fun isVpnIface(name: String): Boolean {")
+    lines.append("    /** True if `name` is in the never-hide whitelist per data/interfaces.toml. */")
+    lines.append("    fun isNeverHide(name: String): Boolean {")
     lines.append("        if (name.isEmpty()) return false")
     lines.append("        val n = name.lowercase()")
     for r in rules:
@@ -596,10 +597,10 @@ def emit_kotlin_test(tests: list[TestVector]) -> str:
     lines.append("    @Test")
     lines.append("    fun `generated vectors`() {")
     for t in tests:
-        expected = "true" if t.is_vpn else "false"
+        expected = "true" if t.is_never_hide else "false"
         lines.append(
             f"        assertEquals({kt_str_lit(t.name)}, {expected}, "
-            f"IfaceLists.isVpnIface({kt_str_lit(t.name)}))"
+            f"IfaceLists.isNeverHide({kt_str_lit(t.name)}))"
         )
     lines.append("    }")
     lines.append("}")

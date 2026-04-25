@@ -6,10 +6,32 @@ use jni::sys::jstring;
 use std::ffi::CStr;
 use std::io::ErrorKind;
 
-use crate::generated::iface_lists::matches_vpn;
+use crate::generated::iface_lists::is_never_hide;
 
+// Tunnel ARPHRD_* values from <linux/if_arp.h>. Anything in this set
+// is a tunnel from the kernel's POV regardless of the iface's name.
+const TUNNEL_ARPHRDS: &[i32] = &[0xFFFE, 512, 768, 769, 776, 778];
+
+/// Returns true if the kernel reports `name` as a tunnel-class iface
+/// AND the name is not in the never-hide whitelist (CLAT, Thread BR).
+///
+/// This is the self-test answer to "should vpnhide be hiding this?".
+/// No cache — called a handful of times per diagnostics run, sysfs
+/// reads are cheap and we want fresh data every time the user retests.
 fn is_vpn_iface(name: &str) -> bool {
-    matches_vpn(name.as_bytes())
+    if is_never_hide(name.as_bytes()) {
+        return false;
+    }
+    let path = format!("/sys/class/net/{name}/type");
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let arphrd: i32 = match raw.trim().parse() {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    TUNNEL_ARPHRDS.contains(&arphrd)
 }
 
 fn logi(msg: &str) {

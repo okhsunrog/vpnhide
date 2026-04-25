@@ -9,7 +9,6 @@ import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
-import dev.okhsunrog.vpnhide.generated.IfaceLists
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -72,7 +71,7 @@ class HookEntry : IXposedHookLoadPackage {
     //  Helpers
     // ------------------------------------------------------------------
 
-    private fun isVpnInterfaceName(name: String): Boolean = IfaceLists.isVpnIface(name)
+    private fun isVpnInterfaceName(name: String): Boolean = IfaceTypeProbe.shouldHide(name)
 
     private fun sanitizeLinkProperties(copy: LinkProperties): Boolean {
         var modified = false

@@ -3,30 +3,14 @@
 package dev.okhsunrog.vpnhide.generated
 
 internal object IfaceLists {
-    /** True if `name` looks like a VPN tunnel per data/interfaces.toml. */
-    fun isVpnIface(name: String): Boolean {
+    /** True if `name` is in the never-hide whitelist per data/interfaces.toml. */
+    fun isNeverHide(name: String): Boolean {
         if (name.isEmpty()) return false
         val n = name.lowercase()
-        // OpenVPN, WireGuard userspace, Tailscale, generic tunneling
-        if (n.startsWith("tun")) return true
-        // OpenVPN bridged
-        if (n.startsWith("tap")) return true
-        // WireGuard kernel
-        if (n.startsWith("wg")) return true
-        // PPTP / L2TP PPP tunnels
-        if (n.startsWith("ppp")) return true
-        // Android built-in IPsec VPN
-        if (n.startsWith("ipsec")) return true
-        // kernel IPsec XFRM framework
-        if (n.startsWith("xfrm")) return true
-        // Apple-style, rare on Android
-        if (n.startsWith("utun")) return true
-        // L2TP
-        if (n.startsWith("l2tp")) return true
-        // GRE tunnels
-        if (n.startsWith("gre")) return true
-        // catch-all for renamed clients (myvpn0, vpn-client, xvpn1, ...)
-        if (n.contains("vpn")) return true
+        // 464XLAT CLAT shadow iface (v4-rmnet0, v4-wlan0, ...). Required on IPv6-only carriers (T-Mobile US, Reliance Jio, ...) — without it IPv4-only apps lose internet. Created by clatd, lives as ARPHRD_NONE TUN, easy to mistake for a VPN tunnel. AOSP source: external/android-clat.
+        if (n.startsWith("v4-") && n.length > 3) return true
+        // OpenThread border router on Pixel 7+. Hard-coded in init.rc inside the com.android.tethering APEX (the same APEX that delivers VPN-related code). Used for Matter / smart-home Thread mesh, not connectivity for normal apps.
+        if (n == "thread-wpan") return true
         return false
     }
 }

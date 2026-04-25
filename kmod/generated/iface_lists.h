@@ -97,39 +97,15 @@ static inline bool vpnhide_iface_contains_ci(
 	return false;
 }
 
-static inline bool vpnhide_iface_is_vpn(const char *name)
+static inline bool vpnhide_iface_is_never_hide(const char *name)
 {
 	if (!name || !name[0])
 		return false;
-	/* OpenVPN, WireGuard userspace, Tailscale, generic tunneling */
-	if (vpnhide_iface_starts_with_ci(name, "tun"))
+	/* 464XLAT CLAT shadow iface (v4-rmnet0, v4-wlan0, ...). Required on IPv6-only carriers (T-Mobile US, Reliance Jio, ...) — without it IPv4-only apps lose internet. Created by clatd, lives as ARPHRD_NONE TUN, easy to mistake for a VPN tunnel. AOSP source: external/android-clat. */
+	if (vpnhide_iface_starts_with_then_any_ci(name, "v4-"))
 		return true;
-	/* OpenVPN bridged */
-	if (vpnhide_iface_starts_with_ci(name, "tap"))
-		return true;
-	/* WireGuard kernel */
-	if (vpnhide_iface_starts_with_ci(name, "wg"))
-		return true;
-	/* PPTP / L2TP PPP tunnels */
-	if (vpnhide_iface_starts_with_ci(name, "ppp"))
-		return true;
-	/* Android built-in IPsec VPN */
-	if (vpnhide_iface_starts_with_ci(name, "ipsec"))
-		return true;
-	/* kernel IPsec XFRM framework */
-	if (vpnhide_iface_starts_with_ci(name, "xfrm"))
-		return true;
-	/* Apple-style, rare on Android */
-	if (vpnhide_iface_starts_with_ci(name, "utun"))
-		return true;
-	/* L2TP */
-	if (vpnhide_iface_starts_with_ci(name, "l2tp"))
-		return true;
-	/* GRE tunnels */
-	if (vpnhide_iface_starts_with_ci(name, "gre"))
-		return true;
-	/* catch-all for renamed clients (myvpn0, vpn-client, xvpn1, ...) */
-	if (vpnhide_iface_contains_ci(name, "vpn"))
+	/* OpenThread border router on Pixel 7+. Hard-coded in init.rc inside the com.android.tethering APEX (the same APEX that delivers VPN-related code). Used for Matter / smart-home Thread mesh, not connectivity for normal apps. */
+	if (vpnhide_iface_equals_ci(name, "thread-wpan"))
 		return true;
 	return false;
 }

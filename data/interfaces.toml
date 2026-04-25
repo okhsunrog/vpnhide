@@ -1,226 +1,108 @@
-# Single source of truth for VPN-like network interface name patterns.
-# A name matching any rule below is treated as a tunnel and hidden from
-# target apps (kmod) / from the calling process (zygisk + lsposed).
+# Single source of truth for VPN-iface name patterns that vpnhide
+# treats specially. With the kernel-truth detection landed (see
+# is_tunnel_dev / is_tunnel_iface in each component), VPN interfaces
+# are recognized by the kernel's own type info — names alone no longer
+# matter for "is this a tunnel?".
+#
+# What's left here is the inverse: patterns we must NEVER hide even
+# though the kernel correctly reports them as tunnel-class. There are
+# exactly two right now (CLAT and Thread border router), and they both
+# need to slip through the type check.
 #
 # Read at codegen time by scripts/codegen-interfaces.py, which renders
-# four matchers (kmod C, zygisk Rust, lsposed-native Rust, lsposed
-# Kotlin). Sync between platforms is enforced by a CI lint step that
-# re-runs the codegen and fails if the generated files drift.
+# four `is_never_hide(name)` matchers (kmod C, zygisk Rust,
+# lsposed-native Rust, lsposed Kotlin). Sync between platforms is
+# enforced by a CI lint step that re-runs the codegen and fails if the
+# generated files drift.
 #
 # Match grammar (intentionally tiny so all four targets implement it
 # identically without depending on a regex engine — kernel C has none):
 #
 #   { exact   = "lo"     }                          name == "lo"
 #   { prefix  = "rmnet"  }                          name.starts_with("rmnet")
-#   { prefix  = "wlan", suffix = "digits" }         starts_with + rest is 1+ ASCII digits
-#   { prefix  = "seth_lte", suffix = "digits_optional" }  starts_with + rest is 0+ ASCII digits
-#   { prefix  = "v4-", suffix = "any" }             starts_with + rest is 1+ any chars
+#   { prefix  = "wlan", suffix = "digits" }         starts_with + 1+ ASCII digits
+#   { prefix  = "seth_lte", suffix = "digits_optional" }  starts_with + 0+ ASCII digits
+#   { prefix  = "v4-", suffix = "any" }             starts_with + 1+ any chars
 #   { contains = "vpn"   }                          needle anywhere in name
 #
 # All matches are ASCII case-insensitive.
-#
-# [[test]] entries below feed into the generated unit tests in each
-# language target — they verify that all four matchers agree on a fixed
-# set of inputs. CI runs them on every PR.
 
-[[vpn]]
-match = { prefix = "tun" }
-note = "OpenVPN, WireGuard userspace, Tailscale, generic tunneling"
+# ── Never-hide whitelist ──────────────────────────────────────────────
+# Interfaces the kernel reports as TUN but that we must let through.
 
-[[vpn]]
-match = { prefix = "tap" }
-note = "OpenVPN bridged"
+[[never_hide]]
+match = { prefix = "v4-", suffix = "any" }
+note = """464XLAT CLAT shadow iface (v4-rmnet0, v4-wlan0, ...). Required \
+on IPv6-only carriers (T-Mobile US, Reliance Jio, ...) — without it \
+IPv4-only apps lose internet. Created by clatd, lives as ARPHRD_NONE \
+TUN, easy to mistake for a VPN tunnel. AOSP source: external/android-clat."""
 
-[[vpn]]
-match = { prefix = "wg" }
-note = "WireGuard kernel"
-
-[[vpn]]
-match = { prefix = "ppp" }
-note = "PPTP / L2TP PPP tunnels"
-
-[[vpn]]
-match = { prefix = "ipsec" }
-note = "Android built-in IPsec VPN"
-
-[[vpn]]
-match = { prefix = "xfrm" }
-note = "kernel IPsec XFRM framework"
-
-[[vpn]]
-match = { prefix = "utun" }
-note = "Apple-style, rare on Android"
-
-[[vpn]]
-match = { prefix = "l2tp" }
-note = "L2TP"
-
-[[vpn]]
-match = { prefix = "gre" }
-note = "GRE tunnels"
-
-[[vpn]]
-match = { contains = "vpn" }
-note = "catch-all for renamed clients (myvpn0, vpn-client, xvpn1, ...)"
+[[never_hide]]
+match = { exact = "thread-wpan" }
+note = """OpenThread border router on Pixel 7+. Hard-coded in \
+init.rc inside the com.android.tethering APEX (the same APEX that \
+delivers VPN-related code). Used for Matter / smart-home Thread mesh, \
+not connectivity for normal apps."""
 
 
 # ── Test vectors ──────────────────────────────────────────────────────
-# Array of {name, is_vpn} fixtures. Codegen renders these into per-
-# language unit tests so all four matchers stay in lockstep.
+# `is_never_hide = true` means the name is in the whitelist above and
+# vpnhide must not hide the iface even if the kernel says it's a tunnel.
 
 [[test]]
-name = "tun0"
-is_vpn = true
+name = "v4-rmnet0"
+is_never_hide = true
 
 [[test]]
-name = "tun"          # bare prefix, no digits — still matches
-is_vpn = true
+name = "v4-rmnet_data0"
+is_never_hide = true
 
 [[test]]
-name = "tun1234"
-is_vpn = true
+name = "v4-wlan0"
+is_never_hide = true
 
 [[test]]
-name = "tap0"
-is_vpn = true
+name = "v4-x"          # one char after prefix is enough
+is_never_hide = true
+
+[[test]]
+name = "thread-wpan"
+is_never_hide = true
+
+[[test]]
+name = "Thread-Wpan"   # case-insensitivity
+is_never_hide = true
+
+# Negative cases — must NOT be treated as exceptions.
+
+[[test]]
+name = "v4-"           # bare prefix, no suffix
+is_never_hide = false
+
+[[test]]
+name = "v4"            # no dash
+is_never_hide = false
+
+[[test]]
+name = "tun0"          # actual VPN — the kernel-truth check should hide it
+is_never_hide = false
 
 [[test]]
 name = "wg0"
-is_vpn = true
+is_never_hide = false
 
 [[test]]
-name = "wg-client"    # prefix wg, then any suffix
-is_vpn = true
+name = "wlan0"         # legit Wi-Fi — kernel says non-tunnel anyway
+is_never_hide = false
 
 [[test]]
-name = "ppp0"
-is_vpn = true
+name = "thread-wpan-extra"   # only the exact name is whitelisted
+is_never_hide = false
 
 [[test]]
-name = "ipsec0"
-is_vpn = true
+name = "if33"          # the renamed-tun trick from issue #86
+is_never_hide = false
 
 [[test]]
-name = "xfrm0"
-is_vpn = true
-
-[[test]]
-name = "utun3"
-is_vpn = true
-
-[[test]]
-name = "l2tp0"
-is_vpn = true
-
-[[test]]
-name = "gre0"
-is_vpn = true
-
-# Case-insensitivity
-
-[[test]]
-name = "TUN0"
-is_vpn = true
-
-[[test]]
-name = "Wg99"
-is_vpn = true
-
-[[test]]
-name = "MyVPN"
-is_vpn = true
-
-[[test]]
-name = "custom_VPN_42"
-is_vpn = true
-
-# Substring catch-all
-
-[[test]]
-name = "myvpn0"
-is_vpn = true
-
-[[test]]
-name = "vpn"
-is_vpn = true
-
-[[test]]
-name = "xvpn1"
-is_vpn = true
-
-# Real physical / system interfaces — must NOT match
-
-[[test]]
-name = "lo"
-is_vpn = false
-
-[[test]]
-name = "wlan0"
-is_vpn = false
-
-[[test]]
-name = "wlan"
-is_vpn = false
-
-[[test]]
-name = "rmnet0"
-is_vpn = false
-
-[[test]]
-name = "rmnet_data0"
-is_vpn = false
-
-[[test]]
-name = "rmnet_ipa0"
-is_vpn = false
-
-[[test]]
-name = "eth0"
-is_vpn = false
-
-[[test]]
-name = "ccmni0"
-is_vpn = false
-
-[[test]]
-name = "seth_lte8"
-is_vpn = false
-
-[[test]]
-name = "dummy0"
-is_vpn = false
-
-[[test]]
-name = "bnep0"
-is_vpn = false
-
-[[test]]
-name = "rndis0"
-is_vpn = false
-
-# The renamed-tun trick from issue #86 — name-only matching cannot
-# catch this; here just confirms the matcher does not over-match on a
-# generic prefix.
-
-[[test]]
-name = "if33"
-is_vpn = false
-
-# Edge cases
-
-[[test]]
-name = ""             # empty
-is_vpn = false
-
-[[test]]
-name = "tunl"         # 'tun' prefix matches even with non-digit suffix
-is_vpn = true
-
-[[test]]
-name = "atun0"        # prefix only matches at start of name
-is_vpn = false
-
-[[test]]
-name = "VPN"          # full name is the substring
-is_vpn = true
-
+name = ""
+is_never_hide = false

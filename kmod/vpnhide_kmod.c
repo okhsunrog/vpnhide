@@ -35,7 +35,9 @@
 #include <linux/rtnetlink.h>
 #include <linux/skbuff.h>
 #include <linux/inetdevice.h>
+#include <linux/if_arp.h>
 #include <net/if_inet6.h>
+#include <net/rtnetlink.h>
 
 #include "generated/iface_lists.h"
 
@@ -55,10 +57,73 @@ static bool debug_enabled;
 	} while (0)
 
 /* ------------------------------------------------------------------ */
-/*  VPN interface name matching — see data/interfaces.toml            */
+/*  VPN interface detection — kernel-truth                            */
+/*                                                                    */
+/*  Every netdev is registered with a type (ARPHRD_*) and (for        */
+/*  link-typed ones) a `rtnl_link_ops->kind` string. Both are         */
+/*  kernel-set and not forgeable by an unprivileged VPN client even   */
+/*  after `ip link set ... name`. So renamed-tun tricks like the      */
+/*  if33 case in issue #86 still get caught here.                     */
+/*                                                                    */
+/*  Two kernel-confirmed TUNs must NOT be hidden (CLAT shadow,        */
+/*  Thread BR) — that's what vpnhide_iface_is_never_hide() (generated */
+/*  from data/interfaces.toml) is for.                                */
 /* ------------------------------------------------------------------ */
 
-#define is_vpn_ifname(name) vpnhide_iface_is_vpn(name)
+static bool is_tunnel_dev(struct net_device *dev)
+{
+	const char *kind;
+
+	if (!dev)
+		return false;
+
+	switch (dev->type) {
+	case ARPHRD_NONE:
+	case ARPHRD_PPP:
+	case ARPHRD_TUNNEL:
+	case ARPHRD_TUNNEL6:
+	case ARPHRD_SIT:
+	case ARPHRD_IPGRE:
+		return true;
+	}
+
+	if (!dev->rtnl_link_ops || !dev->rtnl_link_ops->kind)
+		return false;
+
+	kind = dev->rtnl_link_ops->kind;
+	return !strcmp(kind, "tun") || !strcmp(kind, "wireguard") ||
+	       !strcmp(kind, "xfrm") || !strcmp(kind, "gre") ||
+	       !strcmp(kind, "gretap") || !strcmp(kind, "ip6gre") ||
+	       !strcmp(kind, "sit") || !strcmp(kind, "ipip") ||
+	       !strcmp(kind, "ip6tnl") || !strcmp(kind, "bareudp");
+}
+
+static bool should_hide_dev(struct net_device *dev)
+{
+	return dev && is_tunnel_dev(dev) &&
+	       !vpnhide_iface_is_never_hide(dev->name);
+}
+
+/* For hooks that only get an ifname (ioctl, /proc/net/route) — look
+ * the dev up. Returns false (don't hide) if the lookup fails: better
+ * to leak a tunnel than break a network call by guessing.
+ */
+static bool should_hide_name(const char *name)
+{
+	struct net_device *dev;
+	bool hide;
+
+	if (!name || !name[0])
+		return false;
+
+	dev = dev_get_by_name(current->nsproxy->net_ns, name);
+	if (!dev)
+		return false;
+
+	hide = should_hide_dev(dev);
+	dev_put(dev);
+	return hide;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Target UID list                                                   */
@@ -259,7 +324,7 @@ static int dev_ioctl_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 	memcpy(name, data->kifr->ifr_name, IFNAMSIZ);
 	name[IFNAMSIZ - 1] = '\0';
 
-	if (is_vpn_ifname(name)) {
+	if (should_hide_name(name)) {
 		vpnhide_dbg("dev_ioctl_ret: hiding iface=%s cmd=0x%x\n", name,
 			    data->cmd);
 		regs_set_return_value(regs, -ENODEV);
@@ -344,7 +409,7 @@ static void filter_ifconf_buf(struct ifreq __user *usr_ifr, int n, int *out_len)
 		if (copy_from_user(&tmp, &usr_ifr[i], sizeof(tmp)))
 			return;
 		tmp.ifr_name[IFNAMSIZ - 1] = '\0';
-		if (is_vpn_ifname(tmp.ifr_name))
+		if (should_hide_name(tmp.ifr_name))
 			continue;
 		if (dst != i) {
 			if (copy_to_user(&usr_ifr[dst], &tmp, sizeof(tmp)))
@@ -434,7 +499,7 @@ static int rtnl_fill_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	/* Callers hold RTNL which protects dev->name, but take RCU as
 	 * belt-and-suspenders — same rationale as inet6_fill_entry. */
 	rcu_read_lock();
-	if (dev && is_vpn_ifname(dev->name)) {
+	if (should_hide_dev(dev)) {
 		data->should_filter = true;
 		vpnhide_dbg(
 			"rtnl_fill_entry: uid=%u target=1 iface=%s -> filter\n",
@@ -510,8 +575,7 @@ static int inet6_fill_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	 * so the kretprobe handler doesn't rely on that implicit guarantee.
 	 */
 	rcu_read_lock();
-	if (ifa && ifa->idev && ifa->idev->dev &&
-	    is_vpn_ifname(ifa->idev->dev->name)) {
+	if (ifa && ifa->idev && should_hide_dev(ifa->idev->dev)) {
 		data->skb = (struct sk_buff *)regs->regs[0];
 		data->saved_len = data->skb ? data->skb->len : 0;
 		data->should_filter = true;
@@ -575,8 +639,7 @@ static int inet_fill_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	ifa = (struct in_ifaddr *)regs->regs[1];
 	/* Same RCU rationale as inet6_fill_entry above. */
 	rcu_read_lock();
-	if (ifa && ifa->ifa_dev && ifa->ifa_dev->dev &&
-	    is_vpn_ifname(ifa->ifa_dev->dev->name)) {
+	if (ifa && ifa->ifa_dev && should_hide_dev(ifa->ifa_dev->dev)) {
 		data->skb = (struct sk_buff *)regs->regs[0];
 		data->saved_len = data->skb ? data->skb->len : 0;
 		data->should_filter = true;
@@ -695,7 +758,7 @@ static int fib_route_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 			ifname[j] = src[j];
 		ifname[j] = '\0';
 
-		if (is_vpn_ifname(ifname)) {
+		if (should_hide_name(ifname)) {
 			vpnhide_dbg("fib_route_ret: hiding route for %s\n",
 				    ifname);
 			/* Skip this line */

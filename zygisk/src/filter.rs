@@ -1,45 +1,119 @@
-//! Pure logic: is a given interface name a VPN tunnel?
+//! Should this iface be hidden from the calling app?
 //!
-//! Kept as a leaf module so it's easy to unit-test on the host. The
-//! actual rules live in `data/interfaces.toml` and are rendered into
-//! `generated::iface_lists::matches_vpn` by
-//! `scripts/codegen-interfaces.py`; this file is just the public API
-//! plus the NUL-trim that `ifr_name`-style buffers need.
+//! Two layers:
+//!   1. NEVER-hide whitelist (CLAT, Thread BR) — generated from
+//!      data/interfaces.toml as `is_never_hide(name)`.
+//!   2. Kernel-truth tunnel detection — read
+//!      `/sys/class/net/<name>/type` (ARPHRD_*) and treat tunnel-class
+//!      as VPN. Per-name cached behind an RwLock; we only pay the
+//!      sysfs read on first sighting. Sysfs read failure is treated
+//!      as "not a tunnel" — better leak than break network calls.
+//!
+//! Final decision:
+//!   should_hide(name) = !is_never_hide(name) && is_tunnel_iface(name)
 
 use core::ffi::CStr;
+use std::collections::HashMap;
+use std::sync::{OnceLock, RwLock};
 
-use crate::generated::iface_lists::matches_vpn;
+use crate::generated::iface_lists::is_never_hide;
 
-/// True if the bytes look like a VPN tunnel interface name.
-///
-/// Works on raw `&[u8]` so we can call it straight from a
-/// `libc::ifreq.ifr_name` buffer (which is `[c_char; IFNAMSIZ]`) without
-/// having to copy into a String.
-pub fn is_vpn_iface_bytes(name: &[u8]) -> bool {
-    // Trim at the first NUL — ifr_name is a fixed-size buffer with a NUL
-    // terminator somewhere inside it.
-    let end = name.iter().position(|&b| b == 0).unwrap_or(name.len());
-    matches_vpn(&name[..end])
+// ── ARPHRD_* tunnel-class constants from <linux/if_arp.h> ─────────────
+// Anything in this set is a tunnel from the kernel's POV regardless of
+// what the netdev's name is.
+const ARPHRD_PPP: i32 = 512;
+const ARPHRD_TUNNEL: i32 = 768;
+const ARPHRD_TUNNEL6: i32 = 769;
+const ARPHRD_SIT: i32 = 776;
+const ARPHRD_IPGRE: i32 = 778;
+const ARPHRD_NONE: i32 = 0xFFFE; // 65534 — used for TUN
+
+fn is_tunnel_arphrd(t: i32) -> bool {
+    matches!(
+        t,
+        ARPHRD_NONE | ARPHRD_PPP | ARPHRD_TUNNEL | ARPHRD_TUNNEL6 | ARPHRD_SIT | ARPHRD_IPGRE
+    )
 }
 
-/// Convenience wrapper: takes a `CStr` and dispatches to `is_vpn_iface_bytes`.
+// Per-iface cache. Cold path: one sysfs read on first sighting; warm
+// path: HashMap lookup + RwLock read. Names rarely change in practice
+// (interfaces are added/removed but rarely renamed), so we don't bother
+// with TTL — stale entries would only matter if a non-tunnel were
+// re-registered as a tunnel under the same name, which is exotic.
+static CACHE: OnceLock<RwLock<HashMap<String, bool>>> = OnceLock::new();
+
+fn cache() -> &'static RwLock<HashMap<String, bool>> {
+    CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn read_iface_type(name: &str) -> Option<i32> {
+    let path = format!("/sys/class/net/{}/type", name);
+    let s = std::fs::read_to_string(path).ok()?;
+    s.trim().parse::<i32>().ok()
+}
+
+/// True if the kernel reports `name` as a tunnel-class netdev.
+fn is_tunnel_iface(name: &str) -> bool {
+    if let Ok(cache) = cache().read() {
+        if let Some(&v) = cache.get(name) {
+            return v;
+        }
+    }
+    let v = read_iface_type(name).map(is_tunnel_arphrd).unwrap_or(false);
+    if let Ok(mut cache) = cache().write() {
+        cache.insert(name.to_string(), v);
+    }
+    v
+}
+
+/// Trim a fixed-size buffer (e.g. `ifreq.ifr_name`) at the first NUL.
+fn trim_to_nul(name: &[u8]) -> &[u8] {
+    let end = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+    &name[..end]
+}
+
+/// True if `name` should be hidden from the calling app.
+///
+/// Works on raw `&[u8]` so we can call it straight from a
+/// `libc::ifreq.ifr_name` buffer (which is `[c_char; IFNAMSIZ]`).
+pub fn is_vpn_iface_bytes(name: &[u8]) -> bool {
+    let trimmed = trim_to_nul(name);
+    if trimmed.is_empty() {
+        return false;
+    }
+    if is_never_hide(trimmed) {
+        return false;
+    }
+    // sysfs path needs a str; valid ifnames are ASCII, so this can only
+    // fail on adversarial input — treat as non-tunnel and bail.
+    let name_str = match std::str::from_utf8(trimmed) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    is_tunnel_iface(name_str)
+}
+
 #[allow(dead_code)]
 pub fn is_vpn_iface_cstr(name: &CStr) -> bool {
     is_vpn_iface_bytes(name.to_bytes())
 }
 
-/// Filter `/proc/net/route` content in-place, removing lines whose
-/// first tab-separated field is a VPN interface name.
-/// Returns the new length of the valid data in `data`.
+/// Filter `/proc/net/route` in-place, removing lines whose first
+/// tab-separated field (Iface) names a tunnel.
 ///
 /// Format:
 /// ```text
 /// Iface   Destination Gateway     Flags RefCnt Use Metric Mask     MTU Window IRTT
-/// wlan0   00000000    0101A8C0    0003  0      0   0      00000000 0   0      0
 /// tun0    00000000    010010AC    0003  0      0   0      00000000 0   0      0
 /// ```
-/// The header line (starting with "Iface") is always kept.
 pub fn filter_route_buf(data: &mut [u8]) -> usize {
+    filter_route_buf_with(data, is_vpn_iface_bytes)
+}
+
+/// Predicate-injectable variant of [`filter_route_buf`] — production
+/// uses [`is_vpn_iface_bytes`]; tests pass their own closure so they
+/// don't depend on a real /sys/class/net.
+pub fn filter_route_buf_with<F: Fn(&[u8]) -> bool>(data: &mut [u8], is_vpn: F) -> usize {
     if data.is_empty() {
         return 0;
     }
@@ -64,7 +138,7 @@ pub fn filter_route_buf(data: &mut [u8]) -> usize {
             .unwrap_or(line.len());
         let ifname = &line[..field_len];
 
-        let hide = !ifname.is_empty() && is_vpn_iface_bytes(ifname);
+        let hide = !ifname.is_empty() && is_vpn(ifname);
 
         if !hide {
             let line_len = line_end - read_pos;
@@ -83,18 +157,18 @@ pub fn filter_route_buf(data: &mut [u8]) -> usize {
 /// Filter `/proc/net/ipv6_route` in-place. Interface name is the LAST
 /// whitespace-delimited field on each line.
 pub fn filter_ipv6_route_buf(data: &mut [u8]) -> usize {
-    filter_by_last_field(data)
+    filter_by_last_field(data, is_vpn_iface_bytes)
 }
 
 /// Filter `/proc/net/if_inet6` in-place. Interface name is the LAST
 /// whitespace-delimited field on each line.
 pub fn filter_if_inet6_buf(data: &mut [u8]) -> usize {
-    filter_by_last_field(data)
+    filter_by_last_field(data, is_vpn_iface_bytes)
 }
 
 /// Shared logic: filter lines where the LAST whitespace-delimited field
 /// is a VPN interface name (used by ipv6_route and if_inet6).
-fn filter_by_last_field(data: &mut [u8]) -> usize {
+fn filter_by_last_field<F: Fn(&[u8]) -> bool>(data: &mut [u8], is_vpn: F) -> usize {
     if data.is_empty() {
         return 0;
     }
@@ -112,7 +186,7 @@ fn filter_by_last_field(data: &mut [u8]) -> usize {
 
         let line = &data[read_pos..line_end];
         let ifname = extract_last_field(line);
-        let hide = !ifname.is_empty() && is_vpn_iface_bytes(ifname);
+        let hide = !ifname.is_empty() && is_vpn(ifname);
 
         if !hide {
             let line_len = line_end - read_pos;
@@ -373,56 +447,36 @@ pub fn filter_netlink_dump(data: &mut [u8], vpn_indices: &[u32]) -> usize {
 mod tests {
     use super::*;
 
-    #[test]
-    fn detects_tun0() {
-        assert!(is_vpn_iface_bytes(b"tun0"));
-        assert!(is_vpn_iface_bytes(b"tun1"));
-        assert!(is_vpn_iface_bytes(b"TUN0"));
+    /// Mock VPN-name predicate for /proc filter tests, so they don't
+    /// depend on a real /sys/class/net layout.
+    fn mock_is_vpn(name: &[u8]) -> bool {
+        name.starts_with(b"tun") || name.starts_with(b"wg") || name.starts_with(b"ppp")
     }
 
     #[test]
-    fn detects_wireguard() {
-        assert!(is_vpn_iface_bytes(b"wg0"));
-        assert!(is_vpn_iface_bytes(b"wg-client"));
-    }
-
-    #[test]
-    fn detects_ppp_and_l2tp() {
-        assert!(is_vpn_iface_bytes(b"ppp0"));
-        assert!(is_vpn_iface_bytes(b"l2tp0"));
-    }
-
-    #[test]
-    fn detects_vpn_substring() {
-        assert!(is_vpn_iface_bytes(b"my-vpn-iface"));
-        assert!(is_vpn_iface_bytes(b"custom_VPN_42"));
-    }
-
-    #[test]
-    fn rejects_real_interfaces() {
-        assert!(!is_vpn_iface_bytes(b"lo"));
-        assert!(!is_vpn_iface_bytes(b"wlan0"));
-        assert!(!is_vpn_iface_bytes(b"rmnet16"));
-        assert!(!is_vpn_iface_bytes(b"eth0"));
-        assert!(!is_vpn_iface_bytes(b"dummy0"));
-    }
-
-    #[test]
-    fn handles_embedded_nul_from_ifreq() {
-        // IFNAMSIZ is 16 — simulate a kernel-filled ifr_name buffer
-        let mut buf = [0u8; 16];
-        buf[..4].copy_from_slice(b"tun0");
-        assert!(is_vpn_iface_bytes(&buf));
-
-        buf.fill(0);
-        buf[..5].copy_from_slice(b"wlan0");
-        assert!(!is_vpn_iface_bytes(&buf));
-    }
-
-    #[test]
-    fn empty_name_is_not_vpn() {
+    fn empty_name_short_circuits() {
+        // No sysfs read should happen — ensured by the empty-trim check.
         assert!(!is_vpn_iface_bytes(b""));
         assert!(!is_vpn_iface_bytes(&[0u8; 16]));
+    }
+
+    #[test]
+    fn never_hide_short_circuits() {
+        // CLAT and Thread BR must NEVER be flagged, even though the
+        // kernel reports them as TUN. This stays true on the host
+        // because is_never_hide answers without touching sysfs.
+        assert!(!is_vpn_iface_bytes(b"v4-rmnet0"));
+        assert!(!is_vpn_iface_bytes(b"v4-wlan0"));
+        assert!(!is_vpn_iface_bytes(b"thread-wpan"));
+    }
+
+    #[test]
+    fn trims_nul_in_ifreq_buffer() {
+        // IFNAMSIZ-style buffer with trailing NULs — the never-hide
+        // check should see the trimmed name, not the full 16 bytes.
+        let mut buf = [0u8; 16];
+        buf[..9].copy_from_slice(b"v4-rmnet0");
+        assert!(!is_vpn_iface_bytes(&buf));
     }
 
     #[test]
@@ -432,7 +486,7 @@ mod tests {
                        tun0\t00000000\t010010AC\n\
                        rmnet0\tFEFFFFFF\t00000000\n";
         let mut buf = input.to_vec();
-        let new_len = filter_route_buf(&mut buf);
+        let new_len = filter_route_buf_with(&mut buf, mock_is_vpn);
         let result = core::str::from_utf8(&buf[..new_len]).unwrap();
         assert!(result.contains("Iface\t"));
         assert!(result.contains("wlan0\t"));
@@ -446,7 +500,7 @@ mod tests {
                        wlan0\t00000000\n\
                        rmnet0\tFEFFFFFF\n";
         let mut buf = input.to_vec();
-        let new_len = filter_route_buf(&mut buf);
+        let new_len = filter_route_buf_with(&mut buf, mock_is_vpn);
         assert_eq!(new_len, input.len());
     }
 
@@ -454,7 +508,7 @@ mod tests {
     fn filter_route_removes_wg_lines() {
         let input = b"Iface\tDest\nwg0\t00000000\nwlan0\t00000000\n";
         let mut buf = input.to_vec();
-        let new_len = filter_route_buf(&mut buf);
+        let new_len = filter_route_buf_with(&mut buf, mock_is_vpn);
         let result = core::str::from_utf8(&buf[..new_len]).unwrap();
         assert!(!result.contains("wg0"));
         assert!(result.contains("wlan0"));
@@ -466,7 +520,7 @@ mod tests {
         assert_eq!(filter_route_buf(&mut buf), 0);
     }
 
-    // ---- Netlink filter tests ----
+    // ---- Netlink filter tests (no iface-name dependency) ----
 
     /// Build a minimal nlmsghdr + ifaddrmsg/ifinfomsg for testing.
     /// `msg_type` is RTM_NEWADDR (20) or RTM_NEWLINK (16).

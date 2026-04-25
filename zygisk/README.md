@@ -113,7 +113,9 @@ cargo ndk -t arm64-v8a build --release \
 
 ## Filter logic
 
-VPN interface prefixes: `tun`, `ppp`, `tap`, `wg`, `ipsec`, `xfrm`, `utun`, `l2tp`, `gre`, plus anything containing the substring `vpn`. Matches the list in the [LSPosed companion](../lsposed/).
+For each interface name encountered, vpnhide reads `/sys/class/net/<name>/type` once (cached after) and treats the iface as a VPN tunnel iff the kernel-reported ARPHRD class is one of `NONE`/`PPP`/`TUNNEL`/`TUNNEL6`/`SIT`/`IPGRE`. Renamed `tun` interfaces (e.g. `if33`) are still caught because the kernel-set type is not forgeable by an unprivileged process.
+
+Two iface name patterns are explicit exceptions and are never hidden — `v4-*` (CLAT, required on IPv6-only carriers) and `thread-wpan` (Thread border router on Pixel 7+). Both are tunnel-class from the kernel's POV but breaking them would break end-user connectivity. Source of truth: [`data/interfaces.toml`](../data/interfaces.toml).
 
 ## Known limitations
 

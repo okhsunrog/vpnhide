@@ -30,7 +30,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import dev.okhsunrog.vpnhide.generated.IfaceLists
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,7 +66,7 @@ internal suspend fun isVpnActive(): Boolean =
             output
                 .lines()
                 .map { it.trim() }
-                .filter { name -> IfaceLists.isVpnIface(name) }
+                .filter { name -> IfaceTypeProbe.shouldHide(name) }
         if (vpnIfaces.isEmpty()) return@withContext false
         vpnIfaces.any { iface ->
             val (_, state) =
@@ -748,7 +747,7 @@ private fun checkNetworkInterfaceEnum(name: String): CheckResult =
         val vpnNames = mutableListOf<String>()
         for (iface in ifaces) {
             allNames.add(iface.name)
-            if (IfaceLists.isVpnIface(iface.name)) vpnNames.add(iface.name)
+            if (IfaceTypeProbe.shouldHide(iface.name)) vpnNames.add(iface.name)
         }
         val detail =
             if (vpnNames.isEmpty()) {
@@ -815,7 +814,7 @@ private fun checkLinkPropertiesIfname(
     val ifname = lp.interfaceName ?: "(null)"
     val routes = lp.routes.map { "${it.destination} via ${it.gateway} dev ${it.`interface`}" }
     val dns = lp.dnsServers.map { it.hostAddress ?: "?" }
-    val isVpn = IfaceLists.isVpnIface(ifname)
+    val isVpn = IfaceTypeProbe.shouldHide(ifname)
     val detail =
         if (!isVpn) {
             "PASS: ifname=$ifname, ${routes.size} routes, dns=[${dns.joinToString()}]"
@@ -835,7 +834,7 @@ private fun checkLinkPropertiesRoutes(
     val vpnRoutes =
         routes.filter { route ->
             val iface = route.`interface` ?: return@filter false
-            IfaceLists.isVpnIface(iface)
+            IfaceTypeProbe.shouldHide(iface)
         }
     val detail =
         if (vpnRoutes.isEmpty()) {
@@ -872,7 +871,7 @@ private fun checkProcNetRouteJava(name: String): CheckResult =
                 // /proc/net/route is whitespace-separated; check
                 // each token instead of just startsWith on the raw
                 // line so we don't match e.g. an IP-as-hex by chance.
-                if (line!!.split(Regex("\\s+")).any(IfaceLists::isVpnIface)) {
+                if (line!!.split(Regex("\\s+")).any(IfaceTypeProbe::shouldHide)) {
                     vpnLines.add(line!!.take(60))
                 }
             }
