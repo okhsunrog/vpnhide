@@ -1,0 +1,58 @@
+# Single source of truth for VPN-like network interface name patterns.
+# A name matching any rule below is treated as a tunnel and hidden from
+# target apps (kmod) / from the calling process (zygisk + lsposed).
+#
+# Read at codegen time by scripts/codegen-interfaces.py, which renders
+# four matchers (kmod C, zygisk Rust, lsposed-native Rust, lsposed
+# Kotlin). Sync between platforms is enforced by a CI lint step that
+# re-runs the codegen and fails if the generated files drift.
+#
+# Match grammar (intentionally tiny so all four targets implement it
+# identically without depending on a regex engine — kernel C has none):
+#
+#   { exact   = "lo"     }                  name == "lo"
+#   { prefix  = "rmnet"  }                  name.starts_with("rmnet")
+#   { prefix  = "wlan", suffix = "digits" } starts_with + rest is all ASCII digits
+#   { contains = "vpn"   }                  needle anywhere in name
+#
+# All matches are ASCII case-insensitive.
+
+[[vpn]]
+match = { prefix = "tun" }
+note = "OpenVPN, WireGuard userspace, Tailscale, generic tunneling"
+
+[[vpn]]
+match = { prefix = "tap" }
+note = "OpenVPN bridged"
+
+[[vpn]]
+match = { prefix = "wg" }
+note = "WireGuard kernel"
+
+[[vpn]]
+match = { prefix = "ppp" }
+note = "PPTP / L2TP PPP tunnels"
+
+[[vpn]]
+match = { prefix = "ipsec" }
+note = "Android built-in IPsec VPN"
+
+[[vpn]]
+match = { prefix = "xfrm" }
+note = "kernel IPsec XFRM framework"
+
+[[vpn]]
+match = { prefix = "utun" }
+note = "Apple-style, rare on Android"
+
+[[vpn]]
+match = { prefix = "l2tp" }
+note = "L2TP"
+
+[[vpn]]
+match = { prefix = "gre" }
+note = "GRE tunnels"
+
+[[vpn]]
+match = { contains = "vpn" }
+note = "catch-all for renamed clients (myvpn0, vpn-client, xvpn1, ...)"

@@ -27,6 +27,7 @@
 //! ensures we only actually do work for targeted apps.
 
 mod filter;
+mod generated;
 mod hooks;
 mod shadowhook;
 

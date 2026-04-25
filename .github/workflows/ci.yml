@@ -38,6 +38,16 @@ jobs:
       - name: Mark workspace safe
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # Codegen
+      - name: Verify generated iface lists are up to date
+        run: |
+          python3 scripts/codegen-interfaces.py
+          if ! git diff --quiet; then
+            echo "::error::data/interfaces.toml is out of sync with generated files. Run scripts/codegen-interfaces.py and commit the result." >&2
+            git --no-pager diff
+            exit 1
+          fi
+
       # Rust
       - name: rustfmt
         run: |

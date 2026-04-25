@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import dev.okhsunrog.vpnhide.generated.IfaceLists
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -44,7 +45,6 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 private const val TAG = "VPNHideTest"
-private val VPN_PREFIXES = listOf("tun", "wg", "ppp", "tap", "ipsec", "xfrm")
 
 data class CheckResult(
     val name: String,
@@ -67,9 +67,7 @@ internal suspend fun isVpnActive(): Boolean =
             output
                 .lines()
                 .map { it.trim() }
-                .filter { name ->
-                    name.isNotEmpty() && VPN_PREFIXES.any { name.startsWith(it) }
-                }
+                .filter { name -> IfaceLists.isVpnIface(name) }
         if (vpnIfaces.isEmpty()) return@withContext false
         vpnIfaces.any { iface ->
             val (_, state) =
@@ -750,7 +748,7 @@ private fun checkNetworkInterfaceEnum(name: String): CheckResult =
         val vpnNames = mutableListOf<String>()
         for (iface in ifaces) {
             allNames.add(iface.name)
-            if (VPN_PREFIXES.any { iface.name.startsWith(it) }) vpnNames.add(iface.name)
+            if (IfaceLists.isVpnIface(iface.name)) vpnNames.add(iface.name)
         }
         val detail =
             if (vpnNames.isEmpty()) {
@@ -817,7 +815,7 @@ private fun checkLinkPropertiesIfname(
     val ifname = lp.interfaceName ?: "(null)"
     val routes = lp.routes.map { "${it.destination} via ${it.gateway} dev ${it.`interface`}" }
     val dns = lp.dnsServers.map { it.hostAddress ?: "?" }
-    val isVpn = VPN_PREFIXES.any { ifname.startsWith(it) }
+    val isVpn = IfaceLists.isVpnIface(ifname)
     val detail =
         if (!isVpn) {
             "PASS: ifname=$ifname, ${routes.size} routes, dns=[${dns.joinToString()}]"
@@ -837,7 +835,7 @@ private fun checkLinkPropertiesRoutes(
     val vpnRoutes =
         routes.filter { route ->
             val iface = route.`interface` ?: return@filter false
-            VPN_PREFIXES.any { iface.startsWith(it) }
+            IfaceLists.isVpnIface(iface)
         }
     val detail =
         if (vpnRoutes.isEmpty()) {
@@ -871,7 +869,12 @@ private fun checkProcNetRouteJava(name: String): CheckResult =
             var line: String?
             while (br.readLine().also { line = it } != null) {
                 allLines.add(line!!)
-                if (VPN_PREFIXES.any { line!!.startsWith(it) }) vpnLines.add(line!!.take(60))
+                // /proc/net/route is whitespace-separated; check
+                // each token instead of just startsWith on the raw
+                // line so we don't match e.g. an IP-as-hex by chance.
+                if (line!!.split(Regex("\\s+")).any(IfaceLists::isVpnIface)) {
+                    vpnLines.add(line!!.take(60))
+                }
             }
         }
         val detail =

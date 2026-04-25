@@ -1,14 +1,15 @@
+mod generated;
+
 use jni::JNIEnv;
 use jni::objects::JClass;
 use jni::sys::jstring;
 use std::ffi::CStr;
 use std::io::ErrorKind;
 
-const VPN_PREFIXES: &[&str] = &["tun", "wg", "ppp", "tap", "ipsec", "xfrm"];
+use crate::generated::iface_lists::matches_vpn;
 
 fn is_vpn_iface(name: &str) -> bool {
-    let n = name.to_ascii_lowercase();
-    VPN_PREFIXES.iter().any(|p| n.starts_with(p)) || n.contains("vpn")
+    matches_vpn(name.as_bytes())
 }
 
 fn logi(msg: &str) {
@@ -267,7 +268,12 @@ fn check_proc_file(path: &str) -> String {
                 }
                 total += 1;
                 logi(&format!("  {path} line: {}", &line[..line.len().min(120)]));
-                if VPN_PREFIXES.iter().any(|p| line.contains(p)) {
+                // /proc/net/route and /proc/net/ipv6_route are
+                // whitespace-separated; an iface name is one of the
+                // tokens. Token-by-token check avoids the false
+                // positive of substring "tun" or "gre" appearing
+                // inside a hex-encoded IP address.
+                if line.split_whitespace().any(is_vpn_iface) {
                     vpn_lines.push(line[..line.len().min(80)].to_string());
                 }
             }

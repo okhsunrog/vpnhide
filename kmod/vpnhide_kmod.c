@@ -37,6 +37,8 @@
 #include <linux/inetdevice.h>
 #include <net/if_inet6.h>
 
+#include "generated/iface_lists.h"
+
 #define MODNAME "vpnhide"
 #define MAX_TARGET_UIDS 64
 
@@ -53,30 +55,10 @@ static bool debug_enabled;
 	} while (0)
 
 /* ------------------------------------------------------------------ */
-/*  VPN interface name matching                                       */
+/*  VPN interface name matching — see data/interfaces.toml            */
 /* ------------------------------------------------------------------ */
 
-static const char *const vpn_prefixes[] = {
-	"tun", "ppp", "tap", "wg", "ipsec", "xfrm", "utun", "l2tp", "gre",
-};
-
-static bool is_vpn_ifname(const char *name)
-{
-	int i;
-
-	if (!name || !*name)
-		return false;
-
-	for (i = 0; i < ARRAY_SIZE(vpn_prefixes); i++) {
-		if (strncmp(name, vpn_prefixes[i], strlen(vpn_prefixes[i])) ==
-		    0)
-			return true;
-	}
-	if (strstr(name, "vpn") || strstr(name, "VPN"))
-		return true;
-
-	return false;
-}
+#define is_vpn_ifname(name) vpnhide_iface_is_vpn(name)
 
 /* ------------------------------------------------------------------ */
 /*  Target UID list                                                   */
