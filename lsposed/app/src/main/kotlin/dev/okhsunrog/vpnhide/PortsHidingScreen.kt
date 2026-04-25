@@ -291,12 +291,6 @@ fun PortsHidingScreen(
                         }
                     }
 
-//                    SnackbarHost(
-//                        hostState = snackbarHostState,
-//                        modifier = Modifier
-//                            .fillMaxWidth()
-//                            .align(Alignment.TopCenter),
-//                    )
                     SnackbarHost(
                         hostState = snackbarHostState,
                         modifier =
