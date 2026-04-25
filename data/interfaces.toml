@@ -44,6 +44,47 @@ init.rc inside the com.android.tethering APEX (the same APEX that \
 delivers VPN-related code). Used for Matter / smart-home Thread mesh, \
 not connectivity for normal apps."""
 
+# Standard kernel tunnel placeholders. Each tunnel kmod (sit, ipip,
+# ip6_tunnel, ip_vti, ip6_vti, ip_gre) registers a *0 netdev when it
+# loads — it sits there DOWN with no addresses. Confirmed present on
+# stock Pixel 7 / Pixel 8 Pro (Android 16) without any VPN; hiding
+# them would create a clear vpnhide fingerprint. Real tunnels created
+# later get *1, *2, ... and stay hidden.
+
+[[never_hide]]
+match = { exact = "sit0" }
+note = "IPv6-in-IPv4 tunnel placeholder (kmod: sit). ARPHRD_SIT=776."
+
+[[never_hide]]
+match = { exact = "tunl0" }
+note = "IPv4 IPIP tunnel placeholder (kmod: ipip). ARPHRD_TUNNEL=768."
+
+[[never_hide]]
+match = { exact = "ip6tnl0" }
+note = "IPv6 tunnel placeholder (kmod: ip6_tunnel). ARPHRD_TUNNEL6=769."
+
+[[never_hide]]
+match = { exact = "ip_vti0" }
+note = "IPv4 VTI (IPsec) placeholder (kmod: ip_vti). ARPHRD_TUNNEL=768."
+
+[[never_hide]]
+match = { exact = "ip6_vti0" }
+note = "IPv6 VTI (IPsec) placeholder (kmod: ip6_vti). ARPHRD_TUNNEL6=769."
+
+[[never_hide]]
+match = { exact = "gre0" }
+note = "GRE tunnel placeholder (kmod: ip_gre). ARPHRD_IPGRE=778."
+
+[[never_hide]]
+match = { exact = "ipsec250" }
+note = """Android system IPsec/XFRM placeholder. Created by the platform \
+on stock Android (observed on Pixel 8 Pro / Android 16) as ARPHRD_NONE \
+without a tun_flags attr — looks like a TUN VPN by ARPHRD alone, but is \
+not. The numeric suffix is the system token; if vendor builds use a \
+different one we'll add it explicitly rather than blanket-whitelisting \
+ipsec* (which would let real IKEv2 VPNs created via IpSecTunnelInterface \
+slip past)."""
+
 
 # ── Test vectors ──────────────────────────────────────────────────────
 # `is_never_hide = true` means the name is in the whitelist above and
@@ -71,6 +112,40 @@ is_never_hide = true
 
 [[test]]
 name = "Thread-Wpan"   # case-insensitivity
+is_never_hide = true
+
+# Standard kernel tunnel placeholders — must slip through.
+
+[[test]]
+name = "sit0"
+is_never_hide = true
+
+[[test]]
+name = "tunl0"
+is_never_hide = true
+
+[[test]]
+name = "ip6tnl0"
+is_never_hide = true
+
+[[test]]
+name = "ip_vti0"
+is_never_hide = true
+
+[[test]]
+name = "ip6_vti0"
+is_never_hide = true
+
+[[test]]
+name = "gre0"
+is_never_hide = true
+
+[[test]]
+name = "ipsec250"
+is_never_hide = true
+
+[[test]]
+name = "IPSec250"      # case-insensitivity
 is_never_hide = true
 
 # Negative cases — must NOT be treated as exceptions.
@@ -101,6 +176,48 @@ is_never_hide = false
 
 [[test]]
 name = "if33"          # the renamed-tun trick from issue #86
+is_never_hide = false
+
+# Real tunnels created on top of the same kmods (index 1+) — must hide.
+
+[[test]]
+name = "sit1"
+is_never_hide = false
+
+[[test]]
+name = "tunl1"
+is_never_hide = false
+
+[[test]]
+name = "ip6tnl1"
+is_never_hide = false
+
+[[test]]
+name = "ip_vti1"
+is_never_hide = false
+
+[[test]]
+name = "ip6_vti1"
+is_never_hide = false
+
+[[test]]
+name = "gre1"
+is_never_hide = false
+
+# Other ipsec* tokens — must hide (legit Android IKEv2 VPN through
+# IpSecTunnelInterface API uses arbitrary tokens too; only the known
+# system placeholder 250 is whitelisted).
+
+[[test]]
+name = "ipsec0"
+is_never_hide = false
+
+[[test]]
+name = "ipsec1"
+is_never_hide = false
+
+[[test]]
+name = "ipsec1234"
 is_never_hide = false
 
 [[test]]

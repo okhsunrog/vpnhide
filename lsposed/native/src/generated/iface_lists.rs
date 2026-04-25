@@ -75,6 +75,34 @@ pub fn is_never_hide(name: &[u8]) -> bool {
     if equals_ci(name, b"thread-wpan") {
         return true;
     }
+    // IPv6-in-IPv4 tunnel placeholder (kmod: sit). ARPHRD_SIT=776.
+    if equals_ci(name, b"sit0") {
+        return true;
+    }
+    // IPv4 IPIP tunnel placeholder (kmod: ipip). ARPHRD_TUNNEL=768.
+    if equals_ci(name, b"tunl0") {
+        return true;
+    }
+    // IPv6 tunnel placeholder (kmod: ip6_tunnel). ARPHRD_TUNNEL6=769.
+    if equals_ci(name, b"ip6tnl0") {
+        return true;
+    }
+    // IPv4 VTI (IPsec) placeholder (kmod: ip_vti). ARPHRD_TUNNEL=768.
+    if equals_ci(name, b"ip_vti0") {
+        return true;
+    }
+    // IPv6 VTI (IPsec) placeholder (kmod: ip6_vti). ARPHRD_TUNNEL6=769.
+    if equals_ci(name, b"ip6_vti0") {
+        return true;
+    }
+    // GRE tunnel placeholder (kmod: ip_gre). ARPHRD_IPGRE=778.
+    if equals_ci(name, b"gre0") {
+        return true;
+    }
+    // Android system IPsec/XFRM placeholder. Created by the platform on stock Android (observed on Pixel 8 Pro / Android 16) as ARPHRD_NONE without a tun_flags attr — looks like a TUN VPN by ARPHRD alone, but is not. The numeric suffix is the system token; if vendor builds use a different one we'll add it explicitly rather than blanket-whitelisting ipsec* (which would let real IKEv2 VPNs created via IpSecTunnelInterface slip past).
+    if equals_ci(name, b"ipsec250") {
+        return true;
+    }
     false
 }
 
@@ -91,6 +119,14 @@ mod tests {
         assert_eq!(is_never_hide(b"v4-x"), true, "is_never_hide('v4-x')");
         assert_eq!(is_never_hide(b"thread-wpan"), true, "is_never_hide('thread-wpan')");
         assert_eq!(is_never_hide(b"Thread-Wpan"), true, "is_never_hide('Thread-Wpan')");
+        assert_eq!(is_never_hide(b"sit0"), true, "is_never_hide('sit0')");
+        assert_eq!(is_never_hide(b"tunl0"), true, "is_never_hide('tunl0')");
+        assert_eq!(is_never_hide(b"ip6tnl0"), true, "is_never_hide('ip6tnl0')");
+        assert_eq!(is_never_hide(b"ip_vti0"), true, "is_never_hide('ip_vti0')");
+        assert_eq!(is_never_hide(b"ip6_vti0"), true, "is_never_hide('ip6_vti0')");
+        assert_eq!(is_never_hide(b"gre0"), true, "is_never_hide('gre0')");
+        assert_eq!(is_never_hide(b"ipsec250"), true, "is_never_hide('ipsec250')");
+        assert_eq!(is_never_hide(b"IPSec250"), true, "is_never_hide('IPSec250')");
         assert_eq!(is_never_hide(b"v4-"), false, "is_never_hide('v4-')");
         assert_eq!(is_never_hide(b"v4"), false, "is_never_hide('v4')");
         assert_eq!(is_never_hide(b"tun0"), false, "is_never_hide('tun0')");
@@ -98,6 +134,15 @@ mod tests {
         assert_eq!(is_never_hide(b"wlan0"), false, "is_never_hide('wlan0')");
         assert_eq!(is_never_hide(b"thread-wpan-extra"), false, "is_never_hide('thread-wpan-extra')");
         assert_eq!(is_never_hide(b"if33"), false, "is_never_hide('if33')");
+        assert_eq!(is_never_hide(b"sit1"), false, "is_never_hide('sit1')");
+        assert_eq!(is_never_hide(b"tunl1"), false, "is_never_hide('tunl1')");
+        assert_eq!(is_never_hide(b"ip6tnl1"), false, "is_never_hide('ip6tnl1')");
+        assert_eq!(is_never_hide(b"ip_vti1"), false, "is_never_hide('ip_vti1')");
+        assert_eq!(is_never_hide(b"ip6_vti1"), false, "is_never_hide('ip6_vti1')");
+        assert_eq!(is_never_hide(b"gre1"), false, "is_never_hide('gre1')");
+        assert_eq!(is_never_hide(b"ipsec0"), false, "is_never_hide('ipsec0')");
+        assert_eq!(is_never_hide(b"ipsec1"), false, "is_never_hide('ipsec1')");
+        assert_eq!(is_never_hide(b"ipsec1234"), false, "is_never_hide('ipsec1234')");
         assert_eq!(is_never_hide(b""), false, "is_never_hide('')");
     }
 

@@ -30,6 +30,14 @@ int main(void)
 	check("v4-x", true);
 	check("thread-wpan", true);
 	check("Thread-Wpan", true);
+	check("sit0", true);
+	check("tunl0", true);
+	check("ip6tnl0", true);
+	check("ip_vti0", true);
+	check("ip6_vti0", true);
+	check("gre0", true);
+	check("ipsec250", true);
+	check("IPSec250", true);
 	check("v4-", false);
 	check("v4", false);
 	check("tun0", false);
@@ -37,12 +45,21 @@ int main(void)
 	check("wlan0", false);
 	check("thread-wpan-extra", false);
 	check("if33", false);
+	check("sit1", false);
+	check("tunl1", false);
+	check("ip6tnl1", false);
+	check("ip_vti1", false);
+	check("ip6_vti1", false);
+	check("gre1", false);
+	check("ipsec0", false);
+	check("ipsec1", false);
+	check("ipsec1234", false);
 	check("", false);
 
 	if (failures) {
 		fprintf(stderr, "%d test(s) failed\n", failures);
 		return 1;
 	}
-	printf("OK: 14 vectors passed\n");
+	printf("OK: 31 vectors passed\n");
 	return 0;
 }
