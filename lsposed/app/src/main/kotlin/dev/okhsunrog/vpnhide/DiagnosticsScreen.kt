@@ -60,13 +60,17 @@ internal data class CheckResults(
 
 internal suspend fun isVpnActive(): Boolean =
     withContext(Dispatchers.IO) {
+        // Populate the ARPHRD cache once via root — untrusted_app can't
+        // read /sys/class/net/<name>/type directly under SELinux. After
+        // this prefetch, shouldHide / shouldHideViaRoot are cache hits.
+        IfaceTypeProbe.prefetchAllViaRoot()
         val (exitCode, output) = suExec("ls /sys/class/net/ 2>/dev/null")
         if (exitCode != 0) return@withContext false
         val vpnIfaces =
             output
                 .lines()
                 .map { it.trim() }
-                .filter { name -> IfaceTypeProbe.shouldHide(name) }
+                .filter { name -> IfaceTypeProbe.shouldHideViaRoot(name) }
         if (vpnIfaces.isEmpty()) return@withContext false
         vpnIfaces.any { iface ->
             val (_, state) =
@@ -747,7 +751,7 @@ private fun checkNetworkInterfaceEnum(name: String): CheckResult =
         val vpnNames = mutableListOf<String>()
         for (iface in ifaces) {
             allNames.add(iface.name)
-            if (IfaceTypeProbe.shouldHide(iface.name)) vpnNames.add(iface.name)
+            if (IfaceTypeProbe.shouldHideViaRoot(iface.name)) vpnNames.add(iface.name)
         }
         val detail =
             if (vpnNames.isEmpty()) {
@@ -814,7 +818,7 @@ private fun checkLinkPropertiesIfname(
     val ifname = lp.interfaceName ?: "(null)"
     val routes = lp.routes.map { "${it.destination} via ${it.gateway} dev ${it.`interface`}" }
     val dns = lp.dnsServers.map { it.hostAddress ?: "?" }
-    val isVpn = IfaceTypeProbe.shouldHide(ifname)
+    val isVpn = IfaceTypeProbe.shouldHideViaRoot(ifname)
     val detail =
         if (!isVpn) {
             "PASS: ifname=$ifname, ${routes.size} routes, dns=[${dns.joinToString()}]"
@@ -834,7 +838,7 @@ private fun checkLinkPropertiesRoutes(
     val vpnRoutes =
         routes.filter { route ->
             val iface = route.`interface` ?: return@filter false
-            IfaceTypeProbe.shouldHide(iface)
+            IfaceTypeProbe.shouldHideViaRoot(iface)
         }
     val detail =
         if (vpnRoutes.isEmpty()) {
@@ -871,7 +875,7 @@ private fun checkProcNetRouteJava(name: String): CheckResult =
                 // /proc/net/route is whitespace-separated; check
                 // each token instead of just startsWith on the raw
                 // line so we don't match e.g. an IP-as-hex by chance.
-                if (line!!.split(Regex("\\s+")).any(IfaceTypeProbe::shouldHide)) {
+                if (line!!.split(Regex("\\s+")).any(IfaceTypeProbe::shouldHideViaRoot)) {
                     vpnLines.add(line!!.take(60))
                 }
             }

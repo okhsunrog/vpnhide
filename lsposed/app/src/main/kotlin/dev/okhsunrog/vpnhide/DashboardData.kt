@@ -1115,12 +1115,15 @@ internal fun loadDashboardState(
 }
 
 private fun isVpnActiveSync(): Boolean {
+    // Ask the kernel via ARPHRD type, not by name — a renamed tun (issue
+    // #86) has the wrong name but the right ARPHRD. Untrusted_app SELinux
+    // blocks direct sysfs reads, so go through `su`.
+    IfaceTypeProbe.prefetchAllViaRoot()
     val (exitCode, output) = suExec("ls /sys/class/net/ 2>/dev/null")
     if (exitCode != 0) return false
-    val vpnPrefixes = listOf("tun", "wg", "ppp", "tap", "ipsec", "xfrm")
     val vpnIfaces =
         output.lines().map { it.trim() }.filter { name ->
-            name.isNotEmpty() && vpnPrefixes.any { name.startsWith(it) }
+            name.isNotEmpty() && IfaceTypeProbe.shouldHideViaRoot(name)
         }
     if (vpnIfaces.isEmpty()) {
         VpnHideLog.d(TAG, "isVpnActive: no VPN interfaces found")
