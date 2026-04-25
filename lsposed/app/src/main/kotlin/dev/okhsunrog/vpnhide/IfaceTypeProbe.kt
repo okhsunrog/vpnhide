@@ -21,19 +21,19 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Per-name cache: read once on first sighting, keep forever. Names
  * are stable in practice — interfaces come and go but rarely change
- * type under the same name. Only successful reads are cached, so a
- * direct-read failure (e.g. SELinux denial in app context) doesn't
- * poison subsequent root-fallback lookups.
+ * type under the same name. Only successful reads land in the cache,
+ * so a direct-read failure (e.g. SELinux denial in app context)
+ * doesn't poison subsequent root-fallback lookups.
  *
- * Two read paths:
- *   - direct File read — for hook context (system_server, hook
- *     processes) where sysfs is reachable. Used by [shouldHide].
- *   - root via `suExec` — for app context where SELinux blocks
- *     untrusted_app's access to `/sys/class/net/<name>/type`.
- *     Used by [shouldHideViaRoot] / [prefetchViaRoot]. The diagnostic
- *     UI specifically needs this because the app hides VPN ifaces
- *     from itself for self-test, so it has to bypass its own filter
- *     via root to learn the ground truth.
+ * Two read paths share the same matching/cache logic via [shouldHideWith]:
+ *   - [shouldHide]: direct File read — for hook context
+ *     (system_server, hook processes) where sysfs is reachable.
+ *   - [shouldHideViaRoot]: root via `suExec` — for app context where
+ *     SELinux blocks untrusted_app's access to
+ *     `/sys/class/net/<name>/type`. The diagnostic UI specifically
+ *     needs this because the app hides VPN ifaces from itself for
+ *     self-test, so it has to bypass its own filter via root to learn
+ *     the ground truth.
  */
 internal object IfaceTypeProbe {
     /** ARPHRD_* values from `<linux/if_arp.h>` that mean "tunnel". */
@@ -50,41 +50,11 @@ internal object IfaceTypeProbe {
     /** ARPHRD value per name. Only successful reads land here. */
     private val arphrdCache = ConcurrentHashMap<String, Int>()
 
-    /** True if vpnhide should hide this iface from target apps. Direct sysfs read. */
-    fun shouldHide(name: String): Boolean {
-        if (name.isEmpty()) return false
-        if (IfaceLists.isNeverHide(name)) return false
-        return isTunnel(name)
-    }
+    /** Hook context: read sysfs directly. */
+    fun shouldHide(name: String): Boolean = shouldHideWith(name, ::readArphrd)
 
-    /** True if the kernel classifies this iface as a tunnel. Direct sysfs read. */
-    fun isTunnel(name: String): Boolean {
-        if (name.isEmpty()) return false
-        arphrdCache[name]?.let { return TUNNEL_ARPHRDS.contains(it) }
-        val arphrd = readArphrd(name) ?: return false
-        arphrdCache[name] = arphrd
-        return TUNNEL_ARPHRDS.contains(arphrd)
-    }
-
-    /**
-     * App-context variant: same as [shouldHide] but reads sysfs through
-     * `su` because untrusted_app SELinux policy denies direct access to
-     * `/sys/class/net/<name>/type`. Falls back to direct read if the
-     * cache already has a value (filled by an earlier prefetch or hook).
-     */
-    fun shouldHideViaRoot(name: String): Boolean {
-        if (name.isEmpty()) return false
-        if (IfaceLists.isNeverHide(name)) return false
-        return isTunnelViaRoot(name)
-    }
-
-    fun isTunnelViaRoot(name: String): Boolean {
-        if (name.isEmpty()) return false
-        arphrdCache[name]?.let { return TUNNEL_ARPHRDS.contains(it) }
-        val arphrd = readArphrdViaRoot(name) ?: return false
-        arphrdCache[name] = arphrd
-        return TUNNEL_ARPHRDS.contains(arphrd)
-    }
+    /** App context: read sysfs via `su` (SELinux blocks the direct path). */
+    fun shouldHideViaRoot(name: String): Boolean = shouldHideWith(name, ::readArphrdViaRoot)
 
     /**
      * Batch-fill the cache for every netdev currently in `/sys/class/net/`
@@ -96,10 +66,8 @@ internal object IfaceTypeProbe {
         val (exit, out) =
             suExec(
                 """
-                for f in /sys/class/net/*/type; do
-                    n=${'$'}(basename ${'$'}(dirname ${'$'}f))
-                    t=${'$'}(cat ${'$'}f 2>/dev/null)
-                    [ -n "${'$'}t" ] && echo "${'$'}n ${'$'}t"
+                for f in /sys/class/net/*; do
+                    [ -f "${'$'}f/type" ] && echo "${'$'}{f##*/} ${'$'}(cat ${'$'}f/type 2>/dev/null)"
                 done
                 """.trimIndent(),
             )
@@ -108,26 +76,34 @@ internal object IfaceTypeProbe {
         for (line in out.lines()) {
             val parts = line.trim().split(Regex("\\s+"))
             if (parts.size != 2) continue
-            val name = parts[0]
             val arphrd = parts[1].toIntOrNull() ?: continue
-            arphrdCache[name] = arphrd
+            arphrdCache[parts[0]] = arphrd
             n++
         }
         return n
     }
 
-    /** Raw `/sys/class/net/<name>/type` integer, or null on read failure. */
-    fun readArphrd(name: String): Int? =
+    private inline fun shouldHideWith(
+        name: String,
+        reader: (String) -> Int?,
+    ): Boolean {
+        if (name.isEmpty() || IfaceLists.isNeverHide(name)) return false
+        val arphrd =
+            arphrdCache[name]
+                ?: reader(name)?.also { arphrdCache[name] = it }
+                ?: return false
+        return arphrd in TUNNEL_ARPHRDS
+    }
+
+    private fun readArphrd(name: String): Int? =
         try {
             File("/sys/class/net/$name/type").readText().trim().toIntOrNull()
         } catch (e: Exception) {
             null
         }
 
-    /** Same as [readArphrd] but routed through `su` for app-context callers. */
-    fun readArphrdViaRoot(name: String): Int? {
+    private fun readArphrdViaRoot(name: String): Int? {
         val (exit, out) = suExec("cat /sys/class/net/$name/type 2>/dev/null")
-        if (exit != 0) return null
-        return out.trim().toIntOrNull()
+        return if (exit == 0) out.trim().toIntOrNull() else null
     }
 }
