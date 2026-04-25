@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -96,7 +97,10 @@ fun AppHidingScreen(
 
     LaunchedEffect(snackMessage) {
         snackMessage?.let {
-            snackbarHostState.showSnackbar(it)
+            snackbarHostState.showSnackbar(
+                message = it,
+                duration = SnackbarDuration.Long,
+            )
             snackMessage = null
         }
     }
@@ -298,33 +302,41 @@ fun AppHidingScreen(
                 )
             }
             Surface(tonalElevation = 3.dp) {
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "H: $hiddenCount · O: $observerCount",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Button(
-                        onClick = {
-                            saving = true
-                            dirty = false
-                        },
-                        enabled = dirty && !saving,
+                Box {
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(stringResource(R.string.btn_save))
+                        Text(
+                            text = "H: $hiddenCount · O: $observerCount",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Button(
+                            onClick = {
+                                saving = true
+                                dirty = false
+                            },
+                            enabled = dirty && !saving,
+                        ) {
+                            Text(stringResource(R.string.btn_save))
+                        }
                     }
+
+                    SnackbarHost(
+                        hostState = snackbarHostState,
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.TopCenter),
+                    )
                 }
             }
         }
-
-        SnackbarHost(snackbarHostState)
     }
 
     if (saving) {
