@@ -53,11 +53,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     rustup target add aarch64-linux-android && \
     rustup component add rustfmt clippy && \
     cargo install cargo-ndk --locked && \
-    # Pre-built uniffi-bindgen so Gobley's :app:installUniffiBindgen task
-    # finds it ready (instead of running `cargo install uniffi-bindgen` on
-    # every CI build — that took ~50 s of the lsposed/lint job each run).
-    # Version range matches lsposed/native/Cargo.toml's `uniffi = "0.29"`.
-    cargo install uniffi-bindgen --version "^0.29" --locked && \
     chmod -R a+w /usr/local/rustup /usr/local/cargo
 
 # ── Android NDK (for zygisk) ─────────────────────────────────────────
