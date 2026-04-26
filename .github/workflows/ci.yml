@@ -59,6 +59,8 @@ jobs:
         run: cd lsposed/native && cargo ndk -t arm64-v8a clippy -- -D warnings
       - name: cargo test (zygisk)
         run: cd zygisk && cargo test
+      - name: cargo test (lsposed native)
+        run: cd lsposed/native && cargo test
 
       # C (kernel module)
       - name: clang-format

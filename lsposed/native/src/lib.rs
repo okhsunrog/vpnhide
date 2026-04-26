@@ -113,7 +113,7 @@ fn check_ioctl_siocgifflags() -> String {
         let name = b"tun0\0";
         ifr.ifr_name[..name.len()].copy_from_slice(&name.map(|b| b as libc::c_char));
 
-        let ret = libc::ioctl(fd, libc::SIOCGIFFLAGS as i32, &ifr);
+        let ret = libc::ioctl(fd, libc::SIOCGIFFLAGS as _, &ifr);
         let err = last_os_errno();
         libc::close(fd);
 
@@ -152,7 +152,7 @@ fn check_ioctl_siocgifmtu() -> String {
         let name = b"tun0\0";
         ifr.ifr_name[..name.len()].copy_from_slice(&name.map(|b| b as libc::c_char));
 
-        let ret = libc::ioctl(fd, libc::SIOCGIFMTU as i32, &ifr);
+        let ret = libc::ioctl(fd, libc::SIOCGIFMTU as _, &ifr);
         let err = last_os_errno();
         libc::close(fd);
 
@@ -186,7 +186,7 @@ fn check_ioctl_siocgifconf() -> String {
         ifc.ifc_len = buf.len() as libc::c_int;
         ifc.ifc_ifcu.ifcu_buf = buf.as_mut_ptr().cast();
 
-        if libc::ioctl(fd, libc::SIOCGIFCONF as i32, &mut ifc) < 0 {
+        if libc::ioctl(fd, libc::SIOCGIFCONF as _, &mut ifc) < 0 {
             let e = last_os_error();
             libc::close(fd);
             return format!("FAIL: ioctl error: {e}");
