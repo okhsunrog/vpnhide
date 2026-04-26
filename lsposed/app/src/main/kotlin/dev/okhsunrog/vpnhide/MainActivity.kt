@@ -28,7 +28,9 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -42,6 +44,16 @@ class MainActivity : ComponentActivity() {
         // Load the user's debug-logging preference before anything else
         // runs so the first suExec + Dashboard reload honor it.
         VpnHideLog.init(applicationContext)
+        // Re-propagate the persisted flag to the on-disk sinks. Reinstalling
+        // a native module wipes its /data/adb/modules/<id>/ tree wholesale
+        // (KSU/Magisk replace it from the zip), so the zygisk-side
+        // debug_logging file disappears even though SharedPrefs still says
+        // ON. Without this re-write zygisk would silently default to
+        // error-only logging until the user toggled off-then-on. Cheap —
+        // two `su` roundtrips on a background dispatcher.
+        lifecycleScope.launch(Dispatchers.IO) {
+            applyDebugLoggingRuntime(VpnHideLog.enabled)
+        }
         setContent { VpnHideApp(onReady = { splashReady.set(true) }) }
     }
 }
