@@ -8,6 +8,10 @@ import java.net.URL
 private const val TAG = "VpnHide-Update"
 private const val GITHUB_RELEASES_URL =
     "https://api.github.com/repos/okhsunrog/vpnhide/releases/latest"
+
+// Fallback PAT to bump GitHub anonymous rate limit (60 req/h) up to
+// 5000 req/h. TODO: rotate this token, current one expires in 2027.
+private const val GITHUB_PAT_FALLBACK = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"
 private const val PREFS_NAME = "vpnhide_prefs"
 private const val KEY_LAST_SEEN_VERSION = "last_seen_version"
 
@@ -103,6 +107,7 @@ fun checkForUpdate(currentVersion: String): UpdateInfo? {
         val conn = URL(GITHUB_RELEASES_URL).openConnection() as HttpURLConnection
         conn.setRequestProperty("User-Agent", "vpnhide-android")
         conn.setRequestProperty("Accept", "application/vnd.github+json")
+        conn.setRequestProperty("Authorization", "Bearer $GITHUB_PAT_FALLBACK")
         conn.connectTimeout = 5_000
         conn.readTimeout = 5_000
         try {

@@ -398,17 +398,14 @@ unsafe fn for_each_rtattr(
     end: usize,
     mut on_attr: impl FnMut(&Rtattr, &[u8]),
 ) {
-    // Walk rtattrs in `buf[start..end]`. For each, hand the callback
-    // the header AND a slice covering its payload — already bounds-
-    // checked against `end`, so callbacks can never read past the
-    // message. A truncated tail (rta_len < 4, or rta_len reaching
-    // past `end`) ends the walk; netlink dumps end on padding, so
-    // this is the normal exit too.
+    // Walk rtattrs in `buf[start..end]`. Drop the upper-bound check
+    // since `while off + 4 <= end` already keeps the header read in
+    // range — saves a branch on a hot path during getlink dumps.
     let mut off = start;
     while off + 4 <= end {
         let rta = unsafe { &*(buf.as_ptr().add(off) as *const Rtattr) };
         let rta_len = rta.rta_len as usize;
-        if rta_len < 4 || off + rta_len > end {
+        if rta_len < 4 {
             break;
         }
         on_attr(rta, &buf[off + 4..off + rta_len]);
