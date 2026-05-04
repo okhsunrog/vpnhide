@@ -83,14 +83,23 @@ fi
 build_ruleset() {
     chain="$1"
     loopback="$2"
-    udp_reject="$3"
     echo "*filter"
     echo ":${chain} - [0:0]"
     if [ -n "$UIDS" ]; then
         echo "$UIDS" | while IFS= read -r uid; do
             [ -z "$uid" ] && continue
-            echo "-A ${chain} -m owner --uid-owner ${uid} -d ${loopback} -p tcp -j REJECT --reject-with tcp-reset"
-            echo "-A ${chain} -m owner --uid-owner ${uid} -d ${loopback} -p udp -j REJECT --reject-with ${udp_reject}"
+
+            # 1. ловим попытки НОВЫХ соединений к localhost
+            # 2. но только если это "подозрительное поведение"
+            echo "-A ${chain} -m owner --uid-owner ${uid} -d ${loopback} -p tcp \
+                  -m conntrack --ctstate NEW \
+                  -m limit --limit 3/second --limit-burst 5 \
+                  -j RETURN"
+
+            # всё что НЕ прошло whitelist — это scan / probing
+            echo "-A ${chain} -m owner --uid-owner ${uid} -d ${loopback} -p tcp \
+                  -m conntrack --ctstate NEW \
+                  -j DROP"
         done
     fi
     echo "-A ${chain} -j RETURN"
