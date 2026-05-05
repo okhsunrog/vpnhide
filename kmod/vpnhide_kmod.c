@@ -967,15 +967,15 @@ static int rt_fill_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 		return 0;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
-	/* GKI 6.1+ mapping: x0=skb, x3=rt */
+	/* GKI 6.1+ mapping: x0=skb, x3=fri */
 	data->skb = (struct sk_buff *)regs->regs[0];
 	{
-		struct rtable *rt = (struct rtable *)regs->regs[3];
-		if (rt)
-			dev = rt->dst.dev;
+		struct fib_rt_info *fri = (struct fib_rt_info *)regs->regs[3];
+		if (fri && fri->fi && fri->fi->fib_nhs > 0)
+			dev = fri->fi->fib_nh[0].nh_common.nhc_dev;
 	}
 #else
-	/* GKI 5.10 / 5.15 mapping: x6=skb, x7=rt/fri */
+	/* GKI 5.10 / 5.15 mapping: x6=skb, x7=rt */
 	data->skb = (struct sk_buff *)regs->regs[6];
 	{
 		struct rtable *rt = (struct rtable *)regs->regs[7];
