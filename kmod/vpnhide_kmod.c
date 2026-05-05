@@ -40,6 +40,10 @@
 #include <linux/skbuff.h>
 #include <linux/inetdevice.h>
 #include <net/if_inet6.h>
+#include <net/ip_fib.h>
+#include <net/ip6_fib.h>
+#include <net/ip6_route.h>
+#include <net/route.h>
 
 #include "generated/iface_lists.h"
 
@@ -805,6 +809,215 @@ static struct kretprobe fib_route_krp = {
 };
 
 /* ================================================================== */
+/*  Hook 7: fib_dump_info — IPv4 routes dump                          */
+/*                                                                    */
+/*  fib_dump_info(skb, portid, seq, event, fri, flags)                */
+/*  arm64: x0=skb, x4=fri (struct fib_rt_info*)                       */
+/* ================================================================== */
+
+struct fib_dump_data {
+	struct sk_buff *skb;
+	unsigned int saved_len;
+	bool should_filter;
+};
+
+static int fib_dump_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct fib_dump_data *data = (void *)ri->data;
+	struct fib_info *fi = NULL;
+
+	data->should_filter = false;
+
+	if (!is_target_uid())
+		return 0;
+
+	/* x0=skb, x4=fi (or fri in 6.1+) */
+	data->skb = (struct sk_buff *)regs->regs[0];
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+	{
+		struct fib_rt_info *fri = (struct fib_rt_info *)regs->regs[4];
+		if (fri)
+			fi = fri->fi;
+	}
+#else
+	fi = (struct fib_info *)regs->regs[4];
+#endif
+
+	rcu_read_lock();
+	if (fi && fi->fib_nhs > 0) {
+		/* Access first nexthop interface */
+		struct net_device *dev = fi->fib_nh[0].nh_common.nhc_dev;
+		if (dev && is_vpn_ifname(dev->name)) {
+			data->saved_len = data->skb ? data->skb->len : 0;
+			data->should_filter = true;
+			vpnhide_dbg("fib_dump_entry: hiding route via %s\n",
+				    dev->name);
+		}
+	}
+	rcu_read_unlock();
+
+	return 0;
+}
+
+static int fib_dump_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct fib_dump_data *data = (void *)ri->data;
+
+	if (!data->should_filter || !data->skb)
+		return 0;
+
+	if (regs_return_value(regs) >= 0) {
+		skb_trim(data->skb, data->saved_len);
+		regs_set_return_value(regs, 0);
+	}
+	return 0;
+}
+
+static struct kretprobe fib_dump_krp = {
+	.handler = fib_dump_ret,
+	.entry_handler = fib_dump_entry,
+	.data_size = sizeof(struct fib_dump_data),
+	.maxactive = VPNHIDE_KRETPROBE_MAXACTIVE,
+	.kp.symbol_name = "fib_dump_info",
+};
+
+/* ================================================================== */
+/*  Hook 8: rt6_fill_node — IPv6 routes                                */
+/*                                                                    */
+/*  rt6_fill_node(net, skb, rt, dst, ...)                             */
+/*  arm64: x1=skb, x3=dst (struct dst_entry*)                         */
+/* ================================================================== */
+
+struct rt6_fill_data {
+	struct sk_buff *skb;
+	unsigned int saved_len;
+	bool should_filter;
+};
+
+static int rt6_fill_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct rt6_fill_data *data = (void *)ri->data;
+	struct dst_entry *dst;
+
+	data->should_filter = false;
+
+	if (!is_target_uid())
+		return 0;
+
+	/* x1=skb, x3=dst */
+	data->skb = (struct sk_buff *)regs->regs[1];
+	dst = (struct dst_entry *)regs->regs[3];
+
+	rcu_read_lock();
+	if (dst && dst->dev && is_vpn_ifname(dst->dev->name)) {
+		data->saved_len = data->skb ? data->skb->len : 0;
+		data->should_filter = true;
+		vpnhide_dbg("rt6_fill_entry: hiding IPv6 route via %s\n",
+			    dst->dev->name);
+	}
+	rcu_read_unlock();
+
+	return 0;
+}
+
+static int rt6_fill_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct rt6_fill_data *data = (void *)ri->data;
+
+	if (!data->should_filter || !data->skb)
+		return 0;
+
+	if (regs_return_value(regs) >= 0) {
+		skb_trim(data->skb, data->saved_len);
+		regs_set_return_value(regs, 0);
+	}
+	return 0;
+}
+
+static struct kretprobe rt6_fill_krp = {
+	.handler = rt6_fill_ret,
+	.entry_handler = rt6_fill_entry,
+	.data_size = sizeof(struct rt6_fill_data),
+	.maxactive = VPNHIDE_KRETPROBE_MAXACTIVE,
+	.kp.symbol_name = "rt6_fill_node",
+};
+
+/* ================================================================== */
+/*  Hook 9: rt_fill_info — IPv4 single route lookup                   */
+/*                                                                    */
+/*  rt_fill_info(skb, dst, src, rt, ...)                              */
+/*  arm64: x0=skb, x3=rt (struct rtable*)                             */
+/* ================================================================== */
+
+struct rt_fill_data {
+	struct sk_buff *skb;
+	unsigned int saved_len;
+	bool should_filter;
+};
+
+static int rt_fill_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct rt_fill_data *data = (void *)ri->data;
+	struct net_device *dev = NULL;
+
+	data->should_filter = false;
+
+	if (!is_target_uid())
+		return 0;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+	/* GKI 6.1+ mapping: x0=skb, x3=rt */
+	data->skb = (struct sk_buff *)regs->regs[0];
+	{
+		struct rtable *rt = (struct rtable *)regs->regs[3];
+		if (rt)
+			dev = rt->dst.dev;
+	}
+#else
+	/* GKI 5.10 / 5.15 mapping: x6=skb, x7=rt/fri */
+	data->skb = (struct sk_buff *)regs->regs[6];
+	{
+		struct rtable *rt = (struct rtable *)regs->regs[7];
+		if (rt)
+			dev = rt->dst.dev;
+	}
+#endif
+
+	rcu_read_lock();
+	if (dev && is_vpn_ifname(dev->name)) {
+		data->saved_len = data->skb ? data->skb->len : 0;
+		data->should_filter = true;
+		vpnhide_dbg("rt_fill_entry: hiding route via %s\n", dev->name);
+	}
+	rcu_read_unlock();
+
+	return 0;
+}
+
+static int rt_fill_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct rt_fill_data *data = (void *)ri->data;
+
+	if (!data->should_filter || !data->skb)
+		return 0;
+
+	if (regs_return_value(regs) >= 0) {
+		skb_trim(data->skb, data->saved_len);
+		regs_set_return_value(regs, 0);
+	}
+	return 0;
+}
+
+static struct kretprobe rt_fill_krp = {
+	.handler = rt_fill_ret,
+	.entry_handler = rt_fill_entry,
+	.data_size = sizeof(struct rt_fill_data),
+	.maxactive = VPNHIDE_KRETPROBE_MAXACTIVE,
+	.kp.symbol_name = "rt_fill_info",
+};
+
+/* ================================================================== */
 /*  Module init / exit                                                */
 /* ================================================================== */
 
@@ -824,6 +1037,9 @@ static struct kretprobe_reg probes[] = {
 	{ &inet6_fill_krp, "inet6_fill_ifaddr", false },
 	{ &inet_fill_krp, "inet_fill_ifaddr", false },
 	{ &fib_route_krp, "fib_route_seq_show", false },
+	{ &fib_dump_krp, "fib_dump_info", false },
+	{ &rt6_fill_krp, "rt6_fill_node", false },
+	{ &rt_fill_krp, "rt_fill_info", false },
 };
 
 static int __init vpnhide_init(void)
