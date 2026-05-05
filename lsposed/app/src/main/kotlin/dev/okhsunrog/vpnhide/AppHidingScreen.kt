@@ -151,8 +151,10 @@ fun AppHidingScreen(
                         hidden = finalHidden,
                         observer = finalObserver,
                     )
-                }
-        dirty = autoFixedConflict
+                }.sortedWith(
+                    compareByDescending<HidingEntry> { it.anySelected }
+                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label },
+                )
     }
 
     val loading = cachedApps == null || targets == null

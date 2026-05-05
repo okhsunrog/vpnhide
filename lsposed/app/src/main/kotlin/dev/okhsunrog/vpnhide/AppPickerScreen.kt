@@ -123,8 +123,10 @@ fun AppPickerScreen(
                         zygisk = app.packageName in t.zygiskTargets,
                         lsposed = app.packageName in t.lsposedTargets,
                     )
-                }
-        dirty = false
+                }.sortedWith(
+                    compareByDescending<AppEntry> { it.anySelected }
+                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label },
+                )
     }
 
     val loading = cachedApps == null || targets == null

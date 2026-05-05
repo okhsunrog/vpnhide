@@ -127,8 +127,10 @@ fun PortsHidingScreen(
                         userIds = app.userIds,
                         observer = app.packageName in t.portsObservers,
                     )
-                }
-        dirty = false
+                }.sortedWith(
+                    compareByDescending<PortsEntry> { it.observer }
+                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label },
+                )
     }
 
     val loading = cachedApps == null || targets == null
