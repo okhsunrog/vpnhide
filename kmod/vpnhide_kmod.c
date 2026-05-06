@@ -101,6 +101,9 @@ struct vpnhide_targets {
 static struct vpnhide_targets __rcu *global_targets;
 static DEFINE_SPINLOCK(targets_update_lock);
 
+static struct vpnhide_targets __rcu *global_direct_targets;
+static DEFINE_SPINLOCK(direct_targets_update_lock);
+
 static bool is_target_uid(void)
 {
 	uid_t uid = from_kuid(&init_user_ns, current_uid());
@@ -110,6 +113,27 @@ static bool is_target_uid(void)
 
 	rcu_read_lock();
 	t = rcu_dereference(global_targets);
+	if (t) {
+		for (i = 0; i < t->count; i++) {
+			if (t->uids[i] == uid) {
+				found = true;
+				break;
+			}
+		}
+	}
+	rcu_read_unlock();
+	return found;
+}
+
+static bool is_direct_target_uid(void)
+{
+	uid_t uid = from_kuid(&init_user_ns, current_uid());
+	struct vpnhide_targets *t;
+	bool found = false;
+	int i;
+
+	rcu_read_lock();
+	t = rcu_dereference(global_direct_targets);
 	if (t) {
 		for (i = 0; i < t->count; i++) {
 			if (t->uids[i] == uid) {
@@ -214,6 +238,90 @@ static const struct proc_ops targets_proc_ops = {
 	.proc_open = targets_open,
 	.proc_read = seq_read,
 	.proc_write = targets_write,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+
+/* ------------------------------------------------------------------ */
+/*  /proc/vpnhide_direct_targets                                      */
+/* ------------------------------------------------------------------ */
+
+static ssize_t direct_targets_write(struct file *file, const char __user *ubuf,
+				    size_t count, loff_t *ppos)
+{
+	char *buf, *line, *next;
+	struct vpnhide_targets *new_t, *old_t;
+	int new_count = 0;
+
+	if (count > PAGE_SIZE)
+		return -EINVAL;
+
+	buf = kmalloc(count + 1, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	if (copy_from_user(buf, ubuf, count)) {
+		kfree(buf);
+		return -EFAULT;
+	}
+	buf[count] = '\0';
+
+	new_t = kzalloc(sizeof(*new_t), GFP_KERNEL);
+	if (!new_t) {
+		kfree(buf);
+		return -ENOMEM;
+	}
+
+	for (line = buf; line && *line && new_count < MAX_TARGET_UIDS;
+	     line = next) {
+		unsigned long uid;
+		next = strchr(line, '\n');
+		if (next) *next++ = '\0';
+		while (*line == ' ' || *line == '\t') line++;
+		if (!*line || *line == '#') continue;
+		if (kstrtoul(line, 10, &uid) == 0)
+			new_t->uids[new_count++] = (uid_t)uid;
+	}
+	new_t->count = new_count;
+
+	spin_lock(&direct_targets_update_lock);
+	old_t = rcu_dereference_protected(global_direct_targets,
+					  lockdep_is_held(&direct_targets_update_lock));
+	rcu_assign_pointer(global_direct_targets, new_t);
+	spin_unlock(&direct_targets_update_lock);
+
+	if (old_t)
+		call_rcu(&old_t->rcu, free_targets_rcu);
+
+	kfree(buf);
+	pr_info(MODNAME ": loaded %d direct target UIDs\n", new_count);
+	return count;
+}
+
+static int direct_targets_show(struct seq_file *m, void *v)
+{
+	struct vpnhide_targets *t;
+	int i;
+
+	rcu_read_lock();
+	t = rcu_dereference(global_direct_targets);
+	if (t) {
+		for (i = 0; i < t->count; i++)
+			seq_printf(m, "%u\n", t->uids[i]);
+	}
+	rcu_read_unlock();
+	return 0;
+}
+
+static int direct_targets_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, direct_targets_show, NULL);
+}
+
+static const struct proc_ops direct_targets_proc_ops = {
+	.proc_open = direct_targets_open,
+	.proc_read = seq_read,
+	.proc_write = direct_targets_write,
 	.proc_lseek = seq_lseek,
 	.proc_release = single_release,
 };
@@ -1133,7 +1241,7 @@ static int ip_route_output_flow_entry(struct kretprobe_instance *ri,
 	struct net *net = (struct net *)regs->regs[0];
 	struct flowi4 *flp4 = (struct flowi4 *)regs->regs[1];
 
-	if (flp4 && is_target_uid()) {
+	if (flp4 && is_direct_target_uid()) {
 		bool vpn_active;
 		int phys_idx;
 
@@ -1168,7 +1276,7 @@ static int ip_route_output_key_entry(struct kretprobe_instance *ri,
 	struct net *net = (struct net *)regs->regs[0];
 	struct flowi4 *flp4 = (struct flowi4 *)regs->regs[1];
 
-	if (flp4 && is_target_uid()) {
+	if (flp4 && is_direct_target_uid()) {
 		bool vpn_active;
 		int phys_idx;
 
@@ -1208,7 +1316,7 @@ static int ip6_route_output_entry(struct kretprobe_instance *ri,
 	struct net *net = (struct net *)regs->regs[0];
 	struct flowi6 *fl6 = (struct flowi6 *)regs->regs[2];
 
-	if (fl6 && is_target_uid()) {
+	if (fl6 && is_direct_target_uid()) {
 		bool vpn_active;
 		int phys_idx;
 
@@ -1240,6 +1348,7 @@ static struct kretprobe ip6_route_output_krp = {
 /* ================================================================== */
 
 static struct proc_dir_entry *targets_entry;
+static struct proc_dir_entry *direct_targets_entry;
 static struct proc_dir_entry *debug_entry;
 
 struct kretprobe_reg {
@@ -1267,8 +1376,9 @@ static int __init vpnhide_init(void)
 {
 	int i, ret, ok = 0;
 
-	/* Initialize RCU targets pointer */
+	/* Initialize RCU targets pointers */
 	rcu_assign_pointer(global_targets, NULL);
+	rcu_assign_pointer(global_direct_targets, NULL);
 
 	for (i = 0; i < ARRAY_SIZE(probes); i++) {
 		ret = register_kretprobe(probes[i].krp);
@@ -1297,9 +1407,6 @@ static int __init vpnhide_init(void)
 	targets_entry =
 		proc_create("vpnhide_targets", 0600, NULL, &targets_proc_ops);
 	if (!targets_entry) {
-		/* Without /proc/vpnhide_targets userspace cannot configure
-		 * the target UID list, so the module would silently filter
-		 * nothing — fail loudly instead of pretending to work. */
 		pr_err(MODNAME
 		       ": proc_create(vpnhide_targets) failed; aborting\n");
 		for (i = 0; i < ARRAY_SIZE(probes); i++)
@@ -1307,12 +1414,19 @@ static int __init vpnhide_init(void)
 				unregister_kretprobe(probes[i].krp);
 		return -ENOMEM;
 	}
+
+	direct_targets_entry =
+		proc_create("vpnhide_direct_targets", 0600, NULL, &direct_targets_proc_ops);
+	if (!direct_targets_entry)
+		pr_warn(MODNAME
+			": proc_create(vpnhide_direct_targets) failed; direct routing configuration unavailable\n");
+
 	debug_entry = proc_create("vpnhide_debug", 0600, NULL, &debug_proc_ops);
 	if (!debug_entry)
 		pr_warn(MODNAME
 			": proc_create(vpnhide_debug) failed; debug toggle unavailable\n");
 
-	pr_info(MODNAME ": loaded — write UIDs to /proc/vpnhide_targets\n");
+	pr_info(MODNAME ": loaded — write UIDs to /proc/vpnhide_targets and /proc/vpnhide_direct_targets\n");
 	return 0;
 }
 
@@ -1325,6 +1439,8 @@ static void __exit vpnhide_exit(void)
 		proc_remove(debug_entry);
 	if (targets_entry)
 		proc_remove(targets_entry);
+	if (direct_targets_entry)
+		proc_remove(direct_targets_entry);
 
 	for (i = 0; i < ARRAY_SIZE(probes); i++) {
 		if (probes[i].registered) {
@@ -1343,7 +1459,18 @@ static void __exit vpnhide_exit(void)
 	spin_unlock(&targets_update_lock);
 
 	if (t) {
-		/* Wait for any pending is_target_uid calls to finish */
+		synchronize_rcu();
+		kfree(t);
+	}
+
+	/* Cleanup RCU direct targets */
+	spin_lock(&direct_targets_update_lock);
+	t = rcu_dereference_protected(global_direct_targets,
+				      lockdep_is_held(&direct_targets_update_lock));
+	rcu_assign_pointer(global_direct_targets, NULL);
+	spin_unlock(&direct_targets_update_lock);
+
+	if (t) {
 		synchronize_rcu();
 		kfree(t);
 	}
