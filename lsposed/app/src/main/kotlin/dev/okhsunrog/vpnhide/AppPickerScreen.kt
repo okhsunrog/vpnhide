@@ -412,34 +412,6 @@ private fun buildSaveCommand(
     return parts.joinToString(" ; ")
 }
 
-private fun buildUidResolver(
-    packages: List<String>,
-    outputFile: String,
-): String =
-    buildString {
-        // `--user all` produces comma-separated UIDs for packages that
-        // exist in multiple profiles (e.g. work profile), like:
-        //   package:com.android.chrome uid:10187,1010187
-        // `tr ',' '\n'` expands each to its own line so every profile's
-        // copy of the target is individually filtered by the hooks.
-        // Literal field match via awk — grep would treat dots in `pkg`
-        // as regex wildcards, occasionally cross-matching distinct
-        // packages.
-        append("ALL_PKGS=\"\$(pm list packages -U --user all 2>/dev/null)\"")
-        append("; UIDS=\"\"")
-        for (pkg in packages) {
-            append(
-                "; U=\$(echo \"\$ALL_PKGS\" | awk -v p=\"package:$pkg\" " +
-                    "'\$1 == p { sub(/uid:/, \"\", \$2); print \$2; exit }' | tr ',' '\\n')",
-            )
-            append("; if [ -n \"\$U\" ]; then if [ -z \"\$UIDS\" ]; then UIDS=\"\$U\"; else UIDS=\"\$UIDS")
-            append("\n")
-            append("\$U\"; fi; fi")
-        }
-        append("; if [ -n \"\$UIDS\" ]; then echo \"\$UIDS\" > $outputFile 2>/dev/null")
-        append("; else echo > $outputFile 2>/dev/null; fi")
-    }
-
 @Composable
 private fun AppRow(
     app: AppEntry,

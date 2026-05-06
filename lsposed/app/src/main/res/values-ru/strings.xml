@@ -9,6 +9,7 @@
 
     <!-- Protection modes (segmented button) -->
     <string name="mode_vpn_targets">Туннели</string>
+    <string name="mode_tun_bypass">Байпас</string>
     <string name="mode_app_hiding">Приложения</string>
     <string name="mode_port_hiding">Порты</string>
     <string name="port_hiding_coming_soon">Скоро</string>
@@ -34,6 +35,11 @@
     <string name="apps_hint_toggles">Нажимайте L, K, Z для переключения отдельных уровней защиты (LSPosed, модуль ядра, Zygisk). Нажмите на строку, чтобы переключить все уровни сразу.</string>
     <string name="apps_hint_restart_target">После Save: L (LSPosed) и K (модуль ядра) применяются к целевому приложению мгновенно — рестарт не нужен. Z (Zygisk) внедряется при форке процесса, поэтому для любого только что переключённого целевого приложения с Z (включением или выключением) нужен force-stop + повторный запуск, чтобы изменение для него вступило в силу.</string>
     <string name="apps_hint_zygisk">Банковские и платёжные приложения обнаруживают Zygisk-хуки и при включённом Z крашатся или отказываются работать. Держите Z выключенным для таких приложений и полагайтесь на модуль ядра + LSPosed.</string>
+
+    <!-- TUN bypass -->
+    <string name="bypass_help_title">Как работает байпас TUN</string>
+    <string name="bypass_hint_logic">Нажмите K, чтобы заставить приложение обходить VPN-туннель. Трафик отмеченных приложений пойдет напрямую через Wi-Fi или мобильную сеть, даже если VPN включен.</string>
+    <string name="bypass_hint_kmod">Требуется установленный и активный модуль ядра (kmod). Эта функция работает только на уровне ядра для обеспечения надежного перенаправления маршрутизации.</string>
 
     <!-- App hiding -->
     <string name="hiding_help_title">Как работает скрытие приложений</string>

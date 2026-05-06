@@ -4,13 +4,15 @@
 # lsposed targets → /data/system/vpnhide_uids.txt
 
 KMOD_TARGETS="/data/adb/vpnhide_kmod/targets.txt"
+KMOD_DIRECT_TARGETS="/data/adb/vpnhide_kmod/direct_targets.txt"
 LSPOSED_TARGETS="/data/adb/vpnhide_lsposed/targets.txt"
 PROC_TARGETS="/proc/vpnhide_targets"
+PROC_DIRECT_TARGETS="/proc/vpnhide_direct_targets"
 SS_UIDS_FILE="/data/system/vpnhide_uids.txt"
 
-# Wait for the proc entry (kernel module must be loaded)
+# Wait for the proc entries (kernel module must be loaded)
 for i in 1 2 3 4 5 6 7 8 9 10; do
-    [ -f "$PROC_TARGETS" ] && break
+    [ -f "$PROC_TARGETS" ] && [ -f "$PROC_DIRECT_TARGETS" ] && break
     sleep 1
 done
 
@@ -80,6 +82,18 @@ if [ -f "$PROC_TARGETS" ] && [ -f "$KMOD_TARGETS" ]; then
         log -t vpnhide "kmod: loaded $count target UIDs"
     else
         log -t vpnhide "kmod: no UIDs resolved"
+    fi
+fi
+
+# Resolve kmod direct bypass targets → /proc/vpnhide_direct_targets
+if [ -f "$PROC_DIRECT_TARGETS" ] && [ -f "$KMOD_DIRECT_TARGETS" ]; then
+    DIRECT_UIDS="$(resolve_uids "$KMOD_DIRECT_TARGETS")"
+    if [ -n "$DIRECT_UIDS" ]; then
+        echo "$DIRECT_UIDS" > "$PROC_DIRECT_TARGETS"
+        count="$(echo "$DIRECT_UIDS" | wc -l)"
+        log -t vpnhide "kmod-direct: loaded $count target UIDs"
+    else
+        log -t vpnhide "kmod-direct: no UIDs resolved"
     fi
 fi
 

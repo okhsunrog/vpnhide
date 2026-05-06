@@ -32,6 +32,7 @@ internal data class TargetsSnapshot(
     val zygiskModuleInstalled: Boolean,
     val portsModuleInstalled: Boolean,
     val kmodTargets: Set<String>,
+    val kmodDirectTargets: Set<String>,
     val zygiskTargets: Set<String>,
     val lsposedTargets: Set<String>,
     val hiddenPkgs: Set<String>,
@@ -96,6 +97,8 @@ internal object TargetsCache {
         cat $PORTS_MODULE_DIR/module.prop 2>/dev/null || true
         echo "$SENTINEL KMOD_TARGETS"
         cat $KMOD_TARGETS 2>/dev/null || true
+        echo "$SENTINEL KMOD_DIRECT_TARGETS"
+        cat $KMOD_DIRECT_TARGETS 2>/dev/null || true
         echo "$SENTINEL ZYGISK_TARGETS"
         cat $ZYGISK_TARGETS 2>/dev/null || true
         echo "$SENTINEL LSPOSED_TARGETS"
@@ -176,6 +179,7 @@ internal object TargetsCache {
             zygiskModuleInstalled = sections["ZYGISK_MODULE_DIR"]?.trim() == "1",
             portsModuleInstalled = portsInstalled,
             kmodTargets = nonEmptyLines(sections["KMOD_TARGETS"]),
+            kmodDirectTargets = nonEmptyLines(sections["KMOD_DIRECT_TARGETS"]),
             zygiskTargets = nonEmptyLines(sections["ZYGISK_TARGETS"]),
             lsposedTargets = nonEmptyLines(sections["LSPOSED_TARGETS"]),
             hiddenPkgs = nonEmptyLines(sections["HIDDEN_PKGS"]),

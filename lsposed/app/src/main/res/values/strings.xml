@@ -9,6 +9,7 @@
 
     <!-- Protection modes (segmented button) -->
     <string name="mode_vpn_targets">Tun</string>
+    <string name="mode_tun_bypass">Bypass</string>
     <string name="mode_app_hiding">Apps</string>
     <string name="mode_port_hiding">Ports</string>
     <string name="port_hiding_coming_soon">Coming soon</string>
@@ -36,6 +37,11 @@
     <string name="apps_hint_toggles">Tap L, K, Z to toggle individual layers (LSPosed, Kernel module, Zygisk). Tap the row to toggle all layers at once.</string>
     <string name="apps_hint_restart_target">After Save: L (LSPosed) and K (Kernel module) apply to the target app immediately — no restart needed. Z (Zygisk) hooks are injected at process fork, so any newly-toggled target with Z on (or off) needs a force-stop + reopen for the change to take effect for it.</string>
     <string name="apps_hint_zygisk">Banking and payment apps detect Zygisk hooks and crash or refuse to work when Z is enabled for them. Keep Z off for such apps and rely on the Kernel module + LSPosed layers instead.</string>
+
+    <!-- TUN bypass -->
+    <string name="bypass_help_title">How TUN bypass works</string>
+    <string name="bypass_hint_logic">Tap K to force an app to bypass the VPN tunnel. Traffic from marked apps will go directly through Wi-Fi or Mobile Data, even when a VPN is active.</string>
+    <string name="bypass_hint_kmod">Requires the Kernel module (kmod) to be installed and active. This feature only works at the kernel level to ensure reliable routing redirection.</string>
 
     <!-- App hiding -->
     <string name="hiding_chip_hidden" translatable="false">H</string>

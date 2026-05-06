@@ -404,7 +404,7 @@ private fun buildHidingSaveCommand(
 
     // Observer list: resolved UIDs. Same 0640 root:system rationale.
     if (observerPkgs.isNotEmpty()) {
-        parts += buildHidingUidResolver(observerPkgs, SS_OBSERVER_UIDS_FILE)
+        parts += buildUidResolver(observerPkgs, SS_OBSERVER_UIDS_FILE)
         parts += "chmod 640 $SS_OBSERVER_UIDS_FILE 2>/dev/null"
         parts += "chown root:system $SS_OBSERVER_UIDS_FILE 2>/dev/null"
         parts += "chcon u:object_r:system_data_file:s0 $SS_OBSERVER_UIDS_FILE 2>/dev/null; true"
@@ -418,32 +418,6 @@ private fun buildHidingSaveCommand(
 
     return parts.joinToString(" ; ")
 }
-
-private fun buildHidingUidResolver(
-    packages: List<String>,
-    outputFile: String,
-): String =
-    buildString {
-        // `--user all` emits comma-separated UIDs for multi-profile
-        // packages (e.g. work profile). `tr ',' '\n'` splits them so
-        // each profile's observer gets matched by the system_server
-        // hook, not just the primary-user one. Literal field match via
-        // awk — grep would treat dots in `pkg` as regex wildcards.
-        append("ALL_PKGS=\"\$(pm list packages -U --user all 2>/dev/null)\"")
-        append("; UIDS=\"\"")
-        for (pkg in packages) {
-            append(
-                "; U=\$(echo \"\$ALL_PKGS\" | awk -v p=\"package:$pkg\" " +
-                    "'\$1 == p { sub(/uid:/, \"\", \$2); print \$2; exit }' | tr ',' '\\n')",
-            )
-            append("; if [ -n \"\$U\" ]; then if [ -z \"\$UIDS\" ]; then UIDS=\"\$U\"; else UIDS=\"\$UIDS")
-            append("\n")
-            append("\$U\"; fi; fi")
-        }
-        append("; if [ -n \"\$UIDS\" ]; then echo \"\$UIDS\" > $outputFile 2>/dev/null")
-        append("; else echo > $outputFile 2>/dev/null; fi")
-    }
-
 @Composable
 private fun HidingAppRow(
     app: HidingEntry,

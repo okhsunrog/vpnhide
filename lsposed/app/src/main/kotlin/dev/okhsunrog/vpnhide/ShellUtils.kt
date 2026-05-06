@@ -12,10 +12,12 @@ import java.util.concurrent.atomic.AtomicReference
 private const val TAG = "VpnHide"
 
 internal const val KMOD_TARGETS = "/data/adb/vpnhide_kmod/targets.txt"
+internal const val KMOD_DIRECT_TARGETS = "/data/adb/vpnhide_kmod/direct_targets.txt"
 internal const val ZYGISK_TARGETS = "/data/adb/vpnhide_zygisk/targets.txt"
 internal const val ZYGISK_MODULE_TARGETS = "/data/adb/modules/vpnhide_zygisk/targets.txt"
 internal const val LSPOSED_TARGETS = "/data/adb/vpnhide_lsposed/targets.txt"
 internal const val PROC_TARGETS = "/proc/vpnhide_targets"
+internal const val PROC_DIRECT_TARGETS = "/proc/vpnhide_direct_targets"
 internal const val KMOD_DEBUG_PROC = "/proc/vpnhide_debug"
 internal const val SS_UIDS_FILE = "/data/system/vpnhide_uids.txt"
 internal const val SS_HIDDEN_PKGS_FILE = "/data/system/vpnhide_hidden_pkgs.txt"
@@ -253,3 +255,31 @@ internal fun ensureSelfInTargets(selfPkg: String): Boolean {
     VpnHideLog.d(TAG, "ensureSelfInTargets: done, added=$added")
     return added
 }
+
+internal fun buildUidResolver(
+    packages: List<String>,
+    outputFile: String,
+): String =
+    buildString {
+        // `--user all` produces comma-separated UIDs for packages that
+        // exist in multiple profiles (e.g. work profile), like:
+        //   package:com.android.chrome uid:10187,1010187
+        // `tr ',' '\n'` expands each to its own line so every profile's
+        // copy of the target is individually filtered by the hooks.
+        // Literal field match via awk — grep would treat dots in `pkg`
+        // as regex wildcards, occasionally cross-matching distinct
+        // packages.
+        append("ALL_PKGS=\"\$(pm list packages -U --user all 2>/dev/null)\"")
+        append("; UIDS=\"\"")
+        for (pkg in packages) {
+            append(
+                "; U=\$(echo \"\$ALL_PKGS\" | awk -v p=\"package:$pkg\" " +
+                    "'\$1 == p { sub(/uid:/, \"\", \$2); print \$2; exit }' | tr ',' '\\n')",
+            )
+            append("; if [ -n \"\$U\" ]; then if [ -z \"\$UIDS\" ]; then UIDS=\"\$U\"; else UIDS=\"\$UIDS")
+            append("\n")
+            append("\$U\"; fi; fi")
+        }
+        append("; if [ -n \"\$UIDS\" ]; then echo \"\$UIDS\" > $outputFile 2>/dev/null")
+        append("; else echo > $outputFile 2>/dev/null; fi")
+    }

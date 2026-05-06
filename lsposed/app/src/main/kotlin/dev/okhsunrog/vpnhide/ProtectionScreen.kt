@@ -17,7 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
-internal enum class ProtectionMode { VpnTargets, AppHiding, PortHiding }
+internal enum class ProtectionMode { VpnTargets, TunBypass, AppHiding, PortHiding }
 
 @Composable
 fun ProtectionScreen(
@@ -36,6 +36,15 @@ fun ProtectionScreen(
         when (mode) {
             ProtectionMode.VpnTargets -> {
                 AppPickerScreen(
+                    searchQuery = searchQuery,
+                    showSystem = showSystem,
+                    showRussianOnly = showRussianOnly,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            
+            ProtectionMode.TunBypass -> {
+                TunBypassScreen(
                     searchQuery = searchQuery,
                     showSystem = showSystem,
                     showRussianOnly = showRussianOnly,
@@ -72,6 +81,7 @@ private fun ProtectionModeSwitcher(
     val options =
         listOf(
             ProtectionMode.VpnTargets to R.string.mode_vpn_targets,
+            ProtectionMode.TunBypass to R.string.mode_tun_bypass,
             ProtectionMode.AppHiding to R.string.mode_app_hiding,
             ProtectionMode.PortHiding to R.string.mode_port_hiding,
         )
