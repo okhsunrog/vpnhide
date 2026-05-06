@@ -1044,41 +1044,38 @@ static struct kretprobe rt_fill_krp = {
 };
 
 /* ================================================================== */
-/*  Direct Interface Discovery                                        */
+/*  Optimized Routing State Cache                                     */
 /* ================================================================== */
 
-static bool is_any_vpn_active(struct net *net)
-{
-	struct net_device *dev;
-	bool active = false;
+struct vpnhide_cache {
+	bool vpn_active;
+	int direct_idx;
+	unsigned long last_update;
+};
 
-	rcu_read_lock();
-	for_each_netdev_rcu(net, dev) {
-		if ((dev->flags & IFF_UP) && is_vpn_ifname(dev->name)) {
-			active = true;
-			break;
-		}
-	}
-	rcu_read_unlock();
-	return active;
-}
+static struct vpnhide_cache routing_cache;
+static DEFINE_SPINLOCK(cache_lock);
 
-static int get_direct_ifindex(struct net *net)
+#define CACHE_TTL (HZ) /* 1 second */
+
+static void update_routing_cache(struct net *net, struct vpnhide_cache *c)
 {
 	struct net_device *dev;
 	int best_idx = 0;
 	int current_prio = -1;
+	bool vpn_found = false;
 
 	rcu_read_lock();
 	for_each_netdev_rcu(net, dev) {
 		bool up = !!(dev->flags & IFF_UP);
-		bool loopback = !!(dev->flags & IFF_LOOPBACK);
-		bool ptp = !!(dev->flags & IFF_POINTOPOINT);
 		bool vpn = is_vpn_ifname(dev->name);
 
-		if (up && !loopback && !ptp && !vpn) {
-			int prio = 0; /* Default low priority */
+		if (up && vpn)
+			vpn_found = true;
 
+		if (up && !vpn && !(dev->flags & IFF_LOOPBACK) &&
+		    !(dev->flags & IFF_POINTOPOINT)) {
+			int prio = 0;
 			if (vpnhide_iface_starts_with_ci(dev->name, "wlan"))
 				prio = 10;
 			else if (vpnhide_iface_starts_with_ci(dev->name, "rmnet") ||
@@ -1089,15 +1086,31 @@ static int get_direct_ifindex(struct net *net)
 			if (prio > current_prio) {
 				best_idx = dev->ifindex;
 				current_prio = prio;
-				/* If we found Wi-Fi, we can stop searching. */
-				if (prio == 10)
-					break;
 			}
 		}
 	}
 	rcu_read_unlock();
 
-	return best_idx;
+	c->vpn_active = vpn_found;
+	c->direct_idx = best_idx;
+	c->last_update = jiffies;
+}
+
+static void get_routing_info(struct net *net, bool *vpn_active, int *direct_idx)
+{
+	unsigned long now = jiffies;
+
+	/* We use a simple spinlock for the cache update. Since it only happens
+	 * once per second, there is no meaningful contention. */
+	if (time_after(now, READ_ONCE(routing_cache.last_update) + CACHE_TTL)) {
+		if (spin_trylock(&cache_lock)) {
+			update_routing_cache(net, &routing_cache);
+			spin_unlock(&cache_lock);
+		}
+	}
+
+	*vpn_active = READ_ONCE(routing_cache.vpn_active);
+	*direct_idx = READ_ONCE(routing_cache.direct_idx);
 }
 
 /* ================================================================== */
@@ -1120,33 +1133,24 @@ static int ip_route_output_flow_entry(struct kretprobe_instance *ri,
 	struct net *net = (struct net *)regs->regs[0];
 	struct flowi4 *flp4 = (struct flowi4 *)regs->regs[1];
 
-	if (flp4 && is_target_uid() && is_any_vpn_active(net)) {
-		int phys_idx = get_direct_ifindex(net);
+	if (flp4 && is_target_uid()) {
+		bool vpn_active;
+		int phys_idx;
 
-		/* 1. Force marks to bypass VPN. */
+		get_routing_info(net, &vpn_active, &phys_idx);
+		if (!vpn_active)
+			return 0;
+
+		/* Force marks to bypass VPN. */
 		flp4->flowi4_mark &= ~0xFFFF;
 		flp4->flowi4_mark |= (ANDROID_PROTECTED_FROM_VPN_BIT |
 				      ANDROID_EXPLICITLY_SELECTED_BIT);
-
-		/* 2. Clear source IP. */
 		flp4->saddr = 0;
-
-		/* 3. Force output to physical interface if found. */
-		if (phys_idx > 0) {
+		if (phys_idx > 0)
 			flp4->flowi4_oif = phys_idx;
-		} else if (flp4->flowi4_oif > 0) {
-			/* Fallback: just clear VPN ifindex if no physical found. */
-			struct net_device *dev;
-			rcu_read_lock();
-			dev = dev_get_by_index_rcu(net, flp4->flowi4_oif);
-			if (dev && is_vpn_ifname(dev->name))
-				flp4->flowi4_oif = 0;
-			rcu_read_unlock();
-		}
 
-		vpnhide_dbg("ip_route_output_flow: forced bypass (mark=0x%x, oif=%d) for uid=%u\n",
-			    flp4->flowi4_mark, flp4->flowi4_oif,
-			    from_kuid(&init_user_ns, current_uid()));
+		vpnhide_dbg("ip_route_output_flow: forced bypass (oif=%d) for uid=%u\n",
+			    flp4->flowi4_oif, from_kuid(&init_user_ns, current_uid()));
 	}
 	return 0;
 }
@@ -1164,8 +1168,14 @@ static int ip_route_output_key_entry(struct kretprobe_instance *ri,
 	struct net *net = (struct net *)regs->regs[0];
 	struct flowi4 *flp4 = (struct flowi4 *)regs->regs[1];
 
-	if (flp4 && is_target_uid() && is_any_vpn_active(net)) {
-		int phys_idx = get_direct_ifindex(net);
+	if (flp4 && is_target_uid()) {
+		bool vpn_active;
+		int phys_idx;
+
+		get_routing_info(net, &vpn_active, &phys_idx);
+		if (!vpn_active)
+			return 0;
+
 		flp4->flowi4_mark &= ~0xFFFF;
 		flp4->flowi4_mark |= (ANDROID_PROTECTED_FROM_VPN_BIT |
 				      ANDROID_EXPLICITLY_SELECTED_BIT);
@@ -1198,20 +1208,23 @@ static int ip6_route_output_entry(struct kretprobe_instance *ri,
 	struct net *net = (struct net *)regs->regs[0];
 	struct flowi6 *fl6 = (struct flowi6 *)regs->regs[2];
 
-	if (fl6) {
-		bool target = is_target_uid();
-		if (target && is_any_vpn_active(net)) {
-			int phys_idx = get_direct_ifindex(net);
-			fl6->flowi6_mark &= ~0xFFFF;
-			fl6->flowi6_mark |= (ANDROID_PROTECTED_FROM_VPN_BIT |
-					     ANDROID_EXPLICITLY_SELECTED_BIT);
-			fl6->saddr = in6addr_any;
-			if (phys_idx > 0)
-				fl6->flowi6_oif = phys_idx;
-			
-			vpnhide_dbg("ip6_route_output: forced bypass (oif=%d) for uid=%u\n",
-				    fl6->flowi6_oif, from_kuid(&init_user_ns, current_uid()));
-		}
+	if (fl6 && is_target_uid()) {
+		bool vpn_active;
+		int phys_idx;
+
+		get_routing_info(net, &vpn_active, &phys_idx);
+		if (!vpn_active)
+			return 0;
+
+		fl6->flowi6_mark &= ~0xFFFF;
+		fl6->flowi6_mark |= (ANDROID_PROTECTED_FROM_VPN_BIT |
+				     ANDROID_EXPLICITLY_SELECTED_BIT);
+		fl6->saddr = in6addr_any;
+		if (phys_idx > 0)
+			fl6->flowi6_oif = phys_idx;
+		
+		vpnhide_dbg("ip6_route_output: forced bypass (oif=%d) for uid=%u\n",
+			    fl6->flowi6_oif, from_kuid(&init_user_ns, current_uid()));
 	}
 	return 0;
 }
