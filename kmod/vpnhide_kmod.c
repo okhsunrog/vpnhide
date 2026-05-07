@@ -609,6 +609,85 @@ static struct kretprobe sock_ioctl_krp = {
 };
 
 /* ================================================================== */
+/*  Hook 2b: sock_setsockopt — Aikido Bind Sabotage                   */
+/*                                                                    */
+/*  sock_setsockopt(struct socket *sock, int level, int optname,      */
+/*                  sockptr_t optval, unsigned int optlen)            */
+/*                                                                    */
+/*  If a target app tries to SO_BINDTODEVICE or SO_BINDTOIFINDEX to   */
+/*  a VPN interface, we sabotage the arguments on the fly. We change  */
+/*  optlen to 0. The kernel interprets this as "remove binding", does */
+/*  nothing harmful, and returns 0 (Success) to the app.              */
+/* ================================================================== */
+
+static int sock_setsockopt_entry(struct kretprobe_instance *ri,
+				 struct pt_regs *regs)
+{
+	int level = (int)regs->regs[1];
+	int optname = (int)regs->regs[2];
+	void __user *optval_ptr = (void __user *)regs->regs[3];
+	bool is_kernel = (regs->regs[4] & 1); /* sockptr_t.is_kernel */
+	int optlen = (int)regs->regs[5];
+	char name[IFNAMSIZ];
+
+	if (!is_target_uid())
+		return 0;
+
+	if (level != SOL_SOCKET)
+		return 0;
+
+	if (is_kernel)
+		return 0;
+
+	if (optname == SO_BINDTODEVICE) {
+		if (optlen <= 0)
+			return 0;
+		if (optlen > IFNAMSIZ)
+			optlen = IFNAMSIZ;
+
+		if (copy_from_user(name, optval_ptr, optlen))
+			return 0;
+		name[optlen - 1] = '\0';
+
+		if (is_vpn_ifname(name)) {
+			vpnhide_dbg("sock_setsockopt: spoofing SO_BINDTODEVICE to %s\n", name);
+			regs->regs[5] = 0; 
+		}
+	} else if (optname == SO_BINDTOIFINDEX) {
+		int ifindex;
+		struct net_device *dev;
+		struct net *net;
+
+		if (optlen != sizeof(int))
+			return 0;
+		if (copy_from_user(&ifindex, optval_ptr, sizeof(int)))
+			return 0;
+
+		if (ifindex <= 0)
+			return 0;
+
+		net = current->nsproxy->net_ns;
+		rcu_read_lock();
+		dev = dev_get_by_index_rcu(net, ifindex);
+		if (dev && is_vpn_ifname(dev->name)) {
+			vpnhide_dbg("sock_setsockopt: spoofing SO_BINDTOIFINDEX %d (%s)\n", 
+				    ifindex, dev->name);
+			regs->regs[2] = SO_BINDTODEVICE;
+			regs->regs[5] = 0;
+		}
+		rcu_read_unlock();
+	}
+
+	return 0;
+}
+
+static struct kretprobe sock_setsockopt_krp = {
+	.entry_handler = sock_setsockopt_entry,
+	.maxactive = VPNHIDE_KRETPROBE_MAXACTIVE,
+	.kp.symbol_name = "sock_setsockopt",
+};
+
+/* ================================================================== */
 /*  Hook 3: rtnl_fill_ifinfo — netlink RTM_NEWLINK (getifaddrs path)  */
 /*                                                                    */
 /*  rtnl_fill_ifinfo fills one interface's data into a netlink skb    */
@@ -1163,6 +1242,7 @@ struct vpnhide_cache {
 
 static struct vpnhide_cache routing_cache;
 static DEFINE_SPINLOCK(cache_lock);
+static int manual_phys_ifindex = 0;
 
 #define CACHE_TTL (HZ) /* 1 second */
 
@@ -1170,8 +1250,8 @@ static void update_routing_cache(struct net *net, struct vpnhide_cache *c)
 {
 	struct net_device *dev;
 	int best_idx = 0;
-	int current_prio = -1;
 	bool vpn_found = false;
+	int manual_idx = READ_ONCE(manual_phys_ifindex);
 
 	rcu_read_lock();
 	for_each_netdev_rcu(net, dev) {
@@ -1181,20 +1261,9 @@ static void update_routing_cache(struct net *net, struct vpnhide_cache *c)
 		if (up && vpn)
 			vpn_found = true;
 
-		if (up && !vpn && !(dev->flags & IFF_LOOPBACK) &&
-		    !(dev->flags & IFF_POINTOPOINT)) {
-			int prio = 0;
-			if (vpnhide_iface_starts_with_ci(dev->name, "wlan"))
-				prio = 10;
-			else if (vpnhide_iface_starts_with_ci(dev->name, "rmnet") ||
-				 vpnhide_iface_starts_with_ci(dev->name, "ccmni") ||
-				 vpnhide_iface_starts_with_ci(dev->name, "pdp"))
-				prio = 5;
-
-			if (prio > current_prio) {
-				best_idx = dev->ifindex;
-				current_prio = prio;
-			}
+		/* Use ONLY the interface explicitly provided by userspace */
+		if (manual_idx > 0 && dev->ifindex == manual_idx && up) {
+			best_idx = dev->ifindex;
 		}
 	}
 	rcu_read_unlock();
@@ -1343,12 +1412,55 @@ static struct kretprobe ip6_route_output_krp = {
 	.kp.symbol_name = "ip6_route_output",
 };
 
+/* ------------------------------------------------------------------ */
+/*  /proc/vpnhide_phys_ifindex                                        */
+/* ------------------------------------------------------------------ */
+
+static ssize_t vpnhide_phys_ifindex_write(struct file *file, const char __user *buf,
+					  size_t count, loff_t *ppos)
+{
+	char kbuf[16];
+	int val;
+
+	if (count >= sizeof(kbuf))
+		return -EINVAL;
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EFAULT;
+
+	kbuf[count] = '\0';
+	if (kstrtoint(kbuf, 10, &val) == 0) {
+		WRITE_ONCE(manual_phys_ifindex, val);
+		/* Force immediate cache update on next request */
+		WRITE_ONCE(routing_cache.last_update, 0);
+	}
+
+	return count;
+}
+
+static ssize_t vpnhide_phys_ifindex_read(struct file *file, char __user *buf,
+					 size_t count, loff_t *ppos)
+{
+	char kbuf[16];
+	int len;
+
+	len = snprintf(kbuf, sizeof(kbuf), "%d\n", READ_ONCE(manual_phys_ifindex));
+	return simple_read_from_buffer(buf, count, ppos, kbuf, len);
+}
+
+static const struct proc_ops vpnhide_phys_ifindex_ops = {
+	.proc_read = vpnhide_phys_ifindex_read,
+	.proc_write = vpnhide_phys_ifindex_write,
+};
+
+
 /* ================================================================== */
 /*  Module init / exit                                                */
 /* ================================================================== */
 
 static struct proc_dir_entry *targets_entry;
 static struct proc_dir_entry *direct_targets_entry;
+static struct proc_dir_entry *phys_ifindex_entry;
 static struct proc_dir_entry *debug_entry;
 
 struct kretprobe_reg {
@@ -1370,6 +1482,7 @@ static struct kretprobe_reg probes[] = {
 	{ &ip_route_output_flow_krp, "ip_route_output_flow", false },
 	{ &ip_route_output_key_krp, "__ip_route_output_key", false },
 	{ &ip6_route_output_krp, "ip6_route_output", false },
+	{ &sock_setsockopt_krp, "sock_setsockopt", false },
 };
 
 static int __init vpnhide_init(void)
@@ -1426,6 +1539,11 @@ static int __init vpnhide_init(void)
 		pr_warn(MODNAME
 			": proc_create(vpnhide_debug) failed; debug toggle unavailable\n");
 
+	phys_ifindex_entry = proc_create("vpnhide_phys_ifindex", 0600, NULL, &vpnhide_phys_ifindex_ops);
+	if (!phys_ifindex_entry)
+		pr_warn(MODNAME
+			": proc_create(vpnhide_phys_ifindex) failed\n");
+
 	pr_info(MODNAME ": loaded — write UIDs to /proc/vpnhide_targets and /proc/vpnhide_direct_targets\n");
 	return 0;
 }
@@ -1441,6 +1559,8 @@ static void __exit vpnhide_exit(void)
 		proc_remove(targets_entry);
 	if (direct_targets_entry)
 		proc_remove(direct_targets_entry);
+	if (phys_ifindex_entry)
+		proc_remove(phys_ifindex_entry);
 
 	for (i = 0; i < ARRAY_SIZE(probes); i++) {
 		if (probes[i].registered) {

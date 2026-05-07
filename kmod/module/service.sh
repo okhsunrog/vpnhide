@@ -97,6 +97,53 @@ if [ -f "$PROC_DIRECT_TARGETS" ] && [ -f "$KMOD_DIRECT_TARGETS" ]; then
     fi
 fi
 
+# Background monitoring: find active physical interface and tell the kernel
+(
+    TRIGGER="/tmp/vpnhide_route_trigger"
+    rm -f "$TRIGGER"
+
+    (
+        while true; do
+            ip monitor link address route | while read -r line; do
+                touch "$TRIGGER"
+            done
+            sleep 1
+        done
+    ) &
+
+    last_idx=""
+    heartbeat=0
+
+    while true; do
+        if [ -f "$TRIGGER" ] || [ -z "$last_idx" ] || [ "$heartbeat" -ge 5 ]; then
+            rm -f "$TRIGGER"
+            heartbeat=0
+            
+            sleep 0.5
+            
+            phys_iface=$(ip route show table all | grep "default via" | grep -vE "tun|wg|dummy|p2p" | head -n1 | awk '{print $5}')
+            
+            if [ -n "$phys_iface" ]; then
+                phys_ifindex=$(cat "/sys/class/net/$phys_iface/ifindex" 2>/dev/null)
+                
+                if [ -n "$phys_ifindex" ]; then
+                    echo "$phys_ifindex" > /proc/vpnhide_phys_ifindex
+
+                    if [ "$phys_ifindex" != "$last_idx" ]; then
+                        log -t vpnhide "routing: active physical interface changed to $phys_iface ($phys_ifindex)"
+                        last_idx="$phys_ifindex"
+                    fi
+                fi
+            fi
+        fi
+        
+        sleep 1
+        heartbeat=$((heartbeat + 1))
+    done
+) &
+
+log -t vpnhide "service.sh background monitoring started"
+
 # Resolve lsposed targets → /data/system/vpnhide_uids.txt
 # Create persist dir if needed (for first-time installs)
 mkdir -p /data/adb/vpnhide_lsposed 2>/dev/null
