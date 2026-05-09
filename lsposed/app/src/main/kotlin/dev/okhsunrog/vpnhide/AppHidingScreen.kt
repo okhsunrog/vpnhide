@@ -152,8 +152,13 @@ fun AppHidingScreen(
                         observer = finalObserver,
                     )
                 }.sortedWith(
-                    compareByDescending<HidingEntry> { it.anySelected }
-                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label },
+                    compareBy<HidingEntry> {
+                        when {
+                            it.hidden -> 0
+                            it.observer -> 1
+                            else -> 2
+                        }
+                    }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.label },
                 )
     }
 
