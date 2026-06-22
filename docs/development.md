@@ -99,7 +99,7 @@ cd lsposed/native && cargo ndk -t arm64-v8a clippy -- -D warnings
 clang-format --dry-run --Werror kmod/vpnhide_kmod.c
 
 # Kotlin
-ktlint "lsposed/**/*.kt"
+ktlint "lsposed/app/src/**/*.kt"
 cd lsposed && ./gradlew :app:lint
 ```
 

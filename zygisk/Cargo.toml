@@ -16,9 +16,8 @@ crate-type = ["cdylib"]
 [dependencies]
 # Zygisk API bindings (v2: get_module_dir + set_option — all we need)
 zygisk-api = { git = "https://github.com/rmnscnce/zygisk-api-rs.git" }
-libc = "0.2"
-jni = { version = "0.21", default-features = false }
-log = { version = "0.4.29", default-features = false }
+libc = "0.2.186"
+log = { version = "0.4.33", default-features = false }
 android_logger = { version = "0.15.1", default-features = false }
 
 # Compile-time log level. `log` statically elides any call below the

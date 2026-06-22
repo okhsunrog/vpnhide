@@ -1,15 +1,18 @@
 import java.io.FileInputStream
 import java.util.Properties
+import javax.inject.Inject
+import org.gradle.api.DefaultTask
+import org.gradle.api.tasks.TaskAction
+import org.gradle.process.ExecOperations
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
 }
 
 android {
     namespace = "dev.okhsunrog.vpnhide"
-    compileSdk = 35
+    compileSdk = 37
 
     // Effective build version from ../scripts/build-version.sh:
     //   release tag    -> "0.6.2"
@@ -77,30 +80,39 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     packaging {
         resources.excludes += "META-INF/*.kotlin_module"
     }
 }
 
-// Build the Rust native checks library via cargo-ndk.
-val buildRustNative by tasks.registering {
-    outputs.upToDateWhen { false }
-
-    doLast {
-        exec {
-            workingDir = file("../native")
-            commandLine("cargo", "ndk", "-t", "arm64-v8a", "build", "--release")
+abstract class BuildRustNativeTask
+    @Inject
+    constructor(
+        private val execOperations: ExecOperations,
+    ) : DefaultTask() {
+        init {
+            outputs.upToDateWhen { false }
         }
-        val src = file("../native/target/aarch64-linux-android/release/libvpnhide_checks.so")
-        val dst = file("src/main/jniLibs/arm64-v8a/libvpnhide_checks.so")
-        dst.parentFile.mkdirs()
-        src.copyTo(dst, overwrite = true)
+
+        @TaskAction
+        fun build() {
+            execOperations.exec {
+                workingDir = project.file("../native")
+                commandLine("cargo", "ndk", "-t", "arm64-v8a", "build", "--release")
+            }
+            val src = project.file("../native/target/aarch64-linux-android/release/libvpnhide_checks.so")
+            val dst = project.file("src/main/jniLibs/arm64-v8a/libvpnhide_checks.so")
+            dst.parentFile.mkdirs()
+            src.copyTo(dst, overwrite = true)
+        }
     }
-}
+
+// Build the Rust native checks library via cargo-ndk.
+val buildRustNative =
+    tasks.register<BuildRustNativeTask>("buildRustNative") {
+        group = "build"
+        description = "Builds the Rust native checks library via cargo-ndk."
+    }
 
 tasks.named("preBuild") {
     dependsOn(buildRustNative)
@@ -111,12 +123,12 @@ dependencies {
     compileOnly("de.robv.android.xposed:api:82")
 
     // Android 12 SplashScreen API, backported to API 23+.
-    implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("androidx.core:core-splashscreen:1.2.0")
 
     // Compose UI
     implementation(libs.core.ktx)
     implementation(libs.activity.compose)
-    implementation(platform(libs.compose.bom))
+    implementation(platform(libs.compose.bom.get()))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation("androidx.compose.material:material-icons-extended")

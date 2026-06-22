@@ -975,15 +975,15 @@ internal fun loadDashboardState(
     // Save from a profile that doesn't see all the targets would silently
     // drop them. Recommend uninstalling everywhere except the main profile.
     val (_, selfPmRaw) =
-        suExec("pm list packages -U --user all 2>/dev/null | grep '^package:$selfPkg '")
+        suExec(
+            "ALL_PKGS=\"\$(pm list packages -U --user all 2>/dev/null)\"; " +
+                buildPackageUidsExpression(selfPkg, "SELF_UIDS") +
+                "; echo \"\$SELF_UIDS\"",
+        )
     val selfUidCount =
         selfPmRaw
             .lines()
-            .firstOrNull { it.startsWith("package:$selfPkg ") }
-            ?.substringAfter("uid:", "")
-            ?.split(',')
-            ?.count { it.trim().toIntOrNull() != null }
-            ?: 0
+            .count { it.trim().toIntOrNull() != null }
     if (selfUidCount > 1) {
         warn(res.getString(R.string.dashboard_issue_self_multi_profile, selfUidCount))
     }

@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -82,6 +83,7 @@ fun AppHidingScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
 
     val cachedApps by AppListCache.apps.collectAsState()
@@ -334,25 +336,25 @@ fun AppHidingScreen(
             val hiddenPkgs =
                 (allApps.filter { it.hidden }.map { it.packageName } + selfPkg).distinct().sorted()
             val observerPkgs = allApps.filter { it.observer }.map { it.packageName }.sorted()
-            val header = context.getString(R.string.save_header_comment)
+            val header = resources.getString(R.string.save_header_comment)
 
             try {
                 val (exitCode, _) =
                     suExecAsync(buildHidingSaveCommand(header, hiddenPkgs, observerPkgs))
                 if (exitCode == 0) {
                     snackMessage =
-                        context.getString(R.string.hiding_save_success, hiddenPkgs.size, observerPkgs.size)
+                        resources.getString(R.string.hiding_save_success, hiddenPkgs.size, observerPkgs.size)
                     DashboardCache.invalidate()
                     TargetsCache.refresh(scope, context)
                 } else if (exitCode == -1) {
-                    snackMessage = context.getString(R.string.save_failed_root)
+                    snackMessage = resources.getString(R.string.save_failed_root)
                     dirty = true
                 } else {
-                    snackMessage = context.getString(R.string.save_failed_exit, exitCode)
+                    snackMessage = resources.getString(R.string.save_failed_exit, exitCode)
                     dirty = true
                 }
             } catch (e: Exception) {
-                snackMessage = context.getString(R.string.save_failed_error, e.message ?: "")
+                snackMessage = resources.getString(R.string.save_failed_error, e.message ?: "")
                 dirty = true
             }
             saving = false
@@ -378,7 +380,7 @@ private fun buildHidingSaveCommand(
 
     // Observer list: resolved UIDs.
     if (observerPkgs.isNotEmpty()) {
-        parts += buildHidingUidResolver(observerPkgs, SS_OBSERVER_UIDS_FILE)
+        parts += buildUidResolverCommand(observerPkgs, SS_OBSERVER_UIDS_FILE)
         parts += "chmod 644 $SS_OBSERVER_UIDS_FILE 2>/dev/null"
         parts += "chcon u:object_r:system_data_file:s0 $SS_OBSERVER_UIDS_FILE 2>/dev/null; true"
     } else {
@@ -390,27 +392,6 @@ private fun buildHidingSaveCommand(
 
     return parts.joinToString(" ; ")
 }
-
-private fun buildHidingUidResolver(
-    packages: List<String>,
-    outputFile: String,
-): String =
-    buildString {
-        // `--user all` emits comma-separated UIDs for multi-profile
-        // packages (e.g. work profile). `tr ',' '\n'` splits them so
-        // each profile's observer gets matched by the system_server
-        // hook, not just the primary-user one.
-        append("ALL_PKGS=\"\$(pm list packages -U --user all 2>/dev/null)\"")
-        append("; UIDS=\"\"")
-        for (pkg in packages) {
-            append("; U=\$(echo \"\$ALL_PKGS\" | grep '^package:$pkg ' | sed 's/.*uid://' | tr ',' '\\n')")
-            append("; if [ -n \"\$U\" ]; then if [ -z \"\$UIDS\" ]; then UIDS=\"\$U\"; else UIDS=\"\$UIDS")
-            append("\n")
-            append("\$U\"; fi; fi")
-        }
-        append("; if [ -n \"\$UIDS\" ]; then echo \"\$UIDS\" > $outputFile 2>/dev/null")
-        append("; else echo > $outputFile 2>/dev/null; fi")
-    }
 
 @Composable
 private fun HidingAppRow(

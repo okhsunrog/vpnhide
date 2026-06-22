@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -79,6 +80,7 @@ fun PortsHidingScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
 
     val cachedApps by AppListCache.apps.collectAsState()
@@ -294,22 +296,22 @@ fun PortsHidingScreen(
     if (saving) {
         LaunchedEffect(Unit) {
             val observerPkgs = allApps.filter { it.observer }.map { it.packageName }.sorted()
-            val header = context.getString(R.string.save_header_comment)
+            val header = resources.getString(R.string.save_header_comment)
             try {
                 val (exitCode, _) = suExecAsync(buildPortsSaveCommand(header, observerPkgs))
                 if (exitCode == 0) {
-                    snackMessage = context.getString(R.string.ports_save_success, observerPkgs.size)
+                    snackMessage = resources.getString(R.string.ports_save_success, observerPkgs.size)
                     DashboardCache.invalidate()
                     TargetsCache.refresh(scope, context)
                 } else if (exitCode == -1) {
-                    snackMessage = context.getString(R.string.save_failed_root)
+                    snackMessage = resources.getString(R.string.save_failed_root)
                     dirty = true
                 } else {
-                    snackMessage = context.getString(R.string.save_failed_exit, exitCode)
+                    snackMessage = resources.getString(R.string.save_failed_exit, exitCode)
                     dirty = true
                 }
             } catch (e: Exception) {
-                snackMessage = context.getString(R.string.save_failed_error, e.message ?: "")
+                snackMessage = resources.getString(R.string.save_failed_error, e.message ?: "")
                 dirty = true
             }
             saving = false

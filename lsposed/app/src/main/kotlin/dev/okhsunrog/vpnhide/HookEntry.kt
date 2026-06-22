@@ -71,21 +71,6 @@ class HookEntry : IXposedHookLoadPackage {
     //  Helpers
     // ------------------------------------------------------------------
 
-    private fun isVpnInterfaceName(name: String): Boolean {
-        if (name.isEmpty()) return false
-        val n = name.lowercase()
-        return n.startsWith("tun") ||
-            n.startsWith("ppp") ||
-            n.startsWith("tap") ||
-            n.startsWith("wg") ||
-            n.startsWith("ipsec") ||
-            n.startsWith("xfrm") ||
-            n.startsWith("utun") ||
-            n.startsWith("l2tp") ||
-            n.startsWith("gre") ||
-            n.contains("vpn")
-    }
-
     private fun sanitizeLinkProperties(copy: LinkProperties): Boolean {
         var modified = false
 

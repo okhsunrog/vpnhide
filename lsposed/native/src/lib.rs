@@ -1,10 +1,12 @@
-use jni::JNIEnv;
 use jni::objects::JClass;
 use jni::sys::jstring;
+use jni::{EnvUnowned, Outcome};
 use std::ffi::CStr;
 use std::io::ErrorKind;
 
-const VPN_PREFIXES: &[&str] = &["tun", "wg", "ppp", "tap", "ipsec", "xfrm"];
+const VPN_PREFIXES: &[&str] = &[
+    "tun", "ppp", "tap", "wg", "ipsec", "xfrm", "utun", "l2tp", "gre",
+];
 
 fn is_vpn_iface(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
@@ -15,10 +17,14 @@ fn logi(msg: &str) {
     log::info!("{msg}");
 }
 
-fn result_to_jstring(env: &mut JNIEnv, s: &str) -> jstring {
-    env.new_string(s)
-        .map(|j| j.into_raw())
-        .unwrap_or(std::ptr::null_mut())
+fn result_to_jstring(env: &mut EnvUnowned, s: &str) -> jstring {
+    match env
+        .with_env(|env| env.new_string(s).map(|j| j.into_raw()))
+        .into_outcome()
+    {
+        Outcome::Ok(value) => value,
+        Outcome::Err(_) | Outcome::Panic(_) => std::ptr::null_mut(),
+    }
 }
 
 fn is_selinux_denial(e: &std::io::Error) -> bool {
@@ -42,6 +48,16 @@ fn last_os_error() -> String {
 
 fn last_os_errno() -> i32 {
     std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+}
+
+#[cfg(target_os = "android")]
+type IoctlRequest = libc::c_int;
+
+#[cfg(not(target_os = "android"))]
+type IoctlRequest = libc::c_ulong;
+
+unsafe fn ioctl_ptr(fd: libc::c_int, request: IoctlRequest, arg: *mut libc::c_void) -> libc::c_int {
+    unsafe { libc::ioctl(fd, request, arg) }
 }
 
 fn join_list(v: &[String]) -> String {
@@ -112,7 +128,11 @@ fn check_ioctl_siocgifflags() -> String {
         let name = b"tun0\0";
         ifr.ifr_name[..name.len()].copy_from_slice(&name.map(|b| b as libc::c_char));
 
-        let ret = libc::ioctl(fd, libc::SIOCGIFFLAGS as i32, &ifr);
+        let ret = ioctl_ptr(
+            fd,
+            libc::SIOCGIFFLAGS as IoctlRequest,
+            (&mut ifr as *mut libc::ifreq).cast(),
+        );
         let err = last_os_errno();
         libc::close(fd);
 
@@ -151,7 +171,11 @@ fn check_ioctl_siocgifmtu() -> String {
         let name = b"tun0\0";
         ifr.ifr_name[..name.len()].copy_from_slice(&name.map(|b| b as libc::c_char));
 
-        let ret = libc::ioctl(fd, libc::SIOCGIFMTU as i32, &ifr);
+        let ret = ioctl_ptr(
+            fd,
+            libc::SIOCGIFMTU as IoctlRequest,
+            (&mut ifr as *mut libc::ifreq).cast(),
+        );
         let err = last_os_errno();
         libc::close(fd);
 
@@ -185,7 +209,12 @@ fn check_ioctl_siocgifconf() -> String {
         ifc.ifc_len = buf.len() as libc::c_int;
         ifc.ifc_ifcu.ifcu_buf = buf.as_mut_ptr().cast();
 
-        if libc::ioctl(fd, libc::SIOCGIFCONF as i32, &mut ifc) < 0 {
+        if ioctl_ptr(
+            fd,
+            libc::SIOCGIFCONF as IoctlRequest,
+            (&mut ifc as *mut libc::ifconf).cast(),
+        ) < 0
+        {
             let e = last_os_error();
             libc::close(fd);
             return format!("FAIL: ioctl error: {e}");
@@ -645,7 +674,7 @@ fn check_sys_class_net() -> String {
 macro_rules! jni_fn {
     ($name:ident, $body:expr) => {
         #[unsafe(no_mangle)]
-        pub extern "system" fn $name(mut env: JNIEnv, _class: JClass) -> jstring {
+        pub extern "system" fn $name(mut env: EnvUnowned, _class: JClass) -> jstring {
             let result = $body;
             logi(&format!("RESULT: {result}"));
             result_to_jstring(&mut env, &result)

@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
@@ -660,7 +661,7 @@ private fun ChangelogDialog(
     var index by remember { mutableIntStateOf(0) }
     val entry = entries[index]
     val locale =
-        LocalContext.current.resources.configuration.locales[0]
+        LocalConfiguration.current.locales[0]
             .language
     val sectionLabels =
         mapOf(

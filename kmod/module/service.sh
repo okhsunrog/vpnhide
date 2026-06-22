@@ -56,7 +56,12 @@ resolve_uids() {
         pkg="$(echo "$line" | tr -d '[:space:]')"
         [ -z "$pkg" ] && continue
         case "$pkg" in \#*) continue ;; esac
-        uid_csv="$(echo "$ALL_PACKAGES" | grep "^package:${pkg} " | sed 's/.*uid://')"
+        uid_csv="$(echo "$ALL_PACKAGES" | awk -v p="package:${pkg}" '
+            $1 == p {
+                sub(/uid:/, "", $2)
+                n = split($2, ids, ",")
+                for (i = 1; i <= n; i++) print ids[i]
+            }')"
         if [ -n "$uid_csv" ]; then
             expanded="$(echo "$uid_csv" | tr ',' '\n')"
             if [ -z "$uids" ]; then uids="$expanded"; else uids="${uids}

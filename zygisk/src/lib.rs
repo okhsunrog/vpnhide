@@ -33,11 +33,11 @@ mod shadowhook;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::Once;
 
-use jni::JNIEnv;
 use log::{debug, error, info};
 use zygisk_api::ZygiskModule;
 use zygisk_api::api::ZygiskApi;
 use zygisk_api::api::v2::{AppSpecializeArgs, V2, ZygiskOption};
+use zygisk_api::jni::JNIEnv;
 
 use crate::hooks::{
     hooked_getifaddrs, hooked_ioctl, hooked_openat, hooked_recv, hooked_recvmsg,
@@ -478,7 +478,10 @@ fn is_targeted(package: &str) -> bool {
 
 /// Decode a `JString` (as stored in `AppSpecializeArgs::nice_name`) into
 /// an owned Rust `String`. Returns None on any failure.
-fn read_jstring<'a>(env: &JNIEnv<'a>, jstr: &jni::objects::JString<'a>) -> Option<String> {
+fn read_jstring<'a>(
+    env: &JNIEnv<'a>,
+    jstr: &zygisk_api::jni::objects::JString<'a>,
+) -> Option<String> {
     if jstr.is_null() {
         return None;
     }

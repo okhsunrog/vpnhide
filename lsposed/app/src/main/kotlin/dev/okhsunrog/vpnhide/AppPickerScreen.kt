@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +64,7 @@ fun AppPickerScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
 
     val cachedApps by AppListCache.apps.collectAsState()
@@ -312,7 +314,7 @@ fun AppPickerScreen(
             val kmodPkgs = (allApps.filter { it.kmod }.map { it.packageName } + selfPkg).distinct().sorted()
             val zygiskPkgs = (allApps.filter { it.zygisk }.map { it.packageName } + selfPkg).distinct().sorted()
             val lsposedPkgs = (allApps.filter { it.lsposed }.map { it.packageName } + selfPkg).distinct().sorted()
-            val header = context.getString(R.string.save_header_comment)
+            val header = resources.getString(R.string.save_header_comment)
 
             try {
                 val (exitCode, _) =
@@ -321,21 +323,21 @@ fun AppPickerScreen(
                     )
                 val totalSelected = allApps.count { it.anySelected }
                 if (exitCode == 0) {
-                    snackMessage = context.getString(R.string.save_success, totalSelected)
+                    snackMessage = resources.getString(R.string.save_success, totalSelected)
                     // Target counts shown on the Dashboard just changed;
                     // invalidate so next open reflects them without a
                     // manual refresh tap.
                     DashboardCache.invalidate()
                     TargetsCache.refresh(scope, context)
                 } else if (exitCode == -1) {
-                    snackMessage = context.getString(R.string.save_failed_root)
+                    snackMessage = resources.getString(R.string.save_failed_root)
                     dirty = true
                 } else {
-                    snackMessage = context.getString(R.string.save_failed_exit, exitCode)
+                    snackMessage = resources.getString(R.string.save_failed_exit, exitCode)
                     dirty = true
                 }
             } catch (e: Exception) {
-                snackMessage = context.getString(R.string.save_failed_error, e.message ?: "")
+                snackMessage = resources.getString(R.string.save_failed_error, e.message ?: "")
                 dirty = true
             }
             saving = false
@@ -372,14 +374,14 @@ private fun buildSaveCommand(
 
     // Resolve kmod UIDs -> /proc/vpnhide_targets
     if (kmodPkgs.isNotEmpty()) {
-        parts += buildUidResolver(kmodPkgs, PROC_TARGETS)
+        parts += buildUidResolverCommand(kmodPkgs, PROC_TARGETS)
     } else {
         parts += "echo > $PROC_TARGETS 2>/dev/null; true"
     }
 
     // Resolve lsposed UIDs -> /data/system/vpnhide_uids.txt
     if (lsposedPkgs.isNotEmpty()) {
-        parts += buildUidResolver(lsposedPkgs, SS_UIDS_FILE)
+        parts += buildUidResolverCommand(lsposedPkgs, SS_UIDS_FILE)
         parts += "chmod 644 $SS_UIDS_FILE 2>/dev/null"
         parts += "chcon u:object_r:system_data_file:s0 $SS_UIDS_FILE 2>/dev/null"
     } else {
@@ -388,28 +390,6 @@ private fun buildSaveCommand(
 
     return parts.joinToString(" ; ")
 }
-
-private fun buildUidResolver(
-    packages: List<String>,
-    outputFile: String,
-): String =
-    buildString {
-        // `--user all` produces comma-separated UIDs for packages that
-        // exist in multiple profiles (e.g. work profile), like:
-        //   package:com.android.chrome uid:10187,1010187
-        // `tr ',' '\n'` expands each to its own line so every profile's
-        // copy of the target is individually filtered by the hooks.
-        append("ALL_PKGS=\"\$(pm list packages -U --user all 2>/dev/null)\"")
-        append("; UIDS=\"\"")
-        for (pkg in packages) {
-            append("; U=\$(echo \"\$ALL_PKGS\" | grep '^package:$pkg ' | sed 's/.*uid://' | tr ',' '\\n')")
-            append("; if [ -n \"\$U\" ]; then if [ -z \"\$UIDS\" ]; then UIDS=\"\$U\"; else UIDS=\"\$UIDS")
-            append("\n")
-            append("\$U\"; fi; fi")
-        }
-        append("; if [ -n \"\$UIDS\" ]; then echo \"\$UIDS\" > $outputFile 2>/dev/null")
-        append("; else echo > $outputFile 2>/dev/null; fi")
-    }
 
 @Composable
 private fun AppRow(
