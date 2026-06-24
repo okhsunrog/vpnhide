@@ -14,6 +14,11 @@ Zero footprint in the target app's process -- no modified function prologues, no
 | `inet6_fill_ifaddr` | Trims VPN entries from RTM_GETADDR IPv6 responses via `skb_trim` | IPv6 address enumeration over netlink |
 | `inet_fill_ifaddr` | Trims VPN entries from RTM_GETADDR IPv4 responses via `skb_trim` | IPv4 address enumeration over netlink |
 | `fib_route_seq_show` | Forward-scans for VPN lines and compacts them out with `memmove` | `/proc/net/route` reads |
+| `ipv6_route_seq_show` | Forward-scans for VPN lines and compacts them out with `memmove` | `/proc/net/ipv6_route` reads |
+| `fib_dump_info` | Trims IPv4 VPN route entries and public physical-interface host-route hints from netlink route dumps via `skb_trim` | RTM_GETROUTE route table dumps |
+| `rt_fill_info` | Trims IPv4 VPN route entries from single-route netlink lookups via `skb_trim` | RTM_GETROUTE lookups for specific destinations |
+| `rt6_fill_node` | Trims IPv6 VPN route entries from netlink route replies via `skb_trim` | IPv6 RTM_GETROUTE dumps/lookups |
+| `fib_nl_fill_rule` | Trims target-UID policy rules and VPN interface rules from netlink rule dumps via `skb_trim` | RTM_GETRULE policy routing dumps |
 
 All filtering is **per-UID**: only processes whose UID appears in `/proc/vpnhide_targets` see the filtered view. Everyone else (system services, VPN client, NFC subsystem) sees the real data.
 
@@ -69,7 +74,7 @@ The app writes to **three places** simultaneously:
 
 For apps with aggressive anti-tamper SDKs, full VPN hiding requires covering both native and Java API detection paths -- without placing any hooks in the target app's process:
 
-- **vpnhide-kmod** (this module) covers the native side: `ioctl`, `getifaddrs()` (netlink), `/proc/net/route`, and netlink address enumeration.
+- **vpnhide-kmod** (this module) covers the native side: `ioctl`, `getifaddrs()` (netlink), `/proc/net/route`, `/proc/net/ipv6_route`, netlink address enumeration, netlink route dumps, and policy routing rule dumps.
 - **[lsposed](../lsposed/)** hooks `writeToParcel()` on `NetworkCapabilities`, `NetworkInfo`, `LinkProperties` inside `system_server` -- stripping VPN data before Binder serialization reaches the app.
 
 Together they provide complete VPN hiding without any hooks in the target app's process.
