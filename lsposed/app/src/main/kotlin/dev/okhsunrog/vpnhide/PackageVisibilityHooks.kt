@@ -9,6 +9,7 @@ import android.os.Process
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import dev.okhsunrog.vpnhide.generated.HookIds
 
 /**
  * Package-visibility policy — hide packages from selected callers.
@@ -173,6 +174,7 @@ internal object PackageVisibilityHooks {
                 if (removed.isEmpty()) return
 
                 param.result = newListResultLike(result, filtered) ?: return
+                LsposedStats.record(callerUid, HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
                 HookLog.i(
                     "VpnHide/PV: $methodName uid=$callerUid filtered ${removed.size}/${original.size} " +
                         "hidden=${removed.sorted()} wrapper=${result.javaClass.simpleName}",
@@ -225,6 +227,7 @@ internal object PackageVisibilityHooks {
                 val callerUid = observerCallerUid() ?: return
                 if (pkg in loadHiddenPackages()) {
                     param.result = null
+                    LsposedStats.record(callerUid, HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
                     HookLog.i("VpnHide/PV: $methodName uid=$callerUid hid $pkg")
                 }
             }
@@ -239,6 +242,7 @@ internal object PackageVisibilityHooks {
                 val callerUid = observerCallerUid() ?: return
                 if (pkg in loadHiddenPackages()) {
                     param.result = -1
+                    LsposedStats.record(callerUid, HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
                     HookLog.i("VpnHide/PV: getPackageUid uid=$callerUid hid $pkg")
                 }
             }
@@ -254,6 +258,7 @@ internal object PackageVisibilityHooks {
                 val pkg = resolveInfoPackageName(ri) ?: return
                 if (pkg in loadHiddenPackages()) {
                     param.result = null
+                    LsposedStats.record(callerUid, HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
                     HookLog.i("VpnHide/PV: $methodName uid=$callerUid hid $pkg")
                 }
             }
@@ -271,6 +276,7 @@ internal object PackageVisibilityHooks {
                 val filtered = arr.filterIsInstance<String>().filter { it !in hidden }
                 if (filtered.size == arr.size) return
                 param.result = if (filtered.isEmpty()) null else filtered.toTypedArray()
+                LsposedStats.record(callerUid, HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
                 val requestedUid = param.args.firstOrNull()
                 val removed = arr.filterIsInstance<String>().filter { it in hidden }
                 HookLog.i(

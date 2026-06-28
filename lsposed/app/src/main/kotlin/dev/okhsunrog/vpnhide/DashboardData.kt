@@ -4,6 +4,7 @@ import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
 import android.os.Build
 import android.os.SystemClock
+import dev.okhsunrog.vpnhide.generated.HookIds
 import java.io.File
 
 // ── Domain types — invalid states are unrepresentable ────────────────────
@@ -1119,12 +1120,18 @@ internal suspend fun loadDashboardState(
     )
     StartupTrace.mark("dashboard_kernel_done")
 
-    // lsposed hook status
-    val hookStatusRaw = shellSnapshot["hook_status"].orEmpty()
-    val hookProps = parseKeyValueLines(hookStatusRaw)
+    // lsposed runtime state
+    val lsposedStateRaw = shellSnapshot["lsposed_state"].orEmpty()
+    val lsposedStatus = Protocol.parseStatus(lsposedStateRaw)
+    val hookProps = parseLsposedStateMetadata(lsposedStateRaw)
     val hookVersion = hookProps["version"]
     val hookBootId = hookProps["boot_id"]
-    val hooksActiveThisBoot = hookBootId != null && hookBootId == currentBootId.trim()
+    val hooksActiveThisBoot =
+        lsposedStatus?.backend ==
+            HookIds.Backend.LSPOSED.id
+                .toLong() &&
+            hookBootId != null &&
+            hookBootId == currentBootId.trim()
     val lsposedTargetCount = countPackages(targetsSnapshot.lsposedTargets)
     val lsposedFramework = detectLsposedFramework(shellSnapshot)
     val lsposedConfig =
@@ -1160,7 +1167,7 @@ internal suspend fun loadDashboardState(
     VpnHideLog.i(
         TAG,
         "lsposed: $lsposed (hookBootId=$hookBootId currentBootId=${currentBootId.trim()} " +
-            "framework=$lsposedFramework hooksActive=$hooksActiveThisBoot config=$lsposedConfig)",
+            "status=$lsposedStatus framework=$lsposedFramework hooksActive=$hooksActiveThisBoot config=$lsposedConfig)",
     )
     StartupTrace.mark("dashboard_lsposed_done")
 

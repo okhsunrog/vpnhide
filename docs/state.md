@@ -144,14 +144,18 @@ is exportable and readable by `system_server`.
 
 ## 4. system_server Files
 
-### `/data/system/vpnhide_hook_active`
+### `/data/system/vpnhide_lsposed_state`
 
-- Format: `key=value`: `version`, `boot_id`, `timestamp`, `aosp_sdk`, optional
-  `broken_fields`.
-- Writer: LSPosed hook entry in `system_server`.
+- Format: protocol-shaped readback: `vpnhide 1 status` plus LSPosed `meta`
+  records (`version`, `boot_id`, `timestamp`, `aosp_sdk`, optional
+  `broken_fields`) and `vpnhide 1 stats` sparse counters.
+- Writer: LSPosed hooks in `system_server`.
 - Reader: app dashboard via root snapshot.
 - Permissions: default root/system-server write behavior; app reads via `su`.
 - Lifetime: per boot.
+
+`/data/system/vpnhide_hook_active` is the retired status-only marker. App
+startup removes it best-effort after canonical JSON migration.
 
 The canonical config is also in `/data/system`, but it is covered in section 1
 because it is the storage root for every layer.
@@ -297,7 +301,7 @@ service:
 system_server:
   HookEntry.handleLoadPackage
     -> install hooks
-    -> write /data/system/vpnhide_hook_active
+    -> write /data/system/vpnhide_lsposed_state
     -> watch canonical JSON
 
 zygote app fork:
@@ -315,7 +319,7 @@ zygote app fork:
 | Lifetime | Examples |
 |---|---|
 | In-kernel per boot | `/proc/vpnhide_ctl` state, KPM in-kernel state, iptables chains |
-| Per boot files | `/data/adb/vpnhide_kmod/load_status`, `/data/adb/vpnhide_kmod/load_dmesg`, `/data/adb/vpnhide_kpm/load_status`, `/data/system/vpnhide_hook_active` |
+| Per boot files | `/data/adb/vpnhide_kmod/load_status`, `/data/adb/vpnhide_kmod/load_dmesg`, `/data/adb/vpnhide_kpm/load_status`, `/data/system/vpnhide_lsposed_state` |
 | Per app launch | `filesDir/vpnhide_zygisk_active` |
 | Persistent root-managed | `/data/system/vpnhide_config.json`, `/data/adb/vpnhide/superkey` |
 | Module-dir derived state | `/data/adb/modules/vpnhide_zygisk/targets.txt` |

@@ -1173,6 +1173,9 @@ private fun buildTargetsText(): String =
         appendLine("=== /proc/vpnhide_ctl (live status + stats) ===")
         appendLine(suExec("cat $PROC_CTL 2>/dev/null").second.ifEmpty { "(empty)" })
         appendLine()
+        appendLine("=== LSPosed state (live status + stats) ===")
+        appendLine(suExec("cat $LSPOSED_STATE_FILE 2>/dev/null").second.ifEmpty { "(empty)" })
+        appendLine()
         appendLine("=== canonical config ===")
         appendLine(suExec("cat $CANONICAL_CONFIG_FILE 2>/dev/null").second.ifEmpty { "(empty)" })
     }

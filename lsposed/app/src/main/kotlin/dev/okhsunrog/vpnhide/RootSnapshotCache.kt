@@ -44,7 +44,7 @@ internal val REQUIRED_ROOT_SNAPSHOT_SECTIONS =
         "kmod_load_status",
         "kmod_load_dmesg",
         "kernel_release",
-        "hook_status",
+        "lsposed_state",
         "debug_logging",
         "getenforce",
         "pm_packages",
@@ -230,7 +230,7 @@ internal fun buildRootShellSnapshotCommand(includePmPackages: Boolean = true): S
     phase_runtime_status_files() {
       phase_start runtime_status_files
       emit_cmd kernel_release uname -r
-      emit_file hook_status ${HookEntry.HOOK_STATUS_FILE}
+      emit_file lsposed_state $LSPOSED_STATE_FILE
       emit_file debug_logging /data/system/vpnhide_debug_logging
       emit_cmd getenforce getenforce
       phase_end

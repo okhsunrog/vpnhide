@@ -14,8 +14,8 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.generated.IfaceLists
-import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.lang.reflect.Array as JavaArray
 
@@ -39,7 +39,11 @@ import java.lang.reflect.Array as JavaArray
  * by vpnhide-kmod (kernel module) or vpnhide-zygisk (in-process hooks).
  *
  * Only "System Framework" needs to be in LSPosed scope.
+ *
+ * Single Xposed entry point for system_server hook wiring; splitting the hook
+ * installer is a separate refactor from adding telemetry.
  */
+@Suppress("LargeClass")
 class HookEntry : IXposedHookLoadPackage {
     private val hookInstalled = AtomicBoolean(false)
 
@@ -85,29 +89,41 @@ class HookEntry : IXposedHookLoadPackage {
         if (hookInstalled.compareAndSet(false, true)) {
             HookLog.install()
             HookLog.i("VpnHide: system_server detected, installing Binder hooks")
-            val brokenFields = installSystemServerHooks()
-            tryHook("PackageVisibility") { PackageVisibilityHooks.install(lpparam.classLoader) }
-            tryHook("ConnectivityService") { installConnectivityServiceHook(lpparam.classLoader) }
-            writeHookStatusFile(brokenFields)
+            val hookInstall = installSystemServerHooks()
+            var installedMask = hookInstall.installedHookMask
+            if (tryHook("PackageVisibility") { PackageVisibilityHooks.install(lpparam.classLoader) }) {
+                installedMask = installedMask or hookBit(HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
+            }
+            if (tryHook("ConnectivityService") { installConnectivityServiceHook(lpparam.classLoader) }) {
+                installedMask =
+                    installedMask or
+                    hookBit(HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT) or
+                    hookBit(HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK) or
+                    hookBit(HookIds.Hook.LSPOSED_CONNECTIVITY_NETWORK)
+            }
+            LsposedStats.setStatus(installedMask, hookInstall.brokenFields)
         }
     }
 
     private inline fun tryHook(
         name: String,
         block: () -> Unit,
-    ) {
+    ): Boolean =
         try {
             block()
+            true
         } catch (t: Throwable) {
             HookLog.e("VpnHide: $name hook failed: ${t::class.java.simpleName}: ${t.message}")
+            false
         }
-    }
 
     // ------------------------------------------------------------------
     //  Helpers
     // ------------------------------------------------------------------
 
     private fun isVpnInterfaceName(name: String): Boolean = IfaceLists.isVpnIface(name)
+
+    private fun hookBit(hook: HookIds.Hook): Int = 1 shl hook.id
 
     // Recursively sanitizes mIfaceName + mRoutes + nested mStackedLinks; the
     // length and nesting are inherent to walking that object graph by reflection.
@@ -389,10 +405,13 @@ class HookEntry : IXposedHookLoadPackage {
         }
 
         val copy = JavaArray.newInstance(componentType, values.size)
+        var modified = false
         for (i in values.indices) {
-            JavaArray.set(copy, i, sanitizedValue(values[i]))
+            val sanitized = sanitizedValue(values[i])
+            if (sanitized !== values[i]) modified = true
+            JavaArray.set(copy, i, sanitized)
         }
-        return copy
+        return if (modified) copy else values
     }
 
     private fun sanitizeMethodResult(
@@ -402,22 +421,41 @@ class HookEntry : IXposedHookLoadPackage {
         if (bypassConnectivitySanitize.get() == true) return
         if (!isTargetCallerOrUid(explicitUid)) return
         try {
-            param.result = sanitizedValue(param.result)
+            val original = param.result
+            val sanitized = sanitizedValue(original)
+            if (sanitized !== original) {
+                param.result = sanitized
+                LsposedStats.record(explicitUid ?: effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT)
+            }
         } catch (t: Throwable) {
             HookLog.e("VpnHide: ConnectivityService result sanitize error: ${t.message}")
         }
     }
 
     @Suppress("DEPRECATION")
-    private fun sanitizeCallbackBundle(bundle: Bundle) {
+    private fun sanitizeCallbackBundle(bundle: Bundle): Boolean {
+        var modified = false
         try {
             val nc = bundle.getParcelable(NetworkCapabilities::class.java.simpleName) as? NetworkCapabilities
-            if (nc != null) bundle.putParcelable(NetworkCapabilities::class.java.simpleName, sanitizedNetworkCapabilities(nc))
+            if (nc != null) {
+                val sanitized = sanitizedNetworkCapabilities(nc)
+                if (sanitized !== nc) {
+                    bundle.putParcelable(NetworkCapabilities::class.java.simpleName, sanitized)
+                    modified = true
+                }
+            }
             val lp = bundle.getParcelable(LinkProperties::class.java.simpleName) as? LinkProperties
-            if (lp != null) bundle.putParcelable(LinkProperties::class.java.simpleName, sanitizedLinkProperties(lp))
+            if (lp != null) {
+                val sanitized = sanitizedLinkProperties(lp)
+                if (sanitized !== lp) {
+                    bundle.putParcelable(LinkProperties::class.java.simpleName, sanitized)
+                    modified = true
+                }
+            }
         } catch (t: Throwable) {
             HookLog.e("VpnHide: callback bundle sanitize error: ${t.message}")
         }
+        return modified
     }
 
     // ==================================================================
@@ -438,11 +476,17 @@ class HookEntry : IXposedHookLoadPackage {
     // gets that on every NetworkCapabilities IPC, target or not). The
     // dashboard surfaces the broken_fields list as a red error so the
     // user can see and report the AOSP drift.
-    private fun installSystemServerHooks(): List<String> {
+    private data class HookInstallResult(
+        val brokenFields: List<String>,
+        val installedHookMask: Int,
+    )
+
+    private fun installSystemServerHooks(): HookInstallResult {
         val brokenFields = runReflectionSmokeCheck()
         if (brokenFields.isNotEmpty()) {
             HookLog.e("VpnHide: reflection smoke-check found broken keys: $brokenFields")
         }
+        var installedHookMask = 0
 
         // Match a probe key against either an exact entry in `broken` or
         // an entry with a `:type=...` suffix (wrong-typed field).
@@ -455,12 +499,16 @@ class HookEntry : IXposedHookLoadPackage {
         if (anyBroken(LP_CRITICAL_KEYS)) {
             HookLog.e("VpnHide: LP.writeToParcel hook SKIPPED — critical reflection broken")
         } else {
-            tryHook("LP.writeToParcel") { hookLPWriteToParcel() }
+            if (tryHook("LP.writeToParcel") { hookLPWriteToParcel() }) {
+                installedHookMask = installedHookMask or hookBit(HookIds.Hook.LSPOSED_LINK_PROPERTIES)
+            }
         }
 
         // NC uses public NetworkCapabilities mutators now, so private AOSP
         // field drift must not disable this hook.
-        tryHook("NC.writeToParcel") { hookNCWriteToParcel() }
+        if (tryHook("NC.writeToParcel") { hookNCWriteToParcel() }) {
+            installedHookMask = installedHookMask or hookBit(HookIds.Hook.LSPOSED_NETWORK_CAPABILITIES)
+        }
 
         // NI: every field + ctor is critical — the hook body has no
         // inner try/catch around the per-field setIntField/setBooleanField
@@ -468,12 +516,16 @@ class HookEntry : IXposedHookLoadPackage {
         if (anyBroken(NI_CRITICAL_KEYS)) {
             HookLog.e("VpnHide: NI.writeToParcel hook SKIPPED — critical reflection broken")
         } else {
-            tryHook("NI.writeToParcel") { hookNIWriteToParcel() }
+            if (tryHook("NI.writeToParcel") { hookNIWriteToParcel() }) {
+                installedHookMask = installedHookMask or hookBit(HookIds.Hook.LSPOSED_NETWORK_INFO)
+            }
         }
-        tryHook("Network.writeToParcel") { hookNetworkWriteToParcel() }
+        if (tryHook("Network.writeToParcel") { hookNetworkWriteToParcel() }) {
+            installedHookMask = installedHookMask or hookBit(HookIds.Hook.LSPOSED_NETWORK)
+        }
 
         tryHook("FileObserver") { watchCanonicalConfigFile() }
-        return brokenFields
+        return HookInstallResult(brokenFields, installedHookMask)
     }
 
     private data class FieldProbe(
@@ -523,41 +575,6 @@ class HookEntry : IXposedHookLoadPackage {
             }
         }
         return broken
-    }
-
-    /**
-     * Write a status file so the VPN Hide app can verify hooks are active.
-     * Includes boot_id to distinguish stale files from previous boots,
-     * aosp_sdk for diagnostic context in bug reports, and (only when
-     * non-empty) broken_fields listing the reflection probes that the
-     * smoke-check rejected this boot.
-     */
-    private fun writeHookStatusFile(brokenFields: List<String>) {
-        try {
-            val bootId = File("/proc/sys/kernel/random/boot_id").readText().trim()
-            val timestamp = System.currentTimeMillis() / 1000
-            val version = BuildConfig.VERSION_NAME
-            val sdk = Build.VERSION.SDK_INT
-            val sb = StringBuilder()
-            sb.append("version=").append(version).append('\n')
-            sb.append("boot_id=").append(bootId).append('\n')
-            sb.append("timestamp=").append(timestamp).append('\n')
-            sb.append("aosp_sdk=").append(sdk).append('\n')
-            if (brokenFields.isNotEmpty()) {
-                sb.append("broken_fields=").append(brokenFields.joinToString(",")).append('\n')
-            }
-            val statusFile = File(HOOK_STATUS_FILE)
-            statusFile.writeText(sb.toString())
-            // Don't expose this file to untrusted apps — anti-tamper SDKs
-            // scan /data/system/ for known marker filenames. The VPN Hide
-            // app reads it via root (`suExec("cat ...")`), see DashboardData.kt.
-            HookLog.i(
-                "VpnHide: wrote hook status file (version=$version, boot_id=$bootId, " +
-                    "sdk=$sdk, broken=${brokenFields.size})",
-            )
-        } catch (t: Throwable) {
-            HookLog.e("VpnHide: failed to write hook status: ${t.message}")
-        }
     }
 
     /**
@@ -621,6 +638,7 @@ class HookEntry : IXposedHookLoadPackage {
                             writingCopy.set(false)
                         }
                         param.result = null
+                        LsposedStats.record(callerUid, HookIds.Hook.LSPOSED_NETWORK_CAPABILITIES)
                         HookLog.i("VpnHide-NC: uid=$callerUid STRIPPED VPN")
                     } catch (t: Throwable) {
                         HookLog.e("VpnHide: NC.writeToParcel error: ${t.message}")
@@ -655,6 +673,7 @@ class HookEntry : IXposedHookLoadPackage {
                             writingCopy.set(false)
                         }
                         param.result = null
+                        LsposedStats.record(effectiveCallerUid(), HookIds.Hook.LSPOSED_NETWORK)
                         HookLog.i("VpnHide: replaced VPN Network parcel for uid=${effectiveCallerUid()}")
                     } catch (t: Throwable) {
                         HookLog.e("VpnHide: Network.writeToParcel error: ${t.message}")
@@ -702,6 +721,7 @@ class HookEntry : IXposedHookLoadPackage {
                             writingCopy.set(false)
                         }
                         param.result = null
+                        LsposedStats.record(callerUid, HookIds.Hook.LSPOSED_NETWORK_INFO)
                         HookLog.i("VpnHide-NI: uid=$callerUid STRIPPED VPN (disguised as WIFI)")
                     } catch (t: Throwable) {
                         HookLog.e("VpnHide: NI.writeToParcel error: ${t.message}")
@@ -748,6 +768,7 @@ class HookEntry : IXposedHookLoadPackage {
                             writingCopy.set(false)
                         }
                         param.result = null
+                        LsposedStats.record(callerUid, HookIds.Hook.LSPOSED_LINK_PROPERTIES)
                         HookLog.i("VpnHide-LP: uid=$callerUid STRIPPED VPN (ifname was $ifname)")
                     } catch (t: Throwable) {
                         HookLog.e("VpnHide: LP.writeToParcel error: ${t.message}")
@@ -861,10 +882,15 @@ class HookEntry : IXposedHookLoadPackage {
                         // App is specifically listening for a VPN network —
                         // suppress so it never learns one exists.
                         param.result = null
+                        LsposedStats.record(uid, HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK)
                         HookLog.i("VpnHide-CB: uid=$uid suppressed VPN-request dispatch")
                         return
                     }
-                    (param.args.getOrNull(CALLBACK_BUNDLE_ARG_INDEX) as? Bundle)?.let { sanitizeCallbackBundle(it) }
+                    (param.args.getOrNull(CALLBACK_BUNDLE_ARG_INDEX) as? Bundle)?.let {
+                        if (sanitizeCallbackBundle(it)) {
+                            LsposedStats.record(uid, HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK)
+                        }
+                    }
                     currentCallbackUid.set(uid)
                 }
 
@@ -956,6 +982,7 @@ class HookEntry : IXposedHookLoadPackage {
             return
         }
         param.result = replacement
+        LsposedStats.record(effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_NETWORK)
         HookLog.i("VpnHide: replaced active VPN Network handle for uid=${effectiveCallerUid()}")
     }
 
@@ -965,6 +992,7 @@ class HookEntry : IXposedHookLoadPackage {
         val filtered = networks.filterNot { isVpnNetwork(cs, it) }
         if (filtered.size == networks.size) return
         param.result = filtered.toTypedArray()
+        LsposedStats.record(effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_NETWORK)
         HookLog.i(
             "VpnHide: filtered ${networks.size - filtered.size} VPN Network handle(s) " +
                 "for uid=${effectiveCallerUid()}",
@@ -975,6 +1003,7 @@ class HookEntry : IXposedHookLoadPackage {
         val type = param.args.getOrNull(0) as? Int ?: return
         if (type != ConnectivityManager.TYPE_VPN || param.result == null) return
         param.result = null
+        LsposedStats.record(effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_NETWORK)
         HookLog.i("VpnHide: suppressed getNetworkForType(TYPE_VPN) for uid=${effectiveCallerUid()}")
     }
 
@@ -989,6 +1018,7 @@ class HookEntry : IXposedHookLoadPackage {
         if (param.result == null) return true
         if (!isTargetCallerOrUid()) return false
         param.result = null
+        LsposedStats.record(effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT)
         HookLog.i("VpnHide: suppressed getNetworkInfo(TYPE_VPN) for uid=${effectiveCallerUid()}")
         return true
     }
@@ -1053,8 +1083,6 @@ class HookEntry : IXposedHookLoadPackage {
                 "getNetworkInfoForUid" to 1,
                 "getAllNetworkInfo" to null,
             )
-        const val HOOK_STATUS_FILE = "/data/system/vpnhide_hook_active"
-
         private val FIELD_PROBES =
             listOf(
                 FieldProbe(

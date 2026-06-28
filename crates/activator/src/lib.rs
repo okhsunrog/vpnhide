@@ -113,7 +113,8 @@ impl NativeSelection {
             NativeSelection::Enabled(false) => None,
             NativeSelection::Enabled(true) => Some(KERNEL_HOOK_MASK),
             NativeSelection::Hooks(names) => {
-                let mask = names.iter().fold(0u32, |acc, name| acc | hook_bit(name));
+                let mask =
+                    names.iter().fold(0u32, |acc, name| acc | hook_bit(name)) & KERNEL_HOOK_MASK;
                 (mask != 0).then_some(mask)
             }
         }
@@ -843,6 +844,26 @@ mod tests {
              target 0x278b 0x3ff\n\
              target 0x27fa 0x40\n\
              target 0xf69cb 0x3ff\n",
+        );
+    }
+
+    #[test]
+    fn native_projection_ignores_non_kernel_hook_names() {
+        let cfg = parse_canonical(
+            r#"{
+              "version": 1,
+              "debug": false,
+              "apps": {
+                "com.example.java": { "native": ["lsposed_network"] }
+              }
+            }"#,
+        )
+        .unwrap();
+        let resolver = parse_pm_packages("package:com.example.java uid:10123\n");
+
+        assert_eq!(
+            project_native_with_resolver(&cfg, &resolver),
+            "vpnhide 1 config\ndebug 0\n",
         );
     }
 

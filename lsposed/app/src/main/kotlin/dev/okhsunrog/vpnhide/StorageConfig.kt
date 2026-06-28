@@ -299,6 +299,7 @@ internal fun buildLegacyConfigCleanupCommand(): String =
                 SS_OBSERVER_UIDS_FILE,
                 "/data/system/vpnhide_uids.txt",
                 "/data/system/vpnhide_debug_logging",
+                LEGACY_HOOK_STATUS_FILE,
             ).joinToString(" "),
         "rmdir /data/adb/vpnhide_zygisk /data/adb/vpnhide_lsposed /data/adb/vpnhide_ports 2>/dev/null || true",
     ).joinToString(" ; ")

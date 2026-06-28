@@ -78,8 +78,58 @@ name = "fib_nl_fill_rule"
 backend = "kernel"
 note = "RTM_GETRULE — policy routing rules"
 
-# --- zygisk libc hooks and lsposed Java hooks take the next free ids as they
-# --- are wired into the protocol; appended here then (kept here as the record).
+# --- LSPosed Java hooks (system_server) ------------------------------------
+
+[[hook]]
+id = 10
+name = "lsposed_link_properties"
+backend = "lsposed"
+note = "LinkProperties parcel/result sanitization"
+
+[[hook]]
+id = 11
+name = "lsposed_network_capabilities"
+backend = "lsposed"
+note = "NetworkCapabilities parcel/result sanitization"
+
+[[hook]]
+id = 12
+name = "lsposed_network_info"
+backend = "lsposed"
+note = "NetworkInfo parcel/result sanitization"
+
+[[hook]]
+id = 13
+name = "lsposed_network"
+backend = "lsposed"
+note = "Network handle replacement/filtering"
+
+[[hook]]
+id = 14
+name = "lsposed_connectivity_result"
+backend = "lsposed"
+note = "ConnectivityService synchronous result filtering"
+
+[[hook]]
+id = 15
+name = "lsposed_connectivity_callback"
+backend = "lsposed"
+note = "ConnectivityService callback filtering"
+
+[[hook]]
+id = 16
+name = "lsposed_connectivity_network"
+backend = "lsposed"
+note = "ConnectivityService Network handle APIs"
+
+[[hook]]
+id = 17
+name = "lsposed_package_visibility"
+backend = "lsposed"
+note = "PackageManager app-hiding filters"
+
+# --- zygisk libc hooks take the next free ids as they are wired into the
+# --- protocol; appended here then (kept here as the record).
 
 # --- backend ids (protocol §4.3 `status backend <id>`) ----------------------
 # Which backend answered a `status` read. Distinct from the hook `backend`

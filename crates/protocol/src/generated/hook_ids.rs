@@ -26,14 +26,30 @@ pub enum Hook {
     Rt6FillNode = 8,
     /// RTM_GETRULE — policy routing rules
     FibNlFillRule = 9,
+    /// LinkProperties parcel/result sanitization
+    LsposedLinkProperties = 10,
+    /// NetworkCapabilities parcel/result sanitization
+    LsposedNetworkCapabilities = 11,
+    /// NetworkInfo parcel/result sanitization
+    LsposedNetworkInfo = 12,
+    /// Network handle replacement/filtering
+    LsposedNetwork = 13,
+    /// ConnectivityService synchronous result filtering
+    LsposedConnectivityResult = 14,
+    /// ConnectivityService callback filtering
+    LsposedConnectivityCallback = 15,
+    /// ConnectivityService Network handle APIs
+    LsposedConnectivityNetwork = 16,
+    /// PackageManager app-hiding filters
+    LsposedPackageVisibility = 17,
 }
 
-pub const HOOK_COUNT: u32 = 10;
+pub const HOOK_COUNT: u32 = 18;
 
 /// Hooks owned by each backend: apply `mask & own`.
 pub const KERNEL_HOOK_MASK: u32 = 0x3ff;
 pub const ZYGISK_HOOK_MASK: u32 = 0x0;
-pub const LSPOSED_HOOK_MASK: u32 = 0x0;
+pub const LSPOSED_HOOK_MASK: u32 = 0x3fc00;
 
 /// status error codes (protocol §5.1).
 #[repr(u32)]
@@ -65,7 +81,7 @@ pub enum Backend {
     Lsposed = 3,
 }
 
-pub const HOOK_NAMES: [&str; 10] = [
+pub const HOOK_NAMES: [&str; 18] = [
     "fib_route_seq_show",
     "ipv6_route_seq_show",
     "rtnl_fill_ifinfo",
@@ -76,4 +92,12 @@ pub const HOOK_NAMES: [&str; 10] = [
     "fib_dump_info",
     "rt6_fill_node",
     "fib_nl_fill_rule",
+    "lsposed_link_properties",
+    "lsposed_network_capabilities",
+    "lsposed_network_info",
+    "lsposed_network",
+    "lsposed_connectivity_result",
+    "lsposed_connectivity_callback",
+    "lsposed_connectivity_network",
+    "lsposed_package_visibility",
 ];

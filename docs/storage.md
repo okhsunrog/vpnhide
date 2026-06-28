@@ -119,12 +119,12 @@ How it reads, carefully (this runs in the bootloop-critical `system_server`):
   `packages.list` is a plain file read, hook-free.
 - **Multi-profile for free:** match `callingUid % 100000 ∈ targetAppIds`. Any
   profile's instance of a target app matches, with no per-profile enumeration.
-- **Status out:** the hook writes `/data/system/vpnhide_hook_active`
-  (`version`/`boot_id`/`broken_fields`) so the dashboard knows the Java layer is
-  alive and healthy. (Config-in and status-out are different files / opposite
-  directions — `system_server` can't expose a `/proc`-style node, so it can't
-  multiplex both on one channel the way the kmod node does.)
-- **Stats:** deferred (§5).
+- **State out:** the hook writes `/data/system/vpnhide_lsposed_state`, a single
+  protocol-shaped readback file containing `vpnhide 1 status` plus LSPosed
+  metadata (`version`/`boot_id`/`broken_fields`) and `vpnhide 1 stats` counters.
+  Config-in and state-out are still different files / opposite directions:
+  `system_server` can't expose a `/proc`-style node, so it can't multiplex write
+  config + read state on one channel the way the kmod node does.
 
 > Current code (#164) differs: LSPosed reads a *derived protocol config*
 > (`vpnhide_uids.txt`) that the native boot scripts populate. That is exactly the
@@ -252,8 +252,9 @@ single-writer / atomic-replace, and stats are never written back into it.
   zygote-inherited memfd must be created in the zygote, where our code does not run).
   So Zygisk emits **status only**; per-hook stats are a future problem, not a
   blocker for this design.
-- **LSPosed: deferred** (it *could* aggregate in `system_server`'s single process,
-  but not now). Status via `vpnhide_hook_active`.
+- **LSPosed: yes** — counters live in `system_server`, so the hook aggregates
+  cumulative-since-boot non-zero `(uid, hook_id)` cells and writes them into
+  `/data/system/vpnhide_lsposed_state` next to its `status` block.
 
 ---
 
@@ -345,7 +346,7 @@ optional.
 | `/proc/vpnhide_ctl` | kmod runtime channel (node, not a file) | per-boot, in-kernel |
 | KPM ctl0 supercall | KPM runtime channel (supercall, no file) | per-boot, in-kernel |
 | `/data/adb/modules/vpnhide_zygisk/<cfg>` | Zygisk runtime channel (derived copy) | regenerated |
-| `/data/system/vpnhide_hook_active` | LSPosed status (hook → dashboard) | per-boot |
+| `/data/system/vpnhide_lsposed_state` | LSPosed status + stats (hook → dashboard) | per-boot |
 | `/data/adb/vpnhide/superkey` | APatch superkey (optional, flag-gated) | persistent, root-only |
 
 Removed vs. the pre-redesign layout:

@@ -49,7 +49,7 @@ Broken examples:
 ```sh
 adb -s SERIAL shell 'su -c "
 cat /data/system/vpnhide_config.json
-cat /data/system/vpnhide_hook_active 2>/dev/null
+cat /data/system/vpnhide_lsposed_state 2>/dev/null
 cat /data/adb/vpnhide_kmod/load_status 2>/dev/null
 cat /data/adb/vpnhide_kpm/load_status 2>/dev/null
 ls -lZ /data/adb/modules/vpnhide_kmod /data/adb/modules/vpnhide_kpm 2>&1
