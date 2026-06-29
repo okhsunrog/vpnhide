@@ -88,7 +88,25 @@ Follow-up work (low priority):
 - Keep install-time hook status detailed enough to diagnose Android framework
   drift, especially private-field changes in new Android releases.
 
-### Per-app probe statistics
+### Permissive SELinux — dashboard severity and coverage
+
+When the device is in SELinux Permissive mode, the dashboard raises a **warning**:
+permissive exposes roughly six detection vectors VPN Hide relies on SELinux to
+block (`RTM_GETROUTE`, `/proc/net/{tcp,tcp6,udp,udp6,dev,fib_trie}`,
+`/sys/class/net`; see the coverage table in the top-level README). That warning
+is the current, deliberate behaviour.
+
+Open questions to settle later:
+
+- **Severity.** Is a warning the right weight, or should it be an error (these
+  vectors are genuinely uncovered while permissive) — or downgraded if the user
+  has a backend that already covers them another way?
+- **Behaviour.** Should VPN Hide do anything beyond warning under permissive —
+  e.g. attempt to cover the SELinux-relied vectors at the app/native layer
+  instead of leaving them to SELinux, or surface which specific vectors are
+  currently open?
+- **Detection.** `getenforce` is global; per-domain permissive (`permissive`
+  type rules) isn't caught. Worth deciding whether that matters.
 
 The Statistics screen surfaces the per-uid × per-hook interception counters
 every active backend already reports (Java + the one installed native backend),

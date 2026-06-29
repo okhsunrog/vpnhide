@@ -160,6 +160,29 @@ class NativeBackendTest {
         assertEquals(false, kpmDeferredForConflict("", "boot-1"))
     }
 
+    // ── kpmAwaitingSuperkey ──────────────────────────────────────────────
+
+    @Test
+    fun `kpm awaiting-superkey detected for current boot`() {
+        val status = "runtime=apatch\nloaded=0\nboot_id=boot-1\ndetail=awaiting_superkey\n"
+        assertEquals(true, kpmAwaitingSuperkey(status, currentBootId = "boot-1"))
+    }
+
+    @Test
+    fun `kpm awaiting-superkey ignored for a stale boot`() {
+        val status = "runtime=apatch\nloaded=0\nboot_id=boot-0\ndetail=awaiting_superkey\n"
+        assertEquals(false, kpmAwaitingSuperkey(status, currentBootId = "boot-1"))
+    }
+
+    @Test
+    fun `kpm awaiting-superkey false once loaded or for other states`() {
+        // Superkey saved and module loaded this boot.
+        assertEquals(false, kpmAwaitingSuperkey("runtime=kpatch-next\nloaded=1\nboot_id=boot-1\n", "boot-1"))
+        // Conflict deferral is a different status, not awaiting-superkey.
+        assertEquals(false, kpmAwaitingSuperkey("runtime=conflict\nloaded=0\nboot_id=boot-1\n", "boot-1"))
+        assertEquals(false, kpmAwaitingSuperkey("", "boot-1"))
+    }
+
     // ── detectKpmModule ──────────────────────────────────────────────────
 
     @Test

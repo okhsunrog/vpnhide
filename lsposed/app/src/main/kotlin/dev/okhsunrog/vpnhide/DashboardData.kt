@@ -144,6 +144,29 @@ internal fun kpmDeferredForConflict(
         bootId == currentBootId.trim()
 }
 
+/**
+ * True when the KPM boot script stood down this boot because it runs under APatch
+ * and no superkey is saved yet (`runtime=apatch, loaded=0, detail=awaiting_superkey`
+ * for the current boot_id — see kmod/kpm/module/post-fs-data.sh and protocol §1.5).
+ *
+ * Distinct from [kpmDeferredForConflict] (that writes `runtime=conflict`): here the
+ * module is installed and healthy but dormant, waiting for the user to save the
+ * APatch superkey in Settings so the service activator can load it. Without this,
+ * the dashboard would just show KPM as inactive with no explanation.
+ */
+internal fun kpmAwaitingSuperkey(
+    loadStatusSection: String,
+    currentBootId: String,
+): Boolean {
+    val load = parseKeyValueLines(loadStatusSection)
+    val bootId = load["boot_id"]?.trim()
+    return load["runtime"]?.trim() == "apatch" &&
+        load["loaded"]?.trim() == "0" &&
+        load["detail"]?.trim() == "awaiting_superkey" &&
+        !bootId.isNullOrEmpty() &&
+        bootId == currentBootId.trim()
+}
+
 internal data class ModuleMismatch(
     val kind: FlashableModuleKind,
     val moduleVersion: String,
@@ -1298,7 +1321,9 @@ internal suspend fun loadDashboardState(
     }
     val totalTargets = lsposedTargetCount + kmodTargetCount + kpmTargetCount + zygiskTargetCount
     if (totalTargets == 0) {
-        err(res.getString(R.string.dashboard_issue_no_targets))
+        // A fresh, not-yet-configured install isn't broken — guide the user to add
+        // apps rather than flag a red error.
+        info(res.getString(R.string.dashboard_issue_no_targets))
     }
     if (ports is ModuleState.Installed && ports.targetCount == 0) {
         info(res.getString(R.string.dashboard_issue_ports_no_observers))
@@ -1328,7 +1353,7 @@ internal suspend fun loadDashboardState(
 
     // ── Low-priority info: suboptimal-but-working setups ──
 
-    // I1: a stealthier kernel backend fits this kernel, but the user only
+    // A stealthier kernel backend fits this kernel, but the user only
     // installed zygisk. Zygisk is detected by banking / payment apps (Z-off per
     // app), whereas kmod/KPM are invisible to anti-tamper. Only nudge when the
     // better backend is actually installable now: kmod always is; KPM only when
@@ -1363,7 +1388,7 @@ internal suspend fun loadDashboardState(
         }
     }
 
-    // I2: the KPM backend is experimental (beta). When it's the active native
+    // The KPM backend is experimental (beta). When it's the active native
     // backend, surface a neutral note with a contact-author action so users can
     // reach the author if something misbehaves, and point them at the more
     // battle-tested alternative for their kernel (kmod on GKI, else Zygisk).
@@ -1377,7 +1402,7 @@ internal suspend fun loadDashboardState(
         info(experimentalText, action = DashboardMessageAction.ContactAuthor)
     }
 
-    // W2: more than one native backend active. Disabled / inactive modules may
+    // More than one native backend active. Disabled / inactive modules may
     // still have directories under /data/adb/modules; they are not a runtime
     // freeze risk and must not trigger the .ko+KPM conflict banner.
     when (
@@ -1406,7 +1431,16 @@ internal suspend fun loadDashboardState(
         }
     }
 
-    // I2: user has debug logging turned on. Only adb/root can read those
+    // KPM is installed under APatch but dormant because no superkey is saved yet.
+    // Without this the module just reads as inactive with no reason; tell the user
+    // to save the superkey so the service activator can load it.
+    if (kpm is ModuleState.Installed &&
+        kpmAwaitingSuperkey(shellSnapshot["kpm_load_status"].orEmpty(), currentBootId)
+    ) {
+        warn(res.getString(R.string.dashboard_issue_kpm_awaiting_superkey))
+    }
+
+    // User has debug logging turned on. Only adb/root can read those
     // verbose lines, so this is a neutral dashboard note rather than an issue.
     val debugEnabled =
         targetsSnapshot.canonicalConfig?.debug
@@ -1422,7 +1456,7 @@ internal suspend fun loadDashboardState(
         info(res.getString(R.string.dashboard_issue_agent_bridge_on))
     }
 
-    // W4: SELinux Permissive exposes six detection vectors we rely on SELinux
+    // SELinux Permissive exposes six detection vectors we rely on SELinux
     // to block (RTM_GETROUTE, /proc/net/{tcp,tcp6,udp,udp6,dev,fib_trie},
     // /sys/class/net). See the coverage table in the top-level README.
     val getenforce = shellSnapshot["getenforce"].orEmpty()
@@ -1430,7 +1464,7 @@ internal suspend fun loadDashboardState(
         warn(res.getString(R.string.dashboard_issue_selinux_permissive))
     }
 
-    // W5: VPN Hide installed in more than one user profile (work profile,
+    // VPN Hide installed in more than one user profile (work profile,
     // MIUI Second Space, etc.). Each instance can write to the shared
     // canonical config, but each one's app picker only sees apps from its own
     // profile (PackageManager.getInstalledApplications is per-user). A Save
