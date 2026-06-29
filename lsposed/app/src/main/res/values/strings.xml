@@ -76,7 +76,7 @@
     <string name="btn_save_debug">Save</string>
     <string name="btn_share_debug">Share</string>
     <string name="diag_debug_logging_title">Debug logging</string>
-    <string name="diag_debug_logging_description">Off by default — VPN Hide keeps logcat and dmesg near-silent. You don\'t need to flip this to collect a bug report: Start recording and Collect debug log below automatically turn logging on for the duration of the capture. Use this toggle only if you want logs to be emitted continuously across the app, system_server hooks, Zygisk-hooked apps, and the kernel module (kmod logs to dmesg). Zygisk-hooked apps must be restarted for the change to take effect for them.</string>
+    <string name="diag_debug_logging_description">Off by default — VPN Hide keeps logcat and dmesg near-silent. You don\'t need to flip this to collect a bug report: the capture tools in Settings → Debugging turn logging on automatically for the duration of the capture. Use this toggle only if you want logs to be emitted continuously across the app, system_server hooks, Zygisk-hooked apps, and the kernel module (kmod logs to dmesg). Zygisk-hooked apps must be restarted for the change to take effect for them.</string>
     <string name="logcat_card_title">Full system logcat</string>
     <string name="logcat_card_description">Records unfiltered logs from all buffers (main/system/crash/events/radio) for debugging issues that aren\'t visible in the standard checks. Start recording, reproduce the bug, then stop.</string>
     <string name="logcat_btn_start">Start recording</string>

@@ -206,10 +206,6 @@ fun DebugToolsSection(
     Column(
         modifier = modifier.fillMaxWidth(),
     ) {
-        DebugLoggingCard()
-
-        Spacer(Modifier.height(16.dp))
-
         LogcatRecordCard()
 
         Spacer(Modifier.height(16.dp))
@@ -258,7 +254,7 @@ fun DebugToolsSection(
 }
 
 @Composable
-private fun DebugLoggingCard() {
+internal fun DebugLoggingCard() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var enabled by remember { mutableStateOf(VpnHideLog.enabled) }

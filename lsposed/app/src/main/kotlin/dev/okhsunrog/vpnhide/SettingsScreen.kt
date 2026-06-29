@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -361,6 +362,11 @@ private fun DeveloperSettingsSection() {
             checked = settings.agentControlEnabled,
             onCheckedChange = interactor::setAgentControlEnabled,
         )
+        // Debug logging is a stealth-sensitive runtime flag (its own prefs store,
+        // not the UI DataStore), so it stays a self-contained card rather than a
+        // preference row — but it belongs with the other developer toggles.
+        Spacer(Modifier.height(10.dp))
+        DebugLoggingCard()
     }
 }
 
