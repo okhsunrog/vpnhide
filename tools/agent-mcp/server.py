@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
@@ -131,7 +131,16 @@ class BridgeClient:
         if self.config.serial:
             cmd += ["-s", self.config.serial]
         cmd += list(args)
-        return subprocess.run(cmd, text=True, capture_output=True, check=False)
+        # Detach adb's stdin from ours: this process speaks MCP JSON-RPC over
+        # stdin, and an inherited stdin lets the adb child consume those frames
+        # before the stdio server reads them, which silently wedges the handshake.
+        return subprocess.run(
+            cmd,
+            text=True,
+            capture_output=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
 
 
 def parse_args() -> argparse.Namespace:

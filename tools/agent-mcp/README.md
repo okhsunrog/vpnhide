@@ -78,3 +78,16 @@ Example MCP client config:
 The MCP server fetches `/functions` from the app at startup and exposes one MCP
 tool per bridge function. Tool calls are forwarded to `POST /call` with the
 same bearer token.
+
+## Smoke test
+
+`smoke-test.py` drives the full host -> MCP -> HTTP bridge -> app path: it
+launches the server over stdio, performs the MCP handshake, lists tools, and
+calls one read-only tool. Use it to confirm a debug build with Agent control
+enabled is reachable:
+
+```sh
+./tools/agent-mcp/smoke-test.py --serial 3B241FDJG003LP
+```
+
+It exits non-zero on any failure.
