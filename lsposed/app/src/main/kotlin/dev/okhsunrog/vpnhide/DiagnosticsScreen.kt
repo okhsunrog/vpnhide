@@ -151,6 +151,15 @@ fun DiagnosticsScreen(
                 )
             }
 
+            diagState is DiagnosticsCache.State.Failed -> {
+                DiagnosticsFailedPrompt(
+                    onRetry = {
+                        DiagnosticsCache.retry(scope, context)
+                        DashboardCache.refresh(scope, context, selfNeedsRestart)
+                    },
+                )
+            }
+
             diagState is DiagnosticsCache.State.Running ||
                 diagState is DiagnosticsCache.State.NotRun -> {
                 Box(

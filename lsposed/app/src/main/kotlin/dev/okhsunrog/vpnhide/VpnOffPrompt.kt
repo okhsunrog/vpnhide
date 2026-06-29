@@ -16,12 +16,30 @@ import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 
 /**
- * Shared banner + retry button for the "VPN is not active, please turn
- * it on and re-run the checks" state. Used both on the Dashboard
- * protection panel and the Diagnostics screen so the UX is identical.
+ * Banner + retry button for the "VPN is not active, please turn it on and re-run
+ * the checks" state. Used both on the Dashboard protection panel and the
+ * Diagnostics screen so the UX is identical.
  */
 @Composable
 internal fun VpnOffPrompt(
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) = RetryPromptCard(R.string.vpn_off_prompt, onRetry, modifier)
+
+/**
+ * Banner + retry button for a diagnostics run that *failed* (root dropped, shell
+ * exec error) rather than finding the VPN off — kept separate from
+ * [VpnOffPrompt] so an active-VPN user isn't wrongly told their VPN is off.
+ */
+@Composable
+internal fun DiagnosticsFailedPrompt(
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) = RetryPromptCard(R.string.diag_failed_prompt, onRetry, modifier)
+
+@Composable
+private fun RetryPromptCard(
+    messageRes: Int,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -35,7 +53,7 @@ internal fun VpnOffPrompt(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = stringResource(R.string.vpn_off_prompt),
+                text = stringResource(messageRes),
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(12.dp))

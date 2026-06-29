@@ -29,6 +29,9 @@ import kotlinx.coroutines.withContext
  * - [State.Running] — a run is in flight.
  * - [State.VpnOff] — last run aborted because no active VPN was
  *   detected. User gets a "turn on VPN, then retry" banner.
+ * - [State.Failed] — last run threw (root dropped, shell exec failure). VPN may
+ *   well be on; the user gets a "diagnostics failed, retry" banner — distinct
+ *   from [State.VpnOff] so an active-VPN user isn't told their VPN is off.
  * - [State.Ready] — at least the fast phase is captured; [State.Ready.complete]
  *   flips to true when the slow Java probes have filled in too. Dashboard waits
  *   for the complete result, while Diagnostics can show the fast result first.
@@ -44,6 +47,8 @@ internal object DiagnosticsCache {
         data object Running : State
 
         data object VpnOff : State
+
+        data object Failed : State
 
         data class Ready(
             val results: CheckResults,
@@ -81,15 +86,15 @@ internal object DiagnosticsCache {
                 return
             }
 
-            State.NotRun, State.VpnOff -> { /* proceed */ }
+            State.NotRun, State.VpnOff, State.Failed -> { /* proceed */ }
         }
         if (inflight?.isActive == true) return
         inflight = scope.launch { doRun(context.applicationContext) }
     }
 
-    /** Used by the retry button in the "VPN off" banner — a readable alias
-     * for [run] at the call site (the [run] guard already permits a re-run
-     * from both NotRun and VpnOff).
+    /** Used by the retry button in the "VPN off" / "failed" banners — a readable
+     * alias for [run] at the call site (the [run] guard already permits a re-run
+     * from NotRun, VpnOff, and Failed).
      */
     fun retry(
         scope: CoroutineScope,
@@ -104,7 +109,8 @@ internal object DiagnosticsCache {
      */
     suspend fun awaitFullResults(context: Context): CheckResults? {
         run(cacheScope, context)
-        val terminal = state.first { it is State.VpnOff || (it is State.Ready && it.complete) }
+        val terminal =
+            state.first { it is State.VpnOff || it is State.Failed || (it is State.Ready && it.complete) }
         return (terminal as? State.Ready)?.results
     }
 
@@ -136,11 +142,10 @@ internal object DiagnosticsCache {
             // VpnOff result.
             throw e
         } catch (e: Exception) {
-            // Failures leave us in VpnOff so the user sees the retry UI
-            // rather than a frozen spinner. Real-world causes here are
-            // transient (root dropped, shell exec failure) and a retry
-            // usually works.
-            _state.value = State.VpnOff
+            // A real failure (root dropped, shell exec failure) — distinct from
+            // VpnOff so an active-VPN user isn't wrongly told their VPN is off.
+            // Both states offer a retry; these causes are usually transient.
+            _state.value = State.Failed
             StartupTrace.mark("diagnostics_cache_failed")
             VpnHideLog.w("VpnHide-Diag", "runAllChecks failed: ${e.message}")
         }

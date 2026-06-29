@@ -142,6 +142,7 @@
     <string name="dashboard_needs_restart">VPN Hide was just added to its own protection config. Restart VPN Hide (force-stop and reopen) to check protection — no device reboot needed.</string>
     <string name="vpn_off_prompt">No active VPN. Turn it on, then tap Retry to run the protection checks. Results are cached until VPN Hide is restarted — no need to re-run later in the same session.</string>
     <string name="vpn_off_retry">Retry</string>
+    <string name="diag_failed_prompt">The protection checks couldn\'t run — root access may have been denied or a command failed. Tap Retry. This is usually transient.</string>
 
     <!-- Statistics -->
     <string name="statistics_title">Interception counters</string>
