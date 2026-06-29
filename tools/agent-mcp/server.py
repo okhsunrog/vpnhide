@@ -81,7 +81,9 @@ class BridgeClient:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Bridge {method} {path} failed: HTTP {error.code}: {detail}") from error
+            raise RuntimeError(
+                f"Bridge {method} {path} failed: HTTP {error.code}: {detail}"
+            ) from error
         except OSError as error:
             raise RuntimeError(
                 "Could not reach VPN Hide bridge. Install a debug build, open the app, "
@@ -102,7 +104,9 @@ class BridgeClient:
         )
 
     def _read_token_file(self) -> str | None:
-        result = self._adb_result("shell", "run-as", self.config.package, "cat", "files/agent_bridge_token")
+        result = self._adb_result(
+            "shell", "run-as", self.config.package, "cat", "files/agent_bridge_token"
+        )
         if result.returncode != 0:
             return None
         token = result.stdout.strip()
@@ -118,7 +122,9 @@ class BridgeClient:
     def _adb(self, *args: str) -> str:
         result = self._adb_result(*args)
         if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"adb {' '.join(args)} failed")
+            raise RuntimeError(
+                result.stderr.strip() or result.stdout.strip() or f"adb {' '.join(args)} failed"
+            )
         return result.stdout
 
     def _adb_result(self, *args: str) -> subprocess.CompletedProcess[str]:
@@ -134,8 +140,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--serial", help="adb device serial to target")
     parser.add_argument("--adb", default="adb", help="adb executable path")
     parser.add_argument("--package", default=DEFAULT_PACKAGE, help="VPN Hide application id")
-    parser.add_argument("--host-port", type=int, default=DEFAULT_HOST_PORT, help="localhost port for adb forward")
-    parser.add_argument("--device-port", type=int, default=DEFAULT_DEVICE_PORT, help="device bridge port")
+    parser.add_argument(
+        "--host-port", type=int, default=DEFAULT_HOST_PORT, help="localhost port for adb forward"
+    )
+    parser.add_argument(
+        "--device-port", type=int, default=DEFAULT_DEVICE_PORT, help="device bridge port"
+    )
     return parser.parse_args()
 
 
