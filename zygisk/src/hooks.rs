@@ -201,12 +201,17 @@ pub unsafe extern "C" fn hooked_ioctl(
     unsafe { real(fd, request, arg) }
 }
 
-/// Check if the ioctl request is a SIOCGIF* command (0x8910..0x8930 range).
-/// These all use struct ifreq with ifr_name as input.
+/// Check if the ioctl request is a SIOCGIF* command that takes a struct
+/// ifreq with `ifr_name` as input. Covers the whole get-by-name family,
+/// 0x8910 (SIOCGIFNAME) through 0x8970 (SIOCGIFMAP).
+///
+/// The old ceiling of 0x8930 silently excluded SIOCGIFINDEX (0x8933) — the
+/// ioctl `if_nametoindex()` issues — so `if_nametoindex("tun0")` returned the
+/// real index and leaked VPN presence. SIOCGIFTXQLEN (0x8942) and SIOCGIFMAP
+/// (0x8970) sat above the ceiling too. SIOCGIFNAME (0x8910) and SIOCGIFCONF
+/// (0x8912) are handled in their own branches before this check.
 fn is_siocgif(request: libc::c_ulong) -> bool {
-    // SIOCGIF* range: 0x8910 (SIOCGIFNAME) to ~0x8927 (SIOCGIFVLAN)
-    // SIOCGIFCONF (0x8912) is handled separately above.
-    (0x8910..=0x8930).contains(&(request as u32))
+    (0x8910..=0x8970).contains(&(request as u32))
 }
 
 /// Walk the `ifreq[]` array inside an `ifconf` and remove VPN entries
@@ -365,13 +370,16 @@ pub fn set_real_openat_ptr(p: *const ()) {
 }
 
 /// Which /proc/net file was matched.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ProcNetFile {
     Route,
     Ipv6Route,
     IfInet6,
     Tcp,
     Tcp6,
+    Udp,
+    Udp6,
+    Dev,
 }
 
 /// The basenames we intercept under /proc/.../net/.
@@ -381,28 +389,54 @@ const PROC_NET_FILES: &[(&[u8], ProcNetFile)] = &[
     (b"if_inet6", ProcNetFile::IfInet6),
     (b"tcp", ProcNetFile::Tcp),
     (b"tcp6", ProcNetFile::Tcp6),
+    // udp/udp6 share the tcp/tcp6 line format (local address is filtered the
+    // same way); dev lists interface names verbatim. On enforcing SELinux these
+    // are blocked for untrusted_app, but we filter them too as defence in depth.
+    (b"udp", ProcNetFile::Udp),
+    (b"udp6", ProcNetFile::Udp6),
+    (b"dev", ProcNetFile::Dev),
 ];
 
-/// Check an absolute path like `/proc/net/<file>`, `/proc/self/net/<file>`,
-/// or `/proc/<pid>/net/<file>`.
-fn match_abs_proc_net(path: &[u8]) -> Option<ProcNetFile> {
-    // Strip the /proc/{net,self/net,<pid>/net}/ prefix, leaving the basename.
-    let basename = if let Some(rest) = path.strip_prefix(b"/proc/net/") {
-        rest
-    } else if let Some(rest) = path.strip_prefix(b"/proc/self/net/") {
-        rest
-    } else if let Some(rest) = path.strip_prefix(b"/proc/") {
-        // /proc/<digits>/net/<file>
-        let slash = rest.iter().position(|&b| b == b'/')?;
-        let pid = &rest[..slash];
-        if pid.is_empty() || !pid.iter().all(|b| b.is_ascii_digit()) {
-            return None;
-        }
-        rest.get(slash + 1..)?.strip_prefix(b"net/")?
-    } else {
+/// Given the text after `/proc/`, return the basename following the
+/// `.../net/` segment for any owner form we recognise:
+/// `net/`, `self/net/`, `thread-self/net/`, `<pid>/net/`,
+/// `<pid>/task/<tid>/net/`. Returns `None` if the shape doesn't match.
+///
+/// Covering `thread-self` and the `task/<tid>` forms closes the bypass where
+/// a detector opens `/proc/thread-self/net/tcp` (or its own task dir) to dodge
+/// a matcher that only knew `self` and the top-level pid dir.
+fn strip_owner_net(rest: &[u8]) -> Option<&[u8]> {
+    if let Some(r) = rest.strip_prefix(b"net/") {
+        return Some(r);
+    }
+    if let Some(r) = rest.strip_prefix(b"self/net/") {
+        return Some(r);
+    }
+    if let Some(r) = rest.strip_prefix(b"thread-self/net/") {
+        return Some(r);
+    }
+    // <pid>/... — either <pid>/net/ or <pid>/task/<tid>/net/.
+    let slash = rest.iter().position(|&b| b == b'/')?;
+    if rest[..slash].is_empty() || !rest[..slash].iter().all(|b| b.is_ascii_digit()) {
         return None;
-    };
+    }
+    let after = &rest[slash + 1..];
+    if let Some(r) = after.strip_prefix(b"net/") {
+        return Some(r);
+    }
+    let after = after.strip_prefix(b"task/")?;
+    let slash2 = after.iter().position(|&b| b == b'/')?;
+    if after[..slash2].is_empty() || !after[..slash2].iter().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    after.get(slash2 + 1..)?.strip_prefix(b"net/")
+}
 
+/// Check an absolute path like `/proc/net/<file>`, `/proc/self/net/<file>`,
+/// `/proc/thread-self/net/<file>`, `/proc/<pid>/net/<file>`, or
+/// `/proc/<pid>/task/<tid>/net/<file>`.
+fn match_abs_proc_net(path: &[u8]) -> Option<ProcNetFile> {
+    let basename = strip_owner_net(path.strip_prefix(b"/proc/")?)?;
     PROC_NET_FILES
         .iter()
         .find(|(name, _)| *name == basename)
@@ -460,14 +494,18 @@ fn is_dirfd_proc_net(dirfd: c_int) -> bool {
     }
     let target = &link_buf[..n as usize];
 
-    if target == b"/proc/net" || target == b"/proc/self/net" {
-        return true;
-    }
+    // A dirfd pointing at any `.../net` directory we recognise. Reuse
+    // strip_owner_net by appending a trailing '/': it expects `.../net/<rest>`,
+    // so an empty <rest> means the dir itself.
     if let Some(rest) = target.strip_prefix(b"/proc/") {
-        if let Some(slash) = rest.iter().position(|&b| b == b'/') {
-            let pid = &rest[..slash];
-            let tail = &rest[slash..];
-            return !pid.is_empty() && pid.iter().all(|b| b.is_ascii_digit()) && tail == b"/net";
+        let mut probe = [0u8; 160];
+        let body = rest.len();
+        if body < probe.len() {
+            probe[..body].copy_from_slice(rest);
+            probe[body] = b'/';
+            if let Some(tail) = strip_owner_net(&probe[..body + 1]) {
+                return tail.is_empty();
+            }
         }
     }
     false
@@ -643,6 +681,15 @@ fn apply_filter(data: &mut [u8], kind: ProcNetFile) -> usize {
             let (_, _, addrs6, n6) = collect_vpn_addrs();
             filter_tcp6_buf(data, &addrs6, n6)
         }
+        ProcNetFile::Udp => {
+            let (addrs4, n4, _, _) = collect_vpn_addrs();
+            filter_tcp4_buf(data, &addrs4, n4)
+        }
+        ProcNetFile::Udp6 => {
+            let (_, _, addrs6, n6) = collect_vpn_addrs();
+            filter_tcp6_buf(data, &addrs6, n6)
+        }
+        ProcNetFile::Dev => filter_dev_buf(data),
     }
 }
 
@@ -900,7 +947,12 @@ pub unsafe extern "C" fn hooked_recv(
 
     let ret = unsafe { real(fd, buf, len, flags) };
 
-    unsafe { maybe_filter_netlink_buf(fd, buf as *mut u8, ret) }
+    // Clamp to the buffer size: with MSG_TRUNC the kernel returns the full
+    // datagram length, which can exceed `len`, and the filter must never read
+    // or write past the caller's buffer. Propagate any shrink like recvmsg.
+    let in_buf = ret.min(len as isize);
+    let filtered = unsafe { maybe_filter_netlink_buf(fd, buf as *mut u8, in_buf) };
+    ret - (in_buf - filtered)
 }
 
 // ============================================================================
@@ -954,7 +1006,10 @@ pub unsafe extern "C" fn hooked_recvfrom(
 
     let ret = unsafe { real(fd, buf, len, flags, src_addr, addrlen) };
 
-    unsafe { maybe_filter_netlink_buf(fd, buf as *mut u8, ret) }
+    // Clamp to the buffer size (MSG_TRUNC can return more than `len`).
+    let in_buf = ret.min(len as isize);
+    let filtered = unsafe { maybe_filter_netlink_buf(fd, buf as *mut u8, in_buf) };
+    ret - (in_buf - filtered)
 }
 
 static REAL_RECVFROM_CHK: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
@@ -1002,7 +1057,11 @@ pub unsafe extern "C" fn hooked_recvfrom_chk(
 
     let ret = unsafe { real(fd, buf, len, buf_size, flags, src_addr, addrlen) };
 
-    unsafe { maybe_filter_netlink_buf(fd, buf as *mut u8, ret) }
+    // Clamp to the requested length, itself bounded by the FORTIFY buffer size
+    // (MSG_TRUNC can return more than was written).
+    let in_buf = ret.min(len.min(buf_size) as isize);
+    let filtered = unsafe { maybe_filter_netlink_buf(fd, buf as *mut u8, in_buf) };
+    ret - (in_buf - filtered)
 }
 
 /// Collect interface indices of VPN interfaces. Uses real_getifaddrs
@@ -1019,7 +1078,17 @@ fn collect_vpn_iface_indices() -> ([u32; crate::filter::MAX_VPN_ADDRS], usize) {
             if n >= MAX_VPN_ADDRS {
                 return;
             }
-            let idx = libc::if_nametoindex(entry.ifa_name);
+            // if_nametoindex issues ioctl(SIOCGIFINDEX), which our ioctl hook
+            // now blocks for VPN names. Run it under the IN_GETIFADDRS guard so
+            // it passes through to the real index — otherwise this filter loses
+            // the VPN indices and the netlink route dump (#86) stops filtering.
+            let idx = IN_GETIFADDRS.with(|f| {
+                let prev = f.get();
+                f.set(true);
+                let i = libc::if_nametoindex(entry.ifa_name);
+                f.set(prev);
+                i
+            });
             if idx == 0 || indices[..n].contains(&idx) {
                 return;
             }
@@ -1029,4 +1098,39 @@ fn collect_vpn_iface_indices() -> ([u32; crate::filter::MAX_VPN_ADDRS], usize) {
     }
 
     (indices, n)
+}
+
+#[cfg(test)]
+mod proc_net_path_tests {
+    use super::{match_abs_proc_net, strip_owner_net, ProcNetFile};
+
+    #[test]
+    fn matches_classic_forms() {
+        assert_eq!(match_abs_proc_net(b"/proc/net/tcp"), Some(ProcNetFile::Tcp));
+        assert_eq!(match_abs_proc_net(b"/proc/self/net/tcp6"), Some(ProcNetFile::Tcp6));
+        assert_eq!(match_abs_proc_net(b"/proc/1234/net/route"), Some(ProcNetFile::Route));
+    }
+
+    #[test]
+    fn matches_new_dev_udp_files() {
+        assert_eq!(match_abs_proc_net(b"/proc/net/dev"), Some(ProcNetFile::Dev));
+        assert_eq!(match_abs_proc_net(b"/proc/net/udp"), Some(ProcNetFile::Udp));
+        assert_eq!(match_abs_proc_net(b"/proc/net/udp6"), Some(ProcNetFile::Udp6));
+    }
+
+    #[test]
+    fn matches_thread_self_and_task_forms() {
+        // These previously bypassed the matcher (#14/#52).
+        assert_eq!(match_abs_proc_net(b"/proc/thread-self/net/tcp"), Some(ProcNetFile::Tcp));
+        assert_eq!(match_abs_proc_net(b"/proc/1234/task/5678/net/tcp"), Some(ProcNetFile::Tcp));
+        assert_eq!(match_abs_proc_net(b"/proc/self/net/dev"), Some(ProcNetFile::Dev));
+    }
+
+    #[test]
+    fn rejects_non_proc_net() {
+        assert_eq!(match_abs_proc_net(b"/proc/net/unknownfile"), None);
+        assert_eq!(match_abs_proc_net(b"/etc/passwd"), None);
+        assert_eq!(match_abs_proc_net(b"/proc/abc/net/tcp"), None);
+        assert_eq!(strip_owner_net(b"bogus/path"), None);
+    }
 }

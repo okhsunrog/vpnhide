@@ -85,6 +85,67 @@ pub fn filter_ipv6_route_buf(data: &mut [u8]) -> usize {
     filter_by_last_field(data)
 }
 
+/// Filter `/proc/net/dev` in-place. Each data line is `  <iface>: <stats>`;
+/// drop lines whose interface name (trimmed, before the first ':') is a VPN
+/// interface. The two header lines have no `name:` token and are kept.
+pub fn filter_dev_buf(data: &mut [u8]) -> usize {
+    if data.is_empty() {
+        return 0;
+    }
+
+    let len = data.len();
+    let mut read_pos = 0usize;
+    let mut write_pos = 0usize;
+
+    while read_pos < len {
+        let line_end = data[read_pos..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map(|p| read_pos + p + 1)
+            .unwrap_or(len);
+
+        let line = &data[read_pos..line_end];
+        let hide = match line.iter().position(|&b| b == b':') {
+            Some(colon) => {
+                let name = trim_ascii_ws(&line[..colon]);
+                !name.is_empty() && is_vpn_iface_bytes(name)
+            }
+            None => false,
+        };
+
+        if !hide {
+            let line_len = line_end - read_pos;
+            if write_pos != read_pos {
+                data.copy_within(read_pos..line_end, write_pos);
+            }
+            write_pos += line_len;
+        }
+
+        read_pos = line_end;
+    }
+
+    write_pos
+}
+
+/// Trim leading and trailing ASCII whitespace from a byte slice.
+fn trim_ascii_ws(mut s: &[u8]) -> &[u8] {
+    while let [first, rest @ ..] = s {
+        if matches!(first, b' ' | b'\t' | b'\n' | b'\r') {
+            s = rest;
+        } else {
+            break;
+        }
+    }
+    while let [rest @ .., last] = s {
+        if matches!(last, b' ' | b'\t' | b'\n' | b'\r') {
+            s = rest;
+        } else {
+            break;
+        }
+    }
+    s
+}
+
 /// Filter `/proc/net/if_inet6` in-place. Interface name is the LAST
 /// whitespace-delimited field on each line.
 pub fn filter_if_inet6_buf(data: &mut [u8]) -> usize {
@@ -430,6 +491,27 @@ mod tests {
         assert!(is_vpn_iface_bytes(b"tun0"));
         assert!(is_vpn_iface_bytes(b"tun1"));
         assert!(is_vpn_iface_bytes(b"TUN0"));
+    }
+
+    #[test]
+    fn filter_dev_removes_vpn_iface_keeps_headers() {
+        let mut buf = b"Inter-|   Receive                                                |  Transmit\n \
+face |bytes    packets errs drop\n    lo:  100    1    0    0\n  wlan0:  200    2    0    0\n  \
+tun0:  300    3    0    0\n"
+            .to_vec();
+        let n = filter_dev_buf(&mut buf);
+        let out = core::str::from_utf8(&buf[..n]).unwrap();
+        assert!(out.contains("Inter-|"), "header kept");
+        assert!(out.contains("face |"), "second header kept");
+        assert!(out.contains("lo:"), "lo kept");
+        assert!(out.contains("wlan0:"), "wlan0 kept");
+        assert!(!out.contains("tun0"), "tun0 removed");
+    }
+
+    #[test]
+    fn filter_dev_empty() {
+        let mut buf = Vec::new();
+        assert_eq!(filter_dev_buf(&mut buf), 0);
     }
 
     #[test]
