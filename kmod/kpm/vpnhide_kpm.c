@@ -1032,6 +1032,15 @@ static long vpnhide_kpm_ctl0(const char *args, char *__user out_msg, int outlen)
 			full = vpnhide_format_status(buf, sizeof(buf), &st);
 		}
 
+		/*
+		 * vpnhide_format_* report the FULL intended length, which can
+		 * exceed sizeof(buf); the bytes past the buffer were never
+		 * written. Clamp before clamp_to_line/copy_to_user so a
+		 * generous outlen can't drive a read past the 4096-byte stack
+		 * buffer (kernel infoleak / OOB). The .ko bounds the same way.
+		 */
+		if (full > sizeof(buf))
+			full = sizeof(buf);
 		n = vpnhide_clamp_to_line(
 			buf, full, outlen > 0 ? (unsigned long)outlen : 0);
 		if (_copy_to_user && out_msg && n)

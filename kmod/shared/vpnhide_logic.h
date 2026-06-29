@@ -344,14 +344,20 @@ static inline int vpnhide_tok_eq(const char *b, unsigned long ts,
 static inline int vpnhide_tok_decimal(const char *b, unsigned long ts,
 				      unsigned long te, unsigned long *out)
 {
-	unsigned long v = 0, p;
+	unsigned long v = 0, p, digit;
 
 	if (ts >= te)
 		return 0;
 	for (p = ts; p < te; p++) {
 		if (b[p] < '0' || b[p] > '9')
 			return 0;
-		v = v * 10u + (unsigned long)(b[p] - '0');
+		digit = (unsigned long)(b[p] - '0');
+		/* Reject values that would overflow unsigned long instead of
+		 * wrapping mod 2^64 and slipping past the version fuse — same
+		 * contract as the hex parser below. */
+		if (v > (~0UL - digit) / 10u)
+			return 0;
+		v = v * 10u + digit;
 	}
 	*out = v;
 	return 1;
