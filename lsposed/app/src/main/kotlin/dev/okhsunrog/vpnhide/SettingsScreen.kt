@@ -328,18 +328,8 @@ private fun DiagnosticsSettingsScreen(
 
 @Composable
 private fun DebugToolsSettingsSection(selfNeedsRestart: Boolean?) {
-    val settings = LocalSettingsState.current
-    val interactor = LocalSettingsInteractor.current
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SettingsSectionHeader(stringResource(R.string.settings_debug_section))
-        PreferenceRowSwitch(
-            title = stringResource(R.string.settings_agent_control),
-            subtitle = stringResource(R.string.settings_agent_control_sub),
-            icon = Icons.Default.Settings,
-            checked = settings.agentControlEnabled,
-            onCheckedChange = interactor::setAgentControlEnabled,
-        )
-        Spacer(Modifier.heightIn(min = 13.dp))
         DebugToolsSection(selfNeedsRestart = selfNeedsRestart)
     }
 }
@@ -348,6 +338,10 @@ private fun DebugToolsSettingsSection(selfNeedsRestart: Boolean?) {
 private fun DeveloperSettingsSection() {
     val settings = LocalSettingsState.current
     val interactor = LocalSettingsInteractor.current
+    // The agent bridge only exists in debug builds (the release AgentControlBridge
+    // is a no-op stub), so its toggle is debug-only; the version/changelog switch
+    // is useful for anyone running their own builds and stays visible always.
+    val count = if (BuildConfig.DEBUG) 2 else 1
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SettingsSectionHeader(stringResource(R.string.settings_developer_section))
         PreferenceRowSwitch(
@@ -355,10 +349,21 @@ private fun DeveloperSettingsSection() {
             subtitle = stringResource(R.string.settings_suppress_version_warnings_sub),
             icon = Icons.Default.Update,
             index = 0,
-            count = 1,
+            count = count,
             checked = settings.suppressVersionWarnings,
             onCheckedChange = interactor::setSuppressVersionWarnings,
         )
+        if (BuildConfig.DEBUG) {
+            PreferenceRowSwitch(
+                title = stringResource(R.string.settings_agent_control),
+                subtitle = stringResource(R.string.settings_agent_control_sub),
+                icon = Icons.Default.Settings,
+                index = 1,
+                count = count,
+                checked = settings.agentControlEnabled,
+                onCheckedChange = interactor::setAgentControlEnabled,
+            )
+        }
     }
 }
 
