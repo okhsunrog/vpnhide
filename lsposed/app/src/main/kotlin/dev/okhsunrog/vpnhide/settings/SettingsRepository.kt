@@ -9,7 +9,6 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import dev.okhsunrog.vpnhide.AgentControlBridge
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -83,10 +82,7 @@ class SettingsRepository(
 
     suspend fun setFullProtectionRoleLabels(value: Boolean) = edit { it[Keys.FULL_PROTECTION_ROLE_LABELS] = value }
 
-    suspend fun setAgentControlEnabled(value: Boolean) {
-        edit { it[Keys.AGENT_CONTROL] = value }
-        AgentControlBridge.setEnabled(context.applicationContext, value)
-    }
+    suspend fun setAgentControlEnabled(value: Boolean) = edit { it[Keys.AGENT_CONTROL] = value }
 
     suspend fun setSettingsHintSeen(value: Boolean) = edit { it[Keys.SETTINGS_HINT_SEEN] = value }
 
