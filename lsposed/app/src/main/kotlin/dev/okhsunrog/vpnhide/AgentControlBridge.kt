@@ -46,8 +46,8 @@ internal object AgentControlBridge {
         }
     }
 
-    private fun startServer(context: Context): BridgeServer? {
-        return runCatching {
+    private fun startServer(context: Context): BridgeServer? =
+        runCatching {
             val token = generateToken()
             val tokenFile = File(context.filesDir, AGENT_BRIDGE_TOKEN_FILE)
             tokenFile.writeText(token)
@@ -61,7 +61,6 @@ internal object AgentControlBridge {
         }.onFailure { error ->
             Log.e(TAG, "Failed to start agent bridge", error)
         }.getOrNull()
-    }
 
     private fun generateToken(): String {
         val bytes = ByteArray(32)
