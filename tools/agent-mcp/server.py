@@ -23,7 +23,6 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-
 DEFAULT_PACKAGE = "dev.okhsunrog.vpnhide"
 DEFAULT_HOST_PORT = 27193
 DEFAULT_DEVICE_PORT = 27193
