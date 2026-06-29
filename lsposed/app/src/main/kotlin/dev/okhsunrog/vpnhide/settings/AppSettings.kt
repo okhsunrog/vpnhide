@@ -45,6 +45,8 @@ data class AppSettings(
     val hapticsEnabled: Boolean = true,
     /** Use full role labels in the unified Protection picker instead of single-letter chips. */
     val fullProtectionRoleLabels: Boolean = true,
+    /** Expose UI-equivalent state/control through the debug host bridge for agent-driven development. */
+    val agentControlEnabled: Boolean = false,
     /** Whether the user has opened Settings at least once (gates the gear hint). */
     val settingsHintSeen: Boolean = false,
     /**

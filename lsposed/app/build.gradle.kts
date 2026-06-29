@@ -13,6 +13,7 @@ plugins {
     alias(libs.plugins.android.application)
     // kotlin-android removed: AGP 9+ has built-in Kotlin support.
     alias(libs.plugins.kotlin.atomicfu)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.gobley.cargo)
     alias(libs.plugins.gobley.uniffi)
@@ -236,6 +237,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     // Reactive theme/settings store (replaces ad-hoc SharedPreferences for UI prefs).
     implementation(libs.datastore.preferences)
+    implementation(libs.kotlinx.serialization.json)
     // Material You color-scheme generation + harmonization (seed -> full M3 scheme,
     // AMOLED, contrast, palette styles). Powers VpnHideTheme.
     implementation(libs.material.kolor)

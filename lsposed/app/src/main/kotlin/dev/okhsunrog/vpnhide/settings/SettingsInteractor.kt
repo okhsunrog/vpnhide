@@ -40,6 +40,8 @@ interface SettingsInteractor {
 
     fun setFullProtectionRoleLabels(value: Boolean)
 
+    fun setAgentControlEnabled(value: Boolean)
+
     fun setSettingsHintSeen(value: Boolean)
 
     fun setSuppressVersionWarnings(value: Boolean)
@@ -72,6 +74,8 @@ class RepositorySettingsInteractor(
     override fun setHapticsEnabled(value: Boolean) = launch { repository.setHapticsEnabled(value) }
 
     override fun setFullProtectionRoleLabels(value: Boolean) = launch { repository.setFullProtectionRoleLabels(value) }
+
+    override fun setAgentControlEnabled(value: Boolean) = launch { repository.setAgentControlEnabled(value) }
 
     override fun setSettingsHintSeen(value: Boolean) = launch { repository.setSettingsHintSeen(value) }
 

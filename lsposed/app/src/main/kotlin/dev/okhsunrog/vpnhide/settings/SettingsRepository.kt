@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import dev.okhsunrog.vpnhide.AgentControlBridge
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -35,6 +36,7 @@ class SettingsRepository(
         val ANIMATIONS = booleanPreferencesKey("animations_enabled")
         val HAPTICS = booleanPreferencesKey("haptics_enabled")
         val FULL_PROTECTION_ROLE_LABELS = booleanPreferencesKey("full_protection_role_labels")
+        val AGENT_CONTROL = booleanPreferencesKey("agent_control_enabled")
         val SETTINGS_HINT_SEEN = booleanPreferencesKey("settings_hint_seen")
         val SUPPRESS_VERSION_WARNINGS = booleanPreferencesKey("suppress_version_warnings")
     }
@@ -54,6 +56,7 @@ class SettingsRepository(
                 hapticsEnabled = p[Keys.HAPTICS] ?: defaults.hapticsEnabled,
                 fullProtectionRoleLabels =
                     p[Keys.FULL_PROTECTION_ROLE_LABELS] ?: defaults.fullProtectionRoleLabels,
+                agentControlEnabled = p[Keys.AGENT_CONTROL] ?: defaults.agentControlEnabled,
                 settingsHintSeen = p[Keys.SETTINGS_HINT_SEEN] ?: defaults.settingsHintSeen,
                 suppressVersionWarnings =
                     p[Keys.SUPPRESS_VERSION_WARNINGS] ?: defaults.suppressVersionWarnings,
@@ -79,6 +82,11 @@ class SettingsRepository(
     suspend fun setHapticsEnabled(value: Boolean) = edit { it[Keys.HAPTICS] = value }
 
     suspend fun setFullProtectionRoleLabels(value: Boolean) = edit { it[Keys.FULL_PROTECTION_ROLE_LABELS] = value }
+
+    suspend fun setAgentControlEnabled(value: Boolean) {
+        edit { it[Keys.AGENT_CONTROL] = value }
+        AgentControlBridge.setEnabled(context.applicationContext, value)
+    }
 
     suspend fun setSettingsHintSeen(value: Boolean) = edit { it[Keys.SETTINGS_HINT_SEEN] = value }
 

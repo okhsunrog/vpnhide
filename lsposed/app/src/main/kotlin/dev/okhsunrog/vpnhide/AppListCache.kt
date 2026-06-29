@@ -108,6 +108,18 @@ internal object AppListCache : StateCache<List<AppSummary>>(
         forceRefresh(scope)
     }
 
+    suspend fun loadForAgent(
+        context: Context,
+        force: Boolean,
+    ): List<AppSummary> {
+        appContext = context.applicationContext
+        return if (!force) {
+            apps.value ?: load(force = false)
+        } else {
+            load(force = true)
+        }
+    }
+
     override suspend fun load(force: Boolean): List<AppSummary> {
         val appContext = requireNotNull(appContext) { "AppListCache.load before ensureLoaded/refresh" }
         return withContext(Dispatchers.IO) {

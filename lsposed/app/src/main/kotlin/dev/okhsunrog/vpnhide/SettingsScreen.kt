@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RoundedCorner
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Update
 import androidx.compose.material.icons.filled.Vibration
@@ -327,8 +328,18 @@ private fun DiagnosticsSettingsScreen(
 
 @Composable
 private fun DebugToolsSettingsSection(selfNeedsRestart: Boolean?) {
+    val settings = LocalSettingsState.current
+    val interactor = LocalSettingsInteractor.current
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SettingsSectionHeader(stringResource(R.string.settings_debug_section))
+        PreferenceRowSwitch(
+            title = stringResource(R.string.settings_agent_control),
+            subtitle = stringResource(R.string.settings_agent_control_sub),
+            icon = Icons.Default.Settings,
+            checked = settings.agentControlEnabled,
+            onCheckedChange = interactor::setAgentControlEnabled,
+        )
+        Spacer(Modifier.heightIn(min = 13.dp))
         DebugToolsSection(selfNeedsRestart = selfNeedsRestart)
     }
 }

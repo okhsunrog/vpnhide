@@ -327,6 +327,8 @@
     <string name="settings_diagnostics_title">Подробная диагностика</string>
     <string name="settings_diagnostics_sub">Полный набор проверок защиты</string>
     <string name="settings_debug_section">Отладка</string>
+    <string name="settings_agent_control">Agent control</string>
+    <string name="settings_agent_control_sub">Запустить отладочный localhost-bridge для host MCP-инструментов через adb</string>
     <string name="settings_developer_section">Для разработчиков</string>
     <string name="settings_suppress_version_warnings">Скрыть предупреждения о версиях и changelog</string>
     <string name="settings_suppress_version_warnings_sub">Игнорировать суффикс dev-сборки при сравнении запущенного хука LSPosed с установленным приложением и не показывать changelog после каждой пересборки. Актуально только при сборке из исходников; на релизных версиях не влияет.</string>

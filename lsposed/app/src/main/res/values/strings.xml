@@ -369,6 +369,8 @@
     <string name="settings_diagnostics_title">Detailed diagnostics</string>
     <string name="settings_diagnostics_sub">Run the full protection check suite</string>
     <string name="settings_debug_section">Debugging</string>
+    <string name="settings_agent_control">Agent control</string>
+    <string name="settings_agent_control_sub">Start the debug localhost bridge for host MCP tools over adb</string>
     <string name="settings_developer_section">Developer</string>
     <string name="settings_suppress_version_warnings">Hide version and changelog notices</string>
     <string name="settings_suppress_version_warnings_sub">Ignore the dev-build suffix when comparing the running LSPosed hook against the installed app, and don\'t pop the changelog after each rebuild. Only relevant when running your own builds; no effect on release versions.</string>

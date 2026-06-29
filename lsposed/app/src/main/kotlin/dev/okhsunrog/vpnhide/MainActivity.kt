@@ -91,6 +91,12 @@ fun VpnHideApp() {
             RepositorySettingsInteractor(settingsRepository, settingsScope)
         }
 
+    LaunchedEffect(settings.agentControlEnabled) {
+        withContext(Dispatchers.IO) {
+            AgentControlBridge.setEnabled(context.applicationContext, settings.agentControlEnabled)
+        }
+    }
+
     CompositionLocalProvider(
         LocalSettingsState provides settings,
         LocalSettingsInteractor provides settingsInteractor,
