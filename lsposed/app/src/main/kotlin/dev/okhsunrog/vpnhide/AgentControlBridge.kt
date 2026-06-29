@@ -47,7 +47,6 @@ internal object AgentControlBridge {
     }
 
     private fun startServer(context: Context): BridgeServer? {
-        if (!BuildConfig.DEBUG) return null
         return runCatching {
             val token = generateToken()
             val tokenFile = File(context.filesDir, AGENT_BRIDGE_TOKEN_FILE)

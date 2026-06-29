@@ -2,8 +2,8 @@ _2026-06-29_
 
 ## English
 
-Experimental debug HTTP bridge with a host MCP server for adb-driven app state and protection management.
+Experimental local HTTP bridge with a host MCP server for adb-driven app state and protection management. Off by default; enable it under Settings → Developer → Agent control.
 
 ## Русский
 
-Экспериментальный отладочный HTTP-bridge и host MCP-сервер для управления состоянием приложения и настройками защиты через adb.
+Экспериментальный локальный HTTP-bridge и host MCP-сервер для управления состоянием приложения и настройками защиты через adb. Выключен по умолчанию; включается в Настройки → Для разработчиков → Agent control.

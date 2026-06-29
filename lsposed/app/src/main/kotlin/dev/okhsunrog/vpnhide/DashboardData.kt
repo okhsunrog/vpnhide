@@ -1309,8 +1309,8 @@ internal suspend fun loadDashboardState(
     // until reboot. Developers who reinstall constantly can flip
     // suppressVersionWarnings to fall back to base-compare (release users see no
     // difference — release versions carry no dev suffix).
-    val suppressVersionWarnings =
-        SettingsRepository(context.applicationContext).settings.first().suppressVersionWarnings
+    val appSettings = SettingsRepository(context.applicationContext).settings.first()
+    val suppressVersionWarnings = appSettings.suppressVersionWarnings
     var lsposedVersionMismatch: String? = null
     if (lsposed is LsposedState.Active) {
         val runningVersion = lsposed.version
@@ -1413,6 +1413,13 @@ internal suspend fun loadDashboardState(
             ?: (shellSnapshot["debug_logging"].orEmpty().trim() == "1")
     if (debugEnabled) {
         info(res.getString(R.string.dashboard_issue_debug_logging_on))
+    }
+
+    // The agent control bridge is on: a loopback HTTP server is listening, which
+    // is an on-device fingerprint. Neutral note (same weight as debug logging) so
+    // it isn't left running unnoticed; turn it off in Settings when done.
+    if (appSettings.agentControlEnabled) {
+        info(res.getString(R.string.dashboard_issue_agent_bridge_on))
     }
 
     // W4: SELinux Permissive exposes six detection vectors we rely on SELinux
