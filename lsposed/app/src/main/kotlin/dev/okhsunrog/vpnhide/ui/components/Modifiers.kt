@@ -49,17 +49,13 @@ fun Modifier.container(
     borderColor: Color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
     drawBorder: Boolean = true,
     shadowElevation: Dp = 1.dp,
-): Modifier {
-    // The soft shadow is a user-tunable knob (ImageToolbox-style): when off,
-    // surfaces read flat and rely on the hairline border for separation.
-    val elevation = if (LocalSettingsState.current.drawContainerShadows) shadowElevation else 0.dp
-    return this
-        .shadow(elevation = elevation, shape = shape, clip = false)
+): Modifier =
+    this
+        .shadow(elevation = shadowElevation, shape = shape, clip = false)
         // clip before background so a following clickable's ripple is shape-clipped
         .clip(shape)
         .background(color = color)
         .then(if (drawBorder) Modifier.border(width = 1.dp, color = borderColor, shape = shape) else Modifier)
-}
 
 /**
  * Clickable that fires a light haptic tick before [onClick] when haptics are

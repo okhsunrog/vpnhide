@@ -37,8 +37,6 @@ data class AppSettings(
     val seedColor: Long = DEFAULT_SEED,
     val cornerStyle: CornerStyle = CornerStyle.Smooth,
     val themeMode: ThemeMode = ThemeMode.System,
-    /** Draw soft elevation shadows under cards/surfaces (off = flat, bordered). */
-    val drawContainerShadows: Boolean = true,
     /** Master switch for the new expressive motion (springs, transitions). */
     val animationsEnabled: Boolean = true,
     /** Subtle haptic feedback on taps/toggles. */

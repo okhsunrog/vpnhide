@@ -76,7 +76,7 @@
     <string name="btn_save_debug">Save</string>
     <string name="btn_share_debug">Share</string>
     <string name="diag_debug_logging_title">Debug logging</string>
-    <string name="diag_debug_logging_description">Off by default — VPN Hide keeps logcat and dmesg near-silent. You don\'t need to flip this to collect a bug report: the capture tools in Settings → Debugging turn logging on automatically for the duration of the capture. Use this toggle only if you want logs to be emitted continuously across the app, system_server hooks, Zygisk-hooked apps, and the kernel module (kmod logs to dmesg). Zygisk-hooked apps must be restarted for the change to take effect for them.</string>
+    <string name="settings_debug_logging_sub">Off by default for stealth. The capture tools in Debugging enable it automatically — turn this on only for continuous logs across every component.</string>
     <string name="logcat_card_title">Full system logcat</string>
     <string name="logcat_card_description">Records unfiltered logs from all buffers (main/system/crash/events/radio) for debugging issues that aren\'t visible in the standard checks. Start recording, reproduce the bug, then stop.</string>
     <string name="logcat_btn_start">Start recording</string>
@@ -360,8 +360,6 @@
     <string name="settings_amoled_sub">Pure black surfaces in dark theme</string>
     <string name="settings_squircle">Squircle corners</string>
     <string name="settings_squircle_sub">iOS-style continuous corners</string>
-    <string name="settings_shadows">Card shadows</string>
-    <string name="settings_shadows_sub">Soft elevation under cards</string>
     <string name="settings_haptics">Haptic feedback</string>
     <string name="settings_haptics_sub">Vibrate on taps and toggles</string>
     <string name="settings_animations">Animations</string>

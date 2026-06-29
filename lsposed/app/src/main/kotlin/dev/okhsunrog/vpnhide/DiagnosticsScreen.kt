@@ -254,48 +254,6 @@ fun DebugToolsSection(
 }
 
 @Composable
-internal fun DebugLoggingCard() {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var enabled by remember { mutableStateOf(VpnHideLog.enabled) }
-
-    EnhancedCard(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.diag_debug_logging_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = stringResource(R.string.diag_debug_logging_description),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Switch(
-                checked = enabled,
-                onCheckedChange = { newValue ->
-                    enabled = newValue
-                    scope.launch(Dispatchers.IO) {
-                        setDebugLoggingEnabled(context, newValue)
-                    }
-                },
-            )
-        }
-    }
-}
-
-@Composable
 private fun LogcatRecordCard() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()

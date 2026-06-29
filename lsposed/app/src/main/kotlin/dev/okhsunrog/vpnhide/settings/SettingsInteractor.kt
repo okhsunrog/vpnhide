@@ -32,8 +32,6 @@ interface SettingsInteractor {
 
     fun setThemeMode(value: ThemeMode)
 
-    fun setDrawContainerShadows(value: Boolean)
-
     fun setAnimationsEnabled(value: Boolean)
 
     fun setHapticsEnabled(value: Boolean)
@@ -66,8 +64,6 @@ class RepositorySettingsInteractor(
     override fun setCornerStyle(value: CornerStyle) = launch { repository.setCornerStyle(value) }
 
     override fun setThemeMode(value: ThemeMode) = launch { repository.setThemeMode(value) }
-
-    override fun setDrawContainerShadows(value: Boolean) = launch { repository.setDrawContainerShadows(value) }
 
     override fun setAnimationsEnabled(value: Boolean) = launch { repository.setAnimationsEnabled(value) }
 

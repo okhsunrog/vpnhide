@@ -285,7 +285,7 @@
     <string name="btn_save_debug">Сохранить</string>
     <string name="btn_share_debug">Поделиться</string>
     <string name="diag_debug_logging_title">Отладочные логи</string>
-    <string name="diag_debug_logging_description">По умолчанию выключено — VPN Hide почти ничего не пишет в logcat и dmesg. Переключатель не нужен для сбора разового багрепорта: инструменты захвата в Настройки → Отладка автоматически включают логирование на время захвата. Этот переключатель — только если вы хотите, чтобы логи писались постоянно во всех компонентах: приложение, хуки в system_server, Zygisk-хуки в приложениях и модуль ядра (kmod пишет в dmesg). Приложениям с хуками Zygisk нужен перезапуск, чтобы для них применилось изменение.</string>
+    <string name="settings_debug_logging_sub">По умолчанию выключено ради скрытности. Инструменты захвата в «Отладке» включают его автоматически — этот тумблер нужен только для постоянных логов во всех компонентах.</string>
     <string name="logcat_card_title">Полный системный logcat</string>
     <string name="logcat_card_description">Записывает неотфильтрованные логи из всех буферов (main/system/crash/events/radio) для диагностики проблем, которые не видны в стандартных проверках. Начните запись, воспроизведите баг, затем остановите.</string>
     <string name="logcat_btn_start">Начать запись</string>
@@ -318,8 +318,6 @@
     <string name="settings_amoled_sub">Чистый чёрный фон в тёмной теме</string>
     <string name="settings_squircle">Squircle-углы</string>
     <string name="settings_squircle_sub">Плавные углы в стиле iOS</string>
-    <string name="settings_shadows">Тени карточек</string>
-    <string name="settings_shadows_sub">Мягкая тень под карточками</string>
     <string name="settings_haptics">Тактильный отклик</string>
     <string name="settings_haptics_sub">Вибрация при нажатиях и переключениях</string>
     <string name="settings_animations">Анимации</string>

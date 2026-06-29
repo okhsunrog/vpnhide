@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.BrightnessMedium
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
@@ -35,7 +36,6 @@ import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RoundedCorner
@@ -138,7 +138,7 @@ fun SettingsScreen(
                     .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            // ── Appearance ── one grouped block of five rows.
+            // ── Appearance ── one grouped block of four rows.
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 SettingsSectionHeader(stringResource(R.string.settings_appearance))
 
@@ -153,7 +153,7 @@ fun SettingsScreen(
                     subtitle = themeModeLabel,
                     icon = Icons.Default.BrightnessMedium,
                     index = 0,
-                    count = 5,
+                    count = 4,
                     onClick = {
                         val next =
                             when (settings.themeMode) {
@@ -169,7 +169,7 @@ fun SettingsScreen(
                     subtitle = stringResource(R.string.settings_dynamic_color_sub),
                     icon = Icons.Default.Palette,
                     index = 1,
-                    count = 5,
+                    count = 4,
                     checked = settings.dynamicColor,
                     onCheckedChange = interactor::setDynamicColor,
                 )
@@ -178,7 +178,7 @@ fun SettingsScreen(
                     subtitle = stringResource(R.string.settings_amoled_sub),
                     icon = Icons.Default.DarkMode,
                     index = 2,
-                    count = 5,
+                    count = 4,
                     checked = settings.amoled,
                     onCheckedChange = interactor::setAmoled,
                 )
@@ -187,20 +187,11 @@ fun SettingsScreen(
                     subtitle = stringResource(R.string.settings_squircle_sub),
                     icon = Icons.Default.RoundedCorner,
                     index = 3,
-                    count = 5,
+                    count = 4,
                     checked = settings.cornerStyle == CornerStyle.Smooth,
                     onCheckedChange = { value ->
                         interactor.setCornerStyle(if (value) CornerStyle.Smooth else CornerStyle.Rounded)
                     },
-                )
-                PreferenceRowSwitch(
-                    title = stringResource(R.string.settings_shadows),
-                    subtitle = stringResource(R.string.settings_shadows_sub),
-                    icon = Icons.Default.Layers,
-                    index = 4,
-                    count = 5,
-                    checked = settings.drawContainerShadows,
-                    onCheckedChange = interactor::setDrawContainerShadows,
                 )
             }
 
@@ -339,6 +330,12 @@ private fun DebugToolsSettingsSection(selfNeedsRestart: Boolean?) {
 private fun DeveloperSettingsSection() {
     val settings = LocalSettingsState.current
     val interactor = LocalSettingsInteractor.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // Debug logging isn't a UI-DataStore setting — it's a stealth-sensitive runtime
+    // flag in its own prefs store (DebugLoggingPrefs), so it's driven by local state
+    // and a direct write rather than through the settings interactor.
+    var debugLogging by remember { mutableStateOf(VpnHideLog.enabled) }
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SettingsSectionHeader(stringResource(R.string.settings_developer_section))
         PreferenceRowSwitch(
@@ -346,7 +343,7 @@ private fun DeveloperSettingsSection() {
             subtitle = stringResource(R.string.settings_suppress_version_warnings_sub),
             icon = Icons.Default.Update,
             index = 0,
-            count = 2,
+            count = 3,
             checked = settings.suppressVersionWarnings,
             onCheckedChange = interactor::setSuppressVersionWarnings,
         )
@@ -358,15 +355,22 @@ private fun DeveloperSettingsSection() {
             subtitle = stringResource(R.string.settings_agent_control_sub),
             icon = Icons.Default.Settings,
             index = 1,
-            count = 2,
+            count = 3,
             checked = settings.agentControlEnabled,
             onCheckedChange = interactor::setAgentControlEnabled,
         )
-        // Debug logging is a stealth-sensitive runtime flag (its own prefs store,
-        // not the UI DataStore), so it stays a self-contained card rather than a
-        // preference row — but it belongs with the other developer toggles.
-        Spacer(Modifier.height(10.dp))
-        DebugLoggingCard()
+        PreferenceRowSwitch(
+            title = stringResource(R.string.diag_debug_logging_title),
+            subtitle = stringResource(R.string.settings_debug_logging_sub),
+            icon = Icons.Default.BugReport,
+            index = 2,
+            count = 3,
+            checked = debugLogging,
+            onCheckedChange = { value ->
+                debugLogging = value
+                scope.launch(Dispatchers.IO) { setDebugLoggingEnabled(context, value) }
+            },
+        )
     }
 }
 
