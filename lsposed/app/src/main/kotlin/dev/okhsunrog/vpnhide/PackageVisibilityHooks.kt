@@ -94,6 +94,8 @@ internal object PackageVisibilityHooks {
         hook(ipmClass, "resolveIntent", resolveInfoSingleHide("resolveIntent"))
         hook(ipmClass, "resolveService", resolveInfoSingleHide("resolveService"))
         hook(ipmClass, "getPackagesForUid", packagesForUidHide())
+        hook(ipmClass, "getNameForUid", nameForUidHide())
+        hook(ipmClass, "getNamesForUids", namesForUidsHide())
 
         watchConfigFiles()
     }
@@ -288,6 +290,53 @@ internal object PackageVisibilityHooks {
                     "VpnHide/PV: getPackagesForUid uid=${caller.uid} requestedUid=$requestedUid " +
                         "hidden=${removed.sorted()}",
                 )
+            }
+        }
+
+    /**
+     * getNameForUid(int): the single package name owning a uid. Null it out
+     * when hidden, so a hidden package can't be discovered by resolving a uid
+     * back to its name (the dual of getPackagesForUid).
+     */
+    private fun nameForUidHide(): XC_MethodHook =
+        object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (param.hasThrowable()) return
+                val name = param.result as? String ?: return
+                val caller = observerCaller() ?: return
+                if (caller.shouldHidePackage(name)) {
+                    param.result = null
+                    LsposedStats.record(caller.uid, HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
+                    HookLog.i("VpnHide/PV: getNameForUid uid=${caller.uid} hid $name")
+                }
+            }
+        }
+
+    /**
+     * getNamesForUids(int[]): names positional per requested uid. Null the
+     * hidden entries in place (the array is the result we return), so a bulk
+     * uid→name resolve can't enumerate a hidden package either.
+     */
+    private fun namesForUidsHide(): XC_MethodHook =
+        object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (param.hasThrowable()) return
+                @Suppress("UNCHECKED_CAST")
+                val names = param.result as? Array<String?> ?: return
+                val caller = observerCaller() ?: return
+                if (caller.config.hiddenPackages.isEmpty()) return
+                var changed = false
+                for (i in names.indices) {
+                    val name = names[i] ?: continue
+                    if (caller.shouldHidePackage(name)) {
+                        names[i] = null
+                        changed = true
+                    }
+                }
+                if (changed) {
+                    LsposedStats.record(caller.uid, HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
+                    HookLog.i("VpnHide/PV: getNamesForUids uid=${caller.uid} hid some entries")
+                }
             }
         }
 }

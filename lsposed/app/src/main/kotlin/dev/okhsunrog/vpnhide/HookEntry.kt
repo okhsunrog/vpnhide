@@ -138,49 +138,66 @@ class HookEntry : IXposedHookLoadPackage {
     // mStackedLinks, migrate this to the public LinkProperties API
     // (setInterfaceName(null) / setLinkAddresses / setRoutes / setDnsServers)
     // the same way NC was done, and drop LP from the install-time smoke-check.
-    @Suppress("LongMethod", "NestedBlockDepth")
     private fun sanitizeLinkProperties(copy: LinkProperties): Boolean {
         var modified = false
 
         val ifaceName = XposedHelpers.getObjectField(copy, "mIfaceName") as? String
-        if (ifaceName != null && isVpnInterfaceName(ifaceName)) {
+        val isVpnLp = ifaceName != null && isVpnInterfaceName(ifaceName)
+        if (isVpnLp) {
             XposedHelpers.setObjectField(copy, "mIfaceName", null)
             modified = true
         }
 
+        // mLinkAddresses (the tunnel's assigned IP) and mDnses (the VPN's DNS
+        // servers) carry no interface tag, so they can only be scrubbed when the
+        // whole LinkProperties is a VPN one. Leaving them let an app read the
+        // VPN's tunnel address / DNS straight back via getLinkAddresses() /
+        // getDnsServers(). Clear both for a VPN LP (the routes/iface above are
+        // already handled).
+        if (isVpnLp) {
+            if (clearLinkPropertyList(copy, "mLinkAddresses")) modified = true
+            if (clearLinkPropertyList(copy, "mDnses")) modified = true
+        }
+
+        if (sanitizeLinkRoutes(copy)) modified = true
+        if (sanitizeStackedLinks(copy)) modified = true
+
+        return modified
+    }
+
+    /** Remove routes whose interface is a VPN tunnel. Returns true if any went. */
+    private fun sanitizeLinkRoutes(copy: LinkProperties): Boolean {
         try {
             @Suppress("UNCHECKED_CAST")
-            val routesField = XposedHelpers.getObjectField(copy, "mRoutes") as? MutableList<RouteInfo>
-            if (routesField != null) {
-                val filtered =
-                    routesField.filterNot { route ->
-                        val routeIface = route.`interface`
-                        routeIface != null && isVpnInterfaceName(routeIface)
-                    }
-                if (filtered.size != routesField.size) {
-                    routesField.clear()
-                    routesField.addAll(filtered)
-                    modified = true
+            val routesField = XposedHelpers.getObjectField(copy, "mRoutes") as? MutableList<RouteInfo> ?: return false
+            val filtered =
+                routesField.filterNot { route ->
+                    val routeIface = route.`interface`
+                    routeIface != null && isVpnInterfaceName(routeIface)
                 }
+            if (filtered.size != routesField.size) {
+                routesField.clear()
+                routesField.addAll(filtered)
+                return true
             }
         } catch (t: Throwable) {
             HookLog.e("VpnHide: failed to sanitize mRoutes: ${t.message}")
         }
+        return false
+    }
 
+    /** Recursively sanitize stacked LinkProperties, dropping ones that become
+     *  empty VPN tunnels. Returns true if anything changed. */
+    @Suppress("NestedBlockDepth")
+    private fun sanitizeStackedLinks(copy: LinkProperties): Boolean {
+        var modified = false
         try {
             @Suppress("UNCHECKED_CAST")
             val stacked = XposedHelpers.getObjectField(copy, "mStackedLinks") as? MutableMap<String, LinkProperties>
             if (stacked != null && stacked.isNotEmpty()) {
                 val filtered = LinkedHashMap<String, LinkProperties>()
                 for ((key, value) in stacked) {
-                    val stackedCopy =
-                        try {
-                            val ctor = LinkProperties::class.java.getDeclaredConstructor(LinkProperties::class.java)
-                            ctor.isAccessible = true
-                            ctor.newInstance(value) as LinkProperties
-                        } catch (_: Throwable) {
-                            value
-                        }
+                    val stackedCopy = cloneLinkProperties(value)
                     val stackedModified = sanitizeLinkProperties(stackedCopy)
                     val stackedIface = XposedHelpers.getObjectField(stackedCopy, "mIfaceName") as? String
                     if (stackedIface == null && stackedCopy.routes.isEmpty()) {
@@ -190,12 +207,6 @@ class HookEntry : IXposedHookLoadPackage {
                             filtered[key] = stackedCopy
                         }
                     } else {
-                        // Only mark `modified` if sanitization actually
-                        // changed something. The previous condition also
-                        // tripped on `stackedCopy !== value`, which is
-                        // true after every successful clone — so any
-                        // non-empty stacked map forced a clear+putAll
-                        // even when no VPN data was present.
                         if (stackedModified) modified = true
                         filtered[key] = stackedCopy
                     }
@@ -208,9 +219,38 @@ class HookEntry : IXposedHookLoadPackage {
         } catch (t: Throwable) {
             HookLog.e("VpnHide: failed to sanitize mStackedLinks: ${t.message}")
         }
-
         return modified
     }
+
+    /** Deep-copy a LinkProperties via its copy constructor, falling back to the
+     *  original on any reflection failure. */
+    private fun cloneLinkProperties(value: LinkProperties): LinkProperties =
+        try {
+            val ctor = LinkProperties::class.java.getDeclaredConstructor(LinkProperties::class.java)
+            ctor.isAccessible = true
+            ctor.newInstance(value) as LinkProperties
+        } catch (_: Throwable) {
+            value
+        }
+
+    /** Clear a `MutableList` field on a LinkProperties by reflection; returns
+     *  true if it had entries that were removed. */
+    private fun clearLinkPropertyList(
+        copy: LinkProperties,
+        field: String,
+    ): Boolean =
+        try {
+            val list = XposedHelpers.getObjectField(copy, field) as? MutableList<*>
+            if (!list.isNullOrEmpty()) {
+                list.clear()
+                true
+            } else {
+                false
+            }
+        } catch (t: Throwable) {
+            HookLog.e("VpnHide: failed to clear $field: ${t.message}")
+            false
+        }
 
     private fun sanitizeNetworkCapabilities(copy: NetworkCapabilities): Boolean {
         val hasVpnTransport = copy.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
