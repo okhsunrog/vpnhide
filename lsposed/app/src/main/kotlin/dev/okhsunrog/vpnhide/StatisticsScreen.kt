@@ -1,11 +1,15 @@
 package dev.okhsunrog.vpnhide
 
+import android.graphics.drawable.Drawable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -26,12 +30,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.drawable.toBitmap
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
@@ -43,11 +49,17 @@ import dev.okhsunrog.vpnhide.ui.components.SectionHeader
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.delay
 
+// How often the live capture session re-reads the backend counters. Comfortably
+// longer than a typical root-snapshot read so polls don't stack up.
+private const val CAPTURE_POLL_MS = 2000L
+
 @Composable
 fun StatisticsScreen(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val state by StatisticsCache.state.collectAsState()
     val loadError by StatisticsCache.error.collectAsState()
+    val installedApps by AppListCache.apps.collectAsState()
     var detailApp by remember { mutableStateOf<AppProbeStats?>(null) }
     var captureBaseline by remember { mutableStateOf<Map<Pair<Long, Long>, Long>?>(null) }
     var captureStartMs by remember { mutableLongStateOf(0L) }
@@ -55,12 +67,27 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
 
     LaunchedEffect(Unit) {
         StatisticsCache.ensureLoaded(scope)
+        // Resolve UID → app icon + friendly label for the per-app list, the
+        // same package scan the Protection tab uses (cached app-wide).
+        AppListCache.ensureLoaded(scope, context)
     }
     // Tick the elapsed clock while a capture session is active.
     LaunchedEffect(captureBaseline != null) {
         while (captureBaseline != null) {
             nowMs = System.currentTimeMillis()
             delay(1000)
+        }
+    }
+    // Live capture: re-read the counters every couple of seconds while a session
+    // is active so probes appear on their own as the user exercises a target app
+    // — no manual refresh. The coroutine keeps running while the app is
+    // backgrounded (composition is retained), so polling continues while the
+    // user is inside the target app. Skip a tick if a read is still in flight so
+    // a slow root snapshot doesn't get cancelled-and-restarted forever.
+    LaunchedEffect(captureBaseline != null) {
+        while (captureBaseline != null) {
+            delay(CAPTURE_POLL_MS)
+            if (!StatisticsCache.loading.value) StatisticsCache.refresh(scope)
         }
     }
 
@@ -91,8 +118,10 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
             return@Column
         }
 
-        val selfPackage = LocalContext.current.packageName
+        val selfPackage = context.packageName
         val appStats = remember(s, selfPackage) { buildAppProbeStats(s, selfPackage) }
+        val appsByPackage =
+            remember(installedApps) { installedApps?.associateBy(AppSummary::packageName).orEmpty() }
         val methodCount = remember(appStats) { appStats.flatMap { it.byMethod.keys }.toSet().size }
 
         val capturing = captureBaseline != null
@@ -115,7 +144,11 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
         val shownApps = capture?.apps ?: appStats
 
         detailApp?.let { app ->
-            AppProbeDetailDialog(app = app, onDismiss = { detailApp = null })
+            AppProbeDetailDialog(
+                app = app,
+                appName = resolveAppSummary(app, appsByPackage)?.label ?: appLabel(app),
+                onDismiss = { detailApp = null },
+            )
         }
 
         StatisticsHeroCard(state = s, appCount = appStats.size, methodCount = methodCount)
@@ -131,7 +164,6 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
                 nowMs = captureStartMs
             },
             onStop = { captureBaseline = null },
-            onRefresh = { StatisticsCache.refresh(scope) },
         )
         Spacer(Modifier.height(20.dp))
 
@@ -185,7 +217,13 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     shownApps.forEachIndexed { index, app ->
-                        AppProbeCard(app, index = index, count = shownApps.size, onClick = { detailApp = app })
+                        AppProbeCard(
+                            app = app,
+                            summary = resolveAppSummary(app, appsByPackage),
+                            index = index,
+                            count = shownApps.size,
+                            onClick = { detailApp = app },
+                        )
                     }
                 }
             }
@@ -324,12 +362,11 @@ private fun CaptureControlCard(
     capturedAppCount: Int,
     onStart: () -> Unit,
     onStop: () -> Unit,
-    onRefresh: () -> Unit,
 ) {
     EnhancedCard(modifier = Modifier.fillMaxWidth(), color = AppColors.cardContainer) {
         Column(
             modifier = Modifier.padding(16.dp).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
                 text = stringResource(R.string.statistics_capture_title),
@@ -342,30 +379,77 @@ private fun CaptureControlCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CaptureStep(1, stringResource(R.string.statistics_capture_step1))
+                    CaptureStep(2, stringResource(R.string.statistics_capture_step2))
+                    CaptureStep(3, stringResource(R.string.statistics_capture_step3))
+                }
                 EnhancedButton(onClick = onStart, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.statistics_capture_start))
                 }
             } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier =
+                            Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(StatusColors.successDot),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text =
+                            stringResource(
+                                R.string.statistics_capture_live,
+                                formatElapsed(elapsedMs),
+                                capturedAppCount,
+                            ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
                 Text(
-                    text =
-                        stringResource(
-                            R.string.statistics_capture_active,
-                            formatElapsed(elapsedMs),
-                            capturedAppCount,
-                        ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
+                    text = stringResource(R.string.statistics_capture_active_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    EnhancedButton(onClick = onRefresh, modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.action_refresh))
-                    }
-                    EnhancedOutlinedButton(onClick = onStop, modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.statistics_capture_stop))
-                    }
+                EnhancedOutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.statistics_capture_stop))
                 }
             }
         }
+    }
+}
+
+// One numbered line in the capture how-to. The number sits in a small tinted
+// circle so the three-step flow reads at a glance.
+@Composable
+private fun CaptureStep(
+    number: Int,
+    text: String,
+) {
+    Row(verticalAlignment = Alignment.Top) {
+        Box(
+            modifier =
+                Modifier
+                    .size(20.dp)
+                    .clip(CircleShape)
+                    .background(StatusColors.infoContainer()),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = number.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = StatusColors.infoAccent,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -436,6 +520,7 @@ private fun BackendSummaryCard(
 @Composable
 private fun AppProbeCard(
     app: AppProbeStats,
+    summary: AppSummary?,
     index: Int,
     count: Int,
     onClick: () -> Unit,
@@ -449,21 +534,17 @@ private fun AppProbeCard(
     ) {
         Column(modifier = Modifier.padding(14.dp).fillMaxWidth()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                AppStatAvatar(summary?.icon)
+                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = appLabel(app),
+                        text = summary?.label ?: appLabel(app),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        text = appSurfacesText(app),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    AppProbeSubtitle(app = app, resolved = summary != null)
                 }
                 Spacer(Modifier.width(12.dp))
                 Text(
@@ -499,11 +580,12 @@ private fun AppProbeCard(
 @Composable
 private fun AppProbeDetailDialog(
     app: AppProbeStats,
+    appName: String,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(appLabel(app)) },
+        title = { Text(appName) },
         text = {
             Column(
                 modifier =
@@ -646,6 +728,70 @@ private fun surfaceLabel(surface: MethodSurface): String =
             MethodSurface.Package -> R.string.surface_package
         },
     )
+
+// First installed-app summary that matches one of this UID's packages, so the
+// row can show a real icon + label instead of the bare package name. UIDs with
+// no installed match (system uids, uninstalled packages) resolve to null and
+// fall back to the package/uid text + a neutral placeholder avatar.
+private fun resolveAppSummary(
+    app: AppProbeStats,
+    byPackage: Map<String, AppSummary>,
+): AppSummary? = app.packageNames.firstNotNullOfOrNull { byPackage[it] }
+
+@Composable
+private fun AppStatAvatar(icon: Drawable?) {
+    if (icon != null) {
+        Image(
+            bitmap = icon.toBitmap(48, 48).asImageBitmap(),
+            contentDescription = null,
+            modifier = Modifier.size(40.dp),
+        )
+    } else {
+        Box(
+            modifier =
+                Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AppColors.neutralAccentContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Android,
+                contentDescription = null,
+                tint = StatusColors.neutralAccent,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+    }
+}
+
+// Secondary line under the app label: the package name(s) in monospace once the
+// app is resolved (mirrors the Protection rows), otherwise the detection
+// surfaces (Java · Native · Apps) since there's no friendlier identity to show.
+@Composable
+private fun AppProbeSubtitle(
+    app: AppProbeStats,
+    resolved: Boolean,
+) {
+    if (resolved && app.packageNames.isNotEmpty()) {
+        Text(
+            text = app.packageNames.joinToString(", "),
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    } else {
+        Text(
+            text = appSurfacesText(app),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
 
 @Composable
 private fun appLabel(app: AppProbeStats): String =

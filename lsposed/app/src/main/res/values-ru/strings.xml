@@ -140,13 +140,17 @@
     <string name="statistics_apps_header">Приложения, проверявшие VPN</string>
     <string name="statistics_apps_caption">Накопительно с момента загрузки. Нажмите приложение для полной разбивки по хукам.</string>
     <string name="statistics_capture_title">Сессия захвата</string>
-    <string name="statistics_capture_intro">Начните захват, затем откройте целевое приложение и попользуйтесь им. Нажмите «Обновить» — увидите, какие проверки VPN оно сделало за это время.</string>
+    <string name="statistics_capture_intro">Посмотрите, какие проверки VPN запускает приложение — вживую:</string>
+    <string name="statistics_capture_step1">Нажмите «Начать захват» ниже.</string>
+    <string name="statistics_capture_step2">Переключитесь на приложение, которое хотите проверить, и попользуйтесь им.</string>
+    <string name="statistics_capture_step3">Его пробы появятся здесь вживую — возвращаться и обновлять не нужно.</string>
     <string name="statistics_capture_start">Начать захват</string>
-    <string name="statistics_capture_active">Идёт захват · %1$s · приложений: %2$d</string>
+    <string name="statistics_capture_live">Вживую · %1$s · приложений: %2$d</string>
+    <string name="statistics_capture_active_hint">Переключитесь на целевое приложение и попользуйтесь — пробы будут появляться ниже по мере поступления.</string>
     <string name="statistics_capture_stop">Стоп</string>
-    <string name="statistics_capture_apps_header">Пробы за сессию</string>
-    <string name="statistics_capture_hint">Что целевые приложения проверяли с начала захвата. Нажмите для разбивки по хукам.</string>
-    <string name="statistics_capture_empty">Пока ничего не поймано. Откройте целевое приложение и нажмите «Обновить».</string>
+    <string name="statistics_capture_apps_header">Пробы за эту сессию</string>
+    <string name="statistics_capture_hint">Что целевое приложение проверяло с начала этой сессии. Нажмите для разбивки по хукам.</string>
+    <string name="statistics_capture_empty">Ждём пробы… переключитесь на целевое приложение и попользуйтесь им.</string>
     <string name="statistics_apps_metric">Приложений</string>
     <string name="statistics_methods_metric">Способов</string>
     <!-- Способы детекта (разбивка по приложениям) -->
