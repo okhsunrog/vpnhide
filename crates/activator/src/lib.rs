@@ -469,7 +469,12 @@ pub fn project_ports_with_resolver(
         // alias, so an observer could `connect(127.0.0.2:port)` and still get a
         // handshake — a positive fingerprint — if only 127.0.0.1 were rejected.
         // (::1 already is the entire IPv6 loopback.)
-        ipv4: build_ports_ruleset(PORTS_CHAIN4, "127.0.0.0/8", "icmp-port-unreachable", &targets),
+        ipv4: build_ports_ruleset(
+            PORTS_CHAIN4,
+            "127.0.0.0/8",
+            "icmp-port-unreachable",
+            &targets,
+        ),
         ipv6: build_ports_ruleset(PORTS_CHAIN6, "::1", "icmp6-port-unreachable", &targets),
         target_count: targets.len(),
     }
