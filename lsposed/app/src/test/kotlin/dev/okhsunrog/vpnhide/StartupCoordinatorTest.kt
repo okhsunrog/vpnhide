@@ -53,6 +53,7 @@ class StartupCoordinatorTest {
                             selfNeedsRestart = false,
                             currentBootId = null,
                             error = "exit=-1",
+                            failureKind = SelfTargetFailureKind.RootUnavailable,
                         )
                     },
                     cleanupZygiskStatus = { _, bootId -> cleanupBootId = bootId },
@@ -62,7 +63,10 @@ class StartupCoordinatorTest {
 
             coordinator.prepareSelfTargets()
 
-            assertEquals(StartupSelfTargetState.Failed("exit=-1"), coordinator.selfTargetState.value)
+            assertEquals(
+                StartupSelfTargetState.Failed(SelfTargetFailureKind.RootUnavailable, "exit=-1"),
+                coordinator.selfTargetState.value,
+            )
             assertNull(seededPackages)
             assertNull(cleanupBootId)
             assertEquals(

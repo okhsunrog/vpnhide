@@ -212,12 +212,32 @@ internal fun isVpnActiveBlocking(): Boolean {
     return isVpnActiveFromSnapshot(output)
 }
 
+/**
+ * Why startup root-state preparation failed, so the UI can tell the user the
+ * truth instead of always blaming root permissions. The distinction is known at
+ * the point of failure (not parsed back out of a string).
+ */
+internal enum class SelfTargetFailureKind {
+    /** The root command didn't run: denied, su prompt interrupted, non-zero exit. */
+    RootUnavailable,
+
+    /** Root worked, but the state probe returned incomplete data (a backend's
+     *  section was missing — e.g. a broken/garbled KPM control reply). */
+    IncompleteData,
+
+    /** Root worked, but writing the updated config back failed. */
+    ConfigWriteFailed,
+
+    Unknown,
+}
+
 internal data class SelfTargetPreparation(
     val rootAvailable: Boolean,
     val selfNeedsRestart: Boolean,
     val currentBootId: String?,
     val pmPackages: String? = null,
     val error: String? = null,
+    val failureKind: SelfTargetFailureKind = SelfTargetFailureKind.Unknown,
 )
 
 internal fun cleanupStaleZygiskStatus(
@@ -268,11 +288,16 @@ internal fun ensureSelfInTargets(
     selfPkg: String,
     timeoutSec: Long = SELF_TARGETS_TIMEOUT_SEC,
 ): SelfTargetPreparation {
-    val (sections, loadError) = loadStartupRootSections(timeoutSec)
-    if (sections == null) return selfTargetPreparationFailure(loadError ?: "snapshot load failed")
+    val (sections, loadFailure) = loadStartupRootSections(timeoutSec)
+    if (sections == null) {
+        val failure = loadFailure ?: SelfTargetFailureDetail(SelfTargetFailureKind.Unknown, "snapshot load failed")
+        return selfTargetPreparationFailure(failure.kind, failure.detail)
+    }
     val update = buildCanonicalSelfUpdate(sections, selfPkg)
     if (update.writeRequired) {
-        writeStartupCanonical(update.canonical, timeoutSec)?.let { return selfTargetPreparationFailure(it) }
+        writeStartupCanonical(update.canonical, timeoutSec)?.let {
+            return selfTargetPreparationFailure(SelfTargetFailureKind.ConfigWriteFailed, it)
+        }
         RootSnapshotCache.invalidate()
     }
     cleanupLegacyConfigInputs(timeoutSec)
@@ -293,17 +318,27 @@ private data class CanonicalSelfUpdate(
     val writeRequired: Boolean,
 )
 
-private fun loadStartupRootSections(timeoutSec: Long): Pair<Map<String, String>?, String?> {
+private data class SelfTargetFailureDetail(
+    val kind: SelfTargetFailureKind,
+    val detail: String,
+)
+
+private fun loadStartupRootSections(timeoutSec: Long): Pair<Map<String, String>?, SelfTargetFailureDetail?> {
     val (exitCode, out) = suExec(buildRootShellSnapshotCommand(includePmPackages = true), timeoutSec = timeoutSec)
     if (exitCode != 0) {
         VpnHideLog.w(TAG, "ensureSelfInTargets: root snapshot failed (exit=$exitCode): ${out.trim()}")
-        return null to "exit=$exitCode"
+        return null to SelfTargetFailureDetail(SelfTargetFailureKind.RootUnavailable, "exit=$exitCode")
     }
     return try {
         parseRootShellSnapshot(out).also(::validateRootSnapshotSections) to null
+    } catch (e: RootSnapshotException) {
+        // Root worked, but a required section was missing (incomplete probe — e.g.
+        // a backend's control reply didn't come back). Distinct from no-root.
+        VpnHideLog.w(TAG, "ensureSelfInTargets: snapshot parse failed: ${e.message}")
+        null to SelfTargetFailureDetail(SelfTargetFailureKind.IncompleteData, e.message ?: "incomplete root snapshot")
     } catch (e: Exception) {
         VpnHideLog.w(TAG, "ensureSelfInTargets: snapshot parse failed: ${e.message}")
-        null to (e.message ?: "snapshot parse failed")
+        null to SelfTargetFailureDetail(SelfTargetFailureKind.Unknown, e.message ?: "snapshot parse failed")
     }
 }
 
@@ -353,10 +388,14 @@ private fun cleanupLegacyConfigInputs(timeoutSec: Long) {
     }
 }
 
-private fun selfTargetPreparationFailure(error: String): SelfTargetPreparation =
+private fun selfTargetPreparationFailure(
+    kind: SelfTargetFailureKind,
+    error: String,
+): SelfTargetPreparation =
     SelfTargetPreparation(
         rootAvailable = false,
         selfNeedsRestart = false,
         currentBootId = null,
         error = error,
+        failureKind = kind,
     )

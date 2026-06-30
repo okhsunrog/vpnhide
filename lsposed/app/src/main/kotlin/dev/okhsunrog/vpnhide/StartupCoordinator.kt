@@ -17,7 +17,8 @@ internal sealed interface StartupSelfTargetState {
     ) : StartupSelfTargetState
 
     data class Failed(
-        val message: String,
+        val kind: SelfTargetFailureKind,
+        val detail: String,
     ) : StartupSelfTargetState
 }
 
@@ -59,7 +60,8 @@ internal class StartupCoordinator(
             markStartupEvent("self_targets_failed")
             _selfTargetState.value =
                 StartupSelfTargetState.Failed(
-                    preparation.error ?: "root preparation failed",
+                    kind = preparation.failureKind,
+                    detail = preparation.error ?: "root preparation failed",
                 )
         }
     }

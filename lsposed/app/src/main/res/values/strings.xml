@@ -97,7 +97,10 @@
     <string name="dashboard_load_failed_message">VPN Hide could not collect the root state needed for this screen. Check your root manager if permission was interrupted, then tap Retry.</string>
     <string name="dashboard_refresh_failed_message">Refresh failed. Showing the previous dashboard data.</string>
     <string name="self_targets_error_title">Startup preparation failed</string>
-    <string name="self_targets_error_message">VPN Hide could not update its root config. Check your root manager if permission was interrupted, then tap Retry.</string>
+    <string name="self_targets_error_body_root">VPN Hide could not run a root command. If you denied or interrupted the root prompt, grant access in your root manager, then tap Retry.</string>
+    <string name="self_targets_error_body_incomplete">Root access worked, but VPN Hide could not read part of its startup state (shown below). This is usually temporary — tap Retry.</string>
+    <string name="self_targets_error_body_write">Root access worked, but VPN Hide could not save its updated config (shown below). Tap Retry.</string>
+    <string name="self_targets_error_body_unknown">VPN Hide could not finish its root-side startup (shown below). Tap Retry.</string>
     <string name="targets_load_failed_title">Protection data unavailable</string>
     <string name="targets_load_failed_message">VPN Hide could not collect the root state needed for this tab. Check your root manager if permission was interrupted, then tap Retry.</string>
     <string name="dashboard_ports">Ports hiding module</string>

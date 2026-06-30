@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -229,8 +230,7 @@ private fun MainScreen() {
     val selfTargetState by startupCoordinator.selfTargetState.collectAsState()
     val selfNeedsRestart =
         (selfTargetState as? StartupSelfTargetState.Ready)?.selfNeedsRestart
-    val selfTargetError =
-        (selfTargetState as? StartupSelfTargetState.Failed)?.message
+    val selfTargetFailure = selfTargetState as? StartupSelfTargetState.Failed
     val refreshRestart = selfNeedsRestart ?: false
 
     LaunchedEffect(startupCoordinator) {
@@ -533,9 +533,11 @@ private fun MainScreen() {
         },
     ) { innerPadding ->
         val restart = selfNeedsRestart
-        val preparationError = selfTargetError
-        if (preparationError != null) {
+        val preparationFailure = selfTargetFailure
+        if (preparationFailure != null) {
             RootPreparationErrorScreen(
+                kind = preparationFailure.kind,
+                detail = preparationFailure.detail,
                 modifier = Modifier.padding(innerPadding),
                 onRetry = { startupCoordinator.retrySelfTargets(scope) },
             )
@@ -614,8 +616,18 @@ private fun StartupLoadingScreen() {
     }
 }
 
+private fun selfTargetErrorBodyRes(kind: SelfTargetFailureKind): Int =
+    when (kind) {
+        SelfTargetFailureKind.RootUnavailable -> R.string.self_targets_error_body_root
+        SelfTargetFailureKind.IncompleteData -> R.string.self_targets_error_body_incomplete
+        SelfTargetFailureKind.ConfigWriteFailed -> R.string.self_targets_error_body_write
+        SelfTargetFailureKind.Unknown -> R.string.self_targets_error_body_unknown
+    }
+
 @Composable
 private fun RootPreparationErrorScreen(
+    kind: SelfTargetFailureKind,
+    detail: String,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -642,10 +654,20 @@ private fun RootPreparationErrorScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = stringResource(R.string.self_targets_error_message),
+                    text = stringResource(selfTargetErrorBodyRes(kind)),
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                 )
+                if (detail.isNotBlank()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.75f),
+                    )
+                }
                 Spacer(Modifier.height(16.dp))
                 EnhancedButton(onClick = onRetry) {
                     Text(stringResource(R.string.vpn_off_retry))

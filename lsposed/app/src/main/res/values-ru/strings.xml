@@ -66,7 +66,10 @@
     <string name="dashboard_load_failed_message">VPN Hide не смог собрать root-состояние для этого экрана. Проверьте менеджер root, если разрешение было прервано, затем нажмите «Повторить».</string>
     <string name="dashboard_refresh_failed_message">Обновление не удалось. Показываются предыдущие данные обзора.</string>
     <string name="self_targets_error_title">Подготовка запуска не удалась</string>
-    <string name="self_targets_error_message">VPN Hide не смог обновить root-конфиг. Проверьте менеджер root, если разрешение было прервано, затем нажмите «Повторить».</string>
+    <string name="self_targets_error_body_root">VPN Hide не смог выполнить root-команду. Если вы отклонили или прервали запрос root, выдайте доступ в менеджере root и нажмите «Повторить».</string>
+    <string name="self_targets_error_body_incomplete">Root-доступ сработал, но VPN Hide не смог прочитать часть стартового состояния (показано ниже). Обычно это временно — нажмите «Повторить».</string>
+    <string name="self_targets_error_body_write">Root-доступ сработал, но VPN Hide не смог сохранить обновлённый конфиг (показано ниже). Нажмите «Повторить».</string>
+    <string name="self_targets_error_body_unknown">VPN Hide не смог завершить root-часть запуска (показано ниже). Нажмите «Повторить».</string>
     <string name="targets_load_failed_title">Данные защиты недоступны</string>
     <string name="targets_load_failed_message">VPN Hide не смог собрать root-состояние для этой вкладки. Проверьте менеджер root, если разрешение было прервано, затем нажмите «Повторить».</string>
     <string name="dashboard_ports">Модуль скрытия портов</string>
