@@ -48,6 +48,7 @@
 #include <linux/rtnetlink.h>
 #include <linux/skbuff.h>
 #include <linux/inetdevice.h>
+#include <net/sock.h>
 #include <net/if_inet6.h>
 #include <net/ip_fib.h>
 #include <net/nexthop.h>
@@ -435,6 +436,11 @@ static struct kretprobe dev_ioctl_krp = {
 
 struct sock_ioctl_data {
 	void __user *argp;
+	/* Net namespace of the socket this ioctl is on — captured at entry so
+	 * the size-query path (ifc_req == NULL) can enumerate that ns's netdevs
+	 * to learn how many ifreqs the kernel counted for VPN ifaces. dev_ifconf
+	 * uses sock_net(sk), so we match it instead of guessing current's ns. */
+	struct net *net;
 	bool target;
 };
 
@@ -442,6 +448,8 @@ static int sock_ioctl_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	struct sock_ioctl_data *data = (void *)ri->data;
 	unsigned int cmd = (unsigned int)regs->regs[1];
+	struct file *file;
+	struct socket *sock;
 
 	data->target = false;
 
@@ -449,6 +457,12 @@ static int sock_ioctl_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 		return 0;
 	if (!hook_active(VPNHIDE_HOOK_SOCK_IOCTL))
 		return 0;
+
+	/* sock_ioctl only runs for socket files, so file->private_data is the
+	 * struct socket (same thing sock_from_file() returns). Stable uapi. */
+	file = (struct file *)regs->regs[0];
+	sock = file ? file->private_data : NULL;
+	data->net = (sock && sock->sk) ? sock_net(sock->sk) : NULL;
 
 	data->target = true;
 	data->argp = (void __user *)regs->regs[2];
@@ -504,6 +518,63 @@ static enum filter_ifconf_result filter_ifconf_buf(struct ifreq __user *usr_ifr,
 	return FILTER_IFCONF_CHANGED;
 }
 
+/*
+ * Size-query subcase: SIOCGIFCONF with ifc_req == NULL. The kernel
+ * (dev_ifconf -> inet_gifconf) doesn't copy any ifreqs, it just returns
+ * ifc_len = (number of IPv4 addresses across all netdevs) * sizeof(ifreq).
+ * There's no buffer to compact, so to keep the size query consistent with the
+ * filtered fill, we recompute how many of those ifreqs belong to VPN ifaces
+ * and shrink ifc_len by that much. Otherwise a target doing the classic
+ * two-step probe (size, then fill) sees the fill come back one interface short
+ * of the advertised size.
+ *
+ * inet_gifconf emits one ifreq per in_ifaddr, named by ifa_label, so we count
+ * by ifa_label under rcu — the exact set and naming the fill path would filter.
+ */
+static void filter_ifconf_size_probe(struct net *net,
+				     struct ifconf __user *uifc, int orig_len)
+{
+	struct net_device *dev;
+	int hidden = 0;
+	int new_len;
+
+	if (!net)
+		return;
+
+	rcu_read_lock();
+	for_each_netdev_rcu(net, dev) {
+		struct in_device *in_dev = __in_dev_get_rcu(dev);
+		const struct in_ifaddr *ifa;
+
+		if (!in_dev)
+			continue;
+		in_dev_for_each_ifa_rcu(ifa, in_dev) {
+			char label[IFNAMSIZ];
+
+			memcpy(label, ifa->ifa_label, IFNAMSIZ);
+			label[IFNAMSIZ - 1] = '\0';
+			if (is_vpn_ifname(label))
+				hidden++;
+		}
+	}
+	rcu_read_unlock();
+
+	if (hidden == 0)
+		return;
+
+	new_len = orig_len - hidden * (int)sizeof(struct ifreq);
+	if (new_len < 0)
+		new_len = 0;
+	if (put_user(new_len, &uifc->ifc_len)) {
+		vpnhide_dbg(
+			"ifconf size-probe: put_user failed; len untouched\n");
+		return;
+	}
+	vpnhide_dbg("ifconf size-probe %d -> %d (hid %d vpn addr)\n", orig_len,
+		    new_len, hidden);
+	record_hook_hit(VPNHIDE_HOOK_SOCK_IOCTL);
+}
+
 static int sock_ioctl_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	struct sock_ioctl_data *data = (void *)ri->data;
@@ -524,8 +595,14 @@ static int sock_ioctl_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 	uifc = data->argp;
 	if (copy_from_user(&ifc, uifc, sizeof(ifc)))
 		return 0;
-	if (!ifc.ifc_req || ifc.ifc_len <= 0)
+	if (ifc.ifc_len <= 0)
 		return 0;
+
+	/* ifc_req == NULL is the size-query probe (no buffer to compact). */
+	if (!ifc.ifc_req) {
+		filter_ifconf_size_probe(data->net, uifc, ifc.ifc_len);
+		return 0;
+	}
 
 	orig_len = ifc.ifc_len;
 	res = filter_ifconf_buf(ifc.ifc_req,

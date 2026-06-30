@@ -122,23 +122,32 @@ Notes: bionic's `getifaddrs` itself runs over netlink, so the kmod
 at once. zygisk additionally unlinks entries from the `getifaddrs` result list
 directly, so it works even if a future bionic stops using netlink.
 
-**Two known narrow `SIOCGIFCONF` gaps (kmod `.ko`), tracked not yet closed:**
+**`SIOCGIFCONF` size-query subcase — closed in the `.ko`.** The classic two-step
+`SIOCGIFCONF` (first call with `ifc_req == NULL` to learn the buffer size, then a
+sized call to fill it) used to leak: the `.ko` filtered the fill but returned the
+*unfiltered* length from the size query, so a target comparing the two back-to-back
+saw a one-interface discrepancy. `sock_ioctl_ret` now also handles the
+`ifc_req == NULL` path — it rcu-enumerates the socket's netns netdevs and subtracts
+`sizeof(struct ifreq)` per *IPv4-addressed* VPN iface (matched by `ifa_label`, the
+exact set/naming `inet_gifconf` would have emitted), so the size query agrees with
+the filtered fill. Validated by the harness `ifconf_size_probe` vector.
 
-- **Size-query subcase.** The classic two-step `SIOCGIFCONF` (first call with
-  `ifc_req == NULL` to learn the buffer size, then a sized call to fill it) — the
-  `.ko` filters the fill but returns the *unfiltered* length from the size query,
-  so a target comparing the two back-to-back sees a one-interface discrepancy.
-  Closing it means, on the `ifc_req == NULL` path, enumerating netdevs (rcu) and
-  subtracting `sizeof(struct ifreq)` per *IPv4-addressed* VPN iface — feasible
-  but unvalidated without a dedicated probe. zygisk (its own `getifaddrs`/procfs
-  filtering) and modern apps (netlink `getifaddrs`, not `SIOCGIFCONF`) are
-  unaffected; the leak needs an app deliberately doing the legacy NULL-probe.
-- **32-bit (compat) callers.** `sock_ioctl_krp` hooks `sock_ioctl` only; a 32-bit
-  app's `SIOCGIFCONF` enters through `compat_sock_ioctl` → `compat_dev_ifconf`
-  and never reaches it, so the size/fill filtering is skipped for 32-bit
-  enumeration. Most current Android apps are 64-bit and modern enumeration uses
-  netlink (which the rtnl/inet fill hooks do cover), so this is narrow; closing
-  it means also hooking `compat_sock_ioctl` with the compat `ifconf` layout.
+**One narrow `SIOCGIFCONF` gap still open:**
+
+- **32-bit (compat) callers (kmod `.ko`).** `sock_ioctl_krp` hooks `sock_ioctl`
+  only; a 32-bit app's `SIOCGIFCONF` enters through `compat_sock_ioctl` →
+  `compat_dev_ifconf` and never reaches it, so both the fill and the size-query
+  filtering are skipped for 32-bit enumeration. Most current Android apps are
+  64-bit and modern enumeration uses netlink (which the rtnl/inet fill hooks do
+  cover), so this is narrow; closing it means also hooking `compat_sock_ioctl`
+  with the compat `ifconf` layout. Deferred (low priority) — see
+  [ROADMAP.md](ROADMAP.md).
+
+The KPM backend's `filter_ifconf` compacts the fill the same way the `.ko` does,
+but does not yet reduce the `ifc_req == NULL` size query (it would need raw netdev
+walking by per-kver offset rather than the `.ko`'s rcu helpers); the size-query
+subcase is therefore `.ko`-only for now, tracked with the KPM's other WIP parity
+items.
 
 ### 3B. Route table — "is the default route a tunnel?"
 

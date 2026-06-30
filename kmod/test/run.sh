@@ -58,6 +58,30 @@ if [ -z "$GAI" ] && [ -n "${VPNHIDE_GAI_REQUIRED:-}" ]; then
 	exit 2
 fi
 
+# --- static SIOCGIFCONF probe (validates the ifconf size-query path) ---------
+# Reuses the same bionic toolchain as the getifaddrs probe (any libc would do
+# for this one, but keep it consistent). Built only if a toolchain is around;
+# the harness SKIPs the size-probe vectors when it's missing.
+IFC=""
+if [ -n "${VPNHIDE_IFC_BIN:-}" ] && [ -x "${VPNHIDE_IFC_BIN:-}" ]; then
+	IFC="$VPNHIDE_IFC_BIN"
+	echo "[run] ifconf probe: prebuilt ($IFC)"
+else
+	IFC_CC="${VPNHIDE_GAI_CC:-$(find "$HOME/Android/Sdk/ndk" -type f -path '*/toolchains/llvm/prebuilt/*/bin/aarch64-linux-android*-clang' 2>/dev/null | sort | tail -1 || true)}"
+	if [ -n "$IFC_CC" ] && [ -x "$IFC_CC" ]; then
+		IFC="$CACHE/ifconf"
+		"$IFC_CC" -static -O2 -o "$IFC" "$HERE/ifconf-probe.c" 2>/dev/null || IFC=""
+	fi
+	[ -n "$IFC" ] && echo "[run] ifconf probe built ($(basename "$IFC_CC"))" || \
+		echo "[run] no bionic toolchain/binary — skipping SIOCGIFCONF size-probe vector"
+fi
+
+if [ -z "$IFC" ] && [ -n "${VPNHIDE_IFC_REQUIRED:-}" ]; then
+	echo "ERROR: ifconf probe is required here (VPNHIDE_IFC_REQUIRED set) but" \
+	     "unavailable. Refusing to pass with the SIOCGIFCONF size-query path unchecked."
+	exit 2
+fi
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 RFS="$WORK/rootfs"
@@ -67,6 +91,7 @@ cp "$KO" "$RFS/vpnhide_kmod.ko"
 cp "$HERE/init.sh" "$RFS/init"
 chmod +x "$RFS/init"
 [ -n "$GAI" ] && { cp "$GAI" "$RFS/gai"; chmod +x "$RFS/gai"; }
+[ -n "$IFC" ] && { cp "$IFC" "$RFS/ifconf"; chmod +x "$RFS/ifconf"; }
 ( cd "$RFS" && find . | cpio -o -H newc 2>/dev/null | gzip > "$WORK/initramfs.cpio.gz" )
 
 LOG="$WORK/serial.log"

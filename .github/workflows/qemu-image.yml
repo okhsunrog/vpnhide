@@ -12,6 +12,7 @@ on:
       - .github/docker/kpm-qemu-legacy/Dockerfile
       - .github/workflows/qemu-image.yml
       - kmod/test/gai-probe.c
+      - kmod/test/ifconf-probe.c
       - kmod/test/qemu.config
       - kmod/test/build-source-kernel.sh
   schedule:
