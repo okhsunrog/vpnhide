@@ -107,6 +107,20 @@ fn significant(line: &[u8]) -> Option<&[u8]> {
     Some(rest)
 }
 
+/// True for a line that may legally precede the header (§4.2): blank /
+/// whitespace-only, or a `#` comment. A line carrying any non-comment token —
+/// **even a non-ASCII one** — is NOT ignorable: the first such line must be the
+/// header. This is deliberately narrower than [significant], which also folds in
+/// the ASCII check; the header scan needs to tell "skip this" apart from
+/// "significant but invalid", to match the C and Kotlin parsers which reject the
+/// whole payload when the first significant line is non-ASCII.
+fn is_ignorable(line: &[u8]) -> bool {
+    match line.iter().position(|&b| !is_sep(b)) {
+        None => true,                  // blank / whitespace-only
+        Some(start) => line[start] == b'#', // comment
+    }
+}
+
 /// Whitespace-delimited tokens of a line (runs of separators collapse, §4.1).
 fn tokens(line: &[u8]) -> impl Iterator<Item = &[u8]> {
     line.split(|&b| is_sep(b)).filter(|t| !t.is_empty())
@@ -160,9 +174,15 @@ fn parse_header(buf: &[u8]) -> Option<(Kind, &[u8])> {
             end -= 1; // CRLF → LF (§4.1)
         }
 
-        let Some(content) = significant(&buf[s..end]) else {
+        let line = &buf[s..end];
+        if is_ignorable(line) {
             continue; // blank / comment before the header is allowed
-        };
+        }
+        // The first significant line MUST be the header. If it is significant
+        // but non-ASCII, `significant` returns None and `?` rejects the whole
+        // payload rather than skipping it — parity with the C (kmod/KPM) and
+        // Kotlin (LSPosed) parsers (§4.2).
+        let content = significant(line)?;
         // first significant line == the mandatory header
         let mut it = tokens(content);
         if it.next() != Some(b"vpnhide".as_slice()) {

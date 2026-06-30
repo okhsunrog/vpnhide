@@ -48,6 +48,10 @@ cfg|vpnhide 1 config\r\ntarget 0x9 0x1\r\n|debug=-1;0x9:0x1
 cfg|vpnhide 1 config\ntarget 0xa 0x2|debug=-1;0xa:0x2
 # non-ASCII byte -> reject just that line
 cfg|vpnhide 1 config\ntarget 0x1 0x1\n\x80bad 0x2\ntarget 0x2 0x2\n|debug=-1;0x1:0x1;0x2:0x2
+# non-ASCII byte as the FIRST significant line -> reject whole. It is significant
+# (not blank/comment), so per §4.2 it must be the header; a non-ASCII line is not
+# a valid header, so the payload is rejected rather than skipped to the next line.
+cfg|\x80bad\nvpnhide 1 config\ntarget 0x1 0x1\n|REJECT
 
 # --- peek_kind dispatch (§7.1) ---------------------------------------------
 kind|vpnhide 1 config\n|CONFIG
@@ -55,6 +59,9 @@ kind|vpnhide 1 stats|STATS
 kind|\n\nvpnhide 1 status\n|STATUS
 kind|vpnhide 2 config\n|INVALID
 kind|garbage\n|INVALID
+# non-ASCII first significant line rejects the whole payload — the parser must
+# NOT skip it and find the header on the following line (§4.2 parity).
+kind|\x80bad\nvpnhide 1 config\n|INVALID
 
 # --- stats serialise (§4.3) ------------------------------------------------
 stats|0x27fa,0x0,0x5;0x27fa,0x3,0xc;0x2947,0x2,0x1|vpnhide 1 stats\n0x27fa 0x0:0x5 0x3:0xc\n0x2947 0x2:0x1\n

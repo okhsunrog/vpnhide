@@ -56,6 +56,22 @@ fn is_vpn_iface(name: &str) -> bool {
     matches_vpn(name.as_bytes())
 }
 
+/// 8-byte-aligned byte buffer. Several probes reinterpret the raw bytes the
+/// kernel writes back (`ifreq` from SIOCGIFCONF, `nlmsghdr`/`rtattr` from a
+/// netlink dump) as typed structs. A plain `[u8; N]` is only 1-aligned, so
+/// forming a reference/slice of those types over it is undefined behaviour even
+/// when it happens to work. Over-aligning the backing storage to 8 — at least
+/// the alignment of every struct read out of these buffers — makes every such
+/// reference well-formed.
+#[repr(align(8))]
+struct AlignedBytes<const N: usize>([u8; N]);
+
+impl<const N: usize> AlignedBytes<N> {
+    fn zeroed() -> Self {
+        Self([0u8; N])
+    }
+}
+
 fn is_selinux_denial(e: &std::io::Error) -> bool {
     e.kind() == ErrorKind::PermissionDenied
 }
@@ -217,10 +233,10 @@ fn check_ioctl_siocgifmtu() -> CheckOutput {
 fn check_ioctl_siocgifconf() -> CheckOutput {
     unsafe {
         with_inet_dgram_socket(|fd| {
-            let mut buf = [0u8; 4096];
+            let mut buf = AlignedBytes::<4096>::zeroed();
             let mut ifc: libc::ifconf = std::mem::zeroed();
-            ifc.ifc_len = buf.len() as libc::c_int;
-            ifc.ifc_ifcu.ifcu_buf = buf.as_mut_ptr().cast();
+            ifc.ifc_len = buf.0.len() as libc::c_int;
+            ifc.ifc_ifcu.ifcu_buf = buf.0.as_mut_ptr().cast();
 
             if libc::ioctl(fd, libc::SIOCGIFCONF as _, &mut ifc) < 0 {
                 let e = last_os_error();
@@ -228,7 +244,7 @@ fn check_ioctl_siocgifconf() -> CheckOutput {
             }
 
             let count = ifc.ifc_len as usize / std::mem::size_of::<libc::ifreq>();
-            let reqs = std::slice::from_raw_parts(buf.as_ptr() as *const libc::ifreq, count);
+            let reqs = std::slice::from_raw_parts(buf.0.as_ptr() as *const libc::ifreq, count);
 
             let mut all = Vec::new();
             let mut vpn = Vec::new();
@@ -472,19 +488,19 @@ fn check_netlink_getlink() -> CheckOutput {
             return CheckOutput::fail(format!("send error: {e}"));
         }
 
-        let mut buf = [0u8; 32768];
+        let mut buf = AlignedBytes::<32768>::zeroed();
         let mut all = Vec::new();
         let mut vpn = Vec::new();
         let hdr_plus_ifinfo =
             std::mem::size_of::<libc::nlmsghdr>() + std::mem::size_of::<Ifinfomsg>();
 
         for _ in 0..MAX_NETLINK_RECV_ITERS {
-            let len = netlink_recv(fd, &mut buf);
+            let len = netlink_recv(fd, &mut buf.0);
             if len <= 0 {
                 break;
             }
             let cont = parse_netlink_msgs(
-                &buf,
+                &buf.0,
                 len as usize,
                 libc::RTM_NEWLINK,
                 |b, offset, msg_len| {
@@ -548,18 +564,18 @@ fn check_netlink_getroute() -> CheckOutput {
             return CheckOutput::fail(format!("send error: {e}"));
         }
 
-        let mut buf = [0u8; 32768];
+        let mut buf = AlignedBytes::<32768>::zeroed();
         let mut vpn = Vec::new();
         let mut total = 0u32;
         let hdr_plus_rtmsg = std::mem::size_of::<libc::nlmsghdr>() + std::mem::size_of::<Rtmsg>();
 
         for _ in 0..MAX_NETLINK_RECV_ITERS {
-            let len = netlink_recv(fd, &mut buf);
+            let len = netlink_recv(fd, &mut buf.0);
             if len <= 0 {
                 break;
             }
             let cont = parse_netlink_msgs(
-                &buf,
+                &buf.0,
                 len as usize,
                 libc::RTM_NEWROUTE,
                 |b, offset, msg_len| {
@@ -642,32 +658,15 @@ fn check_proc_net_ipv6_route() -> CheckOutput {
     check_proc_file("/proc/net/ipv6_route")
 }
 
-#[uniffi::export]
-fn check_proc_net_tcp() -> CheckOutput {
-    check_proc_file("/proc/net/tcp")
-}
-
-#[uniffi::export]
-fn check_proc_net_tcp6() -> CheckOutput {
-    check_proc_file("/proc/net/tcp6")
-}
-
-#[uniffi::export]
-fn check_proc_net_udp() -> CheckOutput {
-    check_proc_file("/proc/net/udp")
-}
-
-#[uniffi::export]
-fn check_proc_net_udp6() -> CheckOutput {
-    check_proc_file("/proc/net/udp6")
-}
+// NOTE: /proc/net/{tcp,tcp6,udp,udp6,fib_trie} are intentionally NOT probed
+// here. Those files expose the VPN only as a hex *local address*, never as an
+// interface name, so a name-matching probe could only ever report a green pass
+// regardless of an actual leak. From inside the targeted (and thus self-hidden)
+// process we have no reference tunnel address to decode and compare, so there is
+// no honest check to run; the address-leak vector on these files is covered by
+// zygisk's tcp/tcp6/udp socket-table filters, not by a self-diagnostic.
 
 #[uniffi::export]
 fn check_proc_net_dev() -> CheckOutput {
     check_proc_file("/proc/net/dev")
-}
-
-#[uniffi::export]
-fn check_proc_net_fib_trie() -> CheckOutput {
-    check_proc_file("/proc/net/fib_trie")
 }

@@ -320,12 +320,7 @@
     <string name="check_proc_route" translatable="false">/proc/net/route</string>
     <string name="check_proc_ipv6_route" translatable="false">/proc/net/ipv6_route</string>
     <string name="check_proc_if_inet6" translatable="false">/proc/net/if_inet6</string>
-    <string name="check_proc_tcp" translatable="false">/proc/net/tcp</string>
-    <string name="check_proc_tcp6" translatable="false">/proc/net/tcp6</string>
-    <string name="check_proc_udp" translatable="false">/proc/net/udp</string>
-    <string name="check_proc_udp6" translatable="false">/proc/net/udp6</string>
     <string name="check_proc_dev" translatable="false">/proc/net/dev</string>
-    <string name="check_proc_fib_trie" translatable="false">/proc/net/fib_trie</string>
     <string name="check_sys_class_net" translatable="false">/sys/class/net</string>
     <string name="check_net_iface_enum" translatable="false">NetworkInterface enum</string>
     <string name="check_proc_route_java" translatable="false">/proc/net/route (Java)</string>

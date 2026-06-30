@@ -220,6 +220,13 @@ vpnhide <version> <kind>
 A payload without this header, or with `version` > the reader's known version,
 is rejected whole (§3).
 
+"Significant" is decided by **non-blank, non-comment alone** — a non-ASCII line
+is significant. So if the first significant line is non-ASCII, it *is* the line
+that MUST be the header; being an invalid header, it rejects the payload whole.
+The §4.1 "reject that line" (skip-and-continue) rule applies to **records**,
+once a valid header is established — it does **not** let the header search step
+over a non-ASCII first significant line to find a header on a later line.
+
 ### 4.3 Records
 
 **config** (`kind = config`):

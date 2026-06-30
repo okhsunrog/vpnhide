@@ -9,14 +9,9 @@ import dev.okhsunrog.vpnhide.checks.checkIoctlSiocgifmtu
 import dev.okhsunrog.vpnhide.checks.checkNetlinkGetlink
 import dev.okhsunrog.vpnhide.checks.checkNetlinkGetroute
 import dev.okhsunrog.vpnhide.checks.checkProcNetDev
-import dev.okhsunrog.vpnhide.checks.checkProcNetFibTrie
 import dev.okhsunrog.vpnhide.checks.checkProcNetIfInet6
 import dev.okhsunrog.vpnhide.checks.checkProcNetIpv6Route
 import dev.okhsunrog.vpnhide.checks.checkProcNetRoute
-import dev.okhsunrog.vpnhide.checks.checkProcNetTcp
-import dev.okhsunrog.vpnhide.checks.checkProcNetTcp6
-import dev.okhsunrog.vpnhide.checks.checkProcNetUdp
-import dev.okhsunrog.vpnhide.checks.checkProcNetUdp6
 import dev.okhsunrog.vpnhide.checks.checkSysClassNet
 
 /**
@@ -61,11 +56,6 @@ internal val NATIVE_CHECKS: List<NativeCheckSpec> =
         NativeCheckSpec("proc_route", R.string.check_proc_route) { checkProcNetRoute() },
         NativeCheckSpec("proc_ipv6_route", R.string.check_proc_ipv6_route) { checkProcNetIpv6Route() },
         NativeCheckSpec("proc_if_inet6", R.string.check_proc_if_inet6) { checkProcNetIfInet6() },
-        NativeCheckSpec("proc_tcp", R.string.check_proc_tcp) { checkProcNetTcp() },
-        NativeCheckSpec("proc_tcp6", R.string.check_proc_tcp6) { checkProcNetTcp6() },
-        NativeCheckSpec("proc_udp", R.string.check_proc_udp) { checkProcNetUdp() },
-        NativeCheckSpec("proc_udp6", R.string.check_proc_udp6) { checkProcNetUdp6() },
         NativeCheckSpec("proc_dev", R.string.check_proc_dev) { checkProcNetDev() },
-        NativeCheckSpec("proc_fib_trie", R.string.check_proc_fib_trie) { checkProcNetFibTrie() },
         NativeCheckSpec("sys_class_net", R.string.check_sys_class_net) { checkSysClassNet() },
     )
