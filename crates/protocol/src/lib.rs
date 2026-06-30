@@ -116,7 +116,7 @@ fn significant(line: &[u8]) -> Option<&[u8]> {
 /// whole payload when the first significant line is non-ASCII.
 fn is_ignorable(line: &[u8]) -> bool {
     match line.iter().position(|&b| !is_sep(b)) {
-        None => true,                  // blank / whitespace-only
+        None => true,                       // blank / whitespace-only
         Some(start) => line[start] == b'#', // comment
     }
 }
