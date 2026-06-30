@@ -58,9 +58,12 @@ import kotlinx.coroutines.delay
 // longer than a typical root-snapshot read so polls don't stack up.
 private const val CAPTURE_POLL_MS = 2000L
 
-// Sentinel wrapped around the highlighted figures in the summary sentence so the
-// AnnotatedString builder can style them apart from the surrounding words.
+// Sentinels wrapped around the figures in the summary sentence so the
+// AnnotatedString builder can style them apart from the surrounding words:
+// TOTAL_MARK for the big blue grand total, FIGURE_MARK for the green scope
+// figures (apps / methods).
 private const val FIGURE_MARK = '\u0001'
+private const val TOTAL_MARK = '\u0002'
 
 @Composable
 fun StatisticsScreen(modifier: Modifier = Modifier) {
@@ -363,30 +366,17 @@ private fun StatisticsHeroCard(
                 }
             }
             Spacer(Modifier.height(18.dp))
-            // Headline as an editorial sentence: the grand total as a big blue
-            // figure, then a centred line "<events> recorded across <apps> via
-            // <methods>" with the two scope figures highlighted in green. One
-            // wrapping AnnotatedString so it never clips, and the words come from
-            // plurals so the Russian forms agree with each count.
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = formatStatCount(state.totalCount),
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Bold,
-                    color = StatusColors.infoAccent,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(2.dp))
-                StatisticsSummarySentence(
-                    totalCount = state.totalCount,
-                    appCount = appCount,
-                    methodCount = methodCount,
-                )
-            }
+            // Headline as one editorial sentence (a single wrapping paragraph):
+            // "<total> <events> recorded across <apps> via <methods>", with the
+            // grand total a big blue figure and the two scope figures larger and
+            // green. One AnnotatedString so it never clips and the number + word
+            // stay one element; the words come from plurals so the Russian forms
+            // agree with each count.
+            StatisticsSummarySentence(
+                totalCount = state.totalCount,
+                appCount = appCount,
+                methodCount = methodCount,
+            )
             // Per-backend breakdown folded into the hero so there's no separate
             // mid-screen "Backends" section: one quiet row per active backend
             // (health dot + name + hooks + its event count).
@@ -414,11 +404,12 @@ private fun StatisticsHeroCard(
     }
 }
 
-// The headline's second line: "<events word> recorded across <apps> via
-// <methods>" as one sentence, with the apps/methods figures highlighted in
-// green. The number figures are wrapped in a sentinel char in the template so
-// each can be styled; the words are resolved through plurals so the Russian
-// case/number forms agree with the actual counts.
+// The whole headline as one sentence/paragraph: "<total> <events> recorded
+// across <apps> via <methods>". The grand total is a big blue figure; the
+// apps/methods figures are larger and green. Each figure is wrapped in a
+// sentinel char in the template (TOTAL_MARK for the total, FIGURE_MARK for the
+// scope figures) so it can be styled while staying in one Text; the words come
+// from plurals so the Russian case/number forms agree with each count.
 @Composable
 private fun StatisticsSummarySentence(
     totalCount: ULong,
@@ -432,29 +423,51 @@ private fun StatisticsSummarySentence(
     val template =
         stringResource(
             R.string.statistics_summary,
+            "$TOTAL_MARK${formatStatCount(totalCount)}$TOTAL_MARK",
             eventsWord,
             "$FIGURE_MARK$appCount$FIGURE_MARK",
             appsWord,
             "$FIGURE_MARK$methodCount$FIGURE_MARK",
             methodsWord,
         )
-    val figureStyle = SpanStyle(color = StatusColors.successDot, fontWeight = FontWeight.Bold)
+    val totalStyle =
+        SpanStyle(
+            color = StatusColors.infoAccent,
+            fontWeight = FontWeight.Bold,
+            fontSize = MaterialTheme.typography.displaySmall.fontSize,
+        )
+    val figureStyle =
+        SpanStyle(
+            color = StatusColors.successDot,
+            fontWeight = FontWeight.Bold,
+            fontSize = MaterialTheme.typography.headlineSmall.fontSize,
+        )
     val sentence =
         buildAnnotatedString {
-            // Segments at odd indices were wrapped by FIGURE_MARK — the figures.
-            template.split(FIGURE_MARK).forEachIndexed { index, segment ->
-                if (index % 2 == 1) {
-                    withStyle(figureStyle) { append(segment) }
-                } else {
-                    append(segment)
+            var i = 0
+            while (i < template.length) {
+                when (val ch = template[i]) {
+                    TOTAL_MARK, FIGURE_MARK -> {
+                        val end = template.indexOf(ch, i + 1).let { if (it < 0) template.length else it }
+                        withStyle(if (ch == TOTAL_MARK) totalStyle else figureStyle) {
+                            append(template.substring(i + 1, end))
+                        }
+                        i = end + 1
+                    }
+
+                    else -> {
+                        append(ch)
+                        i++
+                    }
                 }
             }
         }
     Text(
         text = sentence,
-        style = MaterialTheme.typography.bodyMedium,
+        style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
     )
 }
 

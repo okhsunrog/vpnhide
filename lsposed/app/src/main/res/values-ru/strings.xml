@@ -121,10 +121,10 @@
     <string name="statistics_subtitle">Runtime-события от активных бэкендов</string>
     <string name="statistics_backend_detail">%1$s · хуков: %2$d</string>
     <string name="statistics_backend_unavailable_detail">Нативные счётчики недоступны</string>
-    <!-- Сводное предложение в шапке. %1$s = слово «событий», %2$s = число
-         приложений, %3$s = слово «приложений», %4$s = число способов,
-         %5$s = слово «способами». -->
-    <string name="statistics_summary">%1$s зарегистрировано среди %2$s %3$s, %4$s %5$s</string>
+    <!-- Сводное предложение в шапке. %1$s = число событий, %2$s = слово
+         «событий», %3$s = число приложений, %4$s = слово «приложений»,
+         %5$s = число способов, %6$s = слово «способами». -->
+    <string name="statistics_summary">%1$s %2$s зарегистрировано среди %3$s %4$s, %5$s %6$s</string>
     <!-- Word forms only — the matching figure is rendered separately in the
          summary sentence, so the ImpliedQuantity (%d-in-string) rule doesn't
          apply here. -->

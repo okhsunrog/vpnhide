@@ -152,9 +152,10 @@
     <string name="statistics_subtitle">Runtime events reported by active backends</string>
     <string name="statistics_backend_detail">%1$s · hooks: %2$d</string>
     <string name="statistics_backend_unavailable_detail">Native counters unavailable</string>
-    <!-- Headline summary sentence. %1$s = events word, %2$s = apps count,
-         %3$s = apps word, %4$s = methods count, %5$s = methods word. -->
-    <string name="statistics_summary">%1$s recorded across %2$s %3$s via %4$s %5$s</string>
+    <!-- Headline summary sentence. %1$s = total events count, %2$s = events
+         word, %3$s = apps count, %4$s = apps word, %5$s = methods count,
+         %6$s = methods word. -->
+    <string name="statistics_summary">%1$s %2$s recorded across %3$s %4$s via %5$s %6$s</string>
     <plurals name="statistics_events_word">
         <item quantity="one">event</item>
         <item quantity="other">events</item>
