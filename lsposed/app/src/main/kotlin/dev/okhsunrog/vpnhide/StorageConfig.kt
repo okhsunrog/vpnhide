@@ -168,29 +168,30 @@ private fun parseCanonicalApp(obj: JSONObject?): CanonicalApp {
 
 private fun parsePortPolicy(obj: JSONObject?): PortPolicy? {
     if (obj == null) return null
-    val rulesJson =
-        obj.optJSONArray("rules")
-            ?: throw IllegalArgumentException("portPolicy.rules is required")
-    val rules =
-        (0 until rulesJson.length())
-            .map { idx ->
-                parsePortRule(
-                    rulesJson.optJSONObject(idx)
-                        ?: throw IllegalArgumentException("portPolicy.rules[$idx] must be an object"),
-                )
+    // Best-effort: a single malformed rule (e.g. an out-of-range port that trips
+    // PortRule's require()) must not throw and unwind the WHOLE canonical config,
+    // which would silently disable every hook. Drop the offending rule/policy and
+    // treat the app as ports-disabled instead.
+    return runCatching {
+        val rulesJson = obj.optJSONArray("rules") ?: return@runCatching null
+        val rules =
+            (0 until rulesJson.length()).mapNotNull { idx ->
+                val ruleObj = rulesJson.optJSONObject(idx) ?: return@mapNotNull null
+                runCatching { parsePortRule(ruleObj) }.getOrNull()
             }
-    return normalizePortPolicy(
-        PortPolicy(
-            mode = PortPolicyMode.fromJson(obj.optString("mode", PortPolicyMode.Custom.jsonName)),
-            preset =
-                if (obj.has("preset") && !obj.isNull("preset")) {
-                    obj.optString("preset").takeIf { it.isNotBlank() }
-                } else {
-                    null
-                },
-            rules = rules,
-        ),
-    )
+        normalizePortPolicy(
+            PortPolicy(
+                mode = PortPolicyMode.fromJson(obj.optString("mode", PortPolicyMode.Custom.jsonName)),
+                preset =
+                    if (obj.has("preset") && !obj.isNull("preset")) {
+                        obj.optString("preset").takeIf { it.isNotBlank() }
+                    } else {
+                        null
+                    },
+                rules = rules,
+            ),
+        )
+    }.getOrNull()
 }
 
 private fun parsePortRule(obj: JSONObject): PortRule {

@@ -59,8 +59,23 @@ internal object UpdateCheckCache {
     }
 
     private suspend fun run(currentVersion: String) {
-        val result = withContext(Dispatchers.IO) { checkForUpdate(currentVersion) }
-        _info.value = result
-        lastCheckMs = System.currentTimeMillis()
+        when (val result = withContext(Dispatchers.IO) { checkForUpdate(currentVersion) }) {
+            is UpdateCheckResult.Available -> {
+                _info.value = result.info
+                lastCheckMs = System.currentTimeMillis()
+            }
+
+            UpdateCheckResult.UpToDate -> {
+                _info.value = null
+                lastCheckMs = System.currentTimeMillis()
+            }
+
+            // Transient failure: leave a previously-found update in place and
+            // DON'T advance lastCheckMs, so the next ensureFresh retries instead
+            // of caching the failure as a fresh "no update" for 6 hours.
+            UpdateCheckResult.Failed -> {
+                VpnHideLog.d("VpnHide-Update", "update check failed; keeping prior state, will retry")
+            }
+        }
     }
 }

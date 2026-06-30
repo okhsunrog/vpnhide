@@ -72,6 +72,7 @@ internal object DiagnosticsCache {
      * completed result yet. Idempotent — safe to call from both
      * Dashboard and Diagnostics screens on every composition.
      */
+    @Synchronized
     fun run(
         scope: CoroutineScope,
         context: Context,
@@ -83,7 +84,11 @@ internal object DiagnosticsCache {
             }
 
             State.Running -> {
-                return
+                // Only bail if a run is genuinely still in flight. If the
+                // launching scope was cancelled mid-run, the state stays
+                // Running but the job is dead — fall through and relaunch so
+                // Diagnostics/Dashboard don't wedge on a stale Running forever.
+                if (inflight?.isActive == true) return
             }
 
             State.NotRun, State.VpnOff, State.Failed -> { /* proceed */ }
@@ -139,7 +144,9 @@ internal object DiagnosticsCache {
         } catch (e: CancellationException) {
             // A cancelled job (e.g. the screen left) must propagate so
             // structured concurrency unwinds — never get reinterpreted as a
-            // VpnOff result.
+            // VpnOff result. If we were cancelled before publishing a result,
+            // reset Running back to NotRun so a later run() can relaunch.
+            if (_state.value is State.Running) _state.value = State.NotRun
             throw e
         } catch (e: Exception) {
             // A real failure (root dropped, shell exec failure) — distinct from

@@ -197,8 +197,14 @@ fun DebugToolsSection(
         ) { uri: Uri? ->
             val zip = debugZipFile ?: return@rememberLauncherForActivityResult
             if (uri != null) {
-                context.contentResolver.openOutputStream(uri)?.use { out ->
-                    zip.inputStream().use { it.copyTo(out) }
+                // Copy off the main thread and swallow IO errors — a large zip
+                // would otherwise block the UI and a write failure would crash.
+                scope.launch(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openOutputStream(uri)?.use { out ->
+                            zip.inputStream().use { it.copyTo(out) }
+                        }
+                    }.onFailure { HookLog.e("VpnHide: debug-zip save failed: ${it.message}") }
                 }
             }
         }
@@ -277,8 +283,12 @@ private fun LogcatRecordCard() {
         ) { uri: Uri? ->
             val src = (state as? LogcatRecorder.State.Stopped)?.lastFile ?: return@rememberLauncherForActivityResult
             if (uri != null) {
-                context.contentResolver.openOutputStream(uri)?.use { out ->
-                    src.inputStream().use { it.copyTo(out) }
+                scope.launch(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openOutputStream(uri)?.use { out ->
+                            src.inputStream().use { it.copyTo(out) }
+                        }
+                    }.onFailure { HookLog.e("VpnHide: logcat save failed: ${it.message}") }
                 }
             }
         }

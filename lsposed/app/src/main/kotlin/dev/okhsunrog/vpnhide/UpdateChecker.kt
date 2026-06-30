@@ -109,11 +109,27 @@ internal fun compareSemver(
 }
 
 /**
- * Check GitHub Releases for a newer APK version.
- * Returns [UpdateInfo] if a newer version exists, null otherwise.
- * Silently returns null on any error (network, parse, rate limit).
+ * Outcome of a GitHub update check. [Failed] (network/rate-limit/parse error) is
+ * kept distinct from [UpToDate] so a transient failure doesn't get cached as a
+ * fresh "no update" — see [UpdateCheckCache].
  */
-fun checkForUpdate(currentVersion: String): UpdateInfo? {
+sealed interface UpdateCheckResult {
+    data class Available(
+        val info: UpdateInfo,
+    ) : UpdateCheckResult
+
+    data object UpToDate : UpdateCheckResult
+
+    data object Failed : UpdateCheckResult
+}
+
+/**
+ * Check GitHub Releases for a newer APK version. Returns [UpdateCheckResult]:
+ * [Available] with the newer release, [UpToDate] when current, or [Failed] on
+ * any error (network, parse, rate limit) so the caller can retry instead of
+ * caching the failure.
+ */
+fun checkForUpdate(currentVersion: String): UpdateCheckResult {
     try {
         val conn = URL(GITHUB_RELEASES_URL).openConnection() as HttpURLConnection
         conn.setRequestProperty("User-Agent", "vpnhide-android")
@@ -123,14 +139,14 @@ fun checkForUpdate(currentVersion: String): UpdateInfo? {
         try {
             if (conn.responseCode != 200) {
                 VpnHideLog.d(TAG, "GitHub API returned ${conn.responseCode}")
-                return null
+                return UpdateCheckResult.Failed
             }
             val body = conn.inputStream.bufferedReader().readText()
             val release = JSONObject(body)
             val remoteVersion = normalizeVersion(release.getString("tag_name"))
             if (!isNewerVersion(remoteVersion, currentVersion)) {
                 VpnHideLog.d(TAG, "No update: remote=$remoteVersion current=$currentVersion")
-                return null
+                return UpdateCheckResult.UpToDate
             }
             val assets = release.getJSONArray("assets")
             var apkUrl: String? = null
@@ -143,13 +159,13 @@ fun checkForUpdate(currentVersion: String): UpdateInfo? {
             }
             val downloadUrl = apkUrl ?: release.getString("html_url")
             VpnHideLog.i(TAG, "Update available: $remoteVersion (url=$downloadUrl)")
-            return UpdateInfo(latestVersion = remoteVersion, downloadUrl = downloadUrl)
+            return UpdateCheckResult.Available(UpdateInfo(latestVersion = remoteVersion, downloadUrl = downloadUrl))
         } finally {
             conn.disconnect()
         }
     } catch (e: Exception) {
         VpnHideLog.d(TAG, "Update check failed: ${e.message}")
-        return null
+        return UpdateCheckResult.Failed
     }
 }
 
