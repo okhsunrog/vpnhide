@@ -32,6 +32,7 @@ import dev.okhsunrog.vpnhide.generated.IfaceLists
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.components.GroupedCard
+import dev.okhsunrog.vpnhide.ui.components.SectionHeader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -388,16 +389,6 @@ private fun formatSize(bytes: Long): String {
     if (kb < 1024.0) return "%.1f KB".format(kb)
     val mb = kb / 1024.0
     return "%.1f MB".format(mb)
-}
-
-@Composable
-private fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-    )
 }
 
 @Composable

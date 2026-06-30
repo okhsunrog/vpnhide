@@ -490,6 +490,7 @@ private fun AppRow(
             title = stringResource(R.string.java_hooks_title),
             hookEntries = LsposedJavaHookEntries,
             selectedHooks = app.javaHooks,
+            roleEnabled = app.java,
             onDismiss = { javaHookDialogOpen = false },
             onSave = { hooks ->
                 onJavaHooksChange(hooks)
@@ -504,6 +505,7 @@ private fun AppRow(
             title = nativeHooksTitle(nativeBackendId),
             hookEntries = nativeHookEntriesFor(nativeHookFamily),
             selectedHooks = nativeHooks,
+            roleEnabled = app.native,
             onDismiss = { nativeHookDialogOpen = false },
             onSave = { hooks ->
                 onNativeHooksChange(hooks)
@@ -812,12 +814,24 @@ private fun HooksDialog(
     title: String,
     hookEntries: List<HookIds.Hook>,
     selectedHooks: List<String>?,
+    roleEnabled: Boolean,
     onDismiss: () -> Unit,
     onSave: (List<String>?) -> Unit,
 ) {
     val hookNames = remember(hookEntries) { hookEntries.map { it.hookName } }
-    var selected by remember(app.packageName, selectedHooks, hookNames) {
-        mutableStateOf(selectedHooks?.toSet() ?: hookNames.toSet())
+    // `selectedHooks == null` is ambiguous: it means BOTH "role on with all
+    // hooks" and "role off". Disambiguate with roleEnabled so opening the dialog
+    // on a disabled role starts with nothing checked — otherwise it would show
+    // every hook pre-checked and Save would silently turn the role into a full
+    // target (resolveHookSelection(all) -> null -> enabled).
+    var selected by remember(app.packageName, selectedHooks, roleEnabled, hookNames) {
+        mutableStateOf(
+            when {
+                selectedHooks != null -> selectedHooks.toSet()
+                roleEnabled -> hookNames.toSet()
+                else -> emptySet()
+            },
+        )
     }
 
     AlertDialog(

@@ -41,11 +41,14 @@ import dev.okhsunrog.vpnhide.settings.SettingsRepository
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.components.GroupedCard
+import dev.okhsunrog.vpnhide.ui.components.IconBubble
+import dev.okhsunrog.vpnhide.ui.components.MetricTile
 import dev.okhsunrog.vpnhide.ui.components.pulse
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import dev.okhsunrog.vpnhide.ui.components.SectionHeader as SharedSectionHeader
 
 @Composable
 fun DashboardScreen(
@@ -442,18 +445,17 @@ private fun LoadingBlock(
     )
 }
 
-/** A bold section title. Pass [color] for the colored issue/warning headers. */
+/**
+ * Dashboard section title: the emphasized (titleMedium) variant, defaulting to
+ * onSurface. Pass [color] for the colored issue/warning headers. Delegates to
+ * the shared [SharedSectionHeader] so the rendering isn't duplicated per screen.
+ */
 @Composable
 private fun SectionHeader(
     text: String,
     color: Color = MaterialTheme.colorScheme.onSurface,
 ) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold,
-        color = color,
-    )
+    SharedSectionHeader(text = text, color = color, emphasized = true)
 }
 
 private data class HeroVisual(
@@ -529,9 +531,9 @@ private fun DashboardHeroCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                StatusIconBubble(
+                IconBubble(
                     icon = visual.icon,
-                    accent = visual.accent,
+                    tint = visual.accent,
                     container = visual.container,
                     modifier =
                         Modifier.pulse(
@@ -564,13 +566,13 @@ private fun DashboardHeroCard(
             Spacer(Modifier.height(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HeroMetric(
+                    MetricTile(
                         label = stringResource(R.string.dashboard_summary_modules),
                         value = moduleSummaryText(state),
                         accent = moduleSummaryAccent(state),
                         modifier = Modifier.weight(1f),
                     )
-                    HeroMetric(
+                    MetricTile(
                         label = stringResource(R.string.dashboard_native_protection),
                         value = nativeSummaryText(state.protection),
                         accent = nativeSummaryAccent(state.protection),
@@ -578,13 +580,13 @@ private fun DashboardHeroCard(
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HeroMetric(
+                    MetricTile(
                         label = stringResource(R.string.dashboard_java_protection),
                         value = javaSummaryText(state.protection),
                         accent = javaSummaryAccent(state.protection),
                         modifier = Modifier.weight(1f),
                     )
-                    HeroMetric(
+                    MetricTile(
                         label = stringResource(R.string.dashboard_summary_issues),
                         value = (errorCount + warningCount).toString(),
                         accent =
@@ -598,30 +600,6 @@ private fun DashboardHeroCard(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun StatusIconBubble(
-    icon: ImageVector,
-    accent: Color,
-    container: Color,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier =
-            modifier
-                .size(58.dp)
-                .clip(CircleShape)
-                .background(container),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = accent,
-            modifier = Modifier.size(31.dp),
-        )
     }
 }
 
@@ -646,39 +624,6 @@ private fun StatusPill(
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
             color = contentColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun HeroMetric(
-    label: String,
-    value: String,
-    accent: Color,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier =
-            modifier
-                .clip(MaterialTheme.shapes.medium)
-                .background(AppColors.cardContainerStrong)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = accent,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

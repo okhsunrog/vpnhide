@@ -83,6 +83,7 @@ import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
 import dev.okhsunrog.vpnhide.ui.components.PreferenceRow
 import dev.okhsunrog.vpnhide.ui.components.PreferenceRowSwitch
+import dev.okhsunrog.vpnhide.ui.components.SectionHeader
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -1337,12 +1338,13 @@ private fun writeManualHiddenApps(
     return exit
 }
 
+// Settings headers are the non-bold, indented variant; delegate to the shared
+// component so the Text rendering isn't duplicated per screen.
 @Composable
 private fun SettingsSectionHeader(text: String) {
-    Text(
+    SectionHeader(
         text = text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
+        bold = false,
         modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
     )
 }

@@ -37,6 +37,9 @@ import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
 import dev.okhsunrog.vpnhide.ui.components.GroupedCard
+import dev.okhsunrog.vpnhide.ui.components.IconBubble
+import dev.okhsunrog.vpnhide.ui.components.MetricTile
+import dev.okhsunrog.vpnhide.ui.components.SectionHeader
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.delay
 
@@ -93,7 +96,13 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
         val methodCount = remember(appStats) { appStats.flatMap { it.byMethod.keys }.toSet().size }
 
         val capturing = captureBaseline != null
-        val capture = captureBaseline?.let { diffCapture(it, s, selfPackage) }
+        // Memoize the diff so the once-per-second elapsed-clock tick (which flips
+        // nowMs and recomposes the whole screen) does not rebuild the per-app
+        // rollup every second; it only changes when the baseline or stats do.
+        val capture =
+            remember(captureBaseline, s, selfPackage) {
+                captureBaseline?.let { diffCapture(it, s, selfPackage) }
+            }
         val backendReset = capture?.backendReset == true
         // Backend restarted mid-session (a counter dropped): re-baseline so the
         // deltas restart from the fresh counter values instead of going negative.
@@ -254,7 +263,8 @@ private fun StatisticsHeroCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconBubble(
-                    iconTint = StatusColors.infoAccent,
+                    icon = Icons.Default.BarChart,
+                    tint = StatusColors.infoAccent,
                     container = StatusColors.infoContainer(),
                 )
                 Spacer(Modifier.width(16.dp))
@@ -275,13 +285,13 @@ private fun StatisticsHeroCard(
             Spacer(Modifier.height(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatisticsMetric(
+                    MetricTile(
                         label = stringResource(R.string.statistics_total_events),
                         value = formatStatCount(state.totalCount),
                         accent = StatusColors.infoAccent,
                         modifier = Modifier.weight(1f),
                     )
-                    StatisticsMetric(
+                    MetricTile(
                         label = stringResource(R.string.statistics_active_backends),
                         value = "${state.activeBackendCount}/${state.backends.size}",
                         accent = if (state.hasAnyData) StatusColors.successDot else StatusColors.warningAccent,
@@ -289,13 +299,13 @@ private fun StatisticsHeroCard(
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatisticsMetric(
+                    MetricTile(
                         label = stringResource(R.string.statistics_apps_metric),
                         value = appCount.toString(),
                         accent = StatusColors.successDot,
                         modifier = Modifier.weight(1f),
                     )
-                    StatisticsMetric(
+                    MetricTile(
                         label = stringResource(R.string.statistics_methods_metric),
                         value = methodCount.toString(),
                         accent = StatusColors.successDot,
@@ -362,61 +372,6 @@ private fun CaptureControlCard(
 private fun formatElapsed(ms: Long): String {
     val totalSeconds = ms / 1000
     return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
-}
-
-@Composable
-private fun IconBubble(
-    iconTint: Color,
-    container: Color,
-) {
-    Box(
-        modifier =
-            Modifier
-                .size(58.dp)
-                .clip(CircleShape)
-                .background(container),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = Icons.Default.BarChart,
-            contentDescription = null,
-            tint = iconTint,
-            modifier = Modifier.size(31.dp),
-        )
-    }
-}
-
-@Composable
-private fun StatisticsMetric(
-    label: String,
-    value: String,
-    accent: Color,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier =
-            modifier
-                .clip(MaterialTheme.shapes.medium)
-                .background(AppColors.cardContainerStrong)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = accent,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
 }
 
 @Composable
@@ -737,16 +692,6 @@ private fun BackendBadge(
             maxLines = 1,
         )
     }
-}
-
-@Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-    )
 }
 
 @Composable
