@@ -171,12 +171,12 @@
     <string name="statistics_apps_header">Apps probing VPN</string>
     <string name="statistics_apps_caption">Cumulative since boot. Tap an app for the full per-hook breakdown.</string>
     <string name="statistics_capture_title">Capture session</string>
-    <string name="statistics_capture_intro">See exactly which VPN checks an app runs — live:</string>
+    <string name="statistics_capture_intro">See exactly which VPN checks an app runs:</string>
     <string name="statistics_capture_step1">Tap Start capture below.</string>
     <string name="statistics_capture_step2">Switch to the app you want to test and use it for a bit.</string>
-    <string name="statistics_capture_step3">Its probes appear here live — no need to come back and refresh.</string>
+    <string name="statistics_capture_step3">Every VPN check it makes shows up in the list below.</string>
     <string name="statistics_capture_start">Start capture</string>
-    <string name="statistics_capture_live">Live · %1$s · %2$d apps</string>
+    <string name="statistics_capture_live">Capturing · %1$s · %2$d apps</string>
     <string name="statistics_capture_active_hint">Switch to a target app and use it — probes show up below as they happen.</string>
     <string name="statistics_capture_stop">Stop</string>
     <string name="statistics_capture_apps_header">Probes this session</string>
