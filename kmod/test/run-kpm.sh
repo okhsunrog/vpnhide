@@ -180,6 +180,11 @@ for vec in proc_route_v4 getifaddrs proc_route_v6 siocgifconf dev_ioctl netlink_
 	if [ "$vec" = gai_getifaddrs ] && [ -z "$GAI" ]; then
 		echo "RESULT $vec=SKIP (no bionic getifaddrs probe available)"; continue
 	fi
+	# init-kpm.sh emits `VEC <name>=SKIP` for a vector that doesn't apply to the
+	# running kernel (e.g. the host-route on non-GKI <5.6 kernels).
+	if grep -q "VEC $vec=SKIP" "$NT_LOG"; then
+		echo "RESULT $vec=SKIP (not supported on this kernel)"; continue
+	fi
 	nt="$(vec_count "$vec" "$NT_LOG")"
 	tg="$(vec_count "$vec" "$TG_LOG")"
 	if [ "$nt" -gt 0 ] && [ "$tg" -eq 0 ]; then

@@ -40,14 +40,29 @@ ip -6 addr add fd00:9::1/64 dev vpn0 2>/dev/null
 ip -6 route add fd00:99::/64 dev vpn0 2>/dev/null
 ip rule add uidrange 0-0 table 199 2>/dev/null
 
-# Public /32 host-route pinned to the physical uplink (eth0) — the route a VPN
-# client installs so tunnel packets reach the server. It leaks the server's
-# public IP through an RTM_GETROUTE dump even though vpn0 is hidden, so it must
-# be hidden for a target the same way the .ko hides it. eth0 is not a VPN iface,
-# so this exercises the public-host-route path, not iface_is_vpn.
-ip route add 1.2.3.4/32 dev eth0 2>/dev/null
-# IPv6 analogue: a public /128 host-route pinned to the physical uplink.
-ip -6 route add 2001:4860:4860::8888/128 dev eth0 2>/dev/null
+# Public host-route concealment is a GKI 5.6+ feature in the KPM: IPv4 uses the
+# constant fib_rt_info offsets (5.6+ fib_dump_info), IPv6 the per-kver fib6_dst
+# offset (only populated for GKI). On the legacy non-GKI kernels (<5.6: 4.14/
+# 4.19/5.4 the legacy job boots) it is intentionally disabled, so set up + assert
+# those vectors only when the running kernel actually supports them.
+KVER_MM=$(uname -r | sed 's/^\([0-9]*\.[0-9]*\).*/\1/')
+KVER_MAJ=${KVER_MM%.*}
+KVER_MIN=${KVER_MM#*.}
+if [ "$KVER_MAJ" -gt 5 ] || { [ "$KVER_MAJ" -eq 5 ] && [ "$KVER_MIN" -ge 6 ]; }; then
+	HOSTROUTE_OK=1
+else
+	HOSTROUTE_OK=0
+fi
+
+if [ "$HOSTROUTE_OK" = 1 ]; then
+	# Public /32 + /128 host-routes pinned to the physical uplink (eth0) — the
+	# routes a VPN client installs so tunnel packets reach the server. They
+	# leak the server's public IP through an RTM_GETROUTE dump even though vpn0
+	# is hidden, so they must be hidden for a target the way the .ko hides them.
+	# eth0 is not a VPN iface, so this exercises the public-host-route path.
+	ip route add 1.2.3.4/32 dev eth0 2>/dev/null
+	ip -6 route add 2001:4860:4860::8888/128 dev eth0 2>/dev/null
+fi
 
 # Vectors covered by the wired hooks. Count vpn0 hits as seen by root, then
 # count stable non-VPN entries so an over-trimmed empty dump fails loudly.
@@ -62,8 +77,13 @@ echo "VEC dev_ioctl=$(ifconfig vpn0 2>/dev/null | grep -c vpn0)"                
 echo "VEC keep_dev_ioctl=$(ifconfig eth0 2>/dev/null | grep -c '^eth0')"
 echo "VEC netlink_route4=$(ip route show table all 2>/dev/null | grep -c vpn0)"     # fib_dump_info (#86)
 echo "VEC keep_netlink_route4=$(ip route show table all 2>/dev/null | grep -c 'dev eth0')"
-echo "VEC hostroute4=$(ip route show table all 2>/dev/null | grep -c '1\.2\.3\.4')" # fib_dump_info public host-route
-echo "VEC hostroute6=$(ip -6 route show table all 2>/dev/null | grep -c '2001:4860')" # rt6_fill_node public host-route
+if [ "$HOSTROUTE_OK" = 1 ]; then
+	echo "VEC hostroute4=$(ip route show table all 2>/dev/null | grep -c '1\.2\.3\.4')" # fib_dump_info public host-route
+	echo "VEC hostroute6=$(ip -6 route show table all 2>/dev/null | grep -c '2001:4860')" # rt6_fill_node public host-route
+else
+	echo "VEC hostroute4=SKIP" # host-route disabled on non-GKI <5.6 kernels
+	echo "VEC hostroute6=SKIP"
+fi
 echo "VEC netlink_route6=$(ip -6 route show table all 2>/dev/null | grep -c vpn0)"  # rt6_fill_node
 echo "VEC policy_rule=$(ip rule show 2>/dev/null | grep -c 199)"                    # fib_nl_fill_rule
 echo "VEC keep_policy_rule=$(ip rule show 2>/dev/null | grep -c 'lookup main')"

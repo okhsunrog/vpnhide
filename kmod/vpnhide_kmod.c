@@ -859,8 +859,8 @@ static int fib_route_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 	 * Uses the shared compactor — the single implementation the KPM also
 	 * calls — instead of an open-coded copy.
 	 */
-	newc = vpnhide_compact_seq_lines(seq->buf, data->start_count, seq->count,
-					 VPNHIDE_FIELD_FIRST,
+	newc = vpnhide_compact_seq_lines(seq->buf, data->start_count,
+					 seq->count, VPNHIDE_FIELD_FIRST,
 					 vpnhide_iface_is_vpn);
 	if (newc != seq->count) {
 		seq->count = newc;
@@ -917,8 +917,8 @@ static int ipv6_route_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 	/* Same as fib_route_ret but the iface name is the LAST whitespace field
 	 * of each /proc/net/ipv6_route line — the shared compactor handles both
 	 * via the field selector. */
-	newc = vpnhide_compact_seq_lines(seq->buf, data->start_count, seq->count,
-					 VPNHIDE_FIELD_LAST,
+	newc = vpnhide_compact_seq_lines(seq->buf, data->start_count,
+					 seq->count, VPNHIDE_FIELD_LAST,
 					 vpnhide_iface_is_vpn);
 	if (newc != seq->count) {
 		seq->count = newc;
