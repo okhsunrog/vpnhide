@@ -152,7 +152,21 @@
     <string name="statistics_subtitle">Runtime events reported by active backends</string>
     <string name="statistics_backend_detail">%1$s · hooks: %2$d</string>
     <string name="statistics_backend_unavailable_detail">Native counters unavailable</string>
-    <string name="statistics_events">events</string>
+    <!-- Headline summary sentence. %1$s = events word, %2$s = apps count,
+         %3$s = apps word, %4$s = methods count, %5$s = methods word. -->
+    <string name="statistics_summary">%1$s recorded across %2$s %3$s via %4$s %5$s</string>
+    <plurals name="statistics_events_word">
+        <item quantity="one">event</item>
+        <item quantity="other">events</item>
+    </plurals>
+    <plurals name="statistics_apps_word">
+        <item quantity="one">app</item>
+        <item quantity="other">apps</item>
+    </plurals>
+    <plurals name="statistics_methods_word">
+        <item quantity="one">method</item>
+        <item quantity="other">methods</item>
+    </plurals>
     <string name="statistics_no_data">No runtime statistics yet. Counters appear after a protected app hits an installed hook.</string>
     <string name="statistics_no_data_supported_backends">No counters yet from backends that support statistics.</string>
     <string name="statistics_zygisk_native_unavailable">Native counters are not available for Zygisk. Java and Apps counters are still reported by LSPosed.</string>
@@ -184,7 +198,6 @@
     <string name="statistics_capture_stopped_empty">No probes were captured this session.</string>
     <string name="statistics_capture_new">New capture</string>
     <string name="statistics_capture_clear">Clear</string>
-    <string name="statistics_apps_methods">%1$d apps · %2$d methods</string>
     <!-- Detection methods (per-app breakdown) -->
     <string name="method_routes">Routing table</string>
     <string name="method_interfaces">Network interfaces</string>

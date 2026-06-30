@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">VPN Hide</string>
     <string name="module_description">Скрывает активное VPN-соединение от выбранных приложений — NetworkCapabilities, NetworkInfo, NetworkInterface, LinkProperties, /proc/net</string>
 
@@ -121,7 +121,31 @@
     <string name="statistics_subtitle">Runtime-события от активных бэкендов</string>
     <string name="statistics_backend_detail">%1$s · хуков: %2$d</string>
     <string name="statistics_backend_unavailable_detail">Нативные счётчики недоступны</string>
-    <string name="statistics_events">события</string>
+    <!-- Сводное предложение в шапке. %1$s = слово «событий», %2$s = число
+         приложений, %3$s = слово «приложений», %4$s = число способов,
+         %5$s = слово «способами». -->
+    <string name="statistics_summary">%1$s зарегистрировано среди %2$s %3$s, %4$s %5$s</string>
+    <!-- Word forms only — the matching figure is rendered separately in the
+         summary sentence, so the ImpliedQuantity (%d-in-string) rule doesn't
+         apply here. -->
+    <plurals name="statistics_events_word" tools:ignore="ImpliedQuantity">
+        <item quantity="one">событие</item>
+        <item quantity="few">события</item>
+        <item quantity="many">событий</item>
+        <item quantity="other">события</item>
+    </plurals>
+    <plurals name="statistics_apps_word" tools:ignore="ImpliedQuantity">
+        <item quantity="one">приложения</item>
+        <item quantity="few">приложений</item>
+        <item quantity="many">приложений</item>
+        <item quantity="other">приложений</item>
+    </plurals>
+    <plurals name="statistics_methods_word" tools:ignore="ImpliedQuantity">
+        <item quantity="one">способом</item>
+        <item quantity="few">способами</item>
+        <item quantity="many">способами</item>
+        <item quantity="other">способами</item>
+    </plurals>
     <string name="statistics_no_data">Runtime-статистики пока нет. Счётчики появятся после того, как защищённое приложение попадёт в установленный хук.</string>
     <string name="statistics_no_data_supported_backends">Счётчиков от бэкендов, которые поддерживают статистику, пока нет.</string>
     <string name="statistics_zygisk_native_unavailable">Нативные счётчики недоступны для Zygisk. Java и Apps счётчики по-прежнему отдаёт LSPosed.</string>
@@ -153,7 +177,6 @@
     <string name="statistics_capture_stopped_empty">За эту сессию ничего не захвачено.</string>
     <string name="statistics_capture_new">Новый захват</string>
     <string name="statistics_capture_clear">Очистить</string>
-    <string name="statistics_apps_methods">приложений: %1$d · способов: %2$d</string>
     <!-- Способы детекта (разбивка по приложениям) -->
     <string name="method_routes">Таблица маршрутов</string>
     <string name="method_interfaces">Сетевые интерфейсы</string>

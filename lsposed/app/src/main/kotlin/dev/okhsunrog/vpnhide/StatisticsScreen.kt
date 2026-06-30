@@ -33,10 +33,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import dev.okhsunrog.vpnhide.generated.HookIds
@@ -52,6 +57,10 @@ import kotlinx.coroutines.delay
 // How often the live capture session re-reads the backend counters. Comfortably
 // longer than a typical root-snapshot read so polls don't stack up.
 private const val CAPTURE_POLL_MS = 2000L
+
+// Sentinel wrapped around the highlighted figures in the summary sentence so the
+// AnnotatedString builder can style them apart from the surrounding words.
+private const val FIGURE_MARK = '\u0001'
 
 @Composable
 fun StatisticsScreen(modifier: Modifier = Modifier) {
@@ -317,7 +326,6 @@ private fun StatisticsLoadErrorCard(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StatisticsHeroCard(
     state: StatisticsState,
@@ -355,43 +363,28 @@ private fun StatisticsHeroCard(
                 }
             }
             Spacer(Modifier.height(18.dp))
-            // Headline: the grand total + its unit kept together as one block (so
-            // "events" is never stranded), with the apps/methods summary flowing
-            // onto the same line when it fits and wrapping below when it doesn't.
-            // The inter-item gap forces the longer Russian strings to wrap on a
-            // narrow screen instead of clipping.
-            FlowRow(
+            // Headline as an editorial sentence: the grand total as a big blue
+            // figure, then a centred line "<events> recorded across <apps> via
+            // <methods>" with the two scope figures highlighted in green. One
+            // wrapping AnnotatedString so it never clips, and the words come from
+            // plurals so the Russian forms agree with each count.
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                itemVerticalAlignment = Alignment.Bottom,
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = formatStatCount(state.totalCount),
-                        style = MaterialTheme.typography.displaySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = StatusColors.infoAccent,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.alignByBaseline(),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = stringResource(R.string.statistics_events),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.alignByBaseline(),
-                    )
-                }
                 Text(
-                    text = stringResource(R.string.statistics_apps_methods, appCount, methodCount),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = formatStatCount(state.totalCount),
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = StatusColors.infoAccent,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                StatisticsSummarySentence(
+                    totalCount = state.totalCount,
+                    appCount = appCount,
+                    methodCount = methodCount,
                 )
             }
             // Per-backend breakdown folded into the hero so there's no separate
@@ -419,6 +412,50 @@ private fun StatisticsHeroCard(
             }
         }
     }
+}
+
+// The headline's second line: "<events word> recorded across <apps> via
+// <methods>" as one sentence, with the apps/methods figures highlighted in
+// green. The number figures are wrapped in a sentinel char in the template so
+// each can be styled; the words are resolved through plurals so the Russian
+// case/number forms agree with the actual counts.
+@Composable
+private fun StatisticsSummarySentence(
+    totalCount: ULong,
+    appCount: Int,
+    methodCount: Int,
+) {
+    val totalForPlural = totalCount.coerceAtMost(Int.MAX_VALUE.toULong()).toInt()
+    val eventsWord = pluralStringResource(R.plurals.statistics_events_word, totalForPlural)
+    val appsWord = pluralStringResource(R.plurals.statistics_apps_word, appCount)
+    val methodsWord = pluralStringResource(R.plurals.statistics_methods_word, methodCount)
+    val template =
+        stringResource(
+            R.string.statistics_summary,
+            eventsWord,
+            "$FIGURE_MARK$appCount$FIGURE_MARK",
+            appsWord,
+            "$FIGURE_MARK$methodCount$FIGURE_MARK",
+            methodsWord,
+        )
+    val figureStyle = SpanStyle(color = StatusColors.successDot, fontWeight = FontWeight.Bold)
+    val sentence =
+        buildAnnotatedString {
+            // Segments at odd indices were wrapped by FIGURE_MARK — the figures.
+            template.split(FIGURE_MARK).forEachIndexed { index, segment ->
+                if (index % 2 == 1) {
+                    withStyle(figureStyle) { append(segment) }
+                } else {
+                    append(segment)
+                }
+            }
+        }
+    Text(
+        text = sentence,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+    )
 }
 
 // One compact line in the hero's backend strip: a health-coloured dot, the
