@@ -20,15 +20,17 @@ internal fun <T : TargetEntry> visibleTargetEntries(
     searchQuery: String,
     showSystem: Boolean,
     showRussianOnly: Boolean,
-    showConfiguredOnly: Boolean,
     sortMode: TargetListSortMode,
 ): List<T> {
     val query = searchQuery.trim().lowercase()
     return entries
         .filter { app ->
+            // The system and Russian filters narrow the discovery set for
+            // *new* apps; they never hide an already-configured app (anySelected) —
+            // its roles are set, so the user must always be able to see and edit
+            // it. Search is explicit intent, so it still applies to everything.
             (showSystem || !app.isSystem || app.anySelected) &&
-                (!showRussianOnly || isRussianApp(app.packageName, app.label)) &&
-                (!showConfiguredOnly || app.anySelected) &&
+                (!showRussianOnly || isRussianApp(app.packageName, app.label) || app.anySelected) &&
                 (
                     query.isEmpty() ||
                         app.label.lowercase().contains(query) ||

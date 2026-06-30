@@ -14,7 +14,6 @@ internal fun ProtectionScreen(
     searchQuery: String,
     showSystem: Boolean,
     showRussianOnly: Boolean,
-    showConfiguredOnly: Boolean,
     sortMode: TargetListSortMode,
     modifier: Modifier = Modifier,
 ) {
@@ -22,7 +21,6 @@ internal fun ProtectionScreen(
         searchQuery = searchQuery,
         showSystem = showSystem,
         showRussianOnly = showRussianOnly,
-        showConfiguredOnly = showConfiguredOnly,
         sortMode = sortMode,
         modifier = modifier,
     )

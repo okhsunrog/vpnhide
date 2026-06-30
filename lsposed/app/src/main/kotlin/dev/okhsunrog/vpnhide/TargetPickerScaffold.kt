@@ -126,7 +126,6 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     searchQuery: String,
     showSystem: Boolean,
     showRussianOnly: Boolean,
-    showConfiguredOnly: Boolean,
     sortMode: TargetListSortMode,
     modifier: Modifier,
     helpPrefKey: String,
@@ -211,13 +210,12 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     }
 
     val visibleApps =
-        remember(allApps, searchQuery, showSystem, showRussianOnly, showConfiguredOnly, sortMode) {
+        remember(allApps, searchQuery, showSystem, showRussianOnly, sortMode) {
             visibleTargetEntries(
                 entries = allApps,
                 searchQuery = searchQuery,
                 showSystem = showSystem,
                 showRussianOnly = showRussianOnly,
-                showConfiguredOnly = showConfiguredOnly,
                 sortMode = sortMode,
             )
         }

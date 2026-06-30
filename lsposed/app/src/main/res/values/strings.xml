@@ -15,7 +15,6 @@
     <string name="search_placeholder">Search apps&#8230;</string>
     <string name="filter_show_system">Show system apps</string>
     <string name="filter_russian_only">Russian apps only</string>
-    <string name="filter_configured_only">Configured only</string>
     <string name="sort_configured_first">Configured first</string>
     <string name="sort_alphabetical">Alphabetical</string>
     <string name="target_group_configured">Configured</string>

@@ -217,7 +217,6 @@ private fun MainScreen() {
     var searchActive by remember { mutableStateOf(false) }
     var showSystem by remember { mutableStateOf(false) }
     var showRussianOnly by remember { mutableStateOf(false) }
-    var showConfiguredOnly by remember { mutableStateOf(false) }
     var targetSortMode by remember { mutableStateOf(TargetListSortMode.ConfiguredFirst) }
     var showFilterMenu by remember { mutableStateOf(false) }
     val appListLoading by AppListCache.loading.collectAsState()
@@ -400,7 +399,6 @@ private fun MainScreen() {
                                     val anyFilterActive =
                                         showSystem ||
                                             showRussianOnly ||
-                                            showConfiguredOnly ||
                                             targetSortMode != TargetListSortMode.ConfiguredFirst
                                     TopBarActionButton(
                                         onClick = { showFilterMenu = true },
@@ -431,16 +429,6 @@ private fun MainScreen() {
                                             leadingIcon = {
                                                 Checkbox(
                                                     checked = showRussianOnly,
-                                                    onCheckedChange = null,
-                                                )
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.filter_configured_only)) },
-                                            onClick = { showConfiguredOnly = !showConfiguredOnly },
-                                            leadingIcon = {
-                                                Checkbox(
-                                                    checked = showConfiguredOnly,
                                                     onCheckedChange = null,
                                                 )
                                             },
@@ -595,7 +583,6 @@ private fun MainScreen() {
                             searchQuery = searchQuery,
                             showSystem = showSystem,
                             showRussianOnly = showRussianOnly,
-                            showConfiguredOnly = showConfiguredOnly,
                             sortMode = targetSortMode,
                             modifier = Modifier.padding(innerPadding),
                         )

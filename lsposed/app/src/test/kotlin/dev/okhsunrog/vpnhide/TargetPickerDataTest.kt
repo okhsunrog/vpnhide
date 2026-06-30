@@ -19,7 +19,6 @@ class TargetPickerDataTest {
                 searchQuery = "",
                 showSystem = false,
                 showRussianOnly = false,
-                showConfiguredOnly = false,
                 sortMode = TargetListSortMode.ConfiguredFirst,
             )
 
@@ -44,7 +43,6 @@ class TargetPickerDataTest {
                 searchQuery = "",
                 showSystem = false,
                 showRussianOnly = false,
-                showConfiguredOnly = false,
                 sortMode = TargetListSortMode.Alphabetical,
             )
 
@@ -53,24 +51,24 @@ class TargetPickerDataTest {
     }
 
     @Test
-    fun `configured only filters unselected apps`() {
+    fun `configured apps stay visible when russian-only is on`() {
         val visible =
             visibleTargetEntries(
                 entries =
                     listOf(
-                        target("com.alpha", "Alpha"),
-                        target("com.beta", "Beta", selected = true),
-                        target("com.gamma", "Gamma"),
+                        target("com.foreign.unselected", "Foreign unselected"),
+                        target("com.foreign.selected", "Foreign selected", selected = true),
+                        target("ru.bank", "Russian bank"),
                     ),
                 searchQuery = "",
                 showSystem = false,
-                showRussianOnly = false,
-                showConfiguredOnly = true,
+                showRussianOnly = true,
                 sortMode = TargetListSortMode.ConfiguredFirst,
             )
 
-        assertEquals(listOf("Beta"), visible.map { it.label })
-        assertEquals(TargetListGroup.Configured, targetListSections(visible, TargetListSortMode.ConfiguredFirst).single().group)
+        // Russian-only narrows discovery to ru.* apps, but a configured foreign
+        // app is never hidden — it stays so the user can still see and edit it.
+        assertEquals(listOf("Foreign selected", "Russian bank"), visible.map { it.label })
     }
 
     @Test
@@ -86,7 +84,6 @@ class TargetPickerDataTest {
                 searchQuery = "",
                 showSystem = false,
                 showRussianOnly = false,
-                showConfiguredOnly = false,
                 sortMode = TargetListSortMode.ConfiguredFirst,
             )
 

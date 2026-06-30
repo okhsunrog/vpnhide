@@ -91,7 +91,6 @@ internal fun AppPickerScreen(
     searchQuery: String,
     showSystem: Boolean,
     showRussianOnly: Boolean,
-    showConfiguredOnly: Boolean,
     sortMode: TargetListSortMode,
     modifier: Modifier = Modifier,
 ) {
@@ -99,7 +98,6 @@ internal fun AppPickerScreen(
         searchQuery = searchQuery,
         showSystem = showSystem,
         showRussianOnly = showRussianOnly,
-        showConfiguredOnly = showConfiguredOnly,
         sortMode = sortMode,
         modifier = modifier,
         helpPrefKey = "apps_unified",

@@ -15,7 +15,6 @@
     <string name="search_placeholder">Поиск приложений&#8230;</string>
     <string name="filter_show_system">Показать системные приложения</string>
     <string name="filter_russian_only">Только российские</string>
-    <string name="filter_configured_only">Только настроенные</string>
     <string name="sort_configured_first">Сначала настроенные</string>
     <string name="sort_alphabetical">По алфавиту</string>
     <string name="target_group_configured">Настроенные</string>
