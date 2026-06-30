@@ -11,8 +11,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 
 /**
  * Cache for `runAllChecks` results.
@@ -146,7 +148,7 @@ internal object DiagnosticsCache {
             // structured concurrency unwinds — never get reinterpreted as a
             // VpnOff result. If we were cancelled before publishing a result,
             // reset Running back to NotRun so a later run() can relaunch.
-            if (_state.value is State.Running) _state.value = State.NotRun
+            resetRunningIfStillOurs(coroutineContext.job)
             throw e
         } catch (e: Exception) {
             // A real failure (root dropped, shell exec failure) — distinct from
@@ -155,6 +157,27 @@ internal object DiagnosticsCache {
             _state.value = State.Failed
             StartupTrace.mark("diagnostics_cache_failed")
             VpnHideLog.w("VpnHide-Diag", "runAllChecks failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Reset a stranded [State.Running] back to [State.NotRun] on cancellation —
+     * but only if [self] is still the current [inflight] job.
+     *
+     * [doRun]'s catch runs asynchronously on a dispatcher after [run] has
+     * already returned and released the monitor. Between a run's cancellation
+     * (its job goes `!isActive`) and its catch actually landing, a later [run]
+     * can fall through the dead-job guard and relaunch — setting `inflight` to
+     * the new job and `_state = Running` for *its* run. An unconditional reset
+     * from the cancelled run would then clobber the live run's state with a
+     * spurious NotRun. Guarding on job identity (and doing the read-modify-write
+     * under the same monitor [run] uses) keeps only our own cancellation able to
+     * reset, atomically against a concurrent relaunch.
+     */
+    @Synchronized
+    private fun resetRunningIfStillOurs(self: Job?) {
+        if (inflight === self && _state.value is State.Running) {
+            _state.value = State.NotRun
         }
     }
 }
