@@ -15,12 +15,25 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.security.SecureRandom
 import java.util.Base64
 import kotlin.concurrent.thread
 
 private const val TAG = "VpnHideAgentBridge"
 private const val LOCALHOST = "127.0.0.1"
+
+// A stalled localhost peer must not wedge the single serve thread forever:
+// every accepted socket gets this read deadline before any byte is read.
+private const val SOCKET_TIMEOUT_MS = 5_000
+
+// Upper bound on a request body. The /call payload is a small JSON document;
+// anything larger is rejected (after auth) rather than allocated.
+private const val MAX_BODY_BYTES = 256 * 1024
+
+// Pre-auth guard: cap a single request/header line so an unauthenticated peer
+// cannot grow the line buffer without bound before we ever check the token.
+private const val MAX_LINE_BYTES = 8 * 1024
 
 internal object AgentControlBridge {
     private val lock = Any()
@@ -53,6 +66,13 @@ internal object AgentControlBridge {
             tokenFile.writeText(token)
             BridgeServer(context.applicationContext, token).also { server ->
                 server.start()
+                // The token IS logged on purpose: tools/agent-mcp/server.py reads
+                // it from logcat (`logcat -s VpnHideAgentBridge`) as the fallback
+                // for retrieving it on RELEASE builds, where `run-as cat
+                // files/agent_bridge_token` is unavailable. The bridge is an
+                // opt-in, off-by-default, loopback-only debug feature, so emitting
+                // the credential to logcat (readable only with READ_LOGS) is an
+                // accepted trade-off for that workflow — do not gate or remove it.
                 Log.i(
                     TAG,
                     "Agent bridge listening on $LOCALHOST:$AGENT_BRIDGE_PORT token=$token tokenFile=${tokenFile.absolutePath}",
@@ -82,6 +102,11 @@ private class BridgeServer(
     @Volatile private var running = true
     private lateinit var worker: Thread
 
+    // The client currently being served, so stop() can unblock a worker parked
+    // in a socket read (interrupting the thread does not abort blocking socket
+    // I/O, and the ServerSocket close does not touch an accepted client socket).
+    @Volatile private var activeClient: Socket? = null
+
     fun start() {
         worker =
             thread(name = "VpnHideAgentBridge", isDaemon = true) {
@@ -92,6 +117,7 @@ private class BridgeServer(
     fun stop() {
         running = false
         runCatching { socket.close() }
+        runCatching { activeClient?.close() }
         if (::worker.isInitialized) worker.interrupt()
     }
 
@@ -99,35 +125,41 @@ private class BridgeServer(
         while (running && !socket.isClosed) {
             val client =
                 try {
-                    socket.accept()
+                    socket.accept().apply { soTimeout = SOCKET_TIMEOUT_MS }
                 } catch (_: IOException) {
                     if (running) Log.w(TAG, "Agent bridge accept failed")
                     continue
                 }
+            activeClient = client
             client.use(::handleClient)
+            activeClient = null
         }
     }
 
     private fun handleClient(client: Socket) {
         try {
-            val request = readHttpRequest(client.getInputStream())
-            if (request == null) {
+            val input = client.getInputStream()
+            val head = readRequestHead(input)
+            if (head == null) {
                 writeError(client, 400, "Bad Request", "Invalid HTTP request")
                 return
             }
-            if (request.headers["authorization"] != "Bearer $token") {
+            // Authenticate on the headers BEFORE allocating/reading the body, so
+            // an unauthenticated peer can never trigger a body-sized allocation.
+            if (head.headers["authorization"] != "Bearer $token") {
                 writeError(client, 401, "Unauthorized", "Missing or invalid bearer token")
                 return
             }
+            val body = readBody(input, head.headers)
             when {
-                request.method == "GET" && request.path == "/functions" -> {
+                head.method == "GET" && head.path == "/functions" -> {
                     writeJson(client, 200, "OK", AgentControlDispatcher.functionsJson())
                 }
 
-                request.method == "POST" && request.path == "/call" -> {
+                head.method == "POST" && head.path == "/call" -> {
                     val result =
                         runBlocking {
-                            AgentControlDispatcher.call(context, request.body)
+                            AgentControlDispatcher.call(context, body)
                         }
                     writeJson(client, 200, "OK", result)
                 }
@@ -136,6 +168,8 @@ private class BridgeServer(
                     writeError(client, 404, "Not Found", "Unknown endpoint")
                 }
             }
+        } catch (_: SocketTimeoutException) {
+            // Stalled/idle peer hit the read deadline; drop the connection quietly.
         } catch (e: IllegalArgumentException) {
             writeError(client, 400, "Bad Request", e.message ?: "Invalid request")
         } catch (e: SerializationException) {
@@ -147,14 +181,13 @@ private class BridgeServer(
     }
 }
 
-private data class HttpRequest(
+private data class RequestHead(
     val method: String,
     val path: String,
     val headers: Map<String, String>,
-    val body: String,
 )
 
-private fun readHttpRequest(input: InputStream): HttpRequest? {
+private fun readRequestHead(input: InputStream): RequestHead? {
     val requestLine = readAsciiLine(input)?.takeIf { it.isNotBlank() } ?: return null
     val requestParts = requestLine.split(' ', limit = 3)
     if (requestParts.size < 2) return null
@@ -167,10 +200,24 @@ private fun readHttpRequest(input: InputStream): HttpRequest? {
         if (separator <= 0) continue
         headers[line.substring(0, separator).trim().lowercase()] = line.substring(separator + 1).trim()
     }
+    return RequestHead(method = requestParts[0], path = requestParts[1], headers = headers)
+}
 
+private fun readBody(
+    input: InputStream,
+    headers: Map<String, String>,
+): String {
     val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
-    val body = if (contentLength > 0) readBody(input, contentLength).decodeToString() else ""
-    return HttpRequest(method = requestParts[0], path = requestParts[1], headers = headers, body = body)
+    if (contentLength <= 0) return ""
+    require(contentLength <= MAX_BODY_BYTES) { "Request body too large" }
+    val body = ByteArray(contentLength)
+    var offset = 0
+    while (offset < contentLength) {
+        val read = input.read(body, offset, contentLength - offset)
+        if (read == -1) throw IOException("Unexpected end of request body")
+        offset += read
+    }
+    return body.decodeToString()
 }
 
 private fun readAsciiLine(input: InputStream): String? {
@@ -179,23 +226,12 @@ private fun readAsciiLine(input: InputStream): String? {
         val next = input.read()
         if (next == -1) return if (out.size() == 0) null else out.toString(Charsets.US_ASCII.name())
         if (next == '\n'.code) break
-        if (next != '\r'.code) out.write(next)
+        if (next != '\r'.code) {
+            require(out.size() < MAX_LINE_BYTES) { "Request header line too long" }
+            out.write(next)
+        }
     }
     return out.toString(Charsets.US_ASCII.name())
-}
-
-private fun readBody(
-    input: InputStream,
-    length: Int,
-): ByteArray {
-    val body = ByteArray(length)
-    var offset = 0
-    while (offset < length) {
-        val read = input.read(body, offset, length - offset)
-        if (read == -1) throw IOException("Unexpected end of request body")
-        offset += read
-    }
-    return body
 }
 
 private fun writeError(
