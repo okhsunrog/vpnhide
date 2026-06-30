@@ -12,12 +12,15 @@ packages through PackageManager, and installs `iptables` / `ip6tables` rules
 inside a dedicated chain `vpnhide_out` / `vpnhide_out6`:
 
 ```
-iptables -A vpnhide_out -m owner --uid-owner <UID> -d 127.0.0.1 -p tcp -j REJECT --reject-with tcp-reset
-iptables -A vpnhide_out -m owner --uid-owner <UID> -d 127.0.0.1 -p udp -j REJECT --reject-with icmp-port-unreachable
+iptables -A vpnhide_out -m owner --uid-owner <UID> -d 127.0.0.0/8 -p tcp -j REJECT --reject-with tcp-reset
+iptables -A vpnhide_out -m owner --uid-owner <UID> -d 127.0.0.0/8 -p udp -j REJECT --reject-with icmp-port-unreachable
 ```
 
 ...for every UID whose package has `"ports": true` in
 `/data/system/vpnhide_config.json`, plus the same for `::1` via `ip6tables`.
+The IPv4 rules match the whole `127.0.0.0/8` loopback block, not just
+`127.0.0.1`, so a daemon bound to the wildcard `0.0.0.0` stays unreachable on
+every `127.x.x.x` alias (`::1` is already the entire IPv6 loopback).
 If the app also has a `portPolicy.rules` list, the activator adds `--dport`
 matches for those TCP/UDP ports instead of blocking the whole loopback range.
 A jump from `OUTPUT` into the dedicated chain is inserted exactly once

@@ -18,6 +18,14 @@ pub use generated::hook_ids;
 /// Wire version this implementation speaks (header line, §4.2).
 pub const PROTO_VERSION: u32 = 1;
 
+/// Maximum number of `target` records a native backend will store. The backends
+/// keep a fixed `targets[MAX_TARGET_UIDS]` array, so a config carrying more than
+/// this many native targets is truncated on projection. This is the single
+/// source of truth for the cap on the wire boundary; the C backends mirror it as
+/// `#define MAX_TARGET_UIDS` in kmod/vpnhide_kmod.c and kmod/kpm/vpnhide_kpm.c —
+/// keep all three in sync.
+pub const MAX_TARGET_UIDS: usize = 64;
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Kind {
     Config,

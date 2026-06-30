@@ -52,6 +52,9 @@ KPM_AUTHOR("okhsunrog");
 KPM_DESCRIPTION("Hide VPN interfaces from selected UIDs (KPM backend, WIP)");
 
 #define MODNAME "vpnhide"
+/* Mirror of vpnhide_protocol::MAX_TARGET_UIDS (crates/protocol/src/lib.rs); the
+ * activator truncates the projected config to this many targets, so keep both in
+ * sync. */
 #define MAX_TARGET_UIDS 64
 
 /* ------------------------------------------------------------------ */

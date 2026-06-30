@@ -17,7 +17,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use vpnhide_protocol::Target;
 use vpnhide_protocol::hook_ids::{HOOK_NAMES, KERNEL_HOOK_MASK, ZYGISK_HOOK_MASK};
-use vpnhide_protocol::{format_config, parse_config};
+use vpnhide_protocol::{MAX_TARGET_UIDS, format_config, parse_config};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -32,7 +32,10 @@ const APP_PACKAGE: &str = "dev.okhsunrog.vpnhide";
 const KPM_NAME: &str = "vpnhide";
 const PORTS_CHAIN4: &str = "vpnhide_out";
 const PORTS_CHAIN6: &str = "vpnhide_out6";
-const MAX_NATIVE_TARGETS: usize = 64;
+// The native-target cap is owned by the shared protocol crate (and mirrored by
+// the C backends' `#define MAX_TARGET_UIDS`); alias it here so all three stay in
+// lock-step instead of restating the literal 64.
+const MAX_NATIVE_TARGETS: usize = MAX_TARGET_UIDS;
 const PM_READY_ATTEMPTS: u32 = 60;
 const APATCH_SUPERCALL_NR: c_long = 45;
 const APATCH_SUPERCALL_DEFAULT_VERSION_CODE: c_long = 0x000d00;
@@ -378,6 +381,19 @@ fn project_native_with_resolver_for_family(
                 .or_insert(mask);
         }
     }
+    // `by_uid` is a BTreeMap, so iteration is ascending by UID; truncating would
+    // silently drop the highest-UID (typically most-recently-installed) apps with
+    // no diagnostic. Warn so a user with more native targets than the backend can
+    // hold learns their protection is partial, instead of failing closed silently.
+    if by_uid.len() > MAX_NATIVE_TARGETS {
+        eprintln!(
+            "vpnhide: WARNING: {} native targets exceed the backend cap of {}; \
+             dropping the {} highest-UID app(s) from native protection",
+            by_uid.len(),
+            MAX_NATIVE_TARGETS,
+            by_uid.len() - MAX_NATIVE_TARGETS,
+        );
+    }
     let targets = by_uid
         .into_iter()
         .take(MAX_NATIVE_TARGETS)
@@ -447,7 +463,13 @@ pub fn project_ports_with_resolver(
         }
     }
     PortsRuleset {
-        ipv4: build_ports_ruleset(PORTS_CHAIN4, "127.0.0.1", "icmp-port-unreachable", &targets),
+        // Match the whole IPv4 loopback block, not just 127.0.0.1: a localhost
+        // proxy/VPN daemon bound to the wildcard 0.0.0.0 (the common allow-lan /
+        // TUN config for Clash, sing-box, V2Ray) is reachable on every 127.x.x.x
+        // alias, so an observer could `connect(127.0.0.2:port)` and still get a
+        // handshake — a positive fingerprint — if only 127.0.0.1 were rejected.
+        // (::1 already is the entire IPv6 loopback.)
+        ipv4: build_ports_ruleset(PORTS_CHAIN4, "127.0.0.0/8", "icmp-port-unreachable", &targets),
         ipv6: build_ports_ruleset(PORTS_CHAIN6, "::1", "icmp6-port-unreachable", &targets),
         target_count: targets.len(),
     }
@@ -1382,10 +1404,10 @@ mod tests {
             rules.ipv4,
             "*filter\n\
              :vpnhide_out - [0:0]\n\
-             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.1 -p tcp -j REJECT --reject-with tcp-reset\n\
-             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.1 -p udp -j REJECT --reject-with icmp-port-unreachable\n\
-             -A vpnhide_out -m owner --uid-owner 1010123 -d 127.0.0.1 -p tcp -j REJECT --reject-with tcp-reset\n\
-             -A vpnhide_out -m owner --uid-owner 1010123 -d 127.0.0.1 -p udp -j REJECT --reject-with icmp-port-unreachable\n\
+             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.0/8 -p tcp -j REJECT --reject-with tcp-reset\n\
+             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.0/8 -p udp -j REJECT --reject-with icmp-port-unreachable\n\
+             -A vpnhide_out -m owner --uid-owner 1010123 -d 127.0.0.0/8 -p tcp -j REJECT --reject-with tcp-reset\n\
+             -A vpnhide_out -m owner --uid-owner 1010123 -d 127.0.0.0/8 -p udp -j REJECT --reject-with icmp-port-unreachable\n\
              -A vpnhide_out -j RETURN\n\
              COMMIT\n",
         );
@@ -1432,10 +1454,10 @@ mod tests {
             rules.ipv4,
             "*filter\n\
              :vpnhide_out - [0:0]\n\
-             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.1 -p tcp --dport 1080 -j REJECT --reject-with tcp-reset\n\
-             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.1 -p udp --dport 1080 -j REJECT --reject-with icmp-port-unreachable\n\
-             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.1 -p udp --dport 5353 -j REJECT --reject-with icmp-port-unreachable\n\
-             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.1 -p tcp --dport 7890:7892 -j REJECT --reject-with tcp-reset\n\
+             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.0/8 -p tcp --dport 1080 -j REJECT --reject-with tcp-reset\n\
+             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.0/8 -p udp --dport 1080 -j REJECT --reject-with icmp-port-unreachable\n\
+             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.0/8 -p udp --dport 5353 -j REJECT --reject-with icmp-port-unreachable\n\
+             -A vpnhide_out -m owner --uid-owner 10123 -d 127.0.0.0/8 -p tcp --dport 7890:7892 -j REJECT --reject-with tcp-reset\n\
              -A vpnhide_out -j RETURN\n\
              COMMIT\n",
         );

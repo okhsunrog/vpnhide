@@ -65,6 +65,9 @@
 #endif
 
 #define MODNAME "vpnhide"
+/* Mirror of vpnhide_protocol::MAX_TARGET_UIDS (crates/protocol/src/lib.rs); the
+ * activator truncates the projected config to this many targets, so keep both in
+ * sync. */
 #define MAX_TARGET_UIDS 64
 #define MAX_STATS_ENTRIES (MAX_TARGET_UIDS * VPNHIDE_HOOK_COUNT)
 #define CTL_READ_BUF_SIZE 32768
