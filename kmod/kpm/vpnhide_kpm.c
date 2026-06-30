@@ -62,10 +62,23 @@ static const struct vpnhide_offsets *off; /* selected per running kver */
 
 /* Live config (protocol §4.3). Each target carries a per-hook mask so the app
  * can enable hooks individually; a hook fires only if its bit is set for the
- * calling uid. */
-static struct vpnhide_target targets[MAX_TARGET_UIDS];
-static int nr_targets;
-static uint32_t active_hook_mask;
+ * calling uid.
+ *
+ * Double-buffered so a hook reader (every hooked syscall, on any CPU) never sees
+ * a half-applied target set. A writer (rare, root-initiated: ctl0 config or the
+ * init load-args path) fills the INACTIVE buffer, then publishes it with a
+ * single release-store of `active_cfg`; readers acquire-load `active_cfg` once
+ * and use only that snapshot. KP has no kernel spinlock/RCU, so this is the
+ * lock-free equivalent of the .ko's parse-into-staging-then-publish-under-lock.
+ * Config writes are assumed serialized (single control path), so two writers
+ * never pick the same inactive buffer. */
+struct vpnhide_config {
+	struct vpnhide_target targets[MAX_TARGET_UIDS];
+	int nr_targets;
+	uint32_t active_hook_mask;
+};
+static struct vpnhide_config cfg_buf[2];
+static int active_cfg; /* index into cfg_buf; release-published / acquire-read */
 static bool debug_enabled;
 
 /* status (protocol §4.3/§5.1): which hooks actually installed, and the dominant
@@ -104,37 +117,46 @@ static void (*_skb_trim)(void *, unsigned int);
 /*  Core helpers                                                      */
 /* ------------------------------------------------------------------ */
 
-static uint32_t compute_active_hook_mask(int count)
+/* Fill the inactive buffer from a parsed target set, derive its active-hook
+ * mask, then publish it with one release-store. Single-writer (see the cfg_buf
+ * comment): a concurrent reader sees either the whole old or whole new config. */
+static void publish_config(const struct vpnhide_target *t, int count)
 {
+	int inactive = 1 - __atomic_load_n(&active_cfg, __ATOMIC_RELAXED);
+	struct vpnhide_config *c = &cfg_buf[inactive];
 	uint32_t mask = 0;
 	int i;
 
-	for (i = 0; i < count; i++)
-		mask |= targets[i].hookmask & VPNHIDE_KERNEL_HOOK_MASK;
-	return mask;
+	if (count < 0)
+		count = 0;
+	if (count > MAX_TARGET_UIDS)
+		count = MAX_TARGET_UIDS;
+	for (i = 0; i < count; i++) {
+		c->targets[i] = t[i];
+		mask |= t[i].hookmask & VPNHIDE_KERNEL_HOOK_MASK;
+	}
+	c->nr_targets = count;
+	c->active_hook_mask = mask;
+	__atomic_store_n(&active_cfg, inactive, __ATOMIC_RELEASE);
 }
 
-/* The enabled-hook mask for the calling uid (0 if it is not a target). */
-static uint32_t target_mask(void)
+/* True if `hook_id` is enabled for the calling uid (per-hook gate, §4.3). Reads
+ * the published snapshot once (acquire) so the mask gate and the per-uid scan
+ * always come from the same consistent config. */
+static int hook_active(uint32_t hook_id)
 {
+	int b = __atomic_load_n(&active_cfg, __ATOMIC_ACQUIRE);
+	const struct vpnhide_config *c = &cfg_buf[b];
 	uid_t uid;
 	int i;
 
-	if (nr_targets <= 0)
+	if (!(c->active_hook_mask & (1u << hook_id)))
 		return 0;
 	uid = current_uid();
-	for (i = 0; i < nr_targets; i++)
-		if (targets[i].uid == uid)
-			return targets[i].hookmask;
+	for (i = 0; i < c->nr_targets; i++)
+		if (c->targets[i].uid == uid)
+			return (c->targets[i].hookmask & (1u << hook_id)) != 0;
 	return 0;
-}
-
-/* True if `hook_id` is enabled for the calling uid (per-hook gate, §4.3). */
-static int hook_active(uint32_t hook_id)
-{
-	if (!(active_hook_mask & (1u << hook_id)))
-		return 0;
-	return (target_mask() & (1u << hook_id)) != 0;
 }
 
 static int stats_slot_for_uid(uint32_t uid)
@@ -936,6 +958,7 @@ static int resolve_symbols(void)
 static void apply_targets(const char *s)
 {
 	unsigned int uids[MAX_TARGET_UIDS];
+	struct vpnhide_target newt[MAX_TARGET_UIDS];
 	unsigned long n = 0;
 	int cnt, i;
 
@@ -945,13 +968,11 @@ static void apply_targets(const char *s)
 		n++;
 	cnt = vpnhide_parse_target_uids(s, n, uids, MAX_TARGET_UIDS);
 	for (i = 0; i < cnt; i++) {
-		targets[i].uid = uids[i];
-		targets[i].hookmask = VPNHIDE_KERNEL_HOOK_MASK;
+		newt[i].uid = uids[i];
+		newt[i].hookmask = VPNHIDE_KERNEL_HOOK_MASK;
 	}
-	nr_targets = cnt;
-	active_hook_mask = compute_active_hook_mask(cnt);
-	vpnhide_dbg("loaded %d target UIDs (active hooks=0x%x)\n", cnt,
-		    active_hook_mask);
+	publish_config(newt, cnt);
+	vpnhide_dbg("loaded %d target UIDs\n", cnt);
 }
 
 /* Resolve `name`, wrap it, and record the install in `installed_hooks` so the
@@ -975,7 +996,7 @@ static long vpnhide_kpm_init(const char *args, const char *event,
 
 	installed_hooks = 0;
 	last_error = VPNHIDE_ERR_OK;
-	active_hook_mask = 0;
+	publish_config(0, 0); /* start with an empty (no-op) active config */
 
 	/* `kver` is KernelPatch's running-kernel version (common.h), encoded
 	 * the same way as VPNHIDE_KVER. NULL table = unsupported → bail. */
@@ -1078,17 +1099,19 @@ static long vpnhide_kpm_ctl0(const char *args, char *__user out_msg, int outlen)
 	kind = vpnhide_peek_kind(args, n_args);
 
 	if (kind == VPNHIDE_KIND_CONFIG) {
+		/* Parse into a stack-local staging set, then publish atomically —
+		 * never mutate the live config in place (a hook reader on another
+		 * CPU must not see a half-written targets[]). */
+		struct vpnhide_target newt[MAX_TARGET_UIDS];
 		int dbg = debug_enabled ? 1 : 0;
-		int n = vpnhide_parse_config(args, n_args, targets,
-					     MAX_TARGET_UIDS, &dbg);
+		int n = vpnhide_parse_config(args, n_args, newt, MAX_TARGET_UIDS,
+					     &dbg);
 
 		if (n < 0)
 			return -1; /* rejected whole (bad header / version) */
-		nr_targets = n;
-		active_hook_mask = compute_active_hook_mask(n);
+		publish_config(newt, n);
 		debug_enabled = dbg ? true : false;
-		vpnhide_dbg("ctl0 config: %d targets, debug=%d active=0x%x\n",
-			    n, dbg, active_hook_mask);
+		vpnhide_dbg("ctl0 config: %d targets, debug=%d\n", n, dbg);
 		return 0;
 	}
 
