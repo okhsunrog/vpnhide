@@ -63,6 +63,10 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
     var detailApp by remember { mutableStateOf<AppProbeStats?>(null) }
     var captureBaseline by remember { mutableStateOf<Map<Pair<Long, Long>, Long>?>(null) }
     var captureStartMs by remember { mutableLongStateOf(0L) }
+    // Results of the last finished session, frozen at Stop. Non-null means we're
+    // in the "stopped" state: the live session is over but its probes stay on
+    // screen for review until the user starts a new capture or clears them.
+    var frozenCapture by remember { mutableStateOf<FrozenCapture?>(null) }
     var nowMs by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(Unit) {
@@ -141,7 +145,21 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
                 captureStartMs = System.currentTimeMillis()
             }
         }
-        val shownApps = capture?.apps ?: appStats
+        // Three-state session: live deltas while capturing, the frozen result
+        // once stopped, and the all-time list when idle.
+        val captureMode =
+            when {
+                capturing -> CaptureMode.Live
+                frozenCapture != null -> CaptureMode.Stopped
+                else -> CaptureMode.Idle
+            }
+        val sessionApps =
+            when (captureMode) {
+                CaptureMode.Live -> capture?.apps.orEmpty()
+                CaptureMode.Stopped -> frozenCapture?.apps.orEmpty()
+                CaptureMode.Idle -> null
+            }
+        val shownApps = sessionApps ?: appStats
 
         detailApp?.let { app ->
             AppProbeDetailDialog(
@@ -155,15 +173,31 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(20.dp))
 
         CaptureControlCard(
-            capturing = capturing,
-            elapsedMs = if (capturing) (nowMs - captureStartMs).coerceAtLeast(0L) else 0L,
-            capturedAppCount = capture?.apps?.size ?: 0,
+            mode = captureMode,
+            elapsedMs =
+                when (captureMode) {
+                    CaptureMode.Live -> (nowMs - captureStartMs).coerceAtLeast(0L)
+                    CaptureMode.Stopped -> frozenCapture?.durationMs ?: 0L
+                    CaptureMode.Idle -> 0L
+                },
+            sessionAppCount = sessionApps?.size ?: 0,
             onStart = {
                 captureBaseline = snapshotCounters(s)
                 captureStartMs = System.currentTimeMillis()
                 nowMs = captureStartMs
+                frozenCapture = null
             },
-            onStop = { captureBaseline = null },
+            onStop = {
+                // Freeze the current deltas so they survive the stop, then end
+                // the live session (clearing the baseline halts the poll loop).
+                frozenCapture =
+                    FrozenCapture(
+                        apps = capture?.apps.orEmpty(),
+                        durationMs = (System.currentTimeMillis() - captureStartMs).coerceAtLeast(0L),
+                    )
+                captureBaseline = null
+            },
+            onClear = { frozenCapture = null },
         )
         Spacer(Modifier.height(20.dp))
 
@@ -191,26 +225,34 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
             )
         }
 
-        if (capturing || shownApps.isNotEmpty()) {
+        val showingSession = captureMode != CaptureMode.Idle
+        if (showingSession || shownApps.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
             SectionHeader(
                 stringResource(
-                    if (capturing) R.string.statistics_capture_apps_header else R.string.statistics_apps_header,
+                    if (showingSession) R.string.statistics_capture_apps_header else R.string.statistics_apps_header,
                 ),
             )
             Spacer(Modifier.height(2.dp))
             Text(
                 text =
                     stringResource(
-                        if (capturing) R.string.statistics_capture_hint else R.string.statistics_apps_caption,
+                        if (showingSession) R.string.statistics_capture_hint else R.string.statistics_apps_caption,
                     ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
-            if (capturing && shownApps.isEmpty()) {
+            if (showingSession && shownApps.isEmpty()) {
                 StatusBanner(
-                    text = stringResource(R.string.statistics_capture_empty),
+                    text =
+                        stringResource(
+                            if (captureMode == CaptureMode.Stopped) {
+                                R.string.statistics_capture_stopped_empty
+                            } else {
+                                R.string.statistics_capture_empty
+                            },
+                        ),
                     containerColor = StatusColors.infoContainer(),
                     contentColor = MaterialTheme.colorScheme.onSurface,
                 )
@@ -355,13 +397,16 @@ private fun StatisticsHeroCard(
     }
 }
 
+private enum class CaptureMode { Idle, Live, Stopped }
+
 @Composable
 private fun CaptureControlCard(
-    capturing: Boolean,
+    mode: CaptureMode,
     elapsedMs: Long,
-    capturedAppCount: Int,
+    sessionAppCount: Int,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onClear: () -> Unit,
 ) {
     EnhancedCard(modifier = Modifier.fillMaxWidth(), color = AppColors.cardContainer) {
         Column(
@@ -373,50 +418,113 @@ private fun CaptureControlCard(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
             )
-            if (!capturing) {
-                Text(
-                    text = stringResource(R.string.statistics_capture_intro),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    CaptureStep(1, stringResource(R.string.statistics_capture_step1))
-                    CaptureStep(2, stringResource(R.string.statistics_capture_step2))
-                    CaptureStep(3, stringResource(R.string.statistics_capture_step3))
+            when (mode) {
+                CaptureMode.Idle -> {
+                    CaptureIdleBody(onStart = onStart)
                 }
-                EnhancedButton(onClick = onStart, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.statistics_capture_start))
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier =
-                            Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(StatusColors.successDot),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text =
-                            stringResource(
-                                R.string.statistics_capture_live,
-                                formatElapsed(elapsedMs),
-                                capturedAppCount,
-                            ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
+
+                CaptureMode.Live -> {
+                    CaptureLiveBody(
+                        elapsedMs = elapsedMs,
+                        sessionAppCount = sessionAppCount,
+                        onStop = onStop,
                     )
                 }
-                Text(
-                    text = stringResource(R.string.statistics_capture_active_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                EnhancedOutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.statistics_capture_stop))
+
+                CaptureMode.Stopped -> {
+                    CaptureStoppedBody(
+                        elapsedMs = elapsedMs,
+                        sessionAppCount = sessionAppCount,
+                        onStart = onStart,
+                        onClear = onClear,
+                    )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CaptureIdleBody(onStart: () -> Unit) {
+    Text(
+        text = stringResource(R.string.statistics_capture_intro),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        CaptureStep(1, stringResource(R.string.statistics_capture_step1))
+        CaptureStep(2, stringResource(R.string.statistics_capture_step2))
+        CaptureStep(3, stringResource(R.string.statistics_capture_step3))
+    }
+    EnhancedButton(onClick = onStart, modifier = Modifier.fillMaxWidth()) {
+        Text(stringResource(R.string.statistics_capture_start))
+    }
+}
+
+@Composable
+private fun CaptureLiveBody(
+    elapsedMs: Long,
+    sessionAppCount: Int,
+    onStop: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier =
+                Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(StatusColors.successDot),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text =
+                stringResource(
+                    R.string.statistics_capture_live,
+                    formatElapsed(elapsedMs),
+                    sessionAppCount,
+                ),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+    Text(
+        text = stringResource(R.string.statistics_capture_active_hint),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    EnhancedOutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) {
+        Text(stringResource(R.string.statistics_capture_stop))
+    }
+}
+
+@Composable
+private fun CaptureStoppedBody(
+    elapsedMs: Long,
+    sessionAppCount: Int,
+    onStart: () -> Unit,
+    onClear: () -> Unit,
+) {
+    Text(
+        text =
+            stringResource(
+                R.string.statistics_capture_captured,
+                formatElapsed(elapsedMs),
+                sessionAppCount,
+            ),
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.Medium,
+    )
+    Text(
+        text = stringResource(R.string.statistics_capture_stopped_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        EnhancedButton(onClick = onStart, modifier = Modifier.weight(1f)) {
+            Text(stringResource(R.string.statistics_capture_new))
+        }
+        EnhancedOutlinedButton(onClick = onClear, modifier = Modifier.weight(1f)) {
+            Text(stringResource(R.string.statistics_capture_clear))
         }
     }
 }

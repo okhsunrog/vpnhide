@@ -151,6 +151,11 @@
     <string name="statistics_capture_apps_header">Пробы за эту сессию</string>
     <string name="statistics_capture_hint">Что целевое приложение проверяло с начала этой сессии. Нажмите для разбивки по хукам.</string>
     <string name="statistics_capture_empty">Ждём пробы… переключитесь на целевое приложение и попользуйтесь им.</string>
+    <string name="statistics_capture_captured">Поймано · %1$s · приложений: %2$d</string>
+    <string name="statistics_capture_stopped_note">Сессия остановлена — результаты сохранятся, пока вы не начнёте новый захват или не очистите их.</string>
+    <string name="statistics_capture_stopped_empty">За эту сессию пробы не пойманы.</string>
+    <string name="statistics_capture_new">Новый захват</string>
+    <string name="statistics_capture_clear">Очистить</string>
     <string name="statistics_apps_metric">Приложений</string>
     <string name="statistics_methods_metric">Способов</string>
     <!-- Способы детекта (разбивка по приложениям) -->

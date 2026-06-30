@@ -182,6 +182,11 @@
     <string name="statistics_capture_apps_header">Probes this session</string>
     <string name="statistics_capture_hint">What a target app probed since this session started. Tap for the per-hook breakdown.</string>
     <string name="statistics_capture_empty">Waiting for probes… switch to a target app and use it.</string>
+    <string name="statistics_capture_captured">Captured · %1$s · %2$d apps</string>
+    <string name="statistics_capture_stopped_note">Session stopped — these results stay until you start a new capture or clear them.</string>
+    <string name="statistics_capture_stopped_empty">No probes were captured this session.</string>
+    <string name="statistics_capture_new">New capture</string>
+    <string name="statistics_capture_clear">Clear</string>
     <string name="statistics_apps_metric">Apps</string>
     <string name="statistics_methods_metric">Methods</string>
     <!-- Detection methods (per-app breakdown) -->
