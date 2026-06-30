@@ -495,10 +495,11 @@ mod tests {
 
     #[test]
     fn filter_dev_removes_vpn_iface_keeps_headers() {
-        let mut buf = b"Inter-|   Receive                                                |  Transmit\n \
+        let mut buf =
+            b"Inter-|   Receive                                                |  Transmit\n \
 face |bytes    packets errs drop\n    lo:  100    1    0    0\n  wlan0:  200    2    0    0\n  \
 tun0:  300    3    0    0\n"
-            .to_vec();
+                .to_vec();
         let n = filter_dev_buf(&mut buf);
         let out = core::str::from_utf8(&buf[..n]).unwrap();
         assert!(out.contains("Inter-|"), "header kept");

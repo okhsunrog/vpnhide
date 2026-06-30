@@ -1102,28 +1102,46 @@ fn collect_vpn_iface_indices() -> ([u32; crate::filter::MAX_VPN_ADDRS], usize) {
 
 #[cfg(test)]
 mod proc_net_path_tests {
-    use super::{match_abs_proc_net, strip_owner_net, ProcNetFile};
+    use super::{ProcNetFile, match_abs_proc_net, strip_owner_net};
 
     #[test]
     fn matches_classic_forms() {
         assert_eq!(match_abs_proc_net(b"/proc/net/tcp"), Some(ProcNetFile::Tcp));
-        assert_eq!(match_abs_proc_net(b"/proc/self/net/tcp6"), Some(ProcNetFile::Tcp6));
-        assert_eq!(match_abs_proc_net(b"/proc/1234/net/route"), Some(ProcNetFile::Route));
+        assert_eq!(
+            match_abs_proc_net(b"/proc/self/net/tcp6"),
+            Some(ProcNetFile::Tcp6)
+        );
+        assert_eq!(
+            match_abs_proc_net(b"/proc/1234/net/route"),
+            Some(ProcNetFile::Route)
+        );
     }
 
     #[test]
     fn matches_new_dev_udp_files() {
         assert_eq!(match_abs_proc_net(b"/proc/net/dev"), Some(ProcNetFile::Dev));
         assert_eq!(match_abs_proc_net(b"/proc/net/udp"), Some(ProcNetFile::Udp));
-        assert_eq!(match_abs_proc_net(b"/proc/net/udp6"), Some(ProcNetFile::Udp6));
+        assert_eq!(
+            match_abs_proc_net(b"/proc/net/udp6"),
+            Some(ProcNetFile::Udp6)
+        );
     }
 
     #[test]
     fn matches_thread_self_and_task_forms() {
         // These previously bypassed the matcher (#14/#52).
-        assert_eq!(match_abs_proc_net(b"/proc/thread-self/net/tcp"), Some(ProcNetFile::Tcp));
-        assert_eq!(match_abs_proc_net(b"/proc/1234/task/5678/net/tcp"), Some(ProcNetFile::Tcp));
-        assert_eq!(match_abs_proc_net(b"/proc/self/net/dev"), Some(ProcNetFile::Dev));
+        assert_eq!(
+            match_abs_proc_net(b"/proc/thread-self/net/tcp"),
+            Some(ProcNetFile::Tcp)
+        );
+        assert_eq!(
+            match_abs_proc_net(b"/proc/1234/task/5678/net/tcp"),
+            Some(ProcNetFile::Tcp)
+        );
+        assert_eq!(
+            match_abs_proc_net(b"/proc/self/net/dev"),
+            Some(ProcNetFile::Dev)
+        );
     }
 
     #[test]
