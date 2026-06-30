@@ -119,9 +119,6 @@
     <!-- Statistics -->
     <string name="statistics_title">Счётчики перехватов</string>
     <string name="statistics_subtitle">Runtime-события от активных бэкендов</string>
-    <string name="statistics_backends">Бэкенды</string>
-    <string name="statistics_total_events">События</string>
-    <string name="statistics_active_backends">Активные бэкенды</string>
     <string name="statistics_backend_detail">%1$s · хуков: %2$d</string>
     <string name="statistics_backend_unavailable_detail">Нативные счётчики недоступны</string>
     <string name="statistics_events">события</string>
@@ -156,8 +153,7 @@
     <string name="statistics_capture_stopped_empty">За эту сессию ничего не захвачено.</string>
     <string name="statistics_capture_new">Новый захват</string>
     <string name="statistics_capture_clear">Очистить</string>
-    <string name="statistics_apps_metric">Приложений</string>
-    <string name="statistics_methods_metric">Способов</string>
+    <string name="statistics_apps_methods">приложений: %1$d · способов: %2$d</string>
     <!-- Способы детекта (разбивка по приложениям) -->
     <string name="method_routes">Таблица маршрутов</string>
     <string name="method_interfaces">Сетевые интерфейсы</string>

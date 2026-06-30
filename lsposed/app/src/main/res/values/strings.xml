@@ -150,9 +150,6 @@
     <!-- Statistics -->
     <string name="statistics_title">Interception counters</string>
     <string name="statistics_subtitle">Runtime events reported by active backends</string>
-    <string name="statistics_backends">Backends</string>
-    <string name="statistics_total_events">Events</string>
-    <string name="statistics_active_backends">Active backends</string>
     <string name="statistics_backend_detail">%1$s · hooks: %2$d</string>
     <string name="statistics_backend_unavailable_detail">Native counters unavailable</string>
     <string name="statistics_events">events</string>
@@ -187,8 +184,7 @@
     <string name="statistics_capture_stopped_empty">No probes were captured this session.</string>
     <string name="statistics_capture_new">New capture</string>
     <string name="statistics_capture_clear">Clear</string>
-    <string name="statistics_apps_metric">Apps</string>
-    <string name="statistics_methods_metric">Methods</string>
+    <string name="statistics_apps_methods">%1$d apps · %2$d methods</string>
     <!-- Detection methods (per-app breakdown) -->
     <string name="method_routes">Routing table</string>
     <string name="method_interfaces">Network interfaces</string>

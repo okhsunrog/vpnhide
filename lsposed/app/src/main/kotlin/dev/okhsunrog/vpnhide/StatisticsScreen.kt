@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -44,7 +45,6 @@ import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
 import dev.okhsunrog.vpnhide.ui.components.GroupedCard
 import dev.okhsunrog.vpnhide.ui.components.IconBubble
-import dev.okhsunrog.vpnhide.ui.components.MetricTile
 import dev.okhsunrog.vpnhide.ui.components.SectionHeader
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.delay
@@ -199,15 +199,6 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
             },
             onClear = { frozenCapture = null },
         )
-        Spacer(Modifier.height(20.dp))
-
-        SectionHeader(stringResource(R.string.statistics_backends))
-        Spacer(Modifier.height(8.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            s.backends.forEachIndexed { index, backend ->
-                BackendSummaryCard(backend, index = index, count = s.backends.size)
-            }
-        }
 
         if (!s.hasAnyData) {
             Spacer(Modifier.height(12.dp))
@@ -362,38 +353,102 @@ private fun StatisticsHeroCard(
                     )
                 }
             }
-            Spacer(Modifier.height(16.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MetricTile(
-                        label = stringResource(R.string.statistics_total_events),
-                        value = formatStatCount(state.totalCount),
-                        accent = StatusColors.infoAccent,
-                        modifier = Modifier.weight(1f),
-                    )
-                    MetricTile(
-                        label = stringResource(R.string.statistics_active_backends),
-                        value = "${state.activeBackendCount}/${state.backends.size}",
-                        accent = if (state.hasAnyData) StatusColors.successDot else StatusColors.warningAccent,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MetricTile(
-                        label = stringResource(R.string.statistics_apps_metric),
-                        value = appCount.toString(),
-                        accent = StatusColors.successDot,
-                        modifier = Modifier.weight(1f),
-                    )
-                    MetricTile(
-                        label = stringResource(R.string.statistics_methods_metric),
-                        value = methodCount.toString(),
-                        accent = StatusColors.successDot,
-                        modifier = Modifier.weight(1f),
-                    )
+            Spacer(Modifier.height(18.dp))
+            // Headline: the grand total intercepted across every backend.
+            Text(
+                text = formatStatCount(state.totalCount),
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+                color = StatusColors.infoAccent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = stringResource(R.string.statistics_events),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.statistics_apps_methods, appCount, methodCount),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // Per-backend breakdown folded into the hero so there's no separate
+            // mid-screen "Backends" section: one quiet row per active backend
+            // (health dot + name + hooks + its event count).
+            if (state.backends.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                Column(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(AppColors.cardContainerStrong),
+                ) {
+                    state.backends.forEachIndexed { index, backend ->
+                        if (index > 0) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(horizontal = 14.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            )
+                        }
+                        BackendStripRow(backend)
+                    }
                 }
             }
         }
+    }
+}
+
+// One compact line in the hero's backend strip: a health-coloured dot, the
+// backend name with its "OK · hooks: N" detail, and its event count (or "—"
+// when the backend can't report counters, e.g. Zygisk).
+@Composable
+private fun BackendStripRow(backend: BackendStatistics) {
+    val visual = backendHealthVisual(backendHealth(backend))
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier =
+                Modifier
+                    .size(9.dp)
+                    .clip(CircleShape)
+                    .background(visual.accent),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = backendName(backend.backend),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = backendDetailText(backend, visual),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = if (backend.unavailableReason != null) "—" else formatStatCount(backend.totalCount),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color =
+                if (backend.unavailableReason != null) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    visual.accent
+                },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -564,64 +619,6 @@ private fun CaptureStep(
 private fun formatElapsed(ms: Long): String {
     val totalSeconds = ms / 1000
     return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
-}
-
-@Composable
-private fun BackendSummaryCard(
-    backend: BackendStatistics,
-    index: Int,
-    count: Int,
-) {
-    val health = backendHealth(backend)
-    val visual = backendHealthVisual(health)
-    GroupedCard(
-        index = index,
-        count = count,
-        modifier = Modifier.fillMaxWidth(),
-        color = AppColors.cardContainer,
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            BackendBadge(
-                text = backendBadge(backend.backend),
-                accentColor = visual.accent,
-                containerColor = visual.container,
-            )
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = backendName(backend.backend),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = backendDetailText(backend, visual),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = formatStatCount(backend.totalCount),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = visual.accent,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = stringResource(R.string.statistics_events),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -925,30 +922,6 @@ private fun appSurfacesText(app: AppProbeStats): String {
 }
 
 @Composable
-private fun BackendBadge(
-    text: String,
-    accentColor: Color,
-    containerColor: Color,
-) {
-    Box(
-        modifier =
-            Modifier
-                .size(46.dp)
-                .clip(CircleShape)
-                .background(containerColor),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = accentColor,
-            maxLines = 1,
-        )
-    }
-}
-
-@Composable
 private fun backendName(backend: HookIds.Backend): String =
     stringResource(
         when (backend) {
@@ -958,14 +931,6 @@ private fun backendName(backend: HookIds.Backend): String =
             HookIds.Backend.LSPOSED -> R.string.dashboard_backend_lsposed
         },
     )
-
-private fun backendBadge(backend: HookIds.Backend): String =
-    when (backend) {
-        HookIds.Backend.KMOD -> "K"
-        HookIds.Backend.KPM -> "KPM"
-        HookIds.Backend.ZYGISK -> "Z"
-        HookIds.Backend.LSPOSED -> "J"
-    }
 
 private enum class BackendHealth { Ok, Partial, Error, NoData, Unavailable }
 
