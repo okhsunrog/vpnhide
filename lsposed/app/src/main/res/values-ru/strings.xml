@@ -52,7 +52,8 @@
 
     <!-- Root status -->
     <string name="root_error_title">Требуется root-доступ</string>
-    <string name="root_error_message">VPN Hide необходим root-доступ для управления целевыми приложениями. Предоставьте root-права этому приложению в менеджере root (Magisk, KernelSU и т.д.) и откройте приложение заново.</string>
+    <string name="root_error_message">VPN Hide нужен root-доступ для управления защищёнными приложениями. Выдайте его в менеджере root (Magisk, KernelSU, APatch) и нажмите «Проверить снова».</string>
+    <string name="root_error_recheck">Проверить снова</string>
 
     <!-- Save feedback -->
     <string name="save_success">Сохранено целей: %d</string>

@@ -20,8 +20,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -44,6 +46,7 @@ import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
 import dev.okhsunrog.vpnhide.settings.RepositorySettingsInteractor
 import dev.okhsunrog.vpnhide.settings.SettingsRepository
+import dev.okhsunrog.vpnhide.ui.components.BlockingErrorCard
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.components.pulse
@@ -104,14 +107,20 @@ fun VpnHideApp() {
     ) {
         VpnHideTheme {
             var rootState by remember { mutableStateOf<RootState?>(null) }
-
-            LaunchedEffect(Unit) {
-                rootState =
-                    withContext(Dispatchers.IO) {
-                        if (checkRootAccess()) RootState.Granted else RootState.Denied
-                    }
-                StartupTrace.mark("root_check_done")
+            val rootCheckScope = rememberCoroutineScope()
+            // Re-probe root without relaunching the app: clears to the loading
+            // state, then re-runs the check. Lets the no-root gate offer a
+            // "Check again" button after the user grants root in their manager.
+            val probeRoot: () -> Unit = {
+                rootState = null
+                rootCheckScope.launch {
+                    val granted = withContext(Dispatchers.IO) { checkRootAccess() }
+                    rootState = if (granted) RootState.Granted else RootState.Denied
+                    StartupTrace.mark("root_check_done")
+                }
             }
+
+            LaunchedEffect(Unit) { probeRoot() }
 
             when (rootState) {
                 null -> {
@@ -120,7 +129,7 @@ fun VpnHideApp() {
 
                 RootState.Denied -> {
                     LaunchedEffect(Unit) { StartupTrace.rootDeniedReady() }
-                    RootDeniedScreen()
+                    RootDeniedScreen(onRecheck = probeRoot)
                 }
 
                 RootState.Granted -> {
@@ -638,56 +647,29 @@ private fun RootPreparationErrorScreen(
                 .padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        EnhancedCard(
-            color = MaterialTheme.colorScheme.errorContainer,
-            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = stringResource(R.string.self_targets_error_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = stringResource(selfTargetErrorBodyRes(kind)),
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                )
-                if (detail.isNotBlank()) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        text = detail,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.75f),
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
-                EnhancedButton(onClick = onRetry) {
-                    Text(stringResource(R.string.vpn_off_retry))
-                }
-            }
-        }
+        BlockingErrorCard(
+            icon = Icons.Default.ErrorOutline,
+            title = stringResource(R.string.self_targets_error_title),
+            body = stringResource(selfTargetErrorBodyRes(kind)),
+            detail = detail.takeIf { it.isNotBlank() },
+            actionLabel = stringResource(R.string.vpn_off_retry),
+            onAction = onRetry,
+        )
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RootDeniedScreen() {
+private fun RootDeniedScreen(onRecheck: () -> Unit) {
     Scaffold(
+        containerColor = AppColors.screenBackground,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.app_name)) },
                 colors =
                     TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        titleContentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        containerColor = AppColors.topBarContainer,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
                     ),
             )
         },
@@ -700,28 +682,13 @@ private fun RootDeniedScreen() {
                     .padding(32.dp),
             contentAlignment = Alignment.Center,
         ) {
-            EnhancedCard(
-                color = MaterialTheme.colorScheme.errorContainer,
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        text = stringResource(R.string.root_error_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        text = stringResource(R.string.root_error_message),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            }
+            BlockingErrorCard(
+                icon = Icons.Default.Lock,
+                title = stringResource(R.string.root_error_title),
+                body = stringResource(R.string.root_error_message),
+                actionLabel = stringResource(R.string.root_error_recheck),
+                onAction = onRecheck,
+            )
         }
     }
 }
