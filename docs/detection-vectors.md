@@ -122,6 +122,24 @@ Notes: bionic's `getifaddrs` itself runs over netlink, so the kmod
 at once. zygisk additionally unlinks entries from the `getifaddrs` result list
 directly, so it works even if a future bionic stops using netlink.
 
+**Two known narrow `SIOCGIFCONF` gaps (kmod `.ko`), tracked not yet closed:**
+
+- **Size-query subcase.** The classic two-step `SIOCGIFCONF` (first call with
+  `ifc_req == NULL` to learn the buffer size, then a sized call to fill it) — the
+  `.ko` filters the fill but returns the *unfiltered* length from the size query,
+  so a target comparing the two back-to-back sees a one-interface discrepancy.
+  Closing it means, on the `ifc_req == NULL` path, enumerating netdevs (rcu) and
+  subtracting `sizeof(struct ifreq)` per *IPv4-addressed* VPN iface — feasible
+  but unvalidated without a dedicated probe. zygisk (its own `getifaddrs`/procfs
+  filtering) and modern apps (netlink `getifaddrs`, not `SIOCGIFCONF`) are
+  unaffected; the leak needs an app deliberately doing the legacy NULL-probe.
+- **32-bit (compat) callers.** `sock_ioctl_krp` hooks `sock_ioctl` only; a 32-bit
+  app's `SIOCGIFCONF` enters through `compat_sock_ioctl` → `compat_dev_ifconf`
+  and never reaches it, so the size/fill filtering is skipped for 32-bit
+  enumeration. Most current Android apps are 64-bit and modern enumeration uses
+  netlink (which the rtnl/inet fill hooks do cover), so this is narrow; closing
+  it means also hooking `compat_sock_ioctl` with the compat `ifconf` layout.
+
 ### 3B. Route table — "is the default route a tunnel?"
 
 | Vector | How it manifests | kmod | zygisk | lsposed | SELinux |
