@@ -85,9 +85,13 @@ struct vpnhide_offsets {
 
 	/* Pre-fib6_info kernels (<= 4.14): rt6_fill_node takes a struct rt6_info*
 	 * (which begins with a struct dst_entry), not a fib6_info. When
-	 * rt6_via_dst is set, dev = *(rt + rt6_dst_dev) (dst_entry.dev). */
+	 * rt6_via_dst is set, dev = *(rt + rt6_dst_dev) (dst_entry.dev), and the
+	 * route's destination is rt6_info.rt6i_dst (a rt6key) at rt6_dst (the
+	 * fib6_info_fib6_dst above is for the fib6_info path; 0 disables the v6
+	 * host-route check). */
 	int rt6_via_dst;
 	unsigned int rt6_dst_dev;
+	unsigned int rt6_dst;
 
 	/* Policy rules (fib_nl_fill_rule -> struct fib_rule). */
 	unsigned int fib_rule_table;
@@ -379,6 +383,11 @@ static const struct vpnhide_offsets vpnhide_off_4_x = {
 	.fib6_info_fib6_nh = 0,
 	.rt6_via_dst = 1,
 	.rt6_dst_dev = 0,
+	/* rt6_info.rt6i_dst (rt6key) is ____cacheline_aligned_in_smp: dst_entry is
+	 * 160B (config-independent — the __pads keep it constant), the rt6_info
+	 * prefix runs to +220, rounded up to a cacheline -> @256 (same for 64- or
+	 * 128-byte lines). QEMU-validated on the legacy 4.14 image. */
+	.rt6_dst = 256,
 	/* struct fib_rule layout matches 5.10; the symbol is fib_nl_fill_rule
 	 * .isra.N under gcc — the fuzzy resolver finds it. */
 	.fib_rule_table = 36,
