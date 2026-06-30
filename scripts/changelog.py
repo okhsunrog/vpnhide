@@ -40,6 +40,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from changelog_lib import (  # type: ignore[import-not-found]
     FRAGMENTS_DIR,
+    REPO_ROOT,
     VALID_TYPES,
 )
 from rich.console import Console
@@ -94,7 +95,11 @@ def main() -> int:
     path = fragment_path(args.type, slug)
     write_fragment(path, args.en.strip(), args.ru.strip())
 
-    console.print(f"[green]wrote[/green] {path.relative_to(Path.cwd())}")
+    # Relative to REPO_ROOT, not cwd: the fragment always lives under the repo,
+    # but cwd need not be an ancestor of it (e.g. run from scripts/), and
+    # Path.relative_to raises ValueError in that case — a spurious traceback
+    # after the fragment was already written fine.
+    console.print(f"[green]wrote[/green] {path.relative_to(REPO_ROOT)}")
     console.print(f"  [cyan]type:[/cyan] {args.type}")
     console.print(f"  [cyan]en:[/cyan]   {args.en}")
     console.print(f"  [cyan]ru:[/cyan]   {args.ru}")

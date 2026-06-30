@@ -12,7 +12,9 @@ if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-VERSION_CODE=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))
+# Force base-10: the regex above accepts a zero-padded component (e.g. 1.08.0),
+# which bash would otherwise read as octal in $(( )) and abort on a digit 8/9.
+VERSION_CODE=$(( 10#$MAJOR * 10000 + 10#$MINOR * 100 + 10#$PATCH ))
 
 REPO="https://github.com/okhsunrog/vpnhide"
 RAW="https://raw.githubusercontent.com/okhsunrog/vpnhide/main"

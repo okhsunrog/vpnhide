@@ -290,7 +290,15 @@ def emit_kotlin(hooks: list[Hook], errs: list[Err], backends: list[Backend]) -> 
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
+def write_if_changed(path: Path, content: str) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return False
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
+def main() -> int:
     hooks, errs, backends = load()
     outputs = {
         OUT_KMOD: emit_kmod(hooks, errs, backends),
@@ -298,11 +306,22 @@ def main() -> None:
         OUT_ZYGISK: emit_rust(hooks, errs, backends),
         OUT_LSP_KT: emit_kotlin(hooks, errs, backends),
     }
+    # Skip rewriting unchanged files (and report only what changed), matching
+    # codegen-interfaces.py — avoids bumping mtimes and forcing needless
+    # downstream Gradle/cargo incremental rebuilds when the data didn't change.
+    changed = []
     for path, text in outputs.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        print(f"wrote {path.relative_to(REPO_ROOT)}")
+        if write_if_changed(path, text):
+            changed.append(path.relative_to(REPO_ROOT))
+
+    if changed:
+        print("Regenerated:")
+        for p in changed:
+            print(f"  {p}")
+    else:
+        print("All generated files already up to date.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

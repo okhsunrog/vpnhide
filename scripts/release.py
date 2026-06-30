@@ -60,12 +60,21 @@ def parse_version(raw: str) -> tuple[str, int]:
     return raw, major * 10000 + minor * 100 + patch
 
 
-def patch_file(path: Path, replacements: list[tuple[re.Pattern[str], str]]) -> None:
+def patch_file(
+    path: Path,
+    replacements: list[tuple[re.Pattern[str], str]],
+    *,
+    dry_run: bool = False,
+) -> None:
     """Apply each pattern → replacement once.
 
     Hard-fails if any pattern doesn't match. Silently leaving a stale
     version in some file because the format drifted from what the regex
     expects is exactly the failure mode we want to catch loudly.
+
+    With ``dry_run=True`` the patterns are still validated (and a miss still
+    raises) but nothing is written — used to pre-flight every source patch
+    before the irreversible changelog rotation.
     """
     text = path.read_text(encoding="utf-8")
     new_text = text
@@ -76,36 +85,54 @@ def patch_file(path: Path, replacements: list[tuple[re.Pattern[str], str]]) -> N
                 f"error: pattern {pattern.pattern!r} did not match in {path}. "
                 f"File format probably changed — update release.py."
             )
-    if new_text != text:
+    if not dry_run and new_text != text:
         path.write_text(new_text, encoding="utf-8")
 
 
-def update_module_prop(path: Path, version: str, version_code: int) -> None:
+def update_module_prop(
+    path: Path, version: str, version_code: int, *, dry_run: bool = False
+) -> None:
     patch_file(
         path,
         [
             (re.compile(r"^version=.*$", re.M), f"version=v{version}"),
             (re.compile(r"^versionCode=.*$", re.M), f"versionCode={version_code}"),
         ],
+        dry_run=dry_run,
     )
 
 
-def update_cargo_toml(path: Path, version: str) -> None:
+def update_cargo_toml(path: Path, version: str, *, dry_run: bool = False) -> None:
     """Replace the first `version = "..."` line — package version sits at top."""
     patch_file(
         path,
         [(re.compile(r'^version = "[^"]*"$', re.M), f'version = "{version}"')],
+        dry_run=dry_run,
     )
 
 
-def update_gradle_kts(path: Path, version: str, version_code: int) -> None:
+def update_gradle_kts(
+    path: Path, version: str, version_code: int, *, dry_run: bool = False
+) -> None:
     patch_file(
         path,
         [
             (re.compile(r"versionCode = \d+"), f"versionCode = {version_code}"),
             (re.compile(r'versionName = "[^"]*"'), f'versionName = "{version}"'),
         ],
+        dry_run=dry_run,
     )
+
+
+def patch_all_sources(version: str, version_code: int, *, dry_run: bool) -> None:
+    """Patch (or, with dry_run, just validate) every version-bearing source file."""
+    vc = version_code  # local alias to keep the patch calls within the line limit
+    update_module_prop(REPO_ROOT / "kmod/module/module.prop", version, vc, dry_run=dry_run)
+    update_module_prop(REPO_ROOT / "zygisk/module/module.prop", version, vc, dry_run=dry_run)
+    update_module_prop(REPO_ROOT / "portshide/module/module.prop", version, vc, dry_run=dry_run)
+    update_cargo_toml(REPO_ROOT / "zygisk/Cargo.toml", version, dry_run=dry_run)
+    update_cargo_toml(REPO_ROOT / "lsposed/native/Cargo.toml", version, dry_run=dry_run)
+    update_gradle_kts(REPO_ROOT / "lsposed/app/build.gradle.kts", version, vc, dry_run=dry_run)
 
 
 def write_version_file(version: str) -> None:
@@ -151,9 +178,16 @@ def main() -> int:
             console.print(f"[red]missing:[/red] {f.relative_to(REPO_ROOT)}")
             return 1
 
+    # Pre-flight: validate every version-patch regex BEFORE the irreversible
+    # changelog rotation. patch_file hard-fails on a drifted module.prop /
+    # Cargo.toml / gradle format; if that failure happened after save_json +
+    # delete_fragment_files, changelog.json would already hold the release and
+    # the fragments would be gone, while the duplicate-version guard above then
+    # refuses any retry. Catching it here leaves the changelog fully retryable.
+    patch_all_sources(version, version_code, dry_run=True)
+
     # Changelog: rotate fragments into history, persist, then delete the
-    # fragment files. Order matters — if save_json/write_md fails, the
-    # fragments are still on disk and the run can be retried safely.
+    # fragment files. Now safe — the source patches are known to match.
     rotate_fragments_into_history(data, fragments, version)
     save_json(data)
     write_md(data)
@@ -166,13 +200,8 @@ def main() -> int:
     write_version_file(version)
     console.print("  [green]✓[/green] VERSION")
 
-    # Version-bearing source files.
-    update_module_prop(REPO_ROOT / "kmod/module/module.prop", version, version_code)
-    update_module_prop(REPO_ROOT / "zygisk/module/module.prop", version, version_code)
-    update_module_prop(REPO_ROOT / "portshide/module/module.prop", version, version_code)
-    update_cargo_toml(REPO_ROOT / "zygisk/Cargo.toml", version)
-    update_cargo_toml(REPO_ROOT / "lsposed/native/Cargo.toml", version)
-    update_gradle_kts(REPO_ROOT / "lsposed/app/build.gradle.kts", version, version_code)
+    # Version-bearing source files (validated above, so these will not fail).
+    patch_all_sources(version, version_code, dry_run=False)
 
     console.print("  [green]✓[/green] kmod/module/module.prop")
     console.print("  [green]✓[/green] zygisk/module/module.prop")
