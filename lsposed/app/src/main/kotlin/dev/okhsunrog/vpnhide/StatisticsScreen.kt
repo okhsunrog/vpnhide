@@ -354,26 +354,39 @@ private fun StatisticsHeroCard(
                 }
             }
             Spacer(Modifier.height(18.dp))
-            // Headline: the grand total intercepted across every backend.
-            Text(
-                text = formatStatCount(state.totalCount),
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold,
-                color = StatusColors.infoAccent,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = stringResource(R.string.statistics_events),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = stringResource(R.string.statistics_apps_methods, appCount, methodCount),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // Headline: the grand total intercepted, with its unit on the same
+            // baseline and the apps/methods summary pushed to the right so the
+            // line fills the card width instead of leaving "events" stranded.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Text(
+                    text = formatStatCount(state.totalCount),
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = StatusColors.infoAccent,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.alignByBaseline(),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.statistics_events),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.alignByBaseline(),
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = stringResource(R.string.statistics_apps_methods, appCount, methodCount),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.alignByBaseline(),
+                )
+            }
             // Per-backend breakdown folded into the hero so there's no separate
             // mid-screen "Backends" section: one quiet row per active backend
             // (health dot + name + hooks + its event count).
