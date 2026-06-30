@@ -119,6 +119,13 @@ static bool debug_enabled;
 static struct vpnhide_target targets[MAX_TARGET_UIDS];
 static int nr_targets;
 static DEFINE_SPINLOCK(targets_lock);
+/* OR of every target's hookmask — a lock-free fast-path gate so hook_active()
+ * can reject the common case (a hook enabled for nobody, e.g. no targets yet)
+ * with a single atomic-free read instead of acquiring targets_lock on every
+ * hooked syscall. Recomputed under targets_lock on each config apply; a torn
+ * read only costs a brief over- or under-filter around a (rare) config change.
+ * Mirrors the KPM's active_hook_mask. */
+static u32 active_hook_mask;
 
 /* The enabled-hook mask for the calling UID (0 if it is not a target). */
 static u32 target_mask(void)
@@ -139,9 +146,12 @@ static u32 target_mask(void)
 }
 
 /* True if `hook_id` is enabled for the calling UID (per-hook gate, §4.3).
- * The .ko owns the full kernel hook mask, so it never masks foreign bits. */
+ * The .ko owns the full kernel hook mask, so it never masks foreign bits.
+ * Fast path: if no target enables this hook, skip the per-uid lock+scan. */
 static bool hook_active(u32 hook_id)
 {
+	if (!(READ_ONCE(active_hook_mask) & (1u << hook_id)))
+		return false;
 	return (target_mask() & (1u << hook_id)) != 0;
 }
 
@@ -246,6 +256,14 @@ static ssize_t ctl_write(struct file *file, const char __user *ubuf,
 	spin_lock(&targets_lock);
 	memcpy(targets, newt, (size_t)n * sizeof(*targets));
 	nr_targets = n;
+	{
+		u32 mask = 0;
+		int i;
+
+		for (i = 0; i < n; i++)
+			mask |= newt[i].hookmask & VPNHIDE_KERNEL_HOOK_MASK;
+		WRITE_ONCE(active_hook_mask, mask);
+	}
 	spin_unlock(&targets_lock);
 	WRITE_ONCE(debug_enabled, dbg ? true : false);
 
@@ -828,58 +846,26 @@ static int fib_route_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	struct fib_route_data *data = (void *)ri->data;
 	struct seq_file *seq = data->seq;
-	char *buf, *src, *dst, *end;
-	char ifname[IFNAMSIZ];
-	int j;
+	unsigned long newc;
 
 	if (!data->target || !seq || !seq->buf)
 		return 0;
-
 	if (seq->count <= data->start_count)
 		return 0;
 
 	/*
-	 * Scan the region [start_count, seq->count) for lines whose
-	 * first tab-separated field is a VPN interface name. Compact
-	 * out matching lines in place and adjust seq->count.
-	 *
-	 * Each route line looks like: "tun0\t08000000\t...\n"
+	 * Compact out lines whose FIRST tab-separated field (each route line is
+	 * "tun0\t08000000\t...\n") is a VPN iface name, in [start_count, count).
+	 * Uses the shared compactor — the single implementation the KPM also
+	 * calls — instead of an open-coded copy.
 	 */
-	buf = seq->buf;
-	src = buf + data->start_count;
-	dst = src;
-	end = buf + seq->count;
-
-	while (src < end) {
-		char *nl = memchr(src, '\n', end - src);
-		char *line_end = nl ? nl + 1 : end;
-		size_t line_len = line_end - src;
-
-		/* Extract the interface name (first field, tab-delimited) */
-		for (j = 0; j < IFNAMSIZ - 1 && j < (int)line_len &&
-			    src[j] != '\t' && src[j] != '\n';
-		     j++)
-			ifname[j] = src[j];
-		ifname[j] = '\0';
-
-		if (is_vpn_ifname(ifname)) {
-			vpnhide_dbg("fib_route_ret: hiding route for %s\n",
-				    ifname);
-			/* Skip this line */
-			src = line_end;
-			continue;
-		}
-
-		/* Keep this line — move it down if there's a gap */
-		if (dst != src)
-			memmove(dst, src, line_len);
-		dst += line_len;
-		src = line_end;
-	}
-
-	seq->count = dst - buf;
-	if (seq->count != (size_t)(end - buf))
+	newc = vpnhide_compact_seq_lines(seq->buf, data->start_count, seq->count,
+					 VPNHIDE_FIELD_FIRST,
+					 vpnhide_iface_is_vpn);
+	if (newc != seq->count) {
+		seq->count = newc;
 		record_hook_hit(VPNHIDE_HOOK_FIB_ROUTE_SEQ_SHOW);
+	}
 	return 0;
 }
 
@@ -921,57 +907,23 @@ static int ipv6_route_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	struct fib_route_data *data = (void *)ri->data;
 	struct seq_file *seq = data->seq;
-	char *buf, *src, *dst, *end;
-	char ifname[IFNAMSIZ];
-	int j;
+	unsigned long newc;
 
 	if (!data->target || !seq || !seq->buf)
 		return 0;
 	if (seq->count <= data->start_count)
 		return 0;
 
-	buf = seq->buf;
-	src = buf + data->start_count;
-	dst = src;
-	end = buf + seq->count;
-
-	while (src < end) {
-		char *nl = memchr(src, '\n', end - src);
-		char *line_end = nl ? nl + 1 : end;
-		size_t line_len = line_end - src;
-		char *field_start;
-		char *field_end = line_end;
-
-		while (field_end > src &&
-		       (field_end[-1] == '\n' || field_end[-1] == '\r' ||
-			field_end[-1] == ' ' || field_end[-1] == '\t'))
-			field_end--;
-		field_start = field_end;
-		while (field_start > src && field_start[-1] != ' ' &&
-		       field_start[-1] != '\t')
-			field_start--;
-
-		for (j = 0; j < IFNAMSIZ - 1 && (field_start + j) < field_end;
-		     j++)
-			ifname[j] = field_start[j];
-		ifname[j] = '\0';
-
-		if (is_vpn_ifname(ifname)) {
-			vpnhide_dbg("ipv6_route_ret: hiding route for %s\n",
-				    ifname);
-			src = line_end;
-			continue;
-		}
-
-		if (dst != src)
-			memmove(dst, src, line_len);
-		dst += line_len;
-		src = line_end;
-	}
-
-	seq->count = dst - buf;
-	if (seq->count != (size_t)(end - buf))
+	/* Same as fib_route_ret but the iface name is the LAST whitespace field
+	 * of each /proc/net/ipv6_route line — the shared compactor handles both
+	 * via the field selector. */
+	newc = vpnhide_compact_seq_lines(seq->buf, data->start_count, seq->count,
+					 VPNHIDE_FIELD_LAST,
+					 vpnhide_iface_is_vpn);
+	if (newc != seq->count) {
+		seq->count = newc;
 		record_hook_hit(VPNHIDE_HOOK_IPV6_ROUTE_SEQ_SHOW);
+	}
 	return 0;
 }
 
