@@ -21,7 +21,14 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from codegen_lib import (  # type: ignore[import-not-found]
+    REPO_ROOT,
+    emit_outputs,
+    generated_header,
+    lsposed_generated_kt,
+)
+
 TOML_PATH = REPO_ROOT / "data" / "interfaces.toml"
 
 # Output paths — kept next to the code that consumes them so include /
@@ -30,36 +37,11 @@ OUT_KMOD = REPO_ROOT / "kmod" / "generated" / "iface_lists.h"
 OUT_KMOD_TEST = REPO_ROOT / "kmod" / "test_iface_lists.c"
 OUT_ZYGISK = REPO_ROOT / "zygisk" / "src" / "generated" / "iface_lists.rs"
 OUT_LSP_NATIVE = REPO_ROOT / "lsposed" / "native" / "src" / "generated" / "iface_lists.rs"
-OUT_LSP_KT = (
-    REPO_ROOT
-    / "lsposed"
-    / "app"
-    / "src"
-    / "main"
-    / "kotlin"
-    / "dev"
-    / "okhsunrog"
-    / "vpnhide"
-    / "generated"
-    / "IfaceLists.kt"
-)
-OUT_LSP_KT_TEST = (
-    REPO_ROOT
-    / "lsposed"
-    / "app"
-    / "src"
-    / "test"
-    / "kotlin"
-    / "dev"
-    / "okhsunrog"
-    / "vpnhide"
-    / "generated"
-    / "IfaceListsGeneratedTest.kt"
-)
+OUT_LSP_KT = lsposed_generated_kt("IfaceLists.kt")
+OUT_LSP_KT_TEST = lsposed_generated_kt("IfaceListsGeneratedTest.kt", test=True)
 
-GENERATED_HEADER_LINE = (
-    "AUTO-GENERATED from data/interfaces.toml — do not edit by hand. "
-    "Regenerate with: python3 scripts/codegen-interfaces.py"
+GENERATED_HEADER_LINE = generated_header(
+    "data/interfaces.toml", "python3 scripts/codegen-interfaces.py"
 )
 
 
@@ -545,37 +527,19 @@ def emit_kotlin_test(tests: list[TestVector]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def write_if_changed(path: Path, content: str) -> bool:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() and path.read_text(encoding="utf-8") == content:
-        return False
-    path.write_text(content, encoding="utf-8")
-    return True
-
-
 def main() -> int:
     rules, tests = load()
     rust_body = emit_rust(rules, tests)
-    outputs = {
-        OUT_KMOD: emit_kmod(rules),
-        OUT_KMOD_TEST: emit_kmod_test(tests),
-        OUT_ZYGISK: rust_body,
-        OUT_LSP_NATIVE: rust_body,
-        OUT_LSP_KT: emit_kotlin(rules),
-        OUT_LSP_KT_TEST: emit_kotlin_test(tests),
-    }
-    changed = []
-    for path, content in outputs.items():
-        if write_if_changed(path, content):
-            changed.append(path.relative_to(REPO_ROOT))
-
-    if changed:
-        print("Regenerated:")
-        for p in changed:
-            print(f"  {p}")
-    else:
-        print("All generated files already up to date.")
-    return 0
+    return emit_outputs(
+        {
+            OUT_KMOD: emit_kmod(rules),
+            OUT_KMOD_TEST: emit_kmod_test(tests),
+            OUT_ZYGISK: rust_body,
+            OUT_LSP_NATIVE: rust_body,
+            OUT_LSP_KT: emit_kotlin(rules),
+            OUT_LSP_KT_TEST: emit_kotlin_test(tests),
+        }
+    )
 
 
 if __name__ == "__main__":

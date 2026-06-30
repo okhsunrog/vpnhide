@@ -32,7 +32,14 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from codegen_lib import (  # type: ignore[import-not-found]
+    REPO_ROOT,
+    emit_outputs,
+    generated_header,
+    lsposed_generated_kt,
+)
+
 TOML_PATH = REPO_ROOT / "data" / "hooks.toml"
 
 # Targets are only the protocol participants (§1.4): the kernel backends (C),
@@ -42,23 +49,10 @@ TOML_PATH = REPO_ROOT / "data" / "hooks.toml"
 OUT_KMOD = REPO_ROOT / "kmod" / "generated" / "hook_ids.h"
 OUT_PROTOCOL_RS = REPO_ROOT / "crates" / "protocol" / "src" / "generated" / "hook_ids.rs"
 OUT_ZYGISK = REPO_ROOT / "zygisk" / "src" / "generated" / "hook_ids.rs"
-OUT_LSP_KT = (
-    REPO_ROOT
-    / "lsposed"
-    / "app"
-    / "src"
-    / "main"
-    / "kotlin"
-    / "dev"
-    / "okhsunrog"
-    / "vpnhide"
-    / "generated"
-    / "HookIds.kt"
-)
+OUT_LSP_KT = lsposed_generated_kt("HookIds.kt")
 
-GENERATED_HEADER_LINE = (
-    "AUTO-GENERATED from data/hooks.toml — do not edit by hand. "
-    "Regenerate with: uv run scripts/codegen-hooks.py"
+GENERATED_HEADER_LINE = generated_header(
+    "data/hooks.toml", "uv run scripts/codegen-hooks.py"
 )
 
 KNOWN_BACKENDS = ("kernel", "zygisk", "lsposed")
@@ -290,37 +284,16 @@ def emit_kotlin(hooks: list[Hook], errs: list[Err], backends: list[Backend]) -> 
 # ---------------------------------------------------------------------------
 
 
-def write_if_changed(path: Path, content: str) -> bool:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() and path.read_text(encoding="utf-8") == content:
-        return False
-    path.write_text(content, encoding="utf-8")
-    return True
-
-
 def main() -> int:
     hooks, errs, backends = load()
-    outputs = {
-        OUT_KMOD: emit_kmod(hooks, errs, backends),
-        OUT_PROTOCOL_RS: emit_rust(hooks, errs, backends),
-        OUT_ZYGISK: emit_rust(hooks, errs, backends),
-        OUT_LSP_KT: emit_kotlin(hooks, errs, backends),
-    }
-    # Skip rewriting unchanged files (and report only what changed), matching
-    # codegen-interfaces.py — avoids bumping mtimes and forcing needless
-    # downstream Gradle/cargo incremental rebuilds when the data didn't change.
-    changed = []
-    for path, text in outputs.items():
-        if write_if_changed(path, text):
-            changed.append(path.relative_to(REPO_ROOT))
-
-    if changed:
-        print("Regenerated:")
-        for p in changed:
-            print(f"  {p}")
-    else:
-        print("All generated files already up to date.")
-    return 0
+    return emit_outputs(
+        {
+            OUT_KMOD: emit_kmod(hooks, errs, backends),
+            OUT_PROTOCOL_RS: emit_rust(hooks, errs, backends),
+            OUT_ZYGISK: emit_rust(hooks, errs, backends),
+            OUT_LSP_KT: emit_kotlin(hooks, errs, backends),
+        }
+    )
 
 
 if __name__ == "__main__":
