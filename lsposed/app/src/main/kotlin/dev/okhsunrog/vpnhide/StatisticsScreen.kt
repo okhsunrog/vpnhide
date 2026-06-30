@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 import android.graphics.drawable.Drawable
+import android.os.SystemClock
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -65,6 +66,17 @@ private const val CAPTURE_POLL_MS = 2000L
 private const val FIGURE_MARK = '\u0001'
 private const val TOTAL_MARK = '\u0002'
 
+// Capture-session state lives in a process-scoped holder rather than screen-local
+// remember, so a configuration change — rotation, the day/night auto-switch,
+// split-screen resize — that recreates the Activity doesn't silently drop an
+// in-progress or just-frozen session. It also survives switching to another tab
+// and back. The snapshot-state fields are observed normally in composition.
+private object CaptureSession {
+    val baseline = mutableStateOf<Map<Pair<Long, Long>, Long>?>(null)
+    val startMs = mutableLongStateOf(0L)
+    val frozen = mutableStateOf<FrozenCapture?>(null)
+}
+
 @Composable
 fun StatisticsScreen(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
@@ -73,12 +85,15 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
     val loadError by StatisticsCache.error.collectAsState()
     val installedApps by AppListCache.apps.collectAsState()
     var detailApp by remember { mutableStateOf<AppProbeStats?>(null) }
-    var captureBaseline by remember { mutableStateOf<Map<Pair<Long, Long>, Long>?>(null) }
-    var captureStartMs by remember { mutableLongStateOf(0L) }
-    // Results of the last finished session, frozen at Stop. Non-null means we're
-    // in the "stopped" state: the live session is over but its probes stay on
-    // screen for review until the user starts a new capture or clears them.
-    var frozenCapture by remember { mutableStateOf<FrozenCapture?>(null) }
+    // Backed by the process-scoped CaptureSession so the session survives an
+    // Activity recreation (rotation / day-night / resize). frozenCapture being
+    // non-null means we're in the "stopped" state: the live session is over but
+    // its probes stay on screen for review until the user starts a new capture
+    // or clears them.
+    var captureBaseline by CaptureSession.baseline
+    var captureStartMs by CaptureSession.startMs
+    var frozenCapture by CaptureSession.frozen
+    // Transient display clock — re-derived from captureStartMs each composition.
     var nowMs by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(Unit) {
@@ -90,7 +105,7 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
     // Tick the elapsed clock while a capture session is active.
     LaunchedEffect(captureBaseline != null) {
         while (captureBaseline != null) {
-            nowMs = System.currentTimeMillis()
+            nowMs = SystemClock.elapsedRealtime()
             delay(1000)
         }
     }
@@ -154,7 +169,7 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
         LaunchedEffect(backendReset) {
             if (backendReset) {
                 captureBaseline = snapshotCounters(s)
-                captureStartMs = System.currentTimeMillis()
+                captureStartMs = SystemClock.elapsedRealtime()
             }
         }
         // Three-state session: live deltas while capturing, the frozen result
@@ -195,7 +210,7 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
             sessionAppCount = sessionApps?.size ?: 0,
             onStart = {
                 captureBaseline = snapshotCounters(s)
-                captureStartMs = System.currentTimeMillis()
+                captureStartMs = SystemClock.elapsedRealtime()
                 nowMs = captureStartMs
                 frozenCapture = null
             },
@@ -205,7 +220,7 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
                 frozenCapture =
                     FrozenCapture(
                         apps = capture?.apps.orEmpty(),
-                        durationMs = (System.currentTimeMillis() - captureStartMs).coerceAtLeast(0L),
+                        durationMs = (SystemClock.elapsedRealtime() - captureStartMs).coerceAtLeast(0L),
                     )
                 captureBaseline = null
             },
@@ -416,7 +431,7 @@ private fun StatisticsSummarySentence(
     appCount: Int,
     methodCount: Int,
 ) {
-    val totalForPlural = totalCount.coerceAtMost(Int.MAX_VALUE.toULong()).toInt()
+    val totalForPlural = (totalCount % 100uL).toInt()
     val eventsWord = pluralStringResource(R.plurals.statistics_events_word, totalForPlural)
     val appsWord = pluralStringResource(R.plurals.statistics_apps_word, appCount)
     val methodsWord = pluralStringResource(R.plurals.statistics_methods_word, methodCount)
@@ -907,8 +922,13 @@ private fun surfaceLabel(surface: MethodSurface): String =
 @Composable
 private fun AppStatAvatar(icon: Drawable?) {
     if (icon != null) {
+        // Rasterise once per distinct Drawable (the instance is stable, held in
+        // AppListCache), not on every recomposition — the live-capture 1 Hz tick
+        // recomposes the whole screen, and AdaptiveIconDrawable.toBitmap always
+        // allocates.
+        val bitmap = remember(icon) { icon.toBitmap(48, 48).asImageBitmap() }
         Image(
-            bitmap = icon.toBitmap(48, 48).asImageBitmap(),
+            bitmap = bitmap,
             contentDescription = null,
             modifier = Modifier.size(40.dp),
         )
@@ -1039,7 +1059,6 @@ private fun statisticsUnavailableText(reason: StatisticsUnavailableReason): Stri
 private data class HealthVisual(
     val label: String,
     val accent: Color,
-    val container: Color,
 )
 
 @Composable
@@ -1049,7 +1068,6 @@ private fun backendHealthVisual(health: BackendHealth): HealthVisual =
             HealthVisual(
                 label = stringResource(R.string.statistics_status_ok),
                 accent = StatusColors.successDot,
-                container = StatusColors.successContainer(),
             )
         }
 
@@ -1057,7 +1075,6 @@ private fun backendHealthVisual(health: BackendHealth): HealthVisual =
             HealthVisual(
                 label = stringResource(R.string.statistics_status_partial),
                 accent = StatusColors.warningAccent,
-                container = StatusColors.warningContainer(),
             )
         }
 
@@ -1065,7 +1082,6 @@ private fun backendHealthVisual(health: BackendHealth): HealthVisual =
             HealthVisual(
                 label = stringResource(R.string.statistics_status_error),
                 accent = StatusColors.errorAccent,
-                container = StatusColors.errorContainer(),
             )
         }
 
@@ -1073,7 +1089,6 @@ private fun backendHealthVisual(health: BackendHealth): HealthVisual =
             HealthVisual(
                 label = stringResource(R.string.statistics_status_no_data),
                 accent = StatusColors.neutralAccent,
-                container = AppColors.neutralAccentContainer,
             )
         }
 
@@ -1081,7 +1096,6 @@ private fun backendHealthVisual(health: BackendHealth): HealthVisual =
             HealthVisual(
                 label = stringResource(R.string.statistics_status_unavailable),
                 accent = StatusColors.infoAccent,
-                container = StatusColors.infoContainer(),
             )
         }
     }

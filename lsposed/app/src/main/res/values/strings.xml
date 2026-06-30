@@ -188,13 +188,13 @@
     <string name="statistics_capture_step2">Switch to the app you want to test and use it for a bit.</string>
     <string name="statistics_capture_step3">Every VPN check it makes shows up in the list below.</string>
     <string name="statistics_capture_start">Start capture</string>
-    <string name="statistics_capture_live">Capturing · %1$s · %2$d apps</string>
+    <string name="statistics_capture_live">Capturing · %1$s · apps: %2$d</string>
     <string name="statistics_capture_active_hint">Switch to a target app and use it — probes show up below as they happen.</string>
     <string name="statistics_capture_stop">Stop</string>
     <string name="statistics_capture_apps_header">Probes this session</string>
     <string name="statistics_capture_hint">What a target app probed since this session started. Tap for the per-hook breakdown.</string>
     <string name="statistics_capture_empty">Waiting for probes… switch to a target app and use it.</string>
-    <string name="statistics_capture_captured">Captured · %1$s · %2$d apps</string>
+    <string name="statistics_capture_captured">Captured · %1$s · apps: %2$d</string>
     <string name="statistics_capture_stopped_note">Session stopped — these results stay until you start a new capture or clear them.</string>
     <string name="statistics_capture_stopped_empty">No probes were captured this session.</string>
     <string name="statistics_capture_new">New capture</string>
