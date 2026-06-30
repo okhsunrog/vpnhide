@@ -170,17 +170,36 @@ static int stats_slot_for_uid(uint32_t uid)
 	}
 
 	for (i = 0; i < MAX_TARGET_UIDS; i++) {
-		if (__atomic_load_n(&stats_used[i], __ATOMIC_ACQUIRE) != 0)
-			continue;
+		uint32_t st;
+
+		/* Wait out a concurrent claimer that is mid-init (state 2):
+		 * until it settles to state 1 we can't read its uid, and just
+		 * skipping it (the old code's `continue`) would let us allocate a
+		 * SECOND slot for the SAME uid. The init window is a few
+		 * instructions (CAS -> store uid -> store state 1), so this
+		 * settles immediately. */
+		while ((st = __atomic_load_n(&stats_used[i], __ATOMIC_ACQUIRE)) ==
+		       2)
+			;
+		if (st == 1) {
+			if (stats_uids[i] == uid)
+				return i; /* already ours */
+			continue; /* another uid owns this slot */
+		}
+		/* st == 0: free — try to claim it. */
 		if (__sync_bool_compare_and_swap(&stats_used[i], 0, 2)) {
 			stats_uids[i] = uid;
 			__sync_synchronize();
 			__atomic_store_n(&stats_used[i], 1, __ATOMIC_RELEASE);
 			return i;
 		}
-		if (__atomic_load_n(&stats_used[i], __ATOMIC_ACQUIRE) == 1 &&
-		    stats_uids[i] == uid)
-			return i;
+		/* Lost the CAS to a concurrent claimer — re-examine THIS slot (it
+		 * may be settling to our uid) instead of moving on and allocating
+		 * a duplicate. (A residual window remains only if two first-hits
+		 * for one uid claim two different free slots simultaneously; that
+		 * just splits a counter across two stats lines, never a crash —
+		 * a perfect lock-free find-or-insert needs a lock KP lacks.) */
+		i--;
 	}
 
 	return -1;
