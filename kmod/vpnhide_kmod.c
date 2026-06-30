@@ -997,71 +997,22 @@ static bool copy_dev_name(struct net_device *dev, char name[IFNAMSIZ])
 	return true;
 }
 
-static bool is_physical_ifname(const char *name)
-{
-	return vpnhide_iface_starts_with_ci(name, "rmnet") ||
-	       vpnhide_iface_starts_with_ci(name, "wlan") ||
-	       vpnhide_iface_starts_with_ci(name, "eth") ||
-	       vpnhide_iface_starts_with_ci(name, "ccmni") ||
-	       vpnhide_iface_starts_with_ci(name, "ccemni") ||
-	       vpnhide_iface_starts_with_ci(name, "seth");
-}
-
-static bool is_public_ipv4(__be32 addr)
-{
-	u32 host = be32_to_cpu(addr);
-	u8 a = (host >> 24) & 0xff;
-	u8 b = (host >> 16) & 0xff;
-	u8 c = (host >> 8) & 0xff;
-
-	if (a == 0 || a == 10 || a == 127 || a >= 224)
-		return false;
-	if (a == 100 && b >= 64 && b <= 127)
-		return false;
-	if (a == 169 && b == 254)
-		return false;
-	if (a == 172 && b >= 16 && b <= 31)
-		return false;
-	if (a == 192 && b == 168)
-		return false;
-	if (a == 192 && b == 0 && c == 0)
-		return false;
-	if (a == 192 && b == 0 && c == 2)
-		return false;
-	if (a == 198 && (b == 18 || b == 19))
-		return false;
-	if (a == 198 && b == 51 && c == 100)
-		return false;
-	if (a == 203 && b == 0 && c == 113)
-		return false;
-	return true;
-}
-
+/* A public /32 host-route pinned to a physical uplink — the route a VPN client
+ * installs so tunnel packets reach the server, leaking the server's IPv4 even
+ * when the tun iface is hidden. The address/iface logic is shared with the KPM
+ * (vpnhide_is_public_ipv4 / vpnhide_iface_is_physical in shared/vpnhide_logic.h);
+ * &fri->dst is the __be32's 4 network-order bytes. */
 static bool is_public_host_route_via_physical(const struct fib_rt_info *fri,
 					      struct net_device *dev)
 {
 	char name[IFNAMSIZ];
 
-	if (!fri || !dev || fri->dst_len != 32 || !is_public_ipv4(fri->dst))
+	if (!fri || !dev || fri->dst_len != 32 ||
+	    !vpnhide_is_public_ipv4((const unsigned char *)&fri->dst))
 		return false;
 	if (!copy_dev_name(dev, name))
 		return false;
-	return is_physical_ifname(name);
-}
-
-static bool is_public_ipv6(const struct in6_addr *addr)
-{
-	u8 b0 = addr->s6_addr[0];
-
-	/* Global unicast 2000::/3 only. Excludes ::/:: 1 (unspec/loopback),
-	 * fe80::/10 (link-local), fc00::/7 (ULA), ff00::/8 (multicast). */
-	if ((b0 & 0xe0) != 0x20)
-		return false;
-	/* 2001:db8::/32 documentation range. */
-	if (addr->s6_addr[0] == 0x20 && addr->s6_addr[1] == 0x01 &&
-	    addr->s6_addr[2] == 0x0d && addr->s6_addr[3] == 0xb8)
-		return false;
-	return true;
+	return vpnhide_iface_is_physical(name);
 }
 
 /* IPv6 analogue of is_public_host_route_via_physical: a /128 route to a
@@ -1069,7 +1020,8 @@ static bool is_public_ipv6(const struct in6_addr *addr)
  * client installs so tunnel packets can reach the server — it leaks the
  * server's IPv6 even when the tun interface itself is hidden. fib6_dst
  * (struct rt6key { struct in6_addr addr; int plen; }) is stable across
- * GKI 5.10..6.12; read it fault-safe since `rt` comes from a raw reg. */
+ * GKI 5.10..6.12; read it fault-safe since `rt` comes from a raw reg. The
+ * address/iface logic is shared with the KPM (shared/vpnhide_logic.h). */
 static bool is_public_host_route6_via_physical(struct fib6_info *rt,
 					       struct net_device *dev)
 {
@@ -1085,11 +1037,11 @@ static bool is_public_host_route6_via_physical(struct fib6_info *rt,
 		return false;
 	if (copy_from_kernel_nofault(&addr, &rt->fib6_dst.addr, sizeof(addr)) !=
 		    0 ||
-	    !is_public_ipv6(&addr))
+	    !vpnhide_is_public_ipv6(addr.s6_addr))
 		return false;
 	if (!copy_dev_name(dev, name))
 		return false;
-	return is_physical_ifname(name);
+	return vpnhide_iface_is_physical(name);
 }
 
 static struct net_device *dev_from_nexthop(struct nexthop *nh)

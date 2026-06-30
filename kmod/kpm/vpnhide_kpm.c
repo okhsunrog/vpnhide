@@ -217,6 +217,32 @@ static const char *netdev_name(void *dev)
 	return dev ? (const char *)((char *)dev + off->netdev_name) : 0;
 }
 
+/* True when `dev` (a route's output device) is physical AND the route is a
+ * public /32 host-route — the route a VPN client pins to the uplink so tunnel
+ * packets can reach the server, which leaks the server's public IPv4 even when
+ * the tun interface itself is hidden. The address/iface logic is shared with
+ * the .ko (vpnhide_is_public_ipv4 / vpnhide_iface_is_physical in
+ * shared/vpnhide_logic.h); only the kernel-struct read is KPM-specific.
+ *
+ * Only valid on the 5.6+ fib_rt_info path: `fri` is
+ * `fargs->args[fib_dump_fi_arg]`, with dst (__be32) at a constant +12 and
+ * dst_len (int) at +16 (struct fib_rt_info is stable across GKI 5.10..6.12,
+ * verified against the kernel sources). The fri is stack-resident in the
+ * caller, so reading those two fields is in-bounds. */
+static int kpm_is_public_host_route4(const void *fri, void *dev)
+{
+	int dst_len;
+
+	if (!fri || !dev)
+		return 0;
+	dst_len = *(const int *)((const char *)fri + 16);
+	if (dst_len != 32)
+		return 0;
+	if (!vpnhide_is_public_ipv4((const unsigned char *)fri + 12))
+		return 0;
+	return vpnhide_iface_is_physical(netdev_name(dev));
+}
+
 /* ================================================================== */
 /*  Hook 1 (PoC): fib_route_seq_show — /proc/net/route                */
 /*  arg0 = struct seq_file *.  Compact VPN lines out of this call's    */
@@ -569,7 +595,14 @@ static void fib_dump_before(hook_fargs12_t *fargs, void *udata)
 		return;
 	fi = off->fib_dump_fi_via_fri ? *(void **)p : p; /* fib_rt_info.fi @0 */
 	dev = dev_from_fib_info(fi);
-	if (!dev || !iface_is_vpn(netdev_name(dev)))
+	if (!dev)
+		return;
+	/* Hide the route if its output dev is a VPN iface, OR (5.6+ only, where
+	 * dst/dst_len live at fixed offsets in the fib_rt_info) it is a public
+	 * /32 host-route pinned to a physical uplink — the .ko hides both, so the
+	 * KPM must too for backend parity. */
+	if (!iface_is_vpn(netdev_name(dev)) &&
+	    !(off->fib_dump_fi_via_fri && kpm_is_public_host_route4(p, dev)))
 		return;
 
 	fargs->local.data0 = 1;
@@ -721,10 +754,23 @@ static void fib_rule_after(hook_fargs8_t *fargs, void *udata)
  *   inet6_fill_ifaddr      RTM_GETADDR v6         ✓ (inet6_ifaddr.idev->dev)
  *   dev_ioctl              SIOCGIF* by name       ✓ (ret -> -ENODEV)
  *   sock_ioctl             SIOCGIFCONF            ✓ (ifconf compaction)
- *   fib_dump_info          RTM_GETROUTE v4 dump   ✓ (#86; fib_info nexthop)
+ *   fib_dump_info          RTM_GETROUTE v4 dump   ✓ (#86; fib_info nexthop +
+ *                                                   public /32 host-route via a
+ *                                                   physical uplink, the .ko's
+ *                                                   is_public_host_route_via_
+ *                                                   physical — constant
+ *                                                   fib_rt_info offsets, A/B on
+ *                                                   5.10 + 6.12)
  *   rt6_fill_node          RTM_GETROUTE v6 dump   ✓ (fib6_info nexthop)
  *   fib_nl_fill_rule       RTM_GETRULE            ✓ (fib_rule iif/oif/uid)
  *   ( rt_fill_info — intentionally NOT hooked; unstable arg->reg ABI )
+ *
+ * PARITY GAP (TODO): the .ko also hides a public /128 IPv6 host-route pinned to
+ * a physical uplink (is_public_host_route6_via_physical). The KPM does not yet,
+ * because that needs the per-kver offset of fib6_info.fib6_dst (it varies, e.g.
+ * 64 on 5.10..6.6 vs 80 on 6.12 due to the new gc_link) added to kver_offsets.h
+ * and A/B-validated per version. The IPv4 host-route above needs no such offset
+ * (fib_rt_info.dst/dst_len are at a constant +12/+16 on 5.6+).
  */
 
 /* ------------------------------------------------------------------ */

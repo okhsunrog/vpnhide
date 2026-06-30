@@ -37,6 +37,107 @@ enum vpnhide_iface_field {
 		1, /* /proc/net/ipv6_route    — last ws field      */
 };
 
+/* ====================================================================== */
+/*  Public-host-route concealment predicates (shared by .ko + KPM).        */
+/*                                                                          */
+/*  A VPN client pins a host-route to the server's PUBLIC address on the    */
+/*  PHYSICAL uplink so tunnel packets can escape. That route leaks the      */
+/*  server's address through a routing-table dump even when the tun iface   */
+/*  is hidden, so both backends hide it. The byte/address logic below is    */
+/*  pure (no kernel types); each backend supplies the kernel-struct reads.  */
+/* ====================================================================== */
+
+/* Case-insensitive ASCII prefix test. Self-contained (freestanding): the
+ * generated iface_lists.h has an equivalent, but this header must not depend
+ * on it (or on libc). */
+static inline int vpnhide_str_starts_with_ci(const char *s, const char *prefix)
+{
+	unsigned int i;
+
+	if (!s || !prefix)
+		return 0;
+	for (i = 0; prefix[i]; i++) {
+		char a = s[i];
+		char b = prefix[i];
+
+		if (a >= 'A' && a <= 'Z')
+			a = (char)(a + ('a' - 'A'));
+		if (b >= 'A' && b <= 'Z')
+			b = (char)(b + ('a' - 'A'));
+		if (a != b)
+			return 0;
+	}
+	return 1;
+}
+
+/* A physical (non-tunnel) uplink by name prefix: the only device the
+ * host-route concealment fires on (a public route pinned to a tun is left to
+ * the normal VPN-iface matcher). rmnet/ccmni/ccemni/seth are cellular, wlan
+ * Wi-Fi, eth wired/tethering. */
+static inline int vpnhide_iface_is_physical(const char *name)
+{
+	if (!name)
+		return 0;
+	return vpnhide_str_starts_with_ci(name, "rmnet") ||
+	       vpnhide_str_starts_with_ci(name, "wlan") ||
+	       vpnhide_str_starts_with_ci(name, "eth") ||
+	       vpnhide_str_starts_with_ci(name, "ccmni") ||
+	       vpnhide_str_starts_with_ci(name, "ccemni") ||
+	       vpnhide_str_starts_with_ci(name, "seth");
+}
+
+/* Public-IPv4 test on the 4 network-order bytes of an address (be[0] is the
+ * first octet, so this is endianness-explicit — no host byte-swap needed).
+ * Rejects 0/8, 10/8, 127/8, 224/4+, 100.64/10, 169.254/16, 172.16/12,
+ * 192.168/16, and the 192.0.0/24, 192.0.2/24, 198.18/15, 198.51.100/24,
+ * 203.0.113/24 special blocks. */
+static inline int vpnhide_is_public_ipv4(const unsigned char *be)
+{
+	unsigned int a, b, c;
+
+	if (!be)
+		return 0;
+	a = be[0];
+	b = be[1];
+	c = be[2];
+	if (a == 0 || a == 10 || a == 127 || a >= 224)
+		return 0;
+	if (a == 100 && b >= 64 && b <= 127)
+		return 0;
+	if (a == 169 && b == 254)
+		return 0;
+	if (a == 172 && b >= 16 && b <= 31)
+		return 0;
+	if (a == 192 && b == 168)
+		return 0;
+	if (a == 192 && b == 0 && c == 0)
+		return 0;
+	if (a == 192 && b == 0 && c == 2)
+		return 0;
+	if (a == 198 && (b == 18 || b == 19))
+		return 0;
+	if (a == 198 && b == 51 && c == 100)
+		return 0;
+	if (a == 203 && b == 0 && c == 113)
+		return 0;
+	return 1;
+}
+
+/* Public-IPv6 test on the 16 address bytes (network order). Global unicast
+ * 2000::/3 only — excludes ::/::1 (unspec/loopback), fe80::/10 (link-local),
+ * fc00::/7 (ULA), ff00::/8 (multicast), and 2001:db8::/32 (documentation). */
+static inline int vpnhide_is_public_ipv6(const unsigned char *addr)
+{
+	if (!addr)
+		return 0;
+	if ((addr[0] & 0xe0) != 0x20)
+		return 0;
+	if (addr[0] == 0x20 && addr[1] == 0x01 && addr[2] == 0x0d &&
+	    addr[3] == 0xb8)
+		return 0;
+	return 1;
+}
+
 /*
  * Compact VPN lines out of a /proc/net seq-file buffer in place.
  *

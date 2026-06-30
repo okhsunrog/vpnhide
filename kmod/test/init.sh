@@ -50,6 +50,12 @@ ip -6 addr add fd00:9::1/64 dev vpn0 2>/dev/null
 ip -6 route add fd00:99::/64 dev vpn0 2>/dev/null
 ip rule add uidrange 0-0 table 199 2>/dev/null
 
+# Public /32 host-route pinned to the physical uplink (eth0) — the route a VPN
+# client installs so tunnel packets reach the server. eth0 is not a VPN iface,
+# so hiding it from a target exercises is_public_host_route_via_physical, not
+# the VPN-name matcher.
+ip route add 1.2.3.4/32 dev eth0 2>/dev/null
+
 PASS=0
 FAIL=0
 
@@ -152,6 +158,7 @@ check_hide dev_ioctl       "ifconfig vpn0"                "vpn0"   # dev_ioctl
 check_hide proc_route_v4   "cat /proc/net/route"          "vpn0"   # fib_route_seq_show
 check_hide proc_route_v6   "cat /proc/net/ipv6_route"     "vpn0"   # ipv6_route_seq_show
 check_hide netlink_route4  "ip route show table all"      "vpn0"   # fib_dump_info
+check_hide hostroute4      "ip route show table all"      "1\.2\.3\.4" # fib_dump_info public host-route
 check_hide netlink_route6  "ip -6 route show table all"   "vpn0"   # rt6_fill_node
 check_hide policy_rule     "ip rule show"                 "199"    # fib_nl_fill_rule
 check_gai
