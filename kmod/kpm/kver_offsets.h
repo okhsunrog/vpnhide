@@ -285,12 +285,11 @@ static const struct vpnhide_offsets vpnhide_off_5_4 = {
 	.fib_dump_fi_arg = 9,
 	.fib_dump_fi_via_fri = 0,
 	/* fib6_info: rt6key=20, NO KABI reserve -> nh@152, fib6_nh[]@160. fib6_dst
-	 * is almost certainly @64 (same head as 5.10), but 5.4 is not in the QEMU
-	 * matrix, so leave the public-/128-host-route check disabled here (0) rather
-	 * than ship an unvalidated offset — the .ko covers 5.4-class devices anyway. */
+	 * is the first rt6key after fib6_metrics@56 -> @64 (head identical to 5.10);
+	 * QEMU-validated on the legacy 5.4 image (kpm-qemu-legacy). */
 	.fib6_info_nh = 152,
 	.fib6_info_fib6_nh = 160,
-	.fib6_info_fib6_dst = 0,
+	.fib6_info_fib6_dst = 64,
 	/* struct fib_rule layout identical to 5.10. */
 	.fib_rule_table = 36,
 	.fib_rule_iifname = 88,
@@ -333,9 +332,10 @@ static const struct vpnhide_offsets vpnhide_off_4_19 = {
 	 * (Without ROUTER_PREF it would be @168 — config-sensitive.) */
 	.fib6_info_nh = 0,
 	.fib6_info_fib6_nh = 176,
-	/* 4.19's fib6_info head differs (config-sensitive) and is not in the QEMU
-	 * matrix, so leave the public-/128-host-route check disabled (0). */
-	.fib6_info_fib6_dst = 0,
+	/* 4.19 fib6_info: list_head fib6_siblings (16, no union) then nsiblings/
+	 * ref/expires/metrics -> fib6_dst, the first rt6key, lands @64 (same as 5.4/
+	 * 5.10). QEMU-validated on the legacy 4.19 image. */
+	.fib6_info_fib6_dst = 64,
 	/* struct fib_rule layout identical to 5.4/5.10. */
 	.fib_rule_table = 36,
 	.fib_rule_iifname = 88,

@@ -40,27 +40,30 @@ ip -6 addr add fd00:9::1/64 dev vpn0 2>/dev/null
 ip -6 route add fd00:99::/64 dev vpn0 2>/dev/null
 ip rule add uidrange 0-0 table 199 2>/dev/null
 
-# Public host-route concealment is a GKI 5.6+ feature in the KPM: IPv4 uses the
-# constant fib_rt_info offsets (5.6+ fib_dump_info), IPv6 the per-kver fib6_dst
-# offset (only populated for GKI). On the legacy non-GKI kernels (<5.6: 4.14/
-# 4.19/5.4 the legacy job boots) it is intentionally disabled, so set up + assert
-# those vectors only when the running kernel actually supports them.
+# Public host-route concealment in the KPM: IPv4 works on EVERY supported kernel
+# (5.6+ via the fib_rt_info ABI, <5.6 via the dst/dst_len args). IPv6 needs
+# fib6_info.fib6_dst, populated for every kver EXCEPT 4.14 (which uses rt6_info,
+# whose cacheline-aligned rt6i_dst we carry no offset for). So always test
+# hostroute4; skip hostroute6 only on 4.14.
 KVER_MM=$(uname -r | sed 's/^\([0-9]*\.[0-9]*\).*/\1/')
 KVER_MAJ=${KVER_MM%.*}
 KVER_MIN=${KVER_MM#*.}
-if [ "$KVER_MAJ" -gt 5 ] || { [ "$KVER_MAJ" -eq 5 ] && [ "$KVER_MIN" -ge 6 ]; }; then
-	HOSTROUTE_OK=1
+HOSTROUTE4_OK=1
+if [ "$KVER_MAJ" -eq 4 ] && [ "$KVER_MIN" -eq 14 ]; then
+	HOSTROUTE6_OK=0
 else
-	HOSTROUTE_OK=0
+	HOSTROUTE6_OK=1
 fi
 
-if [ "$HOSTROUTE_OK" = 1 ]; then
-	# Public /32 + /128 host-routes pinned to the physical uplink (eth0) — the
-	# routes a VPN client installs so tunnel packets reach the server. They
-	# leak the server's public IP through an RTM_GETROUTE dump even though vpn0
-	# is hidden, so they must be hidden for a target the way the .ko hides them.
-	# eth0 is not a VPN iface, so this exercises the public-host-route path.
+# Public /32 + /128 host-routes pinned to the physical uplink (eth0) — the routes
+# a VPN client installs so tunnel packets reach the server. They leak the server's
+# public IP through an RTM_GETROUTE dump even though vpn0 is hidden, so they must
+# be hidden for a target the way the .ko hides them. eth0 is not a VPN iface, so
+# this exercises the public-host-route path, not iface_is_vpn.
+if [ "$HOSTROUTE4_OK" = 1 ]; then
 	ip route add 1.2.3.4/32 dev eth0 2>/dev/null
+fi
+if [ "$HOSTROUTE6_OK" = 1 ]; then
 	ip -6 route add 2001:4860:4860::8888/128 dev eth0 2>/dev/null
 fi
 
@@ -77,12 +80,15 @@ echo "VEC dev_ioctl=$(ifconfig vpn0 2>/dev/null | grep -c vpn0)"                
 echo "VEC keep_dev_ioctl=$(ifconfig eth0 2>/dev/null | grep -c '^eth0')"
 echo "VEC netlink_route4=$(ip route show table all 2>/dev/null | grep -c vpn0)"     # fib_dump_info (#86)
 echo "VEC keep_netlink_route4=$(ip route show table all 2>/dev/null | grep -c 'dev eth0')"
-if [ "$HOSTROUTE_OK" = 1 ]; then
+if [ "$HOSTROUTE4_OK" = 1 ]; then
 	echo "VEC hostroute4=$(ip route show table all 2>/dev/null | grep -c '1\.2\.3\.4')" # fib_dump_info public host-route
+else
+	echo "VEC hostroute4=SKIP"
+fi
+if [ "$HOSTROUTE6_OK" = 1 ]; then
 	echo "VEC hostroute6=$(ip -6 route show table all 2>/dev/null | grep -c '2001:4860')" # rt6_fill_node public host-route
 else
-	echo "VEC hostroute4=SKIP" # host-route disabled on non-GKI <5.6 kernels
-	echo "VEC hostroute6=SKIP"
+	echo "VEC hostroute6=SKIP" # 4.14 uses rt6_info; no fib6_dst offset carried
 fi
 echo "VEC netlink_route6=$(ip -6 route show table all 2>/dev/null | grep -c vpn0)"  # rt6_fill_node
 echo "VEC policy_rule=$(ip rule show 2>/dev/null | grep -c 199)"                    # fib_nl_fill_rule
