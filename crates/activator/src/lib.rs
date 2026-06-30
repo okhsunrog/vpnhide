@@ -869,11 +869,15 @@ fn run_kpatch_kpm_ctl0_read(kpatch: &Path, wire: &str) -> Result<String> {
     let mut cmd = Command::new(kpatch);
     cmd.args(["kpm", "ctl0", KPM_NAME, wire]);
     let out = cmd.output()?;
-    if out.status.success() {
-        Ok(String::from_utf8(out.stdout)?)
-    } else {
-        Err(format!("kpm ctl0 read failed with status {}", out.status).into())
-    }
+    // The kpatch CLI prints the reply to stdout (`fprintf(stdout, "%s", buf)`)
+    // and exits with the supercall's return value — for a READ that is the reply
+    // BYTE COUNT (e.g. 64), NOT 0. So a non-zero exit is the normal success case
+    // here; treating it as failure (the old behaviour) dropped every status/stats
+    // read on KPatch-Next, leaving the dashboard with no KPM stats. On a real
+    // error the supercall returns a negative rc and never fills the buffer, so
+    // stdout is empty. Trust stdout: the reply text is authoritative, the exit
+    // code is not (it can't even round-trip a reply longer than 255 bytes).
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 fn kpatch_ctl0_config_status_ok(status: std::process::ExitStatus, wire: &str) -> bool {
