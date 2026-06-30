@@ -81,6 +81,27 @@ Follow-up work (low priority):
   the reply skb to a physical ifindex, instead of reading a fixed register
   off the static `rt_fill_info`.
 
+### 32-bit (compat) SIOCGIFCONF enumeration (low priority)
+
+The kmod `.ko` filters `SIOCGIFCONF` interface enumeration via a kretprobe on
+`sock_ioctl`. A **32-bit** app's `SIOCGIFCONF` enters the kernel through
+`compat_sock_ioctl` → `compat_dev_ifconf` and never reaches `sock_ioctl`, so its
+enumeration is not filtered (it sees VPN interfaces). The size-query subcase of
+the 64-bit path (the `ifc_req == NULL` length query) is likewise unfiltered.
+Both are tracked in [detection-vectors.md](detection-vectors.md) (the SIOCGIFCONF
+notes).
+
+This is **low priority**: most current Android apps are 64-bit, and modern
+interface enumeration uses netlink `getifaddrs` (covered by the rtnl/inet fill
+hooks), not the legacy `SIOCGIFCONF`. zygisk (its own `getifaddrs`/procfs
+filtering) is unaffected.
+
+Follow-up work (low priority — may revisit):
+
+- Register a second kretprobe on `compat_sock_ioctl` and filter `SIOCGIFCONF`
+  there using the compat `struct ifconf` / `struct ifreq` layout (32-bit
+  pointers and `ifr_name` offset), mirroring the `sock_ioctl_ret` compaction.
+
 ## Diagnostics And Observability
 
 - Add optional per-hook interception counters so users can see which apps are
