@@ -375,54 +375,73 @@ fn mark_cleanup(api: &mut ZygiskApi<'_, V2>) {
 fn install_hooks(hookmask: u32) -> Result<(), String> {
     shadowhook::init_once().map_err(|rc| format!("shadowhook_init: rc={rc}"))?;
 
-    // (sym, replacement, stash-original-via). Install order is the
-    // order we'll roll back in on failure (LIFO).
+    // Every libc symbol the Zygisk backend can hook, in install order (we roll
+    // back LIFO on failure). Each row is gated by its per-hook bit in
+    // `hookmask`; adding a hook is one row here plus a `saved_original!` block
+    // and a `hooked_*` fn — no parallel match arms to keep in sync.
     //
-    // recv is hooked directly because bionic's `recv()` tail-calls
-    // recvfrom via a bare `b` branch — patching recvfrom's prologue
-    // would break recv. recv itself is 12 bytes (3 instructions),
-    // safe for island-mode hooking.
-    type StoreFn = fn(*const ());
-    let mut plan: Vec<(&core::ffi::CStr, *mut core::ffi::c_void, StoreFn)> = Vec::new();
-    if zygisk_hook_enabled(hookmask, Hook::ZygiskIoctl) {
-        plan.push((c"ioctl", hooked_ioctl as *mut _, set_real_ioctl_ptr));
+    // recv is hooked directly because bionic's `recv()` tail-calls recvfrom via
+    // a bare `b` branch — patching recvfrom's prologue would break recv. recv
+    // itself is 12 bytes (3 instructions), safe for island-mode hooking.
+    // recvfrom + __recvfrom_chk catch FORTIFY'd / direct callers that never
+    // touch the `recv` symbol (issue #86 native route dump).
+    struct HookDesc {
+        sym: &'static core::ffi::CStr,
+        hook_id: Hook,
+        replacement: *mut core::ffi::c_void,
+        store_orig: fn(*const ()),
     }
-    if zygisk_hook_enabled(hookmask, Hook::ZygiskGetifaddrs) {
-        plan.push((
-            c"getifaddrs",
-            hooked_getifaddrs as *mut _,
-            set_real_getifaddrs_ptr,
-        ));
-    }
-    if zygisk_hook_enabled(hookmask, Hook::ZygiskOpenat) {
-        plan.push((c"openat", hooked_openat as *mut _, set_real_openat_ptr));
-    }
-    if zygisk_hook_enabled(hookmask, Hook::ZygiskRecvmsg) {
-        plan.push((c"recvmsg", hooked_recvmsg as *mut _, set_real_recvmsg_ptr));
-    }
-    if zygisk_hook_enabled(hookmask, Hook::ZygiskRecv) {
-        plan.push((c"recv", hooked_recv as *mut _, set_real_recv_ptr));
-    }
-    // recvfrom + __recvfrom_chk catch FORTIFY'd / direct callers that
-    // never touch the `recv` symbol (issue #86 native route dump).
-    if zygisk_hook_enabled(hookmask, Hook::ZygiskRecvfrom) {
-        plan.push((
-            c"recvfrom",
-            hooked_recvfrom as *mut _,
-            set_real_recvfrom_ptr,
-        ));
-    }
-    if zygisk_hook_enabled(hookmask, Hook::ZygiskRecvfromChk) {
-        plan.push((
-            c"__recvfrom_chk",
-            hooked_recvfrom_chk as *mut _,
-            set_real_recvfrom_chk_ptr,
-        ));
-    }
+    let table = [
+        HookDesc {
+            sym: c"ioctl",
+            hook_id: Hook::ZygiskIoctl,
+            replacement: hooked_ioctl as *mut _,
+            store_orig: set_real_ioctl_ptr,
+        },
+        HookDesc {
+            sym: c"getifaddrs",
+            hook_id: Hook::ZygiskGetifaddrs,
+            replacement: hooked_getifaddrs as *mut _,
+            store_orig: set_real_getifaddrs_ptr,
+        },
+        HookDesc {
+            sym: c"openat",
+            hook_id: Hook::ZygiskOpenat,
+            replacement: hooked_openat as *mut _,
+            store_orig: set_real_openat_ptr,
+        },
+        HookDesc {
+            sym: c"recvmsg",
+            hook_id: Hook::ZygiskRecvmsg,
+            replacement: hooked_recvmsg as *mut _,
+            store_orig: set_real_recvmsg_ptr,
+        },
+        HookDesc {
+            sym: c"recv",
+            hook_id: Hook::ZygiskRecv,
+            replacement: hooked_recv as *mut _,
+            store_orig: set_real_recv_ptr,
+        },
+        HookDesc {
+            sym: c"recvfrom",
+            hook_id: Hook::ZygiskRecvfrom,
+            replacement: hooked_recvfrom as *mut _,
+            store_orig: set_real_recvfrom_ptr,
+        },
+        HookDesc {
+            sym: c"__recvfrom_chk",
+            hook_id: Hook::ZygiskRecvfromChk,
+            replacement: hooked_recvfrom_chk as *mut _,
+            store_orig: set_real_recvfrom_chk_ptr,
+        },
+    ];
 
-    let mut installed: Vec<*mut core::ffi::c_void> = Vec::with_capacity(plan.len());
-    for (sym, new_fn, store_orig) in plan {
-        match hook_libc_sym(sym, new_fn, store_orig) {
+    let mut installed: Vec<*mut core::ffi::c_void> = Vec::with_capacity(table.len());
+    for desc in table {
+        if !zygisk_hook_enabled(hookmask, desc.hook_id) {
+            continue;
+        }
+        match hook_libc_sym(desc.sym, desc.replacement, desc.store_orig) {
             Ok(stub) => installed.push(stub),
             Err(err) => {
                 // Roll back any hooks already installed before this

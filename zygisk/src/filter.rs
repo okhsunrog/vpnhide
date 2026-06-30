@@ -27,22 +27,16 @@ pub fn is_vpn_iface_cstr(name: &CStr) -> bool {
     is_vpn_iface_bytes(name.to_bytes())
 }
 
-/// Filter `/proc/net/route` content in-place, removing lines whose
-/// first tab-separated field is a VPN interface name.
-/// Returns the new length of the valid data in `data`.
+/// Walk `data` line by line, keeping every line for which `hide(line)` is
+/// false and compacting the kept lines toward the front in place. Returns the
+/// new valid length.
 ///
-/// Format:
-/// ```text
-/// Iface   Destination Gateway     Flags RefCnt Use Metric Mask     MTU Window IRTT
-/// wlan0   00000000    0101A8C0    0003  0      0   0      00000000 0   0      0
-/// tun0    00000000    010010AC    0003  0      0   0      00000000 0   0      0
-/// ```
-/// The header line (starting with "Iface") is always kept.
-pub fn filter_route_buf(data: &mut [u8]) -> usize {
-    if data.is_empty() {
-        return 0;
-    }
-
+/// Each `line` passed to `hide` spans from the start of the line through and
+/// including its terminating `'\n'` (or to end-of-buffer for an unterminated
+/// final line) — the same span that gets copied down, so a predicate can look
+/// at the whole record. Empty input yields 0 (the loop never runs). This is
+/// the shared skeleton behind every `/proc/net/*` line filter below.
+fn compact_lines(data: &mut [u8], mut hide: impl FnMut(&[u8]) -> bool) -> usize {
     let len = data.len();
     let mut read_pos = 0usize;
     let mut write_pos = 0usize;
@@ -55,17 +49,7 @@ pub fn filter_route_buf(data: &mut [u8]) -> usize {
             .map(|p| read_pos + p + 1)
             .unwrap_or(len);
 
-        // Extract first field (up to '\t').
-        let line = &data[read_pos..line_end];
-        let field_len = line
-            .iter()
-            .position(|&b| b == b'\t' || b == b'\n')
-            .unwrap_or(line.len());
-        let ifname = &line[..field_len];
-
-        let hide = !ifname.is_empty() && is_vpn_iface_bytes(ifname);
-
-        if !hide {
+        if !hide(&data[read_pos..line_end]) {
             let line_len = line_end - read_pos;
             if write_pos != read_pos {
                 data.copy_within(read_pos..line_end, write_pos);
@@ -77,6 +61,29 @@ pub fn filter_route_buf(data: &mut [u8]) -> usize {
     }
 
     write_pos
+}
+
+/// Filter `/proc/net/route` content in-place, removing lines whose
+/// first tab-separated field is a VPN interface name.
+/// Returns the new length of the valid data in `data`.
+///
+/// Format:
+/// ```text
+/// Iface   Destination Gateway     Flags RefCnt Use Metric Mask     MTU Window IRTT
+/// wlan0   00000000    0101A8C0    0003  0      0   0      00000000 0   0      0
+/// tun0    00000000    010010AC    0003  0      0   0      00000000 0   0      0
+/// ```
+/// The header line (starting with "Iface") is always kept.
+pub fn filter_route_buf(data: &mut [u8]) -> usize {
+    compact_lines(data, |line| {
+        // Extract first field (up to '\t').
+        let field_len = line
+            .iter()
+            .position(|&b| b == b'\t' || b == b'\n')
+            .unwrap_or(line.len());
+        let ifname = &line[..field_len];
+        !ifname.is_empty() && is_vpn_iface_bytes(ifname)
+    })
 }
 
 /// Filter `/proc/net/ipv6_route` in-place. Interface name is the LAST
@@ -89,42 +96,13 @@ pub fn filter_ipv6_route_buf(data: &mut [u8]) -> usize {
 /// drop lines whose interface name (trimmed, before the first ':') is a VPN
 /// interface. The two header lines have no `name:` token and are kept.
 pub fn filter_dev_buf(data: &mut [u8]) -> usize {
-    if data.is_empty() {
-        return 0;
-    }
-
-    let len = data.len();
-    let mut read_pos = 0usize;
-    let mut write_pos = 0usize;
-
-    while read_pos < len {
-        let line_end = data[read_pos..]
-            .iter()
-            .position(|&b| b == b'\n')
-            .map(|p| read_pos + p + 1)
-            .unwrap_or(len);
-
-        let line = &data[read_pos..line_end];
-        let hide = match line.iter().position(|&b| b == b':') {
-            Some(colon) => {
-                let name = trim_ascii_ws(&line[..colon]);
-                !name.is_empty() && is_vpn_iface_bytes(name)
-            }
-            None => false,
-        };
-
-        if !hide {
-            let line_len = line_end - read_pos;
-            if write_pos != read_pos {
-                data.copy_within(read_pos..line_end, write_pos);
-            }
-            write_pos += line_len;
+    compact_lines(data, |line| match line.iter().position(|&b| b == b':') {
+        Some(colon) => {
+            let name = trim_ascii_ws(&line[..colon]);
+            !name.is_empty() && is_vpn_iface_bytes(name)
         }
-
-        read_pos = line_end;
-    }
-
-    write_pos
+        None => false,
+    })
 }
 
 /// Trim leading and trailing ASCII whitespace from a byte slice.
@@ -155,37 +133,10 @@ pub fn filter_if_inet6_buf(data: &mut [u8]) -> usize {
 /// Shared logic: filter lines where the LAST whitespace-delimited field
 /// is a VPN interface name (used by ipv6_route and if_inet6).
 fn filter_by_last_field(data: &mut [u8]) -> usize {
-    if data.is_empty() {
-        return 0;
-    }
-
-    let len = data.len();
-    let mut read_pos = 0usize;
-    let mut write_pos = 0usize;
-
-    while read_pos < len {
-        let line_end = data[read_pos..]
-            .iter()
-            .position(|&b| b == b'\n')
-            .map(|p| read_pos + p + 1)
-            .unwrap_or(len);
-
-        let line = &data[read_pos..line_end];
+    compact_lines(data, |line| {
         let ifname = extract_last_field(line);
-        let hide = !ifname.is_empty() && is_vpn_iface_bytes(ifname);
-
-        if !hide {
-            let line_len = line_end - read_pos;
-            if write_pos != read_pos {
-                data.copy_within(read_pos..line_end, write_pos);
-            }
-            write_pos += line_len;
-        }
-
-        read_pos = line_end;
-    }
-
-    write_pos
+        !ifname.is_empty() && is_vpn_iface_bytes(ifname)
+    })
 }
 
 /// Extract the last whitespace-delimited field from a line (trimming
@@ -214,7 +165,7 @@ pub fn filter_tcp4_buf(data: &mut [u8], vpn_addrs: &[u32], n_addrs: usize) -> us
     if data.is_empty() || n_addrs == 0 {
         return data.len();
     }
-    filter_tcp_generic(data, &vpn_addrs[..n_addrs], 8, parse_hex_u32)
+    filter_tcp_addr(data, &vpn_addrs[..n_addrs], 8, parse_hex_u32)
 }
 
 /// Filter `/proc/net/tcp6` in-place. Removes lines whose local address
@@ -225,92 +176,30 @@ pub fn filter_tcp6_buf(data: &mut [u8], vpn_addrs: &[[u32; 4]], n_addrs: usize) 
     if data.is_empty() || n_addrs == 0 {
         return data.len();
     }
-    filter_tcp6_inner(data, &vpn_addrs[..n_addrs])
+    filter_tcp_addr(data, &vpn_addrs[..n_addrs], 32, parse_hex_addr6)
 }
 
-/// Generic TCP filter: for each line, find ": ", parse `hex_len` hex
-/// chars as an address, check against `vpn_addrs`.
-fn filter_tcp_generic(
+/// Generic TCP filter, shared by tcp4 (`Addr = u32`) and tcp6
+/// (`Addr = [u32; 4]`): for each line find ": ", parse `hex_len` hex chars
+/// into an `Addr`, and drop the line if it matches any of `vpn_addrs`.
+fn filter_tcp_addr<Addr: PartialEq>(
     data: &mut [u8],
-    vpn_addrs: &[u32],
+    vpn_addrs: &[Addr],
     hex_len: usize,
-    parse: fn(&[u8]) -> Option<u32>,
+    parse: fn(&[u8]) -> Option<Addr>,
 ) -> usize {
-    let len = data.len();
-    let mut read_pos = 0usize;
-    let mut write_pos = 0usize;
-
-    while read_pos < len {
-        let line_end = data[read_pos..]
-            .iter()
-            .position(|&b| b == b'\n')
-            .map(|p| read_pos + p + 1)
-            .unwrap_or(len);
-
-        let line = &data[read_pos..line_end];
-        let mut hide = false;
-
+    compact_lines(data, |line| {
         // Find ": " separator, then parse hex address after it.
         if let Some(colon_pos) = find_colon_space(line) {
             let addr_start = colon_pos + 2;
             if addr_start + hex_len <= line.len() {
                 if let Some(addr) = parse(&line[addr_start..addr_start + hex_len]) {
-                    hide = vpn_addrs.contains(&addr);
+                    return vpn_addrs.contains(&addr);
                 }
             }
         }
-
-        if !hide {
-            let line_len = line_end - read_pos;
-            if write_pos != read_pos {
-                data.copy_within(read_pos..line_end, write_pos);
-            }
-            write_pos += line_len;
-        }
-
-        read_pos = line_end;
-    }
-
-    write_pos
-}
-
-/// TCP6 filter: parse 32-char hex as 4×u32 and compare against VPN addrs.
-fn filter_tcp6_inner(data: &mut [u8], vpn_addrs: &[[u32; 4]]) -> usize {
-    let len = data.len();
-    let mut read_pos = 0usize;
-    let mut write_pos = 0usize;
-
-    while read_pos < len {
-        let line_end = data[read_pos..]
-            .iter()
-            .position(|&b| b == b'\n')
-            .map(|p| read_pos + p + 1)
-            .unwrap_or(len);
-
-        let line = &data[read_pos..line_end];
-        let mut hide = false;
-
-        if let Some(colon_pos) = find_colon_space(line) {
-            let addr_start = colon_pos + 2;
-            if addr_start + 32 <= line.len() {
-                if let Some(addr) = parse_hex_addr6(&line[addr_start..addr_start + 32]) {
-                    hide = vpn_addrs.contains(&addr);
-                }
-            }
-        }
-
-        if !hide {
-            let line_len = line_end - read_pos;
-            if write_pos != read_pos {
-                data.copy_within(read_pos..line_end, write_pos);
-            }
-            write_pos += line_len;
-        }
-
-        read_pos = line_end;
-    }
-
-    write_pos
+        false
+    })
 }
 
 fn find_colon_space(line: &[u8]) -> Option<usize> {

@@ -93,32 +93,58 @@ fn set_errno(val: c_int) {
 //  Saved originals
 // ============================================================================
 
-/// Pointer to the real `ioctl` entrypoint, captured by `pltHookRegister`.
-/// Stored as `AtomicPtr<c_void>` so the hook can load it with a relaxed
-/// atomic read — no locks.
-static REAL_IOCTL: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
+/// Declare a saved-original slot for one PLT-hooked libc function.
+///
+/// Each hook needs the same four items to call through to the function it
+/// replaced, so we generate them from one declaration instead of hand-copying
+/// the block seven times:
+///   - `static $slot: AtomicPtr<c_void>` — the captured original pointer,
+///   - `type $ty` — its function-pointer shape (doc comments carry through),
+///   - `fn $getter() -> Option<$ty>` — None before install or if somehow null,
+///   - `pub fn $setter(p: *const ())` — what `pltHookRegister` feeds the
+///     original into.
+///
+/// The slot is read/written with relaxed atomics: install happens-before any
+/// hook fires, so no stronger ordering is needed and no locks are taken.
+macro_rules! saved_original {
+    (
+        $(#[$tymeta:meta])*
+        type $ty:ident = $sig:ty;
+        static $slot:ident;
+        fn $getter:ident;
+        pub fn $setter:ident;
+    ) => {
+        static $slot: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
 
-/// Raw function type for the slice of ioctl variants we care about.
-/// Matches the three-argument C signature `int ioctl(int, unsigned long, void*)`.
-type IoctlFn = unsafe extern "C" fn(c_int, libc::c_ulong, *mut c_void) -> c_int;
+        $(#[$tymeta])*
+        type $ty = $sig;
 
-/// Safely fetch the saved original ioctl. Returns None if for some reason
-/// the pointer is null (should never happen after install, but defensive).
-#[inline(always)]
-fn real_ioctl() -> Option<IoctlFn> {
-    let raw = REAL_IOCTL.load(Ordering::Relaxed);
-    if raw.is_null() {
-        None
-    } else {
-        // SAFETY: we only ever store a valid function pointer of this shape
-        // in this slot via set_real_ioctl_ptr.
-        Some(unsafe { core::mem::transmute::<*mut c_void, IoctlFn>(raw) })
-    }
+        #[inline(always)]
+        fn $getter() -> Option<$ty> {
+            let raw = $slot.load(Ordering::Relaxed);
+            if raw.is_null() {
+                None
+            } else {
+                // SAFETY: the slot only ever holds a valid pointer of this
+                // exact shape, stored once at install via the setter below.
+                Some(unsafe { core::mem::transmute::<*mut c_void, $ty>(raw) })
+            }
+        }
+
+        /// Stash the original pointer returned by `pltHookRegister`.
+        pub fn $setter(p: *const ()) {
+            $slot.store(p as *mut c_void, Ordering::Relaxed);
+        }
+    };
 }
 
-/// Stash the original pointer we got back from `pltHookRegister`.
-pub fn set_real_ioctl_ptr(p: *const ()) {
-    REAL_IOCTL.store(p as *mut c_void, Ordering::Relaxed);
+saved_original! {
+    /// Raw function type for the slice of ioctl variants we care about.
+    /// Matches the three-argument C signature `int ioctl(int, unsigned long, void*)`.
+    type IoctlFn = unsafe extern "C" fn(c_int, libc::c_ulong, *mut c_void) -> c_int;
+    static REAL_IOCTL;
+    fn real_ioctl;
+    pub fn set_real_ioctl_ptr;
 }
 
 // ============================================================================
@@ -258,26 +284,12 @@ unsafe fn filter_ifconf(ifc: *mut ifconf) {
 //  Hook: getifaddrs
 // ============================================================================
 
-/// Pointer to the real `getifaddrs`, captured at install time.
-static REAL_GETIFADDRS: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
-
-type GetifaddrsFn = unsafe extern "C" fn(*mut *mut libc::ifaddrs) -> c_int;
-
-#[inline(always)]
-fn real_getifaddrs() -> Option<GetifaddrsFn> {
-    let raw = REAL_GETIFADDRS.load(Ordering::Relaxed);
-    if raw.is_null() {
-        None
-    } else {
-        // SAFETY: we only ever store a valid `getifaddrs` pointer in this
-        // slot via `set_real_getifaddrs_ptr`.
-        Some(unsafe { core::mem::transmute::<*mut c_void, GetifaddrsFn>(raw) })
-    }
-}
-
-/// Stash the trampoline returned by shadowhook for `libc.so!getifaddrs`.
-pub fn set_real_getifaddrs_ptr(p: *const ()) {
-    REAL_GETIFADDRS.store(p as *mut c_void, Ordering::Relaxed);
+saved_original! {
+    /// Raw function type for `getifaddrs`.
+    type GetifaddrsFn = unsafe extern "C" fn(*mut *mut libc::ifaddrs) -> c_int;
+    static REAL_GETIFADDRS;
+    fn real_getifaddrs;
+    pub fn set_real_getifaddrs_ptr;
 }
 
 /// Replacement for `libc::getifaddrs`.
@@ -350,23 +362,12 @@ pub unsafe extern "C" fn hooked_getifaddrs(ifap: *mut *mut libc::ifaddrs) -> c_i
 //  Hook: openat — intercept /proc/net/* reads
 // ============================================================================
 
-/// Pointer to the real `openat` entrypoint, captured at install time.
-static REAL_OPENAT: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
-
-type OpenatFn = unsafe extern "C" fn(c_int, *const libc::c_char, c_int, libc::mode_t) -> c_int;
-
-#[inline(always)]
-fn real_openat() -> Option<OpenatFn> {
-    let raw = REAL_OPENAT.load(Ordering::Relaxed);
-    if raw.is_null() {
-        None
-    } else {
-        Some(unsafe { core::mem::transmute::<*mut c_void, OpenatFn>(raw) })
-    }
-}
-
-pub fn set_real_openat_ptr(p: *const ()) {
-    REAL_OPENAT.store(p as *mut c_void, Ordering::Relaxed);
+saved_original! {
+    /// Raw function type for `openat`.
+    type OpenatFn = unsafe extern "C" fn(c_int, *const libc::c_char, c_int, libc::mode_t) -> c_int;
+    static REAL_OPENAT;
+    fn real_openat;
+    pub fn set_real_openat_ptr;
 }
 
 /// Which /proc/net file was matched.
@@ -783,22 +784,12 @@ fn collect_vpn_addrs() -> (
 //  Hook: recvmsg — filter netlink RTM_NEWADDR / RTM_NEWLINK responses
 // ============================================================================
 
-static REAL_RECVMSG: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
-
-type RecvmsgFn = unsafe extern "C" fn(c_int, *mut libc::msghdr, c_int) -> isize;
-
-#[inline(always)]
-fn real_recvmsg() -> Option<RecvmsgFn> {
-    let raw = REAL_RECVMSG.load(Ordering::Relaxed);
-    if raw.is_null() {
-        None
-    } else {
-        Some(unsafe { core::mem::transmute::<*mut c_void, RecvmsgFn>(raw) })
-    }
-}
-
-pub fn set_real_recvmsg_ptr(p: *const ()) {
-    REAL_RECVMSG.store(p as *mut c_void, Ordering::Relaxed);
+saved_original! {
+    /// Raw function type for `recvmsg`.
+    type RecvmsgFn = unsafe extern "C" fn(c_int, *mut libc::msghdr, c_int) -> isize;
+    static REAL_RECVMSG;
+    fn real_recvmsg;
+    pub fn set_real_recvmsg_ptr;
 }
 
 /// Replacement for `libc::recvmsg`.
@@ -912,22 +903,12 @@ unsafe fn maybe_filter_netlink_buf(fd: c_int, buf: *mut u8, ret: isize) -> isize
 // hook only has to handle the bare `recv` symbol. (Hooking `recvfrom`
 // turned out to be fine in practice — see the recvfrom hook block.)
 
-static REAL_RECV: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
-
-type RecvFn = unsafe extern "C" fn(c_int, *mut c_void, usize, c_int) -> isize;
-
-#[inline(always)]
-fn real_recv() -> Option<RecvFn> {
-    let raw = REAL_RECV.load(Ordering::Relaxed);
-    if raw.is_null() {
-        None
-    } else {
-        Some(unsafe { core::mem::transmute::<*mut c_void, RecvFn>(raw) })
-    }
-}
-
-pub fn set_real_recv_ptr(p: *const ()) {
-    REAL_RECV.store(p as *mut c_void, Ordering::Relaxed);
+saved_original! {
+    /// Raw function type for `recv`.
+    type RecvFn = unsafe extern "C" fn(c_int, *mut c_void, usize, c_int) -> isize;
+    static REAL_RECV;
+    fn real_recv;
+    pub fn set_real_recv_ptr;
 }
 
 /// Replacement for `libc::recv`.
@@ -971,23 +952,13 @@ pub unsafe extern "C" fn hooked_recv(
 // `is_netlink_fd` in `maybe_filter_netlink_buf` keeps TCP/UDP/Unix recvfrom
 // traffic untouched, so hooking these high-traffic symbols is safe.
 
-static REAL_RECVFROM: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
-
-type RecvfromFn =
-    unsafe extern "C" fn(c_int, *mut c_void, usize, c_int, *mut c_void, *mut c_void) -> isize;
-
-#[inline(always)]
-fn real_recvfrom() -> Option<RecvfromFn> {
-    let raw = REAL_RECVFROM.load(Ordering::Relaxed);
-    if raw.is_null() {
-        None
-    } else {
-        Some(unsafe { core::mem::transmute::<*mut c_void, RecvfromFn>(raw) })
-    }
-}
-
-pub fn set_real_recvfrom_ptr(p: *const ()) {
-    REAL_RECVFROM.store(p as *mut c_void, Ordering::Relaxed);
+saved_original! {
+    /// Raw function type for `recvfrom`.
+    type RecvfromFn =
+        unsafe extern "C" fn(c_int, *mut c_void, usize, c_int, *mut c_void, *mut c_void) -> isize;
+    static REAL_RECVFROM;
+    fn real_recvfrom;
+    pub fn set_real_recvfrom_ptr;
 }
 
 /// Replacement for `libc::recvfrom`. Filters the flat buffer like `recv`.
@@ -1012,32 +983,21 @@ pub unsafe extern "C" fn hooked_recvfrom(
     ret - (in_buf - filtered)
 }
 
-static REAL_RECVFROM_CHK: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
-
-/// `ssize_t __recvfrom_chk(int, void*, size_t len, size_t buf_size, int flags,
-///                         const struct sockaddr*, socklen_t*)` — bionic FORTIFY.
-type RecvfromChkFn = unsafe extern "C" fn(
-    c_int,
-    *mut c_void,
-    usize,
-    usize,
-    c_int,
-    *mut c_void,
-    *mut c_void,
-) -> isize;
-
-#[inline(always)]
-fn real_recvfrom_chk() -> Option<RecvfromChkFn> {
-    let raw = REAL_RECVFROM_CHK.load(Ordering::Relaxed);
-    if raw.is_null() {
-        None
-    } else {
-        Some(unsafe { core::mem::transmute::<*mut c_void, RecvfromChkFn>(raw) })
-    }
-}
-
-pub fn set_real_recvfrom_chk_ptr(p: *const ()) {
-    REAL_RECVFROM_CHK.store(p as *mut c_void, Ordering::Relaxed);
+saved_original! {
+    /// `ssize_t __recvfrom_chk(int, void*, size_t len, size_t buf_size, int flags,
+    ///                         const struct sockaddr*, socklen_t*)` — bionic FORTIFY.
+    type RecvfromChkFn = unsafe extern "C" fn(
+        c_int,
+        *mut c_void,
+        usize,
+        usize,
+        c_int,
+        *mut c_void,
+        *mut c_void,
+    ) -> isize;
+    static REAL_RECVFROM_CHK;
+    fn real_recvfrom_chk;
+    pub fn set_real_recvfrom_chk_ptr;
 }
 
 /// Replacement for bionic's `__recvfrom_chk`. Same filtering as `recvfrom`.
