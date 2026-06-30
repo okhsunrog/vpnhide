@@ -317,6 +317,7 @@ private fun StatisticsLoadErrorCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StatisticsHeroCard(
     state: StatisticsState,
@@ -354,37 +355,43 @@ private fun StatisticsHeroCard(
                 }
             }
             Spacer(Modifier.height(18.dp))
-            // Headline: the grand total intercepted, with its unit on the same
-            // baseline and the apps/methods summary pushed to the right so the
-            // line fills the card width instead of leaving "events" stranded.
-            Row(
+            // Headline: the grand total + its unit kept together as one block (so
+            // "events" is never stranded), with the apps/methods summary flowing
+            // onto the same line when it fits and wrapping below when it doesn't.
+            // The inter-item gap forces the longer Russian strings to wrap on a
+            // narrow screen instead of clipping.
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                itemVerticalAlignment = Alignment.Bottom,
             ) {
-                Text(
-                    text = formatStatCount(state.totalCount),
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Bold,
-                    color = StatusColors.infoAccent,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.alignByBaseline(),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.statistics_events),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.alignByBaseline(),
-                )
-                Spacer(Modifier.weight(1f))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = formatStatCount(state.totalCount),
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = StatusColors.infoAccent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.alignByBaseline(),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.statistics_events),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.alignByBaseline(),
+                    )
+                }
                 Text(
                     text = stringResource(R.string.statistics_apps_methods, appCount, methodCount),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.alignByBaseline(),
                 )
             }
             // Per-backend breakdown folded into the hero so there's no separate
