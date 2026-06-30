@@ -243,6 +243,31 @@ static int kpm_is_public_host_route4(const void *fri, void *dev)
 	return vpnhide_iface_is_physical(netdev_name(dev));
 }
 
+/* IPv6 analogue of kpm_is_public_host_route4: a public /128 host-route pinned to
+ * a physical uplink (the route a VPN client installs to reach the server, which
+ * leaks its IPv6 even when the tun is hidden — the .ko's
+ * is_public_host_route6_via_physical). Reads fib6_info.fib6_dst (rt6key { addr@0;
+ * int plen@16 }) at the per-kver offset; off->fib6_info_fib6_dst == 0 disables
+ * it (the pre-fib6_info 4.14 rt6_info path, and non-GKI kernels the QEMU matrix
+ * can't validate). `rt` is the fib6_info* arg to rt6_fill_node and fib6_dst sits
+ * before fib6_nh — which dev_from_fib6_info already reads — so it is in-bounds.
+ * The address/iface logic is shared with the .ko (shared/vpnhide_logic.h). */
+static int kpm_is_public_host_route6(void *rt, void *dev)
+{
+	const unsigned char *dst;
+	int plen;
+
+	if (!rt || !dev || !off->fib6_info_fib6_dst)
+		return 0;
+	dst = (const unsigned char *)rt + off->fib6_info_fib6_dst;
+	plen = *(const int *)(dst + 16); /* rt6key.plen */
+	if (plen != 128)
+		return 0;
+	if (!vpnhide_is_public_ipv6(dst)) /* rt6key.addr @ +0 */
+		return 0;
+	return vpnhide_iface_is_physical(netdev_name(dev));
+}
+
 /* ================================================================== */
 /*  Hook 1 (PoC): fib_route_seq_show — /proc/net/route                */
 /*  arg0 = struct seq_file *.  Compact VPN lines out of this call's    */
@@ -661,7 +686,12 @@ static void rt6_fill_before(hook_fargs12_t *fargs, void *udata)
 	if (!hook_active(VPNHIDE_HOOK_RT6_FILL_NODE) || !skb || !rt)
 		return;
 	dev = dev_from_fib6_info(rt);
-	if (!dev || !iface_is_vpn(netdev_name(dev)))
+	if (!dev)
+		return;
+	/* Hide the route if its output dev is a VPN iface, OR it is a public /128
+	 * host-route pinned to a physical uplink (parity with the .ko). */
+	if (!iface_is_vpn(netdev_name(dev)) &&
+	    !kpm_is_public_host_route6(rt, dev))
 		return;
 
 	fargs->local.data0 = 1;
@@ -761,16 +791,21 @@ static void fib_rule_after(hook_fargs8_t *fargs, void *udata)
  *                                                   physical — constant
  *                                                   fib_rt_info offsets, A/B on
  *                                                   5.10 + 6.12)
- *   rt6_fill_node          RTM_GETROUTE v6 dump   ✓ (fib6_info nexthop)
+ *   rt6_fill_node          RTM_GETROUTE v6 dump   ✓ (fib6_info nexthop +
+ *                                                   public /128 host-route via a
+ *                                                   physical uplink, the .ko's
+ *                                                   is_public_host_route6_via_
+ *                                                   physical — per-kver
+ *                                                   fib6_info.fib6_dst offset,
+ *                                                   A/B on 5.10/5.15/6.1/6.12)
  *   fib_nl_fill_rule       RTM_GETRULE            ✓ (fib_rule iif/oif/uid)
  *   ( rt_fill_info — intentionally NOT hooked; unstable arg->reg ABI )
  *
- * PARITY GAP (TODO): the .ko also hides a public /128 IPv6 host-route pinned to
- * a physical uplink (is_public_host_route6_via_physical). The KPM does not yet,
- * because that needs the per-kver offset of fib6_info.fib6_dst (it varies, e.g.
- * 64 on 5.10..6.6 vs 80 on 6.12 due to the new gc_link) added to kver_offsets.h
- * and A/B-validated per version. The IPv4 host-route above needs no such offset
- * (fib_rt_info.dst/dst_len are at a constant +12/+16 on 5.6+).
+ * Both host-route predicates (v4 + v6) and their address/iface logic are now
+ * shared with the .ko via shared/vpnhide_logic.h. The IPv4 path needs no offset
+ * (fib_rt_info.dst/dst_len are at a constant +12/+16 on 5.6+); the IPv6 path
+ * reads fib6_info.fib6_dst at the per-kver offset (64 on 5.10..6.6, 80 on 6.12),
+ * disabled (0) on the non-GKI kernels the QEMU matrix can't validate.
  */
 
 /* ------------------------------------------------------------------ */

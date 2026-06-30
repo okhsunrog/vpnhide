@@ -173,7 +173,7 @@ echo "-------------------------------------------------------------------"
 [ "$(kpmload "$TG_LOG")" = ok ] || { echo "ERROR: KPM did not load (target boot)"; tail -20 "$TG_LOG"; exit 1; }
 
 PASS=0; FAIL=0
-for vec in proc_route_v4 getifaddrs proc_route_v6 siocgifconf dev_ioctl netlink_route4 hostroute4 netlink_route6 policy_rule gai_getifaddrs; do
+for vec in proc_route_v4 getifaddrs proc_route_v6 siocgifconf dev_ioctl netlink_route4 hostroute4 netlink_route6 hostroute6 policy_rule gai_getifaddrs; do
 	# The gai_getifaddrs vector only exists when the bionic probe is available
 	# (baked VPNHIDE_GAI_BIN, or built from an NDK on this host). If neither is
 	# present the probe can't run, so skip the vector instead of failing it.

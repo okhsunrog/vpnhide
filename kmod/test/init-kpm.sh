@@ -46,6 +46,8 @@ ip rule add uidrange 0-0 table 199 2>/dev/null
 # be hidden for a target the same way the .ko hides it. eth0 is not a VPN iface,
 # so this exercises the public-host-route path, not iface_is_vpn.
 ip route add 1.2.3.4/32 dev eth0 2>/dev/null
+# IPv6 analogue: a public /128 host-route pinned to the physical uplink.
+ip -6 route add 2001:4860:4860::8888/128 dev eth0 2>/dev/null
 
 # Vectors covered by the wired hooks. Count vpn0 hits as seen by root, then
 # count stable non-VPN entries so an over-trimmed empty dump fails loudly.
@@ -61,6 +63,7 @@ echo "VEC keep_dev_ioctl=$(ifconfig eth0 2>/dev/null | grep -c '^eth0')"
 echo "VEC netlink_route4=$(ip route show table all 2>/dev/null | grep -c vpn0)"     # fib_dump_info (#86)
 echo "VEC keep_netlink_route4=$(ip route show table all 2>/dev/null | grep -c 'dev eth0')"
 echo "VEC hostroute4=$(ip route show table all 2>/dev/null | grep -c '1\.2\.3\.4')" # fib_dump_info public host-route
+echo "VEC hostroute6=$(ip -6 route show table all 2>/dev/null | grep -c '2001:4860')" # rt6_fill_node public host-route
 echo "VEC netlink_route6=$(ip -6 route show table all 2>/dev/null | grep -c vpn0)"  # rt6_fill_node
 echo "VEC policy_rule=$(ip rule show 2>/dev/null | grep -c 199)"                    # fib_nl_fill_rule
 echo "VEC keep_policy_rule=$(ip rule show 2>/dev/null | grep -c 'lookup main')"

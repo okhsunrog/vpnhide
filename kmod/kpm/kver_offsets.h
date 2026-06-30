@@ -76,6 +76,13 @@ struct vpnhide_offsets {
 	unsigned int fib6_info_nh;
 	unsigned int fib6_info_fib6_nh;
 
+	/* fib6_info.fib6_dst (struct rt6key { in6_addr addr@0; int plen@16; }) —
+	 * the destination of an IPv6 route, used to spot a public /128 host-route
+	 * pinned to a physical uplink. 0 disables that check for this version
+	 * (e.g. the pre-fib6_info 4.14 rt6_info path, and the non-GKI kernels that
+	 * the QEMU matrix can't validate — a wrong offset here would fault). */
+	unsigned int fib6_info_fib6_dst;
+
 	/* Pre-fib6_info kernels (<= 4.14): rt6_fill_node takes a struct rt6_info*
 	 * (which begins with a struct dst_entry), not a fib6_info. When
 	 * rt6_via_dst is set, dev = *(rt + rt6_dst_dev) (dst_entry.dev). */
@@ -122,9 +129,11 @@ static const struct vpnhide_offsets vpnhide_off_6_1 = {
 	.fib_dump_fi_arg = 4, /* fib_rt_info* form (5.6+) */
 	.fib_dump_fi_via_fri = 1,
 	/* fib6_info: bitfield@136, rcu@144, nh@160, ANDROID_KABI_RESERVE(1)@168,
-	 * fib6_nh[]@176; nhc_dev first in fib6_nh -> dev@176. */
+	 * fib6_nh[]@176; nhc_dev first in fib6_nh -> dev@176. fib6_dst is the first
+	 * rt6key after fib6_metrics@56 -> @64 (no gc_link, same head as 5.10). */
 	.fib6_info_nh = 160,
 	.fib6_info_fib6_nh = 176,
+	.fib6_info_fib6_dst = 64,
 	/* struct fib_rule layout identical to 5.10. */
 	.fib_rule_table = 36,
 	.fib_rule_iifname = 88,
@@ -157,9 +166,11 @@ static const struct vpnhide_offsets vpnhide_off_6_12 = {
 	.fib_info_fib_nh = 128,
 	.fib_dump_fi_arg = 4,
 	.fib_dump_fi_via_fri = 1,
-	/* fib6_info + gc_link(16) before fib6_metrics -> nh@176, fib6_nh[]@192. */
+	/* fib6_info + gc_link(16) before fib6_metrics -> nh@176, fib6_nh[]@192.
+	 * The same gc_link shifts fib6_metrics@72 and fib6_dst@80 (vs @64 elsewhere). */
 	.fib6_info_nh = 176,
 	.fib6_info_fib6_nh = 192,
+	.fib6_info_fib6_dst = 80,
 	.fib_rule_table = 36,
 	.fib_rule_iifname = 88,
 	.fib_rule_oifname = 104,
@@ -195,9 +206,11 @@ static const struct vpnhide_offsets vpnhide_off_5_x = {
 	.fib_dump_fi_arg = 4,
 	.fib_dump_fi_via_fri = 1,
 	/* android12-5.10 fib6_info (LP64; rt6key=20, ANDROID_KABI_RESERVE=8):
-	 * nh@152, fib6_nh[]@168; nhc_dev first in fib6_nh -> +168. */
+	 * nh@152, fib6_nh[]@168; nhc_dev first in fib6_nh -> +168. fib6_dst is the
+	 * first rt6key after fib6_metrics@56 -> @64. */
 	.fib6_info_nh = 152,
 	.fib6_info_fib6_nh = 168,
+	.fib6_info_fib6_dst = 64,
 	/* android12-5.10 struct fib_rule (LP64). */
 	.fib_rule_table = 36,
 	.fib_rule_iifname = 88,
@@ -229,9 +242,11 @@ static const struct vpnhide_offsets vpnhide_off_5_15 = {
 	.fib_info_fib_nh = 128,
 	.fib_dump_fi_arg = 4,
 	.fib_dump_fi_via_fri = 1,
-	/* fib6_info with offload/offload_failed (cf. 6.1): nh@160, fib6_nh[]@176. */
+	/* fib6_info with offload/offload_failed (cf. 6.1): nh@160, fib6_nh[]@176.
+	 * The offload fields are after the rt6keys, so fib6_dst stays @64. */
 	.fib6_info_nh = 160,
 	.fib6_info_fib6_nh = 176,
+	.fib6_info_fib6_dst = 64,
 	.fib_rule_table = 36,
 	.fib_rule_iifname = 88,
 	.fib_rule_oifname = 104,
@@ -269,9 +284,13 @@ static const struct vpnhide_offsets vpnhide_off_5_4 = {
 	 * passed directly (not via fib_rt_info). */
 	.fib_dump_fi_arg = 9,
 	.fib_dump_fi_via_fri = 0,
-	/* fib6_info: rt6key=20, NO KABI reserve -> nh@152, fib6_nh[]@160. */
+	/* fib6_info: rt6key=20, NO KABI reserve -> nh@152, fib6_nh[]@160. fib6_dst
+	 * is almost certainly @64 (same head as 5.10), but 5.4 is not in the QEMU
+	 * matrix, so leave the public-/128-host-route check disabled here (0) rather
+	 * than ship an unvalidated offset — the .ko covers 5.4-class devices anyway. */
 	.fib6_info_nh = 152,
 	.fib6_info_fib6_nh = 160,
+	.fib6_info_fib6_dst = 0,
 	/* struct fib_rule layout identical to 5.10. */
 	.fib_rule_table = 36,
 	.fib_rule_iifname = 88,
@@ -314,6 +333,9 @@ static const struct vpnhide_offsets vpnhide_off_4_19 = {
 	 * (Without ROUTER_PREF it would be @168 — config-sensitive.) */
 	.fib6_info_nh = 0,
 	.fib6_info_fib6_nh = 176,
+	/* 4.19's fib6_info head differs (config-sensitive) and is not in the QEMU
+	 * matrix, so leave the public-/128-host-route check disabled (0). */
+	.fib6_info_fib6_dst = 0,
 	/* struct fib_rule layout identical to 5.4/5.10. */
 	.fib_rule_table = 36,
 	.fib_rule_iifname = 88,

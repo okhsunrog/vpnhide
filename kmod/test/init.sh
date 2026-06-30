@@ -55,6 +55,8 @@ ip rule add uidrange 0-0 table 199 2>/dev/null
 # so hiding it from a target exercises is_public_host_route_via_physical, not
 # the VPN-name matcher.
 ip route add 1.2.3.4/32 dev eth0 2>/dev/null
+# IPv6 analogue: a public /128 host-route pinned to the physical uplink.
+ip -6 route add 2001:4860:4860::8888/128 dev eth0 2>/dev/null
 
 PASS=0
 FAIL=0
@@ -160,6 +162,7 @@ check_hide proc_route_v6   "cat /proc/net/ipv6_route"     "vpn0"   # ipv6_route_
 check_hide netlink_route4  "ip route show table all"      "vpn0"   # fib_dump_info
 check_hide hostroute4      "ip route show table all"      "1\.2\.3\.4" # fib_dump_info public host-route
 check_hide netlink_route6  "ip -6 route show table all"   "vpn0"   # rt6_fill_node
+check_hide hostroute6      "ip -6 route show table all"   "2001:4860" # rt6_fill_node public host-route
 check_hide policy_rule     "ip rule show"                 "199"    # fib_nl_fill_rule
 check_gai
 
