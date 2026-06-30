@@ -188,7 +188,7 @@ class HookEntry : IXposedHookLoadPackage {
 
     /** Recursively sanitize stacked LinkProperties, dropping ones that become
      *  empty VPN tunnels. Returns true if anything changed. */
-    @Suppress("NestedBlockDepth")
+    @Suppress("NestedBlockDepth") // try-inside-for-inside-if-else over the stacked-LP map is structurally unavoidable
     private fun sanitizeStackedLinks(copy: LinkProperties): Boolean {
         var modified = false
         try {
