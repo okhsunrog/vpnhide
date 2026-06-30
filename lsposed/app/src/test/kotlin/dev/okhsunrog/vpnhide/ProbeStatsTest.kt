@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.generated.HookIds
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ProbeStatsTest {
@@ -144,5 +145,35 @@ class ProbeStatsTest {
 
         assertEquals(true, diff.backendReset)
         assertEquals(emptyList<AppProbeStats>(), diff.apps)
+    }
+
+    private fun appStats(
+        vararg packages: String,
+        uid: Long = 10100,
+    ) = AppProbeStats(uid = uid, packageNames = packages.toList(), total = 1uL, byHook = emptyMap())
+
+    private fun summary(pkg: String) = AppSummary(packageName = pkg, label = pkg.uppercase(), icon = null, isSystem = false)
+
+    @Test
+    fun `resolveAppSummary returns the installed match for the uid's package`() {
+        val byPackage = mapOf("com.a" to summary("com.a"), "com.b" to summary("com.b"))
+        assertEquals("com.a", resolveAppSummary(appStats("com.a"), byPackage)?.packageName)
+    }
+
+    @Test
+    fun `resolveAppSummary picks the first matching package for a shared uid`() {
+        // Only the second package of the shared UID is installed.
+        val onlySecond = mapOf("com.b" to summary("com.b"))
+        assertEquals("com.b", resolveAppSummary(appStats("com.a", "com.b"), onlySecond)?.packageName)
+        // When several match, the first listed one wins.
+        val both = mapOf("com.a" to summary("com.a"), "com.b" to summary("com.b"))
+        assertEquals("com.a", resolveAppSummary(appStats("com.a", "com.b"), both)?.packageName)
+    }
+
+    @Test
+    fun `resolveAppSummary is null when nothing installed matches or no packages are listed`() {
+        val byPackage = mapOf("com.a" to summary("com.a"))
+        assertNull(resolveAppSummary(appStats("com.unknown"), byPackage))
+        assertNull(resolveAppSummary(appStats(), byPackage)) // unknown uid, no packages
     }
 }

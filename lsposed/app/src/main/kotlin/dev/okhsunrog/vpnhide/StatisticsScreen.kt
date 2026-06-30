@@ -904,15 +904,6 @@ private fun surfaceLabel(surface: MethodSurface): String =
         },
     )
 
-// First installed-app summary that matches one of this UID's packages, so the
-// row can show a real icon + label instead of the bare package name. UIDs with
-// no installed match (system uids, uninstalled packages) resolve to null and
-// fall back to the package/uid text + a neutral placeholder avatar.
-private fun resolveAppSummary(
-    app: AppProbeStats,
-    byPackage: Map<String, AppSummary>,
-): AppSummary? = app.packageNames.firstNotNullOfOrNull { byPackage[it] }
-
 @Composable
 private fun AppStatAvatar(icon: Drawable?) {
     if (icon != null) {

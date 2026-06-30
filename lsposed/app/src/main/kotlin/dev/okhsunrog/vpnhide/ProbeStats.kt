@@ -144,6 +144,15 @@ internal fun buildAppProbeStats(
         )
 }
 
+// First installed-app summary that matches one of this UID's packages, so the
+// Statistics row can show a real icon + label instead of the bare package name.
+// UIDs with no installed match (system uids, uninstalled packages) resolve to
+// null and the caller falls back to the package/uid text + placeholder avatar.
+internal fun resolveAppSummary(
+    app: AppProbeStats,
+    byPackage: Map<String, AppSummary>,
+): AppSummary? = app.packageNames.firstNotNullOfOrNull { byPackage[it] }
+
 // ── Capture session: baseline-diff over a user-controlled window ──────────
 //
 // No backend reset command and no per-event timestamps — the app snapshots the
