@@ -51,9 +51,7 @@ OUT_PROTOCOL_RS = REPO_ROOT / "crates" / "protocol" / "src" / "generated" / "hoo
 OUT_ZYGISK = REPO_ROOT / "zygisk" / "src" / "generated" / "hook_ids.rs"
 OUT_LSP_KT = lsposed_generated_kt("HookIds.kt")
 
-GENERATED_HEADER_LINE = generated_header(
-    "data/hooks.toml", "uv run scripts/codegen-hooks.py"
-)
+GENERATED_HEADER_LINE = generated_header("data/hooks.toml", "uv run scripts/codegen-hooks.py")
 
 KNOWN_BACKENDS = ("kernel", "zygisk", "lsposed")
 

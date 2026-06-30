@@ -19,10 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 def generated_header(source: str, regen_cmd: str) -> str:
     """The banner text for a generated file (without the per-language comment
     marker): ``AUTO-GENERATED from <source> … Regenerate with: <regen_cmd>``."""
-    return (
-        f"AUTO-GENERATED from {source} — do not edit by hand. "
-        f"Regenerate with: {regen_cmd}"
-    )
+    return f"AUTO-GENERATED from {source} — do not edit by hand. Regenerate with: {regen_cmd}"
 
 
 def lsposed_generated_kt(filename: str, *, test: bool = False) -> Path:
