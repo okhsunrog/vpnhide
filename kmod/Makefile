@@ -27,8 +27,15 @@ KPM_INCLUDES := $(foreach d,$(KPM_INCLUDE_DIRS),-I$(KP_DIR)/kernel/$(d))
 # -nostdlib: this is a freestanding relocatable kernel object; older Android
 # clang drivers (e.g. clang-12 on android12-5.10) otherwise add CRT startup
 # files + -lc/-ldl to the `-r` link and fail (crtbegin_dynamic.o / -lc not found).
+# -mcmodel=large: REQUIRED, do not change to small. KernelPatch loads the .kpm
+# in a vmalloc region that can sit >4 GB from where ADRP-relative literals were
+# assumed, so -mcmodel=small's ADR_PREL_PG_HI21 relocations for .rodata (string
+# literals) overflow and resolve to garbage addresses — the ctl0 status/stats
+# replies came back corrupted on a real APatch device until this was switched to
+# large (absolute MOVW_UABS materialisation, no ±4 GB range limit). The .ko is
+# unaffected because Kbuild handles module addressing itself.
 KPM_CFLAGS := -target aarch64-linux-android -fuse-ld=lld -nostdlib \
-	-O2 -fno-pic -fno-pie -fno-plt -mcmodel=small \
+	-O2 -fno-pic -fno-pie -fno-plt -mcmodel=large \
 	-fvisibility=hidden -mno-outline-atomics \
 	-fno-stack-protector -fno-common -fno-builtin -ffreestanding \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables -nostdinc \
