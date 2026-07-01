@@ -214,8 +214,9 @@ internal sealed interface LsposedConfig {
 internal enum class DashboardMessageSeverity { ERROR, WARNING, INFO }
 
 // Optional call-to-action rendered on a message banner. ContactAuthor opens the
-// shared community/feedback modal (GitHub / Telegram / 4PDA).
-internal enum class DashboardMessageAction { ContactAuthor, }
+// shared community/feedback modal (GitHub / Telegram / 4PDA); OpenDiagnostics
+// opens the detailed diagnostics screen.
+internal enum class DashboardMessageAction { ContactAuthor, OpenDiagnostics }
 
 internal data class DashboardMessage(
     val severity: DashboardMessageSeverity,
@@ -1532,6 +1533,21 @@ internal suspend fun loadDashboardState(
         } else {
             warn(text)
         }
+    }
+
+    // A hiding layer is active but some of its runtime probes still leak (native
+    // partial/full, or a Java probe fails). Without this the state shows only as
+    // an amber hero/tile with no explanation — surface a warning that links to
+    // the full diagnostics for the per-check breakdown.
+    if (protection is ProtectionCheck.Checked &&
+        (protection.native is NativeResult.Fail || protection.java is JavaResult.Fail)
+    ) {
+        messages +=
+            DashboardMessage(
+                DashboardMessageSeverity.WARNING,
+                res.getString(R.string.dashboard_issue_checks_failed),
+                DashboardMessageAction.OpenDiagnostics,
+            )
     }
 
     StartupTrace.mark("dashboard_messages_done")

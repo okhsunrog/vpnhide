@@ -315,6 +315,17 @@ private fun MainScreen() {
         return
     }
 
+    // Full-screen diagnostics overlay, reachable from a Dashboard message's
+    // "Details" button (the same screen Settings → Diagnostics opens).
+    var showDiagnostics by remember { mutableStateOf(false) }
+    if (showDiagnostics) {
+        DiagnosticsSettingsScreen(
+            selfNeedsRestart = selfNeedsRestart,
+            onBack = { showDiagnostics = false },
+        )
+        return
+    }
+
     Scaffold(
         containerColor = AppColors.screenBackground,
         topBar = {
@@ -579,6 +590,7 @@ private fun MainScreen() {
                     Tab.Dashboard -> {
                         DashboardScreen(
                             selfNeedsRestart = restart,
+                            onOpenDiagnostics = { showDiagnostics = true },
                             modifier = Modifier.padding(innerPadding),
                         )
                     }

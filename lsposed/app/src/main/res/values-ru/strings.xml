@@ -254,6 +254,8 @@
     <string name="dashboard_issues">Ошибки (%d)</string>
     <string name="dashboard_warnings">Предупреждения (%d)</string>
     <string name="dashboard_info">Информация (%d)</string>
+    <string name="dashboard_issue_checks_failed">Не все проверки скрытия пройдены.</string>
+    <string name="dashboard_action_details">Подробности</string>
     <string name="dashboard_issue_kmod_capable_but_zygisk">Ваше ядро поддерживает модуль ядра — он работает в пространстве ядра и невидим для анти-тампер проверок. Zygisk тоже работает, но банковские и платёжные приложения могут обнаружить его хуки, если для них включён Native. Установите %1$s и удалите Zygisk-модуль.</string>
     <string name="dashboard_issue_native_conflict_kernel">Модуль ядра (.ko) и KPM установлены одновременно. Они перехватывают одни и те же функции ядра, и при одновременной работе устройство может полностью зависнуть. Оставьте только один — удалите либо модуль ядра, либо KPM.</string>
     <string name="dashboard_issue_native_conflict_deferred">Модуль ядра (.ko) и KPM установлены одновременно. KPM отключился при загрузке, чтобы не подвесить устройство, и сейчас бездействует. Оставьте только один — удалите KPM (или модуль ядра).</string>
@@ -315,7 +317,7 @@
     <string name="btn_save_debug">Сохранить</string>
     <string name="btn_share_debug">Поделиться</string>
     <string name="diag_debug_logging_title">Отладочные логи</string>
-    <string name="settings_debug_logging_sub">По умолчанию выключено ради скрытности. Инструменты захвата в «Отладке» включают его автоматически — этот переключатель нужен только для постоянных логов во всех компонентах.</string>
+    <string name="settings_debug_logging_sub">По умолчанию выключено, чтобы не засорять logcat и не тратить ресурсы. Инструменты захвата в «Отладке» включают его автоматически — вручную нужен только для постоянных логов во всех компонентах.</string>
     <string name="logcat_card_title">Полный системный logcat</string>
     <string name="logcat_card_description">Записывает неотфильтрованные логи из всех буферов (main/system/crash/events/radio) для диагностики проблем, которые не видны в стандартных проверках. Начните запись, воспроизведите ошибку, затем остановите.</string>
     <string name="logcat_btn_start">Начать запись</string>

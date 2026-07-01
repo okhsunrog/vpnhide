@@ -76,7 +76,7 @@
     <string name="btn_save_debug">Save</string>
     <string name="btn_share_debug">Share</string>
     <string name="diag_debug_logging_title">Debug logging</string>
-    <string name="settings_debug_logging_sub">Off by default for stealth. The capture tools in Debugging enable it automatically — turn this on only for continuous logs across every component.</string>
+    <string name="settings_debug_logging_sub">Off by default to keep logcat quiet and avoid the overhead. The capture tools in Debugging enable it automatically — turn this on only for continuous logs across every component.</string>
     <string name="logcat_card_title">Full system logcat</string>
     <string name="logcat_card_description">Records unfiltered logs from all buffers (main/system/crash/events/radio) for debugging issues that aren\'t visible in the standard checks. Start recording, reproduce the bug, then stop.</string>
     <string name="logcat_btn_start">Start recording</string>
@@ -276,6 +276,8 @@
     <string name="dashboard_issues">Errors (%d)</string>
     <string name="dashboard_warnings">Warnings (%d)</string>
     <string name="dashboard_info">Info (%d)</string>
+    <string name="dashboard_issue_checks_failed">Not all hiding checks passed.</string>
+    <string name="dashboard_action_details">Details</string>
     <string name="dashboard_issue_kmod_capable_but_zygisk">Your kernel supports the kernel module — it hooks in kernel space and is invisible to anti-tamper checks. Zygisk works too, but banking and payment apps may detect its hooks when Native is enabled for them. Install %1$s and uninstall the Zygisk module for cleaner coverage.</string>
     <string name="dashboard_issue_native_conflict_kernel">The kernel module (.ko) and the KPM are both installed. They hook the same kernel functions, and having both active can hard-freeze the device. Keep only one — uninstall either the kernel module or the KPM.</string>
     <string name="dashboard_issue_native_conflict_deferred">The kernel module (.ko) and the KPM are both installed. The KPM stood down at boot to avoid a freeze, so it isn\'t doing anything. Keep only one — uninstall the KPM (or the kernel module).</string>

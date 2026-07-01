@@ -276,7 +276,7 @@ private fun CommunitySettingsSection() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DiagnosticsSettingsScreen(
+internal fun DiagnosticsSettingsScreen(
     selfNeedsRestart: Boolean?,
     onBack: () -> Unit,
 ) {

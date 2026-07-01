@@ -40,6 +40,7 @@ import dev.okhsunrog.vpnhide.settings.LocalSettingsState
 import dev.okhsunrog.vpnhide.settings.SettingsRepository
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
+import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
 import dev.okhsunrog.vpnhide.ui.components.GroupedCard
 import dev.okhsunrog.vpnhide.ui.components.IconBubble
 import dev.okhsunrog.vpnhide.ui.components.MetricTile
@@ -53,6 +54,7 @@ import dev.okhsunrog.vpnhide.ui.components.SectionHeader as SharedSectionHeader
 @Composable
 fun DashboardScreen(
     selfNeedsRestart: Boolean,
+    onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -229,6 +231,7 @@ fun DashboardScreen(
                     text = issue.text,
                     containerColor = errorBg,
                     contentColor = onBannerColor,
+                    action = messageActionSlot(issue.action, onOpenDiagnostics) { showContact = true },
                 )
                 Spacer(Modifier.height(6.dp))
             }
@@ -243,6 +246,7 @@ fun DashboardScreen(
                     text = issue.text,
                     containerColor = warningBg,
                     contentColor = onBannerColor,
+                    action = messageActionSlot(issue.action, onOpenDiagnostics) { showContact = true },
                 )
                 Spacer(Modifier.height(6.dp))
             }
@@ -257,12 +261,7 @@ fun DashboardScreen(
                     text = message.text,
                     containerColor = infoBg,
                     contentColor = onBannerColor,
-                    action =
-                        if (message.action == DashboardMessageAction.ContactAuthor) {
-                            { ContactAuthorButton(onClick = { showContact = true }) }
-                        } else {
-                            null
-                        },
+                    action = messageActionSlot(message.action, onOpenDiagnostics) { showContact = true },
                 )
                 Spacer(Modifier.height(6.dp))
             }
@@ -273,6 +272,27 @@ fun DashboardScreen(
 }
 
 // ── UI Components ────────────────────────────────────────────────────────
+
+// Maps a message's data-layer action tag to the actual button + handler in ONE
+// place, so a new action is an enum case + one branch here — not an edit in
+// every message loop. The data layer stays UI-free (it only emits the tag).
+private fun messageActionSlot(
+    action: DashboardMessageAction?,
+    onOpenDiagnostics: () -> Unit,
+    onContactAuthor: () -> Unit,
+): (@Composable () -> Unit)? =
+    when (action) {
+        DashboardMessageAction.ContactAuthor -> ({ ContactAuthorButton(onClick = onContactAuthor) })
+        DashboardMessageAction.OpenDiagnostics -> ({ DetailsButton(onClick = onOpenDiagnostics) })
+        null -> null
+    }
+
+@Composable
+private fun DetailsButton(onClick: () -> Unit) {
+    EnhancedOutlinedButton(onClick = onClick) {
+        Text(stringResource(R.string.dashboard_action_details))
+    }
+}
 
 @Composable
 internal fun DashboardLoadingState(modifier: Modifier = Modifier) {
