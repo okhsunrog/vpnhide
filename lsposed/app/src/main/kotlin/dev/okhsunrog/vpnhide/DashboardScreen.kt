@@ -555,11 +555,6 @@ private fun DashboardHeroCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                StatusPill(
-                    text = stringResource(visual.titleRes),
-                    contentColor = visual.accent,
-                    containerColor = visual.container,
-                )
             }
             Spacer(Modifier.height(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -598,33 +593,6 @@ private fun DashboardHeroCard(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun StatusPill(
-    text: String,
-    contentColor: Color,
-    containerColor: Color,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier =
-            modifier
-                .widthIn(max = 160.dp)
-                .clip(MaterialTheme.shapes.medium)
-                .background(containerColor)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = contentColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
