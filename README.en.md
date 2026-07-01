@@ -168,7 +168,7 @@ Any issues found are shown as actionable cards with specific instructions.
 
 **Statistics** tab — per-app breakdown of which apps probe for the VPN and how, showing which checks each app runs (counters reported by the active backends).
 
-**Settings → Diagnostics** (Detailed diagnostics) — detailed per-check breakdown with individual PASS/FAIL results for all 26 detection vectors. Useful for troubleshooting when the Dashboard shows incomplete hiding.
+**Settings → Diagnostics** (Detailed diagnostics) — detailed per-check breakdown with individual PASS/FAIL results for all 25 checks. Useful for troubleshooting when the Dashboard shows incomplete hiding.
 
 ## Components
 
