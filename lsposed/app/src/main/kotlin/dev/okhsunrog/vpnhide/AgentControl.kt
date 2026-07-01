@@ -92,7 +92,7 @@ internal object AgentControl {
         }
 
     /**
-     * Return the Protection tab canonical config and configured package summary.
+     * Return the Apps tab canonical config and configured package summary.
      *
      * @param refresh Force a fresh root snapshot instead of reusing the app cache.
      */
@@ -106,7 +106,7 @@ internal object AgentControl {
         }
 
     /**
-     * List installed apps in the same shape used by the Protection picker.
+     * List installed apps in the same shape used by the Apps picker.
      *
      * @param includeSystem Include system packages.
      * @param configuredOnly Return only packages currently present in canonical config.

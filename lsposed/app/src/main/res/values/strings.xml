@@ -5,7 +5,7 @@
     <!-- Navigation -->
     <string name="tab_dashboard">Dashboard</string>
     <string name="tab_statistics">Statistics</string>
-    <string name="tab_protection">Protection</string>
+    <string name="tab_protection">Hiding</string>
 
     <!-- App picker -->
     <string name="selected_count">%d selected</string>
@@ -48,19 +48,19 @@
     <string name="apps_help_role_java_body">LSPosed hides VPN signals exposed through Android Java APIs such as NetworkCapabilities, NetworkInfo, LinkProperties, and NetworkInterface.</string>
     <string name="apps_help_role_native_body">The active native backend hides VPN signals visible through kernel or libc probes. VPN Hide writes one native selection to every installed native backend; only the active backend acts.</string>
     <string name="apps_help_role_apps_body">App-hiding observer mode. This app receives a sanitized package-manager view and cannot list, resolve, or query packages that VPN Hide marks as hidden.</string>
-    <string name="apps_help_role_ports_body">Ports observer mode. The ports module makes localhost VPN/proxy daemon probes look like closed ports for this app. By default P blocks every localhost port; the settings edge can limit it to selected ranges.</string>
+    <string name="apps_help_role_ports_body">Ports observer mode. The ports module makes localhost VPN/proxy daemon probes look like closed ports for this app. By default P blocks every localhost port; settings can limit it to selected ranges.</string>
     <string name="apps_help_hook_settings_title">Per-hook settings</string>
-    <string name="apps_help_hook_settings_body">For Java, Native, and Ports, tap the settings edge of the combined chip to choose exact hooks or port ranges for this app. A chip marked with * means custom settings are active.</string>
+    <string name="apps_help_hook_settings_body">For Java, Native, and Ports, tap the settings icon next to the label to choose individual hooks or port ranges for this app. A * means this app has custom settings.</string>
     <string name="apps_help_apps_hiding_title">Apps hiding</string>
-    <string name="apps_help_apps_hiding_body">VPN Hide auto-detects packages that should be hidden from observers, including apps declaring a VPN service and optional name heuristics. Manual hidden-package choices live in Settings → Advanced protection. System callers stay exempt so Android can keep installing and launching apps.</string>
+    <string name="apps_help_apps_hiding_body">VPN Hide auto-detects packages that should be hidden from observers, including apps declaring a VPN service and optional name heuristics. Manual hidden-package choices live in Settings → Advanced hiding. System callers stay exempt so Android can keep installing and launching apps.</string>
     <string name="apps_help_apply_title">Applying changes</string>
-    <string name="apps_help_apply_body">After Save, Java and kernel native backends (kmod/KPM) apply immediately. Zygisk native hooks and ports rules are picked up by a target app after force-stop and reopen.</string>
+    <string name="apps_help_apply_body">After Save, Java and kernel native backends (kmod/KPM) apply immediately. Zygisk native hooks and ports rules are picked up by a selected app after force-stop and reopen.</string>
     <string name="apps_help_zygisk_warning_title">Zygisk and banking apps</string>
-    <string name="apps_help_zygisk_warning_body">Zygisk hooks run inside the target process. Banking and payment apps may detect that when Native is enabled for them; leave Native off for those apps and rely on Java where possible.</string>
+    <string name="apps_help_zygisk_warning_body">Zygisk hooks run inside the selected app process. Banking and payment apps may detect that when Native is enabled for them; leave Native off for those apps and rely on Java where possible.</string>
 
     <!-- Root status -->
     <string name="root_error_title">Root access required</string>
-    <string name="root_error_message">VPN Hide needs root access to manage protected apps. Grant it in your root manager (Magisk, KernelSU, APatch), then tap Check again.</string>
+    <string name="root_error_message">VPN Hide needs root access to manage VPN hiding for selected apps. Grant it in your root manager (Magisk, KernelSU, APatch), then tap Check again.</string>
     <string name="root_error_recheck">Check again</string>
 
     <!-- Save feedback -->
@@ -86,10 +86,10 @@
     <string name="badge_pass">PASS</string>
     <string name="badge_fail">FAIL</string>
     <string name="badge_info">INFO</string>
-    <string name="banner_ready">VPN is active. This app is in the protection config. Results below.</string>
-    <string name="banner_added_self">Added VPN Hide to the protection config. Restart VPN Hide (force-stop and reopen) for native-level checks to take effect — no device reboot needed.</string>
+    <string name="banner_ready">VPN is active. Hiding is enabled for this app. Results below.</string>
+    <string name="banner_added_self">Enabled hiding for VPN Hide. Restart VPN Hide (force-stop and reopen) for native-level checks to take effect — no device reboot needed.</string>
     <string name="banner_network_blocked">Network access is disabled for this app. ioctl checks (SIOCGIFFLAGS, SIOCGIFMTU, SIOCGIFCONF) cannot run without it. Enable in Settings → Apps → VPN Hide → Mobile data &amp; Wi-Fi.</string>
-    <string name="section_native">Native level (kmod / zygisk)</string>
+    <string name="section_native">Native level (kmod / KPM / Zygisk)</string>
     <string name="section_java">Java API level (LSPosed)</string>
 
     <!-- Dashboard -->
@@ -102,7 +102,7 @@
     <string name="self_targets_error_body_incomplete">Root access worked, but VPN Hide could not read part of its startup state (shown below). This is usually temporary — tap Retry.</string>
     <string name="self_targets_error_body_write">Root access worked, but VPN Hide could not save its updated config (shown below). Tap Retry.</string>
     <string name="self_targets_error_body_unknown">VPN Hide could not finish its root-side startup (shown below). Tap Retry.</string>
-    <string name="targets_load_failed_title">Protection data unavailable</string>
+    <string name="targets_load_failed_title">Hiding data unavailable</string>
     <string name="targets_load_failed_message">VPN Hide could not collect the root state needed for this tab. Check your root manager if permission was interrupted, then tap Retry.</string>
     <string name="dashboard_ports">Ports hiding module</string>
     <string name="dashboard_java_backend">Java backend</string>
@@ -123,15 +123,15 @@
     <string name="dashboard_kmod_broken_signature_enforced">Installed, kernel rejects unsigned modules</string>
     <string name="dashboard_active_targets">Active · %d target(s)</string>
     <string name="dashboard_reboot_needed">Device reboot needed</string>
-    <string name="dashboard_protection">Protection status</string>
-    <string name="dashboard_hero_protected_title">Protected</string>
-    <string name="dashboard_hero_protected_subtitle">All protections are active</string>
+    <string name="dashboard_protection">Hiding status</string>
+    <string name="dashboard_hero_protected_title">VPN hidden</string>
+    <string name="dashboard_hero_protected_subtitle">All hiding layers are active</string>
     <string name="dashboard_hero_attention_title">Needs attention</string>
     <string name="dashboard_hero_attention_subtitle">Some checks need a look</string>
-    <string name="dashboard_hero_unprotected_title">Not protected</string>
-    <string name="dashboard_hero_unprotected_subtitle">Protection is not active</string>
+    <string name="dashboard_hero_unprotected_title">VPN visible</string>
+    <string name="dashboard_hero_unprotected_subtitle">Hiding is not active</string>
     <string name="dashboard_hero_vpnoff_title">VPN is off</string>
-    <string name="dashboard_hero_vpnoff_subtitle">Protection is inactive without a VPN</string>
+    <string name="dashboard_hero_vpnoff_subtitle">Hiding is inactive without a VPN</string>
     <string name="dashboard_summary_modules">Modules</string>
     <string name="dashboard_summary_issues">Issues</string>
     <string name="dashboard_native_protection">Native level</string>
@@ -142,10 +142,10 @@
     <string name="dashboard_protection_unknown">Not checked</string>
     <string name="dashboard_protection_no_module">No module</string>
     <string name="dashboard_protection_hooks_inactive">Hooks inactive</string>
-    <string name="dashboard_needs_restart">VPN Hide was just added to its own protection config. Restart VPN Hide (force-stop and reopen) to check protection — no device reboot needed.</string>
-    <string name="vpn_off_prompt">No active VPN. Turn it on, then tap Retry to run the protection checks. Results are cached until VPN Hide is restarted — no need to re-run later in the same session.</string>
+    <string name="dashboard_needs_restart">VPN Hide just enabled hiding for itself. Restart VPN Hide (force-stop and reopen) to check hiding — no device reboot needed.</string>
+    <string name="vpn_off_prompt">No active VPN. Turn it on, then tap Retry to run the hiding checks. Results are cached until VPN Hide is restarted — no need to re-run later in the same session.</string>
     <string name="vpn_off_retry">Retry</string>
-    <string name="diag_failed_prompt">The protection checks couldn\'t run — root access may have been denied or a command failed. Tap Retry. This is usually transient.</string>
+    <string name="diag_failed_prompt">The hiding checks couldn\'t run — root access may have been denied or a command failed. Tap Retry. This is usually transient.</string>
 
     <!-- Statistics -->
     <string name="statistics_title">Interception counters</string>
@@ -168,7 +168,7 @@
         <item quantity="one">method</item>
         <item quantity="other">methods</item>
     </plurals>
-    <string name="statistics_no_data">No runtime statistics yet. Counters appear after a protected app hits an installed hook.</string>
+    <string name="statistics_no_data">No runtime statistics yet. Counters appear when a selected app calls an installed hook.</string>
     <string name="statistics_no_data_supported_backends">No counters yet from backends that support statistics.</string>
     <string name="statistics_zygisk_native_unavailable">Native counters are not available for Zygisk. Java and Apps counters are still reported by LSPosed.</string>
     <string name="statistics_unknown_uid">uid %1$d</string>
@@ -189,11 +189,11 @@
     <string name="statistics_capture_step3">Every VPN check it makes shows up in the list below.</string>
     <string name="statistics_capture_start">Start capture</string>
     <string name="statistics_capture_live">Capturing · %1$s · apps: %2$d</string>
-    <string name="statistics_capture_active_hint">Switch to a target app and use it — probes show up below as they happen.</string>
+    <string name="statistics_capture_active_hint">Switch to the app you are testing and use it — probes show up below as they happen.</string>
     <string name="statistics_capture_stop">Stop</string>
     <string name="statistics_capture_apps_header">Probes this session</string>
-    <string name="statistics_capture_hint">What a target app probed since this session started. Tap for the per-hook breakdown.</string>
-    <string name="statistics_capture_empty">Waiting for probes… switch to a target app and use it.</string>
+    <string name="statistics_capture_hint">What the tested app probed since this session started. Tap for the per-hook breakdown.</string>
+    <string name="statistics_capture_empty">Waiting for probes… switch to the app you are testing and use it.</string>
     <string name="statistics_capture_captured">Captured · %1$s · apps: %2$d</string>
     <string name="statistics_capture_stopped_note">Session stopped — these results stay until you start a new capture or clear them.</string>
     <string name="statistics_capture_stopped_empty">No probes were captured this session.</string>
@@ -231,7 +231,7 @@
     <string name="dashboard_install_recommendation_kmod">Kernel module is recommended. Download %1$s.</string>
     <string name="dashboard_install_recommendation_kmod_ambiguous">Kernel module is recommended. Your kernel\'s GKI branch isn\'t identifiable from uname -r, so try %1$s first; if it doesn\'t load after reboot, install %2$s instead.</string>
     <string name="dashboard_install_recommendation_zygisk">Kernel module is not supported for your device. Install %1$s.</string>
-    <string name="dashboard_install_recommendation_zygisk_warning">Banking and payment apps detect Zygisk hooks and crash when Z is enabled for them. Leave Z off for those apps and rely on LSPosed (Java-level) hiding — native-level hiding won\'t work for them on a kernel without kmod support.</string>
+    <string name="dashboard_install_recommendation_zygisk_warning">Banking and payment apps may detect Zygisk hooks when Native is enabled for them. Leave Native off for those apps and rely on LSPosed (Java-level) hiding.</string>
     <string name="dashboard_install_recommendation_kpm">KPM (beta) is recommended for your kernel — a single universal module that hides at the kernel level, invisible to anti-tamper. Download %1$s.</string>
     <string name="dashboard_install_recommendation_kpm_needs_runtime">KPM (beta) is recommended for your kernel — kernel-level hiding, invisible to anti-tamper. It needs the KPatch-Next-Module installed first. If you\'d rather not install that, use vpnhide-zygisk.zip instead. KPM artifact: %1$s.</string>
     <string name="dashboard_install_recommendation_kpm_beta_note">KPM is experimental (beta). If something doesn\'t work, you can fall back to Zygisk and contact the author.</string>
@@ -277,25 +277,25 @@
     <string name="dashboard_issues">Errors (%d)</string>
     <string name="dashboard_warnings">Warnings (%d)</string>
     <string name="dashboard_info">Info (%d)</string>
-    <string name="dashboard_issue_kmod_capable_but_zygisk">Your kernel supports the kernel module — it hooks in kernel space and is invisible to anti-tamper checks. Zygisk works too, but its hooks can be detected by banking and payment apps, so you\'d have to keep Z off for those apps individually. Install %1$s and uninstall the Zygisk module for cleaner coverage.</string>
+    <string name="dashboard_issue_kmod_capable_but_zygisk">Your kernel supports the kernel module — it hooks in kernel space and is invisible to anti-tamper checks. Zygisk works too, but banking and payment apps may detect its hooks when Native is enabled for them. Install %1$s and uninstall the Zygisk module for cleaner coverage.</string>
     <string name="dashboard_issue_native_conflict_kernel">The kernel module (.ko) and the KPM are both installed. They hook the same kernel functions, and having both active can hard-freeze the device. Keep only one — uninstall either the kernel module or the KPM.</string>
     <string name="dashboard_issue_native_conflict_deferred">The kernel module (.ko) and the KPM are both installed. The KPM stood down at boot to avoid a freeze, so it isn\'t doing anything. Keep only one — uninstall the KPM (or the kernel module).</string>
-    <string name="dashboard_issue_kpm_awaiting_superkey">The KPM is installed but inactive: APatch needs your superkey to load it. Save it in Settings → Security, then reboot to activate native protection.</string>
+    <string name="dashboard_issue_kpm_awaiting_superkey">The KPM is installed but inactive: APatch needs your superkey to load it. Save it in Settings → Security, then reboot to activate native hiding.</string>
     <string name="dashboard_issue_multiple_native">More than one native backend is installed. Only one can be active at a time (priority: kernel module, then KPM, then Zygisk); the others sit idle. Uninstall the ones you don\'t use to keep things clean.</string>
     <string name="dashboard_issue_debug_logging_on">Debug logging is enabled. VPN Hide is writing verbose lines to logcat that anyone with root can read. Turn it off in Settings → Debugging after you\'ve finished collecting a bug report.</string>
     <string name="dashboard_issue_agent_bridge_on">Agent control is enabled. VPN Hide is running a local debug bridge whose open port lets other apps on this device detect VPN Hide. Turn it off in Settings → Developer when you\'re done.</string>
-    <string name="dashboard_issue_selinux_permissive">SELinux is Permissive. Six detection vectors VPN Hide relies on the kernel to block (RTM_GETROUTE, /proc/net/{tcp,udp,dev,fib_trie}, /sys/class/net) are reachable to target apps. Run `setenforce 1` and investigate what disabled it.</string>
+    <string name="dashboard_issue_selinux_permissive">SELinux is Permissive. Six detection vectors VPN Hide relies on the kernel to block (RTM_GETROUTE, /proc/net/{tcp,udp,dev,fib_trie}, /sys/class/net) are reachable to selected apps. Run `setenforce 1` and investigate what disabled it.</string>
     <string name="dashboard_issue_self_multi_profile">VPN Hide is installed in %1$d profiles. The main-profile copy is the one that matters — LSPosed hooks system_server, which runs in the main profile only, and the picker there already sees apps from every profile and applies filters to all of them. Extra copies in secondary profiles are redundant and race each other\'s Saves to the shared config. Uninstall from work profile / Second Space / other secondary profiles.</string>
-    <string name="dashboard_issue_no_native">No native module installed. Install kmod or zygisk for full protection.</string>
+    <string name="dashboard_issue_no_native">No Native backend installed. Install the recommended Native backend for full hiding.</string>
     <string name="dashboard_issue_lsposed_not_installed">LSPosed/Vector is not installed. Install it and enable the VPN Hide module for System Framework.</string>
     <string name="dashboard_issue_reboot">LSPosed is configured correctly, but its hooks are not active yet. Reboot the device to activate them.</string>
     <string name="dashboard_issue_lsposed_config_unreadable">Failed to read LSPosed/Vector configuration. Reopen LSPosed/Vector, verify that VPN Hide is enabled there, and then reopen VPN Hide.</string>
     <string name="dashboard_issue_lsposed_not_enabled">VPN Hide is present in LSPosed/Vector, but the module is disabled. Enable VPN Hide in LSPosed/Vector and keep System Framework in its scope.</string>
     <string name="dashboard_issue_lsposed_no_system_scope">VPN Hide is enabled in LSPosed/Vector, but System Framework is missing from its scope. Add System Framework to the VPN Hide scope in LSPosed/Vector.</string>
-    <string name="dashboard_issue_lsposed_extra_scope">VPN Hide should stay scoped only to System Framework in LSPosed/Vector. Remove these apps from the VPN Hide scope: %1$s. Use Protection → Tun in VPN Hide for filtering instead.</string>
-    <string name="dashboard_issue_lsposed_field_rename">AOSP field rename detected on Android SDK %2$s: %1$s. Java-layer protection is degraded for the affected hooks (they were skipped at install time to avoid logcat-spam from per-call NoSuchFieldError). Please file an issue at github.com/okhsunrog/vpnhide/issues with this list so the hooks can be updated for your Android version.</string>
-    <string name="dashboard_issue_no_targets">No target apps configured. Go to Protection → Tun to select apps.</string>
-    <string name="dashboard_issue_ports_no_observers">Ports hiding module is installed but no observers are configured. Go to Protection → Ports to pick apps.</string>
+    <string name="dashboard_issue_lsposed_extra_scope">VPN Hide should stay scoped only to System Framework in LSPosed/Vector. Remove these apps from the VPN Hide scope: %1$s. Use the Hiding tab in VPN Hide for filtering instead.</string>
+    <string name="dashboard_issue_lsposed_field_rename">AOSP field rename detected on Android SDK %2$s: %1$s. Java-layer hiding is degraded for the affected hooks (they were skipped at install time to avoid logcat-spam from per-call NoSuchFieldError). Please file an issue at github.com/okhsunrog/vpnhide/issues with this list so the hooks can be updated for your Android version.</string>
+    <string name="dashboard_issue_no_targets">No target apps configured. Open Hiding and choose the apps you need.</string>
+    <string name="dashboard_issue_ports_no_observers">Ports hiding module is installed, but no apps have Ports enabled. Open Hiding and enable Ports for the apps you need.</string>
     <string name="dashboard_issue_version_mismatch">LSPosed module version mismatch: running %1$s, installed %2$s. Reboot the device to apply the update.</string>
     <string name="dashboard_issue_update_kmod">Kernel module version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
     <string name="dashboard_issue_update_zygisk">Zygisk version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
@@ -385,7 +385,7 @@
     <string name="settings_full_role_labels_sub">Show Java / Native / Apps / Ports instead of J / N / A / P</string>
     <string name="settings_diagnostics_section">Diagnostics</string>
     <string name="settings_diagnostics_title">Detailed diagnostics</string>
-    <string name="settings_diagnostics_sub">Run the full protection check suite</string>
+    <string name="settings_diagnostics_sub">Run the full hiding check suite</string>
     <string name="settings_debug_section">Debugging</string>
     <string name="settings_agent_control">Agent control</string>
     <string name="settings_agent_control_sub">Start the debug localhost bridge for host MCP tools over adb</string>
@@ -405,13 +405,13 @@
     <string name="settings_config_import_root_failed">Import failed: root config write failed.</string>
     <string name="settings_package_list_title">Package list export</string>
     <string name="settings_package_list_sub">Copy or save package IDs for VPN clients</string>
-    <string name="settings_package_list_dialog_body">Export package IDs from the saved protection config. The JSON backup above remains the full VPN Hide config.</string>
+    <string name="settings_package_list_dialog_body">Export package IDs from the saved hiding config. The JSON backup above remains the full VPN Hide config.</string>
     <string name="settings_package_list_source">Source</string>
-    <string name="settings_package_list_source_java">Tun / Java</string>
+    <string name="settings_package_list_source_java">Java</string>
     <string name="settings_package_list_source_native">Native</string>
     <string name="settings_package_list_source_app_hiding">Apps hiding</string>
     <string name="settings_package_list_source_ports">Ports</string>
-    <string name="settings_package_list_source_all">All protection roles</string>
+    <string name="settings_package_list_source_all">All hiding roles</string>
     <string name="settings_package_list_format">Format</string>
     <string name="settings_package_list_format_comma">Comma-separated</string>
     <string name="settings_package_list_format_lines">One package per line</string>
@@ -422,9 +422,9 @@
     <string name="settings_package_list_copied">Package list copied.</string>
     <string name="settings_package_list_saved">Package list saved.</string>
     <string name="settings_package_list_save_failed">Package list export failed.</string>
-    <string name="settings_advanced_protection">Advanced protection</string>
+    <string name="settings_advanced_protection">Advanced hiding</string>
     <string name="settings_auto_hide_vpn_services">Auto-hide VPN apps</string>
-    <string name="settings_auto_hide_vpn_services_sub">Hide installed apps that declare Android VpnService from app-hiding targets.</string>
+    <string name="settings_auto_hide_vpn_services_sub">Hide installed apps that declare Android VpnService from apps with the Apps role.</string>
     <string name="settings_auto_hide_vpn_name">Also match VPN in app names</string>
     <string name="settings_auto_hide_vpn_name_sub">Low-confidence heuristic for clones and renamed VPN clients. Off by default.</string>
     <string name="settings_manual_hidden_apps">Manually hidden apps</string>

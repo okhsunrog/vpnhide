@@ -5,7 +5,7 @@
     <!-- Navigation -->
     <string name="tab_dashboard">Обзор</string>
     <string name="tab_statistics">Статистика</string>
-    <string name="tab_protection">Защита</string>
+    <string name="tab_protection">Скрытие</string>
 
     <!-- App picker -->
     <string name="selected_count">%d выбрано</string>
@@ -26,33 +26,33 @@
     <string name="native_hooks_title_with_backend">Нативные хуки · %1$s</string>
     <string name="ports_policy_title">Правила портов</string>
     <string name="ports_policy_all_title">Все localhost-порты</string>
-    <string name="ports_policy_all_body">Блокировать все TCP и UDP подключения к 127.0.0.1 и ::1 для этого приложения. Это стандартное поведение P.</string>
+    <string name="ports_policy_all_body">Блокировать все TCP- и UDP-подключения к 127.0.0.1 и ::1 для этого приложения. Это стандартное поведение P.</string>
     <string name="ports_policy_preset_title">Пресет</string>
     <string name="ports_policy_preset_body">%1$s: %2$s</string>
-    <string name="ports_policy_common_proxy">Типичные proxy-порты</string>
+    <string name="ports_policy_common_proxy">Типичные прокси-порты</string>
     <string name="ports_policy_custom_title">Свои диапазоны</string>
-    <string name="ports_policy_custom_body">Блокировать только перечисленные localhost-порты. Оставьте поле End пустым для одного порта.</string>
+    <string name="ports_policy_custom_body">Блокировать только перечисленные localhost-порты. Оставьте поле «Конец» пустым для одного порта.</string>
     <string name="ports_policy_add_rule">Добавить правило</string>
     <string name="ports_policy_start">Начало</string>
     <string name="ports_policy_end">Конец</string>
     <string name="ports_policy_delete_rule">Удалить правило</string>
     <string name="ports_policy_invalid">Укажите хотя бы один корректный порт или диапазон от 1 до 65535.</string>
     <string name="apps_help_role_java_body">LSPosed скрывает VPN-сигналы в Java API Android: NetworkCapabilities, NetworkInfo, LinkProperties и NetworkInterface.</string>
-    <string name="apps_help_role_native_body">Активный нативный бэкенд скрывает VPN-сигналы, видимые через kernel/libc-проверки. VPN Hide пишет один native-выбор во все установленные нативные бэкенды; работает только активный.</string>
-    <string name="apps_help_role_apps_body">Режим observer для скрытия приложений. Это приложение получает очищенный вид PackageManager и не может перечислить, resolve\'нуть или query\'нуть пакеты, которые VPN Hide пометил скрытыми.</string>
-    <string name="apps_help_role_ports_body">Режим observer для портов. Модуль портов делает localhost-проверки VPN/прокси-демонов похожими на закрытые порты для этого приложения. По умолчанию P блокирует все localhost-порты; через край с настройками можно ограничить выбранные диапазоны.</string>
-    <string name="apps_help_hook_settings_title">Настройки хуков</string>
-    <string name="apps_help_hook_settings_body">Для Java, Native и Ports нажмите край комбинированного чипа с иконкой настроек, чтобы выбрать точные хуки или диапазоны портов для этого приложения. Чип со звёздочкой * означает, что включены кастомные настройки.</string>
+    <string name="apps_help_role_native_body">Активный Native-бэкенд скрывает VPN-сигналы, видимые через проверки ядра и libc. VPN Hide сохраняет один выбор Native для всех установленных Native-бэкендов; работает только активный.</string>
+    <string name="apps_help_role_apps_body">Apps скрывает выбранные пакеты от этого приложения: оно получает очищенный ответ PackageManager и не может перечислять, находить или запрашивать пакеты, которые VPN Hide пометил скрытыми.</string>
+    <string name="apps_help_role_ports_body">Ports скрывает localhost-проверки VPN- и прокси-демонов: для этого приложения они выглядят как закрытые порты. По умолчанию P блокирует все localhost-порты; в настройках можно ограничить блокировку выбранными диапазонами.</string>
+    <string name="apps_help_hook_settings_title">Индивидуальные настройки</string>
+    <string name="apps_help_hook_settings_body">Для Java, Native и Ports нажмите значок настройки рядом с названием, чтобы выбрать отдельные хуки или диапазоны портов. Звёздочка означает, что для приложения включены индивидуальные настройки.</string>
     <string name="apps_help_apps_hiding_title">Скрытие приложений</string>
-    <string name="apps_help_apps_hiding_body">VPN Hide автоматически находит пакеты, которые нужно скрывать от observer\'ов: приложения с VPN-сервисом и опционально эвристика по имени. Ручной выбор скрытых пакетов находится в Настройки → Расширенная защита. Системные вызовы исключены, чтобы Android мог продолжать устанавливать и запускать приложения.</string>
+    <string name="apps_help_apps_hiding_body">VPN Hide автоматически находит пакеты, которые стоит скрывать от приложений-наблюдателей: приложения с VPN-сервисом и, если включено, совпадения по имени. Ручной список скрытых пакетов находится в Настройки → Расширенное скрытие. Системные вызовы исключены, чтобы Android мог продолжать устанавливать и запускать приложения.</string>
     <string name="apps_help_apply_title">Применение изменений</string>
-    <string name="apps_help_apply_body">После Save Java и нативные бэкенды уровня ядра (kmod/KPM) применяются сразу. Zygisk-хуки и правила портов подхватываются целевым приложением после force-stop и повторного открытия.</string>
+    <string name="apps_help_apply_body">После сохранения Java и Native-бэкенды уровня ядра (kmod/KPM) применяются сразу. Zygisk-хуки и правила портов применяются для выбранного приложения после принудительной остановки и повторного запуска.</string>
     <string name="apps_help_zygisk_warning_title">Zygisk и банковские приложения</string>
-    <string name="apps_help_zygisk_warning_body">Zygisk-хуки работают внутри процесса целевого приложения. Банковские и платёжные приложения могут это обнаружить при включённом Native; для таких приложений оставьте Native выключенным и по возможности используйте Java.</string>
+    <string name="apps_help_zygisk_warning_body">Zygisk-хуки работают внутри процесса выбранного приложения. Банковские и платёжные приложения могут это обнаружить, если для них включён Native; оставьте Native выключенным и по возможности используйте Java.</string>
 
     <!-- Root status -->
     <string name="root_error_title">Требуется root-доступ</string>
-    <string name="root_error_message">VPN Hide нужен root-доступ для управления защищёнными приложениями. Выдайте его в менеджере root (Magisk, KernelSU, APatch) и нажмите «Проверить снова».</string>
+    <string name="root_error_message">VPN Hide нужен root-доступ, чтобы управлять скрытием VPN для выбранных приложений. Выдайте его в менеджере root (Magisk, KernelSU, APatch) и нажмите «Проверить снова».</string>
     <string name="root_error_recheck">Проверить снова</string>
 
     <!-- Save feedback -->
@@ -64,15 +64,15 @@
     <!-- Dashboard -->
     <string name="dashboard_modules">Модули</string>
     <string name="dashboard_load_failed_title">Данные обзора недоступны</string>
-    <string name="dashboard_load_failed_message">VPN Hide не смог собрать root-состояние для этого экрана. Проверьте менеджер root, если разрешение было прервано, затем нажмите «Повторить».</string>
+    <string name="dashboard_load_failed_message">VPN Hide не смог получить данные для этого экрана через root. Проверьте менеджер root, если запрос доступа был прерван, затем нажмите «Повторить».</string>
     <string name="dashboard_refresh_failed_message">Обновление не удалось. Показываются предыдущие данные обзора.</string>
     <string name="self_targets_error_title">Подготовка запуска не удалась</string>
-    <string name="self_targets_error_body_root">VPN Hide не смог выполнить root-команду. Если вы отклонили или прервали запрос root, выдайте доступ в менеджере root и нажмите «Повторить».</string>
-    <string name="self_targets_error_body_incomplete">Root-доступ сработал, но VPN Hide не смог прочитать часть стартового состояния (показано ниже). Обычно это временно — нажмите «Повторить».</string>
-    <string name="self_targets_error_body_write">Root-доступ сработал, но VPN Hide не смог сохранить обновлённый конфиг (показано ниже). Нажмите «Повторить».</string>
-    <string name="self_targets_error_body_unknown">VPN Hide не смог завершить root-часть запуска (показано ниже). Нажмите «Повторить».</string>
-    <string name="targets_load_failed_title">Данные защиты недоступны</string>
-    <string name="targets_load_failed_message">VPN Hide не смог собрать root-состояние для этой вкладки. Проверьте менеджер root, если разрешение было прервано, затем нажмите «Повторить».</string>
+    <string name="self_targets_error_body_root">VPN Hide не смог выполнить команду с root-доступом. Если вы отклонили или прервали запрос root, выдайте доступ в менеджере root и нажмите «Повторить».</string>
+    <string name="self_targets_error_body_incomplete">Root-доступ есть, но VPN Hide не смог прочитать часть данных запуска (показано ниже). Обычно это временно — нажмите «Повторить».</string>
+    <string name="self_targets_error_body_write">Root-доступ есть, но VPN Hide не смог сохранить обновлённый конфиг (показано ниже). Нажмите «Повторить».</string>
+    <string name="self_targets_error_body_unknown">VPN Hide не смог завершить подготовку запуска с root-доступом (показано ниже). Нажмите «Повторить».</string>
+    <string name="targets_load_failed_title">Данные скрытия недоступны</string>
+    <string name="targets_load_failed_message">VPN Hide не смог получить данные для этой вкладки через root. Проверьте менеджер root, если запрос доступа был прерван, затем нажмите «Повторить».</string>
     <string name="dashboard_ports">Модуль скрытия портов</string>
     <string name="dashboard_java_backend">Java-бэкенд</string>
     <string name="dashboard_native_backend">Нативный бэкенд</string>
@@ -92,15 +92,15 @@
     <string name="dashboard_kmod_broken_signature_enforced">Установлен, ядро отклоняет неподписанные модули</string>
     <string name="dashboard_active_targets">Активен · целей: %d</string>
     <string name="dashboard_reboot_needed">Требуется перезагрузка устройства</string>
-    <string name="dashboard_protection">Статус защиты</string>
-    <string name="dashboard_hero_protected_title">Защищено</string>
-    <string name="dashboard_hero_protected_subtitle">Все защиты активны</string>
+    <string name="dashboard_protection">Статус скрытия</string>
+    <string name="dashboard_hero_protected_title">VPN скрыт</string>
+    <string name="dashboard_hero_protected_subtitle">Все уровни скрытия активны</string>
     <string name="dashboard_hero_attention_title">Требует внимания</string>
     <string name="dashboard_hero_attention_subtitle">Часть проверок требует внимания</string>
-    <string name="dashboard_hero_unprotected_title">Не защищено</string>
-    <string name="dashboard_hero_unprotected_subtitle">Защита не активна</string>
+    <string name="dashboard_hero_unprotected_title">VPN виден</string>
+    <string name="dashboard_hero_unprotected_subtitle">Скрытие не активно</string>
     <string name="dashboard_hero_vpnoff_title">VPN выключен</string>
-    <string name="dashboard_hero_vpnoff_subtitle">Без VPN защита неактивна</string>
+    <string name="dashboard_hero_vpnoff_subtitle">Скрытие неактивно без VPN</string>
     <string name="dashboard_summary_modules">Модули</string>
     <string name="dashboard_summary_issues">Проблемы</string>
     <string name="dashboard_native_protection">Нативный уровень</string>
@@ -111,20 +111,20 @@
     <string name="dashboard_protection_unknown">Не проверено</string>
     <string name="dashboard_protection_no_module">Нет модуля</string>
     <string name="dashboard_protection_hooks_inactive">Хуки неактивны</string>
-    <string name="dashboard_needs_restart">VPN Hide только что добавил себя в конфиг защиты. Перезапустите VPN Hide (force-stop и откройте заново) для проверки защиты — перезагрузка устройства не нужна.</string>
-    <string name="vpn_off_prompt">VPN не активен. Включите его и нажмите «Повторить», чтобы запустить проверку защиты. Результаты кэшируются до перезапуска VPN Hide — повторно гонять в рамках сессии не нужно.</string>
+    <string name="dashboard_needs_restart">VPN Hide только что включил скрытие для самого себя. Принудительно остановите VPN Hide и откройте снова, чтобы проверить скрытие — перезагрузка устройства не нужна.</string>
+    <string name="vpn_off_prompt">VPN не активен. Включите его и нажмите «Повторить», чтобы проверить скрытие. Результаты кэшируются до перезапуска VPN Hide — повторно запускать проверку в этой сессии не нужно.</string>
     <string name="vpn_off_retry">Повторить</string>
-    <string name="diag_failed_prompt">Не удалось выполнить проверку защиты — возможно, отклонён root-доступ или команда завершилась с ошибкой. Нажмите «Повторить». Обычно это временно.</string>
+    <string name="diag_failed_prompt">Не удалось выполнить проверку скрытия — возможно, отклонён root-доступ или команда завершилась с ошибкой. Нажмите «Повторить». Обычно это временно.</string>
 
     <!-- Statistics -->
     <string name="statistics_title">Счётчики перехватов</string>
-    <string name="statistics_subtitle">Runtime-события от активных бэкендов</string>
+    <string name="statistics_subtitle">События от активных бэкендов во время работы</string>
     <string name="statistics_backend_detail">%1$s · хуков: %2$d</string>
     <string name="statistics_backend_unavailable_detail">Нативные счётчики недоступны</string>
     <!-- Сводное предложение в шапке. %1$s = число событий, %2$s = слово
          «событий», %3$s = число приложений, %4$s = слово «приложений»,
          %5$s = число способов, %6$s = слово «способами». -->
-    <string name="statistics_summary">%1$s %2$s зарегистрировано среди %3$s %4$s, %5$s %6$s</string>
+    <string name="statistics_summary">%1$s %2$s зафиксировано у %3$s %4$s, %5$s %6$s</string>
     <!-- Word forms only — the matching figure is rendered separately in the
          summary sentence, so the ImpliedQuantity (%d-in-string) rule doesn't
          apply here. -->
@@ -146,9 +146,9 @@
         <item quantity="many">способами</item>
         <item quantity="other">способами</item>
     </plurals>
-    <string name="statistics_no_data">Runtime-статистики пока нет. Счётчики появятся после того, как защищённое приложение попадёт в установленный хук.</string>
+    <string name="statistics_no_data">Данных статистики пока нет. Счётчики появятся, когда выбранное приложение вызовет установленный хук.</string>
     <string name="statistics_no_data_supported_backends">Счётчиков от бэкендов, которые поддерживают статистику, пока нет.</string>
-    <string name="statistics_zygisk_native_unavailable">Нативные счётчики недоступны для Zygisk. Java и Apps счётчики по-прежнему отдаёт LSPosed.</string>
+    <string name="statistics_zygisk_native_unavailable">Нативные счётчики недоступны для Zygisk. Счётчики Java и Apps по-прежнему доступны через LSPosed.</string>
     <string name="statistics_unknown_uid">uid %1$d</string>
     <string name="statistics_status_ok">ОК</string>
     <string name="statistics_status_partial">Частично</string>
@@ -156,7 +156,7 @@
     <string name="statistics_status_no_data">Нет данных</string>
     <string name="statistics_status_unavailable">Недоступно</string>
     <string name="statistics_load_failed_title">Статистика недоступна</string>
-    <string name="statistics_load_failed_message">VPN Hide не смог собрать root-состояние для этой вкладки. Проверьте менеджер root, если разрешение было прервано, затем нажмите «Повторить».</string>
+    <string name="statistics_load_failed_message">VPN Hide не смог получить данные для этой вкладки через root. Проверьте менеджер root, если запрос доступа был прерван, затем нажмите «Повторить».</string>
     <string name="statistics_refresh_failed_message">Обновление не удалось. Показываются предыдущие данные статистики.</string>
     <string name="statistics_apps_header">Приложения, проверявшие VPN</string>
     <string name="statistics_apps_caption">Накопительно с момента загрузки. Нажмите приложение для полной разбивки по хукам.</string>
@@ -167,11 +167,11 @@
     <string name="statistics_capture_step3">Все его проверки VPN появятся в списке ниже.</string>
     <string name="statistics_capture_start">Начать захват</string>
     <string name="statistics_capture_live">Идёт захват · %1$s · приложений: %2$d</string>
-    <string name="statistics_capture_active_hint">Переключитесь на целевое приложение и попользуйтесь — пробы будут появляться ниже по мере поступления.</string>
-    <string name="statistics_capture_stop">Стоп</string>
-    <string name="statistics_capture_apps_header">Пробы за эту сессию</string>
-    <string name="statistics_capture_hint">Что целевое приложение проверяло с начала этой сессии. Нажмите для разбивки по хукам.</string>
-    <string name="statistics_capture_empty">Ждём пробы… переключитесь на целевое приложение и попользуйтесь им.</string>
+    <string name="statistics_capture_active_hint">Переключитесь на тестируемое приложение и попользуйтесь им — проверки будут появляться ниже по мере поступления.</string>
+    <string name="statistics_capture_stop">Остановить</string>
+    <string name="statistics_capture_apps_header">Проверки за эту сессию</string>
+    <string name="statistics_capture_hint">Что тестируемое приложение проверяло с начала этой сессии. Нажмите для разбивки по хукам.</string>
+    <string name="statistics_capture_empty">Ждём проверок… переключитесь на тестируемое приложение и попользуйтесь им.</string>
     <string name="statistics_capture_captured">Захвачено · %1$s · приложений: %2$d</string>
     <string name="statistics_capture_stopped_note">Сессия остановлена — результаты сохранятся, пока вы не начнёте новый захват или не очистите их.</string>
     <string name="statistics_capture_stopped_empty">За эту сессию ничего не захвачено.</string>
@@ -185,19 +185,19 @@
     <string name="method_network_capabilities">NetworkCapabilities</string>
     <string name="method_link_properties">LinkProperties</string>
     <string name="method_network_info">NetworkInfo</string>
-    <string name="method_network_handle">Сетевой хэндл</string>
+    <string name="method_network_handle">Идентификатор сети</string>
     <string name="method_connectivity_service">ConnectivityService</string>
     <string name="method_package_enumeration">Перечисление пакетов</string>
     <!-- Описания способов детекта: что это за проверка + как она выдаёт VPN -->
-    <string name="method_desc_routes">Приложение читает таблицу маршрутов (/proc/net/route или netlink). VPN добавляет маршрут по умолчанию через свой туннель-интерфейс — его наличие выдаёт VPN.</string>
-    <string name="method_desc_interfaces">Приложение перечисляет сетевые интерфейсы и их адреса (getifaddrs / netlink). VPN виден как лишний интерфейс tunNN с адресом, не совпадающим с Wi-Fi или моб. сетью.</string>
-    <string name="method_desc_interface_ioctl">Приложение запрашивает интерфейсы напрямую через ioctl (SIOCGIFCONF / SIOCGIFFLAGS). Туннель-интерфейс VPN появляется в списке или числится поднятым.</string>
-    <string name="method_desc_policy_rules">Приложение читает правила маршрутизации (RTM_GETRULE). VPN добавляет правила, заворачивающие трафик в туннель, — они его выдают.</string>
+    <string name="method_desc_routes">Приложение читает таблицу маршрутов (/proc/net/route или netlink). VPN добавляет маршрут по умолчанию через свой туннельный интерфейс — его наличие выдаёт VPN.</string>
+    <string name="method_desc_interfaces">Приложение перечисляет сетевые интерфейсы и их адреса (getifaddrs / netlink). VPN виден как лишний интерфейс tunNN с адресом, не совпадающим с Wi-Fi или мобильной сетью.</string>
+    <string name="method_desc_interface_ioctl">Приложение запрашивает интерфейсы напрямую через ioctl (SIOCGIFCONF / SIOCGIFFLAGS). Туннельный интерфейс VPN появляется в списке или отмечается как активный.</string>
+    <string name="method_desc_policy_rules">Приложение читает правила маршрутизации (RTM_GETRULE). VPN добавляет правила, направляющие трафик в туннель, — они его выдают.</string>
     <string name="method_desc_network_capabilities">Приложение запрашивает NetworkCapabilities. Активный VPN выставляет флаг VPN-транспорта — прямой признак включённого VPN.</string>
     <string name="method_desc_link_properties">Приложение читает LinkProperties. VPN раскрывает имя своего интерфейса tunNN, VPN-маршруты и DNS-серверы.</string>
-    <string name="method_desc_network_info">Приложение проверяет NetworkInfo (устаревший API). Активный VPN сообщает тип VPN вместо моб. сети или Wi-Fi.</string>
-    <string name="method_desc_network_handle">Приложение получает хэндл активной сети. VPN возвращает свою виртуальную сеть вместо физической.</string>
-    <string name="method_desc_connectivity_service">Приложение перечисляет все сети или подписывается на колбэки через ConnectivityService. VPN-сеть всплывает в списке или в колбэках.</string>
+    <string name="method_desc_network_info">Приложение проверяет NetworkInfo (устаревший API). Активный VPN сообщает тип VPN вместо мобильной сети или Wi-Fi.</string>
+    <string name="method_desc_network_handle">Приложение получает идентификатор активной сети. VPN возвращает свою виртуальную сеть вместо физической.</string>
+    <string name="method_desc_connectivity_service">Приложение перечисляет все сети или подписывается на сетевые события через ConnectivityService. VPN-сеть появляется в списке или в событиях.</string>
     <string name="method_desc_package_enumeration">Приложение перечисляет установленные пакеты или ищет компоненты VpnService. Наличие известных VPN-приложений выдаёт использование VPN.</string>
     <string name="surface_java">Java API</string>
     <string name="surface_native">Нативные</string>
@@ -207,21 +207,21 @@
     <string name="dashboard_install_recommendation_device">Ваше устройство: %1$s, ядро %2$s</string>
     <string name="dashboard_install_recommendation_kmi_note">«%1$s» в версии ядра — это GKI Kernel Module Interface, обозначающий бинарный интерфейс ядра для модулей, а не версию Android на устройстве.</string>
     <string name="dashboard_install_recommendation_kmod">Рекомендуется модуль ядра. Скачайте %1$s.</string>
-    <string name="dashboard_install_recommendation_kmod_ambiguous">Рекомендуется модуль ядра. GKI-ветку вашего ядра не удаётся определить из uname -r, поэтому сначала попробуйте %1$s; если после ребута он не загрузится — установите %2$s.</string>
+    <string name="dashboard_install_recommendation_kmod_ambiguous">Рекомендуется модуль ядра. GKI-ветку вашего ядра не удаётся определить из uname -r, поэтому сначала попробуйте %1$s; если после перезагрузки он не загрузится — установите %2$s.</string>
     <string name="dashboard_install_recommendation_zygisk">Для вашего устройства модуль ядра не поддерживается. Установите %1$s.</string>
-    <string name="dashboard_install_recommendation_zygisk_warning">Банковские и платёжные приложения обнаруживают Zygisk-хуки и крашатся при включённом Z. Для таких приложений оставьте Z выключенным и полагайтесь на LSPosed (Java-уровень) — native-уровень защиты для них работать не будет без поддержки kmod в ядре.</string>
+    <string name="dashboard_install_recommendation_zygisk_warning">Банковские и платёжные приложения могут обнаруживать Zygisk-хуки, если для них включён Native. Для таких приложений оставьте Native выключенным и полагайтесь на LSPosed (Java-уровень).</string>
     <string name="dashboard_install_recommendation_kpm">Для вашего ядра рекомендуется KPM (бета) — единый универсальный модуль, скрывающий VPN на уровне ядра, невидимый для анти-тампер проверок. Скачайте %1$s.</string>
-    <string name="dashboard_install_recommendation_kpm_needs_runtime">Для вашего ядра рекомендуется KPM (бета) — скрытие на уровне ядра, невидимое для анти-тампер проверок. Сначала нужно установить KPatch-Next-Module. Если не хотите его ставить — используйте vpnhide-zygisk.zip. Артефакт KPM: %1$s.</string>
+    <string name="dashboard_install_recommendation_kpm_needs_runtime">Для вашего ядра рекомендуется KPM (бета) — скрытие на уровне ядра, невидимое для анти-тампер проверок. Сначала нужно установить KPatch-Next-Module. Если не хотите его ставить — используйте vpnhide-zygisk.zip. Файл KPM: %1$s.</string>
     <string name="dashboard_install_recommendation_kpm_beta_note">KPM экспериментальный (бета). Если что-то не работает — можно вернуться на Zygisk и связаться с автором.</string>
-    <string name="dashboard_install_recommendation_kmod_kpm_alt">Модуль ядра — стабильное и наиболее протестированное решение. KPM (бета) — альтернатива: один универсальный модуль без привязки к GKI-варианту, полезен, если kmod-zip не загружается.</string>
-    <string name="dashboard_issue_kpm_capable_but_zygisk">Ваше ядро поддерживает более скрытный KPM (бета), но установлен только Zygisk. Zygisk детектируется банковскими/платёжными приложениями; KPM скрывает на уровне ядра. Стоит установить %1$s.</string>
-    <string name="dashboard_issue_kpm_experimental_kmod">Бэкенд KPM экспериментальный (бета) и сейчас активен. При проблемах попробуйте модуль ядра (kmod) и, пожалуйста, свяжитесь с автором.</string>
-    <string name="dashboard_issue_kpm_experimental_zygisk">Бэкенд KPM экспериментальный (бета) и сейчас активен. При проблемах попробуйте Zygisk и, пожалуйста, свяжитесь с автором.</string>
+    <string name="dashboard_install_recommendation_kmod_kpm_alt">Модуль ядра — стабильное и наиболее протестированное решение. KPM (бета) — альтернатива: один универсальный модуль без привязки к GKI-варианту, полезен, если zip с kmod не загружается.</string>
+    <string name="dashboard_issue_kpm_capable_but_zygisk">Ваше ядро поддерживает более скрытный KPM (бета), но установлен только Zygisk. Банковские и платёжные приложения могут обнаруживать Zygisk; KPM скрывает VPN на уровне ядра. Стоит установить %1$s.</string>
+    <string name="dashboard_issue_kpm_experimental_kmod">KPM пока экспериментальный (бета) и сейчас активен. При проблемах попробуйте модуль ядра (kmod) и, пожалуйста, свяжитесь с автором.</string>
+    <string name="dashboard_issue_kpm_experimental_zygisk">KPM пока экспериментальный (бета) и сейчас активен. При проблемах попробуйте Zygisk и, пожалуйста, свяжитесь с автором.</string>
     <!-- Community / contact modal -->
     <string name="contact_title">Сообщество и обратная связь</string>
-    <string name="contact_body">Вопросы, баг-репорты или обратная связь? Свяжитесь с автором.</string>
+    <string name="contact_body">Вопросы, сообщения об ошибках или обратная связь? Свяжитесь с автором.</string>
     <string name="contact_github">GitHub Issues</string>
-    <string name="contact_github_sub">Сообщить о баге или предложить функцию</string>
+    <string name="contact_github_sub">Сообщить об ошибке или предложить функцию</string>
     <string name="contact_telegram">Группа в Telegram</string>
     <string name="contact_telegram_sub">Чат с сообществом и автором</string>
     <string name="contact_4pda">Тема на 4PDA</string>
@@ -234,10 +234,10 @@
     <!-- Full reset / leftover cleanup -->
     <string name="settings_reset_section">Сброс</string>
     <string name="reset_button">Удалить оставшиеся файлы</string>
-    <string name="reset_button_sub">Удалить все файлы конфигов, состояния и таргетов, которые VPN Hide оставил на устройстве</string>
+    <string name="reset_button_sub">Удалить все файлы конфигов, состояния и целей, которые VPN Hide оставил на устройстве</string>
     <string name="reset_title">Удалить оставшиеся файлы</string>
-    <string name="reset_warning">Будут безвозвратно удалены все файлы конфигов, состояния, статистики и таргетов, которые VPN Hide и его модули писали вне своих модульных каталогов. Действие необратимо.</string>
-    <string name="reset_instructions">Делайте это только после того, как: удалили все модули VPN Hide в root-менеджере, выключили LSPosed-модуль VPN Hide и перезагрузились. Каталоги модулей, само приложение и runtime-состояние здесь не трогаются — они уходят сами после шагов выше.</string>
+    <string name="reset_warning">Будут безвозвратно удалены все файлы конфигов, состояния, статистики и целей, которые VPN Hide и его модули записывали вне своих модульных каталогов. Действие необратимо.</string>
+    <string name="reset_instructions">Выполняйте сброс только после того, как удалили все модули VPN Hide в root-менеджере, выключили LSPosed-модуль VPN Hide и перезагрузили устройство. Каталоги модулей, само приложение и временное состояние здесь не трогаются — они удаляются после шагов выше.</string>
     <string name="reset_checking">Проверка состояния модулей…</string>
     <string name="reset_running">Удаление файлов…</string>
     <string name="reset_blocked_intro">Пока нельзя — VPN Hide ещё активен. Сначала удалите это и перезагрузитесь:</string>
@@ -255,25 +255,25 @@
     <string name="dashboard_issues">Ошибки (%d)</string>
     <string name="dashboard_warnings">Предупреждения (%d)</string>
     <string name="dashboard_info">Информация (%d)</string>
-    <string name="dashboard_issue_kmod_capable_but_zygisk">Ваше ядро поддерживает модуль ядра — он работает в пространстве ядра и невидим для анти-тампер проверок. Zygisk тоже работает, но его хуки обнаруживаются банковскими и платёжными приложениями, так что Z для них придётся вручную держать выключенным. Установите %1$s и удалите Zygisk-модуль.</string>
-    <string name="dashboard_issue_native_conflict_kernel">Модуль ядра (.ko) и KPM установлены одновременно. Они хукают одни и те же функции ядра, и работа обоих может намертво подвесить устройство. Оставьте только один — удалите либо модуль ядра, либо KPM.</string>
+    <string name="dashboard_issue_kmod_capable_but_zygisk">Ваше ядро поддерживает модуль ядра — он работает в пространстве ядра и невидим для анти-тампер проверок. Zygisk тоже работает, но банковские и платёжные приложения могут обнаружить его хуки, если для них включён Native. Установите %1$s и удалите Zygisk-модуль.</string>
+    <string name="dashboard_issue_native_conflict_kernel">Модуль ядра (.ko) и KPM установлены одновременно. Они перехватывают одни и те же функции ядра, и при одновременной работе устройство может полностью зависнуть. Оставьте только один — удалите либо модуль ядра, либо KPM.</string>
     <string name="dashboard_issue_native_conflict_deferred">Модуль ядра (.ko) и KPM установлены одновременно. KPM отключился при загрузке, чтобы не подвесить устройство, и сейчас бездействует. Оставьте только один — удалите KPM (или модуль ядра).</string>
-    <string name="dashboard_issue_kpm_awaiting_superkey">KPM установлен, но не активен: APatch нужен суперключ, чтобы его загрузить. Сохраните его в Настройки → Безопасность и перезагрузитесь для активации нативной защиты.</string>
-    <string name="dashboard_issue_multiple_native">Установлено больше одного нативного бэкенда. Активным может быть только один (приоритет: модуль ядра, затем KPM, затем Zygisk), остальные простаивают. Удалите неиспользуемые, чтобы не захламлять систему.</string>
-    <string name="dashboard_issue_debug_logging_on">Отладочные логи включены. VPN Hide пишет подробные строки в logcat, которые может прочитать любой с root-доступом. Выключите переключатель в Настройки → Отладка после сбора багрепорта.</string>
-    <string name="dashboard_issue_agent_bridge_on">Agent control включён. VPN Hide держит локальный отладочный мост, по открытому порту которого другие приложения на устройстве могут обнаружить VPN Hide. Выключите его в Настройки → Для разработчиков, когда закончите.</string>
-    <string name="dashboard_issue_selinux_permissive">SELinux в режиме Permissive. Шесть векторов детекции, которые VPN Hide рассчитывает на блокировку ядром (RTM_GETROUTE, /proc/net/{tcp,udp,dev,fib_trie}, /sys/class/net), стали доступны целевым приложениям. Выполните `setenforce 1` и разберитесь, что его переключило.</string>
-    <string name="dashboard_issue_self_multi_profile">VPN Hide установлен в %1$d профилях. Значимая копия — в основном профиле: LSPosed хукает system_server, а он запущен только в основном профиле; picker там уже видит приложения из всех профилей и применяет фильтры ко всем. Копии в дополнительных профилях избыточны и конкурируют за Save в общий конфиг. Удалите VPN Hide из рабочего профиля / Second Space / других дополнительных профилей.</string>
-    <string name="dashboard_issue_no_native">Нативный модуль не установлен. Установите kmod или zygisk для полной защиты.</string>
+    <string name="dashboard_issue_kpm_awaiting_superkey">KPM установлен, но не активен: APatch нужен суперключ, чтобы его загрузить. Сохраните его в Настройки → Безопасность и перезагрузитесь для активации нативного скрытия.</string>
+    <string name="dashboard_issue_multiple_native">Установлено больше одного Native-бэкенда. Активным может быть только один (приоритет: модуль ядра, затем KPM, затем Zygisk), остальные простаивают. Удалите неиспользуемые, чтобы не засорять систему.</string>
+    <string name="dashboard_issue_debug_logging_on">Отладочные логи включены. VPN Hide пишет подробные строки в logcat, которые может прочитать любой с root-доступом. Выключите переключатель в Настройки → Отладка после сбора отчёта об ошибке.</string>
+    <string name="dashboard_issue_agent_bridge_on">Agent control включён. VPN Hide запускает локальный отладочный мост; по открытому порту другие приложения на устройстве могут обнаружить VPN Hide. Выключите его в Настройки → Для разработчиков, когда закончите.</string>
+    <string name="dashboard_issue_selinux_permissive">SELinux в режиме Permissive. Шесть векторов обнаружения, которые VPN Hide рассчитывает блокировать на уровне ядра (RTM_GETROUTE, /proc/net/{tcp,udp,dev,fib_trie}, /sys/class/net), стали доступны выбранным приложениям. Выполните `setenforce 1` и проверьте, что перевело SELinux в этот режим.</string>
+    <string name="dashboard_issue_self_multi_profile">VPN Hide установлен в %1$d профилях. Рабочая копия — в основном профиле: LSPosed перехватывает system_server, а он запущен только в основном профиле; экран выбора там уже видит приложения из всех профилей и применяет фильтры ко всем. Копии в дополнительных профилях избыточны и могут одновременно записывать общий конфиг. Удалите VPN Hide из рабочего профиля / Second Space / других дополнительных профилей.</string>
+    <string name="dashboard_issue_no_native">Native-бэкенд не установлен. Установите рекомендованный Native-бэкенд для полного скрытия.</string>
     <string name="dashboard_issue_lsposed_not_installed">LSPosed/Vector не установлен. Установите его и включите модуль VPN Hide для System Framework.</string>
     <string name="dashboard_issue_reboot">LSPosed настроен правильно, но его хуки ещё не активны. Перезагрузите устройство, чтобы активировать их.</string>
     <string name="dashboard_issue_lsposed_config_unreadable">Не удалось прочитать конфигурацию LSPosed/Vector. Откройте LSPosed/Vector, проверьте что VPN Hide там включён, затем снова откройте VPN Hide.</string>
     <string name="dashboard_issue_lsposed_not_enabled">VPN Hide найден в LSPosed/Vector, но модуль выключен. Включите VPN Hide в LSPosed/Vector и оставьте в scope System Framework.</string>
     <string name="dashboard_issue_lsposed_no_system_scope">VPN Hide включён в LSPosed/Vector, но в его scope отсутствует System Framework. Добавьте System Framework в scope модуля VPN Hide в LSPosed/Vector.</string>
-    <string name="dashboard_issue_lsposed_extra_scope">VPN Hide в LSPosed/Vector должен быть включён только для System Framework. Уберите из scope модуля VPN Hide эти приложения: %1$s. Для фильтрации используйте Защита → Туннели в VPN Hide.</string>
-    <string name="dashboard_issue_lsposed_field_rename">Обнаружено переименование AOSP-поля на Android SDK %2$s: %1$s. Java-защита отключена для затронутых хуков (они пропущены при установке, чтобы не спамить logcat NoSuchFieldError на каждом вызове). Пожалуйста, заведите issue на github.com/okhsunrog/vpnhide/issues с этим списком — это нужно, чтобы обновить хуки под вашу версию Android.</string>
-    <string name="dashboard_issue_no_targets">Целевые приложения не настроены. Перейдите в Защита → Туннели.</string>
-    <string name="dashboard_issue_ports_no_observers">Модуль скрытия портов установлен, но наблюдатели не настроены. Перейдите в Защита → Порты.</string>
+    <string name="dashboard_issue_lsposed_extra_scope">VPN Hide в LSPosed/Vector должен быть включён только для System Framework. Уберите из scope модуля VPN Hide эти приложения: %1$s. Для фильтрации используйте вкладку «Скрытие» в VPN Hide.</string>
+    <string name="dashboard_issue_lsposed_field_rename">Обнаружено переименование AOSP-поля на Android SDK %2$s: %1$s. Java-уровень скрытия отключён для затронутых хуков: они пропущены при установке, чтобы не засорять logcat ошибками NoSuchFieldError при каждом вызове. Пожалуйста, откройте issue на github.com/okhsunrog/vpnhide/issues с этим списком — это нужно, чтобы обновить хуки под вашу версию Android.</string>
+    <string name="dashboard_issue_no_targets">Целевые приложения не настроены. Откройте вкладку «Скрытие» и выберите нужные.</string>
+    <string name="dashboard_issue_ports_no_observers">Модуль скрытия портов установлен, но Ports не включён ни для одного приложения. Откройте вкладку «Скрытие» и включите Ports для нужных приложений.</string>
     <string name="dashboard_issue_version_mismatch">Несоответствие версий LSPosed модуля: запущена %1$s, установлена %2$s. Перезагрузите устройство для обновления.</string>
     <string name="dashboard_issue_update_kmod">Версия модуля ядра %1$s старее версии приложения %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
     <string name="dashboard_issue_update_zygisk">Версия модуля Zygisk %1$s старее версии приложения %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
@@ -293,8 +293,8 @@
     <string name="dashboard_issue_kmod_wrong_variant">Неправильный вариант модуля ядра: установлен %1$s, вашему ядру нужен %2$s. Удалите текущий kmod и установите %3$s из последнего релиза.</string>
     <string name="dashboard_issue_kmod_unknown_variant">Модуль ядра установлен, но не загружается, и в zip не указано, под какой GKI-вариант он собран. Переустановите %1$s из последнего релиза, чтобы убедиться, что он подходит вашему ядру.</string>
     <string name="dashboard_issue_kmod_ambiguous_try_alternative">Модуль ядра %1$s не загрузился при текущей загрузке. GKI-ветку вашего ядра не удаётся определить из uname -r — установите %2$s вместо него.</string>
-    <string name="dashboard_issue_kmod_load_failed">Модуль ядра не загрузился. Ошибка insmod: %1$s. Чтобы приложить полный вывод insmod к багрепорту, нажмите Настройки → Отладка → Собрать отладочный лог.</string>
-    <string name="dashboard_issue_kmod_signature_enforced">Ваше ядро требует подписанные модули, поэтому неподписанный модуль ядра не загружается (insmod вернул EKEYREJECTED — \"Key was rejected by service\"). Magisk это не отключает. Перейдите на KernelSU Next в режиме GKI — он снимает проверку подписи, и kmod загрузится. На GKI-ядрах правильный инструмент — именно модуль ядра; не откатывайтесь на Zygisk: его хуки в процессе легко детектят банковские и антифрод-приложения.</string>
+    <string name="dashboard_issue_kmod_load_failed">Модуль ядра не загрузился. Ошибка insmod: %1$s. Чтобы приложить полный вывод insmod к отчёту об ошибке, нажмите Настройки → Отладка → Собрать отладочный лог.</string>
+    <string name="dashboard_issue_kmod_signature_enforced">Ваше ядро требует подписанные модули, поэтому неподписанный модуль ядра не загружается (insmod вернул EKEYREJECTED — \"Key was rejected by service\"). Magisk это не отключает. Перейдите на KernelSU Next в режиме GKI — он снимает проверку подписи, и kmod загрузится. На GKI-ядрах правильный инструмент — именно модуль ядра; не откатывайтесь на Zygisk: банковские и платёжные приложения легко обнаруживают его хуки внутри процесса.</string>
     <string name="dashboard_issue_kmod_not_supported_kernel">Для вашего ядра (%1$s) нет подходящего варианта vpnhide-kmod. Удалите модуль kmod и установите вместо него %2$s.</string>
     <string name="dashboard_issue_kprobes_missing">Ваше ядро собрано без CONFIG_KRETPROBES. Модуль ядра VPN Hide не может работать на таком ядре. Удалите kmod и используйте vpnhide-zygisk.zip.</string>
 
@@ -316,9 +316,9 @@
     <string name="btn_save_debug">Сохранить</string>
     <string name="btn_share_debug">Поделиться</string>
     <string name="diag_debug_logging_title">Отладочные логи</string>
-    <string name="settings_debug_logging_sub">По умолчанию выключено ради скрытности. Инструменты захвата в «Отладке» включают его автоматически — этот тумблер нужен только для постоянных логов во всех компонентах.</string>
+    <string name="settings_debug_logging_sub">По умолчанию выключено ради скрытности. Инструменты захвата в «Отладке» включают его автоматически — этот переключатель нужен только для постоянных логов во всех компонентах.</string>
     <string name="logcat_card_title">Полный системный logcat</string>
-    <string name="logcat_card_description">Записывает неотфильтрованные логи из всех буферов (main/system/crash/events/radio) для диагностики проблем, которые не видны в стандартных проверках. Начните запись, воспроизведите баг, затем остановите.</string>
+    <string name="logcat_card_description">Записывает неотфильтрованные логи из всех буферов (main/system/crash/events/radio) для диагностики проблем, которые не видны в стандартных проверках. Начните запись, воспроизведите ошибку, затем остановите.</string>
     <string name="logcat_btn_start">Начать запись</string>
     <string name="logcat_btn_stop">Остановить и сохранить</string>
     <string name="logcat_recording_status">● Запись · %1$s · %2$s</string>
@@ -327,10 +327,10 @@
     <string name="badge_pass">ОК</string>
     <string name="badge_fail">ПРОВАЛ</string>
     <string name="badge_info">ИНФО</string>
-    <string name="banner_ready">VPN активен. Приложение в списке целевых. Результаты проверок ниже.</string>
-    <string name="banner_added_self">VPN Hide добавлен в список целевых приложений. Перезапустите VPN Hide (force-stop и откройте заново) для работы нативных проверок — перезагрузка устройства не нужна.</string>
+    <string name="banner_ready">VPN активен. Для этого приложения включено скрытие. Результаты проверок ниже.</string>
+    <string name="banner_added_self">Для VPN Hide включено скрытие. Принудительно остановите VPN Hide и откройте снова, чтобы нативные проверки начали работать — перезагрузка устройства не нужна.</string>
     <string name="banner_network_blocked">Доступ к сети отключён для этого приложения. Проверки ioctl (SIOCGIFFLAGS, SIOCGIFMTU, SIOCGIFCONF) не могут быть выполнены. Включите в Настройки → Приложения → VPN Hide → Мобильный интернет и Wi-Fi.</string>
-    <string name="section_native">Нативный уровень (kmod / zygisk)</string>
+    <string name="section_native">Нативный уровень (kmod / KPM / Zygisk)</string>
     <string name="section_java">Java API уровень (LSPosed)</string>
 
     <!-- Экран настроек -->
@@ -352,18 +352,18 @@
     <string name="settings_haptics">Тактильный отклик</string>
     <string name="settings_haptics_sub">Вибрация при нажатиях и переключениях</string>
     <string name="settings_animations">Анимации</string>
-    <string name="settings_animations_sub">Пружинные переходы и морфинг форм</string>
+    <string name="settings_animations_sub">Пружинные переходы и плавное изменение формы</string>
     <string name="settings_full_role_labels">Полные названия ролей</string>
     <string name="settings_full_role_labels_sub">Показывать Java / Native / Apps / Ports вместо J / N / A / P</string>
     <string name="settings_diagnostics_section">Диагностика</string>
     <string name="settings_diagnostics_title">Подробная диагностика</string>
-    <string name="settings_diagnostics_sub">Полный набор проверок защиты</string>
+    <string name="settings_diagnostics_sub">Полный набор проверок скрытия</string>
     <string name="settings_debug_section">Отладка</string>
     <string name="settings_agent_control">Agent control</string>
-    <string name="settings_agent_control_sub">Запустить отладочный localhost-bridge для host MCP-инструментов через adb</string>
+    <string name="settings_agent_control_sub">Запустить локальный отладочный мост для MCP-инструментов на хосте через adb</string>
     <string name="settings_developer_section">Для разработчиков</string>
-    <string name="settings_suppress_version_warnings">Скрыть предупреждения о версиях и changelog</string>
-    <string name="settings_suppress_version_warnings_sub">Игнорировать суффикс dev-сборки при сравнении запущенного хука LSPosed с установленным приложением и не показывать changelog после каждой пересборки. Актуально только при сборке из исходников; на релизных версиях не влияет.</string>
+    <string name="settings_suppress_version_warnings">Скрыть предупреждения о версиях и истории изменений</string>
+    <string name="settings_suppress_version_warnings_sub">Игнорировать суффикс dev-сборки при сравнении запущенного хука LSPosed с установленным приложением и не показывать историю изменений после каждой пересборки. Актуально только при сборке из исходников; на релизных версиях не влияет.</string>
     <string name="settings_config_section">Конфигурация</string>
     <string name="settings_config_backup_title">Резервная копия конфига</string>
     <string name="settings_config_backup_sub">Сохранить или восстановить канонический JSON-конфиг</string>
@@ -376,42 +376,42 @@
     <string name="settings_config_import_invalid">Импорт не удался: некорректный JSON-конфиг.</string>
     <string name="settings_config_import_root_failed">Импорт не удался: не получилось записать root-конфиг.</string>
     <string name="settings_package_list_title">Экспорт списка пакетов</string>
-    <string name="settings_package_list_sub">Скопировать или сохранить package IDs для VPN-клиентов</string>
-    <string name="settings_package_list_dialog_body">Экспортирует package IDs из сохранённого конфига защиты. JSON-резервная копия выше остаётся полным конфигом VPN Hide.</string>
+    <string name="settings_package_list_sub">Скопировать или сохранить ID пакетов для VPN-клиентов</string>
+    <string name="settings_package_list_dialog_body">Экспортирует ID пакетов из сохранённого конфига скрытия. JSON-резервная копия выше остаётся полным конфигом VPN Hide.</string>
     <string name="settings_package_list_source">Источник</string>
-    <string name="settings_package_list_source_java">Туннели / Java</string>
+    <string name="settings_package_list_source_java">Java</string>
     <string name="settings_package_list_source_native">Native</string>
-    <string name="settings_package_list_source_app_hiding">Apps hiding</string>
+    <string name="settings_package_list_source_app_hiding">Скрытие приложений</string>
     <string name="settings_package_list_source_ports">Ports</string>
-    <string name="settings_package_list_source_all">Все роли защиты</string>
+    <string name="settings_package_list_source_all">Все роли скрытия</string>
     <string name="settings_package_list_format">Формат</string>
     <string name="settings_package_list_format_comma">Через запятую</string>
     <string name="settings_package_list_format_lines">По одному пакету на строку</string>
-    <string name="settings_package_list_count">Package IDs: %1$d</string>
-    <string name="settings_package_list_empty">Для этого источника package IDs нет.</string>
+    <string name="settings_package_list_count">ID пакетов: %1$d</string>
+    <string name="settings_package_list_empty">Для этого источника нет ID пакетов.</string>
     <string name="settings_package_list_copy">Копировать</string>
     <string name="settings_package_list_save">Сохранить .txt</string>
     <string name="settings_package_list_copied">Список пакетов скопирован.</string>
     <string name="settings_package_list_saved">Список пакетов сохранён.</string>
     <string name="settings_package_list_save_failed">Не удалось экспортировать список пакетов.</string>
-    <string name="settings_advanced_protection">Расширенная защита</string>
+    <string name="settings_advanced_protection">Расширенное скрытие</string>
     <string name="settings_auto_hide_vpn_services">Автоматически скрывать VPN-приложения</string>
-    <string name="settings_auto_hide_vpn_services_sub">Скрывать от целей app hiding установленные приложения, которые объявляют Android VpnService.</string>
+    <string name="settings_auto_hide_vpn_services_sub">Скрывать от приложений с ролью Apps установленные приложения, которые объявляют Android VpnService.</string>
     <string name="settings_auto_hide_vpn_name">Также искать «VPN» в названиях</string>
-    <string name="settings_auto_hide_vpn_name_sub">Шумная эвристика для клонов и переименованных VPN-клиентов. По умолчанию выключена.</string>
+    <string name="settings_auto_hide_vpn_name_sub">Неточная эвристика для клонов и переименованных VPN-клиентов. По умолчанию выключена.</string>
     <string name="settings_manual_hidden_apps">Скрытые вручную приложения</string>
     <string name="settings_manual_hidden_apps_sub">Скрыто вручную: %1$d</string>
     <string name="settings_unavailable_configured_title">Недоступные настроенные приложения</string>
     <string name="settings_unavailable_configured_sub">Сохранены, но сейчас не видны: %1$d</string>
     <string name="settings_unavailable_configured_loading">Загрузка списка приложений…</string>
-    <string name="settings_unavailable_configured_body">Эти package IDs всё ещё сохранены в конфиге, но сейчас не установлены или не видны в списке приложений. Удалите ненужные устаревшие записи.</string>
+    <string name="settings_unavailable_configured_body">Эти ID пакетов всё ещё сохранены в конфиге, но сейчас не установлены или не видны в списке приложений. Удалите ненужные устаревшие записи.</string>
     <string name="settings_unavailable_configured_remove">Удалить</string>
     <string name="settings_unavailable_configured_remove_all">Удалить все</string>
     <string name="settings_unavailable_configured_removed">Недоступные настроенные приложения удалены.</string>
     <string name="settings_unavailable_configured_failed">Не удалось удалить недоступные приложения.</string>
-    <string name="settings_role_hidden">Hidden</string>
-    <string name="settings_auto_hide_saved">Настройки app hiding сохранены.</string>
-    <string name="settings_auto_hide_failed">Не удалось обновить настройки app hiding.</string>
+    <string name="settings_role_hidden">Скрыто</string>
+    <string name="settings_auto_hide_saved">Настройки скрытия приложений сохранены.</string>
+    <string name="settings_auto_hide_failed">Не удалось обновить настройки скрытия приложений.</string>
     <string name="settings_security">Безопасность</string>
     <string name="settings_superkey_title">APatch SuperKey</string>
     <string name="settings_superkey_saved">Сохранён для активации KPM при загрузке.</string>

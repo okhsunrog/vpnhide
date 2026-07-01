@@ -99,7 +99,7 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
     LaunchedEffect(Unit) {
         StatisticsCache.ensureLoaded(scope)
         // Resolve UID → app icon + friendly label for the per-app list, the
-        // same package scan the Protection tab uses (cached app-wide).
+        // same package scan the Apps tab uses (cached app-wide).
         AppListCache.ensureLoaded(scope, context)
     }
     // Tick the elapsed clock while a capture session is active.
@@ -110,10 +110,10 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
         }
     }
     // Live capture: re-read the counters every couple of seconds while a session
-    // is active so probes appear on their own as the user exercises a target app
+    // is active so probes appear on their own as the user exercises the tested app
     // — no manual refresh. The coroutine keeps running while the app is
     // backgrounded (composition is retained), so polling continues while the
-    // user is inside the target app. Skip a tick if a read is still in flight so
+    // user is inside the tested app. Skip a tick if a read is still in flight so
     // a slow root snapshot doesn't get cancelled-and-restarted forever.
     LaunchedEffect(captureBaseline != null) {
         while (captureBaseline != null) {

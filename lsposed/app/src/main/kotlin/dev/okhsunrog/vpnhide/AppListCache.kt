@@ -18,9 +18,9 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
- * Common per-installed-app fields used by every Protection screen
- * (Tun targets, App hiding, Ports). The three screens merge this with
- * their own per-screen toggle state at render time.
+ * Common per-installed-app fields used by the unified Apps list.
+ * Role-specific state (Java, Native, Apps, Ports) is merged with this data
+ * at render time.
  */
 internal data class AppSummary(
     val packageName: String,
@@ -68,9 +68,9 @@ internal fun labelWithUsers(
 
 /**
  * App-scoped cache for the installed-app list. Loaded asynchronously
- * at startup; Protection screens subscribe to `apps` and render
+ * at startup; the Apps screen subscribes to `apps` and renders
  * instantly on tab switch. The top-bar refresh button calls [refresh]
- * which reloads the package + icon list; Protection screens re-merge
+ * which reloads the package + icon list; the Apps screen re-merges
  * their per-screen target flags reactively off `apps` + the targets
  * snapshot, so nothing keys off a manual refresh counter anymore.
  */

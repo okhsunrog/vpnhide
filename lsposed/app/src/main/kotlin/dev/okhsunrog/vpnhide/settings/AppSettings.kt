@@ -41,7 +41,7 @@ data class AppSettings(
     val animationsEnabled: Boolean = true,
     /** Subtle haptic feedback on taps/toggles. */
     val hapticsEnabled: Boolean = true,
-    /** Use full role labels in the unified Protection picker instead of single-letter chips. */
+    /** Use full role labels in the unified Apps picker instead of single-letter chips. */
     val fullProtectionRoleLabels: Boolean = true,
     /** Expose UI-equivalent state/control through the debug host bridge for agent-driven development. */
     val agentControlEnabled: Boolean = false,

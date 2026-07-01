@@ -67,10 +67,10 @@ import io.github.oikvpqya.compose.fastscroller.material3.defaultMaterialScrollba
 import io.github.oikvpqya.compose.fastscroller.rememberScrollbarAdapter
 
 /**
- * Common per-row fields every Protection picker needs. The three pickers
- * (Tun targets, App hiding, Ports) layer their own toggle flags on top of
- * these, but the list scaffold — filtering, scrollbar, save lifecycle,
- * row chrome — only ever touches this interface.
+ * Common per-row fields the Apps picker needs. Role-specific wrappers
+ * layer their own toggle flags on top of these, but the list scaffold —
+ * filtering, scrollbar, save lifecycle, row chrome — only ever touches this
+ * interface.
  */
 internal interface TargetEntry {
     val packageName: String
@@ -104,7 +104,7 @@ internal data class SaveContext(
 )
 
 /**
- * Shared scaffold for the three Protection picker screens. Owns all the
+ * Shared scaffold for app-role picker screens. Owns all the
  * machinery they had copy-pasted: the cached-apps / targets subscription,
  * the dirty-guarded merge, search/system/Russian/configured filtering, the alphabetical
  * fast-scrollbar, the bottom save bar, the snackbar, and the save lifecycle
@@ -495,9 +495,9 @@ internal fun TargetRowShell(
 }
 
 /**
- * Toggle chip used by every picker row (Tun layers L/K/Z, hiding roles
- * Hidden/Observer, Ports). [available] gates interactivity without changing
- * the visual — used when a layer's module isn't installed.
+ * Toggle chip used by every picker row (Java, Native, Apps, Ports).
+ * [available] gates interactivity without changing the visual — used when
+ * a role's backend module isn't installed.
  */
 @Composable
 internal fun TargetChip(

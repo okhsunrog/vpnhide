@@ -1353,10 +1353,11 @@ internal suspend fun loadDashboardState(
 
     // ── Low-priority info: suboptimal-but-working setups ──
 
-    // A stealthier kernel backend fits this kernel, but the user only
-    // installed zygisk. Zygisk is detected by banking / payment apps (Z-off per
-    // app), whereas kmod/KPM are invisible to anti-tamper. Only nudge when the
-    // better backend is actually installable now: kmod always is; KPM only when
+    // A stealthier kernel backend fits this kernel, but the user only installed
+    // Zygisk. Zygisk is detectable by banking / payment apps when the Native role
+    // is enabled for them, whereas kmod/KPM are invisible to anti-tamper.
+    // Only nudge when the better backend is actually installable now:
+    // kmod always is; KPM only when
     // a KPatch runtime is already present (else replacing a working zygisk would
     // mean installing two more things — too pushy for a low-priority hint).
     if (zygisk is ModuleState.Installed &&

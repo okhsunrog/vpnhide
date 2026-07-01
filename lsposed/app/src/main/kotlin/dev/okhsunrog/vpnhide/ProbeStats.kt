@@ -157,7 +157,7 @@ internal fun resolveAppSummary(
 //
 // No backend reset command and no per-event timestamps — the app snapshots the
 // cumulative counters at "Start capture" and shows current − baseline. Lets a
-// user start a session, exercise a target app, and see exactly what it probed
+// user start a session, exercise a tested app, and see exactly what it probed
 // in that window, on any active backend.
 
 /** Snapshot of cumulative counters keyed by (uid, hookId), taken at capture start. */

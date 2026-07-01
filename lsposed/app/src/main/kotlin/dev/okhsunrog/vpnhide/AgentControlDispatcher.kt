@@ -54,14 +54,14 @@ internal object AgentControlDispatcher {
             },
             function<RefreshArgs, AgentProtectionState>(
                 name = "getProtectionState",
-                description = "Return the Protection tab canonical config and configured package summary.",
+                description = "Return the Apps tab canonical config and configured package summary.",
                 inputSchema = schema(optional("refresh", booleanSchema())),
             ) { context, args ->
                 AgentControl.getProtectionState(context, args.refresh)
             },
             function<ListInstalledAppsArgs, List<AgentInstalledApp>>(
                 name = "listInstalledApps",
-                description = "List installed apps in the same shape used by the Protection picker.",
+                description = "List installed apps in the same shape used by the Apps picker.",
                 inputSchema =
                     schema(
                         optional("includeSystem", booleanSchema()),

@@ -53,9 +53,8 @@ import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
 
 /**
- * One row per app across every protection role. The three old tabs (Tun /
- * App-hiding / Ports) are merged into this single list so a target is
- * configured once, in one place, and saved once. Roles:
+ * One row per app across every VPN-hiding role. The unified list keeps role
+ * selection in one place, and one Save writes the complete hiding config. Roles:
  *
  *  - [java]      "J" — LSPosed (the Java layer)
  *  - [native]    "N" — the one active native backend (kmod / KPM / Zygisk, §1.5);

@@ -11,7 +11,7 @@ data class AgentMutationResult(
     val message: String,
     /** True when persistent app/root state changed. */
     val changed: Boolean = false,
-    /** True when a target app force-stop/reopen is needed for all effects to apply. */
+    /** True when a selected app force-stop/reopen is needed for all effects to apply. */
     val targetRestartRecommended: Boolean = false,
 )
 
@@ -243,7 +243,7 @@ data class AgentStatisticsCaptureDiff(
     val apps: List<AgentAppProbeStats>,
 )
 
-/** Protection tab state and canonical config summary. */
+/** Apps tab state and canonical config summary. */
 @Serializable
 data class AgentProtectionState(
     /** Canonical JSON exactly as export/import uses it. */
@@ -303,7 +303,7 @@ data class AgentCanonicalSettings(
     val autoHiddenPackages: List<String>,
 )
 
-/** Ports policy shown by the ports settings edge. */
+/** Ports policy shown by the Ports settings dialog. */
 @Serializable
 data class AgentPortPolicy(
     /** all, preset, or custom. */
@@ -325,7 +325,7 @@ data class AgentPortRule(
     val end: Int,
 )
 
-/** Installed app summary used by the Protection picker. */
+/** Installed app summary used by the Apps picker. */
 @Serializable
 data class AgentInstalledApp(
     /** Package name. */
