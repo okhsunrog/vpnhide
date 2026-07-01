@@ -74,10 +74,10 @@ Key consequences:
   `/proc/net/{if_inet6,tcp,tcp6}`, kmod/KPM also handle `RTM_GETRULE` and the
   server host-route — are noted in the matrix; neither delta is a reason to
   stack native backends.
-- So a complete install is **two roles**: exactly one native backend (kmod,
-  KPM, or Zygisk) **plus** lsposed for the Java vectors, with SELinux as an
-  unreliable platform backstop underneath. Where only one layer covers a vector,
-  that is called out below.
+- So a complete install is **two components**: exactly one native backend (kmod,
+  KPM, or Zygisk) **plus** lsposed — which covers both the Java network vectors
+  and package visibility — with SELinux as an unreliable platform backstop
+  underneath. Where only one layer covers a vector, that is called out below.
 
 > **SELinux is a free but unreliable backstop.** On a Pixel 4a / Android 13,
 > `untrusted_app` is already *denied* `read` on `/proc/net/route` and `search`

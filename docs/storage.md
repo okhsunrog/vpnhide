@@ -15,15 +15,16 @@ defines the single on-disk source of truth those bytes are derived from.
 
 ## 1. Two layers, one boundary
 
-Two formats, by role — not one format stretched over everything:
+Two formats, by function — not one format stretched over everything:
 
 - **On disk = JSON.** A single canonical "desired state" file. Package-keyed (so it
   survives reinstalls), rich (roles, per-hook selection, debug, app settings),
   trivially import/export-able. Read by the app (Kotlin), the LSPosed hook
   (Kotlin), and the Rust activators.
 - **Runtime IPC = the text protocol** ([protocol.md](protocol.md), v1 frozen).
-  uid-keyed, hand-parsed, kernel-safe. The runtime wire for the **native**
-  backends only (kmod / KPM / Zygisk): config in, stats/status out.
+  uid-keyed, hand-parsed, kernel-safe. The runtime *config* wire for the
+  **native** backends (kmod / KPM / Zygisk): config in, stats/status out. Its
+  text format is also reused for LSPosed's read-only state file (§3).
 - **The bridge = the activator** (Rust). It projects the JSON onto the wire for
   whichever native backend is installed.
 
@@ -155,7 +156,10 @@ How it reads, carefully (this runs in the bootloop-critical `system_server`):
   them via **`/data/system/packages.list`** (the stable AOSP `pkg uid …` map) —
   **not** via `PackageManager`, because the hook *is* hooking PackageManager and a
   PM call could re-enter its own hooks (recursion → deadlock → bootloop). Reading
-  `packages.list` is a plain file read, hook-free.
+  `packages.list` is a plain file read, hook-free. The same self-read + `packages.list`
+  resolution also drives the **Apps** role (package visibility) — it just keys on the
+  observer UIDs and hidden packages instead of the target set, so both LSPosed jobs
+  share one hook-free resolver.
 - **Multi-profile for free:** match `callingUid % 100000 ∈ targetAppIds`. Any
   profile's instance of a target app matches, with no per-profile enumeration.
 - **State out:** the hook writes `/data/system/vpnhide_lsposed_state`, a single
@@ -170,7 +174,7 @@ does not: the hook self-reads the canonical JSON and resolves UIDs in-process.
 
 ---
 
-## 4. Native layer (kmod / KPM / Zygisk) + the activator
+## 4. The activator and its backends (native + ports)
 
 The native backends are **mutually exclusive** — exactly one is installed (the app
 warns/errors and asks the user to remove the extra otherwise). So the activator

@@ -37,11 +37,11 @@ The target app's process is completely untouched when using LSPosed + a kernel-l
 
 ## What vpnhide hides
 
-vpnhide is not just one toggle. It combines three different hiding roles that can be enabled per app:
+vpnhide hides three things from selected apps, all configured per app via the four **J / N / A / P** roles (Java, Native, Apps, Ports):
 
-1. **Interface hiding** — the core VPN-hiding layer. It removes VPN interfaces and routes from native APIs (`ioctl`, `getifaddrs`, `/proc/net/*`, `NetworkInterface`) and from Java APIs (`NetworkCapabilities`, `NetworkInfo`, `LinkProperties`).
-2. **Port hiding** — blocks localhost access for selected apps so they cannot detect Clash, sing-box, V2Ray, Happ, and similar tools by probing local ports.
-3. **App hiding** — hides selected installed apps from selected observer apps. Useful against package visibility checks, for example when an app tries to determine whether a VPN or proxy client is installed.
+1. **Interface hiding** — the main goal. It removes VPN interfaces and routes from native APIs (`ioctl`, `getifaddrs`, `/proc/net/*`, `NetworkInterface`) and from Java APIs (`NetworkCapabilities`, `NetworkInfo`, `LinkProperties`). It is delivered by two roles together — **Java (J)** and **Native (N)** — toggled independently.
+2. **Port hiding** — blocks localhost access for selected apps so they cannot detect Clash, sing-box, V2Ray, Happ, and similar tools by probing local ports (the **Ports (P)** role).
+3. **App hiding** — hides selected installed apps from selected observer apps. Useful against package visibility checks, for example when an app tries to determine whether a VPN or proxy client is installed (the **Apps (A)** role).
 
 ## Which modules do I need?
 

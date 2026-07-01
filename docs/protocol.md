@@ -416,7 +416,7 @@ the only writer of all profiles; each backend reads its own.
 |---|---|---|---|
 | `.ko` / KPM | `debug`, `target` (kernel-owned mask bits) | yes | yes (§4.3) |
 | Zygisk | `debug`, `target` (zygisk-owned mask bits) | no, not yet (§7) | yes, via the app heartbeat |
-| LSPosed | `debug`, `target` (lsposed-owned mask bits), package/observer records | yes | yes |
+| LSPosed | `debug`, `target` (lsposed-owned mask bits, incl. package visibility) | yes | yes |
 
 A backend ignores `target` mask bits it does not own (`mask & own_hooks`), so the
 same `target 0x27fa 0x3ff` line is valid on every channel and each backend takes
