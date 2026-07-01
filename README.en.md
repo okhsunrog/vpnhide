@@ -141,17 +141,17 @@ Alternatively, run `adb shell uname -r` to see the kernel version string.
 
 ## Screenshots
 
-| Dashboard — all OK | Dashboard — issues | Install recommendation |
+| Dashboard — VPN hidden | Hiding — one app list | How it works |
 |:-:|:-:|:-:|
-| <img src="assets/screenshots/dashboard-all-ok.png" width="250"> | <img src="assets/screenshots/dashboard-issues.jpg" width="250"> | <img src="assets/screenshots/dashboard-install-recommendation.jpg" width="250"> |
+| <img src="assets/screenshots/dashboard-hidden.png" width="250"> | <img src="assets/screenshots/hiding-list.png" width="250"> | <img src="assets/screenshots/hiding-help.png" width="250"> |
 
-| Hiding — list | App hiding | Ports hiding |
+| Statistics | Per-hook breakdown | Per-app hook selection |
 |:-:|:-:|:-:|
-| <img src="assets/screenshots/protection-tunnels-list.png" width="250"> | <img src="assets/screenshots/app-hiding-list.png" width="250"> | <img src="assets/screenshots/ports-hiding-list.png" width="250"> |
+| <img src="assets/screenshots/statistics.png" width="250"> | <img src="assets/screenshots/statistics-breakdown.png" width="250"> | <img src="assets/screenshots/hook-picker.png" width="250"> |
 
-| App hiding help | Ports hiding help | Diagnostics |
+| Diagnostics | Settings | Community |
 |:-:|:-:|:-:|
-| <img src="assets/screenshots/app-hiding-help.png" width="250"> | <img src="assets/screenshots/ports-hiding-help.png" width="250"> | <img src="assets/screenshots/diagnostics-native.jpg" width="250"> |
+| <img src="assets/screenshots/diagnostics-native.png" width="250"> | <img src="assets/screenshots/settings.png" width="250"> | <img src="assets/screenshots/community.png" width="250"> |
 
 ## Verify
 

@@ -141,17 +141,17 @@ su -c /data/adb/modules/vpnhide_ports/activator
 
 ## Скриншоты
 
-| Обзор — всё ОК | Обзор — проблемы | Рекомендация установки |
+| Обзор — VPN скрыт | Скрытие — единый список | Как это работает |
 |:-:|:-:|:-:|
-| <img src="assets/screenshots/dashboard-all-ok.png" width="250"> | <img src="assets/screenshots/dashboard-issues.jpg" width="250"> | <img src="assets/screenshots/dashboard-install-recommendation.jpg" width="250"> |
+| <img src="assets/screenshots/dashboard-hidden.png" width="250"> | <img src="assets/screenshots/hiding-list.png" width="250"> | <img src="assets/screenshots/hiding-help.png" width="250"> |
 
-| Скрытие — список | Скрытие приложений | Скрытие портов |
+| Статистика | Разбор по хукам | Выбор хуков для приложения |
 |:-:|:-:|:-:|
-| <img src="assets/screenshots/protection-tunnels-list.png" width="250"> | <img src="assets/screenshots/app-hiding-list.png" width="250"> | <img src="assets/screenshots/ports-hiding-list.png" width="250"> |
+| <img src="assets/screenshots/statistics.png" width="250"> | <img src="assets/screenshots/statistics-breakdown.png" width="250"> | <img src="assets/screenshots/hook-picker.png" width="250"> |
 
-| Скрытие приложений — помощь | Скрытие портов — помощь | Диагностика |
+| Диагностика | Настройки | Сообщество |
 |:-:|:-:|:-:|
-| <img src="assets/screenshots/app-hiding-help.png" width="250"> | <img src="assets/screenshots/ports-hiding-help.png" width="250"> | <img src="assets/screenshots/diagnostics-native.jpg" width="250"> |
+| <img src="assets/screenshots/diagnostics-native.png" width="250"> | <img src="assets/screenshots/settings.png" width="250"> | <img src="assets/screenshots/community.png" width="250"> |
 
 ## Проверка
 
