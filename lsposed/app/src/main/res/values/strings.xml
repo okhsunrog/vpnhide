@@ -339,6 +339,9 @@
     <string name="changelog_section_added">Added</string>
     <string name="changelog_section_changed">Changed</string>
     <string name="changelog_section_fixed">Fixed</string>
+    <string name="changelog_section_removed">Removed</string>
+    <string name="changelog_section_deprecated">Deprecated</string>
+    <string name="changelog_section_security">Security</string>
     <string name="changelog_section_notes">Notes</string>
 
     <!-- Native check names (technical, not translatable) -->

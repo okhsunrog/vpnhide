@@ -1212,6 +1212,9 @@ private fun ChangelogDialog(
             "added" to stringResource(R.string.changelog_section_added),
             "changed" to stringResource(R.string.changelog_section_changed),
             "fixed" to stringResource(R.string.changelog_section_fixed),
+            "removed" to stringResource(R.string.changelog_section_removed),
+            "deprecated" to stringResource(R.string.changelog_section_deprecated),
+            "security" to stringResource(R.string.changelog_section_security),
             "notes" to stringResource(R.string.changelog_section_notes),
         )
 

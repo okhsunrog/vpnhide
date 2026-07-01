@@ -317,6 +317,9 @@
     <string name="changelog_section_added">Добавлено</string>
     <string name="changelog_section_changed">Изменено</string>
     <string name="changelog_section_fixed">Исправлено</string>
+    <string name="changelog_section_removed">Удалено</string>
+    <string name="changelog_section_deprecated">Устарело</string>
+    <string name="changelog_section_security">Безопасность</string>
     <string name="changelog_section_notes">Заметки</string>
 
     <!-- Diagnostics -->
