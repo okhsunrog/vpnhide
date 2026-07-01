@@ -98,7 +98,7 @@ process:
 
 | Language | Process | Role in protocol |
 |---|---|---|
-| C | kernel (`.ko` + KPM) | parse config; emit stats. Freestanding, `shared/vpnhide_logic.h`. |
+| C | kernel (`.ko` + KPM) | parse config; emit stats. Freestanding, `kmod/shared/vpnhide_logic.h`. |
 | Rust | Zygisk process | parse its config profile (`targets.txt`). |
 | Kotlin | app | **serialise** all config snapshots into every channel; **parse** stats readback. The "thick" end. |
 | Kotlin | `system_server` (LSPosed hook) | parse its config profile from its file. Not removable — cannot inject a `.so` into `system_server`. |
@@ -442,7 +442,7 @@ static long vpnhide_kpm_ctl0(const char *args, char *__user out_msg, int outlen)
 ```
 
 The config parser is *already* shared with `.ko` (`apply_targets` →
-`vpnhide_parse_target_uids` from `shared/`). KPM reuses the §4 format unchanged;
+`vpnhide_parse_config` from `kmod/shared/`). KPM reuses the §4 format unchanged;
 only the transport differs and `out_msg`/`outlen` (currently `(void)`) become the
 read-back channel for `stats` and `status`.
 
@@ -496,7 +496,7 @@ paginates. Therefore:
 
 On write, the whole snapshot must fit in `args`; bound it by `MAX_TARGET_UIDS`
 and have the parser truncate honestly at that ceiling (already the case for
-`vpnhide_parse_target_uids(..., MAX_TARGET_UIDS)`).
+`vpnhide_parse_config(..., MAX_TARGET_UIDS)`).
 
 ### 7.3 Delivery
 
@@ -536,9 +536,10 @@ dispatch on those low bits, but the calling conventions differ:
   directly. The activator probes `SUPERCALL_HELLO` before load/control, so a
   missing KernelPatch runtime or stale SuperKey fails before a stray original
   syscall can run.
-- **KPatch-Next:** syscall number `45`, arg0 is `NULL`, command word uses the
-  `0x2026` marker, and the kernel side gates calls by root UID rather than a
-  SuperKey. Use the runtime's own `kpatch kpm ...` CLI. With the standalone
+- **KPatch-Next:** syscall number `45`, arg0 is `NULL`, and the kernel side gates
+  calls by root UID rather than a SuperKey. The activator issues no raw
+  command-word marker here — it drives KPatch-Next through the runtime's own
+  `kpatch kpm ...` CLI. With the standalone
   KPatch-Next-Module that binary lives under
   `/data/adb/modules/KPatch-Next/bin/kpatch`.
 

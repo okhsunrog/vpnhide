@@ -388,12 +388,15 @@ optional.
 | `/data/system/vpnhide_lsposed_state` | LSPosed status + stats (hook → dashboard) | per-boot |
 | `/data/adb/vpnhide/superkey` | APatch superkey (optional, flag-gated) | persistent, root-only |
 
-Removed vs. the pre-redesign layout:
+No longer user-managed config vs. the pre-redesign layout — kept only as migration
+inputs (read when the canonical JSON is absent) and best-effort cleanup until
+removed (see §9):
 
 - the four per-backend `targets.txt` lists → folded into the **one** canonical;
-- `vpnhide_debug_logging` → **gone** (debug is a field in the canonical);
+- `vpnhide_debug_logging` → **no longer user-managed** (debug is a field in the canonical);
 - `vpnhide_uids.txt` / `vpnhide_hidden_pkgs.txt` / `vpnhide_observer_uids.txt` →
-  **gone** (LSPosed reads the canonical + `packages.list` and derives them in-process).
+  **no longer user-managed** (LSPosed reads the canonical + `packages.list` and
+  derives them in-process).
 
 ---
 

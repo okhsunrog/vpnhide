@@ -93,7 +93,7 @@ The script auto-spawns the `ghcr.io/ylarod/ddk-min:<kmi>-<TAG>` container via Do
 ### KPM backend
 
 ```sh
-python3 kmod/kpm/build.py
+./kmod/kpm/build.py
 # → vpnhide-kpm.zip at the repo root
 ```
 
@@ -112,10 +112,12 @@ adb install -r lsposed/app/build/outputs/apk/release/app-release.apk
 # KernelSU, KernelSU-Next, or APatch manager path appropriate for the backend.
 adb push zygisk/target/vpnhide-zygisk.zip /sdcard/Download/
 adb push vpnhide-kmod-<kmi>.zip /sdcard/Download/
+# The KPM zip additionally needs a KernelPatch runtime (built into APatch;
+# KernelSU-Next/Magisk add it via KPatch-Next) — see kmod/kpm/README.md.
 adb push vpnhide-kpm.zip /sdcard/Download/
 ```
 
-After flashing a native backend, reboot the device. Do not keep multiple Native
+After flashing a native backend, reboot the device. Do not keep multiple native
 backends installed unless you are explicitly testing conflict handling; the app
 uses priority `kmod > KPM > Zygisk`, and `.ko` + KPM together is unsafe.
 

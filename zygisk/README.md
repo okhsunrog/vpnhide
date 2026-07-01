@@ -14,6 +14,7 @@ All hooks are inline on `libc.so` via ByteDance shadowhook:
 | `getifaddrs` | `NetworkInterface.getNetworkInterfaces()`, Dart VM, direct C/C++ | Unlinks VPN entries from the returned linked list. |
 | `openat` | `/proc/net/{route,ipv6_route,if_inet6,tcp,tcp6}` | Returns a memfd with VPN entries stripped out. |
 | `recvmsg` | Netlink `RTM_NEWADDR` / `RTM_NEWLINK` dump responses | Removes VPN interface entries from netlink messages. |
+| `recv` | Netlink `RTM_NEWADDR` / `RTM_NEWLINK` dump responses | Same as `recvmsg`; hooked separately because bionic's `recv()` tail-calls `recvfrom`. |
 
 ## Architecture
 
@@ -43,7 +44,7 @@ We carry a small fork at [okhsunrog/android-inline-hook](https://github.com/okhs
 
 ## Compatibility
 
-The module declares Zygisk API v5 but only calls v1-era functions (`pre_app_specialize`, `post_app_specialize`, `args.nice_name`, `set_option(DlCloseModuleLibrary)`). The inline hooks happen via shadowhook inside the process, not through the Zygisk API.
+The module declares Zygisk API v2 but only calls v1-era functions (`pre_app_specialize`, `post_app_specialize`, `args.nice_name`, `set_option(DlCloseModuleLibrary)`). The inline hooks happen via shadowhook inside the process, not through the Zygisk API.
 
 | Setup | Works |
 |-------|-------|
@@ -113,7 +114,7 @@ cargo ndk -t arm64-v8a build --release \
 
 ## Filter logic
 
-VPN interface prefixes: `tun`, `ppp`, `tap`, `wg`, `ipsec`, `xfrm`, `utun`, `l2tp`, `gre`, plus anything containing the substring `vpn`. Matches the list in the [LSPosed companion](../lsposed/).
+VPN interface prefixes: `tun`, `ppp`, `tap`, `wg`, `ipsec`, `xfrm`, `utun`, `l2tp`, `gre`, plus anything containing the substring `vpn`, plus `if<N>` renamed/anonymous netdevs. Matches the list in the [LSPosed companion](../lsposed/).
 
 ## Known limitations
 

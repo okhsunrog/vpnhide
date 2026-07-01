@@ -22,7 +22,7 @@ These short files cover everything specific to this repo. Skipping them leads to
 - [CONTRIBUTING.md](CONTRIBUTING.md) — PR process, commit conventions, changelog requirement
 - [docs/development.md](docs/development.md) — prereqs, per-module build quickstart, keystore setup, device install, CI lints
 - [docs/state.md](docs/state.md) — every persistent path / proc entry / iptables chain the project touches; who writes, who reads, lifetime
-- [docs/storage.md](docs/storage.md) — current storage & activation design: the single JSON canonical, the activator (Rust workspace, native/ports bins) that derives runtime state, LSPosed self-read, the APatch superkey, SELinux layout. Read before touching how config is stored/loaded.
+- [docs/storage.md](docs/storage.md) — current storage & activation design: the single JSON canonical, the activator (Rust workspace, four thin bins: kmod/kpm/zygisk/ports) that derives runtime state, LSPosed self-read, the APatch superkey, SELinux layout. Read before touching how config is stored/loaded.
 - [docs/protocol.md](docs/protocol.md) — the frozen v1 control/stats **wire** between the app and the native backends (config/stats/status); the format every backend parser must agree on
 - [docs/detection-vectors.md](docs/detection-vectors.md) — what an app can probe to detect the VPN (or a hidden package), which component (kmod / KPM / zygisk / lsposed / SELinux) covers each vector, how it manifests. Read before adding or changing a hook.
 - [docs/adb-root-debugging.md](docs/adb-root-debugging.md) — how to make `adb shell su` useful on KernelSU/APatch/Magisk test devices; covers UID 0 without capabilities, SELinux denials on `/data/adb` and `/data/system`, and KPM/KPatch diagnostics.

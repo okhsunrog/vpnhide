@@ -44,12 +44,12 @@ The APK includes a Compose UI for managing target apps across all vpnhide module
 - System apps toggle (selected system apps always visible)
 - One row per app with the current roles:
   - **Java** — LSPosed Java/API hiding
-  - **Native** — the active native backend (`kmod`, KPM, or Zygisk)
+  - **Native** — the active native backend (kmod, KPM, or Zygisk)
   - **Apps** — PackageManager observer mode
   - **Ports** — localhost-port blocking observer
-- Save writes the canonical JSON via `su`, runs the installed native activator
-  (`vpnhide_kmod`, `vpnhide_kpm`, or `vpnhide_zygisk`), and runs the ports
-  activator if present. The LSPosed hook reloads the JSON itself.
+- Save writes the canonical JSON via `su`, runs the active native module's
+  activator (installed under `vpnhide_kmod`, `vpnhide_kpm`, or `vpnhide_zygisk`),
+  and runs the ports activator if present. The LSPosed hook reloads the JSON itself.
 
 Works on KernelSU, Magisk, and any other root solution.
 

@@ -64,11 +64,12 @@ Key consequences:
   case because they hook the same kernel functions and can freeze the device;
   other overlaps are redundant and make setup harder to reason about.
     - **kmod** is preferred on supported GKI kernels — bypass-proof and
-      out-of-process, with the most test coverage.
+      out-of-process, with the most test coverage; needs `CONFIG_KPROBES`.
     - **KPM** is also bypass-proof and out-of-process, but beta and dependent on
       KernelPatch runtime (APatch or KPatch-Next-Module).
-    - **Zygisk** is the fallback — works where no kernel backend is practical,
-      but only catches libc-routed calls and runs inside the target app process.
+    - **Zygisk** is the fallback where no kernel backend is practical — works on
+      any arm64 kernel, but only catches libc-routed calls (a raw `svc #0` slips
+      past) and runs in-process, visible to aggressive anti-tamper.
   The small deltas between backends — e.g. Zygisk also filters
   `/proc/net/{if_inet6,tcp,tcp6}`, kmod/KPM also handle `RTM_GETRULE` and the
   server host-route — are noted in the matrix; neither delta is a reason to
@@ -160,7 +161,7 @@ items.
 | netlink `RTM_GETROUTE` **dump** | `RTA_OIF` index per route | ✅ `fib_dump_info` / `rt6_fill_node` | ✅ `fib_dump_info` / `rt6_fill_node` | ✅ `RTM_NEWROUTE` filter (issue #86) | — | |
 | netlink `RTM_GETROUTE` **single** (`ip route get`) | one `rt_fill_info` reply | ⚠️ intentionally unhooked (see ROADMAP) | ⚠️ intentionally unhooked | ⚠️ not filtered | — | |
 | netlink `RTM_GETRULE` (policy rules) | per-UID lookup tables | ✅ `fib_nl_fill_rule` | ✅ `fib_nl_fill_rule` | — | — | |
-| host-route to the VPN **server** | `/32`·`/128` to a public IP via a *physical* iface | ✅ `is_public_host_route_via_physical` | ✅ `is_public_host_route_via_physical` | — | — | |
+| host-route to the VPN **server** | `/32`·`/128` to a public IP via a *physical* iface | ✅ `is_public_host_route_via_physical` | ✅ `kpm_is_public_host_route{4,6}` | — | — | |
 | `LinkProperties.getRoutes()` (Java) | framework route list | — | — | — | ✅ filter `mRoutes` | |
 
 The **`if<N>` leak (issue #86)** lived here: a hidden tun still has an index, and
@@ -283,7 +284,7 @@ detectors actually probe:
 | KPM | `kmod/kpm/vpnhide_kpm.c` (KernelPatch inline hooks + ctl0); offsets in `kmod/kpm/kver_offsets.h` |
 | zygisk | `zygisk/src/hooks.rs` (ioctl/getifaddrs/openat/recv*); `zygisk/src/filter.rs` (procfs + netlink filters) |
 | lsposed | `lsposed/app/.../HookEntry.kt`, `PackageVisibilityHooks.kt`; iface matcher `.../generated/IfaceLists.kt` |
-| iface match rules | single source of truth `data/interfaces.toml` → `scripts/codegen-interfaces.py` renders all four languages |
+| iface match rules | single source of truth `data/interfaces.toml` → `scripts/codegen-interfaces.py` renders all four targets (kmod/KPM C, zygisk Rust, lsposed native Rust, lsposed Kotlin) |
 
 The interface-name patterns (`tun`/`tap`/`wg`/`ppp`/`ipsec`/`xfrm`/`utun`/`l2tp`/`gre`,
 substring `vpn`, and the `if<digits>` renamed-tunnel form from issue #86) are

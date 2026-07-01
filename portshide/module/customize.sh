@@ -9,4 +9,4 @@ set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
 
 ui_print "- Config: /data/system/vpnhide_config.json (managed by the app)"
-ui_print "- Pick apps via the VPN Hide app → Protection → Ports."
+ui_print "- Pick apps via the VPN Hide app → Hiding → Ports."

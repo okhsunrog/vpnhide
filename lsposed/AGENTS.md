@@ -29,13 +29,16 @@ reinvent them.** `grep` for an existing helper before writing a new one.
 - **`ShellUtils`** — `suExec`/`suExecAsync`, and the parsers `parseConfigLines`,
   `parseKeyValueLines`, `parsePackageUidMap`. **Never write another `pm list`
   or `key=value` parser** — there used to be four; there is now one of each.
-- **`ConfigChannels`** — the one place that invokes installed native activators
-  after the canonical JSON changes. Save, the debug toggle, and startup
-  reconcile go through it. **Don't** hand-build per-backend runtime config in
-  Kotlin; the activators project canonical JSON into each backend's wire.
+- **`ConfigChannels`** — the one place that invokes the single active native
+  activator — folding `kmod > KPM > Zygisk` down to the first installed,
+  non-disabled backend — after the canonical JSON changes; the ports activator
+  is invoked alongside it. Save, the debug toggle, and startup reconcile go
+  through it. **Don't** hand-build per-backend runtime config in Kotlin; the
+  activators derive each backend's wire from the canonical JSON.
 - **`StorageConfig` / `ShellCommandBuilders`** — canonical JSON schema,
-  migration helpers, and root-safe file writes (`buildCanonicalConfigWriteCommand`,
-  `buildAtomicSystemDataRawWriteCommand`). The canonical JSON is the persistent
+  migration helpers, and root-safe file writes (`buildCanonicalConfigWriteCommand`
+  in `StorageConfig` wraps the generic `buildAtomicSystemDataRawWriteCommand` in
+  `ShellCommandBuilders`). The canonical JSON is the persistent
   target config; legacy `targets.txt` / UID files are migration inputs or
   derived runtime state, not app-owned user config.
 - **`TargetPickerScaffold`** — `TargetPickerScreen<T>`, `TargetRowShell`,

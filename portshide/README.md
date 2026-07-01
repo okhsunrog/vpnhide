@@ -1,6 +1,6 @@
 # portshide
 
-Magisk / KernelSU-Next module that blocks selected apps from reaching
+Magisk / KernelSU / KernelSU-Next / APatch module that blocks selected apps from reaching
 `localhost` ports. Used to hide locally-bound VPN / proxy daemons
 (Clash, Sing-box, V2Ray, Amnezia, etc.) from apps that probe for them
 via `connect(127.0.0.1, PORT)` / `connect(::1, PORT)`.
@@ -32,8 +32,9 @@ beside them and is idempotently re-applied on every config change.
 
 ## Install
 
-Pick `vpnhide-ports.zip` in the KernelSU-Next or Magisk manager and
-install. Reboot not strictly required — rules apply on next boot via
+Install `vpnhide-ports.zip` via your root manager's Modules screen
+(Magisk / KernelSU / KernelSU-Next / APatch). Reboot not strictly
+required — rules apply on next boot via
 `service.sh`, or immediately if you manage observers through the VPN
 Hide app (it invokes the ports activator via `su`).
 

@@ -162,11 +162,13 @@ The app has a built-in diagnostics system that catches most setup problems autom
 - LSPosed configuration validation — reads the LSPosed database to verify that VPN Hide is enabled, System Framework is in scope, and no extra apps are scoped (a common misconfiguration)
 - Version mismatch detection — compares installed module versions with the running app version and tells you exactly what to update
 - Native backend recommendation — detects your kernel and maps it to the right kmod, KPM, or Zygisk artifact
-- Live hiding check (when VPN is active) — runs 16 native checks and 5 Java API checks to verify that VPN is actually hidden
+- Live hiding check (when VPN is active) — runs 13 native checks and 12 Java API checks to verify that VPN is actually hidden
 
 Any issues found are shown as actionable cards with specific instructions.
 
-**Diagnostics** tab — detailed per-check breakdown with individual PASS/FAIL results for all 26 detection vectors. Useful for troubleshooting when the Dashboard shows incomplete hiding.
+**Statistics** tab — per-app breakdown of which apps probe for the VPN and how, showing which checks each app runs (counters reported by the active backends).
+
+**Settings → Diagnostics** (Detailed diagnostics) — detailed per-check breakdown with individual PASS/FAIL results for all 26 detection vectors. Useful for troubleshooting when the Dashboard shows incomplete hiding.
 
 ## Components
 
@@ -211,6 +213,8 @@ Any issues found are shown as actionable cards with specific instructions.
 **blocked** = on stock-enforcing builds (Android 10+) SELinux usually denies untrusted apps access to that `/proc/net/*` / `/sys` file. But **SELinux policy is configured differently across devices and ROMs** (OEM and custom ROMs, `permissive` builds), so the vpnhide layers filter these paths anyway and never rely on SELinux.
 
 Important: **netlink dumps (rows 7-9) are not restricted by SELinux** — a regular app reads interfaces, addresses, and routes directly over `NETLINK_ROUTE`. This is exactly how detectors like RKNHardering bypass the `/proc/net/route` denial (see [issue #86](https://github.com/okhsunrog/vpnhide/issues/86)). So the vectors actually reachable by a regular app are rows 1-9 and 24; the active Native backend handles them. Kernel-level backends (kmod/KPM) do this with no target-process footprint; Zygisk covers libc-routed paths but remains detectable and raw-syscall-bypassable. Everything else is either often SELinux-blocked on stock (device-dependent) or goes through Java APIs and is covered by LSPosed.
+
+KPM is beta: its coverage mirrors the `.ko` columns above, but there are minor hook-parity gaps versus the stable `.ko`.
 
 The full vector map — per-layer breakdown, SELinux caveats, and known gaps — lives in [docs/detection-vectors.md](docs/detection-vectors.md).
 

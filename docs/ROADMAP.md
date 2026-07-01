@@ -88,7 +88,8 @@ The kmod `.ko` filters `SIOCGIFCONF` interface enumeration via a kretprobe on
 **32-bit** app's `SIOCGIFCONF` still enters the kernel through
 `compat_sock_ioctl` → `compat_dev_ifconf` and never reaches `sock_ioctl`, so its
 enumeration is not filtered (it sees VPN interfaces). KPM also compacts the
-filled ifreq array but does not yet reduce the `ifc_req == NULL` size query.
+filled ifreq array but does not yet reduce the `ifc_req == NULL` size query —
+a separate, 64-bit gap, not the 32-bit/compat case this heading names.
 Both remaining cases are tracked in [detection-vectors.md](detection-vectors.md)
 (the SIOCGIFCONF notes).
 

@@ -49,7 +49,7 @@ See [docs/changelog.md](docs/changelog.md) for the full changelog workflow.
 All style is enforced by CI — run the checks locally before pushing:
 
 - Rust: `cargo fmt` + `cargo clippy -- -D warnings`
-- C: `clang-format` against `kmod/vpnhide_kmod.c`
+- C: `scripts/clang-format-c.sh --check` (all tracked kmod C sources)
 - Kotlin: `ktlint`
 - Android: `./gradlew :app:lint`
 

@@ -47,7 +47,7 @@ See [BUILDING.md](BUILDING.md) for the full guide (DDK Docker build, kernel sour
 
 ## Install
 
-1. `adb push vpnhide-kmod.zip /sdcard/Download/`
+1. `adb push vpnhide-kmod-<kmi>.zip /sdcard/Download/` (download the zip matching your device's GKI generation, e.g. `vpnhide-kmod-android14-6.1.zip`)
 2. KernelSU-Next manager -> Modules -> Install from storage
 3. Reboot
 

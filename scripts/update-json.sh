@@ -45,6 +45,16 @@ cat > "update-json/update-zygisk.json" <<EOJSON
 EOJSON
 echo "  update-json/update-zygisk.json"
 
+cat > "update-json/update-kpm.json" <<EOJSON
+{
+  "version": "v${VERSION}",
+  "versionCode": ${VERSION_CODE},
+  "zipUrl": "${REPO}/releases/download/v${VERSION}/vpnhide-kpm.zip",
+  "changelog": "${RAW}/update-json/changelog.md"
+}
+EOJSON
+echo "  update-json/update-kpm.json"
+
 cat > "update-json/update-ports.json" <<EOJSON
 {
   "version": "v${VERSION}",
