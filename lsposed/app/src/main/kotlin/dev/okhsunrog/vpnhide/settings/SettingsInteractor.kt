@@ -38,6 +38,8 @@ interface SettingsInteractor {
 
     fun setFullProtectionRoleLabels(value: Boolean)
 
+    fun setBackgroundUpdateChecksEnabled(value: Boolean)
+
     fun setAgentControlEnabled(value: Boolean)
 
     fun setSettingsHintSeen(value: Boolean)
@@ -70,6 +72,8 @@ class RepositorySettingsInteractor(
     override fun setHapticsEnabled(value: Boolean) = launch { repository.setHapticsEnabled(value) }
 
     override fun setFullProtectionRoleLabels(value: Boolean) = launch { repository.setFullProtectionRoleLabels(value) }
+
+    override fun setBackgroundUpdateChecksEnabled(value: Boolean) = launch { repository.setBackgroundUpdateChecksEnabled(value) }
 
     override fun setAgentControlEnabled(value: Boolean) = launch { repository.setAgentControlEnabled(value) }
 

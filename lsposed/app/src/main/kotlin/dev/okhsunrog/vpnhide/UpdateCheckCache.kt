@@ -21,9 +21,9 @@ import kotlinx.coroutines.withContext
  *    keep the app minimized for a day still see a fresh state when
  *    they come back.
  *
- * No WorkManager, no background alarms, no notifications — this is
- * purely reactive to app lifecycle. If the app is actually killed the
- * cache dies with it and the next launch re-checks as usual.
+ * This cache is purely reactive to app lifecycle. Optional background checks
+ * live in [BackgroundUpdateChecks] and report through system notifications,
+ * not through this in-memory state.
  */
 internal object UpdateCheckCache {
     /** 6 hours. Arbitrary — roughly matches how often a release cadence

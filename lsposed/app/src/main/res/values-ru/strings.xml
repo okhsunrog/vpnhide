@@ -303,6 +303,14 @@
     <string name="update_available_title">Доступно обновление</string>
     <string name="update_available_subtitle">Доступна версия %1$s</string>
     <string name="update_download">Скачать</string>
+    <string name="update_notification_channel_name">Обновления</string>
+    <string name="update_notification_channel_description">Уведомления о новых версиях VPN Hide</string>
+    <string name="update_notification_title">Доступно обновление</string>
+    <string name="update_notification_body">Доступна версия %1$s. Нажмите, чтобы скачать.</string>
+    <string name="background_update_prompt_title">Проверять обновления автоматически?</string>
+    <string name="background_update_prompt_body">VPN Hide может раз в сутки проверять GitHub и присылать уведомление, когда доступна новая версия. Android может задерживать фоновую проверку ради экономии батареи.</string>
+    <string name="background_update_prompt_enable">Включить</string>
+    <string name="background_update_prompt_not_now">Не сейчас</string>
 
     <!-- Changelog -->
     <string name="changelog_title">Что нового в v%1$s</string>
@@ -356,6 +364,9 @@
     <string name="settings_animations_sub">Пружинные переходы и плавное изменение формы</string>
     <string name="settings_full_role_labels">Полные названия ролей</string>
     <string name="settings_full_role_labels_sub">Показывать Java / Native / Apps / Ports вместо J / N / A / P</string>
+    <string name="settings_updates_section">Обновления</string>
+    <string name="settings_background_update_checks">Автоматическая проверка обновлений</string>
+    <string name="settings_background_update_checks_sub">Раз в сутки проверять новые релизы в фоне и уведомлять, когда доступна новая версия.</string>
     <string name="settings_diagnostics_section">Диагностика</string>
     <string name="settings_diagnostics_title">Подробная диагностика</string>
     <string name="settings_diagnostics_sub">Полный набор проверок скрытия</string>

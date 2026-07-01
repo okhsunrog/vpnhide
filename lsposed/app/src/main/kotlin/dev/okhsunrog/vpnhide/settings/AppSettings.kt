@@ -43,6 +43,10 @@ data class AppSettings(
     val hapticsEnabled: Boolean = true,
     /** Use full role labels in the unified Apps picker instead of single-letter chips. */
     val fullProtectionRoleLabels: Boolean = true,
+    /** Whether the user has explicitly accepted or declined daily background update checks. */
+    val backgroundUpdateChecksConfigured: Boolean = false,
+    /** Check GitHub Releases in the background and notify when a newer APK is available. */
+    val backgroundUpdateChecksEnabled: Boolean = false,
     /** Expose UI-equivalent state/control through the debug host bridge for agent-driven development. */
     val agentControlEnabled: Boolean = false,
     /** Whether the user has opened Settings at least once (gates the gear hint). */

@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.net.Uri
@@ -228,6 +229,7 @@ fun SettingsScreen(
                 )
             }
 
+            UpdatesSettingsSection()
             AutoHideSettingsSection()
             DiagnosticsSettingsSection(onOpen = { diagnosticsOpen = true })
             DebugToolsSettingsSection(selfNeedsRestart = selfNeedsRestart)
@@ -237,6 +239,33 @@ fun SettingsScreen(
             ResetSettingsSection(selfNeedsRestart = selfNeedsRestart)
             DeveloperSettingsSection()
         }
+    }
+}
+
+@Composable
+private fun UpdatesSettingsSection() {
+    val settings = LocalSettingsState.current
+    val interactor = LocalSettingsInteractor.current
+    val context = LocalContext.current
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+            // The switch reflects the user's preference. If Android denies the
+            // notification permission, the worker still runs and skips delivery.
+        }
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        SettingsSectionHeader(stringResource(R.string.settings_updates_section))
+        PreferenceRowSwitch(
+            title = stringResource(R.string.settings_background_update_checks),
+            subtitle = stringResource(R.string.settings_background_update_checks_sub),
+            icon = Icons.Default.Update,
+            checked = settings.backgroundUpdateChecksEnabled,
+            onCheckedChange = { enabled ->
+                interactor.setBackgroundUpdateChecksEnabled(enabled)
+                if (enabled && shouldRequestUpdateNotificationPermission(context)) {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            },
+        )
     }
 }
 

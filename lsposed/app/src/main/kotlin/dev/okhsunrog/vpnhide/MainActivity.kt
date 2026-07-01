@@ -1,10 +1,13 @@
 package dev.okhsunrog.vpnhide
 
+import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -83,21 +86,68 @@ private fun checkRootAccess(): Boolean {
     return exitCode == 0 && stdout.contains("uid=0")
 }
 
+@Composable
+private fun BackgroundUpdatePromptDialog(
+    onEnable: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.background_update_prompt_title)) },
+        text = { Text(stringResource(R.string.background_update_prompt_body)) },
+        confirmButton = {
+            TextButton(onClick = onEnable) {
+                Text(stringResource(R.string.background_update_prompt_enable))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.background_update_prompt_not_now))
+            }
+        },
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VpnHideApp() {
     val context = LocalContext.current
     val settingsRepository = remember(context) { SettingsRepository(context.applicationContext) }
-    val settings by settingsRepository.settings.collectAsState(initial = AppSettings())
+    val loadedSettings by settingsRepository.settings.collectAsState(initial = null)
+    val settingsLoaded = loadedSettings != null
+    val settings = loadedSettings ?: AppSettings()
     val settingsScope = rememberCoroutineScope()
     val settingsInteractor =
         remember(settingsRepository, settingsScope) {
             RepositorySettingsInteractor(settingsRepository, settingsScope)
         }
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+            // Work scheduling is controlled by the DataStore setting. If the user
+            // denies notifications, the worker still runs but skips notification
+            // delivery until permission is granted later.
+        }
+
+    fun requestUpdateNotificationsIfNeeded() {
+        if (shouldRequestUpdateNotificationPermission(context)) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     LaunchedEffect(settings.agentControlEnabled) {
         withContext(Dispatchers.IO) {
             AgentControlBridge.setEnabled(context.applicationContext, settings.agentControlEnabled)
+        }
+    }
+    LaunchedEffect(
+        settingsLoaded,
+        settings.backgroundUpdateChecksConfigured,
+        settings.backgroundUpdateChecksEnabled,
+    ) {
+        if (settingsLoaded) {
+            withContext(Dispatchers.IO) {
+                BackgroundUpdateChecks.sync(context.applicationContext, settings)
+            }
         }
     }
 
@@ -106,6 +156,24 @@ fun VpnHideApp() {
         LocalSettingsInteractor provides settingsInteractor,
     ) {
         VpnHideTheme {
+            var showBackgroundUpdatePrompt by remember { mutableStateOf(false) }
+            LaunchedEffect(settingsLoaded, settings.backgroundUpdateChecksConfigured) {
+                showBackgroundUpdatePrompt =
+                    settingsLoaded && !settings.backgroundUpdateChecksConfigured
+            }
+            if (showBackgroundUpdatePrompt) {
+                BackgroundUpdatePromptDialog(
+                    onEnable = {
+                        showBackgroundUpdatePrompt = false
+                        settingsInteractor.setBackgroundUpdateChecksEnabled(true)
+                        requestUpdateNotificationsIfNeeded()
+                    },
+                    onDismiss = {
+                        showBackgroundUpdatePrompt = false
+                        settingsInteractor.setBackgroundUpdateChecksEnabled(false)
+                    },
+                )
+            }
             var rootState by remember { mutableStateOf<RootState?>(null) }
             val rootCheckScope = rememberCoroutineScope()
             // Re-probe root without relaunching the app: clears to the loading

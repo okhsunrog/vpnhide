@@ -238,6 +238,7 @@ dependencies {
     // Reactive theme/settings store (replaces ad-hoc SharedPreferences for UI prefs).
     implementation(libs.datastore.preferences)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.work.runtime.ktx)
     // Material You color-scheme generation + harmonization (seed -> full M3 scheme,
     // AMOLED, contrast, palette styles). Powers VpnHideTheme.
     implementation(libs.material.kolor)

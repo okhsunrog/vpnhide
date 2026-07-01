@@ -325,6 +325,14 @@
     <string name="update_available_title">Update available</string>
     <string name="update_available_subtitle">Version %1$s is available</string>
     <string name="update_download">Download</string>
+    <string name="update_notification_channel_name">Updates</string>
+    <string name="update_notification_channel_description">VPN Hide release notifications</string>
+    <string name="update_notification_title">Update available</string>
+    <string name="update_notification_body">Version %1$s is available. Tap to download.</string>
+    <string name="background_update_prompt_title">Check for updates automatically?</string>
+    <string name="background_update_prompt_body">VPN Hide can check GitHub once a day and notify you when a new version is available. Android may delay background checks to save battery.</string>
+    <string name="background_update_prompt_enable">Enable</string>
+    <string name="background_update_prompt_not_now">Not now</string>
 
     <!-- Changelog -->
     <string name="changelog_title">What\'s new in v%1$s</string>
@@ -384,6 +392,9 @@
     <string name="settings_animations_sub">Springy transitions and shape morphing</string>
     <string name="settings_full_role_labels">Full role labels</string>
     <string name="settings_full_role_labels_sub">Show Java / Native / Apps / Ports instead of J / N / A / P</string>
+    <string name="settings_updates_section">Updates</string>
+    <string name="settings_background_update_checks">Automatic update checks</string>
+    <string name="settings_background_update_checks_sub">Check once a day in the background and notify when a new release is available.</string>
     <string name="settings_diagnostics_section">Diagnostics</string>
     <string name="settings_diagnostics_title">Detailed diagnostics</string>
     <string name="settings_diagnostics_sub">Run the full hiding check suite</string>
