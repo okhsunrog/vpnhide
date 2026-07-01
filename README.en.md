@@ -24,17 +24,14 @@ Existing modules like [NoVPNDetect](https://bitbucket.org/yuri-project/novpndete
 
 vpnhide solves both problems with a layered architecture:
 
-**Layer 1 — Java API (lsposed module):** hooks `system_server`, not the target app. `NetworkCapabilities`, `NetworkInfo`, and `LinkProperties` are filtered at the Binder level *before* data reaches the app's process. The app receives clean data over IPC — no injection into its process, nothing for anti-tamper to detect.
+**Layer 1 — Java API (lsposed module):** hooks `system_server`, not the target app. `NetworkCapabilities`, `NetworkInfo`, and `LinkProperties` are filtered at the Binder level *before* data reaches the app's process. The app receives clean data over IPC — no injection into its process, nothing for anti-tamper to detect. The same module also hides selected apps from observer apps at the `PackageManager` level (the **Apps** role).
 
 **Layer 2 — Native (kmod, KPM, or Zygisk):** covers native detection paths. Exactly one native backend should be active:
 - **kmod** (recommended for supported GKI kernels) — kernel-level `kretprobe` hooks. Filters `ioctl` (SIOCGIFFLAGS, SIOCGIFNAME, SIOCGIFCONF), `getifaddrs`/netlink dumps (RTM_GETLINK, RTM_GETADDR), routes, and `/proc/net/route` reads before the syscall returns to userspace. Zero footprint in the target process: no library injection, nothing to detect.
 - **KPM** (beta) — a KernelPatch Module with the same purpose as kmod, but without a GKI-variant-specific `.ko`. Useful for old/non-GKI 4.14 / 4.19 / 5.4 kernels and cases where the `.ko` cannot load. Requires a KernelPatch runtime: APatch or KPatch-Next-Module.
 - **Zygisk** — fallback when a kernel-level backend is not possible. It inline-hooks `libc.so` inside the target process, so banking and anti-fraud apps may detect it. For those apps, leave Native off and rely on the Java layer.
 
-**Layer 3 — Additional app-level controls (integrated into the VPN Hide app):**
-- **Interface hiding** — hide VPN interfaces, routes, and Java API VPN state from selected apps
-- **Port hiding** — block selected apps from reaching `127.0.0.1` / `::1` so they cannot probe locally bound VPN / proxy daemons
-- **App hiding** — hide selected apps from selected observer apps at the PackageManager level
+**Layer 3 — Ports module (portshide):** a separate Magisk module. It blocks selected apps from reaching `127.0.0.1` / `::1` (via iptables), so they can't detect a locally bound VPN / proxy daemon by its open port (the **Ports** role).
 
 The target app's process is completely untouched when using LSPosed + a kernel-level Native backend (kmod or KPM) — no Xposed, no inline hooks, no modified memory regions. Because of that, vpnhide works with banking and government apps that actively detect and block Xposed-based modules.
 
