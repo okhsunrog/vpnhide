@@ -142,7 +142,7 @@
     <string name="dashboard_protection_no_module">No module</string>
     <string name="dashboard_protection_hooks_inactive">Hooks inactive</string>
     <string name="dashboard_needs_restart">VPN Hide just enabled hiding for itself. Restart VPN Hide (force-stop and reopen) to check hiding — no device reboot needed.</string>
-    <string name="vpn_off_prompt">No active VPN. Turn it on, then tap Retry to run the hiding checks. Results are cached until VPN Hide is restarted — no need to re-run later in the same session.</string>
+    <string name="vpn_off_prompt">No active VPN. Turn it on, then tap Retry to run the hiding checks.</string>
     <string name="vpn_off_retry">Retry</string>
     <string name="diag_failed_prompt">The hiding checks couldn\'t run — root access may have been denied or a command failed. Tap Retry. This is usually transient.</string>
 
