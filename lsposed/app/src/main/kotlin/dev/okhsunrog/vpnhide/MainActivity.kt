@@ -156,24 +156,6 @@ fun VpnHideApp() {
         LocalSettingsInteractor provides settingsInteractor,
     ) {
         VpnHideTheme {
-            var showBackgroundUpdatePrompt by remember { mutableStateOf(false) }
-            LaunchedEffect(settingsLoaded, settings.backgroundUpdateChecksConfigured) {
-                showBackgroundUpdatePrompt =
-                    settingsLoaded && !settings.backgroundUpdateChecksConfigured
-            }
-            if (showBackgroundUpdatePrompt) {
-                BackgroundUpdatePromptDialog(
-                    onEnable = {
-                        showBackgroundUpdatePrompt = false
-                        settingsInteractor.setBackgroundUpdateChecksEnabled(true)
-                        requestUpdateNotificationsIfNeeded()
-                    },
-                    onDismiss = {
-                        showBackgroundUpdatePrompt = false
-                        settingsInteractor.setBackgroundUpdateChecksEnabled(false)
-                    },
-                )
-            }
             var rootState by remember { mutableStateOf<RootState?>(null) }
             val rootCheckScope = rememberCoroutineScope()
             // Re-probe root without relaunching the app: clears to the loading
@@ -201,6 +183,27 @@ fun VpnHideApp() {
                 }
 
                 RootState.Granted -> {
+                    // Only prompt about background update checks once the app is
+                    // actually usable (root granted) — not over the loading or
+                    // no-root gate, where nothing else works yet.
+                    var showBackgroundUpdatePrompt by remember { mutableStateOf(false) }
+                    LaunchedEffect(settingsLoaded, settings.backgroundUpdateChecksConfigured) {
+                        showBackgroundUpdatePrompt =
+                            settingsLoaded && !settings.backgroundUpdateChecksConfigured
+                    }
+                    if (showBackgroundUpdatePrompt) {
+                        BackgroundUpdatePromptDialog(
+                            onEnable = {
+                                showBackgroundUpdatePrompt = false
+                                settingsInteractor.setBackgroundUpdateChecksEnabled(true)
+                                requestUpdateNotificationsIfNeeded()
+                            },
+                            onDismiss = {
+                                showBackgroundUpdatePrompt = false
+                                settingsInteractor.setBackgroundUpdateChecksEnabled(false)
+                            },
+                        )
+                    }
                     MainScreen()
                 }
             }
