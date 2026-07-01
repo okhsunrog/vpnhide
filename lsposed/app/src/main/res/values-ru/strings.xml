@@ -92,7 +92,6 @@
     <string name="dashboard_kmod_broken_signature_enforced">Установлен, ядро отклоняет неподписанные модули</string>
     <string name="dashboard_active_targets">Активен · целей: %d</string>
     <string name="dashboard_reboot_needed">Требуется перезагрузка устройства</string>
-    <string name="dashboard_protection">Статус скрытия</string>
     <string name="dashboard_hero_protected_title">VPN скрыт</string>
     <string name="dashboard_hero_protected_subtitle">Все уровни скрытия активны</string>
     <string name="dashboard_hero_attention_title">Требует внимания</string>

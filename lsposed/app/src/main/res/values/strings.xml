@@ -123,7 +123,6 @@
     <string name="dashboard_kmod_broken_signature_enforced">Installed, kernel rejects unsigned modules</string>
     <string name="dashboard_active_targets">Active · %d target(s)</string>
     <string name="dashboard_reboot_needed">Device reboot needed</string>
-    <string name="dashboard_protection">Hiding status</string>
     <string name="dashboard_hero_protected_title">VPN hidden</string>
     <string name="dashboard_hero_protected_subtitle">All hiding layers are active</string>
     <string name="dashboard_hero_attention_title">Needs attention</string>

@@ -165,6 +165,39 @@ fun DashboardScreen(
 
         // Hero: the whole setup's health at a glance.
         DashboardHeroCard(state = loadedState, errorCount = errors.size, warningCount = warnings.size)
+
+        // Critical protection states sit right under the hero (not in a separate
+        // mid-screen section): the VPN needs turning on, or a self-restart is
+        // pending. The all-good "Checked" state renders nothing here — the hero's
+        // per-level tiles already carry that status, so the old duplicate per-level
+        // cards (Native / Java «OK», which just restated those tiles) are gone.
+        when (loadedState.protection) {
+            is ProtectionCheck.NoVpn -> {
+                Spacer(Modifier.height(12.dp))
+                VpnOffPrompt(
+                    onRetry = {
+                        // Re-read dashboard state (re-runs its own VPN + protection
+                        // probes) and re-run the diag cache so both screens move to
+                        // "Ready" when VPN is back.
+                        DashboardCache.refresh(scope, context, selfNeedsRestart)
+                        DiagnosticsCache.retry(scope, context)
+                    },
+                )
+            }
+
+            is ProtectionCheck.NeedsRestart -> {
+                Spacer(Modifier.height(12.dp))
+                StatusBanner(
+                    text = stringResource(R.string.dashboard_needs_restart),
+                    containerColor = warningBg,
+                    contentColor = onBannerColor,
+                )
+            }
+
+            is ProtectionCheck.Checked -> {
+                Unit
+            }
+        }
         Spacer(Modifier.height(20.dp))
 
         // Module status cards — one grouped block (byIndex corners).
@@ -185,41 +218,6 @@ fun DashboardScreen(
         updateInfo?.let { info ->
             Spacer(Modifier.height(8.dp))
             UpdateAvailableCard(info)
-        }
-
-        // Protection status
-        Spacer(Modifier.height(20.dp))
-        SectionHeader(stringResource(R.string.dashboard_protection))
-        Spacer(Modifier.height(8.dp))
-
-        when (val p = loadedState.protection) {
-            is ProtectionCheck.NoVpn -> {
-                VpnOffPrompt(
-                    onRetry = {
-                        // Re-read dashboard state (re-runs its own VPN
-                        // + protection probes) and re-run the diag
-                        // cache so both screens move to "Ready" when
-                        // VPN is back.
-                        DashboardCache.refresh(scope, context, selfNeedsRestart)
-                        DiagnosticsCache.retry(scope, context)
-                    },
-                )
-            }
-
-            is ProtectionCheck.NeedsRestart -> {
-                StatusBanner(
-                    text = stringResource(R.string.dashboard_needs_restart),
-                    containerColor = warningBg,
-                    contentColor = onBannerColor,
-                )
-            }
-
-            is ProtectionCheck.Checked -> {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    NativeProtectionCard(p.native, index = 0, count = 2)
-                    JavaProtectionCard(p.java, index = 1, count = 2)
-                }
-            }
         }
 
         if (errors.isNotEmpty()) {
@@ -1129,156 +1127,6 @@ private fun NativeInstallRecommendationCard(recommendation: NativeInstallRecomme
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
             )
-        }
-    }
-}
-
-@Composable
-private fun NativeProtectionCard(
-    result: NativeResult,
-    index: Int = -1,
-    count: Int = 1,
-) {
-    val (statusContainerColor, statusText, statusColor) =
-        when (result) {
-            is NativeResult.Ok -> {
-                Triple(
-                    StatusColors.successContainer(),
-                    stringResource(R.string.dashboard_protection_ok),
-                    StatusColors.successDot,
-                )
-            }
-
-            is NativeResult.Fail -> {
-                val text =
-                    if (result.passed > 0) {
-                        stringResource(R.string.dashboard_protection_partial)
-                    } else {
-                        stringResource(R.string.dashboard_protection_fail)
-                    }
-                val color = if (result.passed > 0) StatusColors.warningAccent else StatusColors.errorAccent
-                val bg = if (result.passed > 0) StatusColors.warningContainer() else StatusColors.errorContainer()
-                Triple(bg, text, color)
-            }
-
-            is NativeResult.NoModule -> {
-                Triple(
-                    MaterialTheme.colorScheme.surfaceVariant,
-                    stringResource(R.string.dashboard_protection_no_module),
-                    MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    ProtectionCardShell(
-        badgeText = "N",
-        label = stringResource(R.string.dashboard_native_protection),
-        statusText = statusText,
-        statusColor = statusColor,
-        statusContainerColor = statusContainerColor,
-        pulsing = result is NativeResult.Ok,
-        index = index,
-        count = count,
-    )
-}
-
-@Composable
-private fun JavaProtectionCard(
-    result: JavaResult,
-    index: Int = -1,
-    count: Int = 1,
-) {
-    val (statusContainerColor, statusText, statusColor) =
-        when (result) {
-            is JavaResult.Ok -> {
-                Triple(
-                    StatusColors.successContainer(),
-                    stringResource(R.string.dashboard_protection_ok),
-                    StatusColors.successDot,
-                )
-            }
-
-            is JavaResult.Fail -> {
-                Triple(
-                    StatusColors.errorContainer(),
-                    stringResource(R.string.dashboard_protection_fail),
-                    StatusColors.errorAccent,
-                )
-            }
-
-            is JavaResult.HooksInactive -> {
-                Triple(
-                    MaterialTheme.colorScheme.surfaceVariant,
-                    stringResource(R.string.dashboard_protection_hooks_inactive),
-                    MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    ProtectionCardShell(
-        badgeText = "J",
-        label = stringResource(R.string.dashboard_java_protection),
-        statusText = statusText,
-        statusColor = statusColor,
-        statusContainerColor = statusContainerColor,
-        pulsing = result is JavaResult.Ok,
-        index = index,
-        count = count,
-    )
-}
-
-@Composable
-private fun ProtectionCardShell(
-    badgeText: String,
-    label: String,
-    statusText: String,
-    statusColor: Color,
-    statusContainerColor: Color,
-    pulsing: Boolean = false,
-    index: Int = -1,
-    count: Int = 1,
-) {
-    val animations = LocalSettingsState.current.animationsEnabled
-    GroupedCard(
-        index = index,
-        count = count,
-        modifier = Modifier.fillMaxWidth(),
-        color = AppColors.cardContainer,
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ModuleBadge(text = badgeText, accentColor = statusColor, containerColor = statusContainerColor)
-            Spacer(Modifier.width(14.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(10.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (pulsing) {
-                    Box(
-                        modifier =
-                            Modifier
-                                .size(9.dp)
-                                .pulse(enabled = animations, min = 0.55f, max = 1f, durationMillis = 1100)
-                                .clip(CircleShape)
-                                .background(statusColor),
-                    )
-                }
-                StatusPill(
-                    text = statusText,
-                    contentColor = statusColor,
-                    containerColor = statusContainerColor,
-                )
-            }
         }
     }
 }
