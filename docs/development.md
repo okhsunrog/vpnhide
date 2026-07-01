@@ -33,7 +33,7 @@ How to build vpnhide from source.
 |---|---|
 | `zygisk/` | Zygisk native module (Rust, inline `libc` hooks) |
 | `lsposed/` | LSPosed module + target-picker Android app (Kotlin, Compose) |
-| `kmod/` | Kernel module (C, kretprobes) |
+| `kmod/` | Kernel-level native backends: GKI `.ko` (C, kretprobes) and KPM beta (KernelPatch inline hooks) |
 | `portshide/` | Localhost port blocker (shell + iptables) |
 | `scripts/` | Release & changelog tooling |
 | `update-json/` | Magisk/KSU update metadata |
@@ -90,18 +90,34 @@ cd lsposed && ./gradlew :app:assembleRelease
 
 The script auto-spawns the `ghcr.io/ylarod/ddk-min:<kmi>-<TAG>` container via Docker or podman (same image CI uses; Docker is preferred when both are installed). For local kernel-source builds via `direnv` and the GKI matrix details, see [kmod/BUILDING.md](../kmod/BUILDING.md).
 
+### KPM backend
+
+```sh
+python3 kmod/kpm/build.py
+# → vpnhide-kpm.zip at the repo root
+```
+
+The script builds the Android `kpm` activator, builds `vpnhide.kpm` against the
+pinned KernelPatch submodule, stages `kmod/kpm/module/`, and packages the
+flashable zip. For runtime requirements and safety notes, see
+[kmod/kpm/README.md](../kmod/kpm/README.md).
+
 ## Install on device
 
 ```sh
 # APK
 adb install -r lsposed/app/build/outputs/apk/release/app-release.apk
 
-# zygisk / kmod: push to device, install via the Magisk or KernelSU manager app
+# Native backend: push exactly one of these, then install via the Magisk,
+# KernelSU, KernelSU-Next, or APatch manager path appropriate for the backend.
 adb push zygisk/target/vpnhide-zygisk.zip /sdcard/Download/
-adb push vpnhide-kmod.zip /sdcard/Download/
+adb push vpnhide-kmod-<kmi>.zip /sdcard/Download/
+adb push vpnhide-kpm.zip /sdcard/Download/
 ```
 
-After flashing kmod or zygisk, reboot the device.
+After flashing a native backend, reboot the device. Do not keep multiple Native
+backends installed unless you are explicitly testing conflict handling; the app
+uses priority `kmod > KPM > Zygisk`, and `.ko` + KPM together is unsafe.
 
 ## CI lints (run before pushing)
 

@@ -39,7 +39,8 @@ Hide app (it invokes the ports activator via `su`).
 
 ## Configuration
 
-Managed by the VPN Hide app (Protection -> P, tune icon). Direct shell
+Managed by the VPN Hide app (**Hiding** tab -> **Ports** / **P**, settings icon
+next to the role label). Direct shell
 alternative:
 
 ```

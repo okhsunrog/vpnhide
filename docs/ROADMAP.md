@@ -84,12 +84,13 @@ Follow-up work (low priority):
 ### 32-bit (compat) SIOCGIFCONF enumeration (low priority)
 
 The kmod `.ko` filters `SIOCGIFCONF` interface enumeration via a kretprobe on
-`sock_ioctl`. A **32-bit** app's `SIOCGIFCONF` enters the kernel through
+`sock_ioctl`, including the 64-bit `ifc_req == NULL` size-query path. A
+**32-bit** app's `SIOCGIFCONF` still enters the kernel through
 `compat_sock_ioctl` → `compat_dev_ifconf` and never reaches `sock_ioctl`, so its
-enumeration is not filtered (it sees VPN interfaces). The size-query subcase of
-the 64-bit path (the `ifc_req == NULL` length query) is likewise unfiltered.
-Both are tracked in [detection-vectors.md](detection-vectors.md) (the SIOCGIFCONF
-notes).
+enumeration is not filtered (it sees VPN interfaces). KPM also compacts the
+filled ifreq array but does not yet reduce the `ifc_req == NULL` size query.
+Both remaining cases are tracked in [detection-vectors.md](detection-vectors.md)
+(the SIOCGIFCONF notes).
 
 This is **low priority**: most current Android apps are 64-bit, and modern
 interface enumeration uses netlink `getifaddrs` (covered by the rtnl/inet fill

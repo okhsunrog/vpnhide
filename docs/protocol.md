@@ -7,8 +7,8 @@ decides who is wrong. Every implementation (C / Rust / Kotlin) and every test
 vector references it.
 
 Status: `version 1` **frozen** — all seven OPEN items (§10) are resolved.
-Being implemented on `feat/control-protocol`. Key shape: one always-on Java
-(LSPosed) layer + exactly one active native backend, priority `kmod > KPM >
+Key shape: one always-on Java (LSPosed) layer + exactly one active native
+backend, priority `kmod > KPM >
 Zygisk` (§1.5); three `kind`s — `config` (in), `stats` + `status` (out, §4.3);
 UID is the key on every channel incl. Zygisk; `u64` cumulative counters; `debug`
 folded into config; the `.ko` channel is one folded node `/proc/vpnhide_ctl`

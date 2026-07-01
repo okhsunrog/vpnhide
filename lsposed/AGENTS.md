@@ -10,11 +10,13 @@ reinvent them.** `grep` for an existing helper before writing a new one.
 
 - **Read path:** one batched root shell → `RootSnapshotCache` → typed snapshots
   (`DashboardState`, `TargetsSnapshot`) derived in pure functions → Compose.
-  Dashboard and Protection derive from the *same* snapshot so their counts
-  can't drift.
-- **Write path (Save):** typed entries → `ShellCommandBuilders` → base64 →
-  root-owned text files in `/data/adb` + `/data/system` (the kmod/service.sh
-  contract). See `docs/state.md` for every path's owner/reader/lifetime.
+  Dashboard and Hiding derive from the *same* snapshot so their counts can't
+  drift.
+- **Write path (Save):** typed entries → canonical JSON
+  (`/data/system/vpnhide_config.json`) → `ConfigChannels` / module activators
+  derive runtime state for the installed native and ports backends. LSPosed
+  reads the canonical JSON directly from `system_server`. See `docs/state.md`
+  for every path's owner/reader/lifetime.
 
 ## Load-bearing abstractions — reuse these
 
@@ -22,27 +24,23 @@ reinvent them.** `grep` for an existing helper before writing a new one.
   (loading/error/value flows + single-flight job). A new cache **extends this**;
   never hand-roll `inflight`/`loading` again.
 - **`RootSnapshotCache`** — the single batched root read. Need new system state
-  on the Dashboard/Protection path? Add a section to its shell snapshot; don't
+  on the Dashboard/Hiding path? Add a section to its shell snapshot; don't
   add an ad-hoc `suExec` that races the snapshot.
 - **`ShellUtils`** — `suExec`/`suExecAsync`, and the parsers `parseConfigLines`,
   `parseKeyValueLines`, `parsePackageUidMap`. **Never write another `pm list`
   or `key=value` parser** — there used to be four; there is now one of each.
-- **`ConfigChannels`** — the single serialiser of the `vpnhide 1 config` wire
-  (docs/protocol.md) and the one place that fans it to every runtime channel
-  (kmod `/proc/vpnhide_ctl`, the zygisk module dir, the system_server UID file).
-  Save, the debug toggle, and the startup reconcile all go through it. **Don't
-  hand-build a config snapshot anywhere else** — use `Protocol.formatConfig` via
-  this object.
-- **`ShellCommandBuilders`** — `buildRawWriteCommand` (the base64 `echo | base64
-  -d > path` primitive every file write uses), `buildConfigWriteCommand` /
-  `managedConfigBody` (the persistent **package-list** files, NOT the wire),
-  `systemDataFilePermsParts`, and `buildUidResolverCommand` (now only the
-  observer-UID file — the app-hiding "A" role; it is **not** the target-config
-  path anymore, that's `ConfigChannels`). The persistent package lists and the
-  resolved-UID runtime channels are deliberately separate (protocol §1.2).
+- **`ConfigChannels`** — the one place that invokes installed native activators
+  after the canonical JSON changes. Save, the debug toggle, and startup
+  reconcile go through it. **Don't** hand-build per-backend runtime config in
+  Kotlin; the activators project canonical JSON into each backend's wire.
+- **`StorageConfig` / `ShellCommandBuilders`** — canonical JSON schema,
+  migration helpers, and root-safe file writes (`buildCanonicalConfigWriteCommand`,
+  `buildAtomicSystemDataRawWriteCommand`). The canonical JSON is the persistent
+  target config; legacy `targets.txt` / UID files are migration inputs or
+  derived runtime state, not app-owned user config.
 - **`TargetPickerScaffold`** — `TargetPickerScreen<T>`, `TargetRowShell`,
-  `TargetChip`, `AppListScrollbar`. All three picker screens (tun / hiding /
-  ports) are thin configs over this; a new picker is too.
+  `TargetChip`, `AppListScrollbar`. The unified Hiding list is built on these
+  primitives; a new picker/list view should be too.
 - **`StatusUi`** — `StatusColors` (pinned status palette — **never** use
   `MaterialTheme.colorScheme.errorContainer` etc. for status; Material You
   remixes them off-meaning), `StatusBanner`, `FileSaveShareRow`,

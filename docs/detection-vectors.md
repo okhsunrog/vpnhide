@@ -33,48 +33,50 @@ Two recurring assumptions, both documented in ROADMAP:
 
 ---
 
-## 2. The four enforcement layers
+## 2. The enforcement layers
 
-Coverage comes from three vpnhide components plus the platform. They differ in
+Coverage comes from vpnhide components plus the platform. They differ in
 *where* they sit, *which APIs* they can touch, *how* targets are selected, and
 *whether a raw-syscall detector can bypass them*.
 
 | Layer | Where it runs | Selects targets by | Sees | Bypassable by raw syscalls? |
 |---|---|---|---|---|
 | **kmod** | Linux kernel (kretprobes) | **UID** (`/proc/vpnhide_ctl`) | Everything below libc — the syscall/skb/seq_file source | **No** — filters at the source regardless of how userspace calls |
+| **KPM** | Linux kernel (KernelPatch inline hooks) | **UID** (KPM `ctl0` supercall) | Same kernel sources as kmod, delivered through KernelPatch instead of `.ko` loading | **No** — filters at the source regardless of how userspace calls |
 | **zygisk** | target process, inline `libc` hooks (shadowhook) | **package** (canonical JSON -> module-dir runtime wire, per-fork) | Only calls routed through the hooked `libc` symbols | **Yes** — a direct `svc #0` / unhooked libc entry slips past |
 | **lsposed** | `system_server`, Binder hooks (Vector framework) | **package/appId** (`vpnhide_config.json` + `/data/system/packages.list`) | Java/framework Binder results *before* serialization to the app | N/A — the data is built in another process; the app only gets the sanitized parcel |
 | **SELinux** | platform policy | domain (`untrusted_app`) | n/a — it *denies* access rather than filtering | n/a — a denial is a denial |
 
 Key consequences:
 
-- **kmod is the only bypass-proof layer.** A detector reading `/proc/net/route`
-  with a raw `openat` syscall, or driving netlink without libc, defeats zygisk
-  but not kmod. zygisk's value is that it works **without a custom kernel**
-  (stock GKI, Magisk/KSU) and reaches the same native APIs for libc-routed
-  callers.
+- **The kernel backends (kmod `.ko` and KPM) are the bypass-proof native layers.**
+  A detector reading `/proc/net/route` with a raw `openat` syscall, or driving
+  netlink without libc, defeats Zygisk but not a kernel backend. kmod is the
+  stable default for supported GKI kernels; KPM is the beta KernelPatch path for
+  old/non-GKI kernels and `.ko` load failures.
 - **lsposed is the only layer that can fake the high-level Java network model**
   (`ConnectivityManager`, `LinkProperties`, capabilities, callbacks) and
   **package visibility**. Native layers cannot synthesize a coherent
   `NetworkCapabilities` parcel; framework layers cannot touch `getifaddrs`.
-- **kmod and zygisk are two implementations of the *same* native layer — you
-  install one, not both.** They cover essentially the same native vectors
-  (interface enumeration, routes, procfs, netlink); the choice is a tradeoff,
-  not an addition:
-    - **kmod** is preferred — bypass-proof and out-of-process (zero footprint in
-      the app), but needs a supported GKI kernel with `CONFIG_KPROBES`.
-    - **zygisk** is the fallback for kernels kmod doesn't support — works on any
-      arm64 kernel, but only catches libc-routed calls (a raw `svc #0` slips
-      past) and runs inside the app process (visible to aggressive anti-tamper).
-  Running both at once is redundant, not additive (both would filter the same
-  data for the same target). The small deltas between them — e.g. zygisk also
-  filters `/proc/net/{if_inet6,tcp,tcp6}`, kmod also handles `RTM_GETRULE` and
-  the server host-route — are noted in the matrix; neither delta is a reason to
-  stack them.
-- So a complete install is **two roles**: the native layer (kmod *or* zygisk)
-  **plus** lsposed for the Java vectors, with SELinux as an unreliable platform
-  backstop underneath. Where only one layer covers a vector, that is called out
-  below.
+- **kmod, KPM, and Zygisk are implementations of the same Native role — you
+  install one active backend, not a stack.** The app prioritizes kmod > KPM >
+  Zygisk when more than one is installed. `.ko` + KPM together is the dangerous
+  case because they hook the same kernel functions and can freeze the device;
+  other overlaps are redundant and make setup harder to reason about.
+    - **kmod** is preferred on supported GKI kernels — bypass-proof and
+      out-of-process, with the most test coverage.
+    - **KPM** is also bypass-proof and out-of-process, but beta and dependent on
+      KernelPatch runtime (APatch or KPatch-Next-Module).
+    - **Zygisk** is the fallback — works where no kernel backend is practical,
+      but only catches libc-routed calls and runs inside the target app process.
+  The small deltas between backends — e.g. Zygisk also filters
+  `/proc/net/{if_inet6,tcp,tcp6}`, kmod/KPM also handle `RTM_GETRULE` and the
+  server host-route — are noted in the matrix; neither delta is a reason to
+  stack native backends.
+- So a complete install is **two roles**: exactly one native backend (kmod,
+  KPM, or Zygisk) **plus** lsposed for the Java vectors, with SELinux as an
+  unreliable platform backstop underneath. Where only one layer covers a vector,
+  that is called out below.
 
 > **SELinux is a free but unreliable backstop.** On a Pixel 4a / Android 13,
 > `untrusted_app` is already *denied* `read` on `/proc/net/route` and `search`
@@ -106,20 +108,20 @@ Legend: ✅ covered · ⚠️ partial / conditional · — not applicable to tha
 
 ### 3A. Interface enumeration — "is there a tun/wg/ppp interface?"
 
-| Vector | How it manifests | kmod | zygisk | lsposed | SELinux |
-|---|---|:--:|:--:|:--:|:--:|
-| `getifaddrs()` | native list of ifaces+addrs | ✅ via netlink hooks | ✅ unlinks VPN nodes | — | |
-| `NetworkInterface.getNetworkInterfaces()` (Java) | JNI → `getifaddrs` | ✅ | ✅ | — | |
-| `ioctl(SIOCGIFNAME)` index→name | native | ✅ `dev_ioctl` | ✅ | — | |
-| `ioctl(SIOCGIFCONF)` enumerate | native | ✅ `sock_ioctl` | ✅ `filter_ifconf` | — | |
-| `ioctl(SIOCGIF{FLAGS,MTU,INDEX,HWADDR,ADDR})` by name | native | ✅ `dev_ioctl` | ✅ pre-screen | — | |
-| netlink `RTM_GETLINK` dump | `recvmsg`/`recvfrom` of `RTM_NEWLINK` | ✅ `rtnl_fill_ifinfo` | ✅ filter by index | — | |
-| netlink `RTM_GETADDR` dump | `RTM_NEWADDR` | ✅ `inet*_fill_ifaddr` | ✅ filter by index | — | |
-| `/sys/class/net/<iface>/*` | reads iface type/mtu/operstate | — | — | — | 🔒 usually denied |
+| Vector | How it manifests | kmod | KPM | Zygisk | lsposed | SELinux |
+|---|---|:--:|:--:|:--:|:--:|:--:|
+| `getifaddrs()` | native list of ifaces+addrs | ✅ via netlink hooks | ✅ via netlink hooks | ✅ unlinks VPN nodes | — | |
+| `NetworkInterface.getNetworkInterfaces()` (Java) | JNI → `getifaddrs` | ✅ | ✅ | ✅ | — | |
+| `ioctl(SIOCGIFNAME)` index→name | native | ✅ `dev_ioctl` | ✅ `dev_ioctl` | ✅ | — | |
+| `ioctl(SIOCGIFCONF)` enumerate | native | ✅ `sock_ioctl` | ✅ `sock_ioctl` | ✅ `filter_ifconf` | — | |
+| `ioctl(SIOCGIF{FLAGS,MTU,INDEX,HWADDR,ADDR})` by name | native | ✅ `dev_ioctl` | ✅ `dev_ioctl` | ✅ pre-screen | — | |
+| netlink `RTM_GETLINK` dump | `recvmsg`/`recvfrom` of `RTM_NEWLINK` | ✅ `rtnl_fill_ifinfo` | ✅ `rtnl_fill_ifinfo` | ✅ filter by index | — | |
+| netlink `RTM_GETADDR` dump | `RTM_NEWADDR` | ✅ `inet*_fill_ifaddr` | ✅ `inet*_fill_ifaddr` | ✅ filter by index | — | |
+| `/sys/class/net/<iface>/*` | reads iface type/mtu/operstate | — | — | — | — | 🔒 usually denied |
 
-Notes: bionic's `getifaddrs` itself runs over netlink, so the kmod
+Notes: bionic's `getifaddrs` itself runs over netlink, so the kernel-backend
 `rtnl_fill_ifinfo` / `inet*_fill_ifaddr` hooks cover the Java and native paths
-at once. zygisk additionally unlinks entries from the `getifaddrs` result list
+at once. Zygisk additionally unlinks entries from the `getifaddrs` result list
 directly, so it works even if a future bionic stops using netlink.
 
 **`SIOCGIFCONF` size-query subcase — closed in the `.ko`.** The classic two-step
@@ -151,46 +153,47 @@ items.
 
 ### 3B. Route table — "is the default route a tunnel?"
 
-| Vector | How it manifests | kmod | zygisk | lsposed | SELinux |
-|---|---|:--:|:--:|:--:|:--:|
-| `/proc/net/route` (IPv4) | text, iface in col 1 | ✅ `fib_route_seq_show` | ✅ `filter_route_buf` | — | 🔒 often denied |
-| `/proc/net/ipv6_route` | text, iface last field | ✅ `ipv6_route_seq_show` | ✅ | — | 🔒 |
-| netlink `RTM_GETROUTE` **dump** | `RTA_OIF` index per route | ✅ `fib_dump_info` / `rt6_fill_node` | ✅ `RTM_NEWROUTE` filter (issue #86) | — | |
-| netlink `RTM_GETROUTE` **single** (`ip route get`) | one `rt_fill_info` reply | ⚠️ intentionally unhooked (see ROADMAP) | ⚠️ not filtered | — | |
-| netlink `RTM_GETRULE` (policy rules) | per-UID lookup tables | ✅ `fib_nl_fill_rule` | — | — | |
-| host-route to the VPN **server** | `/32`·`/128` to a public IP via a *physical* iface | ✅ `is_public_host_route_via_physical` | — | — | |
-| `LinkProperties.getRoutes()` (Java) | framework route list | — | — | ✅ filter `mRoutes` | |
+| Vector | How it manifests | kmod | KPM | Zygisk | lsposed | SELinux |
+|---|---|:--:|:--:|:--:|:--:|:--:|
+| `/proc/net/route` (IPv4) | text, iface in col 1 | ✅ `fib_route_seq_show` | ✅ `fib_route_seq_show` | ✅ `filter_route_buf` | — | 🔒 often denied |
+| `/proc/net/ipv6_route` | text, iface last field | ✅ `ipv6_route_seq_show` | ✅ `ipv6_route_seq_show` | ✅ | — | 🔒 |
+| netlink `RTM_GETROUTE` **dump** | `RTA_OIF` index per route | ✅ `fib_dump_info` / `rt6_fill_node` | ✅ `fib_dump_info` / `rt6_fill_node` | ✅ `RTM_NEWROUTE` filter (issue #86) | — | |
+| netlink `RTM_GETROUTE` **single** (`ip route get`) | one `rt_fill_info` reply | ⚠️ intentionally unhooked (see ROADMAP) | ⚠️ intentionally unhooked | ⚠️ not filtered | — | |
+| netlink `RTM_GETRULE` (policy rules) | per-UID lookup tables | ✅ `fib_nl_fill_rule` | ✅ `fib_nl_fill_rule` | — | — | |
+| host-route to the VPN **server** | `/32`·`/128` to a public IP via a *physical* iface | ✅ `is_public_host_route_via_physical` | ✅ `is_public_host_route_via_physical` | — | — | |
+| `LinkProperties.getRoutes()` (Java) | framework route list | — | — | — | ✅ filter `mRoutes` | |
 
 The **`if<N>` leak (issue #86)** lived here: a hidden tun still has an index, and
 a route dump exposes that index even when the *name* is hidden, so the detector
-renders it as the synthetic `if33`. Fixed in zygisk by filtering `RTM_NEWROUTE`
+renders it as the synthetic `if33`. Fixed in Zygisk by filtering `RTM_NEWROUTE`
 on `RTA_OIF` *and* hooking the FORTIFY'd `recvfrom`/`__recvfrom_chk` that
 fortified native code actually calls (plain `recv` is never emitted for a
-fixed-size buffer). kmod already covered it via `fib_dump_info`.
+fixed-size buffer). The kernel backends cover it via `fib_dump_info`.
 
 **Host-route to the server** is a desktop-VPN pattern: OpenVPN / kernel
 WireGuard / root VPNs pin a `/32` (or `/128`) route to the server's public IP
 out the physical interface so tunnel packets don't loop. That route names a
-*physical* iface, so name-based hiding misses it — kmod matches it by *shape*
+*physical* iface, so name-based hiding misses it — the kernel backends match it by *shape*
 (host prefix + public dst + physical dev) instead. **On Android `VpnService`
 apps this route usually does not exist**: they reach the server via
 `protect(socket)` (an `SO_MARK` fwmark that bypasses VPN routing), so no host
-route is installed. The kmod logic is therefore *inert* on the typical Android
+route is installed. This logic is therefore *inert* on the typical Android
 setup and matters for desktop-style / non-`VpnService` VPNs. Kept because it is
 cheap and correct when such a route is present; see issue discussion.
 
 ### 3C. Socket / address leaks — "any socket bound to a tunnel IP?"
 
-| Vector | How it manifests | kmod | zygisk | lsposed | SELinux |
-|---|---|:--:|:--:|:--:|:--:|
-| `/proc/net/tcp` | local addr hex per socket | — | ✅ `filter_tcp4_buf` (by VPN addr) | — | 🔒 often denied |
-| `/proc/net/tcp6` | 32-hex local addr | — | ✅ `filter_tcp6_buf` | — | 🔒 |
-| `/proc/net/if_inet6` | IPv6 addrs, iface last field | — | ✅ `filter_if_inet6_buf` | — | 🔒 |
+| Vector | How it manifests | kmod | KPM | Zygisk | lsposed | SELinux |
+|---|---|:--:|:--:|:--:|:--:|:--:|
+| `/proc/net/tcp` | local addr hex per socket | — | — | ✅ `filter_tcp4_buf` (by VPN addr) | — | 🔒 often denied |
+| `/proc/net/tcp6` | 32-hex local addr | — | — | ✅ `filter_tcp6_buf` | — | 🔒 |
+| `/proc/net/if_inet6` | IPv6 addrs, iface last field | — | — | ✅ `filter_if_inet6_buf` | — | 🔒 |
 
-These three are **zygisk-only** today: kmod hides IPv6 addresses on the netlink
-`RTM_GETADDR` path but does **not** hook `if_inet6_seq_show`, `tcp4_seq_show`,
-or `tcp6_seq_show`, so the procfs equivalents leak under a raw-syscall reader
-that SELinux happens to allow. Candidate kmod work if a real detector uses them.
+These three are **Zygisk-only** today: kernel backends hide IPv6 addresses on
+the netlink `RTM_GETADDR` path but do **not** hook `if_inet6_seq_show`,
+`tcp4_seq_show`, or `tcp6_seq_show`, so the procfs equivalents leak under a
+raw-syscall reader that SELinux happens to allow. Candidate kernel-backend work
+if a real detector uses them.
 
 ### 3D. Framework network APIs (Java) — lsposed territory
 
@@ -233,7 +236,8 @@ detectors actually probe:
 
 1. **Interface enumeration + route dump (3A, 3B).** The first thing every native
    detector checks. Must be airtight across libc *and* raw-syscall readers →
-   needs kmod for the bypass-proof guarantee, zygisk for kmod-less installs.
+   needs a kernel backend (`.ko` or KPM) for the bypass-proof guarantee, Zygisk
+   for kernel-backend-less installs.
 2. **Framework network model (3D).** What pure-Java apps and most anti-fraud
    SDKs use. lsposed-only; high value because it is the easy path for apps.
 3. **Package visibility (3E).** Stops "you have a VPN app installed" heuristics.
@@ -247,14 +251,17 @@ detectors actually probe:
 
 ## 5. Known gaps & assumptions
 
-- **Raw-syscall native readers defeat zygisk.** Only kmod is bypass-proof.
-  Document any "covered" claim with the layer; a zygisk-only install is not
-  raw-syscall-proof.
+- **Raw-syscall native readers defeat Zygisk.** Only the kernel backends
+  (`.ko`/KPM) are bypass-proof. Document any "covered" claim with the layer; a
+  Zygisk-only install is not raw-syscall-proof.
 - **zygisk netlink filtering is recv-family-scoped.** It hooks `recvmsg`,
   `recv`, `recvfrom`, `__recvfrom_chk`. A detector reading a netlink socket via
   plain `read()`/`readv()` or `recvmmsg` would slip past. Not seen in the wild
   yet; add hooks if it appears.
-- **kmod procfs gap:** no `if_inet6` / `tcp` / `tcp6` seq-file hooks (3C).
+- **Kernel-backend procfs gap:** no `if_inet6` / `tcp` / `tcp6` seq-file hooks
+  in `.ko` or KPM (3C).
+- **KPM SIOCGIFCONF size-query gap:** KPM compacts the returned ifreq array but
+  does not yet reduce the `ifc_req == NULL` size query the `.ko` handles (3A).
 - **Single-lookup route** (`rt_fill_info`) is intentionally unhooked — no stable
   static-function ABI; low value under split tunnel. See
   [ROADMAP.md](ROADMAP.md).
@@ -273,6 +280,7 @@ detectors actually probe:
 | Layer | Entry points |
 |---|---|
 | kmod | `kmod/vpnhide_kmod.c` (10 kretprobes); iface matcher `kmod/generated/iface_lists.h` |
+| KPM | `kmod/kpm/vpnhide_kpm.c` (KernelPatch inline hooks + ctl0); offsets in `kmod/kpm/kver_offsets.h` |
 | zygisk | `zygisk/src/hooks.rs` (ioctl/getifaddrs/openat/recv*); `zygisk/src/filter.rs` (procfs + netlink filters) |
 | lsposed | `lsposed/app/.../HookEntry.kt`, `PackageVisibilityHooks.kt`; iface matcher `.../generated/IfaceLists.kt` |
 | iface match rules | single source of truth `data/interfaces.toml` → `scripts/codegen-interfaces.py` renders all four languages |

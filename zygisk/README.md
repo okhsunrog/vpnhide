@@ -117,7 +117,7 @@ VPN interface prefixes: `tun`, `ppp`, `tap`, `wg`, `ipsec`, `xfrm`, `utun`, `l2t
 
 ## Known limitations
 
-- **Direct `svc #0` syscalls bypass the hook.** Apps issuing raw syscalls skip libc entirely. Use [vpnhide-kmod](../kmod/) for these apps.
+- **Direct `svc #0` syscalls bypass the hook.** Apps issuing raw syscalls skip libc entirely. Use a kernel-level backend, [vpnhide-kmod](../kmod/) or [KPM](../kmod/kpm/), for these apps.
 - **arm64 only.** No 32-bit arm, no x86.
 - **`getifaddrs` hook leaks a few bytes per call.** Unlinked VPN entries in the ifaddrs linked list are intentionally leaked rather than tracked with a shadow allocator. Acceptable tradeoff -- `getifaddrs` is called infrequently.
 - **Tested on Android 16 (API 36).** Should work back to API 24 in principle, but nothing older has been exercised.

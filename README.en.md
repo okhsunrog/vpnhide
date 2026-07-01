@@ -26,20 +26,21 @@ vpnhide solves both problems with a layered architecture:
 
 **Layer 1 — Java API (lsposed module):** hooks `system_server`, not the target app. `NetworkCapabilities`, `NetworkInfo`, and `LinkProperties` are filtered at the Binder level *before* data reaches the app's process. The app receives clean data over IPC — no injection into its process, nothing for anti-tamper to detect.
 
-**Layer 2 — Native (kmod or zygisk):** covers every native detection path:
-- **kmod** (recommended) — kernel-level `kretprobe` hooks. Filters `ioctl` (SIOCGIFFLAGS, SIOCGIFNAME, SIOCGIFCONF), `getifaddrs`/netlink dumps (RTM_GETLINK, RTM_GETADDR), and `/proc/net/route` reads — all before the syscall returns to userspace. Other `/proc/net/*` files (`tcp*`, `udp*`, `dev`, `if_inet6`, etc.) are blocked by SELinux for untrusted apps on Android 10+, so no hook is needed there. Zero in-process footprint. No library injection. Nothing to detect.
-- **zygisk** (alternative) — inline-hooks `libc.so` inside the app process. Same native coverage as kmod but runs in-process, so it's theoretically detectable by advanced anti-tamper. Use this if your kernel isn't supported by kmod.
+**Layer 2 — Native (kmod, KPM, or Zygisk):** covers native detection paths. Exactly one native backend should be active:
+- **kmod** (recommended for supported GKI kernels) — kernel-level `kretprobe` hooks. Filters `ioctl` (SIOCGIFFLAGS, SIOCGIFNAME, SIOCGIFCONF), `getifaddrs`/netlink dumps (RTM_GETLINK, RTM_GETADDR), routes, and `/proc/net/route` reads before the syscall returns to userspace. Zero footprint in the target process: no library injection, nothing to detect.
+- **KPM** (beta) — a KernelPatch Module with the same purpose as kmod, but without a GKI-variant-specific `.ko`. Useful for old/non-GKI 4.14 / 4.19 / 5.4 kernels and cases where the `.ko` cannot load. Requires a KernelPatch runtime: APatch or KPatch-Next-Module.
+- **Zygisk** — fallback when a kernel-level backend is not possible. It inline-hooks `libc.so` inside the target process, so banking and anti-fraud apps may detect it. For those apps, leave Native off and rely on the Java layer.
 
 **Layer 3 — Additional app-level controls (integrated into the VPN Hide app):**
 - **Interface hiding** — hide VPN interfaces, routes, and Java API VPN state from selected apps
 - **Port hiding** — block selected apps from reaching `127.0.0.1` / `::1` so they cannot probe locally bound VPN / proxy daemons
 - **App hiding** — hide selected apps from selected observer apps at the PackageManager level
 
-The target app's process is completely untouched (with kmod + lsposed) — no Xposed, no inline hooks, no modified memory regions. Because of that, vpnhide works with banking and government apps that actively detect and block Xposed-based modules.
+The target app's process is completely untouched when using LSPosed + a kernel-level Native backend (kmod or KPM) — no Xposed, no inline hooks, no modified memory regions. Because of that, vpnhide works with banking and government apps that actively detect and block Xposed-based modules.
 
 ## What vpnhide hides
 
-vpnhide is not just one toggle. It combines three different protections that can be enabled per app:
+vpnhide is not just one toggle. It combines three different hiding roles that can be enabled per app:
 
 1. **Interface hiding** — the core VPN-hiding layer. It removes VPN interfaces and routes from native APIs (`ioctl`, `getifaddrs`, `/proc/net/*`, `NetworkInterface`) and from Java APIs (`NetworkCapabilities`, `NetworkInfo`, `LinkProperties`).
 2. **Port hiding** — blocks localhost access for selected apps so they cannot detect Clash, sing-box, V2Ray, Happ, and similar tools by probing local ports.
@@ -47,11 +48,14 @@ vpnhide is not just one toggle. It combines three different protections that can
 
 ## Which modules do I need?
 
-You always need the **VPN Hide app** (`vpnhide.apk`) plus one native module for interface hiding. The app can also use the optional Ports module if you want localhost port blocking:
+You always need the **VPN Hide app** (`vpnhide.apk`) + LSPosed/Vector for the Java layer + exactly one Native backend for native hiding. The app can also use the optional Ports module if you want localhost port blocking:
 
-- **`kmod`** (recommended) — fully out-of-process, invisible to anti-tamper. Requires a supported GKI kernel.
-- **`zygisk`** — use this if your kernel isn't supported by kmod.
+- **`kmod`** (stable default) — fully out-of-process, invisible to anti-tamper. Requires a supported GKI kernel: 5.10, 5.15, 6.1, 6.6, or 6.12.
+- **`KPM`** (beta) — kernel-level backend for 4.14 / 4.19 / 5.4 and other cases where the `.ko` does not fit. Requires APatch or KPatch-Next-Module.
+- **`Zygisk`** — fallback if kmod/KPM are unavailable or you do not want to install a KernelPatch runtime.
 - **`portshide`** (optional) — install this if you want to block selected apps from probing localhost ports.
+
+Do not install multiple Native backends at the same time. If more than one is installed, the app chooses the active one by priority: kmod, then KPM, then Zygisk; uninstall unused modules.
 
 See [Install](#install) for step-by-step instructions.
 
@@ -64,18 +68,20 @@ Download the latest release from [Releases](https://github.com/okhsunrog/vpnhide
 1. Install `vpnhide.apk` as a regular app
 2. In LSPosed manager, enable the VPN Hide module and add **"System Framework"** to its scope
 3. Reboot the device (required — LSPosed hooks are injected into `system_server` at boot, so the module must be active before `system_server` starts)
-4. Open the VPN Hide app and grant it root access (Magisk will prompt automatically; on KernelSU-Next, grant permission manually in the manager)
+4. Open the VPN Hide app and grant it root access (Magisk usually prompts automatically; on KernelSU/KernelSU-Next/APatch, grant permission in the manager)
 
 ### Step 2 — Native module for interface hiding
 
-Open the VPN Hide app. The **Dashboard** tab will detect your device and kernel, and tell you exactly which native module to install:
+Open the VPN Hide app. The **Dashboard** tab will detect your device and kernel, and tell you which Native backend to install:
 
-- If your kernel is supported, it will recommend a specific kmod file (e.g. `vpnhide-kmod-android14-6.1.zip`)
-- If not, it will recommend the zygisk module (`vpnhide-zygisk.zip`)
+- For a supported GKI kernel, it recommends a specific kmod file, e.g. `vpnhide-kmod-android14-6.1.zip`.
+- For old/non-GKI 4.14 / 4.19 / 5.4 kernels, it recommends `vpnhide-kpm.zip` (beta). If no KernelPatch runtime is detected yet, the app asks you to install KPatch-Next-Module first or use Zygisk as a fallback.
+- For other kernels, it recommends `vpnhide-zygisk.zip`.
 
 Install the recommended module:
-- **kmod:** via KernelSU-Next manager → Modules → Install from storage
-- **zygisk:** via KernelSU-Next or Magisk manager → Modules
+- **kmod:** via KernelSU-Next / KernelSU / Magisk manager → Modules → Install from storage.
+- **KPM:** install `vpnhide-kpm.zip`; under APatch the app may ask you to save the SuperKey in **Settings → Security** for boot-time activation. Under Magisk, KernelSU, and KernelSU-Next, install KPatch-Next-Module first if it is not already installed.
+- **Zygisk:** via KernelSU-Next, KernelSU, or Magisk manager → Modules.
 
 Reboot the device after installing the native module.
 
@@ -83,26 +89,40 @@ Reboot the device after installing the native module.
 
 If you want localhost port blocking, install `vpnhide-ports.zip` via KernelSU-Next or Magisk manager.
 
-This module is independent from kmod / zygisk and is only needed for the **Ports** mode in the app.
+This module is independent from the Native backend and is only needed for the **Ports** role in the app.
 
-### Step 4 — Configure protections
+### Step 4 — Configure hiding
 
-Open the VPN Hide app → **Protection** tab.
+Open the VPN Hide app → **Hiding** tab.
 
-- **Tun** mode: use the **L** / **K** / **Z** toggles to control interface hiding layers for each app (LSPosed, Kernel module, Zygisk), or tap the row to toggle all layers at once
-- **Apps** mode: choose which apps should be hidden and which apps should act as observers
-- **Ports** mode: choose which apps should be blocked from accessing localhost ports
+Each app row has roles:
+
+- **Java** — hide VPN through Android Java APIs at the LSPosed/system_server level.
+- **Native** — the active Native backend: kmod, KPM, or Zygisk. VPN Hide stores one Native selection; only the active backend acts.
+- **Apps** — the app becomes an observer that should receive a sanitized PackageManager view with selected VPN/proxy apps hidden.
+- **Ports** — block this app from reaching localhost ports.
+
+Settings can switch from short **J / N / A / P** chips to full role labels. For Java, Native, and Ports, the settings icon next to the label opens per-hook or port-range settings.
 
 Tap Save after making changes.
 
-After changing targets, force-stop and restart the affected apps — hooks take effect on the next app launch.
+Java and kernel-level Native backends (kmod/KPM) apply immediately. Zygisk hooks and Ports rules are picked up by a selected app after force-stop and reopen.
 
-> **Note:** some apps detect Zygisk hooks. For those apps, keep **Z** disabled and rely on kmod + LSPosed.
+> **Note:** some apps detect Zygisk hooks when Native is enabled for them. Leave Native off for those apps and rely on the Java layer, or use kmod/KPM instead.
 
 <details>
 <summary><b>Shell configuration (advanced)</b></summary>
 
-Edit `/data/adb/vpnhide_kmod/targets.txt`, `/data/adb/vpnhide_zygisk/targets.txt`, or `/data/adb/vpnhide_lsposed/targets.txt` directly (one package name per line). Force-stop and restart affected apps for changes to take effect.
+The user-managed config lives in `/data/system/vpnhide_config.json`. Edit the JSON, then run the activator for the installed module:
+
+```sh
+su -c /data/adb/modules/vpnhide_kmod/activator
+su -c /data/adb/modules/vpnhide_kpm/activator
+su -c /data/adb/modules/vpnhide_zygisk/activator
+su -c /data/adb/modules/vpnhide_ports/activator
+```
+
+Run only activators for modules that are actually installed. LSPosed reads the JSON directly from `system_server`; it does not need an activator. Old `/data/adb/vpnhide_*` `targets.txt` files are no longer user config and are only used for migration from older releases.
 
 </details>
 
@@ -125,7 +145,7 @@ Alternatively, run `adb shell uname -r` to see the kernel version string.
 |:-:|:-:|:-:|
 | <img src="assets/screenshots/dashboard-all-ok.png" width="250"> | <img src="assets/screenshots/dashboard-issues.jpg" width="250"> | <img src="assets/screenshots/dashboard-install-recommendation.jpg" width="250"> |
 
-| Protection — Tun | App hiding | Ports hiding |
+| Hiding — list | App hiding | Ports hiding |
 |:-:|:-:|:-:|
 | <img src="assets/screenshots/protection-tunnels-list.png" width="250"> | <img src="assets/screenshots/app-hiding-list.png" width="250"> | <img src="assets/screenshots/ports-hiding-list.png" width="250"> |
 
@@ -138,65 +158,66 @@ Alternatively, run `adb shell uname -r` to see the kernel version string.
 The app has a built-in diagnostics system that catches most setup problems automatically.
 
 **Dashboard** (runs on every app launch):
-- Module status for all three layers (installed, active, version, target count)
+- Module and backend status (installed, active, version, target count)
 - LSPosed configuration validation — reads the LSPosed database to verify that VPN Hide is enabled, System Framework is in scope, and no extra apps are scoped (a common misconfiguration)
 - Version mismatch detection — compares installed module versions with the running app version and tells you exactly what to update
-- Native module recommendation — detects your kernel and maps it to the right kmod artifact, or recommends zygisk if unsupported
-- Live protection check (when VPN is active) — runs 16 native checks and 5 Java API checks to verify that VPN is actually hidden
+- Native backend recommendation — detects your kernel and maps it to the right kmod, KPM, or Zygisk artifact
+- Live hiding check (when VPN is active) — runs 16 native checks and 5 Java API checks to verify that VPN is actually hidden
 
 Any issues found are shown as actionable cards with specific instructions.
 
-**Diagnostics** tab — detailed per-check breakdown with individual PASS/FAIL results for all 26 detection vectors. Useful for troubleshooting when the Dashboard shows partial protection.
+**Diagnostics** tab — detailed per-check breakdown with individual PASS/FAIL results for all 26 detection vectors. Useful for troubleshooting when the Dashboard shows incomplete hiding.
 
 ## Components
 
 | Directory | What | How |
 |---|---|---|
-| **[kmod/](kmod/)** | Kernel module (C) | `kretprobe` hooks in kernel space. Zero footprint in the target app's process. ([details](kmod/README.md)) |
-| **[lsposed/](lsposed/)** | LSPosed module + app (Kotlin + Rust) | Hooks `writeToParcel` in `system_server` for per-UID Binder filtering. The APK provides a dashboard (module status, version checks, LSPosed config validation, install recommendations), Protection modes for interface / port / app hiding, and diagnostics. ([details](lsposed/README.md)) |
+| **[kmod/](kmod/)** | `.ko` kernel module + KPM backend (C) | Two kernel-level Native backends: the stable GKI `.ko` using `kretprobe`, and the KPM beta using KernelPatch inline hooks. Both have zero footprint in the target app's process; only one should be active. ([details](kmod/README.md), [KPM](kmod/kpm/README.md)) |
+| **[lsposed/](lsposed/)** | LSPosed module + app (Kotlin + Rust) | Hooks `writeToParcel` in `system_server` for per-UID Binder filtering. The APK provides a dashboard (module status, version checks, LSPosed config validation, install recommendations), the Hiding tab for Java / Native / Apps / Ports roles, and diagnostics. ([details](lsposed/README.md)) |
 | **[portshide/](portshide/)** | Ports module (Shell + iptables) | Blocks selected apps from reaching `127.0.0.1` / `::1`, hiding locally bound VPN / proxy daemons from localhost port probes. ([details](portshide/README.md)) |
-| **[zygisk/](zygisk/)** | Zygisk module (Rust) | Inline-hooks `libc.so` in the target app's process. Alternative to kmod. ([details](zygisk/README.md)) |
+| **[zygisk/](zygisk/)** | Zygisk module (Rust) | Inline-hooks `libc.so` in the target app's process. Fallback when a kernel-level backend is unavailable. ([details](zygisk/README.md)) |
 
 ## Detection coverage
 
-| # | Detection vector | SELinux | kmod | zygisk | lsposed |
-|---|---|---|---|---|---|
-| 1 | `ioctl(SIOCGIFFLAGS)` on tun0 | | x | x | |
-| 2 | `ioctl(SIOCGIFNAME)` resolve index to name | | x | x | |
-| 3 | `ioctl(SIOCGIFMTU)` MTU fingerprinting | | x | x | |
-| 4 | `ioctl(SIOCGIFCONF)` interface enumeration | | x | x | |
-| 5 | All other `SIOCGIF*` (INDEX, HWADDR, ADDR, etc.) | | x | x | |
-| 6 | `getifaddrs()` (uses netlink internally) | | x | x | |
-| 7 | netlink `RTM_GETLINK` dump | | x | x | |
-| 8 | netlink `RTM_GETADDR` dump (IPv4 + IPv6) | | x | x | |
-| 9 | netlink `RTM_GETROUTE` dump | | x | x | |
-| 10 | `/proc/net/route` | blocked | x | x | |
-| 11 | `/proc/net/ipv6_route` | blocked | x | x | |
-| 12 | `/proc/net/if_inet6` | blocked | | x | |
-| 13 | `/proc/net/tcp`, `tcp6` | blocked | | x | |
-| 14 | `/proc/net/udp`, `udp6` | blocked | | | |
-| 15 | `/proc/net/dev` | blocked | | | |
-| 16 | `/proc/net/fib_trie` | blocked | | | |
-| 17 | `/sys/class/net/tun0/` | blocked | | | |
-| 18 | `NetworkCapabilities` (hasTransport, NOT_VPN, transportInfo) | | | | x |
-| 19 | `NetworkInfo` (getType, getTypeName) | | | | x |
-| 20 | `ConnectivityManager.getActiveNetwork()` | | | | x |
-| 21 | `ConnectivityManager.getAllNetworks()` + VPN scan | | | | x |
-| 22 | `LinkProperties` (interfaceName) | | | | x |
-| 23 | `LinkProperties` (routes via VPN interfaces) | | | | x |
-| 24 | `NetworkInterface.getNetworkInterfaces()` | | x | x | |
-| 25 | `System.getProperty` (proxy settings) | | | x | |
-| 26 | `/proc/net/route` via Java `FileInputStream` | blocked | x | x | |
+| # | Detection vector | SELinux | kmod | KPM | Zygisk | LSPosed |
+|---|---|---|---|---|---|---|
+| 1 | `ioctl(SIOCGIFFLAGS)` on tun0 | | x | x | x | |
+| 2 | `ioctl(SIOCGIFNAME)` resolve index to name | | x | x | x | |
+| 3 | `ioctl(SIOCGIFMTU)` MTU fingerprinting | | x | x | x | |
+| 4 | `ioctl(SIOCGIFCONF)` interface enumeration | | x | x | x | |
+| 5 | All other `SIOCGIF*` (INDEX, HWADDR, ADDR, etc.) | | x | x | x | |
+| 6 | `getifaddrs()` (uses netlink internally) | | x | x | x | |
+| 7 | netlink `RTM_GETLINK` dump | | x | x | x | |
+| 8 | netlink `RTM_GETADDR` dump (IPv4 + IPv6) | | x | x | x | |
+| 9 | netlink `RTM_GETROUTE` dump | | x | x | x | |
+| 10 | `/proc/net/route` | blocked | x | x | x | |
+| 11 | `/proc/net/ipv6_route` | blocked | x | x | x | |
+| 12 | `/proc/net/if_inet6` | blocked | | | x | |
+| 13 | `/proc/net/tcp`, `tcp6` | blocked | | | x | |
+| 14 | `/proc/net/udp`, `udp6` | blocked | | | | |
+| 15 | `/proc/net/dev` | blocked | | | | |
+| 16 | `/proc/net/fib_trie` | blocked | | | | |
+| 17 | `/sys/class/net/tun0/` | blocked | | | | |
+| 18 | `NetworkCapabilities` (hasTransport, NOT_VPN, transportInfo) | | | | | x |
+| 19 | `NetworkInfo` (getType, getTypeName) | | | | | x |
+| 20 | `ConnectivityManager.getActiveNetwork()` | | | | | x |
+| 21 | `ConnectivityManager.getAllNetworks()` + VPN scan | | | | | x |
+| 22 | `LinkProperties` (interfaceName) | | | | | x |
+| 23 | `LinkProperties` (routes via VPN interfaces) | | | | | x |
+| 24 | `NetworkInterface.getNetworkInterfaces()` | | x | x | x | |
+| 25 | `System.getProperty` (proxy settings) | | | | x | |
+| 26 | `/proc/net/route` via Java `FileInputStream` | blocked | x | x | x | |
 
 **blocked** = on stock-enforcing builds (Android 10+) SELinux usually denies untrusted apps access to that `/proc/net/*` / `/sys` file. But **SELinux policy is configured differently across devices and ROMs** (OEM and custom ROMs, `permissive` builds), so the vpnhide layers filter these paths anyway and never rely on SELinux.
 
-Important: **netlink dumps (rows 7-9) are not restricted by SELinux** — a regular app reads interfaces, addresses, and routes directly over `NETLINK_ROUTE`. This is exactly how detectors like RKNHardering bypass the `/proc/net/route` denial (see [issue #86](https://github.com/okhsunrog/vpnhide/issues/86)). So the vectors actually reachable by a regular app are rows 1-9 and 24, closed by kmod / zygisk; everything else is either often SELinux-blocked on stock (device-dependent) or goes through Java APIs and is covered by lsposed.
+Important: **netlink dumps (rows 7-9) are not restricted by SELinux** — a regular app reads interfaces, addresses, and routes directly over `NETLINK_ROUTE`. This is exactly how detectors like RKNHardering bypass the `/proc/net/route` denial (see [issue #86](https://github.com/okhsunrog/vpnhide/issues/86)). So the vectors actually reachable by a regular app are rows 1-9 and 24; the active Native backend handles them. Kernel-level backends (kmod/KPM) do this with no target-process footprint; Zygisk covers libc-routed paths but remains detectable and raw-syscall-bypassable. Everything else is either often SELinux-blocked on stock (device-dependent) or goes through Java APIs and is covered by LSPosed.
 
 The full vector map — per-layer breakdown, SELinux caveats, and known gaps — lives in [docs/detection-vectors.md](docs/detection-vectors.md).
 
 ## Building from source
 
 - **kmod**: `./kmod/build.py --kmi android14-6.1` (or `--all`) — auto-spawns the DDK container via podman/docker. Full guide: [kmod/BUILDING.md](kmod/BUILDING.md).
+- **KPM**: `python3 kmod/kpm/build.py` — builds the universal `vpnhide-kpm.zip` through the KernelPatch submodule. Details: [kmod/kpm/README.md](kmod/kpm/README.md).
 - **zygisk**: `cd zygisk && ./build.py` (Rust + NDK + cargo-ndk)
 - **lsposed**: `cd lsposed && ./gradlew assembleDebug` (JDK 17 + Rust + NDK + cargo-ndk)
 
@@ -208,9 +229,11 @@ If you're on Windows, there are some inconveniences with building some subprojec
 
 **portshide**: `cd .\portshide\; python .\build-zip.py` runs fine.
 
-For the next two, you'll (unfortunately) need to install [Docker for Windows](https://docs.docker.com/desktop/setup/install/windows-install/).
+For kmod and zygisk, you'll (unfortunately) need to install [Docker for Windows](https://docs.docker.com/desktop/setup/install/windows-install/).
 
 **kmod**: `python .\kmod\build.py --kmi android14-6.1` — the script picks up Docker and pulls the same `ddk-min` image that CI uses.
+
+**KPM**: build from Linux or WSL. The script expects POSIX tools, `make`/`clang`, the KernelPatch submodule, and the Android NDK; a native Windows build path is not documented.
 
 **zygisk**:
 ```powershell
@@ -242,10 +265,11 @@ vpnhide hides an active VPN from specific apps. It is NOT designed for:
 
 ## Known limitations
 
-- `kmod` requires a GKI kernel with `CONFIG_KPROBES=y` (standard on Android 12+ devices)
+- `kmod` requires a supported GKI kernel with `CONFIG_KPROBES=y` (standard on Android 12+ devices)
+- KPM is beta and requires a KernelPatch runtime (APatch or KPatch-Next-Module); do not install KPM together with the `.ko`
 - `lsposed` requires LSPosed, LSPosed-Next, or Vector
 - `zygisk` is arm64 only
-- Direct `svc #0` syscalls bypass zygisk's libc hooks — that's what kmod is for
+- Direct `svc #0` syscalls bypass Zygisk's libc hooks — use a kernel-level backend (kmod or KPM) for that
 - Server-side detection is unfixable client-side — use split tunneling
 
 ## License

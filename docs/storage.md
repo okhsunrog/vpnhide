@@ -5,12 +5,11 @@ each backend. This is the layer *above* the wire protocol: [protocol.md](protoco
 defines the bytes exchanged with the kernel/native backends at runtime; this file
 defines the single on-disk source of truth those bytes are derived from.
 
-> **Status.** This is the **target** design. The current code (the control-protocol
-> migration, PR #164) is an interim step: it puts the text protocol on *every*
-> backend with per-backend text files. This document is where that converges —
-> one JSON canonical + activators that derive runtime state for the native and
-> ports backends, with LSPosed reading the JSON directly. Sections below note
-> where the current code differs.
+> **Status.** This is the current storage/activation design: one canonical JSON
+> desired-state file, Rust activators that derive runtime state for native and
+> ports backends, and LSPosed reading the JSON directly from `system_server`.
+> Older per-backend text files are migration inputs or derived runtime state, not
+> user-managed config.
 
 ---
 
@@ -166,9 +165,8 @@ How it reads, carefully (this runs in the bootloop-critical `system_server`):
   `system_server` can't expose a `/proc`-style node, so it can't multiplex write
   config + read state on one channel the way the kmod node does.
 
-> Current code (#164) differs: LSPosed reads a *derived protocol config*
-> (`vpnhide_uids.txt`) that the native boot scripts populate. That is exactly the
-> native-dependency this target design removes.
+Older releases used a derived `vpnhide_uids.txt` file for this path. Current code
+does not: the hook self-reads the canonical JSON and resolves UIDs in-process.
 
 ---
 
@@ -191,11 +189,8 @@ wire. So: one shared core, thin per-target front-ends.
 
 ```
 crates/
-  protocol/                 # lib, NO serde — the wire (parse/format). Shared by
-                            #   the Zygisk .so AND the activator. Today's
-                            #   zygisk/src/protocol.rs, promoted to a shared crate.
-  zygisk/                   # cdylib — the injected .so. deps: protocol (+ shadowhook).
-                            #   Lean: no serde, no JSON in every app process.
+  protocol/                 # lib, NO serde — the wire (parse/format), shared by
+                            #   the Zygisk .so and the activator.
   activator/
     src/lib.rs              # shared core: JSON schema (serde), pkg→uid resolution
                             #   (`pm`), project_native(json) -> String
@@ -203,6 +198,8 @@ crates/
     src/bin/kpm.rs          #   project_native(json) → APatch supercall / KPatch-Next `kpatch`
     src/bin/zygisk.rs       #   project_native(json) → write_atomic(module_dir file)
     src/bin/ports.rs        #   project_ports(json) → iptables-restore/ip6tables-restore
+zygisk/                     # cdylib — the injected .so. deps: protocol (+ shadowhook).
+                            #   Lean: no serde, no JSON in every app process.
 ```
 
 - **Why a workspace, not feature-flags or one crate with `src/bin/`+cdylib:**
@@ -377,7 +374,7 @@ exactly the threat model.
 
 ---
 
-## 8. File inventory (target)
+## 8. File inventory
 
 What you actually manage shrinks to **one** file; everything else is generated or
 optional.

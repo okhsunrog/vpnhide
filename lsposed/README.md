@@ -2,7 +2,10 @@
 
 Hooks `writeToParcel()` in `system_server` to strip VPN data before Binder serialization reaches target apps. Part of [vpnhide](../README.md).
 
-The APK also serves as the **target management UI** for the entire vpnhide project — it writes targets for both [kmod](../kmod/) and [zygisk](../zygisk/) modules.
+The APK also serves as the **target management UI** for the entire vpnhide project.
+It owns the canonical config at `/data/system/vpnhide_config.json`, then runs the
+installed activators for the native and ports modules. LSPosed itself reads the
+same JSON directly from `system_server`.
 
 Zero presence in the target app's process -- only "System Framework" is needed in the LSPosed scope.
 
@@ -24,11 +27,13 @@ Filtering is controlled by `Binder.getCallingUid()` -- only apps whose UID appea
 
 ### Target management
 
-Target UIDs are loaded from `/data/system/vpnhide_uids.txt`. A `FileObserver` (inotify) watches for changes and reloads the list immediately -- no reboot needed.
+Targets are loaded from `/data/system/vpnhide_config.json`. A `FileObserver`
+(inotify) watches that file and reloads immediately -- no reboot needed for
+Java-layer target changes.
 
-This file is written by:
-- The **VPN Hide app** (this APK's target picker UI)
-- The module's `service.sh` on boot
+The hook resolves package names to appIds through `/data/system/packages.list`,
+not PackageManager, because it runs inside PackageManager hooks and must avoid
+re-entering them.
 
 ## Target picker app
 
@@ -37,12 +42,14 @@ The APK includes a Compose UI for managing target apps across all vpnhide module
 - Lists all installed apps with icons, names, and package names
 - Text search filter
 - System apps toggle (selected system apps always visible)
-- Save writes to all target locations via `su`:
-  - `/data/adb/vpnhide_kmod/targets.txt` (if kmod is installed)
-  - `/data/adb/vpnhide_zygisk/targets.txt` (if zygisk is installed)
-  - `/data/adb/modules/vpnhide_zygisk/targets.txt` (Magisk module dir copy)
-  - `/proc/vpnhide_ctl` (kmod live update, no reboot needed)
-  - `/data/system/vpnhide_uids.txt` (system_server hooks, live reload via inotify)
+- One row per app with the current roles:
+  - **Java** — LSPosed Java/API hiding
+  - **Native** — the active native backend (`kmod`, KPM, or Zygisk)
+  - **Apps** — PackageManager observer mode
+  - **Ports** — localhost-port blocking observer
+- Save writes the canonical JSON via `su`, runs the installed native activator
+  (`vpnhide_kmod`, `vpnhide_kpm`, or `vpnhide_zygisk`), and runs the ports
+  activator if present. The LSPosed hook reloads the JSON itself.
 
 Works on KernelSU, Magisk, and any other root solution.
 
@@ -53,16 +60,18 @@ Works on KernelSU, Magisk, and any other root solution.
 3. Open LSPosed/Vector manager, go to Modules, enable **VPN Hide**.
 4. Add **"System Framework"** to the module's scope. No other apps should be in scope.
 5. Reboot.
-6. Open the VPN Hide app to manage target apps.
+6. Open the VPN Hide app and use the **Hiding** tab to manage roles for target apps.
 
-## Combined use with kmod
+## Combined use with native backends
 
 For apps with aggressive anti-tamper SDKs, full VPN hiding requires covering both native and Java API paths without any hooks in the target app's process:
 
-- **[kmod](../kmod/)** covers native: `ioctl`, `getifaddrs` (netlink), `/proc/net/route`.
+- **[kmod](../kmod/)** and **[KPM](../kmod/kpm/)** cover native paths at the kernel level: `ioctl`, `getifaddrs`/netlink, routes, and `/proc/net/route`.
 - **This module** covers Java APIs: `NetworkCapabilities`, `NetworkInfo`, `LinkProperties` via `writeToParcel()` in `system_server`.
 
 Together they provide complete VPN hiding with zero footprint in the target process.
+Zygisk can be used as the native fallback, but its libc hooks run inside the
+target process and can be detected by aggressive apps.
 
 ## Debugging
 

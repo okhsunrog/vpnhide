@@ -8,9 +8,9 @@ tooling that follows the AGENTS-convention picks it up automatically.
 
 ## Project layout
 
-Monorepo for hiding VPN interfaces from selected Android apps. Three runtime components plus tooling:
+Monorepo for hiding VPN interfaces from selected Android apps. Runtime components plus tooling:
 
-- `kmod/` — kernel module, kretprobes-based, per-GKI-generation builds
+- `kmod/` — kernel-level native backends: `.ko` kretprobe module per GKI generation, plus KPM beta for KernelPatch
 - `zygisk/` — Rust Zygisk module, inline `libc` hooks via shadowhook
 - `lsposed/` — LSPosed module + Compose target-picker app
 - `portshide/` — localhost port blocker (shell + iptables)
@@ -22,9 +22,9 @@ These short files cover everything specific to this repo. Skipping them leads to
 - [CONTRIBUTING.md](CONTRIBUTING.md) — PR process, commit conventions, changelog requirement
 - [docs/development.md](docs/development.md) — prereqs, per-module build quickstart, keystore setup, device install, CI lints
 - [docs/state.md](docs/state.md) — every persistent path / proc entry / iptables chain the project touches; who writes, who reads, lifetime
-- [docs/storage.md](docs/storage.md) — **target** storage & activation design: the single JSON canonical, the activator (Rust workspace, three bins) that derives the runtime wire, LSPosed self-read, the APatch superkey, SELinux layout. Read before touching how config is stored/loaded.
+- [docs/storage.md](docs/storage.md) — current storage & activation design: the single JSON canonical, the activator (Rust workspace, native/ports bins) that derives runtime state, LSPosed self-read, the APatch superkey, SELinux layout. Read before touching how config is stored/loaded.
 - [docs/protocol.md](docs/protocol.md) — the frozen v1 control/stats **wire** between the app and the native backends (config/stats/status); the format every backend parser must agree on
-- [docs/detection-vectors.md](docs/detection-vectors.md) — what an app can probe to detect the VPN (or a hidden package), which component (kmod / zygisk / lsposed / SELinux) covers each vector, how it manifests. Read before adding or changing a hook.
+- [docs/detection-vectors.md](docs/detection-vectors.md) — what an app can probe to detect the VPN (or a hidden package), which component (kmod / KPM / zygisk / lsposed / SELinux) covers each vector, how it manifests. Read before adding or changing a hook.
 - [docs/adb-root-debugging.md](docs/adb-root-debugging.md) — how to make `adb shell su` useful on KernelSU/APatch/Magisk test devices; covers UID 0 without capabilities, SELinux denials on `/data/adb` and `/data/system`, and KPM/KPatch diagnostics.
 - [docs/changelog.md](docs/changelog.md) — changelog storage (`changelog.d/` fragments + history JSON), `./scripts/changelog.py` usage
 - [docs/releasing.md](docs/releasing.md) — `./scripts/release.py` usage, version-bump flow
@@ -49,6 +49,7 @@ These short files cover everything specific to this repo. Skipping them leads to
 Single-command builds for both CI and local — the same scripts run in both places.
 
 - **kmod**: `./kmod/build.py --kmi <kmi>` (or `--all`). Auto-spawns the DDK Docker/podman container if you're not already inside it; CI passes `--inside-container` to skip the spawn. The DDK image tag is `DDK_IMAGE_TAG` in `kmod/build.py` — `.github/workflows/ci.yml` mirrors it, bump both together.
+- **KPM**: `python3 kmod/kpm/build.py` — builds the KernelPatch module and flashable `vpnhide-kpm.zip`.
 - **zygisk**: `cd zygisk && ./build.py` — host-side cargo-ndk build, same script in CI image.
 - **lsposed APK**: `cd lsposed && ./gradlew :app:assembleRelease`.
 
@@ -62,4 +63,4 @@ So when you need diagnostics in the logs and Debug logging is off: **stop and as
 
 ## Design notes
 
-- **KPatch-Next KPM:** `kmod/` currently uses kretprobes and requires per-GKI-generation builds (kernel headers + `Module.symvers`). Porting to a [KPatch-Next](https://github.com/KernelSU-Next/KPatch-Next) KPM would produce a single binary for kernels 3.18–6.12, eliminating the multi-GKI build problem. Tradeoff: adds KPatch-Next as a hard dependency (already bundled in KernelSU-Next).
+- **KPM backend:** `kmod/kpm/` ships a KernelPatch Module beta packaged as `vpnhide-kpm.zip`. It is a kernel-level Native backend like the `.ko`, but uses KernelPatch inline hooks and one cross-version artifact for supported 4.14–6.12 kernels. It requires APatch or KPatch-Next-Module, and must not be active together with the `.ko`; supported GKI devices should still prefer the QEMU-tested `.ko` unless there is a real load/signing problem.
