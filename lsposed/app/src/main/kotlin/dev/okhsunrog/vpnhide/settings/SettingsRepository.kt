@@ -8,8 +8,10 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 /**
@@ -38,6 +40,11 @@ class SettingsRepository(
         val AGENT_CONTROL = booleanPreferencesKey("agent_control_enabled")
         val SETTINGS_HINT_SEEN = booleanPreferencesKey("settings_hint_seen")
         val SUPPRESS_VERSION_WARNINGS = booleanPreferencesKey("suppress_version_warnings")
+
+        // Worker-internal state (not a user-facing setting, so not surfaced in
+        // AppSettings): the last release the background update worker already
+        // notified about, so it doesn't re-notify for the same version.
+        val LAST_NOTIFIED_UPDATE_VERSION = stringPreferencesKey("last_notified_update_version")
     }
 
     val settings: Flow<AppSettings> =
@@ -89,6 +96,14 @@ class SettingsRepository(
     suspend fun setSettingsHintSeen(value: Boolean) = edit { it[Keys.SETTINGS_HINT_SEEN] = value }
 
     suspend fun setSuppressVersionWarnings(value: Boolean) = edit { it[Keys.SUPPRESS_VERSION_WARNINGS] = value }
+
+    /** Last release the background update worker has already notified about, if any. */
+    suspend fun lastNotifiedUpdateVersion(): String? =
+        context.uiSettingsStore.data
+            .map { it[Keys.LAST_NOTIFIED_UPDATE_VERSION] }
+            .first()
+
+    suspend fun setLastNotifiedUpdateVersion(value: String) = edit { it[Keys.LAST_NOTIFIED_UPDATE_VERSION] = value }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.uiSettingsStore.edit(block)

@@ -30,8 +30,6 @@ private const val TAG = "VpnHide-Update"
 private const val UPDATE_WORK_NAME = "vpnhide_background_update_check"
 private const val UPDATE_NOTIFICATION_CHANNEL_ID = "vpnhide_updates"
 private const val UPDATE_NOTIFICATION_ID = 1001
-private const val UPDATE_PREFS_NAME = "vpnhide_prefs"
-private const val KEY_LAST_NOTIFIED_UPDATE_VERSION = "last_notified_update_version"
 
 internal object BackgroundUpdateChecks {
     fun sync(
@@ -86,11 +84,12 @@ class BackgroundUpdateCheckWorker(
     params: WorkerParameters,
 ) : Worker(appContext, params) {
     override fun doWork(): Result {
-        if (!backgroundChecksEnabled()) return Result.success()
+        val repository = SettingsRepository(applicationContext)
+        if (!backgroundChecksEnabled(repository)) return Result.success()
 
         return when (val result = checkForUpdate(BuildConfig.VERSION_NAME)) {
             is UpdateCheckResult.Available -> {
-                notifyIfNeeded(applicationContext, result.info)
+                notifyIfNeeded(applicationContext, repository, result.info)
                 Result.success()
             }
 
@@ -104,29 +103,35 @@ class BackgroundUpdateCheckWorker(
         }
     }
 
-    private fun backgroundChecksEnabled(): Boolean =
+    private fun backgroundChecksEnabled(repository: SettingsRepository): Boolean =
         runCatching {
             runBlocking {
-                SettingsRepository(applicationContext).settings.first().backgroundUpdateChecksEnabled
+                repository.settings.first().backgroundUpdateChecksEnabled
             }
         }.getOrDefault(false)
 }
 
 private fun notifyIfNeeded(
     context: Context,
+    repository: SettingsRepository,
     info: UpdateInfo,
 ) {
     if (!canPostUpdateNotifications(context)) {
         VpnHideLog.d(TAG, "Update ${info.latestVersion} available, but notifications are disabled")
         return
     }
-    val prefs = context.getSharedPreferences(UPDATE_PREFS_NAME, Context.MODE_PRIVATE)
-    if (prefs.getString(KEY_LAST_NOTIFIED_UPDATE_VERSION, null) == info.latestVersion) return
-    if (showUpdateNotification(context, info)) {
-        prefs
-            .edit()
-            .putString(KEY_LAST_NOTIFIED_UPDATE_VERSION, info.latestVersion)
-            .apply()
+    runCatching {
+        runBlocking {
+            if (repository.lastNotifiedUpdateVersion() == info.latestVersion) return@runBlocking
+            if (showUpdateNotification(context, info)) {
+                // Persist through the app's DataStore with a suspend write that
+                // completes before doWork() returns — not SharedPreferences.apply().
+                // The OS can tear this worker's process down the moment work
+                // finishes, dropping a fire-and-forget async write and re-notifying
+                // for the same version on the next run.
+                repository.setLastNotifiedUpdateVersion(info.latestVersion)
+            }
+        }
     }
 }
 
