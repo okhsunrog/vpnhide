@@ -1,10 +1,10 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.Context
-import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
@@ -63,6 +65,7 @@ internal object LogcatRecorder {
     private val _state = MutableStateFlow<State>(State.Stopped(null))
     val state: StateFlow<State> = _state
 
+    private val activeMutex = Mutex()
     private var active: ActiveRecording? = null
 
     /**
@@ -76,33 +79,46 @@ internal object LogcatRecorder {
         selfNeedsRestart: Boolean,
     ): File? =
         withContext(Dispatchers.IO) {
-            active?.let { return@withContext it.rawLogFile }
+            activeMutex.withLock {
+                active?.let { return@withLock it.rawLogFile }
+                startRecordingLocked(
+                    context = context.applicationContext,
+                    selfNeedsRestart = selfNeedsRestart,
+                )
+            }
+        }
 
-            val appContext = context.applicationContext
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val id = timestamp
-            val rawLogFile = File(appContext.cacheDir, "vpnhide_logcat_raw_$timestamp.log")
-            runCatching { rawLogFile.createNewFile() }
-                .onFailure {
-                    VpnHideLog.w(TAG, "failed to create output file: ${it.message}")
-                    return@withContext null
-                }
+    private suspend fun startRecordingLocked(
+        context: Context,
+        selfNeedsRestart: Boolean,
+    ): File? {
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val id = timestamp
+        val rawLogFile = File(context.cacheDir, "vpnhide_logcat_raw_$timestamp.log")
+        runCatching { rawLogFile.createNewFile() }
+            .onFailure {
+                VpnHideLog.w(TAG, "failed to create output file: ${it.message}")
+                return null
+            }
 
-            val loggingSession = beginDebugCaptureLogging(appContext)
+        var loggingSession: DebugCaptureLoggingSession? = null
+        var process: Process? = null
+        var scope: CoroutineScope? = null
+        try {
+            loggingSession = beginDebugCaptureLogging(context)
             val startMs = System.currentTimeMillis()
             // Step back one second so the start marker and any immediate debug
             // propagation lines are not lost to logcat timestamp rounding.
             val logcatSince = formatLogcatSince(Date(startMs - 1_000L))
             writeLogcatMarker("start", id)
 
-            val process =
-                startLogcatProcess(logcatSince)
-                    ?: run {
-                        restoreDebugCaptureLogging(appContext, loggingSession)
-                        return@withContext null
-                    }
+            process = startLogcatProcess(logcatSince)
+            if (process == null) {
+                restoreDebugCaptureLogging(context, loggingSession)
+                return null
+            }
 
-            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             val pipeJob = pipeLogcatToFile(scope, process, rawLogFile)
             val sizeJob = publishSize(scope, rawLogFile)
 
@@ -120,8 +136,14 @@ internal object LogcatRecorder {
                     loggingSession = loggingSession,
                 )
             _state.value = State.Recording(rawLogFile, startMs, 0L)
-            rawLogFile
+            return rawLogFile
+        } catch (t: Throwable) {
+            process?.destroyForcibly()
+            scope?.cancel()
+            loggingSession?.let { restoreDebugCaptureLogging(context, it) }
+            throw t
         }
+    }
 
     /**
      * Stop recording and return the final diagnostic ZIP, or null if no
@@ -129,61 +151,114 @@ internal object LogcatRecorder {
      */
     suspend fun stop(context: Context): File? =
         withContext(Dispatchers.IO) {
-            val recording = active ?: return@withContext null
-            val appContext = context.applicationContext
-            active = null
+            activeMutex.withLock {
+                val recording = active ?: return@withLock null
+                active = null
+                stopRecordingLocked(
+                    context = context.applicationContext,
+                    recording = recording,
+                )
+            }
+        }
 
-            val stopMs = System.currentTimeMillis()
+    private suspend fun stopRecordingLocked(
+        context: Context,
+        recording: ActiveRecording,
+    ): File? {
+        val stopMs = System.currentTimeMillis()
+        val duration = (stopMs - recording.startMs).coerceAtLeast(0L)
+        var processStopped = false
+        var restoreAttempted = false
+        var zipFile: File? = null
+
+        try {
             writeLogcatMarker("stop", recording.id)
             delay(LOGCAT_STOP_GRACE_MS)
             stopLogcatProcess(recording)
+            processStopped = true
 
-            val duration = (stopMs - recording.startMs).coerceAtLeast(0L)
             val dmesg = suExec("dmesg 2>/dev/null").second
             val shellSnapshot = collectDebugShellSnapshot()
-            val restore = restoreDebugCaptureLogging(appContext, recording.loggingSession)
+            val restore = restoreDebugCaptureLogging(context, recording.loggingSession)
+            restoreAttempted = true
             val completedLoggingSession = recording.loggingSession.withRestore(restore)
 
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(stopMs))
-            val zipFile = File(appContext.cacheDir, "vpnhide_logcat_$timestamp.zip")
-            val files =
-                linkedMapOf(
-                    "summary.txt" to
-                        buildDiagnosticSummaryText(
-                            context = appContext,
-                            selfNeedsRestart = recording.selfNeedsRestart,
-                            results = null,
-                            shellSnapshot = shellSnapshot,
-                            loggingSession = completedLoggingSession,
-                            captureKind = "full_system_logcat",
-                        ),
-                    "recording.txt" to buildRecordingText(recording, stopMs, duration),
-                )
-            files.putAll(
-                buildCommonDiagnosticTextFiles(
-                    context = appContext,
-                    selfNeedsRestart = recording.selfNeedsRestart,
-                    shellSnapshot = shellSnapshot,
-                    loggingSession = completedLoggingSession,
-                ),
-            )
-            files["hook_report.txt"] =
-                buildHookDiagnosticsText(
-                    context = appContext,
-                    shellSnapshot = shellSnapshot,
-                )
-            files["dmesg_vpnhide.txt"] = filterVpnHideDmesg(dmesg)
-            files["dmesg_full.txt"] = dmesg.ifBlank { "(no dmesg entries)" }
-            files["logcat_vpnhide.txt"] = filterVpnHideLogcat(recording.rawLogFile).ifBlank { "(no VpnHide logcat entries)" }
+            zipFile = File(context.cacheDir, "vpnhide_logcat_$timestamp.zip")
 
             writeDiagnosticZip(
                 zipFile = zipFile,
-                textEntries = files,
+                textEntries =
+                    buildFullSystemLogcatTextEntries(
+                        context = context,
+                        recording = recording,
+                        stopMs = stopMs,
+                        duration = duration,
+                        shellSnapshot = shellSnapshot,
+                        loggingSession = completedLoggingSession,
+                        dmesg = dmesg,
+                    ),
                 fileEntries = listOf(DiagnosticFileEntry("logcat_full.txt", recording.rawLogFile)),
             )
             _state.value = State.Stopped(zipFile, duration)
-            zipFile
+            return zipFile
+        } finally {
+            withContext(NonCancellable) {
+                if (!processStopped) {
+                    runCatching { stopLogcatProcess(recording) }
+                        .onFailure { VpnHideLog.w(TAG, "failed to stop logcat process: ${it.message}") }
+                }
+                if (!restoreAttempted) {
+                    runCatching { restoreDebugCaptureLogging(context, recording.loggingSession) }
+                        .onFailure { VpnHideLog.w(TAG, "failed to restore debug logging: ${it.message}") }
+                }
+                if (zipFile == null) {
+                    _state.value = State.Stopped(null, duration)
+                }
+            }
         }
+    }
+
+    private fun buildFullSystemLogcatTextEntries(
+        context: Context,
+        recording: ActiveRecording,
+        stopMs: Long,
+        duration: Long,
+        shellSnapshot: DebugShellSnapshot,
+        loggingSession: DebugCaptureLoggingSession,
+        dmesg: String,
+    ): LinkedHashMap<String, String> {
+        val files =
+            linkedMapOf(
+                "summary.txt" to
+                    buildDiagnosticSummaryText(
+                        context = context,
+                        selfNeedsRestart = recording.selfNeedsRestart,
+                        results = null,
+                        shellSnapshot = shellSnapshot,
+                        loggingSession = loggingSession,
+                        captureKind = "full_system_logcat",
+                    ),
+                "recording.txt" to buildRecordingText(recording, stopMs, duration),
+            )
+        files.putAll(
+            buildCommonDiagnosticTextFiles(
+                context = context,
+                selfNeedsRestart = recording.selfNeedsRestart,
+                shellSnapshot = shellSnapshot,
+                loggingSession = loggingSession,
+            ),
+        )
+        files["hook_report.txt"] =
+            buildHookDiagnosticsText(
+                context = context,
+                shellSnapshot = shellSnapshot,
+            )
+        files["dmesg_vpnhide.txt"] = filterVpnHideDmesg(dmesg)
+        files["dmesg_full.txt"] = dmesg.ifBlank { "(no dmesg entries)" }
+        files["logcat_vpnhide.txt"] = filterVpnHideLogcat(recording.rawLogFile).ifBlank { "(no VpnHide logcat entries)" }
+        return files
+    }
 
     private fun startLogcatProcess(logcatSince: String): Process? =
         try {

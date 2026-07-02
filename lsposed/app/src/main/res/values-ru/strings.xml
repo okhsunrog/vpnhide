@@ -338,7 +338,7 @@
     <string name="kernel_images_btn_export">Экспортировать образы</string>
     <string name="kernel_images_btn_export_running">Экспортирую образы&#8230;</string>
     <string name="logcat_card_title">Полный системный logcat</string>
-    <string name="logcat_card_description">Записывает неотфильтрованные логи из всех буферов (main/system/crash/events/radio) и сохраняет ZIP с информацией об устройстве, бэкендах, ядре и конфигурации. Начните запись, воспроизведите ошибку, затем остановите.</string>
+    <string name="logcat_card_description">Записывает неотфильтрованные логи из всех буферов (main/system/crash/events/radio) и сохраняет ZIP с информацией об устройстве, бэкендах, ядре и конфигурации. Внутри могут быть данные других приложений и токен agent-control. Начните запись, воспроизведите ошибку, затем остановите.</string>
     <string name="logcat_btn_start">Начать запись</string>
     <string name="logcat_btn_stop">Остановить и сохранить</string>
     <string name="logcat_recording_status">● Запись · %1$s · %2$s</string>

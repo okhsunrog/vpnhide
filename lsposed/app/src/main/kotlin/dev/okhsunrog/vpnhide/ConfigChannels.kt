@@ -59,27 +59,42 @@ internal fun runRuntimeConfigReconcile(
     rootSnapshot: RootSnapshot,
 ) {
     val snapshot = parseTargetsSnapshot(rootSnapshot)
-    val debug =
-        snapshot.canonicalConfig?.debug
-            ?: isEnabledInPrefs(context)
+    val persistedDebug = isEnabledInPrefs(context)
     val parts = mutableListOf<String>()
-    if (snapshot.canonicalConfig == null) {
-        parts +=
-            buildCanonicalConfigWriteCommand(
-                buildCanonicalConfig(
-                    debug = debug,
-                    javaPkgs = snapshot.lsposedTargets,
-                    nativePkgs = snapshot.nativeTargets,
-                    hiddenPkgs = snapshot.hiddenPkgs,
-                    observerPkgs = snapshot.observerNames,
-                    portsPkgs = snapshot.portsObservers,
-                ),
-            )
+    runtimeReconcileCanonicalConfig(snapshot, persistedDebug)?.let { canonical ->
+        parts += buildCanonicalConfigWriteCommand(canonical)
     }
     parts += ConfigChannels.reconcileCommand()
     val cmd = parts.joinToString(" ; ")
     val (exit, _) = suExec(cmd)
     if (exit != 0) VpnHideLog.w("VpnHide-Startup", "runtime config reconcile failed (exit=$exit)")
+}
+
+internal fun runtimeReconcileCanonicalConfig(
+    snapshot: TargetsSnapshot,
+    persistedDebug: Boolean,
+): CanonicalConfig? {
+    val existing = snapshot.canonicalConfig
+    return when {
+        existing == null -> {
+            buildCanonicalConfig(
+                debug = persistedDebug,
+                javaPkgs = snapshot.lsposedTargets,
+                nativePkgs = snapshot.nativeTargets,
+                hiddenPkgs = snapshot.hiddenPkgs,
+                observerPkgs = snapshot.observerNames,
+                portsPkgs = snapshot.portsObservers,
+            )
+        }
+
+        existing.debug != persistedDebug -> {
+            existing.copy(debug = persistedDebug)
+        }
+
+        else -> {
+            null
+        }
+    }
 }
 
 /**

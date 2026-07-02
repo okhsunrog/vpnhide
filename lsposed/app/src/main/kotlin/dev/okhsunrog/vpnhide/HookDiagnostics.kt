@@ -130,13 +130,8 @@ private fun StringBuilder.appendCounterDelta(
         }
         backend.rows.forEach { row ->
             val key = CounterKey(backend.backend, row.uid, row.hookId)
-            val delta = row.count - (baselineCounters[key] ?: 0L)
-            val deltaText =
-                when {
-                    baselineCounters.isEmpty() -> "n/a"
-                    delta < 0L -> "reset"
-                    else -> "+$delta"
-                }
+            val baseline = baselineCounters[key]
+            val deltaText = counterDeltaText(row.count, baseline, hasBaseline = baselineCounters.isNotEmpty())
             appendLine(
                 "  uid=${row.uid} pkg=${row.packageNames.ifEmpty { listOf("(unknown)") }.joinToString("|")} " +
                     "hook=${row.hook?.hookName ?: row.hookId} count=${formatStatCount(row.count)} delta=$deltaText",
@@ -203,20 +198,30 @@ private fun totalDeltaForHook(
     counters: Map<CounterKey, Long>,
     baselineCounters: Map<CounterKey, Long>,
 ): String {
-    val current =
-        counters
-            .filterKeys { key -> key.hookId == hook.id.toLong() }
-            .values
-            .sum()
     if (baselineCounters.isEmpty()) return "n/a"
-    val baseline =
-        baselineCounters
-            .filterKeys { key -> key.hookId == hook.id.toLong() }
-            .values
-            .sum()
-    val delta = current - baseline
-    return if (delta < 0L) "reset" else "+$delta"
+    val current = counters.unsignedSumForHook(hook)
+    val baseline = baselineCounters.unsignedSumForHook(hook)
+    return if (current < baseline) "reset" else "+${formatStatCount(current - baseline)}"
 }
+
+private fun counterDeltaText(
+    current: Long,
+    baseline: Long?,
+    hasBaseline: Boolean,
+): String {
+    if (!hasBaseline) return "n/a"
+    if (baseline == null) return "+${formatStatCount(current)}"
+    return if (current.toULong() < baseline.toULong()) {
+        "reset"
+    } else {
+        "+${formatStatCount(current.toULong() - baseline.toULong())}"
+    }
+}
+
+private fun Map<CounterKey, Long>.unsignedSumForHook(hook: HookIds.Hook): ULong =
+    filterKeys { key -> key.hookId == hook.id.toLong() }
+        .values
+        .fold(0uL) { acc, value -> acc + value.toULong() }
 
 private fun StatisticsState.toCounterMap(): Map<CounterKey, Long> =
     backends

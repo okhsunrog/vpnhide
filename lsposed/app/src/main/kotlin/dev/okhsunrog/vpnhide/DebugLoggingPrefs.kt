@@ -72,6 +72,7 @@ internal suspend fun reapplyDebugLoggingIfDrifted(enabled: Boolean) {
     }
     writeDebugFlagFilesFromSnapshot(enabled)
 }
+
 private fun writeDebugFlagFiles(enabled: Boolean) {
     val parts = mutableListOf<String>()
 

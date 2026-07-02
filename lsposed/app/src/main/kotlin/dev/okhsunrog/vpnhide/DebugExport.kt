@@ -35,7 +35,7 @@ internal suspend fun exportDebugZip(
         // it applied/restored so bug reports can distinguish "no logs" from
         // "debug propagation failed".
         val loggingSession = beginDebugCaptureLogging(context)
-        var restored = false
+        var restoreAttempted = false
         try {
             val counterBaseline = collectHookCounterSnapshot()
             // 1. Clear dmesg so we only capture fresh output from the
@@ -51,7 +51,7 @@ internal suspend fun exportDebugZip(
 
             val logcat = captureDebugLogcat()
             val restore = restoreDebugCaptureLogging(context, loggingSession)
-            restored = true
+            restoreAttempted = true
             val completedLoggingSession = loggingSession.withRestore(restore)
 
             // 4. Collect everything into named files — each section is its own
@@ -97,7 +97,7 @@ internal suspend fun exportDebugZip(
             Log.e(TAG, "Debug export failed", e)
             null
         } finally {
-            if (!restored) {
+            if (!restoreAttempted) {
                 restoreDebugCaptureLogging(context, loggingSession)
             }
         }
@@ -160,6 +160,7 @@ internal fun buildCommonDiagnosticTextFiles(
         "proc_net.txt" to buildProcNetText(shellSnapshot),
         "kernel.txt" to buildKernelText(shellSnapshot),
         "kernel_partitions.txt" to buildKernelPartitionMetadataText(),
+        "boot_logcat_lsposed.txt" to captureBootLsposedLogcat(),
         "debug_capture.txt" to loggingSession.toText(),
     )
 
@@ -333,6 +334,45 @@ private fun captureDebugLogcat(): String {
     val (exit, output) = suExec("logcat -d -b all -v threadtime -s $tags 2>/dev/null")
     return if (exit == 0) output else "(logcat failed: exit=$exit)\n$output"
 }
+
+internal fun captureBootLsposedLogcat(): String {
+    val (exit, output) = suExec(buildBootLsposedLogcatCommand(), timeoutSec = 15)
+    return buildString {
+        appendLine("commandExit=$exit")
+        appendLine("source=logcat -d -b all -v threadtime")
+        appendLine("scope=best_effort_current_ring_buffer")
+        appendLine("note=Contains boot-time LSPosed/Vector context only if the logcat ring buffer has not rotated yet.")
+        appendLine("patterns=${BOOT_LSPOSED_LOGCAT_PATTERNS.joinToString(",")}")
+        appendLine()
+        appendLine(output.ifBlank { "(no LSPosed/Vector boot logcat entries in current buffers)" }.trimEnd())
+    }.trimEnd()
+}
+
+internal fun buildBootLsposedLogcatCommand(): String {
+    val pattern = BOOT_LSPOSED_LOGCAT_PATTERNS.joinToString("|")
+    return """
+        logcat -d -b all -v threadtime 2>/dev/null |
+          grep -Ei '$pattern' |
+          tail -2000 || true
+        """.trimIndent()
+}
+
+private val BOOT_LSPOSED_LOGCAT_PATTERNS =
+    listOf(
+        "VpnHide-LSPosed",
+        "LSPosed-Bridge",
+        "VectorNative",
+        "VectorBridge",
+        "LSPosedService",
+        "LSPlt",
+        "LSPHooker",
+        "LSPosedBridge",
+        "Xposed",
+        "org[.]lsposed",
+        "lspd",
+        "modules_config",
+        "dev[.]okhsunrog[.]vpnhide",
+    )
 
 private fun DebugShellSnapshot.section(name: String): String = sections[name].orEmpty()
 

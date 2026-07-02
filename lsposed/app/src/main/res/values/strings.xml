@@ -83,7 +83,7 @@
     <string name="kernel_images_btn_export">Export kernel images</string>
     <string name="kernel_images_btn_export_running">Exporting images&#8230;</string>
     <string name="logcat_card_title">Full system logcat</string>
-    <string name="logcat_card_description">Records unfiltered logs from all buffers (main/system/crash/events/radio) and saves a ZIP with device, backend, kernel, and config context. Start recording, reproduce the bug, then stop.</string>
+    <string name="logcat_card_description">Records unfiltered logs from all buffers (main/system/crash/events/radio) and saves a ZIP with device, backend, kernel, and config context. It can include sensitive app data and the agent-control token. Start recording, reproduce the bug, then stop.</string>
     <string name="logcat_btn_start">Start recording</string>
     <string name="logcat_btn_stop">Stop and save</string>
     <string name="logcat_recording_status">● Recording · %1$s · %2$s</string>

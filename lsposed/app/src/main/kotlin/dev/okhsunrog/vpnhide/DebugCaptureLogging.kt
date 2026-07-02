@@ -1,11 +1,21 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.Context
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 
 private const val DEBUG_CAPTURE_OBSERVER_DELAY_MS = 250L
 
+private val debugCaptureMutex = Mutex()
+private val nextDebugCaptureSessionId = AtomicLong(1L)
+private val activeDebugCaptureSessions = linkedSetOf<Long>()
+
 internal data class DebugCaptureLoggingSession(
+    val id: Long,
     val persistedEnabled: Boolean,
     val runtimeWasEnabled: Boolean,
     val apply: DebugCaptureLoggingStep,
@@ -18,6 +28,7 @@ internal data class DebugCaptureLoggingSession(
 
     fun toText(): String =
         buildString {
+            appendLine("sessionId=$id")
             appendLine("persistedEnabled=$persistedEnabled")
             appendLine("runtimeWasEnabled=$runtimeWasEnabled")
             appendLine("forced=$forced")
@@ -57,28 +68,80 @@ internal data class DebugCaptureLoggingStep(
         }.trimEnd()
 }
 
-internal suspend fun beginDebugCaptureLogging(context: Context): DebugCaptureLoggingSession {
-    val persisted = isEnabledInPrefs(context)
-    val runtime = VpnHideLog.enabled
-    val apply = applyDebugLoggingForCapture(enabled = true)
-    return DebugCaptureLoggingSession(
-        persistedEnabled = persisted,
-        runtimeWasEnabled = runtime,
-        apply = apply,
-    )
-}
+internal suspend fun beginDebugCaptureLogging(context: Context): DebugCaptureLoggingSession =
+    withContext(NonCancellable) {
+        debugCaptureMutex.withLock {
+            val sessionId = nextDebugCaptureSessionId.getAndIncrement()
+            val persisted = isEnabledInPrefs(context)
+            val runtime = VpnHideLog.enabled
+            val activeBeforeBegin = activeDebugCaptureSessions.size
+            activeDebugCaptureSessions += sessionId
+            try {
+                val apply =
+                    if (activeBeforeBegin == 0) {
+                        applyDebugLoggingForCapture(enabled = true)
+                    } else {
+                        VpnHideLog.enabled = true
+                        DebugCaptureLoggingStep(
+                            requestedEnabled = true,
+                            source = "already_forced_by_active_capture",
+                            rootSnapshotExit = null,
+                            commandExit = null,
+                            detail = "activeCaptureSessions=$activeBeforeBegin",
+                        )
+                    }
+                DebugCaptureLoggingSession(
+                    id = sessionId,
+                    persistedEnabled = persisted,
+                    runtimeWasEnabled = runtime,
+                    apply = apply,
+                )
+            } catch (t: Throwable) {
+                activeDebugCaptureSessions -= sessionId
+                if (activeDebugCaptureSessions.isEmpty()) {
+                    runCatching { applyDebugLoggingForCapture(enabled = isEnabledInPrefs(context)) }
+                }
+                throw t
+            }
+        }
+    }
 
 internal suspend fun restoreDebugCaptureLogging(
     context: Context,
     session: DebugCaptureLoggingSession,
-): DebugCaptureLoggingStep? {
-    val target = isEnabledInPrefs(context)
-    return if (target == session.apply.requestedEnabled && VpnHideLog.enabled == target) {
-        null
-    } else {
-        applyDebugLoggingForCapture(enabled = target)
+): DebugCaptureLoggingStep? =
+    withContext(NonCancellable) {
+        debugCaptureMutex.withLock {
+            val target = isEnabledInPrefs(context)
+            if (!activeDebugCaptureSessions.remove(session.id)) {
+                return@withLock DebugCaptureLoggingStep(
+                    requestedEnabled = target,
+                    source = "capture_session_not_active",
+                    rootSnapshotExit = null,
+                    commandExit = null,
+                    detail = "sessionId=${session.id} was already restored or never registered",
+                )
+            }
+
+            if (activeDebugCaptureSessions.isNotEmpty()) {
+                VpnHideLog.enabled = true
+                return@withLock DebugCaptureLoggingStep(
+                    requestedEnabled = true,
+                    source = "restore_deferred_active_capture",
+                    rootSnapshotExit = null,
+                    commandExit = null,
+                    detail =
+                        "targetAfterLastCapture=$target activeCaptureSessions=${activeDebugCaptureSessions.size}",
+                )
+            }
+
+            if (target == session.apply.requestedEnabled && VpnHideLog.enabled == target) {
+                null
+            } else {
+                applyDebugLoggingForCapture(enabled = target)
+            }
+        }
     }
-}
 
 private suspend fun applyDebugLoggingForCapture(enabled: Boolean): DebugCaptureLoggingStep {
     VpnHideLog.enabled = enabled
