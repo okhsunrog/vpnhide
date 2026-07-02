@@ -22,8 +22,15 @@ internal fun debugFromCanonicalSnapshot(rootSnapshot: RootSnapshot?): Boolean =
  * an IO dispatcher and still tolerate a temporary mismatch if needed.
  */
 internal suspend fun setDebugLoggingEnabled(enabled: Boolean) {
+    // Re-read canonical from disk rather than the cached StateFlow: a prior
+    // toggle in the same Settings visit invalidates RootSnapshotCache, and
+    // nothing on the Settings screen repopulates it, so `.snapshot.value` would
+    // be null and this write would silently no-op.
+    val snapshot =
+        runCatching { RootSnapshotCache.getOrLoad() }.getOrNull()
+            ?: RootSnapshotCache.snapshot.value
     val canonical =
-        canonicalFromSnapshot(RootSnapshotCache.snapshot.value)
+        canonicalFromSnapshot(snapshot)
             ?.copy(
                 debug = enabled,
                 debugSwitch = enabled,
