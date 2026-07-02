@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide
 
 import android.content.Context
 import android.os.Process
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -30,57 +31,73 @@ internal suspend fun exportKernelImagesZip(context: Context): File? =
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val partsDir = File(appContext.cacheDir, "vpnhide_kernel_images_${timestamp}_parts")
         val zipFile = File(appContext.cacheDir, "vpnhide_kernel_images_$timestamp.zip")
-        runCatching { partsDir.deleteRecursively() }
-
-        val (exit, output) =
-            suExec(
-                buildKernelImagesExportCommand(
-                    outputDir = partsDir.absolutePath,
-                    appUid = Process.myUid(),
-                ),
-                timeoutSec = KERNEL_IMAGE_EXPORT_TIMEOUT_SEC,
-            )
-
-        val imageFiles =
-            partsDir
-                .listFiles()
-                .orEmpty()
-                .filter { it.isFile && it.name.endsWith(".img.gz") }
-                .sortedBy { it.name }
-
-        if (exit != 0 || imageFiles.isEmpty()) {
-            HookLog.e("VpnHide: kernel image export failed: exit=$exit output=${output.take(400)}")
+        try {
             runCatching { partsDir.deleteRecursively() }
-            return@withContext null
-        }
 
-        val manifest =
-            partsDir
-                .resolve("manifest.txt")
-                .takeIf { it.isFile }
-                ?.readText()
-                .orEmpty()
-        val files =
-            linkedMapOf(
-                "summary.txt" to
-                    buildString {
-                        appendLine("Kernel image export")
-                        appendLine("Generated: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date())}")
-                        appendLine("App package: ${appContext.packageName}")
-                        appendLine("App version: ${appVersionText(appContext)}")
-                        appendLine("commandExit=$exit")
-                    }.trimEnd(),
-                "manifest.txt" to manifest.ifBlank { "(missing manifest)" },
-                "kernel_partitions.txt" to buildKernelPartitionMetadataText(),
+            val (exit, output) =
+                suExec(
+                    buildKernelImagesExportCommand(
+                        outputDir = partsDir.absolutePath,
+                        appUid = Process.myUid(),
+                    ),
+                    timeoutSec = KERNEL_IMAGE_EXPORT_TIMEOUT_SEC,
+                )
+
+            val imageFiles =
+                partsDir
+                    .listFiles()
+                    .orEmpty()
+                    .filter { it.isFile && it.name.endsWith(".img.gz") }
+                    .sortedBy { it.name }
+
+            if (exit != 0 || imageFiles.isEmpty()) {
+                HookLog.e("VpnHide: kernel image export failed: exit=$exit output=${output.take(400)}")
+                return@withContext null
+            }
+
+            writeDiagnosticZip(
+                zipFile = zipFile,
+                textEntries = kernelExportTextEntries(appContext, partsDir, exit),
+                fileEntries = imageFiles.map { file -> DiagnosticFileEntry("images/${file.name}", file) },
             )
-        writeDiagnosticZip(
-            zipFile = zipFile,
-            textEntries = files,
-            fileEntries = imageFiles.map { file -> DiagnosticFileEntry("images/${file.name}", file) },
-        )
-        runCatching { partsDir.deleteRecursively() }
-        zipFile
+            zipFile
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            // Never let a zip/IO failure (e.g. /data full while packing tens of
+            // MB of images) escape and strand the caller's UI in a stuck state.
+            HookLog.e("VpnHide: kernel image export error: ${t.message}")
+            runCatching { zipFile.delete() }
+            null
+        } finally {
+            runCatching { partsDir.deleteRecursively() }
+        }
     }
+
+private fun kernelExportTextEntries(
+    appContext: Context,
+    partsDir: File,
+    exit: Int,
+): LinkedHashMap<String, String> {
+    val manifest =
+        partsDir
+            .resolve("manifest.txt")
+            .takeIf { it.isFile }
+            ?.readText()
+            .orEmpty()
+    return linkedMapOf(
+        "summary.txt" to
+            buildString {
+                appendLine("Kernel image export")
+                appendLine("Generated: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date())}")
+                appendLine("App package: ${appContext.packageName}")
+                appendLine("App version: ${appVersionText(appContext)}")
+                appendLine("commandExit=$exit")
+            }.trimEnd(),
+        "manifest.txt" to manifest.ifBlank { "(missing manifest)" },
+        "kernel_partitions.txt" to buildKernelPartitionMetadataText(),
+    )
+}
 
 internal fun buildKernelPartitionMetadataCommand(): String =
     """
@@ -155,6 +172,10 @@ private fun buildKernelImagesExportCommand(
         set +e
         OUT_DIR=$quotedDir
         APP_UID=$appUid
+        # Kernel/boot images are tens of MB; cap the copy so an unexpectedly
+        # large or mislabelled partition can't fill /data. 512 MiB = 128 * 4 MiB.
+        MAX_IMAGE_BYTES=536870912
+        MAX_IMAGE_BLOCKS=128
         rm -rf "${'$'}OUT_DIR"
         mkdir -p "${'$'}OUT_DIR" || exit 1
         MANIFEST="${'$'}OUT_DIR/manifest.txt"
@@ -197,7 +218,19 @@ private fun buildKernelImagesExportCommand(
             echo "present=1"
             echo "path=${'$'}PATH_TO_READ"
             echo "size_bytes=${'$'}SIZE"
-            if dd if="${'$'}PATH_TO_READ" of="${'$'}RAW" bs=4194304 2>>"${'$'}MANIFEST"; then
+            case "${'$'}SIZE" in
+              ''|*[!0-9]*)
+                echo "skipped=size unknown (refusing unbounded dd)"
+                echo
+                continue
+                ;;
+            esac
+            if [ "${'$'}SIZE" -gt "${'$'}MAX_IMAGE_BYTES" ]; then
+              echo "skipped=size ${'$'}SIZE above cap ${'$'}MAX_IMAGE_BYTES"
+              echo
+              continue
+            fi
+            if dd if="${'$'}PATH_TO_READ" of="${'$'}RAW" bs=4194304 count="${'$'}MAX_IMAGE_BLOCKS" 2>>"${'$'}MANIFEST"; then
               if gzip -c "${'$'}RAW" > "${'$'}GZ" 2>>"${'$'}MANIFEST"; then
                 rm -f "${'$'}RAW"
                 echo "file=images/${'$'}OUT_BASE.gz"

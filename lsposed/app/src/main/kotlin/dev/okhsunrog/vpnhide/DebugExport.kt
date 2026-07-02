@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -93,6 +94,11 @@ internal suspend fun exportDebugZip(
             val zipFile = File(context.cacheDir, "vpnhide_debug_$timestamp.zip")
             writeDiagnosticZip(zipFile, files)
             zipFile
+        } catch (c: CancellationException) {
+            // The finally below still restores debug logging; don't mask the
+            // cancellation as a normal "export failed" — rethrow for structured
+            // concurrency (navigating away mid-capture must cancel cleanly).
+            throw c
         } catch (e: Exception) {
             Log.e(TAG, "Debug export failed", e)
             null

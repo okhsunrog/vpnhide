@@ -313,8 +313,11 @@ private fun KernelImageExportCard() {
                     onClick = {
                         exporting = true
                         scope.launch {
-                            kernelImagesFile = exportKernelImagesZip(context)
-                            exporting = false
+                            try {
+                                kernelImagesFile = exportKernelImagesZip(context)
+                            } finally {
+                                exporting = false
+                            }
                         }
                     },
                     enabled = !exporting,

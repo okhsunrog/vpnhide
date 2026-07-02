@@ -115,6 +115,7 @@ internal object LogcatRecorder {
             process = startLogcatProcess(logcatSince)
             if (process == null) {
                 restoreDebugCaptureLogging(context, loggingSession)
+                runCatching { rawLogFile.delete() }
                 return null
             }
 
@@ -141,6 +142,7 @@ internal object LogcatRecorder {
             process?.destroyForcibly()
             scope?.cancel()
             loggingSession?.let { restoreDebugCaptureLogging(context, it) }
+            runCatching { rawLogFile.delete() }
             throw t
         }
     }
@@ -215,6 +217,10 @@ internal object LogcatRecorder {
                 if (zipFile == null) {
                     _state.value = State.Stopped(null, duration)
                 }
+                // The raw stream has been packed into the ZIP (or the run
+                // failed); either way it is no longer needed. Without this each
+                // Start/Stop leaves a multi-MB raw .log behind in cacheDir.
+                runCatching { recording.rawLogFile.delete() }
             }
         }
     }

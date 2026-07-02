@@ -25,7 +25,7 @@ class DebugShellSnapshotTest {
     }
 
     @Test
-    fun `parser ignores unclosed partial section`() {
+    fun `parser keeps an unclosed partial section but flags it truncated`() {
         val raw =
             """
             __VPNHIDE_DEBUG_SECTION_BEGIN__:complete
@@ -38,7 +38,12 @@ class DebugShellSnapshotTest {
         val sections = parseDebugShellSnapshot(raw)
 
         assertEquals("ok", sections["complete"])
-        assertFalse(sections.containsKey("partial"))
+        // The partial (timeout-truncated) section is preserved and flagged rather
+        // than silently dropped, so a bug report shows where the snapshot cut off.
+        assertTrue(sections.containsKey("partial"))
+        assertTrue(sections["partial"].orEmpty().contains("lost"))
+        assertTrue(sections["partial"].orEmpty().contains("TRUNCATED"))
+        assertEquals("partial", sections["debug_snapshot_truncated"])
     }
 
     @Test
@@ -66,14 +71,16 @@ class DebugShellSnapshotTest {
     }
 
     @Test
-    fun `counter command captures only hook status and package uid map`() {
+    fun `counter command captures hook status without enumerating packages`() {
         val command = buildHookCounterSnapshotCommand()
 
-        assertTrue(command.contains("pm list packages -U --user all"))
         assertTrue(command.contains("cat $PROC_CTL"))
         assertTrue(command.contains("$KPM_ACTIVATOR state"))
         assertTrue(command.contains(LSPOSED_STATE_FILE))
         assertTrue(command.contains(ZYGISK_STATUS_FILE))
+        // The counter baseline is consumed only through counts (backend+uid+hookId),
+        // never package names, so it skips the expensive multi-user pm enumeration.
+        assertFalse(command.contains("pm list packages"))
         assertFalse(command.contains("dumpsys connectivity"))
         assertFalse(command.contains("/proc/net/fib_trie"))
     }

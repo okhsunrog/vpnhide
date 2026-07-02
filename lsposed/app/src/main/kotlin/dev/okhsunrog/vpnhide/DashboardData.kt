@@ -175,9 +175,14 @@ internal fun detectPortsApplyProblem(
     ports: ModuleState,
     loadStatusSection: String,
     currentBootId: String,
+    portsDisabled: Boolean,
 ): PortsApplyProblem? {
     val installed = ports as? ModuleState.Installed ?: return null
     if (installed.active || installed.targetCount == 0) return null
+    // A module the user turned off via their manager (a `disable` marker) is
+    // inactive by design — the activator skips it for the same reason. Don't
+    // nag "iptables rules are not active" for a deliberately disabled module.
+    if (portsDisabled) return null
 
     val load = parseKeyValueLines(loadStatusSection)
     val bootId = load["boot_id"]?.trim()
@@ -1358,7 +1363,12 @@ internal suspend fun loadDashboardState(
     if (ports is ModuleState.Installed && ports.targetCount == 0) {
         info(res.getString(R.string.dashboard_issue_ports_no_observers))
     }
-    detectPortsApplyProblem(ports, shellSnapshot["ports_load_status"].orEmpty(), currentBootId)?.let { problem ->
+    detectPortsApplyProblem(
+        ports,
+        shellSnapshot["ports_load_status"].orEmpty(),
+        currentBootId,
+        portsDisabled = shellSnapshot["ports_disabled"].orEmpty().trim() == "1",
+    )?.let { problem ->
         val detail = problem.failureDetail
         warn(
             if (detail == null) {

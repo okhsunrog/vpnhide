@@ -265,6 +265,7 @@ internal fun buildRootShellSnapshotCommand(includePmPackages: Boolean = true): S
         ip6tables -C OUTPUT -j vpnhide_out6 >/dev/null 2>&1 &&
         echo 1 || echo 0
       '
+      emit_eval ports_disabled '[ -f $PORTS_MODULE_DIR/disable ] && echo 1 || echo 0'
       phase_end
     }
     phase_lsposed_framework() {

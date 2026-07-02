@@ -7,7 +7,12 @@ internal data class DebugShellSnapshot(
 
 private const val DEBUG_SNAPSHOT_BEGIN_PREFIX = "__VPNHIDE_DEBUG_SECTION_BEGIN__:"
 private const val DEBUG_SNAPSHOT_END_PREFIX = "__VPNHIDE_DEBUG_SECTION_END__:"
-private const val DEBUG_SNAPSHOT_TIMEOUT_SEC: Long = 20
+
+// The batch runs many heavy root commands (pm list --user all, dumpsys
+// connectivity, ip route show table all, fib_trie, several sha256sum). On a busy
+// device 20s was easy to overrun, which truncated the output mid-section and
+// silently dropped that section and every later one. Give it real headroom.
+private const val DEBUG_SNAPSHOT_TIMEOUT_SEC: Long = 60
 private const val COUNTER_SNAPSHOT_TIMEOUT_SEC: Long = 8
 
 internal fun collectDebugShellSnapshot(): DebugShellSnapshot {
@@ -63,6 +68,15 @@ internal fun parseDebugShellSnapshot(raw: String): Map<String, String> {
                 currentBody.appendLine(line)
             }
         }
+    }
+    // A command that overran the su timeout leaves the last section open (no END
+    // marker) and every later section absent. Keep the partial body but flag it,
+    // so a bug report shows "cut off here" instead of a silently-missing section.
+    currentName?.let { name ->
+        sections[name] =
+            (currentBody.toString().trimEnd() + "\n(TRUNCATED: snapshot cut off before this section completed)")
+                .trim()
+        sections["debug_snapshot_truncated"] = name
     }
     return sections
 }
@@ -352,7 +366,6 @@ internal fun buildHookCounterSnapshotCommand(): String =
     }
 
     emit_cmd current_boot_id cat /proc/sys/kernel/random/boot_id
-    emit_cmd pm_packages pm list packages -U --user all
     emit_eval kmod_state '[ -e $PROC_CTL ] && cat $PROC_CTL 2>&1 || echo "(missing: $PROC_CTL)"'
     emit_eval kpm_state '
       if [ -x $KPM_ACTIVATOR ] && [ ! -f $KPM_MODULE_DIR/disable ]; then

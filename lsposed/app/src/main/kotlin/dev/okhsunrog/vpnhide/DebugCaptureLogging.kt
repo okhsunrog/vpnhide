@@ -199,11 +199,20 @@ internal fun debugToggledCanonicalConfig(
     snapshot: RootSnapshot,
     enabled: Boolean,
 ): DebugCanonicalUpdate? {
-    val existing =
-        runCatching { parseCanonicalConfig(snapshot.sections["canonical_config"].orEmpty()) }
-            .getOrNull()
+    val raw = snapshot.sections["canonical_config"].orEmpty()
+    val existing = runCatching { parseCanonicalConfig(raw) }.getOrNull()
     if (existing != null) {
         return DebugCanonicalUpdate(existing.copy(debug = enabled), "canonical_debug_only")
+    }
+
+    // A canonical config that is present but unparseable must NOT be rebuilt from
+    // the legacy targets snapshot: buildCanonicalConfig would reset settings to
+    // defaults and silently clear autoHiddenPackages / autoHideVpnName /
+    // rememberSuperkey. Refuse the rewrite (caller falls back to an app-process-
+    // only toggle) so a routine debug capture can't wipe the user's settings.
+    // Only rebuild when there is genuinely no canonical config on disk yet.
+    if (raw.isNotBlank()) {
+        return null
     }
 
     return runCatching {

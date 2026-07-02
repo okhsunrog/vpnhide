@@ -30,6 +30,11 @@ internal fun buildHookDiagnosticsText(
     val baselineState = counterBaseline?.let { buildStatisticsState(RootSnapshot(it.sections)) }
     val baselineCounters = baselineState?.toCounterMap().orEmpty()
     val currentCounters = currentState.toCounterMap()
+    // Whether a baseline was actually captured — NOT whether it had counter rows.
+    // A fresh boot with no prior traffic captures a valid but empty baseline, and
+    // deriving "has baseline" from baselineCounters.isNotEmpty() would then report
+    // every delta as n/a, defeating the before/after report.
+    val hasBaseline = counterBaseline != null
     val statusByBackend = statusByBackend(shellSnapshot)
 
     return buildString {
@@ -46,7 +51,7 @@ internal fun buildHookDiagnosticsText(
         }
 
         appendLine("=== Counter delta after diagnostics ===")
-        appendCounterDelta(currentState, baselineCounters)
+        appendCounterDelta(currentState, baselineCounters, hasBaseline)
         appendLine()
 
         appendLine("=== Native diagnostic checks and expected hooks ===")
@@ -56,6 +61,7 @@ internal fun buildHookDiagnosticsText(
             statusByBackend = statusByBackend,
             counters = currentCounters,
             baselineCounters = baselineCounters,
+            hasBaseline = hasBaseline,
         )
     }.trimEnd()
 }
@@ -117,6 +123,7 @@ private fun StringBuilder.appendInstalledHooks(
 private fun StringBuilder.appendCounterDelta(
     currentState: StatisticsState,
     baselineCounters: Map<CounterKey, Long>,
+    hasBaseline: Boolean,
 ) {
     if (currentState.backends.none { it.rows.isNotEmpty() }) {
         appendLine("(no counter rows)")
@@ -131,7 +138,7 @@ private fun StringBuilder.appendCounterDelta(
         backend.rows.forEach { row ->
             val key = CounterKey(backend.backend, row.uid, row.hookId)
             val baseline = baselineCounters[key]
-            val deltaText = counterDeltaText(row.count, baseline, hasBaseline = baselineCounters.isNotEmpty())
+            val deltaText = counterDeltaText(row.count, baseline, hasBaseline = hasBaseline)
             appendLine(
                 "  uid=${row.uid} pkg=${row.packageNames.ifEmpty { listOf("(unknown)") }.joinToString("|")} " +
                     "hook=${row.hook?.hookName ?: row.hookId} count=${formatStatCount(row.count)} delta=$deltaText",
@@ -146,6 +153,7 @@ private fun StringBuilder.appendNativeChecks(
     statusByBackend: Map<HookIds.Backend, Protocol.Status?>,
     counters: Map<CounterKey, Long>,
     baselineCounters: Map<CounterKey, Long>,
+    hasBaseline: Boolean,
 ) {
     val byName =
         results
@@ -165,7 +173,7 @@ private fun StringBuilder.appendNativeChecks(
         } else {
             appendLine("  expected hooks:")
             spec.expectedHooks.forEach { hook ->
-                appendLine("    ${formatHookWithOwners(hook, statusByBackend, counters, baselineCounters)}")
+                appendLine("    ${formatHookWithOwners(hook, statusByBackend, counters, baselineCounters, hasBaseline)}")
             }
         }
     }
@@ -178,6 +186,7 @@ private fun formatHookWithOwners(
     statusByBackend: Map<HookIds.Backend, Protocol.Status?>,
     counters: Map<CounterKey, Long>,
     baselineCounters: Map<CounterKey, Long>,
+    hasBaseline: Boolean,
 ): String {
     val ownerText =
         hookOwners(hook)
@@ -189,7 +198,7 @@ private fun formatHookWithOwners(
                     else -> "${backend.name}:missing"
                 }
             }.ifBlank { "owner:n/a" }
-    val totalDelta = totalDeltaForHook(hook, counters, baselineCounters)
+    val totalDelta = totalDeltaForHook(hook, counters, baselineCounters, hasBaseline)
     return "${formatHook(hook)} [$ownerText, totalDelta=$totalDelta]"
 }
 
@@ -197,14 +206,15 @@ private fun totalDeltaForHook(
     hook: HookIds.Hook,
     counters: Map<CounterKey, Long>,
     baselineCounters: Map<CounterKey, Long>,
+    hasBaseline: Boolean,
 ): String {
-    if (baselineCounters.isEmpty()) return "n/a"
+    if (!hasBaseline) return "n/a"
     val current = counters.unsignedSumForHook(hook)
     val baseline = baselineCounters.unsignedSumForHook(hook)
     return if (current < baseline) "reset" else "+${formatStatCount(current - baseline)}"
 }
 
-private fun counterDeltaText(
+internal fun counterDeltaText(
     current: Long,
     baseline: Long?,
     hasBaseline: Boolean,
