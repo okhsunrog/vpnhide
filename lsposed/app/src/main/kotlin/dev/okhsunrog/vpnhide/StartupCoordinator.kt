@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -30,6 +31,10 @@ internal class StartupCoordinator(
     private val seedRootSnapshotPackages: (String?) -> Unit = RootSnapshotCache::seedPmPackages,
     private val markStartupEvent: (String) -> Unit = StartupTrace::mark,
     private val reconcileRuntimeConfig: (RootSnapshot) -> Unit = { runRuntimeConfigReconcile(appContext, it) },
+    private val reconcileAutoHidden: (CanonicalConfig, List<AppAutoHideSignal>) -> Unit =
+        { config, signals -> reconcileAutoHiddenPackages(appContext, config, signals) },
+    private val loadCanonicalConfig: suspend () -> CanonicalConfig? =
+        { parseTargetsSnapshot(RootSnapshotCache.getOrLoad()).canonicalConfig },
 ) {
     private val _selfTargetState = MutableStateFlow<StartupSelfTargetState>(StartupSelfTargetState.Preparing)
     val selfTargetState: StateFlow<StartupSelfTargetState> = _selfTargetState.asStateFlow()
@@ -38,6 +43,12 @@ internal class StartupCoordinator(
     // activator from canonical JSON. A once-per-session reconcile is enough
     // (Save / the debug toggle re-run the activator on their own afterwards).
     private val reconcileStarted =
+        java.util.concurrent.atomic
+            .AtomicBoolean(false)
+
+    // The auto-hide reconcile observer is a single session-long collector; guard
+    // against starting a second one if ensureInitialCaches re-runs.
+    private val autoHideReconcileStarted =
         java.util.concurrent.atomic
             .AtomicBoolean(false)
 
@@ -77,6 +88,29 @@ internal class StartupCoordinator(
         AppListCache.ensureLoaded(scope, appContext)
         DashboardCache.ensureLoaded(scope, appContext, selfNeedsRestart)
         if (!selfNeedsRestart) DiagnosticsCache.run(scope, appContext)
+        startAutoHideReconcile(scope)
+    }
+
+    /**
+     * Once per session, watch the installed-app list and re-materialize the
+     * auto-hidden VPN-app set whenever it (re)loads — at cold start and after a
+     * Hiding-tab Refresh (which force-reloads [AppListCache]). This keeps a
+     * newly-installed VPN app hidden from observers without the user having to
+     * open the picker and Save. The write itself is idempotent: it only touches
+     * disk when the auto-hidden set actually changed.
+     *
+     * Self-target preparation runs first and always writes the canonical config,
+     * so by the time the app list emits, the config is non-null — a null read
+     * means no root, and the reconcile is simply skipped.
+     */
+    private fun startAutoHideReconcile(scope: CoroutineScope) {
+        if (!autoHideReconcileStarted.compareAndSet(false, true)) return
+        scope.launch(Dispatchers.IO) {
+            AppListCache.apps.filterNotNull().collect { apps ->
+                val config = loadCanonicalConfig() ?: return@collect
+                reconcileAutoHidden(config, apps.map { it.toAutoHideSignal() })
+            }
+        }
     }
 
     fun ensureProtectionCacheAfterRootSnapshot(

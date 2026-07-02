@@ -78,3 +78,44 @@ internal fun runRuntimeConfigReconcile(
     val (exit, _) = suExec(cmd)
     if (exit != 0) VpnHideLog.w("VpnHide-Startup", "runtime config reconcile failed (exit=$exit)")
 }
+
+/**
+ * Re-materialize `settings.autoHiddenPackages` for the on-disk [config] against
+ * fresh VpnService [signals], and persist it iff the auto-hidden set changed.
+ * This keeps a newly-installed VPN app hidden from observers after a Hiding-tab
+ * Refresh or a cold start, without the user having to open the picker and Save.
+ *
+ * Idempotent: [applyAutoHiddenPackages] only touches the auto-hidden set and the
+ * hidden flags derived from it — every manual role (Java / Native / Apps / Ports
+ * and manually-hidden packages) is preserved — so an unchanged set writes
+ * nothing. Best-effort, blocking; call from a background dispatcher. Returns
+ * true when it wrote (and re-activated) a new config.
+ */
+internal fun reconcileAutoHiddenPackages(
+    context: Context,
+    config: CanonicalConfig,
+    signals: Collection<AppAutoHideSignal>,
+): Boolean {
+    val selfPkg = context.packageName
+    if (!autoHiddenPackagesNeedReconcile(config, selfPkg, signals)) return false
+    val next = applyAutoHiddenPackages(config, selfPkg, signals)
+    val cmd =
+        listOf(
+            buildCanonicalConfigWriteCommand(next),
+            ConfigChannels.reconcileCommand(),
+        ).joinToString(" ; ")
+    val (exit, output) = suExec(cmd)
+    if (exit != 0) {
+        VpnHideLog.w("VpnHide-Startup", "auto-hide reconcile failed (exit=$exit): ${output.trim()}")
+        return false
+    }
+    RootSnapshotCache.invalidate()
+    TargetsCache.invalidate()
+    DashboardCache.invalidate()
+    StatisticsCache.invalidate()
+    VpnHideLog.i(
+        "VpnHide-Startup",
+        "auto-hide reconcile: ${next.settings.autoHiddenPackages.size} auto-hidden package(s)",
+    )
+    return true
+}

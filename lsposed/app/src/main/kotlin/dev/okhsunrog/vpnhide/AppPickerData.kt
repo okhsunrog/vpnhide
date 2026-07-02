@@ -139,6 +139,21 @@ internal fun applyAutoHiddenPackages(
     )
 }
 
+/**
+ * Whether re-materializing the auto-hidden set against fresh [signals] would
+ * change the set persisted for [config] — i.e. whether the startup / Refresh
+ * reconcile needs to write. The reconcile write-guard: a newly-installed VPN
+ * app that isn't in `autoHiddenPackages` yet flips this true; an unchanged set
+ * keeps it false so the reconcile is a no-op.
+ */
+internal fun autoHiddenPackagesNeedReconcile(
+    config: CanonicalConfig,
+    selfPkg: String,
+    signals: Collection<AppAutoHideSignal>,
+): Boolean =
+    applyAutoHiddenPackages(config, selfPkg, signals).settings.autoHiddenPackages !=
+        config.settings.autoHiddenPackages
+
 internal fun manualHiddenPackages(
     config: CanonicalConfig,
     selfPkg: String,

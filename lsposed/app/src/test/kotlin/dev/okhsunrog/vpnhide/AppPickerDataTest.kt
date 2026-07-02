@@ -522,6 +522,45 @@ class AppPickerDataTest {
         assertEquals(emptySet<String>(), manualHiddenPackages(updated, self))
     }
 
+    @Test
+    fun `reconcile needed when a newly installed vpn app is missing from auto hidden set`() {
+        val config = CanonicalConfig()
+        val signals = listOf(AppAutoHideSignal(packageName = "com.happproxy", declaresVpnService = true))
+
+        assertEquals(true, autoHiddenPackagesNeedReconcile(config, self, signals))
+    }
+
+    @Test
+    fun `reconcile is a no op when the auto hidden set already matches the signals`() {
+        val config =
+            CanonicalConfig(
+                apps = mapOf("com.happproxy" to CanonicalApp(hidden = true)),
+                settings = CanonicalSettings(autoHiddenPackages = setOf("com.happproxy")),
+            )
+        val signals = listOf(AppAutoHideSignal(packageName = "com.happproxy", declaresVpnService = true))
+
+        assertEquals(false, autoHiddenPackagesNeedReconcile(config, self, signals))
+    }
+
+    @Test
+    fun `reconcile needed when an auto hidden vpn app is no longer present`() {
+        val config =
+            CanonicalConfig(
+                apps = mapOf("com.gone" to CanonicalApp(hidden = true)),
+                settings = CanonicalSettings(autoHiddenPackages = setOf("com.gone")),
+            )
+
+        assertEquals(true, autoHiddenPackagesNeedReconcile(config, self, emptyList()))
+    }
+
+    @Test
+    fun `reconcile is a no op when auto hide is disabled and the set is already empty`() {
+        val config = CanonicalConfig(settings = CanonicalSettings(autoHideVpnServices = false))
+        val signals = listOf(AppAutoHideSignal(packageName = "com.happproxy", declaresVpnService = true))
+
+        assertEquals(false, autoHiddenPackagesNeedReconcile(config, self, signals))
+    }
+
     private fun snapshotWithCanonical(
         vararg apps: Pair<String, CanonicalApp>,
         settings: CanonicalSettings = CanonicalSettings(),
