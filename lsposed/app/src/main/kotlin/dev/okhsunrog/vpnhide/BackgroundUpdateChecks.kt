@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 
-private const val TAG = "VpnHide-Update"
+private const val TAG = LogTags.UPDATE
 private const val UPDATE_WORK_NAME = "vpnhide_background_update_check"
 private const val UPDATE_NOTIFICATION_CHANNEL_ID = "vpnhide_updates"
 private const val UPDATE_NOTIFICATION_ID = 1001

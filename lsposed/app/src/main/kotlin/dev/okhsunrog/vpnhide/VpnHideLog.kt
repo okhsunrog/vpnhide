@@ -3,25 +3,16 @@ package dev.okhsunrog.vpnhide
 import android.util.Log
 
 /**
- * Log wrapper gated by a runtime "debug logging" flag so users can
- * silence logcat output from the app process.
- *
- * Only i/d/w are gated. Error-level logs always pass through for crash
- * analysis.
- *
- * [enabled] is a volatile plain boolean rather than a synchronized
- * getter: i/d/w are on enough hot paths (Dashboard reload, suExec
- * wrappers, update checks) that we can't afford a monitor per call.
- * Worst case, a toggle flip takes one extra log line to take effect.
+ * App-process logcat facade. Info/debug/warn are gated by the runtime "debug
+ * logging" flag ([enabled]); error always prints for crash analysis. The
+ * gate-and-level policy lives in [GatedLogger]; this object only carries the app
+ * sink and the flag's source (the canonical config snapshot).
  */
-internal object VpnHideLog {
-    @Volatile
-    var enabled: Boolean = false
-
+internal object VpnHideLog : GatedLogger() {
     /**
-     * Load the persisted preference into [enabled] so the first log
-     * call after app start reflects the user's choice without waiting
-     * for the settings UI to be opened.
+     * Load the effective debug flag from the current root snapshot so the first
+     * log call after app start reflects the user's choice without waiting for
+     * the settings UI to be opened.
      */
     fun init() {
         enabled = debugFromCanonicalSnapshot(RootSnapshotCache.snapshot.value)
@@ -31,47 +22,44 @@ internal object VpnHideLog {
         enabled = debugFromCanonicalSnapshot(rootSnapshot)
     }
 
+    override fun emit(
+        priority: Int,
+        tag: String,
+        msg: String,
+        tr: Throwable?,
+    ) {
+        Log.println(priority, tag, if (tr == null) msg else "$msg\n${Log.getStackTraceString(tr)}")
+    }
+
     fun i(
         tag: String,
         msg: String,
-    ) {
-        if (enabled) Log.i(tag, msg)
-    }
+    ) = log(Log.INFO, tag, msg)
 
     fun d(
         tag: String,
         msg: String,
-    ) {
-        if (enabled) Log.d(tag, msg)
-    }
+    ) = log(Log.DEBUG, tag, msg)
 
     fun w(
         tag: String,
         msg: String,
-    ) {
-        if (enabled) Log.w(tag, msg)
-    }
+    ) = log(Log.WARN, tag, msg)
 
     fun w(
         tag: String,
         msg: String,
         tr: Throwable,
-    ) {
-        if (enabled) Log.w(tag, msg, tr)
-    }
+    ) = log(Log.WARN, tag, msg, tr)
 
     fun e(
         tag: String,
         msg: String,
-    ) {
-        Log.e(tag, msg)
-    }
+    ) = log(Log.ERROR, tag, msg)
 
     fun e(
         tag: String,
         msg: String,
         tr: Throwable,
-    ) {
-        Log.e(tag, msg, tr)
-    }
+    ) = log(Log.ERROR, tag, msg, tr)
 }

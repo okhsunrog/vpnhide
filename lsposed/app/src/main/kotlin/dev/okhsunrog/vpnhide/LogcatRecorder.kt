@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit
  * so reports about a third-party app still carry enough VPN Hide context.
  */
 internal object LogcatRecorder {
-    private const val TAG = "VpnHide-Logcat"
+    private const val TAG = LogTags.LOGCAT
     private const val LOGCAT_STOP_GRACE_MS = 200L
     private const val LOGCAT_PIPE_JOIN_MS = 2_000L
 
@@ -355,22 +355,7 @@ internal object LogcatRecorder {
             }
         }.trimEnd()
 
-    private fun isVpnHideLogcatLine(line: String): Boolean =
-        listOf(
-            "VPNHideTest",
-            "VpnHide",
-            "VpnHide-Dashboard",
-            "VpnHide-Startup",
-            "VpnHide-LSPosed",
-            "VpnHide-Diag",
-            "VpnHide-Logcat",
-            "VpnHide-Update",
-            "VpnHideAgentBridge",
-            "vpnhide",
-            "vpnhide_ports",
-            "vpnhide-zygisk",
-            "shadowhook_tag",
-        ).any { line.contains(it) }
+    private fun isVpnHideLogcatLine(line: String): Boolean = (LogTags.APP_TAGS + LogTags.NATIVE_TAGS).any { line.contains(it) }
 
     private fun formatLogcatSince(date: Date): String = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(date)
 

@@ -74,7 +74,7 @@ internal object UpdateCheckCache {
             // DON'T advance lastCheckMs, so the next ensureFresh retries instead
             // of caching the failure as a fresh "no update" for 6 hours.
             UpdateCheckResult.Failed -> {
-                VpnHideLog.d("VpnHide-Update", "update check failed; keeping prior state, will retry")
+                VpnHideLog.d(LogTags.UPDATE, "update check failed; keeping prior state, will retry")
             }
         }
     }

@@ -5,26 +5,18 @@ import android.util.Log
 import de.robv.android.xposed.XposedBridge
 
 /**
- * Log wrapper gated by a filesystem flag set from the app. Used by LSPosed
- * hooks running inside `system_server`, where we don't have access to the
- * app's SharedPreferences.
+ * system_server logcat facade for LSPosed hooks, which can't reach the app's
+ * canonical-snapshot cache. Same gate-and-level policy as [VpnHideLog] (see
+ * [GatedLogger]) — info is per-request/hot-path and gated, error always prints
+ * so "hooks didn't attach" reports stay diagnosable — but the flag is read
+ * straight from the canonical JSON on [install] and refreshed by an inotify
+ * watcher, so a toggle flip lands without restarting system_server.
  *
- * Source of truth is the canonical JSON config. We read it on [install] and via an
- * inotify watcher so a flip takes effect without restarting system_server.
- *
- * The logcat sink makes Settings → Debugging → Debug logging visible through
- * ordinary bug-report captures. The Xposed sink is kept for framework UIs /
- * files that expose `XposedBridge.log` separately.
- *
- * Only per-request / hot-path logs should go through [i]. Hook install failures
- * and other one-time errors use [e], which always prints — losing those would
- * make diagnosing "hooks didn't attach" reports impossible.
+ * Every line also goes to `XposedBridge.log`, keeping Settings → Debugging →
+ * Debug logging visible through framework UIs that surface the Xposed log
+ * separately from ordinary bug-report captures.
  */
-internal object HookLog {
-    private const val LOGCAT_TAG = "VpnHide-LSPosed"
-
-    @Volatile private var enabled: Boolean = false
-
+internal object HookLog : GatedLogger() {
     @Volatile private var watcher: FileObserver? = null
 
     fun install() {
@@ -45,15 +37,18 @@ internal object HookLog {
         enabled = SystemServerConfigCache.load().debug
     }
 
-    fun i(msg: String) {
-        if (!enabled) return
-        Log.i(LOGCAT_TAG, msg)
+    override fun emit(
+        priority: Int,
+        tag: String,
+        msg: String,
+        tr: Throwable?,
+    ) {
+        Log.println(priority, tag, if (tr == null) msg else "$msg\n${Log.getStackTraceString(tr)}")
         XposedBridge.log(msg)
     }
 
+    fun i(msg: String) = log(Log.INFO, LogTags.LSPOSED, msg)
+
     /** Always prints — used for install failures and other diagnostics we can't afford to lose. */
-    fun e(msg: String) {
-        Log.e(LOGCAT_TAG, msg)
-        XposedBridge.log(msg)
-    }
+    fun e(msg: String) = log(Log.ERROR, LogTags.LSPOSED, msg)
 }

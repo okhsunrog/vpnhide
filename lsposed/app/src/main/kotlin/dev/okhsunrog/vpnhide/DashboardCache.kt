@@ -20,7 +20,7 @@ import kotlinx.coroutines.withContext
  */
 internal object DashboardCache : StateCache<DashboardState>(
     traceName = "dashboard_state",
-    logTag = "VpnHide-Dashboard",
+    logTag = LogTags.DASHBOARD,
 ) {
     val state: StateFlow<DashboardState?> get() = value
 

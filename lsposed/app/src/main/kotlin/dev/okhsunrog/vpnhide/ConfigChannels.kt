@@ -66,7 +66,7 @@ internal fun runRuntimeConfigReconcile() {
     parts += ConfigChannels.reconcileCommand()
     val cmd = parts.joinToString(" ; ")
     val (exit, _) = suExec(cmd)
-    if (exit != 0) VpnHideLog.w("VpnHide-Startup", "runtime config reconcile failed (exit=$exit)")
+    if (exit != 0) VpnHideLog.w(LogTags.STARTUP, "runtime config reconcile failed (exit=$exit)")
 }
 
 /**
@@ -96,7 +96,7 @@ internal fun reconcileAutoHiddenPackages(
         ).joinToString(" ; ")
     val (exit, output) = suExec(cmd)
     if (exit != 0) {
-        VpnHideLog.w("VpnHide-Startup", "auto-hide reconcile failed (exit=$exit): ${output.trim()}")
+        VpnHideLog.w(LogTags.STARTUP, "auto-hide reconcile failed (exit=$exit): ${output.trim()}")
         return false
     }
     RootSnapshotCache.invalidate()
@@ -104,7 +104,7 @@ internal fun reconcileAutoHiddenPackages(
     DashboardCache.invalidate()
     StatisticsCache.invalidate()
     VpnHideLog.i(
-        "VpnHide-Startup",
+        LogTags.STARTUP,
         "auto-hide reconcile: ${next.settings.autoHiddenPackages.size} auto-hidden package(s)",
     )
     return true

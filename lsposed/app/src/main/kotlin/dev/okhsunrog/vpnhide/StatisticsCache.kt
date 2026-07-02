@@ -7,7 +7,7 @@ import kotlinx.coroutines.withContext
 
 internal object StatisticsCache : StateCache<StatisticsState>(
     traceName = "statistics_state",
-    logTag = "VpnHide-Statistics",
+    logTag = LogTags.STATISTICS,
 ) {
     val state: StateFlow<StatisticsState?> get() = value
 

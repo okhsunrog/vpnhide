@@ -156,7 +156,7 @@ internal object DiagnosticsCache {
             // Both states offer a retry; these causes are usually transient.
             _state.value = State.Failed
             StartupTrace.mark("diagnostics_cache_failed")
-            VpnHideLog.w("VpnHide-Diag", "runAllChecks failed: ${e.message}")
+            VpnHideLog.w(LogTags.DIAG, "runAllChecks failed: ${e.message}")
         }
     }
 

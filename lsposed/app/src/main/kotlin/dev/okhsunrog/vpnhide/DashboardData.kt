@@ -385,7 +385,7 @@ internal data class KmodLoadStatus(
     val freshForCurrentBoot: Boolean,
 )
 
-private const val TAG = "VpnHide-Dashboard"
+private const val TAG = LogTags.DASHBOARD
 
 // Non-GKI kernel series KernelPatch (the KPM runtime) supports but the .ko does
 // not: no GKI KMI, no DDK build. Mirrors the sub-5.10 rows of the KPM kver

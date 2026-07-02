@@ -8,7 +8,7 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-private const val TAG = "VpnHide"
+private const val TAG = LogTags.APP
 
 // Legacy storage files retained as read-only migration inputs when canonical
 // JSON is absent. New writes go to CANONICAL_CONFIG_FILE only.

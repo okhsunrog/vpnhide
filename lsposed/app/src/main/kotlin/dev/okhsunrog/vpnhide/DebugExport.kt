@@ -13,7 +13,7 @@ import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-private const val TAG = "VPNHideTest"
+private const val TAG = LogTags.TEST
 
 internal data class DiagnosticFileEntry(
     val name: String,
@@ -364,7 +364,7 @@ internal fun buildBootLsposedLogcatCommand(): String {
 
 private val BOOT_LSPOSED_LOGCAT_PATTERNS =
     listOf(
-        "VpnHide-LSPosed",
+        LogTags.LSPOSED,
         "LSPosed-Bridge",
         "VectorNative",
         "VectorBridge",

@@ -47,7 +47,7 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-private const val TAG = "VPNHideTest"
+private const val TAG = LogTags.TEST
 
 data class CheckResult(
     val name: String,

@@ -76,7 +76,7 @@ internal fun labelWithUsers(
  */
 internal object AppListCache : StateCache<List<AppSummary>>(
     traceName = "app_list_cache",
-    logTag = "VpnHide-AppList",
+    logTag = LogTags.APP_LIST,
 ) {
     val apps: StateFlow<List<AppSummary>?> get() = value
 

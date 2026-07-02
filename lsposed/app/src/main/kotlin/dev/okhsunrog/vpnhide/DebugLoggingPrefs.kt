@@ -1,6 +1,6 @@
 package dev.okhsunrog.vpnhide
 
-private const val TAG = "VpnHideDebugConfig"
+private const val TAG = LogTags.DEBUG_CONFIG
 
 private fun canonicalFromSnapshot(snapshot: RootSnapshot?): CanonicalConfig? =
     snapshot

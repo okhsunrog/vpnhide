@@ -129,24 +129,28 @@ internal class StartupCoordinator(
     private fun reconcileRuntimeConfigNow(rootSnapshot: RootSnapshot) {
         val canonicalConfig = parseTargetsSnapshot(rootSnapshot).canonicalConfig
         val reconciled = canonicalConfig?.let { canonicalConfigForStartupDebugReconcile(it) }
-        if (reconciled != null) {
-            val command =
-                listOf(
-                    buildCanonicalConfigWriteCommand(reconciled),
-                    ConfigChannels.reconcileCommand(),
-                ).joinToString(" ; ")
-            val (exit, output) = suExec(command)
-            if (exit != 0) {
-                VpnHideLog.w("VpnHide-Startup", "startup debug reconcile failed (exit=$exit): ${output.trim()}")
-                return
-            }
-            RootSnapshotCache.invalidate()
-            TargetsCache.invalidate()
-            DashboardCache.invalidate()
-            StatisticsCache.invalidate()
+        // A capture interrupted mid-flight left effective `debug` out of sync with
+        // the user's `debugSwitch`: write the healed config and run the activator
+        // once. Otherwise nothing needs writing — just re-run the activator to pick
+        // up the current file state. Never both (the write command already runs it).
+        if (reconciled == null) {
+            reconcileRuntimeConfig()
+            return
         }
-
-        reconcileRuntimeConfig()
+        val command =
+            listOf(
+                buildCanonicalConfigWriteCommand(reconciled),
+                ConfigChannels.reconcileCommand(),
+            ).joinToString(" ; ")
+        val (exit, output) = suExec(command)
+        if (exit != 0) {
+            VpnHideLog.w(LogTags.STARTUP, "startup debug reconcile failed (exit=$exit): ${output.trim()}")
+            return
+        }
+        RootSnapshotCache.invalidate()
+        TargetsCache.invalidate()
+        DashboardCache.invalidate()
+        StatisticsCache.invalidate()
     }
 
     fun ensureUpdateFresh(scope: CoroutineScope) {

@@ -5,7 +5,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-private const val TAG = "VpnHide-Update"
+private const val TAG = LogTags.UPDATE
 private const val GITHUB_RELEASES_URL =
     "https://api.github.com/repos/okhsunrog/vpnhide/releases/latest"
 private const val PREFS_NAME = "vpnhide_prefs"

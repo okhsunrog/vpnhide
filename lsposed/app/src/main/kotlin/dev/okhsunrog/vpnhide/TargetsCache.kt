@@ -72,7 +72,7 @@ internal data class TargetsSnapshot(
 
 internal object TargetsCache : StateCache<TargetsSnapshot>(
     traceName = "targets_cache",
-    logTag = "VpnHide-Targets",
+    logTag = LogTags.TARGETS,
 ) {
     val snapshot: StateFlow<TargetsSnapshot?> get() = value
 

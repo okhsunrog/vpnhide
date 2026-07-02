@@ -4,7 +4,7 @@ import android.os.SystemClock
 import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean
 
-private const val STARTUP_TAG = "VpnHide-Startup"
+private const val STARTUP_TAG = LogTags.STARTUP
 
 internal object StartupTrace {
     private val originMs = SystemClock.elapsedRealtime()

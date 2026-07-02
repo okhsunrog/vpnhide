@@ -20,7 +20,7 @@ import java.security.SecureRandom
 import java.util.Base64
 import kotlin.concurrent.thread
 
-private const val TAG = "VpnHideAgentBridge"
+private const val TAG = LogTags.AGENT_BRIDGE
 private const val LOCALHOST = "127.0.0.1"
 
 // A stalled localhost peer must not wedge the single serve thread forever:
@@ -109,7 +109,7 @@ private class BridgeServer(
 
     fun start() {
         worker =
-            thread(name = "VpnHideAgentBridge", isDaemon = true) {
+            thread(name = LogTags.AGENT_BRIDGE, isDaemon = true) {
                 serveLoop()
             }
     }
