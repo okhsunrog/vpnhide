@@ -348,8 +348,10 @@ private fun MainScreen() {
             StartupTrace.dashboardReady()
             scope.launch(Dispatchers.IO) {
                 // Re-propagate the persisted flag to the on-disk sinks as a
-                // safety-net, but keep it off the cold-start critical path.
-                applyDebugLoggingRuntime(VpnHideLog.enabled)
+                // safety-net, but only if they've drifted — otherwise a cold
+                // start needlessly rewrites the canonical config every launch.
+                // Kept off the cold-start critical path.
+                reapplyDebugLoggingIfDrifted(VpnHideLog.enabled)
             }
         }
     }

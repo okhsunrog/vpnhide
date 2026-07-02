@@ -62,6 +62,30 @@ internal fun applyDebugLoggingRuntime(enabled: Boolean) {
     writeDebugFlagFiles(enabled)
 }
 
+/**
+ * Startup safety-net: re-propagate the persisted debug flag to the on-disk
+ * config + native sinks only if they've drifted from [enabled]. This runs on
+ * every cold start; without the drift check it would rewrite the canonical
+ * config (and re-run the native activator) with byte-identical content on every
+ * launch. Capture paths (LogcatRecorder / debug export) do not go through here —
+ * they already gate their own [applyDebugLoggingRuntime] calls on
+ * [VpnHideLog.enabled] and must always write both directions.
+ *
+ * When the snapshot isn't loaded yet the flag is treated as drifted, so the
+ * safety-net still fires once.
+ */
+internal fun reapplyDebugLoggingIfDrifted(enabled: Boolean) {
+    val onDiskDebug =
+        TargetsCache.snapshot.value
+            ?.canonicalConfig
+            ?.debug
+    if (onDiskDebug == enabled) {
+        VpnHideLog.enabled = enabled
+        return
+    }
+    applyDebugLoggingRuntime(enabled)
+}
+
 private fun writeDebugFlagFiles(enabled: Boolean) {
     val parts = mutableListOf<String>()
 
