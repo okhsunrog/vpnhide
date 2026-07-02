@@ -24,29 +24,34 @@ sealed interface ModuleState {
         // Non-null when the module is installed but the installation itself
         // is permanently broken (distinct from "active=false" which usually
         // just means a reboot is pending). UI colors the card red.
-        val brokenReason: KmodBrokenReason? = null,
+        val brokenReason: ModuleBrokenReason? = null,
     ) : ModuleState
 }
 
-enum class KmodBrokenReason {
+// Shared across every flashable module kind (kmod, KPM, ...) that stamps
+// ModuleState.Installed.brokenReason — not just kmod, despite the name
+// prefixes on the individual kmod-only cases below.
+enum class ModuleBrokenReason {
     WrongVariant,
     UnsupportedKernel,
     MissingKprobes,
     UnknownVariantInactive,
     AmbiguousLoadFailed,
     SignatureEnforced,
+    KpmActivatorMissing,
 }
 
 /**
- * The single kmod problem to surface. [reason] drives the red module-card
+ * The single module problem to surface. [reason] drives the red module-card
  * color; [text] drives the dashboard error banner. Computed once (see
  * `loadDashboardState`) so the card and the banner can never disagree —
  * previously the priority order was hand-mirrored in two separate `when`
- * blocks. [reason] is null for a generic insmod failure where we only have
- * raw stderr to show, not a named diagnosis.
+ * blocks. [reason] is null for a generic load failure where we only have raw
+ * stderr/exit-status text to show, not a named diagnosis. Shared by the kmod
+ * (`classifyKmodProblem`) and KPM (`classifyKpmProblem`) diagnosis paths.
  */
-internal data class KmodProblem(
-    val reason: KmodBrokenReason?,
+internal data class ModuleProblem(
+    val reason: ModuleBrokenReason?,
     val text: String,
 )
 
@@ -587,10 +592,10 @@ internal fun readKmodLoadStatus(
  * to be hand-mirrored across two `when` blocks.
  */
 internal sealed interface KmodProblemKind {
-    val reason: KmodBrokenReason?
+    val reason: ModuleBrokenReason?
 
     data object KprobesMissing : KmodProblemKind {
-        override val reason get() = KmodBrokenReason.MissingKprobes
+        override val reason get() = ModuleBrokenReason.MissingKprobes
     }
 
     // The kernel enforces module signature verification and refused our
@@ -598,14 +603,14 @@ internal sealed interface KmodProblemKind {
     // such a kernel, so the only fix is removing the enforcement — KernelSU
     // Next (GKI mode) does that. See issue #132.
     data object SignatureEnforced : KmodProblemKind {
-        override val reason get() = KmodBrokenReason.SignatureEnforced
+        override val reason get() = ModuleBrokenReason.SignatureEnforced
     }
 
     data class UnsupportedKernel(
         val unameR: String,
         val recommendedArtifact: String,
     ) : KmodProblemKind {
-        override val reason get() = KmodBrokenReason.UnsupportedKernel
+        override val reason get() = ModuleBrokenReason.UnsupportedKernel
     }
 
     data class WrongVariant(
@@ -613,27 +618,27 @@ internal sealed interface KmodProblemKind {
         val recommendedKmi: String,
         val recommendedArtifact: String,
     ) : KmodProblemKind {
-        override val reason get() = KmodBrokenReason.WrongVariant
+        override val reason get() = ModuleBrokenReason.WrongVariant
     }
 
     data class UnknownVariant(
         val recommendedArtifact: String,
     ) : KmodProblemKind {
-        override val reason get() = KmodBrokenReason.UnknownVariantInactive
+        override val reason get() = ModuleBrokenReason.UnknownVariantInactive
     }
 
     data class AmbiguousLoadFailed(
         val installedVariant: String,
         val tryArtifact: String,
     ) : KmodProblemKind {
-        override val reason get() = KmodBrokenReason.AmbiguousLoadFailed
+        override val reason get() = ModuleBrokenReason.AmbiguousLoadFailed
     }
 
     // Generic insmod failure where we only have raw stderr, no named diagnosis.
     data class LoadFailed(
         val insmodStderr: String,
     ) : KmodProblemKind {
-        override val reason: KmodBrokenReason? get() = null
+        override val reason: ModuleBrokenReason? get() = null
     }
 }
 
@@ -733,8 +738,8 @@ internal fun KmodLoadStatus.isModuleSignatureRejected(): Boolean {
 private fun renderKmodProblem(
     kind: KmodProblemKind,
     res: android.content.res.Resources,
-): KmodProblem =
-    KmodProblem(
+): ModuleProblem =
+    ModuleProblem(
         reason = kind.reason,
         text =
             when (kind) {
@@ -773,6 +778,85 @@ private fun renderKmodProblem(
 
                 is KmodProblemKind.LoadFailed -> {
                     res.getString(R.string.dashboard_issue_kmod_load_failed, kind.insmodStderr)
+                }
+            },
+    )
+
+internal sealed interface KpmProblemKind {
+    val reason: ModuleBrokenReason?
+
+    // The activator binary itself is missing from the module directory — a
+    // corrupted or partial KPM install (see kmod/kpm/module/service.sh).
+    // [path] is the path the boot script tried to exec.
+    data class ActivatorMissing(
+        val path: String,
+    ) : KpmProblemKind {
+        override val reason get() = ModuleBrokenReason.KpmActivatorMissing
+    }
+
+    // The activator ran but exited non-zero for a reason we don't have a
+    // named diagnosis for. [detail] is the raw `rc=<code> <captured output>`
+    // the boot script wrote — the KPM analogue of kmod's raw insmod stderr.
+    // Null reason (mirrors KmodProblemKind.LoadFailed): an untriaged exit
+    // code isn't a confident enough diagnosis to paint the module card red.
+    data class LoadFailed(
+        val detail: String,
+    ) : KpmProblemKind {
+        override val reason: ModuleBrokenReason? get() = null
+    }
+}
+
+/**
+ * Diagnose a KPM install that's present but didn't load, for the
+ * `runtime=activator` outcomes the boot script (kmod/kpm/module/service.sh)
+ * writes. The other two runtimes it can write — `conflict` (a co-installed
+ * .ko took the single-active slot) and `apatch` (dormant, awaiting a saved
+ * superkey) — are expected, recoverable states already handled separately as
+ * warnings by [kpmDeferredForConflict] / [kpmAwaitingSuperkey]; this function
+ * only fires for `runtime=activator`, so it can never double up with those.
+ * `runtime=activator` itself covers both the success case (`loaded=1`, which
+ * the `!kpm.active` guard below already excludes) and the failure cases this
+ * diagnoses — the KPM analogue of classifyKmodProblem's LoadFailed fallback,
+ * sourced from the activator's own captured detail instead of insmod stderr.
+ */
+internal fun classifyKpmProblem(
+    kpm: ModuleState,
+    loadStatusSection: String,
+    currentBootId: String,
+): KpmProblemKind? {
+    if (kpm !is ModuleState.Installed || kpm.active) return null
+    val load = parseKeyValueLines(loadStatusSection)
+    val bootId = load["boot_id"]?.trim()
+    if (load["runtime"]?.trim() != "activator" ||
+        load["loaded"]?.trim() != "0" ||
+        bootId.isNullOrEmpty() ||
+        bootId != currentBootId.trim()
+    ) {
+        return null
+    }
+    val detail = load["detail"]?.trim().orEmpty()
+    val missingPrefix = "activator missing at "
+    return if (detail.startsWith(missingPrefix)) {
+        KpmProblemKind.ActivatorMissing(detail.removePrefix(missingPrefix))
+    } else {
+        KpmProblemKind.LoadFailed(detail)
+    }
+}
+
+private fun renderKpmProblem(
+    kind: KpmProblemKind,
+    res: android.content.res.Resources,
+): ModuleProblem =
+    ModuleProblem(
+        reason = kind.reason,
+        text =
+            when (kind) {
+                is KpmProblemKind.ActivatorMissing -> {
+                    res.getString(R.string.dashboard_issue_kpm_activator_missing, kind.path)
+                }
+
+                is KpmProblemKind.LoadFailed -> {
+                    res.getString(R.string.dashboard_issue_kpm_load_failed, kind.detail)
                 }
             },
     )
@@ -912,6 +996,11 @@ private fun buildModuleVersionIssue(
     kind: FlashableModuleKind,
     moduleVersion: String,
     appVersion: String,
+    // Only meaningful for FlashableModuleKind.Kmod: the GKI-specific zip the
+    // kernel recommends, so an "update the module" nudge can name the exact
+    // file instead of sending the user back to KernelSU/Magisk to guess
+    // which variant they originally flashed (issue #225).
+    recommendedArtifact: String? = null,
 ): String =
     when (compareSemver(normalizeVersion(moduleVersion), normalizeVersion(appVersion))) {
         null, 0 -> {
@@ -928,16 +1017,20 @@ private fun buildModuleVersionIssue(
         }
 
         in Int.MIN_VALUE..-1 -> {
-            res.getString(
-                when (kind) {
-                    FlashableModuleKind.Kmod -> R.string.dashboard_issue_update_kmod
-                    FlashableModuleKind.Kpm -> R.string.dashboard_issue_update_kpm
-                    FlashableModuleKind.Zygisk -> R.string.dashboard_issue_update_zygisk
-                    FlashableModuleKind.Ports -> R.string.dashboard_issue_update_ports
-                },
-                moduleVersion,
-                appVersion,
-            )
+            if (kind == FlashableModuleKind.Kmod && recommendedArtifact != null) {
+                res.getString(R.string.dashboard_issue_update_kmod_named, moduleVersion, appVersion, recommendedArtifact)
+            } else {
+                res.getString(
+                    when (kind) {
+                        FlashableModuleKind.Kmod -> R.string.dashboard_issue_update_kmod
+                        FlashableModuleKind.Kpm -> R.string.dashboard_issue_update_kpm
+                        FlashableModuleKind.Zygisk -> R.string.dashboard_issue_update_zygisk
+                        FlashableModuleKind.Ports -> R.string.dashboard_issue_update_ports
+                    },
+                    moduleVersion,
+                    appVersion,
+                )
+            }
         }
 
         else -> {
@@ -1132,12 +1225,12 @@ internal suspend fun loadDashboardState(
     val kmodRaw = rawNativeBackends.kmod.withTargetCount(nativeTargetCount)
     val zygiskStatusRaw = shellSnapshot["zygisk_status"].orEmpty()
     val zygisk = rawNativeBackends.zygisk.withTargetCount(nativeTargetCount)
-    val kpm = rawNativeBackends.kpm.withTargetCount(nativeTargetCount)
+    val kpmRaw = rawNativeBackends.kpm.withTargetCount(nativeTargetCount)
     val ports = detectPortsModule(shellSnapshot, selfPkg).withTargetCount(countPackages(targetsSnapshot.portsObservers))
     val kmodTargetCount = (kmodRaw as? ModuleState.Installed)?.targetCount ?: 0
-    val kpmTargetCount = (kpm as? ModuleState.Installed)?.targetCount ?: 0
+    val kpmTargetCount = (kpmRaw as? ModuleState.Installed)?.targetCount ?: 0
     val zygiskTargetCount = (zygisk as? ModuleState.Installed)?.targetCount ?: 0
-    VpnHideLog.i(TAG, "modules: kmodRaw=$kmodRaw kpm=$kpm zygisk=$zygisk ports=$ports")
+    VpnHideLog.i(TAG, "modules: kmodRaw=$kmodRaw kpmRaw=$kpmRaw zygisk=$zygisk ports=$ports")
     StartupTrace.mark("dashboard_modules_done")
 
     // Recommendation based purely on the kernel — used by the install card,
@@ -1160,34 +1253,47 @@ internal suspend fun loadDashboardState(
     // diagnosis; renderKmodProblem maps it to the localized banner text.
     // [reason] colors the card, [text] is the banner — both derive from the
     // one classification so they can't disagree.
-    val kmodProblem: KmodProblem? =
+    val kmodProblem: ModuleProblem? =
         classifyKmodProblem(kmodRaw, kernelRecommendation, kmodLoadStatus)
             ?.let { renderKmodProblem(it, res) }
-    val kmodBrokenReason = kmodProblem?.reason
     val kmod: ModuleState =
-        if (kmodRaw is ModuleState.Installed && kmodBrokenReason != null) {
-            kmodRaw.copy(brokenReason = kmodBrokenReason)
+        if (kmodRaw is ModuleState.Installed && kmodProblem?.reason != null) {
+            kmodRaw.copy(brokenReason = kmodProblem.reason)
         } else {
             kmodRaw
         }
     VpnHideLog.i(TAG, "kmod (with brokenReason): $kmod")
+
+    // Same single-source-of-truth pattern as kmod above, for the KPM
+    // runtime=activator failure cases classifyKpmProblem diagnoses (the
+    // conflict / awaiting-superkey cases stay separate warnings below).
+    val kpmProblem: ModuleProblem? =
+        classifyKpmProblem(kpmRaw, shellSnapshot["kpm_load_status"].orEmpty(), currentBootId)
+            ?.let { renderKpmProblem(it, res) }
+    val kpm: ModuleState =
+        if (kpmRaw is ModuleState.Installed && kpmProblem?.reason != null) {
+            kpmRaw.copy(brokenReason = kpmProblem.reason)
+        } else {
+            kpmRaw
+        }
+    VpnHideLog.i(TAG, "kpm (with brokenReason): $kpm")
+
+    // The one place all three backends are grouped together — every
+    // "is anything installed / active" gate below reads from this instead of
+    // re-deriving its own kmod/kpm/zygisk boolean combination.
+    val backends = NativeBackendStates(kmod = kmod, kpm = kpm, zygisk = zygisk)
     // The single native backend the dashboard shows (kmod > KPM > Zygisk).
-    val nativeBackend = displayNativeBackend(NativeBackendStates(kmod = kmod, kpm = kpm, zygisk = zygisk))
+    val nativeBackend = displayNativeBackend(backends)
     VpnHideLog.i(TAG, "nativeBackend=$nativeBackend")
     // Only surface the blue "what to install" card when nothing is
     // installed yet. Wrong-variant / broken / unsupported-kernel cases
     // already emit a red error below with the same CTA — showing both
     // duplicates the instruction.
-    val nativeInstallRecommendation =
-        kernelRecommendation?.takeIf {
-            kmod is ModuleState.NotInstalled &&
-                kpm is ModuleState.NotInstalled &&
-                zygisk is ModuleState.NotInstalled
-        }
+    val nativeInstallRecommendation = kernelRecommendation?.takeIf { backends.noneInstalled }
     VpnHideLog.i(
         TAG,
         "nativeInstallRecommendation=$nativeInstallRecommendation " +
-            "(raw=$kernelRecommendation kmodProblem=$kmodProblem)",
+            "(raw=$kernelRecommendation kmodProblem=$kmodProblem kpmProblem=$kpmProblem)",
     )
     StartupTrace.mark("dashboard_kernel_done")
 
@@ -1243,10 +1349,7 @@ internal suspend fun loadDashboardState(
     StartupTrace.mark("dashboard_lsposed_done")
 
     // ── Messages ──
-    val hasNative =
-        kmod is ModuleState.Installed ||
-            kpm is ModuleState.Installed ||
-            zygisk is ModuleState.Installed
+    val hasNative = backends.anyInstalled
     if (!hasNative) {
         err(res.getString(R.string.dashboard_issue_no_native))
     }
@@ -1318,7 +1421,13 @@ internal suspend fun loadDashboardState(
             appVersion,
         )
     moduleMismatches.forEach { mismatch ->
-        warn(buildModuleVersionIssue(res, mismatch.kind, mismatch.moduleVersion, mismatch.appVersion))
+        val recommendedArtifact =
+            if (mismatch.kind == FlashableModuleKind.Kmod && kernelRecommendation?.preferKmod == true) {
+                kernelRecommendation.recommendedArtifact
+            } else {
+                null
+            }
+        warn(buildModuleVersionIssue(res, mismatch.kind, mismatch.moduleVersion, mismatch.appVersion, recommendedArtifact))
     }
     val totalTargets = lsposedTargetCount + kmodTargetCount + kpmTargetCount + zygiskTargetCount
     if (totalTargets == 0) {
@@ -1481,12 +1590,15 @@ internal suspend fun loadDashboardState(
         warn(res.getString(R.string.dashboard_issue_self_multi_profile, selfUidCount))
     }
 
-    // ── Errors: kmod variant / load problems ──
-    // The diagnosis (reason + banner text) was computed once above as
-    // `kmodProblem`; emit its text here. Only one kmod-failure banner fires,
-    // and its priority can't drift from the card color because both come
-    // from the same value.
+    // ── Errors: kmod / KPM variant / load problems ──
+    // Each diagnosis (reason + banner text) was computed once above as
+    // `kmodProblem` / `kpmProblem`; emit their text here. Only one banner per
+    // backend fires, and its priority can't drift from the card color
+    // because both come from the same value. classifyKpmProblem only matches
+    // runtime=activator, so this can never double up with the
+    // conflict/awaiting-superkey warnings below.
     kmodProblem?.let { err(it.text) }
+    kpmProblem?.let { err(it.text) }
 
     // ── Protection checks ──
     StartupTrace.mark("dashboard_protection_start")

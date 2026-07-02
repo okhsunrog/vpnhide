@@ -72,7 +72,7 @@ class ClassifyKmodProblemTest {
                 loadStatus(fresh = true, kretprobes = "n"),
             )
         assertEquals(KmodProblemKind.KprobesMissing, kind)
-        assertEquals(KmodBrokenReason.MissingKprobes, kind?.reason)
+        assertEquals(ModuleBrokenReason.MissingKprobes, kind?.reason)
     }
 
     @Test
@@ -178,7 +178,7 @@ class ClassifyKmodProblemTest {
                 loadStatus(fresh = true, insmodStderr = "Key was rejected by service", insmodExit = 129),
             )
         assertEquals(KmodProblemKind.SignatureEnforced, kind)
-        assertEquals(KmodBrokenReason.SignatureEnforced, kind?.reason)
+        assertEquals(ModuleBrokenReason.SignatureEnforced, kind?.reason)
     }
 
     @Test

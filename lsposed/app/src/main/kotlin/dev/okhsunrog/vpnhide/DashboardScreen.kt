@@ -740,21 +740,27 @@ private fun installedVisual(
     val broken = state.brokenReason
     val brokenSubtitleRes =
         when (broken) {
-            KmodBrokenReason.WrongVariant -> R.string.dashboard_kmod_broken_wrong_variant
-            KmodBrokenReason.UnsupportedKernel -> R.string.dashboard_kmod_broken_unsupported_kernel
-            KmodBrokenReason.MissingKprobes -> R.string.dashboard_kmod_broken_no_kprobes
-            KmodBrokenReason.UnknownVariantInactive -> R.string.dashboard_kmod_broken_unknown_variant
-            KmodBrokenReason.AmbiguousLoadFailed -> R.string.dashboard_kmod_broken_ambiguous
-            KmodBrokenReason.SignatureEnforced -> R.string.dashboard_kmod_broken_signature_enforced
+            ModuleBrokenReason.WrongVariant -> R.string.dashboard_kmod_broken_wrong_variant
+            ModuleBrokenReason.UnsupportedKernel -> R.string.dashboard_kmod_broken_unsupported_kernel
+            ModuleBrokenReason.MissingKprobes -> R.string.dashboard_kmod_broken_no_kprobes
+            ModuleBrokenReason.UnknownVariantInactive -> R.string.dashboard_kmod_broken_unknown_variant
+            ModuleBrokenReason.AmbiguousLoadFailed -> R.string.dashboard_kmod_broken_ambiguous
+            ModuleBrokenReason.SignatureEnforced -> R.string.dashboard_kmod_broken_signature_enforced
+            ModuleBrokenReason.KpmActivatorMissing -> R.string.dashboard_kpm_broken_activator_missing
             null -> null
         }
+    // Stamped GKI variant (kmod builds from v0.6.3+ only — see ModuleState.gkiVariant),
+    // appended so the card itself answers "which zip did I install", without
+    // sending the user hunting through KernelSU/Magisk's module list (which
+    // shows only the generic module name, not the GKI variant — issue #225).
+    val variantSuffix = state.gkiVariant?.let { " · $it" }.orEmpty()
     return InstalledVisual(
         subtitle =
             when {
                 brokenSubtitleRes != null -> stringResource(brokenSubtitleRes)
-                active -> stringResource(R.string.dashboard_active_targets, state.targetCount)
+                active -> stringResource(R.string.dashboard_active_targets, state.targetCount) + variantSuffix
                 selfNeedsRestart -> stringResource(R.string.dashboard_installed_restart_app)
-                else -> stringResource(R.string.dashboard_installed_inactive)
+                else -> stringResource(R.string.dashboard_installed_inactive) + variantSuffix
             },
         accentColor =
             when {

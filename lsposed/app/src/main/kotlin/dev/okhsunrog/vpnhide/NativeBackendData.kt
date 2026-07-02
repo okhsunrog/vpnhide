@@ -12,6 +12,17 @@ internal data class NativeBackendStates(
         get() = activeNativeBackendId(this)
 }
 
+// Single source of truth for "is anything installed at all" — reused by both
+// the install-recommendation gate (noneInstalled) and the missing-native
+// error (anyInstalled) so the two checks can't independently drift out of
+// sync the way two hand-written `kmod is X || kpm is X || zygisk is X`
+// expressions could.
+internal val NativeBackendStates.anyInstalled: Boolean
+    get() = kmod is ModuleState.Installed || kpm is ModuleState.Installed || zygisk is ModuleState.Installed
+
+internal val NativeBackendStates.noneInstalled: Boolean
+    get() = !anyInstalled
+
 /**
  * The one native backend to surface on the dashboard. This is display state:
  * an active backend wins, otherwise the highest-priority installed backend is

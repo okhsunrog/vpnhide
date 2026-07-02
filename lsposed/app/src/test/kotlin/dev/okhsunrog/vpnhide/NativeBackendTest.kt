@@ -105,6 +105,22 @@ class NativeBackendTest {
         assertEquals(NativeBackendId.Kmod, states.activeId)
     }
 
+    // ── anyInstalled / noneInstalled ─────────────────────────────────────
+
+    @Test
+    fun `none installed is the only state where noneInstalled is true`() {
+        val none = states(ModuleState.NotInstalled, ModuleState.NotInstalled, ModuleState.NotInstalled)
+        assertEquals(false, none.anyInstalled)
+        assertEquals(true, none.noneInstalled)
+    }
+
+    @Test
+    fun `a single installed backend flips anyInstalled regardless of which one`() {
+        val kpmOnly = states(ModuleState.NotInstalled, installed(active = false), ModuleState.NotInstalled)
+        assertEquals(true, kpmOnly.anyInstalled)
+        assertEquals(false, kpmOnly.noneInstalled)
+    }
+
     // ── classifyMultiNative ──────────────────────────────────────────────
 
     @Test

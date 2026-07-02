@@ -121,6 +121,7 @@
     <string name="dashboard_kmod_broken_unknown_variant">Installed, did not load</string>
     <string name="dashboard_kmod_broken_ambiguous">Installed, did not load — try the other GKI variant</string>
     <string name="dashboard_kmod_broken_signature_enforced">Installed, kernel rejects unsigned modules</string>
+    <string name="dashboard_kpm_broken_activator_missing">Installed, activator missing</string>
     <string name="dashboard_active_targets">Active · %d target(s)</string>
     <string name="dashboard_reboot_needed">Device reboot needed</string>
     <string name="dashboard_hero_protected_title">VPN hidden</string>
@@ -282,6 +283,8 @@
     <string name="dashboard_issue_native_conflict_kernel">The kernel module (.ko) and the KPM are both installed. They hook the same kernel functions, and having both active can hard-freeze the device. Keep only one — uninstall either the kernel module or the KPM.</string>
     <string name="dashboard_issue_native_conflict_deferred">The kernel module (.ko) and the KPM are both installed. The KPM stood down at boot to avoid a freeze, so it isn\'t doing anything. Keep only one — uninstall the KPM (or the kernel module).</string>
     <string name="dashboard_issue_kpm_awaiting_superkey">The KPM is installed but inactive: APatch needs your superkey to load it. Save it in Settings → Security, then reboot to activate native hiding.</string>
+    <string name="dashboard_issue_kpm_activator_missing">KPM module is corrupted: the activator binary is missing (%1$s). Reinstall vpnhide-kpm.zip from the latest release.</string>
+    <string name="dashboard_issue_kpm_load_failed">KPM installed but failed to load: %1$s. Use Settings → Debugging → Collect debug log to attach the full boot-time output to a bug report, or reinstall vpnhide-kpm.zip from the latest release.</string>
     <string name="dashboard_issue_multiple_native">More than one native backend is installed. Only one can be active at a time (priority: kernel module, then KPM, then Zygisk); the others sit idle. Uninstall the ones you don\'t use to keep things clean.</string>
     <string name="dashboard_issue_debug_logging_on">Debug logging is enabled. VPN Hide is writing verbose lines to logcat that anyone with root can read. Turn it off in Settings → Debugging after you\'ve finished collecting a bug report.</string>
     <string name="dashboard_issue_agent_bridge_on">Agent control is enabled. VPN Hide is running a local debug bridge whose open port lets other apps on this device detect VPN Hide. Turn it off in Settings → Developer when you\'re done.</string>
@@ -299,6 +302,7 @@
     <string name="dashboard_issue_ports_no_observers">Ports hiding module is installed, but no apps have Ports enabled. Open Hiding and enable Ports for the apps you need.</string>
     <string name="dashboard_issue_version_mismatch">LSPosed module version mismatch: running %1$s, installed %2$s. Reboot the device to apply the update.</string>
     <string name="dashboard_issue_update_kmod">Kernel module version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
+    <string name="dashboard_issue_update_kmod_named">Kernel module version %1$s is older than app version %2$s. Install %3$s from the latest release via KernelSU/Magisk → Modules to update.</string>
     <string name="dashboard_issue_update_zygisk">Zygisk version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
     <string name="dashboard_issue_update_app_for_kmod">Kernel module version %1$s is newer than app version %2$s. Update the VPN Hide app.</string>
     <string name="dashboard_issue_update_app_for_zygisk">Zygisk version %1$s is newer than app version %2$s. Update the VPN Hide app.</string>
