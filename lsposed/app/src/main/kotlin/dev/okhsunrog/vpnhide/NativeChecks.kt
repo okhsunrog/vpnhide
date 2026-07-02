@@ -13,6 +13,7 @@ import dev.okhsunrog.vpnhide.checks.checkProcNetIfInet6
 import dev.okhsunrog.vpnhide.checks.checkProcNetIpv6Route
 import dev.okhsunrog.vpnhide.checks.checkProcNetRoute
 import dev.okhsunrog.vpnhide.checks.checkSysClassNet
+import dev.okhsunrog.vpnhide.generated.HookIds
 
 /**
  * One native (UniFFI / kmod-or-zygisk-covered) detection probe. [id] is a
@@ -23,6 +24,7 @@ import dev.okhsunrog.vpnhide.checks.checkSysClassNet
 internal data class NativeCheckSpec(
     val id: String,
     val labelRes: Int,
+    val expectedHooks: Set<HookIds.Hook> = emptySet(),
     val run: () -> CheckOutput,
 )
 
@@ -47,15 +49,78 @@ internal fun CheckStatus.toPassed(): Boolean? =
  */
 internal val NATIVE_CHECKS: List<NativeCheckSpec> =
     listOf(
-        NativeCheckSpec("ioctl_flags", R.string.check_ioctl_flags) { checkIoctlSiocgifflags() },
-        NativeCheckSpec("ioctl_mtu", R.string.check_ioctl_mtu) { checkIoctlSiocgifmtu() },
-        NativeCheckSpec("ioctl_conf", R.string.check_ioctl_conf) { checkIoctlSiocgifconf() },
-        NativeCheckSpec("getifaddrs", R.string.check_getifaddrs) { checkGetifaddrs() },
-        NativeCheckSpec("netlink_getlink", R.string.check_netlink_getlink) { checkNetlinkGetlink() },
-        NativeCheckSpec("netlink_getroute", R.string.check_netlink_getroute) { checkNetlinkGetroute() },
-        NativeCheckSpec("proc_route", R.string.check_proc_route) { checkProcNetRoute() },
-        NativeCheckSpec("proc_ipv6_route", R.string.check_proc_ipv6_route) { checkProcNetIpv6Route() },
-        NativeCheckSpec("proc_if_inet6", R.string.check_proc_if_inet6) { checkProcNetIfInet6() },
-        NativeCheckSpec("proc_dev", R.string.check_proc_dev) { checkProcNetDev() },
+        NativeCheckSpec(
+            id = "ioctl_flags",
+            labelRes = R.string.check_ioctl_flags,
+            expectedHooks = setOf(HookIds.Hook.DEV_IOCTL, HookIds.Hook.ZYGISK_IOCTL),
+        ) { checkIoctlSiocgifflags() },
+        NativeCheckSpec(
+            id = "ioctl_mtu",
+            labelRes = R.string.check_ioctl_mtu,
+            expectedHooks = setOf(HookIds.Hook.DEV_IOCTL, HookIds.Hook.ZYGISK_IOCTL),
+        ) { checkIoctlSiocgifmtu() },
+        NativeCheckSpec(
+            id = "ioctl_conf",
+            labelRes = R.string.check_ioctl_conf,
+            expectedHooks = setOf(HookIds.Hook.SOCK_IOCTL, HookIds.Hook.ZYGISK_IOCTL),
+        ) { checkIoctlSiocgifconf() },
+        NativeCheckSpec(
+            id = "getifaddrs",
+            labelRes = R.string.check_getifaddrs,
+            expectedHooks =
+                setOf(
+                    HookIds.Hook.RTNL_FILL_IFINFO,
+                    HookIds.Hook.INET_FILL_IFADDR,
+                    HookIds.Hook.INET6_FILL_IFADDR,
+                    HookIds.Hook.ZYGISK_GETIFADDRS,
+                ),
+        ) { checkGetifaddrs() },
+        NativeCheckSpec(
+            id = "netlink_getlink",
+            labelRes = R.string.check_netlink_getlink,
+            expectedHooks =
+                setOf(
+                    HookIds.Hook.RTNL_FILL_IFINFO,
+                    HookIds.Hook.INET_FILL_IFADDR,
+                    HookIds.Hook.INET6_FILL_IFADDR,
+                    HookIds.Hook.ZYGISK_RECVMSG,
+                    HookIds.Hook.ZYGISK_RECV,
+                    HookIds.Hook.ZYGISK_RECVFROM,
+                    HookIds.Hook.ZYGISK_RECVFROM_CHK,
+                ),
+        ) { checkNetlinkGetlink() },
+        NativeCheckSpec(
+            id = "netlink_getroute",
+            labelRes = R.string.check_netlink_getroute,
+            expectedHooks =
+                setOf(
+                    HookIds.Hook.FIB_DUMP_INFO,
+                    HookIds.Hook.RT6_FILL_NODE,
+                    HookIds.Hook.ZYGISK_RECVMSG,
+                    HookIds.Hook.ZYGISK_RECV,
+                    HookIds.Hook.ZYGISK_RECVFROM,
+                    HookIds.Hook.ZYGISK_RECVFROM_CHK,
+                ),
+        ) { checkNetlinkGetroute() },
+        NativeCheckSpec(
+            id = "proc_route",
+            labelRes = R.string.check_proc_route,
+            expectedHooks = setOf(HookIds.Hook.FIB_ROUTE_SEQ_SHOW, HookIds.Hook.ZYGISK_OPENAT),
+        ) { checkProcNetRoute() },
+        NativeCheckSpec(
+            id = "proc_ipv6_route",
+            labelRes = R.string.check_proc_ipv6_route,
+            expectedHooks = setOf(HookIds.Hook.IPV6_ROUTE_SEQ_SHOW, HookIds.Hook.ZYGISK_OPENAT),
+        ) { checkProcNetIpv6Route() },
+        NativeCheckSpec(
+            id = "proc_if_inet6",
+            labelRes = R.string.check_proc_if_inet6,
+            expectedHooks = setOf(HookIds.Hook.INET6_FILL_IFADDR, HookIds.Hook.ZYGISK_OPENAT),
+        ) { checkProcNetIfInet6() },
+        NativeCheckSpec(
+            id = "proc_dev",
+            labelRes = R.string.check_proc_dev,
+            expectedHooks = setOf(HookIds.Hook.ZYGISK_OPENAT),
+        ) { checkProcNetDev() },
         NativeCheckSpec("sys_class_net", R.string.check_sys_class_net) { checkSysClassNet() },
     )

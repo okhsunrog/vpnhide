@@ -24,6 +24,7 @@ class LsposedStateTest {
                     linkedMapOf(
                         LsposedStateMetadata.VERSION to "1.2.3",
                         LsposedStateMetadata.BOOT_ID to "boot-123",
+                        LsposedStateMetadata.INSTALL_FAILURES to "NC.writeToParcel: NoSuchMethodError",
                     ),
                 stats =
                     listOf(
@@ -54,6 +55,7 @@ class LsposedStateTest {
             mapOf(
                 LsposedStateMetadata.VERSION to "1.2.3",
                 LsposedStateMetadata.BOOT_ID to "boot-123",
+                LsposedStateMetadata.INSTALL_FAILURES to "NC.writeToParcel: NoSuchMethodError",
             ),
             parseLsposedStateMetadata(text),
         )

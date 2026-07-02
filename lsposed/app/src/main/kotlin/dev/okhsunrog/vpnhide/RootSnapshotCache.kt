@@ -39,6 +39,7 @@ internal val REQUIRED_ROOT_SNAPSHOT_SECTIONS =
         "hidden_pkgs",
         "observer_uids",
         "ports_observers",
+        "ports_load_status",
         "superkey_saved",
         "current_boot_id",
         "kmod_load_status",
@@ -48,7 +49,6 @@ internal val REQUIRED_ROOT_SNAPSHOT_SECTIONS =
         "kmod_state",
         "kpm_state",
         "lsposed_state",
-        "debug_logging",
         "getenforce",
         "kpatch_runtime",
         "pm_packages",
@@ -230,6 +230,7 @@ internal fun buildRootShellSnapshotCommand(includePmPackages: Boolean = true): S
       emit_file kmod_load_dmesg $KMOD_LOAD_DMESG_FILE
       emit_file zygisk_status $ZYGISK_STATUS_FILE
       emit_file kpm_load_status $KPM_LOAD_STATUS_FILE
+      emit_file ports_load_status $PORTS_LOAD_STATUS_FILE
       phase_end
     }
     phase_runtime_status_files() {
@@ -238,7 +239,6 @@ internal fun buildRootShellSnapshotCommand(includePmPackages: Boolean = true): S
       emit_eval kmod_state '[ -e $PROC_CTL ] && cat $PROC_CTL || true'
       emit_eval kpm_state 'if [ -x $KPM_ACTIVATOR ] && [ ! -f $KPM_MODULE_DIR/disable ]; then $KPM_ACTIVATOR state; fi'
       emit_file lsposed_state $LSPOSED_STATE_FILE
-      emit_file debug_logging /data/system/vpnhide_debug_logging
       emit_cmd getenforce getenforce
       # Is a KPM runtime present? Either APatch's native KernelPatch (loads KPMs
       # via supercall — detected by its /data/adb/ap dir; no kpatch CLI needed,

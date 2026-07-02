@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -213,7 +214,11 @@ fun DebugToolsSection(
     Column(
         modifier = modifier.fillMaxWidth(),
     ) {
-        LogcatRecordCard()
+        LogcatRecordCard(selfNeedsRestart = selfNeedsRestart)
+
+        Spacer(Modifier.height(16.dp))
+
+        KernelImageExportCard()
 
         Spacer(Modifier.height(16.dp))
 
@@ -261,7 +266,97 @@ fun DebugToolsSection(
 }
 
 @Composable
-private fun LogcatRecordCard() {
+private fun KernelImageExportCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var exporting by remember { mutableStateOf(false) }
+    var kernelImagesFile by remember { mutableStateOf<File?>(null) }
+
+    val saveLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("application/zip"),
+        ) { uri: Uri? ->
+            val zip = kernelImagesFile ?: return@rememberLauncherForActivityResult
+            if (uri != null) {
+                scope.launch(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openOutputStream(uri)?.use { out ->
+                            zip.inputStream().use { it.copyTo(out) }
+                        }
+                    }.onFailure { HookLog.e("VpnHide: kernel-image save failed: ${it.message}") }
+                }
+            }
+        }
+
+    EnhancedCard(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.kernel_images_card_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.kernel_images_card_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+
+            val zip = kernelImagesFile
+            if (zip == null || !zip.exists()) {
+                EnhancedButton(
+                    onClick = {
+                        exporting = true
+                        scope.launch {
+                            kernelImagesFile = exportKernelImagesZip(context)
+                            exporting = false
+                        }
+                    },
+                    enabled = !exporting,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (exporting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.FileDownload,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (exporting) {
+                            stringResource(R.string.kernel_images_btn_export_running)
+                        } else {
+                            stringResource(R.string.kernel_images_btn_export)
+                        },
+                    )
+                }
+            } else {
+                FileSaveShareRow(
+                    saveLabel = stringResource(R.string.btn_save_kernel_images),
+                    shareLabel = stringResource(R.string.btn_share_debug),
+                    sharePrimary = true,
+                    onSave = { saveLauncher.launch(zip.name) },
+                    onShare = { shareFileViaProvider(context, zip, "application/zip") },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by LogcatRecorder.state.collectAsState()
@@ -280,7 +375,7 @@ private fun LogcatRecordCard() {
 
     val saveLauncher =
         rememberLauncherForActivityResult(
-            ActivityResultContracts.CreateDocument("text/plain"),
+            ActivityResultContracts.CreateDocument("application/zip"),
         ) { uri: Uri? ->
             val src = (state as? LogcatRecorder.State.Stopped)?.lastFile ?: return@rememberLauncherForActivityResult
             if (uri != null) {
@@ -363,14 +458,16 @@ private fun LogcatRecordCard() {
                             shareLabel = stringResource(R.string.btn_share_debug),
                             sharePrimary = false,
                             onSave = { saveLauncher.launch(last.name) },
-                            onShare = { shareFileViaProvider(context, last, "text/plain") },
+                            onShare = { shareFileViaProvider(context, last, "application/zip") },
                         )
                         Spacer(Modifier.height(8.dp))
                     }
                     EnhancedButton(
                         onClick = {
-                            scope.launch { LogcatRecorder.start(context) }
+                            val restartState = selfNeedsRestart ?: return@EnhancedButton
+                            scope.launch { LogcatRecorder.start(context, restartState) }
                         },
+                        enabled = selfNeedsRestart != null,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(

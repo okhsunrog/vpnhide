@@ -185,6 +185,22 @@ android {
         }
         debug {
             signingConfig = signingConfigs.getByName("release")
+            isDebuggable = true
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+                "proguard-debug-rules.pro",
+            )
+        }
+        create("rawDebug") {
+            initWith(getByName("debug"))
+            signingConfig = signingConfigs.getByName("release")
+            isDebuggable = true
+            isMinifyEnabled = false
+            isShrinkResources = false
+            matchingFallbacks += listOf("debug")
         }
     }
 
@@ -248,6 +264,7 @@ dependencies {
     implementation("io.github.oikvpqya.compose.fastscroller:fastscroller-indicator:0.3.2")
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
+    add("rawDebugImplementation", libs.compose.ui.tooling)
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

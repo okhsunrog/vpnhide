@@ -86,6 +86,14 @@ adb logcat | grep VpnHide
 ```
 
 Requires JDK 17 or later. Output: `app/build/outputs/apk/debug/app-debug.apk`.
+The default debug APK is debuggable and signed like release, but R8/resource
+shrinking is enabled so the installed Xposed module stays small enough for
+LSPosed/Vector cold-start smoke tests.
+
+Use `./gradlew assembleRawDebug` only when you need the old unminified debug APK
+for Studio/debugger work. That variant can be much larger and may make the first
+launch after updating the Xposed module slow enough to hit Android's process
+start timeout.
 
 The build cross-compiles `lsposed/native/` (Rust crate) for `aarch64-linux-android` via cargo-ndk and bundles the resulting `libvpnhide_checks.so` into the APK's `jniLibs/`, plus auto-generated UniFFI Kotlin bindings under package `dev.okhsunrog.vpnhide.checks`. Both steps are driven by [Gobley](https://github.com/gobley/gobley) Gradle plugins (`dev.gobley.cargo` + `dev.gobley.uniffi`) — no manual `cargo` invocation needed. See [../docs/development.md](../docs/development.md#prerequisites) for the full prereq list.
 

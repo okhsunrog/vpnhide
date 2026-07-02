@@ -162,9 +162,10 @@ reported). This is a deliberate non-feature, not a gap to fill.
 Zygisk hooks run inside each target app's own process under that app's SELinux
 sandbox (`untrusted_app`, the app's UID). Such a process cannot write anywhere
 VPN Hide can read it back — not VPN Hide's private dir, not `/data/adb`. The
-existing zygisk heartbeat only works because VPN Hide targets *itself*, so its
-own injected process writes to its own data dir. Exporting per-app counters from
-*other* apps' injected processes would require one of:
+existing zygisk heartbeat only works because VPN Hide keeps its own UID in the
+Zygisk target config, so its own injected process writes to its own data dir
+(native self-targeting for status, not LSPosed module scope). Exporting per-app
+counters from *other* apps' injected processes would require one of:
 
 - writing a stats file into the **target app's own sandbox** — which that app
   can list and use as a "I'm being hooked" detection signal, directly

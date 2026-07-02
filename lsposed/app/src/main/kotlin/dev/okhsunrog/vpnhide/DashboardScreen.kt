@@ -74,8 +74,10 @@ fun DashboardScreen(
     // Both caches are reactive to tab switches without re-doing work:
     // ensureLoaded / ensureFresh are no-ops if the data is already
     // populated or an inflight job hasn't finished yet.
-    LaunchedEffect(Unit) {
-        DashboardCache.ensureLoaded(scope, context, selfNeedsRestart)
+    LaunchedEffect(state == null && loadError == null, selfNeedsRestart) {
+        if (state == null && loadError == null) {
+            DashboardCache.ensureLoaded(scope, context, selfNeedsRestart)
+        }
         UpdateCheckCache.ensureFresh(scope, BuildConfig.VERSION_NAME)
     }
     LaunchedEffect(Unit) {

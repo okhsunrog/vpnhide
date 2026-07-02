@@ -918,7 +918,7 @@ private fun importConfigFromUri(
         listOf(
             buildCanonicalConfigWriteCommand(canonical),
             ConfigChannels.reconcileCommand(),
-            "if [ -x $PORTS_ACTIVATOR ]; then $PORTS_ACTIVATOR; fi",
+            ConfigChannels.portsActivatorCommand(),
         ).joinToString(" ; ")
     val (exit, _) = suExec(cmd)
     if (exit != 0) return ConfigImportResult.RootFailed
@@ -1225,7 +1225,7 @@ private fun writeRemoveUnavailableConfiguredApps(
         listOf(
             buildCanonicalConfigWriteCommand(canonical),
             ConfigChannels.reconcileCommand(),
-            "if [ -x $PORTS_ACTIVATOR ]; then $PORTS_ACTIVATOR; fi",
+            ConfigChannels.portsActivatorCommand(),
         ).joinToString(" ; ")
     val (exit, _) = suExec(cmd)
     if (exit == 0) {

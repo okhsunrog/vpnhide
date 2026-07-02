@@ -19,6 +19,7 @@ internal object LsposedStateMetadata {
     const val TIMESTAMP = "timestamp"
     const val AOSP_SDK = "aosp_sdk"
     const val BROKEN_FIELDS = "broken_fields"
+    const val INSTALL_FAILURES = "install_failures"
 }
 
 internal fun parseLsposedStateMetadata(raw: String): Map<String, String> =
@@ -75,12 +76,16 @@ internal object LsposedStats {
 
     @Volatile private var brokenFields: List<String> = emptyList()
 
+    @Volatile private var installFailures: List<String> = emptyList()
+
     fun setStatus(
         installedHookMask: Int,
         broken: List<String>,
+        failures: List<String> = emptyList(),
     ) {
         installedHooks = installedHookMask
         brokenFields = broken
+        installFailures = failures.map(::sanitizeMetadataValue).take(MAX_METADATA_FAILURES)
         // Supersede any coalesced counter write with an immediate flush.
         writeHandler.removeCallbacks(flushRunnable)
         flushPending.set(false)
@@ -156,6 +161,10 @@ internal object LsposedStats {
         if (broken.isNotEmpty()) {
             meta[LsposedStateMetadata.BROKEN_FIELDS] = broken.joinToString(",")
         }
+        val failures = installFailures
+        if (failures.isNotEmpty()) {
+            meta[LsposedStateMetadata.INSTALL_FAILURES] = failures.joinToString("; ")
+        }
         return meta
     }
 
@@ -181,4 +190,14 @@ internal object LsposedStats {
         } catch (_: Throwable) {
             ""
         }
+
+    private fun sanitizeMetadataValue(value: String): String =
+        value
+            .lineSequence()
+            .joinToString(" ") { it.trim() }
+            .replace(Regex("\\s+"), " ")
+            .take(MAX_METADATA_VALUE_CHARS)
+
+    private const val MAX_METADATA_FAILURES = 24
+    private const val MAX_METADATA_VALUE_CHARS = 240
 }

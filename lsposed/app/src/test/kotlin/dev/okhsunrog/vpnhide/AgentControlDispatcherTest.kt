@@ -13,6 +13,7 @@ class AgentControlDispatcherTest {
         assertTrue("getStatisticsState missing", "getStatisticsState" in names)
         assertTrue("getStatisticsCaptureBaseline missing", "getStatisticsCaptureBaseline" in names)
         assertTrue("getStatisticsCaptureDiff missing", "getStatisticsCaptureDiff" in names)
+        assertTrue("exportKernelImages missing", "exportKernelImages" in names)
         assertTrue("setAppProtection missing", "setAppProtection" in names)
     }
 

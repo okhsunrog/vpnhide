@@ -66,6 +66,12 @@ Then:
 su -c /data/adb/modules/vpnhide_ports/activator
 ```
 
+The latest apply result is recorded in:
+
+```sh
+su -c 'cat /data/adb/vpnhide_ports/load_status; cat /data/adb/vpnhide_ports/load_log'
+```
+
 ## Why just localhost, and why for selected apps only
 
 - Banking / anti-censorship detection apps probe `127.0.0.1:7890`,

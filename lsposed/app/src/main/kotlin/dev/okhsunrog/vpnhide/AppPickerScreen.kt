@@ -374,7 +374,7 @@ private fun buildUnifiedSaveCommand(
 
     parts += ConfigChannels.nativeWriteParts()
 
-    parts += "if [ -x $PORTS_ACTIVATOR ]; then $PORTS_ACTIVATOR; fi"
+    parts += ConfigChannels.portsActivatorCommand()
 
     return parts.joinToString(" ; ")
 }

@@ -81,7 +81,9 @@ cat /data/system/vpnhide_config.json
 cat /data/system/vpnhide_lsposed_state 2>/dev/null
 cat /data/adb/vpnhide_kmod/load_status 2>/dev/null
 cat /data/adb/vpnhide_kpm/load_status 2>/dev/null
-ls -lZ /data/adb/modules/vpnhide_kmod /data/adb/modules/vpnhide_kpm 2>&1
+cat /data/adb/vpnhide_ports/load_status 2>/dev/null
+cat /data/adb/vpnhide_ports/load_log 2>/dev/null
+ls -lZ /data/adb/modules/vpnhide_kmod /data/adb/modules/vpnhide_kpm /data/adb/modules/vpnhide_ports 2>&1
 "'
 ```
 
@@ -89,14 +91,19 @@ The canonical JSON is `/data/system/vpnhide_config.json`, not `/data/adb`.
 `/data/adb` is still important for module files, KPM status, superkey storage,
 KernelSU/APatch CLIs, and LSPosed module state.
 
-## APK variant for LSPosed-enabled devices
+## APK variants for LSPosed/Vector smoke tests
 
-Use the release APK for cold-start checks on devices where VPN Hide itself is
-enabled in LSPosed/Vector. The debug APK is intentionally unminified and can
-carry tens of megabytes of dex; LSPosed/Vector may spend longer than Android's
-process-start timeout obfuscating that dex before the app attaches, producing
-`Process ... failed to attach` / `start timeout` in logcat. The release APK is
-R8-shrunk and is the representative path for app-start diagnostics.
+Use the default debug APK (`:app:assembleDebug`) or the release APK for
+cold-start checks. The default debug APK remains debuggable, but it is
+R8/resource-shrunk so LSPosed/Vector has less dex to prepare after the APK is
+updated as an Xposed module.
+
+The `rawDebug` variant (`:app:assembleRawDebug`) keeps the old unminified debug
+behavior for Studio/debugger work. It can be much larger; after updating that
+APK, LSPosed/Vector may spend long enough preparing module code before the app
+attaches that Android logs `Process ... failed to attach` / `start timeout`.
+That symptom does not mean VPN Hide is in its own LSPosed scope. The expected
+module scope is still **System Framework** only.
 
 ## KernelSU Next Shell profile
 

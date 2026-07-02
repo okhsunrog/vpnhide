@@ -43,7 +43,7 @@ Each module has its own README with architecture and design notes.
 
 ## Signing keystore (required for lsposed)
 
-`lsposed/app/build.gradle.kts` routes both the `debug` and `release` build types through a single signing config that reads `lsposed/keystore.properties`. Without that file, `./gradlew assembleDebug` and `:app:assembleRelease` fail with:
+`lsposed/app/build.gradle.kts` routes all APK build types (`debug`, `rawDebug`, and `release`) through a single signing config that reads `lsposed/keystore.properties`. Without that file, `./gradlew assembleDebug`, `:app:assembleRawDebug`, and `:app:assembleRelease` fail with:
 
 > SigningConfig 'release' is missing required property 'storeFile'
 
@@ -76,9 +76,25 @@ The script auto-detects the NDK from `$ANDROID_NDK_HOME` or `~/Android/Sdk/ndk/*
 ### lsposed APK
 
 ```sh
+cd lsposed && ./gradlew :app:assembleDebug
+# → lsposed/app/build/outputs/apk/debug/app-debug.apk
+```
+
+The default debug APK is still debuggable and uses the same package id/signing
+as release, but it is R8/resource-shrunk so LSPosed/Vector has less dex to
+prepare after an APK update. This is the recommended local and agent-control
+build.
+
+For a distribution build:
+
+```sh
 cd lsposed && ./gradlew :app:assembleRelease
 # → lsposed/app/build/outputs/apk/release/app-release.apk
 ```
+
+For the old unminified Studio/debugger path, build `:app:assembleRawDebug`
+instead. Use it only when you specifically need to debug code before R8 has
+shrunk it.
 
 ### kernel module
 

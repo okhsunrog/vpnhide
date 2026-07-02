@@ -1,9 +1,12 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.Context
+import android.net.ConnectivityManager
 import dev.okhsunrog.vpnhide.generated.HookIds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.zip.ZipFile
 
 /**
  * Transport-independent control surface used by the debug host bridge.
@@ -44,6 +47,65 @@ internal object AgentControl {
             } else {
                 results.toAgentDiagnosticsReport()
             }
+        }
+
+    /**
+     * Create the same debug ZIP as Detailed diagnostics and return app-cache metadata.
+     *
+     * @param selfNeedsRestart Whether the current app process needs restart for its own hooks.
+     */
+    suspend fun exportDebugZip(
+        context: Context,
+        selfNeedsRestart: Boolean? = null,
+    ): AgentDebugZipExport =
+        withAppContext(context) { context ->
+            val connectivityManager =
+                context.getSystemService(ConnectivityManager::class.java)
+                    ?: error("ConnectivityManager unavailable")
+            val file =
+                exportDebugZip(
+                    cm = connectivityManager,
+                    context = context,
+                    selfNeedsRestart = selfNeedsRestart == true,
+                ) ?: error("Debug ZIP export failed")
+            file.toAgentDebugZipExport()
+        }
+
+    /**
+     * Create a separate opt-in ZIP with active boot/init_boot/vendor_boot kernel images.
+     */
+    suspend fun exportKernelImages(context: Context): AgentDebugZipExport =
+        withAppContext(context) { context ->
+            val file = exportKernelImagesZip(context) ?: error("Kernel image export failed")
+            file.toAgentDebugZipExport()
+        }
+
+    /**
+     * Start the same full-system-logcat recording session as Detailed diagnostics.
+     */
+    suspend fun startFullSystemLogcat(
+        context: Context,
+        selfNeedsRestart: Boolean? = null,
+    ): AgentMutationResult =
+        withAppContext(context) { context ->
+            val file =
+                LogcatRecorder.start(
+                    context = context,
+                    selfNeedsRestart = selfNeedsRestart == true,
+                ) ?: error("Full system logcat recording failed to start")
+            AgentMutationResult(
+                ok = true,
+                message = "Full system logcat recording started: ${file.absolutePath}",
+            )
+        }
+
+    /**
+     * Stop full-system-logcat recording and return the diagnostic ZIP metadata.
+     */
+    suspend fun stopFullSystemLogcat(context: Context): AgentDebugZipExport =
+        withAppContext(context) { context ->
+            val file = LogcatRecorder.stop(context) ?: error("No full system logcat recording is active")
+            file.toAgentDebugZipExport()
         }
 
     /**
@@ -441,7 +503,7 @@ private fun runActivationCommand(
         listOfNotNull(
             prefix,
             ConfigChannels.reconcileCommand(),
-            "if [ -x $PORTS_ACTIVATOR ]; then $PORTS_ACTIVATOR; fi",
+            ConfigChannels.portsActivatorCommand(),
         )
     val (exit, output) = suExec(parts.joinToString(" ; "))
     return if (exit == 0) {
@@ -642,6 +704,21 @@ private fun StatisticsState.toAgentStatisticsState(selfPackage: String? = null):
         apps = apps.map(AppProbeStats::toAgentAppProbeStats),
     )
 }
+
+private fun File.toAgentDebugZipExport(): AgentDebugZipExport =
+    AgentDebugZipExport(
+        path = absolutePath,
+        sizeBytes = length(),
+        entries =
+            ZipFile(this).use { zip ->
+                zip
+                    .entries()
+                    .asSequence()
+                    .map { it.name }
+                    .sorted()
+                    .toList()
+            },
+    )
 
 private fun BackendStatistics.toAgentBackendStatistics(): AgentBackendStatistics =
     AgentBackendStatistics(

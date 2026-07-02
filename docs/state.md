@@ -50,7 +50,6 @@ state into the canonical JSON:
 - `/data/adb/vpnhide_ports/observers.txt`
 - `/data/system/vpnhide_hidden_pkgs.txt`
 - `/data/system/vpnhide_observer_uids.txt`
-- `/data/system/vpnhide_debug_logging`
 
 After canonical JSON exists, app startup removes these retired inputs
 best-effort. The LSPosed hooks do not read them anymore. These read paths are
@@ -110,9 +109,10 @@ module reinstall. They hold binaries and boot scripts, not user-managed config.
 - `service.sh`: background-waits for netd baseline iptables, then runs
   `activator --boot-wait`, and repeats once after 30 seconds.
 - `activator`: Rust bin that reads canonical JSON, derives `ports: true`
-  packages, resolves UIDs, and applies iptables rules.
-- `uninstall.sh`: removes `vpnhide_out`, `vpnhide_out6`, and legacy
-  `/data/adb/vpnhide_ports/observers.txt`.
+  packages, resolves UIDs, applies iptables rules, and records the latest
+  apply status under `/data/adb/vpnhide_ports/`.
+- `uninstall.sh`: removes `vpnhide_out`, `vpnhide_out6`, legacy
+  `/data/adb/vpnhide_ports/observers.txt`, and portshide diagnostics.
 
 ---
 
@@ -130,6 +130,13 @@ module reinstall. They hold binaries and boot scripts, not user-managed config.
 | File | Format | Writer | Reader | Lifetime |
 |---|---|---|---|---|
 | `load_status` | `key=value`: timestamp, uname_r, runtime, loaded, detail | `kmod/kpm/module/post-fs-data.sh` | app dashboard | overwritten each boot |
+
+### `/data/adb/vpnhide_ports/`
+
+| File | Format | Writer | Reader | Lifetime |
+|---|---|---|---|---|
+| `load_status` | `key=value`: timestamp, boot_id, uname_r, runtime=ports, source, loaded, target_count, detail | ports activator; `portshide/module/service.sh` when the activator is missing or crashes | app dashboard/debug export | overwritten on every ports apply |
+| `load_log` | stdout/stderr excerpt from the latest ports apply | ports activator; `portshide/module/service.sh` failure fallback | debug export | overwritten on every ports apply |
 
 ### `/data/adb/vpnhide/superkey`
 
@@ -217,7 +224,8 @@ Two chains in the filter/OUTPUT path:
 - `vpnhide_out6` for IPv6 loopback.
 
 Writer: ports Rust activator through `iptables-restore --noflush` and
-`ip6tables-restore --noflush`.
+`ip6tables-restore --noflush`. The same activator writes
+`/data/adb/vpnhide_ports/load_status` and `load_log` after each apply attempt.
 
 Readers/checks: dashboard tests chain existence with `iptables -L vpnhide_out -n`.
 
@@ -252,7 +260,9 @@ the app when Vector is active.
 `/data/user/0/dev.okhsunrog.vpnhide/files/vpnhide_zygisk_active`
 
 - Format: `key=value`: `version`, `boot_id`, `pid`, `timestamp`.
-- Writer: Zygisk module when VPN Hide itself is forked under hooks.
+- Writer: Zygisk module when the current forked target process is the VPN Hide
+  app. This is canonical/native self-targeting for the heartbeat, not LSPosed
+  module scope.
 - Reader: app root snapshot/dashboard/startup cleanup.
 - Lifetime: per app launch, stale records removed when boot_id changes.
 
@@ -314,7 +324,7 @@ zygote app fork:
     -> read module-dir targets.txt text wire
   zygisk post_app_specialize
     -> if target: install libc hooks
-    -> if VPN Hide app: write filesDir/vpnhide_zygisk_active
+    -> if target process is VPN Hide app: write filesDir/vpnhide_zygisk_active
 ```
 
 ---
@@ -324,7 +334,7 @@ zygote app fork:
 | Lifetime | Examples |
 |---|---|
 | In-kernel per boot | `/proc/vpnhide_ctl` state, KPM in-kernel state, iptables chains |
-| Per boot files | `/data/adb/vpnhide_kmod/load_status`, `/data/adb/vpnhide_kmod/load_dmesg`, `/data/adb/vpnhide_kpm/load_status`, `/data/system/vpnhide_lsposed_state` |
+| Per boot / last apply files | `/data/adb/vpnhide_kmod/load_status`, `/data/adb/vpnhide_kmod/load_dmesg`, `/data/adb/vpnhide_kpm/load_status`, `/data/adb/vpnhide_ports/load_status`, `/data/adb/vpnhide_ports/load_log`, `/data/system/vpnhide_lsposed_state` |
 | Per app launch | `filesDir/vpnhide_zygisk_active` |
 | Persistent root-managed | `/data/system/vpnhide_config.json`, `/data/adb/vpnhide/superkey` |
 | Module-dir derived state | `/data/adb/modules/vpnhide_zygisk/targets.txt` |

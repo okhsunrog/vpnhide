@@ -397,7 +397,6 @@ inputs (read when the canonical JSON is absent) and best-effort cleanup until
 removed (see §9):
 
 - the four per-backend `targets.txt` lists → folded into the **one** canonical;
-- `vpnhide_debug_logging` → **no longer user-managed** (debug is a field in the canonical);
 - `vpnhide_uids.txt` / `vpnhide_hidden_pkgs.txt` / `vpnhide_observer_uids.txt` →
   **no longer user-managed** (LSPosed reads the canonical + `packages.list` and
   derives them in-process).

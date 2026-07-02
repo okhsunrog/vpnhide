@@ -98,6 +98,17 @@ data class AgentDiagnosticsReport(
     val javaChecks: List<AgentCheckResult>,
 )
 
+/** Debug ZIP export metadata for agent-controlled diagnostics capture. */
+@Serializable
+data class AgentDebugZipExport(
+    /** Absolute path inside app-private cache. Pull with run-as on debug builds. */
+    val path: String,
+    /** ZIP file size in bytes. */
+    val sizeBytes: Long,
+    /** File entries contained in the ZIP. */
+    val entries: List<String>,
+)
+
 /** Pass/total diagnostics score. */
 @Serializable
 data class AgentCheckScore(

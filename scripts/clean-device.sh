@@ -13,7 +13,6 @@ set -euo pipefail
 RESET_FILES=(
   /data/system/vpnhide_config.json
   /data/system/vpnhide_uids.txt
-  /data/system/vpnhide_debug_logging
   /data/system/vpnhide_hidden_pkgs.txt
   /data/system/vpnhide_observer_uids.txt
   /data/system/vpnhide_lsposed_state

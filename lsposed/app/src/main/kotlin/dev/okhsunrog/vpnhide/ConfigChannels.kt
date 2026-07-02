@@ -31,6 +31,10 @@ internal object ConfigChannels {
             "elif [ -x $ZYGISK_ACTIVATOR ] && [ ! -f $ZYGISK_MODULE_DIR/disable ]; then $ZYGISK_ACTIVATOR; " +
             "else true; fi"
 
+    /** Shell part running the optional ports activator when its module is enabled. */
+    fun portsActivatorCommand(): String =
+        "if [ -x $PORTS_ACTIVATOR ] && [ ! -f $PORTS_MODULE_DIR/disable ]; then $PORTS_ACTIVATOR 2>&1; else true; fi"
+
     /** Shell part running exactly one native activator by backend priority. */
     fun nativeWriteParts(): List<String> =
         listOf(
@@ -57,7 +61,6 @@ internal fun runRuntimeConfigReconcile(
     val snapshot = parseTargetsSnapshot(rootSnapshot)
     val debug =
         snapshot.canonicalConfig?.debug
-            ?: rootSnapshot.sections["debug_logging"]?.trim()?.let { it == "1" }
             ?: isEnabledInPrefs(context)
     val parts = mutableListOf<String>()
     if (snapshot.canonicalConfig == null) {

@@ -1,54 +1,24 @@
 package dev.okhsunrog.vpnhide
 
+import android.content.Context
 import android.net.ConnectivityManager
-import android.net.LinkProperties
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.Uri
 import android.os.Build
 import android.util.Log
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FiberManualRecord
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import dev.okhsunrog.vpnhide.checks.CheckOutput
-import dev.okhsunrog.vpnhide.generated.IfaceLists
-import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
-import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
-import dev.okhsunrog.vpnhide.ui.components.GroupedCard
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
-import java.net.NetworkInterface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 private const val TAG = "VPNHideTest"
+
+internal data class DiagnosticFileEntry(
+    val name: String,
+    val file: File,
+)
 
 // ==========================================================================
 //  Debug log export
@@ -56,64 +26,79 @@ private const val TAG = "VPNHideTest"
 
 internal suspend fun exportDebugZip(
     cm: ConnectivityManager,
-    context: android.content.Context,
+    context: Context,
     selfNeedsRestart: Boolean,
 ): File? =
     withContext(Dispatchers.IO) {
-        // Force-enable debug logging across all four sinks (app, system_server,
-        // zygisk, kmod) while the capture runs so the dump contains VpnHide-
-        // tagged lines + verbose dmesg even when the user's persistent toggle
-        // is OFF (the default). We restore to whatever the SharedPreferences
-        // say at the end — if the user happens to flip the UI toggle mid-
-        // capture, we honor their final choice instead of blindly rolling
-        // back. applyDebugLoggingRuntime drives all four sinks uniformly, so
-        // there's no ad-hoc /proc/vpnhide_debug flip here anymore.
-        val loggingWasForced = !VpnHideLog.enabled
-        if (loggingWasForced) applyDebugLoggingRuntime(true)
+        // Force-enable debug logging across app, system_server and active
+        // native sinks while the capture runs. The helper records exactly what
+        // it applied/restored so bug reports can distinguish "no logs" from
+        // "debug propagation failed".
+        val loggingSession = beginDebugCaptureLogging(context)
+        var restored = false
         try {
+            val counterBaseline = collectHookCounterSnapshot()
             // 1. Clear dmesg so we only capture fresh output from the
-            //    kmod hooks fired by runAllChecks below.
+            //    native hooks fired by runAllChecks below.
             suExec("dmesg -c > /dev/null 2>&1")
 
-            // 2. Run all diagnostic checks (this triggers kmod hooks)
+            // 2. Run all diagnostic checks (this triggers native hooks)
             val checkResults = runAllChecks(cm, context)
 
             // 3. Capture dmesg right after checks
             val (_, dmesg) = suExec("dmesg 2>/dev/null")
+            val shellSnapshot = collectDebugShellSnapshot()
+
+            val logcat = captureDebugLogcat()
+            val restore = restoreDebugCaptureLogging(context, loggingSession)
+            restored = true
+            val completedLoggingSession = loggingSession.withRestore(restore)
 
             // 4. Collect everything into named files — each section is its own
             //    builder below.
             val files =
-                mapOf(
-                    "dmesg_vpnhide.txt" to dmesg.lines().filter { it.contains("vpnhide") }.joinToString("\n"),
-                    "dmesg_full.txt" to dmesg,
+                linkedMapOf(
+                    "summary.txt" to
+                        buildDiagnosticSummaryText(
+                            context = context,
+                            selfNeedsRestart = selfNeedsRestart,
+                            results = checkResults,
+                            shellSnapshot = shellSnapshot,
+                            loggingSession = completedLoggingSession,
+                            captureKind = "debug_zip",
+                        ),
                     "diagnostics.txt" to buildDiagnosticsText(checkResults),
-                    "device_info.txt" to buildDeviceInfoText(context, selfNeedsRestart),
-                    "modules.txt" to buildModuleInfoText(),
-                    "config.txt" to buildTargetsText(),
-                    "interfaces.txt" to buildInterfacesText(),
-                    "proc_net.txt" to buildProcNetText(),
-                    "logcat.txt" to captureDebugLogcat().ifEmpty { "(no logcat entries)" },
                 )
+            files.putAll(
+                buildCommonDiagnosticTextFiles(
+                    context = context,
+                    selfNeedsRestart = selfNeedsRestart,
+                    shellSnapshot = shellSnapshot,
+                    loggingSession = completedLoggingSession,
+                ),
+            )
+            files["hook_report.txt"] =
+                buildHookDiagnosticsText(
+                    context = context,
+                    shellSnapshot = shellSnapshot,
+                    counterBaseline = counterBaseline,
+                    results = checkResults,
+                )
+            files["dmesg_vpnhide.txt"] = filterVpnHideDmesg(dmesg)
+            files["dmesg_full.txt"] = dmesg.ifBlank { "(no dmesg entries)" }
+            files["logcat_vpnhide.txt"] = logcat.ifEmpty { "(no logcat entries)" }
 
             // Create zip
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val zipFile = File(context.cacheDir, "vpnhide_debug_$timestamp.zip")
-            ZipOutputStream(zipFile.outputStream()).use { zos ->
-                for ((name, content) in files) {
-                    zos.putNextEntry(ZipEntry(name))
-                    zos.write(content.toByteArray())
-                    zos.closeEntry()
-                }
-            }
+            writeDiagnosticZip(zipFile, files)
             zipFile
         } catch (e: Exception) {
             Log.e(TAG, "Debug export failed", e)
             null
         } finally {
-            if (loggingWasForced) {
-                val target = isEnabledInPrefs(context)
-                if (VpnHideLog.enabled != target) applyDebugLoggingRuntime(target)
+            if (!restored) {
+                restoreDebugCaptureLogging(context, loggingSession)
             }
         }
     }
@@ -126,6 +111,76 @@ private fun badge(passed: Boolean?): String =
         false -> "FAIL"
         null -> "INFO"
     }
+
+internal fun buildDiagnosticSummaryText(
+    context: Context,
+    selfNeedsRestart: Boolean,
+    results: CheckResults?,
+    shellSnapshot: DebugShellSnapshot,
+    loggingSession: DebugCaptureLoggingSession,
+    captureKind: String,
+): String =
+    buildString {
+        appendLine("Diagnostic bundle schema: 3")
+        appendLine("Capture type: $captureKind")
+        appendLine("Generated: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date())}")
+        appendLine("App package: ${context.packageName}")
+        appendLine("App version: ${appVersionText(context)}")
+        if (results == null) {
+            appendLine("Diagnostics: not run")
+        } else {
+            val score = results.all.score()
+            appendLine("Diagnostics: ${score.passed}/${score.total} passed")
+        }
+        appendLine("selfNeedsRestart: $selfNeedsRestart")
+        appendLine("debugCaptureForced: ${loggingSession.forced}")
+        appendLine("debugCaptureApplyExit: ${loggingSession.apply.commandExit?.toString() ?: "(n/a)"}")
+        appendLine("debugCaptureRestoreExit: ${loggingSession.restore?.commandExit?.toString() ?: "(n/a)"}")
+        appendLine("rootSnapshotExit: ${shellSnapshot.exitCode}")
+        shellSnapshot.section("debug_snapshot_error").takeIf { it.isNotBlank() }?.let {
+            appendLine("rootSnapshotError: $it")
+        }
+        appendLine()
+        appendDebugSection("Current boot_id", shellSnapshot.section("current_boot_id"))
+        appendDebugSection("Backend evidence", buildBackendEvidence(shellSnapshot))
+    }
+
+internal fun buildCommonDiagnosticTextFiles(
+    context: Context,
+    selfNeedsRestart: Boolean,
+    shellSnapshot: DebugShellSnapshot,
+    loggingSession: DebugCaptureLoggingSession,
+): LinkedHashMap<String, String> =
+    linkedMapOf(
+        "device_info.txt" to buildDeviceInfoText(context, selfNeedsRestart, shellSnapshot),
+        "backends.txt" to buildBackendsText(context, shellSnapshot),
+        "modules.txt" to buildModulesText(shellSnapshot),
+        "config.txt" to buildConfigText(shellSnapshot),
+        "interfaces.txt" to buildInterfacesText(shellSnapshot),
+        "proc_net.txt" to buildProcNetText(shellSnapshot),
+        "kernel.txt" to buildKernelText(shellSnapshot),
+        "kernel_partitions.txt" to buildKernelPartitionMetadataText(),
+        "debug_capture.txt" to loggingSession.toText(),
+    )
+
+internal fun writeDiagnosticZip(
+    zipFile: File,
+    textEntries: Map<String, String>,
+    fileEntries: List<DiagnosticFileEntry> = emptyList(),
+) {
+    ZipOutputStream(zipFile.outputStream()).use { zos ->
+        for ((name, content) in textEntries) {
+            zos.putNextEntry(ZipEntry(name))
+            zos.write(content.toByteArray())
+            zos.closeEntry()
+        }
+        for ((name, file) in fileEntries) {
+            zos.putNextEntry(ZipEntry(name))
+            file.inputStream().use { it.copyTo(zos) }
+            zos.closeEntry()
+        }
+    }
+}
 
 private fun buildDiagnosticsText(results: CheckResults): String =
     buildString {
@@ -146,138 +201,116 @@ private fun buildDiagnosticsText(results: CheckResults): String =
     }
 
 private fun buildDeviceInfoText(
-    context: android.content.Context,
+    context: Context,
     selfNeedsRestart: Boolean,
-): String {
-    val (_, kernelVersion) = suExec("uname -r 2>/dev/null")
-    val (_, procVersion) = suExec("cat /proc/version 2>/dev/null")
-    val (_, selinuxMode) = suExec("getenforce 2>/dev/null")
-    return buildString {
+    shellSnapshot: DebugShellSnapshot,
+): String =
+    buildString {
         appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
         appendLine("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
-        appendLine("Kernel: ${kernelVersion.trim()}")
-        appendLine("Kernel full: ${procVersion.trim()}")
         appendLine("ABI: ${Build.SUPPORTED_ABIS.joinToString()}")
-        appendLine("SELinux: ${selinuxMode.trim()}")
         appendLine("App package: ${context.packageName}")
-        try {
-            val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            appendLine("App version: ${pInfo.versionName}")
-        } catch (_: Exception) {
-        }
+        appendLine("App version: ${appVersionText(context)}")
         appendLine("selfNeedsRestart: $selfNeedsRestart")
         appendLine()
-        appendLine("=== Root manager ===")
-        val (_, magiskVer) = suExec("magisk -V 2>/dev/null")
-        val (_, magiskVerName) = suExec("magisk -v 2>/dev/null")
-        if (magiskVer.isNotBlank()) {
-            appendLine("Magisk: ${magiskVerName.trim()} (${magiskVer.trim()})")
-        }
-        val (_, ksuVer) = suExec("cat /data/adb/ksu/version 2>/dev/null")
-        if (ksuVer.isNotBlank()) {
-            appendLine("KernelSU: ${ksuVer.trim()}")
-        }
-        val (exitKsuNext, ksuNextVer) = suExec("ksud --version 2>/dev/null")
-        if (exitKsuNext == 0 && ksuNextVer.isNotBlank()) {
-            appendLine("KernelSU-Next: ${ksuNextVer.trim()}")
-        }
-        if (magiskVer.isBlank() && ksuVer.isBlank() && (exitKsuNext != 0 || ksuNextVer.isBlank())) {
-            appendLine("(unknown root manager)")
-        }
+        appendDebugSection("uname", shellSnapshot.section("uname"))
+        appendDebugSection("/proc/version", shellSnapshot.section("proc_version"))
+        appendDebugSection("/proc/cmdline", shellSnapshot.section("proc_cmdline"))
+        appendDebugSection("Selected getprop", shellSnapshot.section("getprop_selected"))
+        appendDebugSection("Root manager", shellSnapshot.section("root_manager"))
+        appendDebugSection("SELinux", shellSnapshot.section("selinux"))
     }
-}
 
-private fun buildModuleInfoText(): String =
+private fun buildBackendsText(
+    context: Context,
+    shellSnapshot: DebugShellSnapshot,
+): String =
     buildString {
-        appendLine("=== Kernel module (kmod) ===")
-        val (_, kmodProp) = suExec("cat /data/adb/modules/vpnhide_kmod/module.prop 2>/dev/null")
-        appendLine(kmodProp.ifEmpty { "Not installed" })
-        appendLine()
-        appendLine("=== kmod load_status (boot-time diagnostics) ===")
-        val (_, loadStatus) = suExec("cat $KMOD_LOAD_STATUS_FILE 2>/dev/null")
-        appendLine(loadStatus.ifEmpty { "(not available — module never ran post-fs-data.sh this boot)" })
-        appendLine()
-        appendLine("=== Current boot_id ===")
-        val (_, curBootId) = suExec("cat /proc/sys/kernel/random/boot_id 2>/dev/null")
-        appendLine(curBootId.trim().ifEmpty { "(not available)" })
-        appendLine()
-        appendLine("=== kmod load_dmesg ===")
-        val (_, loadDmesg) = suExec("cat $KMOD_LOAD_DMESG_FILE 2>/dev/null")
-        appendLine(loadDmesg.ifEmpty { "(not captured)" })
-        appendLine()
-        appendLine("=== Zygisk module ===")
-        val (_, zygiskProp) = suExec("cat /data/adb/modules/vpnhide_zygisk/module.prop 2>/dev/null")
-        appendLine(zygiskProp.ifEmpty { "Not installed" })
-        appendLine()
-        appendLine("=== Registered kretprobes ===")
-        val (_, kprobes) = suExec("cat /sys/kernel/debug/kprobes/list 2>/dev/null | grep vpnhide")
-        appendLine(kprobes.ifEmpty { "(not available or no vpnhide probes)" })
-        appendLine()
-        appendLine("=== Kernel symbols (hooked functions) ===")
-        val symbols =
-            listOf("dev_ioctl", "dev_ifconf", "rtnl_fill_ifinfo", "inet6_fill_ifaddr", "inet_fill_ifaddr", "fib_route_seq_show")
-        for (sym in symbols) {
-            val (_, line) = suExec("cat /proc/kallsyms 2>/dev/null | grep -w $sym | head -3")
-            appendLine("$sym: ${line.trim().ifEmpty { "(not found)" }}")
-        }
-        appendLine()
-        appendLine("=== LSPosed configuration ===")
-        val (_, lsposedDb) =
-            suExec(
-                "sqlite3 /data/adb/lspd/config/modules_config.db " +
-                    "\"SELECT mid, module_pkg_name, enabled FROM modules WHERE module_pkg_name LIKE '%vpnhide%';\" 2>/dev/null",
+        appendDebugSection("Current boot_id", shellSnapshot.section("current_boot_id"))
+        appendDebugSection("Backend evidence", buildBackendEvidence(shellSnapshot))
+        appendDebugSection("kmod module.prop", shellSnapshot.section("kmod_prop"))
+        appendDebugSection("kmod module state", shellSnapshot.section("kmod_module_state"))
+        appendDebugSection("kmod live /proc/vpnhide_ctl", shellSnapshot.section("kmod_state"))
+        appendDebugSection("kmod boot load_status", shellSnapshot.section("kmod_load_status"))
+        appendDebugSection("kmod boot dmesg", shellSnapshot.section("kmod_load_dmesg"))
+        appendDebugSection("kmod runtime targets", shellSnapshot.section("kmod_targets"))
+        appendDebugSection("KPM module.prop", shellSnapshot.section("kpm_prop"))
+        appendDebugSection("KPM module state", shellSnapshot.section("kpm_module_state"))
+        appendDebugSection("KPM live activator state", shellSnapshot.section("kpm_state"))
+        appendDebugSection("KPM boot load_status", shellSnapshot.section("kpm_load_status"))
+        appendDebugSection("KPM runtime targets", shellSnapshot.section("kpm_targets"))
+        appendDebugSection("KernelPatch runtime", shellSnapshot.section("kpatch_runtime"))
+        appendDebugSection("Zygisk module.prop", shellSnapshot.section("zygisk_prop"))
+        appendDebugSection("Zygisk module state", shellSnapshot.section("zygisk_module_state"))
+        appendDebugSection("Zygisk heartbeat", shellSnapshot.section("zygisk_status"))
+        appendDebugSection("Zygisk runtime modules", shellSnapshot.section("zygisk_runtime"))
+        appendDebugSection("Zygisk runtime targets", shellSnapshot.section("zygisk_targets"))
+        appendDebugSection("LSPosed hook state", shellSnapshot.section("lsposed_state"))
+        appendDebugSection("LSPosed config DB", buildLsposedConfigText(context))
+        appendDebugSection("LSPosed framework", shellSnapshot.section("lsposed_framework"))
+        appendDebugSection("LSPosed files", shellSnapshot.section("lsposed_files"))
+        appendDebugSection("Ports module.prop", shellSnapshot.section("ports_prop"))
+        appendDebugSection("Ports module state", shellSnapshot.section("ports_module_state"))
+        appendDebugSection("Ports load_status", shellSnapshot.section("ports_load_status"))
+        appendDebugSection("Ports load_log", shellSnapshot.section("ports_load_log"))
+        appendDebugSection("Ports observers", shellSnapshot.section("ports_observers"))
+        appendDebugSection("Ports iptables state", shellSnapshot.section("ports_state"))
+    }
+
+private fun buildModulesText(shellSnapshot: DebugShellSnapshot): String =
+    buildString {
+        appendDebugSection("Module inventory", shellSnapshot.section("module_inventory"))
+        appendDebugSection("Root manager", shellSnapshot.section("root_manager"))
+        appendDebugSection("Kernel modules", shellSnapshot.section("proc_modules"))
+    }
+
+private fun buildConfigText(shellSnapshot: DebugShellSnapshot): String =
+    buildString {
+        appendDebugSection("canonical config", shellSnapshot.section("canonical_config"))
+        appendDebugSection("hidden packages", shellSnapshot.section("hidden_pkgs"))
+        appendDebugSection("observer UIDs", shellSnapshot.section("observer_uids"))
+        appendDebugSection("kmod runtime targets", shellSnapshot.section("kmod_targets"))
+        appendDebugSection("KPM runtime targets", shellSnapshot.section("kpm_targets"))
+        appendDebugSection("Zygisk runtime targets", shellSnapshot.section("zygisk_targets"))
+        appendDebugSection("Ports observers", shellSnapshot.section("ports_observers"))
+        appendDebugSection("Ports load_status", shellSnapshot.section("ports_load_status"))
+    }
+
+private fun buildInterfacesText(shellSnapshot: DebugShellSnapshot): String =
+    buildString {
+        appendDebugSection("ip -d addr", shellSnapshot.section("network_addr"))
+        appendDebugSection("Interface operstate", shellSnapshot.section("network_operstate"))
+        appendDebugSection("ip route show table all", shellSnapshot.section("network_routes"))
+        appendDebugSection("ip rule", shellSnapshot.section("network_rules"))
+        appendDebugSection("Listening sockets", shellSnapshot.section("network_sockets"))
+        appendDebugSection("dumpsys connectivity excerpt", shellSnapshot.section("connectivity_dump"))
+    }
+
+private fun buildProcNetText(shellSnapshot: DebugShellSnapshot): String =
+    buildString {
+        val sections =
+            listOf(
+                "route" to "proc_net_route",
+                "ipv6_route" to "proc_net_ipv6_route",
+                "if_inet6" to "proc_net_if_inet6",
+                "tcp" to "proc_net_tcp",
+                "tcp6" to "proc_net_tcp6",
+                "udp" to "proc_net_udp",
+                "udp6" to "proc_net_udp6",
+                "dev" to "proc_net_dev",
+                "fib_trie" to "proc_net_fib_trie",
             )
-        appendLine(lsposedDb.ifEmpty { "(not available or module not in LSPosed)" })
-        val (_, lsposedScope) =
-            suExec(
-                "sqlite3 /data/adb/lspd/config/modules_config.db " +
-                    "\"SELECT s.app_pkg_name FROM scope s JOIN modules m ON s.mid=m.mid WHERE m.module_pkg_name LIKE '%vpnhide%';\" 2>/dev/null",
-            )
-        if (lsposedScope.isNotBlank()) {
-            appendLine("Scope: ${lsposedScope.trim()}")
+        for ((label, sectionName) in sections) {
+            appendDebugSection("/proc/net/$label", shellSnapshot.section(sectionName))
         }
     }
 
-private fun buildTargetsText(): String =
+private fun buildKernelText(shellSnapshot: DebugShellSnapshot): String =
     buildString {
-        appendLine("=== /proc/vpnhide_ctl (live status + stats) ===")
-        appendLine(suExec("cat $PROC_CTL 2>/dev/null").second.ifEmpty { "(empty)" })
-        appendLine()
-        appendLine("=== LSPosed state (live status + stats) ===")
-        appendLine(suExec("cat $LSPOSED_STATE_FILE 2>/dev/null").second.ifEmpty { "(empty)" })
-        appendLine()
-        appendLine("=== canonical config ===")
-        appendLine(suExec("cat $CANONICAL_CONFIG_FILE 2>/dev/null").second.ifEmpty { "(empty)" })
-    }
-
-private fun buildInterfacesText(): String =
-    buildString {
-        appendLine("=== ip -d addr ===")
-        appendLine(suExec("ip -d addr 2>/dev/null").second.ifEmpty { "(not available)" })
-        appendLine()
-        appendLine("=== Interface operstate ===")
-        val (_, operstate) =
-            suExec(
-                "for iface in /sys/class/net/*; do " +
-                    "echo \"\$(basename \$iface): \$(cat \$iface/operstate 2>/dev/null)\"; " +
-                    "done",
-            )
-        appendLine(operstate.ifEmpty { "(not available)" })
-        appendLine()
-        appendLine("=== ip route show table all ===")
-        appendLine(suExec("ip route show table all 2>/dev/null").second.ifEmpty { "(not available)" })
-        appendLine()
-        appendLine("=== ip rule ===")
-        appendLine(suExec("ip rule 2>/dev/null").second.ifEmpty { "(not available)" })
-    }
-
-private fun buildProcNetText(): String =
-    buildString {
-        for (pf in listOf("route", "ipv6_route", "if_inet6", "tcp", "tcp6", "udp", "udp6", "dev")) {
-            appendLine("=== /proc/net/$pf ===")
-            appendLine(suExec("cat /proc/net/$pf 2>/dev/null").second.ifEmpty { "(not available)" })
-            appendLine()
-        }
+        appendDebugSection("Kernel config", shellSnapshot.section("kernel_config"))
+        appendDebugSection("Kernel modules", shellSnapshot.section("proc_modules"))
+        appendDebugSection("Registered kprobes", shellSnapshot.section("kprobes"))
+        appendDebugSection("Kernel symbols", shellSnapshot.section("kernel_symbols"))
     }
 
 private fun captureDebugLogcat(): String {
@@ -286,11 +319,100 @@ private fun captureDebugLogcat(): String {
             "VPNHideTest:*",
             "VpnHide:*",
             "VpnHide-Dashboard:*",
+            "VpnHide-Startup:*",
             "VpnHide-LSPosed:*",
-            // zygisk's android_logger uses this tag (see zygisk/src/lib.rs:LOG_TAG);
-            // without it the export is missing all native-side hook logs.
+            "VpnHide-Diag:*",
+            "VpnHide-Logcat:*",
+            "VpnHide-Update:*",
+            "VpnHideAgentBridge:*",
+            "vpnhide:*",
+            "vpnhide_ports:*",
             "vpnhide-zygisk:*",
+            "shadowhook_tag:*",
         ).joinToString(" ")
     val (exit, output) = suExec("logcat -d -b all -v threadtime -s $tags 2>/dev/null")
     return if (exit == 0) output else "(logcat failed: exit=$exit)\n$output"
+}
+
+private fun DebugShellSnapshot.section(name: String): String = sections[name].orEmpty()
+
+private fun StringBuilder.appendDebugSection(
+    title: String,
+    body: String,
+) {
+    appendLine("=== $title ===")
+    appendLine(body.trimEnd().ifBlank { "(empty)" })
+    appendLine()
+}
+
+internal fun appVersionText(context: Context): String =
+    try {
+        val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        val code =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pInfo.longVersionCode.toString()
+            } else {
+                @Suppress("DEPRECATION")
+                pInfo.versionCode.toString()
+            }
+        "${pInfo.versionName} ($code)"
+    } catch (_: Exception) {
+        "(unknown)"
+    }
+
+private fun buildBackendEvidence(shellSnapshot: DebugShellSnapshot): String =
+    buildString {
+        fun evidence(
+            label: String,
+            section: String,
+            predicate: (String) -> Boolean,
+        ) {
+            val raw = shellSnapshot.section(section)
+            appendLine("$label: ${if (predicate(raw)) "present" else "not observed"}")
+        }
+        evidence("kmod live proc", "kmod_state") { it.contains("vpnhide 1 status") }
+        evidence("KPM live ctl0", "kpm_state") { it.contains("vpnhide 1 status") }
+        evidence("Zygisk heartbeat", "zygisk_status") { it.contains("boot_id=") }
+        evidence("LSPosed hook state", "lsposed_state") { it.contains("vpnhide 1 status") }
+        evidence("Ports activator status", "ports_load_status") { it.contains("loaded=1") }
+        evidence("Ports iptables", "ports_state") { it.contains("vpnhide_out") || it.contains("vpnhide_out6") }
+    }.trimEnd()
+
+private fun buildLsposedConfigText(context: Context): String {
+    val config =
+        runCatching {
+            readLsposedConfig(context, context.packageName)
+        }.getOrNull()
+            ?: return "(not available)"
+    return when (config) {
+        LsposedConfig.ModuleNotConfigured -> {
+            "module=not_configured"
+        }
+
+        LsposedConfig.Disabled -> {
+            "module=disabled"
+        }
+
+        is LsposedConfig.Enabled -> {
+            buildString {
+                appendLine("module=enabled")
+                appendLine("hasSystemFramework=${config.hasSystemFramework}")
+                appendLine("scope=${config.entries.joinToString()}")
+                appendLine("extraScope=${config.extraEntries.joinToString()}")
+            }.trimEnd()
+        }
+    }
+}
+
+internal fun filterVpnHideDmesg(dmesg: String): String {
+    val filtered =
+        dmesg
+            .lineSequence()
+            .filter {
+                it.contains("vpnhide", ignoreCase = true) ||
+                    it.contains("kpm", ignoreCase = true) ||
+                    it.contains("kretprobe", ignoreCase = true) ||
+                    it.contains("[+] KP", ignoreCase = true)
+            }.joinToString("\n")
+    return filtered.ifBlank { "(no vpnhide dmesg entries)" }
 }

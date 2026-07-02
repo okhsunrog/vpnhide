@@ -167,6 +167,31 @@ internal fun kpmAwaitingSuperkey(
         bootId == currentBootId.trim()
 }
 
+internal data class PortsApplyProblem(
+    val failureDetail: String?,
+)
+
+internal fun detectPortsApplyProblem(
+    ports: ModuleState,
+    loadStatusSection: String,
+    currentBootId: String,
+): PortsApplyProblem? {
+    val installed = ports as? ModuleState.Installed ?: return null
+    if (installed.active || installed.targetCount == 0) return null
+
+    val load = parseKeyValueLines(loadStatusSection)
+    val bootId = load["boot_id"]?.trim()
+    val sameBoot = !bootId.isNullOrEmpty() && bootId == currentBootId.trim()
+    val failedThisBoot = sameBoot && load["loaded"]?.trim() == "0"
+    val detail =
+        if (failedThisBoot) {
+            load["detail"]?.trim()?.takeIf { it.isNotBlank() }
+        } else {
+            null
+        }
+    return PortsApplyProblem(failureDetail = detail)
+}
+
 internal data class ModuleMismatch(
     val kind: FlashableModuleKind,
     val moduleVersion: String,
@@ -1033,7 +1058,7 @@ private fun copyLsposedConfigDb(context: android.content.Context): File? {
 // Nesting depth comes from the chained SQLite `.use {}` resource scopes
 // (db → modules cursor → scope cursor), not from branching logic.
 @Suppress("NestedBlockDepth")
-private fun readLsposedConfig(
+internal fun readLsposedConfig(
     context: android.content.Context,
     selfPkg: String,
 ): LsposedConfig? {
@@ -1303,6 +1328,10 @@ internal suspend fun loadDashboardState(
         val sdkLabel = hookProps["aosp_sdk"]?.takeIf { it.isNotBlank() } ?: "?"
         err(res.getString(R.string.dashboard_issue_lsposed_field_rename, brokenFields, sdkLabel))
     }
+    val installFailures = hookProps["install_failures"]?.takeIf { it.isNotBlank() }
+    if (installFailures != null && brokenFields == null) {
+        err(res.getString(R.string.dashboard_issue_lsposed_install_failures, installFailures))
+    }
 
     val appVersion = BuildConfig.VERSION_NAME
     // Version mismatches are warnings — modules keep working, user just needs to
@@ -1328,6 +1357,16 @@ internal suspend fun loadDashboardState(
     }
     if (ports is ModuleState.Installed && ports.targetCount == 0) {
         info(res.getString(R.string.dashboard_issue_ports_no_observers))
+    }
+    detectPortsApplyProblem(ports, shellSnapshot["ports_load_status"].orEmpty(), currentBootId)?.let { problem ->
+        val detail = problem.failureDetail
+        warn(
+            if (detail == null) {
+                res.getString(R.string.dashboard_issue_ports_rules_inactive)
+            } else {
+                res.getString(R.string.dashboard_issue_ports_apply_failed, detail)
+            },
+        )
     }
     // The running-LSPosed-vs-installed-APK check compares the FULL version by
     // default: the hook code lives in system_server and only swaps on reboot, so
@@ -1444,10 +1483,7 @@ internal suspend fun loadDashboardState(
 
     // User has debug logging turned on. Only adb/root can read those
     // verbose lines, so this is a neutral dashboard note rather than an issue.
-    val debugEnabled =
-        targetsSnapshot.canonicalConfig?.debug
-            ?: (shellSnapshot["debug_logging"].orEmpty().trim() == "1")
-    if (debugEnabled) {
+    if (targetsSnapshot.canonicalConfig?.debug == true) {
         info(res.getString(R.string.dashboard_issue_debug_logging_on))
     }
 

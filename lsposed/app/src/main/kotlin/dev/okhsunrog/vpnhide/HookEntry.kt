@@ -96,22 +96,24 @@ class HookEntry : IXposedHookLoadPackage {
             HookLog.i("VpnHide: system_server detected, installing Binder hooks")
             val hookInstall = installSystemServerHooks()
             var installedMask = hookInstall.installedHookMask
-            if (tryHook("PackageVisibility") { PackageVisibilityHooks.install(lpparam.classLoader) }) {
+            val installFailures = hookInstall.installFailures.toMutableList()
+            if (tryHook("PackageVisibility", installFailures) { PackageVisibilityHooks.install(lpparam.classLoader) }) {
                 installedMask = installedMask or hookBit(HookIds.Hook.LSPOSED_PACKAGE_VISIBILITY)
             }
-            if (tryHook("ConnectivityService") { installConnectivityServiceHook(lpparam.classLoader) }) {
+            if (tryHook("ConnectivityService", installFailures) { installConnectivityServiceHook(lpparam.classLoader) }) {
                 installedMask =
                     installedMask or
                     hookBit(HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT) or
                     hookBit(HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK) or
                     hookBit(HookIds.Hook.LSPOSED_CONNECTIVITY_NETWORK)
             }
-            LsposedStats.setStatus(installedMask, hookInstall.brokenFields)
+            LsposedStats.setStatus(installedMask, hookInstall.brokenFields, installFailures)
         }
     }
 
     private inline fun tryHook(
         name: String,
+        failures: MutableList<String>? = null,
         block: () -> Unit,
     ): Boolean =
         try {
@@ -119,8 +121,14 @@ class HookEntry : IXposedHookLoadPackage {
             true
         } catch (t: Throwable) {
             HookLog.e("VpnHide: $name hook failed: ${t::class.java.simpleName}: ${t.message}")
+            failures?.add(formatInstallFailure(name, t))
             false
         }
+
+    private fun formatInstallFailure(
+        name: String,
+        t: Throwable,
+    ): String = "$name: ${t::class.java.simpleName}: ${t.message.orEmpty()}"
 
     // ------------------------------------------------------------------
     //  Helpers
@@ -527,6 +535,7 @@ class HookEntry : IXposedHookLoadPackage {
     private data class HookInstallResult(
         val brokenFields: List<String>,
         val installedHookMask: Int,
+        val installFailures: List<String>,
     )
 
     private fun installSystemServerHooks(): HookInstallResult {
@@ -535,6 +544,7 @@ class HookEntry : IXposedHookLoadPackage {
             HookLog.e("VpnHide: reflection smoke-check found broken keys: $brokenFields")
         }
         var installedHookMask = 0
+        val installFailures = mutableListOf<String>()
 
         // Match a probe key against either an exact entry in `broken` or
         // an entry with a `:type=...` suffix (wrong-typed field).
@@ -546,15 +556,16 @@ class HookEntry : IXposedHookLoadPackage {
         // proceed when those are absent.
         if (anyBroken(LP_CRITICAL_KEYS)) {
             HookLog.e("VpnHide: LP.writeToParcel hook SKIPPED — critical reflection broken")
+            installFailures += "LP.writeToParcel: skipped critical reflection broken: ${brokenFields.joinToString(",")}"
         } else {
-            if (tryHook("LP.writeToParcel") { hookLPWriteToParcel() }) {
+            if (tryHook("LP.writeToParcel", installFailures) { hookLPWriteToParcel() }) {
                 installedHookMask = installedHookMask or hookBit(HookIds.Hook.LSPOSED_LINK_PROPERTIES)
             }
         }
 
         // NC uses public NetworkCapabilities mutators now, so private AOSP
         // field drift must not disable this hook.
-        if (tryHook("NC.writeToParcel") { hookNCWriteToParcel() }) {
+        if (tryHook("NC.writeToParcel", installFailures) { hookNCWriteToParcel() }) {
             installedHookMask = installedHookMask or hookBit(HookIds.Hook.LSPOSED_NETWORK_CAPABILITIES)
         }
 
@@ -563,17 +574,18 @@ class HookEntry : IXposedHookLoadPackage {
         // calls, so any rename would fail-open per call with logcat spam.
         if (anyBroken(NI_CRITICAL_KEYS)) {
             HookLog.e("VpnHide: NI.writeToParcel hook SKIPPED — critical reflection broken")
+            installFailures += "NI.writeToParcel: skipped critical reflection broken: ${brokenFields.joinToString(",")}"
         } else {
-            if (tryHook("NI.writeToParcel") { hookNIWriteToParcel() }) {
+            if (tryHook("NI.writeToParcel", installFailures) { hookNIWriteToParcel() }) {
                 installedHookMask = installedHookMask or hookBit(HookIds.Hook.LSPOSED_NETWORK_INFO)
             }
         }
-        if (tryHook("Network.writeToParcel") { hookNetworkWriteToParcel() }) {
+        if (tryHook("Network.writeToParcel", installFailures) { hookNetworkWriteToParcel() }) {
             installedHookMask = installedHookMask or hookBit(HookIds.Hook.LSPOSED_NETWORK)
         }
 
-        tryHook("FileObserver") { watchCanonicalConfigFile() }
-        return HookInstallResult(brokenFields, installedHookMask)
+        tryHook("FileObserver", installFailures) { watchCanonicalConfigFile() }
+        return HookInstallResult(brokenFields, installedHookMask, installFailures)
     }
 
     private data class FieldProbe(

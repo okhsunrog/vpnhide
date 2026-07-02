@@ -9,10 +9,13 @@ use std::os::raw::{c_char, c_long, c_void};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::process::Output;
 use std::process::Stdio;
 use std::ptr;
 use std::thread;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use serde::Deserialize;
 use vpnhide_protocol::Target;
@@ -32,6 +35,9 @@ const APP_PACKAGE: &str = "dev.okhsunrog.vpnhide";
 const KPM_NAME: &str = "vpnhide";
 const PORTS_CHAIN4: &str = "vpnhide_out";
 const PORTS_CHAIN6: &str = "vpnhide_out6";
+const PORTS_STATUS_DIR: &str = "/data/adb/vpnhide_ports";
+const PORTS_LOAD_STATUS: &str = "/data/adb/vpnhide_ports/load_status";
+const PORTS_LOAD_LOG: &str = "/data/adb/vpnhide_ports/load_log";
 // The native-target cap is owned by the shared protocol crate (and mirrored by
 // the C backends' `#define MAX_TARGET_UIDS`); alias it here so all three stay in
 // lock-step instead of restating the literal 64.
@@ -124,6 +130,12 @@ pub struct PortRule {
     pub end: Option<u16>,
     #[serde(default = "default_port_protocol")]
     pub protocol: PortProtocol,
+}
+
+#[derive(Debug)]
+pub struct PortsActivationReport {
+    pub target_count: usize,
+    pub log: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -578,17 +590,43 @@ fn activate_kpm_with_pm_wait(wait: PmReadyWait, conflict_is_error: bool) -> Resu
     Ok(KpmBootOutcome::Configured)
 }
 
-pub fn activate_ports() -> Result<()> {
+pub fn activate_ports() -> Result<PortsActivationReport> {
     activate_ports_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
 }
 
-pub fn activate_ports_boot() -> Result<()> {
+pub fn activate_ports_boot() -> Result<PortsActivationReport> {
     activate_ports_with_pm_wait(PmReadyWait::Forever)
 }
 
-fn activate_ports_with_pm_wait(wait: PmReadyWait) -> Result<()> {
+fn activate_ports_with_pm_wait(wait: PmReadyWait) -> Result<PortsActivationReport> {
     let rules = project_ports_with_pm_wait(&read_canonical()?, wait)?;
     apply_ports_rules(&rules)
+}
+
+pub fn activate_ports_recorded(boot_wait: bool) -> Result<()> {
+    let source = if boot_wait { "boot" } else { "app" };
+    let result = if boot_wait {
+        activate_ports_boot()
+    } else {
+        activate_ports()
+    };
+    match result {
+        Ok(report) => {
+            write_ports_load_status(
+                source,
+                true,
+                Some(report.target_count),
+                "configured",
+                &report.log,
+            );
+            Ok(())
+        }
+        Err(err) => {
+            let detail = err.to_string();
+            write_ports_load_status(source, false, None, &detail, &detail);
+            Err(err)
+        }
+    }
 }
 
 pub fn boot_wait_requested_from_env() -> Result<bool> {
@@ -1131,51 +1169,177 @@ fn port_match(rule: PortRule) -> String {
     }
 }
 
-fn apply_ports_rules(rules: &PortsRuleset) -> Result<()> {
-    let _ = Command::new("iptables").args(["-N", PORTS_CHAIN4]).status();
-    let _ = Command::new("ip6tables")
+fn apply_ports_rules(rules: &PortsRuleset) -> Result<PortsActivationReport> {
+    let mut log = String::new();
+
+    if let Ok(out) = Command::new("iptables").args(["-N", PORTS_CHAIN4]).output() {
+        append_command_output(&mut log, "iptables -N vpnhide_out", &out);
+    }
+    if let Ok(out) = Command::new("ip6tables")
         .args(["-N", PORTS_CHAIN6])
-        .status();
+        .output()
+    {
+        append_command_output(&mut log, "ip6tables -N vpnhide_out6", &out);
+    }
 
     let rc4 = run_with_stdin("iptables-restore", &["--noflush"], &rules.ipv4)?;
+    append_command_output(&mut log, "iptables-restore --noflush", &rc4);
     let rc6 = run_with_stdin("ip6tables-restore", &["--noflush"], &rules.ipv6)?;
+    append_command_output(&mut log, "ip6tables-restore --noflush", &rc6);
 
-    ensure_output_jump("iptables", PORTS_CHAIN4)?;
-    ensure_output_jump("ip6tables", PORTS_CHAIN6)?;
+    ensure_output_jump("iptables", PORTS_CHAIN4, &mut log)?;
+    ensure_output_jump("ip6tables", PORTS_CHAIN6, &mut log)?;
 
-    if !rc4.success() || !rc6.success() {
-        return Err(format!("ports apply failed: rc4={rc4} rc6={rc6}").into());
+    if !rc4.status.success() || !rc6.status.success() {
+        return Err(format!(
+            "ports apply failed: rc4={} rc6={}\n{}",
+            rc4.status,
+            rc6.status,
+            log.trim_end()
+        )
+        .into());
     }
-    Ok(())
+    Ok(PortsActivationReport {
+        target_count: rules.target_count,
+        log,
+    })
 }
 
-fn run_with_stdin(program: &str, args: &[&str], stdin: &str) -> Result<std::process::ExitStatus> {
+fn run_with_stdin(program: &str, args: &[&str], stdin: &str) -> Result<Output> {
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()?;
     {
         let pipe = child.stdin.as_mut().ok_or("stdin pipe unavailable")?;
         pipe.write_all(stdin.as_bytes())?;
     }
-    Ok(child.wait()?)
+    Ok(child.wait_with_output()?)
 }
 
-fn ensure_output_jump(program: &str, chain: &str) -> Result<()> {
+fn ensure_output_jump(program: &str, chain: &str, log: &mut String) -> Result<()> {
     let check = Command::new(program)
         .args(["-C", "OUTPUT", "-j", chain])
-        .status()?;
-    if check.success() {
+        .output()?;
+    append_command_output(log, &format!("{program} -C OUTPUT -j {chain}"), &check);
+    if check.status.success() {
         return Ok(());
     }
     let insert = Command::new(program)
         .args(["-I", "OUTPUT", "-j", chain])
-        .status()?;
-    if insert.success() {
+        .output()?;
+    append_command_output(log, &format!("{program} -I OUTPUT -j {chain}"), &insert);
+    if insert.status.success() {
         Ok(())
     } else {
-        Err(format!("{program} failed to insert OUTPUT jump to {chain}: {insert}").into())
+        Err(format!(
+            "{program} failed to insert OUTPUT jump to {chain}: {}\n{}",
+            insert.status,
+            log.trim_end()
+        )
+        .into())
     }
+}
+
+fn append_command_output(log: &mut String, label: &str, output: &Output) {
+    log.push_str("$ ");
+    log.push_str(label);
+    log.push('\n');
+    log.push_str("status=");
+    log.push_str(&output.status.to_string());
+    log.push('\n');
+    append_output_stream(log, "stdout", &output.stdout);
+    append_output_stream(log, "stderr", &output.stderr);
+}
+
+fn append_output_stream(log: &mut String, label: &str, bytes: &[u8]) {
+    let text = String::from_utf8_lossy(bytes);
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    log.push_str(label);
+    log.push_str(":\n");
+    log.push_str(trimmed);
+    log.push('\n');
+}
+
+fn write_ports_load_status(
+    source: &str,
+    loaded: bool,
+    target_count: Option<usize>,
+    detail: &str,
+    log: &str,
+) {
+    if let Err(err) = write_ports_load_status_inner(source, loaded, target_count, detail, log) {
+        eprintln!("vpnhide ports activator failed to write load_status: {err}");
+    }
+}
+
+fn write_ports_load_status_inner(
+    source: &str,
+    loaded: bool,
+    target_count: Option<usize>,
+    detail: &str,
+    log: &str,
+) -> Result<()> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| String::new());
+    let boot_id = read_trimmed("/proc/sys/kernel/random/boot_id");
+    let uname_r = command_stdout_trimmed("uname", &["-r"]);
+    let status = format!(
+        "timestamp={timestamp}\nboot_id={boot_id}\nuname_r={uname_r}\nruntime=ports\nsource={source}\nloaded={}\ntarget_count={}\ndetail={}\n",
+        if loaded { 1 } else { 0 },
+        target_count
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "unknown".to_owned()),
+        sanitize_status_value(detail),
+    );
+    write_atomic(Path::new(PORTS_LOAD_STATUS), status.as_bytes(), 0o644)?;
+    let load_log = if log.trim().is_empty() {
+        "(empty)\n".to_owned()
+    } else {
+        format!("{}\n", log.trim_end())
+    };
+    write_atomic(Path::new(PORTS_LOAD_LOG), load_log.as_bytes(), 0o644)?;
+    let _ = fs::set_permissions(PORTS_STATUS_DIR, fs::Permissions::from_mode(0o755));
+    Ok(())
+}
+
+fn read_trimmed(path: &str) -> String {
+    fs::read_to_string(path)
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_default()
+}
+
+fn command_stdout_trimmed(program: &str, args: &[&str]) -> String {
+    Command::new(program)
+        .args(args)
+        .output()
+        .ok()
+        .and_then(|out| out.status.success().then_some(out.stdout))
+        .map(|stdout| String::from_utf8_lossy(&stdout).trim().to_owned())
+        .unwrap_or_default()
+}
+
+fn sanitize_status_value(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            '\n' | '\r' | '\t' => ' ',
+            _ => ch,
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(240)
+        .collect()
 }
 
 #[cfg(test)]

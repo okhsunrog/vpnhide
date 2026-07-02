@@ -77,6 +77,7 @@ class RootSnapshotCacheTest {
         assertTrue(command.contains("cat $PROC_CTL"))
         assertTrue(command.contains("$KPM_ACTIVATOR state"))
         assertTrue(command.contains(ZYGISK_STATUS_FILE))
+        assertTrue(command.contains(PORTS_LOAD_STATUS_FILE))
         assertTrue(command.contains("probe_ok=1"))
         assertTrue(command.contains("iptables -C OUTPUT -j vpnhide_out"))
         assertTrue(command.contains("ip6tables -C OUTPUT -j vpnhide_out6"))
@@ -86,6 +87,7 @@ class RootSnapshotCacheTest {
         assertFalse(command.contains("exit 0"))
         assertFalse(command.contains("run_phase"))
         assertFalse(command.contains("TMP_DIR"))
+        assertFalse(command.contains("debug_logging"))
     }
 
     @Test

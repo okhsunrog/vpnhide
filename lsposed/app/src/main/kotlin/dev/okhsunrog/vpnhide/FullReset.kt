@@ -19,7 +19,6 @@ internal val FULL_RESET_FILES =
     listOf(
         CANONICAL_CONFIG_FILE,
         "/data/system/vpnhide_uids.txt",
-        "/data/system/vpnhide_debug_logging",
         SS_HIDDEN_PKGS_FILE,
         SS_OBSERVER_UIDS_FILE,
         LSPOSED_STATE_FILE,

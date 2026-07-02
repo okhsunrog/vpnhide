@@ -220,7 +220,7 @@ KPM в бете: его покрытие повторяет колонки `.ko`
 - **kmod**: `./kmod/build.py --kmi android14-6.1` (или `--all`) — авто-запускает DDK-контейнер через podman/docker. Подробнее: [kmod/BUILDING.md](kmod/BUILDING.md).
 - **KPM**: `python3 kmod/kpm/build.py` — собирает универсальный `vpnhide-kpm.zip` через KernelPatch submodule. Подробнее: [kmod/kpm/README.md](kmod/kpm/README.md).
 - **zygisk**: `cd zygisk && ./build.py` (Rust + NDK + cargo-ndk)
-- **lsposed**: `cd lsposed && ./gradlew assembleDebug` (JDK 17 + Rust + NDK + cargo-ndk)
+- **lsposed**: `cd lsposed && ./gradlew assembleDebug` (JDK 17 + Rust + NDK + cargo-ndk). Обычный debug APK остаётся debuggable, но проходит R8/shrink, чтобы не раздувать Xposed-модуль при установке и agent smoke-тестах. Для старой unminified debug-сборки используйте `./gradlew assembleRawDebug`.
 
 ### Заметки для контрибьюторов, застрявших на Windows
 

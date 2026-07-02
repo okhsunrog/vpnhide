@@ -27,13 +27,14 @@ internal fun isEnabledInPrefs(context: Context): Boolean =
  * SU commands, so callers should invoke from a background dispatcher.
  * Use this for the user-facing toggle in Diagnostics.
  */
-internal fun setDebugLoggingEnabled(
+internal suspend fun setDebugLoggingEnabled(
     context: Context,
     enabled: Boolean,
 ) {
     storeDebugLoggingPreference(context, enabled)
-    writeDebugFlagFiles(enabled)
+    writeDebugFlagFilesFromSnapshot(enabled)
     RootSnapshotCache.invalidate()
+    TargetsCache.invalidate()
     DashboardCache.invalidate()
 }
 
@@ -50,31 +51,17 @@ internal fun storeDebugLoggingPreference(
 }
 
 /**
- * Push [enabled] to the runtime sinks only, without touching
- * SharedPreferences. Used by diagnostic capture paths (Collect debug
- * log button + [LogcatRecorder]) that temporarily force-enable logging
- * for the duration of a capture and then restore the user's persisted
- * choice — without this, the user-facing toggle would visually flip
- * under the user while they collected a bug report.
- */
-internal fun applyDebugLoggingRuntime(enabled: Boolean) {
-    VpnHideLog.enabled = enabled
-    writeDebugFlagFiles(enabled)
-}
-
-/**
- * Startup safety-net: re-propagate the persisted debug flag to the on-disk
+ * Startup safety-net: re-propagate the persisted debug flag to the canonical
  * config + native sinks only if they've drifted from [enabled]. This runs on
  * every cold start; without the drift check it would rewrite the canonical
- * config (and re-run the native activator) with byte-identical content on every
- * launch. Capture paths (LogcatRecorder / debug export) do not go through here —
- * they already gate their own [applyDebugLoggingRuntime] calls on
- * [VpnHideLog.enabled] and must always write both directions.
+ * config and re-run the native activator with byte-identical content on every
+ * launch. Capture paths use [beginDebugCaptureLogging] and restore through
+ * their own session cleanup.
  *
  * When the snapshot isn't loaded yet the flag is treated as drifted, so the
  * safety-net still fires once.
  */
-internal fun reapplyDebugLoggingIfDrifted(enabled: Boolean) {
+internal suspend fun reapplyDebugLoggingIfDrifted(enabled: Boolean) {
     val onDiskDebug =
         TargetsCache.snapshot.value
             ?.canonicalConfig
@@ -83,9 +70,8 @@ internal fun reapplyDebugLoggingIfDrifted(enabled: Boolean) {
         VpnHideLog.enabled = enabled
         return
     }
-    applyDebugLoggingRuntime(enabled)
+    writeDebugFlagFilesFromSnapshot(enabled)
 }
-
 private fun writeDebugFlagFiles(enabled: Boolean) {
     val parts = mutableListOf<String>()
 
@@ -103,4 +89,20 @@ private fun writeDebugFlagFiles(enabled: Boolean) {
     // round-trip is ~50-100ms. Channels whose component isn't installed/loaded
     // are skipped by the guards inside the config-write parts.
     suExec(parts.joinToString(" ; "))
+}
+
+private suspend fun writeDebugFlagFilesFromSnapshot(enabled: Boolean) {
+    val snapshot = runCatching { RootSnapshotCache.refresh() }.getOrNull()
+    val canonical = snapshot?.let { debugToggledCanonicalConfig(it, enabled) }
+    if (canonical == null) {
+        writeDebugFlagFiles(enabled)
+        return
+    }
+
+    val cmd =
+        listOf(
+            buildCanonicalConfigWriteCommand(canonical.config),
+            ConfigChannels.reconcileCommand(),
+        ).joinToString(" ; ")
+    suExec(cmd)
 }

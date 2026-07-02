@@ -31,6 +31,34 @@ internal object AgentControlDispatcher {
             ) { context, _ ->
                 AgentControl.runFullDiagnostics(context)
             },
+            function<ExportDebugZipArgs, AgentDebugZipExport>(
+                name = "exportDebugZip",
+                description = "Create the same debug ZIP as Detailed diagnostics and return app-cache metadata.",
+                inputSchema = schema(optional("selfNeedsRestart", booleanSchema())),
+            ) { context, args ->
+                AgentControl.exportDebugZip(context, args.selfNeedsRestart)
+            },
+            function<EmptyArgs, AgentDebugZipExport>(
+                name = "exportKernelImages",
+                description = "Create a separate opt-in ZIP with active boot/init_boot/vendor_boot kernel images.",
+                inputSchema = schema(),
+            ) { context, _ ->
+                AgentControl.exportKernelImages(context)
+            },
+            function<ExportDebugZipArgs, AgentMutationResult>(
+                name = "startFullSystemLogcat",
+                description = "Start the same full-system-logcat recording session as Detailed diagnostics.",
+                inputSchema = schema(optional("selfNeedsRestart", booleanSchema())),
+            ) { context, args ->
+                AgentControl.startFullSystemLogcat(context, args.selfNeedsRestart)
+            },
+            function<EmptyArgs, AgentDebugZipExport>(
+                name = "stopFullSystemLogcat",
+                description = "Stop full-system-logcat recording and return the diagnostic ZIP metadata.",
+                inputSchema = schema(),
+            ) { context, _ ->
+                AgentControl.stopFullSystemLogcat(context)
+            },
             function<RefreshArgs, AgentStatisticsState>(
                 name = "getStatisticsState",
                 description = "Return the Statistics tab state, including backend rows and per-app probe rollups.",
@@ -235,6 +263,11 @@ private data class RefreshArgs(
 private data class CaptureDiffArgs(
     val baseline: AgentStatisticsCaptureBaseline,
     val refresh: Boolean? = null,
+)
+
+@Serializable
+private data class ExportDebugZipArgs(
+    val selfNeedsRestart: Boolean? = null,
 )
 
 @Serializable

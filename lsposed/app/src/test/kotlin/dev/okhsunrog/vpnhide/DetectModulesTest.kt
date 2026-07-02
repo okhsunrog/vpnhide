@@ -78,6 +78,31 @@ class DetectModulesTest {
     }
 
     @Test
+    fun `ports apply problem uses current boot failure detail`() {
+        val ports = ModuleState.Installed(version = "0.6.3", active = false, targetCount = 1)
+        val problem =
+            detectPortsApplyProblem(
+                ports,
+                "boot_id=boot-1\nloaded=0\ndetail=iptables-restore failed\n",
+                currentBootId = "boot-1",
+            )
+
+        assertEquals("iptables-restore failed", problem?.failureDetail)
+    }
+
+    @Test
+    fun `ports apply problem is generic when chains are missing without current boot failure`() {
+        val ports = ModuleState.Installed(version = "0.6.3", active = false, targetCount = 1)
+
+        assertEquals(null, detectPortsApplyProblem(ports.copy(active = true), "", "boot-1"))
+        assertEquals(null, detectPortsApplyProblem(ports.copy(targetCount = 0), "", "boot-1"))
+        assertEquals(
+            PortsApplyProblem(failureDetail = null),
+            detectPortsApplyProblem(ports, "boot_id=old\nloaded=0\ndetail=old failure\n", "boot-1"),
+        )
+    }
+
+    @Test
     fun `ports not installed when prop is absent`() {
         assertEquals(ModuleState.NotInstalled, detectPortsModule(mapOf("ports_chain" to "1"), self))
     }

@@ -6,12 +6,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let result = if boot_wait {
-        vpnhide_activator::activate_ports_boot()
-    } else {
-        vpnhide_activator::activate_ports()
-    };
-    if let Err(e) = result {
+    if let Err(e) = vpnhide_activator::activate_ports_recorded(boot_wait) {
         eprintln!("vpnhide ports activator failed: {e}");
         std::process::exit(1);
     }

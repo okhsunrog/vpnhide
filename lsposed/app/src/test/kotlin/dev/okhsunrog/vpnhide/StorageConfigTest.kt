@@ -469,7 +469,6 @@ class StorageConfigTest {
             SS_HIDDEN_PKGS_FILE,
             SS_OBSERVER_UIDS_FILE,
             "/data/system/vpnhide_uids.txt",
-            "/data/system/vpnhide_debug_logging",
         ).forEach { path -> assertTrue(cmd.contains(path)) }
 
         assertTrue(!cmd.contains(CANONICAL_CONFIG_FILE))

@@ -25,6 +25,8 @@ internal const val PROC_CTL = "/proc/vpnhide_ctl"
 internal const val SS_HIDDEN_PKGS_FILE = "/data/system/vpnhide_hidden_pkgs.txt"
 internal const val SS_OBSERVER_UIDS_FILE = "/data/system/vpnhide_observer_uids.txt"
 internal const val PORTS_OBSERVERS_FILE = "/data/adb/vpnhide_ports/observers.txt"
+internal const val PORTS_LOAD_STATUS_FILE = "/data/adb/vpnhide_ports/load_status"
+internal const val PORTS_LOAD_LOG_FILE = "/data/adb/vpnhide_ports/load_log"
 internal const val PORTS_MODULE_DIR = "/data/adb/modules/vpnhide_ports"
 internal const val PORTS_ACTIVATOR = "$PORTS_MODULE_DIR/activator"
 internal const val KMOD_MODULE_DIR = "/data/adb/modules/vpnhide_kmod"
@@ -347,10 +349,9 @@ private fun buildCanonicalSelfUpdate(
     selfPkg: String,
 ): CanonicalSelfUpdate {
     val targets = parseTargetsSnapshot(RootSnapshot(sections))
-    val legacyDebug = sections["debug_logging"]?.trim() == "1"
     val baseCanonical =
         targets.canonicalConfig
-            ?: buildCanonicalConfigFromTargetsSnapshot(targets, debug = legacyDebug)
+            ?: buildCanonicalConfigFromTargetsSnapshot(targets, debug = false)
     val previousSelf = baseCanonical.apps[selfPkg]
     val selfNeedsRestart =
         previousSelf == null ||
@@ -373,7 +374,7 @@ private fun writeStartupCanonical(
         listOf(
             buildCanonicalConfigWriteCommand(canonical),
             ConfigChannels.reconcileCommand(),
-            "if [ -x $PORTS_ACTIVATOR ]; then $PORTS_ACTIVATOR; fi",
+            ConfigChannels.portsActivatorCommand(),
         ).joinToString(" ; ")
     val (exit, out) = suExec(command, timeoutSec = timeoutSec)
     if (exit == 0) return null
