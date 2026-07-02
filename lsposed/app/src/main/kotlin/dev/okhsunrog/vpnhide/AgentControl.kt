@@ -164,7 +164,7 @@ internal object AgentControl {
     ): AgentProtectionState =
         withAppContext(context) { context ->
             val snapshot = targetsSnapshot(refresh == true)
-            buildProtectionState(context, snapshot)
+            buildProtectionState(snapshot)
         }
 
     /**
@@ -183,7 +183,7 @@ internal object AgentControl {
         withAppContext(context) { context ->
             val apps = AppListCache.loadForAgent(context, force = refresh == true)
             val userNames = AppListCache.userNames.value
-            val protection = buildProtectionState(context, targetsSnapshot(refresh = false))
+            val protection = buildProtectionState(targetsSnapshot(refresh = false))
             val rolesByPackage = protection.configuredApps.associateBy { it.packageName }
             apps
                 .asSequence()
@@ -203,7 +203,7 @@ internal object AgentControl {
      */
     suspend fun exportCanonicalConfig(context: Context): String =
         withAppContext(context) { context ->
-            canonicalConfigJson(currentCanonicalConfig(context, refresh = false))
+            canonicalConfigJson(currentCanonicalConfig(refresh = false))
         }
 
     /**
@@ -219,11 +219,7 @@ internal object AgentControl {
             val canonical =
                 parseImportedCanonicalConfig(json, context.packageName)
                     ?: throw IllegalArgumentException("Invalid canonical JSON")
-            applyCanonicalConfig(
-                context = context,
-                canonical = canonical,
-                updateDebugPreference = true,
-            )
+            applyCanonicalConfig(context = context, canonical = canonical)
         }
 
     /**
@@ -247,7 +243,7 @@ internal object AgentControl {
     ): AgentMutationResult =
         withAppContext(context) { context ->
             val pkg = requirePackageName(packageName)
-            val base = currentCanonicalConfig(context, refresh = true)
+            val base = currentCanonicalConfig(refresh = true)
             val current = base.apps[pkg] ?: CanonicalApp()
             val nextPorts = ports ?: current.ports
             val next =
@@ -282,7 +278,7 @@ internal object AgentControl {
         withAppContext(context) { context ->
             val pkg = requirePackageName(packageName)
             val hooks = resolveHookIds(hookIds, LsposedJavaHookEntries)
-            val base = currentCanonicalConfig(context, refresh = true)
+            val base = currentCanonicalConfig(refresh = true)
             val current = base.apps[pkg] ?: CanonicalApp()
             val selected = resolveHookSelection(LsposedJavaHookEntries.map { it.hookName }, hooks.toSet())
             val next =
@@ -313,7 +309,7 @@ internal object AgentControl {
             val hookFamily = family?.let(::parseNativeHookFamily) ?: snapshot.nativeHookFamily
             val entries = nativeHookEntriesFor(hookFamily)
             val hooks = resolveHookIds(hookIds, entries)
-            val base = currentCanonicalConfig(context, refresh = false)
+            val base = currentCanonicalConfig(refresh = false)
             val current = base.apps[pkg] ?: CanonicalApp()
             val selected = resolveNativeHookSelection(entries.map { it.hookName }, hooks.toSet())
             val next =
@@ -349,7 +345,7 @@ internal object AgentControl {
         withAppContext(context) { context ->
             val pkg = requirePackageName(packageName)
             val policy = parseAgentPortPolicy(mode, preset, rules.orEmpty())
-            val base = currentCanonicalConfig(context, refresh = true)
+            val base = currentCanonicalConfig(refresh = true)
             val current = base.apps[pkg] ?: CanonicalApp()
             val next = current.copy(ports = true, portPolicy = policy)
             applyCanonicalConfig(context, base.withApp(pkg, next), targetRestartRecommended = true)
@@ -368,7 +364,7 @@ internal object AgentControl {
     ): AgentMutationResult =
         withAppContext(context) { context ->
             val apps = AppListCache.loadForAgent(context, force = true)
-            val base = currentCanonicalConfig(context, refresh = true)
+            val base = currentCanonicalConfig(refresh = true)
             val nextSettings =
                 base.settings.copy(
                     autoHideVpnServices = autoHideVpnServices ?: base.settings.autoHideVpnServices,
@@ -394,7 +390,7 @@ internal object AgentControl {
     ): AgentMutationResult =
         withAppContext(context) { context ->
             val apps = AppListCache.loadForAgent(context, force = true)
-            val base = currentCanonicalConfig(context, refresh = true)
+            val base = currentCanonicalConfig(refresh = true)
             val visiblePackages = apps.mapTo(mutableSetOf()) { it.packageName }
             val selected = packageNames.map(::requirePackageName).toSortedSet()
             val next =
@@ -420,7 +416,7 @@ internal object AgentControl {
         withAppContext(context) { context ->
             val packages = packageNames.map(::requirePackageName).toSortedSet()
             if (packages.isEmpty()) return@withAppContext AgentMutationResult(ok = true, message = "No packages to remove")
-            val base = currentCanonicalConfig(context, refresh = true)
+            val base = currentCanonicalConfig(refresh = true)
             applyCanonicalConfig(
                 context = context,
                 canonical = removeConfiguredPackages(base, packages, context.packageName),
@@ -437,7 +433,7 @@ internal object AgentControl {
         enabled: Boolean,
     ): AgentMutationResult =
         withAppContext(context) { context ->
-            setDebugLoggingEnabled(context, enabled)
+            setDebugLoggingEnabled(enabled)
             AgentMutationResult(ok = true, message = "Debug logging updated", changed = true)
         }
 
@@ -446,7 +442,7 @@ internal object AgentControl {
      */
     suspend fun activateConfig(context: Context): AgentMutationResult =
         withAppContext(context) { context ->
-            runActivation(context, changed = false)
+            runActivation(changed = false)
         }
 }
 
@@ -463,25 +459,20 @@ private suspend fun rootSnapshot(refresh: Boolean): RootSnapshot =
 
 private suspend fun targetsSnapshot(refresh: Boolean): TargetsSnapshot = parseTargetsSnapshot(rootSnapshot(refresh))
 
-private suspend fun currentCanonicalConfig(
-    context: Context,
-    refresh: Boolean,
-): CanonicalConfig {
+private suspend fun currentCanonicalConfig(refresh: Boolean): CanonicalConfig {
     val snapshot = targetsSnapshot(refresh)
     return snapshot.canonicalConfig
-        ?: buildCanonicalConfigFromTargetsSnapshot(snapshot, debug = isEnabledInPrefs(context))
+        ?: buildCanonicalConfigFromTargetsSnapshot(snapshot)
 }
 
 private fun applyCanonicalConfig(
     context: Context,
     canonical: CanonicalConfig,
-    updateDebugPreference: Boolean = false,
     targetRestartRecommended: Boolean = true,
 ): AgentMutationResult {
     val next = canonicalConfigWithSelfTarget(canonical, context.packageName)
     val result = runActivationCommand(buildCanonicalConfigWriteCommand(next), changed = true)
     if (result.ok) {
-        if (updateDebugPreference) storeDebugLoggingPreference(context, next.debug)
         RootSnapshotCache.invalidate()
         TargetsCache.invalidate()
         DashboardCache.invalidate()
@@ -490,10 +481,7 @@ private fun applyCanonicalConfig(
     return result.copy(targetRestartRecommended = result.ok && targetRestartRecommended)
 }
 
-private fun runActivation(
-    @Suppress("UNUSED_PARAMETER") context: Context,
-    changed: Boolean,
-): AgentMutationResult = runActivationCommand(prefix = null, changed = changed)
+private fun runActivation(changed: Boolean): AgentMutationResult = runActivationCommand(prefix = null, changed = changed)
 
 private fun runActivationCommand(
     prefix: String?,
@@ -517,13 +505,10 @@ private fun runActivationCommand(
     }
 }
 
-private fun buildProtectionState(
-    context: Context,
-    snapshot: TargetsSnapshot,
-): AgentProtectionState {
+private fun buildProtectionState(snapshot: TargetsSnapshot): AgentProtectionState {
     val canonical =
         snapshot.canonicalConfig
-            ?: buildCanonicalConfigFromTargetsSnapshot(snapshot, debug = isEnabledInPrefs(context))
+            ?: buildCanonicalConfigFromTargetsSnapshot(snapshot)
     return AgentProtectionState(
         canonicalConfigJson = canonicalConfigJson(canonical),
         activeNativeBackend = snapshot.activeNativeBackendId?.name,

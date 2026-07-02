@@ -96,7 +96,7 @@ internal fun suExec(
             proc.destroy()
         }
     } catch (e: Exception) {
-        Log.e(TAG, "su exec failed: ${e.message}")
+        VpnHideLog.e(TAG, "su exec failed: ${e.message}")
         -1 to ""
     }
 

@@ -89,6 +89,45 @@ class StorageConfigTest {
     }
 
     @Test
+    fun `canonical config migrates debugSwitch from legacy debug`() {
+        val cfg =
+            requireNotNull(
+                parseCanonicalConfig(
+                    """
+                    {
+                      "version": 1,
+                      "debug": true,
+                      "apps": {}
+                    }
+                    """.trimIndent(),
+                ),
+            )
+
+        assertEquals(true, cfg.debug)
+        assertEquals(true, cfg.debugSwitch)
+    }
+
+    @Test
+    fun `canonical config reads explicit debugSwitch independently of debug`() {
+        val cfg =
+            requireNotNull(
+                parseCanonicalConfig(
+                    """
+                    {
+                      "version": 1,
+                      "debug": true,
+                      "debugSwitch": false,
+                      "apps": {}
+                    }
+                    """.trimIndent(),
+                ),
+            )
+
+        assertEquals(true, cfg.debug)
+        assertEquals(false, cfg.debugSwitch)
+    }
+
+    @Test
     fun `canonical config parses backend specific native hook overrides`() {
         val cfg =
             requireNotNull(
@@ -308,9 +347,11 @@ class StorageConfigTest {
         val cfg =
             CanonicalConfig(
                 debug = true,
+                debugSwitch = true,
                 apps =
                     buildCanonicalConfig(
                         debug = true,
+                        debugSwitch = true,
                         javaPkgs = setOf("com.java"),
                         nativePkgs = setOf("com.native"),
                         hiddenPkgs = setOf("dev.okhsunrog.vpnhide"),
@@ -329,6 +370,16 @@ class StorageConfigTest {
         val reparsed = requireNotNull(parseCanonicalConfig(canonicalConfigJson(cfg)))
 
         assertEquals(cfg, reparsed)
+    }
+
+    @Test
+    fun `canonical json serializes both debug flags`() {
+        val cfg = CanonicalConfig(debug = true, debugSwitch = false)
+        val json = canonicalConfigJson(cfg)
+
+        assertTrue(json.contains("\"debug\": true"))
+        assertTrue(json.contains("\"debugSwitch\": false"))
+        assertEquals(cfg, requireNotNull(parseCanonicalConfig(json)))
     }
 
     @Test

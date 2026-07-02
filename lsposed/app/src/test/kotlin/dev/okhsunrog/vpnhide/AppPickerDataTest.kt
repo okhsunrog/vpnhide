@@ -561,6 +561,26 @@ class AppPickerDataTest {
         assertEquals(false, autoHiddenPackagesNeedReconcile(config, self, signals))
     }
 
+    @Test
+    fun `auto-hide rebuild preserves debugSwitch when it differs from effective debug`() {
+        // While a capture forces logging, effective debug=true but the user's
+        // toggle intent debugSwitch=false. A rebuild (auto-hide reconcile) must
+        // keep debugSwitch, not reset it to debug — otherwise the interrupted-
+        // capture self-heal is defeated and the user's debug gets stuck on.
+        val config =
+            CanonicalConfig(
+                debug = true,
+                debugSwitch = false,
+            )
+        val signals = listOf(AppAutoHideSignal(packageName = "com.happproxy", declaresVpnService = true))
+
+        val result = applyAutoHiddenPackages(config, self, signals)
+
+        assertEquals(false, result.debugSwitch)
+        assertEquals(true, result.debug)
+        assertEquals(setOf("com.happproxy"), result.settings.autoHiddenPackages)
+    }
+
     private fun snapshotWithCanonical(
         vararg apps: Pair<String, CanonicalApp>,
         settings: CanonicalSettings = CanonicalSettings(),

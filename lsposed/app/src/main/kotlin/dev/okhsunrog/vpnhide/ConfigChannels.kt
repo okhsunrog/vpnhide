@@ -49,52 +49,24 @@ internal object ConfigChannels {
 }
 
 /**
- * Run the startup runtime-config reconcile over root: derive the targets from
- * [rootSnapshot], fold in the persisted debug flag, and (re-)write the
- * `vpnhide 1 config` snapshot to every live channel. Blocking — call from a
- * background dispatcher. Best-effort: a non-zero exit is logged, not fatal.
+ * If capture left debug enabled, return a canonical copy with effective debug
+ * snapped back to user intent for startup reconciliation.
  */
-internal fun runRuntimeConfigReconcile(
-    context: Context,
-    rootSnapshot: RootSnapshot,
-) {
-    val snapshot = parseTargetsSnapshot(rootSnapshot)
-    val persistedDebug = isEnabledInPrefs(context)
+internal fun canonicalConfigForStartupDebugReconcile(config: CanonicalConfig): CanonicalConfig? =
+    if (config.debug != config.debugSwitch) config.copy(debug = config.debugSwitch) else null
+
+/**
+ * Run the startup runtime-config reconcile. Canonical JSON already contains
+ * debug, so reconcile only needs to re-run activators to pick up the current
+ * file state. Blocking — call from a background dispatcher. Best-effort: a
+ * non-zero exit is logged, not fatal.
+ */
+internal fun runRuntimeConfigReconcile() {
     val parts = mutableListOf<String>()
-    runtimeReconcileCanonicalConfig(snapshot, persistedDebug)?.let { canonical ->
-        parts += buildCanonicalConfigWriteCommand(canonical)
-    }
     parts += ConfigChannels.reconcileCommand()
     val cmd = parts.joinToString(" ; ")
     val (exit, _) = suExec(cmd)
     if (exit != 0) VpnHideLog.w("VpnHide-Startup", "runtime config reconcile failed (exit=$exit)")
-}
-
-internal fun runtimeReconcileCanonicalConfig(
-    snapshot: TargetsSnapshot,
-    persistedDebug: Boolean,
-): CanonicalConfig? {
-    val existing = snapshot.canonicalConfig
-    return when {
-        existing == null -> {
-            buildCanonicalConfig(
-                debug = persistedDebug,
-                javaPkgs = snapshot.lsposedTargets,
-                nativePkgs = snapshot.nativeTargets,
-                hiddenPkgs = snapshot.hiddenPkgs,
-                observerPkgs = snapshot.observerNames,
-                portsPkgs = snapshot.portsObservers,
-            )
-        }
-
-        existing.debug != persistedDebug -> {
-            existing.copy(debug = persistedDebug)
-        }
-
-        else -> {
-            null
-        }
-    }
 }
 
 /**

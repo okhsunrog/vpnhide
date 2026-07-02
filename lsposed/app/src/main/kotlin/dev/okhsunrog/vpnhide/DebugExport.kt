@@ -3,7 +3,6 @@ package dev.okhsunrog.vpnhide
 import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
-import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -35,7 +34,7 @@ internal suspend fun exportDebugZip(
         // native sinks while the capture runs. The helper records exactly what
         // it applied/restored so bug reports can distinguish "no logs" from
         // "debug propagation failed".
-        val loggingSession = beginDebugCaptureLogging(context)
+        val loggingSession = beginDebugCaptureLogging()
         var restoreAttempted = false
         try {
             val counterBaseline = collectHookCounterSnapshot()
@@ -51,7 +50,7 @@ internal suspend fun exportDebugZip(
             val shellSnapshot = collectDebugShellSnapshot()
 
             val logcat = captureDebugLogcat()
-            val restore = restoreDebugCaptureLogging(context, loggingSession)
+            val restore = restoreDebugCaptureLogging(loggingSession)
             restoreAttempted = true
             val completedLoggingSession = loggingSession.withRestore(restore)
 
@@ -100,11 +99,11 @@ internal suspend fun exportDebugZip(
             // concurrency (navigating away mid-capture must cancel cleanly).
             throw c
         } catch (e: Exception) {
-            Log.e(TAG, "Debug export failed", e)
+            VpnHideLog.e(TAG, "Debug export failed", e)
             null
         } finally {
             if (!restoreAttempted) {
-                restoreDebugCaptureLogging(context, loggingSession)
+                restoreDebugCaptureLogging(loggingSession)
             }
         }
     }

@@ -55,9 +55,10 @@ The number-keying difference is deliberate and bridged by the activator:
 - **Readers:** the app (`su`), the LSPosed hook (directly, from `system_server`),
   the activator (root). **Not** readable by unprivileged apps or non-root `adb`
   (see §7).
-- **Holds:** schema version, the global `debug` flag, per-package roles + (optional)
-  per-hook selection, and app settings. It does **not** hold stats, status, or the
-  APatch superkey (those are runtime/secret — §5, §6).
+- **Holds:** schema version, the global `debug` flag (effective logging intent),
+  `debugSwitch` (user toggle intent), per-package roles + (optional) per-hook
+  selection, and app settings. It does **not** hold stats, status, or the APatch
+  superkey (those are runtime/secret — §5, §6).
 - **Import / export = copy this one file.** It contains no device-specific secret,
   so it is safe to back up / move / share. (This is *why* the superkey is **not**
   stored here — §6.)
@@ -68,6 +69,7 @@ Shape (illustrative):
 {
   "version": 1,
   "debug": false,
+  "debugSwitch": false,
   "apps": {
     "com.example.bank":  { "java": true, "native": true,  "appHiding": false, "ports": false },
     "org.example.proxy": {
@@ -90,6 +92,16 @@ Shape (illustrative):
   }
 }
 ```
+
+`debugSwitch` is the user intent stored by the app toggle; `debug` is the
+effective in-runtime value. On a capture path, `debug` may temporarily become
+`true` while `debugSwitch` remains `false`. Startup reconciliation restores
+`debug := debugSwitch` when they diverge.
+
+Migration from pre-switch configs:
+
+- If `debugSwitch` is missing, it is treated as `debug` while parsing so older
+  canonical JSONs keep working.
 
 Per-hook granularity ("раздельное управление хуками"): the coarse `"java": true`
 or `"native": true` is the common case (enable every hook in that role for the

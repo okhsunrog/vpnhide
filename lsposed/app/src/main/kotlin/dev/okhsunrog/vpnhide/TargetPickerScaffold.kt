@@ -314,7 +314,11 @@ internal fun <T : TargetEntry> TargetPickerScreen(
         LaunchedEffect(Unit) {
             val entries = allApps
             val selfPkg = context.packageName
-            val ctx = SaveContext(selfPkg, isEnabledInPrefs(context))
+            val ctx =
+                SaveContext(
+                    selfPkg,
+                    targets?.canonicalConfig?.debugSwitch ?: (targets?.canonicalConfig?.debug ?: false),
+                )
             try {
                 val (exitCode, _) =
                     suExecAsync(buildSaveCommand(entries, ctx))

@@ -30,7 +30,7 @@ internal class StartupCoordinator(
     private val cleanupZygiskStatus: (Context, String?) -> Unit = ::cleanupStaleZygiskStatus,
     private val seedRootSnapshotPackages: (String?) -> Unit = RootSnapshotCache::seedPmPackages,
     private val markStartupEvent: (String) -> Unit = StartupTrace::mark,
-    private val reconcileRuntimeConfig: (RootSnapshot) -> Unit = { runRuntimeConfigReconcile(appContext, it) },
+    private val reconcileRuntimeConfig: () -> Unit = { runRuntimeConfigReconcile() },
     private val reconcileAutoHidden: (CanonicalConfig, List<AppAutoHideSignal>) -> Unit =
         { config, signals -> reconcileAutoHiddenPackages(appContext, config, signals) },
     private val loadCanonicalConfig: suspend () -> CanonicalConfig? =
@@ -121,9 +121,32 @@ internal class StartupCoordinator(
         if (selfNeedsRestart != null && rootSnapshot != null) {
             TargetsCache.ensureLoaded(scope, appContext)
             if (reconcileStarted.compareAndSet(false, true)) {
-                scope.launch(Dispatchers.IO) { reconcileRuntimeConfig(rootSnapshot) }
+                scope.launch(Dispatchers.IO) { reconcileRuntimeConfigNow(rootSnapshot) }
             }
         }
+    }
+
+    private fun reconcileRuntimeConfigNow(rootSnapshot: RootSnapshot) {
+        val canonicalConfig = parseTargetsSnapshot(rootSnapshot).canonicalConfig
+        val reconciled = canonicalConfig?.let { canonicalConfigForStartupDebugReconcile(it) }
+        if (reconciled != null) {
+            val command =
+                listOf(
+                    buildCanonicalConfigWriteCommand(reconciled),
+                    ConfigChannels.reconcileCommand(),
+                ).joinToString(" ; ")
+            val (exit, output) = suExec(command)
+            if (exit != 0) {
+                VpnHideLog.w("VpnHide-Startup", "startup debug reconcile failed (exit=$exit): ${output.trim()}")
+                return
+            }
+            RootSnapshotCache.invalidate()
+            TargetsCache.invalidate()
+            DashboardCache.invalidate()
+            StatisticsCache.invalidate()
+        }
+
+        reconcileRuntimeConfig()
     }
 
     fun ensureUpdateFresh(scope: CoroutineScope) {

@@ -105,7 +105,7 @@ internal object LogcatRecorder {
         var process: Process? = null
         var scope: CoroutineScope? = null
         try {
-            loggingSession = beginDebugCaptureLogging(context)
+            loggingSession = beginDebugCaptureLogging()
             val startMs = System.currentTimeMillis()
             // Step back one second so the start marker and any immediate debug
             // propagation lines are not lost to logcat timestamp rounding.
@@ -114,7 +114,7 @@ internal object LogcatRecorder {
 
             process = startLogcatProcess(logcatSince)
             if (process == null) {
-                restoreDebugCaptureLogging(context, loggingSession)
+                restoreDebugCaptureLogging(loggingSession)
                 runCatching { rawLogFile.delete() }
                 return null
             }
@@ -141,7 +141,7 @@ internal object LogcatRecorder {
         } catch (t: Throwable) {
             process?.destroyForcibly()
             scope?.cancel()
-            loggingSession?.let { restoreDebugCaptureLogging(context, it) }
+            loggingSession?.let { restoreDebugCaptureLogging(it) }
             runCatching { rawLogFile.delete() }
             throw t
         }
@@ -181,7 +181,7 @@ internal object LogcatRecorder {
 
             val dmesg = suExec("dmesg 2>/dev/null").second
             val shellSnapshot = collectDebugShellSnapshot()
-            val restore = restoreDebugCaptureLogging(context, recording.loggingSession)
+            val restore = restoreDebugCaptureLogging(recording.loggingSession)
             restoreAttempted = true
             val completedLoggingSession = recording.loggingSession.withRestore(restore)
 
@@ -211,7 +211,7 @@ internal object LogcatRecorder {
                         .onFailure { VpnHideLog.w(TAG, "failed to stop logcat process: ${it.message}") }
                 }
                 if (!restoreAttempted) {
-                    runCatching { restoreDebugCaptureLogging(context, recording.loggingSession) }
+                    runCatching { restoreDebugCaptureLogging(recording.loggingSession) }
                         .onFailure { VpnHideLog.w(TAG, "failed to restore debug logging: ${it.message}") }
                 }
                 if (zipFile == null) {

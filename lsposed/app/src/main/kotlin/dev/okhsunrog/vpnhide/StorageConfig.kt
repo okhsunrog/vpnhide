@@ -10,6 +10,7 @@ internal const val SUPERKEY_FILE = "/data/adb/vpnhide/superkey"
 internal data class CanonicalConfig(
     val version: Int = 1,
     val debug: Boolean = false,
+    val debugSwitch: Boolean = false,
     val apps: Map<String, CanonicalApp> = emptyMap(),
     val settings: CanonicalSettings = CanonicalSettings(),
 )
@@ -122,6 +123,8 @@ internal fun parseCanonicalConfig(raw: String): CanonicalConfig? {
     val root = JSONObject(raw)
     val version = root.optInt("version", 1)
     if (version > 1) return null
+    val debug = root.optBoolean("debug", false)
+    val debugSwitch = root.optBoolean("debugSwitch", debug)
     val appsJson = root.optJSONObject("apps")
     val apps =
         appsJson
@@ -135,7 +138,8 @@ internal fun parseCanonicalConfig(raw: String): CanonicalConfig? {
     val defaultSettings = CanonicalSettings()
     return CanonicalConfig(
         version = version,
-        debug = root.optBoolean("debug", false),
+        debug = debug,
+        debugSwitch = debugSwitch,
         apps = apps,
         settings =
             CanonicalSettings(
@@ -272,6 +276,11 @@ private fun parseOptionalStringList(
 
 internal fun buildCanonicalConfig(
     debug: Boolean,
+    // null = inherit the user's toggle intent from [existing] (or fall back to
+    // [debug] on a first-write). Rebuild paths (Save / auto-hide / manual-hidden)
+    // must NOT reset debugSwitch to debug — the two diverge during a capture, and
+    // defaulting to debug would clobber the persisted intent.
+    debugSwitch: Boolean? = null,
     javaPkgs: Collection<String>,
     nativePkgs: Collection<String>,
     hiddenPkgs: Collection<String>,
@@ -303,6 +312,7 @@ internal fun buildCanonicalConfig(
     return CanonicalConfig(
         version = 1,
         debug = debug,
+        debugSwitch = debugSwitch ?: existing?.debugSwitch ?: debug,
         apps = apps,
         settings = existing?.settings ?: CanonicalSettings(),
     )
@@ -311,9 +321,11 @@ internal fun buildCanonicalConfig(
 internal fun buildCanonicalConfigFromTargetsSnapshot(
     snapshot: TargetsSnapshot,
     debug: Boolean = snapshot.canonicalConfig?.debug ?: false,
+    debugSwitch: Boolean = snapshot.canonicalConfig?.debugSwitch ?: debug,
 ): CanonicalConfig =
     buildCanonicalConfig(
         debug = debug,
+        debugSwitch = debugSwitch,
         javaPkgs = snapshot.lsposedTargets,
         nativePkgs = snapshot.nativeTargets,
         hiddenPkgs = snapshot.hiddenPkgs,
@@ -356,6 +368,9 @@ internal fun canonicalConfigJson(config: CanonicalConfig): String =
         append(",\n")
         append("  \"debug\": ")
         append(config.debug)
+        append(",\n")
+        append("  \"debugSwitch\": ")
+        append(config.debugSwitch)
         append(",\n")
         append("  \"apps\": {")
         val apps = config.apps.toSortedMap().filterValues { it.hasAnyRole }

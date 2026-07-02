@@ -362,10 +362,10 @@ private fun DeveloperSettingsSection() {
     val interactor = LocalSettingsInteractor.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Debug logging isn't a UI-DataStore setting — it's a stealth-sensitive runtime
-    // flag in its own prefs store (DebugLoggingPrefs), so it's driven by local state
-    // and a direct write rather than through the settings interactor.
-    var debugLogging by remember { mutableStateOf(VpnHideLog.enabled) }
+    val debugLoggingByCanonicalConfig by TargetsCache.snapshot.collectAsState()
+    val debugLogging =
+        debugLoggingByCanonicalConfig?.canonicalConfig?.debugSwitch
+            ?: VpnHideLog.enabled
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SettingsSectionHeader(stringResource(R.string.settings_developer_section))
         PreferenceRowSwitch(
@@ -397,8 +397,7 @@ private fun DeveloperSettingsSection() {
             count = 3,
             checked = debugLogging,
             onCheckedChange = { value ->
-                debugLogging = value
-                scope.launch(Dispatchers.IO) { setDebugLoggingEnabled(context, value) }
+                scope.launch(Dispatchers.IO) { setDebugLoggingEnabled(value) }
             },
         )
     }
@@ -511,7 +510,7 @@ private fun ConfigBackupSection() {
         ) {
             EnhancedOutlinedButton(
                 onClick = {
-                    pendingExport = buildConfigExportJson(context, targets)
+                    pendingExport = buildConfigExportJson(targets)
                     status = null
                     exportLauncher.launch("vpnhide_config.json")
                 },
@@ -581,7 +580,7 @@ private fun ConfigBackupSection() {
         }
     }
 
-    val packageListConfig = targets?.let { buildConfigExportCanonical(context, it) }
+    val packageListConfig = targets?.let(::buildConfigExportCanonical)
     if (packageListDialogOpen && packageListConfig != null) {
         PackageListExportDialog(
             config = packageListConfig,
@@ -781,7 +780,7 @@ private fun SuperkeySettingsSection() {
                     saving = true
                     status = null
                     scope.launch {
-                        val exit = withContext(Dispatchers.IO) { writeSuperkeySetting(context, remember = false, superkey = "") }
+                        val exit = withContext(Dispatchers.IO) { writeSuperkeySetting(remember = false, superkey = "") }
                         saving = false
                         status = if (exit == 0) clearedMessage else failedMessage
                         if (exit == 0) {
@@ -801,7 +800,7 @@ private fun SuperkeySettingsSection() {
                     status = null
                     val keyToWrite = superkey
                     scope.launch {
-                        val exit = withContext(Dispatchers.IO) { writeSuperkeySetting(context, remember = true, superkey = keyToWrite) }
+                        val exit = withContext(Dispatchers.IO) { writeSuperkeySetting(remember = true, superkey = keyToWrite) }
                         saving = false
                         status = if (exit == 0) storedMessage else failedMessage
                         if (exit == 0) {
@@ -835,14 +834,13 @@ private fun SuperkeySettingsSection() {
 }
 
 private fun writeSuperkeySetting(
-    context: android.content.Context,
     remember: Boolean,
     superkey: String,
 ): Int {
     val snapshot = TargetsCache.snapshot.value
     val base =
         snapshot?.let(::buildCanonicalConfigFromTargetsSnapshot)
-            ?: CanonicalConfig(debug = isEnabledInPrefs(context))
+            ?: CanonicalConfig()
     val canonical = base.copy(settings = base.settings.copy(rememberSuperkey = remember))
     val requiredParts =
         listOf(
@@ -876,20 +874,14 @@ private enum class ConfigOperation {
     PackageListSave,
 }
 
-private fun buildConfigExportCanonical(
-    context: android.content.Context,
-    snapshot: TargetsSnapshot?,
-): CanonicalConfig =
+private fun buildConfigExportCanonical(snapshot: TargetsSnapshot?): CanonicalConfig =
     when {
         snapshot?.canonicalConfig != null -> snapshot.canonicalConfig
         snapshot != null -> buildCanonicalConfigFromTargetsSnapshot(snapshot)
-        else -> CanonicalConfig(debug = isEnabledInPrefs(context))
+        else -> CanonicalConfig()
     }
 
-private fun buildConfigExportJson(
-    context: android.content.Context,
-    snapshot: TargetsSnapshot?,
-): String = canonicalConfigJson(buildConfigExportCanonical(context, snapshot))
+private fun buildConfigExportJson(snapshot: TargetsSnapshot?): String = canonicalConfigJson(buildConfigExportCanonical(snapshot))
 
 private fun writeTextToUri(
     context: android.content.Context,
@@ -922,7 +914,7 @@ private fun importConfigFromUri(
         ).joinToString(" ; ")
     val (exit, _) = suExec(cmd)
     if (exit != 0) return ConfigImportResult.RootFailed
-    storeDebugLoggingPreference(context, canonical.debug)
+    VpnHideLog.enabled = canonical.debug
     RootSnapshotCache.invalidate()
     DashboardCache.invalidate()
     return ConfigImportResult.Success
@@ -1193,7 +1185,7 @@ private fun writeAutoHideSetting(
     val snapshot = TargetsCache.snapshot.value
     val base =
         snapshot?.let(::buildCanonicalConfigFromTargetsSnapshot)
-            ?: CanonicalConfig(debug = isEnabledInPrefs(context))
+            ?: CanonicalConfig()
     val canonical =
         applyAutoHiddenPackages(
             config = base.copy(settings = transform(base.settings)),
@@ -1345,7 +1337,7 @@ private fun writeManualHiddenApps(
     val snapshot = TargetsCache.snapshot.value
     val base =
         snapshot?.let(::buildCanonicalConfigFromTargetsSnapshot)
-            ?: CanonicalConfig(debug = isEnabledInPrefs(context))
+            ?: CanonicalConfig()
     val canonical =
         updateManualHiddenPackages(
             config = base,

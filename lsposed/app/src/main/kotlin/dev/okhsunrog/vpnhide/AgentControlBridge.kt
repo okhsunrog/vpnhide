@@ -79,7 +79,7 @@ internal object AgentControlBridge {
                 )
             }
         }.onFailure { error ->
-            Log.e(TAG, "Failed to start agent bridge", error)
+            VpnHideLog.e(TAG, "Failed to start agent bridge", error)
         }.getOrNull()
 
     private fun generateToken(): String {
@@ -175,7 +175,7 @@ private class BridgeServer(
         } catch (e: SerializationException) {
             writeError(client, 400, "Bad Request", e.message ?: "Invalid JSON")
         } catch (e: Throwable) {
-            Log.e(TAG, "Agent bridge request failed", e)
+            VpnHideLog.e(TAG, "Agent bridge request failed", e)
             writeError(client, 500, "Internal Server Error", e.message ?: e::class.java.simpleName)
         }
     }

@@ -66,9 +66,9 @@ class MainActivity : ComponentActivity() {
         StartupTrace.mark("activity_on_create")
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        // Load the user's debug-logging preference before anything else
-        // runs so the first suExec + Dashboard reload honor it.
-        VpnHideLog.init(applicationContext)
+        // Load debug state from the canonical snapshot before any runtime work.
+        // This keeps first suExec and dashboard bootstrap aligned.
+        VpnHideLog.init()
         setContent {
             VpnHideApp()
         }
@@ -334,6 +334,7 @@ private fun MainScreen() {
     // as that shared snapshot exists, TargetsCache parses it from memory and
     // Protection is still prewarmed before a normal tab switch.
     LaunchedEffect(selfNeedsRestart, rootSnapshot) {
+        VpnHideLog.setFromRootSnapshot(rootSnapshot)
         startupCoordinator.ensureProtectionCacheAfterRootSnapshot(scope, selfNeedsRestart, rootSnapshot)
     }
 
@@ -346,13 +347,6 @@ private fun MainScreen() {
         if (uiReady && !startupTraceMarked) {
             startupTraceMarked = true
             StartupTrace.dashboardReady()
-            scope.launch(Dispatchers.IO) {
-                // Re-propagate the persisted flag to the on-disk sinks as a
-                // safety-net, but only if they've drifted — otherwise a cold
-                // start needlessly rewrites the canonical config every launch.
-                // Kept off the cold-start critical path.
-                reapplyDebugLoggingIfDrifted(VpnHideLog.enabled)
-            }
         }
     }
 

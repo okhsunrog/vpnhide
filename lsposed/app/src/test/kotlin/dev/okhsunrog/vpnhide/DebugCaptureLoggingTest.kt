@@ -2,45 +2,66 @@ package dev.okhsunrog.vpnhide
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DebugCaptureLoggingTest {
     @Test
-    fun `debug toggle updates only canonical debug flag when canonical config is valid`() {
-        val update = debugToggledCanonicalConfig(canonicalSnapshot(), enabled = true)
+    fun `debug toggle preserves debugSwitch when changing debug only`() {
+        val toggled = debugToggledCanonicalConfig(canonicalSnapshotWithSwitch(debug = true, debugSwitch = false), enabled = false)
 
-        assertEquals("canonical_debug_only", update?.source)
-        assertTrue(update?.config?.debug == true)
-        assertExampleBankRoles(update?.config?.apps?.get("com.example.bank"))
-        assertPreservedSettings(update?.config?.settings)
+        assertEquals(false, toggled?.debug)
+        assertEquals(false, toggled?.debugSwitch)
+        assertPreservedSettings(toggled?.settings)
     }
 
     @Test
-    fun `startup reconcile rewrites stale canonical debug from persisted preference`() {
-        val stale = canonicalConfig()
+    fun `debug toggle target updates debug only and preserves settings`() {
+        val toggled = debugToggledCanonicalConfig(canonicalSnapshot(), enabled = true)
 
-        val update =
-            runtimeReconcileCanonicalConfig(
-                targetsSnapshot(stale.copy(debug = true)),
-                persistedDebug = false,
-            )
-
-        assertEquals(false, update?.debug)
-        assertExampleBankRoles(update?.apps?.get("com.example.bank"))
-        assertPreservedSettings(update?.settings)
+        assertNotNull(toggled)
+        assertEquals(true, toggled?.debug)
+        assertExampleBankRoles(toggled?.apps?.get("com.example.bank"))
+        assertPreservedSettings(toggled?.settings)
     }
 
     @Test
-    fun `startup reconcile leaves canonical untouched when debug matches preference`() {
-        val update =
-            runtimeReconcileCanonicalConfig(
-                targetsSnapshot(canonicalConfig().copy(debug = false)),
-                persistedDebug = false,
-            )
+    fun `debug toggle false keeps canonical roles unchanged`() {
+        val toggled = debugToggledCanonicalConfig(canonicalSnapshot(), enabled = false)
 
-        assertNull(update)
+        assertEquals(false, toggled?.debug)
+        assertExampleBankRoles(toggled?.apps?.get("com.example.bank"))
+        assertPreservedSettings(toggled?.settings)
+    }
+
+    @Test
+    fun `debug toggle returns null when canonical config missing`() {
+        val toggled = debugToggledCanonicalConfig(RootSnapshot(mapOf("something_else" to "{}")), enabled = true)
+        assertNull(toggled)
+    }
+
+    @Test
+    fun `startup debug reconcile updates debug only when different from debugSwitch`() {
+        val canonical =
+            canonicalConfig(
+                debug = true,
+                debugSwitch = false,
+                canonicalApps = mapOf("com.example.bank" to canonicalSampleBankApp()),
+            )
+        val reconciled = canonicalConfigForStartupDebugReconcile(canonical)
+
+        assertEquals(false, reconciled?.debug)
+        assertEquals(false, reconciled?.debugSwitch)
+        assertEquals("com.example.bank", reconciled?.apps?.keys?.single())
+    }
+
+    @Test
+    fun `startup debug reconcile skips rewrite when already aligned`() {
+        val canonical = canonicalConfig(debug = true, debugSwitch = true)
+        val reconciled = canonicalConfigForStartupDebugReconcile(canonical)
+        assertNull(reconciled)
     }
 
     private fun assertExampleBankRoles(app: CanonicalApp?) {
@@ -68,38 +89,23 @@ class DebugCaptureLoggingTest {
         assertEquals(setOf("com.example.vpn"), settings?.autoHiddenPackages)
     }
 
-    private fun canonicalConfig(): CanonicalConfig =
-        parseCanonicalConfig(
-            """
-            {
-              "version": 1,
-              "debug": false,
-              "apps": {
-                "com.example.bank": {
-                  "java": true,
-                  "native": {
-                    "enabled": true,
-                    "kernel": ["dev_ioctl"],
-                    "zygisk": ["zygisk_ioctl"]
-                  },
-                  "appHiding": true,
-                  "ports": true,
-                  "portPolicy": {
-                    "mode": "custom",
-                    "rules": [{ "start": 8080, "protocol": "tcp" }]
-                  },
-                  "hidden": true
-                }
-              },
-              "settings": {
-                "rememberSuperkey": true,
-                "autoHideVpnServices": false,
-                "autoHideVpnName": true,
-                "autoHiddenPackages": ["com.example.vpn"]
-              }
-            }
-            """.trimIndent(),
-        ) ?: error("invalid test canonical config")
+    private fun canonicalConfig(
+        debug: Boolean = true,
+        debugSwitch: Boolean = debug,
+        canonicalApps: Map<String, CanonicalApp>? = null,
+    ): CanonicalConfig =
+        CanonicalConfig(
+            debug = debug,
+            debugSwitch = debugSwitch,
+            apps = canonicalApps ?: canonicalSampleApps(),
+            settings =
+                CanonicalSettings(
+                    rememberSuperkey = true,
+                    autoHideVpnServices = false,
+                    autoHideVpnName = true,
+                    autoHiddenPackages = setOf("com.example.vpn"),
+                ),
+        )
 
     private fun canonicalSnapshot(): RootSnapshot =
         RootSnapshot(
@@ -108,20 +114,41 @@ class DebugCaptureLoggingTest {
             ),
         )
 
-    private fun targetsSnapshot(canonical: CanonicalConfig): TargetsSnapshot =
-        TargetsSnapshot(
-            kmodModuleInstalled = false,
-            kpmModuleInstalled = false,
-            zygiskModuleInstalled = false,
-            portsModuleInstalled = false,
-            kmodTargets = emptySet(),
-            kpmTargets = emptySet(),
-            zygiskTargets = emptySet(),
-            lsposedTargets = emptySet(),
-            hiddenPkgs = emptySet(),
-            observerUids = emptySet(),
-            portsObservers = emptySet(),
-            uidToPkg = emptyMap(),
-            canonicalConfig = canonical,
+    private fun canonicalSnapshotWithSwitch(
+        debug: Boolean,
+        debugSwitch: Boolean,
+    ): RootSnapshot =
+        RootSnapshot(
+            mapOf(
+                "canonical_config" to
+                    canonicalConfigJson(canonicalConfig(debug = debug, debugSwitch = debugSwitch)),
+            ),
+        )
+
+    private fun canonicalSampleApps(): Map<String, CanonicalApp> =
+        mapOf(
+            "com.example.bank" to canonicalSampleBankApp(),
+        )
+
+    private fun canonicalSampleBankApp(): CanonicalApp =
+        CanonicalApp(
+            java = true,
+            native =
+                NativeRole(
+                    enabled = true,
+                    overrides =
+                        NativeHookOverrides(
+                            kernel = listOf("dev_ioctl"),
+                            zygisk = listOf("zygisk_ioctl"),
+                        ),
+                ),
+            appHiding = true,
+            ports = true,
+            portPolicy =
+                PortPolicy(
+                    mode = PortPolicyMode.Custom,
+                    rules = listOf(PortRule(start = 8080, end = 8080, protocol = PortProtocol.Tcp)),
+                ),
+            hidden = true,
         )
 }

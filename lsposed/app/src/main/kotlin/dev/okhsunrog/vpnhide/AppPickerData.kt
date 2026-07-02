@@ -191,9 +191,20 @@ private fun canonicalBaseForSave(
     snapshot: TargetsSnapshot?,
 ): CanonicalConfig =
     when {
-        snapshot?.canonicalConfig != null -> snapshot.canonicalConfig.copy(debug = debug)
-        snapshot != null -> buildCanonicalConfigFromTargetsSnapshot(snapshot, debug = debug)
-        else -> CanonicalConfig(debug = debug)
+        snapshot?.canonicalConfig != null -> {
+            snapshot.canonicalConfig.copy(
+                debug = debug,
+                debugSwitch = snapshot.canonicalConfig.debugSwitch,
+            )
+        }
+
+        snapshot != null -> {
+            buildCanonicalConfigFromTargetsSnapshot(snapshot, debug = debug)
+        }
+
+        else -> {
+            CanonicalConfig(debug = debug)
+        }
     }
 
 private fun Collection<AppRoleSelection>.selectedPkgs(predicate: (AppRoleSelection) -> Boolean): Set<String> =

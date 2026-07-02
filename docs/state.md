@@ -241,10 +241,11 @@ and the app reruns the ports activator on Save.
 Accessed through `context.getSharedPreferences("vpnhide_prefs", MODE_PRIVATE)`.
 Keys currently in use:
 
-- `debug_logging: Boolean`: app-process preference backing Diagnostics debug
-  logging. The runtime/storage value is also mirrored into canonical JSON.
 - `last_seen_version: String`: changelog dialog.
 - `help_collapsed_*: Boolean`: help accordions.
+
+`debug` / `debugSwitch` are not stored here anymore. Diagnostics and debug
+capture state comes from canonical JSON (`/data/system/vpnhide_config.json`).
 
 Vector LSPosed redirects this storage to:
 
