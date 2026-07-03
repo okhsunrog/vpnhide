@@ -352,6 +352,13 @@
     <string name="badge_pass">ОК</string>
     <string name="badge_fail">ПРОВАЛ</string>
     <string name="badge_info">ИНФО</string>
+    <!-- Плашки исхода проверки в диагностике — кто скрыл VPN на этом векторе. -->
+    <string name="diag_pill_leak">Утечка</string>
+    <string name="diag_pill_backend">Скрыто бэкендом</string>
+    <string name="diag_pill_selinux">Скрыто SELinux</string>
+    <string name="diag_pill_nothing">Нечего скрывать</string>
+    <string name="diag_pill_clean">Чисто</string>
+    <string name="diag_pill_not_measured">Не измерено</string>
     <string name="banner_ready">VPN активен. Для этого приложения включено скрытие. Результаты проверок ниже.</string>
     <string name="banner_added_self">Для VPN Hide включено скрытие. Принудительно остановите VPN Hide и откройте снова, чтобы нативные проверки начали работать — перезагрузка устройства не нужна.</string>
     <string name="banner_network_blocked">Доступ к сети отключён для этого приложения. Проверки ioctl (SIOCGIFFLAGS, SIOCGIFMTU, SIOCGIFCONF) не могут быть выполнены. Включите в Настройки → Приложения → VPN Hide → Мобильный интернет и Wi-Fi.</string>

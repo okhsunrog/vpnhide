@@ -55,6 +55,10 @@ data class CheckResult(
     val name: String,
     val passed: Boolean?,
     val detail: String,
+    // The who-hid-it attribution for native probes (root differential). Null for
+    // Java-level checks, which have no root ground truth — those fall back to the
+    // legacy [passed] tri-state in the UI.
+    val outcome: CheckOutcome? = null,
 )
 
 internal data class CheckResults(
@@ -122,21 +126,20 @@ internal fun runCoreChecks(
     // differential. Join both back to the specs by stable id.
     val nativeAppView = NativeProbe.runAll()
     val nativeGroundTruth = GroundTruthProbe.run(context)
+    // One pass builds both the per-check UI results and the outcome map (keyed by
+    // spec id for the agent bridge / dashboard). The outcome — the root-differential
+    // attribution — rides along on each CheckResult so the UI is a pure function of
+    // the list.
+    val nativeOutcomes = LinkedHashMap<String, CheckOutcome>()
     val native =
         NATIVE_CHECKS.map { spec ->
             val out =
                 nativeAppView[spec.id]
                     ?: CheckOutput(CheckStatus.NETWORK_BLOCKED, "no native result for ${spec.id}")
-            nativeCheckResult(res.getString(spec.labelRes), out)
-        }
-    val nativeOutcomes =
-        NATIVE_CHECKS.associate { spec ->
-            val app =
-                nativeAppView[spec.id]
-                    ?: CheckOutput(CheckStatus.NETWORK_BLOCKED, "no result")
-            val outcome = classifyNativeOutcome(app, nativeGroundTruth[spec.id])
+            val outcome = classifyNativeOutcome(out, nativeGroundTruth[spec.id])
             VpnHideLog.i(TAG, "[outcome] ${spec.id}: ${outcome.token()}")
-            spec.id to outcome
+            nativeOutcomes[spec.id] = outcome
+            nativeCheckResult(res.getString(spec.labelRes), out, outcome)
         }
 
     val nativeExtra =
@@ -201,9 +204,10 @@ internal fun runAllChecks(
 private fun nativeCheckResult(
     name: String,
     out: CheckOutput,
+    outcome: CheckOutcome? = null,
 ): CheckResult {
     VpnHideLog.i(TAG, "[$name] ${out.status}: ${out.detail}")
-    return CheckResult(name, out.status.toPassed(), out.detail)
+    return CheckResult(name, out.status.toPassed(), out.detail, outcome = outcome)
 }
 
 // ==========================================================================

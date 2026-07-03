@@ -9,6 +9,7 @@ import android.os.Build
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +23,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -500,40 +503,87 @@ private fun formatSize(bytes: Long): String {
     return "%.1f MB".format(mb)
 }
 
+/** Card container + pill (text and accent) for one check. Native checks colour
+ * by the root-differential [CheckOutcome] — green when hidden (by backend or
+ * SELinux) or nothing-to-leak, red on a real leak, grey when not measured.
+ * Java checks have no ground truth, so they fall back to the [passed] tri-state. */
+private class CheckBadge(
+    val text: String,
+    val accent: Color,
+    val container: Color,
+)
+
+@Composable
+private fun checkBadge(r: CheckResult): CheckBadge {
+    val success = StatusColors.successContainer()
+    val error = StatusColors.errorContainer()
+    val neutral = StatusColors.neutralContainer()
+    return when (r.outcome) {
+        CheckOutcome.Leak -> {
+            CheckBadge(stringResource(R.string.diag_pill_leak), StatusColors.errorAccent, error)
+        }
+
+        CheckOutcome.HiddenByBackend -> {
+            CheckBadge(stringResource(R.string.diag_pill_backend), StatusColors.successBadge, success)
+        }
+
+        // Hidden, but by SELinux rather than a backend hook: green card (no leak),
+        // blue pill to flag the distinction the redesign is about.
+        CheckOutcome.HiddenBySelinux -> {
+            CheckBadge(stringResource(R.string.diag_pill_selinux), StatusColors.infoAccent, success)
+        }
+
+        CheckOutcome.NothingToLeak -> {
+            CheckBadge(stringResource(R.string.diag_pill_nothing), StatusColors.neutralAccent, success)
+        }
+
+        is CheckOutcome.NotMeasured -> {
+            CheckBadge(stringResource(R.string.diag_pill_not_measured), StatusColors.neutralAccent, neutral)
+        }
+
+        null -> {
+            when (r.passed) {
+                true -> CheckBadge(stringResource(R.string.diag_pill_clean), StatusColors.successBadge, success)
+                false -> CheckBadge(stringResource(R.string.diag_pill_leak), StatusColors.errorAccent, error)
+                null -> CheckBadge(stringResource(R.string.diag_pill_not_measured), StatusColors.neutralAccent, neutral)
+            }
+        }
+    }
+}
+
+@Composable
+private fun OutcomePill(
+    text: String,
+    accent: Color,
+) {
+    Box(
+        modifier =
+            Modifier
+                .clip(RoundedCornerShape(50))
+                .background(accent.copy(alpha = 0.16f))
+                .padding(horizontal = 10.dp, vertical = 3.dp),
+    ) {
+        Text(
+            text = text,
+            color = accent,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 12.sp,
+        )
+    }
+}
+
 @Composable
 private fun CheckCard(
     r: CheckResult,
     index: Int = -1,
     count: Int = 1,
 ) {
-    val actualColor =
-        when (r.passed) {
-            true -> StatusColors.successContainer()
-            false -> StatusColors.errorContainer()
-            null -> MaterialTheme.colorScheme.surfaceVariant
-        }
-
-    val badgeText =
-        stringResource(
-            when (r.passed) {
-                true -> R.string.badge_pass
-                false -> R.string.badge_fail
-                null -> R.string.badge_info
-            },
-        )
-
-    val badgeColor =
-        when (r.passed) {
-            true -> StatusColors.successBadge
-            false -> StatusColors.errorAccent
-            null -> MaterialTheme.colorScheme.onSurfaceVariant
-        }
-
+    val badge = checkBadge(r)
     GroupedCard(
         index = index,
         count = count,
         modifier = Modifier.fillMaxWidth(),
-        color = actualColor,
+        color = badge.container,
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
@@ -545,14 +595,9 @@ private fun CheckCard(
                     text = r.name,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
                 )
-                Text(
-                    text = badgeText,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = badgeColor,
-                )
+                OutcomePill(badge.text, badge.accent)
             }
             Spacer(Modifier.height(4.dp))
             Text(

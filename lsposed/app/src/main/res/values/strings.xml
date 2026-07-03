@@ -91,6 +91,13 @@
     <string name="badge_pass">PASS</string>
     <string name="badge_fail">FAIL</string>
     <string name="badge_info">INFO</string>
+    <!-- Diagnostics check outcome pills — who hid the VPN on this vector. -->
+    <string name="diag_pill_leak">Leak</string>
+    <string name="diag_pill_backend">Hidden by backend</string>
+    <string name="diag_pill_selinux">Hidden by SELinux</string>
+    <string name="diag_pill_nothing">Nothing to hide</string>
+    <string name="diag_pill_clean">Clean</string>
+    <string name="diag_pill_not_measured">Not measured</string>
     <string name="banner_ready">VPN is active. Hiding is enabled for this app. Results below.</string>
     <string name="banner_added_self">Enabled hiding for VPN Hide. Restart VPN Hide (force-stop and reopen) for native-level checks to take effect — no device reboot needed.</string>
     <string name="banner_network_blocked">Network access is disabled for this app. ioctl checks (SIOCGIFFLAGS, SIOCGIFMTU, SIOCGIFCONF) cannot run without it. Enable in Settings → Apps → VPN Hide → Mobile data &amp; Wi-Fi.</string>
