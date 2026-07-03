@@ -77,6 +77,10 @@ sealed interface ProtectionCheck {
 
     data object NeedsRestart : ProtectionCheck
 
+    // A VPN is up, but this app is not routed through it (split-tunnelled out) —
+    // hiding is moot for us, so we ask the user to add VPN Hide to the tunnel.
+    data object SelfNotRouted : ProtectionCheck
+
     data class Checked(
         val native: LayerStatus,
         val java: LayerStatus,
@@ -291,7 +295,7 @@ internal fun computeHeroStatus(
     // 0 = protected, 1 = attention, 2 = unprotected — keep the worst signal.
     var rank = 0
     when (p) {
-        ProtectionCheck.NeedsRestart -> {
+        ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> {
             rank = maxOf(rank, 1)
         }
 
@@ -1662,9 +1666,15 @@ internal suspend fun loadDashboardState(
                 // result so its "OK" state means every protection probe passed.
                 val checks = DiagnosticsCache.awaitFullResults(context)
                 if (checks == null) {
-                    // No active VPN per the check run (or it failed) — nothing to
-                    // summarize; fall back to the same retry path as no-VPN.
-                    ProtectionCheck.NoVpn
+                    // No results to summarize. Distinguish the self-not-routed gate
+                    // (VPN up but this app split-tunnelled out) from a genuine
+                    // no-VPN / failed run, so the hero can guide "add to tunnel"
+                    // instead of the wrong "turn on VPN".
+                    if (DiagnosticsCache.state.value is DiagnosticsCache.State.SelfNotRouted) {
+                        ProtectionCheck.SelfNotRouted
+                    } else {
+                        ProtectionCheck.NoVpn
+                    }
                 } else {
                     // Tiles judge each backend on the vectors it owns; unowned leaks
                     // (out of scope for the tile) are surfaced via the hero warning below.

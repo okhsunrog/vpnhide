@@ -35,6 +35,27 @@ object GroundTruthProbe {
         return NativeProbe.parse(json)
     }
 
+    /**
+     * The self-in-tunnel gate: is this app's own uid routed through the VPN?
+     * Runs the probe as root with `--uid` (a hook-inert, unfiltered read of the
+     * policy rules). Returns null when root/exec is unavailable — the caller then
+     * does not block, since a no-root device is already handled as "VPN off".
+     */
+    fun selfRoutedThroughVpn(context: Context): Boolean? {
+        val local = extractBinary(context) ?: return null
+        val uid = android.os.Process.myUid()
+        val (exit, out) =
+            suExec(
+                "cp '${local.absolutePath}' $STAGED && chmod 700 $STAGED && $STAGED --uid $uid; rm -f $STAGED",
+            )
+        val json = out.trim()
+        if (exit != 0 || !json.startsWith("{")) {
+            VpnHideLog.w(TAG, "self-routed probe unavailable (exit=$exit, no root?)")
+            return null
+        }
+        return runCatching { org.json.JSONObject(json).getBoolean("routed") }.getOrNull()
+    }
+
     private fun extractBinary(context: Context): File? =
         runCatching {
             val dest = File(context.filesDir, "vhprobe")

@@ -629,6 +629,13 @@ fn check_netlink_getroute() -> CheckOutput {
 /// mirrors that predicate so a working backend reads as "hidden" and root
 /// ground-truth (not a target → hook inert) reads as "leak".
 fn check_netlink_getrule() -> CheckOutput {
+    check_netlink_getrule_uid(unsafe { libc::getuid() })
+}
+
+/// RTM_GETRULE for a specific uid. The `vhprobe --uid` self-routing gate reuses
+/// this to answer "is <uid> routed through the VPN?" — a matching policy rule
+/// (or a VPN-named iif/oif) means yes.
+fn check_netlink_getrule_uid(myuid: u32) -> CheckOutput {
     // rtattr types and standard table ids (linux/fib_rules.h, linux/rtnetlink.h).
     const FRA_IIFNAME: u16 = 3;
     const FRA_TABLE: u16 = 15;
@@ -642,8 +649,6 @@ fn check_netlink_getrule() -> CheckOutput {
         Ok(fd) => fd,
         Err(out) => return out,
     };
-
-    let myuid = unsafe { libc::getuid() };
 
     unsafe {
         // fib_rule_hdr shares Rtmsg's 12-byte layout (family + 7 u8 + u32 flags).
@@ -844,6 +849,158 @@ fn run_all() -> Vec<CheckJson> {
 /// call the exact same code.
 pub fn run_all_json() -> String {
     serde_json::to_string(&run_all()).unwrap_or_else(|_| "[]".to_string())
+}
+
+#[derive(serde::Serialize)]
+struct SelfRouted {
+    uid: u32,
+    routed: bool,
+    detail: String,
+}
+
+/// The self-in-tunnel gate: is `uid` routed through the VPN? Run as root (not a
+/// hook target) so the answer is the unfiltered ground truth. Serialized as
+/// `{uid, routed, detail}`.
+///
+/// This is NOT the diagnostic predicate (`check_netlink_getrule`, which mirrors
+/// the kernel hook's broad "any non-standard table > 100" rule). Policy routing
+/// steers every UID into *some* per-network table (wlan0, rmnet, tun0 — all
+/// non-standard), so the broad predicate would call any online UID "routed".
+/// The gate must pin the VPN table specifically: first learn which table id a
+/// rule egresses to the VPN interface (`oif tun0`), then ask whether a uidrange
+/// rule steers this UID into exactly that table.
+pub fn self_routed_json(uid: u32) -> String {
+    let (routed, detail) = uid_routed_through_vpn(uid);
+    let sr = SelfRouted {
+        uid,
+        routed,
+        detail,
+    };
+    serde_json::to_string(&sr).unwrap_or_else(|_| "{}".to_string())
+}
+
+struct GateRule {
+    table: u32,
+    uid_lo: u32,
+    uid_hi: u32,
+    has_uidrange: bool,
+    oif_vpn: bool,
+}
+
+fn uid_routed_through_vpn(myuid: u32) -> (bool, String) {
+    const FRA_TABLE: u16 = 15;
+    const FRA_OIFNAME: u16 = 17;
+    const FRA_UID_RANGE: u16 = 20;
+
+    let fd = match open_netlink() {
+        Ok(fd) => fd,
+        Err(out) => return (false, out.detail),
+    };
+
+    let mut rules: Vec<GateRule> = Vec::new();
+
+    unsafe {
+        #[repr(C)]
+        struct Req {
+            nlh: libc::nlmsghdr,
+            frh: Rtmsg,
+        }
+        let mut req: Req = std::mem::zeroed();
+        req.nlh.nlmsg_len = std::mem::size_of::<Req>() as u32;
+        req.nlh.nlmsg_type = libc::RTM_GETRULE;
+        req.nlh.nlmsg_flags = (libc::NLM_F_REQUEST | libc::NLM_F_DUMP) as u16;
+        req.nlh.nlmsg_seq = 1;
+        req.frh.rtm_family = libc::AF_INET as u8;
+
+        if libc::send(
+            fd,
+            std::ptr::from_ref(&req).cast(),
+            req.nlh.nlmsg_len as usize,
+            0,
+        ) < 0
+        {
+            let e = last_os_error();
+            libc::close(fd);
+            return (false, format!("send error: {e}"));
+        }
+
+        let mut buf = AlignedBytes::<32768>::zeroed();
+        let hdr_plus_rtmsg = std::mem::size_of::<libc::nlmsghdr>() + std::mem::size_of::<Rtmsg>();
+
+        for _ in 0..MAX_NETLINK_RECV_ITERS {
+            let len = netlink_recv(fd, &mut buf.0);
+            if len <= 0 {
+                break;
+            }
+            let cont = parse_netlink_msgs(
+                &buf.0,
+                len as usize,
+                libc::RTM_NEWRULE,
+                |b, offset, msg_len| {
+                    let frh =
+                        &*(b.as_ptr().add(offset + std::mem::size_of::<libc::nlmsghdr>())
+                            as *const Rtmsg);
+                    let mut r = GateRule {
+                        table: frh.rtm_table as u32,
+                        uid_lo: 0,
+                        uid_hi: 0,
+                        has_uidrange: false,
+                        oif_vpn: false,
+                    };
+                    for_each_rtattr(b, offset + hdr_plus_rtmsg, offset + msg_len, |rta, payload| {
+                        match rta.rta_type {
+                            FRA_OIFNAME if !payload.is_empty() => {
+                                let name = cstr_to_str(payload.as_ptr() as *const libc::c_char);
+                                if is_vpn_iface(&name) {
+                                    r.oif_vpn = true;
+                                }
+                            }
+                            FRA_TABLE if payload.len() >= 4 => {
+                                r.table = u32::from_ne_bytes(payload[..4].try_into().unwrap());
+                            }
+                            FRA_UID_RANGE if payload.len() >= 8 => {
+                                r.uid_lo = u32::from_ne_bytes(payload[..4].try_into().unwrap());
+                                r.uid_hi = u32::from_ne_bytes(payload[4..8].try_into().unwrap());
+                                r.has_uidrange = true;
+                            }
+                            _ => {}
+                        }
+                    });
+                    rules.push(r);
+                },
+            );
+            if !cont {
+                break;
+            }
+        }
+        libc::close(fd);
+    }
+
+    // Pass 1: the VPN egress table id(s) — tables a rule routes out via `oif tun0`.
+    let vpn_tables: Vec<u32> = rules
+        .iter()
+        .filter(|r| r.oif_vpn)
+        .map(|r| r.table)
+        .collect();
+
+    // Pass 2: is this UID steered into exactly a VPN table by a uidrange rule?
+    // Exclude the universal 0..u32::MAX catch-all (not a per-app membership rule).
+    let routed = rules.iter().any(|r| {
+        r.has_uidrange
+            && r.uid_lo <= myuid
+            && myuid <= r.uid_hi
+            && !(r.uid_lo == 0 && r.uid_hi == u32::MAX)
+            && vpn_tables.contains(&r.table)
+    });
+
+    let detail = if vpn_tables.is_empty() {
+        format!("no VPN egress rule found for uid {myuid}")
+    } else if routed {
+        format!("uid {myuid} routed into VPN table(s) {vpn_tables:?}")
+    } else {
+        format!("uid {myuid} not in any VPN table(s) {vpn_tables:?}")
+    };
+    (routed, detail)
 }
 
 /// In-process (app-view) entry. Class/package must match the Kotlin

@@ -27,6 +27,18 @@ internal fun VpnOffPrompt(
 ) = RetryPromptCard(R.string.vpn_off_prompt, onRetry, modifier)
 
 /**
+ * Banner + retry button for the "a VPN is up, but VPN Hide itself is not routed
+ * through it (split-tunnelled out)" state — the checks would be meaningless, so
+ * we ask the user to add VPN Hide to the tunnel. Distinct from [VpnOffPrompt]
+ * (no VPN at all) so the guidance is actionable.
+ */
+@Composable
+internal fun SelfNotRoutedPrompt(
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) = RetryPromptCard(R.string.self_not_routed_prompt, onRetry, modifier)
+
+/**
  * Banner + retry button for a diagnostics run that *failed* (root dropped, shell
  * exec error) rather than finding the VPN off — kept separate from
  * [VpnOffPrompt] so an active-VPN user isn't wrongly told their VPN is off.

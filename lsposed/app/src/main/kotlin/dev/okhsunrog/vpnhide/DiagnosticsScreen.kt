@@ -112,6 +112,15 @@ fun DiagnosticsScreen(
                 )
             }
 
+            diagState is DiagnosticsCache.State.SelfNotRouted -> {
+                SelfNotRoutedPrompt(
+                    onRetry = {
+                        DiagnosticsCache.retry(scope, context)
+                        DashboardCache.refresh(scope, context, selfNeedsRestart)
+                    },
+                )
+            }
+
             diagState is DiagnosticsCache.State.Failed -> {
                 DiagnosticsFailedPrompt(
                     onRetry = {

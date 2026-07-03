@@ -48,6 +48,7 @@ class DashboardUiStateTest {
         assertTrue(protectionFullyPassed(ProtectionCheck.Checked(ok, ok)))
         assertFalse(protectionFullyPassed(ProtectionCheck.NoVpn))
         assertFalse(protectionFullyPassed(ProtectionCheck.NeedsRestart))
+        assertFalse(protectionFullyPassed(ProtectionCheck.SelfNotRouted))
         assertFalse(protectionFullyPassed(ProtectionCheck.Checked(LayerStatus.Absent, ok)))
         assertFalse(protectionFullyPassed(ProtectionCheck.Checked(partial, ok)))
         assertFalse(protectionFullyPassed(ProtectionCheck.Checked(ok, partial)))
@@ -72,6 +73,16 @@ class DashboardUiStateTest {
             HeroStatus.Attention,
             computeHeroStatus(
                 state = dashboardState(protection = ProtectionCheck.NeedsRestart),
+                errorCount = 0,
+                warningCount = 0,
+            ),
+        )
+        // A VPN is up but this app is split-tunnelled out — action needed, not a
+        // hard failure and not "VPN off".
+        assertEquals(
+            HeroStatus.Attention,
+            computeHeroStatus(
+                state = dashboardState(protection = ProtectionCheck.SelfNotRouted),
                 errorCount = 0,
                 warningCount = 0,
             ),

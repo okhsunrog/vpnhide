@@ -198,6 +198,16 @@ fun DashboardScreen(
                 )
             }
 
+            is ProtectionCheck.SelfNotRouted -> {
+                Spacer(Modifier.height(12.dp))
+                SelfNotRoutedPrompt(
+                    onRetry = {
+                        DashboardCache.refresh(scope, context, selfNeedsRestart)
+                        DiagnosticsCache.retry(scope, context)
+                    },
+                )
+            }
+
             // Per-layer verdict renders in the cards below; no hero banner here.
             is ProtectionCheck.Checked -> {}
         }
@@ -675,7 +685,7 @@ private fun layerSummaryAccent(layer: LayerStatus): Color =
 private fun nativeSummaryText(protection: ProtectionCheck): String =
     when (protection) {
         ProtectionCheck.NoVpn -> stringResource(R.string.dashboard_hero_vpnoff_title)
-        ProtectionCheck.NeedsRestart -> stringResource(R.string.dashboard_protection_unknown)
+        ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> stringResource(R.string.dashboard_protection_unknown)
         is ProtectionCheck.Checked -> layerSummaryText(protection.native)
     }
 
@@ -683,7 +693,7 @@ private fun nativeSummaryText(protection: ProtectionCheck): String =
 private fun nativeSummaryAccent(protection: ProtectionCheck): Color =
     when (protection) {
         ProtectionCheck.NoVpn -> StatusColors.infoAccent
-        ProtectionCheck.NeedsRestart -> StatusColors.warningAccent
+        ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> StatusColors.warningAccent
         is ProtectionCheck.Checked -> layerSummaryAccent(protection.native)
     }
 
@@ -691,7 +701,7 @@ private fun nativeSummaryAccent(protection: ProtectionCheck): Color =
 private fun javaSummaryText(protection: ProtectionCheck): String =
     when (protection) {
         ProtectionCheck.NoVpn -> stringResource(R.string.dashboard_hero_vpnoff_title)
-        ProtectionCheck.NeedsRestart -> stringResource(R.string.dashboard_protection_unknown)
+        ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> stringResource(R.string.dashboard_protection_unknown)
         is ProtectionCheck.Checked -> layerSummaryText(protection.java)
     }
 
@@ -699,7 +709,7 @@ private fun javaSummaryText(protection: ProtectionCheck): String =
 private fun javaSummaryAccent(protection: ProtectionCheck): Color =
     when (protection) {
         ProtectionCheck.NoVpn -> StatusColors.infoAccent
-        ProtectionCheck.NeedsRestart -> StatusColors.warningAccent
+        ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> StatusColors.warningAccent
         is ProtectionCheck.Checked -> layerSummaryAccent(protection.java)
     }
 

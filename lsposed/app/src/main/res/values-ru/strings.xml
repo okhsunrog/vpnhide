@@ -114,6 +114,7 @@
     <string name="dashboard_protection_not_active">Не активен</string>
     <string name="dashboard_needs_restart">VPN Hide только что включил скрытие для самого себя. Принудительно остановите VPN Hide и откройте снова, чтобы проверить скрытие — перезагрузка устройства не нужна.</string>
     <string name="vpn_off_prompt">VPN не активен. Включите его и нажмите «Повторить», чтобы проверить скрытие.</string>
+    <string name="self_not_routed_prompt">VPN активен, но VPN Hide через него не идёт. Добавьте VPN Hide в туннель вашего VPN (не исключайте его сплит-туннелем) и нажмите «Повторить» — иначе этим проверкам нечего скрывать.</string>
     <string name="vpn_off_retry">Повторить</string>
     <string name="diag_failed_prompt">Не удалось выполнить проверку скрытия — возможно, отклонён root-доступ или команда завершилась с ошибкой. Нажмите «Повторить». Обычно это временно.</string>
 

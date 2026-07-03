@@ -50,6 +50,12 @@ internal object DiagnosticsCache {
 
         data object VpnOff : State
 
+        // A VPN is up on the device, but this app's own uid is not routed through
+        // it (excluded by split tunnelling). The checks would be meaningless —
+        // nothing to hide from us — so we ask the user to add VPN Hide to the
+        // tunnel instead of showing misleadingly-clean results.
+        data object SelfNotRouted : State
+
         data object Failed : State
 
         data class Ready(
@@ -93,7 +99,7 @@ internal object DiagnosticsCache {
                 if (inflight?.isActive == true) return
             }
 
-            State.NotRun, State.VpnOff, State.Failed -> { /* proceed */ }
+            State.NotRun, State.VpnOff, State.SelfNotRouted, State.Failed -> { /* proceed */ }
         }
         if (inflight?.isActive == true) return
         inflight = scope.launch { doRun(context.applicationContext) }
@@ -117,7 +123,10 @@ internal object DiagnosticsCache {
     suspend fun awaitFullResults(context: Context): CheckResults? {
         run(cacheScope, context)
         val terminal =
-            state.first { it is State.VpnOff || it is State.Failed || (it is State.Ready && it.complete) }
+            state.first {
+                it is State.VpnOff || it is State.SelfNotRouted || it is State.Failed ||
+                    (it is State.Ready && it.complete)
+            }
         return (terminal as? State.Ready)?.results
     }
 
@@ -129,6 +138,17 @@ internal object DiagnosticsCache {
             if (!vpnActive) {
                 _state.value = State.VpnOff
                 StartupTrace.mark("diagnostics_cache_vpn_off")
+                return
+            }
+            // Self-in-tunnel gate: a VPN is up, but is *this* app routed through
+            // it? If it is provably not (excluded by split tunnelling), the checks
+            // have nothing to hide from us — block with a "add to tunnel" prompt.
+            // A null answer (no root to tell) does not block — a no-root device is
+            // already handled as VPN-off above.
+            val selfRouted = withContext(Dispatchers.IO) { GroundTruthProbe.selfRoutedThroughVpn(appContext) }
+            if (selfRouted == false) {
+                _state.value = State.SelfNotRouted
+                StartupTrace.mark("diagnostics_cache_self_not_routed")
                 return
             }
             val cm = appContext.getSystemService(ConnectivityManager::class.java)

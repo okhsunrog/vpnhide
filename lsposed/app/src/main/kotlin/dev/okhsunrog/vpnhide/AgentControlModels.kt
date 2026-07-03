@@ -62,7 +62,7 @@ data class AgentModuleState(
 /** Dashboard protection summary. */
 @Serializable
 data class AgentProtectionSummary(
-    /** none, needs_restart, checked, or vpn_off. */
+    /** none, needs_restart, self_not_routed, checked, or vpn_off. */
     val state: String,
     /** Native-level summary: ok, fail, no_module, or null. */
     val native: String? = null,
@@ -88,7 +88,7 @@ data class AgentDashboardMessage(
 /** Full diagnostics result. */
 @Serializable
 data class AgentDiagnosticsReport(
-    /** ready or vpn_off. */
+    /** ready, vpn_off, or self_not_routed. */
     val state: String,
     /** Combined pass score, excluding informational checks. */
     val score: AgentCheckScore,

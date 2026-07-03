@@ -38,8 +38,14 @@ internal object AgentControl {
         withAppContext(context) { context ->
             val results = DiagnosticsCache.awaitFullResults(context)
             if (results == null) {
+                val gatedState =
+                    if (DiagnosticsCache.state.value is DiagnosticsCache.State.SelfNotRouted) {
+                        "self_not_routed"
+                    } else {
+                        "vpn_off"
+                    }
                 AgentDiagnosticsReport(
-                    state = "vpn_off",
+                    state = gatedState,
                     score = AgentCheckScore(0, 0),
                     nativeChecks = emptyList(),
                     javaChecks = emptyList(),
@@ -626,6 +632,10 @@ private fun ProtectionCheck.toAgentProtectionSummary(): AgentProtectionSummary =
 
         ProtectionCheck.NeedsRestart -> {
             AgentProtectionSummary(state = "needs_restart")
+        }
+
+        ProtectionCheck.SelfNotRouted -> {
+            AgentProtectionSummary(state = "self_not_routed")
         }
 
         is ProtectionCheck.Checked -> {
