@@ -27,6 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.okhsunrog.vpnhide.checks.CheckOutput
+import dev.okhsunrog.vpnhide.checks.CheckStatus
+import dev.okhsunrog.vpnhide.checks.NativeProbe
 import dev.okhsunrog.vpnhide.generated.IfaceLists
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
@@ -111,7 +113,16 @@ internal fun runCoreChecks(
 
     val res = context.resources
 
-    val native = NATIVE_CHECKS.map { spec -> nativeCheck(res.getString(spec.labelRes), spec.run) }
+    // One JNI call runs every native probe in-process (app view); join the
+    // results back to the specs by stable id.
+    val nativeOutcomes = NativeProbe.runAll()
+    val native =
+        NATIVE_CHECKS.map { spec ->
+            val out =
+                nativeOutcomes[spec.id]
+                    ?: CheckOutput(CheckStatus.NETWORK_BLOCKED, "no native result for ${spec.id}")
+            nativeCheckResult(res.getString(spec.labelRes), out)
+        }
 
     val nativeExtra =
         listOf(
@@ -167,19 +178,13 @@ internal fun runAllChecks(
     context: android.content.Context,
 ): CheckResults = runCoreChecks(cm, context).copy(extraJava = runExtraJavaChecks(cm, context))
 
-private fun nativeCheck(
+private fun nativeCheckResult(
     name: String,
-    block: () -> CheckOutput,
-): CheckResult =
-    try {
-        val out = block()
-        VpnHideLog.i(TAG, "[$name] ${out.status}: ${out.detail}")
-        CheckResult(name, out.status.toPassed(), out.detail)
-    } catch (e: Exception) {
-        val detail = e.message ?: e.javaClass.simpleName
-        VpnHideLog.e(TAG, "[$name] $detail", e)
-        CheckResult(name, false, detail)
-    }
+    out: CheckOutput,
+): CheckResult {
+    VpnHideLog.i(TAG, "[$name] ${out.status}: ${out.detail}")
+    return CheckResult(name, out.status.toPassed(), out.detail)
+}
 
 // ==========================================================================
 //  Java API checks

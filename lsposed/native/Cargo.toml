@@ -7,11 +7,20 @@ license = "MIT"
 
 [lib]
 name = "vpnhide_checks"
-crate-type = ["cdylib"]
+# cdylib: loaded in-process via System.loadLibrary for the app-view JNI probe.
+# rlib:   linked by the `vhprobe` bin (root-exec ground-truth probe).
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "vhprobe"
+path = "src/bin/vhprobe.rs"
 
 [dependencies]
-uniffi = "0.29"
 libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Minimal JNI surface: one exported function returning the checks as JSON.
+jni = { version = "0.22.4", default-features = false }
 
 [profile.release]
 opt-level = "z"

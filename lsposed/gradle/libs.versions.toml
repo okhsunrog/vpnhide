@@ -11,7 +11,6 @@ core-ktx = "1.19.0"
 datastore = "1.2.1"
 material-kolor = "4.1.1"
 squircle-shape = "5.3.0"
-gobley = "0.3.8-agp9.1.okhsunrog1"
 detekt = "1.23.8"
 cpd = "3.5"
 kotlinx-serialization-json = "1.9.0"
@@ -37,7 +36,5 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-atomicfu = { id = "org.jetbrains.kotlin.plugin.atomicfu", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-gobley-cargo = { id = "dev.gobley.cargo", version.ref = "gobley" }
-gobley-uniffi = { id = "dev.gobley.uniffi", version.ref = "gobley" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 cpd = { id = "de.aaschmid.cpd", version.ref = "cpd" }

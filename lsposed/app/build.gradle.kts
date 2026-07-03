@@ -1,12 +1,7 @@
 import java.io.FileInputStream
 import java.util.Properties
-import org.gradle.api.DefaultTask
-import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.tasks.Exec
-import org.gradle.api.tasks.InputFile
-import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
-import org.gradle.api.tasks.TaskAction
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -15,8 +10,6 @@ plugins {
     alias(libs.plugins.kotlin.atomicfu)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
-    alias(libs.plugins.gobley.cargo)
-    alias(libs.plugins.gobley.uniffi)
     alias(libs.plugins.detekt)
 }
 
@@ -55,61 +48,64 @@ tasks.register<Exec>("ktlintCheck") {
     commandLine("ktlint", "${projectDir}/src/**/*.kt")
 }
 
-cargo {
-    packageDirectory = layout.projectDirectory.dir("../native")
-    // Don't bundle the Rust lib into Android unit-test resources. Unit tests
-    // never load the native lib, and bundling drags in a Linux x64 cargo
-    // build that fails because the source uses Android-shaped ioctl request
-    // types incompatible with glibc.
-    builds.withType(gobley.gradle.cargo.dsl.CargoJvmBuild::class.java).configureEach {
-        androidUnitTest.set(false)
+// The native check probes ship two ways from one Rust crate (../native):
+//   - libvpnhide_checks.so — a cdylib loaded in-process (System.loadLibrary)
+//     for the app-view probe (real uid + SELinux domain + zygisk/kernel hooks);
+//   - vhprobe — a root-exec'able bin for the ground-truth probe. Shipped as an
+//     asset, not a jniLib: AGP 9 defaults to extractNativeLibs=false, so a
+//     jniLib isn't a real on-disk file and can't be exec'd.
+// Built with cargo-ndk (the same toolchain the zygisk module already uses).
+// This replaces the gobley/UniFFI plugin (and its AGP-9 fork): the whole native
+// surface is now one JSON-returning function, so codegen bindings aren't worth
+// the dependency. -P 29 matches minSdk (getifaddrs needs API >= 24).
+val rustJniLibsDir = layout.buildDirectory.dir("rustNative/jniLibs")
+val rustAssetsDir = layout.buildDirectory.dir("rustNative/assets")
+
+// Resolve SDK/NDK to plain values at configuration time so the task action
+// captures no Project references (configuration-cache safe). NDK version mirrors
+// android.ndkVersion below.
+val rustNdkVersion = "28.2.13676358"
+val rustSdkDir =
+    run {
+        val lp = rootProject.file("local.properties")
+        val fromProps =
+            lp.takeIf { it.exists() }?.let { Properties().apply { load(it.inputStream()) }.getProperty("sdk.dir") }
+        (fromProps ?: System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT"))?.let(::file)
+            ?: error("Android SDK not found: set sdk.dir in local.properties or ANDROID_HOME.")
     }
-}
+val rustNdkDir = rustSdkDir.resolve("ndk/$rustNdkVersion").absolutePath
+val nativeCrateDir = projectDir.parentFile.resolve("native")
+val rustAssetsOut = rustAssetsDir.get().asFile
 
-uniffi {
-    generateFromLibrary {
-        packageName = "dev.okhsunrog.vpnhide.checks"
-    }
-}
-
-abstract class SuppressGeneratedUniffiWarningsTask : DefaultTask() {
-    @get:InputFile
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    abstract val bindingFile: RegularFileProperty
-
-    @TaskAction
-    fun suppress() {
-        // UniFFI emits two intentional object references as bare expressions.
-        // Keep the suppression scoped to the generated binding file so real
-        // UNUSED_EXPRESSION warnings in hand-written Kotlin still surface.
-        val binding = bindingFile.get().asFile
-        if (!binding.isFile) return
-
-        val original = binding.readText()
-        val updated =
-            original.replaceFirst(
-                "@file:Suppress(\"RemoveRedundantBackticks\")",
-                "@file:Suppress(\"RemoveRedundantBackticks\", \"UNUSED_EXPRESSION\")",
-            )
-        if (updated != original) {
-            binding.writeText(updated)
+val buildRustProbe =
+    tasks.register<Exec>("buildRustProbe") {
+        group = "build"
+        description = "Builds the vpnhide_checks cdylib + vhprobe bin via cargo-ndk."
+        workingDir = nativeCrateDir
+        environment("ANDROID_NDK_HOME", rustNdkDir)
+        environment("NDK_HOME", rustNdkDir)
+        inputs.dir(nativeCrateDir.resolve("src")).withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.file(nativeCrateDir.resolve("Cargo.toml"))
+        outputs.dir(rustJniLibsDir)
+        outputs.dir(rustAssetsDir)
+        commandLine(
+            "cargo", "ndk",
+            "-t", "arm64-v8a",
+            "-P", "29",
+            "-o", rustJniLibsDir.get().asFile.absolutePath,
+            "build", "--release",
+        )
+        // Locals (not top-level script vals) so the doLast action captures only
+        // File values — required for configuration-cache serialization.
+        val probeBin = nativeCrateDir.resolve("target/aarch64-linux-android/release/vhprobe")
+        val probeDest = rustAssetsOut.resolve("bin/arm64-v8a/vhprobe")
+        doLast {
+            probeDest.parentFile.mkdirs()
+            probeBin.copyTo(probeDest, overwrite = true)
         }
     }
-}
 
-val generatedUniffiBinding =
-    layout.buildDirectory.file("generated/uniffi/main/dev/okhsunrog/vpnhide/checks/vpnhide_checks.android.kt")
-
-val suppressGeneratedUniffiWarnings =
-    tasks.register<SuppressGeneratedUniffiWarningsTask>("suppressGeneratedUniffiWarnings") {
-        dependsOn("buildUniffiBindings")
-        bindingFile.set(generatedUniffiBinding)
-        outputs.upToDateWhen { false }
-    }
-
-tasks.matching { it.name.startsWith("compile") && it.name.endsWith("Kotlin") }.configureEach {
-    dependsOn(suppressGeneratedUniffiWarnings)
-}
+tasks.named("preBuild").configure { dependsOn(buildRustProbe) }
 
 android {
     namespace = "dev.okhsunrog.vpnhide"
@@ -212,6 +208,12 @@ android {
     packaging {
         resources.excludes += "META-INF/*.kotlin_module"
     }
+
+    // Pick up the cargo-ndk outputs (buildRustProbe): cdylib as a jniLib, the
+    // ground-truth probe bin as an asset. buildRustProbe runs via preBuild, so
+    // these dirs are populated before the merge/package tasks read them.
+    sourceSets["main"].jniLibs.srcDir(rustJniLibsDir.get().asFile)
+    sourceSets["main"].assets.srcDir(rustAssetsDir.get().asFile)
 
     // Skip Android Lint on test source sets. Our `src/test/` is pure JVM
     // unit-test logic (filter/recommendation builders) — no Android

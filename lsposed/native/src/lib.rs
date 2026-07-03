@@ -5,11 +5,12 @@ use std::io::ErrorKind;
 
 use crate::generated::iface_lists::matches_vpn;
 
-uniffi::setup_scaffolding!();
+// ── Probe outcome types — serialized to JSON on both transports ───────
+// In-process (app view) via the JNI export below; root ground-truth via the
+// `vhprobe` bin. Same code, same JSON schema on both sides.
 
-// ── Probe outcome types — crossing the FFI ───────────────────────────
-
-#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum CheckStatus {
     /// Probe ran and saw nothing VPN-shaped, or was legitimately blocked
     /// (SELinux denial, ENODEV, etc.) — both outcomes confirm the VPN is
@@ -23,7 +24,7 @@ pub enum CheckStatus {
     NetworkBlocked,
 }
 
-#[derive(uniffi::Record, Debug, Clone)]
+#[derive(serde::Serialize, Debug, Clone)]
 pub struct CheckOutput {
     pub status: CheckStatus,
     pub detail: String,
@@ -167,7 +168,6 @@ unsafe fn with_inet_dgram_socket(f: impl FnOnce(libc::c_int) -> CheckOutput) -> 
     out
 }
 
-#[uniffi::export]
 fn check_ioctl_siocgifflags() -> CheckOutput {
     unsafe {
         with_inet_dgram_socket(|fd| {
@@ -202,7 +202,6 @@ fn check_ioctl_siocgifflags() -> CheckOutput {
     }
 }
 
-#[uniffi::export]
 fn check_ioctl_siocgifmtu() -> CheckOutput {
     unsafe {
         with_inet_dgram_socket(|fd| {
@@ -229,7 +228,6 @@ fn check_ioctl_siocgifmtu() -> CheckOutput {
     }
 }
 
-#[uniffi::export]
 fn check_ioctl_siocgifconf() -> CheckOutput {
     unsafe {
         with_inet_dgram_socket(|fd| {
@@ -261,7 +259,6 @@ fn check_ioctl_siocgifconf() -> CheckOutput {
     }
 }
 
-#[uniffi::export]
 fn check_getifaddrs() -> CheckOutput {
     unsafe {
         let mut addrs: *mut libc::ifaddrs = std::ptr::null_mut();
@@ -457,7 +454,6 @@ unsafe fn for_each_rtattr(
     }
 }
 
-#[uniffi::export]
 fn check_netlink_getlink() -> CheckOutput {
     let fd = match open_netlink() {
         Ok(fd) => fd,
@@ -533,7 +529,6 @@ fn check_netlink_getlink() -> CheckOutput {
     }
 }
 
-#[uniffi::export]
 fn check_netlink_getroute() -> CheckOutput {
     let fd = match open_netlink() {
         Ok(fd) => fd,
@@ -614,7 +609,6 @@ fn check_netlink_getroute() -> CheckOutput {
     }
 }
 
-#[uniffi::export]
 fn check_sys_class_net() -> CheckOutput {
     match std::fs::read_dir("/sys/class/net") {
         Err(e) => {
@@ -643,17 +637,14 @@ fn check_sys_class_net() -> CheckOutput {
 //    keeps a thin `checkProcNetFoo(): CheckOutput` surface instead of
 //    pushing path strings across the FFI. ──────────────────────────────
 
-#[uniffi::export]
 fn check_proc_net_route() -> CheckOutput {
     check_proc_file("/proc/net/route")
 }
 
-#[uniffi::export]
 fn check_proc_net_if_inet6() -> CheckOutput {
     check_proc_file("/proc/net/if_inet6")
 }
 
-#[uniffi::export]
 fn check_proc_net_ipv6_route() -> CheckOutput {
     check_proc_file("/proc/net/ipv6_route")
 }
@@ -666,7 +657,64 @@ fn check_proc_net_ipv6_route() -> CheckOutput {
 // no honest check to run; the address-leak vector on these files is covered by
 // zygisk's tcp/tcp6/udp socket-table filters, not by a self-diagnostic.
 
-#[uniffi::export]
 fn check_proc_net_dev() -> CheckOutput {
     check_proc_file("/proc/net/dev")
+}
+
+// ── Registry + JSON transport ─────────────────────────────────────────────
+// One code path, two transports: the JNI export runs this in the app's own
+// process (app view — real uid + SELinux domain + zygisk/kernel hooks); the
+// `vhprobe` bin runs it as root (ground truth — uid 0 is not a hook target).
+// Both emit the same JSON; the app classifies by comparing per-`id`.
+
+#[derive(serde::Serialize)]
+struct CheckJson {
+    /// Stable id — matches NativeChecks.kt `NativeCheckSpec.id`.
+    id: &'static str,
+    status: CheckStatus,
+    detail: String,
+}
+
+fn run_all() -> Vec<CheckJson> {
+    fn j(id: &'static str, out: CheckOutput) -> CheckJson {
+        CheckJson {
+            id,
+            status: out.status,
+            detail: out.detail,
+        }
+    }
+    vec![
+        j("ioctl_flags", check_ioctl_siocgifflags()),
+        j("ioctl_mtu", check_ioctl_siocgifmtu()),
+        j("ioctl_conf", check_ioctl_siocgifconf()),
+        j("getifaddrs", check_getifaddrs()),
+        j("netlink_getlink", check_netlink_getlink()),
+        j("netlink_getroute", check_netlink_getroute()),
+        j("proc_route", check_proc_net_route()),
+        j("proc_ipv6_route", check_proc_net_ipv6_route()),
+        j("proc_if_inet6", check_proc_net_if_inet6()),
+        j("proc_dev", check_proc_net_dev()),
+        j("sys_class_net", check_sys_class_net()),
+    ]
+}
+
+/// Run every native probe in display order and serialize to a JSON array of
+/// `{id, status, detail}`. Public so both the JNI export and the `vhprobe` bin
+/// call the exact same code.
+pub fn run_all_json() -> String {
+    serde_json::to_string(&run_all()).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// In-process (app-view) entry. Class/package must match the Kotlin
+/// `object dev.okhsunrog.vpnhide.checks.NativeProbe`.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_okhsunrog_vpnhide_checks_NativeProbe_runAllChecksJson<'local>(
+    mut env: jni::EnvUnowned<'local>,
+    _class: jni::objects::JClass<'local>,
+) -> jni::objects::JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<jni::objects::JString<'local>> {
+        env.new_string(run_all_json())
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
