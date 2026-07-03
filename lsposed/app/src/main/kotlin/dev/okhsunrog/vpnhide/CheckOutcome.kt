@@ -82,6 +82,26 @@ fun classifyNativeOutcome(
         }
     }
 
+/**
+ * Classify one Java-level check. Java checks are framework IPC with no root
+ * differential — but the diagnostics only run once the self-in-tunnel gate has
+ * confirmed a VPN is up AND this app is routed through it. So a VPN artifact is
+ * always present for a VPN-revealing check to surface; a clean app-view therefore
+ * means the LSPosed hook removed it, and a dirty one is a real leak. There is no
+ * "nothing to leak" case on this layer.
+ *
+ * [NotMeasured] is only a defensive edge for a probe that could not actually run
+ * (passed == null): a hidden framework method that reflection can't reach, or no
+ * active network — states the gate makes near-impossible but that we refuse to
+ * paint as a backend success.
+ */
+fun classifyJavaOutcome(passed: Boolean?): CheckOutcome =
+    when (passed) {
+        false -> CheckOutcome.Leak
+        true -> CheckOutcome.HiddenByBackend
+        null -> CheckOutcome.NotMeasured(NotMeasuredReason.NoGroundTruth)
+    }
+
 /** Stable wire/log token for an outcome (for the agent bridge + debug export). */
 fun CheckOutcome.token(): String =
     when (this) {

@@ -77,10 +77,11 @@ internal fun summarizeJavaLayer(
     javaChecks: List<CheckResult>,
 ): LayerStatus {
     if (!lsposedActive) return LayerStatus.Inactive
-    val scored = javaChecks.filter { it.passed != null }
+    // Same shape as the native tile: hidden/leaks read off the who-hid-it outcome
+    // (attached by withJavaOutcomes), so Partial vs Broken is a measurement.
     return LayerStatus.Active(
-        hidden = scored.count { it.passed == true },
-        leaks = scored.count { it.passed == false },
+        hidden = javaChecks.count { it.outcome is CheckOutcome.HiddenByBackend },
+        leaks = javaChecks.count { it.outcome is CheckOutcome.Leak },
     )
 }
 

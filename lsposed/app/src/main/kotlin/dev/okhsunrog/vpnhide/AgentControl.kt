@@ -659,8 +659,9 @@ private fun LayerStatus.toAgentStatus(): String =
 
 private fun CheckResults.toAgentDiagnosticsReport(): AgentDiagnosticsReport {
     val score = all.score()
-    // The Rust native checks (in NATIVE_CHECKS order) carry the who-hid-it
-    // outcome from the root differential; nativeExtra and Java checks don't yet.
+    // Native checks (in NATIVE_CHECKS order) carry the root-differential outcome;
+    // Java checks carry the gate-derived outcome on the result itself. nativeExtra
+    // (Java-implemented native-level probes) has no outcome.
     val nativeWithOutcomes =
         native.mapIndexed { i, cr ->
             cr.toAgentCheckResult(nativeOutcomes[NATIVE_CHECKS.getOrNull(i)?.id]?.token())
@@ -669,7 +670,7 @@ private fun CheckResults.toAgentDiagnosticsReport(): AgentDiagnosticsReport {
         state = "ready",
         score = AgentCheckScore(score.passed, score.total),
         nativeChecks = nativeWithOutcomes,
-        javaChecks = java.map { it.toAgentCheckResult(null) },
+        javaChecks = java.map { it.toAgentCheckResult(it.outcome?.token()) },
     )
 }
 

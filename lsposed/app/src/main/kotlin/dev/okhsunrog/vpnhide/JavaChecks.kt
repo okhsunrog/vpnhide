@@ -156,7 +156,7 @@ internal fun runCoreChecks(
             checkTransportInfo(cm, res.getString(R.string.check_transport_info)),
             checkAllNetworksVpn(cm, res.getString(R.string.check_all_networks_vpn)),
             checkLinkPropertiesIfname(cm, res.getString(R.string.check_link_properties)),
-        ).logged()
+        ).logged().withJavaOutcomes()
 
     return CheckResults(
         native = native,
@@ -180,8 +180,16 @@ internal fun runExtraJavaChecks(
         checkLinkPropertiesRoutes(cm, res.getString(R.string.check_link_properties_routes)),
         checkActiveNetworkInfo(cm, res.getString(R.string.check_active_network_info)),
         checkNetworkInfoVpn(cm, res.getString(R.string.check_network_info_vpn)),
-    ).logged()
+    ).logged().withJavaOutcomes()
 }
+
+/**
+ * Attach the who-hid-it [CheckOutcome] to Java-level checks. The gate guarantees
+ * a VPN is up and this app is routed through it, so clean ⟹ hidden by LSPosed,
+ * dirty ⟹ leak (see [classifyJavaOutcome]). Applied only to the pure Java-API
+ * checks — the Java-implemented native-level probes stay on the passed tri-state.
+ */
+private fun List<CheckResult>.withJavaOutcomes(): List<CheckResult> = map { it.copy(outcome = classifyJavaOutcome(it.passed)) }
 
 /** Log each Java check result; native probes already log via [nativeCheck]. */
 private fun List<CheckResult>.logged(): List<CheckResult> =
