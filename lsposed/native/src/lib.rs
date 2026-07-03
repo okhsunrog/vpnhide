@@ -620,6 +620,135 @@ fn check_netlink_getroute() -> CheckOutput {
     }
 }
 
+/// RTM_GETRULE — policy routing rules. On Android the VPN's per-app policy is
+/// expressed as `ip rule` entries steering a UID range into the interface's own
+/// routing table (`... uidrange 10236-10236 lookup tun0`), plus rules that name
+/// the VPN interface directly (`iif/oif tun0`). Reading those rules reveals the
+/// VPN even when /proc/net/route (main table only) shows nothing. The kernel
+/// `fib_nl_fill_rule` hook trims exactly these from a target's dump; this probe
+/// mirrors that predicate so a working backend reads as "hidden" and root
+/// ground-truth (not a target → hook inert) reads as "leak".
+fn check_netlink_getrule() -> CheckOutput {
+    // rtattr types and standard table ids (linux/fib_rules.h, linux/rtnetlink.h).
+    const FRA_IIFNAME: u16 = 3;
+    const FRA_TABLE: u16 = 15;
+    const FRA_OIFNAME: u16 = 17;
+    const FRA_UID_RANGE: u16 = 20;
+    const RT_TABLE_DEFAULT: u32 = 253;
+    const RT_TABLE_MAIN: u32 = 254;
+    const RT_TABLE_LOCAL: u32 = 255;
+
+    let fd = match open_netlink() {
+        Ok(fd) => fd,
+        Err(out) => return out,
+    };
+
+    let myuid = unsafe { libc::getuid() };
+
+    unsafe {
+        // fib_rule_hdr shares Rtmsg's 12-byte layout (family + 7 u8 + u32 flags).
+        #[repr(C)]
+        struct Req {
+            nlh: libc::nlmsghdr,
+            frh: Rtmsg,
+        }
+        let mut req: Req = std::mem::zeroed();
+        req.nlh.nlmsg_len = std::mem::size_of::<Req>() as u32;
+        req.nlh.nlmsg_type = libc::RTM_GETRULE;
+        req.nlh.nlmsg_flags = (libc::NLM_F_REQUEST | libc::NLM_F_DUMP) as u16;
+        req.nlh.nlmsg_seq = 1;
+        req.frh.rtm_family = libc::AF_INET as u8;
+
+        if libc::send(
+            fd,
+            std::ptr::from_ref(&req).cast(),
+            req.nlh.nlmsg_len as usize,
+            0,
+        ) < 0
+        {
+            let e = last_os_error();
+            libc::close(fd);
+            return CheckOutput::fail(format!("send error: {e}"));
+        }
+
+        let mut buf = AlignedBytes::<32768>::zeroed();
+        let mut leaks: Vec<String> = Vec::new();
+        let mut total = 0u32;
+        let hdr_plus_rtmsg = std::mem::size_of::<libc::nlmsghdr>() + std::mem::size_of::<Rtmsg>();
+
+        for _ in 0..MAX_NETLINK_RECV_ITERS {
+            let len = netlink_recv(fd, &mut buf.0);
+            if len <= 0 {
+                break;
+            }
+            let cont = parse_netlink_msgs(
+                &buf.0,
+                len as usize,
+                libc::RTM_NEWRULE,
+                |b, offset, msg_len| {
+                    total += 1;
+                    let frh =
+                        &*(b.as_ptr().add(offset + std::mem::size_of::<libc::nlmsghdr>())
+                            as *const Rtmsg);
+                    // The low byte of the table id lives in the header; the full
+                    // u32 arrives in FRA_TABLE (Android tun tables are > 255).
+                    let mut table = frh.rtm_table as u32;
+                    let mut uid_lo = 0u32;
+                    let mut uid_hi = 0u32;
+                    let mut has_uidrange = false;
+                    let mut iface_hit: Option<String> = None;
+                    for_each_rtattr(b, offset + hdr_plus_rtmsg, offset + msg_len, |rta, payload| {
+                        match rta.rta_type {
+                            FRA_IIFNAME | FRA_OIFNAME if !payload.is_empty() => {
+                                let name = cstr_to_str(payload.as_ptr() as *const libc::c_char);
+                                if is_vpn_iface(&name) {
+                                    iface_hit = Some(name);
+                                }
+                            }
+                            FRA_TABLE if payload.len() >= 4 => {
+                                table = u32::from_ne_bytes(payload[..4].try_into().unwrap());
+                            }
+                            FRA_UID_RANGE if payload.len() >= 8 => {
+                                uid_lo = u32::from_ne_bytes(payload[..4].try_into().unwrap());
+                                uid_hi = u32::from_ne_bytes(payload[4..8].try_into().unwrap());
+                                has_uidrange = true;
+                            }
+                            _ => {}
+                        }
+                    });
+                    // Mirror fib_nl_fill_rule: a rule leaks the VPN if it names a
+                    // VPN interface, or steers this very UID into a non-standard
+                    // table (the per-app tun policy rule). The 0..u32::MAX range
+                    // is the catch-all default rule, not a VPN rule.
+                    if let Some(name) = iface_hit {
+                        leaks.push(format!("iface {name}"));
+                    } else if has_uidrange
+                        && uid_lo <= myuid
+                        && myuid <= uid_hi
+                        && !(uid_lo == 0 && uid_hi == u32::MAX)
+                        && table != RT_TABLE_MAIN
+                        && table != RT_TABLE_LOCAL
+                        && table != RT_TABLE_DEFAULT
+                        && table > 100
+                    {
+                        leaks.push(format!("uid {myuid} → table {table}"));
+                    }
+                },
+            );
+            if !cont {
+                break;
+            }
+        }
+        libc::close(fd);
+
+        if leaks.is_empty() {
+            CheckOutput::pass(format!("{total} policy rules, none reveal VPN"))
+        } else {
+            CheckOutput::fail(format!("VPN policy rule(s): {}", join_list(&leaks)))
+        }
+    }
+}
+
 fn check_sys_class_net() -> CheckOutput {
     match std::fs::read_dir("/sys/class/net") {
         Err(e) => {
@@ -701,6 +830,7 @@ fn run_all() -> Vec<CheckJson> {
         j("getifaddrs", check_getifaddrs()),
         j("netlink_getlink", check_netlink_getlink()),
         j("netlink_getroute", check_netlink_getroute()),
+        j("netlink_getrule", check_netlink_getrule()),
         j("proc_route", check_proc_net_route()),
         j("proc_ipv6_route", check_proc_net_ipv6_route()),
         j("proc_if_inet6", check_proc_net_if_inet6()),

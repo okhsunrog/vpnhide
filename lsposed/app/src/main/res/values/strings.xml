@@ -364,6 +364,7 @@
     <string name="check_getifaddrs" translatable="false">getifaddrs() enum</string>
     <string name="check_netlink_getlink" translatable="false">netlink RTM_GETLINK</string>
     <string name="check_netlink_getroute" translatable="false">netlink RTM_GETROUTE</string>
+    <string name="check_netlink_getrule" translatable="false">netlink RTM_GETRULE</string>
     <string name="check_proc_route" translatable="false">/proc/net/route</string>
     <string name="check_proc_ipv6_route" translatable="false">/proc/net/ipv6_route</string>
     <string name="check_proc_if_inet6" translatable="false">/proc/net/if_inet6</string>

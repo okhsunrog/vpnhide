@@ -198,9 +198,8 @@ fun DashboardScreen(
                 )
             }
 
-            is ProtectionCheck.Checked -> {
-                Unit
-            }
+            // Per-layer verdict renders in the cards below; no hero banner here.
+            is ProtectionCheck.Checked -> {}
         }
         Spacer(Modifier.height(20.dp))
 

@@ -98,6 +98,13 @@ internal val NATIVE_CHECKS: List<NativeCheckSpec> =
                 ),
         ),
         NativeCheckSpec(
+            // Kernel-only vector: no zygisk hook parses RTM_NEWRULE. The
+            // fib_nl_fill_rule kernel hook trims the per-UID tun policy rules.
+            id = "netlink_getrule",
+            labelRes = R.string.check_netlink_getrule,
+            expectedHooks = setOf(HookIds.Hook.FIB_NL_FILL_RULE),
+        ),
+        NativeCheckSpec(
             id = "proc_route",
             labelRes = R.string.check_proc_route,
             expectedHooks = setOf(HookIds.Hook.FIB_ROUTE_SEQ_SHOW, HookIds.Hook.ZYGISK_OPENAT),
@@ -108,9 +115,12 @@ internal val NATIVE_CHECKS: List<NativeCheckSpec> =
             expectedHooks = setOf(HookIds.Hook.IPV6_ROUTE_SEQ_SHOW, HookIds.Hook.ZYGISK_OPENAT),
         ),
         NativeCheckSpec(
+            // No kernel seq_show hook exists for /proc/net/if_inet6 — INET6_FILL_IFADDR
+            // covers the netlink RTM_GETADDR path, not this procfs read. So a kernel
+            // backend does not own this vector; only the zygisk openat filter (or SELinux).
             id = "proc_if_inet6",
             labelRes = R.string.check_proc_if_inet6,
-            expectedHooks = setOf(HookIds.Hook.INET6_FILL_IFADDR, HookIds.Hook.ZYGISK_OPENAT),
+            expectedHooks = setOf(HookIds.Hook.ZYGISK_OPENAT),
         ),
         NativeCheckSpec(
             id = "proc_dev",
