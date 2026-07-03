@@ -58,7 +58,7 @@ data class CheckResult(
 )
 
 internal data class CheckResults(
-    // UniFFI native probes from the fast phase.
+    // Rust native probes (in-process app view) from the fast phase.
     val native: List<CheckResult>,
     // Java-implemented native-level probes (NetworkInterface enum, /proc/net/route)
     // — shown under "Native level" and included in Dashboard once the full
@@ -69,6 +69,10 @@ internal data class CheckResults(
     // Remaining Java probes (active-network, push callback, routes, proxy) —
     // the slow push-callback check lives here, so it runs in a second phase.
     val extraJava: List<CheckResult> = emptyList(),
+    // Honest per-check outcome for the Rust native checks, keyed by spec id —
+    // the who-hid-it differential (app view vs root ground truth). Empty when the
+    // ground-truth probe couldn't run.
+    val nativeOutcomes: Map<String, CheckOutcome> = emptyMap(),
 ) {
     val nativeAll get() = native + nativeExtra
     val java get() = coreJava + extraJava
@@ -113,15 +117,26 @@ internal fun runCoreChecks(
 
     val res = context.resources
 
-    // One JNI call runs every native probe in-process (app view); join the
-    // results back to the specs by stable id.
-    val nativeOutcomes = NativeProbe.runAll()
+    // One JNI call runs every native probe in-process (app view); a root-exec of
+    // the same probes gives the unfiltered ground truth for the who-hid-it
+    // differential. Join both back to the specs by stable id.
+    val nativeAppView = NativeProbe.runAll()
+    val nativeGroundTruth = GroundTruthProbe.run(context)
     val native =
         NATIVE_CHECKS.map { spec ->
             val out =
-                nativeOutcomes[spec.id]
+                nativeAppView[spec.id]
                     ?: CheckOutput(CheckStatus.NETWORK_BLOCKED, "no native result for ${spec.id}")
             nativeCheckResult(res.getString(spec.labelRes), out)
+        }
+    val nativeOutcomes =
+        NATIVE_CHECKS.associate { spec ->
+            val app =
+                nativeAppView[spec.id]
+                    ?: CheckOutput(CheckStatus.NETWORK_BLOCKED, "no result")
+            val outcome = classifyNativeOutcome(app, nativeGroundTruth[spec.id])
+            VpnHideLog.i(TAG, "[outcome] ${spec.id}: ${outcome.token()}")
+            spec.id to outcome
         }
 
     val nativeExtra =
@@ -139,7 +154,12 @@ internal fun runCoreChecks(
             checkLinkPropertiesIfname(cm, res.getString(R.string.check_link_properties)),
         ).logged()
 
-    return CheckResults(native = native, nativeExtra = nativeExtra, coreJava = coreJava)
+    return CheckResults(
+        native = native,
+        nativeExtra = nativeExtra,
+        coreJava = coreJava,
+        nativeOutcomes = nativeOutcomes,
+    )
 }
 
 internal fun runExtraJavaChecks(

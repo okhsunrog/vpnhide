@@ -127,6 +127,10 @@ data class AgentCheckResult(
     val status: String,
     /** Probe detail text. */
     val detail: String,
+    /** Who-hid-it outcome from the root differential (native checks): leak,
+     * hidden_backend, hidden_selinux, nothing_to_leak, not_measured_*. Null for
+     * checks without a root-differential outcome (Java / nativeExtra). */
+    val outcome: String? = null,
 )
 
 /** Statistics tab state. */

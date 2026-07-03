@@ -12,15 +12,19 @@ use crate::generated::iface_lists::matches_vpn;
 #[derive(serde::Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckStatus {
-    /// Probe ran and saw nothing VPN-shaped, or was legitimately blocked
-    /// (SELinux denial, ENODEV, etc.) — both outcomes confirm the VPN is
-    /// hidden from this surface.
+    /// Probe ran and saw nothing VPN-shaped — the VPN is hidden from this
+    /// surface (by a backend hook, or simply nothing to leak here). The caller
+    /// distinguishes those two via the root ground-truth differential.
     Pass,
     /// Probe surfaced VPN-shaped data the kmod / zygisk should have hidden.
     Fail,
+    /// The probe was denied by SELinux (EACCES/EPERM) before it could read.
+    /// Distinct from Pass: the app saw no VPN, but SELinux blocked the read —
+    /// not a backend hook — so it is not evidence the backend works.
+    SelinuxBlocked,
     /// App has no network permission, so the probe couldn't run at all.
-    /// Reported separately from Pass/Fail so the UI can tell the user to
-    /// enable network access before trusting the results.
+    /// Reported separately so the UI can tell the user to enable network
+    /// access before trusting the results.
     NetworkBlocked,
 }
 
@@ -41,6 +45,13 @@ impl CheckOutput {
     fn fail(detail: impl Into<String>) -> Self {
         Self {
             status: CheckStatus::Fail,
+            detail: detail.into(),
+        }
+    }
+
+    fn selinux_blocked(detail: impl Into<String>) -> Self {
+        Self {
+            status: CheckStatus::SelinuxBlocked,
             detail: detail.into(),
         }
     }
@@ -292,7 +303,7 @@ fn check_proc_file(path: &str) -> CheckOutput {
     match std::fs::read_to_string(path) {
         Err(e) => {
             if is_selinux_denial(&e) {
-                return CheckOutput::pass(format!(
+                return CheckOutput::selinux_blocked(format!(
                     "access denied by SELinux ({e}) — app cannot read {path}"
                 ));
             }
@@ -354,7 +365,7 @@ fn open_netlink() -> Result<i32, CheckOutput> {
         if fd < 0 {
             let e = std::io::Error::last_os_error();
             return Err(if is_selinux_denial(&e) {
-                CheckOutput::pass(format!("netlink socket denied by SELinux ({e})"))
+                CheckOutput::selinux_blocked(format!("netlink socket denied by SELinux ({e})"))
             } else {
                 CheckOutput::fail(format!("cannot create netlink socket: {e}"))
             });
@@ -367,7 +378,7 @@ fn open_netlink() -> Result<i32, CheckOutput> {
             let e = std::io::Error::last_os_error();
             libc::close(fd);
             return Err(if is_selinux_denial(&e) {
-                CheckOutput::pass(format!(
+                CheckOutput::selinux_blocked(format!(
                     "netlink bind denied by SELinux ({e}) — app cannot enumerate interfaces"
                 ))
             } else {
@@ -613,7 +624,7 @@ fn check_sys_class_net() -> CheckOutput {
     match std::fs::read_dir("/sys/class/net") {
         Err(e) => {
             if is_selinux_denial(&e) {
-                CheckOutput::pass(format!("access denied by SELinux ({e})"))
+                CheckOutput::selinux_blocked(format!("access denied by SELinux ({e})"))
             } else {
                 CheckOutput::fail(format!("cannot open /sys/class/net: {e}"))
             }

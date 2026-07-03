@@ -12,7 +12,7 @@ import kotlinx.serialization.json.Json
  * produced in-process (app view) and by the root-exec'd `vhprobe` bin (ground
  * truth), so this parser serves both.
  */
-enum class CheckStatus { PASS, FAIL, NETWORK_BLOCKED }
+enum class CheckStatus { PASS, FAIL, SELINUX_BLOCKED, NETWORK_BLOCKED }
 
 data class CheckOutput(
     val status: CheckStatus,
@@ -47,6 +47,7 @@ object NativeProbe {
         when (raw) {
             "pass" -> CheckStatus.PASS
             "fail" -> CheckStatus.FAIL
+            "selinux_blocked" -> CheckStatus.SELINUX_BLOCKED
             else -> CheckStatus.NETWORK_BLOCKED
         }
 

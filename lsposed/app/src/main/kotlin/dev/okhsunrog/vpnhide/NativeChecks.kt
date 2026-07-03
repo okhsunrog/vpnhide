@@ -26,7 +26,13 @@ internal data class NativeCheckSpec(
 internal fun CheckStatus.toPassed(): Boolean? =
     when (this) {
         CheckStatus.PASS -> true
+
+        // Legacy tri-state: a SELinux-blocked read is "no VPN visible" (green) for
+        // the current UI. The honest split (SELinux vs backend) lives in CheckOutcome.
+        CheckStatus.SELINUX_BLOCKED -> true
+
         CheckStatus.FAIL -> false
+
         CheckStatus.NETWORK_BLOCKED -> null
     }
 

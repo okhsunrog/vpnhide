@@ -656,15 +656,21 @@ private fun JavaResult.toAgentStatus(): String =
 
 private fun CheckResults.toAgentDiagnosticsReport(): AgentDiagnosticsReport {
     val score = all.score()
+    // The Rust native checks (in NATIVE_CHECKS order) carry the who-hid-it
+    // outcome from the root differential; nativeExtra and Java checks don't yet.
+    val nativeWithOutcomes =
+        native.mapIndexed { i, cr ->
+            cr.toAgentCheckResult(nativeOutcomes[NATIVE_CHECKS.getOrNull(i)?.id]?.token())
+        } + nativeExtra.map { it.toAgentCheckResult(null) }
     return AgentDiagnosticsReport(
         state = "ready",
         score = AgentCheckScore(score.passed, score.total),
-        nativeChecks = nativeAll.map(CheckResult::toAgentCheckResult),
-        javaChecks = java.map(CheckResult::toAgentCheckResult),
+        nativeChecks = nativeWithOutcomes,
+        javaChecks = java.map { it.toAgentCheckResult(null) },
     )
 }
 
-private fun CheckResult.toAgentCheckResult(): AgentCheckResult =
+private fun CheckResult.toAgentCheckResult(outcome: String? = null): AgentCheckResult =
     AgentCheckResult(
         name = name,
         status =
@@ -674,6 +680,7 @@ private fun CheckResult.toAgentCheckResult(): AgentCheckResult =
                 null -> "info"
             },
         detail = detail,
+        outcome = outcome,
     )
 
 private fun StatisticsState.toAgentStatisticsState(selfPackage: String? = null): AgentStatisticsState {
