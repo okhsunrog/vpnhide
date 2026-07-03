@@ -633,25 +633,18 @@ private fun ProtectionCheck.toAgentProtectionSummary(): AgentProtectionSummary =
                 state = "checked",
                 native = native.toAgentStatus(),
                 java = java.toAgentStatus(),
-                nativePassed = (native as? NativeResult.Fail)?.passed,
-                nativeFailed = (native as? NativeResult.Fail)?.failed,
-                javaFailed = (java as? JavaResult.Fail)?.failedChecks,
+                nativePassed = (native as? LayerStatus.Active)?.hidden,
+                nativeFailed = (native as? LayerStatus.Active)?.leaks,
+                javaFailed = (java as? LayerStatus.Active)?.leaks,
             )
         }
     }
 
-private fun NativeResult.toAgentStatus(): String =
+private fun LayerStatus.toAgentStatus(): String =
     when (this) {
-        NativeResult.Ok -> "ok"
-        NativeResult.NoModule -> "no_module"
-        is NativeResult.Fail -> "fail"
-    }
-
-private fun JavaResult.toAgentStatus(): String =
-    when (this) {
-        JavaResult.Ok -> "ok"
-        JavaResult.HooksInactive -> "hooks_inactive"
-        is JavaResult.Fail -> "fail"
+        LayerStatus.Absent -> "absent"
+        LayerStatus.Inactive -> "inactive"
+        is LayerStatus.Active -> verdict.name.lowercase()
     }
 
 private fun CheckResults.toAgentDiagnosticsReport(): AgentDiagnosticsReport {

@@ -78,30 +78,9 @@ sealed interface ProtectionCheck {
     data object NeedsRestart : ProtectionCheck
 
     data class Checked(
-        val native: NativeResult,
-        val java: JavaResult,
+        val native: LayerStatus,
+        val java: LayerStatus,
     ) : ProtectionCheck
-}
-
-sealed interface NativeResult {
-    data object Ok : NativeResult
-
-    data class Fail(
-        val passed: Int,
-        val failed: Int,
-    ) : NativeResult
-
-    data object NoModule : NativeResult
-}
-
-sealed interface JavaResult {
-    data object Ok : JavaResult
-
-    data class Fail(
-        val failedChecks: Int,
-    ) : JavaResult
-
-    data object HooksInactive : JavaResult
 }
 
 internal enum class FlashableModuleKind { Kmod, Kpm, Zygisk, Ports }
@@ -277,8 +256,29 @@ internal enum class HeroStatus { Protected, Attention, Unprotected, VpnOff }
 
 internal fun protectionFullyPassed(protection: ProtectionCheck): Boolean =
     protection is ProtectionCheck.Checked &&
-        protection.native is NativeResult.Ok &&
-        protection.java is JavaResult.Ok
+        (protection.native as? LayerStatus.Active)?.verdict == Verdict.Ok &&
+        (protection.java as? LayerStatus.Active)?.verdict == Verdict.Ok
+
+/** Worst-signal rank a layer contributes to the hero: leaking-and-dead = 2,
+ * partial / inactive / absent = 1, ok = 0. */
+private fun LayerStatus.heroRank(): Int =
+    when (this) {
+        LayerStatus.Absent -> {
+            1
+        }
+
+        LayerStatus.Inactive -> {
+            1
+        }
+
+        is LayerStatus.Active -> {
+            when (verdict) {
+                Verdict.Ok -> 0
+                Verdict.Partial -> 1
+                Verdict.Broken -> 2
+            }
+        }
+    }
 
 /** Overall health, ranked worst-signal-wins from protection state + errors/warnings. */
 internal fun computeHeroStatus(
@@ -296,15 +296,7 @@ internal fun computeHeroStatus(
         }
 
         is ProtectionCheck.Checked -> {
-            val native = p.native
-            val java = p.java
-            val hardFail = (native is NativeResult.Fail && native.passed == 0) || java is JavaResult.Fail
-            val partial =
-                native is NativeResult.Fail || native is NativeResult.NoModule || java is JavaResult.HooksInactive
-            when {
-                hardFail -> rank = maxOf(rank, 2)
-                partial -> rank = maxOf(rank, 1)
-            }
+            rank = maxOf(rank, p.native.heroRank(), p.java.heroRank())
         }
     }
     when {
@@ -1651,6 +1643,9 @@ internal suspend fun loadDashboardState(
     val vpnActive = isVpnActiveFromSnapshot(shellSnapshot["vpn_ifaces"].orEmpty())
     VpnHideLog.i(TAG, "vpnActive=$vpnActive selfNeedsRestart=$selfNeedsRestart")
 
+    // Native leaks on vectors the active backend does not own (SELinux/zygisk
+    // territory) — set during the protection computation, surfaced via the hero.
+    var unownedNativeLeakCount = 0
     val protection: ProtectionCheck =
         when {
             !vpnActive -> {
@@ -1671,15 +1666,12 @@ internal suspend fun loadDashboardState(
                     // summarize; fall back to the same retry path as no-VPN.
                     ProtectionCheck.NoVpn
                 } else {
-                    val native =
-                        if (hasNative) checks.nativeAll.toNativeResult() else NativeResult.NoModule
-                    val java =
-                        if (lsposed is LsposedState.Active) {
-                            checks.java.toJavaResult()
-                        } else {
-                            JavaResult.HooksInactive
-                        }
-                    VpnHideLog.i(TAG, "nativeResult=$native javaResult=$java")
+                    // Tiles judge each backend on the vectors it owns; unowned leaks
+                    // (out of scope for the tile) are surfaced via the hero warning below.
+                    val native = summarizeNativeLayer(nativeBackend, checks.nativeOutcomes)
+                    val java = summarizeJavaLayer(lsposed is LsposedState.Active, checks.java)
+                    unownedNativeLeakCount = unownedNativeLeaks(nativeBackend, checks.nativeOutcomes)
+                    VpnHideLog.i(TAG, "nativeLayer=$native javaLayer=$java unownedLeaks=$unownedNativeLeakCount")
                     ProtectionCheck.Checked(native, java)
                 }
             }
@@ -1697,9 +1689,13 @@ internal suspend fun loadDashboardState(
     // partial/full, or a Java probe fails). Without this the state shows only as
     // an amber hero/tile with no explanation — surface a warning that links to
     // the full diagnostics for the per-check breakdown.
-    if (protection is ProtectionCheck.Checked &&
-        (protection.native is NativeResult.Fail || protection.java is JavaResult.Fail)
-    ) {
+    // A leak is a leak: an active layer's owned vector leaks, or a native surface
+    // the backend doesn't cover leaks (only SELinux would). Either way the VPN is
+    // detectable — link to the per-check breakdown.
+    val checked = protection as? ProtectionCheck.Checked
+    val nativeLeaks = (checked?.native as? LayerStatus.Active)?.leaks ?: 0
+    val javaLeaks = (checked?.java as? LayerStatus.Active)?.leaks ?: 0
+    if (nativeLeaks > 0 || javaLeaks > 0 || unownedNativeLeakCount > 0) {
         messages +=
             DashboardMessage(
                 DashboardMessageSeverity.WARNING,
@@ -1725,31 +1721,4 @@ internal suspend fun loadDashboardState(
         protection = protection,
         messages = messages,
     )
-}
-
-/**
- * Roll up the UniFFI native probe results into the Dashboard "Native level"
- * summary. NETWORK_BLOCKED probes report `passed == null` and don't count
- * either way; if nothing actually ran, that's OK (a dedicated banner covers the
- * no-network-permission case).
- */
-internal fun List<CheckResult>.toNativeResult(): NativeResult {
-    val passed = count { it.passed == true }
-    val failed = count { it.passed == false }
-    return when {
-        passed == 0 && failed == 0 -> NativeResult.Ok
-        failed == 0 -> NativeResult.Ok
-        passed > 0 -> NativeResult.Fail(passed, failed)
-        else -> NativeResult.Fail(0, failed)
-    }
-}
-
-/**
- * Roll up the VPN-presence Java probe results into the Dashboard "Java API
- * level" summary — the count that detected a leak. Probes with no active
- * network report `passed == true` ("nothing to leak"), so they don't trip it.
- */
-internal fun List<CheckResult>.toJavaResult(): JavaResult {
-    val failed = count { it.passed == false }
-    return if (failed == 0) JavaResult.Ok else JavaResult.Fail(failed)
 }

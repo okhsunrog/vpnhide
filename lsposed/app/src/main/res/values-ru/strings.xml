@@ -111,6 +111,7 @@
     <string name="dashboard_protection_unknown">Не проверено</string>
     <string name="dashboard_protection_no_module">Нет модуля</string>
     <string name="dashboard_protection_hooks_inactive">Хуки неактивны</string>
+    <string name="dashboard_protection_not_active">Не активен</string>
     <string name="dashboard_needs_restart">VPN Hide только что включил скрытие для самого себя. Принудительно остановите VPN Hide и откройте снова, чтобы проверить скрытие — перезагрузка устройства не нужна.</string>
     <string name="vpn_off_prompt">VPN не активен. Включите его и нажмите «Повторить», чтобы проверить скрытие.</string>
     <string name="vpn_off_retry">Повторить</string>

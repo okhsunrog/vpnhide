@@ -6,6 +6,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DashboardUiStateTest {
+    private val ok = LayerStatus.Active(hidden = 5, leaks = 0)
+    private val partial = LayerStatus.Active(hidden = 5, leaks = 1)
+    private val broken = LayerStatus.Active(hidden = 0, leaks = 3)
+
     @Test
     fun `computeHeroStatus returns protected when checks pass and there are no issues`() {
         assertEquals(
@@ -13,7 +17,7 @@ class DashboardUiStateTest {
             computeHeroStatus(
                 state =
                     dashboardState(
-                        protection = ProtectionCheck.Checked(NativeResult.Ok, JavaResult.Ok),
+                        protection = ProtectionCheck.Checked(ok, ok),
                     ),
                 errorCount = 0,
                 warningCount = 0,
@@ -25,7 +29,7 @@ class DashboardUiStateTest {
     fun `computeHeroStatus ignores info messages`() {
         val state =
             dashboardState(
-                protection = ProtectionCheck.Checked(NativeResult.Ok, JavaResult.Ok),
+                protection = ProtectionCheck.Checked(ok, ok),
                 messages = listOf(DashboardMessage(DashboardMessageSeverity.INFO, "note")),
             )
 
@@ -40,14 +44,14 @@ class DashboardUiStateTest {
     }
 
     @Test
-    fun `protectionFullyPassed is true only when native and java checks pass`() {
-        assertTrue(protectionFullyPassed(ProtectionCheck.Checked(NativeResult.Ok, JavaResult.Ok)))
+    fun `protectionFullyPassed is true only when native and java layers are ok`() {
+        assertTrue(protectionFullyPassed(ProtectionCheck.Checked(ok, ok)))
         assertFalse(protectionFullyPassed(ProtectionCheck.NoVpn))
         assertFalse(protectionFullyPassed(ProtectionCheck.NeedsRestart))
-        assertFalse(protectionFullyPassed(ProtectionCheck.Checked(NativeResult.NoModule, JavaResult.Ok)))
-        assertFalse(protectionFullyPassed(ProtectionCheck.Checked(NativeResult.Fail(passed = 2, failed = 1), JavaResult.Ok)))
-        assertFalse(protectionFullyPassed(ProtectionCheck.Checked(NativeResult.Ok, JavaResult.Fail(failedChecks = 1))))
-        assertFalse(protectionFullyPassed(ProtectionCheck.Checked(NativeResult.Ok, JavaResult.HooksInactive)))
+        assertFalse(protectionFullyPassed(ProtectionCheck.Checked(LayerStatus.Absent, ok)))
+        assertFalse(protectionFullyPassed(ProtectionCheck.Checked(partial, ok)))
+        assertFalse(protectionFullyPassed(ProtectionCheck.Checked(ok, partial)))
+        assertFalse(protectionFullyPassed(ProtectionCheck.Checked(ok, LayerStatus.Inactive)))
     }
 
     @Test
@@ -63,7 +67,7 @@ class DashboardUiStateTest {
     }
 
     @Test
-    fun `computeHeroStatus returns attention for restart partial native or warning`() {
+    fun `computeHeroStatus returns attention for restart partial layer or warning`() {
         assertEquals(
             HeroStatus.Attention,
             computeHeroStatus(
@@ -77,7 +81,20 @@ class DashboardUiStateTest {
             computeHeroStatus(
                 state =
                     dashboardState(
-                        protection = ProtectionCheck.Checked(NativeResult.Fail(passed = 2, failed = 1), JavaResult.Ok),
+                        protection = ProtectionCheck.Checked(partial, ok),
+                    ),
+                errorCount = 0,
+                warningCount = 0,
+            ),
+        )
+        // A couple of failing Java probes is Partial (works, has a gap) → Attention,
+        // no longer a hard "not working".
+        assertEquals(
+            HeroStatus.Attention,
+            computeHeroStatus(
+                state =
+                    dashboardState(
+                        protection = ProtectionCheck.Checked(ok, partial),
                     ),
                 errorCount = 0,
                 warningCount = 0,
@@ -88,7 +105,7 @@ class DashboardUiStateTest {
             computeHeroStatus(
                 state =
                     dashboardState(
-                        protection = ProtectionCheck.Checked(NativeResult.Ok, JavaResult.Ok),
+                        protection = ProtectionCheck.Checked(ok, ok),
                     ),
                 errorCount = 0,
                 warningCount = 1,
@@ -97,13 +114,13 @@ class DashboardUiStateTest {
     }
 
     @Test
-    fun `computeHeroStatus returns unprotected for hard failures or errors`() {
+    fun `computeHeroStatus returns unprotected for broken layer or errors`() {
         assertEquals(
             HeroStatus.Unprotected,
             computeHeroStatus(
                 state =
                     dashboardState(
-                        protection = ProtectionCheck.Checked(NativeResult.Fail(passed = 0, failed = 3), JavaResult.Ok),
+                        protection = ProtectionCheck.Checked(broken, ok),
                     ),
                 errorCount = 0,
                 warningCount = 0,
@@ -114,7 +131,7 @@ class DashboardUiStateTest {
             computeHeroStatus(
                 state =
                     dashboardState(
-                        protection = ProtectionCheck.Checked(NativeResult.Ok, JavaResult.Fail(failedChecks = 1)),
+                        protection = ProtectionCheck.Checked(ok, broken),
                     ),
                 errorCount = 0,
                 warningCount = 0,
@@ -125,7 +142,7 @@ class DashboardUiStateTest {
             computeHeroStatus(
                 state =
                     dashboardState(
-                        protection = ProtectionCheck.Checked(NativeResult.Ok, JavaResult.Ok),
+                        protection = ProtectionCheck.Checked(ok, ok),
                     ),
                 errorCount = 1,
                 warningCount = 0,
@@ -161,7 +178,7 @@ class DashboardUiStateTest {
         zygisk: ModuleState = ModuleState.NotInstalled,
         lsposed: LsposedState = LsposedState.NotInstalled,
         ports: ModuleState = ModuleState.NotInstalled,
-        protection: ProtectionCheck = ProtectionCheck.Checked(NativeResult.Ok, JavaResult.Ok),
+        protection: ProtectionCheck = ProtectionCheck.Checked(ok, ok),
         messages: List<DashboardMessage> = emptyList(),
     ): DashboardState =
         DashboardState(

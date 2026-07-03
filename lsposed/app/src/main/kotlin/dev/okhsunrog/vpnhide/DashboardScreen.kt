@@ -630,96 +630,78 @@ private fun moduleSummaryAccent(state: DashboardState): Color {
     }
 }
 
+/** One tile label for any layer, from its [LayerStatus]/[Verdict]. Native and
+ * Java tiles now share this mapping. */
+@Composable
+private fun layerSummaryText(layer: LayerStatus): String =
+    when (layer) {
+        LayerStatus.Absent -> {
+            stringResource(R.string.dashboard_protection_no_module)
+        }
+
+        LayerStatus.Inactive -> {
+            stringResource(R.string.dashboard_protection_not_active)
+        }
+
+        is LayerStatus.Active -> {
+            when (layer.verdict) {
+                Verdict.Ok -> stringResource(R.string.dashboard_protection_ok)
+                Verdict.Partial -> stringResource(R.string.dashboard_protection_partial)
+                Verdict.Broken -> stringResource(R.string.dashboard_protection_fail)
+            }
+        }
+    }
+
+@Composable
+private fun layerSummaryAccent(layer: LayerStatus): Color =
+    when (layer) {
+        LayerStatus.Absent -> {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+
+        LayerStatus.Inactive -> {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+
+        is LayerStatus.Active -> {
+            when (layer.verdict) {
+                Verdict.Ok -> StatusColors.successDot
+                Verdict.Partial -> StatusColors.warningAccent
+                Verdict.Broken -> StatusColors.errorAccent
+            }
+        }
+    }
+
 @Composable
 private fun nativeSummaryText(protection: ProtectionCheck): String =
     when (protection) {
-        ProtectionCheck.NoVpn -> {
-            stringResource(R.string.dashboard_hero_vpnoff_title)
-        }
-
-        ProtectionCheck.NeedsRestart -> {
-            stringResource(R.string.dashboard_protection_unknown)
-        }
-
-        is ProtectionCheck.Checked -> {
-            when (val native = protection.native) {
-                NativeResult.Ok -> {
-                    stringResource(R.string.dashboard_protection_ok)
-                }
-
-                is NativeResult.Fail -> {
-                    if (native.passed > 0) {
-                        stringResource(R.string.dashboard_protection_partial)
-                    } else {
-                        stringResource(R.string.dashboard_protection_fail)
-                    }
-                }
-
-                NativeResult.NoModule -> {
-                    stringResource(R.string.dashboard_protection_no_module)
-                }
-            }
-        }
+        ProtectionCheck.NoVpn -> stringResource(R.string.dashboard_hero_vpnoff_title)
+        ProtectionCheck.NeedsRestart -> stringResource(R.string.dashboard_protection_unknown)
+        is ProtectionCheck.Checked -> layerSummaryText(protection.native)
     }
 
 @Composable
 private fun nativeSummaryAccent(protection: ProtectionCheck): Color =
     when (protection) {
-        ProtectionCheck.NoVpn -> {
-            StatusColors.infoAccent
-        }
-
-        ProtectionCheck.NeedsRestart -> {
-            StatusColors.warningAccent
-        }
-
-        is ProtectionCheck.Checked -> {
-            when (val native = protection.native) {
-                NativeResult.Ok -> StatusColors.successDot
-                is NativeResult.Fail -> if (native.passed > 0) StatusColors.warningAccent else StatusColors.errorAccent
-                NativeResult.NoModule -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
-        }
+        ProtectionCheck.NoVpn -> StatusColors.infoAccent
+        ProtectionCheck.NeedsRestart -> StatusColors.warningAccent
+        is ProtectionCheck.Checked -> layerSummaryAccent(protection.native)
     }
 
 @Composable
 private fun javaSummaryText(protection: ProtectionCheck): String =
     when (protection) {
-        ProtectionCheck.NoVpn -> {
-            stringResource(R.string.dashboard_hero_vpnoff_title)
-        }
-
-        ProtectionCheck.NeedsRestart -> {
-            stringResource(R.string.dashboard_protection_unknown)
-        }
-
-        is ProtectionCheck.Checked -> {
-            when (protection.java) {
-                JavaResult.Ok -> stringResource(R.string.dashboard_protection_ok)
-                is JavaResult.Fail -> stringResource(R.string.dashboard_protection_fail)
-                JavaResult.HooksInactive -> stringResource(R.string.dashboard_protection_hooks_inactive)
-            }
-        }
+        ProtectionCheck.NoVpn -> stringResource(R.string.dashboard_hero_vpnoff_title)
+        ProtectionCheck.NeedsRestart -> stringResource(R.string.dashboard_protection_unknown)
+        is ProtectionCheck.Checked -> layerSummaryText(protection.java)
     }
 
 @Composable
 private fun javaSummaryAccent(protection: ProtectionCheck): Color =
     when (protection) {
-        ProtectionCheck.NoVpn -> {
-            StatusColors.infoAccent
-        }
-
-        ProtectionCheck.NeedsRestart -> {
-            StatusColors.warningAccent
-        }
-
-        is ProtectionCheck.Checked -> {
-            when (protection.java) {
-                JavaResult.Ok -> StatusColors.successDot
-                is JavaResult.Fail -> StatusColors.errorAccent
-                JavaResult.HooksInactive -> MaterialTheme.colorScheme.onSurfaceVariant
-            }
-        }
+        ProtectionCheck.NoVpn -> StatusColors.infoAccent
+        ProtectionCheck.NeedsRestart -> StatusColors.warningAccent
+        is ProtectionCheck.Checked -> layerSummaryAccent(protection.java)
     }
 
 private data class InstalledVisual(
