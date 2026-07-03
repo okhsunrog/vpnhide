@@ -620,6 +620,64 @@ fn check_netlink_getroute() -> CheckOutput {
     }
 }
 
+/// Send an RTM_GETRULE dump for `family` on an already-bound `fd` and invoke
+/// `on_rule(buf, offset, msg_len)` for each RTM_NEWRULE message. The kernel's
+/// rule dump is per-family, and Android installs the per-app VPN policy rules for
+/// BOTH IPv4 and IPv6 — so callers dump `AF_INET` and `AF_INET6` on the same
+/// socket (distinct seq) and merge, else an IPv6 rule set is invisible. Returns
+/// the OS error string on a send failure; a short read / NLMSG_DONE ends the dump.
+///
+/// # Safety
+/// `fd` must be a bound NETLINK_ROUTE socket; `buf` must be 8-aligned and large
+/// enough for a dump chunk (the callers pass a 32 KiB `AlignedBytes`).
+unsafe fn dump_fib_rules(
+    fd: i32,
+    family: u8,
+    seq: u32,
+    buf: &mut [u8],
+    mut on_rule: impl FnMut(&[u8], usize, usize),
+) -> Result<(), String> {
+    unsafe {
+        #[repr(C)]
+        struct Req {
+            nlh: libc::nlmsghdr,
+            frh: Rtmsg,
+        }
+        let mut req: Req = std::mem::zeroed();
+        req.nlh.nlmsg_len = std::mem::size_of::<Req>() as u32;
+        req.nlh.nlmsg_type = libc::RTM_GETRULE;
+        req.nlh.nlmsg_flags = (libc::NLM_F_REQUEST | libc::NLM_F_DUMP) as u16;
+        req.nlh.nlmsg_seq = seq;
+        req.frh.rtm_family = family;
+
+        if libc::send(
+            fd,
+            std::ptr::from_ref(&req).cast(),
+            req.nlh.nlmsg_len as usize,
+            0,
+        ) < 0
+        {
+            return Err(last_os_error());
+        }
+
+        for _ in 0..MAX_NETLINK_RECV_ITERS {
+            let len = netlink_recv(fd, buf);
+            if len <= 0 {
+                break;
+            }
+            let cont = parse_netlink_msgs(buf, len as usize, libc::RTM_NEWRULE, &mut on_rule);
+            if !cont {
+                break;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The address families whose policy-rule dumps together cover an Android VPN's
+/// per-app routing (v4 + v6). Iterated by both the diagnostic and the gate.
+const RULE_FAMILIES: [u8; 2] = [libc::AF_INET as u8, libc::AF_INET6 as u8];
+
 /// RTM_GETRULE — policy routing rules. On Android the VPN's per-app policy is
 /// expressed as `ip rule` entries steering a UID range into the interface's own
 /// routing table (`... uidrange 10236-10236 lookup tun0`), plus rules that name
@@ -650,107 +708,77 @@ fn check_netlink_getrule_uid(myuid: u32) -> CheckOutput {
         Err(out) => return out,
     };
 
+    let mut leaks: Vec<String> = Vec::new();
+    let mut total = 0u32;
+
     unsafe {
-        // fib_rule_hdr shares Rtmsg's 12-byte layout (family + 7 u8 + u32 flags).
-        #[repr(C)]
-        struct Req {
-            nlh: libc::nlmsghdr,
-            frh: Rtmsg,
-        }
-        let mut req: Req = std::mem::zeroed();
-        req.nlh.nlmsg_len = std::mem::size_of::<Req>() as u32;
-        req.nlh.nlmsg_type = libc::RTM_GETRULE;
-        req.nlh.nlmsg_flags = (libc::NLM_F_REQUEST | libc::NLM_F_DUMP) as u16;
-        req.nlh.nlmsg_seq = 1;
-        req.frh.rtm_family = libc::AF_INET as u8;
-
-        if libc::send(
-            fd,
-            std::ptr::from_ref(&req).cast(),
-            req.nlh.nlmsg_len as usize,
-            0,
-        ) < 0
-        {
-            let e = last_os_error();
-            libc::close(fd);
-            return CheckOutput::fail(format!("send error: {e}"));
-        }
-
         let mut buf = AlignedBytes::<32768>::zeroed();
-        let mut leaks: Vec<String> = Vec::new();
-        let mut total = 0u32;
         let hdr_plus_rtmsg = std::mem::size_of::<libc::nlmsghdr>() + std::mem::size_of::<Rtmsg>();
 
-        for _ in 0..MAX_NETLINK_RECV_ITERS {
-            let len = netlink_recv(fd, &mut buf.0);
-            if len <= 0 {
-                break;
-            }
-            let cont = parse_netlink_msgs(
-                &buf.0,
-                len as usize,
-                libc::RTM_NEWRULE,
-                |b, offset, msg_len| {
-                    total += 1;
-                    let frh =
-                        &*(b.as_ptr().add(offset + std::mem::size_of::<libc::nlmsghdr>())
-                            as *const Rtmsg);
-                    // The low byte of the table id lives in the header; the full
-                    // u32 arrives in FRA_TABLE (Android tun tables are > 255).
-                    let mut table = frh.rtm_table as u32;
-                    let mut uid_lo = 0u32;
-                    let mut uid_hi = 0u32;
-                    let mut has_uidrange = false;
-                    let mut iface_hit: Option<String> = None;
-                    for_each_rtattr(b, offset + hdr_plus_rtmsg, offset + msg_len, |rta, payload| {
-                        match rta.rta_type {
-                            FRA_IIFNAME | FRA_OIFNAME if !payload.is_empty() => {
-                                let name = cstr_to_str(payload.as_ptr() as *const libc::c_char);
-                                if is_vpn_iface(&name) {
-                                    iface_hit = Some(name);
-                                }
-                            }
-                            FRA_TABLE if payload.len() >= 4 => {
-                                table = u32::from_ne_bytes(payload[..4].try_into().unwrap());
-                            }
-                            FRA_UID_RANGE if payload.len() >= 8 => {
-                                uid_lo = u32::from_ne_bytes(payload[..4].try_into().unwrap());
-                                uid_hi = u32::from_ne_bytes(payload[4..8].try_into().unwrap());
-                                has_uidrange = true;
-                            }
-                            _ => {}
+        // fib_rule_hdr shares Rtmsg's 12-byte layout (family + 7 u8 + u32 flags).
+        let mut on_rule = |b: &[u8], offset: usize, msg_len: usize| {
+            total += 1;
+            let frh =
+                &*(b.as_ptr().add(offset + std::mem::size_of::<libc::nlmsghdr>()) as *const Rtmsg);
+            // The low byte of the table id lives in the header; the full u32
+            // arrives in FRA_TABLE (Android tun tables are > 255).
+            let mut table = frh.rtm_table as u32;
+            let mut uid_lo = 0u32;
+            let mut uid_hi = 0u32;
+            let mut has_uidrange = false;
+            let mut iface_hit: Option<String> = None;
+            for_each_rtattr(b, offset + hdr_plus_rtmsg, offset + msg_len, |rta, payload| {
+                match rta.rta_type {
+                    FRA_IIFNAME | FRA_OIFNAME if !payload.is_empty() => {
+                        let name = cstr_to_str(payload.as_ptr() as *const libc::c_char);
+                        if is_vpn_iface(&name) {
+                            iface_hit = Some(name);
                         }
-                    });
-                    // Mirror fib_nl_fill_rule: a rule leaks the VPN if it names a
-                    // VPN interface, or steers this very UID into a non-standard
-                    // table (the per-app tun policy rule). The 0..u32::MAX range
-                    // is the catch-all default rule, not a VPN rule.
-                    if let Some(name) = iface_hit {
-                        leaks.push(format!("iface {name}"));
-                    } else if has_uidrange
-                        && uid_lo <= myuid
-                        && myuid <= uid_hi
-                        && !(uid_lo == 0 && uid_hi == u32::MAX)
-                        && table != RT_TABLE_MAIN
-                        && table != RT_TABLE_LOCAL
-                        && table != RT_TABLE_DEFAULT
-                        && table > 100
-                    {
-                        leaks.push(format!("uid {myuid} → table {table}"));
                     }
-                },
-            );
-            if !cont {
-                break;
+                    FRA_TABLE if payload.len() >= 4 => {
+                        table = u32::from_ne_bytes(payload[..4].try_into().unwrap());
+                    }
+                    FRA_UID_RANGE if payload.len() >= 8 => {
+                        uid_lo = u32::from_ne_bytes(payload[..4].try_into().unwrap());
+                        uid_hi = u32::from_ne_bytes(payload[4..8].try_into().unwrap());
+                        has_uidrange = true;
+                    }
+                    _ => {}
+                }
+            });
+            // Mirror fib_nl_fill_rule: a rule leaks the VPN if it names a VPN
+            // interface, or steers this very UID into a non-standard table (the
+            // per-app tun policy rule). The 0..u32::MAX range is the catch-all
+            // default rule, not a VPN rule.
+            if let Some(name) = iface_hit {
+                leaks.push(format!("iface {name}"));
+            } else if has_uidrange
+                && uid_lo <= myuid
+                && myuid <= uid_hi
+                && !(uid_lo == 0 && uid_hi == u32::MAX)
+                && table != RT_TABLE_MAIN
+                && table != RT_TABLE_LOCAL
+                && table != RT_TABLE_DEFAULT
+                && table > 100
+            {
+                leaks.push(format!("uid {myuid} → table {table}"));
+            }
+        };
+
+        // Dump v4 and v6 rules on the same socket (distinct seq) and merge.
+        for (i, family) in RULE_FAMILIES.into_iter().enumerate() {
+            if let Err(e) = dump_fib_rules(fd, family, (i + 1) as u32, &mut buf.0, &mut on_rule) {
+                libc::close(fd);
+                return CheckOutput::fail(format!("send error: {e}"));
             }
         }
         libc::close(fd);
+    }
 
-        if leaks.is_empty() {
-            CheckOutput::pass(format!("{total} policy rules, none reveal VPN"))
-        } else {
-            CheckOutput::fail(format!("VPN policy rule(s): {}", join_list(&leaks)))
-        }
+    if leaks.is_empty() {
+        CheckOutput::pass(format!("{total} policy rules, none reveal VPN"))
+    } else {
+        CheckOutput::fail(format!("VPN policy rule(s): {}", join_list(&leaks)))
     }
 }
 
@@ -900,77 +928,47 @@ fn uid_routed_through_vpn(myuid: u32) -> (bool, String) {
     let mut rules: Vec<GateRule> = Vec::new();
 
     unsafe {
-        #[repr(C)]
-        struct Req {
-            nlh: libc::nlmsghdr,
-            frh: Rtmsg,
-        }
-        let mut req: Req = std::mem::zeroed();
-        req.nlh.nlmsg_len = std::mem::size_of::<Req>() as u32;
-        req.nlh.nlmsg_type = libc::RTM_GETRULE;
-        req.nlh.nlmsg_flags = (libc::NLM_F_REQUEST | libc::NLM_F_DUMP) as u16;
-        req.nlh.nlmsg_seq = 1;
-        req.frh.rtm_family = libc::AF_INET as u8;
-
-        if libc::send(
-            fd,
-            std::ptr::from_ref(&req).cast(),
-            req.nlh.nlmsg_len as usize,
-            0,
-        ) < 0
-        {
-            let e = last_os_error();
-            libc::close(fd);
-            return (false, format!("send error: {e}"));
-        }
-
         let mut buf = AlignedBytes::<32768>::zeroed();
         let hdr_plus_rtmsg = std::mem::size_of::<libc::nlmsghdr>() + std::mem::size_of::<Rtmsg>();
 
-        for _ in 0..MAX_NETLINK_RECV_ITERS {
-            let len = netlink_recv(fd, &mut buf.0);
-            if len <= 0 {
-                break;
-            }
-            let cont = parse_netlink_msgs(
-                &buf.0,
-                len as usize,
-                libc::RTM_NEWRULE,
-                |b, offset, msg_len| {
-                    let frh =
-                        &*(b.as_ptr().add(offset + std::mem::size_of::<libc::nlmsghdr>())
-                            as *const Rtmsg);
-                    let mut r = GateRule {
-                        table: frh.rtm_table as u32,
-                        uid_lo: 0,
-                        uid_hi: 0,
-                        has_uidrange: false,
-                        oif_vpn: false,
-                    };
-                    for_each_rtattr(b, offset + hdr_plus_rtmsg, offset + msg_len, |rta, payload| {
-                        match rta.rta_type {
-                            FRA_OIFNAME if !payload.is_empty() => {
-                                let name = cstr_to_str(payload.as_ptr() as *const libc::c_char);
-                                if is_vpn_iface(&name) {
-                                    r.oif_vpn = true;
-                                }
-                            }
-                            FRA_TABLE if payload.len() >= 4 => {
-                                r.table = u32::from_ne_bytes(payload[..4].try_into().unwrap());
-                            }
-                            FRA_UID_RANGE if payload.len() >= 8 => {
-                                r.uid_lo = u32::from_ne_bytes(payload[..4].try_into().unwrap());
-                                r.uid_hi = u32::from_ne_bytes(payload[4..8].try_into().unwrap());
-                                r.has_uidrange = true;
-                            }
-                            _ => {}
+        let mut on_rule = |b: &[u8], offset: usize, msg_len: usize| {
+            let frh =
+                &*(b.as_ptr().add(offset + std::mem::size_of::<libc::nlmsghdr>()) as *const Rtmsg);
+            let mut r = GateRule {
+                table: frh.rtm_table as u32,
+                uid_lo: 0,
+                uid_hi: 0,
+                has_uidrange: false,
+                oif_vpn: false,
+            };
+            for_each_rtattr(b, offset + hdr_plus_rtmsg, offset + msg_len, |rta, payload| {
+                match rta.rta_type {
+                    FRA_OIFNAME if !payload.is_empty() => {
+                        let name = cstr_to_str(payload.as_ptr() as *const libc::c_char);
+                        if is_vpn_iface(&name) {
+                            r.oif_vpn = true;
                         }
-                    });
-                    rules.push(r);
-                },
-            );
-            if !cont {
-                break;
+                    }
+                    FRA_TABLE if payload.len() >= 4 => {
+                        r.table = u32::from_ne_bytes(payload[..4].try_into().unwrap());
+                    }
+                    FRA_UID_RANGE if payload.len() >= 8 => {
+                        r.uid_lo = u32::from_ne_bytes(payload[..4].try_into().unwrap());
+                        r.uid_hi = u32::from_ne_bytes(payload[4..8].try_into().unwrap());
+                        r.has_uidrange = true;
+                    }
+                    _ => {}
+                }
+            });
+            rules.push(r);
+        };
+
+        // v4 + v6: a VPN steers the uid into a tun table for both families; either
+        // membership means routed, so merge both dumps before deciding.
+        for (i, family) in RULE_FAMILIES.into_iter().enumerate() {
+            if let Err(e) = dump_fib_rules(fd, family, (i + 1) as u32, &mut buf.0, &mut on_rule) {
+                libc::close(fd);
+                return (false, format!("send error: {e}"));
             }
         }
         libc::close(fd);
