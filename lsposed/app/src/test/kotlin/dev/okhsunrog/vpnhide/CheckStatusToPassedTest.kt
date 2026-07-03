@@ -12,4 +12,11 @@ class CheckStatusToPassedTest {
         assertEquals(false, CheckStatus.FAIL.toPassed())
         assertNull(CheckStatus.NETWORK_BLOCKED.toPassed())
     }
+
+    @Test
+    fun `selinux-blocked maps to true for the legacy tri-state`() {
+        // A SELinux-blocked read is "no VPN visible" (green) for the passed-based
+        // UI; the honest SELinux-vs-backend split lives in CheckOutcome instead.
+        assertEquals(true, CheckStatus.SELINUX_BLOCKED.toPassed())
+    }
 }
