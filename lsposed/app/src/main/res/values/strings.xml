@@ -392,7 +392,8 @@
     <string name="check_network_callback" translatable="false">NetworkCallback (push)</string>
     <string name="check_link_properties" translatable="false">LinkProperties ifname</string>
     <string name="check_link_properties_routes" translatable="false">LinkProperties routes</string>
-    <string name="check_proxy_host" translatable="false">System proxy properties</string>
+    <string name="check_active_network_info" translatable="false">getActiveNetworkInfo()</string>
+    <string name="check_network_info_vpn" translatable="false">getNetworkInfo(TYPE_VPN)</string>
 
     <!-- Settings screen -->
     <string name="settings_title">Settings</string>

@@ -4,6 +4,7 @@ import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkInfo
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -177,7 +178,8 @@ internal fun runExtraJavaChecks(
         checkActiveNetworkVpn(cm, res.getString(R.string.check_active_network_vpn)),
         checkNetworkCallbackVpn(cm, res.getString(R.string.check_network_callback)),
         checkLinkPropertiesRoutes(cm, res.getString(R.string.check_link_properties_routes)),
-        checkProxyHost(res.getString(R.string.check_proxy_host)),
+        checkActiveNetworkInfo(cm, res.getString(R.string.check_active_network_info)),
+        checkNetworkInfoVpn(cm, res.getString(R.string.check_network_info_vpn)),
     ).logged()
 }
 
@@ -513,19 +515,45 @@ private fun checkLinkPropertiesRoutes(
         CheckResult(name, vpnRoutes.isEmpty(), detail)
     }
 
-private fun checkProxyHost(name: String): CheckResult {
-    val httpHost = System.getProperty("http.proxyHost")
-    val socksHost = System.getProperty("socksProxyHost")
-    val hasProxy = !httpHost.isNullOrEmpty() || !socksHost.isNullOrEmpty()
+// Legacy NetworkInfo leaks (exercise the LSPOSED_NETWORK_INFO parcel hook +
+// the ConnectivityService result sanitizer — surfaces with no other check).
+// getActiveNetworkInfo() marshals a NetworkInfo across Binder; without the
+// hook an on-VPN caller sees type=VPN. The hook disguises it as WIFI.
+@Suppress("DEPRECATION")
+private fun checkActiveNetworkInfo(
+    cm: ConnectivityManager,
+    name: String,
+): CheckResult {
+    val info = cm.activeNetworkInfo ?: return CheckResult(name, true, "no active network info")
+    val isVpn = info.type == ConnectivityManager.TYPE_VPN || info.typeName.equals("VPN", ignoreCase = true)
     val detail =
-        if (!hasProxy) {
-            "no proxy (http=$httpHost, socks=$socksHost)"
+        if (!isVpn) {
+            "type=${info.type} (${info.typeName})"
         } else {
-            val httpPort = System.getProperty("http.proxyPort")
-            val socksPort = System.getProperty("socksProxyPort")
-            "proxy found — http=$httpHost:$httpPort, socks=$socksHost:$socksPort"
+            "activeNetworkInfo type=VPN (${info.typeName})"
         }
-    return CheckResult(name, !hasProxy, detail)
+    return CheckResult(name, !isVpn, detail)
+}
+
+// getNetworkInfo(TYPE_VPN) probes the legacy VPN type directly (issue #85). The
+// hook nulls it for a target; a non-null result that reports connected/connecting
+// still answers "a VPN-type network exists", which is the leak.
+@Suppress("DEPRECATION")
+private fun checkNetworkInfoVpn(
+    cm: ConnectivityManager,
+    name: String,
+): CheckResult {
+    val info =
+        cm.getNetworkInfo(ConnectivityManager.TYPE_VPN)
+            ?: return CheckResult(name, true, "getNetworkInfo(TYPE_VPN) returned null")
+    val leaks = info.isConnectedOrConnecting
+    val detail =
+        if (!leaks) {
+            "TYPE_VPN state=${info.state}"
+        } else {
+            "getNetworkInfo(TYPE_VPN) connected: ${info.typeName} ${info.state}"
+        }
+    return CheckResult(name, !leaks, detail)
 }
 
 private fun checkProcNetRouteJava(name: String): CheckResult =

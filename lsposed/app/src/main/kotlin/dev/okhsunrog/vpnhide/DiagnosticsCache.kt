@@ -112,7 +112,7 @@ internal object DiagnosticsCache {
      * Suspend until the full Diagnostics result is available. Dashboard uses
      * this path so the top-level "OK" state is backed by every protection
      * probe shown in Settings → Detailed diagnostics, including the slow push-callback
-     * and route/proxy Java checks.
+     * and route/NetworkInfo Java checks.
      */
     suspend fun awaitFullResults(context: Context): CheckResults? {
         run(cacheScope, context)
