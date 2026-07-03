@@ -225,26 +225,31 @@ private fun nativeCheckResult(
 // ==========================================================================
 
 /** Shared preamble for the capability-based checks: resolve the active
- * network's [NetworkCapabilities], reporting "no active network" / "no
- * capabilities" (both PASS — nothing for an app to leak) when absent. */
+ * network's [NetworkCapabilities]. A missing active network / capabilities is
+ * reported as `passed == null` (not measured) rather than a green pass: the
+ * self-in-tunnel gate guarantees an active network is present, so an absent one
+ * means the probe couldn't observe — not that a backend hid the VPN. Classifying
+ * it PASS would paint a false "hidden by backend" ([classifyJavaOutcome]). */
 private inline fun withActiveCaps(
     cm: ConnectivityManager,
     name: String,
     body: (NetworkCapabilities) -> CheckResult,
 ): CheckResult {
-    val net = cm.activeNetwork ?: return CheckResult(name, true, "no active network")
-    val caps = cm.getNetworkCapabilities(net) ?: return CheckResult(name, true, "no capabilities")
+    val net = cm.activeNetwork ?: return CheckResult(name, null, "no active network")
+    val caps = cm.getNetworkCapabilities(net) ?: return CheckResult(name, null, "no capabilities")
     return body(caps)
 }
 
-/** Shared preamble for the LinkProperties-based checks. */
+/** Shared preamble for the LinkProperties-based checks. A missing active network
+ * / link properties is `passed == null` (not measured) for the same reason as
+ * [withActiveCaps] — the gate makes it an unobservable edge, not a clean pass. */
 private inline fun withActiveLinkProperties(
     cm: ConnectivityManager,
     name: String,
     body: (LinkProperties) -> CheckResult,
 ): CheckResult {
-    val net = cm.activeNetwork ?: return CheckResult(name, true, "no active network")
-    val lp = cm.getLinkProperties(net) ?: return CheckResult(name, true, "no link properties")
+    val net = cm.activeNetwork ?: return CheckResult(name, null, "no active network")
+    val lp = cm.getLinkProperties(net) ?: return CheckResult(name, null, "no link properties")
     return body(lp)
 }
 
@@ -381,7 +386,9 @@ private fun checkNetworkForTypeVpn(
 ): CheckResult {
     val result = queryNetworkForType(cm, ConnectivityManager.TYPE_VPN)
     result.error?.let { return CheckResult(name, false, it) }
-    if (result.unavailable) return CheckResult(name, true, "getNetworkForType unavailable")
+    // Reflection couldn't reach getNetworkForType — probe didn't run (not measured),
+    // not a clean pass. A non-null TYPE_VPN network below is still a legitimate hidden.
+    if (result.unavailable) return CheckResult(name, null, "getNetworkForType unavailable")
     val vpnNetwork = result.network ?: return CheckResult(name, true, "TYPE_VPN returned null")
 
     val caps = cm.getNetworkCapabilities(vpnNetwork)
@@ -400,10 +407,10 @@ private fun checkActiveNetworkHandle(
     cm: ConnectivityManager,
     name: String,
 ): CheckResult {
-    val active = cm.activeNetwork ?: return CheckResult(name, true, "no active network")
+    val active = cm.activeNetwork ?: return CheckResult(name, null, "no active network")
     val vpnResult = queryNetworkForType(cm, ConnectivityManager.TYPE_VPN)
     vpnResult.error?.let { return CheckResult(name, false, it) }
-    if (vpnResult.unavailable) return CheckResult(name, true, "active=$active, getNetworkForType unavailable")
+    if (vpnResult.unavailable) return CheckResult(name, null, "active=$active, getNetworkForType unavailable")
     val vpnNetwork = vpnResult.network ?: return CheckResult(name, true, "active=$active, TYPE_VPN not exposed")
 
     val leaksVpnHandle = active == vpnNetwork
@@ -424,7 +431,7 @@ private fun checkAllNetworksHandles(
     val networks = cm.allNetworks
     val vpnResult = queryNetworkForType(cm, ConnectivityManager.TYPE_VPN)
     vpnResult.error?.let { return CheckResult(name, false, it) }
-    if (vpnResult.unavailable) return CheckResult(name, true, "${networks.size} networks, getNetworkForType unavailable")
+    if (vpnResult.unavailable) return CheckResult(name, null, "${networks.size} networks, getNetworkForType unavailable")
     val vpnNetwork = vpnResult.network ?: return CheckResult(name, true, "${networks.size} networks, TYPE_VPN not exposed")
 
     val containsVpnHandle = networks.any { it == vpnNetwork }

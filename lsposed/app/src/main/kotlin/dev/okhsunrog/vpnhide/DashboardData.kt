@@ -1647,8 +1647,11 @@ internal suspend fun loadDashboardState(
     val vpnActive = isVpnActiveFromSnapshot(shellSnapshot["vpn_ifaces"].orEmpty())
     VpnHideLog.i(TAG, "vpnActive=$vpnActive selfNeedsRestart=$selfNeedsRestart")
 
-    // Native leaks on vectors the active backend does not own (SELinux/zygisk
-    // territory) — set during the protection computation, surfaced via the hero.
+    // Native leaks the tile doesn't score: vectors the active backend does not own
+    // (SELinux/zygisk territory), plus the Java-implemented native-level probes
+    // (NetworkInterface enum, /proc/net/route via ART) which carry no root
+    // differential and so aren't in nativeOutcomes. Set during the protection
+    // computation, surfaced via the hero warning so a leak there is never invisible.
     var unownedNativeLeakCount = 0
     val protection: ProtectionCheck =
         when {
@@ -1680,7 +1683,12 @@ internal suspend fun loadDashboardState(
                     // (out of scope for the tile) are surfaced via the hero warning below.
                     val native = summarizeNativeLayer(nativeBackend, checks.nativeOutcomes)
                     val java = summarizeJavaLayer(lsposed is LsposedState.Active, checks.java)
-                    unownedNativeLeakCount = unownedNativeLeaks(nativeBackend, checks.nativeOutcomes)
+                    // Rust-probe leaks the tile doesn't own, plus any Java-native
+                    // probe (nativeExtra) that saw the VPN — the latter has no
+                    // outcome, so fold its raw fails in here so they still warn.
+                    unownedNativeLeakCount =
+                        unownedNativeLeaks(nativeBackend, checks.nativeOutcomes) +
+                        checks.nativeExtra.count { it.passed == false }
                     VpnHideLog.i(TAG, "nativeLayer=$native javaLayer=$java unownedLeaks=$unownedNativeLeakCount")
                     ProtectionCheck.Checked(native, java)
                 }

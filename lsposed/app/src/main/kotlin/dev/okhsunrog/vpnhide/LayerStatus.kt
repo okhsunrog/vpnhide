@@ -61,7 +61,10 @@ internal fun summarizeNativeLayer(
             null -> HookIds.KERNEL_HOOK_MASK
         }
     val ownedIds = NATIVE_CHECKS.filter { it.hasHookIn(ownMask) }.map { it.id }.toSet()
-    val hidden = outcomes.values.count { it is CheckOutcome.HiddenByBackend }
+    // Both counts are scoped to vectors this backend owns, so hidden and leaks
+    // describe the same vector set — a cross-backend hidden (only possible if the
+    // one-active-backend invariant ever breaks) can't mask an owned Broken verdict.
+    val hidden = outcomes.count { (id, outcome) -> outcome is CheckOutcome.HiddenByBackend && id in ownedIds }
     val leaks = outcomes.count { (id, outcome) -> outcome is CheckOutcome.Leak && id in ownedIds }
     return LayerStatus.Active(hidden = hidden, leaks = leaks)
 }
