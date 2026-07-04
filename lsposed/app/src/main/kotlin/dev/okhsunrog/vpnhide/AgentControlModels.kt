@@ -131,6 +131,9 @@ data class AgentCheckResult(
      * hidden_backend, hidden_selinux, nothing_to_leak, not_measured_*. Null for
      * checks without a root-differential outcome (Java / nativeExtra). */
     val outcome: String? = null,
+    /** The root ground-truth probe's own detail (native checks) — what root saw on
+     * this surface, the basis for the outcome. Null for checks without a root diff. */
+    val groundTruthDetail: String? = null,
 )
 
 /** Statistics tab state. */

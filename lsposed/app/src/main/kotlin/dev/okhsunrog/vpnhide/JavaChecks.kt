@@ -37,9 +37,7 @@ import dev.okhsunrog.vpnhide.ui.components.GroupedCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
 import java.net.NetworkInterface
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -60,6 +58,11 @@ data class CheckResult(
     // Java-level checks, which have no root ground truth — those fall back to the
     // legacy [passed] tri-state in the UI.
     val outcome: CheckOutcome? = null,
+    // The root ground-truth probe's own detail for native checks — what root saw on
+    // this surface. Shown next to the app-view detail so the verdict is explained
+    // (e.g. "root: 42 routes, no VPN" is WHY a SELinux-blocked read reads as nothing
+    // to leak). Null for Java checks and any probe without a root differential.
+    val groundTruthDetail: String? = null,
 )
 
 internal data class CheckResults(
@@ -137,16 +140,21 @@ internal fun runCoreChecks(
             val out =
                 nativeAppView[spec.id]
                     ?: CheckOutput(CheckStatus.NETWORK_BLOCKED, "no native result for ${spec.id}")
-            val outcome = classifyNativeOutcome(out, nativeGroundTruth[spec.id])
+            val groundTruth = nativeGroundTruth[spec.id]
+            val outcome = classifyNativeOutcome(out, groundTruth)
             VpnHideLog.i(TAG, "[outcome] ${spec.id}: ${outcome.token()}")
             nativeOutcomes[spec.id] = outcome
-            nativeCheckResult(res.getString(spec.labelRes), out, outcome)
+            nativeCheckResult(res.getString(spec.labelRes), out, outcome, groundTruth?.detail)
         }
 
+    // NetworkInterface.getNetworkInterfaces() is the canonical Java iface-enum a
+    // detector uses; kept even though the Rust getifaddrs probe covers the same
+    // syscall. (The /proc/net/route Java duplicate was dropped — the Rust probe
+    // covers that vector with proper attribution, and the Java one could only
+    // report a misleading "OK" on the SELinux denial for want of a root diff.)
     val nativeExtra =
         listOf(
             checkNetworkInterfaceEnum(res.getString(R.string.check_net_iface_enum)),
-            checkProcNetRouteJava(res.getString(R.string.check_proc_route_java)),
         ).logged()
 
     val coreJava =
@@ -178,7 +186,6 @@ internal fun runExtraJavaChecks(
         checkActiveNetworkVpn(cm, res.getString(R.string.check_active_network_vpn)),
         checkNetworkCallbackVpn(cm, res.getString(R.string.check_network_callback)),
         checkLinkPropertiesRoutes(cm, res.getString(R.string.check_link_properties_routes)),
-        checkActiveNetworkInfo(cm, res.getString(R.string.check_active_network_info)),
         checkNetworkInfoVpn(cm, res.getString(R.string.check_network_info_vpn)),
     ).logged().withJavaOutcomes()
 }
@@ -215,9 +222,10 @@ private fun nativeCheckResult(
     name: String,
     out: CheckOutput,
     outcome: CheckOutcome? = null,
+    groundTruthDetail: String? = null,
 ): CheckResult {
     VpnHideLog.i(TAG, "[$name] ${out.status}: ${out.detail}")
-    return CheckResult(name, out.status.toPassed(), out.detail, outcome = outcome)
+    return CheckResult(name, out.status.toPassed(), out.detail, outcome = outcome, groundTruthDetail = groundTruthDetail)
 }
 
 // ==========================================================================
@@ -530,29 +538,12 @@ private fun checkLinkPropertiesRoutes(
         CheckResult(name, vpnRoutes.isEmpty(), detail)
     }
 
-// Legacy NetworkInfo leaks (exercise the LSPOSED_NETWORK_INFO parcel hook +
-// the ConnectivityService result sanitizer — surfaces with no other check).
-// getActiveNetworkInfo() marshals a NetworkInfo across Binder; without the
-// hook an on-VPN caller sees type=VPN. The hook disguises it as WIFI.
-@Suppress("DEPRECATION")
-private fun checkActiveNetworkInfo(
-    cm: ConnectivityManager,
-    name: String,
-): CheckResult {
-    val info = cm.activeNetworkInfo ?: return CheckResult(name, true, "no active network info")
-    val isVpn = info.type == ConnectivityManager.TYPE_VPN || info.typeName.equals("VPN", ignoreCase = true)
-    val detail =
-        if (!isVpn) {
-            "type=${info.type} (${info.typeName})"
-        } else {
-            "activeNetworkInfo type=VPN (${info.typeName})"
-        }
-    return CheckResult(name, !isVpn, detail)
-}
-
 // getNetworkInfo(TYPE_VPN) probes the legacy VPN type directly (issue #85). The
-// hook nulls it for a target; a non-null result that reports connected/connecting
-// still answers "a VPN-type network exists", which is the leak.
+// LSPOSED_NETWORK_INFO parcel hook nulls it for a target; a non-null result that
+// reports connected/connecting still answers "a VPN-type network exists" — the
+// leak. (Its companion getActiveNetworkInfo() was dropped: .type reports the
+// underlying transport (WIFI/mobile) for an active VPN, not TYPE_VPN, so it never
+// surfaced the leak.)
 @Suppress("DEPRECATION")
 private fun checkNetworkInfoVpn(
     cm: ConnectivityManager,
@@ -570,35 +561,3 @@ private fun checkNetworkInfoVpn(
         }
     return CheckResult(name, !leaks, detail)
 }
-
-private fun checkProcNetRouteJava(name: String): CheckResult =
-    try {
-        val allLines = mutableListOf<String>()
-        val vpnLines = mutableListOf<String>()
-        BufferedReader(InputStreamReader(java.io.FileInputStream("/proc/net/route"))).use { br ->
-            while (true) {
-                val line = br.readLine() ?: break
-                allLines.add(line)
-                // /proc/net/route is whitespace-separated; check
-                // each token instead of just startsWith on the raw
-                // line so we don't match e.g. an IP-as-hex by chance.
-                if (line.split(Regex("\\s+")).any(IfaceLists::isVpnIface)) {
-                    vpnLines.add(line.take(60))
-                }
-            }
-        }
-        val detail =
-            if (vpnLines.isEmpty()) {
-                "${allLines.size} lines, no VPN entries"
-            } else {
-                "${vpnLines.size} VPN lines:\n${vpnLines.joinToString("\n") { "  $it" }}"
-            }
-        CheckResult(name, vpnLines.isEmpty(), detail)
-    } catch (e: Exception) {
-        val msg = e.message ?: ""
-        if (msg.contains("EACCES") || msg.contains("Permission denied")) {
-            CheckResult(name, true, "access denied by SELinux")
-        } else {
-            CheckResult(name, false, "${e.message}")
-        }
-    }

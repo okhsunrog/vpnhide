@@ -93,6 +93,7 @@
     <string name="diag_status_selinux" translatable="false">SELinux</string>
     <string name="diag_status_leak">Leak</string>
     <string name="diag_status_nomeasure">No data</string>
+    <string name="diag_status_nothing">Nothing to hide</string>
     <string name="banner_ready">VPN is active. Hiding is enabled for this app. Results below.</string>
     <string name="banner_added_self">Enabled hiding for VPN Hide. Restart VPN Hide (force-stop and reopen) for native-level checks to take effect — no device reboot needed.</string>
     <string name="banner_network_blocked">Network access is disabled for this app. ioctl checks (SIOCGIFFLAGS, SIOCGIFMTU, SIOCGIFCONF) cannot run without it. Enable in Settings → Apps → VPN Hide → Mobile data &amp; Wi-Fi.</string>
@@ -375,7 +376,6 @@
     <string name="check_proc_dev" translatable="false">/proc/net/dev</string>
     <string name="check_sys_class_net" translatable="false">/sys/class/net</string>
     <string name="check_net_iface_enum" translatable="false">NetworkInterface enum</string>
-    <string name="check_proc_route_java" translatable="false">/proc/net/route (Java)</string>
 
     <!-- Java/LSPosed check names (technical, not translatable) -->
     <string name="check_has_transport_vpn" translatable="false">hasTransport(VPN)</string>
@@ -389,7 +389,6 @@
     <string name="check_network_callback" translatable="false">NetworkCallback (push)</string>
     <string name="check_link_properties" translatable="false">LinkProperties ifname</string>
     <string name="check_link_properties_routes" translatable="false">LinkProperties routes</string>
-    <string name="check_active_network_info" translatable="false">getActiveNetworkInfo()</string>
     <string name="check_network_info_vpn" translatable="false">getNetworkInfo(TYPE_VPN)</string>
 
     <!-- Settings screen -->

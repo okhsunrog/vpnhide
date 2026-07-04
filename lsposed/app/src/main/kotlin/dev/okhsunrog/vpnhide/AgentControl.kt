@@ -685,6 +685,7 @@ private fun CheckResult.toAgentCheckResult(outcome: String? = null): AgentCheckR
             },
         detail = detail,
         outcome = outcome,
+        groundTruthDetail = groundTruthDetail,
     )
 
 private fun StatisticsState.toAgentStatisticsState(selfPackage: String? = null): AgentStatisticsState {

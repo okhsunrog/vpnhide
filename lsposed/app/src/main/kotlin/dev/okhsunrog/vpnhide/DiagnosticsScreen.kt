@@ -538,14 +538,25 @@ private fun diagStatus(r: CheckResult): DiagStatus {
     val leak = DiagStatus(stringResource(R.string.diag_status_leak), StatusColors.errorDot, StatusColors.errorContainer(), true)
     val notMeasured =
         DiagStatus(stringResource(R.string.diag_status_nomeasure), StatusColors.neutralAccent, StatusColors.neutralContainer(), false)
+    // Nothing to leak on this surface for anyone (root also saw nothing). A grey
+    // "nothing to hide" dot on a green (not-leaking) card — distinct from the green
+    // "OK" the backend earns, so it never reads as active protection where there
+    // is none (e.g. /proc/net/route: the split-tunnel VPN isn't in the main table).
+    val nothingToLeak =
+        DiagStatus(stringResource(R.string.diag_status_nothing), StatusColors.neutralAccent, StatusColors.successContainer(), false)
     return when (r.outcome) {
         CheckOutcome.Leak -> {
             leak
         }
 
-        // Hidden by the backend, or simply nothing to leak: both read as plain OK.
-        CheckOutcome.HiddenByBackend, CheckOutcome.NothingToLeak -> {
+        // The backend provably hid the VPN here.
+        CheckOutcome.HiddenByBackend -> {
             ok
+        }
+
+        // Not hidden by us — there was simply nothing on this surface to leak.
+        CheckOutcome.NothingToLeak -> {
+            nothingToLeak
         }
 
         // Hidden by SELinux, not a backend hook: still a green card (no alarm), but a
@@ -617,8 +628,14 @@ private fun CheckCard(
             }
             if (expanded) {
                 Spacer(Modifier.height(6.dp))
+                // For native checks the root ground-truth detail is shown next to the
+                // app-view read — it is what the verdict is derived from (e.g. a
+                // SELinux-blocked read reads as "nothing to leak" precisely because
+                // "root: N routes, no VPN"). Java checks have no root diff → plain detail.
+                val detailText =
+                    r.groundTruthDetail?.let { gt -> "app:  ${r.detail}\nroot: $gt" } ?: r.detail
                 Text(
-                    text = r.detail,
+                    text = detailText,
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
