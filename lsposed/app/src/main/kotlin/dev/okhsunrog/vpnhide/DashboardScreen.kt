@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.core.RepeatMode
@@ -242,7 +243,7 @@ fun DashboardScreen(
                     text = issue.text,
                     containerColor = errorBg,
                     contentColor = onBannerColor,
-                    action = messageActionSlot(issue.action, onOpenDiagnostics) { showContact = true },
+                    action = messageActionSlot(issue, onOpenDiagnostics) { showContact = true },
                 )
                 Spacer(Modifier.height(6.dp))
             }
@@ -257,7 +258,7 @@ fun DashboardScreen(
                     text = issue.text,
                     containerColor = warningBg,
                     contentColor = onBannerColor,
-                    action = messageActionSlot(issue.action, onOpenDiagnostics) { showContact = true },
+                    action = messageActionSlot(issue, onOpenDiagnostics) { showContact = true },
                 )
                 Spacer(Modifier.height(6.dp))
             }
@@ -272,7 +273,7 @@ fun DashboardScreen(
                     text = message.text,
                     containerColor = infoBg,
                     contentColor = onBannerColor,
-                    action = messageActionSlot(message.action, onOpenDiagnostics) { showContact = true },
+                    action = messageActionSlot(message, onOpenDiagnostics) { showContact = true },
                 )
                 Spacer(Modifier.height(6.dp))
             }
@@ -288,15 +289,21 @@ fun DashboardScreen(
 // place, so a new action is an enum case + one branch here — not an edit in
 // every message loop. The data layer stays UI-free (it only emits the tag).
 private fun messageActionSlot(
-    action: DashboardMessageAction?,
+    message: DashboardMessage,
     onOpenDiagnostics: () -> Unit,
     onContactAuthor: () -> Unit,
-): (@Composable () -> Unit)? =
-    when (action) {
+): (@Composable () -> Unit)? {
+    // A message that names a downloadable module zip (wrong variant, outdated
+    // version, …) gets a download button; otherwise fall back to its action tag.
+    message.downloadArtifact?.let { artifact ->
+        return { ModuleDownloadButton(artifact) }
+    }
+    return when (message.action) {
         DashboardMessageAction.ContactAuthor -> ({ ContactAuthorButton(onClick = onContactAuthor) })
         DashboardMessageAction.OpenDiagnostics -> ({ DetailsButton(onClick = onOpenDiagnostics) })
         null -> null
     }
+}
 
 @Composable
 private fun DetailsButton(onClick: () -> Unit) {
@@ -1014,6 +1021,28 @@ private fun ModuleBadge(
     }
 }
 
+private const val GITHUB_RELEASES_PAGE = "https://github.com/okhsunrog/vpnhide/releases"
+
+/** Direct download of an asset from the latest release. GitHub redirects
+ * `/releases/latest/download/<asset>` to the current release's asset, so the URL
+ * stays correct without hard-coding a tag or version — we always point at the
+ * latest published release (§ releasing.md). */
+private fun releaseAssetUrl(artifact: String): String = "$GITHUB_RELEASES_PAGE/latest/download/$artifact"
+
+private fun Context.openUrl(url: String) {
+    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+}
+
+/** Compact "download this zip" button for a module-problem banner (wrong variant,
+ * outdated version, …) — grabs the exact named artifact from the latest release. */
+@Composable
+private fun ModuleDownloadButton(artifact: String) {
+    val context = LocalContext.current
+    EnhancedOutlinedButton(onClick = { context.openUrl(releaseAssetUrl(artifact)) }) {
+        Text(stringResource(R.string.dashboard_install_recommendation_download, artifact))
+    }
+}
+
 @Composable
 private fun NativeInstallRecommendationCard(recommendation: NativeInstallRecommendation) {
     val containerColor =
@@ -1122,6 +1151,24 @@ private fun NativeInstallRecommendationCard(recommendation: NativeInstallRecomme
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
             )
+            // Bright primary: one-tap download of the exact recommended zip.
+            // Plain secondary: the full releases page, for the ambiguous-variant
+            // case (grab the alternative) or picking anything else.
+            Spacer(Modifier.height(12.dp))
+            val context = LocalContext.current
+            EnhancedButton(
+                onClick = { context.openUrl(releaseAssetUrl(recommendation.recommendedArtifact)) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.dashboard_install_recommendation_download, recommendation.recommendedArtifact))
+            }
+            Spacer(Modifier.height(6.dp))
+            EnhancedOutlinedButton(
+                onClick = { context.openUrl(GITHUB_RELEASES_PAGE) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.dashboard_install_recommendation_all_releases))
+            }
         }
     }
 }

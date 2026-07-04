@@ -53,6 +53,10 @@ enum class ModuleBrokenReason {
 internal data class ModuleProblem(
     val reason: ModuleBrokenReason?,
     val text: String,
+    // The zip to offer for one-tap download when the fix is re-flashing a specific
+    // artifact (wrong/unknown/unsupported variant, ambiguous load). Null for
+    // problems no download fixes (kprobes missing, signature enforcement).
+    val downloadArtifact: String? = null,
 )
 
 sealed interface LsposedState {
@@ -240,6 +244,9 @@ internal data class DashboardMessage(
     val severity: DashboardMessageSeverity,
     val text: String,
     val action: DashboardMessageAction? = null,
+    // When set, the banner renders a "download this zip" button that grabs this
+    // named artifact from the latest release (wrong variant, outdated module, …).
+    val downloadArtifact: String? = null,
 )
 
 internal data class DashboardState(
@@ -767,6 +774,14 @@ private fun renderKmodProblem(
 ): ModuleProblem =
     ModuleProblem(
         reason = kind.reason,
+        downloadArtifact =
+            when (kind) {
+                is KmodProblemKind.UnsupportedKernel -> kind.recommendedArtifact
+                is KmodProblemKind.WrongVariant -> kind.recommendedArtifact
+                is KmodProblemKind.UnknownVariant -> kind.recommendedArtifact
+                is KmodProblemKind.AmbiguousLoadFailed -> kind.tryArtifact.takeIf { it.endsWith(".zip") }
+                else -> null
+            },
         text =
             when (kind) {
                 KmodProblemKind.KprobesMissing -> {
@@ -1217,12 +1232,18 @@ internal suspend fun loadDashboardState(
     val res = context.resources
     val selfPkg = context.packageName
 
-    fun err(text: String) {
-        messages += DashboardMessage(DashboardMessageSeverity.ERROR, text)
+    fun err(
+        text: String,
+        downloadArtifact: String? = null,
+    ) {
+        messages += DashboardMessage(DashboardMessageSeverity.ERROR, text, downloadArtifact = downloadArtifact)
     }
 
-    fun warn(text: String) {
-        messages += DashboardMessage(DashboardMessageSeverity.WARNING, text)
+    fun warn(
+        text: String,
+        downloadArtifact: String? = null,
+    ) {
+        messages += DashboardMessage(DashboardMessageSeverity.WARNING, text, downloadArtifact = downloadArtifact)
     }
 
     fun info(
@@ -1457,7 +1478,26 @@ internal suspend fun loadDashboardState(
             } else {
                 null
             }
-        warn(buildModuleVersionIssue(res, mismatch.kind, mismatch.moduleVersion, mismatch.appVersion, recommendedArtifact))
+        // Offer the newer module for one-tap download only when the installed
+        // module is OLDER than the app (module newer means the app is behind — the
+        // fix there is updating the app, not re-flashing the module).
+        val moduleOlder =
+            (compareSemver(baseVersion(mismatch.moduleVersion), baseVersion(mismatch.appVersion)) ?: 0) < 0
+        val downloadArtifact =
+            if (moduleOlder) {
+                when (mismatch.kind) {
+                    FlashableModuleKind.Kmod -> recommendedArtifact
+                    FlashableModuleKind.Kpm -> "vpnhide-kpm.zip"
+                    FlashableModuleKind.Zygisk -> "vpnhide-zygisk.zip"
+                    FlashableModuleKind.Ports -> "vpnhide-ports.zip"
+                }
+            } else {
+                null
+            }
+        warn(
+            buildModuleVersionIssue(res, mismatch.kind, mismatch.moduleVersion, mismatch.appVersion, recommendedArtifact),
+            downloadArtifact = downloadArtifact,
+        )
     }
     val totalTargets = lsposedTargetCount + kmodTargetCount + kpmTargetCount + zygiskTargetCount
     if (totalTargets == 0) {
@@ -1639,7 +1679,7 @@ internal suspend fun loadDashboardState(
     // because both come from the same value. classifyKpmProblem only matches
     // runtime=activator, so this can never double up with the
     // conflict/awaiting-superkey warnings below.
-    kmodProblem?.let { err(it.text) }
+    kmodProblem?.let { err(it.text, it.downloadArtifact) }
     kpmProblem?.let { err(it.text) }
 
     // ── Protection checks ──

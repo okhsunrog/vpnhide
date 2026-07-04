@@ -237,13 +237,15 @@
     <string name="dashboard_install_recommendation_device">Your device: %1$s, kernel %2$s</string>
     <string name="dashboard_install_recommendation_kmi_note">\"%1$s\" in the kernel version is the GKI Kernel Module Interface tag — it identifies the kernel\'s binary interface to modules, not your Android OS release.</string>
     <string name="dashboard_install_recommendation_kmod">Kernel module is recommended. Download %1$s.</string>
-    <string name="dashboard_install_recommendation_kmod_ambiguous">Kernel module is recommended. Your kernel\'s GKI branch isn\'t identifiable from uname -r, so try %1$s first; if it doesn\'t load after reboot, install %2$s instead.</string>
+    <string name="dashboard_install_recommendation_kmod_ambiguous">Kernel module is recommended. Your kernel\'s GKI branch isn\'t identifiable from uname -r, so try %1$s first; if it doesn\'t load into the kernel after reboot, install %2$s instead.</string>
     <string name="dashboard_install_recommendation_zygisk">Kernel module is not supported for your device. Install %1$s.</string>
     <string name="dashboard_install_recommendation_zygisk_warning">Banking and payment apps may detect Zygisk hooks when Native is enabled for them. Leave Native off for those apps and rely on LSPosed (Java-level) hiding.</string>
     <string name="dashboard_install_recommendation_kpm">KPM (beta) is recommended for your kernel — a single universal module that hides at the kernel level, invisible to anti-tamper. Download %1$s.</string>
     <string name="dashboard_install_recommendation_kpm_needs_runtime">KPM (beta) is recommended for your kernel — kernel-level hiding, invisible to anti-tamper. It needs the KPatch-Next-Module installed first. If you\'d rather not install that, use vpnhide-zygisk.zip instead. KPM artifact: %1$s.</string>
     <string name="dashboard_install_recommendation_kpm_beta_note">KPM is experimental (beta). If something doesn\'t work, you can fall back to Zygisk and contact the author.</string>
-    <string name="dashboard_install_recommendation_kmod_kpm_alt">The kernel module is the stable, most-tested choice. KPM (beta) is an alternative — one universal module, no GKI variant to match — useful if the kmod zip won\'t load.</string>
+    <string name="dashboard_install_recommendation_kmod_kpm_alt">The kernel module is the stable, most-tested choice. KPM (beta) is an alternative — one universal module, no GKI variant to match — useful if the kernel module won\'t load into your kernel (wrong variant, or the kernel enforces module signatures).</string>
+    <string name="dashboard_install_recommendation_download">Download %1$s</string>
+    <string name="dashboard_install_recommendation_all_releases">All releases</string>
     <string name="dashboard_issue_kpm_capable_but_zygisk">Your kernel supports the stealthier KPM (beta), but only Zygisk is installed. Zygisk is detectable by banking/payment apps; KPM hides at the kernel level. Consider installing %1$s.</string>
     <string name="dashboard_issue_kpm_experimental_kmod">The KPM backend is experimental (beta) and currently active. If you hit problems, try the kernel module (kmod) instead, and please contact the author.</string>
     <string name="dashboard_issue_kpm_experimental_zygisk">The KPM backend is experimental (beta) and currently active. If you hit problems, try Zygisk instead, and please contact the author.</string>

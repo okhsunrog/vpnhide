@@ -208,13 +208,15 @@
     <string name="dashboard_install_recommendation_device">Ваше устройство: %1$s, ядро %2$s</string>
     <string name="dashboard_install_recommendation_kmi_note">«%1$s» в версии ядра — это GKI Kernel Module Interface, обозначающий бинарный интерфейс ядра для модулей, а не версию Android на устройстве.</string>
     <string name="dashboard_install_recommendation_kmod">Рекомендуется модуль ядра. Скачайте %1$s.</string>
-    <string name="dashboard_install_recommendation_kmod_ambiguous">Рекомендуется модуль ядра. GKI-ветку вашего ядра не удаётся определить из uname -r, поэтому сначала попробуйте %1$s; если после перезагрузки он не загрузится — установите %2$s.</string>
+    <string name="dashboard_install_recommendation_kmod_ambiguous">Рекомендуется модуль ядра. GKI-ветку вашего ядра не удаётся определить из uname -r, поэтому сначала попробуйте %1$s; если после перезагрузки он не загрузится в ядро — установите %2$s.</string>
     <string name="dashboard_install_recommendation_zygisk">Для вашего устройства модуль ядра не поддерживается. Установите %1$s.</string>
     <string name="dashboard_install_recommendation_zygisk_warning">Банковские и платёжные приложения могут обнаруживать Zygisk-хуки, если для них включён Native. Для таких приложений оставьте Native выключенным и полагайтесь на LSPosed (Java-уровень).</string>
     <string name="dashboard_install_recommendation_kpm">Для вашего ядра рекомендуется KPM (бета) — единый универсальный модуль, скрывающий VPN на уровне ядра, невидимый для анти-тампер проверок. Скачайте %1$s.</string>
     <string name="dashboard_install_recommendation_kpm_needs_runtime">Для вашего ядра рекомендуется KPM (бета) — скрытие на уровне ядра, невидимое для анти-тампер проверок. Сначала нужно установить KPatch-Next-Module. Если не хотите его ставить — используйте vpnhide-zygisk.zip. Файл KPM: %1$s.</string>
     <string name="dashboard_install_recommendation_kpm_beta_note">KPM экспериментальный (бета). Если что-то не работает — можно вернуться на Zygisk и связаться с автором.</string>
-    <string name="dashboard_install_recommendation_kmod_kpm_alt">Модуль ядра — стабильное и наиболее протестированное решение. KPM (бета) — альтернатива: один универсальный модуль без привязки к GKI-варианту, полезен, если zip с kmod не загружается.</string>
+    <string name="dashboard_install_recommendation_kmod_kpm_alt">Модуль ядра — стабильное и наиболее протестированное решение. KPM (бета) — альтернатива: один универсальный модуль без привязки к GKI-варианту; полезен, если модуль ядра не загружается в ваше ядро (неподходящий вариант или ядро требует подписанные модули).</string>
+    <string name="dashboard_install_recommendation_download">Скачать %1$s</string>
+    <string name="dashboard_install_recommendation_all_releases">Все релизы</string>
     <string name="dashboard_issue_kpm_capable_but_zygisk">Ваше ядро поддерживает более скрытный KPM (бета), но установлен только Zygisk. Банковские и платёжные приложения могут обнаруживать Zygisk; KPM скрывает VPN на уровне ядра. Стоит установить %1$s.</string>
     <string name="dashboard_issue_kpm_experimental_kmod">KPM пока экспериментальный (бета) и сейчас активен. При проблемах попробуйте модуль ядра (kmod) и, пожалуйста, свяжитесь с автором.</string>
     <string name="dashboard_issue_kpm_experimental_zygisk">KPM пока экспериментальный (бета) и сейчас активен. При проблемах попробуйте Zygisk и, пожалуйста, свяжитесь с автором.</string>
