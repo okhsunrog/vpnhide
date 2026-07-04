@@ -718,8 +718,10 @@ fn check_netlink_getrule_uid(myuid: u32) -> CheckOutput {
         // fib_rule_hdr shares Rtmsg's 12-byte layout (family + 7 u8 + u32 flags).
         let mut on_rule = |b: &[u8], offset: usize, msg_len: usize| {
             total += 1;
-            let frh =
-                &*(b.as_ptr().add(offset + std::mem::size_of::<libc::nlmsghdr>()) as *const Rtmsg);
+            let frh = &*(b
+                .as_ptr()
+                .add(offset + std::mem::size_of::<libc::nlmsghdr>())
+                as *const Rtmsg);
             // The low byte of the table id lives in the header; the full u32
             // arrives in FRA_TABLE (Android tun tables are > 255).
             let mut table = frh.rtm_table as u32;
@@ -727,8 +729,11 @@ fn check_netlink_getrule_uid(myuid: u32) -> CheckOutput {
             let mut uid_hi = 0u32;
             let mut has_uidrange = false;
             let mut iface_hit: Option<String> = None;
-            for_each_rtattr(b, offset + hdr_plus_rtmsg, offset + msg_len, |rta, payload| {
-                match rta.rta_type {
+            for_each_rtattr(
+                b,
+                offset + hdr_plus_rtmsg,
+                offset + msg_len,
+                |rta, payload| match rta.rta_type {
                     FRA_IIFNAME | FRA_OIFNAME if !payload.is_empty() => {
                         let name = cstr_to_str(payload.as_ptr() as *const libc::c_char);
                         if is_vpn_iface(&name) {
@@ -744,8 +749,8 @@ fn check_netlink_getrule_uid(myuid: u32) -> CheckOutput {
                         has_uidrange = true;
                     }
                     _ => {}
-                }
-            });
+                },
+            );
             // Mirror fib_nl_fill_rule: a rule leaks the VPN if it names a VPN
             // interface, or steers this very UID into a non-standard table (the
             // per-app tun policy rule). The 0..u32::MAX range is the catch-all
@@ -932,8 +937,10 @@ fn uid_routed_through_vpn(myuid: u32) -> (bool, String) {
         let hdr_plus_rtmsg = std::mem::size_of::<libc::nlmsghdr>() + std::mem::size_of::<Rtmsg>();
 
         let mut on_rule = |b: &[u8], offset: usize, msg_len: usize| {
-            let frh =
-                &*(b.as_ptr().add(offset + std::mem::size_of::<libc::nlmsghdr>()) as *const Rtmsg);
+            let frh = &*(b
+                .as_ptr()
+                .add(offset + std::mem::size_of::<libc::nlmsghdr>())
+                as *const Rtmsg);
             let mut r = GateRule {
                 table: frh.rtm_table as u32,
                 uid_lo: 0,
@@ -941,8 +948,11 @@ fn uid_routed_through_vpn(myuid: u32) -> (bool, String) {
                 has_uidrange: false,
                 oif_vpn: false,
             };
-            for_each_rtattr(b, offset + hdr_plus_rtmsg, offset + msg_len, |rta, payload| {
-                match rta.rta_type {
+            for_each_rtattr(
+                b,
+                offset + hdr_plus_rtmsg,
+                offset + msg_len,
+                |rta, payload| match rta.rta_type {
                     FRA_OIFNAME if !payload.is_empty() => {
                         let name = cstr_to_str(payload.as_ptr() as *const libc::c_char);
                         if is_vpn_iface(&name) {
@@ -958,8 +968,8 @@ fn uid_routed_through_vpn(myuid: u32) -> (bool, String) {
                         r.has_uidrange = true;
                     }
                     _ => {}
-                }
-            });
+                },
+            );
             rules.push(r);
         };
 
@@ -1009,8 +1019,10 @@ pub extern "system" fn Java_dev_okhsunrog_vpnhide_checks_NativeProbe_runAllCheck
     mut env: jni::EnvUnowned<'local>,
     _class: jni::objects::JClass<'local>,
 ) -> jni::objects::JString<'local> {
-    env.with_env(|env| -> jni::errors::Result<jni::objects::JString<'local>> {
-        env.new_string(run_all_json())
-    })
+    env.with_env(
+        |env| -> jni::errors::Result<jni::objects::JString<'local>> {
+            env.new_string(run_all_json())
+        },
+    )
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }

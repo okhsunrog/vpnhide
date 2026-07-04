@@ -73,7 +73,15 @@ val rustSdkDir =
         (fromProps ?: System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT"))?.let(::file)
             ?: error("Android SDK not found: set sdk.dir in local.properties or ANDROID_HOME.")
     }
-val rustNdkDir = rustSdkDir.resolve("ndk/$rustNdkVersion").absolutePath
+// Prefer an explicit NDK env (ANDROID_NDK_HOME/_ROOT) the way the zygisk build
+// does — the CI image installs the NDK standalone at $ANDROID_NDK_HOME, not under
+// $SDK/ndk/<version>. Fall back to the SDK-managed path for local dev.
+val rustNdkDir =
+    (System.getenv("ANDROID_NDK_HOME") ?: System.getenv("ANDROID_NDK_ROOT"))
+        ?.let(::file)
+        ?.takeIf { it.isDirectory }
+        ?.absolutePath
+        ?: rustSdkDir.resolve("ndk/$rustNdkVersion").absolutePath
 val nativeCrateDir = projectDir.parentFile.resolve("native")
 val rustAssetsOut = rustAssetsDir.get().asFile
 
