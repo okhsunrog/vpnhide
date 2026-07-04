@@ -50,11 +50,11 @@ internal fun <T : TargetEntry> targetListSections(
     return listOf(
         TargetListSection(
             group = TargetListGroup.Configured,
-            entries = entries.filter { it.anySelected },
+            entries = entries.filter { it.groupSelected },
         ),
         TargetListSection(
             group = TargetListGroup.OtherApps,
-            entries = entries.filterNot { it.anySelected },
+            entries = entries.filterNot { it.groupSelected },
         ),
     ).filter { it.entries.isNotEmpty() }
 }
@@ -90,7 +90,7 @@ internal fun firstVisibleTargetLabel(
 private fun <T : TargetEntry> targetEntryComparator(sortMode: TargetListSortMode): Comparator<T> =
     when (sortMode) {
         TargetListSortMode.ConfiguredFirst -> {
-            compareBy<T> { if (it.anySelected) 0 else 1 }
+            compareBy<T> { if (it.groupSelected) 0 else 1 }
                 .then(labelComparator())
         }
 

@@ -31,6 +31,27 @@ class TargetPickerDataTest {
     }
 
     @Test
+    fun `configured first groups by saved state while rows have unsaved edits`() {
+        val visible =
+            visibleTargetEntries(
+                entries =
+                    listOf(
+                        target("com.configured", "Configured", selected = false, groupSelected = true),
+                        target("com.other", "Other", selected = true, groupSelected = false),
+                    ),
+                searchQuery = "",
+                showSystem = false,
+                showRussianOnly = false,
+                sortMode = TargetListSortMode.ConfiguredFirst,
+            )
+
+        val sections = targetListSections(visible, TargetListSortMode.ConfiguredFirst)
+        assertEquals(listOf(TargetListGroup.Configured, TargetListGroup.OtherApps), sections.map { it.group })
+        assertEquals(listOf("Configured"), sections[0].entries.map { it.label })
+        assertEquals(listOf("Other"), sections[1].entries.map { it.label })
+    }
+
+    @Test
     fun `alphabetical sort ignores configured state`() {
         val visible =
             visibleTargetEntries(
@@ -111,12 +132,14 @@ class TargetPickerDataTest {
         label: String,
         selected: Boolean = false,
         isSystem: Boolean = false,
+        groupSelected: Boolean = selected,
     ): TestTarget =
         TestTarget(
             packageName = packageName,
             label = label,
             isSystem = isSystem,
             selected = selected,
+            groupSelected = groupSelected,
         )
 
     private data class TestTarget(
@@ -124,6 +147,7 @@ class TargetPickerDataTest {
         override val label: String,
         override val isSystem: Boolean,
         val selected: Boolean,
+        override val groupSelected: Boolean,
     ) : TargetEntry {
         override val icon: Drawable? = null
         override val userIds: List<Int> = emptyList()

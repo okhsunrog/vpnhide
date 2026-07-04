@@ -79,6 +79,7 @@ internal data class AppEntry(
     val portPolicy: PortPolicy? = null,
     val declaresVpnService: Boolean = false,
     val nameContainsVpn: Boolean = false,
+    override val groupSelected: Boolean = java || native || appHiding || ports,
 ) : TargetEntry {
     override val anySelected get() = java || native || appHiding || ports
 }

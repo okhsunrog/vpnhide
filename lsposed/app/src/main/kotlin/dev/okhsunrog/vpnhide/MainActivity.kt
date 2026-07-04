@@ -371,6 +371,10 @@ private fun MainScreen() {
             searchQuery = ""
         }
     }
+    BackHandler(enabled = searchActive && currentTab == Tab.Protection) {
+        searchActive = false
+        searchQuery = ""
+    }
 
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) {

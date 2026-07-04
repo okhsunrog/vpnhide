@@ -83,6 +83,10 @@ internal interface TargetEntry {
      * "keep selected system apps visible even when system apps are hidden"
      * filter rule and the system-app filter exemption. */
     val anySelected: Boolean
+
+    /** Selection state from the last loaded/saved config. Unsaved edits should
+     * not move rows between Configured and Other apps before the user saves. */
+    val groupSelected: Boolean get() = anySelected
 }
 
 /** Result of merging the cached app list with a screen's target snapshot.
