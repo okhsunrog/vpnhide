@@ -44,7 +44,7 @@ const PORTS_LOAD_LOG: &str = "/data/adb/vpnhide_ports/load_log";
 const MAX_NATIVE_TARGETS: usize = MAX_TARGET_UIDS;
 const PM_READY_ATTEMPTS: u32 = 60;
 const APATCH_SUPERCALL_NR: c_long = 45;
-const APATCH_SUPERCALL_DEFAULT_VERSION_CODE: c_long = 0x000d02;
+const APATCH_SUPERCALL_DEFAULT_VERSION_CODE: c_long = 0x000d00;
 const APATCH_SUPERCALL_MAGIC: c_long = 0x1158;
 const APATCH_TRUSTED_SU_KEY: &str = "su";
 const SUPERCALL_HELLO: c_long = 0x1000;
@@ -53,7 +53,7 @@ const SUPERCALL_KPM_LOAD: c_long = 0x1020;
 const SUPERCALL_KPM_CONTROL: c_long = 0x1022;
 const SUPERCALL_KPM_LIST: c_long = 0x1031;
 const APATCH_SUPERCALL_VERSION_FALLBACKS: &[c_long] = &[
-    0x000d01, 0x000d00, 0x000c02, 0x000c01, 0x000c00, 0x000b01, 0x000b00, 0x000a05,
+    0x000d02, 0x000d01, 0x000c02, 0x000c01, 0x000c00, 0x000b01, 0x000b00, 0x000a05,
 ];
 
 unsafe extern "C" {
@@ -1809,6 +1809,10 @@ mod tests {
     #[test]
     fn apatch_command_candidates_include_current_and_folkpatch_versions() {
         let candidates = apatch_command_candidates();
+        assert_eq!(
+            candidates.first(),
+            Some(&ApatchCommandStyle::Versioned(0x000d00))
+        );
         assert!(candidates.contains(&ApatchCommandStyle::Versioned(0x000d02)));
         assert!(candidates.contains(&ApatchCommandStyle::Versioned(0x000d01)));
         assert!(candidates.contains(&ApatchCommandStyle::Versioned(0x000d00)));
