@@ -92,6 +92,29 @@ internal fun filterHiddenAppStates(
         HiddenAppsFilter.Excluded -> states.filter { it.excluded }
     }
 
+internal fun visibleHiddenAppStates(
+    savedStates: List<HiddenAppState>,
+    draftStates: List<HiddenAppState>,
+    filter: HiddenAppsFilter,
+    searchQuery: String,
+    labelsByPackage: Map<String, String>,
+): List<HiddenAppState> {
+    val draftByPackage = draftStates.associateBy { it.packageName }
+    val query = searchQuery.trim().lowercase()
+    return filterHiddenAppStates(savedStates, filter)
+        .filter { state ->
+            val label = labelsByPackage[state.packageName]
+            query.isEmpty() ||
+                state.packageName.lowercase().contains(query) ||
+                label?.lowercase()?.contains(query) == true
+        }.sortedWith(
+            compareBy<HiddenAppState> { !it.hidden }
+                .thenBy { labelsByPackage[it.packageName]?.lowercase() ?: it.packageName },
+        ).map { state ->
+            draftByPackage[state.packageName] ?: state
+        }
+}
+
 internal fun updateHiddenAppsConfig(
     config: CanonicalConfig,
     selfPkg: String,

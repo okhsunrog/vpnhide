@@ -103,4 +103,45 @@ class HiddenAppsDataTest {
         assertFalse(updated.apps.containsKey("com.vpn"))
         assertEquals(setOf("com.vpn"), updated.settings.autoHideExcludedPackages)
     }
+
+    @Test
+    fun `visible hidden app states keep saved position while showing draft checkbox state`() {
+        val saved =
+            listOf(
+                HiddenAppState(
+                    packageName = "com.vpn",
+                    manual = false,
+                    automatic = true,
+                    excluded = false,
+                    reasons = listOf(AutoHideReason.VpnService),
+                    unavailable = false,
+                ),
+                HiddenAppState(
+                    packageName = "com.bank",
+                    manual = false,
+                    automatic = false,
+                    excluded = false,
+                    reasons = emptyList(),
+                    unavailable = false,
+                ),
+            )
+        val draft =
+            listOf(
+                saved[0].copy(automatic = false, excluded = true),
+                saved[1],
+            )
+
+        val visible =
+            visibleHiddenAppStates(
+                savedStates = saved,
+                draftStates = draft,
+                filter = HiddenAppsFilter.Automatic,
+                searchQuery = "",
+                labelsByPackage = mapOf("com.vpn" to "VPN Client", "com.bank" to "Bank"),
+            )
+
+        assertEquals(listOf("com.vpn"), visible.map { it.packageName })
+        assertFalse(visible.single().hidden)
+        assertTrue(visible.single().excluded)
+    }
 }

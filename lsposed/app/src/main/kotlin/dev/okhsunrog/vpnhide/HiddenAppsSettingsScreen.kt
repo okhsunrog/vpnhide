@@ -133,19 +133,16 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
         }
     val summary = remember(states) { hiddenAppsSummary(states) }
     val appsByPackage = remember(appList) { appList.orEmpty().associateBy { it.packageName } }
+    val labelsByPackage = remember(appList) { appList.orEmpty().associate { it.packageName to it.label } }
     val visibleStates =
-        remember(states, filter, query, appsByPackage) {
-            val q = query.trim().lowercase()
-            filterHiddenAppStates(states, filter)
-                .filter { state ->
-                    val app = appsByPackage[state.packageName]
-                    q.isEmpty() ||
-                        state.packageName.lowercase().contains(q) ||
-                        app?.label?.lowercase()?.contains(q) == true
-                }.sortedWith(
-                    compareBy<HiddenAppState> { !it.hidden }
-                        .thenBy { appsByPackage[it.packageName]?.label?.lowercase() ?: it.packageName },
-                )
+        remember(baseStates, states, filter, query, labelsByPackage) {
+            visibleHiddenAppStates(
+                savedStates = baseStates,
+                draftStates = states,
+                filter = filter,
+                searchQuery = query,
+                labelsByPackage = labelsByPackage,
+            )
         }
     val dirty = selectedManual != initialManual || excludedPackages != initialExcluded
 
