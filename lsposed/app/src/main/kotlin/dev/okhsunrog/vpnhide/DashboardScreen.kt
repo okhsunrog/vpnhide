@@ -684,32 +684,40 @@ private fun layerSummaryAccent(layer: LayerStatus): Color =
 @Composable
 private fun nativeSummaryText(protection: ProtectionCheck): String =
     when (protection) {
-        ProtectionCheck.NoVpn -> stringResource(R.string.dashboard_hero_vpnoff_title)
-        ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> stringResource(R.string.dashboard_protection_unknown)
-        is ProtectionCheck.Checked -> layerSummaryText(protection.native)
+        // VPN off / app not in the tunnel / needs restart: the layer wasn't measured, so the
+        // tile just reads "not checked" — the hero and banner carry the actual reason.
+        ProtectionCheck.NoVpn, ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> {
+            stringResource(R.string.dashboard_protection_unknown)
+        }
+
+        is ProtectionCheck.Checked -> {
+            layerSummaryText(protection.native)
+        }
     }
 
 @Composable
 private fun nativeSummaryAccent(protection: ProtectionCheck): Color =
     when (protection) {
-        ProtectionCheck.NoVpn -> StatusColors.infoAccent
-        ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> StatusColors.warningAccent
+        ProtectionCheck.NoVpn, ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> MaterialTheme.colorScheme.onSurfaceVariant
         is ProtectionCheck.Checked -> layerSummaryAccent(protection.native)
     }
 
 @Composable
 private fun javaSummaryText(protection: ProtectionCheck): String =
     when (protection) {
-        ProtectionCheck.NoVpn -> stringResource(R.string.dashboard_hero_vpnoff_title)
-        ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> stringResource(R.string.dashboard_protection_unknown)
-        is ProtectionCheck.Checked -> layerSummaryText(protection.java)
+        ProtectionCheck.NoVpn, ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> {
+            stringResource(R.string.dashboard_protection_unknown)
+        }
+
+        is ProtectionCheck.Checked -> {
+            layerSummaryText(protection.java)
+        }
     }
 
 @Composable
 private fun javaSummaryAccent(protection: ProtectionCheck): Color =
     when (protection) {
-        ProtectionCheck.NoVpn -> StatusColors.infoAccent
-        ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> StatusColors.warningAccent
+        ProtectionCheck.NoVpn, ProtectionCheck.NeedsRestart, ProtectionCheck.SelfNotRouted -> MaterialTheme.colorScheme.onSurfaceVariant
         is ProtectionCheck.Checked -> layerSummaryAccent(protection.java)
     }
 
