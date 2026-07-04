@@ -24,7 +24,6 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
@@ -226,25 +225,37 @@ private fun AppTopBarTitle(currentTab: Tab) {
             Tab.Statistics -> stringResource(R.string.tab_statistics)
             Tab.Protection -> stringResource(R.string.tab_protection)
         }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            painter = painterResource(R.drawable.topbar_mark),
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(46.dp),
-        )
-        Spacer(Modifier.width(12.dp))
-        Column {
-            Text(
-                text = stringResource(R.string.app_name),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
+    // The full-size brand block (logo + wordmark) wants ~190dp. Material3's
+    // TopAppBar hands the title only the width left over after the action
+    // buttons, so on very narrow / high-density screens that slot shrinks.
+    // Scale the logo and the two text lines down together (never below 70%) so
+    // the brand stays on a single line instead of wrapping.
+    BoxWithConstraints {
+        val scale = (maxWidth.value / 200f).coerceIn(0.6f, 1f)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                painter = painterResource(R.drawable.topbar_mark),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(46.dp * scale),
             )
-            Text(
-                text = tabLabel,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Spacer(Modifier.width(12.dp * scale))
+            Column {
+                Text(
+                    text = stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontSize = MaterialTheme.typography.headlineSmall.fontSize * scale,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                Text(
+                    text = tabLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontSize = MaterialTheme.typography.labelLarge.fontSize * scale,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
@@ -299,7 +310,6 @@ private fun MainScreen() {
     var showSystem by remember { mutableStateOf(false) }
     var showRussianOnly by remember { mutableStateOf(false) }
     var targetSortMode by remember { mutableStateOf(TargetListSortMode.ConfiguredFirst) }
-    var showFilterMenu by remember { mutableStateOf(false) }
     val appListLoading by AppListCache.loading.collectAsState()
     val targetsLoading by TargetsCache.loading.collectAsState()
     val dashboardLoading by DashboardCache.loading.collectAsState()
@@ -432,7 +442,7 @@ private fun MainScreen() {
                     modifier = Modifier.fillMaxWidth(),
                 ) {}
             } else {
-                LargeTopAppBar(
+                TopAppBar(
                     title = { AppTopBarTitle(currentTab) },
                     colors =
                         TopAppBarDefaults.topAppBarColors(
@@ -480,72 +490,15 @@ private fun MainScreen() {
                                     }
                                 }
                             if (currentTab == Tab.Protection) {
+                                // Filters (system / RU / sort) now live as chips in
+                                // the Apps list itself — see TargetFilterChips. Only
+                                // Search stays in the bar, so the 4-button crowding
+                                // on narrow/high-density screens is gone.
                                 TopBarActionButton(onClick = { searchActive = true }) {
                                     Icon(
                                         Icons.Default.Search,
                                         contentDescription = null,
                                     )
-                                }
-                                Box {
-                                    val anyFilterActive =
-                                        showSystem ||
-                                            showRussianOnly ||
-                                            targetSortMode != TargetListSortMode.ConfiguredFirst
-                                    TopBarActionButton(
-                                        onClick = { showFilterMenu = true },
-                                        active = anyFilterActive,
-                                    ) {
-                                        Icon(
-                                            Icons.Default.FilterList,
-                                            contentDescription = null,
-                                        )
-                                    }
-                                    DropdownMenu(
-                                        expanded = showFilterMenu,
-                                        onDismissRequest = { showFilterMenu = false },
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.filter_show_system)) },
-                                            onClick = { showSystem = !showSystem },
-                                            leadingIcon = {
-                                                Checkbox(
-                                                    checked = showSystem,
-                                                    onCheckedChange = null,
-                                                )
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.filter_russian_only)) },
-                                            onClick = { showRussianOnly = !showRussianOnly },
-                                            leadingIcon = {
-                                                Checkbox(
-                                                    checked = showRussianOnly,
-                                                    onCheckedChange = null,
-                                                )
-                                            },
-                                        )
-                                        HorizontalDivider()
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.sort_configured_first)) },
-                                            onClick = { targetSortMode = TargetListSortMode.ConfiguredFirst },
-                                            leadingIcon = {
-                                                RadioButton(
-                                                    selected = targetSortMode == TargetListSortMode.ConfiguredFirst,
-                                                    onClick = null,
-                                                )
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.sort_alphabetical)) },
-                                            onClick = { targetSortMode = TargetListSortMode.Alphabetical },
-                                            leadingIcon = {
-                                                RadioButton(
-                                                    selected = targetSortMode == TargetListSortMode.Alphabetical,
-                                                    onClick = null,
-                                                )
-                                            },
-                                        )
-                                    }
                                 }
                             }
                             TopBarActionButton(
@@ -678,6 +631,9 @@ private fun MainScreen() {
                             showSystem = showSystem,
                             showRussianOnly = showRussianOnly,
                             sortMode = targetSortMode,
+                            onToggleSystem = { showSystem = !showSystem },
+                            onToggleRussianOnly = { showRussianOnly = !showRussianOnly },
+                            onSortModeChange = { targetSortMode = it },
                             modifier = Modifier.padding(innerPadding),
                         )
                     }
@@ -693,7 +649,7 @@ private fun StartupLoadingScreen() {
     Scaffold(
         containerColor = AppColors.screenBackground,
         topBar = {
-            LargeTopAppBar(
+            TopAppBar(
                 title = { AppTopBarTitle(Tab.Dashboard) },
                 colors =
                     TopAppBarDefaults.topAppBarColors(

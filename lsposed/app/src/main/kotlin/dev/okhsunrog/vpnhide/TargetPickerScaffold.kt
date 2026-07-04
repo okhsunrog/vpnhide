@@ -5,6 +5,7 @@ import android.graphics.drawable.Drawable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -28,9 +29,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -131,6 +134,9 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     showSystem: Boolean,
     showRussianOnly: Boolean,
     sortMode: TargetListSortMode,
+    onToggleSystem: () -> Unit,
+    onToggleRussianOnly: () -> Unit,
+    onSortModeChange: (TargetListSortMode) -> Unit,
     modifier: Modifier,
     helpPrefKey: String,
     helpTitle: String,
@@ -259,6 +265,17 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                             }
                         }
                     }
+                    item(key = "filters") {
+                        TargetFilterChips(
+                            showSystem = showSystem,
+                            showRussianOnly = showRussianOnly,
+                            sortMode = sortMode,
+                            onToggleSystem = onToggleSystem,
+                            onToggleRussianOnly = onToggleRussianOnly,
+                            onSortModeChange = onSortModeChange,
+                            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 4.dp),
+                        )
+                    }
                     visibleSections.forEach { section ->
                         section.group?.let { group ->
                             item(key = "group_${group.name}") {
@@ -375,6 +392,59 @@ private fun TargetGroupHeader(
                 .fillMaxWidth()
                 .padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 6.dp),
     )
+}
+
+/**
+ * Filter chips shown inline above the Apps list: sort order, show-system, and
+ * RU-only. These used to be a top-bar filter dropdown; moving them into the
+ * list frees the app bar so its remaining actions (Search, Refresh, Settings)
+ * fit on narrow / high-density screens without crowding. The row scrolls
+ * horizontally so the chips always stay on a single line (never wrap).
+ */
+@Composable
+internal fun TargetFilterChips(
+    showSystem: Boolean,
+    showRussianOnly: Boolean,
+    sortMode: TargetListSortMode,
+    onToggleSystem: () -> Unit,
+    onToggleRussianOnly: () -> Unit,
+    onSortModeChange: (TargetListSortMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val configuredFirst = sortMode == TargetListSortMode.ConfiguredFirst
+    Row(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // "Configured first" sort is the default, so its chip is selected out of
+        // the box; tapping it off falls back to alphabetical order.
+        FilterChip(
+            selected = configuredFirst,
+            onClick = {
+                onSortModeChange(
+                    if (configuredFirst) {
+                        TargetListSortMode.Alphabetical
+                    } else {
+                        TargetListSortMode.ConfiguredFirst
+                    },
+                )
+            },
+            label = { Text(stringResource(R.string.sort_configured_first)) },
+        )
+        FilterChip(
+            selected = showSystem,
+            onClick = onToggleSystem,
+            label = { Text(stringResource(R.string.filter_show_system)) },
+        )
+        FilterChip(
+            selected = showRussianOnly,
+            onClick = onToggleRussianOnly,
+            label = { Text(stringResource(R.string.filter_russian_only)) },
+        )
+    }
 }
 
 /**

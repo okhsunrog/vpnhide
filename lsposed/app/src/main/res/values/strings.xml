@@ -13,10 +13,9 @@
     <string name="btn_cancel">Cancel</string>
     <string name="action_refresh">Refresh</string>
     <string name="search_placeholder">Search apps&#8230;</string>
-    <string name="filter_show_system">Show system apps</string>
-    <string name="filter_russian_only">Russian apps only</string>
+    <string name="filter_show_system">System</string>
+    <string name="filter_russian_only">Russian</string>
     <string name="sort_configured_first">Configured first</string>
-    <string name="sort_alphabetical">Alphabetical</string>
     <string name="target_group_configured">Configured</string>
     <string name="target_group_other_apps">Other apps</string>
     <string name="target_group_header">%1$s · %2$d</string>

@@ -13,10 +13,9 @@
     <string name="btn_cancel">Отмена</string>
     <string name="action_refresh">Обновить</string>
     <string name="search_placeholder">Поиск приложений&#8230;</string>
-    <string name="filter_show_system">Показать системные приложения</string>
-    <string name="filter_russian_only">Только российские</string>
+    <string name="filter_show_system">Системные</string>
+    <string name="filter_russian_only">Российские</string>
     <string name="sort_configured_first">Сначала настроенные</string>
-    <string name="sort_alphabetical">По алфавиту</string>
     <string name="target_group_configured">Настроенные</string>
     <string name="target_group_other_apps">Остальные приложения</string>
     <string name="target_group_header">%1$s · %2$d</string>

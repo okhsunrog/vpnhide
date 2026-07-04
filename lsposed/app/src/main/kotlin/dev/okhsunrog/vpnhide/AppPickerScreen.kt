@@ -92,6 +92,9 @@ internal fun AppPickerScreen(
     showSystem: Boolean,
     showRussianOnly: Boolean,
     sortMode: TargetListSortMode,
+    onToggleSystem: () -> Unit,
+    onToggleRussianOnly: () -> Unit,
+    onSortModeChange: (TargetListSortMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     TargetPickerScreen(
@@ -99,6 +102,9 @@ internal fun AppPickerScreen(
         showSystem = showSystem,
         showRussianOnly = showRussianOnly,
         sortMode = sortMode,
+        onToggleSystem = onToggleSystem,
+        onToggleRussianOnly = onToggleRussianOnly,
+        onSortModeChange = onSortModeChange,
         modifier = modifier,
         helpPrefKey = "apps_unified",
         helpTitle = stringResource(R.string.apps_help_title),
