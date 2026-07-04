@@ -36,6 +36,7 @@ After this script succeeds:
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -139,6 +140,25 @@ def patch_all_sources(version: str, version_code: int, *, dry_run: bool) -> None
     update_gradle_kts(REPO_ROOT / "lsposed/app/build.gradle.kts", vc, dry_run=dry_run)
 
 
+def sync_cargo_locks() -> None:
+    """Refresh the workspace members' versions in the committed Cargo.lock files.
+
+    We just rewrote the crates' `version = "..."` in Cargo.toml. Without also
+    updating Cargo.lock, the first `cargo build` in CI rewrites the lock, which
+    dirties the working tree — so `git describe --dirty` stamps every artifact
+    "X.Y.Z-dirty". `cargo update --offline --workspace` only bumps the workspace
+    members' own versions (no registry access, no dependency churn).
+    """
+    for lock_dir in (REPO_ROOT, REPO_ROOT / "lsposed" / "native"):
+        subprocess.run(
+            ["cargo", "update", "--offline", "--workspace"],
+            cwd=lock_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+
 def write_version_file(version: str) -> None:
     (REPO_ROOT / "VERSION").write_text(f"{version}\n", encoding="utf-8")
 
@@ -216,6 +236,11 @@ def main() -> int:
     console.print("  [green]✓[/green] zygisk/Cargo.toml")
     console.print("  [green]✓[/green] lsposed/native/Cargo.toml")
     console.print("  [green]✓[/green] lsposed/app/build.gradle.kts")
+
+    # Keep Cargo.lock in step with the bumped Cargo.toml versions so the release
+    # build starts from a clean tree (otherwise every artifact gets "-dirty").
+    sync_cargo_locks()
+    console.print("  [green]✓[/green] Cargo.lock (+ lsposed/native)")
 
     console.print()
     console.print("[bold]Next steps:[/bold]")

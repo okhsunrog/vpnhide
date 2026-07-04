@@ -101,7 +101,9 @@ val buildRustProbe =
             "-t", "arm64-v8a",
             "-P", "29",
             "-o", rustJniLibsDir.get().asFile.absolutePath,
-            "build", "--release",
+            // --locked: fail if Cargo.lock drifted rather than rewriting it (a
+            // dirtied tree stamps the build "-dirty" via git describe --dirty).
+            "build", "--release", "--locked",
         )
         // Locals (not top-level script vals) so the doLast action captures only
         // File values — required for configuration-cache serialization.

@@ -45,9 +45,10 @@ def main() -> int:
     env["ANDROID_NDK_HOME"] = android_ndk_home
     env["CARGO_TARGET_DIR"] = str(target_dir)
 
-    # Build the cdylib for arm64-v8a
+    # Build the cdylib for arm64-v8a. --locked: fail if Cargo.lock drifted
+    # rather than rewriting it (a dirtied tree stamps artifacts "-dirty").
     subprocess.run(
-        ["cargo", "ndk", "-t", "arm64-v8a", "build", "--release"],
+        ["cargo", "ndk", "-t", "arm64-v8a", "build", "--release", "--locked"],
         env=env,
         check=True,
     )

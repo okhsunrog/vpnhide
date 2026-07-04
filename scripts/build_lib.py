@@ -126,6 +126,10 @@ def build_activator_bin(
             "arm64-v8a",
             "build",
             "--release",
+            # Fail loudly if Cargo.lock is out of sync instead of silently
+            # rewriting it — a rewritten lock dirties the tree and stamps every
+            # artifact "X.Y.Z-dirty" via git describe --dirty.
+            "--locked",
             "-p",
             "vpnhide_activator",
             "--bin",
