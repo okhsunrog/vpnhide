@@ -110,7 +110,6 @@
     <string name="dashboard_protection_fail">Не работает</string>
     <string name="dashboard_protection_unknown">Не проверено</string>
     <string name="dashboard_protection_no_module">Нет модуля</string>
-    <string name="dashboard_protection_hooks_inactive">Хуки неактивны</string>
     <string name="dashboard_protection_not_active">Не активен</string>
     <string name="dashboard_needs_restart">VPN Hide только что включил скрытие для самого себя. Принудительно остановите VPN Hide и откройте снова, чтобы проверить скрытие — перезагрузка устройства не нужна.</string>
     <string name="vpn_off_prompt">VPN не активен. Включите его и нажмите «Повторить», чтобы проверить скрытие.</string>
@@ -350,9 +349,6 @@
     <string name="logcat_recording_status">● Запись · %1$s · %2$s</string>
     <string name="logcat_last_recording">Последняя запись · %1$s · %2$s</string>
     <string name="summary_format">%1$d/%2$d пройдено</string>
-    <string name="badge_pass">ОК</string>
-    <string name="badge_fail">ПРОВАЛ</string>
-    <string name="badge_info">ИНФО</string>
     <!-- Статус проверки в диагностике: цветная точка + короткое слово (кто скрыл VPN на этом векторе). -->
     <string name="diag_status_ok">ОК</string>
     <string name="diag_status_leak">Утечка</string>

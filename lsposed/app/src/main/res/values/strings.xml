@@ -88,9 +88,6 @@
     <string name="logcat_btn_stop">Stop and save</string>
     <string name="logcat_recording_status">● Recording · %1$s · %2$s</string>
     <string name="logcat_last_recording">Last recording · %1$s · %2$s</string>
-    <string name="badge_pass">PASS</string>
-    <string name="badge_fail">FAIL</string>
-    <string name="badge_info">INFO</string>
     <!-- Diagnostics per-check status: coloured dot + short word (who hid the VPN on this vector). -->
     <string name="diag_status_ok">OK</string>
     <string name="diag_status_selinux" translatable="false">SELinux</string>
@@ -151,7 +148,6 @@
     <string name="dashboard_protection_fail">Not working</string>
     <string name="dashboard_protection_unknown">Not checked</string>
     <string name="dashboard_protection_no_module">No module</string>
-    <string name="dashboard_protection_hooks_inactive">Hooks inactive</string>
     <string name="dashboard_protection_not_active">Not active</string>
     <string name="dashboard_needs_restart">VPN Hide just enabled hiding for itself. Restart VPN Hide (force-stop and reopen) to check hiding — no device reboot needed.</string>
     <string name="vpn_off_prompt">No active VPN. Turn it on, then tap Retry to run the hiding checks.</string>
