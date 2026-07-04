@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -33,6 +34,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -40,6 +42,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -260,6 +263,59 @@ private fun AppTopBarTitle(currentTab: Tab) {
     }
 }
 
+/**
+ * Brand block (logo + wordmark + tab label) for the main header, able to grow.
+ * [progress] 0 = compact (single-line bar, same as everywhere), 1 = airy (big
+ * logo dropped below the pinned action buttons — used only on the Dashboard on
+ * tall screens). It also keeps the narrow-screen down-scaling of the compact
+ * state so nothing wraps on small widths.
+ */
+@Composable
+private fun AppHeaderBrand(
+    currentTab: Tab,
+    progress: Float,
+    modifier: Modifier = Modifier,
+) {
+    val tabLabel =
+        when (currentTab) {
+            Tab.Dashboard -> stringResource(R.string.tab_dashboard)
+            Tab.Statistics -> stringResource(R.string.tab_statistics)
+            Tab.Protection -> stringResource(R.string.tab_protection)
+        }
+    BoxWithConstraints(modifier) {
+        val narrowScale = (maxWidth.value / 200f).coerceIn(0.6f, 1f)
+        val logoSize = lerp(38.dp * narrowScale, 58.dp, progress)
+        val titleSize = MaterialTheme.typography.headlineSmall.fontSize * narrowScale * (1f + 0.28f * progress)
+        val subSize = MaterialTheme.typography.labelLarge.fontSize * narrowScale * (1f + 0.12f * progress)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                painter = painterResource(R.drawable.topbar_mark),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(logoSize),
+            )
+            Spacer(Modifier.width(lerp(12.dp, 16.dp, progress)))
+            Column {
+                Text(
+                    text = stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontSize = titleSize,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+                Text(
+                    text = tabLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontSize = subSize,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun TopBarActionButton(
     onClick: () -> Unit,
@@ -442,18 +498,46 @@ private fun MainScreen() {
                     modifier = Modifier.fillMaxWidth(),
                 ) {}
             } else {
-                TopAppBar(
-                    title = { AppTopBarTitle(currentTab) },
-                    colors =
-                        TopAppBarDefaults.topAppBarColors(
-                            containerColor = AppColors.topBarContainer,
-                            scrolledContainerColor = AppColors.topBarScrolledContainer,
-                            titleContentColor = MaterialTheme.colorScheme.onSurface,
-                            actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    actions = {
+                // Dashboard on a tall screen gets an "airy" header: the brand
+                // grows and drops below the (fixed) action buttons. Everywhere
+                // else — and on short screens — it stays the compact single row.
+                // The whole thing morphs via `headerProgress` on tab switch.
+                val airy =
+                    currentTab == Tab.Dashboard &&
+                        LocalConfiguration.current.screenHeightDp >= 760
+                val headerProgress by animateFloatAsState(
+                    targetValue = if (airy) 1f else 0f,
+                    animationSpec = tween(durationMillis = 300),
+                    label = "headerAiry",
+                )
+                // Room the brand must leave for the pinned buttons in the compact
+                // state (2 actions normally, 3 on Protection with Search).
+                val actionReserve = ((if (currentTab == Tab.Protection) 3 else 2) * 52 + 24).dp
+                Surface(color = AppColors.topBarContainer) {
+                    Box(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding(),
+                    ) {
+                        AppHeaderBrand(
+                            currentTab = currentTab,
+                            progress = headerProgress,
+                            modifier =
+                                Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(
+                                        start = 16.dp,
+                                        top = lerp(13.dp, 32.dp, headerProgress),
+                                        bottom = lerp(13.dp, 22.dp, headerProgress),
+                                        end = lerp(actionReserve, 12.dp, headerProgress),
+                                    ),
+                        )
                         Row(
-                            modifier = Modifier.padding(end = 16.dp),
+                            modifier =
+                                Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 10.dp, end = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -536,8 +620,8 @@ private fun MainScreen() {
                                 )
                             }
                         }
-                    },
-                )
+                    }
+                }
             }
         },
         bottomBar = {
