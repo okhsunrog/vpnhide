@@ -48,6 +48,7 @@ internal fun removeConfiguredPackages(
         settings =
             config.settings.copy(
                 autoHiddenPackages = (config.settings.autoHiddenPackages - removable).toSortedSet(),
+                autoHideExcludedPackages = (config.settings.autoHideExcludedPackages - removable).toSortedSet(),
             ),
     )
 }

@@ -19,6 +19,7 @@ internal data class CanonicalSettings(
     val rememberSuperkey: Boolean = false,
     val autoHideVpnServices: Boolean = true,
     val autoHideVpnName: Boolean = false,
+    val autoHideExcludedPackages: Set<String> = emptySet(),
     val autoHiddenPackages: Set<String> = emptySet(),
 )
 
@@ -150,6 +151,7 @@ internal fun parseCanonicalConfig(raw: String): CanonicalConfig? {
                 autoHideVpnName =
                     settingsJson?.optBoolean("autoHideVpnName", defaultSettings.autoHideVpnName)
                         ?: defaultSettings.autoHideVpnName,
+                autoHideExcludedPackages = parseStringSet(settingsJson?.optJSONArray("autoHideExcludedPackages")),
                 autoHiddenPackages = parseStringSet(settingsJson?.optJSONArray("autoHiddenPackages")),
             ),
     )
@@ -394,6 +396,12 @@ internal fun canonicalConfigJson(config: CanonicalConfig): String =
         append("    \"autoHideVpnName\": ")
         append(config.settings.autoHideVpnName)
         append(",\n")
+        append("    \"autoHideExcludedPackages\": [")
+        config.settings.autoHideExcludedPackages.toSortedSet().forEachIndexed { index, pkg ->
+            if (index != 0) append(", ")
+            appendJsonString(pkg)
+        }
+        append("],\n")
         append("    \"autoHiddenPackages\": [")
         config.settings.autoHiddenPackages.toSortedSet().forEachIndexed { index, pkg ->
             if (index != 0) append(", ")

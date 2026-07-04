@@ -56,6 +56,26 @@ class SettingsDataTest {
     }
 
     @Test
+    fun `remove configured packages also clears auto hide exclusions`() {
+        val config =
+            CanonicalConfig(
+                apps =
+                    mapOf(
+                        "com.keep" to CanonicalApp(hidden = true),
+                        "com.remove" to CanonicalApp(hidden = true),
+                    ),
+                settings =
+                    CanonicalSettings(
+                        autoHideExcludedPackages = setOf("com.keep", "com.remove"),
+                    ),
+            )
+
+        val updated = removeConfiguredPackages(config, packages = setOf("com.remove"), selfPkg = self)
+
+        assertEquals(setOf("com.keep"), updated.settings.autoHideExcludedPackages)
+    }
+
+    @Test
     fun `package list export keeps source-specific package ids sorted and excludes self`() {
         val config =
             CanonicalConfig(

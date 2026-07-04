@@ -34,7 +34,8 @@ internal fun resolveAutoHiddenPackages(
         .filter {
             (settings.autoHideVpnServices && it.declaresVpnService) ||
                 (settings.autoHideVpnName && it.nameContainsVpn)
-        }.mapTo(sortedSetOf()) { it.packageName }
+        }.filter { it.packageName !in settings.autoHideExcludedPackages }
+        .mapTo(sortedSetOf()) { it.packageName }
 
 internal data class AppRoleSelection(
     val packageName: String,

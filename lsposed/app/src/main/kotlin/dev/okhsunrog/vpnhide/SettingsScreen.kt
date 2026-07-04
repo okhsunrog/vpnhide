@@ -48,7 +48,6 @@ import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -100,12 +99,17 @@ fun SettingsScreen(
     val settings = LocalSettingsState.current
     val interactor = LocalSettingsInteractor.current
     var diagnosticsOpen by remember { mutableStateOf(false) }
+    var hiddenAppsOpen by remember { mutableStateOf(false) }
 
     if (diagnosticsOpen) {
         DiagnosticsSettingsScreen(
             selfNeedsRestart = selfNeedsRestart,
             onBack = { diagnosticsOpen = false },
         )
+        return
+    }
+    if (hiddenAppsOpen) {
+        HiddenAppsSettingsScreen(onBack = { hiddenAppsOpen = false })
         return
     }
 
@@ -230,7 +234,7 @@ fun SettingsScreen(
             }
 
             UpdatesSettingsSection()
-            AutoHideSettingsSection()
+            AutoHideSettingsSection(onOpenHiddenApps = { hiddenAppsOpen = true })
             DiagnosticsSettingsSection(onOpen = { diagnosticsOpen = true })
             DebugToolsSettingsSection(selfNeedsRestart = selfNeedsRestart)
             ConfigBackupSection()
@@ -921,15 +925,13 @@ private fun importConfigFromUri(
 }
 
 @Composable
-private fun AutoHideSettingsSection() {
+private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val targets by TargetsCache.snapshot.collectAsState()
     val apps by AppListCache.apps.collectAsState()
-    val userNames by AppListCache.userNames.collectAsState()
     var saving by remember { mutableStateOf<AutoHideSetting?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
-    var manualDialogOpen by remember { mutableStateOf(false) }
     var unavailableDialogOpen by remember { mutableStateOf(false) }
     val savedMessage = stringResource(R.string.settings_auto_hide_saved)
     val failedMessage = stringResource(R.string.settings_auto_hide_failed)
@@ -937,7 +939,22 @@ private fun AutoHideSettingsSection() {
     val unavailableFailedMessage = stringResource(R.string.settings_unavailable_configured_failed)
     val canonical = targets?.let(::buildCanonicalConfigFromTargetsSnapshot)
     val settings = canonical?.settings ?: CanonicalSettings()
-    val manualHidden = canonical?.let { manualHiddenPackages(it, context.packageName) }.orEmpty()
+    val hiddenSummary =
+        remember(canonical, apps, context.packageName) {
+            val cfg = canonical
+            val appList = apps
+            if (cfg == null || appList == null) {
+                null
+            } else {
+                hiddenAppsSummary(
+                    hiddenAppStates(
+                        config = cfg,
+                        selfPkg = context.packageName,
+                        signals = appList.map(AppSummary::toAutoHideSignal),
+                    ),
+                )
+            }
+        }
     val unavailableConfigured =
         remember(canonical, apps, context.packageName) {
             val cfg = canonical
@@ -966,21 +983,6 @@ private fun AutoHideSettingsSection() {
             saving = null
             status = if (exit == 0) savedMessage else failedMessage
             if (exit == 0) {
-                TargetsCache.refreshAfterSave(scope, context)
-            }
-        }
-    }
-
-    fun updateManualHidden(selectedPackages: Set<String>) {
-        saving = AutoHideSetting.ManualHidden
-        status = null
-        val appSignals = apps.orEmpty()
-        scope.launch {
-            val exit = withContext(Dispatchers.IO) { writeManualHiddenApps(context, appSignals, selectedPackages) }
-            saving = null
-            status = if (exit == 0) savedMessage else failedMessage
-            if (exit == 0) {
-                manualDialogOpen = false
                 TargetsCache.refreshAfterSave(scope, context)
             }
         }
@@ -1032,13 +1034,16 @@ private fun AutoHideSettingsSection() {
             },
         )
         PreferenceRow(
-            title = stringResource(R.string.settings_manual_hidden_apps),
-            subtitle = stringResource(R.string.settings_manual_hidden_apps_sub, manualHidden.size),
+            title = stringResource(R.string.settings_hidden_apps),
+            subtitle =
+                hiddenSummary?.let {
+                    stringResource(R.string.settings_hidden_apps_sub, it.hidden, it.automatic, it.manual)
+                } ?: stringResource(R.string.settings_unavailable_configured_loading),
             icon = Icons.Default.VisibilityOff,
             index = 2,
             count = 4,
             enabled = canWrite,
-            onClick = { manualDialogOpen = true },
+            onClick = onOpenHiddenApps,
         )
         PreferenceRow(
             title = stringResource(R.string.settings_unavailable_configured_title),
@@ -1064,17 +1069,6 @@ private fun AutoHideSettingsSection() {
         }
     }
 
-    if (manualDialogOpen) {
-        ManualHiddenAppsDialog(
-            apps = apps.orEmpty(),
-            userNames = userNames,
-            initialSelected = manualHidden,
-            saving = saving == AutoHideSetting.ManualHidden,
-            onDismiss = { if (saving != AutoHideSetting.ManualHidden) manualDialogOpen = false },
-            onSave = ::updateManualHidden,
-        )
-    }
-
     if (unavailableDialogOpen) {
         UnavailableConfiguredAppsDialog(
             apps = unavailableConfigured,
@@ -1089,7 +1083,6 @@ private fun AutoHideSettingsSection() {
 private enum class AutoHideSetting {
     VpnService,
     VpnName,
-    ManualHidden,
     UnavailableConfigured,
 }
 
@@ -1224,137 +1217,6 @@ private fun writeRemoveUnavailableConfiguredApps(
         RootSnapshotCache.invalidate()
         DashboardCache.invalidate()
         StatisticsCache.invalidate()
-    }
-    return exit
-}
-
-@Composable
-private fun ManualHiddenAppsDialog(
-    apps: List<AppSummary>,
-    userNames: Map<Int, String>,
-    initialSelected: Set<String>,
-    saving: Boolean,
-    onDismiss: () -> Unit,
-    onSave: (Set<String>) -> Unit,
-) {
-    var selected by remember(initialSelected) { mutableStateOf(initialSelected) }
-    var query by remember { mutableStateOf("") }
-    val filteredApps =
-        remember(apps, query, selected) {
-            val q = query.trim().lowercase()
-            apps
-                .filter { app ->
-                    q.isEmpty() ||
-                        app.label.lowercase().contains(q) ||
-                        app.packageName.lowercase().contains(q)
-                }.sortedWith(compareByDescending<AppSummary> { it.packageName in selected }.thenBy { it.label.lowercase() })
-        }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.settings_manual_hidden_apps)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text(stringResource(R.string.search_placeholder)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                    items(filteredApps, key = { it.packageName }) { app ->
-                        val checked = app.packageName in selected
-                        ManualHiddenAppRow(
-                            app = app,
-                            userNames = userNames,
-                            checked = checked,
-                            onCheckedChange = { enabled ->
-                                selected =
-                                    if (enabled) {
-                                        selected + app.packageName
-                                    } else {
-                                        selected - app.packageName
-                                    }
-                            },
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(selected) }, enabled = !saving) {
-                Text(stringResource(R.string.btn_save))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !saving) {
-                Text(stringResource(R.string.btn_cancel))
-            }
-        },
-    )
-}
-
-@Composable
-private fun ManualHiddenAppRow(
-    app: AppSummary,
-    userNames: Map<Int, String>,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .clickable { onCheckedChange(!checked) }
-                .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Checkbox(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = labelWithUsers(app.label, app.userIds, userNames),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                text = app.packageName,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-private fun writeManualHiddenApps(
-    context: android.content.Context,
-    apps: List<AppSummary>,
-    selectedManualHiddenPackages: Set<String>,
-): Int {
-    val snapshot = TargetsCache.snapshot.value
-    val base =
-        snapshot?.let(::buildCanonicalConfigFromTargetsSnapshot)
-            ?: CanonicalConfig()
-    val canonical =
-        updateManualHiddenPackages(
-            config = base,
-            selfPkg = context.packageName,
-            visiblePackages = apps.mapTo(mutableSetOf()) { it.packageName },
-            selectedManualHiddenPackages = selectedManualHiddenPackages,
-            signals = apps.map(AppSummary::toAutoHideSignal),
-        )
-    val cmd =
-        listOf(
-            buildCanonicalConfigWriteCommand(canonical),
-            ConfigChannels.reconcileCommand(),
-        ).joinToString(" && ")
-    val (exit, _) = suExec(cmd)
-    if (exit == 0) {
-        RootSnapshotCache.invalidate()
-        DashboardCache.invalidate()
     }
     return exit
 }

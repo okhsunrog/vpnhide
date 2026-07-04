@@ -59,6 +59,7 @@ class StorageConfigTest {
                         "rememberSuperkey": true,
                         "autoHideVpnServices": false,
                         "autoHideVpnName": true,
+                        "autoHideExcludedPackages": ["com.vpn.false_positive"],
                         "autoHiddenPackages": ["com.vpn.client"]
                       }
                     }
@@ -72,6 +73,7 @@ class StorageConfigTest {
                 rememberSuperkey = true,
                 autoHideVpnServices = false,
                 autoHideVpnName = true,
+                autoHideExcludedPackages = setOf("com.vpn.false_positive"),
                 autoHiddenPackages = setOf("com.vpn.client"),
             ),
             cfg.settings,
