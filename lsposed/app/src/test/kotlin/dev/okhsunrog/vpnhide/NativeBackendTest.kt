@@ -199,6 +199,43 @@ class NativeBackendTest {
         assertEquals(false, kpmAwaitingSuperkey("", "boot-1"))
     }
 
+    // ── kpatchRuntimeAvailable ───────────────────────────────────────────
+
+    @Test
+    fun `kpatch runtime available when APatch or FolkPatch directory is present`() {
+        val runtime =
+            """
+            apatch_dir=1
+            superkey_saved=0
+            kpatch_bin=(not found)
+            """.trimIndent()
+        assertEquals(true, kpatchRuntimeAvailable(runtime))
+    }
+
+    @Test
+    fun `kpatch runtime available when KPatch-Next hello succeeds`() {
+        val runtime =
+            """
+            apatch_dir=0
+            superkey_saved=0
+            kpatch_bin=/data/adb/modules/KPatch-Next/bin/kpatch
+            hello_exit=0
+            list_exit=0
+            """.trimIndent()
+        assertEquals(true, kpatchRuntimeAvailable(runtime))
+    }
+
+    @Test
+    fun `kpatch runtime unavailable when neither APatch nor KPatch-Next responds`() {
+        val runtime =
+            """
+            apatch_dir=0
+            superkey_saved=0
+            kpatch_bin=(not found)
+            """.trimIndent()
+        assertEquals(false, kpatchRuntimeAvailable(runtime))
+    }
+
     // ── detectKpmModule ──────────────────────────────────────────────────
 
     @Test

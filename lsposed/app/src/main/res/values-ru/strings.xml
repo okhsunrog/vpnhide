@@ -263,7 +263,7 @@
     <string name="dashboard_issue_kmod_capable_but_zygisk">Ваше ядро поддерживает модуль ядра — он работает в пространстве ядра и невидим для анти-тампер проверок. Zygisk тоже работает, но банковские и платёжные приложения могут обнаружить его хуки, если для них включён Native. Установите %1$s и удалите Zygisk-модуль.</string>
     <string name="dashboard_issue_native_conflict_kernel">Модуль ядра (.ko) и KPM установлены одновременно. Они перехватывают одни и те же функции ядра, и при одновременной работе устройство может полностью зависнуть. Оставьте только один — удалите либо модуль ядра, либо KPM.</string>
     <string name="dashboard_issue_native_conflict_deferred">Модуль ядра (.ko) и KPM установлены одновременно. KPM отключился при загрузке, чтобы не подвесить устройство, и сейчас бездействует. Оставьте только один — удалите KPM (или модуль ядра).</string>
-    <string name="dashboard_issue_kpm_awaiting_superkey">KPM установлен, но не активен: APatch нужен суперключ, чтобы его загрузить. Сохраните его в Настройки → Безопасность и перезагрузитесь для активации нативного скрытия.</string>
+    <string name="dashboard_issue_kpm_awaiting_superkey">KPM установлен, но не активен: APatch/FolkPatch не смог загрузить его через доверенный su-токен. Сохраните SuperKey в Настройки → Безопасность и перезагрузитесь для активации нативного скрытия.</string>
     <string name="dashboard_issue_kpm_activator_missing">Модуль KPM повреждён: отсутствует бинарник активатора (%1$s). Переустановите vpnhide-kpm.zip из последнего релиза.</string>
     <string name="dashboard_issue_kpm_load_failed">KPM установлен, но не загрузился: %1$s. Чтобы приложить полный лог загрузки к отчёту об ошибке, нажмите Настройки → Отладка → Собрать отладочный лог, либо переустановите vpnhide-kpm.zip из последнего релиза.</string>
     <string name="dashboard_issue_multiple_native">Установлено больше одного Native-бэкенда. Активным может быть только один (приоритет: модуль ядра, затем KPM, затем Zygisk), остальные простаивают. Удалите неиспользуемые, чтобы не засорять систему.</string>
@@ -457,9 +457,9 @@
     <string name="settings_auto_hide_saved">Настройки скрытия приложений сохранены.</string>
     <string name="settings_auto_hide_failed">Не удалось обновить настройки скрытия приложений.</string>
     <string name="settings_security">Безопасность</string>
-    <string name="settings_superkey_title">APatch SuperKey</string>
+    <string name="settings_superkey_title">APatch/FolkPatch SuperKey</string>
     <string name="settings_superkey_saved">Сохранён для активации KPM при загрузке.</string>
-    <string name="settings_superkey_not_saved">Не сохранён; APatch KPM нужно активировать из приложения после загрузки.</string>
+    <string name="settings_superkey_not_saved">Не сохранён; APatch/FolkPatch KPM может потребовать активацию из приложения после загрузки, если доверенный su недоступен.</string>
     <string name="settings_superkey_placeholder">SuperKey</string>
     <string name="settings_superkey_store">Сохранить SuperKey</string>
     <string name="settings_superkey_clear">Очистить</string>

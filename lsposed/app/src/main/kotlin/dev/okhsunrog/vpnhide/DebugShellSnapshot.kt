@@ -188,6 +188,7 @@ internal fun buildDebugShellSnapshotCommand(): String =
       echo "ksu_version=${'$'}(cat /data/adb/ksu/version 2>/dev/null || true)"
       echo "ksud_version=${'$'}(ksud --version 2>/dev/null || true)"
       [ -d /data/adb/ap ] && echo "apatch_dir=1" || echo "apatch_dir=0"
+      [ -x /data/adb/apd ] && echo "apd=1" || echo "apd=0"
       [ -d /data/adb/magisk ] && echo "magisk_dir=1" || echo "magisk_dir=0"
       [ -d /data/adb/ksu ] && echo "ksu_dir=1" || echo "ksu_dir=0"
       ls -ldZ /data/adb /data/adb/modules /data/adb/modules_update 2>&1 ||
@@ -257,7 +258,14 @@ internal fun buildDebugShellSnapshotCommand(): String =
     '
     emit_eval kpatch_runtime '
       [ -d /data/adb/ap ] && echo "apatch_dir=1" || echo "apatch_dir=0"
+      [ -x /data/adb/apd ] && echo "apd=1" || echo "apd=0"
       [ -s $SUPERKEY_FILE ] && echo "superkey_saved=1" || echo "superkey_saved=0"
+      if [ -f /data/adb/fp/kpms/kpm_autoload_config.json ]; then
+        echo "folkpatch_kpm_autoload=1"
+        sed -n "1,80p" /data/adb/fp/kpms/kpm_autoload_config.json 2>&1 || true
+      else
+        echo "folkpatch_kpm_autoload=0"
+      fi
       BIN="${'$'}(kpatch_bin 2>/dev/null || true)"
       if [ -n "${'$'}BIN" ]; then
         echo "kpatch_bin=${'$'}BIN"

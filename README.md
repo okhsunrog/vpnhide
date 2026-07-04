@@ -77,7 +77,7 @@ vpnhide скрывает от выбранных приложений три в�
 
 Установите рекомендованный модуль:
 - **kmod:** через KernelSU-Next / KernelSU / Magisk → Модули → Установить из хранилища.
-- **KPM:** установите `vpnhide-kpm.zip`; под APatch приложение может попросить сохранить SuperKey в **Настройки → Безопасность** для активации при загрузке. Под Magisk, KernelSU и KernelSU-Next сначала установите KPatch-Next-Module, если он ещё не установлен.
+- **KPM:** установите `vpnhide-kpm.zip`; под APatch/FolkPatch приложение может попросить сохранить SuperKey в **Настройки → Безопасность** для активации при загрузке, если runtime не выдаёт доверенный `su`-токен KernelPatch. Под Magisk, KernelSU и KernelSU-Next сначала установите KPatch-Next-Module, если он ещё не установлен.
 - **Zygisk:** через KernelSU-Next, KernelSU или Magisk → Модули.
 
 Перезагрузите устройство после установки нативного модуля.

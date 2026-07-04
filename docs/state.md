@@ -78,15 +78,15 @@ module reinstall. They hold binaries and boot scripts, not user-managed config.
 ### `/data/adb/modules/vpnhide_kpm/`
 
 - `module.prop`: module metadata.
-- `post-fs-data.sh`: loads KPM automatically on keyless KPatch-Next; on APatch
-  records `awaiting_superkey` and leaves saved-key load/config to service.
+- `post-fs-data.sh`: loads KPM automatically on keyless KPatch-Next; on
+  APatch/FolkPatch records a deferred status and leaves load/config to service.
 - `service.sh`: starts `activator --boot-wait` in the background.
 - `uninstall.sh`: removes KPM-specific persistent status and legacy targets
   under `/data/adb/vpnhide_kpm/`.
 - `activator`: Rust bin that refuses to run when the `.ko` backend is present,
   reads optional `/data/adb/vpnhide/superkey`, loads/configures KPM through
-  APatch direct supercalls or KPatch-Next `kpatch kpm load` + `kpatch kpm ctl0`
-  (including the standalone KPatch-Next-Module CLI path).
+  APatch/FolkPatch direct supercalls or KPatch-Next `kpatch kpm load` +
+  `kpatch kpm ctl0` (including the standalone KPatch-Next-Module CLI path).
 - `vpnhide.kpm`: KernelPatch module binary.
 
 ### `/data/adb/modules/vpnhide_zygisk/`
@@ -188,10 +188,11 @@ so activator delivers one bounded snapshot.
 ### KPM Supercall Channel
 
 No file or proc node. The KPM activator sends the same `vpnhide 1 config` text
-wire through the KernelPatch KPM ctl0 supercall. On APatch it invokes the
-supercall directly with the saved SuperKey; on KPatch-Next it uses
-`kpatch kpm ctl0` from the runtime's own CLI. Status/stats use the same ctl0
-request/response channel.
+wire through the KernelPatch KPM ctl0 supercall. On APatch/FolkPatch it invokes
+the supercall directly with the saved SuperKey when present, otherwise with the
+runtime's trusted `su` token when that grant is available. On KPatch-Next it
+uses `kpatch kpm ctl0` from the runtime's own CLI. Status/stats use the same
+ctl0 request/response channel.
 
 ### Zygisk Module-Dir `targets.txt`
 
@@ -299,14 +300,15 @@ post-fs-data:
   KPM post-fs-data
     -> refuse if .ko module is installed+enabled
     -> keyless KPatch-Next: load vpnhide.kpm
-    -> APatch: defer to service activator; without saved key, write awaiting_superkey
+    -> APatch/FolkPatch: defer to service activator; service tries saved key,
+       then trusted su token, else writes awaiting_superkey
 
 service:
   kmod / KPM / Zygisk service.sh
     -> start that module's activator with --boot-wait in the background
     -> activator waits for PackageManager to expose dev.okhsunrog.vpnhide
     -> kmod activator also waits for /proc/vpnhide_ctl
-    -> KPM activator uses saved APatch SuperKey when present
+    -> KPM activator uses saved APatch SuperKey or trusted su token when present
     -> activator reads canonical JSON and writes exactly one native channel
   ports service.sh
     -> start background waiter

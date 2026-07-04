@@ -137,14 +137,15 @@ internal fun kpmDeferredForConflict(
 }
 
 /**
- * True when the KPM boot script stood down this boot because it runs under APatch
- * and no superkey is saved yet (`runtime=apatch, loaded=0, detail=awaiting_superkey`
- * for the current boot_id — see kmod/kpm/module/post-fs-data.sh and protocol §1.5).
+ * True when the KPM boot script stood down this boot because it runs under
+ * APatch/FolkPatch and has no usable saved SuperKey or trusted `su` token
+ * (`runtime=apatch, loaded=0, detail=awaiting_superkey` for the current
+ * boot_id — see kmod/kpm/module/service.sh and protocol §1.5).
  *
  * Distinct from [kpmDeferredForConflict] (that writes `runtime=conflict`): here the
- * module is installed and healthy but dormant, waiting for the user to save the
- * APatch superkey in Settings so the service activator can load it. Without this,
- * the dashboard would just show KPM as inactive with no explanation.
+ * module is installed and healthy but dormant, waiting for an APatch SuperKey
+ * in Settings so the service activator can load it. Without this, the dashboard
+ * would just show KPM as inactive with no explanation.
  */
 internal fun kpmAwaitingSuperkey(
     loadStatusSection: String,
@@ -157,6 +158,12 @@ internal fun kpmAwaitingSuperkey(
         load["detail"]?.trim() == "awaiting_superkey" &&
         !bootId.isNullOrEmpty() &&
         bootId == currentBootId.trim()
+}
+
+internal fun kpatchRuntimeAvailable(kpatchRuntimeSection: String): Boolean {
+    val props = parseKeyValueLines(kpatchRuntimeSection)
+    if (props["apatch_dir"]?.trim() == "1") return true
+    return props["hello_exit"]?.trim() == "0"
 }
 
 internal data class PortsApplyProblem(
@@ -1284,9 +1291,9 @@ internal suspend fun loadDashboardState(
     // the "kmod-capable kernel, only zygisk installed" warning (W1), and the
     // wrong-variant detection below.
     val kernelRaw = shellSnapshot["kernel_release"].orEmpty()
-    val kpatchRuntimeAvailable = shellSnapshot["kpatch_runtime"].orEmpty().trim() == "1"
+    val hasKpatchRuntime = kpatchRuntimeAvailable(shellSnapshot["kpatch_runtime"].orEmpty())
     val kernelRecommendation =
-        buildNativeInstallRecommendation(kernelRaw, androidMajorVersionLabel(), kpatchRuntimeAvailable)
+        buildNativeInstallRecommendation(kernelRaw, androidMajorVersionLabel(), hasKpatchRuntime)
     val kmodLoadStatus =
         readKmodLoadStatus(
             currentBootId.trim(),
@@ -1627,9 +1634,9 @@ internal suspend fun loadDashboardState(
         }
     }
 
-    // KPM is installed under APatch but dormant because no superkey is saved yet.
-    // Without this the module just reads as inactive with no reason; tell the user
-    // to save the superkey so the service activator can load it.
+    // KPM is installed under APatch/FolkPatch but dormant because neither a
+    // trusted `su` token nor a saved SuperKey was usable. Without this the module
+    // just reads as inactive with no reason.
     if (kpm is ModuleState.Installed &&
         kpmAwaitingSuperkey(shellSnapshot["kpm_load_status"].orEmpty(), currentBootId)
     ) {

@@ -77,7 +77,7 @@ Open the VPN Hide app. The **Dashboard** tab will detect your device and kernel,
 
 Install the recommended module:
 - **kmod:** via KernelSU-Next / KernelSU / Magisk manager → Modules → Install from storage.
-- **KPM:** install `vpnhide-kpm.zip`; under APatch the app may ask you to save the SuperKey in **Settings → Security** for boot-time activation. Under Magisk, KernelSU, and KernelSU-Next, install KPatch-Next-Module first if it is not already installed.
+- **KPM:** install `vpnhide-kpm.zip`; under APatch/FolkPatch the app may ask you to save the SuperKey in **Settings → Security** for boot-time activation if the runtime does not expose a trusted KernelPatch `su` token. Under Magisk, KernelSU, and KernelSU-Next, install KPatch-Next-Module first if it is not already installed.
 - **Zygisk:** via KernelSU-Next, KernelSU, or Magisk manager → Modules.
 
 Reboot the device after installing the native module.

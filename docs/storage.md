@@ -211,7 +211,7 @@ crates/
     src/lib.rs              # shared core: JSON schema (serde), pkg→uid resolution
                             #   (`pm`), project_native(json) -> String
     src/bin/kmod.rs         #   project_native(json) → write("/proc/vpnhide_ctl")
-    src/bin/kpm.rs          #   project_native(json) → APatch supercall / KPatch-Next `kpatch`
+    src/bin/kpm.rs          #   project_native(json) → APatch/FolkPatch supercall / KPatch-Next `kpatch`
     src/bin/zygisk.rs       #   project_native(json) → write_atomic(module_dir file)
     src/bin/ports.rs        #   project_ports(json) → iptables-restore/ip6tables-restore
 zygisk/                     # cdylib — the injected .so. deps: protocol (+ shadowhook).
@@ -241,7 +241,7 @@ zygisk/                     # cdylib — the injected .so. deps: protocol (+ sha
 | Backend | Channel | Kind | Note |
 |---|---|---|---|
 | kmod | `/proc/vpnhide_ctl` | proc node | write = config (kernel parses to memory); read = status+stats |
-| KPM | KPM ctl0 supercall | supercall | APatch direct supercall or KPatch-Next runtime `kpatch kpm ctl0`; no file |
+| KPM | KPM ctl0 supercall | supercall | APatch/FolkPatch direct supercall or KPatch-Next runtime `kpatch kpm ctl0`; no file |
 | Zygisk | file in its module dir | file | the `.so` reads it via the `get_module_dir()` fd |
 
 Why Zygisk needs a file in its module dir even though there is one canonical: the
@@ -320,7 +320,7 @@ UID-gated — *any* process could invoke it. The **superkey** is the capability 
 that authenticates "may control the kernel patch". So it defends against the same
 **unprivileged** adversary this project already cares about: without it, a non-root
 app could `ctl0` our config or grant itself root. (KPatch-Next `d05` under
-Magisk/KSU is **keyless**; this whole section is **APatch-only**.)
+Magisk/KSU is **keyless**; this whole section is **APatch/FolkPatch-only**.)
 
 - **Default:** session-only, re-prompt each session (APatch's own model).
 - **Optional flag `rememberSuperkey`** (in the canonical `settings`): persist it so
@@ -340,15 +340,18 @@ Magisk/KSU is **keyless**; this whole section is **APatch-only**.)
 - **What it unlocks: APatch boot activation.** With the key on disk, the `kpm`
   activator reads it at boot and uses APatch's KernelPatch supercall ABI directly
   to load/configure the KPM — so APatch reaches **parity with keyless KPatch-Next**
-  (protection active after a reboot, no app open needed). Without the flag, APatch
-  cannot be configured at boot because the KPM supercalls require the real key.
+  (protection active after a reboot, no app open needed). Some FolkPatch/APatch
+  builds expose a trusted `su` token to already-authorized root callers; on those
+  builds the activator can use that token and no saved SuperKey is needed.
+  Without either token, boot records `awaiting_superkey`.
 - **Plain file, not Keystore.** The boot activator is a Rust binary, not an Android
   app, so it cannot call Android Keystore (a framework/binder API). Keystore-wrapping
   could protect the *app-time* use only, not the boot path. So the boot-usable copy
   is a plain file; FBE DE-encryption protects it at rest on a powered-off device.
 - **Threat-model fit:** readable by **root only** (trusted in this project's model),
-  never by unprivileged apps or non-root `adb` (§7). The APatch activator calls the
-  supercall directly, so the key is not passed through an external `kpatch` argv.
+  never by unprivileged apps or non-root `adb` (§7). The APatch/FolkPatch activator
+  calls the supercall directly, so the key is not passed through an external
+  `kpatch` argv.
 
 ---
 
@@ -436,9 +439,9 @@ IPC for the native backends. This document supersedes its statements about the
 - **LSPosed does not consume the wire** — it reads the canonical JSON directly
   (§3). protocol.md's "LSPosed parses its config profile from its file" / the
   LSPosed rows in its channel + profile tables are superseded here.
-- **APatch boot is configurable** when the superkey is persisted (§6); without
-  it, boot records `awaiting_superkey` and activation resumes after the app
-  supplies the key.
+- **APatch/FolkPatch boot is configurable** when the superkey is persisted (§6)
+  or the runtime grants the trusted `su` token; without either, boot records
+  `awaiting_superkey` and activation resumes after the app supplies the key.
 - **The app does not hand-build per-channel configs** — the activator does
   (§4). The serialiser is the Rust `protocol` crate, shared with the Zygisk `.so`.
 

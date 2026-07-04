@@ -7,10 +7,10 @@
 #
 # Runtime split (protocol §7.4):
 #   - KPatch-Next (Magisk / KSU), keyless (d05): load here, fully automatic.
-#   - APatch, superkey-required (c02): post-fs-data has no superkey, so it
-#     records `awaiting_superkey`; service.sh can load/configure later through
-#     the activator's direct supercall path if the app saved
-#     /data/adb/vpnhide/superkey.
+#   - APatch/FolkPatch: post-fs-data records a deferred status; service.sh
+#     can load/configure later through the activator's direct supercall path
+#     with a saved /data/adb/vpnhide/superkey or the runtime's trusted `su`
+#     supercall grant.
 #
 # Single-active guard (protocol §1.5): if the .ko backend is installed, do NOT
 # load the KPM. They wrap the same kernel functions and co-residence freezes
@@ -80,9 +80,9 @@ if [ ! -f "$KPM" ]; then
     exit 1
 fi
 
-# --- APatch (c02): superkey-required, service activator owns load/config ------
+# --- APatch/FolkPatch: service activator owns load/config -------------------
 if [ -d /data/adb/ap ]; then
-    log -t vpnhide "kpm: APatch runtime — deferring load to service activator (superkey)"
+    log -t vpnhide "kpm: APatch/FolkPatch runtime — deferring load to service activator"
     write_status apatch 0 awaiting_superkey
     exit 0
 fi

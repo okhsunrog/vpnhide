@@ -105,9 +105,10 @@ everywhere (target the upstream `kpm.h` ABI).
 
 Supported runtimes — pick whichever matches the device's root:
 
-- **APatch** — KernelPatch is built in; the flashable zip installs as an
-  APatch/APM module, and the vpnhide activator loads/configures `vpnhide.kpm`
-  through direct KernelPatch supercalls with the saved APatch SuperKey.
+- **APatch / FolkPatch** — KernelPatch is built in; the flashable zip installs
+  as an APatch/APM module, and the vpnhide activator loads/configures
+  `vpnhide.kpm` through direct KernelPatch supercalls with the saved APatch
+  SuperKey or the runtime's trusted `su` token when available.
 - **KernelSU-Next** — flash **KPatch-Next** (one module, no switch to APatch).
 - **Magisk or stock KernelSU** — flash the standalone
   [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module).
@@ -120,16 +121,16 @@ Supported runtimes — pick whichever matches the device's root:
 
 Persistence: a one-shot runtime `sc_kpm_load` is **lost on reboot**. The
 vpnhide KPM module therefore ships `vpnhide.kpm` plus boot scripts: KPatch-Next
-loads via its runtime `kpatch` CLI, while APatch defers to the activator and
-uses the saved SuperKey when present.
+loads via its runtime `kpatch` CLI, while APatch/FolkPatch defers to the
+activator and uses the saved SuperKey or trusted `su` token when present.
 
 Targeting / control plane: our target-UID set is delivered via the module's
 own `KPM_CTL0` supercall + load-args (the shape the QEMU harness exercises) —
 this is independent of KPatch-Next's generic `package_config` →
 `kpatch exclude_set <uid>` mechanism. The app stores package roles in
 `/data/system/vpnhide_config.json`; the KPM activator resolves that canonical
-config and pushes the same text wire through APatch direct supercalls or
-KPatch-Next `kpatch kpm ctl0`.
+config and pushes the same text wire through APatch/FolkPatch direct supercalls
+or KPatch-Next `kpatch kpm ctl0`.
 
 ## Safety — read before testing on a device
 

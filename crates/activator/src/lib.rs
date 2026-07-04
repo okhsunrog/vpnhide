@@ -44,15 +44,17 @@ const PORTS_LOAD_LOG: &str = "/data/adb/vpnhide_ports/load_log";
 const MAX_NATIVE_TARGETS: usize = MAX_TARGET_UIDS;
 const PM_READY_ATTEMPTS: u32 = 60;
 const APATCH_SUPERCALL_NR: c_long = 45;
-const APATCH_SUPERCALL_DEFAULT_VERSION_CODE: c_long = 0x000d00;
+const APATCH_SUPERCALL_DEFAULT_VERSION_CODE: c_long = 0x000d02;
 const APATCH_SUPERCALL_MAGIC: c_long = 0x1158;
+const APATCH_TRUSTED_SU_KEY: &str = "su";
 const SUPERCALL_HELLO: c_long = 0x1000;
 const SUPERCALL_HELLO_MAGIC: c_long = 0x11581158;
 const SUPERCALL_KPM_LOAD: c_long = 0x1020;
 const SUPERCALL_KPM_CONTROL: c_long = 0x1022;
 const SUPERCALL_KPM_LIST: c_long = 0x1031;
-const APATCH_SUPERCALL_VERSION_FALLBACKS: &[c_long] =
-    &[0x000c02, 0x000c01, 0x000c00, 0x000b01, 0x000b00, 0x000a05];
+const APATCH_SUPERCALL_VERSION_FALLBACKS: &[c_long] = &[
+    0x000d01, 0x000d00, 0x000c02, 0x000c01, 0x000c00, 0x000b01, 0x000b00, 0x000a05,
+];
 
 unsafe extern "C" {
     fn syscall(num: c_long, ...) -> c_long;
@@ -777,6 +779,17 @@ fn read_superkey() -> Result<String> {
     }
 }
 
+fn apatch_auth_candidates() -> Vec<String> {
+    let mut keys = Vec::new();
+    if let Ok(key) = read_superkey() {
+        keys.push(key);
+    }
+    if !keys.iter().any(|key| key == APATCH_TRUSTED_SU_KEY) {
+        keys.push(APATCH_TRUSTED_SU_KEY.to_owned());
+    }
+    keys
+}
+
 enum KpmClient {
     KpatchCli {
         path: PathBuf,
@@ -790,11 +803,26 @@ enum KpmClient {
 impl KpmClient {
     fn detect() -> Result<Self> {
         if Path::new(APATCH_DIR).is_dir() {
-            let key = read_superkey()
-                .map_err(|e| format!("APatch KPM requires saved superkey at {SUPERKEY_FILE}: {e}"));
-            let key = key?;
-            let style = apatch_probe(&key)?;
-            return Ok(Self::ApatchSupercall { key, style });
+            let mut failures = Vec::new();
+            for key in apatch_auth_candidates() {
+                match apatch_probe(&key) {
+                    Ok(style) => return Ok(Self::ApatchSupercall { key, style }),
+                    Err(e) => {
+                        let label = if key == APATCH_TRUSTED_SU_KEY {
+                            "trusted su"
+                        } else {
+                            "saved key"
+                        };
+                        failures.push(format!("{label}: {e}"));
+                    }
+                }
+            }
+            return Err(format!(
+                "APatch/FolkPatch KPM requires a valid saved superkey at {SUPERKEY_FILE} \
+                 or a trusted '{APATCH_TRUSTED_SU_KEY}' supercall grant (attempts: {})",
+                failures.join("; ")
+            )
+            .into());
         }
         let path = find_kpatch().ok_or("kpatch CLI not found")?;
         kpatch_hello(&path)?;
@@ -1776,6 +1804,21 @@ mod tests {
             0x1000,
         );
         assert_eq!(SUPERCALL_HELLO_MAGIC, 0x11581158);
+    }
+
+    #[test]
+    fn apatch_command_candidates_include_current_and_folkpatch_versions() {
+        let candidates = apatch_command_candidates();
+        assert!(candidates.contains(&ApatchCommandStyle::Versioned(0x000d02)));
+        assert!(candidates.contains(&ApatchCommandStyle::Versioned(0x000d01)));
+        assert!(candidates.contains(&ApatchCommandStyle::Versioned(0x000d00)));
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|style| **style == ApatchCommandStyle::Versioned(0x000d01))
+                .count(),
+            1,
+        );
     }
 
     #[test]

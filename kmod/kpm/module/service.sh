@@ -4,6 +4,7 @@
 
 MODDIR="${0%/*}"
 ACTIVATOR="$MODDIR/activator"
+KPM="$MODDIR/vpnhide.kpm"
 STATUS_DIR="/data/adb/vpnhide_kpm"
 STATUS_FILE="$STATUS_DIR/load_status"
 SUPERKEY_FILE="/data/adb/vpnhide/superkey"
@@ -41,10 +42,10 @@ apply_at_boot() {
         write_status activator 0 "activator missing at $ACTIVATOR"
         return 1
     fi
-    if [ -d /data/adb/ap ] && [ ! -s "$SUPERKEY_FILE" ]; then
-        log -t vpnhide "kpm: APatch runtime — awaiting saved superkey"
-        write_status apatch 0 awaiting_superkey
-        return 0
+    if [ ! -f "$KPM" ]; then
+        log -t vpnhide "kpm: KPM missing at $KPM"
+        write_status activator 0 "vpnhide.kpm missing at $KPM"
+        return 1
     fi
 
     out="$("$ACTIVATOR" --boot-wait 2>&1)"
@@ -63,6 +64,11 @@ apply_at_boot() {
             ;;
         *)
             log -t vpnhide "kpm: activator failed rc=$rc"
+            if [ -d /data/adb/ap ] && [ ! -s "$SUPERKEY_FILE" ] && \
+               printf '%s' "$out" | grep -q "APatch/FolkPatch KPM requires"; then
+                write_status apatch 0 awaiting_superkey
+                return 0
+            fi
             write_status activator 0 "rc=$rc $out"
             return "$rc"
             ;;
