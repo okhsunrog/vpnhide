@@ -92,6 +92,12 @@ internal object AppListCache : StateCache<List<AppSummary>>(
     private val _userNames = MutableStateFlow<Map<Int, String>>(emptyMap())
     val userNames: StateFlow<Map<Int, String>> = _userNames.asStateFlow()
 
+    // Display names of profiles skipped because they are stopped/locked (a
+    // locked Private Space, a paused work profile) and cannot be enumerated.
+    // The list loads without them; the UI shows a soft notice naming them.
+    private val _lockedProfiles = MutableStateFlow<List<String>>(emptyList())
+    val lockedProfiles: StateFlow<List<String>> = _lockedProfiles.asStateFlow()
+
     @Volatile private var appContext: Context? = null
 
     /** Kick off an initial load if not already loaded or loading. */
@@ -136,6 +142,10 @@ internal object AppListCache : StateCache<List<AppSummary>>(
             val inventory = requireCompletePackageInventory(RootSnapshotCache.getOrLoad().sections)
             _userNames.value =
                 inventory.profiles.mapValues { (_, profile) -> profileDisplayName(appContext, profile) }
+            _lockedProfiles.value =
+                inventory.skippedLockedUserIds.map { id ->
+                    profileDisplayName(appContext, inventory.profiles.getValue(id))
+                }
             inventory.packages.entries
                 .map { (pkg, meta) ->
                     val info = runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull()

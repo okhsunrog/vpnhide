@@ -20,7 +20,15 @@ internal data class PackageInventoryEntry(
 internal data class PackageInventory(
     val packages: Map<String, PackageInventoryEntry>,
     val profiles: Map<Int, UserProfileInfo>,
+    // Running profiles whose package scan genuinely failed — a real problem that
+    // blocks loading (an incomplete list must not be saved and silently drop
+    // targets).
     val failedUserIds: Set<Int>,
+    // Stopped/locked profiles (a locked Private Space, a paused work profile)
+    // whose packages cannot be enumerated. This is expected, not an error: the
+    // rest of the list still loads and the UI shows a soft notice rather than
+    // the blocking failure card.
+    val skippedLockedUserIds: Set<Int>,
     val userListComplete: Boolean,
 ) {
     val complete: Boolean get() = userListComplete && failedUserIds.isEmpty() && packages.isNotEmpty()
@@ -110,12 +118,19 @@ internal fun parsePackageInventory(
     }
 
     val expectedUserIds = profiles.keys
-    val failedUserIds = expectedUserIds.filterTo(sortedSetOf()) { packageStatuses[it] != 0 || it !in usersWithPackages }
+    val notEnumerated = expectedUserIds.filter { packageStatuses[it] != 0 || it !in usersWithPackages }
+    // A stopped/locked profile can never be enumerated by `pm` — treat that as an
+    // expected skip, not a failure. Only a *running* profile that failed to scan
+    // blocks the list. Unknown running state (profiles[it]?.running == null) is
+    // treated as running, so a profile we could not classify still counts.
+    val (skippedLockedUserIds, failedUserIds) =
+        notEnumerated.partition { profiles[it]?.running == false }
     val userListComplete = userListStatuses.any { it == 0 } && expectedUserIds.isNotEmpty()
     return PackageInventory(
         packages = packages.mapValues { (_, entry) -> entry.freeze() },
         profiles = profiles,
-        failedUserIds = failedUserIds,
+        failedUserIds = failedUserIds.toSortedSet(),
+        skippedLockedUserIds = skippedLockedUserIds.toSortedSet(),
         userListComplete = userListComplete,
     )
 }

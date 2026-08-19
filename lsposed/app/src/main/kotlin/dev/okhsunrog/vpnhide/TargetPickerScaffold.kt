@@ -161,6 +161,7 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     val cachedApps by AppListCache.apps.collectAsState()
     val appListError by AppListCache.error.collectAsState()
     val userNames by AppListCache.userNames.collectAsState()
+    val lockedProfiles by AppListCache.lockedProfiles.collectAsState()
     val targets by TargetsCache.snapshot.collectAsState()
     val targetsError by TargetsCache.error.collectAsState()
 
@@ -264,6 +265,18 @@ internal fun <T : TargetEntry> TargetPickerScreen(
         if (appListError != null && cachedApps != null) {
             StatusBanner(
                 text = stringResource(R.string.profile_scan_stale_message),
+                containerColor = StatusColors.warningContainer(),
+                contentColor = StatusColors.warningHeader(),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+        if (lockedProfiles.isNotEmpty()) {
+            StatusBanner(
+                text =
+                    stringResource(
+                        R.string.profile_scan_locked_skipped_message,
+                        lockedProfiles.joinToString(", "),
+                    ),
                 containerColor = StatusColors.warningContainer(),
                 contentColor = StatusColors.warningHeader(),
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),

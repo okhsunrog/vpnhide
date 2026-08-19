@@ -29,6 +29,7 @@
     <string name="profile_scan_failed_title">Couldn’t scan every Android profile</string>
     <string name="profile_scan_failed_message">VPN Hide did not receive a complete app list from one or more profiles. No partial list was loaded. Unlock or start the profile if needed, then tap Retry.</string>
     <string name="profile_scan_stale_message">Couldn’t refresh every Android profile. Showing the previous complete app list; no settings were removed.</string>
+    <string name="profile_scan_locked_skipped_message">A locked or stopped profile (%1$s) was skipped — its apps aren’t shown. Unlock or start it, then tap refresh to include it.</string>
     <string name="apps_help_title">How it works</string>
     <string name="chip_java" translatable="false">J</string>
     <string name="chip_native" translatable="false">N</string>

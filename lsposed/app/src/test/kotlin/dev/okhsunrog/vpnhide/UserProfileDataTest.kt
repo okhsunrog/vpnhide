@@ -1,10 +1,26 @@
 package dev.okhsunrog.vpnhide
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UserProfileDataTest {
+    @Test
+    fun `plain rows carry running state - a stopped or locked profile has no running token`() {
+        val profiles =
+            parseUserProfiles(
+                """
+                Users:
+                	UserInfo{0:Owner:c13} running
+                	UserInfo{10:Private space:1090}
+                """.trimIndent(),
+            )
+        assertTrue(profiles.getValue(0).running)
+        assertFalse(profiles.getValue(10).running)
+    }
+
     @Test
     fun `only android main user can run the app`() {
         assertEquals(true, isMainAppProfile(10_123))

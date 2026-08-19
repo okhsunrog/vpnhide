@@ -37,12 +37,12 @@ class PackageInventoryDataTest {
     }
 
     @Test
-    fun `reports a failed profile instead of accepting a partial list`() {
+    fun `reports a failed running profile instead of accepting a partial list`() {
         val users =
             """
             ${PM_USERS_STATUS_PREFIX}plain:0
-            UserInfo{0:Owner:c13}
-            UserInfo{10:Work:1030}
+            UserInfo{0:Owner:c13} running
+            UserInfo{10:Work:1030} running
             """.trimIndent()
         val packages =
             """
@@ -58,16 +58,17 @@ class PackageInventoryDataTest {
 
         assertFalse(inventory.complete)
         assertEquals(setOf(10), inventory.failedUserIds)
+        assertTrue(inventory.skippedLockedUserIds.isEmpty())
         assertTrue(inventory.incompleteMessage().contains("10"))
     }
 
     @Test
-    fun `successful but empty profile output is incomplete`() {
+    fun `a running profile with empty output is a failure`() {
         val users =
             """
             ${PM_USERS_STATUS_PREFIX}plain:0
-            UserInfo{0:Owner:c13}
-            UserInfo{10:Private:1030}
+            UserInfo{0:Owner:c13} running
+            UserInfo{10:Private:1030} running
             """.trimIndent()
         val packages =
             """
@@ -79,6 +80,36 @@ class PackageInventoryDataTest {
             """.trimIndent()
 
         assertEquals(setOf(10), parsePackageInventory(packages, users).failedUserIds)
+    }
+
+    @Test
+    fun `a stopped or locked profile is skipped, not a failure`() {
+        // No trailing `running` on user 10 — a locked Private Space / paused
+        // work profile whose packages `pm` cannot enumerate. The rest of the
+        // list still loads and it is reported as a soft skip.
+        val users =
+            """
+            ${PM_USERS_STATUS_PREFIX}plain:0
+            Users:
+            UserInfo{0:Owner:c13} running
+            UserInfo{10:Private space:1090}
+            """.trimIndent()
+        val packages =
+            """
+            $PM_USER_BEGIN_PREFIX${0}
+            package:/system/framework/framework-res.apk=android uid:1000
+            $PM_USER_END_PREFIX${0}:0
+            $PM_USER_BEGIN_PREFIX${10}
+            Error: user 10 is not running
+            $PM_USER_END_PREFIX${10}:7
+            """.trimIndent()
+
+        val inventory = parsePackageInventory(packages, users)
+
+        assertTrue(inventory.complete)
+        assertTrue(inventory.failedUserIds.isEmpty())
+        assertEquals(setOf(10), inventory.skippedLockedUserIds)
+        assertFalse(inventory.profiles.getValue(10).running)
     }
 
     @Test

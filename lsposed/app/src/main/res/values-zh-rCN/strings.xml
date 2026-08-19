@@ -30,6 +30,7 @@
     <string name="profile_scan_failed_title">未能扫描全部 Android 用户资料</string>
     <string name="profile_scan_failed_message">VPN Hide 没有从一个或多个用户资料拿到完整的应用列表，也没有加载不完整的列表。如有需要，请先解锁或启动对应资料，再点按“重试”。</string>
     <string name="profile_scan_stale_message">未能刷新全部 Android 用户资料。正在显示上一次的完整应用列表；没有删除任何设置。</string>
+    <string name="profile_scan_locked_skipped_message">已跳过一个锁定或已停止的用户资料（%1$s）——其应用未显示。请解锁或启动它，然后点击刷新以纳入。</string>
     <string name="apps_help_title">工作原理</string>
     <string name="java_hooks_title">Java 钩子</string>
     <string name="native_hooks_title">原生钩子</string>

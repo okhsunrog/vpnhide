@@ -30,6 +30,13 @@ internal data class UserProfileInfo(
     val id: Int,
     val name: String?,
     val kind: UserProfileKind,
+    // Whether the profile is currently running. `pm list users` marks a running
+    // user with a trailing `running` token; a locked Private Space or a paused
+    // work / stopped secondary user has none. A stopped user's packages cannot
+    // be enumerated (`pm list packages --user N` fails), which is expected — the
+    // scan skips it instead of failing the whole list. Unknown ⇒ true, so a
+    // profile we cannot classify is still required (preserves completeness).
+    val running: Boolean = true,
 )
 
 // Verbose row, Android 13+:
@@ -89,14 +96,20 @@ internal fun parseUserProfiles(raw: String): Map<Int, UserProfileInfo> {
         val legacy = legacyUserLine.find(line) ?: return@forEach
         val id = legacy.groupValues[1].toIntOrNull() ?: return@forEach
         val name = normalizeName(legacy.groupValues[2])
+        // The `running` marker trails the closing brace on the plain row
+        // (`UserInfo{10:Work:1030} running`); its absence means the profile is
+        // stopped/locked. The name lives inside the braces, so slicing after
+        // `}` cannot false-match a profile named "running".
+        val running = line.substringAfterLast('}').contains("running")
         val existing = out[id]
         out[id] =
             if (existing == null) {
-                UserProfileInfo(id = id, name = name, kind = UserProfileKind.UNKNOWN)
+                UserProfileInfo(id = id, name = name, kind = UserProfileKind.UNKNOWN, running = running)
             } else {
                 // The verbose row already classified this profile; the plain
-                // row can still supply a name the verbose row printed as null.
-                existing.copy(name = existing.name ?: name)
+                // row can still supply a name the verbose row printed as null,
+                // and it is the authoritative source for the running state.
+                existing.copy(name = existing.name ?: name, running = running)
             }
     }
     return out
