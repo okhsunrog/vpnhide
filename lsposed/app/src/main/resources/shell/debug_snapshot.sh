@@ -184,6 +184,10 @@ emit_eval kmod_module_state 'file_flags $VPNHIDE_KMOD_DIR; hash_file $VPNHIDE_KM
 emit_file kmod_load_status "$VPNHIDE_KMOD_LOAD_STATUS"
 emit_file kmod_load_dmesg "$VPNHIDE_KMOD_LOAD_DMESG"
 emit_eval kmod_state '[ -e $VPNHIDE_PROC_CTL ] && cat $VPNHIDE_PROC_CTL 2>&1 || echo "(missing: $VPNHIDE_PROC_CTL)"'
+# Diagnostic-only companion to the control node: hook masks, kretprobe nmissed
+# counters and the live is_vpn_ifname() verdict per netdev. Never parsed — it is
+# catted verbatim for a human reading a field report.
+emit_eval kmod_diag '[ -e $VPNHIDE_PROC_DIAG ] && cat $VPNHIDE_PROC_DIAG 2>&1 || echo "(missing: $VPNHIDE_PROC_DIAG)"'
 
 emit_file kpm_prop "$VPNHIDE_KPM_DIR"/module.prop
 emit_eval kpm_module_state 'file_flags $VPNHIDE_KPM_DIR; hash_file $VPNHIDE_KPM_DIR/vpnhide.kpm; hash_file $VPNHIDE_KPM_ACTIVATOR; staged_state $VPNHIDE_KPM_DIR'
