@@ -16,7 +16,11 @@ private const val DEBUG_SNAPSHOT_END_PREFIX = "__VPNHIDE_DEBUG_SECTION_END__:"
 // connectivity, ip route show table all, fib_trie, several sha256sum). On a busy
 // device 20s was easy to overrun, which truncated the output mid-section and
 // silently dropped that section and every later one. Give it real headroom.
-private const val DEBUG_SNAPSHOT_TIMEOUT_SEC: Long = 60
+// Bumped from 60s after bundles from bloatware-heavy ROMs came back truncated
+// mid-scan: the per-user package enumeration alone can take most of a minute
+// there, and everything after it was lost. The network sections now run first
+// (debug_snapshot.sh), so this is the backstop rather than the fix.
+private const val DEBUG_SNAPSHOT_TIMEOUT_SEC: Long = 120
 private const val COUNTER_SNAPSHOT_TIMEOUT_SEC: Long = 8
 
 internal fun collectDebugShellSnapshot(): DebugShellSnapshot {

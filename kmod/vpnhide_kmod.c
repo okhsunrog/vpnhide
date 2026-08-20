@@ -110,6 +110,33 @@ module_param(filesystem_hiding, bool, 0400);
 MODULE_PARM_DESC(filesystem_hiding,
 		 "install optional sysfs/proc-sys interface concealment hooks");
 
+#ifndef VPNHIDE_PROBE_MASK_DEFAULT
+#define VPNHIDE_PROBE_MASK_DEFAULT 0xfffu
+#endif
+
+/*
+ * Bitmask gating which hooks vpnhide_kmod registers at module load —
+ * field-debugging bisection only, NOT part of the control protocol and not
+ * writable at runtime (0400: root-only read). Bits 0-9 map 1:1 to the
+ * `probes[]` kretprobe table index below: 0 dev_ioctl, 1 sock_ioctl,
+ * 2 rtnl_fill, 3 inet6_fill, 4 inet_fill, 5 fib_route_seq, 6 ipv6_route_seq,
+ * 7 fib_dump_info, 8 rt6_fill_node, 9 fib_nl_fill_rule. Bit 10 gates the
+ * socket-bind kprobe hooks (register_socket_bind_hooks). Bit 11 gates the
+ * filesystem/VFS concealment kprobe hooks (register_filesystem_hooks) —
+ * ANDed with the filesystem_hiding param, so filesystem hooks register only
+ * when BOTH are set.
+ *
+ * Default VPNHIDE_PROBE_MASK_DEFAULT (0xfff) sets every bit = current
+ * shipped behaviour. Build a diagnostic variant with a reduced hook set
+ * baked in by overriding the macro at compile time
+ * (-DVPNHIDE_PROBE_MASK_DEFAULT=0x...); no source edits needed per variant.
+ */
+static uint probe_mask = VPNHIDE_PROBE_MASK_DEFAULT;
+module_param(probe_mask, uint, 0400);
+MODULE_PARM_DESC(
+	probe_mask,
+	"diagnostic-only hook gate bitmask, baked in at build time; see comment above");
+
 /*
  * `debug_enabled` is a single bool, set from the `debug` line of a config
  * snapshot written to /proc/vpnhide_ctl and read from every probe handler.
@@ -2475,6 +2502,7 @@ static int vpnhide_diag_show(struct seq_file *m, void *v)
 	seq_puts(m, "vpnhide diag\n");
 	seq_printf(m, "active_hook_mask 0x%x installed_hook_mask 0x%x\n",
 		   READ_ONCE(active_hook_mask), installed_hook_mask());
+	seq_printf(m, "probe_mask 0x%x\n", probe_mask);
 
 	for (i = 0; i < ARRAY_SIZE(probes); i++) {
 		struct kretprobe *krp = probes[i].krp;
@@ -2541,9 +2569,16 @@ static int vpnhide_diag_show(struct seq_file *m, void *v)
 
 static int __init vpnhide_init(void)
 {
-	int i, ret, ok = 0;
+	int i, ret, ok = 0, attempted = 0;
 
 	for (i = 0; i < ARRAY_SIZE(probes); i++) {
+		if (!(probe_mask & (1u << i))) {
+			pr_info(MODNAME
+				": kretprobe(%s) skipped (probe_mask=0x%x)\n",
+				probes[i].krp->kp.symbol_name, probe_mask);
+			continue;
+		}
+		attempted++;
 		ret = register_kretprobe(probes[i].krp);
 		if (ret < 0) {
 			pr_warn(MODNAME ": kretprobe(%s) failed: %d\n",
@@ -2556,14 +2591,20 @@ static int __init vpnhide_init(void)
 		}
 	}
 
-	if (ok == 0) {
+	/*
+	 * A masked-out probe (probe_mask bit clear) is a deliberate skip, not
+	 * a failure — it must never trip the "nothing registered" abort
+	 * below. Only treat it as fatal when we actually attempted at least
+	 * one probe (mask allowed it) and every attempt failed.
+	 */
+	if (attempted > 0 && ok == 0) {
 		pr_err(MODNAME ": no kretprobes registered, aborting\n");
 		return -ENOENT;
 	}
-	if (ok < ARRAY_SIZE(probes))
-		pr_warn(MODNAME ": only %d/%zu kretprobes registered — "
+	if (attempted > 0 && ok < attempted)
+		pr_warn(MODNAME ": only %d/%d selected kretprobes registered — "
 				"some detection paths are not covered\n",
-			ok, ARRAY_SIZE(probes));
+			ok, attempted);
 	/* 0600: root-only read/write. The config snapshot is written here by
 	 * service.sh and the VPN Hide app (both root). Apps must not see the
 	 * control channel. (Renamed from vpnhide_targets for semantic accuracy
@@ -2603,8 +2644,9 @@ static int __init vpnhide_init(void)
 	/* Activate execution redirection last. No fallible initialization may run
 	 * after module text becomes reachable outside the kprobe handler. The module
 	 * has no exit function and remains resident until reboot. */
-	register_socket_bind_hooks();
-	if (READ_ONCE(filesystem_hiding))
+	if (probe_mask & (1u << 10))
+		register_socket_bind_hooks();
+	if (READ_ONCE(filesystem_hiding) && (probe_mask & (1u << 11)))
 		register_filesystem_hooks();
 
 	pr_info(MODNAME

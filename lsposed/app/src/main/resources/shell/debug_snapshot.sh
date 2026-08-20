@@ -264,6 +264,26 @@ emit_eval lsposed_files '
     ls -l /data/adb/lspd/config/modules_config.db* 2>&1 || true
 '
 
+# Network state first: the per-user package scan further down can eat most of
+# the su timeout on a bloatware-heavy ROM, and bundles came back truncated
+# with exactly these sections missing — the ones a routing bug needs.
+emit_cmd network_addr ip -d addr
+emit_eval network_operstate 'for IFACE in /sys/class/net/*; do echo "$(basename "$IFACE"): $(cat "$IFACE/operstate" 2>/dev/null)"; done'
+emit_cmd network_routes ip route show table all
+emit_cmd network_rules ip rule
+emit_eval network_sockets 'ss -H -ltnup 2>/dev/null | grep -E "127[.]|::1|LISTEN|udp" | head -300 || true'
+emit_eval connectivity_dump 'dumpsys connectivity 2>/dev/null | grep -iE "vpn|tun|NetworkAgentInfo|NetworkCapabilities|LinkProperties|rmnet|wlan|dummy" | head -400 || true'
+
+emit_file proc_net_route /proc/net/route
+emit_file proc_net_ipv6_route /proc/net/ipv6_route
+emit_file proc_net_if_inet6 /proc/net/if_inet6
+emit_file proc_net_tcp /proc/net/tcp
+emit_file proc_net_tcp6 /proc/net/tcp6
+emit_file proc_net_udp /proc/net/udp
+emit_file proc_net_udp6 /proc/net/udp6
+emit_file proc_net_dev /proc/net/dev
+emit_eval proc_net_fib_trie 'cat /proc/net/fib_trie 2>&1 | sed -n "1,1200p" || true'
+
 emit_file canonical_config "$VPNHIDE_CONFIG_FILE"
 # Pre-1.0 lists. Present only on an install that upgraded across the 1.2.0
 # gap without importing yet, so a bundle still shows what the import would
@@ -314,19 +334,3 @@ emit_eval app_scan_diagnostics '
   echo "inprocess_backstop=app also unions getInstalledApplications(0) into user 0"
 '
 
-emit_cmd network_addr ip -d addr
-emit_eval network_operstate 'for IFACE in /sys/class/net/*; do echo "$(basename "$IFACE"): $(cat "$IFACE/operstate" 2>/dev/null)"; done'
-emit_cmd network_routes ip route show table all
-emit_cmd network_rules ip rule
-emit_eval network_sockets 'ss -H -ltnup 2>/dev/null | grep -E "127[.]|::1|LISTEN|udp" | head -300 || true'
-emit_eval connectivity_dump 'dumpsys connectivity 2>/dev/null | grep -iE "vpn|tun|NetworkAgentInfo|NetworkCapabilities|LinkProperties|rmnet|wlan|dummy" | head -400 || true'
-
-emit_file proc_net_route /proc/net/route
-emit_file proc_net_ipv6_route /proc/net/ipv6_route
-emit_file proc_net_if_inet6 /proc/net/if_inet6
-emit_file proc_net_tcp /proc/net/tcp
-emit_file proc_net_tcp6 /proc/net/tcp6
-emit_file proc_net_udp /proc/net/udp
-emit_file proc_net_udp6 /proc/net/udp6
-emit_file proc_net_dev /proc/net/dev
-emit_eval proc_net_fib_trie 'cat /proc/net/fib_trie 2>&1 | sed -n "1,1200p" || true'
