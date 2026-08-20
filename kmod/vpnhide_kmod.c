@@ -2571,6 +2571,12 @@ static int __init vpnhide_init(void)
 {
 	int i, ret, ok = 0, attempted = 0;
 
+#ifdef VPNHIDE_BARE_INIT
+	pr_info(MODNAME
+		": BARE_INIT diagnostic build — init does nothing (no hooks, no proc nodes, no symbol resolution)\n");
+	return 0;
+#endif
+
 	for (i = 0; i < ARRAY_SIZE(probes); i++) {
 		if (!(probe_mask & (1u << i))) {
 			pr_info(MODNAME
