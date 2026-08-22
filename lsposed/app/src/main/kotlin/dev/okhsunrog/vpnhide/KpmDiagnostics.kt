@@ -19,6 +19,16 @@ internal sealed interface KpmProblemKind {
         override val reason: ModuleBrokenReason? get() = null
     }
 
+    // APatch is present and its KernelPatch runtime answered, but a KPM
+    // supercall was refused and VPN Hide has no SuperKey saved. The activator
+    // authenticates with the trusted-'su' grant in that case, which is enough
+    // for the hello ping and not for module management — so the fix is to save
+    // the real key, not to reinstall anything. Seen on a device where the key
+    // was never entered: "kpm list supercall failed with rc=-1".
+    data object NeedsSuperkey : KpmProblemKind {
+        override val reason: ModuleBrokenReason? get() = null
+    }
+
     // Null reason mirrors kmod's raw LoadFailed fallback: an untriaged exit
     // isn't a confident enough diagnosis to paint the module card red.
     data class LoadFailed(
@@ -34,6 +44,7 @@ internal fun classifyKpmProblem(
     status: KpmLoadStatus,
     currentBootId: String,
     hasKpatchRuntime: Boolean,
+    apatchSuperkeySaved: Boolean = true,
 ): KpmProblemKind? {
     if (kpm !is ModuleState.Installed || kpm.active) return null
     if (status.runtime !in setOf(KpmRuntime.Activator, KpmRuntime.KpatchNext) ||
@@ -51,7 +62,11 @@ internal fun classifyKpmProblem(
     if (!hasKpatchRuntime) {
         return KpmProblemKind.NoKernelPatchRuntime
     }
-    return KpmProblemKind.LoadFailed(status.detail.orEmpty())
+    val detail = status.detail.orEmpty()
+    if (!apatchSuperkeySaved && detail.contains("supercall")) {
+        return KpmProblemKind.NeedsSuperkey
+    }
+    return KpmProblemKind.LoadFailed(detail)
 }
 
 internal fun renderKpmProblem(
@@ -68,6 +83,10 @@ internal fun renderKpmProblem(
 
                 is KpmProblemKind.NoKernelPatchRuntime -> {
                     res.getString(R.string.dashboard_issue_kpm_needs_runtime)
+                }
+
+                is KpmProblemKind.NeedsSuperkey -> {
+                    res.getString(R.string.dashboard_issue_kpm_needs_superkey)
                 }
 
                 is KpmProblemKind.LoadFailed -> {

@@ -71,6 +71,34 @@ internal fun ownedNativeHooks(
         }
     }
 
+/**
+ * Hooks the active kernel backend should have installed but did not — the gap
+ * between what its family owns and what its status mask reports (protocol §5.1,
+ * the same gap that makes it report `PARTIAL_HOOKS`).
+ *
+ * A kernel backend resolves each target by name at load time, so one that a
+ * vendor kernel renamed (or dropped from kallsyms) is simply skipped and the
+ * vectors behind it stay visible. Naming those hooks is the difference between
+ * "leak, reinstall the module" and "your kernel does not expose sock_ioctl".
+ *
+ * Empty for Zygisk: its heartbeat mask is per-process and its optional hooks are
+ * tracked separately, so a diff would report noise, not a defect.
+ */
+internal fun missingBackendHooks(
+    id: NativeBackendId?,
+    reportedHooks: Set<HookIds.Hook>,
+): Set<HookIds.Hook> =
+    when (id) {
+        NativeBackendId.Kmod, NativeBackendId.Kpm -> {
+            // An empty report means "no status read", not "nothing installed".
+            if (reportedHooks.isEmpty()) emptySet() else KERNEL_HOOKS - reportedHooks
+        }
+
+        NativeBackendId.Zygisk, null -> {
+            emptySet()
+        }
+    }
+
 /** Decode a backend's installed-hook wire mask into the typed registry set. */
 internal fun installedHooks(statusRaw: String): Set<HookIds.Hook> = parseProtocolStatusBlock(statusRaw)?.hooks?.let(::hooksInMask).orEmpty()
 

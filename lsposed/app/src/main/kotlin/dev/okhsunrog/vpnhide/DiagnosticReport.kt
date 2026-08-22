@@ -64,6 +64,11 @@ internal data class DiagnosticCheck(
     val groundTruthDetail: String?,
     val expectedHooks: List<HookIds.Hook>,
     val owned: Boolean,
+    // Expected hooks the active kernel backend reported as NOT installed. A leak
+    // here is a kernel-side gap (a renamed/absent symbol), not a misconfiguration
+    // — the difference between "reinstall the module" and "your kernel does not
+    // expose this function". Empty on every healthy device.
+    val missingHooks: List<HookIds.Hook> = emptyList(),
 )
 
 /** Per-layer rollup: presence plus the classified checks that produced it. The
@@ -172,6 +177,10 @@ private fun nativeDiagnosticChecks(
 ): List<DiagnosticCheck> {
     if (results == null) return emptyList()
     val ownedHooks = ownedNativeHooks(backend.id, installedOptionalHooks)
+    // For a kernel backend the caller passes the backend's whole reported hook
+    // mask (FilesystemHidingData.installedNativeOptionalHooks), so the gap against
+    // the family set is exactly the hooks that failed to install this boot.
+    val missingHooks = missingBackendHooks(backend.id, installedOptionalHooks)
     // native and nativeExtra are built in NATIVE_CHECKS order, so a positional zip
     // is stable by construction — the spec carries the stable id + hook coverage,
     // the result carries the localized label, outcome, and root ground-truth detail.
@@ -186,6 +195,7 @@ private fun nativeDiagnosticChecks(
                 groundTruthDetail = cr.groundTruthDetail,
                 expectedHooks = spec.expectedHooks.toList(),
                 owned = spec.coveredBy(ownedHooks),
+                missingHooks = spec.expectedHooks.filter { it in missingHooks },
             )
         }
     // Java-implemented native-level probes (NetworkInterface enum): no hook
