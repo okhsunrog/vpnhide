@@ -1,6 +1,6 @@
 @file:Suppress("DEPRECATION")
 
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.hook
 
 import android.net.LinkProperties
 import android.net.NetworkInfo

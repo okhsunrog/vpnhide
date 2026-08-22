@@ -10,7 +10,7 @@ covers which vector), and [lsposed/AGENTS.md](../lsposed/AGENTS.md) (the Kotlin
 module architecture). The wire the state file speaks is in
 [protocol.md](protocol.md).
 
-The hooks live in `lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/HookEntry.kt`;
+The hooks live in `lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/hook/HookEntry.kt`;
 the state file they publish is written by `LsposedState.kt` and rendered by
 `HookDiagnostics.kt`.
 

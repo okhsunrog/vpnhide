@@ -1,5 +1,7 @@
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.hook
 
+import dev.okhsunrog.vpnhide.LsposedStats
+import dev.okhsunrog.vpnhide.bit
 import dev.okhsunrog.vpnhide.generated.HookIds
 import java.util.concurrent.CopyOnWriteArrayList
 

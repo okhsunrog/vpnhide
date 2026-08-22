@@ -1,4 +1,4 @@
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.hook
 
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
@@ -10,6 +10,7 @@ import android.os.Process
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import dev.okhsunrog.vpnhide.LsposedStats
 import dev.okhsunrog.vpnhide.generated.HookIds
 
 /**

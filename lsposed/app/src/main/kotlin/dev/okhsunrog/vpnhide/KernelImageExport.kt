@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide
 
 import android.content.Context
 import android.os.Process
+import dev.okhsunrog.vpnhide.hook.HookLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
