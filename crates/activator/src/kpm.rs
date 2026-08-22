@@ -221,6 +221,7 @@ impl KpmClient {
                 }
             }
             Self::ApatchSupercall { key, style } => {
+                let auth = auth_label(key);
                 let path = CString::new(KPM_MODULE_FILE)?;
                 let key = CString::new(key.as_str())?;
                 let args = options.args().map(CString::new).transpose()?;
@@ -234,7 +235,7 @@ impl KpmClient {
                         ptr::null_mut::<c_void>(),
                     )
                 };
-                supercall_ok(rc, "kpm load")
+                supercall_ok(rc, "kpm load", auth)
             }
         }
     }
@@ -566,6 +567,7 @@ fn apatch_hello(key: &str, style: ApatchCommandStyle) -> Result<c_long> {
 }
 
 fn apatch_kpm_list(key: &str, style: ApatchCommandStyle) -> Result<String> {
+    let auth = auth_label(key);
     let key = CString::new(key)?;
     let mut buf = [0u8; 4096];
     let rc = unsafe {
@@ -577,19 +579,19 @@ fn apatch_kpm_list(key: &str, style: ApatchCommandStyle) -> Result<String> {
             buf.len() as c_long,
         )
     };
-    supercall_ok(rc, "kpm list")?;
+    supercall_ok(rc, "kpm list", auth)?;
     let len = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
     Ok(String::from_utf8_lossy(&buf[..len]).into_owned())
 }
 
 fn apatch_kpm_ctl0_config(key: &str, style: ApatchCommandStyle, wire: &str) -> Result<()> {
     let (rc, _) = apatch_kpm_ctl0_raw(key, style, wire)?;
-    supercall_ok(rc, "kpm ctl0")
+    supercall_ok(rc, "kpm ctl0", auth_label(key))
 }
 
 fn apatch_kpm_ctl0_read_raw(key: &str, style: ApatchCommandStyle, wire: &str) -> Result<String> {
     let (rc, out) = apatch_kpm_ctl0_raw(key, style, wire)?;
-    supercall_ok(rc, "kpm ctl0")?;
+    supercall_ok(rc, "kpm ctl0", auth_label(key))?;
     let len = apatch_output_len(rc, &out);
     if len == 0 {
         Err("KPM ctl0 returned an empty reply".into())
@@ -640,10 +642,26 @@ fn apatch_kernel_version_hint() -> Option<c_long> {
     parse_apatch_kernel_version_hint(&String::from_utf8_lossy(&out.stdout))
 }
 
-fn supercall_ok(rc: c_long, op: &str) -> Result<()> {
+/// A refused supercall says nothing about *why* on its own: the same rc comes
+/// back for a kernel without KPM support and for a key the runtime will not
+/// accept for module management. `auth` names the credential that was used, so
+/// a bug report distinguishes "the saved SuperKey was rejected" from "we only
+/// had the trusted-su grant" without a second capture.
+fn supercall_ok(rc: c_long, op: &str, auth: &str) -> Result<()> {
     if rc >= 0 {
         Ok(())
     } else {
-        Err(format!("{op} supercall failed with rc={rc}").into())
+        Err(format!("{op} supercall failed with rc={rc} (auth: {auth})").into())
+    }
+}
+
+/// How the APatch supercall authenticated — the saved SuperKey, or KernelPatch's
+/// trusted-`su` grant, which authenticates a hello ping but is not necessarily
+/// accepted for KPM management.
+fn auth_label(key: &str) -> &'static str {
+    if key == APATCH_TRUSTED_SU_KEY {
+        "trusted su"
+    } else {
+        "saved superkey"
     }
 }
