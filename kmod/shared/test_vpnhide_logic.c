@@ -168,6 +168,49 @@ static void test_ioctl_is_get_by_name(void)
 	expect_int("ioctl 0 non-ioctl", vpnhide_ioctl_is_get_by_name(0), 0);
 }
 
+/*
+ * Symbol-suffix matching. The device that motivated the `$<hex>` form (MediaTek
+ * 4.14, Clang CFI + full LTO) lost three hooks to it: kallsyms carried
+ * `sock_ioctl$b388e3b21badf1d3fd36089d77bedd45`, the lookup wanted plain
+ * `sock_ioctl`, and SIOCGIFCONF stayed visible to targeted apps.
+ */
+static void test_symbol_suffix_is_clone(void)
+{
+	expect_int("plain name has no suffix",
+		   vpnhide_symbol_suffix_is_clone(""), 0);
+	expect_int("gcc isra clone", vpnhide_symbol_suffix_is_clone(".isra.0"),
+		   1);
+	expect_int("gcc constprop clone",
+		   vpnhide_symbol_suffix_is_clone(".constprop.12"), 1);
+	expect_int("clang thinlto clone",
+		   vpnhide_symbol_suffix_is_clone(".llvm.1668598349721762545"),
+		   1);
+	expect_int("clang cfi + full lto clone",
+		   vpnhide_symbol_suffix_is_clone(
+			   "$b388e3b21badf1d3fd36089d77bedd45"),
+		   1);
+	expect_int("uppercase hex accepted",
+		   vpnhide_symbol_suffix_is_clone("$B388E3B2"), 1);
+	/* The jump-table alias sits next to the real symbol; taking it would
+	 * hook a trampoline. */
+	expect_int("cfi jump table rejected",
+		   vpnhide_symbol_suffix_is_clone(
+			   "$b388e3b21badf1d3fd36089d77bedd45.cfi_jt"),
+		   0);
+	expect_int("bare cfi_jt rejected",
+		   vpnhide_symbol_suffix_is_clone(".cfi_jt"), 0);
+	expect_int("cold fragment rejected",
+		   vpnhide_symbol_suffix_is_clone(".cold"), 0);
+	expect_int("empty hash rejected", vpnhide_symbol_suffix_is_clone("$"),
+		   0);
+	expect_int("non-hex hash rejected",
+		   vpnhide_symbol_suffix_is_clone("$zzzz"), 0);
+	expect_int("llvm with non-digit rejected",
+		   vpnhide_symbol_suffix_is_clone(".llvm.abc"), 0);
+	expect_int("unrelated longer name rejected",
+		   vpnhide_symbol_suffix_is_clone("_helper"), 0);
+}
+
 int main(void)
 {
 	test_route_first_field();
@@ -177,6 +220,7 @@ int main(void)
 	test_is_public_ipv6();
 	test_is_physical_iface();
 	test_ioctl_is_get_by_name();
+	test_symbol_suffix_is_clone();
 	if (failures) {
 		fprintf(stderr, "%d test(s) failed\n", failures);
 		return 1;

@@ -1664,41 +1664,16 @@ static void iterate_dir_after(hook_fargs2_t *fargs, void *udata)
  * fib_route_seq_show stayed — leaving the IPv6 route hook uninstalled). The
  * clang-built GKI images usually retain the plain name, while gcc-built legacy
  * QEMU images can rename e.g. fib_nl_fill_rule -> fib_nl_fill_rule.isra.N.
+ * Clang CFI with full LTO adds a fourth form, `name$<hex>` (vendor 4.14).
  * Fall back only to compiler clone forms observed in supported reference
- * kernels. Other dotted symbols (for example cold fragments) are not valid
- * substitutes for the complete function.
+ * kernels. Other dotted symbols (for example cold fragments, or the `.cfi_jt`
+ * jump-table aliases) are not valid substitutes for the complete function.
  */
 struct vpnhide_sym_q {
 	const char *base;
 	int baselen;
 	unsigned long addr;
 };
-
-static const char *vpnhide_skip_prefix(const char *value, const char *prefix)
-{
-	int i;
-
-	for (i = 0; prefix[i]; i++)
-		if (value[i] != prefix[i])
-			return 0;
-	return value + i;
-}
-
-static int vpnhide_is_clone_suffix(const char *suffix)
-{
-	const char *number = vpnhide_skip_prefix(suffix, ".isra.");
-
-	if (!number)
-		number = vpnhide_skip_prefix(suffix, ".constprop.");
-	if (!number)
-		number = vpnhide_skip_prefix(suffix, ".llvm.");
-	if (!number || *number < '0' || *number > '9')
-		return 0;
-	do {
-		number++;
-	} while (*number >= '0' && *number <= '9');
-	return *number == '\0';
-}
 
 static int vpnhide_sym_cb(void *data, const char *name, struct module *mod,
 			  unsigned long addr)
@@ -1707,12 +1682,15 @@ static int vpnhide_sym_cb(void *data, const char *name, struct module *mod,
 	const char *suffix;
 	int i;
 
-	(void)mod;
+	/* Hook targets are vmlinux functions; a same-named symbol exported by a
+	 * loaded module is a different function entirely. */
+	if (mod)
+		return 0;
 	for (i = 0; i < q->baselen; i++)
 		if (name[i] != q->base[i])
 			return 0;
 	suffix = name + q->baselen;
-	if (vpnhide_is_clone_suffix(suffix)) {
+	if (vpnhide_symbol_suffix_is_clone(suffix)) {
 		q->addr = addr;
 		return 1; /* found — stop iterating */
 	}
