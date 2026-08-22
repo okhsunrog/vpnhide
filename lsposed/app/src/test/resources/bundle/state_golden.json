@@ -1,0 +1,165 @@
+{
+    "schema": 2,
+    "generatedAt": "2026-08-22T12:00:00+0300",
+    "captureKind": "debug",
+    "app": {
+        "packageName": "dev.okhsunrog.vpnhide",
+        "version": "1.2.5 (10205)"
+    },
+    "device": {
+        "manufacturer": "Google",
+        "model": "Pixel 8 Pro",
+        "androidRelease": "17",
+        "sdk": 36,
+        "abis": [
+            "arm64-v8a"
+        ]
+    },
+    "selfNeedsRestart": false,
+    "gate": "ROUTED",
+    "nativeVerdict": "Ok",
+    "javaVerdict": "Ok",
+    "report": {
+        "gate": "ROUTED",
+        "native": {
+            "layer": "NATIVE",
+            "backend": "Kmod",
+            "status": {
+                "kind": "active",
+                "hidden": 0,
+                "leaks": 0
+            },
+            "unownedLeaks": 0,
+            "checks": []
+        },
+        "java": {
+            "layer": "JAVA",
+            "backend": null,
+            "status": {
+                "kind": "active",
+                "hidden": 0,
+                "leaks": 0
+            },
+            "unownedLeaks": 0,
+            "checks": []
+        },
+        "complete": true
+    },
+    "backends": {
+        "kmod": {
+            "kind": "installed",
+            "version": "1.2.5",
+            "active": true,
+            "gkiVariant": null,
+            "brokenReason": null,
+            "pendingReboot": false,
+            "runtimeCheckable": true
+        },
+        "kpm": {
+            "kind": "not_installed"
+        },
+        "zygisk": {
+            "kind": "installed",
+            "version": "1.2.5",
+            "active": false,
+            "gkiVariant": null,
+            "brokenReason": null,
+            "pendingReboot": false,
+            "runtimeCheckable": true
+        }
+    },
+    "activeBackend": {
+        "id": "Kmod",
+        "state": {
+            "kind": "installed",
+            "version": "1.2.5",
+            "active": true,
+            "gkiVariant": null,
+            "brokenReason": null,
+            "pendingReboot": false,
+            "runtimeCheckable": true
+        }
+    },
+    "ports": {
+        "kind": "not_installed"
+    },
+    "kmodLoadStatus": null,
+    "dashboard": {
+        "kmod": {
+            "kind": "installed",
+            "version": "1.2.5",
+            "active": true,
+            "gkiVariant": null,
+            "brokenReason": null,
+            "pendingReboot": false,
+            "runtimeCheckable": true
+        },
+        "kpm": {
+            "kind": "not_installed"
+        },
+        "zygisk": {
+            "kind": "installed",
+            "version": "1.2.5",
+            "active": false,
+            "gkiVariant": null,
+            "brokenReason": null,
+            "pendingReboot": false,
+            "runtimeCheckable": true
+        },
+        "lsposed": {
+            "kind": "active",
+            "version": "1.2.5",
+            "targetCount": 3
+        },
+        "ports": {
+            "kind": "not_installed"
+        },
+        "nativeTargetCount": 3,
+        "portsTargetCount": 0,
+        "nativeBackend": {
+            "id": "Kmod",
+            "state": {
+                "kind": "installed",
+                "version": "1.2.5",
+                "active": true,
+                "gkiVariant": null,
+                "brokenReason": null,
+                "pendingReboot": false,
+                "runtimeCheckable": true
+            }
+        },
+        "nativeInstallRecommendation": null,
+        "kmodLoadStatus": null,
+        "protection": {
+            "kind": "blocked",
+            "gate": "VPN_OFF"
+        },
+        "messages": [],
+        "installedOptionalHooks": [],
+        "legacyImport": null
+    },
+    "config": null,
+    "statistics": null,
+    "rootShell": {
+        "uid": 0,
+        "idLine": "uid=0(root)",
+        "context": "u:r:ksu:s0",
+        "errnoCtl": "ok",
+        "runtimeCheckable": true
+    },
+    "sections": {
+        "proc_exists": "1",
+        "current_boot_id": "boot-1"
+    },
+    "dmesg": "vpnhide: loaded",
+    "logcat": "",
+    "bootLsposedLogcat": "",
+    "lsposedConfigDb": "",
+    "hookReport": null,
+    "debugCapture": null,
+    "captureOptions": {
+        "forensics": false,
+        "appList": false
+    },
+    "errors": []
+}

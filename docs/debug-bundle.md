@@ -50,13 +50,38 @@ Everything below is a `state.json` field unless noted.
 
 ## 2. The 30-second triage (read in this order)
 
-1. **`captureKind`, `app.version`, `device`** — what am I even looking at? (model, Android release, ABI, app+backend version).
+1. **`captureKind`, `app.version`, `device`, `schema`** — what am I even looking at? (model, Android release, ABI, app+backend version, and which bundle format — §2.1 if it isn't the one this doc describes).
 2. **`gate`** — was the run *measurable*? Only `ROUTED` yields real verdicts. `VPN_OFF` / `SELF_NOT_ROUTED` / `NEEDS_RESTART` mean "we deliberately measured nothing" — a clean-looking report there is **not** evidence of health. (See §4.)
 3. **`nativeVerdict` / `javaVerdict`** — `Ok` / `Partial` / `Broken` / `null`. `null` = gated (see #2) or not measured.
 4. **`rootShell`** — did the snapshot shell actually have root? If `uid != 0` or `runtimeCheckable=false`, "inactive"/"not verified" readings are unreliable, not facts. (See §6 — this is the #1 misread.)
 5. **`activeBackend` + `kmodLoadStatus`** — which backend is in charge, did it load this boot, any `brokenReason`.
 6. **`errors`** — non-fatal capture failures. If it lists `snapshot truncated at: <section>`, every section at/after that one is missing or partial (see §8).
 7. Then drill into the raw `sections` and logs for the specific symptom (§5, §7, §9 playbooks).
+
+### 2.1 Schema versions
+
+`state.json → schema` says which shape the bundle was written in. **This doc
+describes schema 2.** One number covers the whole bundle; there is no per-object
+version.
+
+| Schema | Shipped in | What changed |
+|---|---|---|
+| 2 | unreleased | Sealed `kind` discriminators are compact snake_case everywhere. Previously `dashboard.lsposed` and `dashboard.protection` carried fully-qualified class names (`dev.okhsunrog.vpnhide.LsposedState.Active`) instead of `active`/`blocked`. The separate `report.schema` field is gone — the top-level one is the only version. |
+| 1 | 1.0.0 – 1.2.5 | Initial format. |
+
+Rules for changing it (enforced by `BundleSchemaGoldenTest`, which pins the
+serialized shape against `app/src/test/resources/bundle/state_golden.json`):
+
+- A field removed, renamed, or given a new meaning → **bump** `VPNHIDE_STATE_SCHEMA`
+  and add a row above.
+- A field added → no bump; a reader of an older bundle just finds it missing.
+- Either way the golden file has to be refreshed
+  (`UPDATE_GOLDEN=1 ./gradlew :app:testDebugUnitTest --tests '*BundleSchemaGoldenTest*'`),
+  so no shape change reaches a release unnoticed.
+
+Bundles are read, not machine-parsed, so nothing rejects an old schema — the
+number exists to tell you *which* doc revision applies to the file in front of
+you.
 
 ---
 
@@ -67,7 +92,7 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 
 | Field | Meaning |
 |---|---|
-| `schema` | State schema version (currently 1). |
+| `schema` | Bundle schema version — **this doc describes 2** (§2.1). |
 | `generatedAt` | ISO-8601 capture time. |
 | `captureKind` | `debug` / `full_system_logcat` / `kernel_images` (§1). |
 | `app` | `{packageName, version}` — `version` is `"1.2.5 (10205)"` (name + versionCode). |

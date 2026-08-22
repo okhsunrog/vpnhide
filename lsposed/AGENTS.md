@@ -70,6 +70,14 @@ reinvent them.** `grep` for an existing helper before writing a new one.
   fragments through `ProcessBuilder("sh", ...)` like `ShellCommandBuildersTest`).
 - **`grep` before adding** any parser / formatter / shell-builder / status
   colour — it probably already exists above.
+- **Changing a `@Serializable` type that reaches the debug bundle bumps the
+  bundle schema.** `BundleSchemaGoldenTest` pins the serialized shape; when it
+  fails, refresh the golden (`UPDATE_GOLDEN=1 ./gradlew :app:testDebugUnitTest
+  --tests '*BundleSchemaGoldenTest*'`) and, if a field was removed/renamed or
+  changed meaning, bump `VPNHIDE_STATE_SCHEMA` + add a row to
+  [docs/debug-bundle.md §2.1](../docs/debug-bundle.md). Sealed subclasses that
+  land in the bundle need an explicit `@SerialName` — without one kotlinx emits
+  the fully-qualified class name, which changes the moment the class moves.
 
 ## Quality gates
 

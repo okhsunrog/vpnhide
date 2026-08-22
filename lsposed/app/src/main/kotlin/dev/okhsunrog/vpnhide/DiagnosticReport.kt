@@ -3,12 +3,6 @@ package dev.okhsunrog.vpnhide
 import dev.okhsunrog.vpnhide.generated.HookIds
 import kotlinx.serialization.Serializable
 
-/**
- * Schema version for the serialized report (the debug bundle's `diagnostics.json`
- * and the summary header). Bump when the wire shape changes.
- */
-internal const val DIAGNOSTIC_REPORT_SCHEMA: Int = 1
-
 @Serializable
 internal enum class CheckLayer { NATIVE, JAVA }
 
@@ -98,7 +92,6 @@ internal data class DiagnosticReport(
     val java: LayerReport,
     // False after the fast core phase, true once the slow Java probes have filled in.
     val complete: Boolean,
-    val schema: Int = DIAGNOSTIC_REPORT_SCHEMA,
 ) {
     /** Per-layer Ok/Partial/Broken — the ONLY way to read a report's verdict.
      * Null unless the run was actually measured ([DiagnosticGate.ROUTED]); a
