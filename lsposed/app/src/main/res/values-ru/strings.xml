@@ -48,6 +48,8 @@
     <string name="ports_policy_end">Конец</string>
     <string name="ports_policy_delete_rule">Удалить правило</string>
     <string name="ports_policy_invalid">Укажите хотя бы один корректный порт или диапазон от 1 до 65535.</string>
+    <string name="apps_help_who_title">Какое приложение настраивать?</string>
+    <string name="apps_help_who_body">Роли ставятся на приложение, ОТ которого вы прячете VPN — банк, госуслуги, маркетплейс. Само VPN-приложение здесь настраивать не нужно: оно то, что прячут, и его список находится в Настройки → «Скрытие VPN-приложений».</string>
     <string name="apps_help_role_java_body">LSPosed скрывает VPN-сигналы в Java API Android: NetworkCapabilities, NetworkInfo, LinkProperties и NetworkInterface.</string>
     <string name="apps_help_role_native_body">Активный Native-бэкенд скрывает VPN-сигналы, видимые через проверки ядра и libc. VPN Hide сохраняет один выбор Native для всех установленных Native-бэкендов; работает только активный.</string>
     <string name="apps_help_role_apps_body">Apps скрывает выбранные пакеты от этого приложения: оно получает очищенный ответ PackageManager и не может перечислять, находить или запрашивать пакеты, которые VPN Hide пометил скрытыми.</string>

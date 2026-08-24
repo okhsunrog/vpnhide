@@ -55,6 +55,8 @@
     <string name="ports_policy_end">End</string>
     <string name="ports_policy_delete_rule">Delete rule</string>
     <string name="ports_policy_invalid">Enter at least one valid port or range from 1 to 65535.</string>
+    <string name="apps_help_who_title">Which app do I configure?</string>
+    <string name="apps_help_who_body">Set roles on the app you are hiding the VPN FROM — a bank, a government service, a marketplace. The VPN app itself needs no roles here: it is the thing being hidden, and that list lives in Settings → VPN app hiding.</string>
     <string name="apps_help_role_java_body">LSPosed hides VPN signals exposed through Android Java APIs such as NetworkCapabilities, NetworkInfo, LinkProperties, and NetworkInterface.</string>
     <string name="apps_help_role_native_body">The active native backend hides VPN signals visible through kernel or libc probes. VPN Hide writes one native selection to every installed native backend; only the active backend acts.</string>
     <string name="apps_help_role_apps_body">App-hiding observer mode. This app receives a sanitized package-manager view and cannot list, resolve, or query packages that VPN Hide marks as hidden.</string>

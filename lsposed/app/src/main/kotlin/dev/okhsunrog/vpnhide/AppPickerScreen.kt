@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Tune
@@ -248,6 +249,14 @@ private fun AppsHelpContent(targets: TargetsSnapshot) {
     val error = MaterialTheme.colorScheme.error
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // First, because it is the one thing people get wrong: the roles go on
+        // the app you are hiding FROM, not on the VPN app.
+        HelpInfoBlock(
+            title = stringResource(R.string.apps_help_who_title),
+            body = stringResource(R.string.apps_help_who_body),
+            icon = Icons.Default.Info,
+            color = primary,
+        )
         HelpInfoBlock(
             title =
                 roleHelpLabel(

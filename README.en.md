@@ -103,6 +103,22 @@ Settings can switch from short **J / N / A / P** chips to full role labels. For 
 
 Tap Save after making changes.
 
+#### Which app gets configured
+
+Roles go on the **detector app** — the one you are hiding the VPN from (a bank, a government service, a marketplace). The VPN app itself needs no roles here: it is the thing being hidden, and *that* list lives in Settings → **VPN app hiding**.
+
+Common cases:
+
+| What is happening | What to enable |
+|---|---|
+| A bank must not see that a VPN is up | On the **bank**: Java + Native |
+| The bank also scans the installed-app list | Add **Apps** on the bank. Then check Settings → VPN app hiding actually lists your VPN: apps declaring a VpnService are found automatically, anything else is added by hand |
+| The bank objects to Zygisk specifically | Turn Native off and keep Java. On a GKI device, switching to kmod or KPM is better — they are invisible from inside the process |
+| The app probes a localhost proxy port (127.0.0.1:1080 and friends) | Add **Ports** on that app (needs the ports module installed) |
+
+Worked example: to keep a banking app from seeing either the VPN or the installed WireGuard, give the bank **J + N + A** and make sure WireGuard is in the hidden list. WireGuard itself needs no roles.
+
+
 Java and kernel-level Native backends (kmod/KPM) apply immediately. Zygisk hooks and Ports rules are picked up by a selected app after force-stop and reopen.
 
 > **Note:** some apps detect Zygisk hooks when Native is enabled for them. Leave Native off for those apps and rely on the Java layer, or use kmod/KPM instead.
