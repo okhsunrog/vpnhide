@@ -876,10 +876,10 @@ private suspend fun writeSuperkeySetting(
     remember: Boolean,
     superkey: String,
 ): Int {
-    val snapshot = TargetsCache.snapshot.value
-    val base =
-        snapshot?.let(::buildCanonicalConfigFromTargetsSnapshot)
-            ?: CanonicalConfig()
+    // Read the config itself, never a rebuild from the snapshot's projections:
+    // this toggles one settings field and must not rewrite the app list on its
+    // way past. A missing config means there is nothing to preserve yet.
+    val base = TargetsCache.snapshot.value?.canonicalConfig ?: CanonicalConfig()
     val canonical = base.copy(settings = base.settings.copy(rememberSuperkey = remember))
     val secretCommand = if (remember) buildSuperkeyWriteCommand(superkey) else buildSuperkeyClearCommand()
     return CanonicalConfigRepository
