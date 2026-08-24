@@ -358,7 +358,7 @@
     <string name="dashboard_issue_kpm_standalone_install">检测到无效的 KPM 安装：KernelPatch 加载了独立的 vpnhide.kpm 文件，但 vpnhide-kpm.zip 模块并未安装。单独的 .kpm 文件没有 VPN Hide 激活器、开机脚本或配置下发，因此保护无法正常工作。请在 APatch/KPatch-Next 中移除或卸载独立的“vpnhide”条目（若它是内嵌的，请在不含它的情况下重新修补 boot 镜像），再从模块界面安装完整的 vpnhide-kpm.zip，然后重启。</string>
     <string name="dashboard_issue_kpm_needs_superkey">KPM 已安装，KernelPatch 运行时也有响应，但模块控制调用被拒绝——VPN Hide 没有保存 SuperKey，只能用受信任的 su 令牌认证。请在“设置 → 安全”中保存 SuperKey（与 APatch/FolkPatch 里设置的相同），然后点按“刷新”。重装 zip 没有用。</string>
     <string name="dashboard_issue_kpm_needs_runtime">KPM 已安装，但内核尚未通过 KernelPatch 运行时打补丁来加载它。请安装 KPatch-Next-Module 并在其界面中为内核打补丁（在 Magisk 和 KernelSU 上均可用）。若不行，请改用 APatch 或 FolkPatch。</string>
-    <string name="dashboard_issue_native_partial_hooks">原生后端已加载，但在此内核上只装上了 %2$d 个内核钩子中的 %1$d 个——未能解析：%3$s。它们负责的检测面仍然可见，其余部分依旧被隐藏。重新安装没有用：在这个内核版本里，这些函数的名字不同或根本不存在。</string>
+    <string name="dashboard_issue_native_partial_hooks">原生后端已加载，但在此内核上只装上了 %2$d 个内核钩子中的 %1$d 个——未能解析：%3$s。它们负责的检测面不由该后端覆盖，可能仍有其他层将其关闭。重新安装没有用：在这个内核版本里，这些函数的名字不同或根本不存在。</string>
     <string name="dashboard_issue_kpm_load_failed">KPM 已安装但加载失败：%1$s。请用“设置 → 调试 → 收集调试日志”，把完整的开机输出附到 Bug 报告里，或从最新发行版重新安装 vpnhide-kpm.zip。</string>
     <string name="dashboard_issue_multiple_native">装了多个原生后端。同一时间只能有一个生效（优先级：内核模块，其次 KPM，再次 Zygisk），其余会闲置。请卸载用不到的，保持整洁。</string>
     <string name="dashboard_issue_debug_logging_on">调试日志已开启。VPN Hide 正在往 logcat 写详细日志，任何有 Root 的人都能读到。收集完 Bug 报告后，请在“设置 → 调试”中把它关掉。</string>

@@ -99,7 +99,21 @@ internal data class PartialHookGap(
     val installed: Int,
     val expected: Int,
     val missing: List<HookIds.Hook>,
-)
+) {
+    /**
+     * Is any vector actually leaking because one of [missing] never installed?
+     *
+     * A hook the kernel does not expose is only worth telling the user about when
+     * it costs something here: on old kernels the same surface is usually closed
+     * by SELinux or a capability check, and warning there would be noise. A
+     * measured leak on a check whose expected hooks are all missing is the case
+     * that needs the explanation.
+     */
+    fun costsAnyVector(report: DiagnosticReport): Boolean =
+        report.native.checks.any { check ->
+            check.outcome is CheckOutcome.Leak && check.missingHooks.isNotEmpty()
+        }
+}
 
 internal fun partialHookGap(
     backend: DisplayNativeBackend,

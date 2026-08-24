@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.generated.HookIds
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -60,6 +61,50 @@ class PartialHookGapTest {
     @Test
     fun `zygisk is out of scope — its mask is per-process`() {
         assertNull(partialHookGap(backend(NativeBackendId.Zygisk), setOf(HookIds.Hook.ZYGISK_IOCTL)))
+    }
+
+    @Test
+    fun `a gap only warrants a warning when it costs a measured vector`() {
+        val gap = partialHookGap(backend(NativeBackendId.Kpm), KERNEL_HOOKS - HookIds.Hook.SOCK_IOCTL)!!
+
+        // The vector the missing hook covers is leaking → worth telling the user.
+        assertTrue(gap.costsAnyVector(reportWith(CheckOutcome.Leak, listOf(HookIds.Hook.SOCK_IOCTL))))
+        // Same missing hook, but SELinux already closes that surface → silence.
+        assertFalse(gap.costsAnyVector(reportWith(CheckOutcome.HiddenBySelinux, listOf(HookIds.Hook.SOCK_IOCTL))))
+        // A leak on a vector whose hooks all installed is somebody else's problem.
+        assertFalse(gap.costsAnyVector(reportWith(CheckOutcome.Leak, emptyList())))
+    }
+
+    private fun reportWith(
+        outcome: CheckOutcome,
+        missing: List<HookIds.Hook>,
+    ): DiagnosticReport {
+        val check =
+            DiagnosticCheck(
+                id = "ioctl_conf",
+                label = "ioctl SIOCGIFCONF enum",
+                layer = CheckLayer.NATIVE,
+                outcome = outcome,
+                appDetail = "",
+                groundTruthDetail = null,
+                expectedHooks = listOf(HookIds.Hook.SOCK_IOCTL),
+                owned = true,
+                missingHooks = missing,
+            )
+        val layer =
+            LayerReport(
+                layer = CheckLayer.NATIVE,
+                backend = NativeBackendId.Kpm,
+                status = LayerStatus.Active(hidden = 0, leaks = 1),
+                unownedLeaks = 0,
+                checks = listOf(check),
+            )
+        return DiagnosticReport(
+            gate = DiagnosticGate.ROUTED,
+            native = layer,
+            java = layer.copy(layer = CheckLayer.JAVA, backend = null, checks = emptyList()),
+            complete = true,
+        )
     }
 
     @Test
