@@ -12,7 +12,15 @@ class ClassifyKpmProblemTest {
         rawStatus: String,
         currentBootId: String,
         hasKpatchRuntime: Boolean = true,
-    ): KpmProblemKind? = classifyKpmProblem(kpm, parseKpmLoadStatus(rawStatus), currentBootId, hasKpatchRuntime)
+        apatchSuperkeySaved: Boolean = true,
+    ): KpmProblemKind? =
+        classifyKpmProblem(
+            kpm = kpm,
+            status = parseKpmLoadStatus(rawStatus),
+            currentBootId = currentBootId,
+            hasKpatchRuntime = hasKpatchRuntime,
+            apatchSuperkeySaved = apatchSuperkeySaved,
+        )
 
     @Test
     fun `not installed produces no problem`() {
@@ -34,6 +42,30 @@ class ClassifyKpmProblemTest {
     fun `apatch awaiting-superkey runtime is not diagnosed here — handled by kpmAwaitingSuperkey`() {
         val status = "runtime=apatch\nloaded=0\nboot_id=boot-1\ndetail=awaiting_superkey\n"
         assertNull(classify(installed(active = false), status, "boot-1"))
+    }
+
+    // The device that motivated this: APatch present, hello accepted via the
+    // trusted-su grant, KPM management refused, no SuperKey ever entered. The
+    // generic branch told the user to reinstall the zip, which fixes nothing.
+    @Test
+    fun `refused supercall without a saved superkey asks for the superkey`() {
+        val status = "runtime=activator\nloaded=0\nboot_id=boot-1\ndetail=kpm list supercall failed with rc=-1\n"
+        val kind = classify(installed(active = false), status, "boot-1", apatchSuperkeySaved = false)
+        assertEquals(KpmProblemKind.NeedsSuperkey, kind)
+    }
+
+    @Test
+    fun `refused supercall with a saved superkey stays the generic failure`() {
+        val status = "runtime=activator\nloaded=0\nboot_id=boot-1\ndetail=kpm list supercall failed with rc=-1\n"
+        val kind = classify(installed(active = false), status, "boot-1", apatchSuperkeySaved = true)
+        assertEquals(KpmProblemKind.LoadFailed("kpm list supercall failed with rc=-1"), kind)
+    }
+
+    @Test
+    fun `a non-supercall failure is never blamed on the superkey`() {
+        val status = "runtime=activator\nloaded=0\nboot_id=boot-1\ndetail=vpnhide.kpm not found\n"
+        val kind = classify(installed(active = false), status, "boot-1", apatchSuperkeySaved = false)
+        assertEquals(KpmProblemKind.LoadFailed("vpnhide.kpm not found"), kind)
     }
 
     @Test

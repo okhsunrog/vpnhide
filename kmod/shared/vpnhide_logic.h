@@ -909,4 +909,69 @@ static inline unsigned long vpnhide_clamp_to_line(const char *buf,
 	return p ? p - 1 : 0;
 }
 
+/* ====================================================================== */
+/*  kallsyms name matching (KPM symbol resolution).                       */
+/* ====================================================================== */
+
+static inline const char *vpnhide_skip_prefix(const char *value,
+					      const char *prefix)
+{
+	int i;
+
+	for (i = 0; prefix[i]; i++)
+		if (value[i] != prefix[i])
+			return 0;
+	return value + i;
+}
+
+static inline int vpnhide_is_hex_digit(char c)
+{
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+	       (c >= 'A' && c <= 'F');
+}
+
+/*
+ * Does `suffix` (what follows the wanted function name in a kallsyms entry)
+ * mark a compiler-renamed clone of that same function?
+ *
+ * A hook target can reach kallsyms under four observed forms:
+ *   - GCC specialisation:   name.isra.N / name.constprop.N
+ *   - Clang (Thin)LTO:      name.llvm.<decimal>
+ *   - Clang CFI + full LTO: name$<hex>
+ * The last one showed up on a MediaTek 4.14 vendor build, where sock_ioctl,
+ * fib_route_seq_show and ipv6_route_seq_show all carried it (and their hooks
+ * silently did not install) while every other target kept a plain or `.llvm.`
+ * name.
+ *
+ * The digit/hex run must end the string. That is what rejects the CFI jump
+ * table alias `name$<hex>.cfi_jt`, which sits right next to the real symbol:
+ * hooking a trampoline would patch the wrong instructions. Cold fragments
+ * (`name.cold`) and every other dotted form are rejected for the same reason —
+ * they are not the complete function.
+ */
+static inline int vpnhide_symbol_suffix_is_clone(const char *suffix)
+{
+	const char *rest = vpnhide_skip_prefix(suffix, ".isra.");
+
+	if (!rest)
+		rest = vpnhide_skip_prefix(suffix, ".constprop.");
+	if (!rest)
+		rest = vpnhide_skip_prefix(suffix, ".llvm.");
+	if (rest) {
+		if (*rest < '0' || *rest > '9')
+			return 0;
+		do {
+			rest++;
+		} while (*rest >= '0' && *rest <= '9');
+		return *rest == '\0';
+	}
+	rest = vpnhide_skip_prefix(suffix, "$");
+	if (!rest || !vpnhide_is_hex_digit(*rest))
+		return 0;
+	do {
+		rest++;
+	} while (vpnhide_is_hex_digit(*rest));
+	return *rest == '\0';
+}
+
 #endif /* VPNHIDE_SHARED_LOGIC_H */

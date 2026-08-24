@@ -1336,8 +1336,13 @@ internal suspend fun loadDashboardState(
                 sections = shellSnapshot,
                 activatorPath = KPM_ACTIVATOR,
             )?.let { renderModuleIntegrityProblem(it, res) }
-                ?: classifyKpmProblem(kpmRaw, kpmLoadStatus, currentBootId, hasKpatchRuntime)
-                    ?.let { renderKpmProblem(it, res) }
+                ?: classifyKpmProblem(
+                    kpm = kpmRaw,
+                    status = kpmLoadStatus,
+                    currentBootId = currentBootId,
+                    hasKpatchRuntime = hasKpatchRuntime,
+                    apatchSuperkeySaved = shellSnapshot["superkey_saved"]?.trim() == "1",
+                )?.let { renderKpmProblem(it, res) }
         }
     val kpm = kpmRaw.withBrokenReason(kpmProblem?.reason).withPendingReboot(kpmPendingReboot)
     VpnHideLog.i(TAG, "kpm (with brokenReason): $kpm")
@@ -1735,6 +1740,19 @@ internal suspend fun loadDashboardState(
 
     val installedOptionalHooks =
         installedNativeOptionalHooks(nativeBackend.id, shellSnapshot, currentBootId)
+    // A kernel backend that loaded but could not resolve every hook target. Not an
+    // error (what did install still works, and no reinstall fixes a kernel that
+    // renamed the symbol), but the leaks it causes are otherwise unexplained.
+    partialHookGap(nativeBackend, installedOptionalHooks)?.let { gap ->
+        warn(
+            res.getString(
+                R.string.dashboard_issue_native_partial_hooks,
+                gap.installed,
+                gap.expected,
+                gap.missing.joinToString(", ") { it.hookName },
+            ),
+        )
+    }
     // Single source of truth: the cache does all the gating (VPN off / needs-restart /
     // self-not-routed) through the one fold. awaitTerminal returns the terminal state
     // itself, so the reason for "no results" (blocked gate vs a failed run) is carried

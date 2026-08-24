@@ -769,6 +769,9 @@ private data class DiagCard(
     val groundTruthDetail: String?,
     val outcome: CheckOutcome,
     val uncovered: Boolean,
+    // Hook names the active kernel backend owns but did not install this boot.
+    // Turns an unexplained red leak into "your kernel does not expose this".
+    val missingHooks: List<String> = emptyList(),
 )
 
 /** From a canonical report check — the only source that knows [DiagnosticCheck.owned],
@@ -780,6 +783,7 @@ private fun DiagnosticCheck.toDiagCard(): DiagCard =
         groundTruthDetail = groundTruthDetail,
         outcome = outcome,
         uncovered = layer == CheckLayer.NATIVE && outcome is CheckOutcome.Leak && !owned,
+        missingHooks = missingHooks.map { it.hookName },
     )
 
 /** Raw-list fallback (dashboard not yet loaded): no ownership known, so nothing is
@@ -964,6 +968,18 @@ private fun CheckCard(
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                 )
+                if (r.missingHooks.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text =
+                            stringResource(
+                                R.string.diag_check_hook_missing,
+                                r.missingHooks.joinToString(", "),
+                            ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

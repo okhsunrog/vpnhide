@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.generated.HookIds
 import kotlinx.serialization.Serializable
 
 // The native layer is exactly one of these at runtime (docs/storage.md §4.3).
@@ -81,3 +82,35 @@ private fun prioritizedNativeBackends(states: NativeBackendStates): List<Pair<Na
                 NativeBackendId.Zygisk -> states.zygisk
             }
     }
+
+/**
+ * An active kernel backend that did not install every hook it owns.
+ *
+ * The backend resolves each target by name when it loads, so a function a
+ * vendor kernel renamed (Clang CFI/LTO manglings) or never exported is skipped
+ * — the module reports `PARTIAL_HOOKS` and the vectors behind those hooks stay
+ * visible. Without this the dashboard shows a plain green "active" card next to
+ * a red leak in Diagnostics, which reads as the app contradicting itself.
+ *
+ * Null unless there is something to say: a non-kernel/inactive backend, an
+ * unread status ([reportedHooks] empty), or a complete install all return null.
+ */
+internal data class PartialHookGap(
+    val installed: Int,
+    val expected: Int,
+    val missing: List<HookIds.Hook>,
+)
+
+internal fun partialHookGap(
+    backend: DisplayNativeBackend,
+    reportedHooks: Set<HookIds.Hook>,
+): PartialHookGap? {
+    if (!moduleActive(backend.state)) return null
+    val missing = missingBackendHooks(backend.id, reportedHooks)
+    if (missing.isEmpty()) return null
+    return PartialHookGap(
+        installed = KERNEL_HOOKS.size - missing.size,
+        expected = KERNEL_HOOKS.size,
+        missing = missing.sortedBy { it.id },
+    )
+}
