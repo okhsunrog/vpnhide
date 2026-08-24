@@ -189,7 +189,7 @@ fn check_ioctl_siocgifflags() -> CheckOutput {
             let name = b"tun0\0";
             ifr.ifr_name[..name.len()].copy_from_slice(&name.map(|b| b as libc::c_char));
 
-            let ret = libc::ioctl(fd, libc::SIOCGIFFLAGS as _, &ifr);
+            let ret = libc::ioctl(fd, libc::SIOCGIFFLAGS as _, &mut ifr);
             let err = last_os_errno();
 
             if ret < 0 {
@@ -223,7 +223,7 @@ fn check_ioctl_siocgifmtu() -> CheckOutput {
             let name = b"tun0\0";
             ifr.ifr_name[..name.len()].copy_from_slice(&name.map(|b| b as libc::c_char));
 
-            let ret = libc::ioctl(fd, libc::SIOCGIFMTU as _, &ifr);
+            let ret = libc::ioctl(fd, libc::SIOCGIFMTU as _, &mut ifr);
             let err = last_os_errno();
 
             if ret < 0 {
@@ -373,8 +373,9 @@ fn check_setsockopt_bindtodevice() -> CheckOutput {
 ///
 /// Interface names are arbitrary bytes, so a `/proc/net` line can legitimately
 /// carry multi-byte UTF-8. Slicing straight at `max_bytes` panics when that byte
-/// lands mid-character, and this crate builds with `panic = "abort"` — the app
-/// would die running its own diagnostics. (Truncation itself is not an edge
+/// lands mid-character. The JNI entry catches the unwind now, but a probe that
+/// panics still loses the whole check run, and the truncation itself is not an
+/// edge case. (Truncation itself is not an edge
 /// case: `/proc/net/route` lines routinely run past 80 bytes.)
 fn truncate_on_char_boundary(line: &str, max_bytes: usize) -> &str {
     let mut end = line.len().min(max_bytes);
@@ -1233,14 +1234,74 @@ fn uid_routed_through_vpn(myuid: u32) -> (bool, String) {
     (routed, detail)
 }
 
+/// Log tag for anything this crate reports. Listed in the app's `LogTags` so the
+/// debug bundle's logcat filter picks it up.
+#[cfg(target_os = "android")]
+const LOG_TAG: &str = "VpnHide-Native";
+
+#[cfg(target_os = "android")]
+unsafe extern "C" {
+    fn __android_log_write(
+        prio: libc::c_int,
+        tag: *const libc::c_char,
+        text: *const libc::c_char,
+    ) -> libc::c_int;
+}
+
+/// Send one line to logcat. Best effort: a message with an interior NUL is
+/// dropped rather than truncated at a surprising place.
+#[cfg(target_os = "android")]
+fn log_error(message: &str) {
+    use std::ffi::CString;
+
+    const ANDROID_LOG_ERROR: libc::c_int = 6;
+    let (Ok(tag), Ok(text)) = (CString::new(LOG_TAG), CString::new(message)) else {
+        return;
+    };
+    // SAFETY: both pointers are NUL-terminated and outlive the call.
+    unsafe {
+        __android_log_write(ANDROID_LOG_ERROR, tag.as_ptr(), text.as_ptr());
+    }
+}
+
+/// Route panics to logcat.
+///
+/// The default hook writes to stderr, which for an Android app process goes
+/// nowhere — so a panic in here used to be invisible: the process just died (or,
+/// since the switch to unwinding, surfaced as a Java exception with no location).
+/// The hook runs under either panic strategy and carries what actually matters
+/// for a bug report: the message and the `file:line` that raised it. Backtraces
+/// are deliberately not attempted; this crate is built with fat LTO and stripped,
+/// so they would be unsymbolised addresses.
+#[cfg(target_os = "android")]
+fn install_panic_hook() {
+    use std::sync::Once;
+
+    static HOOK: Once = Once::new();
+    HOOK.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            log_error(&format!("panic in native probe: {info}"));
+            previous(info);
+        }));
+    });
+}
+
 /// In-process (app-view) entry. Class/package must match the Kotlin
 /// `object dev.okhsunrog.vpnhide.checks.NativeProbe`.
+///
+/// A panic here must not take the app down with it: the probes parse whatever
+/// the kernel hands back on an arbitrary vendor build, and this runs on every
+/// cold start. `with_env` catches the unwind (which is why the crate builds with
+/// `panic = "unwind"`) and `ThrowRuntimeExAndDefault` turns it into a Java
+/// exception the caller can report as a failed check run.
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_okhsunrog_vpnhide_checks_NativeProbe_runAllChecksJson<'local>(
     mut env: jni::EnvUnowned<'local>,
     _class: jni::objects::JClass<'local>,
 ) -> jni::objects::JString<'local> {
+    install_panic_hook();
     env.with_env(
         |env| -> jni::errors::Result<jni::objects::JString<'local>> {
             env.new_string(run_all_json())

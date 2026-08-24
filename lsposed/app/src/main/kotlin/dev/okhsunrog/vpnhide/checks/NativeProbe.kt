@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide.checks
 
+import android.util.Log
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -30,8 +31,19 @@ object NativeProbe {
     external fun runAllChecksJson(): String
 
     /** In-process (app-view) run: probes execute as this app (real uid +
-     * SELinux domain + zygisk/kernel hooks), keyed by stable check id. */
-    fun runAll(): Map<String, CheckOutput> = parse(runAllChecksJson())
+     * SELinux domain + zygisk/kernel hooks), keyed by stable check id.
+     *
+     * A probe parses whatever the kernel returns on an arbitrary vendor build,
+     * so the native side catches its own panics and rethrows them here as a
+     * Java exception (see the JNI entry in lsposed/native). Swallowing it costs
+     * one check run — the alternative is the whole app going down on a device
+     * whose kernel returns something we did not anticipate. The panic message
+     * and its file:line are in logcat under `VpnHide-Native`.
+     */
+    fun runAll(): Map<String, CheckOutput> =
+        runCatching { parse(runAllChecksJson()) }
+            .onFailure { Log.e("VpnHide-Native", "native probe run failed", it) }
+            .getOrDefault(emptyMap())
 
     /** Parse a probe JSON blob (from either transport) into id -> outcome. */
     fun parse(json: String): Map<String, CheckOutput> =
