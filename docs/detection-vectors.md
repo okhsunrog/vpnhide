@@ -363,7 +363,7 @@ detectors actually probe:
 | kmod | `kmod/vpnhide_kmod.c` (10 kretprobes + socket-bind redirects + four optional VFS redirects); iface matcher `kmod/generated/iface_lists.h` |
 | KPM | `kmod/kpm/vpnhide_kpm.c` (KernelPatch inline hooks + ctl0, including four optional VFS hooks); offsets in `kmod/kpm/kver_offsets.h` |
 | zygisk | `zygisk/src/hooks.rs` (ioctl/getifaddrs/openat/recv*); `zygisk/src/filter.rs` (procfs + netlink filters) |
-| lsposed | `lsposed/app/.../HookEntry.kt`, `PackageVisibilityHooks.kt`; iface matcher `.../generated/IfaceLists.kt` |
+| lsposed | `lsposed/app/.../hook/HookEntry.kt`, `hook/PackageVisibilityHooks.kt`; iface matcher `.../generated/IfaceLists.kt` |
 | iface match rules | single source of truth `data/interfaces.toml` → `scripts/codegen-interfaces.py` renders all four targets (kmod/KPM C, zygisk Rust, lsposed native Rust, lsposed Kotlin) |
 
 The interface-name patterns (`tun`/`tap`/`wg`/`ppp`/`ipsec`/`xfrm`/`utun`/`l2tp`/`gre`,

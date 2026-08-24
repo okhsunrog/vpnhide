@@ -1,4 +1,4 @@
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.hook
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

@@ -1,8 +1,10 @@
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.hook
 
 import android.os.FileObserver
 import android.util.Log
 import de.robv.android.xposed.XposedBridge
+import dev.okhsunrog.vpnhide.GatedLogger
+import dev.okhsunrog.vpnhide.LogTags
 
 /**
  * system_server logcat facade for LSPosed hooks, which can't reach the app's

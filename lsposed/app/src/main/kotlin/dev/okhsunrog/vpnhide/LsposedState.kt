@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Process
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.hook.HookLog
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean

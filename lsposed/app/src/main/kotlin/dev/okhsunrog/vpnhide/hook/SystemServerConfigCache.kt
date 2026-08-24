@@ -1,7 +1,12 @@
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.hook
 
 import android.os.SystemClock
+import dev.okhsunrog.vpnhide.CANONICAL_CONFIG_FILE
+import dev.okhsunrog.vpnhide.LsposedJavaHookEntries
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.hasHook
+import dev.okhsunrog.vpnhide.hookSelectionMask
+import dev.okhsunrog.vpnhide.parseCanonicalConfig
 import java.io.File
 
 internal data class SystemServerConfig(

@@ -1,4 +1,4 @@
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.hook
 
 import android.os.FileObserver
 

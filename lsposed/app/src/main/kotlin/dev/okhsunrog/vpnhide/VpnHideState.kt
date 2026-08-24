@@ -18,11 +18,24 @@ import kotlinx.serialization.json.JsonElement
  * object: the derived state, the raw shell sections it was derived from, the
  * captured logs, and the root-shell self-diagnosis.
  *
- * Compatibility is intentionally NOT a concern: nothing consumes this format but
- * an operator (or an AI) reading the file, so fields may be added/removed freely.
- * The invariant that matters is completeness.
+ * Nothing machine-parses this format but an operator (or an AI) reading a bug
+ * report, so the shape may change freely — but a bundle can arrive months late,
+ * from an app version nobody has the source of at hand, so the version it was
+ * written against travels with it.
+ *
+ * The number below is the ONE version of the whole bundle (there is no separate
+ * per-object version). Bump it when a field is removed, renamed, or changes
+ * meaning; a pure addition needs no bump. Either way `BundleSchemaGoldenTest`
+ * fails until the golden file is updated, so no shape change ships unnoticed.
+ * Every version gets a row in the history table in docs/debug-bundle.md — the
+ * number is only worth carrying if it can be looked up.
+ *
+ * 2: sealed `kind` discriminators are compact snake_case everywhere. Before
+ *    this, LsposedState and ProtectionCheck serialized as fully-qualified class
+ *    names, which also made them unmovable between packages.
+ * 1: initial.
  */
-internal const val VPNHIDE_STATE_SCHEMA: Int = 1
+internal const val VPNHIDE_STATE_SCHEMA: Int = 2
 
 /**
  * What to include in a captured [VpnHideState]. The ONE source of truth for the

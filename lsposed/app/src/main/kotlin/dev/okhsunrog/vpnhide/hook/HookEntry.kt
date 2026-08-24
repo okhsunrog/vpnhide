@@ -1,4 +1,4 @@
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.hook
 
 import android.net.ConnectivityManager
 import android.net.LinkProperties
@@ -16,6 +16,8 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import dev.okhsunrog.vpnhide.LsposedStats
+import dev.okhsunrog.vpnhide.bit
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.generated.IfaceLists
 import java.util.concurrent.atomic.AtomicBoolean

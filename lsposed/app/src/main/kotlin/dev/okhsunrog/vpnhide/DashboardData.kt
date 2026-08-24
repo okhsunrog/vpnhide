@@ -82,19 +82,23 @@ internal data class ModuleProblem(
 @Serializable
 sealed interface LsposedState {
     @Serializable
+    @SerialName("not_installed")
     data object NotInstalled : LsposedState
 
     @Serializable
+    @SerialName("installed_inactive")
     data class InstalledInactive(
         val version: String?,
     ) : LsposedState
 
     @Serializable
+    @SerialName("needs_reboot")
     data class NeedsReboot(
         val version: String?,
     ) : LsposedState
 
     @Serializable
+    @SerialName("active")
     data class Active(
         val version: String?,
         val targetCount: Int,
@@ -108,6 +112,7 @@ internal sealed interface ProtectionCheck {
     // self-restart. Carries the shared [DiagnosticGate] so the hero/agent explain
     // which without a second enum. Never [DiagnosticGate.ROUTED] — that is [Checked].
     @Serializable
+    @SerialName("blocked")
     data class Blocked(
         val gate: DiagnosticGate,
     ) : ProtectionCheck {
@@ -120,9 +125,11 @@ internal sealed interface ProtectionCheck {
     // just couldn't measure. Distinct from a VPN-off gate so the hero doesn't tell an
     // active-VPN user to turn their VPN on.
     @Serializable
+    @SerialName("failed")
     data object Failed : ProtectionCheck
 
     @Serializable
+    @SerialName("checked")
     data class Checked(
         val native: LayerStatus,
         val java: LayerStatus,

@@ -6,6 +6,19 @@ duplication / god-function drift that AI-assisted edits cause when each change
 only sees its local neighbourhood. **Reuse the abstractions below — don't
 reinvent them.** `grep` for an existing helper before writing a new one.
 
+## Two processes, one APK
+
+The single most important thing about this module: `hook/` is loaded by LSPosed
+**into `system_server`**; everything else runs in the app process. So `hook/`
+carries no Compose, no Activity, no app resources — and nothing outside it may
+touch `de.robv.android.xposed` (absent in the app process). The shared vocabulary
+they both use (canonical-config parsing, `HookRegistry`, `LsposedStats`,
+`LogTags`) stays in the root package. `HookPackageBoundaryTest` enforces both
+directions, since `internal` is module-wide and the compiler will not.
+
+`assets/xposed_init` names the entry class (`…vpnhide.hook.HookEntry`) and
+`proguard-rules.pro` keeps it — moving or renaming it means editing both.
+
 ## Data flow
 
 - **Read path:** one batched root shell → `RootSnapshotCache` → typed snapshots
@@ -70,6 +83,14 @@ reinvent them.** `grep` for an existing helper before writing a new one.
   fragments through `ProcessBuilder("sh", ...)` like `ShellCommandBuildersTest`).
 - **`grep` before adding** any parser / formatter / shell-builder / status
   colour — it probably already exists above.
+- **Changing a `@Serializable` type that reaches the debug bundle bumps the
+  bundle schema.** `BundleSchemaGoldenTest` pins the serialized shape; when it
+  fails, refresh the golden (`UPDATE_GOLDEN=1 ./gradlew :app:testDebugUnitTest
+  --tests '*BundleSchemaGoldenTest*'`) and, if a field was removed/renamed or
+  changed meaning, bump `VPNHIDE_STATE_SCHEMA` + add a row to
+  [docs/debug-bundle.md §2.1](../docs/debug-bundle.md). Sealed subclasses that
+  land in the bundle need an explicit `@SerialName` — without one kotlinx emits
+  the fully-qualified class name, which changes the moment the class moves.
 
 ## Quality gates
 
