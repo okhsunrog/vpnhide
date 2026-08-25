@@ -199,6 +199,9 @@ class HookEntry : IXposedHookLoadPackage {
     /** Remove routes whose interface is a VPN tunnel. Returns true if any went. */
     private fun sanitizeLinkRoutes(copy: LinkProperties): Boolean {
         try {
+            // Unchecked only in the element type: AOSP declares LinkProperties.mRoutes as
+            // ArrayList<RouteInfo>, and the `as?` still checks List-ness at runtime, so a
+            // ROM that reshaped the field falls out as null rather than crashing here.
             @Suppress("UNCHECKED_CAST")
             val routesField = XposedHelpers.getObjectField(copy, "mRoutes") as? MutableList<RouteInfo> ?: return false
             val filtered =
@@ -223,6 +226,8 @@ class HookEntry : IXposedHookLoadPackage {
     private fun sanitizeStackedLinks(copy: LinkProperties): Boolean {
         var modified = false
         try {
+            // Same shape as mRoutes above: AOSP declares mStackedLinks as
+            // Hashtable<String, LinkProperties>; Map-ness is still checked at runtime.
             @Suppress("UNCHECKED_CAST")
             val stacked = XposedHelpers.getObjectField(copy, "mStackedLinks") as? MutableMap<String, LinkProperties>
             if (stacked != null && stacked.isNotEmpty()) {

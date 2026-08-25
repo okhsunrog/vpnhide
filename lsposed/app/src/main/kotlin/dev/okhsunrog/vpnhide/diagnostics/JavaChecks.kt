@@ -1,32 +1,22 @@
+// The deprecated ConnectivityManager surface is the point of this file, not an
+// oversight: `allNetworks`, `getNetworkInfo(type)`, `getNetworkInfo(network)`,
+// `activeNetworkInfo` and the network-handle calls are exactly what a VPN-probing
+// app reaches for, so the checks that prove we hid the tunnel have to reach for the
+// same ones. Migrating them to the modern equivalents would silently drop detection
+// coverage — see docs/detection-vectors.md for the vector each one stands in for.
+//
+// Hence file-level rather than the six per-function suppressions this replaces: the
+// whole file is deliberately-legacy probe code, and there is no non-probe code here
+// for the blanket to hide a genuine deprecation warning in.
+@file:Suppress("DEPRECATION")
+
 package dev.okhsunrog.vpnhide.diagnostics
 
 import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.net.NetworkInfo
-import android.net.Uri
 import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FiberManualRecord
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.VpnHideLog
@@ -35,22 +25,10 @@ import dev.okhsunrog.vpnhide.checks.CheckStatus
 import dev.okhsunrog.vpnhide.checks.NativeProbe
 import dev.okhsunrog.vpnhide.generated.IfaceLists
 import dev.okhsunrog.vpnhide.next
-import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
-import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
-import dev.okhsunrog.vpnhide.ui.components.GroupedCard
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
 import java.net.NetworkInterface
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 
 private const val TAG = LogTags.TEST
 
@@ -327,7 +305,6 @@ private fun checkNetworkInterfaceEnum(name: String): CheckResult =
         javaCheck(name, null, "${e.message}")
     }
 
-@Suppress("DEPRECATION")
 internal fun checkAllNetworksVpn(
     cm: ConnectivityManager,
     name: String,
@@ -377,7 +354,6 @@ private data class NetworkForTypeResult(
     val error: String? = null,
 )
 
-@Suppress("DEPRECATION")
 private fun queryNetworkForType(
     cm: ConnectivityManager,
     type: Int,
@@ -392,7 +368,6 @@ private fun queryNetworkForType(
         NetworkForTypeResult(error = t.cause?.message ?: t.message ?: t.javaClass.simpleName)
     }
 
-@Suppress("DEPRECATION")
 private fun checkNetworkForTypeVpn(
     cm: ConnectivityManager,
     name: String,
@@ -415,7 +390,6 @@ private fun checkNetworkForTypeVpn(
     return javaCheck(name, false, detail)
 }
 
-@Suppress("DEPRECATION")
 private fun checkActiveNetworkHandle(
     cm: ConnectivityManager,
     name: String,
@@ -436,7 +410,6 @@ private fun checkActiveNetworkHandle(
     return javaCheck(name, !leaksVpnHandle, detail)
 }
 
-@Suppress("DEPRECATION")
 private fun checkAllNetworksHandles(
     cm: ConnectivityManager,
     name: String,
@@ -553,7 +526,6 @@ private fun checkLinkPropertiesRoutes(
 // leak. (Its companion getActiveNetworkInfo() was dropped: .type reports the
 // underlying transport (WIFI/mobile) for an active VPN, not TYPE_VPN, so it never
 // surfaced the leak.)
-@Suppress("DEPRECATION")
 private fun checkNetworkInfoVpn(
     cm: ConnectivityManager,
     name: String,

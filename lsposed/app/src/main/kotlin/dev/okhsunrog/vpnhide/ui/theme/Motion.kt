@@ -61,6 +61,21 @@ object AppMotion {
 }
 
 /**
+ * Hand a spec cached as `Any` back out as one for [T].
+ *
+ * [MotionScheme] asks for a fresh `FiniteAnimationSpec<T>` per call site, but the
+ * specs are built once and shared, so the erased element type has to be restored on
+ * the way out. Sound for what is cached here: every spec below is a `tween` or a
+ * `spring` with no visibility threshold, and neither ever touches a value of `T` —
+ * they vectorize through the converter supplied at animation time. Do not route a
+ * spec that carries `T`-typed data (a threshold, a keyframe) through this.
+ *
+ * One suppression, stated once, instead of six identical ones down the object.
+ */
+@Suppress("UNCHECKED_CAST")
+private fun <T> AnimationSpec<Any>.retyped(): FiniteAnimationSpec<T> = this as FiniteAnimationSpec<T>
+
+/**
  * Custom [MotionScheme] driving every expressive Material 3 component animation.
  *
  * Adapted from ImageToolbox's `CustomMotionScheme` (Apache-2.0, © 2024 T8RIN):
@@ -78,21 +93,15 @@ val AppMotionScheme: MotionScheme =
         private val fastEffects = AppMotion.fastEffects<Any>()
         private val slowEffects = AppMotion.slowEffects<Any>()
 
-        @Suppress("UNCHECKED_CAST")
-        override fun <T> defaultSpatialSpec(): FiniteAnimationSpec<T> = defaultSpatial as FiniteAnimationSpec<T>
+        override fun <T> defaultSpatialSpec(): FiniteAnimationSpec<T> = defaultSpatial.retyped()
 
-        @Suppress("UNCHECKED_CAST")
-        override fun <T> fastSpatialSpec(): FiniteAnimationSpec<T> = fastSpatial as FiniteAnimationSpec<T>
+        override fun <T> fastSpatialSpec(): FiniteAnimationSpec<T> = fastSpatial.retyped()
 
-        @Suppress("UNCHECKED_CAST")
-        override fun <T> slowSpatialSpec(): FiniteAnimationSpec<T> = slowSpatial as FiniteAnimationSpec<T>
+        override fun <T> slowSpatialSpec(): FiniteAnimationSpec<T> = slowSpatial.retyped()
 
-        @Suppress("UNCHECKED_CAST")
-        override fun <T> defaultEffectsSpec(): FiniteAnimationSpec<T> = defaultEffects as FiniteAnimationSpec<T>
+        override fun <T> defaultEffectsSpec(): FiniteAnimationSpec<T> = defaultEffects.retyped()
 
-        @Suppress("UNCHECKED_CAST")
-        override fun <T> fastEffectsSpec(): FiniteAnimationSpec<T> = fastEffects as FiniteAnimationSpec<T>
+        override fun <T> fastEffectsSpec(): FiniteAnimationSpec<T> = fastEffects.retyped()
 
-        @Suppress("UNCHECKED_CAST")
-        override fun <T> slowEffectsSpec(): FiniteAnimationSpec<T> = slowEffects as FiniteAnimationSpec<T>
+        override fun <T> slowEffectsSpec(): FiniteAnimationSpec<T> = slowEffects.retyped()
     }
