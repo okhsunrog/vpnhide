@@ -191,11 +191,13 @@ class DiagnosticReportTest {
         assertEquals("root: tun0 up", leak.groundTruthDetail)
     }
 
+    private val prettyJson = Json { prettyPrint = true }
+
     @Test
     fun `the report serializes straight to JSON with its outcome and ground truth`() {
         // No hand-written DTO: the domain report IS the serialized form. @SerialName
         // gives the outcome a compact token discriminator, not a fully-qualified name.
-        val json = Json { prettyPrint = true }.encodeToString(leakReport())
+        val json = prettyJson.encodeToString(leakReport())
         assertTrue("compact outcome discriminator", json.contains("\"leak\""))
         assertTrue("ground truth carried", json.contains("\"root: tun0 up\""))
         assertTrue("check id carried", json.contains("\"ioctl_flags\""))
