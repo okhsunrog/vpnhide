@@ -186,6 +186,11 @@ internal object PackageVisibilityHooks {
                 val pls = parceledListSliceClass ?: return
                 if (!pls.isInstance(result)) return
 
+                // T is whatever element type the caller hooked for (PackageInfo,
+                // ApplicationInfo, ResolveInfo…). ParceledListSlice.getList() is
+                // declared List<T> on the framework side; List-ness is checked at
+                // runtime, the element type is taken on trust — pkgOf below is the
+                // only thing that touches an element, and it is null-tolerant.
                 @Suppress("UNCHECKED_CAST")
                 val original = XposedHelpers.callMethod(result, "getList") as? List<T> ?: return
                 val filtered =
@@ -336,6 +341,9 @@ internal object PackageVisibilityHooks {
         object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (param.hasThrowable()) return
+                // Unchecked only in element nullability — getNamesForUids returns
+                // String[] with null holes for unresolved uids. The array class itself
+                // is still checked, so a ROM returning something else bails out.
                 @Suppress("UNCHECKED_CAST")
                 val names = param.result as? Array<String?> ?: return
                 val caller = observerCaller() ?: return

@@ -27,6 +27,27 @@ What stays in the root package is the shared vocabulary both sides use —
 `DashboardData`, the agent bridge. Moving those buys import churn and nothing
 else; they belong to no single feature.
 
+## "Diagnostic" names seven different things
+
+The word got attached to every layer that answers "what is going on", so the
+name alone will not tell you which one you are looking at. Nothing here is
+misplaced — they genuinely are all diagnostics — but know which is which before
+you add to any of them:
+
+| name | what it actually is |
+|---|---|
+| `DiagnosticsScreen`, *Detailed diagnostics* | the user-facing check suite |
+| `DiagnosticsCache` | the **run state** of that suite (NotRun / Running / Failed) |
+| `DiagnosticReport`, `buildDiagnosticReport`, `DiagnosticCheck` | the **canonical model** the screen and the bundle both render — see `docs/diagnostics.md` |
+| `DiagnosticGate`, `RoutingGateCache`, `resolveDiagnosticGate` | the **precondition** for a meaningful run (VPN up, this app routed) — not a check |
+| `HookDiagnostics`, `ConnectivityAttachDiagnostics`, `KpmDiagnostics` | attach/telemetry for the hooks themselves; **not part of the suite** |
+| `writeDiagnosticZip`, `debug/` | the export — the artifact is the *debug bundle* (`docs/debug-bundle.md`) |
+| `app_scan_diagnostics`, `kmod_diag` | section names inside that bundle |
+
+The pair worth keeping straight: `DiagnosticsCache` holds a **run**,
+`RoutingGateCache` holds a **precondition**, and only the second is derived from
+the canonical config (so only the second is refreshed after a write).
+
 ## Two processes, one APK
 
 The single most important thing about this module: `hook/` is loaded by LSPosed
@@ -56,7 +77,10 @@ directions, since `internal` is module-wide and the compiler will not.
 
 - **`StateCache<T>`** — base for every app-scoped, lazily-loaded cache
   (loading/error/value flows + single-flight job). A new cache **extends this**;
-  never hand-roll `inflight`/`loading` again.
+  never hand-roll `inflight`/`loading` again. If its value is derived from the
+  canonical config, also add it to `CanonicalConfigRepository.derivedCaches` —
+  that list, and only that list, is what a config write refreshes. Membership
+  rule and the deliberate non-members are documented on it.
 - **`RootSnapshotCache`** — the single batched root read. Need new system state
   on the Dashboard/Hiding path? Add a section to its shell snapshot; don't
   add an ad-hoc `suExec` that races the snapshot.
