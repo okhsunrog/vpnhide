@@ -109,6 +109,13 @@ directions, since `internal` is module-wide and the compiler will not.
 - **`NativeChecks`** — `NATIVE_CHECKS` is the single probe list (Dashboard
   summary + Diagnostics share it); `CheckStatus.toPassed()` is the single
   tri-state mapping.
+- **`DashboardIssue` / `dashboardIssues`** — every dashboard banner is decided
+  here, purely, from a `DashboardFacts`; `toMessage` (in
+  `DashboardIssueRender.kt`) is the only half that words it. A new banner is a
+  new `DashboardIssue` case plus its branch in the renderer — **never** a
+  `res.getString` inside `loadDashboardState`, which is what made the guard list
+  untestable for a year. Emission order in `dashboardIssues` is what the user
+  sees; `DashboardIssuesTest` pins it.
 - **`watchSystemDataDir`** — the shared `/data/system` FileObserver factory for
   the three system_server watchers (HookEntry / PackageVisibilityHooks /
   HookLog).
@@ -119,8 +126,12 @@ directions, since `internal` is module-wide and the compiler will not.
 
 - **Pure logic goes in top-level functions in `*Data.kt`, with a unit test** —
   not inside a composable or an orchestrator. `classifyKmodProblem`,
-  `resolveLsposedState`, `buildNativeInstallRecommendation` are the pattern:
-  data in, data out, no Android deps, tested. This is what keeps orchestrators
+  `resolveLsposedState`, `buildNativeInstallRecommendation`, `dashboardIssues`
+  are the pattern: data in, data out, no Android deps, tested. The recurring
+  shape is classify-then-render — a pure function returning a decision, and a
+  thin one turning it into strings. There is no Robolectric here, so anything
+  that takes a `Context` or `Resources` is a function no test will ever cover:
+  keep those as small as the wording itself. This is what keeps orchestrators
   (`loadDashboardState`) from rotting back into god-functions.
 - **Keep functions short** (detekt fails new non-`@Composable` methods over
   ~60 lines). If an orchestrator grows, extract a pure helper.

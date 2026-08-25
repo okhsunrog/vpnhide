@@ -238,9 +238,9 @@ def main() -> int:
         ("kernel", "dashboard_modules_done", "dashboard_kernel_done"),
         ("lsposed_config", "dashboard_kernel_done", "dashboard_lsposed_config_done"),
         ("lsposed_state", "dashboard_lsposed_config_done", "dashboard_lsposed_done"),
-        ("issues", "dashboard_lsposed_done", "dashboard_issues_done"),
         ("protection", "dashboard_protection_start", "dashboard_protection_done"),
-        ("compose_frame", "dashboard_protection_done", "dashboard_ready"),
+        ("issues", "dashboard_protection_done", "dashboard_issues_done"),
+        ("compose_frame", "dashboard_issues_done", "dashboard_ready"),
     ]
     print()
     print("Startup stage deltas:")

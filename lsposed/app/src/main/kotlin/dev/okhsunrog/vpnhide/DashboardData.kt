@@ -17,10 +17,11 @@ import dev.okhsunrog.vpnhide.diagnostics.token
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.hook.HookEntry
+import dev.okhsunrog.vpnhide.picker.TargetsSnapshot
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import dev.okhsunrog.vpnhide.settings.SettingsRepository
-import dev.okhsunrog.vpnhide.settings.filesystemHidingDashboardMessage
 import dev.okhsunrog.vpnhide.settings.installedNativeOptionalHooks
+import dev.okhsunrog.vpnhide.settings.resolveFilesystemHidingState
 import dev.okhsunrog.vpnhide.startup.StartupTrace
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.SerialName
@@ -1055,87 +1056,6 @@ private fun androidMajorVersionLabel(): String {
     return "Android $release"
 }
 
-private fun buildModuleVersionIssue(
-    res: android.content.res.Resources,
-    kind: FlashableModuleKind,
-    moduleVersion: String,
-    appVersion: String,
-    // Only meaningful for FlashableModuleKind.Kmod: the GKI-specific zip the
-    // kernel recommends, so an "update the module" nudge can name the exact
-    // file instead of sending the user back to KernelSU/Magisk to guess
-    // which variant they originally flashed (issue #225).
-    recommendedArtifact: String? = null,
-): String =
-    when (compareSemver(normalizeVersion(moduleVersion), normalizeVersion(appVersion))) {
-        null, 0 -> {
-            res.getString(
-                when (kind) {
-                    FlashableModuleKind.Kmod -> R.string.dashboard_issue_kmod_version_mismatch
-                    FlashableModuleKind.Kpm -> R.string.dashboard_issue_kpm_version_mismatch
-                    FlashableModuleKind.Zygisk -> R.string.dashboard_issue_zygisk_version_mismatch
-                    FlashableModuleKind.Ports -> R.string.dashboard_issue_ports_version_mismatch
-                },
-                moduleVersion,
-                appVersion,
-            )
-        }
-
-        in Int.MIN_VALUE..-1 -> {
-            if (kind == FlashableModuleKind.Kmod && recommendedArtifact != null) {
-                res.getString(R.string.dashboard_issue_update_kmod_named, moduleVersion, appVersion, recommendedArtifact)
-            } else {
-                res.getString(
-                    when (kind) {
-                        FlashableModuleKind.Kmod -> R.string.dashboard_issue_update_kmod
-                        FlashableModuleKind.Kpm -> R.string.dashboard_issue_update_kpm
-                        FlashableModuleKind.Zygisk -> R.string.dashboard_issue_update_zygisk
-                        FlashableModuleKind.Ports -> R.string.dashboard_issue_update_ports
-                    },
-                    moduleVersion,
-                    appVersion,
-                )
-            }
-        }
-
-        else -> {
-            res.getString(
-                when (kind) {
-                    FlashableModuleKind.Kmod -> R.string.dashboard_issue_update_app_for_kmod
-                    FlashableModuleKind.Kpm -> R.string.dashboard_issue_update_app_for_kpm
-                    FlashableModuleKind.Zygisk -> R.string.dashboard_issue_update_app_for_zygisk
-                    FlashableModuleKind.Ports -> R.string.dashboard_issue_update_app_for_ports
-                },
-                moduleVersion,
-                appVersion,
-            )
-        }
-    }
-
-private fun resolveScopeEntryLabel(
-    context: android.content.Context,
-    entry: String,
-): String {
-    if (entry == "system" || entry == "system/0") return "System Framework"
-
-    val packageName = entry.substringBefore('/')
-    val userId = entry.substringAfter('/', "")
-    return try {
-        val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
-        val appLabel =
-            context.packageManager
-                .getApplicationLabel(appInfo)
-                .toString()
-                .trim()
-        when {
-            appLabel.isEmpty() -> packageName
-            userId.isNotEmpty() && userId != "0" -> "$appLabel ($userId)"
-            else -> appLabel
-        }
-    } catch (_: PackageManager.NameNotFoundException) {
-        packageName
-    }
-}
-
 private fun detectLsposedFramework(sections: Map<String, String>): LsposedFramework {
     val out = sections["lsposed_framework"].orEmpty()
     val props = parseKeyValueLines(out)
@@ -1245,532 +1165,246 @@ internal fun readLsposedConfig(
 // then a flat list of independent guards builds the dashboard message banners.
 // Kept as one top-to-bottom narrative — splitting the flat guard list behind a
 // parameter bundle would add indirection without improving clarity.
-@Suppress("LongMethod", "CyclomaticComplexMethod")
-internal suspend fun loadDashboardState(
-    context: android.content.Context,
-    selfNeedsRestart: Boolean,
-    rootSnapshot: RootSnapshot,
-): DashboardState {
-    val messages = mutableListOf<DashboardMessage>()
-    val res = context.resources
-    val selfPkg = context.packageName
 
-    fun err(
-        text: String,
-        downloadArtifact: String? = null,
-    ) {
-        messages += DashboardMessage(DashboardMessageSeverity.ERROR, text, downloadArtifact = downloadArtifact)
-    }
-
-    fun warn(
-        text: String,
-        downloadArtifact: String? = null,
-    ) {
-        messages += DashboardMessage(DashboardMessageSeverity.WARNING, text, downloadArtifact = downloadArtifact)
-    }
-
-    fun info(
-        text: String,
-        action: DashboardMessageAction? = null,
-    ) {
-        messages += DashboardMessage(DashboardMessageSeverity.INFO, text, action)
-    }
-
-    VpnHideLog.i(TAG, "=== Loading dashboard state ===")
-    StartupTrace.mark("dashboard_derive_start")
-    val shellSnapshot = rootSnapshot.sections
-    val targetsSnapshot = parseTargetsSnapshot(rootSnapshot)
-
-    fun countPackages(pkgs: Set<String>): Int = pkgs.count { it != selfPkg }
-
-    // ── Module detection ──
-    // Each module's state comes from a pure detector (unit-tested). kmod's
-    // brokenReason is layered on below, once the kernel recommendation and
-    // load status are known (classifyKmodProblem).
-    val currentBootId = shellSnapshot["current_boot_id"].orEmpty()
-    val kpmLoadStatus = parseKpmLoadStatus(shellSnapshot["kpm_load_status"].orEmpty())
-    val nativeTargetCount = countPackages(targetsSnapshot.nativeTargets)
-    val rawNativeBackends =
-        detectNativeBackendStates(
-            shellSnapshot,
-            currentBootId = currentBootId,
-            kpmLoadStatus = kpmLoadStatus,
-        )
-    val kmodRaw = rawNativeBackends.kmod
-    val zygiskStatusRaw = shellSnapshot["zygisk_status"].orEmpty()
-    val zygiskRaw = rawNativeBackends.zygisk
-    val kpmRaw = rawNativeBackends.kpm
-    val standaloneKpm = standaloneKpmLoaded(kpmRaw, shellSnapshot["kpm_runtime_modules"].orEmpty())
-    val portsRaw = detectPortsModule(shellSnapshot)
-    val portsTargetCount = countPackages(targetsSnapshot.portsObservers)
-    VpnHideLog.i(
-        TAG,
-        "modules: kmodRaw=$kmodRaw kpmRaw=$kpmRaw standaloneKpm=$standaloneKpm " +
-            "zygiskRaw=$zygiskRaw portsRaw=$portsRaw",
+/**
+ * One flashable module's derived state: the integrity/load diagnosis, whether
+ * it is merely staged for the next reboot, and the [ModuleState] with both
+ * folded in.
+ *
+ * The four backends used to do this inline, in four ~18-line blocks that
+ * differed only in kind, activator path and the backend-specific classifier —
+ * which is exactly the shape that lets one of them quietly drift.
+ *
+ * Order matters: a staged install is not a corrupt one, so [modulePendingReboot]
+ * suppresses the diagnosis entirely; integrity beats the backend classifier so a
+ * missing activator is not reported as a load failure.
+ */
+private fun deriveModuleFact(
+    kind: FlashableModuleKind,
+    raw: ModuleState,
+    sections: Map<String, String>,
+    activatorPath: String,
+    res: android.content.res.Resources,
+    classifyBackendProblem: () -> ModuleProblem? = { null },
+): ModuleFact {
+    val pendingReboot = modulePendingReboot(kind, raw, sections)
+    val problem =
+        if (pendingReboot) {
+            null
+        } else {
+            moduleIntegrityProblem(
+                kind = kind,
+                module = raw,
+                sections = sections,
+                activatorPath = activatorPath,
+            )?.let { renderModuleIntegrityProblem(it, res) }
+                ?: classifyBackendProblem()
+        }
+    return ModuleFact(
+        state = raw.withBrokenReason(problem?.reason).withPendingReboot(pendingReboot),
+        problem = problem,
+        pendingReboot = pendingReboot,
     )
-    StartupTrace.mark("dashboard_modules_done")
+}
 
-    // Recommendation based purely on the kernel — used by the install card,
-    // the "kmod-capable kernel, only zygisk installed" warning (W1), and the
-    // wrong-variant detection below.
-    val kernelRaw = shellSnapshot["kernel_release"].orEmpty()
-    val hasKpatchRuntime = kpatchRuntimeAvailable(shellSnapshot["kpatch_runtime"].orEmpty())
-    val kernelRecommendation =
-        buildNativeInstallRecommendation(kernelRaw, androidMajorVersionLabel(), hasKpatchRuntime)
+/** Every module's state, as the cards show it and the banners read it. */
+private fun deriveModuleFacts(
+    sections: Map<String, String>,
+    res: android.content.res.Resources,
+    kernelRecommendation: NativeInstallRecommendation?,
+    hasKpatchRuntime: Boolean,
+    appVersion: String,
+): ModuleFacts {
+    val currentBootId = sections["current_boot_id"].orEmpty()
+    val kpmLoadStatus = parseKpmLoadStatus(sections["kpm_load_status"].orEmpty())
+    val raw = detectNativeBackendStates(sections, currentBootId = currentBootId, kpmLoadStatus = kpmLoadStatus)
+    val portsRaw = detectPortsModule(sections)
     val kmodLoadStatus =
         readKmodLoadStatus(
             currentBootId.trim(),
-            shellSnapshot["kmod_load_status"].orEmpty(),
-            shellSnapshot["kmod_load_dmesg"].orEmpty(),
+            sections["kmod_load_status"].orEmpty(),
+            sections["kmod_load_dmesg"].orEmpty(),
         )
     VpnHideLog.i(TAG, "kmodLoadStatus=$kmodLoadStatus")
 
-    // A freshly-installed module staged in modules_update/ needs a reboot, not
-    // a reinstall — suppress its integrity/runtime error and warn instead.
-    val kmodPendingReboot = modulePendingReboot(FlashableModuleKind.Kmod, kmodRaw, shellSnapshot)
-    val kpmPendingReboot = modulePendingReboot(FlashableModuleKind.Kpm, kpmRaw, shellSnapshot)
-    val zygiskPendingReboot = modulePendingReboot(FlashableModuleKind.Zygisk, zygiskRaw, shellSnapshot)
-    val portsPendingReboot = modulePendingReboot(FlashableModuleKind.Ports, portsRaw, shellSnapshot)
-
-    // Integrity takes priority; one problem drives both card color and banner.
-    val kmodProblem: ModuleProblem? =
-        if (kmodPendingReboot) {
-            null
-        } else {
-            moduleIntegrityProblem(
-                kind = FlashableModuleKind.Kmod,
-                module = kmodRaw,
-                sections = shellSnapshot,
-                activatorPath = KMOD_ACTIVATOR,
-            )?.let { renderModuleIntegrityProblem(it, res) }
-                ?: classifyKmodProblem(kmodRaw, kernelRecommendation, kmodLoadStatus)
-                    ?.let { renderKmodProblem(it, res) }
+    val kmod =
+        deriveModuleFact(FlashableModuleKind.Kmod, raw.kmod, sections, KMOD_ACTIVATOR, res) {
+            classifyKmodProblem(raw.kmod, kernelRecommendation, kmodLoadStatus)?.let { renderKmodProblem(it, res) }
         }
-    val kmod = kmodRaw.withBrokenReason(kmodProblem?.reason).withPendingReboot(kmodPendingReboot)
-    VpnHideLog.i(TAG, "kmod (with brokenReason): $kmod")
-
-    val kpmProblem: ModuleProblem? =
-        if (kpmPendingReboot) {
-            null
-        } else {
-            moduleIntegrityProblem(
-                kind = FlashableModuleKind.Kpm,
-                module = kpmRaw,
-                sections = shellSnapshot,
-                activatorPath = KPM_ACTIVATOR,
-            )?.let { renderModuleIntegrityProblem(it, res) }
-                ?: classifyKpmProblem(
-                    kpm = kpmRaw,
-                    status = kpmLoadStatus,
-                    currentBootId = currentBootId,
-                    hasKpatchRuntime = hasKpatchRuntime,
-                    apatchSuperkeySaved = shellSnapshot["superkey_saved"]?.trim() == "1",
-                )?.let { renderKpmProblem(it, res) }
+    val kpm =
+        deriveModuleFact(FlashableModuleKind.Kpm, raw.kpm, sections, KPM_ACTIVATOR, res) {
+            classifyKpmProblem(
+                kpm = raw.kpm,
+                status = kpmLoadStatus,
+                currentBootId = currentBootId,
+                hasKpatchRuntime = hasKpatchRuntime,
+                apatchSuperkeySaved = sections["superkey_saved"]?.trim() == "1",
+            )?.let { renderKpmProblem(it, res) }
         }
-    val kpm = kpmRaw.withBrokenReason(kpmProblem?.reason).withPendingReboot(kpmPendingReboot)
-    VpnHideLog.i(TAG, "kpm (with brokenReason): $kpm")
+    val zygisk = deriveModuleFact(FlashableModuleKind.Zygisk, raw.zygisk, sections, ZYGISK_ACTIVATOR, res)
+    val ports = deriveModuleFact(FlashableModuleKind.Ports, portsRaw, sections, PORTS_ACTIVATOR, res)
 
-    val zygiskProblem =
-        if (zygiskPendingReboot) {
-            null
-        } else {
-            moduleIntegrityProblem(
-                kind = FlashableModuleKind.Zygisk,
-                module = zygiskRaw,
-                sections = shellSnapshot,
-                activatorPath = ZYGISK_ACTIVATOR,
-            )?.let { renderModuleIntegrityProblem(it, res) }
-        }
-    val zygisk = zygiskRaw.withBrokenReason(zygiskProblem?.reason).withPendingReboot(zygiskPendingReboot)
-
-    val portsProblem =
-        if (portsPendingReboot) {
-            null
-        } else {
-            moduleIntegrityProblem(
-                kind = FlashableModuleKind.Ports,
-                module = portsRaw,
-                sections = shellSnapshot,
-                activatorPath = PORTS_ACTIVATOR,
-            )?.let { renderModuleIntegrityProblem(it, res) }
-        }
-    val ports = portsRaw.withBrokenReason(portsProblem?.reason).withPendingReboot(portsPendingReboot)
-
-    // The one place all three backends are grouped together — every
-    // "is anything installed / active" gate below reads from this instead of
-    // re-deriving its own kmod/kpm/zygisk boolean combination.
-    val backends = NativeBackendStates(kmod = kmod, kpm = kpm, zygisk = zygisk)
-    // The single native backend the dashboard shows (kmod > KPM > Zygisk).
-    val nativeBackend = displayNativeBackend(backends)
-    VpnHideLog.i(TAG, "nativeBackend=$nativeBackend")
-    // Only surface the blue "what to install" card when nothing is
-    // installed yet. Wrong-variant / broken / unsupported-kernel cases
-    // already emit a red error below with the same CTA — showing both
-    // duplicates the instruction.
-    val nativeInstallRecommendation = kernelRecommendation?.takeIf { backends.noneInstalled && !standaloneKpm }
-    VpnHideLog.i(
-        TAG,
-        "nativeInstallRecommendation=$nativeInstallRecommendation " +
-            "(raw=$kernelRecommendation kmodProblem=$kmodProblem kpmProblem=$kpmProblem " +
-            "zygiskProblem=$zygiskProblem portsProblem=$portsProblem)",
+    // The one place the three native backends are grouped: every "is anything
+    // installed / active" gate reads from this instead of re-deriving its own
+    // kmod/kpm/zygisk boolean combination.
+    val backends = NativeBackendStates(kmod = kmod.state, kpm = kpm.state, zygisk = zygisk.state)
+    VpnHideLog.i(TAG, "modules: kmod=${kmod.state} kpm=${kpm.state} zygisk=${zygisk.state} ports=${ports.state}")
+    return ModuleFacts(
+        kmod = kmod,
+        kpm = kpm,
+        zygisk = zygisk,
+        ports = ports,
+        backends = backends,
+        // The single native backend the dashboard shows (kmod > KPM > Zygisk).
+        nativeBackend = displayNativeBackend(backends),
+        standaloneKpm = standaloneKpmLoaded(raw.kpm, sections["kpm_runtime_modules"].orEmpty()),
+        kpmLoadStatus = kpmLoadStatus,
+        kmodLoadStatus = kmodLoadStatus,
+        currentBootId = currentBootId,
+        mismatches =
+            detectModuleMismatches(
+                listOf(
+                    kmod.state to FlashableModuleKind.Kmod,
+                    kpm.state to FlashableModuleKind.Kpm,
+                    zygisk.state to FlashableModuleKind.Zygisk,
+                    ports.state to FlashableModuleKind.Ports,
+                ),
+                appVersion,
+            ),
     )
-    StartupTrace.mark("dashboard_kernel_done")
+}
 
-    // lsposed runtime state
-    val lsposedStateRaw = shellSnapshot["lsposed_state"].orEmpty()
-    val lsposedStatus = Protocol.parseStatus(lsposedStateRaw)
+/** LSPosed's runtime and on-disk state, and the hooks' own install health. */
+private fun deriveLsposedFacts(
+    context: android.content.Context,
+    sections: Map<String, String>,
+    currentBootId: String,
+    lsposedTargetCount: Int,
+): LsposedFacts {
+    val lsposedStateRaw = sections["lsposed_state"].orEmpty()
     val hookProps = parseLsposedStateMetadata(lsposedStateRaw)
-    val hookVersion = hookProps["version"]
-    val hookBootId = hookProps["boot_id"]
     val hooksActiveThisBoot = lsposedHooksActiveThisBoot(lsposedStateRaw, currentBootId)
-    val lsposedTargetCount = countPackages(targetsSnapshot.lsposedTargets)
-    val lsposedFramework = detectLsposedFramework(shellSnapshot)
-    val lsposedConfig =
+    val framework = detectLsposedFramework(sections)
+    val config =
         if (hooksActiveThisBoot) {
-            // A current-boot hook heartbeat is stronger evidence than the
-            // on-disk LSPosed DB: the module is active, and config warnings
-            // are intentionally suppressed for active hooks below.
+            // A current-boot hook heartbeat is stronger evidence than the on-disk
+            // LSPosed DB: the module is active, and config warnings are suppressed
+            // for active hooks anyway.
             null
         } else {
-            when (lsposedFramework) {
+            when (framework) {
                 LsposedFramework.NotInstalled -> {
                     LsposedConfig.ModuleNotConfigured
                 }
 
                 is LsposedFramework.Installed -> {
-                    if (lsposedFramework.disabled) {
+                    if (framework.disabled) {
                         LsposedConfig.Disabled
                     } else {
-                        readLsposedConfig(context, selfPkg)
+                        readLsposedConfig(context, context.packageName)
                     }
                 }
             }
         }
     StartupTrace.mark("dashboard_lsposed_config_done")
-    val lsposed: LsposedState =
+    val state =
         resolveLsposedState(
             hooksActiveThisBoot = hooksActiveThisBoot,
-            hookVersion = hookVersion,
+            hookVersion = hookProps["version"],
             lsposedTargetCount = lsposedTargetCount,
-            framework = lsposedFramework,
-            config = lsposedConfig,
+            framework = framework,
+            config = config,
         )
     VpnHideLog.i(
         TAG,
-        "lsposed: $lsposed (hookBootId=$hookBootId currentBootId=${currentBootId.trim()} " +
-            "status=$lsposedStatus framework=$lsposedFramework hooksActive=$hooksActiveThisBoot config=$lsposedConfig)",
+        "lsposed: $state (hookBootId=${hookProps["boot_id"]} currentBootId=${currentBootId.trim()} " +
+            "status=${Protocol.parseStatus(lsposedStateRaw)} framework=$framework " +
+            "hooksActive=$hooksActiveThisBoot config=$config)",
     )
-    StartupTrace.mark("dashboard_lsposed_done")
+    return LsposedFacts(
+        state = state,
+        framework = framework,
+        config = config,
+        // The install-time smoke check on the private NetworkCapabilities /
+        // NetworkInfo / LinkProperties fields the hooks reflect on. Non-empty means
+        // the running AOSP renamed or retyped one and the matching writeToParcel
+        // hook was skipped — independent of Active/Inactive, since hooks can be live
+        // with partial coverage.
+        brokenFields = hookProps["broken_fields"]?.takeIf { it.isNotBlank() },
+        installFailures = hookProps["install_failures"]?.takeIf { it.isNotBlank() },
+        aospSdkLabel = hookProps["aosp_sdk"]?.takeIf { it.isNotBlank() } ?: "?",
+    )
+}
 
-    // ── Messages ──
-    val hasNative = backends.anyInstalled
-    if (standaloneKpm) {
-        err(res.getString(R.string.dashboard_issue_kpm_standalone_install), "vpnhide-kpm.zip")
-    } else if (!hasNative) {
-        err(res.getString(R.string.dashboard_issue_no_native))
-    }
-    if (lsposedFramework is LsposedFramework.NotInstalled && lsposed !is LsposedState.Active) {
-        err(res.getString(R.string.dashboard_issue_lsposed_not_installed))
-    }
-    if (lsposed is LsposedState.NeedsReboot) {
-        err(res.getString(R.string.dashboard_issue_reboot))
-    }
-    // Only report LSPosed config issues when hooks are not already active at runtime —
-    // if hooks are active, the config is clearly working regardless of what we detect on disk
-    if (lsposed !is LsposedState.Active) {
-        when (lsposedConfig) {
-            null -> {
-                err(res.getString(R.string.dashboard_issue_lsposed_config_unreadable))
-            }
-
-            LsposedConfig.ModuleNotConfigured -> {
-                if (lsposedFramework is LsposedFramework.Installed) {
-                    err(res.getString(R.string.dashboard_issue_lsposed_not_enabled))
-                }
-            }
-
-            LsposedConfig.Disabled -> {
-                err(res.getString(R.string.dashboard_issue_lsposed_not_enabled))
-            }
-
-            is LsposedConfig.Enabled -> {
-                if (!lsposedConfig.hasSystemFramework) {
-                    err(res.getString(R.string.dashboard_issue_lsposed_no_system_scope))
-                }
-                if (lsposedConfig.extraEntries.isNotEmpty()) {
-                    // Extra entries work, they're just cosmetic noise — warn.
-                    warn(
-                        res.getString(
-                            R.string.dashboard_issue_lsposed_extra_scope,
-                            lsposedConfig.extraEntries.joinToString(", ") { resolveScopeEntryLabel(context, it) },
-                        ),
-                    )
-                }
-            }
-        }
-    }
-
-    // AOSP-drift detector: HookEntry's install-time smoke-check on the
-    // private NetworkCapabilities/NetworkInfo/LinkProperties fields it
-    // touches by reflection. Non-empty means the running AOSP renamed
-    // or retyped a field — the corresponding writeToParcel hook was
-    // skipped at install time, Java-layer protection is degraded for
-    // that class. Independent of lsposed Active/Inactive state: hooks
-    // can still be "active" in heartbeat sense but with partial coverage.
-    val brokenFields = hookProps["broken_fields"]?.takeIf { it.isNotBlank() }
-    if (brokenFields != null) {
-        val sdkLabel = hookProps["aosp_sdk"]?.takeIf { it.isNotBlank() } ?: "?"
-        err(res.getString(R.string.dashboard_issue_lsposed_field_rename, brokenFields, sdkLabel))
-    }
-    val installFailures = hookProps["install_failures"]?.takeIf { it.isNotBlank() }
-    if (installFailures != null && brokenFields == null) {
-        err(res.getString(R.string.dashboard_issue_lsposed_install_failures, installFailures))
-    }
-
-    val appVersion = BuildConfig.VERSION_NAME
-    // Version mismatches are warnings — modules keep working, user just needs to
-    // update the lagging side. Full coverage is not affected by a patch-level gap.
-    val moduleMismatches =
-        detectModuleMismatches(
-            listOf(
-                kmod to FlashableModuleKind.Kmod,
-                kpm to FlashableModuleKind.Kpm,
-                zygisk to FlashableModuleKind.Zygisk,
-                ports to FlashableModuleKind.Ports,
-            ),
-            appVersion,
-        )
-    moduleMismatches.forEach { mismatch ->
-        val recommendedArtifact =
-            if (mismatch.kind == FlashableModuleKind.Kmod && kernelRecommendation?.preferKmod == true) {
-                kernelRecommendation.recommendedArtifact
-            } else {
-                null
-            }
-        // Offer the newer module for one-tap download only when the installed
-        // module is OLDER than the app (module newer means the app is behind — the
-        // fix there is updating the app, not re-flashing the module).
-        val moduleOlder =
-            (compareSemver(baseVersion(mismatch.moduleVersion), baseVersion(mismatch.appVersion)) ?: 0) < 0
-        val downloadArtifact =
-            if (moduleOlder) {
-                when (mismatch.kind) {
-                    FlashableModuleKind.Kmod -> recommendedArtifact
-                    FlashableModuleKind.Kpm -> "vpnhide-kpm.zip"
-                    FlashableModuleKind.Zygisk -> "vpnhide-zygisk.zip"
-                    FlashableModuleKind.Ports -> "vpnhide-ports.zip"
-                }
-            } else {
-                null
-            }
-        warn(
-            buildModuleVersionIssue(res, mismatch.kind, mismatch.moduleVersion, mismatch.appVersion, recommendedArtifact),
-            downloadArtifact = downloadArtifact,
-        )
-    }
-    val totalTargets = lsposedTargetCount + nativeTargetCount
-    if (totalTargets == 0) {
-        // A fresh, not-yet-configured install isn't broken — guide the user to add
-        // apps rather than flag a red error.
-        info(res.getString(R.string.dashboard_issue_no_targets))
-    }
-    if (ports is ModuleState.Installed && portsTargetCount == 0) {
-        info(res.getString(R.string.dashboard_issue_ports_no_observers))
-    }
-    detectPortsApplyProblem(
-        ports,
-        portsTargetCount,
-        shellSnapshot["ports_load_status"].orEmpty(),
-        currentBootId,
-        portsDisabled = shellSnapshot["ports_disabled"].orEmpty().trim() == "1",
-    )?.let { problem ->
-        val detail = problem.failureDetail
-        warn(
-            if (detail == null) {
-                res.getString(R.string.dashboard_issue_ports_rules_inactive)
-            } else {
-                res.getString(R.string.dashboard_issue_ports_apply_failed, detail)
-            },
-        )
-    }
-    // The running-LSPosed-vs-installed-APK check compares the FULL version by
-    // default: the hook code lives in system_server and only swaps on reboot, so
-    // a dev who reinstalls the APK on the same base keeps running the old hook
-    // until reboot. Developers who reinstall constantly can flip
-    // suppressVersionWarnings to fall back to base-compare (release users see no
-    // difference — release versions carry no dev suffix).
+/** The device and the app's own settings — everything not owned by one module. */
+private suspend fun deriveEnvironmentFacts(
+    context: android.content.Context,
+    sections: Map<String, String>,
+    targetsSnapshot: TargetsSnapshot,
+    ports: ModuleState,
+    portsTargetCount: Int,
+    currentBootId: String,
+): EnvironmentFacts {
     val appSettings = SettingsRepository(context.applicationContext).settings.first()
-    val suppressVersionWarnings = appSettings.suppressVersionWarnings
-    var lsposedVersionMismatch: String? = null
-    if (lsposed is LsposedState.Active) {
-        val runningVersion = lsposed.version
-        val mismatch =
-            if (suppressVersionWarnings) {
-                versionsMismatch(runningVersion, appVersion)
-            } else {
-                versionsMismatchFull(runningVersion, appVersion)
-            }
-        if (mismatch) {
-            VpnHideLog.w(TAG, "version mismatch: running=$runningVersion app=$appVersion")
-            lsposedVersionMismatch = res.getString(R.string.dashboard_issue_version_mismatch, runningVersion, appVersion)
-        }
-    }
+    return EnvironmentFacts(
+        selinuxPermissive = sections["getenforce"].orEmpty().trim().equals("Permissive", ignoreCase = true),
+        // Each profile's picker only lists its own apps (getInstalledApplications is
+        // per-user), so a Save from a profile that cannot see every target would
+        // silently drop the rest.
+        selfProfileCount =
+            parsePackageUidMap(sections["pm_packages"].orEmpty())[context.packageName]
+                ?.distinct()
+                ?.size
+                ?: 0,
+        debugLoggingOn = targetsSnapshot.canonicalConfig?.debug == true,
+        agentBridgeOn = appSettings.agentControlEnabled,
+        suppressVersionWarnings = appSettings.suppressVersionWarnings,
+        filesystemHiding =
+            resolveFilesystemHidingState(
+                desiredEnabled =
+                    OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS in
+                        targetsSnapshot.canonicalConfig
+                            ?.settings
+                            ?.optionalFeatures
+                            .orEmpty(),
+                sections = sections,
+            ),
+        portsApply =
+            detectPortsApplyProblem(
+                ports,
+                portsTargetCount,
+                sections["ports_load_status"].orEmpty(),
+                currentBootId,
+                portsDisabled = sections["ports_disabled"].orEmpty().trim() == "1",
+            ),
+    )
+}
 
-    // ── Low-priority info: suboptimal-but-working setups ──
-
-    // A stealthier kernel backend fits this kernel, but the user only installed
-    // Zygisk. Zygisk is detectable by banking / payment apps when the Native role
-    // is enabled for them, whereas kmod/KPM are invisible to anti-tamper.
-    // Only nudge when the better backend is actually installable now:
-    // kmod always is; KPM only when
-    // a KPatch runtime is already present (else replacing a working zygisk would
-    // mean installing two more things — too pushy for a low-priority hint).
-    if (zygisk is ModuleState.Installed &&
-        kmod is ModuleState.NotInstalled &&
-        kpm is ModuleState.NotInstalled
-    ) {
-        when (kernelRecommendation?.recommended) {
-            NativeBackendId.Kmod -> {
-                info(
-                    res.getString(
-                        R.string.dashboard_issue_kmod_capable_but_zygisk,
-                        kernelRecommendation.recommendedArtifact,
-                    ),
-                )
-            }
-
-            NativeBackendId.Kpm -> {
-                if (kernelRecommendation.kpatchRuntimeAvailable) {
-                    info(
-                        res.getString(
-                            R.string.dashboard_issue_kpm_capable_but_zygisk,
-                            kernelRecommendation.recommendedArtifact,
-                        ),
-                    )
-                }
-            }
-
-            else -> {}
-        }
-    }
-
-    // More than one native backend active. Disabled / inactive modules may
-    // still have directories under /data/adb/modules; they are not a runtime
-    // freeze risk and must not trigger the .ko+KPM conflict banner.
-    when (
-        classifyMultiNative(
-            kmodActive = moduleActive(kmod),
-            kpmActive = moduleActive(kpm),
-            zygiskActive = moduleActive(zygisk),
-        )
-    ) {
-        MultiNativeSeverity.Error -> {
-            err(res.getString(R.string.dashboard_issue_native_conflict_kernel))
-        }
-
-        MultiNativeSeverity.Warning -> {
-            warn(res.getString(R.string.dashboard_issue_multiple_native))
-        }
-
-        MultiNativeSeverity.None -> {
-            // The active-pair Error above is effectively unobservable (two live
-            // kernel hookers freeze the device). The KPM standing down for a
-            // co-installed .ko is the real state to surface — warn so the user
-            // removes one of the two kernel backends.
-            if (kpmDeferredForConflict(kpmLoadStatus, currentBootId)) {
-                warn(res.getString(R.string.dashboard_issue_native_conflict_deferred))
-            }
-        }
-    }
-
-    // KPM is installed under APatch/FolkPatch but dormant because neither a
-    // trusted `su` token nor a saved SuperKey was usable. Without this the module
-    // just reads as inactive with no reason.
-    if (kpm is ModuleState.Installed &&
-        kpmAwaitingSuperkey(kpmLoadStatus, currentBootId)
-    ) {
-        warn(res.getString(R.string.dashboard_issue_kpm_awaiting_superkey))
-    }
-
-    filesystemHidingDashboardMessage(
-        desiredEnabled =
-            OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS in
-                targetsSnapshot.canonicalConfig
-                    ?.settings
-                    ?.optionalFeatures
-                    .orEmpty(),
-        sections = shellSnapshot,
-        res = res,
-    )?.let(messages::add)
-
-    // User has debug logging turned on. Only adb/root can read those
-    // verbose lines, so this is a neutral dashboard note rather than an issue.
-    if (targetsSnapshot.canonicalConfig?.debug == true) {
-        info(res.getString(R.string.dashboard_issue_debug_logging_on))
-    }
-
-    // The agent control bridge is on: a loopback HTTP server is listening, which
-    // is an on-device fingerprint. Neutral note (same weight as debug logging) so
-    // it isn't left running unnoticed; turn it off in Settings when done.
-    if (appSettings.agentControlEnabled) {
-        info(res.getString(R.string.dashboard_issue_agent_bridge_on))
-    }
-
-    // SELinux Permissive exposes six detection vectors we rely on SELinux
-    // to block (RTM_GETROUTE, /proc/net/{tcp,tcp6,udp,udp6,dev,fib_trie},
-    // /sys/class/net). See the coverage table in the top-level README.
-    val getenforce = shellSnapshot["getenforce"].orEmpty()
-    if (getenforce.trim().equals("Permissive", ignoreCase = true)) {
-        warn(res.getString(R.string.dashboard_issue_selinux_permissive))
-    }
-
-    // VPN Hide installed in more than one user profile (work profile,
-    // MIUI Second Space, etc.). Each instance can write to the shared
-    // canonical config, but each one's app picker only sees apps from its own
-    // profile (PackageManager.getInstalledApplications is per-user). A Save
-    // from a profile that doesn't see all the targets would silently drop them.
-    // Recommend uninstalling everywhere except the main profile.
-    val selfUidCount =
-        parsePackageUidMap(shellSnapshot["pm_packages"].orEmpty())[selfPkg]
-            ?.distinct()
-            ?.size
-            ?: 0
-    if (selfUidCount > 1) {
-        warn(res.getString(R.string.dashboard_issue_self_multi_profile, selfUidCount))
-    }
-
-    // ── Errors: module integrity and backend load problems ──
-    // Each diagnosis (reason + banner text) was computed once above. Only one
-    // banner per module fires, and its priority can't drift from the card color.
-    kmodProblem?.let { err(it.text, it.downloadArtifact) }
-    kpmProblem?.let { err(it.text) }
-    zygiskProblem?.let { err(it.text) }
-    portsProblem?.let { err(it.text) }
-
-    // ── Warnings: modules installed but staged for the next reboot ──
-    fun rebootWarn(moduleName: String) {
-        warn(res.getString(R.string.dashboard_issue_module_reboot_to_activate, moduleName))
-    }
-    if (kmodPendingReboot) rebootWarn("kmod")
-    if (kpmPendingReboot) rebootWarn("KPM")
-    if (zygiskPendingReboot) rebootWarn("Zygisk")
-    if (portsPendingReboot) rebootWarn("Ports")
-
-    // ── Protection checks ──
-    StartupTrace.mark("dashboard_protection_start")
-    val vpnActive = isVpnActiveFromSnapshot(shellSnapshot["vpn_ifaces"].orEmpty())
-    VpnHideLog.i(TAG, "vpnActive=$vpnActive selfNeedsRestart=$selfNeedsRestart")
-
+/**
+ * Await the check run and fold it into the protection verdict.
+ *
+ * The cache does all the gating (VPN off / needs-restart / self-not-routed) in
+ * one fold, and `awaitTerminal` returns the terminal state itself — so the
+ * reason for "no results" (blocked gate vs failed run) is carried through
+ * instead of re-derived from a second VPN sensor or a raced `state.value` read.
+ */
+private suspend fun resolveProtectionFacts(
+    context: android.content.Context,
+    selfNeedsRestart: Boolean,
+    modules: ModuleFacts,
+    lsposedActive: Boolean,
+    sections: Map<String, String>,
+): ProtectionFacts {
+    VpnHideLog.i(
+        TAG,
+        "vpnActive=${isVpnActiveFromSnapshot(sections["vpn_ifaces"].orEmpty())} " +
+            "selfNeedsRestart=$selfNeedsRestart",
+    )
+    val nativeBackend = modules.nativeBackend
     val installedOptionalHooks =
-        installedNativeOptionalHooks(nativeBackend.id, shellSnapshot, currentBootId)
-    // Held so the partial-hook warning below can ask whether a missing hook is
-    // actually costing us a vector on this device.
-    var measuredReport: DiagnosticReport? = null
-    // Single source of truth: the cache does all the gating (VPN off / needs-restart /
-    // self-not-routed) through the one fold. awaitTerminal returns the terminal state
-    // itself, so the reason for "no results" (blocked gate vs a failed run) is carried
-    // through instead of re-derived from a second VPN sensor or a raced state.value read.
-    val protection: ProtectionCheck =
+        installedNativeOptionalHooks(nativeBackend.id, sections, modules.currentBootId)
+    var report: DiagnosticReport? = null
+    val check: ProtectionCheck =
         when (val terminal = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart)) {
             is DiagnosticsCache.State.Blocked -> {
                 ProtectionCheck.Blocked(terminal.gate)
@@ -1780,93 +1414,142 @@ internal suspend fun loadDashboardState(
                 // Derive tiles from the one canonical report (the same object the
                 // debug bundle renders), so the on-screen verdict and the exported
                 // one can never diverge. Tiles judge each backend on the vectors it
-                // owns; unowned leaks are surfaced via the hero warning below.
-                val report =
+                // owns; unowned leaks are left to the issue list.
+                val built =
                     buildDiagnosticReport(
                         gate = DiagnosticGate.ROUTED,
                         results = terminal.results,
                         backend = nativeBackend,
-                        lsposedActive = lsposed is LsposedState.Active,
+                        lsposedActive = lsposedActive,
                         complete = true,
                         installedOptionalHooks = installedOptionalHooks,
                     )
-                measuredReport = report
-                ProtectionCheck.Checked(report.native.status, report.java.status)
+                report = built
+                ProtectionCheck.Checked(built.native.status, built.java.status)
             }
 
-            // State.Failed, and defensively the never-terminal NotRun/Running:
-            // the run couldn't measure — distinct from a VPN-off gate.
+            // State.Failed, and defensively the never-terminal NotRun/Running: the
+            // run couldn't measure — distinct from a VPN-off gate.
             else -> {
                 ProtectionCheck.Failed
             }
         }
+    return ProtectionFacts(
+        check = check,
+        report = report,
+        partialHookGap = partialHookGap(nativeBackend, installedOptionalHooks),
+        installedOptionalHooks = installedOptionalHooks,
+    )
+}
 
-    // A kernel backend that loaded but could not resolve every hook target. Warn
-    // only when a missing hook is costing us something measurable: on kernels that
-    // never had the symbol at all, the vector is usually closed by SELinux or a
-    // capability check anyway, and an alarm there is noise. No reinstall fixes a
-    // kernel that renamed or dropped a function, so this is a warning, not an error.
-    partialHookGap(nativeBackend, installedOptionalHooks)
-        ?.takeIf { gap -> measuredReport?.let { gap.costsAnyVector(it) } != false }
-        ?.let { gap ->
-            warn(
-                res.getString(
-                    R.string.dashboard_issue_native_partial_hooks,
-                    gap.installed,
-                    gap.expected,
-                    gap.missing.joinToString(", ") { it.hookName },
-                ),
-            )
-        }
+/**
+ * The screen's state object, assembled from the facts it was derived from.
+ *
+ * Separate from [loadDashboardState] because it is pure plumbing: no decision is
+ * made here, every field is either copied out of [DashboardFacts] or is the one
+ * value the facts deliberately do not carry ([messages], already worded).
+ */
+private fun DashboardFacts.toDashboardState(
+    messages: List<DashboardMessage>,
+    legacyImport: LegacyImportPrompt?,
+): DashboardState =
+    DashboardState(
+        kmod = modules.kmod.state,
+        kpm = modules.kpm.state,
+        zygisk = modules.zygisk.state,
+        lsposed = lsposed.state,
+        ports = modules.ports.state,
+        nativeTargetCount = targets.native,
+        portsTargetCount = targets.ports,
+        nativeBackend = modules.nativeBackend,
+        // Only surface the blue "what to install" card when nothing is installed
+        // yet. Wrong-variant / broken / unsupported-kernel cases already emit a red
+        // error with the same call to action — showing both duplicates it.
+        nativeInstallRecommendation =
+            kernelRecommendation?.takeIf { modules.backends.noneInstalled && !modules.standaloneKpm },
+        kmodLoadStatus = modules.kmodLoadStatus,
+        protection = protection.check,
+        messages = messages,
+        installedOptionalHooks = protection.installedOptionalHooks,
+        legacyImport = legacyImport,
+    )
 
-    lsposedVersionMismatch?.let { text ->
-        if (protectionFullyPassed(protection)) {
-            info(text)
-        } else {
-            warn(text)
-        }
-    }
+/**
+ * Everything the Dashboard shows, derived from one root snapshot.
+ *
+ * Reads as four steps: derive the facts, await the check run, turn the facts
+ * into banners, assemble. The banner logic itself is deliberately not here —
+ * [dashboardIssues] decides and [toMessage] words it, so the ~25 guards are
+ * reachable from a unit test that needs no `Context`.
+ */
+internal suspend fun loadDashboardState(
+    context: android.content.Context,
+    selfNeedsRestart: Boolean,
+    rootSnapshot: RootSnapshot,
+): DashboardState {
+    VpnHideLog.i(TAG, "=== Loading dashboard state ===")
+    StartupTrace.mark("dashboard_derive_start")
+    val res = context.resources
+    val selfPkg = context.packageName
+    val sections = rootSnapshot.sections
+    val targetsSnapshot = parseTargetsSnapshot(rootSnapshot)
 
-    // A hiding layer is active but a vector it OWNS still leaks — the backend
-    // should hide it and didn't, so the VPN is detectable AND the user can act on
-    // it (report the device). Surface a warning linking to the per-check breakdown.
-    //
-    // Unowned leaks — vectors no active backend covers on this device (e.g.
-    // RTM_GETRULE with no kernel backend loaded, or a best-effort sysfs path) — are
-    // deliberately NOT surfaced here: the active backend is already doing everything
-    // it can, so alarming about a gap the user cannot close just generates noise (and
-    // support churn). Those still appear, neutrally, in the per-check breakdown.
-    val checked = protection as? ProtectionCheck.Checked
-    val nativeLeaks = (checked?.native as? LayerStatus.Active)?.leaks ?: 0
-    val javaLeaks = (checked?.java as? LayerStatus.Active)?.leaks ?: 0
-    if (nativeLeaks > 0 || javaLeaks > 0) {
-        messages +=
-            DashboardMessage(
-                DashboardMessageSeverity.WARNING,
-                res.getString(R.string.dashboard_issue_checks_failed),
-                DashboardMessageAction.OpenDiagnostics,
-            )
-    }
+    fun countPackages(pkgs: Set<String>): Int = pkgs.count { it != selfPkg }
+    val targets =
+        TargetCounts(
+            lsposed = countPackages(targetsSnapshot.lsposedTargets),
+            native = countPackages(targetsSnapshot.nativeTargets),
+            ports = countPackages(targetsSnapshot.portsObservers),
+        )
 
-    StartupTrace.mark("dashboard_messages_done")
-    VpnHideLog.i(TAG, "protection=$protection messages=$messages")
+    // Recommendation based purely on the kernel — used by the install card, the
+    // "kmod-capable kernel, only zygisk installed" nudge, and wrong-variant
+    // detection inside the kmod diagnosis.
+    val hasKpatchRuntime = kpatchRuntimeAvailable(sections["kpatch_runtime"].orEmpty())
+    val kernelRecommendation =
+        buildNativeInstallRecommendation(
+            sections["kernel_release"].orEmpty(),
+            androidMajorVersionLabel(),
+            hasKpatchRuntime,
+        )
+    val appVersion = BuildConfig.VERSION_NAME
+    val modules = deriveModuleFacts(sections, res, kernelRecommendation, hasKpatchRuntime, appVersion)
+    StartupTrace.mark("dashboard_modules_done")
+    StartupTrace.mark("dashboard_kernel_done")
+
+    val lsposed = deriveLsposedFacts(context, sections, modules.currentBootId, targets.lsposed)
+    StartupTrace.mark("dashboard_lsposed_done")
+
+    StartupTrace.mark("dashboard_protection_start")
+    val protection =
+        resolveProtectionFacts(
+            context = context,
+            selfNeedsRestart = selfNeedsRestart,
+            modules = modules,
+            lsposedActive = lsposed.state is LsposedState.Active,
+            sections = sections,
+        )
+    VpnHideLog.i(TAG, "protection=${protection.check}")
     StartupTrace.mark("dashboard_protection_done")
+
+    val environment =
+        deriveEnvironmentFacts(
+            context = context,
+            sections = sections,
+            targetsSnapshot = targetsSnapshot,
+            ports = modules.ports.state,
+            portsTargetCount = targets.ports,
+            currentBootId = modules.currentBootId,
+        )
+    val facts =
+        DashboardFacts(modules, lsposed, targets, environment, protection, kernelRecommendation, appVersion)
+    val messages = dashboardIssues(facts).map { it.toMessage(context, res) }
+    StartupTrace.mark("dashboard_issues_done")
+    VpnHideLog.i(TAG, "messages=$messages")
     VpnHideLog.i(TAG, "=== Dashboard state loaded ===")
 
-    return DashboardState(
-        kmod = kmod,
-        kpm = kpm,
-        zygisk = zygisk,
-        lsposed = lsposed,
-        ports = ports,
-        nativeTargetCount = nativeTargetCount,
-        portsTargetCount = portsTargetCount,
-        nativeBackend = nativeBackend,
-        nativeInstallRecommendation = nativeInstallRecommendation,
-        kmodLoadStatus = kmodLoadStatus,
-        protection = protection,
+    return facts.toDashboardState(
         messages = messages,
-        installedOptionalHooks = installedOptionalHooks,
-        legacyImport = parseLegacyConfigCandidate(shellSnapshot, targetsSnapshot.uidToPkg)?.toPrompt(),
+        legacyImport = parseLegacyConfigCandidate(sections, targetsSnapshot.uidToPkg)?.toPrompt(),
     )
 }
