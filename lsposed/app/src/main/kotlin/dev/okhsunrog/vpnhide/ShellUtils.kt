@@ -17,6 +17,12 @@ private const val TAG = LogTags.APP
 // Replaces the old /proc/vpnhide_targets (decimal UID list) +
 // /proc/vpnhide_debug nodes.
 internal const val PROC_CTL = "/proc/vpnhide_ctl"
+
+// Diagnostic-only companion to PROC_CTL (kmod/vpnhide_kmod.c, vpnhide_diag_show):
+// human-readable hook-mask/nmissed/live-is_vpn_ifname dump for field debugging.
+// Never part of the frozen control/telemetry wire and never parsed — the debug
+// bundle just cats it verbatim, same as kmod_state below.
+internal const val PROC_DIAG = "/proc/vpnhide_diag"
 internal const val PORTS_LOAD_STATUS_FILE = "/data/adb/vpnhide_ports/load_status"
 internal const val PORTS_LOAD_LOG_FILE = "/data/adb/vpnhide_ports/load_log"
 internal const val PORTS_MODULE_DIR = "/data/adb/modules/vpnhide_ports"

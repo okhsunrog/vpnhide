@@ -210,6 +210,19 @@ Created by the `.ko` backend at module init. Mode `0600`, root-only.
 The state is in-kernel and per-boot. The proc write replaces the whole config,
 so activator delivers one bounded snapshot.
 
+### `/proc/vpnhide_diag`
+
+Created by the `.ko` backend alongside the control node, read-only, root-only.
+Diagnostic surface only: it is **not** part of the frozen control/telemetry wire
+and nothing parses it. It reports what `/proc/vpnhide_ctl` cannot — per-probe
+registration, kretprobe/kprobe `nmissed` counters (so an exhausted
+`VPNHIDE_KRETPROBE_MAXACTIVE` is visible), the active vs installed hook masks,
+and the live `is_vpn_ifname()` verdict for every netdev in the reader's netns.
+The verdict is reported as-is, bugs included, so a false-positive interface match
+shows up instead of being hidden by a corrected copy of the logic.
+
+The debug bundle cats it verbatim into a `kmod_diag` section. No UI surface.
+
 ### KPM Supercall Channel
 
 No file or proc node. The KPM activator sends the same `vpnhide 2 config` text

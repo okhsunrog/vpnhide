@@ -58,6 +58,7 @@
 #include <linux/namei.h>
 #include <linux/file.h>
 #include <linux/list.h>
+#include <linux/nsproxy.h>
 #include <linux/netdevice.h>
 #include <linux/rtnetlink.h>
 #include <linux/skbuff.h>
@@ -108,6 +109,33 @@ static bool filesystem_hiding;
 module_param(filesystem_hiding, bool, 0400);
 MODULE_PARM_DESC(filesystem_hiding,
 		 "install optional sysfs/proc-sys interface concealment hooks");
+
+#ifndef VPNHIDE_PROBE_MASK_DEFAULT
+#define VPNHIDE_PROBE_MASK_DEFAULT 0xfffu
+#endif
+
+/*
+ * Bitmask gating which hooks vpnhide_kmod registers at module load —
+ * field-debugging bisection only, NOT part of the control protocol and not
+ * writable at runtime (0400: root-only read). Bits 0-9 map 1:1 to the
+ * `probes[]` kretprobe table index below: 0 dev_ioctl, 1 sock_ioctl,
+ * 2 rtnl_fill, 3 inet6_fill, 4 inet_fill, 5 fib_route_seq, 6 ipv6_route_seq,
+ * 7 fib_dump_info, 8 rt6_fill_node, 9 fib_nl_fill_rule. Bit 10 gates the
+ * socket-bind kprobe hooks (register_socket_bind_hooks). Bit 11 gates the
+ * filesystem/VFS concealment kprobe hooks (register_filesystem_hooks) —
+ * ANDed with the filesystem_hiding param, so filesystem hooks register only
+ * when BOTH are set.
+ *
+ * Default VPNHIDE_PROBE_MASK_DEFAULT (0xfff) sets every bit = current
+ * shipped behaviour. Build a diagnostic variant with a reduced hook set
+ * baked in by overriding the macro at compile time
+ * (-DVPNHIDE_PROBE_MASK_DEFAULT=0x...); no source edits needed per variant.
+ */
+static uint probe_mask = VPNHIDE_PROBE_MASK_DEFAULT;
+module_param(probe_mask, uint, 0400);
+MODULE_PARM_DESC(
+	probe_mask,
+	"diagnostic-only hook gate bitmask, baked in at build time; see comment above");
 
 /*
  * `debug_enabled` is a single bool, set from the `debug` line of a config
@@ -2422,11 +2450,141 @@ static u32 installed_hook_mask(void)
 	return mask;
 }
 
-static int __init vpnhide_init(void)
+/* Human-readable RFC2863 operstate for the diagnostic dump below. Never
+ * returns NULL. */
+static const char *netdev_operstate_str(unsigned char operstate)
 {
-	int i, ret, ok = 0;
+	switch (operstate) {
+	case IF_OPER_UNKNOWN:
+		return "unknown";
+	case IF_OPER_NOTPRESENT:
+		return "notpresent";
+	case IF_OPER_DOWN:
+		return "down";
+	case IF_OPER_LOWERLAYERDOWN:
+		return "lowerlayerdown";
+	case IF_OPER_TESTING:
+		return "testing";
+	case IF_OPER_DORMANT:
+		return "dormant";
+	case IF_OPER_UP:
+		return "up";
+	}
+	return "?";
+}
+
+/* ================================================================== */
+/*  /proc/vpnhide_diag — read-only field-debugging dump                */
+/*                                                                    */
+/*  NOT part of the frozen control/telemetry wire (docs/protocol.md): */
+/*  a separate proc node, plain human-readable text, never written to */
+/*  and never parsed by the activator or app (grep confirms only      */
+/*  /proc/vpnhide_ctl is read by crates/activator and the lsposed     */
+/*  app's ShellUtils/DashboardData). Exists to surface kernel-internal */
+/*  state /proc/vpnhide_ctl's status/stats lines don't carry: per-     */
+/*  probe registration + kretprobe/kprobe miss counters (is a Xiaomi  */
+/*  HyperOS device exhausting VPNHIDE_KRETPROBE_MAXACTIVE?), and the  */
+/*  LIVE is_vpn_ifname() verdict against every netdev in the reader's */
+/*  netns — for root-causing reports of unexpected filtering behaviour */
+/*  (e.g. a false-positive match hiding a non-VPN interface and         */
+/*  breaking that device's networking). Deliberately reports the       */
+/*  CURRENT verdict as-is, bugs included: "fixing" the match here      */
+/*  would hide the very mismatch this node exists to surface.          */
+/* ================================================================== */
+
+static int vpnhide_diag_show(struct seq_file *m, void *v)
+{
+	struct nsproxy *nsproxy;
+	struct net *net;
+	struct net_device *dev;
+	int i;
+
+	seq_puts(m, "vpnhide diag\n");
+	seq_printf(m, "active_hook_mask 0x%x installed_hook_mask 0x%x\n",
+		   READ_ONCE(active_hook_mask), installed_hook_mask());
+	seq_printf(m, "probe_mask 0x%x\n", probe_mask);
 
 	for (i = 0; i < ARRAY_SIZE(probes); i++) {
+		struct kretprobe *krp = probes[i].krp;
+
+		seq_printf(
+			m,
+			"kretprobe %s registered=%d nmissed=%lu kp_nmissed=%lu\n",
+			krp->kp.symbol_name, probes[i].registered,
+			(unsigned long)krp->nmissed,
+			(unsigned long)krp->kp.nmissed);
+	}
+
+	for (i = 0; i < ARRAY_SIZE(socket_bind_kprobe_hooks); i++) {
+		struct socket_bind_kprobe_hook *hook =
+			&socket_bind_kprobe_hooks[i];
+
+		seq_printf(m, "kprobe %s registered=%d nmissed=%lu\n",
+			   hook->name, hook->registered,
+			   (unsigned long)hook->kp.nmissed);
+	}
+
+	for (i = 0; i < ARRAY_SIZE(filesystem_kprobe_hooks); i++) {
+		struct filesystem_kprobe_hook *hook =
+			&filesystem_kprobe_hooks[i];
+
+		seq_printf(m, "kprobe %s registered=%d nmissed=%lu\n",
+			   hook->name, hook->registered,
+			   (unsigned long)hook->kp.nmissed);
+	}
+
+	/*
+	 * Live is_vpn_ifname() verdict over every netdev in the reader's
+	 * (i.e. the root shell's) network namespace. This handler runs in
+	 * process context off seq_read(), not inside a probe handler, so
+	 * rcu_read_lock() + for_each_netdev_rcu() is the ordinary safe way
+	 * to walk the netdev list here — unlike the probe entry/return
+	 * handlers above, which run with interrupts/preemption states that
+	 * rule it out.
+	 */
+	rcu_read_lock();
+	nsproxy = READ_ONCE(current->nsproxy);
+	net = nsproxy ? nsproxy->net_ns : NULL;
+	if (!net) {
+		rcu_read_unlock();
+		seq_puts(m, "iface (no net namespace available)\n");
+		return 0;
+	}
+	for_each_netdev_rcu(net, dev) {
+		char name[IFNAMSIZ];
+
+		if (!copy_dev_name(dev, name))
+			continue;
+		seq_printf(
+			m,
+			"iface %s ifindex=%d is_vpn=%d up=%d operstate=%s flags=0x%x\n",
+			name, dev->ifindex, is_vpn_ifname(name) ? 1 : 0,
+			!!(dev->flags & IFF_UP),
+			netdev_operstate_str(dev->operstate), dev->flags);
+	}
+	rcu_read_unlock();
+
+	return 0;
+}
+
+static int __init vpnhide_init(void)
+{
+	int i, ret, ok = 0, attempted = 0;
+
+#ifdef VPNHIDE_BARE_INIT
+	pr_info(MODNAME
+		": BARE_INIT diagnostic build — init does nothing (no hooks, no proc nodes, no symbol resolution)\n");
+	return 0;
+#endif
+
+	for (i = 0; i < ARRAY_SIZE(probes); i++) {
+		if (!(probe_mask & (1u << i))) {
+			pr_info(MODNAME
+				": kretprobe(%s) skipped (probe_mask=0x%x)\n",
+				probes[i].krp->kp.symbol_name, probe_mask);
+			continue;
+		}
+		attempted++;
 		ret = register_kretprobe(probes[i].krp);
 		if (ret < 0) {
 			pr_warn(MODNAME ": kretprobe(%s) failed: %d\n",
@@ -2439,14 +2597,20 @@ static int __init vpnhide_init(void)
 		}
 	}
 
-	if (ok == 0) {
+	/*
+	 * A masked-out probe (probe_mask bit clear) is a deliberate skip, not
+	 * a failure — it must never trip the "nothing registered" abort
+	 * below. Only treat it as fatal when we actually attempted at least
+	 * one probe (mask allowed it) and every attempt failed.
+	 */
+	if (attempted > 0 && ok == 0) {
 		pr_err(MODNAME ": no kretprobes registered, aborting\n");
 		return -ENOENT;
 	}
-	if (ok < ARRAY_SIZE(probes))
-		pr_warn(MODNAME ": only %d/%zu kretprobes registered — "
+	if (attempted > 0 && ok < attempted)
+		pr_warn(MODNAME ": only %d/%d selected kretprobes registered — "
 				"some detection paths are not covered\n",
-			ok, ARRAY_SIZE(probes));
+			ok, attempted);
 	/* 0600: root-only read/write. The config snapshot is written here by
 	 * service.sh and the VPN Hide app (both root). Apps must not see the
 	 * control channel. (Renamed from vpnhide_targets for semantic accuracy
@@ -2462,6 +2626,18 @@ static int __init vpnhide_init(void)
 		return -ENOMEM;
 	}
 
+	/*
+	 * Diagnostic-only node — best effort. Its absence must not abort
+	 * module init: unlike vpnhide_ctl it exposes no control surface, only
+	 * human-readable internal state for field debugging (see the comment
+	 * above vpnhide_diag_show). 0400: root-only read, matching
+	 * vpnhide_ctl's root-only owner but read-only since there is nothing
+	 * to write.
+	 */
+	if (!proc_create_single("vpnhide_diag", 0400, NULL, vpnhide_diag_show))
+		pr_warn(MODNAME
+			": proc_create_single(vpnhide_diag) failed — diagnostics unavailable\n");
+
 	/* Resolve dev_get_by_index_rcu through a kprobe before the bind hooks go
 	 * live: the symbol is missing from some OEMs' trimmed GKI KMI module table,
 	 * so it must not be a hard link-time reference. If it stays NULL,
@@ -2474,8 +2650,9 @@ static int __init vpnhide_init(void)
 	/* Activate execution redirection last. No fallible initialization may run
 	 * after module text becomes reachable outside the kprobe handler. The module
 	 * has no exit function and remains resident until reboot. */
-	register_socket_bind_hooks();
-	if (READ_ONCE(filesystem_hiding))
+	if (probe_mask & (1u << 10))
+		register_socket_bind_hooks();
+	if (READ_ONCE(filesystem_hiding) && (probe_mask & (1u << 11)))
 		register_filesystem_hooks();
 
 	pr_info(MODNAME
