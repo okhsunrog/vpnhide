@@ -271,14 +271,17 @@ copies the untrusted option value through a fault-contained self-read, so a bad
 pointer still reaches the kernel for native `EFAULT` handling instead of
 crashing the target process. This is deliberately **best effort**: a caller
 issuing `__NR_setsockopt` through raw `svc #0` never enters bionic and bypasses
-the hook. On pre-5.7 kernels it stays inert because the kernel is expected to
-reject an unprivileged bind before inspecting the name; returning a
-name-dependent error there would create a new oracle. Note the asymmetry with
-the kernel backends after the LineageOS 5.4 finding above: where a bind
-actually succeeds, staying inert leaks. The oracle argument only holds while
-every bind is refused, so this gate wants to become a runtime probe (does an
-unprivileged bind to a physical interface succeed here?) rather than a version
-comparison.
+the hook. It no longer decides what to do from the release string. Instead it
+measures, once per process, what this kernel returns for a bind to a name that
+cannot exist, and denies a hidden interface with exactly that errno — EPERM on
+trees that check `CAP_NET_RAW` before parsing the name, ENODEV on trees that
+resolve the name first. Mirroring the measured answer is what keeps the reply
+from being an oracle: where every bind is refused, a name-specific ENODEV would
+announce the interface; where binds succeed, staying inert would leak it (the
+LineageOS 5.4 case above). If the measurement is unusable the hook falls back to
+the old version heuristic, so behaviour is never worse than before it existed.
+`bind-probe` records the same value per kernel family in the QEMU lanes
+(`bind_absent_name`).
 
 This vector is deliberately tested by a raw `svc` probe. A second, non-target
 UID inspects the same inherited socket after the target call, so a backend that
