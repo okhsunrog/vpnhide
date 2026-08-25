@@ -212,6 +212,8 @@ to an `emit_*` line in
 - `kmod_prop`, `kmod_module_state` (file flags, `.ko` + activator sha256, staged-for-reboot state), `kmod_load_status`, `kmod_load_dmesg` (the boot load log — kretprobe registration lines), `kmod_state` (**live `/proc/vpnhide_ctl`** telemetry: installed-hook mask, per-uid counters — see [protocol.md](protocol.md)).
 - `proc_modules` (is `vpnhide*` in `/proc/modules`), `kprobes` (`/sys/kernel/debug/kprobes/list` for our symbols), `kernel_symbols` (kallsyms presence of each hooked function — key for "symbol missing on trimmed OEM KMI").
 
+**kmod backend (diagnostic)** — `kmod_diag`, the verbatim `/proc/vpnhide_diag` dump: per-probe registration, kretprobe `nmissed` counters, active vs installed hook masks, and the live `is_vpn_ifname()` verdict per netdev ([state.md](state.md)). Absent unless the `.ko` is loaded. This is where a "the module broke my network" report gets answered — a false-positive interface match is visible here and nowhere else.
+
 **KPM backend** — `kpm_prop`, `kpm_module_state`, `kpm_load_status`, `kpm_state` (activator `state` dump), `kpatch_runtime` (APatch/KPatch presence, `kpatch hello`/`kpm list`).
 
 **Zygisk backend** — `zygisk_prop`, `zygisk_module_state`, `zygisk_status`, `zygisk_runtime`.
