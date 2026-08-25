@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.counterDeltaText
 import dev.okhsunrog.vpnhide.generated.HookIds
 import org.junit.Assert.assertEquals
 import org.junit.Test

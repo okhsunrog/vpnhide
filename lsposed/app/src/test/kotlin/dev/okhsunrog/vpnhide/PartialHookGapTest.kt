@@ -1,5 +1,13 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.CheckLayer
+import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticCheck
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
+import dev.okhsunrog.vpnhide.diagnostics.LayerReport
+import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
+import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
 import dev.okhsunrog.vpnhide.generated.HookIds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

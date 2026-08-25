@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
 import dev.okhsunrog.vpnhide.generated.HookIds
 import kotlinx.serialization.Serializable
 

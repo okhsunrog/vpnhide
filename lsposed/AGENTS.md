@@ -6,6 +6,27 @@ duplication / god-function drift that AI-assisted edits cause when each change
 only sees its local neighbourhood. **Reuse the abstractions below — don't
 reinvent them.** `grep` for an existing helper before writing a new one.
 
+## Where things live
+
+The app package is no longer one flat directory. `hook/` is the load-bearing
+split (next section); the rest group a feature's screen, its cache and its pure
+model together:
+
+| package | holds |
+|---|---|
+| `hook/` | everything LSPosed loads into `system_server` |
+| `picker/` | the Hiding tab: app list, target model, per-app caches |
+| `diagnostics/` | the check suite, the canonical report, the Diagnostics screen |
+| `settings/` | Settings and its sub-screens, plus the UI preference store |
+| `debug/` | the bundle, the logcat recorder, kernel-image export |
+| `statistics/`, `startup/` | the Statistics tab; MainActivity and startup wiring |
+| `ui/`, `checks/`, `generated/` | design system, the JNI probe binding, codegen |
+
+What stays in the root package is the shared vocabulary both sides use —
+`StorageConfig`, `ShellUtils`, `RootSnapshotCache`, `HookRegistry`,
+`DashboardData`, the agent bridge. Moving those buys import churn and nothing
+else; they belong to no single feature.
+
 ## Two processes, one APK
 
 The single most important thing about this module: `hook/` is loaded by LSPosed

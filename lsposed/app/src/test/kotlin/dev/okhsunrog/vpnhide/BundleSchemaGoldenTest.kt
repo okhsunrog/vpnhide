@@ -1,5 +1,14 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.debug.AppInfo
+import dev.okhsunrog.vpnhide.debug.DeviceInfo
+import dev.okhsunrog.vpnhide.debug.RootShellDiag
+import dev.okhsunrog.vpnhide.debug.VPNHIDE_STATE_SCHEMA
+import dev.okhsunrog.vpnhide.debug.VpnHideState
+import dev.okhsunrog.vpnhide.debug.toJson
+import dev.okhsunrog.vpnhide.diagnostics.CheckResults
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
+import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

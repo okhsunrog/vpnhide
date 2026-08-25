@@ -1,5 +1,9 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.picker.PM_USERS_STATUS_PREFIX
+import dev.okhsunrog.vpnhide.picker.PM_USER_BEGIN_PREFIX
+import dev.okhsunrog.vpnhide.picker.PM_USER_END_PREFIX
+
 internal data class DebugShellSnapshot(
     val sections: Map<String, String>,
     val exitCode: Int,

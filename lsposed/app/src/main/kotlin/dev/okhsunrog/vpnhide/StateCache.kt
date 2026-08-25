@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.picker.AppListCache
+import dev.okhsunrog.vpnhide.picker.TargetsCache
 import dev.okhsunrog.vpnhide.startup.StartupTrace
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope

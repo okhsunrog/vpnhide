@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.picker.autoHiddenPackagesNeedReconcile
+import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import kotlinx.serialization.Serializable
 
 // Import of the pre-1.0 on-disk configuration.

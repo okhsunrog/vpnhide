@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.debug.LogcatRecorder
 import dev.okhsunrog.vpnhide.hook.HookLog
 
 /**

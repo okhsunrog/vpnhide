@@ -1,5 +1,16 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.picker.AppAutoHideSignal
+import dev.okhsunrog.vpnhide.picker.AppRoleSelection
+import dev.okhsunrog.vpnhide.picker.TargetsSnapshot
+import dev.okhsunrog.vpnhide.picker.applyAutoHiddenPackages
+import dev.okhsunrog.vpnhide.picker.autoHiddenPackagesNeedReconcile
+import dev.okhsunrog.vpnhide.picker.buildCanonicalConfigForAppPickerSave
+import dev.okhsunrog.vpnhide.picker.looksLikeVpnAppName
+import dev.okhsunrog.vpnhide.picker.manualHiddenPackages
+import dev.okhsunrog.vpnhide.picker.resolveHiddenPackages
+import dev.okhsunrog.vpnhide.picker.resolveNativeHookSelection
+import dev.okhsunrog.vpnhide.picker.updateManualHiddenPackages
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

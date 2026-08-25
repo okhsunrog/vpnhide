@@ -1,6 +1,9 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.Context
+import dev.okhsunrog.vpnhide.picker.AppAutoHideSignal
+import dev.okhsunrog.vpnhide.picker.applyAutoHiddenPackages
+import dev.okhsunrog.vpnhide.picker.autoHiddenPackagesNeedReconcile
 
 /**
  * Launches the native activators. The app does not fan out wire snapshots

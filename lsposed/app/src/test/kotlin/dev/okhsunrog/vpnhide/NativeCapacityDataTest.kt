@@ -1,5 +1,10 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.picker.AppRoleSelection
+import dev.okhsunrog.vpnhide.picker.NATIVE_TARGET_UID_CAPACITY
+import dev.okhsunrog.vpnhide.picker.NativeTargetCapacityUsage
+import dev.okhsunrog.vpnhide.picker.nativeCapacityIncreaseViolation
+import dev.okhsunrog.vpnhide.picker.nativeTargetCapacityUsage
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

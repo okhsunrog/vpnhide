@@ -1,5 +1,8 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
+import dev.okhsunrog.vpnhide.diagnostics.NotMeasuredReason
+import dev.okhsunrog.vpnhide.diagnostics.classifyJavaOutcome
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

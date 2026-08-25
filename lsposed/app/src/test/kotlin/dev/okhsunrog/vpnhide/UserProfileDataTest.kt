@@ -1,5 +1,10 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.picker.UserProfileInfo
+import dev.okhsunrog.vpnhide.picker.UserProfileKind
+import dev.okhsunrog.vpnhide.picker.classifyUserProfile
+import dev.okhsunrog.vpnhide.picker.isMainAppProfile
+import dev.okhsunrog.vpnhide.picker.parseUserProfiles
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

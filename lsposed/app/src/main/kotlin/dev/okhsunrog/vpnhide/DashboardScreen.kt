@@ -37,6 +37,14 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
+import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
+import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
+import dev.okhsunrog.vpnhide.diagnostics.Verdict
+import dev.okhsunrog.vpnhide.diagnostics.VpnTransportWatcher
+import dev.okhsunrog.vpnhide.diagnostics.blockedOrNull
+import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
 import dev.okhsunrog.vpnhide.settings.SettingsRepository
