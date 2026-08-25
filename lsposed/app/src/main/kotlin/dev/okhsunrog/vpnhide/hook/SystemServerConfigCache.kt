@@ -82,6 +82,16 @@ internal object SystemServerConfigCache {
 
             val result = readConfig()
             val loadedFingerprint = fingerprint()
+            // The debug-logging flag rides this same 1s stat poll as everything
+            // else the hooks read. It used to be refreshed only by HookLog's
+            // FileObserver, and on a Pixel 8 Pro that observer silently stopped
+            // delivering: an atomic rename over the config produced no callback
+            // at all, so the flag stayed frozen at its boot value for five days
+            // while this cache — reading the very same file — was current the
+            // whole time. Turning Debug logging off in the app simply never
+            // reached system_server, and the hooks kept naming target UIDs in
+            // logcat. Correctness must not depend on inotify.
+            HookLog.enabled = result.debug
             HookLog.i(
                 "VpnHide: system_server config loaded " +
                     "java=${result.javaTargetAppIds.size} observer=${result.observerAppIds.size} " +
