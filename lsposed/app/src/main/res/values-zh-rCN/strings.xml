@@ -48,6 +48,8 @@
     <string name="ports_policy_end">结束</string>
     <string name="ports_policy_delete_rule">删除规则</string>
     <string name="ports_policy_invalid">请至少输入一个 1 到 65535 之间的有效端口或范围。</string>
+    <string name="apps_help_who_title">该配置哪个应用？</string>
+    <string name="apps_help_who_body">角色要配置在你想对其隐藏 VPN 的那个应用上——银行、政务、电商。VPN 应用本身在这里不需要配置：它是被隐藏的一方，那份名单在“设置 → 隐藏 VPN 应用”里。</string>
     <string name="apps_help_role_java_body">LSPosed 负责隐藏通过 Android Java API 暴露的 VPN 信号，例如 NetworkCapabilities、NetworkInfo、LinkProperties 和 NetworkInterface。</string>
     <string name="apps_help_role_native_body">当前生效的原生后端负责隐藏内核或 libc 探测能看到的 VPN 信号。VPN Hide 会把同一份原生选择写入所有已安装的原生后端，但只有当前生效的那个会起作用。</string>
     <string name="apps_help_role_apps_body">应用隐藏——观察者模式。此应用收到的是经过净化的包管理器视图，无法列出、解析或查询被 VPN Hide 标记为隐藏的软件包。</string>
