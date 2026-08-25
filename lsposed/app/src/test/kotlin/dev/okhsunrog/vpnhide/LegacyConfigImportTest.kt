@@ -192,7 +192,8 @@ class LegacyConfigImportTest {
     fun `both shell probes read every legacy path`() {
         listOf(buildRootShellSnapshotCommand(), buildDebugShellSnapshotCommand()).forEach { cmd ->
             LEGACY_CONFIG_SECTIONS.forEach { (section, path) ->
-                assertTrue("$section missing", cmd.contains("emit_file $section $path"))
+                // Both probes iterate the pairs the prelude hands them.
+                assertTrue("$section missing", cmd.contains("$section=$path"))
             }
         }
     }

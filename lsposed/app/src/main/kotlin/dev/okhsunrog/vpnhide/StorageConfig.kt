@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.picker.TargetsSnapshot
 import org.json.JSONArray
 import org.json.JSONObject
 

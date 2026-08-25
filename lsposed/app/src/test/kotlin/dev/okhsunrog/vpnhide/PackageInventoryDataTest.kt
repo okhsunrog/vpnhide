@@ -1,5 +1,14 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.picker.BackstopPackage
+import dev.okhsunrog.vpnhide.picker.PM_USERS_STATUS_PREFIX
+import dev.okhsunrog.vpnhide.picker.PM_USER_BEGIN_PREFIX
+import dev.okhsunrog.vpnhide.picker.PM_USER_END_PREFIX
+import dev.okhsunrog.vpnhide.picker.PackageInventoryEntry
+import dev.okhsunrog.vpnhide.picker.buildPerUserPackageInventoryShell
+import dev.okhsunrog.vpnhide.picker.mergeUser0Backstop
+import dev.okhsunrog.vpnhide.picker.parsePackageInventory
+import dev.okhsunrog.vpnhide.picker.requireNonEmptyPackageInventory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -157,7 +166,7 @@ class PackageInventoryDataTest {
                 buildPerUserPackageInventoryShell(
                     sectionBeginPrefix = "__VPNHIDE_ROOT_SECTION_BEGIN__:",
                     sectionEndPrefix = "__VPNHIDE_ROOT_SECTION_END__:",
-                    stderrRedirect = "2>/dev/null",
+                    stderrToStdout = false,
                 )
             }
             """.trimIndent()

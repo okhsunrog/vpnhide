@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.KpmProblemKind
+import dev.okhsunrog.vpnhide.diagnostics.classifyKpmProblem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

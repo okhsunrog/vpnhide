@@ -1,5 +1,8 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.debug.LogcatRecorder
+import dev.okhsunrog.vpnhide.hook.HookLog
+
 /**
  * Single registry of the logcat tags this project emits, so call sites, the
  * [HookLog] system_server sink and the debug-capture logcat filter

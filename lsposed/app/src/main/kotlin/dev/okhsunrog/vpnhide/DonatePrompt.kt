@@ -8,6 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
+import dev.okhsunrog.vpnhide.diagnostics.Verdict
+import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
 
 /**

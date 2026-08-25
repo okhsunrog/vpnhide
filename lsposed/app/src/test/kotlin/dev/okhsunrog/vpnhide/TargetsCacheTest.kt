@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

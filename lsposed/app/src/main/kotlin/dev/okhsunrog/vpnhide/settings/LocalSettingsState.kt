@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide.settings
 
 import androidx.compose.runtime.staticCompositionLocalOf
+import dev.okhsunrog.vpnhide.startup.VpnHideApp
 
 /**
  * Ambient access to the current [AppSettings] snapshot.

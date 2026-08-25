@@ -1,5 +1,18 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.debug.VpnHideState
+import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
+import dev.okhsunrog.vpnhide.diagnostics.CheckResult
+import dev.okhsunrog.vpnhide.diagnostics.CheckResults
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
+import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
+import dev.okhsunrog.vpnhide.diagnostics.NotMeasuredReason
+import dev.okhsunrog.vpnhide.diagnostics.Verdict
+import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
+import dev.okhsunrog.vpnhide.diagnostics.javaCheck
+import dev.okhsunrog.vpnhide.diagnostics.resolveDiagnosticGate
+import dev.okhsunrog.vpnhide.diagnostics.token
+import dev.okhsunrog.vpnhide.diagnostics.verdict
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals

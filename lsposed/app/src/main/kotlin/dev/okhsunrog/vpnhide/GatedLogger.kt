@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 import android.util.Log
+import dev.okhsunrog.vpnhide.hook.HookLog
 
 /**
  * Shared gating core for the project's two logcat facades — [VpnHideLog] (app

@@ -1,5 +1,13 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
+import dev.okhsunrog.vpnhide.diagnostics.CheckResult
+import dev.okhsunrog.vpnhide.diagnostics.DiagStatusKind
+import dev.okhsunrog.vpnhide.diagnostics.NotMeasuredReason
+import dev.okhsunrog.vpnhide.diagnostics.ProtectionCounts
+import dev.okhsunrog.vpnhide.diagnostics.anyNetworkBlocked
+import dev.okhsunrog.vpnhide.diagnostics.diagStatusKind
+import dev.okhsunrog.vpnhide.diagnostics.protectionCounts
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

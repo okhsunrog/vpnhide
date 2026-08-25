@@ -1,6 +1,17 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.AppProbeStats
+import dev.okhsunrog.vpnhide.diagnostics.DetectionMethod
+import dev.okhsunrog.vpnhide.diagnostics.MethodSurface
+import dev.okhsunrog.vpnhide.diagnostics.buildAppProbeStats
+import dev.okhsunrog.vpnhide.diagnostics.diffCapture
+import dev.okhsunrog.vpnhide.diagnostics.resolveAppSummary
+import dev.okhsunrog.vpnhide.diagnostics.snapshotCounters
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.picker.AppSummary
+import dev.okhsunrog.vpnhide.statistics.BackendStatistics
+import dev.okhsunrog.vpnhide.statistics.StatisticsRow
+import dev.okhsunrog.vpnhide.statistics.StatisticsState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

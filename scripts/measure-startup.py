@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 
 PACKAGE = "dev.okhsunrog.vpnhide"
-ACTIVITY = f"{PACKAGE}/.MainActivity"
+ACTIVITY = f"{PACKAGE}/.startup.MainActivity"
 STARTUP_TAG = "VpnHide-Startup"
 
 

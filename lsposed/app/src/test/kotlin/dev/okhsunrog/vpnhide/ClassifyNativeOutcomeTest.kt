@@ -2,6 +2,10 @@ package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.checks.CheckOutput
 import dev.okhsunrog.vpnhide.checks.CheckStatus
+import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
+import dev.okhsunrog.vpnhide.diagnostics.NotMeasuredReason
+import dev.okhsunrog.vpnhide.diagnostics.classifyNativeOutcome
+import dev.okhsunrog.vpnhide.diagnostics.token
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

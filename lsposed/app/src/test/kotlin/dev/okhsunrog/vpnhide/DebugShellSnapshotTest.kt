@@ -64,14 +64,17 @@ class DebugShellSnapshotTest {
     fun `debug command captures all backend state paths`() {
         val command = buildDebugShellSnapshotCommand()
 
-        assertTrue(command.contains("$KPM_ACTIVATOR state"))
-        assertTrue(command.contains("$KPM_LOAD_STATUS_FILE"))
-        assertTrue(command.contains("$KPM_MODULE_DIR/vpnhide.kpm"))
-        assertTrue(command.contains("$KMOD_LOAD_STATUS_FILE"))
-        assertTrue(command.contains("cat $PROC_CTL"))
+        // Paths reach the script through the assignment prelude; check both the
+        // value Kotlin passes and the script's use of it.
+        assertTrue(command.contains("VPNHIDE_KPM_ACTIVATOR='$KPM_ACTIVATOR'"))
+        assertTrue(command.contains("${'$'}VPNHIDE_KPM_ACTIVATOR state"))
+        assertTrue(command.contains("VPNHIDE_KPM_LOAD_STATUS='$KPM_LOAD_STATUS_FILE'"))
+        assertTrue(command.contains("hash_file ${'$'}VPNHIDE_KPM_DIR/vpnhide.kpm"))
+        assertTrue(command.contains("VPNHIDE_KMOD_LOAD_STATUS='$KMOD_LOAD_STATUS_FILE'"))
+        assertTrue(command.contains("cat ${'$'}VPNHIDE_PROC_CTL"))
         assertTrue(command.contains(ZYGISK_STATUS_FILE))
-        assertTrue(command.contains("$ZYGISK_MODULE_DIR/zygisk/arm64-v8a.so"))
-        assertTrue(command.contains("$PORTS_MODULE_DIR/module.prop"))
+        assertTrue(command.contains("${'$'}VPNHIDE_ZYGISK_DIR/zygisk/arm64-v8a.so"))
+        assertTrue(command.contains("\"${'$'}VPNHIDE_PORTS_DIR\"/module.prop"))
         assertTrue(command.contains(PORTS_LOAD_STATUS_FILE))
         assertTrue(command.contains(PORTS_LOAD_LOG_FILE))
         assertTrue(command.contains("iptables -S vpnhide_out"))
@@ -90,8 +93,9 @@ class DebugShellSnapshotTest {
     fun `counter command captures hook status without enumerating packages`() {
         val command = buildHookCounterSnapshotCommand()
 
-        assertTrue(command.contains("cat $PROC_CTL"))
-        assertTrue(command.contains("$KPM_ACTIVATOR state"))
+        assertTrue(command.contains("VPNHIDE_PROC_CTL='$PROC_CTL'"))
+        assertTrue(command.contains("cat ${'$'}VPNHIDE_PROC_CTL"))
+        assertTrue(command.contains("${'$'}VPNHIDE_KPM_ACTIVATOR state"))
         assertTrue(command.contains(LSPOSED_STATE_FILE))
         assertTrue(command.contains(ZYGISK_STATUS_FILE))
         // The counter baseline is consumed only through counts (backend+uid+hookId),
