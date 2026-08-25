@@ -237,7 +237,14 @@ jobs:
         # `:app:lintDebug` (not `:app:lint`) runs Lint on the debug
         # variant only — release-variant Lint covers R8/ProGuard issues
         # and is reserved for ad-hoc local runs / future tag CI.
-        run: cd lsposed && ./gradlew :app:detekt cpdCheck :app:lintDebug :app:testDebugUnitTest
+        # -PvpnhideWarningsAsErrors: the module compiles with zero Kotlin
+        # warnings; this keeps it that way. Off by default so a warning mid-edit
+        # doesn't stop a local build. A toolchain bump that introduces new
+        # warnings fails here — fix or @Suppress them in the bump.
+        run: |
+          cd lsposed
+          ./gradlew -PvpnhideWarningsAsErrors=true \
+            :app:detekt cpdCheck :app:lintDebug :app:testDebugUnitTest
 
   kmod-activator:
     needs: setup
@@ -658,11 +665,11 @@ jobs:
           cd "$GITHUB_WORKSPACE/lsposed"
           case "$GITHUB_REF" in
             refs/tags/v*)
-              ./gradlew assembleRelease
+              ./gradlew -PvpnhideWarningsAsErrors=true assembleRelease
               cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/vpnhide.apk"
               ;;
             *)
-              ./gradlew assembleDebug
+              ./gradlew -PvpnhideWarningsAsErrors=true assembleDebug
               cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/vpnhide.apk"
               ;;
           esac

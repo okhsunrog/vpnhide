@@ -281,9 +281,19 @@ android {
     }
 }
 
+// Compiler warnings are errors in CI (`-PvpnhideWarningsAsErrors`), not locally:
+// a warning mid-edit is information, not a reason to stop the build. The module
+// compiles clean, so the gate only has to keep it that way — and the toolchain
+// that decides what warns is pinned (Gradle via the wrapper, AGP/Kotlin/Compose
+// in libs.versions.toml, NDK by ndkVersion above, JDK by the CI image), so new
+// warnings arrive with a deliberate version bump and get dealt with there.
+// A warning that is genuinely correct to keep gets an @Suppress at its site.
+val warningsAsErrors = (project.findProperty("vpnhideWarningsAsErrors") as String?)?.toBoolean() == true
+
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
+        allWarningsAsErrors.set(warningsAsErrors)
     }
 }
 
