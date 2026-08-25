@@ -20,6 +20,7 @@ import dev.okhsunrog.vpnhide.LsposedStats
 import dev.okhsunrog.vpnhide.bit
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.generated.IfaceLists
+import dev.okhsunrog.vpnhide.token
 import java.util.concurrent.atomic.AtomicBoolean
 import java.lang.reflect.Array as JavaArray
 

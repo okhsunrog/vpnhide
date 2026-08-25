@@ -1,6 +1,8 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.ContextWrapper
+import dev.okhsunrog.vpnhide.startup.StartupCoordinator
+import dev.okhsunrog.vpnhide.startup.StartupSelfTargetState
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

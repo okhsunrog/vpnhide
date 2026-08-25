@@ -1,6 +1,13 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.statistics.StatisticsRow
+import dev.okhsunrog.vpnhide.statistics.StatisticsUnavailableReason
+import dev.okhsunrog.vpnhide.statistics.buildStatisticsState
+import dev.okhsunrog.vpnhide.statistics.extractProtocolBlock
+import dev.okhsunrog.vpnhide.statistics.formatStatCount
+import dev.okhsunrog.vpnhide.statistics.parseProtocolStatsBlock
+import dev.okhsunrog.vpnhide.statistics.parseProtocolStatusBlock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

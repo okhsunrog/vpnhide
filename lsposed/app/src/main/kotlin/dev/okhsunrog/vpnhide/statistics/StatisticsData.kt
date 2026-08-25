@@ -1,6 +1,16 @@
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.statistics
 
+import dev.okhsunrog.vpnhide.NativeBackendId
+import dev.okhsunrog.vpnhide.Protocol
+import dev.okhsunrog.vpnhide.RootSnapshot
+import dev.okhsunrog.vpnhide.activeNativeBackendId
+import dev.okhsunrog.vpnhide.backendId
+import dev.okhsunrog.vpnhide.detectNativeBackendStates
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.indicatesActive
+import dev.okhsunrog.vpnhide.parseLsposedStateMetadata
+import dev.okhsunrog.vpnhide.parsePackageUidMap
+import dev.okhsunrog.vpnhide.statusError
 
 internal data class StatisticsState(
     val backends: List<BackendStatistics>,

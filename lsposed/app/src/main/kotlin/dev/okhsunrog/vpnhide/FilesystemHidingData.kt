@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.statistics.parseProtocolStatusBlock
 
 internal enum class FilesystemHidingStatus {
     Unavailable,

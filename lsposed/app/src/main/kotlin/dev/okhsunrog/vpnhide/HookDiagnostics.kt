@@ -2,6 +2,10 @@ package dev.okhsunrog.vpnhide
 
 import android.content.Context
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.statistics.StatisticsState
+import dev.okhsunrog.vpnhide.statistics.buildStatisticsState
+import dev.okhsunrog.vpnhide.statistics.formatStatCount
+import dev.okhsunrog.vpnhide.statistics.parseProtocolStatusBlock
 
 private data class CounterKey(
     val backend: HookIds.Backend,

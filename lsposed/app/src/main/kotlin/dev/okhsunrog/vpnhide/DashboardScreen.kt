@@ -46,6 +46,8 @@ import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
 import dev.okhsunrog.vpnhide.ui.components.GroupedCard
 import dev.okhsunrog.vpnhide.ui.components.IconBubble
 import dev.okhsunrog.vpnhide.ui.components.MetricTile
+import dev.okhsunrog.vpnhide.ui.components.SectionHeader
+import dev.okhsunrog.vpnhide.ui.components.container
 import dev.okhsunrog.vpnhide.ui.components.pulse
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.Dispatchers

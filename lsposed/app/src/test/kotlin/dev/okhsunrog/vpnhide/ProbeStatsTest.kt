@@ -1,6 +1,9 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.statistics.BackendStatistics
+import dev.okhsunrog.vpnhide.statistics.StatisticsRow
+import dev.okhsunrog.vpnhide.statistics.StatisticsState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

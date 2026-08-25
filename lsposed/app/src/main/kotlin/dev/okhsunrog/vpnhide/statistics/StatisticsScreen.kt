@@ -1,4 +1,4 @@
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.statistics
 
 import android.graphics.drawable.Drawable
 import android.os.SystemClock
@@ -45,13 +45,28 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import dev.okhsunrog.vpnhide.AppListCache
+import dev.okhsunrog.vpnhide.AppProbeStats
+import dev.okhsunrog.vpnhide.AppSummary
+import dev.okhsunrog.vpnhide.DetectionMethod
+import dev.okhsunrog.vpnhide.FrozenCapture
+import dev.okhsunrog.vpnhide.MethodSurface
+import dev.okhsunrog.vpnhide.R
+import dev.okhsunrog.vpnhide.StatusBanner
+import dev.okhsunrog.vpnhide.StatusColors
+import dev.okhsunrog.vpnhide.buildAppProbeStats
+import dev.okhsunrog.vpnhide.diffCapture
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.resolveAppSummary
+import dev.okhsunrog.vpnhide.snapshotCounters
+import dev.okhsunrog.vpnhide.statusError
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
 import dev.okhsunrog.vpnhide.ui.components.GroupedCard
 import dev.okhsunrog.vpnhide.ui.components.IconBubble
 import dev.okhsunrog.vpnhide.ui.components.SectionHeader
+import dev.okhsunrog.vpnhide.ui.components.container
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.delay
 

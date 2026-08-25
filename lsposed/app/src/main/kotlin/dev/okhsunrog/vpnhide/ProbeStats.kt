@@ -1,6 +1,8 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.statistics.BackendStatistics
+import dev.okhsunrog.vpnhide.statistics.StatisticsState
 
 // Where a detection method lives — used to group methods on the per-app card and
 // to explain (native syscall/libc vs Java API vs package enumeration) at a

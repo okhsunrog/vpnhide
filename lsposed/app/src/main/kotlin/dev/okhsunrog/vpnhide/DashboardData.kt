@@ -5,7 +5,9 @@ import android.database.sqlite.SQLiteDatabase
 import android.os.Build
 import android.os.SystemClock
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.hook.HookEntry
 import dev.okhsunrog.vpnhide.settings.SettingsRepository
+import dev.okhsunrog.vpnhide.startup.StartupTrace
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

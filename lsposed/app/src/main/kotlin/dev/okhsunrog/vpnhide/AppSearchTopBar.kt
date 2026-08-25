@@ -20,6 +20,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import dev.okhsunrog.vpnhide.ui.components.container
 
 /**
  * The in-place search/filter top bar shared by the app-picker and hidden-apps

@@ -1,7 +1,8 @@
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.startup
 
 import android.os.SystemClock
 import android.util.Log
+import dev.okhsunrog.vpnhide.LogTags
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val STARTUP_TAG = LogTags.STARTUP
