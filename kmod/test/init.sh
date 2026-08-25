@@ -225,7 +225,7 @@ bind_field() {
 # inspect the same socket afterwards.
 check_socket_bind() {
 	if [ ! -x /bind-probe ]; then
-		for _vec in bind_device_raw bind_device_nul bind_bad_pointer bind_bad_length bind_ifindex keep_bind_device; do
+		for _vec in bind_device_raw bind_device_nul bind_bad_pointer bind_bad_length bind_ifindex keep_bind_device bind_absent_name; do
 			echo "RESULT $_vec=SKIP (no socket bind probe available)"
 		done
 		return
@@ -236,7 +236,7 @@ check_socket_bind() {
 	set_target 5555
 	_vpn_ifindex=$(cat /sys/class/net/vpn0/ifindex 2>/dev/null)
 	if [ -z "$_vpn_ifindex" ]; then
-		for _vec in bind_device_raw bind_device_nul bind_bad_pointer bind_bad_length bind_ifindex keep_bind_device; do
+		for _vec in bind_device_raw bind_device_nul bind_bad_pointer bind_bad_length bind_ifindex keep_bind_device bind_absent_name; do
 			echo "RESULT $_vec=FAIL (vpn0 ifindex unavailable)"
 			FAIL=$((FAIL + 1))
 		done
@@ -321,6 +321,24 @@ check_socket_bind() {
 		PASS=$((PASS + 1))
 	else
 		echo "RESULT keep_bind_device=FAIL (nt_errno=$_nt_errno nt_state=$_nt_state tg_errno=$_tg_errno tg_state=$_tg_state)"
+		FAIL=$((FAIL + 1))
+	fi
+
+	# What does an interface that does not exist look like on THIS kernel?
+	# EPERM where CAP_NET_RAW is checked before the name is parsed, ENODEV
+	# where the name is resolved first.  Hiding an interface means answering
+	# exactly this, so the zygisk backend measures the same thing at runtime
+	# rather than deriving it from the release string.  Both values are
+	# correct; a bind that SUCCEEDS is not, and neither is a bound socket.
+	_nt_errno=$(bind_field "$_nt" BIND_ABSENT_ERRNO)
+	_nt_state=$(bind_field "$_nt" BIND_ABSENT_STATE)
+	[ -n "$_nt_errno" ] || _nt_errno=-1
+	[ -n "$_nt_state" ] || _nt_state=-1
+	if [ "$_nt_errno" -ne 0 ] && [ "$_nt_state" -eq 0 ]; then
+		echo "RESULT bind_absent_name=PASS (errno=$_nt_errno unbound)"
+		PASS=$((PASS + 1))
+	else
+		echo "RESULT bind_absent_name=FAIL (errno=$_nt_errno state=$_nt_state)"
 		FAIL=$((FAIL + 1))
 	fi
 }

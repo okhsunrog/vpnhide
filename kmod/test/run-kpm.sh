@@ -331,6 +331,21 @@ else
 	echo "RESULT keep_bind_device=FAIL (nt_errno=$nt_keep_errno nt_state=$nt_keep_state tg_errno=$tg_keep_errno tg_state=$tg_keep_state)"; FAIL=$((FAIL+1))
 fi
 
+nt_absent_errno="$(bind_field BIND_ABSENT_ERRNO "$NT_LOG")"
+nt_absent_state="$(bind_field BIND_ABSENT_STATE "$NT_LOG")"
+if [ -z "$nt_absent_errno" ] || [ -z "$nt_absent_state" ]; then
+	echo "RESULT bind_absent_name=SKIP (socket bind probe unavailable)"
+	SKIP=$((SKIP+1))
+elif [ "$nt_absent_errno" -ne 0 ] && [ "$nt_absent_state" -eq 0 ]; then
+	# The measured "no such interface" answer for this kernel family: EPERM
+	# where CAP_NET_RAW is checked before the name is parsed, ENODEV where the
+	# name is resolved first.  Recorded because the zygisk backend mirrors it
+	# at runtime (hidden_bind_errno) instead of deriving it from the version.
+	echo "RESULT bind_absent_name=PASS (errno=$nt_absent_errno unbound)"; PASS=$((PASS+1))
+else
+	echo "RESULT bind_absent_name=FAIL (errno=$nt_absent_errno state=$nt_absent_state)"; FAIL=$((FAIL+1))
+fi
+
 if [ -z "$IFC" ]; then
 	echo "RESULT ifconf_tail=SKIP (no ifconf probe available)"
 	SKIP=$((SKIP+1))

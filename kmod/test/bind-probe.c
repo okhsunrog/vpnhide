@@ -370,5 +370,11 @@ int main(int argc, char **argv)
 	run_name_case("BIND_BADLEN", vpn_name, (socklen_t)-1);
 	run_index_case("BIND_INDEX", vpn_ifindex);
 	run_name_case("BIND_KEEP", "eth0", 4);
+	/* Ground truth for "what does an interface that does not exist look like
+	 * here": EPERM on trees that test CAP_NET_RAW before parsing the name,
+	 * ENODEV on trees that resolve the name first. Hiding an interface means
+	 * answering exactly this, so the zygisk backend measures the same thing at
+	 * runtime (hidden_bind_errno) instead of deriving it from the version. */
+	run_name_case("BIND_ABSENT", "zzvpnhideprobe", 15);
 	return 0;
 }

@@ -24,7 +24,7 @@
 
 use core::cell::{Cell, RefCell};
 use core::ffi::{CStr, c_int, c_void};
-use core::sync::atomic::{AtomicPtr, AtomicU8, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicI32, AtomicPtr, AtomicU8, AtomicU32, Ordering};
 use core::{mem, ptr, slice};
 
 use libc::{SIOCGIFCONF, SIOCGIFNAME, ifreq};
@@ -232,6 +232,9 @@ const KERNEL_BIND_POLICY_UNKNOWN: u8 = 0;
 const KERNEL_BIND_POLICY_NATIVE_ONLY: u8 = 1;
 const KERNEL_BIND_POLICY_HOOK: u8 = 2;
 static KERNEL_BIND_POLICY: AtomicU8 = AtomicU8::new(KERNEL_BIND_POLICY_UNKNOWN);
+/// The measured errno to deny a hidden bind with; meaningful once
+/// [`KERNEL_BIND_POLICY`] says HOOK.
+static KERNEL_BIND_ERRNO: AtomicI32 = AtomicI32::new(libc::ENODEV);
 
 fn parse_decimal_component(input: &[u8], cursor: &mut usize) -> Option<u32> {
     let start = *cursor;
@@ -261,19 +264,72 @@ fn release_has_unprivileged_first_bind(release: &[u8]) -> bool {
     major > 5 || (major == 5 && minor >= 7)
 }
 
-/// Linux before 5.7 rejected an unprivileged SO_BINDTODEVICE before reading the
-/// interface name. Filtering there would create a name-dependent ENODEV/EPERM
-/// difference and expose rather than hide VPN prefixes. Keep the hook inert on
-/// those kernels; SO_BINDTOIFINDEX did not exist there either.
-fn kernel_needs_socket_bind_hiding() -> bool {
+/// What a bind to a hidden interface must return, given what this kernel says
+/// about a name that does not exist.
+///
+/// Hiding an interface means making it answer exactly like an absent one. Which
+/// error that is depends on the order of the kernel's own checks, and that order
+/// differs between trees: upstream 5.4 tests `CAP_NET_RAW` before it even looks
+/// at the name, so *every* bind — existing or not — fails with EPERM there;
+/// 5.7+ resolves the name first, so an absent one fails with ENODEV. Mirroring
+/// the measured answer is what keeps the reply from being an oracle: if a
+/// non-existent name gives EPERM, answering ENODEV for `tun0` alone would
+/// announce that `tun0` exists.
+///
+/// `probe` is the errno an unprivileged bind to a made-up name produced here, or
+/// `None` if we could not measure it. `release_allows_first_bind` is the old
+/// version heuristic, kept as the fallback for that case so behaviour is never
+/// worse than before the probe existed.
+fn hidden_bind_errno(probe: Option<c_int>, release_allows_first_bind: bool) -> Option<c_int> {
+    match probe {
+        // A made-up name binding successfully means the probe told us nothing
+        // usable (or the name existed after all) — fall back.
+        Some(0) | None => release_allows_first_bind.then_some(libc::ENODEV),
+        Some(errno) => Some(errno),
+    }
+}
+
+/// Ask the kernel what an unprivileged bind to a name that cannot exist returns.
+///
+/// One socket and one setsockopt, on our own fd, through the real libc entry —
+/// the hook is not consulted, so there is no recursion. Cached for the life of
+/// the process: the answer is a property of the kernel, not of the call.
+fn probe_absent_iface_errno() -> Option<c_int> {
+    // Deliberately not VPN-shaped, so a future matcher change cannot make the
+    // probe name itself interesting, and unlikely to the point of impossibility
+    // as a real interface.
+    const ABSENT: &[u8] = b"zzvpnhideprobe\0";
+
+    let real = real_setsockopt()?;
+    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
+    if fd < 0 {
+        return None;
+    }
+    let rc = unsafe {
+        real(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_BINDTODEVICE,
+            ABSENT.as_ptr().cast(),
+            ABSENT.len() as libc::socklen_t,
+        )
+    };
+    let errno = if rc == 0 { 0 } else { get_errno() };
+    unsafe { libc::close(fd) };
+    Some(errno)
+}
+
+/// The errno this process denies hidden binds with, or `None` to stay out of the
+/// way entirely. Measured once, then cached in [`KERNEL_BIND_POLICY`].
+fn socket_bind_denial_errno() -> Option<c_int> {
     match KERNEL_BIND_POLICY.load(Ordering::Relaxed) {
-        KERNEL_BIND_POLICY_NATIVE_ONLY => return false,
-        KERNEL_BIND_POLICY_HOOK => return true,
+        KERNEL_BIND_POLICY_NATIVE_ONLY => return None,
+        KERNEL_BIND_POLICY_HOOK => return Some(KERNEL_BIND_ERRNO.load(Ordering::Relaxed)),
         _ => {}
     }
 
-    let mut uts = mem::MaybeUninit::<libc::utsname>::zeroed();
-    let hook = unsafe {
+    let release_allows_first_bind = unsafe {
+        let mut uts = mem::MaybeUninit::<libc::utsname>::zeroed();
         if libc::uname(uts.as_mut_ptr()) != 0 {
             false
         } else {
@@ -287,15 +343,19 @@ fn kernel_needs_socket_bind_hiding() -> bool {
             release_has_unprivileged_first_bind(&release[..end])
         }
     };
+    let decision = hidden_bind_errno(probe_absent_iface_errno(), release_allows_first_bind);
+    if let Some(errno) = decision {
+        KERNEL_BIND_ERRNO.store(errno, Ordering::Relaxed);
+    }
     KERNEL_BIND_POLICY.store(
-        if hook {
+        if decision.is_some() {
             KERNEL_BIND_POLICY_HOOK
         } else {
             KERNEL_BIND_POLICY_NATIVE_ONLY
         },
         Ordering::Relaxed,
     );
-    hook
+    decision
 }
 
 /// Copy caller memory without dereferencing its pointer in-process.
@@ -414,11 +474,15 @@ pub unsafe extern "C" fn hooked_setsockopt(
         return unsafe { real(fd, level, optname, optval, optlen) };
     }
 
-    if (optname == libc::SO_BINDTODEVICE || optname == SO_BINDTOIFINDEX)
-        && (!kernel_needs_socket_bind_hiding() || !is_socket_fd(fd))
-    {
-        return unsafe { real(fd, level, optname, optval, optlen) };
-    }
+    let denial_errno = if optname == libc::SO_BINDTODEVICE || optname == SO_BINDTOIFINDEX {
+        match socket_bind_denial_errno() {
+            Some(errno) if is_socket_fd(fd) => errno,
+            // Nothing to mirror (or not a socket): stay out of the way.
+            _ => return unsafe { real(fd, level, optname, optval, optlen) },
+        }
+    } else {
+        libc::ENODEV
+    };
 
     if optname == libc::SO_BINDTODEVICE {
         // The kernel takes a signed length internally. Preserve its native
@@ -435,7 +499,9 @@ pub unsafe extern "C" fn hooked_setsockopt(
             return unsafe { real(fd, level, optname, optval, optlen) };
         }
         if is_vpn_iface_bytes(&name) {
-            set_errno(libc::ENODEV);
+            // The measured "no such interface" answer, so a hidden name is
+            // indistinguishable from one that never existed on this kernel.
+            set_errno(denial_errno);
             return -1;
         }
 
@@ -466,7 +532,7 @@ pub unsafe extern "C" fn hooked_setsockopt(
         }
         let ifindex = c_int::from_ne_bytes(raw);
         if deny_ifindex_bind(ifindex, ifindex_is_vpn(ifindex)) {
-            set_errno(libc::ENODEV);
+            set_errno(denial_errno);
             return -1;
         }
 
@@ -1586,9 +1652,9 @@ mod setsockopt_tests {
     use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
     use super::{
-        KERNEL_BIND_POLICY, KERNEL_BIND_POLICY_HOOK, SO_BINDTOIFINDEX, copy_from_self,
-        deny_ifindex_bind, hooked_setsockopt, release_has_unprivileged_first_bind, set_errno,
-        set_real_setsockopt_ptr,
+        KERNEL_BIND_ERRNO, KERNEL_BIND_POLICY, KERNEL_BIND_POLICY_HOOK, SO_BINDTOIFINDEX,
+        copy_from_self, deny_ifindex_bind, hidden_bind_errno, hooked_setsockopt,
+        release_has_unprivileged_first_bind, set_errno, set_real_setsockopt_ptr,
     };
 
     static REAL_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -1621,6 +1687,41 @@ mod setsockopt_tests {
             core::ptr::dangling::<c_void>(),
             &mut destination
         ));
+    }
+
+    /// Hiding an interface means answering exactly like an absent one, and which
+    /// errno that is depends on the kernel's own check order — EPERM on trees
+    /// that test CAP_NET_RAW before parsing the name, ENODEV on trees that
+    /// resolve first. Mirroring the measured answer is what stops the reply
+    /// being an oracle.
+    #[test]
+    fn hidden_bind_mirrors_the_kernels_answer_for_an_absent_name() {
+        // 5.7+ style: an absent name is ENODEV, so a hidden one is too.
+        assert_eq!(
+            hidden_bind_errno(Some(libc::ENODEV), true),
+            Some(libc::ENODEV)
+        );
+        // Gated tree: every bind is EPERM, so denying with ENODEV would single
+        // the VPN out. Mirror EPERM instead.
+        assert_eq!(
+            hidden_bind_errno(Some(libc::EPERM), false),
+            Some(libc::EPERM)
+        );
+        // Any other refusal is mirrored verbatim rather than reinterpreted.
+        assert_eq!(
+            hidden_bind_errno(Some(libc::EINVAL), true),
+            Some(libc::EINVAL)
+        );
+    }
+
+    #[test]
+    fn an_unusable_probe_falls_back_to_the_release_heuristic() {
+        // Probe failed: behave exactly as before it existed.
+        assert_eq!(hidden_bind_errno(None, true), Some(libc::ENODEV));
+        assert_eq!(hidden_bind_errno(None, false), None);
+        // An absent name that binds successfully tells us nothing usable.
+        assert_eq!(hidden_bind_errno(Some(0), true), Some(libc::ENODEV));
+        assert_eq!(hidden_bind_errno(Some(0), false), None);
     }
 
     #[test]
@@ -1667,6 +1768,28 @@ mod setsockopt_tests {
             Some(libc::ENODEV)
         );
         assert_eq!(REAL_CALLS.load(Ordering::Relaxed), 0);
+
+        // On a tree where every bind is refused for lack of CAP_NET_RAW, the
+        // denial has to mirror that refusal — answering ENODEV only for the VPN
+        // name would announce it. Same call, different measured kernel.
+        KERNEL_BIND_ERRNO.store(libc::EPERM, Ordering::Relaxed);
+        set_errno(0);
+        let rc = unsafe {
+            hooked_setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_BINDTODEVICE,
+                vpn.as_ptr().cast(),
+                vpn.len() as libc::socklen_t,
+            )
+        };
+        assert_eq!(rc, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::EPERM)
+        );
+        assert_eq!(REAL_CALLS.load(Ordering::Relaxed), 0);
+        KERNEL_BIND_ERRNO.store(libc::ENODEV, Ordering::Relaxed);
 
         let physical = *b"eth0";
         let rc = unsafe {
