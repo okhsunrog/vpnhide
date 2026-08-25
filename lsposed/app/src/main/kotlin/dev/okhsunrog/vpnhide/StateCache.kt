@@ -78,6 +78,19 @@ internal abstract class StateCache<T>(
         reload(force)
     }
 
+    /**
+     * True while the cache has never held anything — no value, no failed load.
+     *
+     * A pristine cache has nothing that can go stale, so a config write can skip
+     * it: the next [ensure] loads it fresh anyway. Skipping also matters because
+     * [refreshInPlace] bypasses the concrete cache's `ensureLoaded`, so calling it
+     * first would run [load] without the inputs that method stashes — the load
+     * fails, [reload] records the error, and [ensure] then early-returns on that
+     * error forever. Kept in the error case on purpose: that one is worth retrying.
+     */
+    val pristine: Boolean
+        get() = _value.value == null && _error.value == null
+
     /** Drop the cached value/error so the next [ensure] reloads. */
     open fun invalidate() {
         _value.value = null

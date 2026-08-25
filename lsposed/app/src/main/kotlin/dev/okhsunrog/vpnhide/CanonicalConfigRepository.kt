@@ -63,17 +63,42 @@ internal object CanonicalConfigRepository {
             CanonicalWriteResult(exit, output)
         }
 
-    // Reload each derived cache in place — swap old→new, so no observer sees a null blank
-    // between the write and the reload (the toggle-flicker fix). Root first: the others
-    // derive from it and reuse it via force=false. Failures keep the stale value.
+    /**
+     * The caches whose value is *derived from the canonical config*, and which a
+     * write therefore leaves stale. That is the whole membership rule — add a cache
+     * here if and only if its `load` reads the config (directly, or via the root
+     * snapshot's config-bearing sections).
+     *
+     * Deliberately NOT members: `AppListCache` (an `AppSummary` carries no config
+     * state — the picker merges target flags in reactively), `UpdateCheckCache` and
+     * `DiagnosticsCache` (unrelated to the config), and `SystemServerConfigCache`
+     * (lives in the system_server process, unreachable from here — its own
+     * `SystemDataFileWatcher` invalidates it).
+     *
+     * `RootSnapshotCache` is the shared upstream rather than a member; see
+     * [refreshDerivedCaches].
+     */
+    private val derivedCaches: List<StateCache<*>> =
+        listOf(TargetsCache, DashboardCache, StatisticsCache, RoutingGateCache)
+
+    /**
+     * Reload every config-derived cache in place — swap old→new, so no observer sees
+     * a null blank between the write and the reload (the toggle-flicker fix).
+     *
+     * The root snapshot goes first and alone: the others all derive from it, so they
+     * follow with `force = false` to reuse it. Passing `force = true` here would be a
+     * silent, invisible cost — each cache would invalidate the snapshot and re-run the
+     * whole root shell for itself, once per member. Iterating a list instead of
+     * open-coding the calls is what keeps the order and the flag structural rather
+     * than a comment someone has to notice.
+     *
+     * A failure keeps the stale value (the cache records its own error), so one
+     * unhappy cache can't abort the rest.
+     */
     internal suspend fun refreshDerivedCaches() {
         runCatching { RootSnapshotCache.refresh() }
-        runCatching { TargetsCache.refreshInPlace(force = false) }
-        runCatching { DashboardCache.refreshInPlace(force = false) }
-        runCatching { StatisticsCache.refreshInPlace(force = false) }
-        // Tolerates RoutingGateCache not being initialized yet (load() throws on a
-        // null appContext before any screen has called ensureLoaded/refresh) — a
-        // config write racing app startup should not crash the write itself.
-        runCatching { RoutingGateCache.refreshInPlace(force = false) }
+        derivedCaches.forEach { cache ->
+            if (!cache.pristine) runCatching { cache.refreshInPlace(force = false) }
+        }
     }
 }
