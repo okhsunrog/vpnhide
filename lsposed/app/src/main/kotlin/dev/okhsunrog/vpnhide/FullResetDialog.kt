@@ -135,7 +135,6 @@ internal fun FullResetDialog(
                 }
 
                 done == false || running -> {
-                    Unit
                 }
 
                 ready -> {
@@ -160,7 +159,6 @@ internal fun FullResetDialog(
                 }
 
                 else -> {
-                    Unit
                 }
             }
         },

@@ -182,7 +182,6 @@ internal fun LegacyImportDialog(
             when (state) {
                 // The three choices live in the body; nothing to confirm here.
                 LegacyImportUiState.Choosing, LegacyImportUiState.Running -> {
-                    Unit
                 }
 
                 is LegacyImportUiState.Done -> {

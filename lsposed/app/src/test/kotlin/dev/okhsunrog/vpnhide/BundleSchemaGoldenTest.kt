@@ -40,7 +40,7 @@ class BundleSchemaGoldenTest {
         // Env var, not a -D property: Gradle forwards the environment to the test
         // JVM but not its own system properties.
         if (System.getenv("UPDATE_GOLDEN") == "1") {
-            golden.parentFile.mkdirs()
+            golden.parentFile?.mkdirs()
             golden.writeText(actual)
         }
 

@@ -708,7 +708,6 @@ private fun rememberCaptureGate(selfNeedsRestart: Boolean?): CaptureGate {
                 awaitingFreshSinceOpen = false
             }
         }
-        Unit
     }
     LaunchedEffect(selfNeedsRestart) { recheck() }
     return CaptureGate(
