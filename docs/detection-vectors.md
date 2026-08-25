@@ -250,6 +250,13 @@ name, so KPM probes both by symbol and takes whichever answers. A tree exporting
 neither leaves the hook bit clear — the mask then says, honestly, that this
 backend does not cover the vector.
 
+Below 5.9 the KPM hook is a pre-hook on the mutation helper, so it runs before
+that helper's own `CAP_NET_RAW` check. It therefore asks the same question first
+(`capable(CAP_NET_RAW)`, no struct offsets involved) and denies only callers that
+would otherwise have succeeded: where the kernel refuses everyone, every bind
+keeps failing identically instead of singling the VPN name out with a different
+errno. Same rule the Zygisk hook follows, arrived at from the same counterexample.
+
 The kernel's own `CAP_NET_RAW` gate is **not** treated as a substitute. It used
 to be: below 5.7 this vector was deliberately left unhooked on the grounds that
 `sock_bindtoindex_locked()` rejects an unprivileged bind anyway. A LineageOS

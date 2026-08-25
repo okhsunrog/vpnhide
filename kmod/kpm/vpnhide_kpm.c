@@ -156,6 +156,11 @@ static unsigned long (*_copy_to_user)(void *, const void *, unsigned long);
 static uint64_t (*_read_sanitised_ftr_reg)(uint32_t);
 static void (*_skb_trim)(void *, unsigned int);
 static int (*_netdev_get_name)(void *, char *, int);
+/* Does the caller hold CAP_NET_RAW? Upstream asks ns_capable(net->user_ns, ...);
+ * capable() is the same question against init_user_ns, which is where Android
+ * app processes live — and it needs no struct offsets, so it cannot go stale on
+ * a vendor kernel the way an offset table can. */
+static int (*_capable)(int);
 static char *(*_dentry_path_raw)(void *, char *, int);
 static int (*_vfs_statfs)(const void *, void *);
 static void (*_path_put)(const void *);
@@ -684,6 +689,7 @@ static void rtnl_fill_after(hook_fargs12_t *fargs, void *udata)
 /* ================================================================== */
 
 #define VPNHIDE_ENODEV ((uint64_t)(-19))
+#define VPNHIDE_CAP_NET_RAW 13
 
 /* arm64: TTBR1 (kernel) addresses have the top 16 bits set; user ptrs don't. */
 static int ptr_is_kernel(const void *p)
@@ -825,6 +831,15 @@ static void socket_bind_index_before(hook_fargs4_t *fargs, void *udata)
 	int ifindex = (int)fargs->arg1;
 
 	if (!hook_active(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE))
+		return;
+	/* This is a PRE-hook on the mutation helper, so it runs before the
+	 * helper's own CAP_NET_RAW check. On a kernel where that check refuses
+	 * the caller, every bind fails with EPERM — answering ENODEV for a VPN
+	 * name alone would announce the interface instead of hiding it. Let the
+	 * kernel refuse those callers itself and stay indistinguishable; deny
+	 * only the callers that would otherwise have succeeded. A kernel without
+	 * a resolvable capable() keeps the previous unconditional denial. */
+	if (_capable && !_capable(VPNHIDE_CAP_NET_RAW))
 		return;
 	if (socket_bind_ifindex_hidden((void *)fargs->arg0, ifindex))
 		deny_socket_bind(fargs);
@@ -1785,6 +1800,7 @@ static int resolve_symbols(void)
 	if (!_skb_trim)
 		_skb_trim = (void *)kallsyms_lookup_name("__skb_trim");
 	_netdev_get_name = (void *)lookup_fn("netdev_get_name");
+	_capable = (void *)lookup_fn("capable");
 
 	if (!_skb_trim) {
 		logki(MODNAME ": skb trim helper unavailable\n");
