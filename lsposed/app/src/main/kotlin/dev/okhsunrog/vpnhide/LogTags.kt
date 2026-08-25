@@ -27,6 +27,10 @@ internal object LogTags {
     /** Diagnostics self-test tag (distinct capitalisation, matched separately). */
     const val TEST = "VPNHideTest"
 
+    /** The Rust probe crate: panic reports from its own hook, and the Kotlin
+     *  side's report of a probe run that threw. */
+    const val NATIVE = "VpnHide-Native"
+
     /** App-process (and system_server) tags captured in debug bundles. */
     val APP_TAGS =
         listOf(
@@ -43,6 +47,7 @@ internal object LogTags {
             STATISTICS,
             APP_LIST,
             DEBUG_CONFIG,
+            NATIVE,
         )
 
     /** Native-backend logcat tags (kmod / ports / zygisk / shadowhook). */

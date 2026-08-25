@@ -28,7 +28,13 @@ opt-level = "z"
 lto = "fat"
 codegen-units = 1
 strip = true
-panic = "abort"
+# Unwinding, not abort: this cdylib is loaded into the app process and its JNI
+# entry catches the unwind (see install_panic_hook / with_env), so a panic in a
+# probe surfaces as a Java exception instead of killing the user's app. Costs
+# ~39 KB of unwind tables on arm64 — the only ABI we ship.
+panic = "unwind"
 
 [profile.dev]
-panic = "abort"
+# Host unit tests need unwinding too — abort would mask the panic-hook path
+# this crate now relies on.
+panic = "unwind"

@@ -668,11 +668,6 @@ class AppPickerDataTest {
             kpmModuleInstalled = false,
             zygiskModuleInstalled = false,
             portsModuleInstalled = true,
-            nativeTargets = emptySet(),
-            lsposedTargets = emptySet(),
-            hiddenPkgs = emptySet(),
-            observerUids = emptySet(),
-            portsObservers = emptySet(),
             uidToPkg = emptyMap(),
             canonicalConfig = CanonicalConfig(apps = apps.toMap(), settings = settings),
         )

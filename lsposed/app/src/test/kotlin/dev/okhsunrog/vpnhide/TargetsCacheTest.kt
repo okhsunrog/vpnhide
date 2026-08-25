@@ -53,6 +53,44 @@ class TargetsCacheTest {
         assertTrue(targets.apatchSuperkeySaved)
     }
 
+    /**
+     * The role must survive a package the inventory cannot see.
+     *
+     * `appHiding` used to be stored as resolved UIDs and mapped back through
+     * `pm list packages`, so a target in a profile the scan could not read
+     * vanished from the snapshot — and the next settings write, rebuilt from
+     * that snapshot, dropped the role on disk. A toggle unrelated to the app
+     * list silently unconfigured an app.
+     */
+    @Test
+    fun `an app-hiding target keeps its role when the inventory cannot see it`() {
+        val rootSnapshot =
+            RootSnapshot(
+                sections =
+                    mapOf(
+                        "canonical_config" to
+                            """
+                            {
+                              "version": 1,
+                              "apps": {
+                                "com.invisible": { "appHiding": true },
+                                "com.known": { "appHiding": true }
+                              }
+                            }
+                            """.trimIndent(),
+                        // com.invisible is installed in a profile this scan missed.
+                        "pm_packages" to "package:com.known uid:10123\n",
+                    ),
+            )
+
+        val targets = parseTargetsSnapshot(rootSnapshot)
+
+        assertEquals(setOf("com.invisible", "com.known"), targets.observerNames)
+        // Its UID is genuinely unknown, so it contributes none — that is a
+        // property of the inventory, not a reason to forget the role.
+        assertEquals(setOf(10123), targets.observerUids)
+    }
+
     @Test
     fun `targets snapshot preserves canonical per-hook selections`() {
         val rootSnapshot =

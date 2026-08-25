@@ -534,13 +534,18 @@ class StorageConfigTest {
                 kpmModuleInstalled = false,
                 zygiskModuleInstalled = false,
                 portsModuleInstalled = true,
-                nativeTargets = setOf("com.native"),
-                lsposedTargets = setOf("com.java"),
-                hiddenPkgs = setOf("com.hidden"),
-                observerUids = setOf(10123),
-                portsObservers = setOf("com.ports"),
                 uidToPkg = mapOf(10123 to "com.observer"),
-                canonicalConfig = CanonicalConfig(),
+                canonicalConfig =
+                    CanonicalConfig(
+                        apps =
+                            mapOf(
+                                "com.native" to CanonicalApp(native = NativeRole.All),
+                                "com.java" to CanonicalApp(java = true),
+                                "com.hidden" to CanonicalApp(hidden = true),
+                                "com.observer" to CanonicalApp(appHiding = true),
+                                "com.ports" to CanonicalApp(ports = true),
+                            ),
+                    ),
             )
 
         val cfg = buildCanonicalConfigFromTargetsSnapshot(snapshot, debug = true)

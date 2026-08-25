@@ -240,14 +240,30 @@ return-only kretprobe would be too late; KPM uses KernelPatch's pre-hook
 on the syscall path — and the wrapper must not trust the ABI `level` argument
 (LTO drops it as dead, since `sk_setsockopt` never reads it), because reaching
 either function already proves the call is `SOL_SOCKET`. Both freeze the 5.9+
-`sockptr_t` input before validation to close userspace TOCTOU. On 5.7-5.8, KPM instead hooks the resolved-ifindex mutation
-helper; if LTO removes that static symbol, status is deliberately partial.
-Before 5.7, the kernel itself rejects the first interface bind without
-`CAP_NET_RAW`, and KPM preserves that native result exactly rather than adding
-a distinguishable errno. Android common 5.4 backports `SO_BINDTOIFINDEX` but
-keeps that capability gate; 4.x lacks the option entirely. The legacy QEMU
-checks record the gated paths as native protection and the absent option as
-not applicable.
+`sockptr_t` input before validation to close userspace TOCTOU. Below 5.9 the
+option value is still a raw user pointer, so KPM hooks the resolved-ifindex
+mutation helper instead — after the copy and the name lookup, before
+`sk_bound_dev_if` changes. Which helper exists is a property of the tree, not of
+the version: upstream renamed `sock_setbindtodevice_locked` to
+`sock_bindtoindex_locked` in 5.8, and Android/vendor 5.4 trees backport the newer
+name, so KPM probes both by symbol and takes whichever answers. A tree exporting
+neither leaves the hook bit clear — the mask then says, honestly, that this
+backend does not cover the vector.
+
+Below 5.9 the KPM hook is a pre-hook on the mutation helper, so it runs before
+that helper's own `CAP_NET_RAW` check. It therefore asks the same question first
+(`capable(CAP_NET_RAW)`, no struct offsets involved) and denies only callers that
+would otherwise have succeeded: where the kernel refuses everyone, every bind
+keeps failing identically instead of singling the VPN name out with a different
+errno. Same rule the Zygisk hook follows, arrived at from the same counterexample.
+
+The kernel's own `CAP_NET_RAW` gate is **not** treated as a substitute. It used
+to be: below 5.7 this vector was deliberately left unhooked on the grounds that
+`sock_bindtoindex_locked()` rejects an unprivileged bind anyway. A LineageOS
+5.4 build (sm8350) disproved it — the gate is compiled in there, and an
+untrusted app still bound a socket to `tun0`. Whatever satisfies `ns_capable()`
+on such a ROM, the lesson is that a kernel-side policy we do not control cannot
+back a coverage claim.
 
 When neither kernel backend is available, Zygisk inline-hooks bionic's
 `setsockopt` entry point and applies the same pre-syscall `ENODEV` policy. It
@@ -255,9 +271,14 @@ copies the untrusted option value through a fault-contained self-read, so a bad
 pointer still reaches the kernel for native `EFAULT` handling instead of
 crashing the target process. This is deliberately **best effort**: a caller
 issuing `__NR_setsockopt` through raw `svc #0` never enters bionic and bypasses
-the hook. On pre-5.7 kernels it stays inert because the kernel rejects an
-unprivileged bind before inspecting the name; returning a name-dependent error
-there would create a new oracle.
+the hook. On pre-5.7 kernels it stays inert because the kernel is expected to
+reject an unprivileged bind before inspecting the name; returning a
+name-dependent error there would create a new oracle. Note the asymmetry with
+the kernel backends after the LineageOS 5.4 finding above: where a bind
+actually succeeds, staying inert leaks. The oracle argument only holds while
+every bind is refused, so this gate wants to become a runtime probe (does an
+unprivileged bind to a physical interface succeed here?) rather than a version
+comparison.
 
 This vector is deliberately tested by a raw `svc` probe. A second, non-target
 UID inspects the same inherited socket after the target call, so a backend that

@@ -156,6 +156,11 @@ static unsigned long (*_copy_to_user)(void *, const void *, unsigned long);
 static uint64_t (*_read_sanitised_ftr_reg)(uint32_t);
 static void (*_skb_trim)(void *, unsigned int);
 static int (*_netdev_get_name)(void *, char *, int);
+/* Does the caller hold CAP_NET_RAW? Upstream asks ns_capable(net->user_ns, ...);
+ * capable() is the same question against init_user_ns, which is where Android
+ * app processes live — and it needs no struct offsets, so it cannot go stale on
+ * a vendor kernel the way an offset table can. */
+static int (*_capable)(int);
 static char *(*_dentry_path_raw)(void *, char *, int);
 static int (*_vfs_statfs)(const void *, void *);
 static void (*_path_put)(const void *);
@@ -684,6 +689,7 @@ static void rtnl_fill_after(hook_fargs12_t *fargs, void *udata)
 /* ================================================================== */
 
 #define VPNHIDE_ENODEV ((uint64_t)(-19))
+#define VPNHIDE_CAP_NET_RAW 13
 
 /* arm64: TTBR1 (kernel) addresses have the top 16 bits set; user ptrs don't. */
 static int ptr_is_kernel(const void *p)
@@ -723,18 +729,27 @@ static int sockopt_takes_sk(void)
 	return (unsigned int)kver >= VPNHIDE_KVER(6, 1, 0);
 }
 
+/*
+ * Below the sockptr_t era the setsockopt wrapper cannot be hooked safely (the
+ * option value is still a raw user pointer, so validating it there would be a
+ * TOCTOU). Hook the resolved-ifindex mutation helper instead: it runs after the
+ * copy and the name lookup, but before sk_bound_dev_if changes.
+ *
+ * Which helper exists is a property of the tree, not of the version number.
+ * Upstream renamed sock_setbindtodevice_locked -> sock_bindtoindex_locked in
+ * 5.8, but Android/vendor 5.4 trees backport the newer one (confirmed on a
+ * LineageOS sm8350 5.4.302-qgki build). Probe by symbol and take whichever
+ * answers, rather than deriving the name from kver and missing both.
+ */
 static int socket_bind_uses_index_hook(void)
 {
-	return (unsigned int)kver >= VPNHIDE_KVER(5, 7, 0) &&
-	       (unsigned int)kver < VPNHIDE_KVER(5, 9, 0);
+	return (unsigned int)kver < VPNHIDE_KVER(5, 9, 0);
 }
 
-static const char *socket_bind_index_hook_name(void)
-{
-	return (unsigned int)kver < VPNHIDE_KVER(5, 8, 0) ?
-		       "sock_setbindtodevice_locked" :
-		       "sock_bindtoindex_locked";
-}
+static const char *const socket_bind_index_hook_names[] = {
+	"sock_bindtoindex_locked", /* 5.8+, and 5.4/5.7 backports */
+	"sock_setbindtodevice_locked", /* 5.3-5.7 upstream */
+};
 
 static int copy_sockopt_bytes(hook_fargs8_t *fargs, void *dst, unsigned int len)
 {
@@ -817,6 +832,15 @@ static void socket_bind_index_before(hook_fargs4_t *fargs, void *udata)
 
 	if (!hook_active(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE))
 		return;
+	/* This is a PRE-hook on the mutation helper, so it runs before the
+	 * helper's own CAP_NET_RAW check. On a kernel where that check refuses
+	 * the caller, every bind fails with EPERM — answering ENODEV for a VPN
+	 * name alone would announce the interface instead of hiding it. Let the
+	 * kernel refuse those callers itself and stay indistinguishable; deny
+	 * only the callers that would otherwise have succeeded. A kernel without
+	 * a resolvable capable() keeps the previous unconditional denial. */
+	if (_capable && !_capable(VPNHIDE_CAP_NET_RAW))
+		return;
 	if (socket_bind_ifindex_hidden((void *)fargs->arg0, ifindex))
 		deny_socket_bind(fargs);
 }
@@ -840,10 +864,13 @@ static void socket_bind_before_common(hook_fargs8_t *fargs, int takes_sk)
 	if (optname != VPNHIDE_SO_BINDTODEVICE &&
 	    optname != VPNHIDE_SO_BINDTOIFINDEX)
 		return;
-	/* Before 5.7 the native capability gate owns this vector. On 5.7-5.8
-	 * the resolved-index hook owns it so the old user-pointer ABI cannot
-	 * introduce a check/use race. This wrapper is authoritative only once
-	 * sockptr_t can carry our immutable kernel snapshot. */
+	/* Below 5.9 the resolved-index hook owns this vector, so this wrapper is
+	 * never installed there (see socket_bind_uses_index_hook). The guard stays
+	 * as defence: this path is authoritative only once sockptr_t can carry our
+	 * immutable kernel snapshot, and validating a raw user pointer here would
+	 * be a check/use race. Do NOT re-add "the kernel's CAP_NET_RAW gate covers
+	 * old kernels" as a reason to skip the vector — a LineageOS 5.4 build let an
+	 * app bind to tun0 with that gate compiled in. */
 	if (!sockopt_uses_sockptr())
 		return;
 
@@ -1773,6 +1800,7 @@ static int resolve_symbols(void)
 	if (!_skb_trim)
 		_skb_trim = (void *)kallsyms_lookup_name("__skb_trim");
 	_netdev_get_name = (void *)lookup_fn("netdev_get_name");
+	_capable = (void *)lookup_fn("capable");
 
 	if (!_skb_trim) {
 		logki(MODNAME ": skb trim helper unavailable\n");
@@ -2008,14 +2036,25 @@ static long vpnhide_kpm_init(const char *args, const char *event,
 		int bind_ok;
 
 		if (socket_bind_uses_index_hook()) {
-			/* 5.7-5.8 still pass a raw user pointer to sock_setsockopt.
-			 * Hook the resolved index instead, after the user copy and name
-			 * lookup but before sk_bound_dev_if changes. A missing static
-			 * symbol leaves status partial rather than accepting a TOCTOU. */
-			bind_ok = install_hook(
-				socket_bind_index_hook_name(), 2,
-				(void *)socket_bind_index_before, 0,
-				VPNHIDE_HOOK_SOCKET_BIND_INTERFACE);
+			unsigned int i;
+
+			/* A tree that exports neither helper leaves status partial
+			 * rather than accepting a TOCTOU on the user pointer. It also
+			 * stops us claiming a vector we do not actually cover: the
+			 * kernel's own CAP_NET_RAW gate is NOT a substitute, as a
+			 * LineageOS 5.4 build showed by letting an app bind to tun0
+			 * with the gate compiled in. */
+			bind_ok = 0;
+			for (i = 0;
+			     !bind_ok &&
+			     i < sizeof(socket_bind_index_hook_names) /
+					     sizeof(socket_bind_index_hook_names
+							    [0]);
+			     i++)
+				bind_ok = install_hook(
+					socket_bind_index_hook_names[i], 2,
+					(void *)socket_bind_index_before, 0,
+					VPNHIDE_HOOK_SOCKET_BIND_INTERFACE);
 		} else {
 			bind_ok = install_hook(
 				"sock_setsockopt", 6,

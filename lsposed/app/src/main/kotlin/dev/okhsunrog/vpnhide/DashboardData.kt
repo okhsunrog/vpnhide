@@ -1747,19 +1747,9 @@ internal suspend fun loadDashboardState(
 
     val installedOptionalHooks =
         installedNativeOptionalHooks(nativeBackend.id, shellSnapshot, currentBootId)
-    // A kernel backend that loaded but could not resolve every hook target. Not an
-    // error (what did install still works, and no reinstall fixes a kernel that
-    // renamed the symbol), but the leaks it causes are otherwise unexplained.
-    partialHookGap(nativeBackend, installedOptionalHooks)?.let { gap ->
-        warn(
-            res.getString(
-                R.string.dashboard_issue_native_partial_hooks,
-                gap.installed,
-                gap.expected,
-                gap.missing.joinToString(", ") { it.hookName },
-            ),
-        )
-    }
+    // Held so the partial-hook warning below can ask whether a missing hook is
+    // actually costing us a vector on this device.
+    var measuredReport: DiagnosticReport? = null
     // Single source of truth: the cache does all the gating (VPN off / needs-restart /
     // self-not-routed) through the one fold. awaitTerminal returns the terminal state
     // itself, so the reason for "no results" (blocked gate vs a failed run) is carried
@@ -1784,6 +1774,7 @@ internal suspend fun loadDashboardState(
                         complete = true,
                         installedOptionalHooks = installedOptionalHooks,
                     )
+                measuredReport = report
                 ProtectionCheck.Checked(report.native.status, report.java.status)
             }
 
@@ -1792,6 +1783,24 @@ internal suspend fun loadDashboardState(
             else -> {
                 ProtectionCheck.Failed
             }
+        }
+
+    // A kernel backend that loaded but could not resolve every hook target. Warn
+    // only when a missing hook is costing us something measurable: on kernels that
+    // never had the symbol at all, the vector is usually closed by SELinux or a
+    // capability check anyway, and an alarm there is noise. No reinstall fixes a
+    // kernel that renamed or dropped a function, so this is a warning, not an error.
+    partialHookGap(nativeBackend, installedOptionalHooks)
+        ?.takeIf { gap -> measuredReport?.let { gap.costsAnyVector(it) } != false }
+        ?.let { gap ->
+            warn(
+                res.getString(
+                    R.string.dashboard_issue_native_partial_hooks,
+                    gap.installed,
+                    gap.expected,
+                    gap.missing.joinToString(", ") { it.hookName },
+                ),
+            )
         }
 
     lsposedVersionMismatch?.let { text ->

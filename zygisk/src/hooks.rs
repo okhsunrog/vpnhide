@@ -552,12 +552,17 @@ pub unsafe extern "C" fn hooked_ioctl(
 
     // All other SIOCGIF* ioctls (FLAGS, MTU, INDEX, HWADDR, ADDR, etc.)
     // take an ifreq with the interface name as input. Pre-screen it.
-    if !arg.is_null() && is_siocgif(request) {
-        let req = unsafe { &*(arg as *const ifreq) };
-        let name_bytes = unsafe {
-            slice::from_raw_parts(req.ifr_name.as_ptr().cast::<u8>(), req.ifr_name.len())
-        };
-        if is_vpn_iface_bytes(name_bytes) {
+    //
+    // The name is read through a fault-contained self-read, never by
+    // dereferencing `arg`: this branch inspects the caller's buffer BEFORE the
+    // kernel has validated it, so a target app passing a bad or short pointer
+    // (the case the real ioctl answers with EFAULT) would otherwise take a
+    // SIGSEGV inside its own process. Same reasoning as the setsockopt hook.
+    // A non-socket fd cannot carry this family at all, so it is passed straight
+    // through rather than paying for a read.
+    if !arg.is_null() && is_siocgif(request) && is_socket_fd(fd) {
+        let mut name_bytes = [0u8; libc::IFNAMSIZ];
+        if copy_from_self(arg, &mut name_bytes) && is_vpn_iface_bytes(&name_bytes) {
             set_errno(libc::ENODEV);
             return -1;
         }

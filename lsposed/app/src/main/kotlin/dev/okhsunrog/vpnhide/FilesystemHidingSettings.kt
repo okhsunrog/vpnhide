@@ -191,7 +191,9 @@ private fun filesystemHidingStatusText(state: FilesystemHidingState): String =
 
 private suspend fun writeFilesystemHidingSetting(enabled: Boolean): Int {
     val snapshot = TargetsCache.snapshot.value ?: return 1
-    val base = buildCanonicalConfigFromTargetsSnapshot(snapshot)
+    // The config as stored, not a rebuild from the snapshot's per-role sets —
+    // flipping an optional feature must leave the app list byte-identical.
+    val base = snapshot.canonicalConfig ?: CanonicalConfig()
     val canonical =
         base.copy(
             settings =

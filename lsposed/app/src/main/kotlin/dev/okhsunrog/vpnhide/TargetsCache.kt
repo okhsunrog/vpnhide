@@ -26,11 +26,6 @@ internal data class TargetsSnapshot(
     val kpmModuleInstalled: Boolean,
     val zygiskModuleInstalled: Boolean,
     val portsModuleInstalled: Boolean,
-    val nativeTargets: Set<String>,
-    val lsposedTargets: Set<String>,
-    val hiddenPkgs: Set<String>,
-    val observerUids: Set<Int>,
-    val portsObservers: Set<String>,
     val uidToPkg: Map<Int, String>,
     val canonicalConfig: CanonicalConfig?,
     val apatchSuperkeySaved: Boolean = false,
@@ -58,12 +53,31 @@ internal data class TargetsSnapshot(
     val nativeHookFamily: NativeHookFamily
         get() = nativeHookFamilyFor(displayNativeBackendId)
 
-    /** Observer UIDs resolved back to current package names via
-     * `pm list packages -U`. UIDs that no longer map to an installed
-     * package (e.g. after an uninstall) silently drop out.
+    /**
+     * Per-role package sets, projected from [canonicalConfig] on read.
+     *
+     * They used to be stored fields, filled in beside the config they were
+     * derived from — two representations of one truth in a single object, and
+     * the roles could be written back from the weaker one. `appHiding` was the
+     * casualty: it was stored as resolved UIDs and mapped back through the
+     * package inventory, so a target missing from the inventory (a profile the
+     * scan could not read) silently lost the role the next time anything saved.
+     * Projected getters cannot drift from the config, and no role survives a
+     * round trip through UIDs any more.
      */
-    val observerNames: Set<String>
-        get() = observerUids.mapNotNull { uidToPkg[it] }.toSet()
+    private val desired: CanonicalConfig get() = canonicalConfig ?: CanonicalConfig()
+
+    val nativeTargets: Set<String> get() = desired.apps.filterValues { it.native.enabled }.keys
+    val lsposedTargets: Set<String> get() = desired.apps.filterValues { it.java }.keys
+    val hiddenPkgs: Set<String> get() = desired.apps.filterValues { it.hidden }.keys
+    val portsObservers: Set<String> get() = desired.apps.filterValues { it.ports }.keys
+    val observerNames: Set<String> get() = desired.apps.filterValues { it.appHiding }.keys
+
+    /** App-hiding observers as UIDs, for the consumers that speak the wire's
+     *  language. Derived on demand; a package the inventory does not know
+     *  contributes nothing here but keeps its role in the config. */
+    val observerUids: Set<Int>
+        get() = observerNames.flatMapTo(mutableSetOf()) { packageUids[it].orEmpty() }
 }
 
 internal object TargetsCache : StateCache<TargetsSnapshot>(
@@ -119,7 +133,6 @@ internal fun parseTargetsSnapshot(rootSnapshot: RootSnapshot): TargetsSnapshot {
     val sections = rootSnapshot.sections
     val portsInstalled = sections["ports_prop"]?.isNotBlank() == true
     val canonical = runCatching { parseCanonicalConfig(sections["canonical_config"].orEmpty()) }.getOrNull()
-    val desired = canonical ?: CanonicalConfig()
 
     // The inventory contains one block per Android user. Each resolved UID
     // becomes its own reverse-map entry so observer lookups from any profile
@@ -129,25 +142,15 @@ internal fun parseTargetsSnapshot(rootSnapshot: RootSnapshot): TargetsSnapshot {
     pkgToUids.forEach { (pkg, uids) ->
         uids.forEach { uidToPkg[it] = pkg }
     }
-
-    fun uidsFor(pkgs: Set<String>): Set<Int> = pkgs.flatMap { pkgToUids[it].orEmpty() }.toSet()
     val activeNativeBackendId = detectNativeBackendStates(sections).activeId
 
-    val javaTargets = desired.apps.filterValues { it.java }.keys
-    val nativeTargets = desired.apps.filterValues { it.native.enabled }.keys
-    val observerNames = desired.apps.filterValues { it.appHiding }.keys
-    val hiddenPkgs = desired.apps.filterValues { it.hidden }.keys
-    val portsObservers = desired.apps.filterValues { it.ports }.keys
+    // Per-role sets are projections of the config (see TargetsSnapshot), not
+    // fields — there is nothing to fill in here beyond the config itself.
     return TargetsSnapshot(
         kmodModuleInstalled = sections["kmod_module_dir"]?.trim() == "1",
         kpmModuleInstalled = sections["kpm_module_dir"]?.trim() == "1",
         zygiskModuleInstalled = sections["zygisk_module_dir"]?.trim() == "1",
         portsModuleInstalled = portsInstalled,
-        nativeTargets = nativeTargets,
-        lsposedTargets = javaTargets,
-        hiddenPkgs = hiddenPkgs,
-        observerUids = uidsFor(observerNames),
-        portsObservers = portsObservers,
         uidToPkg = uidToPkg,
         canonicalConfig = canonical,
         apatchSuperkeySaved = sections["superkey_saved"]?.trim() == "1",
