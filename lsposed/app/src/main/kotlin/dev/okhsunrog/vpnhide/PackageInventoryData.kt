@@ -211,41 +211,19 @@ internal fun mergeUser0Backstop(
 internal fun buildPerUserPackageInventoryShell(
     sectionBeginPrefix: String,
     sectionEndPrefix: String,
-    stderrRedirect: String,
+    stderrToStdout: Boolean,
 ): String =
-    """
-    PM_USERS_VERBOSE="${'$'}(pm list users -v $stderrRedirect)"
-    PM_USERS_VERBOSE_STATUS=${'$'}?
-    PM_USERS_PLAIN="${'$'}(pm list users $stderrRedirect)"
-    PM_USERS_PLAIN_STATUS=${'$'}?
-    echo "${sectionBeginPrefix}pm_users"
-    echo "${PM_USERS_STATUS_PREFIX}verbose:${'$'}PM_USERS_VERBOSE_STATUS"
-    echo "${PM_USERS_STATUS_PREFIX}plain:${'$'}PM_USERS_PLAIN_STATUS"
-    [ -n "${'$'}PM_USERS_VERBOSE" ] && printf '%s\n' "${'$'}PM_USERS_VERBOSE"
-    [ -n "${'$'}PM_USERS_PLAIN" ] && printf '%s\n' "${'$'}PM_USERS_PLAIN"
-    echo "${sectionEndPrefix}pm_users"
-    PM_PLAIN_USER_IDS="${'$'}(printf '%s\n' "${'$'}PM_USERS_PLAIN" | sed -n 's/.*UserInfo{\([0-9][0-9]*\):.*/\1/p')"
-    PM_VERBOSE_USER_IDS="${'$'}(printf '%s\n' "${'$'}PM_USERS_VERBOSE" | sed -n 's/^[[:space:]]*[0-9][0-9]*:[[:space:]]*id=\([0-9][0-9]*\),.*/\1/p')"
-    PM_USER_IDS="${'$'}(printf '%s\n%s\n' "${'$'}PM_PLAIN_USER_IDS" "${'$'}PM_VERBOSE_USER_IDS" | sed '/^${'$'}/d' | sort -n -u)"
-    echo "${sectionBeginPrefix}pm_packages"
-    if [ -z "${'$'}PM_USER_IDS" ]; then
-      PM_USER_IDS=0
-    fi
-    for PM_USER_ID in ${'$'}PM_USER_IDS; do
-      echo "$PM_USER_BEGIN_PREFIX${'$'}PM_USER_ID"
-      # Stream pm's stdout straight into the section instead of staging it in a
-      # shell variable and re-emitting it. A device with a very large app list
-      # (bloatware-heavy MIUI/HyperOS) produces a package list bigger than the
-      # kernel's single-argument limit (MAX_ARG_STRLEN, ~128 KiB); passing it as
-      # one argv word to printf/echo fails with "Argument list too long" and
-      # emits nothing, so an exit-0 scan looked like an empty inventory. pm is
-      # the last command in the section, so ${'$'}? below is pm's own exit status.
-      pm list packages -U -f --user "${'$'}PM_USER_ID" $stderrRedirect
-      PM_USER_STATUS=${'$'}?
-      echo "$PM_USER_END_PREFIX${'$'}PM_USER_ID:${'$'}PM_USER_STATUS"
-    done
-    echo "${sectionEndPrefix}pm_packages"
-    """.trimIndent()
+    shellScriptWith(
+        "package_inventory.sh",
+        mapOf(
+            "VPNHIDE_SECTION_BEGIN" to sectionBeginPrefix,
+            "VPNHIDE_SECTION_END" to sectionEndPrefix,
+            "VPNHIDE_PM_USERS_STATUS" to PM_USERS_STATUS_PREFIX,
+            "VPNHIDE_PM_USER_BEGIN" to PM_USER_BEGIN_PREFIX,
+            "VPNHIDE_PM_USER_END" to PM_USER_END_PREFIX,
+            "VPNHIDE_PM_STDERR_TO_STDOUT" to if (stderrToStdout) "1" else "0",
+        ),
+    ) + "\nvpnhide_package_inventory\n"
 
 private data class MutablePackageInventoryEntry(
     var apkPath: String? = null,

@@ -157,7 +157,7 @@ class PackageInventoryDataTest {
                 buildPerUserPackageInventoryShell(
                     sectionBeginPrefix = "__VPNHIDE_ROOT_SECTION_BEGIN__:",
                     sectionEndPrefix = "__VPNHIDE_ROOT_SECTION_END__:",
-                    stderrRedirect = "2>/dev/null",
+                    stderrToStdout = false,
                 )
             }
             """.trimIndent()
