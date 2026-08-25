@@ -1,6 +1,8 @@
 package dev.okhsunrog.vpnhide.settings
 
 import androidx.compose.runtime.staticCompositionLocalOf
+import dev.okhsunrog.vpnhide.next
+import dev.okhsunrog.vpnhide.startup.VpnHideApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 

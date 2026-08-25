@@ -1,5 +1,13 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.settings.ConfiguredAppRole
+import dev.okhsunrog.vpnhide.settings.PackageListFormat
+import dev.okhsunrog.vpnhide.settings.PackageListSource
+import dev.okhsunrog.vpnhide.settings.UnavailableConfiguredApp
+import dev.okhsunrog.vpnhide.settings.formatPackageListExport
+import dev.okhsunrog.vpnhide.settings.packageListExportPackages
+import dev.okhsunrog.vpnhide.settings.removeConfiguredPackages
+import dev.okhsunrog.vpnhide.settings.unavailableConfiguredApps
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

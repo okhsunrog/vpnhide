@@ -18,6 +18,7 @@ import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import dev.okhsunrog.vpnhide.LsposedStats
 import dev.okhsunrog.vpnhide.bit
+import dev.okhsunrog.vpnhide.diagnostics.token
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.generated.IfaceLists
 import java.util.concurrent.atomic.AtomicBoolean

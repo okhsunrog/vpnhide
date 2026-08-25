@@ -2,6 +2,8 @@ package dev.okhsunrog.vpnhide
 
 import android.util.Log
 import dev.okhsunrog.vpnhide.generated.IfaceLists
+import dev.okhsunrog.vpnhide.picker.parsePackageUidLine
+import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File

@@ -1,6 +1,10 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.NativeCheckSpec
+import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
+import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.statistics.parseProtocolStatusBlock
 
 // The set-shaped view over the generated hook registry.
 //

@@ -1,5 +1,13 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.picker.AppAutoHideSignal
+import dev.okhsunrog.vpnhide.picker.applyAutoHiddenPackages
+import dev.okhsunrog.vpnhide.settings.AutoHideReason
+import dev.okhsunrog.vpnhide.settings.HiddenAppState
+import dev.okhsunrog.vpnhide.settings.HiddenAppsFilter
+import dev.okhsunrog.vpnhide.settings.hiddenAppStates
+import dev.okhsunrog.vpnhide.settings.updateHiddenAppsConfig
+import dev.okhsunrog.vpnhide.settings.visibleHiddenAppStates
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

@@ -1,0 +1,345 @@
+package dev.okhsunrog.vpnhide.picker
+
+import dev.okhsunrog.vpnhide.CanonicalApp
+import dev.okhsunrog.vpnhide.CanonicalConfig
+import dev.okhsunrog.vpnhide.CanonicalSettings
+import dev.okhsunrog.vpnhide.NativeHookOverrides
+import dev.okhsunrog.vpnhide.NativeRole
+import dev.okhsunrog.vpnhide.PortPolicy
+import dev.okhsunrog.vpnhide.buildCanonicalConfig
+import dev.okhsunrog.vpnhide.buildCanonicalConfigFromTargetsSnapshot
+import dev.okhsunrog.vpnhide.normalizePortPolicy
+// Pure logic for the unified app picker's save path — data in, data out, no
+// Android deps, unit-tested (see AppPickerDataTest), per lsposed/AGENTS.md.
+
+/**
+ * The hidden-package set to persist on Save. This preserves manual hidden
+ * packages and auto-detected VPN apps, and always includes [selfPkg] (managed
+ * invisibly, never shown in the picker).
+ *
+ * Hidden and app-hiding observer roles can coexist. The package-visibility hook
+ * avoids self-crashes by never hiding a package from callers with the same
+ * appId; other observers still cannot see it.
+ */
+internal fun resolveHiddenPackages(
+    existing: Set<String>,
+    selfPkg: String,
+): List<String> = (existing + selfPkg).distinct().sorted()
+
+internal data class AppAutoHideSignal(
+    val packageName: String,
+    val declaresVpnService: Boolean = false,
+    val nameContainsVpn: Boolean = false,
+)
+
+internal fun resolveAutoHiddenPackages(
+    signals: Collection<AppAutoHideSignal>,
+    settings: CanonicalSettings,
+    selfPkg: String,
+): Set<String> =
+    signals
+        .asSequence()
+        .filter { it.packageName != selfPkg }
+        .filter {
+            (settings.autoHideVpnServices && it.declaresVpnService) ||
+                (settings.autoHideVpnName && it.nameContainsVpn)
+        }.filter { it.packageName !in settings.autoHideExcludedPackages }
+        .mapTo(sortedSetOf()) { it.packageName }
+
+internal data class AppRoleSelection(
+    val packageName: String,
+    val uids: List<Int> = emptyList(),
+    val java: Boolean = false,
+    val javaHooks: List<String>? = null,
+    val native: Boolean = false,
+    val nativeOverrides: NativeHookOverrides = NativeHookOverrides(),
+    val appHiding: Boolean = false,
+    val ports: Boolean = false,
+    val portPolicy: PortPolicy? = null,
+)
+
+/** Mirror of `vpnhide_protocol::MAX_TARGET_UIDS` and both native backends. */
+internal const val NATIVE_TARGET_UID_CAPACITY = 160
+internal const val NATIVE_SELF_RESERVED_UID_SLOTS = 1
+internal const val NATIVE_USER_UID_CAPACITY = NATIVE_TARGET_UID_CAPACITY - NATIVE_SELF_RESERVED_UID_SLOTS
+
+private const val ANDROID_UIDS_PER_USER = 100_000
+private const val FIRST_APPLICATION_UID = 10_000
+
+internal data class NativeTargetCapacityUsage(
+    val used: Int,
+    val capacity: Int = NATIVE_TARGET_UID_CAPACITY,
+) {
+    val overflow: Int get() = (used - capacity).coerceAtLeast(0)
+}
+
+/**
+ * Count the exact UID slots a native projection needs. Visible picker rows
+ * override their saved role; configured packages missing from the current list
+ * stay preserved, matching [buildCanonicalConfigForAppPickerSave]. UID unioning
+ * handles shared identities. The app itself uses one fixed, invisible slot:
+ * secondary-profile copies are unsupported and the activator projects the
+ * self-target only for Android's main user.
+ */
+internal fun nativeTargetCapacityUsage(
+    selfPkg: String,
+    selections: Collection<AppRoleSelection>,
+    existingNativePackages: Set<String>,
+    packageUids: Map<String, List<Int>>,
+): NativeTargetCapacityUsage {
+    val visiblePackages = selections.mapTo(mutableSetOf()) { it.packageName }
+    val selectedPackages =
+        (existingNativePackages - visiblePackages) +
+            selections.filter { it.native }.map { it.packageName }
+    val userSelectedPackages = selectedPackages - selfPkg
+    val selectionUids = selections.associate { it.packageName to it.uids }
+    val resolved = mutableSetOf<Int>()
+    var unresolvedSlots = 0
+
+    userSelectedPackages.forEach { pkg ->
+        val rawUids = selectionUids[pkg].orEmpty().ifEmpty { packageUids[pkg].orEmpty() }
+        val appUids = rawUids.filterTo(mutableSetOf(), ::isApplicationUid)
+        when {
+            rawUids.isEmpty() -> {
+                unresolvedSlots++
+            }
+
+            else -> {
+                resolved += appUids
+            }
+        }
+    }
+
+    return NativeTargetCapacityUsage(
+        used = resolved.size + unresolvedSlots + NATIVE_SELF_RESERVED_UID_SLOTS,
+    )
+}
+
+internal fun nativeCapacityIncreaseViolation(
+    current: NativeTargetCapacityUsage,
+    candidate: NativeTargetCapacityUsage,
+): NativeTargetCapacityUsage? = candidate.takeIf { it.overflow > 0 && it.used > current.used }
+
+private fun isApplicationUid(uid: Int): Boolean = uid >= 0 && uid % ANDROID_UIDS_PER_USER >= FIRST_APPLICATION_UID
+
+internal fun resolveNativeHookSelection(
+    hookNames: List<String>,
+    selectedHookNames: Set<String>,
+): List<String>? = resolveHookSelection(hookNames, selectedHookNames)
+
+internal fun resolveHookSelection(
+    hookNames: List<String>,
+    selectedHookNames: Set<String>,
+): List<String>? {
+    val ordered = hookNames.filter { it in selectedHookNames }
+    return when {
+        ordered.isEmpty() -> emptyList()
+        ordered.size == hookNames.size -> null
+        else -> ordered
+    }
+}
+
+internal fun buildCanonicalConfigForAppPickerSave(
+    debug: Boolean,
+    selfPkg: String,
+    selections: Collection<AppRoleSelection>,
+    snapshot: TargetsSnapshot?,
+    autoHideSignals: Collection<AppAutoHideSignal> = emptyList(),
+    partial: Boolean = false,
+): CanonicalConfig {
+    val base = canonicalBaseForSave(debug, snapshot)
+    val visiblePkgs = selections.mapTo(mutableSetOf()) { it.packageName }
+
+    fun preserved(predicate: (CanonicalApp) -> Boolean): Set<String> =
+        base.apps
+            .filter { (pkg, app) -> pkg !in visiblePkgs && predicate(app) }
+            .keys
+
+    val javaPkgs = preserved { it.java } + selections.selectedPkgs { it.java } + selfPkg
+    val nativePkgs = preserved { it.native.enabled } + selections.selectedPkgs { it.native } + selfPkg
+    val selectedJavaHooks = selections.selectedJavaHooks()
+    val selectedNativeRoles = selections.selectedNativeRoles()
+    val selectedPortPolicies = selections.selectedPortPolicies()
+    val observerPkgs = preserved { it.appHiding } + selections.selectedPkgs { it.appHiding }
+    val portsPkgs = preserved { it.ports } + selections.selectedPkgs { it.ports }
+    val manualHiddenPkgs = base.apps.filterValues { it.hidden }.keys - base.settings.autoHiddenPackages
+    val hiddenPkgs =
+        resolveHiddenPackages(
+            existing = manualHiddenPkgs,
+            selfPkg = selfPkg,
+        )
+
+    val canonicalWithJavaHooks =
+        buildCanonicalConfig(
+            debug = debug,
+            javaPkgs = javaPkgs,
+            nativePkgs = nativePkgs,
+            hiddenPkgs = hiddenPkgs,
+            observerPkgs = observerPkgs,
+            portsPkgs = portsPkgs,
+            existing = base,
+        ).withJavaHooks(selectedJavaHooks)
+    val canonical =
+        canonicalWithJavaHooks
+            .withNativeRoles(selectedNativeRoles)
+            .withPortPolicies(selectedPortPolicies)
+    return applyAutoHiddenPackages(
+        config = canonical,
+        selfPkg = selfPkg,
+        signals = autoHideSignals,
+        partial = partial,
+    )
+}
+
+/**
+ * [partial] is true when the picker's app-list scan (see
+ * [PackageInventory.partial]) was partial — some profile other than user 0
+ * didn't scan this run. [signals] then covers only the packages the picker
+ * could see, so a package auto-hidden in a previous save but absent from
+ * [signals] gets its `autoHiddenPackages` membership preserved (decision A:
+ * a VPN app that lives only in an un-scanned profile must not get un-hidden
+ * by a partial-scan Save) instead of being recomputed away.
+ */
+internal fun applyAutoHiddenPackages(
+    config: CanonicalConfig,
+    selfPkg: String,
+    signals: Collection<AppAutoHideSignal>,
+    partial: Boolean = false,
+): CanonicalConfig {
+    val observerPkgs = config.apps.filterValues { it.appHiding }.keys
+    val manualHiddenPkgs = config.apps.filterValues { it.hidden }.keys - config.settings.autoHiddenPackages
+    val signalPkgs = signals.mapTo(mutableSetOf()) { it.packageName }
+    val preservedAutoHiddenPkgs =
+        if (partial) config.settings.autoHiddenPackages - signalPkgs else emptySet()
+    val autoHiddenPkgs = resolveAutoHiddenPackages(signals, config.settings, selfPkg) + preservedAutoHiddenPkgs
+    val hiddenPkgs =
+        resolveHiddenPackages(
+            existing = manualHiddenPkgs + autoHiddenPkgs,
+            selfPkg = selfPkg,
+        )
+    return buildCanonicalConfig(
+        debug = config.debug,
+        javaPkgs = config.apps.filterValues { it.java }.keys,
+        nativePkgs = config.apps.filterValues { it.native.enabled }.keys,
+        hiddenPkgs = hiddenPkgs,
+        observerPkgs = observerPkgs,
+        portsPkgs = config.apps.filterValues { it.ports }.keys,
+        existing = config.copy(settings = config.settings.copy(autoHiddenPackages = autoHiddenPkgs.toSortedSet())),
+    )
+}
+
+/**
+ * Whether re-materializing the auto-hidden set against fresh [signals] would
+ * change the set persisted for [config] — i.e. whether the startup / Refresh
+ * reconcile needs to write. The reconcile write-guard: a newly-installed VPN
+ * app that isn't in `autoHiddenPackages` yet flips this true; an unchanged set
+ * keeps it false so the reconcile is a no-op.
+ */
+internal fun autoHiddenPackagesNeedReconcile(
+    config: CanonicalConfig,
+    selfPkg: String,
+    signals: Collection<AppAutoHideSignal>,
+): Boolean =
+    applyAutoHiddenPackages(config, selfPkg, signals).settings.autoHiddenPackages !=
+        config.settings.autoHiddenPackages
+
+internal fun manualHiddenPackages(
+    config: CanonicalConfig,
+    selfPkg: String,
+): Set<String> = config.apps.filterValues { it.hidden }.keys - config.settings.autoHiddenPackages - selfPkg
+
+internal fun updateManualHiddenPackages(
+    config: CanonicalConfig,
+    selfPkg: String,
+    visiblePackages: Set<String>,
+    selectedManualHiddenPackages: Set<String>,
+    signals: Collection<AppAutoHideSignal>,
+): CanonicalConfig {
+    val observerPkgs = config.apps.filterValues { it.appHiding }.keys
+    val existingManualHidden = manualHiddenPackages(config, selfPkg)
+    val nextManualHidden = (existingManualHidden - visiblePackages) + selectedManualHiddenPackages
+    val manualConfig =
+        buildCanonicalConfig(
+            debug = config.debug,
+            javaPkgs = config.apps.filterValues { it.java }.keys,
+            nativePkgs = config.apps.filterValues { it.native.enabled }.keys,
+            hiddenPkgs = resolveHiddenPackages(nextManualHidden, selfPkg),
+            observerPkgs = observerPkgs,
+            portsPkgs = config.apps.filterValues { it.ports }.keys,
+            existing = config,
+        )
+    return applyAutoHiddenPackages(
+        config = manualConfig,
+        selfPkg = selfPkg,
+        signals = signals,
+    )
+}
+
+private fun canonicalBaseForSave(
+    debug: Boolean,
+    snapshot: TargetsSnapshot?,
+): CanonicalConfig =
+    when {
+        snapshot?.canonicalConfig != null -> {
+            snapshot.canonicalConfig.copy(
+                debug = debug,
+                debugSwitch = snapshot.canonicalConfig.debugSwitch,
+            )
+        }
+
+        snapshot != null -> {
+            buildCanonicalConfigFromTargetsSnapshot(snapshot, debug = debug)
+        }
+
+        else -> {
+            CanonicalConfig(debug = debug)
+        }
+    }
+
+private fun Collection<AppRoleSelection>.selectedPkgs(predicate: (AppRoleSelection) -> Boolean): Set<String> =
+    filter(predicate).mapTo(mutableSetOf()) { it.packageName }
+
+private fun Collection<AppRoleSelection>.selectedNativeRoles(): Map<String, NativeRole> =
+    filter { it.native }
+        .associate { selection ->
+            selection.packageName to NativeRole(enabled = true, overrides = selection.nativeOverrides)
+        }
+
+private fun Collection<AppRoleSelection>.selectedJavaHooks(): Map<String, List<String>?> =
+    filter { it.java }
+        .associate { selection ->
+            selection.packageName to selection.javaHooks?.takeIf { it.isNotEmpty() }
+        }
+
+private fun Collection<AppRoleSelection>.selectedPortPolicies(): Map<String, PortPolicy?> =
+    filter { it.ports }
+        .associate { selection ->
+            selection.packageName to normalizePortPolicy(selection.portPolicy)
+        }
+
+/**
+ * Rewrite the per-app [values] onto matching packages, preserving the sorted-map
+ * invariant. A no-op when [values] is empty; apps not in [values] are untouched.
+ * [set] applies one entry's value (which may itself be null, e.g. cleared hooks).
+ */
+private fun <V> CanonicalConfig.withAppValues(
+    values: Map<String, V>,
+    set: (CanonicalApp, V) -> CanonicalApp,
+): CanonicalConfig {
+    if (values.isEmpty()) return this
+    val updated =
+        apps
+            .mapValues { (pkg, app) ->
+                if (pkg in values) set(app, values.getValue(pkg)) else app
+            }.toSortedMap()
+    return copy(apps = updated)
+}
+
+private fun CanonicalConfig.withJavaHooks(hooks: Map<String, List<String>?>): CanonicalConfig =
+    withAppValues(hooks) { app, v -> app.copy(javaHooks = v) }
+
+private fun CanonicalConfig.withNativeRoles(roles: Map<String, NativeRole>): CanonicalConfig =
+    withAppValues(roles) { app, v -> app.copy(native = v) }
+
+private fun CanonicalConfig.withPortPolicies(policies: Map<String, PortPolicy?>): CanonicalConfig =
+    withAppValues(policies) { app, v -> app.copy(portPolicy = v) }

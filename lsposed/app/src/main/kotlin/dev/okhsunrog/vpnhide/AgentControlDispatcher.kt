@@ -1,6 +1,10 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.Context
+import dev.okhsunrog.vpnhide.debug.StateContentOptions
+import dev.okhsunrog.vpnhide.debug.VpnHideState
+import dev.okhsunrog.vpnhide.diagnostics.verdict
+import dev.okhsunrog.vpnhide.settings.removeConfiguredPackages
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString

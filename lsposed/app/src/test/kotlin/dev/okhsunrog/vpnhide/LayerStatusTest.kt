@@ -1,6 +1,16 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
+import dev.okhsunrog.vpnhide.diagnostics.CheckResult
+import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
+import dev.okhsunrog.vpnhide.diagnostics.NotMeasuredReason
+import dev.okhsunrog.vpnhide.diagnostics.Verdict
+import dev.okhsunrog.vpnhide.diagnostics.summarizeJavaLayer
+import dev.okhsunrog.vpnhide.diagnostics.summarizeNativeLayer
+import dev.okhsunrog.vpnhide.diagnostics.unownedNativeLeaks
+import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.picker.Layer
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

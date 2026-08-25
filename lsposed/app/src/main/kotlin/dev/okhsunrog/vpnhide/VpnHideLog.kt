@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 import android.util.Log
+import dev.okhsunrog.vpnhide.debug.debugFromCanonicalSnapshot
 
 /**
  * App-process logcat facade. Info/debug/warn are gated by the runtime "debug

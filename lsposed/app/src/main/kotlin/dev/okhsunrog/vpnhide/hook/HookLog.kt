@@ -5,6 +5,7 @@ import android.util.Log
 import de.robv.android.xposed.XposedBridge
 import dev.okhsunrog.vpnhide.GatedLogger
 import dev.okhsunrog.vpnhide.LogTags
+import dev.okhsunrog.vpnhide.VpnHideLog
 
 /**
  * system_server logcat facade for LSPosed hooks, which can't reach the app's

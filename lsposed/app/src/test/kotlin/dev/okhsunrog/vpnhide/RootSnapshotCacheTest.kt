@@ -113,14 +113,22 @@ class RootSnapshotCacheTest {
         assertTrue(command.contains("pm list users"))
         assertTrue(command.contains("pm list packages -U -f --user \"${'$'}PM_USER_ID\""))
         assertTrue(command.contains("grep -H . /sys/class/net/*/operstate"))
-        assertTrue(command.contains("[ -s $SUPERKEY_FILE ] && echo 1 || echo 0"))
-        assertTrue(command.contains("activator_state $KMOD_ACTIVATOR"))
-        assertTrue(command.contains("activator_state $KPM_ACTIVATOR"))
-        assertTrue(command.contains("activator_state $ZYGISK_ACTIVATOR"))
-        assertTrue(command.contains("activator_state $PORTS_ACTIVATOR"))
-        assertTrue(command.contains("[ -f $KMOD_MODULE_DIR/disable ] && echo 1 || echo 0"))
-        assertTrue(command.contains("cat $PROC_CTL"))
-        assertTrue(command.contains("$KPM_ACTIVATOR state"))
+        // Paths reach the script through the assignment prelude now, so both
+        // halves are checked: the value Kotlin passes, and the script using it.
+        assertTrue(command.contains("VPNHIDE_SUPERKEY_FILE='$SUPERKEY_FILE'"))
+        assertTrue(command.contains("VPNHIDE_KMOD_ACTIVATOR='$KMOD_ACTIVATOR'"))
+        assertTrue(command.contains("VPNHIDE_KPM_ACTIVATOR='$KPM_ACTIVATOR'"))
+        assertTrue(command.contains("VPNHIDE_ZYGISK_ACTIVATOR='$ZYGISK_ACTIVATOR'"))
+        assertTrue(command.contains("VPNHIDE_PORTS_ACTIVATOR='$PORTS_ACTIVATOR'"))
+        assertTrue(command.contains("VPNHIDE_PROC_CTL='$PROC_CTL'"))
+        assertTrue(command.contains("[ -s ${'$'}VPNHIDE_SUPERKEY_FILE ] && echo 1 || echo 0"))
+        assertTrue(command.contains("activator_state ${'$'}VPNHIDE_KMOD_ACTIVATOR"))
+        assertTrue(command.contains("activator_state ${'$'}VPNHIDE_KPM_ACTIVATOR"))
+        assertTrue(command.contains("activator_state ${'$'}VPNHIDE_ZYGISK_ACTIVATOR"))
+        assertTrue(command.contains("activator_state ${'$'}VPNHIDE_PORTS_ACTIVATOR"))
+        assertTrue(command.contains("[ -f ${'$'}VPNHIDE_KMOD_DIR/disable ] && echo 1 || echo 0"))
+        assertTrue(command.contains("cat ${'$'}VPNHIDE_PROC_CTL"))
+        assertTrue(command.contains("${'$'}VPNHIDE_KPM_ACTIVATOR state"))
         assertTrue(command.contains("kpm_runtime_modules"))
         assertTrue(command.contains(ZYGISK_STATUS_FILE))
         assertTrue(command.contains(PORTS_LOAD_STATUS_FILE))
@@ -141,7 +149,7 @@ class RootSnapshotCacheTest {
     fun `snapshot stages APatch runtime probe only from validated app path`() {
         val command = buildRootShellSnapshotCommand(runtimeProbeSource = "/data/user/0/dev.okhsunrog.vpnhide/files/vhprobe")
 
-        assertTrue(command.contains("KPM_RUNTIME_PROBE_SOURCE=/data/user/0/dev.okhsunrog.vpnhide/files/vhprobe"))
+        assertTrue(command.contains("VPNHIDE_KPM_PROBE_SOURCE='/data/user/0/dev.okhsunrog.vpnhide/files/vhprobe'"))
         assertTrue(command.contains("--apatch-kpm-list"))
         assertTrue(command.contains("\"${'$'}KPATCH\" kpm list"))
         assertTrue(command.contains("rm -f \"${'$'}KPM_PROBE\""))
@@ -151,8 +159,11 @@ class RootSnapshotCacheTest {
     fun `snapshot command can skip package enumeration when startup seeded it`() {
         val command = buildRootShellSnapshotCommand(includePmPackages = false)
 
-        assertFalse(command.contains("pm list packages"))
-        assertFalse(command.contains("pm list users"))
+        // The inventory is a function in the shared script now, so it is always
+        // defined; what changes is whether the phase calls it.
+        assertTrue(command.contains("VPNHIDE_WITH_PM='0'"))
+        assertTrue(command.contains("if [ \"${'$'}VPNHIDE_WITH_PM\" = 1 ]; then"))
+        assertTrue(buildRootShellSnapshotCommand(includePmPackages = true).contains("VPNHIDE_WITH_PM='1'"))
         assertTrue(command.contains("phase_target_files"))
         assertTrue(command.contains("phase_vpn_ifaces"))
     }

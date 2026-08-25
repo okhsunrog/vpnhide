@@ -1,6 +1,9 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.settings.FilesystemHidingStatus
+import dev.okhsunrog.vpnhide.settings.installedZygiskOptionalHooks
+import dev.okhsunrog.vpnhide.settings.resolveFilesystemHidingState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test

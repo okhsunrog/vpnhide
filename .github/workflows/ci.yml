@@ -195,6 +195,11 @@ jobs:
             scripts/clean-device.sh scripts/update-json.sh \
             kmod/test/run.sh kmod/test/build-kernel.sh kmod/test/init.sh \
             kmod/test/run-kpm.sh kmod/test/init-kpm.sh kmod/test/build-source-kernel.sh
+          # The app's root probes. They are assembled from these files plus a
+          # variable prelude, so they are checked as POSIX sh (the device shell
+          # is mksh) and on their own — a stray apostrophe in one of them once
+          # killed the whole batched command silently for a release.
+          shellcheck -s sh lsposed/app/src/main/resources/shell/*.sh
 
       # C (kernel module)
       - name: clang-format
