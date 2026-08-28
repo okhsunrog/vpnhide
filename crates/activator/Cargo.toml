@@ -24,6 +24,10 @@ name = "kpm"
 path = "src/bin/kpm.rs"
 
 [[bin]]
+name = "kpatch"
+path = "src/bin/kpatch.rs"
+
+[[bin]]
 name = "zygisk"
 path = "src/bin/zygisk.rs"
 
