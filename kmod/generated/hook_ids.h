@@ -44,6 +44,7 @@ static inline unsigned int vpnhide_hook_bit(enum vpnhide_hook_id id)
 #define VPNHIDE_KERNEL_HOOK_MASK 0x20003ffu
 #define VPNHIDE_KMOD_HOOK_MASK 0x8000000u
 #define VPNHIDE_KPM_HOOK_MASK 0x8000000u
+#define VPNHIDE_KPATCH_HOOK_MASK 0x8000000u
 #define VPNHIDE_ZYGISK_HOOK_MASK 0xdfc0000u
 #define VPNHIDE_LSPOSED_HOOK_MASK 0x3fc00u
 
@@ -186,6 +187,7 @@ enum vpnhide_backend {
 	VPNHIDE_BACKEND_KPM     = 1,
 	VPNHIDE_BACKEND_ZYGISK  = 2,
 	VPNHIDE_BACKEND_LSPOSED = 3,
+	VPNHIDE_BACKEND_KPATCH  = 4,
 };
 
 /* Hook name for an id (labeling / debug). Inline so the header stays
