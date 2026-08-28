@@ -1,0 +1,35 @@
+config VPNHIDE
+	bool "VPNHide in-tree VPN interface concealment"
+	depends on NET && INET && IPV6 && PROC_FS
+	default n
+	help
+	  Compile the VPNHide filtering logic directly into the kernel. It hides
+	  active VPN network interfaces from selected Android apps (by calling
+	  UID) by filtering ioctl, netlink dump, and /proc/net route responses
+	  and refusing VPN-interface socket binds — the same detection vectors
+	  the out-of-tree vpnhide_kmod covers, but attached at compile time
+	  through source call-site hooks instead of kretprobes.
+
+	  Choose this over the .ko on kernels where a loadable module cannot run
+	  or cannot hook reliably: CONFIG_MODULES=n / CONFIG_INTEGRATE_MODULES=y,
+	  CONFIG_KPROBES=n, or whole-program LTO that mangles hook-target symbols.
+
+	  Configuration (target UID list + per-hook masks) is delivered at runtime
+	  by the userspace activator through /proc/vpnhide_ctl using the shared
+	  control protocol (docs/protocol.md); with no config written the hooks
+	  are inert.
+
+	  If unsure, say N.
+
+config VPNHIDE_FS_HIDING
+	bool "VPNHide filesystem path concealment"
+	depends on VPNHIDE
+	default y
+	help
+	  Also conceal a VPN interface's sysfs / proc-sys path nodes via VFS
+	  call-site hooks (filename_lookup, do_filp_open, vfs_getattr,
+	  iterate_dir). These sit on hot filesystem paths; a builder who does not
+	  need path concealment can disable this to drop them entirely, leaving
+	  only the network hooks.
+
+	  If unsure, say Y.
