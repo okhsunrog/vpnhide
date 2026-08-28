@@ -88,7 +88,10 @@ dance disappears.
 - [x] Phase 3a — `apply.sh` (driver copy + header/table vendoring + security wiring + patch apply)
 - [ ] Phase 3b — call-site patches for `android14-6.1` (generated against a real tree, see below)
 - [ ] Phase 4 — QEMU build + run gate (reuse `kmod/test` / protocol vectors)
-- [ ] Phase 5 — app + activator: `NativeBackendId.Kpatch`, `kpatch` activator bin, detection + load_status, dashboard card
+- [x] Phase 5a — activator: `activate_kpatch` / `boot_service_kpatch` / `uninstall_kpatch` + `kpatch` bin
+- [ ] Phase 5b — app (Kotlin): `NativeBackendId.Kpatch`, snapshot section for the ctl `backend` id
+      (disambiguates kmod vs kpatch on the shared node), `detectKpatchModule`, dashboard card
+- [ ] Phase 5c — `vpnhide_kpatch` companion module (module.prop + boot scripts running the activator)
 - [ ] Phase 6 — expand KMI coverage (android16-6.12, then the rest)
 
 ### Generating the call-site patches (Phase 3b)
