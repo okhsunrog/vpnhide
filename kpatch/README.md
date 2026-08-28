@@ -85,10 +85,32 @@ dance disappears.
 - [x] Phase 1 — foundation: public header, brain (`core.c`), `vpnhide_internal.h`, Kconfig, Makefile
 - [x] Phase 2a — network hook bodies: `hook_iface.c` (dev/ifname predicate), `hook_socket.c` (bind)
 - [x] Phase 2b — `hook_fs.c` (optional VFS path concealment + readdir filtering)
-- [ ] Phase 3 — patches for `android14-6.1` + `apply.sh`
+- [x] Phase 3a — `apply.sh` (driver copy + header/table vendoring + security wiring + patch apply)
+- [ ] Phase 3b — call-site patches for `android14-6.1` (generated against a real tree, see below)
 - [ ] Phase 4 — QEMU build + run gate (reuse `kmod/test` / protocol vectors)
 - [ ] Phase 5 — app + activator: `NativeBackendId.Kpatch`, `kpatch` activator bin, detection + load_status, dashboard card
 - [ ] Phase 6 — expand KMI coverage (android16-6.12, then the rest)
+
+### Generating the call-site patches (Phase 3b)
+
+The per-version `versions/<kmi>/*.patch` insert the `vpnhide_*` calls at the
+kernel call sites. They must be generated against a real `kernel/common` tree of
+that KMI so the diff context matches, then validated by a build — hand-written
+diffs are too fragile (the fuzz-match can land a hunk at the wrong offset). The
+flow:
+
+```sh
+# 1. a clean kernel/common <kmi> tree (git, so we can diff)
+# 2. edit the call sites to insert vpnhide_should_hide_dev/_ifname (net dumps,
+#    routes, ioctls), vpnhide_setsockopt_bind (__sys_setsockopt), and — with FS
+#    hiding — vpnhide_should_hide_dentry / vpnhide_readdir_begin/_end (VFS).
+# 3. git -C <tree> diff -- net/ fs/ kernel/ > per-file patches under versions/<kmi>/
+# 4. apply.sh <tree> <kmi> on a fresh checkout; build; run the QEMU gate.
+```
+
+Call sites per hook are listed in the table above (cross-checked against the
+android14-6.1 kernel; the `soranerai/vpnhide_next_backend` fork hits the same
+functions, which confirms the locations).
 
 Design rationale and the decision to ship patches only (not prebuilt kernels)
 are recorded in the session that started this work.
