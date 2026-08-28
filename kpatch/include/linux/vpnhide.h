@@ -27,6 +27,8 @@
 struct net_device;
 struct sock;
 struct dentry;
+struct file;
+struct dir_context;
 
 /*
  * Global hook ids (data/hooks.toml -> generated/hook_ids.h). The patch at each
@@ -86,16 +88,21 @@ enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
 /*
  * True if `dentry` resolves to a VPN interface's sysfs / proc-sys node that must
  * be concealed from the calling UID (lookup / open / getattr sites). Dentry-based
- * so it also covers relative openat, symlink following, and bind mounts.
+ * so it also covers relative openat, symlink following, and bind mounts. There is
+ * one filesystem hook id, so no hook_id argument. On a true return the patch
+ * releases its own resource (path_put / fput) and returns -ENOENT.
  */
-bool vpnhide_should_hide_dentry(const struct dentry *dentry, int hook_id);
+bool vpnhide_should_hide_dentry(const struct dentry *dentry);
 
 /*
- * True if `dentry` is a directory whose listing enumerates interface nodes
- * (sysfs .../net, proc .../{conf,neigh}); the iterate_dir site uses it to know a
- * listing needs per-entry filtering.
+ * iterate_dir per-entry filtering. If `file` lists interface nodes for a target
+ * caller, vpnhide_readdir_begin() swaps in a filldir that drops VPN-interface
+ * entries and returns true; the patch then calls the original iteration and
+ * vpnhide_readdir_end() to restore the actor. Returns false (nothing swapped)
+ * when the directory is not a listing dir or the caller is not targeted.
  */
-bool vpnhide_is_iface_listing_dir(const struct dentry *dentry);
+bool vpnhide_readdir_begin(struct file *file, struct dir_context *ctx);
+void vpnhide_readdir_end(struct dir_context *ctx);
 #endif /* CONFIG_VPNHIDE_FS_HIDING */
 
 #else /* !CONFIG_VPNHIDE */
@@ -115,14 +122,17 @@ vpnhide_setsockopt_bind(struct sock *sk, int optname, sockptr_t optval,
 {
 	return VPNHIDE_BIND_PASSTHROUGH;
 }
-static inline bool vpnhide_should_hide_dentry(const struct dentry *dentry,
-					      int hook_id)
+static inline bool vpnhide_should_hide_dentry(const struct dentry *dentry)
 {
 	return false;
 }
-static inline bool vpnhide_is_iface_listing_dir(const struct dentry *dentry)
+static inline bool vpnhide_readdir_begin(struct file *file,
+					 struct dir_context *ctx)
 {
 	return false;
+}
+static inline void vpnhide_readdir_end(struct dir_context *ctx)
+{
 }
 
 #endif /* CONFIG_VPNHIDE */
