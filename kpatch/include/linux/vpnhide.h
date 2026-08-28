@@ -21,9 +21,12 @@
 #define _LINUX_VPNHIDE_H
 
 #include <linux/types.h>
+#include <linux/if.h>		/* IFNAMSIZ */
+#include <linux/sockptr.h>	/* sockptr_t */
 
 struct net_device;
 struct sock;
+struct dentry;
 
 /*
  * Global hook ids (data/hooks.toml -> generated/hook_ids.h). The patch at each
@@ -32,6 +35,25 @@ struct sock;
  * Kept as a plain int in the public API to avoid pulling the generated enum
  * into every patched translation unit; security/vpnhide/ uses the real enum.
  */
+
+/*
+ * SO_BINDTODEVICE / SO_BINDTOIFINDEX decision. The .ko must redirect the syscall
+ * with a kprobe and freeze the option to beat a userspace TOCTOU; in-tree the
+ * patch sits at the __sys_setsockopt call site (process context, before the
+ * option is applied), so the decision reduces to this one call plus, for the
+ * FROZEN verdict, swapping in the kernel-side snapshot the driver captured.
+ */
+enum vpnhide_bind_action {
+	VPNHIDE_BIND_PASSTHROUGH,	/* not a bind opt / not hidden: proceed as-is */
+	VPNHIDE_BIND_FROZEN,		/* proceed, but with *snap (TOCTOU-safe copy) */
+	VPNHIDE_BIND_DENY,		/* hidden VPN interface: return -ENODEV */
+	VPNHIDE_BIND_FAULT,		/* optval copy faulted: return -EFAULT */
+};
+
+union vpnhide_bind_snapshot {
+	char name[IFNAMSIZ];
+	int ifindex;
+};
 
 #ifdef CONFIG_VPNHIDE
 
@@ -50,14 +72,31 @@ bool vpnhide_should_hide_ifname(const char *ifname, int hook_id);
  */
 bool vpnhide_should_hide_dev(const struct net_device *dev, int hook_id);
 
+/*
+ * Classify a setsockopt(SO_BINDTODEVICE / SO_BINDTOIFINDEX). On FROZEN, *snap
+ * holds a kernel copy the caller must pass to the option handler instead of the
+ * user pointer. `sk` may be NULL (treated as passthrough).
+ */
+enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
+						 sockptr_t optval,
+						 unsigned int optlen,
+						 union vpnhide_bind_snapshot *snap);
+
 #ifdef CONFIG_VPNHIDE_FS_HIDING
 /*
- * True if `path` (a resolved absolute pathname) is a VPN interface's sysfs /
- * proc-sys node that must be concealed from the calling UID. Optional: a kernel
- * builder can drop the VFS hot-path hooks by disabling CONFIG_VPNHIDE_FS_HIDING.
+ * True if `dentry` resolves to a VPN interface's sysfs / proc-sys node that must
+ * be concealed from the calling UID (lookup / open / getattr sites). Dentry-based
+ * so it also covers relative openat, symlink following, and bind mounts.
  */
-bool vpnhide_should_hide_path(const char *path, int hook_id);
-#endif
+bool vpnhide_should_hide_dentry(const struct dentry *dentry, int hook_id);
+
+/*
+ * True if `dentry` is a directory whose listing enumerates interface nodes
+ * (sysfs .../net, proc .../{conf,neigh}); the iterate_dir site uses it to know a
+ * listing needs per-entry filtering.
+ */
+bool vpnhide_is_iface_listing_dir(const struct dentry *dentry);
+#endif /* CONFIG_VPNHIDE_FS_HIDING */
 
 #else /* !CONFIG_VPNHIDE */
 
@@ -70,7 +109,18 @@ static inline bool vpnhide_should_hide_dev(const struct net_device *dev,
 {
 	return false;
 }
-static inline bool vpnhide_should_hide_path(const char *path, int hook_id)
+static inline enum vpnhide_bind_action
+vpnhide_setsockopt_bind(struct sock *sk, int optname, sockptr_t optval,
+			unsigned int optlen, union vpnhide_bind_snapshot *snap)
+{
+	return VPNHIDE_BIND_PASSTHROUGH;
+}
+static inline bool vpnhide_should_hide_dentry(const struct dentry *dentry,
+					      int hook_id)
+{
+	return false;
+}
+static inline bool vpnhide_is_iface_listing_dir(const struct dentry *dentry)
 {
 	return false;
 }

@@ -39,8 +39,8 @@ So the app/activator wire path for `kpatch` is byte-identical to `kmod`; only th
 kpatch/
   security/vpnhide/          # the in-tree driver (copied to <kernel>/security/vpnhide/)
     core.c                   # brain: config, stats, /proc/vpnhide_ctl, init  (lifted from the .ko)
-    hook_socket.c            # dev ioctl + SIOCGIFCONF enum + SO_BINDTODEVICE/IFINDEX   [TODO]
-    hook_netlink.c           # rtnl/addr/route dump + policy-rule fill                  [TODO]
+    hook_iface.c             # should_hide_dev/ifname: ioctl + SIOCGIFCONF + all dump/route/rule sites
+    hook_socket.c            # SO_BINDTODEVICE / SO_BINDTOIFINDEX concealment
     hook_fs.c                # optional VFS path concealment (CONFIG_VPNHIDE_FS_HIDING)  [TODO]
     vpnhide_internal.h       # brain API shared between core.c and hook_*.c
     Kconfig  Makefile
@@ -83,7 +83,8 @@ dance disappears.
 
 - [x] Phase 0 — protocol: `VPNHIDE_BACKEND_KPATCH = 4` + `VPNHIDE_KPATCH_HOOK_MASK` (codegen, append-only)
 - [x] Phase 1 — foundation: public header, brain (`core.c`), `vpnhide_internal.h`, Kconfig, Makefile
-- [ ] Phase 2 — hook bodies: `hook_socket.c`, `hook_netlink.c`, `hook_fs.c`
+- [x] Phase 2a — network hook bodies: `hook_iface.c` (dev/ifname predicate), `hook_socket.c` (bind)
+- [ ] Phase 2b — `hook_fs.c` (optional VFS path concealment)
 - [ ] Phase 3 — patches for `android14-6.1` + `apply.sh`
 - [ ] Phase 4 — QEMU build + run gate (reuse `kmod/test` / protocol vectors)
 - [ ] Phase 5 — app + activator: `NativeBackendId.Kpatch`, `kpatch` activator bin, detection + load_status, dashboard card
