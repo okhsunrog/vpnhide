@@ -35,6 +35,19 @@
 
 #define is_vpn_ifname(name) vpnhide_iface_is_vpn(name)
 
+/* The public VPNHIDE_HID_* the call-site patches pass must equal the generated
+ * VPNHIDE_HOOK_* ids; guard against a data/hooks.toml renumber desyncing them. */
+static_assert(VPNHIDE_HID_FIB_ROUTE_SEQ_SHOW == VPNHIDE_HOOK_FIB_ROUTE_SEQ_SHOW, "");
+static_assert(VPNHIDE_HID_IPV6_ROUTE_SEQ_SHOW == VPNHIDE_HOOK_IPV6_ROUTE_SEQ_SHOW, "");
+static_assert(VPNHIDE_HID_RTNL_FILL_IFINFO == VPNHIDE_HOOK_RTNL_FILL_IFINFO, "");
+static_assert(VPNHIDE_HID_INET_FILL_IFADDR == VPNHIDE_HOOK_INET_FILL_IFADDR, "");
+static_assert(VPNHIDE_HID_INET6_FILL_IFADDR == VPNHIDE_HOOK_INET6_FILL_IFADDR, "");
+static_assert(VPNHIDE_HID_DEV_IOCTL == VPNHIDE_HOOK_DEV_IOCTL, "");
+static_assert(VPNHIDE_HID_SOCK_IOCTL == VPNHIDE_HOOK_SOCK_IOCTL, "");
+static_assert(VPNHIDE_HID_FIB_DUMP_INFO == VPNHIDE_HOOK_FIB_DUMP_INFO, "");
+static_assert(VPNHIDE_HID_RT6_FILL_NODE == VPNHIDE_HOOK_RT6_FILL_NODE, "");
+static_assert(VPNHIDE_HID_FIB_NL_FILL_RULE == VPNHIDE_HOOK_FIB_NL_FILL_RULE, "");
+
 /* ------------------------------------------------------------------ */
 /*  Debug flag (set from the config snapshot's `debug` line)          */
 /* ------------------------------------------------------------------ */

@@ -36,7 +36,22 @@ struct dir_context;
  * predicates below preserve the .ko's per-hook enable masks AND per-hook stats.
  * Kept as a plain int in the public API to avoid pulling the generated enum
  * into every patched translation unit; security/vpnhide/ uses the real enum.
+ *
+ * These VPNHIDE_HID_* constants are what the call-site patches pass. Their
+ * values mirror data/hooks.toml; core.c static_asserts each against the
+ * generated VPNHIDE_HOOK_* enum, so a renumber cannot silently desync a patch.
+ * (A distinct prefix avoids colliding with the generated enum in the driver.)
  */
+#define VPNHIDE_HID_FIB_ROUTE_SEQ_SHOW	0
+#define VPNHIDE_HID_IPV6_ROUTE_SEQ_SHOW	1
+#define VPNHIDE_HID_RTNL_FILL_IFINFO	2
+#define VPNHIDE_HID_INET_FILL_IFADDR	3
+#define VPNHIDE_HID_INET6_FILL_IFADDR	4
+#define VPNHIDE_HID_DEV_IOCTL		5
+#define VPNHIDE_HID_SOCK_IOCTL		6
+#define VPNHIDE_HID_FIB_DUMP_INFO	7
+#define VPNHIDE_HID_RT6_FILL_NODE	8
+#define VPNHIDE_HID_FIB_NL_FILL_RULE	9
 
 /*
  * SO_BINDTODEVICE / SO_BINDTOIFINDEX decision. The .ko must redirect the syscall
