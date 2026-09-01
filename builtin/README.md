@@ -106,7 +106,13 @@ dance disappears.
 - [x] Phase 4 — QEMU functional run gate (builtin/test/): boots an Image with CONFIG_VPNHIDE=y and runs
       the shared vector suite. android14-6.1: pass=35 fail=0 panic=0 — every vector hidden for the target
       UID, preserved for the non-target (ioctl/getifaddrs/routes/host-route/rule/fs/all bind cases).
-- [ ] Phase 6 — build/packaging (stamp activator+version into the module zip, like kmod/build.py) + more KMIs (android16-6.12 first; trees at /home/okhsunrog/tmp_zfs/k-android1*-*)
+- [x] Phase 6a — packaging: `builtin/build.py` cross-compiles the `builtin` activator (cargo-ndk) and
+      packages `builtin/module/` into `vpnhide-builtin.zip` (KMI-agnostic; no .ko). Feature is now
+      installable end-to-end; changelog fragment added.
+- [ ] Phase 6b — more KMIs. android16-6.12 scoped: most 6.1 anchors match verbatim, but `__sys_setsockopt`
+      moved its dispatch into `do_sock_setsockopt()` (bind hook retargets there) and `inet6_fill_ifaddr`
+      gained `const ifa` + extra decls — both need 6.12-specific anchors in gen_patches.py. Then 5.15/6.6/
+      5.10/legacy. Each KMI: add EDITS block → generate → build Image → QEMU gate (recipe is mechanical).
 
 ### Generating the call-site patches (Phase 3b)
 
