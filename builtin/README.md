@@ -109,10 +109,11 @@ dance disappears.
 - [x] Phase 6a — packaging: `builtin/build.py` cross-compiles the `builtin` activator (cargo-ndk) and
       packages `builtin/module/` into `vpnhide-builtin.zip` (KMI-agnostic; no .ko). Feature is now
       installable end-to-end; changelog fragment added.
-- [ ] Phase 6b — more KMIs. android16-6.12 scoped: most 6.1 anchors match verbatim, but `__sys_setsockopt`
-      moved its dispatch into `do_sock_setsockopt()` (bind hook retargets there) and `inet6_fill_ifaddr`
-      gained `const ifa` + extra decls — both need 6.12-specific anchors in gen_patches.py. Then 5.15/6.6/
-      5.10/legacy. Each KMI: add EDITS block → generate → build Image → QEMU gate (recipe is mechanical).
+- [x] Phase 6b (android16-6.12) — DONE. gen_patches derives it from 6.1 (26/30 anchors shared) with 4
+      overrides (do_sock_setsockopt bind, const-ifa addr fills, iterate_shared-only readdir). QEMU gate on
+      6.12.89: pass=35 fail=0 panic=0. Two KMIs proven end-to-end.
+- [ ] Phase 6c — remaining KMIs (android14-5.15, android15-6.6, android13-5.10, legacy 5.4/4.19...). Same
+      mechanical recipe: check anchor divergence, add overrides in gen_patches.py, build Image, QEMU gate.
 
 ### Generating the call-site patches (Phase 3b)
 
