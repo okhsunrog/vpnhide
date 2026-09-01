@@ -45,8 +45,9 @@ kpatch/
     vpnhide_internal.h       # brain API shared between core.c and hook_*.c
     Kconfig  Makefile
   include/linux/vpnhide.h    # public call-site API + CONFIG_VPNHIDE=n stubs (copied to <kernel>/include/linux/)
-  versions/<kmi>/*.patch     # per-version call-site patches (start: android14-6.1)     [TODO]
-  scripts/apply.sh           # copy driver + vendor shared/generated headers + apply patches  [TODO]
+  versions/<kmi>/*.patch     # per-version call-site patches (android14-6.1 done)
+  scripts/apply.sh           # copy driver + vendor headers + wire security + apply patches
+  scripts/gen_patches.py     # regenerate versions/<kmi>/*.patch from a clean kernel tree
 ```
 
 `apply.sh` vendors `kmod/shared/vpnhide_logic.h` and `kmod/generated/{iface_lists,hook_ids}.h`
@@ -66,13 +67,13 @@ stats are preserved.
 | RTNL_FILL_IFINFO (2) | `rtnl_fill_ifinfo` | `vpnhide_should_hide_dev` |
 | INET_FILL_IFADDR (3) | `inet_fill_ifaddr` | `vpnhide_should_hide_dev` |
 | INET6_FILL_IFADDR (4) | `inet6_fill_ifaddr` | `vpnhide_should_hide_dev` |
-| FIB_ROUTE_SEQ_SHOW (0) | `fib_route_seq_show` (/proc/net/route) | `vpnhide_should_hide_dev` |
-| IPV6_ROUTE_SEQ_SHOW (1) | `ipv6_route_seq_show` (/proc/net/ipv6_route) | `vpnhide_should_hide_dev` |
-| FIB_DUMP_INFO (7) | `fib_dump_info` (RTM_GETROUTE v4) | `vpnhide_should_hide_dev` |
-| RT6_FILL_NODE (8) | `rt6_fill_node` (RTM_GETROUTE v6) | `vpnhide_should_hide_dev` |
-| FIB_NL_FILL_RULE (9) | `fib_nl_fill_rule` (policy rules) | `vpnhide_should_hide_dev` |
-| SOCKET_BIND_INTERFACE (25) | `__sys_setsockopt` (SO_BINDTODEVICE/IFINDEX) | `vpnhide_setsockopt_bind` *(api TBD in hook_socket.c)* |
-| FILESYSTEM_IFACE_PATHS (27) | `filename_lookup`/`do_filp_open`/`vfs_getattr`/`iterate_dir` | `vpnhide_should_hide_path` |
+| FIB_ROUTE_SEQ_SHOW (0) | `fib_route_seq_show` (/proc/net/route) | route/rule predicate (Phase 3b-ii) |
+| IPV6_ROUTE_SEQ_SHOW (1) | `ipv6_route_seq_show` (/proc/net/ipv6_route) | route/rule predicate (Phase 3b-ii) |
+| FIB_DUMP_INFO (7) | `fib_dump_info` (RTM_GETROUTE v4) | route/rule predicate (Phase 3b-ii) |
+| RT6_FILL_NODE (8) | `rt6_fill_node` (RTM_GETROUTE v6) | route/rule predicate (Phase 3b-ii) |
+| FIB_NL_FILL_RULE (9) | `fib_nl_fill_rule` (policy rules) | route/rule predicate (Phase 3b-ii) |
+| SOCKET_BIND_INTERFACE (25) | `__sys_setsockopt` (SO_BINDTODEVICE/IFINDEX) | `vpnhide_setsockopt_bind` |
+| FILESYSTEM_IFACE_PATHS (27) | `filename_lookup`/`do_filp_open`/`vfs_getattr`/`iterate_dir` | `vpnhide_should_hide_dentry` / `vpnhide_readdir_begin`/`_end` |
 
 In-tree, the trickiest `.ko` hook — SO_BINDTODEVICE — is **simpler and more
 correct**: the patch runs at the syscall call-site in process context *before*
