@@ -17,6 +17,7 @@ duplicate an anchor fails loudly here rather than silently mis-patching.
 from __future__ import annotations
 
 import argparse
+import copy
 import subprocess
 import sys
 from pathlib import Path
@@ -301,6 +302,62 @@ EDITS: dict[str, dict[str, list[tuple[str, str]]]] = {
         ],
     },
 }
+
+# android16-6.12: 26 of 30 call sites match android14-6.1 verbatim. Only four
+# diverge, so derive the KMI by copying the 6.1 edits and replacing just those
+# four entries (kept indices reuse the shared anchors):
+#   - net/socket.c[1]: __sys_setsockopt's option dispatch moved into
+#     do_sock_setsockopt(); the vh_snap decl must live in that function (the
+#     interception at [2] already anchors on the dispatch line, which is there).
+#   - inet_fill_ifaddr / inet6_fill_ifaddr: `const *ifa` + extra local decls.
+#   - iterate_dir: 6.12 dropped the legacy .iterate leg (iterate_shared only).
+_612 = copy.deepcopy(EDITS["android14-6.1"])
+_612["net/socket.c"][1] = (
+    "\tconst struct proto_ops *ops;\n"
+    "\tchar *kernel_optval = NULL;\n"
+    "\tint err;\n",
+    "\tconst struct proto_ops *ops;\n"
+    "\tchar *kernel_optval = NULL;\n"
+    "\tint err;\n"
+    "\tunion vpnhide_bind_snapshot vh_snap;\n",
+)
+_612["net/ipv4/devinet.c"][1] = (
+    "\tu32 preferred, valid;\n\tu32 flags;\n\n"
+    "\tnlh = nlmsg_put(skb, args->portid, args->seq, args->event, sizeof(*ifm),\n",
+    "\tu32 preferred, valid;\n\tu32 flags;\n\n"
+    "\tif (ifa->ifa_dev && ifa->ifa_dev->dev &&\n"
+    "\t    vpnhide_should_hide_dev(ifa->ifa_dev->dev,\n"
+    "\t\t\t\t    VPNHIDE_HID_INET_FILL_IFADDR))\n"
+    "\t\treturn 0;\n\n"
+    "\tnlh = nlmsg_put(skb, args->portid, args->seq, args->event, sizeof(*ifm),\n",
+)
+_612["net/ipv6/addrconf.c"][1] = (
+    "\tstruct nlmsghdr *nlh;\n\tu32 preferred, valid;\n"
+    "\tu32 flags, priority;\n\tu8 proto;\n\n"
+    "\tnlh = nlmsg_put(skb, args->portid, args->seq, args->event,\n",
+    "\tstruct nlmsghdr *nlh;\n\tu32 preferred, valid;\n"
+    "\tu32 flags, priority;\n\tu8 proto;\n\n"
+    "\tif (ifa->idev && ifa->idev->dev &&\n"
+    "\t    vpnhide_should_hide_dev(ifa->idev->dev,\n"
+    "\t\t\t\t    VPNHIDE_HID_INET6_FILL_IFADDR))\n"
+    "\t\treturn 0;\n\n"
+    "\tnlh = nlmsg_put(skb, args->portid, args->seq, args->event,\n",
+)
+_612["fs/readdir.c"][1] = (
+    "\tif (!IS_DEADDIR(inode)) {\n"
+    "\t\tctx->pos = file->f_pos;\n"
+    "\t\tres = file->f_op->iterate_shared(file, ctx);\n"
+    "\t\tfile->f_pos = ctx->pos;\n",
+    "\tif (!IS_DEADDIR(inode)) {\n"
+    "\t\tbool vh_dir = vpnhide_readdir_begin(file, ctx);\n"
+    "\t\tctx->pos = file->f_pos;\n"
+    "\t\tres = file->f_op->iterate_shared(file, ctx);\n"
+    "\t\tif (vh_dir)\n"
+    "\t\t\tvpnhide_readdir_end(ctx);\n"
+    "\t\tfile->f_pos = ctx->pos;\n",
+)
+EDITS["android16-6.12"] = _612
+
 
 # Patch filename per source path: net/core/dev_ioctl.c -> net_core_dev_ioctl.c.patch
 def patch_name(relpath: str) -> str:
