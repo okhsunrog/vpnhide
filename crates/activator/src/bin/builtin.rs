@@ -1,10 +1,10 @@
 use std::{env, process};
 
-use vpnhide_activator::{Result, activate_kpatch, boot_service_kpatch, uninstall_kpatch};
+use vpnhide_activator::{Result, activate_builtin, boot_service_builtin, uninstall_builtin};
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("vpnhide kpatch activator failed: {e}");
+        eprintln!("vpnhide builtin activator failed: {e}");
         process::exit(1);
     }
 }
@@ -14,9 +14,9 @@ fn run() -> Result<()> {
     // so there is no `boot-load` — only config delivery + liveness. The app reads
     // status/stats straight from /proc/vpnhide_ctl, same as the .ko.
     match env::args().skip(1).collect::<Vec<_>>().as_slice() {
-        [] => activate_kpatch(),
-        [command] if command == "boot-service" => boot_service_kpatch(),
-        [command] if command == "uninstall" => uninstall_kpatch(),
+        [] => activate_builtin(),
+        [command] if command == "boot-service" => boot_service_builtin(),
+        [command] if command == "uninstall" => uninstall_builtin(),
         _ => Err("usage: activator [boot-service|uninstall]".into()),
     }
 }

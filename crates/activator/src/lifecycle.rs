@@ -8,14 +8,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::{
     APATCH_DIR, KMOD_CTL, KPM_CTL_LOCK, KpmBootOutcome, KpmBootReport,
     OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS, PORTS_CHAIN4, PORTS_CHAIN6, PORTS_STATUS_DIR, Result,
-    activate_kmod_boot, activate_kpatch_boot, activate_kpm_boot, activate_ports_recorded,
+    activate_kmod_boot, activate_builtin_boot, activate_kpm_boot, activate_ports_recorded,
     activate_zygisk_boot, kmod_backend_present, load_kpm_boot, optional_feature_enabled,
     optional_feature_enabled_or_default, write_atomic,
 };
 
 const KMOD_STATUS_DIR: &str = "/data/adb/vpnhide_kmod";
-const KPATCH_STATUS_DIR: &str = "/data/adb/vpnhide_kpatch";
-const KPATCH_LOAD_STATUS: &str = "/data/adb/vpnhide_kpatch/load_status";
+const BUILTIN_STATUS_DIR: &str = "/data/adb/vpnhide_builtin";
+const BUILTIN_LOAD_STATUS: &str = "/data/adb/vpnhide_builtin/load_status";
 const KMOD_LOAD_STATUS: &str = "/data/adb/vpnhide_kmod/load_status";
 const KMOD_LOAD_DMESG: &str = "/data/adb/vpnhide_kmod/load_dmesg";
 const KMOD_NAME: &str = "vpnhide_kmod";
@@ -306,9 +306,9 @@ pub fn boot_service_kmod() -> Result<()> {
 }
 
 /// Backend id the in-tree driver reports in its /proc/vpnhide_ctl `status` line
-/// (data/hooks.toml -> VPNHIDE_BACKEND_KPATCH). The .ko reports 0; the two share
+/// (data/hooks.toml -> VPNHIDE_BACKEND_BUILTIN). The .ko reports 0; the two share
 /// the node and are mutually exclusive, so this is how we tell which is live.
-const KPATCH_BACKEND_ID: u32 = 4;
+const BUILTIN_BACKEND_ID: u32 = 4;
 
 /// Parse the `backend 0x<n>` field from a /proc/vpnhide_ctl status read.
 fn observed_ctl_backend() -> Option<u32> {
@@ -321,18 +321,18 @@ fn observed_ctl_backend() -> Option<u32> {
     u32::from_str_radix(hex, 16).ok()
 }
 
-struct KpatchLoadStatus {
+struct BuiltinLoadStatus {
     loaded: bool,
     detail: String,
 }
 
-impl KpatchLoadStatus {
+impl BuiltinLoadStatus {
     fn render(&self) -> String {
         format!(
             "timestamp={}\n\
              boot_id={}\n\
              uname_r={}\n\
-             runtime=kpatch\n\
+             runtime=builtin\n\
              loaded={}\n\
              detail={}\n",
             unix_timestamp(),
@@ -344,10 +344,10 @@ impl KpatchLoadStatus {
     }
 }
 
-fn write_kpatch_status(status: KpatchLoadStatus) -> Result<()> {
-    fs::create_dir_all(KPATCH_STATUS_DIR)?;
+fn write_builtin_status(status: BuiltinLoadStatus) -> Result<()> {
+    fs::create_dir_all(BUILTIN_STATUS_DIR)?;
     write_atomic(
-        Path::new(KPATCH_LOAD_STATUS),
+        Path::new(BUILTIN_LOAD_STATUS),
         status.render().as_bytes(),
         0o644,
     )
@@ -355,19 +355,19 @@ fn write_kpatch_status(status: KpatchLoadStatus) -> Result<()> {
 
 /// Boot config delivery for the in-tree backend. Unlike the .ko there is nothing
 /// to insmod: the driver is already live if the kernel was built with
-/// CONFIG_VPNHIDE. Verify that (control node present, backend id == kpatch),
+/// CONFIG_VPNHIDE. Verify that (control node present, backend id == builtin),
 /// deliver the config snapshot, and record liveness for the dashboard.
-pub fn boot_service_kpatch() -> Result<()> {
-    fs::create_dir_all(KPATCH_STATUS_DIR)?;
+pub fn boot_service_builtin() -> Result<()> {
+    fs::create_dir_all(BUILTIN_STATUS_DIR)?;
 
     match observed_ctl_backend() {
-        Some(KPATCH_BACKEND_ID) => {}
+        Some(BUILTIN_BACKEND_ID) => {}
         Some(other) => {
             let detail = format!(
-                "/proc/vpnhide_ctl reports backend 0x{other:x}, not kpatch — kernel not built with CONFIG_VPNHIDE, or the .ko is loaded"
+                "/proc/vpnhide_ctl reports backend 0x{other:x}, not the built-in backend — kernel not built with CONFIG_VPNHIDE, or the .ko is loaded"
             );
-            log_android("vpnhide", &format!("kpatch: {detail}"));
-            return write_kpatch_status(KpatchLoadStatus {
+            log_android("vpnhide", &format!("builtin: {detail}"));
+            return write_builtin_status(BuiltinLoadStatus {
                 loaded: false,
                 detail,
             });
@@ -375,25 +375,25 @@ pub fn boot_service_kpatch() -> Result<()> {
         None => {
             let detail =
                 "/proc/vpnhide_ctl absent — kernel not built with CONFIG_VPNHIDE".to_owned();
-            log_android("vpnhide", &format!("kpatch: {detail}"));
-            return write_kpatch_status(KpatchLoadStatus {
+            log_android("vpnhide", &format!("builtin: {detail}"));
+            return write_builtin_status(BuiltinLoadStatus {
                 loaded: false,
                 detail,
             });
         }
     }
 
-    match activate_kpatch_boot() {
+    match activate_builtin_boot() {
         Ok(()) => {
-            log_android("vpnhide", "kpatch: activator finished boot config");
-            write_kpatch_status(KpatchLoadStatus {
+            log_android("vpnhide", "builtin: activator finished boot config");
+            write_builtin_status(BuiltinLoadStatus {
                 loaded: true,
                 detail: "in-tree backend live".to_owned(),
             })
         }
         Err(err) => {
-            log_android("vpnhide", &format!("kpatch: activator failed: {err}"));
-            write_kpatch_status(KpatchLoadStatus {
+            log_android("vpnhide", &format!("builtin: activator failed: {err}"));
+            write_builtin_status(BuiltinLoadStatus {
                 loaded: false,
                 detail: format!("config delivery failed: {err}"),
             })?;
@@ -402,10 +402,10 @@ pub fn boot_service_kpatch() -> Result<()> {
     }
 }
 
-pub fn uninstall_kpatch() -> Result<()> {
-    remove_if_present(KPATCH_LOAD_STATUS)?;
-    remove_empty_dir(KPATCH_STATUS_DIR)?;
-    log_android("vpnhide", "kpatch: persistent module state removed");
+pub fn uninstall_builtin() -> Result<()> {
+    remove_if_present(BUILTIN_LOAD_STATUS)?;
+    remove_empty_dir(BUILTIN_STATUS_DIR)?;
+    log_android("vpnhide", "builtin: persistent module state removed");
     Ok(())
 }
 

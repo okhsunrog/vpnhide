@@ -344,7 +344,7 @@ def main() -> int:
         touched.append(relpath)
         print(f"[gen] edited {relpath} ({len(file_edits)} insertions)")
 
-    out_dir = REPO_ROOT / "kpatch" / "versions" / args.kmi
+    out_dir = REPO_ROOT / "builtin" / "versions" / args.kmi
     out_dir.mkdir(parents=True, exist_ok=True)
     for relpath in touched:
         diff = subprocess.run(

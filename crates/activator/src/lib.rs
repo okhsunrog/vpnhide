@@ -16,13 +16,13 @@ pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 pub const CANONICAL_CONFIG: &str = "/data/system/vpnhide_config.json";
 pub const KMOD_CTL: &str = "/proc/vpnhide_ctl";
 pub const KMOD_MODULE_DIR: &str = "/data/adb/modules/vpnhide_kmod";
-/// The kpatch backend lives in the kernel image (CONFIG_VPNHIDE=y), not in a
+/// The built-in backend lives in the kernel image (CONFIG_VPNHIDE=y), not in a
 /// loadable module. Its companion module ships only the userspace glue (this
 /// activator + boot scripts) that delivers config over the shared control node
-/// and records liveness. The control node itself is KMOD_CTL — kpatch and kmod
+/// and records liveness. The control node itself is KMOD_CTL — the built-in backend and kmod
 /// speak the identical /proc/vpnhide_ctl wire and are mutually exclusive (one
 /// kernel is either built with the driver or loads the .ko, never both).
-pub const KPATCH_MODULE_DIR: &str = "/data/adb/modules/vpnhide_kpatch";
+pub const BUILTIN_MODULE_DIR: &str = "/data/adb/modules/vpnhide_builtin";
 pub const ZYGISK_RUNTIME_CONFIG: &str = "/data/adb/modules/vpnhide_zygisk/targets.txt";
 pub const KPM_MODULE_FILE: &str = "/data/adb/modules/vpnhide_kpm/vpnhide.kpm";
 pub const SUPERKEY_FILE: &str = "/data/adb/vpnhide/superkey";
@@ -154,15 +154,15 @@ fn activate_kmod_with_pm_wait(wait: PmReadyWait) -> Result<()> {
     Ok(())
 }
 
-/// Deliver config to the in-tree (kpatch) backend. Identical to the kmod config
-/// path — same hook family, same /proc/vpnhide_ctl wire — because kpatch owns the
+/// Deliver config to the in-tree (built-in) backend. Identical to the kmod config
+/// path — same hook family, same /proc/vpnhide_ctl wire — because it owns the
 /// same kernel hooks; only the boot lifecycle (no insmod) and detection differ.
 /// The wire's `backend` field is set by the kernel driver, not here.
-pub fn activate_kpatch() -> Result<()> {
+pub fn activate_builtin() -> Result<()> {
     activate_kmod_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
 }
 
-pub(crate) fn activate_kpatch_boot() -> Result<()> {
+pub(crate) fn activate_builtin_boot() -> Result<()> {
     wait_for_path(KMOD_CTL);
     activate_kmod_with_pm_wait(PmReadyWait::Forever)
 }

@@ -24,8 +24,8 @@ name = "kpm"
 path = "src/bin/kpm.rs"
 
 [[bin]]
-name = "kpatch"
-path = "src/bin/kpatch.rs"
+name = "builtin"
+path = "src/bin/builtin.rs"
 
 [[bin]]
 name = "zygisk"

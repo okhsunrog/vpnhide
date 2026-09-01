@@ -24,11 +24,11 @@
 /*
  * Hooks this backend owns and may act on. Same kernel dump/ioctl/route/bind
  * hooks as the .ko (VPNHIDE_KERNEL_HOOK_MASK); the filesystem-concealment bit
- * (VPNHIDE_KPATCH_HOOK_MASK) is added only when the VFS hooks are compiled in.
+ * (VPNHIDE_BUILTIN_HOOK_MASK) is added only when the VFS hooks are compiled in.
  */
 #ifdef CONFIG_VPNHIDE_FS_HIDING
 #define VPNHIDE_OWNED_HOOK_MASK \
-	(VPNHIDE_KERNEL_HOOK_MASK | VPNHIDE_KPATCH_HOOK_MASK)
+	(VPNHIDE_KERNEL_HOOK_MASK | VPNHIDE_BUILTIN_HOOK_MASK)
 #else
 #define VPNHIDE_OWNED_HOOK_MASK (VPNHIDE_KERNEL_HOOK_MASK)
 #endif

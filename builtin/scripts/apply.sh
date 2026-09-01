@@ -14,7 +14,7 @@
 #      the repo keeps ONE source of truth (regenerate with scripts/codegen-*.py)
 #   3. copy the public header     -> <kernel>/include/linux/vpnhide.h
 #   4. wire security/Kconfig + security/Makefile to build it
-#   5. apply the per-version call-site patches under kpatch/versions/<version>/
+#   5. apply the per-version call-site patches under builtin/versions/<version>/
 #
 # Then build the kernel normally with CONFIG_VPNHIDE=y (and, optionally,
 # CONFIG_VPNHIDE_FS_HIDING=y) via the tree's usual GKI/Kleaf workflow.
@@ -25,12 +25,12 @@ KERNEL_DIR="${1:?Usage: $0 <kernel_common_dir> <version>}"
 VERSION="${2:?Usage: $0 <kernel_common_dir> <version>}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-KPATCH_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$KPATCH_DIR/.." && pwd)"
+BUILTIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$BUILTIN_DIR/.." && pwd)"
 
-DRIVER_SRC="$KPATCH_DIR/security/vpnhide"
-HEADER_SRC="$KPATCH_DIR/include/linux/vpnhide.h"
-PATCHES_DIR="$KPATCH_DIR/versions/$VERSION"
+DRIVER_SRC="$BUILTIN_DIR/security/vpnhide"
+HEADER_SRC="$BUILTIN_DIR/include/linux/vpnhide.h"
+PATCHES_DIR="$BUILTIN_DIR/versions/$VERSION"
 SHARED_SRC="$REPO_ROOT/kmod/shared/vpnhide_logic.h"
 GENERATED_SRC="$REPO_ROOT/kmod/generated"
 

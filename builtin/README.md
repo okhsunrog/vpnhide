@@ -1,7 +1,7 @@
-# kpatch — in-tree (compile-time) native backend
+# builtin — in-tree (compile-time) native backend
 
 A fourth native backend for vpnhide, alongside `kmod` (.ko / kretprobes), `kpm`
-(KernelPatch / inline hooks), and `zygisk` (libc hooks). `kpatch` compiles the
+(KernelPatch / inline hooks), and `zygisk` (libc hooks). `builtin` compiles the
 VPN-hiding logic **directly into the kernel** through source call-site hooks —
 **no loadable module, no kprobes**. It is for kernels where the `.ko` cannot run
 or cannot hook reliably:
@@ -19,24 +19,24 @@ build, whoever produced it.
 
 ## What is shared vs. new (why this is not a rewrite)
 
-vpnhide already separates four layers; `kpatch` only introduces a third *attach
+vpnhide already separates four layers; `builtin` only introduces a third *attach
 mechanism* for the same logic. This mirrors what KPM already did.
 
-| Layer | kmod | kpm | **kpatch** | shared? |
+| Layer | kmod | kpm | **builtin** | shared? |
 |---|---|---|---|---|
 | Attach mechanism | kretprobe | inline hook | **source call-site + `CONFIG_VPNHIDE`** | no — its own |
 | Filter logic | `kmod/shared/vpnhide_logic.h` + `kmod/generated/*` | same | **same (vendored at apply)** | **yes, verbatim** |
 | Config transport | `/proc/vpnhide_ctl` | ctl0 supercall | **`/proc/vpnhide_ctl` (identical)** | reuses kmod's |
 | Wire format | protocol crate (control v2 / telemetry v1) | same | **same** | **yes** |
 
-So the app/activator wire path for `kpatch` is byte-identical to `kmod`; only the
-`status backend` id differs (`VPNHIDE_BACKEND_KPATCH = 4`, added append-only to
+So the app/activator wire path for `builtin` is byte-identical to `kmod`; only the
+`status backend` id differs (`VPNHIDE_BACKEND_BUILTIN = 4`, added append-only to
 `data/hooks.toml`).
 
 ## Layout
 
 ```
-kpatch/
+builtin/
   security/vpnhide/          # the in-tree driver (copied to <kernel>/security/vpnhide/)
     core.c                   # brain: config, stats, /proc/vpnhide_ctl, init  (lifted from the .ko)
     hook_iface.c             # should_hide_dev/ifname: ioctl + SIOCGIFCONF + all dump/route/rule sites
@@ -82,7 +82,7 @@ dance disappears.
 
 ## Status / phases
 
-- [x] Phase 0 — protocol: `VPNHIDE_BACKEND_KPATCH = 4` + `VPNHIDE_KPATCH_HOOK_MASK` (codegen, append-only)
+- [x] Phase 0 — protocol: `VPNHIDE_BACKEND_BUILTIN = 4` + `VPNHIDE_BUILTIN_HOOK_MASK` (codegen, append-only)
 - [x] Phase 1 — foundation: public header, brain (`core.c`), `vpnhide_internal.h`, Kconfig, Makefile
 - [x] Phase 2a — network hook bodies: `hook_iface.c` (dev/ifname predicate), `hook_socket.c` (bind)
 - [x] Phase 2b — `hook_fs.c` (optional VFS path concealment + readdir filtering)
@@ -99,10 +99,10 @@ dance disappears.
       Compile-validated in BOTH configs: FS_HIDING=n (patched fs objects build against header stubs,
       no hook_fs.o) and FS_HIDING=y (real hooks + hook_fs.o), zero warnings.
 - [ ] Phase 4 — QEMU run gate (reuse `kmod/test` / protocol vectors)
-- [x] Phase 5a — activator: `activate_kpatch` / `boot_service_kpatch` / `uninstall_kpatch` + `kpatch` bin
+- [x] Phase 5a — activator: `activate_builtin` / `boot_service_builtin` / `uninstall_builtin` + `builtin` bin
 - [ ] Phase 5b — app (Kotlin): `NativeBackendId.Kpatch`, snapshot section for the ctl `backend` id
-      (disambiguates kmod vs kpatch on the shared node), `detectKpatchModule`, dashboard card
-- [ ] Phase 5c — `vpnhide_kpatch` companion module (module.prop + boot scripts running the activator)
+      (disambiguates kmod vs builtin on the shared node), `detectKpatchModule`, dashboard card
+- [ ] Phase 5c — `vpnhide_builtin` companion module (module.prop + boot scripts running the activator)
 - [ ] Phase 6 — expand KMI coverage (android16-6.12, then the rest)
 
 ### Generating the call-site patches (Phase 3b)

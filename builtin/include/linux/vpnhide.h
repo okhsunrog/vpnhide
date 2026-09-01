@@ -2,10 +2,10 @@
 /*
  * vpnhide — public in-tree API included by patched kernel subsystems.
  *
- * This is the compile-time (kpatch) sibling of the out-of-tree kmod. The .ko
+ * This is the compile-time (builtin) sibling of the out-of-tree kmod. The .ko
  * attaches the same filtering logic with kretprobes; here the logic is compiled
  * into vmlinux and reached through direct call-site hooks placed by the
- * per-version patches under kpatch/versions/<kmi>/. No kprobes, no module
+ * per-version patches under builtin/versions/<kmi>/. No kprobes, no module
  * loading — works on kernels where the .ko cannot run at all (INTEGRATE_MODULES,
  * CONFIG_KPROBES=n, whole-program LTO that mangles hook-target symbols).
  *

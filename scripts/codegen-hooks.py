@@ -53,7 +53,7 @@ OUT_LSP_KT = lsposed_generated_kt("HookIds.kt")
 
 GENERATED_HEADER_LINE = generated_header("data/hooks.toml", "uv run scripts/codegen-hooks.py")
 
-KNOWN_BACKENDS = ("kernel", "kmod", "kpm", "kpatch", "zygisk", "lsposed")
+KNOWN_BACKENDS = ("kernel", "kmod", "kpm", "builtin", "zygisk", "lsposed")
 
 
 # ---------------------------------------------------------------------------

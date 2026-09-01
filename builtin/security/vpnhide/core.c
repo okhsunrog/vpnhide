@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /*
- * vpnhide (in-tree / kpatch) — core: live config, interception stats, and the
+ * vpnhide (in-tree / builtin) — core: live config, interception stats, and the
  * folded /proc/vpnhide_ctl control+stats channel (docs/protocol.md). This is
  * the .ko's brain lifted verbatim; the only thing that changed is the ATTACH
  * mechanism (compile-time call-site hooks instead of kretprobes), so none of
@@ -326,7 +326,7 @@ static int ctl_seq_show(struct seq_file *m, void *v)
 		seq_printf(m,
 			   "vpnhide %u status\nbackend 0x%x\nkver 0x%x\n"
 			   "hooks 0x%x\nerror 0x%x\n",
-			   VPNHIDE_TELEMETRY_VERSION, VPNHIDE_BACKEND_KPATCH,
+			   VPNHIDE_TELEMETRY_VERSION, VPNHIDE_BACKEND_BUILTIN,
 			   LINUX_VERSION_CODE, hooks, VPNHIDE_ERR_OK);
 	} else if (item == 2) {
 		seq_printf(m, "vpnhide %u stats\n", VPNHIDE_TELEMETRY_VERSION);
@@ -410,7 +410,7 @@ static int vpnhide_diag_show(struct seq_file *m, void *v)
 
 	seq_puts(m, "vpnhide diag\n");
 	seq_printf(m, "backend 0x%x active_hook_mask 0x%x installed_hook_mask 0x%x\n",
-		   VPNHIDE_BACKEND_KPATCH, READ_ONCE(active_hook_mask),
+		   VPNHIDE_BACKEND_BUILTIN, READ_ONCE(active_hook_mask),
 		   installed_hook_mask());
 
 	/* Live is_vpn_ifname() verdict over every netdev in the reader's (root
