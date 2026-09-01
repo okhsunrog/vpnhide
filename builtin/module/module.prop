@@ -1,0 +1,6 @@
+id=vpnhide_builtin
+name=VPN Hide (Built-in kernel)
+version=v1.2.5
+versionCode=10205
+author=okhsunrog
+description=Userspace companion for the in-tree (CONFIG_VPNHIDE=y) kernel backend. The driver is compiled into the kernel, so this ships no .ko — only the activator that delivers config over /proc/vpnhide_ctl. Manage targets via VPN Hide app.
