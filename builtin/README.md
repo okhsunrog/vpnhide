@@ -103,7 +103,9 @@ dance disappears.
 - [ ] Phase 5b — app (Kotlin): `NativeBackendId.Kpatch`, snapshot section for the ctl `backend` id
       (disambiguates kmod vs builtin on the shared node), `detectKpatchModule`, dashboard card
 - [ ] Phase 5c — `vpnhide_builtin` companion module (module.prop + boot scripts running the activator)
-- [ ] Phase 4 — QEMU functional run gate (prove hooks hide interfaces at runtime, not just compile)
+- [x] Phase 4 — QEMU functional run gate (builtin/test/): boots an Image with CONFIG_VPNHIDE=y and runs
+      the shared vector suite. android14-6.1: pass=35 fail=0 panic=0 — every vector hidden for the target
+      UID, preserved for the non-target (ioctl/getifaddrs/routes/host-route/rule/fs/all bind cases).
 - [ ] Phase 6 — build/packaging (stamp activator+version into the module zip, like kmod/build.py) + more KMIs (android16-6.12 first; trees at /home/okhsunrog/tmp_zfs/k-android1*-*)
 
 ### Generating the call-site patches (Phase 3b)
