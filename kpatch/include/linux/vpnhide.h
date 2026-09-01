@@ -29,6 +29,11 @@ struct sock;
 struct dentry;
 struct file;
 struct dir_context;
+struct fib_info;
+struct fib_rt_info;
+struct fib6_info;
+struct dst_entry;
+struct fib_rule;
 
 /*
  * Global hook ids (data/hooks.toml -> generated/hook_ids.h). The patch at each
@@ -99,6 +104,22 @@ enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
 						 unsigned int optlen,
 						 union vpnhide_bind_snapshot *snap);
 
+/*
+ * Route / rule concealment (RTM_GETROUTE, /proc/net/route, RTM_GETRULE). Unlike
+ * the interface predicates these carry their own decision — beyond hiding a VPN
+ * interface's own routes they also drop a public host-route pinned to a physical
+ * uplink (the /32 or /128 a VPN client installs to reach its server, which leaks
+ * the server IP even when the tun is hidden) and the target UID's policy rule.
+ * The per-version patch calls these at the top of each emit function and skips
+ * the entry (return 0 / continue) on true. Dev extraction uses the kernel's own
+ * fib_info_nhc()/nexthop_fib6_nh() accessors.
+ */
+bool vpnhide_hide_fib_route(const struct fib_info *fi);		/* fib_route_seq_show */
+bool vpnhide_hide_fib6_route(struct fib6_info *rt);		/* ipv6_route_seq_show */
+bool vpnhide_hide_fib_dump(const struct fib_rt_info *fri);	/* fib_dump_info */
+bool vpnhide_hide_rt6(struct fib6_info *rt, struct dst_entry *dst); /* rt6_fill_node */
+bool vpnhide_hide_fib_rule(const struct fib_rule *rule);	/* fib_nl_fill_rule */
+
 #else /* !CONFIG_VPNHIDE */
 
 static inline bool vpnhide_should_hide_ifname(const char *ifname, int hook_id)
@@ -115,6 +136,26 @@ vpnhide_setsockopt_bind(struct sock *sk, int optname, sockptr_t optval,
 			unsigned int optlen, union vpnhide_bind_snapshot *snap)
 {
 	return VPNHIDE_BIND_PASSTHROUGH;
+}
+static inline bool vpnhide_hide_fib_route(const struct fib_info *fi)
+{
+	return false;
+}
+static inline bool vpnhide_hide_fib6_route(struct fib6_info *rt)
+{
+	return false;
+}
+static inline bool vpnhide_hide_fib_dump(const struct fib_rt_info *fri)
+{
+	return false;
+}
+static inline bool vpnhide_hide_rt6(struct fib6_info *rt, struct dst_entry *dst)
+{
+	return false;
+}
+static inline bool vpnhide_hide_fib_rule(const struct fib_rule *rule)
+{
+	return false;
 }
 
 #endif /* CONFIG_VPNHIDE */

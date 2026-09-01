@@ -227,6 +227,78 @@ EDITS: dict[str, dict[str, list[tuple[str, str]]]] = {
                 "\t\tfile->f_pos = ctx->pos;\n",
             ),
         ],
+        # --- route / policy-rule concealment --------------------------------
+        "net/ipv4/fib_trie.c": [
+            (
+                '#include "fib_lookup.h"\n',
+                VH_INCLUDE + '#include "fib_lookup.h"\n',
+            ),
+            (
+                "\t\tunsigned int flags = fib_flag_trans(fa->fa_type, mask, fi);\n\n"
+                "\t\tif ((fa->fa_type == RTN_BROADCAST) ||\n",
+                "\t\tunsigned int flags = fib_flag_trans(fa->fa_type, mask, fi);\n\n"
+                "\t\tif (vpnhide_hide_fib_route(fi))\n"
+                "\t\t\tcontinue;\n\n"
+                "\t\tif ((fa->fa_type == RTN_BROADCAST) ||\n",
+            ),
+        ],
+        "net/ipv6/ip6_fib.c": [
+            (
+                "#include <net/ip6_route.h>\n",
+                "#include <net/ip6_route.h>\n" + VH_INCLUDE,
+            ),
+            (
+                "\tconst struct net_device *dev;\n\n\tif (rt->nh)\n",
+                "\tconst struct net_device *dev;\n\n"
+                "\tif (vpnhide_hide_fib6_route(rt)) {\n"
+                "\t\titer->w.leaf = NULL;\n"
+                "\t\treturn 0;\n"
+                "\t}\n\n"
+                "\tif (rt->nh)\n",
+            ),
+        ],
+        "net/ipv4/fib_semantics.c": [
+            (
+                '#include "fib_lookup.h"\n',
+                VH_INCLUDE + '#include "fib_lookup.h"\n',
+            ),
+            (
+                "\tstruct rtmsg *rtm;\n\n"
+                "\tnlh = nlmsg_put(skb, portid, seq, event, sizeof(*rtm), flags);\n",
+                "\tstruct rtmsg *rtm;\n\n"
+                "\tif (vpnhide_hide_fib_dump(fri))\n"
+                "\t\treturn 0;\n\n"
+                "\tnlh = nlmsg_put(skb, portid, seq, event, sizeof(*rtm), flags);\n",
+            ),
+        ],
+        "net/ipv6/route.c": [
+            (
+                "#include <trace/events/fib6.h>\n",
+                "#include <trace/events/fib6.h>\n" + VH_INCLUDE,
+            ),
+            (
+                "\tlong expires = 0;\n\n"
+                "\tnlh = nlmsg_put(skb, portid, seq, type, sizeof(*rtm), flags);\n",
+                "\tlong expires = 0;\n\n"
+                "\tif (vpnhide_hide_rt6(rt, dst))\n"
+                "\t\treturn 0;\n\n"
+                "\tnlh = nlmsg_put(skb, portid, seq, type, sizeof(*rtm), flags);\n",
+            ),
+        ],
+        "net/core/fib_rules.c": [
+            (
+                "#include <linux/indirect_call_wrapper.h>\n",
+                "#include <linux/indirect_call_wrapper.h>\n" + VH_INCLUDE,
+            ),
+            (
+                "\tstruct fib_rule_hdr *frh;\n\n"
+                "\tnlh = nlmsg_put(skb, pid, seq, type, sizeof(*frh), flags);\n",
+                "\tstruct fib_rule_hdr *frh;\n\n"
+                "\tif (vpnhide_hide_fib_rule(rule))\n"
+                "\t\treturn 0;\n\n"
+                "\tnlh = nlmsg_put(skb, pid, seq, type, sizeof(*frh), flags);\n",
+            ),
+        ],
     },
 }
 

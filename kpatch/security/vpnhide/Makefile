@@ -7,5 +7,5 @@
 ccflags-y += -I$(src)
 
 obj-$(CONFIG_VPNHIDE) += vpnhide.o
-vpnhide-y := core.o hook_iface.o hook_socket.o
+vpnhide-y := core.o hook_iface.o hook_socket.o hook_route.o
 vpnhide-$(CONFIG_VPNHIDE_FS_HIDING) += hook_fs.o
