@@ -45,10 +45,24 @@ run_as_target() {
 	su -s /bin/sh vpnhide-target -c "$1"
 }
 
-# --- load the module --------------------------------------------------------
-if insmod /vpnhide_kmod.ko filesystem_hiding=1; then echo "INSMOD=ok"; else echo "INSMOD=FAIL"; fi
-REGISTERED=$(dmesg | grep -c 'vpnhide:.*registered')
-echo "REGISTERED=$REGISTERED"
+# --- load / verify the backend ----------------------------------------------
+# Which backend this boot exercises. The host env does not cross into the VM, so
+# builtin/test/run.sh drops a /vpnhide_backend marker into the initramfs; default
+# is the .ko harness.
+VPNHIDE_TEST_BACKEND="${VPNHIDE_TEST_BACKEND:-$([ -f /vpnhide_backend ] && cat /vpnhide_backend 2>/dev/null || echo kmod)}"
+# kmod: insmod the .ko and count the kretprobe registrations from dmesg.
+# builtin: nothing to insmod — the driver is compiled into the kernel
+# (CONFIG_VPNHIDE=y); "loaded" == the control node exists, and every owned hook
+# is a compiled-in call site so there is no per-hook registration to count.
+if [ "${VPNHIDE_TEST_BACKEND:-kmod}" = "builtin" ]; then
+	if [ -e /proc/vpnhide_ctl ]; then echo "INSMOD=ok (builtin, in-tree)"; else echo "INSMOD=FAIL"; fi
+	REGISTERED=$([ -e /proc/vpnhide_ctl ] && echo 1 || echo 0)
+	echo "REGISTERED=$REGISTERED"
+else
+	if insmod /vpnhide_kmod.ko filesystem_hiding=1; then echo "INSMOD=ok"; else echo "INSMOD=FAIL"; fi
+	REGISTERED=$(dmesg | grep -c 'vpnhide:.*registered')
+	echo "REGISTERED=$REGISTERED"
+fi
 
 # Write a control-protocol config snapshot (docs/protocol.md) enabling every
 # kernel and optional filesystem hooks (mask 0xa0003ff) for a single UID, with
@@ -391,7 +405,18 @@ check_keep_exact keep_proc_sys_readdir "ls /proc/sys/net/ipv4/conf" "eth0"
 # Root module managers replace or remove the backend across a reboot. Keep the
 # entry-kprobe replacement text resident for that whole lifetime: ordinary
 # rmmod must fail and leave both the module and its control plane intact.
-if rmmod vpnhide_kmod >/tmp/vpnhide-rmmod.log 2>&1; then
+# The built-in backend is part of the kernel image — the strongest permanence,
+# with no module to rmmod — so the only assertion there is that the control
+# plane stays live.
+if [ "$VPNHIDE_TEST_BACKEND" = "builtin" ]; then
+	if [ -e /proc/vpnhide_ctl ]; then
+		echo "RESULT permanent_module=PASS (built-in; no module to remove, control plane live)"
+		PASS=$((PASS + 1))
+	else
+		echo "RESULT permanent_module=FAIL (built-in control plane missing)"
+		FAIL=$((FAIL + 1))
+	fi
+elif rmmod vpnhide_kmod >/tmp/vpnhide-rmmod.log 2>&1; then
 	echo "RESULT permanent_module=FAIL (rmmod unexpectedly succeeded)"
 	FAIL=$((FAIL + 1))
 elif [ -d /sys/module/vpnhide_kmod ] && [ -e /proc/vpnhide_ctl ]; then
