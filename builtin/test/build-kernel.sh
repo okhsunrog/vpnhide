@@ -40,6 +40,14 @@ echo "[build-kernel/builtin] $KMI: cloning kernel/common + baking CONFIG_VPNHIDE
 	# Bake the built-in backend into the source tree.
 	/repo/builtin/scripts/apply.sh /tmp/linux "$KMI"
 
+	# Work around an AOSP host-tool regression on some GKI HEADs (e.g.
+	# android15-6.6 @ 57c281246): certs/extract-cert.c declares key_pass only
+	# under USE_PKCS11_ENGINE but references it in the non-BoringSSL ENGINE
+	# branch, so the host tool fails to build with real OpenSSL and no PKCS#11.
+	# Unrelated to vpnhide; make the declaration unconditional so certs/ builds.
+	sed -i -z "s/#ifdef USE_PKCS11_ENGINE\nstatic const char \*key_pass;\n#endif/static const char *key_pass;/" \
+		/tmp/linux/certs/extract-cert.c || true
+
 	cd /tmp/linux
 	make ARCH=arm64 LLVM=1 gki_defconfig
 	cp /qemu.config /tmp/frag.config
