@@ -147,6 +147,86 @@ EDITS: dict[str, dict[str, list[tuple[str, str]]]] = {
                 "\t\terr = sock_setsockopt(sock, level, optname, optval, optlen);\n",
             ),
         ],
+        # --- filesystem path concealment (CONFIG_VPNHIDE_FS_HIDING) ----------
+        "fs/namei.c": [
+            (
+                '#include <linux/uaccess.h>\n\n#include "internal.h"',
+                '#include <linux/uaccess.h>\n' + VH_INCLUDE + '\n#include "internal.h"',
+            ),
+            # filename_lookup: hide a resolved VPN-iface path node.
+            (
+                "\tif (likely(!retval))\n"
+                "\t\taudit_inode(name, path->dentry,\n"
+                "\t\t\t    flags & LOOKUP_MOUNTPOINT ? AUDIT_INODE_NOEVAL : 0);\n"
+                "\trestore_nameidata();\n"
+                "\treturn retval;\n",
+                "\tif (likely(!retval))\n"
+                "\t\taudit_inode(name, path->dentry,\n"
+                "\t\t\t    flags & LOOKUP_MOUNTPOINT ? AUDIT_INODE_NOEVAL : 0);\n"
+                "\tif (!retval && vpnhide_should_hide_dentry(path->dentry)) {\n"
+                "\t\tpath_put(path);\n"
+                "\t\tpath->mnt = NULL;\n"
+                "\t\tpath->dentry = NULL;\n"
+                "\t\tretval = -ENOENT;\n"
+                "\t}\n"
+                "\trestore_nameidata();\n"
+                "\treturn retval;\n",
+            ),
+            # do_filp_open: hide an opened VPN-iface path node.
+            (
+                "\trestore_nameidata();\n\treturn filp;\n}",
+                "\tif (!IS_ERR(filp) &&\n"
+                "\t    vpnhide_should_hide_dentry(filp->f_path.dentry)) {\n"
+                "\t\tfput(filp);\n"
+                "\t\tfilp = ERR_PTR(-ENOENT);\n"
+                "\t}\n"
+                "\trestore_nameidata();\n\treturn filp;\n}",
+            ),
+        ],
+        "fs/stat.c": [
+            (
+                "#include <asm/unistd.h>\n",
+                "#include <asm/unistd.h>\n" + VH_INCLUDE,
+            ),
+            (
+                "\tretval = security_inode_getattr(path);\n"
+                "\tif (retval)\n"
+                "\t\treturn retval;\n"
+                "\treturn vfs_getattr_nosec(path, stat, request_mask, query_flags);\n",
+                "\tretval = security_inode_getattr(path);\n"
+                "\tif (retval)\n"
+                "\t\treturn retval;\n"
+                "\tretval = vfs_getattr_nosec(path, stat, request_mask, query_flags);\n"
+                "\tif (!retval && vpnhide_should_hide_dentry(path->dentry))\n"
+                "\t\tretval = -ENOENT;\n"
+                "\treturn retval;\n",
+            ),
+        ],
+        "fs/readdir.c": [
+            (
+                "#include <linux/uaccess.h>\n",
+                "#include <linux/uaccess.h>\n" + VH_INCLUDE,
+            ),
+            (
+                "\tif (!IS_DEADDIR(inode)) {\n"
+                "\t\tctx->pos = file->f_pos;\n"
+                "\t\tif (shared)\n"
+                "\t\t\tres = file->f_op->iterate_shared(file, ctx);\n"
+                "\t\telse\n"
+                "\t\t\tres = file->f_op->iterate(file, ctx);\n"
+                "\t\tfile->f_pos = ctx->pos;\n",
+                "\tif (!IS_DEADDIR(inode)) {\n"
+                "\t\tbool vh_dir = vpnhide_readdir_begin(file, ctx);\n"
+                "\t\tctx->pos = file->f_pos;\n"
+                "\t\tif (shared)\n"
+                "\t\t\tres = file->f_op->iterate_shared(file, ctx);\n"
+                "\t\telse\n"
+                "\t\t\tres = file->f_op->iterate(file, ctx);\n"
+                "\t\tif (vh_dir)\n"
+                "\t\t\tvpnhide_readdir_end(ctx);\n"
+                "\t\tfile->f_pos = ctx->pos;\n",
+            ),
+        ],
     },
 }
 

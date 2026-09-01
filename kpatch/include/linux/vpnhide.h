@@ -99,7 +99,34 @@ enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
 						 unsigned int optlen,
 						 union vpnhide_bind_snapshot *snap);
 
-#ifdef CONFIG_VPNHIDE_FS_HIDING
+#else /* !CONFIG_VPNHIDE */
+
+static inline bool vpnhide_should_hide_ifname(const char *ifname, int hook_id)
+{
+	return false;
+}
+static inline bool vpnhide_should_hide_dev(const struct net_device *dev,
+					   int hook_id)
+{
+	return false;
+}
+static inline enum vpnhide_bind_action
+vpnhide_setsockopt_bind(struct sock *sk, int optname, sockptr_t optval,
+			unsigned int optlen, union vpnhide_bind_snapshot *snap)
+{
+	return VPNHIDE_BIND_PASSTHROUGH;
+}
+
+#endif /* CONFIG_VPNHIDE */
+
+/*
+ * Filesystem path concealment (optional). Kept in its own block so the stubs
+ * cover BOTH CONFIG_VPNHIDE=n AND the CONFIG_VPNHIDE=y / CONFIG_VPNHIDE_FS_HIDING=n
+ * case — otherwise a build with the network hooks but not the VFS hooks would
+ * have no symbol for the patched fs call sites.
+ */
+#if defined(CONFIG_VPNHIDE) && defined(CONFIG_VPNHIDE_FS_HIDING)
+
 /*
  * True if `dentry` resolves to a VPN interface's sysfs / proc-sys node that must
  * be concealed from the calling UID (lookup / open / getattr sites). Dentry-based
@@ -118,25 +145,9 @@ bool vpnhide_should_hide_dentry(const struct dentry *dentry);
  */
 bool vpnhide_readdir_begin(struct file *file, struct dir_context *ctx);
 void vpnhide_readdir_end(struct dir_context *ctx);
-#endif /* CONFIG_VPNHIDE_FS_HIDING */
 
-#else /* !CONFIG_VPNHIDE */
+#else /* !CONFIG_VPNHIDE || !CONFIG_VPNHIDE_FS_HIDING */
 
-static inline bool vpnhide_should_hide_ifname(const char *ifname, int hook_id)
-{
-	return false;
-}
-static inline bool vpnhide_should_hide_dev(const struct net_device *dev,
-					   int hook_id)
-{
-	return false;
-}
-static inline enum vpnhide_bind_action
-vpnhide_setsockopt_bind(struct sock *sk, int optname, sockptr_t optval,
-			unsigned int optlen, union vpnhide_bind_snapshot *snap)
-{
-	return VPNHIDE_BIND_PASSTHROUGH;
-}
 static inline bool vpnhide_should_hide_dentry(const struct dentry *dentry)
 {
 	return false;
@@ -150,5 +161,5 @@ static inline void vpnhide_readdir_end(struct dir_context *ctx)
 {
 }
 
-#endif /* CONFIG_VPNHIDE */
+#endif /* CONFIG_VPNHIDE && CONFIG_VPNHIDE_FS_HIDING */
 #endif /* _LINUX_VPNHIDE_H */

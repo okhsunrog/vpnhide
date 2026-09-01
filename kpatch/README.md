@@ -93,7 +93,9 @@ dance disappears.
 - [ ] Phase 3b(ii) — route/rule patches (fib_route/ipv6_route seq_show, fib_dump_info, rt6_fill_node,
       fib_nl_fill_rule). These need a route-level predicate, not just `should_hide_dev`: the .ko also
       hides a public host-route pinned to a physical uplink (leaks the VPN server IP). Separate API.
-- [ ] Phase 3b(iii) — fs call-site patches (filename_lookup, do_filp_open, vfs_getattr, iterate_dir).
+- [x] Phase 3b(iii) — fs call-site patches (filename_lookup, do_filp_open, vfs_getattr, iterate_dir).
+      Compile-validated in BOTH configs: FS_HIDING=n (patched fs objects build against header stubs,
+      no hook_fs.o) and FS_HIDING=y (real hooks + hook_fs.o), zero warnings.
 - [ ] Phase 4 — QEMU run gate (reuse `kmod/test` / protocol vectors)
 - [x] Phase 5a — activator: `activate_kpatch` / `boot_service_kpatch` / `uninstall_kpatch` + `kpatch` bin
 - [ ] Phase 5b — app (Kotlin): `NativeBackendId.Kpatch`, snapshot section for the ctl `backend` id
