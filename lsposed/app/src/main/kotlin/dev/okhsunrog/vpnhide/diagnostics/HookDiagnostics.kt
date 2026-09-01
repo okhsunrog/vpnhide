@@ -25,6 +25,10 @@ private data class CounterKey(
 private val BACKEND_STATE_SECTIONS =
     linkedMapOf(
         HookIds.Backend.KMOD to "kmod_state",
+        // The in-tree backend shares /proc/vpnhide_ctl (the kmod_state section)
+        // with the .ko; the `backend 0x<n>` line in that dump is what tells them
+        // apart (0x0 = .ko, 0x4 = built-in).
+        HookIds.Backend.BUILTIN to "kmod_state",
         HookIds.Backend.KPM to "kpm_state",
         HookIds.Backend.ZYGISK to "zygisk_status",
         HookIds.Backend.LSPOSED to "lsposed_state",

@@ -21,7 +21,8 @@ class NativeBackendTest {
         kmod: ModuleState,
         kpm: ModuleState,
         zygisk: ModuleState,
-    ) = NativeBackendStates(kmod = kmod, kpm = kpm, zygisk = zygisk)
+        builtin: ModuleState = ModuleState.NotInstalled,
+    ) = NativeBackendStates(kmod = kmod, kpm = kpm, zygisk = zygisk, builtin = builtin)
 
     // ── activeNativeBackendId / displayNativeBackend ─────────────────────
 
@@ -66,6 +67,52 @@ class NativeBackendTest {
             NativeBackendId.Kpm,
             displayNativeBackend(states(ModuleState.NotInstalled, installed(active = false), installed(active = false))).id,
         )
+    }
+
+    @Test
+    fun `builtin sits between kmod and kpm in display priority`() {
+        // Builtin installed alongside KPM/Zygisk, none active -> builtin shown
+        // (it is a top-tier kernel backend, directly below the .ko).
+        assertEquals(
+            NativeBackendId.Builtin,
+            displayNativeBackend(
+                states(
+                    kmod = ModuleState.NotInstalled,
+                    kpm = installed(active = false),
+                    zygisk = installed(active = false),
+                    builtin = installed(active = false),
+                ),
+            ).id,
+        )
+        // An active builtin is reported over an inactive higher-priority kmod.
+        val builtinActive =
+            states(
+                kmod = installed(active = false),
+                kpm = ModuleState.NotInstalled,
+                zygisk = ModuleState.NotInstalled,
+                builtin = installed(active = true),
+            )
+        assertEquals(NativeBackendId.Builtin, builtinActive.activeId)
+        assertEquals(true, builtinActive.anyInstalled)
+    }
+
+    @Test
+    fun `detect native backend states resolves builtin from a backend 0x4 control reply`() {
+        val states =
+            detectNativeBackendStates(
+                sections =
+                    mapOf(
+                        "kmod_prop" to "id=vpnhide_kmod\nversion=v1.2.5\n",
+                        "builtin_prop" to "id=vpnhide_builtin\nversion=v1.2.5\n",
+                        "proc_exists" to "1",
+                        "kmod_state" to "vpnhide 1 status\nbackend 0x4\nkver 0x0\nhooks 0x3ff\nerror 0x0\n",
+                        "current_boot_id" to "boot-1",
+                    ),
+            )
+        // Built-in owns the live proc; the .ko is installed but not the thing running.
+        assertEquals(NativeBackendId.Builtin, states.activeId)
+        assertEquals(true, moduleActive(states.builtin))
+        assertEquals(false, moduleActive(states.kmod))
     }
 
     @Test

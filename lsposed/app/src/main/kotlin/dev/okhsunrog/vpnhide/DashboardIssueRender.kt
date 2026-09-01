@@ -246,11 +246,17 @@ private val FlashableModuleKind.displayName: String
     get() =
         when (this) {
             FlashableModuleKind.Kmod -> "kmod"
+            FlashableModuleKind.Builtin -> "Built-in"
             FlashableModuleKind.Kpm -> "KPM"
             FlashableModuleKind.Zygisk -> "Zygisk"
             FlashableModuleKind.Ports -> "Ports"
         }
 
+// Complexity is inherent: three per-kind string tables (older / newer / equal),
+// one arm per flashable module in each. Adding the built-in backend nudged the
+// branch count past the threshold, but the shape is flat dispatch, not tangled
+// control flow.
+@Suppress("CyclomaticComplexMethod")
 private fun buildModuleVersionIssue(
     res: Resources,
     kind: FlashableModuleKind,
@@ -267,6 +273,7 @@ private fun buildModuleVersionIssue(
             res.getString(
                 when (kind) {
                     FlashableModuleKind.Kmod -> R.string.dashboard_issue_kmod_version_mismatch
+                    FlashableModuleKind.Builtin -> R.string.dashboard_issue_builtin_version_mismatch
                     FlashableModuleKind.Kpm -> R.string.dashboard_issue_kpm_version_mismatch
                     FlashableModuleKind.Zygisk -> R.string.dashboard_issue_zygisk_version_mismatch
                     FlashableModuleKind.Ports -> R.string.dashboard_issue_ports_version_mismatch
@@ -283,6 +290,7 @@ private fun buildModuleVersionIssue(
                 res.getString(
                     when (kind) {
                         FlashableModuleKind.Kmod -> R.string.dashboard_issue_update_kmod
+                        FlashableModuleKind.Builtin -> R.string.dashboard_issue_update_builtin
                         FlashableModuleKind.Kpm -> R.string.dashboard_issue_update_kpm
                         FlashableModuleKind.Zygisk -> R.string.dashboard_issue_update_zygisk
                         FlashableModuleKind.Ports -> R.string.dashboard_issue_update_ports
@@ -297,6 +305,7 @@ private fun buildModuleVersionIssue(
             res.getString(
                 when (kind) {
                     FlashableModuleKind.Kmod -> R.string.dashboard_issue_update_app_for_kmod
+                    FlashableModuleKind.Builtin -> R.string.dashboard_issue_update_app_for_builtin
                     FlashableModuleKind.Kpm -> R.string.dashboard_issue_update_app_for_kpm
                     FlashableModuleKind.Zygisk -> R.string.dashboard_issue_update_app_for_zygisk
                     FlashableModuleKind.Ports -> R.string.dashboard_issue_update_app_for_ports

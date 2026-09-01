@@ -153,7 +153,7 @@ internal sealed interface ProtectionCheck {
     ) : ProtectionCheck
 }
 
-internal enum class FlashableModuleKind { Kmod, Kpm, Zygisk, Ports }
+internal enum class FlashableModuleKind { Kmod, Builtin, Kpm, Zygisk, Ports }
 
 internal enum class MultiNativeSeverity { None, Warning, Error }
 
@@ -978,10 +978,41 @@ internal fun resolveLsposedState(
 
 // ── Module detection (pure, from the root snapshot) ──────────────────────
 
+// The backend that currently owns /proc/vpnhide_ctl, read from the `backend 0x<n>`
+// line of the control status reply captured in the `kmod_state` section (a full
+// `cat /proc/vpnhide_ctl`). The .ko reports 0x0, the in-tree driver 0x4; the two
+// share the node and are mutually exclusive, so this is the one signal that tells
+// a kmod device from a builtin one.
+//
+// Null when the id can't be read — the node was absent, or the snapshot shell
+// wasn't root and got EACCES on the 0600 node (see [snapshotRuntimeCheckable]).
+// A null id must never be treated as "the other backend"; callers keep their
+// existing honest behaviour when it is null.
+internal fun parseCtlBackendId(sections: Map<String, String>): Int? =
+    sections["kmod_state"]
+        .orEmpty()
+        .lineSequence()
+        .firstNotNullOfOrNull { line ->
+            Regex("""\bbackend\s+0x([0-9a-fA-F]+)\b""")
+                .find(line)
+                ?.groupValues
+                ?.get(1)
+                ?.toIntOrNull(16)
+        }
+
+private val BUILTIN_BACKEND_ID = HookIds.Backend.BUILTIN.id
+
 internal fun detectKmodModule(sections: Map<String, String>): ModuleState {
     val prop = parseModuleProp(sections["kmod_prop"].orEmpty())
     if (!prop.installed) return ModuleState.NotInstalled
-    val active = sections["proc_exists"].orEmpty().trim() == "1"
+    // The .ko and the in-tree driver share /proc/vpnhide_ctl. If the node
+    // explicitly reports the built-in backend (0x4) then this proc is NOT the
+    // .ko's — the kmod is installed but not the thing that's live. Only a
+    // definitely-not-kmod id demotes it; a null/unread id (non-root snapshot,
+    // 0600 EACCES) or a 0x0 id keeps the historical proc-present == active rule.
+    val procPresent = sections["proc_exists"].orEmpty().trim() == "1"
+    val ctlBackendId = parseCtlBackendId(sections)
+    val active = procPresent && ctlBackendId != BUILTIN_BACKEND_ID
     // brokenReason is applied by the caller once the kernel recommendation +
     // load status are known (see classifyKmodProblem).
     return ModuleState.Installed(
@@ -991,6 +1022,28 @@ internal fun detectKmodModule(sections: Map<String, String>): ModuleState {
         // A negative liveness read from a non-root snapshot shell is untrustworthy
         // (0600 /proc/vpnhide_ctl → EACCES → false "0"). Mark it unverified so the
         // UI never shows a false "inactive". A positive read is self-verifying.
+        runtimeCheckable = active || snapshotRuntimeCheckable(sections),
+    )
+}
+
+// Built-in kernel backend: the driver is compiled into the kernel, so the
+// companion module ships only the userspace activator. "Installed" = that
+// companion module is present; "active" = the shared control node is live AND
+// it reports the built-in backend id (0x4). Because a non-root snapshot can't
+// read the 0600 node, a proc-present-but-unread id leaves active=false but
+// unverified — never a false "inactive", mirroring detectKmodModule.
+internal fun detectBuiltinModule(sections: Map<String, String>): ModuleState {
+    val prop = parseModuleProp(sections["builtin_prop"].orEmpty())
+    if (!prop.installed) return ModuleState.NotInstalled
+    val procPresent = sections["proc_exists"].orEmpty().trim() == "1"
+    val ctlBackendId = parseCtlBackendId(sections)
+    val active = procPresent && ctlBackendId == BUILTIN_BACKEND_ID
+    return ModuleState.Installed(
+        version = prop.version,
+        active = active,
+        // A positive read (backend==0x4) is self-verifying. Otherwise the id may
+        // simply be unread (non-root snapshot on the 0600 node), so a false
+        // "inactive" is not trustworthy — render "not verified" instead.
         runtimeCheckable = active || snapshotRuntimeCheckable(sections),
     )
 }
@@ -1231,6 +1284,9 @@ private fun deriveModuleFacts(
         deriveModuleFact(FlashableModuleKind.Kmod, raw.kmod, sections, KMOD_ACTIVATOR, res) {
             classifyKmodProblem(raw.kmod, kernelRecommendation, kmodLoadStatus)?.let { renderKmodProblem(it, res) }
         }
+    // The in-tree backend has no .ko to diagnose, so it needs no classifier —
+    // only the shared integrity/pending-reboot checks on its companion activator.
+    val builtin = deriveModuleFact(FlashableModuleKind.Builtin, raw.builtin, sections, BUILTIN_ACTIVATOR, res)
     val kpm =
         deriveModuleFact(FlashableModuleKind.Kpm, raw.kpm, sections, KPM_ACTIVATOR, res) {
             classifyKpmProblem(
@@ -1247,15 +1303,17 @@ private fun deriveModuleFacts(
     // The one place the three native backends are grouped: every "is anything
     // installed / active" gate reads from this instead of re-deriving its own
     // kmod/kpm/zygisk boolean combination.
-    val backends = NativeBackendStates(kmod = kmod.state, kpm = kpm.state, zygisk = zygisk.state)
-    VpnHideLog.i(TAG, "modules: kmod=${kmod.state} kpm=${kpm.state} zygisk=${zygisk.state} ports=${ports.state}")
+    val backends =
+        NativeBackendStates(kmod = kmod.state, builtin = builtin.state, kpm = kpm.state, zygisk = zygisk.state)
+    VpnHideLog.i(TAG, "modules: $backends ports=${ports.state}")
     return ModuleFacts(
         kmod = kmod,
+        builtin = builtin,
         kpm = kpm,
         zygisk = zygisk,
         ports = ports,
         backends = backends,
-        // The single native backend the dashboard shows (kmod > KPM > Zygisk).
+        // The single native backend the dashboard shows (kmod > builtin > KPM > Zygisk).
         nativeBackend = displayNativeBackend(backends),
         standaloneKpm = standaloneKpmLoaded(raw.kpm, sections["kpm_runtime_modules"].orEmpty()),
         kpmLoadStatus = kpmLoadStatus,
@@ -1265,6 +1323,7 @@ private fun deriveModuleFacts(
             detectModuleMismatches(
                 listOf(
                     kmod.state to FlashableModuleKind.Kmod,
+                    builtin.state to FlashableModuleKind.Builtin,
                     kpm.state to FlashableModuleKind.Kpm,
                     zygisk.state to FlashableModuleKind.Zygisk,
                     ports.state to FlashableModuleKind.Ports,

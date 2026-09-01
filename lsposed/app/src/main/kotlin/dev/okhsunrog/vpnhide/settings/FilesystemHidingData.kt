@@ -53,6 +53,14 @@ private fun filesystemNativeBackend(sections: Map<String, String>): FilesystemNa
             FilesystemNativeBackend(NativeBackendId.Kmod, kmodRaw)
         }
 
+        // The in-tree driver shares /proc/vpnhide_ctl (the kmod_state section)
+        // with the .ko and is told apart only by the backend id it reports (0x4).
+        kmodStatus?.backend ==
+            HookIds.Backend.BUILTIN.id
+                .toLong() -> {
+            FilesystemNativeBackend(NativeBackendId.Builtin, kmodRaw)
+        }
+
         kpmStatus?.backend ==
             HookIds.Backend.KPM.id
                 .toLong() -> {
@@ -65,6 +73,10 @@ private fun filesystemNativeBackend(sections: Map<String, String>): FilesystemNa
 
         sections["kmod_module_dir"]?.trim() == "1" -> {
             FilesystemNativeBackend(NativeBackendId.Kmod, kmodRaw)
+        }
+
+        sections["builtin_module_dir"]?.trim() == "1" -> {
+            FilesystemNativeBackend(NativeBackendId.Builtin, kmodRaw)
         }
 
         sections["kpm_module_dir"]?.trim() == "1" -> {
@@ -101,7 +113,10 @@ private fun filesystemHookSetupFailed(
     sections: Map<String, String>,
 ): Boolean =
     when (backend.id) {
-        NativeBackendId.Kmod -> {
+        // The in-tree backend has no kmod load_status with filesystem-config
+        // fields (its activator only records liveness), so there is no boot-time
+        // setup-failure signal to read — same fail-open as an unavailable one.
+        NativeBackendId.Kmod, NativeBackendId.Builtin -> {
             load?.let { it.loaded == true && it.filesystemHiding == true } == true
         }
 
@@ -157,7 +172,9 @@ internal fun installedNativeOptionalHooks(
     currentBootId: String,
 ): Set<HookIds.Hook> =
     when (backend) {
-        NativeBackendId.Kmod -> {
+        // Builtin shares /proc/vpnhide_ctl with the .ko, so its installed-hook
+        // mask is the same kmod_state section.
+        NativeBackendId.Kmod, NativeBackendId.Builtin -> {
             installedHooks(sections["kmod_state"].orEmpty())
         }
 
@@ -191,7 +208,7 @@ internal fun resolveFilesystemHidingState(
             ?: return FilesystemHidingState(FilesystemHidingStatus.Unavailable)
     val hookInstalled =
         when (backend.id) {
-            NativeBackendId.Kmod, NativeBackendId.Kpm -> {
+            NativeBackendId.Kmod, NativeBackendId.Builtin, NativeBackendId.Kpm -> {
                 HookIds.Hook.FILESYSTEM_IFACE_PATHS in installedHooks(backend.statusRaw)
             }
 

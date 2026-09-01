@@ -28,6 +28,98 @@ class DetectModulesTest {
         assertEquals(false, (detectKmodModule(sections) as ModuleState.Installed).active)
     }
 
+    // ── kmod ↔ builtin disambiguation over the shared /proc/vpnhide_ctl node ──
+    // Both the .ko and the in-tree driver own /proc/vpnhide_ctl; the only signal
+    // that tells them apart is the `backend 0x<n>` line in the control status
+    // reply captured in kmod_state (0x0 = .ko, 0x4 = built-in).
+
+    private fun ctlStatus(backendHex: String) = "vpnhide 1 status\nbackend 0x$backendHex\nkver 0x0\nhooks 0x3ff\nerror 0x0\n"
+
+    @Test
+    fun `parseCtlBackendId reads the backend id, or null when unread`() {
+        assertEquals(4, parseCtlBackendId(mapOf("kmod_state" to ctlStatus("4"))))
+        assertEquals(0, parseCtlBackendId(mapOf("kmod_state" to ctlStatus("0"))))
+        assertEquals(null, parseCtlBackendId(emptyMap()))
+        assertEquals(null, parseCtlBackendId(mapOf("kmod_state" to "")))
+    }
+
+    @Test
+    fun `builtin active when the control node reports the built-in backend`() {
+        val sections =
+            mapOf(
+                "builtin_prop" to "id=vpnhide_builtin\nversion=1.2.5",
+                "kmod_prop" to "id=vpnhide_kmod\nversion=1.2.5",
+                "proc_exists" to "1",
+                "kmod_state" to ctlStatus("4"),
+            )
+        val builtin = detectBuiltinModule(sections) as ModuleState.Installed
+        assertEquals(true, builtin.active)
+        assertEquals("1.2.5", builtin.version)
+        // The .ko must NOT also be reported active — this proc is the in-tree
+        // driver's, not the module's, even though the kmod_prop is present.
+        assertEquals(false, (detectKmodModule(sections) as ModuleState.Installed).active)
+    }
+
+    @Test
+    fun `kmod stays active when the control node reports the kmod backend`() {
+        val sections =
+            mapOf(
+                "kmod_prop" to "version=1.2.5",
+                "proc_exists" to "1",
+                "kmod_state" to ctlStatus("0"),
+            )
+        assertEquals(true, (detectKmodModule(sections) as ModuleState.Installed).active)
+        // No builtin companion → not installed.
+        assertEquals(ModuleState.NotInstalled, detectBuiltinModule(sections))
+    }
+
+    @Test
+    fun `kmod stays active when the control backend id is unread`() {
+        // Non-root snapshot: proc_exists is 1 but the 0600 node's status could not
+        // be read, so the backend id is unknown. The historical proc-present rule
+        // must still hold — a null id must never demote the kmod.
+        val sections =
+            mapOf(
+                "kmod_prop" to "version=1.2.5",
+                "proc_exists" to "1",
+            )
+        assertEquals(true, (detectKmodModule(sections) as ModuleState.Installed).active)
+    }
+
+    @Test
+    fun `builtin inactive but verified when the control node reports the kmod backend`() {
+        val sections =
+            mapOf(
+                "builtin_prop" to "id=vpnhide_builtin\nversion=1.2.5",
+                "proc_exists" to "1",
+                "kmod_state" to ctlStatus("0"),
+            )
+        val builtin = detectBuiltinModule(sections) as ModuleState.Installed
+        assertEquals(false, builtin.active)
+        // proc/status were readable (root-equivalent snapshot, no uid probe → trusted).
+        assertEquals(true, builtin.runtimeCheckable)
+    }
+
+    @Test
+    fun `builtin runtime unverified when snapshot shell lacked root`() {
+        // The 0600 /proc/vpnhide_ctl is EACCES to a non-root shell, so the id
+        // can't be read and proc_exists reads 0 — not proof the backend is off.
+        val sections =
+            mapOf(
+                "builtin_prop" to "id=vpnhide_builtin\nversion=1.2.5",
+                "proc_exists" to "0",
+                "snapshot_shell_uid" to "uid=2000\nid=uid=2000(shell)\ncontext=u:r:shell:s0",
+            )
+        val builtin = detectBuiltinModule(sections) as ModuleState.Installed
+        assertEquals(false, builtin.active)
+        assertEquals(false, builtin.runtimeCheckable)
+    }
+
+    @Test
+    fun `builtin not installed when its companion prop is absent`() {
+        assertEquals(ModuleState.NotInstalled, detectBuiltinModule(mapOf("proc_exists" to "1", "kmod_state" to ctlStatus("4"))))
+    }
+
     @Test
     fun `kmod runtime unverified when snapshot shell lacked root`() {
         // proc_exists reads 0 because the 0600 /proc/vpnhide_ctl was EACCES to a

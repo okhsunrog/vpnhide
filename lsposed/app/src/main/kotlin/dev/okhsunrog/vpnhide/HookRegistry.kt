@@ -33,6 +33,7 @@ internal fun hooksInMask(mask: Long): Set<HookIds.Hook> = HookIds.Hook.entries.f
  */
 internal val KERNEL_HOOKS: Set<HookIds.Hook> = hooksInMask(HookIds.KERNEL_HOOK_MASK.toLong())
 internal val KMOD_HOOKS: Set<HookIds.Hook> = hooksInMask(HookIds.KMOD_HOOK_MASK.toLong())
+internal val BUILTIN_HOOKS: Set<HookIds.Hook> = hooksInMask(HookIds.BUILTIN_HOOK_MASK.toLong())
 internal val KPM_HOOKS: Set<HookIds.Hook> = hooksInMask(HookIds.KPM_HOOK_MASK.toLong())
 internal val ZYGISK_HOOKS: Set<HookIds.Hook> = hooksInMask(HookIds.ZYGISK_HOOK_MASK.toLong())
 internal val LSPOSED_HOOKS: Set<HookIds.Hook> = hooksInMask(HookIds.LSPOSED_HOOK_MASK.toLong())
@@ -41,6 +42,7 @@ internal val LSPOSED_HOOKS: Set<HookIds.Hook> = hooksInMask(HookIds.LSPOSED_HOOK
 internal fun ownedHooks(backend: HookIds.Backend): Set<HookIds.Hook> =
     when (backend) {
         HookIds.Backend.KMOD -> KERNEL_HOOKS + KMOD_HOOKS
+        HookIds.Backend.BUILTIN -> KERNEL_HOOKS + BUILTIN_HOOKS
         HookIds.Backend.KPM -> KERNEL_HOOKS + KPM_HOOKS
         HookIds.Backend.ZYGISK -> ZYGISK_HOOKS
         HookIds.Backend.LSPOSED -> LSPOSED_HOOKS
@@ -59,6 +61,10 @@ internal fun ownedNativeHooks(
     when (id) {
         NativeBackendId.Kmod -> {
             KERNEL_HOOKS + installedOptionalHooks.intersect(KMOD_HOOKS)
+        }
+
+        NativeBackendId.Builtin -> {
+            KERNEL_HOOKS + installedOptionalHooks.intersect(BUILTIN_HOOKS)
         }
 
         NativeBackendId.Kpm -> {
@@ -93,7 +99,9 @@ internal fun missingBackendHooks(
     reportedHooks: Set<HookIds.Hook>,
 ): Set<HookIds.Hook> =
     when (id) {
-        NativeBackendId.Kmod, NativeBackendId.Kpm -> {
+        // Builtin is a kernel backend like the .ko/KPM: same KERNEL_HOOKS, same
+        // by-name resolve-at-load, so it reports PARTIAL_HOOKS the same way.
+        NativeBackendId.Kmod, NativeBackendId.Builtin, NativeBackendId.Kpm -> {
             // An empty report means "no status read", not "nothing installed".
             if (reportedHooks.isEmpty()) emptySet() else KERNEL_HOOKS - reportedHooks
         }

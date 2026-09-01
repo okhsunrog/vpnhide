@@ -43,6 +43,7 @@ internal fun classifyModuleIntegrity(
 private fun sectionPrefix(kind: FlashableModuleKind): String =
     when (kind) {
         FlashableModuleKind.Kmod -> "kmod"
+        FlashableModuleKind.Builtin -> "builtin"
         FlashableModuleKind.Kpm -> "kpm"
         FlashableModuleKind.Zygisk -> "zygisk"
         FlashableModuleKind.Ports -> "ports"
@@ -92,6 +93,7 @@ internal fun renderModuleIntegrityProblem(
     val moduleName =
         when (problem.kind) {
             FlashableModuleKind.Kmod -> "kmod"
+            FlashableModuleKind.Builtin -> "Built-in"
             FlashableModuleKind.Kpm -> "KPM"
             FlashableModuleKind.Zygisk -> "Zygisk"
             FlashableModuleKind.Ports -> "Ports"

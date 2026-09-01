@@ -6,14 +6,19 @@ import dev.okhsunrog.vpnhide.generated.HookIds
 import kotlinx.serialization.Serializable
 
 // The native layer is exactly one of these at runtime (docs/storage.md §4.3).
+// Builtin is the in-tree (CONFIG_VPNHIDE=y) kernel backend — "kmod without the
+// insmod": it owns the same kernel hooks and shares /proc/vpnhide_ctl with the
+// .ko, and the two are mutually exclusive (the kernel either has the driver
+// built in or loads the module).
 @Serializable
-internal enum class NativeBackendId { Kmod, Kpm, Zygisk }
+internal enum class NativeBackendId { Kmod, Builtin, Kpm, Zygisk }
 
 @Serializable
 internal data class NativeBackendStates(
     val kmod: ModuleState,
     val kpm: ModuleState,
     val zygisk: ModuleState,
+    val builtin: ModuleState = ModuleState.NotInstalled,
 ) {
     val activeId: NativeBackendId?
         get() = activeNativeBackendId(this)
@@ -25,7 +30,11 @@ internal data class NativeBackendStates(
 // sync the way two hand-written `kmod is X || kpm is X || zygisk is X`
 // expressions could.
 internal val NativeBackendStates.anyInstalled: Boolean
-    get() = kmod is ModuleState.Installed || kpm is ModuleState.Installed || zygisk is ModuleState.Installed
+    get() =
+        kmod is ModuleState.Installed ||
+            builtin is ModuleState.Installed ||
+            kpm is ModuleState.Installed ||
+            zygisk is ModuleState.Installed
 
 internal val NativeBackendStates.noneInstalled: Boolean
     get() = !anyInstalled
@@ -43,7 +52,11 @@ internal data class DisplayNativeBackend(
 
 private val NATIVE_BACKEND_PRIORITY =
     listOf(
+        // Kmod and Builtin are the two top-tier, mutually-exclusive kernel
+        // backends; Builtin sits directly after Kmod so the display/active
+        // resolution treats them as one kernel tier above KPM and Zygisk.
         NativeBackendId.Kmod,
+        NativeBackendId.Builtin,
         NativeBackendId.Kpm,
         NativeBackendId.Zygisk,
     )
@@ -55,6 +68,7 @@ internal fun detectNativeBackendStates(
 ): NativeBackendStates =
     NativeBackendStates(
         kmod = detectKmodModule(sections),
+        builtin = detectBuiltinModule(sections),
         kpm = detectKpmModule(sections, kpmLoadStatus, currentBootId),
         zygisk =
             detectZygiskModule(
@@ -80,6 +94,7 @@ private fun prioritizedNativeBackends(states: NativeBackendStates): List<Pair<Na
         id to
             when (id) {
                 NativeBackendId.Kmod -> states.kmod
+                NativeBackendId.Builtin -> states.builtin
                 NativeBackendId.Kpm -> states.kpm
                 NativeBackendId.Zygisk -> states.zygisk
             }

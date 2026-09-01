@@ -582,6 +582,7 @@ private fun nativeHooksTitle(backend: NativeBackendId?): String {
     val backendName =
         when (backend) {
             NativeBackendId.Kmod -> stringResource(R.string.dashboard_backend_kmod)
+            NativeBackendId.Builtin -> stringResource(R.string.dashboard_backend_builtin)
             NativeBackendId.Kpm -> stringResource(R.string.dashboard_backend_kpm)
             NativeBackendId.Zygisk -> stringResource(R.string.dashboard_backend_zygisk)
             null -> stringResource(R.string.chip_native_full)
