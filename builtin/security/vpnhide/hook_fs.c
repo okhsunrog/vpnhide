@@ -86,6 +86,14 @@ static bool dentry_is_hidden_iface_path(const struct dentry *dentry)
 		return false;
 	type = dentry->d_sb->s_type;
 
+	/* Only sysfs (the net interface dirs) and proc-sys (the per-iface
+	 * /proc/sys/net dirs) host the interface nodes, so the walk below can
+	 * only match on those two filesystems. Bail here for every other
+	 * filesystem - the common case (ext4/f2fs/tmpfs) - instead of climbing
+	 * every path's parent chain on each lookup/open/getattr while active. */
+	if (strcmp(type->name, "sysfs") && strcmp(type->name, "proc"))
+		return false;
+
 	rcu_read_lock();
 	cursor = (struct dentry *)dentry;
 	for (depth = 0; cursor && depth < 16; depth++) {
