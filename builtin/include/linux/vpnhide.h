@@ -22,7 +22,28 @@
 
 #include <linux/types.h>
 #include <linux/if.h>		/* IFNAMSIZ */
+#include <linux/version.h>	/* LINUX_VERSION_CODE / KERNEL_VERSION */
+
+/*
+ * sockptr_t landed in 5.9; __sys_setsockopt took a sockptr optval from then on.
+ * Pre-5.9 kernels (android11-5.4 and older) pass a bare `char __user *optval`
+ * with set_fs(), so those call sites use vpnhide_setsockopt_bind_user() instead
+ * and must not see the sockptr-typed declaration (the header would not even
+ * compile — <linux/sockptr.h> does not exist there).
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 #include <linux/sockptr.h>	/* sockptr_t */
+#define VPNHIDE_HAVE_SOCKPTR 1
+#endif
+
+/*
+ * struct fib_rt_info (the packed RTM_GETROUTE-reply descriptor) landed in 5.5.
+ * Pre-5.5 kernels call fib_dump_info(fi, dst, dst_len, …) with the fields
+ * spread out, so those sites use vpnhide_hide_fib_dump_raw() instead.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0)
+#define VPNHIDE_HAVE_FIB_RT_INFO 1
+#endif
 
 struct net_device;
 struct sock;
@@ -98,11 +119,21 @@ bool vpnhide_should_hide_dev(const struct net_device *dev, int hook_id);
  * Classify a setsockopt(SO_BINDTODEVICE / SO_BINDTOIFINDEX). On FROZEN, *snap
  * holds a kernel copy the caller must pass to the option handler instead of the
  * user pointer. `sk` may be NULL (treated as passthrough).
+ *
+ * Two variants for the two eras of __sys_setsockopt: the sockptr form for 5.9+
+ * (our GKI KMIs) and the bare-user-pointer form for pre-5.9 (android11-5.4 and
+ * older), where the patch swaps optval under set_fs(KERNEL_DS) on FROZEN.
  */
+#ifdef VPNHIDE_HAVE_SOCKPTR
 enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
 						 sockptr_t optval,
 						 unsigned int optlen,
 						 union vpnhide_bind_snapshot *snap);
+#endif
+enum vpnhide_bind_action vpnhide_setsockopt_bind_user(struct sock *sk, int optname,
+						      const char __user *optval,
+						      unsigned int optlen,
+						      union vpnhide_bind_snapshot *snap);
 
 /*
  * Route / rule concealment (RTM_GETROUTE, /proc/net/route, RTM_GETRULE). Unlike
@@ -116,7 +147,11 @@ enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
  */
 bool vpnhide_hide_fib_route(const struct fib_info *fi);		/* fib_route_seq_show */
 bool vpnhide_hide_fib6_route(struct fib6_info *rt);		/* ipv6_route_seq_show */
-bool vpnhide_hide_fib_dump(const struct fib_rt_info *fri);	/* fib_dump_info */
+#ifdef VPNHIDE_HAVE_FIB_RT_INFO
+bool vpnhide_hide_fib_dump(const struct fib_rt_info *fri);	/* fib_dump_info (5.5+) */
+#else
+bool vpnhide_hide_fib_dump_raw(const struct fib_info *fi, __be32 dst, int dst_len);
+#endif
 bool vpnhide_hide_rt6(struct fib6_info *rt, struct dst_entry *dst); /* rt6_fill_node */
 bool vpnhide_hide_fib_rule(const struct fib_rule *rule);	/* fib_nl_fill_rule */
 
@@ -131,9 +166,18 @@ static inline bool vpnhide_should_hide_dev(const struct net_device *dev,
 {
 	return false;
 }
+#ifdef VPNHIDE_HAVE_SOCKPTR
 static inline enum vpnhide_bind_action
 vpnhide_setsockopt_bind(struct sock *sk, int optname, sockptr_t optval,
 			unsigned int optlen, union vpnhide_bind_snapshot *snap)
+{
+	return VPNHIDE_BIND_PASSTHROUGH;
+}
+#endif
+static inline enum vpnhide_bind_action
+vpnhide_setsockopt_bind_user(struct sock *sk, int optname,
+			     const char __user *optval, unsigned int optlen,
+			     union vpnhide_bind_snapshot *snap)
 {
 	return VPNHIDE_BIND_PASSTHROUGH;
 }
@@ -145,10 +189,18 @@ static inline bool vpnhide_hide_fib6_route(struct fib6_info *rt)
 {
 	return false;
 }
+#ifdef VPNHIDE_HAVE_FIB_RT_INFO
 static inline bool vpnhide_hide_fib_dump(const struct fib_rt_info *fri)
 {
 	return false;
 }
+#else
+static inline bool vpnhide_hide_fib_dump_raw(const struct fib_info *fi,
+					     __be32 dst, int dst_len)
+{
+	return false;
+}
+#endif
 static inline bool vpnhide_hide_rt6(struct fib6_info *rt, struct dst_entry *dst)
 {
 	return false;

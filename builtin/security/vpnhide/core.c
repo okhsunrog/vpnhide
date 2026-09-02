@@ -368,6 +368,9 @@ static int ctl_open(struct inode *inode, struct file *file)
 	return seq_open(file, &ctl_seq_ops);
 }
 
+/* struct proc_ops split out of file_operations in 5.6; pre-5.6 (android11-5.4
+ * and older) still registers /proc handlers through file_operations. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
 static const struct proc_ops ctl_proc_ops = {
 	.proc_open = ctl_open,
 	.proc_read = seq_read,
@@ -375,6 +378,15 @@ static const struct proc_ops ctl_proc_ops = {
 	.proc_lseek = seq_lseek,
 	.proc_release = seq_release,
 };
+#else
+static const struct file_operations ctl_proc_ops = {
+	.open = ctl_open,
+	.read = seq_read,
+	.write = ctl_write,
+	.llseek = seq_lseek,
+	.release = seq_release,
+};
+#endif
 
 /* ------------------------------------------------------------------ */
 /*  /proc/vpnhide_diag — read-only field-debugging dump               */

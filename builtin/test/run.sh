@@ -20,6 +20,12 @@ KDIR="$CACHE/$KMI"
 
 IMAGE="${VPNHIDE_QEMU_IMAGE:-$KDIR/Image}"
 
+# GKI Images boot on `-cpu max`; the pre-GKI legacy Images (built from source by
+# build-source-kernel.sh) fault on max's newer features before the console —
+# boot those with VPNHIDE_QEMU_CPU=cortex-a57. `rodata=off` is harmless on GKI
+# and required by some legacy kernels, so it is always passed.
+QEMU_CPU="${VPNHIDE_QEMU_CPU:-max}"
+
 ALPINE_VER="3.21.2"
 ALPINE_TAR="${VPNHIDE_QEMU_ROOTFS:-$CACHE/alpine-minirootfs-$ALPINE_VER-aarch64.tar.gz}"
 ALPINE_URL="https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-$ALPINE_VER-aarch64.tar.gz"
@@ -64,10 +70,10 @@ printf 'builtin\n' > "$RFS/vpnhide_backend"   # selects the in-tree path in init
 LOG="$WORK/serial.log"
 echo "[run] $KMI: booting built-in $(basename "$IMAGE") in QEMU (TCG, no KVM)…"
 timeout 300 qemu-system-aarch64 \
-	-machine virt -cpu max -accel tcg,thread=multi,tb-size=1024 \
+	-machine virt -cpu "$QEMU_CPU" -accel tcg,thread=multi,tb-size=1024 \
 	-smp 4 -m 2G \
 	-kernel "$IMAGE" -initrd "$WORK/initramfs.cpio.gz" \
-	-append "console=ttyAMA0 panic=-1 rdinit=/init" \
+	-append "console=ttyAMA0 rodata=off panic=-1 rdinit=/init" \
 	-netdev user,id=n0 -device virtio-net-pci,netdev=n0,romfile= \
 	-display none -no-reboot -serial "file:$LOG" >/dev/null 2>&1 || true
 

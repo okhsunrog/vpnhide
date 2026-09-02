@@ -66,12 +66,14 @@ static struct net_device *fib6_route_dev(struct fib6_info *rt)
 }
 
 /* A public /32 host-route pinned to a physical uplink leaks the VPN server's
- * IPv4 even when the tun is hidden. &fri->dst is the __be32's 4 network bytes. */
-static bool is_public_host4_via_physical(const struct fib_rt_info *fri,
+ * IPv4 even when the tun is hidden. &dst is the __be32's 4 network bytes.
+ * Raw fields (dst, dst_len) rather than a fib_rt_info so pre-5.5 kernels, which
+ * have no such struct, can share this. */
+static bool is_public_host4_via_physical(__be32 dst, int dst_len,
 					 const struct net_device *dev)
 {
-	if (!fri || !dev || fri->dst_len != 32 ||
-	    !vpnhide_is_public_ipv4((const unsigned char *)&fri->dst))
+	if (!dev || dst_len != 32 ||
+	    !vpnhide_is_public_ipv4((const unsigned char *)&dst))
 		return false;
 	return vpnhide_iface_is_physical(dev->name);
 }
@@ -126,24 +128,40 @@ bool vpnhide_hide_fib6_route(struct fib6_info *rt)
 	return hide;
 }
 
-/* IPv4 RTM_GETROUTE reply: hide a VPN-iface route or a public host-route. */
-bool vpnhide_hide_fib_dump(const struct fib_rt_info *fri)
+/* IPv4 RTM_GETROUTE reply core: hide a VPN-iface route or a public host-route.
+ * Takes the raw route fields so both the 5.5+ fib_rt_info call site and the
+ * pre-5.5 fib_dump_info(fi, dst, dst_len, …) site feed the same decision. */
+static bool hide_fib_dump_core(const struct fib_info *fi, __be32 dst, int dst_len)
 {
 	struct net_device *dev;
 	bool hide = false;
 
-	if (!vpnhide_hook_active(VPNHIDE_HOOK_FIB_DUMP_INFO) || !fri || !fri->fi)
+	if (!vpnhide_hook_active(VPNHIDE_HOOK_FIB_DUMP_INFO) || !fi)
 		return false;
 	rcu_read_lock();
-	dev = fib4_route_dev(fri->fi);
+	dev = fib4_route_dev(fi);
 	if (dev && (is_vpn_ifname(dev->name) ||
-		    is_public_host4_via_physical(fri, dev)))
+		    is_public_host4_via_physical(dst, dst_len, dev)))
 		hide = true;
 	rcu_read_unlock();
 	if (hide)
 		vpnhide_record_hook_hit(VPNHIDE_HOOK_FIB_DUMP_INFO);
 	return hide;
 }
+
+#ifdef VPNHIDE_HAVE_FIB_RT_INFO
+bool vpnhide_hide_fib_dump(const struct fib_rt_info *fri)
+{
+	if (!fri)
+		return false;
+	return hide_fib_dump_core(fri->fi, fri->dst, fri->dst_len);
+}
+#else
+bool vpnhide_hide_fib_dump_raw(const struct fib_info *fi, __be32 dst, int dst_len)
+{
+	return hide_fib_dump_core(fi, dst, dst_len);
+}
+#endif
 
 /* IPv6 RTM_GETROUTE reply: hide a VPN-iface route or a public host-route. */
 bool vpnhide_hide_rt6(struct fib6_info *rt, struct dst_entry *dst)

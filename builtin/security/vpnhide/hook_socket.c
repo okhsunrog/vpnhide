@@ -24,6 +24,7 @@
 #include <linux/if.h>
 #include <linux/socket.h>
 #include <linux/netdevice.h>
+#include <linux/uaccess.h>	/* copy_from_user (pre-5.9 bind variant) */
 #include <net/sock.h>
 
 #include <linux/vpnhide.h>
@@ -54,14 +55,50 @@ static int classify_bind_ifindex(struct sock *sk, int ifindex)
 	return result;
 }
 
+/* True if this setsockopt is a bind-to-interface option we must classify. The
+ * SO_BINDTOIFINDEX comparison is guarded because it only exists from 5.1 (absent
+ * on android10-4.19 / android10-4.14). */
+static bool bind_opt_relevant(int optname)
+{
+	if (!vpnhide_hook_active(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE))
+		return false;
+	if (optname == SO_BINDTODEVICE)
+		return true;
+#ifdef SO_BINDTOIFINDEX
+	if (optname == SO_BINDTOIFINDEX)
+		return true;
+#endif
+	return false;
+}
+
+/* Verdict for an already-copied SO_BINDTODEVICE name snapshot. */
+static enum vpnhide_bind_action classify_bind_name(union vpnhide_bind_snapshot *snap)
+{
+	if (snap->name[0] && is_vpn_ifname(snap->name)) {
+		vpnhide_record_hook_hit(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE);
+		return VPNHIDE_BIND_DENY;
+	}
+	return VPNHIDE_BIND_FROZEN;
+}
+
+/* Verdict for an already-copied SO_BINDTOIFINDEX index snapshot. */
+static enum vpnhide_bind_action classify_bind_idx(struct sock *sk,
+						  union vpnhide_bind_snapshot *snap)
+{
+	if (snap->ifindex > 0 && classify_bind_ifindex(sk, snap->ifindex) != 0) {
+		vpnhide_record_hook_hit(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE);
+		return VPNHIDE_BIND_DENY;
+	}
+	return VPNHIDE_BIND_FROZEN;
+}
+
+#ifdef VPNHIDE_HAVE_SOCKPTR
 enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
 						 sockptr_t optval,
 						 unsigned int optlen,
 						 union vpnhide_bind_snapshot *snap)
 {
-	if (!vpnhide_hook_active(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE))
-		return VPNHIDE_BIND_PASSTHROUGH;
-	if (optname != SO_BINDTODEVICE && optname != SO_BINDTOIFINDEX)
+	if (!bind_opt_relevant(optname))
 		return VPNHIDE_BIND_PASSTHROUGH;
 
 	memset(snap, 0, sizeof(*snap));
@@ -77,21 +114,48 @@ enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
 
 		if (n && copy_from_sockptr(snap->name, optval, n))
 			return VPNHIDE_BIND_FAULT;
-		if (snap->name[0] && is_vpn_ifname(snap->name)) {
-			vpnhide_record_hook_hit(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE);
-			return VPNHIDE_BIND_DENY;
-		}
-		return VPNHIDE_BIND_FROZEN;
+		return classify_bind_name(snap);
 	}
 
 	if (optlen < sizeof(snap->ifindex))
 		return VPNHIDE_BIND_PASSTHROUGH;
 	if (copy_from_sockptr(&snap->ifindex, optval, sizeof(snap->ifindex)))
 		return VPNHIDE_BIND_FAULT;
-	if (snap->ifindex > 0 &&
-	    classify_bind_ifindex(sk, snap->ifindex) != 0) {
-		vpnhide_record_hook_hit(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE);
-		return VPNHIDE_BIND_DENY;
+	return classify_bind_idx(sk, snap);
+}
+#endif /* VPNHIDE_HAVE_SOCKPTR */
+
+/*
+ * Pre-5.9 (bare user pointer) variant. Identical decision to the sockptr form,
+ * copying from user memory directly. On FROZEN the pre-5.9 __sys_setsockopt
+ * patch swaps optval to point at *snap under set_fs(KERNEL_DS) — the same
+ * anti-TOCTOU freeze, using the kernel's existing kernel_optval mechanism.
+ */
+enum vpnhide_bind_action vpnhide_setsockopt_bind_user(struct sock *sk, int optname,
+						      const char __user *optval,
+						      unsigned int optlen,
+						      union vpnhide_bind_snapshot *snap)
+{
+	if (!bind_opt_relevant(optname))
+		return VPNHIDE_BIND_PASSTHROUGH;
+
+	memset(snap, 0, sizeof(*snap));
+
+	if (optname == SO_BINDTODEVICE) {
+		size_t n;
+
+		if ((int)optlen < 0)
+			return VPNHIDE_BIND_PASSTHROUGH;
+		n = min_t(size_t, optlen, IFNAMSIZ - 1);
+
+		if (n && copy_from_user(snap->name, optval, n))
+			return VPNHIDE_BIND_FAULT;
+		return classify_bind_name(snap);
 	}
-	return VPNHIDE_BIND_FROZEN;
+
+	if (optlen < sizeof(snap->ifindex))
+		return VPNHIDE_BIND_PASSTHROUGH;
+	if (copy_from_user(&snap->ifindex, optval, sizeof(snap->ifindex)))
+		return VPNHIDE_BIND_FAULT;
+	return classify_bind_idx(sk, snap);
 }

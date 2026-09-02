@@ -410,6 +410,109 @@ _510["fs/namei.c"][1] = (
 )
 EDITS["android12-5.10"] = _510
 
+# android11-5.4: predates sockptr_t (added in 5.9). __sys_setsockopt takes a bare
+# `char __user *optval` with set_fs(), so bind uses vpnhide_setsockopt_bind_user()
+# and freezes (anti-TOCTOU) by swapping optval to the kernel snapshot under
+# set_fs(KERNEL_DS) — mirroring the kernel's own kernel_optval path — restoring
+# set_fs after the dispatch (socket.c gains a 4th edit for that restore). Older
+# call sites also diverge: no net/core/dev.h; dev_ifconf loops over NPROTO
+# gifconf handlers; filename_lookup's audit_inode is the 3-arg form and putname()
+# follows restore_nameidata(); fib_rules.c lacks <linux/indirect_call_wrapper.h>.
+_54 = copy.deepcopy(EDITS["android14-6.1"])
+_54["net/core/dev_ioctl.c"][0] = (
+    "#include <net/wext.h>\n",
+    "#include <net/wext.h>\n" + VH_INCLUDE,
+)
+_54["net/core/dev_ioctl.c"][2] = (
+    "\tfor_each_netdev(net, dev) {\n\t\tfor (i = 0; i < NPROTO; i++) {",
+    "\tfor_each_netdev(net, dev) {\n"
+    "\t\tif (vpnhide_should_hide_dev(dev, VPNHIDE_HID_SOCK_IOCTL))\n"
+    "\t\t\tcontinue;\n"
+    "\t\tfor (i = 0; i < NPROTO; i++) {",
+)
+_54["net/socket.c"][1] = (
+    "\tmm_segment_t oldfs = get_fs();\n"
+    "\tchar *kernel_optval = NULL;\n"
+    "\tint err, fput_needed;\n"
+    "\tstruct socket *sock;\n",
+    "\tmm_segment_t oldfs = get_fs();\n"
+    "\tchar *kernel_optval = NULL;\n"
+    "\tint err, fput_needed;\n"
+    "\tstruct socket *sock;\n"
+    "\tunion vpnhide_bind_snapshot vh_snap;\n"
+    "\tbool vh_frozen = false;\n",
+)
+_54["net/socket.c"][2] = (
+    "\t\tif (kernel_optval) {\n"
+    "\t\t\tset_fs(KERNEL_DS);\n"
+    "\t\t\toptval = (char __user __force *)kernel_optval;\n"
+    "\t\t}\n",
+    "\t\tif (level == SOL_SOCKET) {\n"
+    "\t\t\tenum vpnhide_bind_action vh_act =\n"
+    "\t\t\t\tvpnhide_setsockopt_bind_user(sock->sk, optname,\n"
+    "\t\t\t\t\t\t\t     optval, optlen,\n"
+    "\t\t\t\t\t\t\t     &vh_snap);\n"
+    "\t\t\tif (vh_act == VPNHIDE_BIND_DENY) {\n"
+    "\t\t\t\terr = -ENODEV;\n"
+    "\t\t\t\tgoto out_put;\n"
+    "\t\t\t}\n"
+    "\t\t\tif (vh_act == VPNHIDE_BIND_FAULT) {\n"
+    "\t\t\t\terr = -EFAULT;\n"
+    "\t\t\t\tgoto out_put;\n"
+    "\t\t\t}\n"
+    "\t\t\tif (vh_act == VPNHIDE_BIND_FROZEN) {\n"
+    "\t\t\t\tset_fs(KERNEL_DS);\n"
+    "\t\t\t\toptval = (char __user __force *)&vh_snap;\n"
+    "\t\t\t\tvh_frozen = true;\n"
+    "\t\t\t}\n"
+    "\t\t}\n\n"
+    "\t\tif (kernel_optval) {\n"
+    "\t\t\tset_fs(KERNEL_DS);\n"
+    "\t\t\toptval = (char __user __force *)kernel_optval;\n"
+    "\t\t}\n",
+)
+_54["net/socket.c"].append((
+    "\t\tif (kernel_optval) {\n"
+    "\t\t\tset_fs(oldfs);\n"
+    "\t\t\tkfree(kernel_optval);\n"
+    "\t\t}\n",
+    "\t\tif (vh_frozen)\n"
+    "\t\t\tset_fs(oldfs);\n\n"
+    "\t\tif (kernel_optval) {\n"
+    "\t\t\tset_fs(oldfs);\n"
+    "\t\t\tkfree(kernel_optval);\n"
+    "\t\t}\n",
+))
+_54["fs/namei.c"][1] = (
+    "\tif (likely(!retval))\n"
+    "\t\taudit_inode(name, path->dentry, 0);\n"
+    "\trestore_nameidata();\n",
+    "\tif (likely(!retval))\n"
+    "\t\taudit_inode(name, path->dentry, 0);\n"
+    "\tif (!retval && vpnhide_should_hide_dentry(path->dentry)) {\n"
+    "\t\tpath_put(path);\n"
+    "\t\tpath->mnt = NULL;\n"
+    "\t\tpath->dentry = NULL;\n"
+    "\t\tretval = -ENOENT;\n"
+    "\t}\n"
+    "\trestore_nameidata();\n",
+)
+_54["net/core/fib_rules.c"][0] = (
+    "#include <net/fib_rules.h>\n",
+    "#include <net/fib_rules.h>\n" + VH_INCLUDE,
+)
+# Pre-5.5 fib_dump_info(fi, dst, dst_len, …): no fib_rt_info, call the raw
+# variant with the fields spread across its arguments.
+_54["net/ipv4/fib_semantics.c"][1] = (
+    "\tstruct rtmsg *rtm;\n\n"
+    "\tnlh = nlmsg_put(skb, portid, seq, event, sizeof(*rtm), flags);\n",
+    "\tstruct rtmsg *rtm;\n\n"
+    "\tif (vpnhide_hide_fib_dump_raw(fi, dst, dst_len))\n"
+    "\t\treturn 0;\n\n"
+    "\tnlh = nlmsg_put(skb, portid, seq, event, sizeof(*rtm), flags);\n",
+)
+EDITS["android11-5.4"] = _54
+
 
 # Patch filename per source path: net/core/dev_ioctl.c -> net_core_dev_ioctl.c.patch
 def patch_name(relpath: str) -> str:
