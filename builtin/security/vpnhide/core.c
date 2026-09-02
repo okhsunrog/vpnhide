@@ -458,6 +458,23 @@ static int vpnhide_diag_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+/* proc_create_single() arrived in 4.18; on 4.14 wrap vpnhide_diag_show in
+ * single_open through a file_operations, and shim the call to use it. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0)
+static int vpnhide_diag_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, vpnhide_diag_show, NULL);
+}
+static const struct file_operations vpnhide_diag_fops = {
+	.open = vpnhide_diag_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+#define proc_create_single(name, mode, parent, show) \
+	proc_create(name, mode, parent, &vpnhide_diag_fops)
+#endif
+
 /* ------------------------------------------------------------------ */
 /*  Init                                                              */
 /* ------------------------------------------------------------------ */

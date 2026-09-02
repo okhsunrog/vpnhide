@@ -69,10 +69,25 @@ static struct net_device *fib4_route_dev(const struct fib_info *fi)
 #endif
 }
 
-static struct net_device *fib6_route_dev(struct fib6_info *rt)
+/*
+ * The IPv6 FIB entry type and its destination key differ across the supported
+ * range: struct fib6_info (4.19+, with rt6key fib6_dst) vs the old combined
+ * struct rt6_info (android10-4.14, with rt6key rt6i_dst and the device on its
+ * embedded dst_entry). One set of predicates serves both via these aliases.
+ */
+#ifdef VPNHIDE_HAVE_FIB6_INFO
+#define VH_FIB6_T	struct fib6_info
+#define VH_FIB6_DST(rt)	((rt)->fib6_dst)
+#else
+#define VH_FIB6_T	struct rt6_info
+#define VH_FIB6_DST(rt)	((rt)->rt6i_dst)
+#endif
+
+static struct net_device *fib6_route_dev(VH_FIB6_T *rt)
 {
 	if (!rt)
 		return NULL;
+#ifdef VPNHIDE_HAVE_FIB6_INFO
 #ifdef VPNHIDE_HAVE_NEXTHOP_OBJ
 	{
 		struct fib6_nh *nh = rt->nh ? nexthop_fib6_nh(rt->nh) : rt->fib6_nh;
@@ -80,9 +95,13 @@ static struct net_device *fib6_route_dev(struct fib6_info *rt)
 		return nh ? nh->fib_nh_dev : NULL;
 	}
 #else
-	/* pre-5.3: fib6_nh is embedded (no nexthop object) and the field is
-	 * still nh_dev, not fib_nh_dev. */
+	/* 4.19: fib6_nh is embedded (no nexthop object) and the field is still
+	 * nh_dev, not fib_nh_dev. */
 	return rt->fib6_nh.nh_dev;
+#endif
+#else
+	/* 4.14: the device hangs off rt6_info's embedded dst_entry. */
+	return rt->dst.dev;
 #endif
 }
 
@@ -100,11 +119,11 @@ static bool is_public_host4_via_physical(__be32 dst, int dst_len,
 }
 
 /* IPv6 analogue: a public /128 host-route via a physical interface. */
-static bool is_public_host6_via_physical(struct fib6_info *rt,
+static bool is_public_host6_via_physical(VH_FIB6_T *rt,
 					 const struct net_device *dev)
 {
-	if (!rt || !dev || rt->fib6_dst.plen != 128 ||
-	    !vpnhide_is_public_ipv6(rt->fib6_dst.addr.s6_addr))
+	if (!rt || !dev || VH_FIB6_DST(rt).plen != 128 ||
+	    !vpnhide_is_public_ipv6(VH_FIB6_DST(rt).addr.s6_addr))
 		return false;
 	return vpnhide_iface_is_physical(dev->name);
 }
@@ -132,7 +151,7 @@ bool vpnhide_hide_fib_route(const struct fib_info *fi)
 }
 
 /* /proc/net/ipv6_route line for a VPN interface. */
-bool vpnhide_hide_fib6_route(struct fib6_info *rt)
+bool vpnhide_hide_fib6_route(VH_FIB6_T *rt)
 {
 	struct net_device *dev;
 	bool hide = false;
@@ -185,7 +204,7 @@ bool vpnhide_hide_fib_dump_raw(const struct fib_info *fi, __be32 dst, int dst_le
 #endif
 
 /* IPv6 RTM_GETROUTE reply: hide a VPN-iface route or a public host-route. */
-bool vpnhide_hide_rt6(struct fib6_info *rt, struct dst_entry *dst)
+bool vpnhide_hide_rt6(VH_FIB6_T *rt, struct dst_entry *dst)
 {
 	struct net_device *dev;
 	bool hide = false;

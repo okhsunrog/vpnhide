@@ -45,6 +45,16 @@
 #define VPNHIDE_HAVE_FIB_RT_INFO 1
 #endif
 
+/*
+ * The IPv6 FIB entry became struct fib6_info in 4.20 (android-4.19-q backported
+ * it); android10-4.14 still carries the old combined struct rt6_info, so the v6
+ * route hooks there take rt6_info and read rt6i_dst/dst.dev instead. Gated at
+ * 4.19 because that is the oldest tree the built-in backend targets.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0)
+#define VPNHIDE_HAVE_FIB6_INFO 1
+#endif
+
 struct net_device;
 struct sock;
 struct dentry;
@@ -53,6 +63,7 @@ struct dir_context;
 struct fib_info;
 struct fib_rt_info;
 struct fib6_info;
+struct rt6_info;
 struct dst_entry;
 struct fib_rule;
 
@@ -146,13 +157,21 @@ enum vpnhide_bind_action vpnhide_setsockopt_bind_user(struct sock *sk, int optna
  * fib_info_nhc()/nexthop_fib6_nh() accessors.
  */
 bool vpnhide_hide_fib_route(const struct fib_info *fi);		/* fib_route_seq_show */
+#ifdef VPNHIDE_HAVE_FIB6_INFO
 bool vpnhide_hide_fib6_route(struct fib6_info *rt);		/* ipv6_route_seq_show */
+#else
+bool vpnhide_hide_fib6_route(struct rt6_info *rt);		/* ipv6_route_seq_show (pre-4.19) */
+#endif
 #ifdef VPNHIDE_HAVE_FIB_RT_INFO
 bool vpnhide_hide_fib_dump(const struct fib_rt_info *fri);	/* fib_dump_info (5.5+) */
 #else
 bool vpnhide_hide_fib_dump_raw(const struct fib_info *fi, __be32 dst, int dst_len);
 #endif
+#ifdef VPNHIDE_HAVE_FIB6_INFO
 bool vpnhide_hide_rt6(struct fib6_info *rt, struct dst_entry *dst); /* rt6_fill_node */
+#else
+bool vpnhide_hide_rt6(struct rt6_info *rt, struct dst_entry *dst); /* rt6_fill_node (pre-4.19) */
+#endif
 bool vpnhide_hide_fib_rule(const struct fib_rule *rule);	/* fib_nl_fill_rule */
 
 #else /* !CONFIG_VPNHIDE */
@@ -185,10 +204,17 @@ static inline bool vpnhide_hide_fib_route(const struct fib_info *fi)
 {
 	return false;
 }
+#ifdef VPNHIDE_HAVE_FIB6_INFO
 static inline bool vpnhide_hide_fib6_route(struct fib6_info *rt)
 {
 	return false;
 }
+#else
+static inline bool vpnhide_hide_fib6_route(struct rt6_info *rt)
+{
+	return false;
+}
+#endif
 #ifdef VPNHIDE_HAVE_FIB_RT_INFO
 static inline bool vpnhide_hide_fib_dump(const struct fib_rt_info *fri)
 {
@@ -201,10 +227,17 @@ static inline bool vpnhide_hide_fib_dump_raw(const struct fib_info *fi,
 	return false;
 }
 #endif
+#ifdef VPNHIDE_HAVE_FIB6_INFO
 static inline bool vpnhide_hide_rt6(struct fib6_info *rt, struct dst_entry *dst)
 {
 	return false;
 }
+#else
+static inline bool vpnhide_hide_rt6(struct rt6_info *rt, struct dst_entry *dst)
+{
+	return false;
+}
+#endif
 static inline bool vpnhide_hide_fib_rule(const struct fib_rule *rule)
 {
 	return false;

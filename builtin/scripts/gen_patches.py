@@ -625,7 +625,57 @@ _419["net/ipv6/ip6_fib.c"][1] = (
 )
 EDITS["android10-4.19"] = _419
 
-_414 = copy.deepcopy(_54)
+# android10-4.14: closest to 4.19 (shares the simple setsockopt syscall body,
+# positional inet6_fill_ifaddr, `flags & LOOKUP_PARENT` audit_inode), so derive
+# from _419 and override the four sites that differ: no build_bug.h before
+# namei's internal.h; the old copy_from_user dev_ifname; rtnl_fill_ifinfo has
+# extra locals before ASSERT_RTNL; and the IPv6 route model is still rt6_info.
+_414 = copy.deepcopy(_419)
+_414["fs/namei.c"][0] = _54["fs/namei.c"][0]
+_414["net/core/dev_ioctl.c"][1] = (
+    "\terror = netdev_get_name(net, ifr.ifr_name, ifr.ifr_ifindex);\n"
+    "\tif (error)\n"
+    "\t\treturn error;\n",
+    "\terror = netdev_get_name(net, ifr.ifr_name, ifr.ifr_ifindex);\n"
+    "\tif (error)\n"
+    "\t\treturn error;\n\n"
+    "\tif (vpnhide_should_hide_ifname(ifr.ifr_name, VPNHIDE_HID_DEV_IOCTL))\n"
+    "\t\treturn -ENODEV;\n",
+)
+_414["net/core/rtnetlink.c"][1] = (
+    "\tstruct ifinfomsg *ifm;\n\tstruct nlmsghdr *nlh;\n"
+    "\tstruct nlattr *af_spec;\n\tstruct rtnl_af_ops *af_ops;\n"
+    "\tstruct net_device *upper_dev = netdev_master_upper_dev_get(dev);\n\n"
+    "\tASSERT_RTNL();\n",
+    "\tstruct ifinfomsg *ifm;\n\tstruct nlmsghdr *nlh;\n"
+    "\tstruct nlattr *af_spec;\n\tstruct rtnl_af_ops *af_ops;\n"
+    "\tstruct net_device *upper_dev = netdev_master_upper_dev_get(dev);\n\n"
+    "\tif (dev &&\n"
+    "\t    vpnhide_should_hide_dev(dev, VPNHIDE_HID_RTNL_FILL_IFINFO))\n"
+    "\t\treturn 0;\n\n"
+    "\tASSERT_RTNL();\n",
+)
+# ipv6_route_seq_show operates on rt6_info (rt6i_dst, not fib6_dst).
+_414["net/ipv6/ip6_fib.c"][1] = (
+    "\tstruct ipv6_route_iter *iter = seq->private;\n\n"
+    '\tseq_printf(seq, "%pi6 %02x ", &rt->rt6i_dst.addr, rt->rt6i_dst.plen);\n',
+    "\tstruct ipv6_route_iter *iter = seq->private;\n\n"
+    "\tif (vpnhide_hide_fib6_route(rt)) {\n"
+    "\t\titer->w.leaf = NULL;\n"
+    "\t\treturn 0;\n"
+    "\t}\n\n"
+    '\tseq_printf(seq, "%pi6 %02x ", &rt->rt6i_dst.addr, rt->rt6i_dst.plen);\n',
+)
+# rt6_fill_node takes rt6_info; its `dst` arg is an in6_addr*, not a dst_entry,
+# so pass NULL (the dev comes off rt->dst inside the hook).
+_414["net/ipv6/route.c"][1] = (
+    "\tlong expires;\n\tu32 table;\n\n"
+    "\tnlh = nlmsg_put(skb, portid, seq, type, sizeof(*rtm), flags);\n",
+    "\tlong expires;\n\tu32 table;\n\n"
+    "\tif (vpnhide_hide_rt6(rt, NULL))\n"
+    "\t\treturn 0;\n\n"
+    "\tnlh = nlmsg_put(skb, portid, seq, type, sizeof(*rtm), flags);\n",
+)
 EDITS["android10-4.14"] = _414
 
 

@@ -1,0 +1,22 @@
+diff --git a/net/ipv6/route.c b/net/ipv6/route.c
+index cae4dc77e..4dca6bbb1 100644
+--- a/net/ipv6/route.c
++++ b/net/ipv6/route.c
+@@ -63,6 +63,7 @@
+ #include <net/ip_tunnels.h>
+ #include <net/l3mdev.h>
+ #include <trace/events/fib6.h>
++#include <linux/vpnhide.h>
+ 
+ #include <linux/uaccess.h>
+ 
+@@ -3491,6 +3492,9 @@ static int rt6_fill_node(struct net *net,
+ 	long expires;
+ 	u32 table;
+ 
++	if (vpnhide_hide_rt6(rt, NULL))
++		return 0;
++
+ 	nlh = nlmsg_put(skb, portid, seq, type, sizeof(*rtm), flags);
+ 	if (!nlh)
+ 		return -EMSGSIZE;

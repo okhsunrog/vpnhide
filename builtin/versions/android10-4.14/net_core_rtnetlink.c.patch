@@ -1,0 +1,23 @@
+diff --git a/net/core/rtnetlink.c b/net/core/rtnetlink.c
+index 738514e5c..b8191abed 100644
+--- a/net/core/rtnetlink.c
++++ b/net/core/rtnetlink.c
+@@ -54,6 +54,7 @@
+ #include <net/udp.h>
+ #include <net/tcp.h>
+ #include <net/sock.h>
++#include <linux/vpnhide.h>
+ #include <net/pkt_sched.h>
+ #include <net/fib_rules.h>
+ #include <net/rtnetlink.h>
+@@ -1318,6 +1319,10 @@ static int rtnl_fill_ifinfo(struct sk_buff *skb, struct net_device *dev,
+ 	struct rtnl_af_ops *af_ops;
+ 	struct net_device *upper_dev = netdev_master_upper_dev_get(dev);
+ 
++	if (dev &&
++	    vpnhide_should_hide_dev(dev, VPNHIDE_HID_RTNL_FILL_IFINFO))
++		return 0;
++
+ 	ASSERT_RTNL();
+ 	nlh = nlmsg_put(skb, pid, seq, type, sizeof(*ifm), flags);
+ 	if (nlh == NULL)
