@@ -45,7 +45,7 @@ builtin/
     vpnhide_internal.h       # brain API shared between core.c and hook_*.c
     Kconfig  Makefile
   include/linux/vpnhide.h    # public call-site API + CONFIG_VPNHIDE=n stubs (copied to <kernel>/include/linux/)
-  versions/<kmi>/*.patch     # per-version call-site patches (android14-6.1 done)
+  versions/<kmi>/*.patch     # per-version call-site patches (8 KMIs: 6.1..6.12, 5.15/5.10, 5.4/4.19/4.14)
   scripts/apply.sh           # copy driver + vendor headers + wire security + apply patches
   scripts/gen_patches.py     # regenerate versions/<kmi>/*.patch from a clean kernel tree
 ```
@@ -118,10 +118,19 @@ dance disappears.
       (3 overrides: wext include, `int done;` in dev_ifconf's loop, putname() in filename_lookup). QEMU
       gate green on 6.6.139 / 5.15.208 / 5.10.257: each pass=35 fail=0 panic=0. **Five KMIs proven
       end-to-end** (6.1, 6.6, 6.12, 5.15, 5.10) — all post-`sockptr_t`.
-- [ ] Phase 6c (legacy) — 5.4 / 4.19 / 4.14 predate `sockptr_t` (added in 5.9): their `__sys_setsockopt`
-      takes `char __user *optval` with `set_fs()`, so the bind call site can't reuse
-      `vpnhide_setsockopt_bind(sockptr_t, ...)`. Needs a user-pointer bind variant, or omit bind
-      concealment there (leaving SO_BINDTODEVICE to the .ko/zygisk). Design decision, not mechanical.
+- [x] Phase 6c (legacy) — DONE. `android11-5.4`, `android10-4.19`, `android10-4.14`. These are built from
+      pinned AOSP source with Bootlin gcc 7.3 (`builtin/test/build-source-kernel.sh`) — there is no
+      ddk-min image below 5.10 — and QEMU-booted with `-cpu cortex-a57`. Each needed driver version gates,
+      all keyed off `LINUX_VERSION_CODE`, so the GKI KMIs are untouched:
+      - `sockptr_t` (5.9): pre-5.9 `__sys_setsockopt` takes `char __user *optval`, so bind uses
+        `vpnhide_setsockopt_bind_user()` and freezes by swapping optval under `set_fs(KERNEL_DS)`.
+      - `proc_ops` (5.6) → `file_operations`; `proc_create_single` (4.18) → `single_open` fops;
+        `static_assert` (5.1) → `_Static_assert`.
+      - `fib_rt_info` (5.5) → `vpnhide_hide_fib_dump_raw(fi, dst, dst_len)`.
+      - nexthop objects (5.3) → `fib_nh[0].nh_dev` / embedded `fib6_nh.nh_dev`.
+      - `fib6_info` (4.19; 4.14 still has `rt6_info`) → the v6 route hooks switch type via `VH_FIB6_T`.
+      QEMU gate green on 5.4.x / 4.19.x / 4.14.x: each pass=35 fail=0 panic=0. **Eight KMIs proven
+      end-to-end** (6.1, 6.6, 6.12, 5.15, 5.10, 5.4, 4.19, 4.14).
 
 ### Generating the call-site patches (Phase 3b)
 
