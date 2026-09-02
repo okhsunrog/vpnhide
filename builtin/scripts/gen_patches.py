@@ -678,6 +678,42 @@ _414["net/ipv6/route.c"][1] = (
 )
 EDITS["android10-4.14"] = _414
 
+# android10-4.9: oldest target; derive from 4.14 (shares rt6_info, pre-nexthop,
+# pre-sockptr). Extra overrides added below as its older anchors surface.
+_49 = copy.deepcopy(_414)
+# 4.9 still uses the old <asm/uaccess.h> include path (namei + readdir).
+_49["fs/namei.c"][0] = (
+    '#include <asm/uaccess.h>\n\n#include "internal.h"',
+    '#include <asm/uaccess.h>\n' + VH_INCLUDE + '\n#include "internal.h"',
+)
+_49["fs/readdir.c"][0] = (
+    "#include <asm/uaccess.h>\n",
+    "#include <asm/uaccess.h>\n" + VH_INCLUDE,
+)
+# vfs_getattr_nosec took only (path, stat) before request_mask/query_flags.
+_49["fs/stat.c"][1] = (
+    "\tretval = security_inode_getattr(path);\n"
+    "\tif (retval)\n"
+    "\t\treturn retval;\n"
+    "\treturn vfs_getattr_nosec(path, stat);\n",
+    "\tretval = security_inode_getattr(path);\n"
+    "\tif (retval)\n"
+    "\t\treturn retval;\n"
+    "\tretval = vfs_getattr_nosec(path, stat);\n"
+    "\tif (!retval && vpnhide_should_hide_dentry(path->dentry))\n"
+    "\t\tretval = -ENOENT;\n"
+    "\treturn retval;\n",
+)
+# rt6_fill_node has a prefix-only-routes block between its decls and nlmsg_put,
+# so anchor the hide directly on the nlmsg_put line.
+_49["net/ipv6/route.c"][1] = (
+    "\tnlh = nlmsg_put(skb, portid, seq, type, sizeof(*rtm), flags);\n",
+    "\tif (vpnhide_hide_rt6(rt, NULL))\n"
+    "\t\treturn 0;\n\n"
+    "\tnlh = nlmsg_put(skb, portid, seq, type, sizeof(*rtm), flags);\n",
+)
+EDITS["android10-4.9"] = _49
+
 
 # Patch filename per source path: net/core/dev_ioctl.c -> net_core_dev_ioctl.c.patch
 def patch_name(relpath: str) -> str:

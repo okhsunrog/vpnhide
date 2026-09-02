@@ -1,0 +1,60 @@
+diff --git a/net/socket.c b/net/socket.c
+index c145e548a..568073093 100644
+--- a/net/socket.c
++++ b/net/socket.c
+@@ -99,6 +99,7 @@
+ #include <net/cls_cgroup.h>
+ 
+ #include <net/sock.h>
++#include <linux/vpnhide.h>
+ #include <linux/netfilter.h>
+ 
+ #include <linux/if_tun.h>
+@@ -1767,6 +1768,9 @@ SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
+ {
+ 	int err, fput_needed;
+ 	struct socket *sock;
++	union vpnhide_bind_snapshot vh_snap;
++	bool vh_frozen = false;
++	mm_segment_t vh_oldfs;
+ 
+ 	if (optlen < 0)
+ 		return -EINVAL;
+@@ -1777,6 +1781,27 @@ SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
+ 		if (err)
+ 			goto out_put;
+ 
++		if (level == SOL_SOCKET) {
++			enum vpnhide_bind_action vh_act =
++				vpnhide_setsockopt_bind_user(sock->sk, optname,
++							     optval, optlen,
++							     &vh_snap);
++			if (vh_act == VPNHIDE_BIND_DENY) {
++				err = -ENODEV;
++				goto out_put;
++			}
++			if (vh_act == VPNHIDE_BIND_FAULT) {
++				err = -EFAULT;
++				goto out_put;
++			}
++			if (vh_act == VPNHIDE_BIND_FROZEN) {
++				vh_oldfs = get_fs();
++				set_fs(KERNEL_DS);
++				optval = (char __user __force *)&vh_snap;
++				vh_frozen = true;
++			}
++		}
++
+ 		if (level == SOL_SOCKET)
+ 			err =
+ 			    sock_setsockopt(sock, level, optname, optval,
+@@ -1785,6 +1810,9 @@ SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
+ 			err =
+ 			    sock->ops->setsockopt(sock, level, optname, optval,
+ 						  optlen);
++
++		if (vh_frozen)
++			set_fs(vh_oldfs);
+ out_put:
+ 		fput_light(sock->file, fput_needed);
+ 	}
