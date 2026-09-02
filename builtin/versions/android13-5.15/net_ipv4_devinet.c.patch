@@ -1,0 +1,24 @@
+diff --git a/net/ipv4/devinet.c b/net/ipv4/devinet.c
+index f27490ac6..5a185fcbe 100644
+--- a/net/ipv4/devinet.c
++++ b/net/ipv4/devinet.c
+@@ -58,6 +58,7 @@
+ #include <net/ip.h>
+ #include <net/route.h>
+ #include <net/ip_fib.h>
++#include <linux/vpnhide.h>
+ #include <net/rtnetlink.h>
+ #include <net/net_namespace.h>
+ #include <net/addrconf.h>
+@@ -1666,6 +1667,11 @@ static int inet_fill_ifaddr(struct sk_buff *skb, struct in_ifaddr *ifa,
+ 	struct nlmsghdr  *nlh;
+ 	u32 preferred, valid;
+ 
++	if (ifa->ifa_dev && ifa->ifa_dev->dev &&
++	    vpnhide_should_hide_dev(ifa->ifa_dev->dev,
++				    VPNHIDE_HID_INET_FILL_IFADDR))
++		return 0;
++
+ 	nlh = nlmsg_put(skb, args->portid, args->seq, args->event, sizeof(*ifm),
+ 			args->flags);
+ 	if (!nlh)

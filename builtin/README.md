@@ -112,8 +112,16 @@ dance disappears.
 - [x] Phase 6b (android16-6.12) — DONE. gen_patches derives it from 6.1 (26/30 anchors shared) with 4
       overrides (do_sock_setsockopt bind, const-ifa addr fills, iterate_shared-only readdir). QEMU gate on
       6.12.89: pass=35 fail=0 panic=0. Two KMIs proven end-to-end.
-- [ ] Phase 6c — remaining KMIs (android14-5.15, android15-6.6, android13-5.10, legacy 5.4/4.19...). Same
-      mechanical recipe: check anchor divergence, add overrides in gen_patches.py, build Image, QEMU gate.
+- [x] Phase 6c (modern KMIs) — DONE. gen_patches derives each from 6.1 by anchor-divergence probing:
+      `android15-6.6` (2 overrides: shares 6.12's do_sock_setsockopt + iterate_shared-only readdir),
+      `android13-5.15` (1 override: no net/core/dev.h, include after <net/wext.h>), `android12-5.10`
+      (3 overrides: wext include, `int done;` in dev_ifconf's loop, putname() in filename_lookup). QEMU
+      gate green on 6.6.139 / 5.15.208 / 5.10.257: each pass=35 fail=0 panic=0. **Five KMIs proven
+      end-to-end** (6.1, 6.6, 6.12, 5.15, 5.10) — all post-`sockptr_t`.
+- [ ] Phase 6c (legacy) — 5.4 / 4.19 / 4.14 predate `sockptr_t` (added in 5.9): their `__sys_setsockopt`
+      takes `char __user *optval` with `set_fs()`, so the bind call site can't reuse
+      `vpnhide_setsockopt_bind(sockptr_t, ...)`. Needs a user-pointer bind variant, or omit bind
+      concealment there (leaving SO_BINDTODEVICE to the .ko/zygisk). Design decision, not mechanical.
 
 ### Generating the call-site patches (Phase 3b)
 

@@ -1,0 +1,22 @@
+diff --git a/net/ipv6/route.c b/net/ipv6/route.c
+index 47851bfe2..10c6cb665 100644
+--- a/net/ipv6/route.c
++++ b/net/ipv6/route.c
+@@ -72,6 +72,7 @@ static int ip6_rt_type_to_error(u8 fib6_type);
+ 
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/fib6.h>
++#include <linux/vpnhide.h>
+ EXPORT_TRACEPOINT_SYMBOL_GPL(fib6_table_lookup);
+ #undef CREATE_TRACE_POINTS
+ 
+@@ -5482,6 +5483,9 @@ static int rt6_fill_node(struct net *net, struct sk_buff *skb,
+ 	struct rtmsg *rtm;
+ 	long expires = 0;
+ 
++	if (vpnhide_hide_rt6(rt, dst))
++		return 0;
++
+ 	nlh = nlmsg_put(skb, portid, seq, type, sizeof(*rtm), flags);
+ 	if (!nlh)
+ 		return -EMSGSIZE;

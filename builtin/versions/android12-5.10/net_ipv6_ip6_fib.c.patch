@@ -1,0 +1,24 @@
+diff --git a/net/ipv6/ip6_fib.c b/net/ipv6/ip6_fib.c
+index 83f15e930..acb9ac7bf 100644
+--- a/net/ipv6/ip6_fib.c
++++ b/net/ipv6/ip6_fib.c
+@@ -34,6 +34,7 @@
+ 
+ #include <net/ip6_fib.h>
+ #include <net/ip6_route.h>
++#include <linux/vpnhide.h>
+ 
+ static struct kmem_cache *fib6_node_kmem __read_mostly;
+ 
+@@ -2487,6 +2488,11 @@ static int ipv6_route_native_seq_show(struct seq_file *seq, void *v)
+ 	unsigned int flags = rt->fib6_flags;
+ 	const struct net_device *dev;
+ 
++	if (vpnhide_hide_fib6_route(rt)) {
++		iter->w.leaf = NULL;
++		return 0;
++	}
++
+ 	if (rt->nh)
+ 		fib6_nh = nexthop_fib6_nh_bh(rt->nh);
+ 

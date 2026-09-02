@@ -358,6 +358,58 @@ _612["fs/readdir.c"][1] = (
 )
 EDITS["android16-6.12"] = _612
 
+# android15-6.6: derive from 6.1. Shares 6.12's do_sock_setsockopt refactor
+# (setsockopt dispatch moved out of __sys_setsockopt), so the vh_snap decl uses
+# the same anchor as 6.12; other overrides added below as divergences surface.
+_66 = copy.deepcopy(EDITS["android14-6.1"])
+_66["net/socket.c"][1] = _612["net/socket.c"][1]
+_66["fs/readdir.c"][1] = _612["fs/readdir.c"][1]  # iterate_shared-only, as 6.12
+EDITS["android15-6.6"] = _66
+
+# android13-5.15: derive from 6.1. Older tree: net/core/dev.h did not exist yet,
+# so the dev_ioctl.c include anchors after <net/wext.h>; more overrides below.
+_515 = copy.deepcopy(EDITS["android14-6.1"])
+_515["net/core/dev_ioctl.c"][0] = (
+    "#include <net/wext.h>\n",
+    "#include <net/wext.h>\n" + VH_INCLUDE,
+)
+EDITS["android13-5.15"] = _515
+
+# android12-5.10: derive from 6.1. No net/core/dev.h (include after <net/wext.h>);
+# dev_ifconf's loop declares `int done;` first; filename_lookup calls putname()
+# between restore_nameidata() and the return, so anchor its tail on
+# restore_nameidata() alone.
+_510 = copy.deepcopy(EDITS["android14-6.1"])
+_510["net/core/dev_ioctl.c"][0] = (
+    "#include <net/wext.h>\n",
+    "#include <net/wext.h>\n" + VH_INCLUDE,
+)
+_510["net/core/dev_ioctl.c"][2] = (
+    "\tfor_each_netdev(net, dev) {\n\t\tint done;\n\t\tif (!pos)",
+    "\tfor_each_netdev(net, dev) {\n"
+    "\t\tint done;\n"
+    "\t\tif (vpnhide_should_hide_dev(dev, VPNHIDE_HID_SOCK_IOCTL))\n"
+    "\t\t\tcontinue;\n"
+    "\t\tif (!pos)",
+)
+_510["fs/namei.c"][1] = (
+    "\tif (likely(!retval))\n"
+    "\t\taudit_inode(name, path->dentry,\n"
+    "\t\t\t    flags & LOOKUP_MOUNTPOINT ? AUDIT_INODE_NOEVAL : 0);\n"
+    "\trestore_nameidata();\n",
+    "\tif (likely(!retval))\n"
+    "\t\taudit_inode(name, path->dentry,\n"
+    "\t\t\t    flags & LOOKUP_MOUNTPOINT ? AUDIT_INODE_NOEVAL : 0);\n"
+    "\tif (!retval && vpnhide_should_hide_dentry(path->dentry)) {\n"
+    "\t\tpath_put(path);\n"
+    "\t\tpath->mnt = NULL;\n"
+    "\t\tpath->dentry = NULL;\n"
+    "\t\tretval = -ENOENT;\n"
+    "\t}\n"
+    "\trestore_nameidata();\n",
+)
+EDITS["android12-5.10"] = _510
+
 
 # Patch filename per source path: net/core/dev_ioctl.c -> net_core_dev_ioctl.c.patch
 def patch_name(relpath: str) -> str:

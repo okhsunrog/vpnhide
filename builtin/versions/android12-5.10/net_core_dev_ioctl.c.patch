@@ -1,0 +1,47 @@
+diff --git a/net/core/dev_ioctl.c b/net/core/dev_ioctl.c
+index 993420da2..99dd7f0ca 100644
+--- a/net/core/dev_ioctl.c
++++ b/net/core/dev_ioctl.c
+@@ -8,6 +8,7 @@
+ #include <linux/wireless.h>
+ #include <net/dsa.h>
+ #include <net/wext.h>
++#include <linux/vpnhide.h>
+ 
+ /*
+  *	Map an interface index to its name (SIOCGIFNAME)
+@@ -22,8 +23,14 @@
+ 
+ static int dev_ifname(struct net *net, struct ifreq *ifr)
+ {
++	int ret;
++
+ 	ifr->ifr_name[IFNAMSIZ-1] = 0;
+-	return netdev_get_name(net, ifr->ifr_name, ifr->ifr_ifindex);
++	ret = netdev_get_name(net, ifr->ifr_name, ifr->ifr_ifindex);
++	if (ret == 0 &&
++	    vpnhide_should_hide_ifname(ifr->ifr_name, VPNHIDE_HID_DEV_IOCTL))
++		return -ENODEV;
++	return ret;
+ }
+ 
+ /*
+@@ -53,6 +60,8 @@ int dev_ifconf(struct net *net, struct ifconf *ifc, int size)
+ 	total = 0;
+ 	for_each_netdev(net, dev) {
+ 		int done;
++		if (vpnhide_should_hide_dev(dev, VPNHIDE_HID_SOCK_IOCTL))
++			continue;
+ 		if (!pos)
+ 			done = inet_gifconf(dev, NULL, 0, size);
+ 		else
+@@ -85,6 +94,9 @@ static int dev_ifsioc_locked(struct net *net, struct ifreq *ifr, unsigned int cm
+ 	if (!dev)
+ 		return -ENODEV;
+ 
++	if (vpnhide_should_hide_dev(dev, VPNHIDE_HID_DEV_IOCTL))
++		return -ENODEV;
++
+ 	switch (cmd) {
+ 	case SIOCGIFFLAGS:	/* Get interface flags */
+ 		ifr->ifr_flags = (short) dev_get_flags(dev);

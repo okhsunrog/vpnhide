@@ -5,7 +5,8 @@
 #
 #   apply.sh <kernel_common_dir> <version>
 #
-#     version: android14-6.1   (more added as their patch sets land)
+#     version: one of builtin/versions/* — android14-6.1, android15-6.6,
+#              android16-6.12, android13-5.15, android12-5.10 (more as they land)
 #
 # What it does (idempotent):
 #   1. copy the driver           -> <kernel>/security/vpnhide/
