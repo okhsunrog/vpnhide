@@ -83,7 +83,11 @@ case "$VER" in
 esac
 
 # --- bake the built-in backend into the source tree ---------------------------
-# apply.sh is idempotent; a stray build tree is reused across reruns.
+# The source tree is cached across reruns, so revert any call-site patches from
+# a previous run to pristine before re-applying (patch --forward otherwise
+# rejects already-applied hunks). The untracked security/vpnhide/ driver dir is
+# replaced by apply.sh itself.
+git -C "$SRC" checkout -- . 2>/dev/null || true
 "$REPO/builtin/scripts/apply.sh" "$SRC" "$KMI"
 
 cd "$SRC"

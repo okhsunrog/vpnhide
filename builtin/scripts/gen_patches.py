@@ -513,6 +513,121 @@ _54["net/ipv4/fib_semantics.c"][1] = (
 )
 EDITS["android11-5.4"] = _54
 
+# android10-4.19 / android10-4.14: derive from 5.4 (share the pre-sockptr bind,
+# 3-arg audit_inode, NPROTO dev_ifconf loop, fib_dump_info raw args). Extra
+# overrides added below as their older anchors surface.
+_419 = copy.deepcopy(_54)
+# rtnl_fill_ifinfo: no `struct Qdisc *qdisc;` local before ASSERT_RTNL yet.
+_419["net/core/rtnetlink.c"][1] = (
+    "\tstruct ifinfomsg *ifm;\n\tstruct nlmsghdr *nlh;\n\n\tASSERT_RTNL();\n",
+    "\tstruct ifinfomsg *ifm;\n\tstruct nlmsghdr *nlh;\n\n"
+    "\tif (dev &&\n"
+    "\t    vpnhide_should_hide_dev(dev, VPNHIDE_HID_RTNL_FILL_IFINFO))\n"
+    "\t\treturn 0;\n\n"
+    "\tASSERT_RTNL();\n",
+)
+# inet6_fill_ifaddr: positional args (portid/seq/event), ifaddrmsg size inline.
+_419["net/ipv6/addrconf.c"][1] = (
+    "\tstruct nlmsghdr  *nlh;\n\tu32 preferred, valid;\n\n"
+    "\tnlh = nlmsg_put(skb, portid, seq, event, sizeof(struct ifaddrmsg), flags);\n",
+    "\tstruct nlmsghdr  *nlh;\n\tu32 preferred, valid;\n\n"
+    "\tif (ifa->idev && ifa->idev->dev &&\n"
+    "\t    vpnhide_should_hide_dev(ifa->idev->dev,\n"
+    "\t\t\t\t    VPNHIDE_HID_INET6_FILL_IFADDR))\n"
+    "\t\treturn 0;\n\n"
+    "\tnlh = nlmsg_put(skb, portid, seq, event, sizeof(struct ifaddrmsg), flags);\n",
+)
+# __sys_setsockopt: pre-BPF/pre-kernel_optval — bare user pointer, no set_fs
+# scaffolding, so declare our own oldfs and freeze around the dispatch. Anchor
+# the decl on the optlen<0 guard to stay unique vs __sys_getsockopt.
+_419["net/socket.c"][1] = (
+    "\tint err, fput_needed;\n\tstruct socket *sock;\n\n"
+    "\tif (optlen < 0)\n\t\treturn -EINVAL;\n",
+    "\tint err, fput_needed;\n\tstruct socket *sock;\n"
+    "\tunion vpnhide_bind_snapshot vh_snap;\n"
+    "\tbool vh_frozen = false;\n"
+    "\tmm_segment_t vh_oldfs;\n\n"
+    "\tif (optlen < 0)\n\t\treturn -EINVAL;\n",
+)
+_419["net/socket.c"][2] = (
+    "\t\tif (level == SOL_SOCKET)\n"
+    "\t\t\terr =\n"
+    "\t\t\t    sock_setsockopt(sock, level, optname, optval,\n"
+    "\t\t\t\t\t    optlen);\n",
+    "\t\tif (level == SOL_SOCKET) {\n"
+    "\t\t\tenum vpnhide_bind_action vh_act =\n"
+    "\t\t\t\tvpnhide_setsockopt_bind_user(sock->sk, optname,\n"
+    "\t\t\t\t\t\t\t     optval, optlen,\n"
+    "\t\t\t\t\t\t\t     &vh_snap);\n"
+    "\t\t\tif (vh_act == VPNHIDE_BIND_DENY) {\n"
+    "\t\t\t\terr = -ENODEV;\n"
+    "\t\t\t\tgoto out_put;\n"
+    "\t\t\t}\n"
+    "\t\t\tif (vh_act == VPNHIDE_BIND_FAULT) {\n"
+    "\t\t\t\terr = -EFAULT;\n"
+    "\t\t\t\tgoto out_put;\n"
+    "\t\t\t}\n"
+    "\t\t\tif (vh_act == VPNHIDE_BIND_FROZEN) {\n"
+    "\t\t\t\tvh_oldfs = get_fs();\n"
+    "\t\t\t\tset_fs(KERNEL_DS);\n"
+    "\t\t\t\toptval = (char __user __force *)&vh_snap;\n"
+    "\t\t\t\tvh_frozen = true;\n"
+    "\t\t\t}\n"
+    "\t\t}\n\n"
+    "\t\tif (level == SOL_SOCKET)\n"
+    "\t\t\terr =\n"
+    "\t\t\t    sock_setsockopt(sock, level, optname, optval,\n"
+    "\t\t\t\t\t    optlen);\n",
+)
+_419["net/socket.c"][3] = (
+    "\t\t\terr =\n"
+    "\t\t\t    sock->ops->setsockopt(sock, level, optname, optval,\n"
+    "\t\t\t\t\t\t  optlen);\n"
+    "out_put:\n",
+    "\t\t\terr =\n"
+    "\t\t\t    sock->ops->setsockopt(sock, level, optname, optval,\n"
+    "\t\t\t\t\t\t  optlen);\n\n"
+    "\t\tif (vh_frozen)\n"
+    "\t\t\tset_fs(vh_oldfs);\n"
+    "out_put:\n",
+)
+# fs/namei.c: extra include (build_bug.h) before internal.h; filename_lookup's
+# audit_inode takes `flags & LOOKUP_PARENT` here.
+_419["fs/namei.c"][0] = (
+    '#include <linux/build_bug.h>\n\n#include "internal.h"',
+    '#include <linux/build_bug.h>\n' + VH_INCLUDE + '\n#include "internal.h"',
+)
+_419["fs/namei.c"][1] = (
+    "\tif (likely(!retval))\n"
+    "\t\taudit_inode(name, path->dentry, flags & LOOKUP_PARENT);\n"
+    "\trestore_nameidata();\n",
+    "\tif (likely(!retval))\n"
+    "\t\taudit_inode(name, path->dentry, flags & LOOKUP_PARENT);\n"
+    "\tif (!retval && vpnhide_should_hide_dentry(path->dentry)) {\n"
+    "\t\tpath_put(path);\n"
+    "\t\tpath->mnt = NULL;\n"
+    "\t\tpath->dentry = NULL;\n"
+    "\t\tretval = -ENOENT;\n"
+    "\t}\n"
+    "\trestore_nameidata();\n",
+)
+# ipv6_route_seq_show: pre-nexthop, no `if (rt->nh)` — anchor on the first
+# seq_printf instead.
+_419["net/ipv6/ip6_fib.c"][1] = (
+    "\tconst struct net_device *dev;\n\n"
+    '\tseq_printf(seq, "%pi6 %02x ", &rt->fib6_dst.addr, rt->fib6_dst.plen);\n',
+    "\tconst struct net_device *dev;\n\n"
+    "\tif (vpnhide_hide_fib6_route(rt)) {\n"
+    "\t\titer->w.leaf = NULL;\n"
+    "\t\treturn 0;\n"
+    "\t}\n\n"
+    '\tseq_printf(seq, "%pi6 %02x ", &rt->fib6_dst.addr, rt->fib6_dst.plen);\n',
+)
+EDITS["android10-4.19"] = _419
+
+_414 = copy.deepcopy(_54)
+EDITS["android10-4.14"] = _414
+
 
 # Patch filename per source path: net/core/dev_ioctl.c -> net_core_dev_ioctl.c.patch
 def patch_name(relpath: str) -> str:

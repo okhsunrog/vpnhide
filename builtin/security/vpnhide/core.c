@@ -35,6 +35,12 @@
 
 #define is_vpn_ifname(name) vpnhide_iface_is_vpn(name)
 
+/* static_assert reached <linux/build_bug.h> in 5.1; pre-5.1 kernels
+ * (android10-4.19 / 4.14) lack it, so fall back to the C11 primitive. */
+#ifndef static_assert
+#define static_assert(expr, ...) _Static_assert(expr, #expr)
+#endif
+
 /* The public VPNHIDE_HID_* the call-site patches pass must equal the generated
  * VPNHIDE_HOOK_* ids; guard against a data/hooks.toml renumber desyncing them. */
 static_assert(VPNHIDE_HID_FIB_ROUTE_SEQ_SHOW == VPNHIDE_HOOK_FIB_ROUTE_SEQ_SHOW, "");

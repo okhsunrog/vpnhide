@@ -309,9 +309,14 @@ check_socket_bind() {
 	[ -n "$_nt_state" ] || _nt_state=-1
 	[ -n "$_tg_errno" ] || _tg_errno=-1
 	[ -n "$_tg_state" ] || _tg_state=-1
-	if [ "$_nt_errno" -eq 14 ] && [ "$_nt_state" -eq 0 ] && \
-		[ "$_tg_errno" -eq 14 ] && [ "$_tg_state" -eq 0 ]; then
-		echo "RESULT bind_bad_pointer=PASS (EFAULT+unbound)"
+	# A kernel-range pointer must be rejected and leave the socket unbound.
+	# The target hits our hook's own uaccess (EFAULT); the non-target passes
+	# through to the kernel, whose rejection errno depends on check order —
+	# EFAULT where the copy runs first (5.4+), EPERM where CAP_NET_RAW is
+	# tested first (4.19/4.14). Any non-zero errno + unbound is a safe reject.
+	if [ "$_nt_errno" -ne 0 ] && [ "$_nt_state" -eq 0 ] && \
+		[ "$_tg_errno" -ne 0 ] && [ "$_tg_state" -eq 0 ]; then
+		echo "RESULT bind_bad_pointer=PASS (safe rejection+unbound: nt=$_nt_errno tg=$_tg_errno)"
 		PASS=$((PASS + 1))
 	else
 		echo "RESULT bind_bad_pointer=FAIL (nt_errno=$_nt_errno nt_state=$_nt_state tg_errno=$_tg_errno tg_state=$_tg_state)"
@@ -450,10 +455,13 @@ else
 	FAIL=$((FAIL + 1))
 fi
 
-# Match real kernel-oops markers only. `BUG:` needs a leading space (a real oops
-# prints "] BUG: …") so the case-insensitive grep does not fire on the benign
-# "dynamic_debug:" line legacy kernels emit — "…c_debug:" has no space before it.
-PANIC=$(dmesg | grep -ci 'Unable to handle\|Internal error\|Oops\| BUG:\|kernel BUG\|Kernel panic')
+# Match real kernel-oops markers only, precisely enough to skip benign lines
+# legacy kernels emit: "dynamic_debug:" (would match a bare BUG:) and the
+# devicetree self-test's "unittest internal error:" (would match a bare
+# "Internal error"). A real arm64 oops prints "Unable to handle kernel …" and
+# "Internal error: Oops …"; BUG_ON prints "kernel BUG at"; other reports print
+# "] BUG:". Kernel panics print "Kernel panic".
+PANIC=$(dmesg | grep -ci 'Unable to handle kernel\|Internal error: Oops\|kernel BUG at\|] BUG:\|Kernel panic')
 echo "PANIC=$PANIC"
 echo "SUMMARY pass=$PASS fail=$FAIL panic=$PANIC registered=$REGISTERED"
 echo "##### VPNHIDE-QEMU-TEST END #####"

@@ -19,6 +19,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/version.h>
 #include <linux/string.h>
 #include <linux/if.h>
 #include <linux/in6.h>
@@ -28,7 +29,14 @@
 #include <linux/netdevice.h>
 #include <net/ip_fib.h>
 #include <net/ip6_fib.h>
+/* Nexthop objects (struct nexthop, fib_info_nhc, nexthop_fib6_nh) and
+ * <net/nexthop.h> landed in 5.3; pre-5.3 (android10-4.19 / 4.14) reach the
+ * device through fib_nh[0]/fib6_nh directly, so the header must not be pulled
+ * in there — it does not exist. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0)
 #include <net/nexthop.h>
+#define VPNHIDE_HAVE_NEXTHOP_OBJ 1
+#endif
 #include <net/dst.h>
 #include <net/fib_rules.h>
 #include <uapi/linux/rtnetlink.h>
@@ -47,22 +55,35 @@
 
 static struct net_device *fib4_route_dev(const struct fib_info *fi)
 {
-	struct fib_nh_common *nhc;
-
 	if (!fi)
 		return NULL;
-	nhc = fib_info_nhc((struct fib_info *)fi, 0);
-	return nhc ? nhc->nhc_dev : NULL;
+#ifdef VPNHIDE_HAVE_NEXTHOP_OBJ
+	{
+		struct fib_nh_common *nhc = fib_info_nhc((struct fib_info *)fi, 0);
+
+		return nhc ? nhc->nhc_dev : NULL;
+	}
+#else
+	/* pre-5.3: the device hangs off the first legacy nexthop directly. */
+	return fi->fib_nh[0].nh_dev;
+#endif
 }
 
 static struct net_device *fib6_route_dev(struct fib6_info *rt)
 {
-	struct fib6_nh *nh;
-
 	if (!rt)
 		return NULL;
-	nh = rt->nh ? nexthop_fib6_nh(rt->nh) : rt->fib6_nh;
-	return nh ? nh->fib_nh_dev : NULL;
+#ifdef VPNHIDE_HAVE_NEXTHOP_OBJ
+	{
+		struct fib6_nh *nh = rt->nh ? nexthop_fib6_nh(rt->nh) : rt->fib6_nh;
+
+		return nh ? nh->fib_nh_dev : NULL;
+	}
+#else
+	/* pre-5.3: fib6_nh is embedded (no nexthop object) and the field is
+	 * still nh_dev, not fib_nh_dev. */
+	return rt->fib6_nh.nh_dev;
+#endif
 }
 
 /* A public /32 host-route pinned to a physical uplink leaks the VPN server's
