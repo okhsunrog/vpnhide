@@ -501,6 +501,43 @@ _54["net/core/fib_rules.c"][0] = (
     "#include <net/fib_rules.h>\n",
     "#include <net/fib_rules.h>\n" + VH_INCLUDE,
 )
+# Pre-5.9 compat setsockopt is a SEPARATE path (compat_sock_setsockopt ->
+# sock_setsockopt) that never enters __sys_setsockopt, so a 32-bit app's
+# SO_BINDTODEVICE would bypass the bind hook patched there. Intercept the compat
+# handler too (the .ko avoids this by hooking sock_setsockopt directly). Same
+# user-pointer variant + KERNEL_DS freeze as the native legacy site; uncapable
+# callers pass through (the cap gate hides uniformly). compat_sock_setsockopt is
+# byte-identical across 4.9/4.14/4.19/5.4, so one override serves all four.
+_54["net/compat.c"] = [
+    (
+        "#include <linux/compat.h>\n",
+        "#include <linux/compat.h>\n" + VH_INCLUDE,
+    ),
+    (
+        "\treturn sock_setsockopt(sock, level, optname, optval, optlen);\n}",
+        "\t{\n"
+        "\t\tunion vpnhide_bind_snapshot vh_snap;\n"
+        "\t\tenum vpnhide_bind_action vh_act =\n"
+        "\t\t\tvpnhide_setsockopt_bind_user(sock->sk, optname, optval,\n"
+        "\t\t\t\t\t\t     optlen, &vh_snap);\n\n"
+        "\t\tif (vh_act == VPNHIDE_BIND_DENY)\n"
+        "\t\t\treturn -ENODEV;\n"
+        "\t\tif (vh_act == VPNHIDE_BIND_FAULT)\n"
+        "\t\t\treturn -EFAULT;\n"
+        "\t\tif (vh_act == VPNHIDE_BIND_FROZEN) {\n"
+        "\t\t\tmm_segment_t vh_oldfs = get_fs();\n"
+        "\t\t\tint vh_ret;\n\n"
+        "\t\t\tset_fs(KERNEL_DS);\n"
+        "\t\t\tvh_ret = sock_setsockopt(sock, level, optname,\n"
+        "\t\t\t\t\t\t (char __user __force *)&vh_snap,\n"
+        "\t\t\t\t\t\t optlen);\n"
+        "\t\t\tset_fs(vh_oldfs);\n"
+        "\t\t\treturn vh_ret;\n"
+        "\t\t}\n"
+        "\t}\n"
+        "\treturn sock_setsockopt(sock, level, optname, optval, optlen);\n}",
+    ),
+]
 # Pre-5.5 fib_dump_info(fi, dst, dst_len, …): no fib_rt_info, call the raw
 # variant with the fields spread across its arguments.
 _54["net/ipv4/fib_semantics.c"][1] = (
