@@ -300,6 +300,28 @@ check_socket_bind() {
 		fi
 	done
 
+	# 32-bit (compat) bind: on pre-5.9 kernels compat setsockopt is a separate
+	# entry, so a bind hook patched only at the 64-bit __sys_setsockopt would
+	# leak here. The target's compat SO_BINDTODEVICE(vpn0) must be as hidden as
+	# the 64-bit path — unbound and returning the native absent errno.
+	if [ -x /bind-probe32 ]; then
+		set_target "$TARGET_UID"
+		_tg32=$(/bind-probe32 vpn0 "$_vpn_ifindex" 2>/dev/null)
+		_c_errno=$(bind_field "$_tg32" BIND_NAME_RAW_ERRNO)
+		_c_state=$(bind_field "$_tg32" BIND_NAME_RAW_STATE)
+		[ -n "$_c_errno" ] || _c_errno=-1
+		[ -n "$_c_state" ] || _c_state=-1
+		if [ "$_c_state" -eq 0 ] && [ "$_c_errno" -eq "$_abs_errno" ]; then
+			echo "RESULT bind_device_compat=PASS (compat vpn0 indistinguishable from absent: errno=$_c_errno unbound)"
+			PASS=$((PASS + 1))
+		else
+			echo "RESULT bind_device_compat=FAIL (errno=$_c_errno state=$_c_state absent_errno=$_abs_errno)"
+			FAIL=$((FAIL + 1))
+		fi
+	else
+		echo "RESULT bind_device_compat=SKIP (no 32-bit bind probe)"
+	fi
+
 	_nt_errno=$(bind_field "$_nt" BIND_BADPTR_ERRNO)
 	_nt_state=$(bind_field "$_nt" BIND_BADPTR_STATE)
 	_tg_errno=$(bind_field "$_tg" BIND_BADPTR_ERRNO)

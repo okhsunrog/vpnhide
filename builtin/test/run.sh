@@ -50,6 +50,19 @@ BIND="$(build_probe "$KMOD_TEST/bind-probe.c" "$CACHE/bind-probe")"
 [ -n "$NDK_CC" ] && echo "[run] native probes built ($(basename "$NDK_CC"))" || \
 	echo "[run] no NDK toolchain — native probes SKIP (core /proc + iproute2 vectors still run)"
 
+# 32-bit (armv7) bind probe: exercises the compat setsockopt path. On pre-5.9
+# kernels that is a separate entry (compat_sock_setsockopt), so this is what
+# catches a bind hook patched only at the 64-bit __sys_setsockopt. Same source,
+# just the armv7 toolchain; SKIP if it is unavailable.
+NDK_CC32="$(find "$HOME/Android/Sdk/ndk" -type f -path '*/toolchains/llvm/prebuilt/*/bin/armv7a-linux-androideabi*-clang' 2>/dev/null | sort | tail -1 || true)"
+BIND32=""
+if [ -n "$NDK_CC32" ] && [ -x "$NDK_CC32" ]; then
+	"$NDK_CC32" -static -O2 -o "$CACHE/bind-probe32" "$KMOD_TEST/bind-probe-compat.c" 2>/dev/null &&
+		BIND32="$CACHE/bind-probe32"
+fi
+[ -n "$BIND32" ] && echo "[run] compat (armv7) bind probe built" || \
+	echo "[run] no armv7 NDK — compat bind vector SKIP"
+
 WORK="$(mktemp -d)"
 if [ -n "${VPNHIDE_QEMU_KEEP_WORK:-}" ]; then
 	echo "[run] preserving QEMU work directory: $WORK"
@@ -65,6 +78,7 @@ printf 'builtin\n' > "$RFS/vpnhide_backend"   # selects the in-tree path in init
 [ -n "$GAI" ]  && { cp "$GAI"  "$RFS/gai";        chmod +x "$RFS/gai"; }
 [ -n "$IFC" ]  && { cp "$IFC"  "$RFS/ifconf";     chmod +x "$RFS/ifconf"; }
 [ -n "$BIND" ] && { cp "$BIND" "$RFS/bind-probe"; chmod +x "$RFS/bind-probe"; }
+[ -n "$BIND32" ] && { cp "$BIND32" "$RFS/bind-probe32"; chmod +x "$RFS/bind-probe32"; }
 ( cd "$RFS" && find . | cpio -o -H newc 2>/dev/null | gzip > "$WORK/initramfs.cpio.gz" )
 
 LOG="$WORK/serial.log"
