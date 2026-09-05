@@ -404,6 +404,37 @@ check_socket_bind() {
 	fi
 }
 
+# By-name SIOCGIFHWADDR / SIOCGIFADDR — bypass dev_ifsioc_locked
+# (dev_get_mac_address on 5.4+, devinet_ioctl on all). The target must get the
+# native "no such device" answer (ENODEV=19) for a hidden interface, while a
+# non-target still sees it (non-ENODEV). ENODEV is the native absent answer for
+# both ioctls (unprivileged GETs, no cap ordering involved), so no #3-style
+# comparison is needed.
+check_iface_ioctl() {
+	if [ ! -x /iface-ioctl ]; then
+		echo "RESULT ioctl_hwaddr=SKIP (no iface-ioctl probe)"
+		echo "RESULT ioctl_addr=SKIP (no iface-ioctl probe)"
+		return
+	fi
+	set_target "$NONMATCH_UID"
+	_nt=$(/iface-ioctl vpn0 2>/dev/null)
+	set_target "$TARGET_UID"
+	_tg=$(/iface-ioctl vpn0 2>/dev/null)
+	for _pair in "ioctl_hwaddr HWADDR_ERRNO" "ioctl_addr ADDR_ERRNO"; do
+		_vec=${_pair%% *}
+		_key=${_pair#* }
+		_nt_e=$(bind_field "$_nt" "$_key"); [ -n "$_nt_e" ] || _nt_e=-1
+		_tg_e=$(bind_field "$_tg" "$_key"); [ -n "$_tg_e" ] || _tg_e=-1
+		if [ "$_tg_e" -eq 19 ] && [ "$_nt_e" -ne 19 ]; then
+			echo "RESULT $_vec=PASS (target ENODEV, non-target visible: nt=$_nt_e)"
+			PASS=$((PASS + 1))
+		else
+			echo "RESULT $_vec=FAIL (nt_errno=$_nt_e tg_errno=$_tg_e)"
+			FAIL=$((FAIL + 1))
+		fi
+	done
+}
+
 # vector -> hook it exercises
 check_hide getifaddrs      "ip addr show"                 "vpn0"   # rtnl_fill_ifinfo + inet*_fill_ifaddr
 check_hide siocgifconf     "ifconfig -a"                  "vpn0"   # sock_ioctl
@@ -437,6 +468,7 @@ esac
 check_gai
 check_ifconf                                                       # sock_ioctl size/tail
 check_socket_bind                                                  # interface socket binding
+check_iface_ioctl                                                  # by-name SIOCGIFHWADDR / SIOCGIFADDR
 
 # Non-VPN entries must survive target filtering. This catches over-trimming
 # regressions where a hook hides the whole dump instead of only vpn0 rows.

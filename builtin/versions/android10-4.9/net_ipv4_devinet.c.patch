@@ -1,5 +1,5 @@
 diff --git a/net/ipv4/devinet.c b/net/ipv4/devinet.c
-index 7a2442623..3d46f1fce 100644
+index 7a2442623..da1bc1cad 100644
 --- a/net/ipv4/devinet.c
 +++ b/net/ipv4/devinet.c
 @@ -61,6 +61,7 @@
@@ -10,7 +10,17 @@ index 7a2442623..3d46f1fce 100644
  #include <net/rtnetlink.h>
  #include <net/net_namespace.h>
  #include <net/addrconf.h>
-@@ -1542,6 +1543,11 @@ static int inet_fill_ifaddr(struct sk_buff *skb, struct in_ifaddr *ifa,
+@@ -959,6 +960,9 @@ int devinet_ioctl(struct net *net, unsigned int cmd, void __user *arg)
+ 
+ 	dev_load(net, ifr.ifr_name);
+ 
++	if (vpnhide_should_hide_ifname(ifr.ifr_name, VPNHIDE_HID_DEV_IOCTL))
++		return -ENODEV;
++
+ 	switch (cmd) {
+ 	case SIOCGIFADDR:	/* Get interface address */
+ 	case SIOCGIFBRDADDR:	/* Get the broadcast address */
+@@ -1542,6 +1546,11 @@ static int inet_fill_ifaddr(struct sk_buff *skb, struct in_ifaddr *ifa,
  	struct nlmsghdr  *nlh;
  	u32 preferred, valid;
  

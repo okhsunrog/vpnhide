@@ -1,5 +1,5 @@
 diff --git a/net/core/dev_ioctl.c b/net/core/dev_ioctl.c
-index e8cb5f5fa..38f27e781 100644
+index e8cb5f5fa..06a70a43c 100644
 --- a/net/core/dev_ioctl.c
 +++ b/net/core/dev_ioctl.c
 @@ -9,6 +9,7 @@
@@ -45,3 +45,15 @@ index e8cb5f5fa..38f27e781 100644
  	switch (cmd) {
  	case SIOCGIFFLAGS:	/* Get interface flags */
  		ifr->ifr_flags = (short) dev_get_flags(dev);
+@@ -478,7 +490,10 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr,
+ 	switch (cmd) {
+ 	case SIOCGIFHWADDR:
+ 		dev_load(net, ifr->ifr_name);
+-		ret = dev_get_mac_address(&ifr->ifr_hwaddr, net, ifr->ifr_name);
++		if (vpnhide_should_hide_ifname(ifr->ifr_name, VPNHIDE_HID_DEV_IOCTL))
++			ret = -ENODEV;
++		else
++			ret = dev_get_mac_address(&ifr->ifr_hwaddr, net, ifr->ifr_name);
+ 		if (colon)
+ 			*colon = ':';
+ 		return ret;

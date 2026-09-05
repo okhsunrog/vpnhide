@@ -47,6 +47,7 @@ build_probe() { # <src> <out>; echoes out path or empty
 GAI="$(build_probe "$KMOD_TEST/gai-probe.c" "$CACHE/gai")"
 IFC="$(build_probe "$KMOD_TEST/ifconf-probe.c" "$CACHE/ifconf")"
 BIND="$(build_probe "$KMOD_TEST/bind-probe.c" "$CACHE/bind-probe")"
+IOC="$(build_probe "$KMOD_TEST/iface-ioctl-probe.c" "$CACHE/iface-ioctl")"
 [ -n "$NDK_CC" ] && echo "[run] native probes built ($(basename "$NDK_CC"))" || \
 	echo "[run] no NDK toolchain — native probes SKIP (core /proc + iproute2 vectors still run)"
 
@@ -79,6 +80,7 @@ printf 'builtin\n' > "$RFS/vpnhide_backend"   # selects the in-tree path in init
 [ -n "$IFC" ]  && { cp "$IFC"  "$RFS/ifconf";     chmod +x "$RFS/ifconf"; }
 [ -n "$BIND" ] && { cp "$BIND" "$RFS/bind-probe"; chmod +x "$RFS/bind-probe"; }
 [ -n "$BIND32" ] && { cp "$BIND32" "$RFS/bind-probe32"; chmod +x "$RFS/bind-probe32"; }
+[ -n "$IOC" ] && { cp "$IOC" "$RFS/iface-ioctl"; chmod +x "$RFS/iface-ioctl"; }
 ( cd "$RFS" && find . | cpio -o -H newc 2>/dev/null | gzip > "$WORK/initramfs.cpio.gz" )
 
 LOG="$WORK/serial.log"

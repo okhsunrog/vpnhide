@@ -752,6 +752,48 @@ _49["net/ipv6/route.c"][1] = (
 EDITS["android10-4.9"] = _49
 
 
+# ---------------------------------------------------------------------------
+# By-name SIOCGIFHWADDR / SIOCGIFADDR concealment (hook id DEV_IOCTL). These
+# two get-by-name ioctls bypass dev_ifsioc_locked: SIOCGIFHWADDR moved to
+# dev_get_mac_address() in dev_ioctl() (5.4+; on 4.x it is still inside
+# dev_ifsioc_locked, already covered), and SIOCGIF{ADDR,BRDADDR,DSTADDR,NETMASK}
+# go through devinet_ioctl() on every version. A caller that guesses a hidden
+# interface's name could otherwise read its MAC / IPv4 config. Deny both for a
+# hidden name, matching the native "no such device" (-ENODEV) answer.
+_HWADDR_HIDE = (
+    "\t\tret = dev_get_mac_address(&ifr->ifr_hwaddr, net, ifr->ifr_name);\n",
+    "\t\tif (vpnhide_should_hide_ifname(ifr->ifr_name, VPNHIDE_HID_DEV_IOCTL))\n"
+    "\t\t\tret = -ENODEV;\n"
+    "\t\telse\n"
+    "\t\t\tret = dev_get_mac_address(&ifr->ifr_hwaddr, net, ifr->ifr_name);\n",
+)
+for _kmi in ("android14-6.1", "android16-6.12", "android15-6.6",
+             "android13-5.15", "android12-5.10", "android11-5.4"):
+    EDITS[_kmi]["net/core/dev_ioctl.c"].append(_HWADDR_HIDE)
+
+_DEVINET_IOCTL_HIDE = (
+    "\tdev_load(net, ifr->ifr_name);\n\n\tswitch (cmd) {\n",
+    "\tdev_load(net, ifr->ifr_name);\n\n"
+    "\tif (vpnhide_should_hide_ifname(ifr->ifr_name, VPNHIDE_HID_DEV_IOCTL))\n"
+    "\t\treturn -ENODEV;\n\n"
+    "\tswitch (cmd) {\n",
+)
+for _kmi in EDITS:
+    EDITS[_kmi]["net/ipv4/devinet.c"].append(_DEVINET_IOCTL_HIDE)
+
+# android10-4.14 / 4.9 take the ifreq by value (local `struct ifreq ifr`), so
+# devinet_ioctl reads ifr.ifr_name (dot) rather than ifr->ifr_name.
+_DEVINET_IOCTL_HIDE_DOT = (
+    "\tdev_load(net, ifr.ifr_name);\n\n\tswitch (cmd) {\n",
+    "\tdev_load(net, ifr.ifr_name);\n\n"
+    "\tif (vpnhide_should_hide_ifname(ifr.ifr_name, VPNHIDE_HID_DEV_IOCTL))\n"
+    "\t\treturn -ENODEV;\n\n"
+    "\tswitch (cmd) {\n",
+)
+for _kmi in ("android10-4.14", "android10-4.9"):
+    EDITS[_kmi]["net/ipv4/devinet.c"][-1] = _DEVINET_IOCTL_HIDE_DOT
+
+
 # Patch filename per source path: net/core/dev_ioctl.c -> net_core_dev_ioctl.c.patch
 def patch_name(relpath: str) -> str:
     return relpath.replace("/", "_") + ".patch"
