@@ -154,17 +154,25 @@ fn activate_kmod_with_pm_wait(wait: PmReadyWait) -> Result<()> {
     Ok(())
 }
 
-/// Deliver config to the in-tree (built-in) backend. Identical to the kmod config
-/// path — same hook family, same /proc/vpnhide_ctl wire — because it owns the
-/// same kernel hooks; only the boot lifecycle (no insmod) and detection differ.
+/// Deliver config to the in-tree (built-in) backend. Same /proc/vpnhide_ctl wire
+/// and kernel hooks as the .ko, but its OWN hook family: unlike the .ko (whose
+/// filesystem hook is gated at insmod by module_param) the driver is compiled in
+/// (CONFIG_VPNHIDE_FS_HIDING=y) with no load-time gate, so the filesystem toggle
+/// must be projected into the runtime mask — otherwise it could never turn off.
 /// The wire's `backend` field is set by the kernel driver, not here.
+fn activate_builtin_with_pm_wait(wait: PmReadyWait) -> Result<()> {
+    let wire = project_native_with_pm_wait(&read_canonical()?, NativeHookFamily::Builtin, wait)?;
+    fs::write(KMOD_CTL, wire)?;
+    Ok(())
+}
+
 pub fn activate_builtin() -> Result<()> {
-    activate_kmod_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
+    activate_builtin_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
 }
 
 pub(crate) fn activate_builtin_boot() -> Result<()> {
     wait_for_path(KMOD_CTL);
-    activate_kmod_with_pm_wait(PmReadyWait::Forever)
+    activate_builtin_with_pm_wait(PmReadyWait::Forever)
 }
 
 pub fn activate_zygisk() -> Result<()> {

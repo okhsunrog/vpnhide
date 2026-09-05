@@ -222,14 +222,27 @@ void vpnhide_record_hook_hit(enum vpnhide_hook_id hook_id)
 /* ------------------------------------------------------------------ */
 
 /*
- * In-tree, every owned hook is a compiled-in call site: if CONFIG_VPNHIDE is
- * set they are all present, so there is no partial-registration failure mode
- * (unlike the .ko, where a kretprobe can fail to attach on an odd ROM). The
- * `hooks` mask is therefore constant and `error` is always OK.
+ * In-tree, every owned network hook is a compiled-in call site: if CONFIG_VPNHIDE
+ * is set they are all present, so there is no partial-registration failure mode
+ * (unlike the .ko, where a kretprobe can fail to attach on an odd ROM).
+ *
+ * The filesystem hook is the one exception: it is compiled in but user-toggleable
+ * and, unlike the .ko (whose fs kretprobes are simply not registered when the
+ * feature is off), it has no load-time gate — only the runtime mask. Report it as
+ * installed just while it is in the active mask, so disabling the feature takes
+ * effect at runtime rather than showing a PendingDisable that a reboot cannot
+ * clear (the driver is compiled in). The network hooks stay always-installed.
  */
 static u32 installed_hook_mask(void)
 {
-	return VPNHIDE_OWNED_HOOK_MASK;
+	u32 mask = VPNHIDE_OWNED_HOOK_MASK;
+
+#ifdef CONFIG_VPNHIDE_FS_HIDING
+	if (!(READ_ONCE(active_hook_mask) &
+	      vpnhide_hook_bit(VPNHIDE_HOOK_FILESYSTEM_IFACE_PATHS)))
+		mask &= ~vpnhide_hook_bit(VPNHIDE_HOOK_FILESYSTEM_IFACE_PATHS);
+#endif
+	return mask;
 }
 
 static ssize_t ctl_write(struct file *file, const char __user *ubuf,
