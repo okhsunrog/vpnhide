@@ -263,40 +263,39 @@ check_socket_bind() {
 	set_target "$TARGET_UID"
 	_tg=$(/bind-probe vpn0 "$_vpn_ifindex" 2>/dev/null)
 
+	# The security invariant: a target binding vpn0 must be indistinguishable
+	# from binding a genuinely-absent interface. The hook freezes in a
+	# guaranteed-absent name/index and lets the kernel answer, so the target's
+	# errno must equal the native "no such interface" errno — which the probe
+	# measures directly via BIND_ABSENT (bind of an absent name). That baseline
+	# is ENODEV where the name is resolved before the CAP_NET_RAW check, EPERM
+	# where the capability is checked first, so comparing to it is order- and
+	# version-agnostic. (The non-target is not hidden; keep_bind_device and the
+	# keep_* vectors cover that it is preserved.)
+	_abs_errno=$(bind_field "$_nt" BIND_ABSENT_ERRNO)
+	[ -n "$_abs_errno" ] || _abs_errno=-1
 	for _case in \
 		"bind_device_raw BIND_NAME_RAW" \
 		"bind_device_nul BIND_NAME_NUL" \
 		"bind_ifindex BIND_INDEX"; do
 		_vec=${_case%% *}
 		_prefix=${_case#* }
-		_nt_errno=$(bind_field "$_nt" "${_prefix}_ERRNO")
-		_nt_state=$(bind_field "$_nt" "${_prefix}_STATE")
 		_tg_errno=$(bind_field "$_tg" "${_prefix}_ERRNO")
 		_tg_state=$(bind_field "$_tg" "${_prefix}_STATE")
-		[ -n "$_nt_errno" ] || _nt_errno=-1
-		[ -n "$_nt_state" ] || _nt_state=-1
 		[ -n "$_tg_errno" ] || _tg_errno=-1
 		[ -n "$_tg_state" ] || _tg_state=-1
-		if [ "$_nt_errno" -eq 0 ] && [ "$_nt_state" -eq 1 ] && \
-			[ "$_tg_errno" -eq 19 ] && [ "$_tg_state" -eq 0 ]; then
-			echo "RESULT $_vec=PASS (notarget=bound target=ENODEV+unbound)"
+		if [ "$_tg_state" -eq 0 ] && [ "$_tg_errno" -eq "$_abs_errno" ]; then
+			echo "RESULT $_vec=PASS (target vpn0 indistinguishable from absent: errno=$_tg_errno unbound)"
 			PASS=$((PASS + 1))
-		elif [ "$_nt_errno" -eq 1 ] && [ "$_nt_state" -eq 0 ] && \
-			[ "$_tg_errno" -eq 19 ] && [ "$_tg_state" -eq 0 ]; then
-			# Legacy kernels (5.4 and older) gate SO_BINDTODEVICE on
-			# CAP_NET_RAW unconditionally, so the unprivileged non-target bind
-			# is denied by the kernel (EPERM) instead of succeeding; the hook
-			# still actively hides the target (ENODEV). Both conceal vpn0.
-			echo "RESULT $_vec=PASS (target ENODEV; non-target CAP_NET_RAW-gated)"
-			PASS=$((PASS + 1))
-		elif [ "$_prefix" = BIND_INDEX ] && [ "$_nt_errno" -eq 92 ] && \
-			[ "$_tg_errno" -eq 92 ]; then
-			# Pre-5.1 kernels have no SO_BINDTOIFINDEX (ENOPROTOOPT for both
-			# actors) — the option, hence this vector, does not exist there.
+		elif [ "$_prefix" = BIND_INDEX ] && [ "$_tg_errno" -eq 92 ]; then
+			# Pre-5.1 kernels have no SO_BINDTOIFINDEX: ENOPROTOOPT means the
+			# option itself is absent, so the vector does not apply here. Both
+			# the setsockopt and the readback getsockopt return ENOPROTOOPT, so
+			# the socket state is the readback error (-92), not a bound state.
 			echo "RESULT $_vec=PASS (no SO_BINDTOIFINDEX; not applicable)"
 			PASS=$((PASS + 1))
 		else
-			echo "RESULT $_vec=FAIL (nt_errno=$_nt_errno nt_state=$_nt_state tg_errno=$_tg_errno tg_state=$_tg_state)"
+			echo "RESULT $_vec=FAIL (tg_errno=$_tg_errno tg_state=$_tg_state absent_errno=$_abs_errno)"
 			FAIL=$((FAIL + 1))
 		fi
 	done

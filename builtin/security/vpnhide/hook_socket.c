@@ -71,17 +71,38 @@ static bool bind_opt_relevant(int optname)
 	return false;
 }
 
-/* Verdict for an already-copied SO_BINDTODEVICE name snapshot. */
+/*
+ * Conceal a bind to a VPN interface WITHOUT choosing an errno ourselves. A fixed
+ * ENODEV is the native "absent interface" answer only on kernels that resolve
+ * the name before the CAP_NET_RAW check; on kernels that check the capability
+ * first, an absent interface yields EPERM to an unprivileged caller, so a
+ * hardcoded ENODEV for the hidden name would differ from every other name — a
+ * fingerprint of the filter. Instead, freeze in a value that can never name a
+ * real interface and let the kernel run its normal path: the caller then gets
+ * EXACTLY what a genuinely-absent interface returns for their privilege on this
+ * kernel (ENODEV, or EPERM where the cap gate fires first). Order-agnostic and
+ * indistinguishable, with no per-version errno table.
+ *
+ * "/" is rejected by dev_valid_name(), so no interface can ever bear it, and it
+ * resolves to "no such device" on every kernel.
+ *
+ * This trick only works for the NAME option: SO_BINDTOIFINDEX stores any
+ * non-negative index without a lookup (sock_bindtoindex_locked never returns
+ * ENODEV), so there is no "absent index" answer to imitate. The index of a VPN
+ * interface is also unlearnable — SIOCGIFINDEX / if_nametoindex / getifaddrs are
+ * already concealed — so a caller cannot target it by index in the first place;
+ * we simply deny that bind (ENODEV, as the .ko does).
+ */
 static enum vpnhide_bind_action classify_bind_name(union vpnhide_bind_snapshot *snap)
 {
 	if (snap->name[0] && is_vpn_ifname(snap->name)) {
 		vpnhide_record_hook_hit(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE);
-		return VPNHIDE_BIND_DENY;
+		snap->name[0] = '/';
+		snap->name[1] = '\0';
 	}
 	return VPNHIDE_BIND_FROZEN;
 }
 
-/* Verdict for an already-copied SO_BINDTOIFINDEX index snapshot. */
 static enum vpnhide_bind_action classify_bind_idx(struct sock *sk,
 						  union vpnhide_bind_snapshot *snap)
 {
@@ -129,7 +150,10 @@ enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
  * Pre-5.9 (bare user pointer) variant. Identical decision to the sockptr form,
  * copying from user memory directly. On FROZEN the pre-5.9 __sys_setsockopt
  * patch swaps optval to point at *snap under set_fs(KERNEL_DS) — the same
- * anti-TOCTOU freeze, using the kernel's existing kernel_optval mechanism.
+ * anti-TOCTOU freeze, using the kernel's existing kernel_optval mechanism. The
+ * hide itself is the frozen guaranteed-absent value from classify_bind_*, so the
+ * kernel's own path produces the native absent errno for the caller's privilege
+ * (this is what makes it correct on both cap-first and name-first legacy).
  */
 enum vpnhide_bind_action vpnhide_setsockopt_bind_user(struct sock *sk, int optname,
 						      const char __user *optval,
