@@ -111,7 +111,7 @@ MODULE_PARM_DESC(filesystem_hiding,
 		 "install optional sysfs/proc-sys interface concealment hooks");
 
 #ifndef VPNHIDE_PROBE_MASK_DEFAULT
-#define VPNHIDE_PROBE_MASK_DEFAULT 0xfffu
+#define VPNHIDE_PROBE_MASK_DEFAULT 0x1fffu
 #endif
 
 /*
@@ -120,13 +120,13 @@ MODULE_PARM_DESC(filesystem_hiding,
  * writable at runtime (0400: root-only read). Bits 0-9 map 1:1 to the
  * `probes[]` kretprobe table index below: 0 dev_ioctl, 1 sock_ioctl,
  * 2 rtnl_fill, 3 inet6_fill, 4 inet_fill, 5 fib_route_seq, 6 ipv6_route_seq,
- * 7 fib_dump_info, 8 rt6_fill_node, 9 fib_nl_fill_rule. Bit 10 gates the
- * socket-bind kprobe hooks (register_socket_bind_hooks). Bit 11 gates the
- * filesystem/VFS concealment kprobe hooks (register_filesystem_hooks) —
+ * 7 fib_dump_info, 8 rt6_fill_node, 9 fib_nl_fill_rule, 10 devinet_ioctl. Bit
+ * 11 gates the socket-bind kprobe hooks (register_socket_bind_hooks). Bit 12
+ * gates the filesystem/VFS concealment kprobe hooks (register_filesystem_hooks) —
  * ANDed with the filesystem_hiding param, so filesystem hooks register only
  * when BOTH are set.
  *
- * Default VPNHIDE_PROBE_MASK_DEFAULT (0xfff) sets every bit = current
+ * Default VPNHIDE_PROBE_MASK_DEFAULT (0x1fff) sets every bit = current
  * shipped behaviour. Build a diagnostic variant with a reduced hook set
  * baked in by overriding the macro at compile time
  * (-DVPNHIDE_PROBE_MASK_DEFAULT=0x...); no source edits needed per variant.
@@ -569,6 +569,23 @@ static struct kretprobe dev_ioctl_krp = {
 	.data_size = sizeof(struct dev_ioctl_data),
 	.maxactive = VPNHIDE_KRETPROBE_MAXACTIVE,
 	.kp.symbol_name = "dev_ioctl",
+};
+
+/*
+ * SIOCGIF{ADDR,BRDADDR,DSTADDR,NETMASK} by name do NOT go through dev_ioctl:
+ * the inet layer handles them in devinet_ioctl(net, cmd, struct ifreq *ifr),
+ * whose arg layout (cmd in x1, kernel ifr in x2) matches dev_ioctl exactly, so
+ * the same entry/return handlers apply — a hidden name's successful GET is
+ * rewritten to -ENODEV. Without this a caller could read a hidden interface's
+ * IPv4 address by name. (SIOCGIFHWADDR is already covered: it is dispatched
+ * inside dev_ioctl, which dev_ioctl_krp hooks.)
+ */
+static struct kretprobe devinet_ioctl_krp = {
+	.handler = dev_ioctl_ret,
+	.entry_handler = dev_ioctl_entry,
+	.data_size = sizeof(struct dev_ioctl_data),
+	.maxactive = VPNHIDE_KRETPROBE_MAXACTIVE,
+	.kp.symbol_name = "devinet_ioctl",
 };
 
 /* ================================================================== */
@@ -2440,6 +2457,9 @@ static struct kretprobe_reg probes[] = {
 	{ &fib_dump_krp, VPNHIDE_HOOK_FIB_DUMP_INFO, false },
 	{ &rt6_fill_krp, VPNHIDE_HOOK_RT6_FILL_NODE, false },
 	{ &fib_rule_fill_krp, VPNHIDE_HOOK_FIB_NL_FILL_RULE, false },
+	/* Appended at the end so existing probe_mask bit indices are unchanged.
+	 * Shares hook id DEV_IOCTL with dev_ioctl_krp (both by-name ioctls). */
+	{ &devinet_ioctl_krp, VPNHIDE_HOOK_DEV_IOCTL, false },
 };
 
 /* Bitset of logical hooks that fully registered — the `status` hooks mask. */
@@ -2658,9 +2678,9 @@ static int __init vpnhide_init(void)
 	/* Activate execution redirection last. No fallible initialization may run
 	 * after module text becomes reachable outside the kprobe handler. The module
 	 * has no exit function and remains resident until reboot. */
-	if (probe_mask & (1u << 10))
+	if (probe_mask & (1u << 11))
 		register_socket_bind_hooks();
-	if (READ_ONCE(filesystem_hiding) && (probe_mask & (1u << 11)))
+	if (READ_ONCE(filesystem_hiding) && (probe_mask & (1u << 12)))
 		register_filesystem_hooks();
 
 	pr_info(MODNAME

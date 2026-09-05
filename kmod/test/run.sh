@@ -101,6 +101,16 @@ else
 		echo "[run] no bionic toolchain/binary — skipping socket bind vectors"
 fi
 
+# By-name SIOCGIFHWADDR / SIOCGIFADDR probe (dev_ioctl / devinet_ioctl vectors).
+IOC=""
+IOC_CC="${VPNHIDE_BIND_CC:-$(find "$HOME/Android/Sdk/ndk" -type f -path '*/toolchains/llvm/prebuilt/*/bin/aarch64-linux-android*-clang' 2>/dev/null | sort | tail -1 || true)}"
+if [ -n "$IOC_CC" ] && [ -x "$IOC_CC" ]; then
+	IOC="$CACHE/iface-ioctl"
+	"$IOC_CC" -static -O2 -o "$IOC" "$HERE/iface-ioctl-probe.c" 2>/dev/null || IOC=""
+fi
+[ -n "$IOC" ] && echo "[run] iface-ioctl probe built" || \
+	echo "[run] no toolchain — skipping SIOCGIFHWADDR/ADDR vectors"
+
 if [ -z "$BIND" ] && [ -n "${VPNHIDE_BIND_REQUIRED:-}" ]; then
 	echo "ERROR: socket bind probe is required here (VPNHIDE_BIND_REQUIRED set) but unavailable."
 	exit 2
@@ -121,6 +131,7 @@ chmod +x "$RFS/init"
 [ -n "$GAI" ] && { cp "$GAI" "$RFS/gai"; chmod +x "$RFS/gai"; }
 [ -n "$IFC" ] && { cp "$IFC" "$RFS/ifconf"; chmod +x "$RFS/ifconf"; }
 [ -n "$BIND" ] && { cp "$BIND" "$RFS/bind-probe"; chmod +x "$RFS/bind-probe"; }
+[ -n "$IOC" ] && { cp "$IOC" "$RFS/iface-ioctl"; chmod +x "$RFS/iface-ioctl"; }
 ( cd "$RFS" && find . | cpio -o -H newc 2>/dev/null | gzip > "$WORK/initramfs.cpio.gz" )
 
 LOG="$WORK/serial.log"
