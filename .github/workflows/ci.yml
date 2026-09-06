@@ -374,6 +374,8 @@ jobs:
       VPNHIDE_IFC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/ifconf
       VPNHIDE_BIND_REQUIRED: "1"
       VPNHIDE_BIND_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/bind-probe
+      VPNHIDE_IOC_REQUIRED: "1"
+      VPNHIDE_IOC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/iface-ioctl
 
     steps:
       - uses: actions/checkout@v7
@@ -388,7 +390,7 @@ jobs:
           path: .artifacts/qemu-native-probes
 
       - name: Mark QEMU native probes executable
-        run: chmod +x "$VPNHIDE_IFC_BIN" "$VPNHIDE_BIND_BIN"
+        run: chmod +x "$VPNHIDE_IFC_BIN" "$VPNHIDE_BIND_BIN" "$VPNHIDE_IOC_BIN"
 
       - name: Build module + QEMU runtime test
         # Build the module against the BAKED kernel tree (VPNHIDE_QEMU_KSRC) so
