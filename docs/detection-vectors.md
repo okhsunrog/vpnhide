@@ -116,7 +116,8 @@ Legend: ✅ covered · ⚠️ partial / conditional · — not applicable to tha
 | `NetworkInterface.getNetworkInterfaces()` (Java) | JNI → `getifaddrs` | ✅ | ✅ | ✅ | — | |
 | `ioctl(SIOCGIFNAME)` index→name | native | ✅ `dev_ioctl` | ✅ `dev_ioctl` | ✅ | — | |
 | `ioctl(SIOCGIFCONF)` enumerate | native | ✅ `sock_ioctl` | ✅ `sock_ioctl` | ✅ `filter_ifconf` | — | |
-| `ioctl(SIOCGIF{FLAGS,MTU,INDEX,HWADDR,ADDR})` by name | native | ✅ `dev_ioctl` | ✅ `dev_ioctl` | ✅ pre-screen | — | |
+| `ioctl(SIOCGIF{FLAGS,MTU,INDEX,HWADDR})` by name | native | ✅ `dev_ioctl` | ✅ `dev_ioctl` | ✅ pre-screen | — | `dev_ioctl` hooks the dispatcher, so the SIOCGIFHWADDR case (`dev_get_mac_address`, 5.4+) is covered too |
+| `ioctl(SIOCGIF{ADDR,BRDADDR,DSTADDR,NETMASK})` by name | native | ✅ `devinet_ioctl` | ✅ `devinet_ioctl` | ✅ pre-screen | — | inet by-name ioctls take a separate path from `dev_ioctl`; hooked as of the finding-1 fix |
 | netlink `RTM_GETLINK` dump | `recvmsg`/`recvfrom` of `RTM_NEWLINK` | ✅ `rtnl_fill_ifinfo` | ✅ `rtnl_fill_ifinfo` | ✅ filter by index | — | |
 | netlink `RTM_GETADDR` dump | `RTM_NEWADDR` | ✅ `inet*_fill_ifaddr` | ✅ `inet*_fill_ifaddr` | ✅ filter by index | — | |
 | `/sys/class/net/<iface>/*` | lookup/stat/open/readlink/readdir reveal iface nodes | ⚠️ optional reboot-gated VFS hooks | ⚠️ optional reboot-gated VFS hooks | ⚠️ optional best-effort libc hooks (incl. `readdir`/`getdents64` listing filter) | — | 🔒 usually denied |

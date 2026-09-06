@@ -206,6 +206,7 @@ internal data class ModuleFact(
 
 internal data class ModuleFacts(
     val kmod: ModuleFact,
+    val builtin: ModuleFact,
     val kpm: ModuleFact,
     val zygisk: ModuleFact,
     val ports: ModuleFact,
@@ -375,8 +376,16 @@ private fun downloadArtifactFor(
 ): String? =
     when (kind) {
         FlashableModuleKind.Kmod -> recommendedArtifact
+
+        // The in-tree backend has no downloadable zip that fixes a version skew:
+        // the driver lives in the kernel image, and the companion module is
+        // updated with the app itself, not re-flashed on its own.
+        FlashableModuleKind.Builtin -> null
+
         FlashableModuleKind.Kpm -> "vpnhide-kpm.zip"
+
         FlashableModuleKind.Zygisk -> "vpnhide-zygisk.zip"
+
         FlashableModuleKind.Ports -> "vpnhide-ports.zip"
     }
 
@@ -414,6 +423,7 @@ private fun betterBackendIssues(facts: DashboardFacts): List<DashboardIssue> {
     val onlyZygisk =
         modules.zygisk.state is ModuleState.Installed &&
             modules.kmod.state is ModuleState.NotInstalled &&
+            modules.builtin.state is ModuleState.NotInstalled &&
             modules.kpm.state is ModuleState.NotInstalled
     if (!onlyZygisk) return emptyList()
     val recommendation = facts.kernelRecommendation ?: return emptyList()
@@ -430,7 +440,10 @@ private fun betterBackendIssues(facts: DashboardFacts): List<DashboardIssue> {
             }
         }
 
-        NativeBackendId.Zygisk -> {
+        // The in-tree backend is never a recommendation: it can't be installed,
+        // it's a property of how the kernel was built. Zygisk suggesting itself
+        // is likewise a no-op.
+        NativeBackendId.Builtin, NativeBackendId.Zygisk -> {
             emptyList()
         }
     }
@@ -526,6 +539,7 @@ private fun moduleProblemIssues(facts: DashboardFacts): List<DashboardIssue> =
         val ordered =
             listOf(
                 FlashableModuleKind.Kmod to modules.kmod,
+                FlashableModuleKind.Builtin to modules.builtin,
                 FlashableModuleKind.Kpm to modules.kpm,
                 FlashableModuleKind.Zygisk to modules.zygisk,
                 FlashableModuleKind.Ports to modules.ports,

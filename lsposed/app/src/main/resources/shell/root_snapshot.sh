@@ -94,21 +94,26 @@ phase_end() {
 phase_module_props() {
   phase_start module_props
   emit_file kmod_prop "$VPNHIDE_KMOD_DIR"/module.prop
+  emit_file builtin_prop "$VPNHIDE_BUILTIN_DIR"/module.prop
   emit_file zygisk_prop "$VPNHIDE_ZYGISK_DIR"/module.prop
   emit_file kpm_prop "$VPNHIDE_KPM_DIR"/module.prop
   emit_file ports_prop "$VPNHIDE_PORTS_DIR"/module.prop
   emit_eval kmod_module_dir '[ -d $VPNHIDE_KMOD_DIR ] && echo 1 || echo 0'
+  emit_eval builtin_module_dir '[ -d $VPNHIDE_BUILTIN_DIR ] && echo 1 || echo 0'
   emit_eval zygisk_module_dir '[ -d $VPNHIDE_ZYGISK_DIR ] && echo 1 || echo 0'
   emit_eval kpm_module_dir '[ -d $VPNHIDE_KPM_DIR ] && echo 1 || echo 0'
   emit_eval kmod_activator_state 'activator_state $VPNHIDE_KMOD_ACTIVATOR'
+  emit_eval builtin_activator_state 'activator_state $VPNHIDE_BUILTIN_ACTIVATOR'
   emit_eval kpm_activator_state 'activator_state $VPNHIDE_KPM_ACTIVATOR'
   emit_eval zygisk_activator_state 'activator_state $VPNHIDE_ZYGISK_ACTIVATOR'
   emit_eval ports_activator_state 'activator_state $VPNHIDE_PORTS_ACTIVATOR'
   emit_eval kmod_disabled '[ -f $VPNHIDE_KMOD_DIR/disable ] && echo 1 || echo 0'
+  emit_eval builtin_disabled '[ -f $VPNHIDE_BUILTIN_DIR/disable ] && echo 1 || echo 0'
   emit_eval kpm_disabled '[ -f $VPNHIDE_KPM_DIR/disable ] && echo 1 || echo 0'
   emit_eval zygisk_disabled '[ -f $VPNHIDE_ZYGISK_DIR/disable ] && echo 1 || echo 0'
   emit_eval ports_disabled '[ -f $VPNHIDE_PORTS_DIR/disable ] && echo 1 || echo 0'
   emit_eval kmod_pending_update 'pending_update $VPNHIDE_KMOD_DIR'
+  emit_eval builtin_pending_update 'pending_update $VPNHIDE_BUILTIN_DIR'
   emit_eval kpm_pending_update 'pending_update $VPNHIDE_KPM_DIR'
   emit_eval zygisk_pending_update 'pending_update $VPNHIDE_ZYGISK_DIR'
   emit_eval ports_pending_update 'pending_update $VPNHIDE_PORTS_DIR'
@@ -138,6 +143,7 @@ phase_kmod_status_files() {
   emit_file current_boot_id /proc/sys/kernel/random/boot_id
   emit_file kmod_load_status "$VPNHIDE_KMOD_LOAD_STATUS"
   emit_file kmod_load_dmesg "$VPNHIDE_KMOD_LOAD_DMESG"
+  emit_file builtin_load_status "$VPNHIDE_BUILTIN_LOAD_STATUS"
   emit_file zygisk_status "$VPNHIDE_ZYGISK_STATUS"
   emit_file kpm_load_status "$VPNHIDE_KPM_LOAD_STATUS"
   emit_file ports_load_status "$VPNHIDE_PORTS_LOAD_STATUS"

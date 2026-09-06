@@ -1,0 +1,22 @@
+diff --git a/net/ipv4/fib_semantics.c b/net/ipv4/fib_semantics.c
+index 233d9d043..0365b21af 100644
+--- a/net/ipv4/fib_semantics.c
++++ b/net/ipv4/fib_semantics.c
+@@ -48,6 +48,7 @@
+ #include <net/fib_notifier.h>
+ #include <net/addrconf.h>
+ 
++#include <linux/vpnhide.h>
+ #include "fib_lookup.h"
+ 
+ static DEFINE_SPINLOCK(fib_info_lock);
+@@ -1785,6 +1786,9 @@ int fib_dump_info(struct sk_buff *skb, u32 portid, u32 seq, int event,
+ 	struct nlmsghdr *nlh;
+ 	struct rtmsg *rtm;
+ 
++	if (vpnhide_hide_fib_dump(fri))
++		return 0;
++
+ 	nlh = nlmsg_put(skb, portid, seq, event, sizeof(*rtm), flags);
+ 	if (!nlh)
+ 		return -EMSGSIZE;

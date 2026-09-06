@@ -1,0 +1,43 @@
+diff --git a/net/socket.c b/net/socket.c
+index 9b233861f..b8c543aa2 100644
+--- a/net/socket.c
++++ b/net/socket.c
+@@ -95,6 +95,7 @@
+ #include <net/cls_cgroup.h>
+ 
+ #include <net/sock.h>
++#include <linux/vpnhide.h>
+ #include <linux/netfilter.h>
+ 
+ #include <linux/if_tun.h>
+@@ -2113,6 +2114,7 @@ int __sys_setsockopt(int fd, int level, int optname, char __user *user_optval,
+ 	char *kernel_optval = NULL;
+ 	int err, fput_needed;
+ 	struct socket *sock;
++	union vpnhide_bind_snapshot vh_snap;
+ 
+ 	if (optlen < 0)
+ 		return -EINVAL;
+@@ -2138,6 +2140,22 @@ int __sys_setsockopt(int fd, int level, int optname, char __user *user_optval,
+ 
+ 	if (kernel_optval)
+ 		optval = KERNEL_SOCKPTR(kernel_optval);
++	if (level == SOL_SOCKET) {
++		enum vpnhide_bind_action vh_act =
++			vpnhide_setsockopt_bind(sock->sk, optname, optval,
++						optlen, &vh_snap);
++		if (vh_act == VPNHIDE_BIND_DENY) {
++			err = -ENODEV;
++			goto out_put;
++		}
++		if (vh_act == VPNHIDE_BIND_FAULT) {
++			err = -EFAULT;
++			goto out_put;
++		}
++		if (vh_act == VPNHIDE_BIND_FROZEN)
++			optval = KERNEL_SOCKPTR(&vh_snap);
++	}
++
+ 	if (level == SOL_SOCKET && !sock_use_custom_sol_socket(sock))
+ 		err = sock_setsockopt(sock, level, optname, optval, optlen);
+ 	else if (unlikely(!sock->ops->setsockopt))

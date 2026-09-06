@@ -4,7 +4,7 @@ use serde::Deserialize;
 use vpnhide_protocol::Target;
 use vpnhide_protocol::format_config;
 use vpnhide_protocol::hook_ids::{
-    Hook, KERNEL_HOOK_MASK, KMOD_HOOK_MASK, KPM_HOOK_MASK, ZYGISK_HOOK_MASK,
+    Hook, BUILTIN_HOOK_MASK, KERNEL_HOOK_MASK, KMOD_HOOK_MASK, KPM_HOOK_MASK, ZYGISK_HOOK_MASK,
 };
 
 use crate::ports::build_ports_ruleset;
@@ -145,6 +145,7 @@ fn default_enabled() -> bool {
 pub(crate) enum NativeHookFamily {
     Kmod,
     Kpm,
+    Builtin,
     Zygisk,
 }
 
@@ -153,8 +154,21 @@ impl NativeHookFamily {
         match self {
             NativeHookFamily::Kmod => HookSet::from_bits(KERNEL_HOOK_MASK | KMOD_HOOK_MASK),
             NativeHookFamily::Kpm => HookSet::from_bits(KERNEL_HOOK_MASK | KPM_HOOK_MASK),
+            NativeHookFamily::Builtin => {
+                HookSet::from_bits(KERNEL_HOOK_MASK | BUILTIN_HOOK_MASK)
+            }
             NativeHookFamily::Zygisk => HookSet::from_bits(ZYGISK_HOOK_MASK),
         }
+    }
+
+    /// True for backends with no separate loader ABI (no insmod module param,
+    /// no ensure_loaded): the optional filesystem hook must be gated in the
+    /// projected mask itself, because there is no load-time gate behind it.
+    /// The .ko (module_param) and KPM (ensure_loaded) gate at load, so their
+    /// mask may carry the bit unconditionally; the compiled-in built-in driver
+    /// and zygisk cannot, so their mask is the only gate.
+    fn filesystem_gated_in_mask(self) -> bool {
+        matches!(self, NativeHookFamily::Builtin | NativeHookFamily::Zygisk)
     }
 }
 
@@ -208,7 +222,9 @@ impl NativeSelection {
                     return None;
                 }
                 let hooks = match family {
-                    NativeHookFamily::Kmod | NativeHookFamily::Kpm => {
+                    NativeHookFamily::Kmod
+                    | NativeHookFamily::Kpm
+                    | NativeHookFamily::Builtin => {
                         HookSet::from_names(names).restricted_to(family.full_set())
                     }
                     NativeHookFamily::Zygisk => family.full_set(),
@@ -220,7 +236,9 @@ impl NativeSelection {
                     return None;
                 }
                 let selected = match family {
-                    NativeHookFamily::Kmod | NativeHookFamily::Kpm => &detail.kernel,
+                    NativeHookFamily::Kmod
+                    | NativeHookFamily::Kpm
+                    | NativeHookFamily::Builtin => &detail.kernel,
                     NativeHookFamily::Zygisk => &detail.zygisk,
                 };
                 let Some(names) = selected else {
@@ -401,7 +419,7 @@ pub(crate) fn project_native_with_resolver_for_family(
     resolver: &PackageUidMap,
     family: NativeHookFamily,
 ) -> String {
-    let zygisk_filesystem_enabled = cfg
+    let filesystem_enabled = cfg
         .settings
         .optional_features
         .contains(OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS);
@@ -410,12 +428,14 @@ pub(crate) fn project_native_with_resolver_for_family(
         let Some(mut hooks) = app.native.hooks(family) else {
             continue;
         };
-        // Kernel backends receive the per-app desired bit independently from
-        // whether their load-time hook group is present; their runtime status
-        // reports the installed capability. Zygisk has no separate loader ABI,
-        // so the optional feature gate is projected directly into each process
-        // mask and takes effect when that app next specializes.
-        if family == NativeHookFamily::Zygisk && !zygisk_filesystem_enabled {
+        // The .ko (module_param) and KPM (ensure_loaded) gate the optional
+        // filesystem hook at load time, so their projected mask may carry the
+        // bit unconditionally; runtime status reports the installed capability.
+        // Backends with no separate loader ABI — zygisk (per-process mask) and
+        // the compiled-in built-in driver (CONFIG_VPNHIDE_FS_HIDING=y, gated
+        // only by the runtime mask) — have no load-time gate, so the toggle
+        // must be projected into the mask itself, else it can never turn off.
+        if family.filesystem_gated_in_mask() && !filesystem_enabled {
             hooks = hooks.without(Hook::FilesystemIfacePaths);
             if hooks.is_empty() {
                 continue;

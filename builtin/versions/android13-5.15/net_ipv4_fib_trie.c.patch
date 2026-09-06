@@ -1,0 +1,22 @@
+diff --git a/net/ipv4/fib_trie.c b/net/ipv4/fib_trie.c
+index 860c2c0f7..7e06036a6 100644
+--- a/net/ipv4/fib_trie.c
++++ b/net/ipv4/fib_trie.c
+@@ -69,6 +69,7 @@
+ #include <net/ip_fib.h>
+ #include <net/fib_notifier.h>
+ #include <trace/events/fib.h>
++#include <linux/vpnhide.h>
+ #include "fib_lookup.h"
+ 
+ static int call_fib_entry_notifier(struct notifier_block *nb,
+@@ -2954,6 +2955,9 @@ static int fib_route_seq_show(struct seq_file *seq, void *v)
+ 		__be32 mask = inet_make_mask(KEYLENGTH - fa->fa_slen);
+ 		unsigned int flags = fib_flag_trans(fa->fa_type, mask, fi);
+ 
++		if (vpnhide_hide_fib_route(fi))
++			continue;
++
+ 		if ((fa->fa_type == RTN_BROADCAST) ||
+ 		    (fa->fa_type == RTN_MULTICAST))
+ 			continue;

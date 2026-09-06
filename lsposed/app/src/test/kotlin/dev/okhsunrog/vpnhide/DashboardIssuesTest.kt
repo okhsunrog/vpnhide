@@ -31,15 +31,17 @@ class DashboardIssuesTest {
         kpm: ModuleState = ModuleState.NotInstalled,
         zygisk: ModuleState = ModuleState.NotInstalled,
         ports: ModuleState = ModuleState.NotInstalled,
+        builtin: ModuleState = ModuleState.NotInstalled,
         kmodProblem: ModuleProblem? = null,
         pendingReboot: Set<FlashableModuleKind> = emptySet(),
         standaloneKpm: Boolean = false,
         kpmLoadStatus: KpmLoadStatus = kpmStatus(),
         mismatches: List<ModuleMismatch> = emptyList(),
     ): ModuleFacts {
-        val backends = NativeBackendStates(kmod = kmod, kpm = kpm, zygisk = zygisk)
+        val backends = NativeBackendStates(kmod = kmod, kpm = kpm, zygisk = zygisk, builtin = builtin)
         return ModuleFacts(
             kmod = ModuleFact(kmod, kmodProblem, FlashableModuleKind.Kmod in pendingReboot),
+            builtin = ModuleFact(builtin, null, FlashableModuleKind.Builtin in pendingReboot),
             kpm = ModuleFact(kpm, null, FlashableModuleKind.Kpm in pendingReboot),
             zygisk = ModuleFact(zygisk, null, FlashableModuleKind.Zygisk in pendingReboot),
             ports = ModuleFact(ports, null, FlashableModuleKind.Ports in pendingReboot),

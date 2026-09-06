@@ -126,7 +126,15 @@ static uint32_t last_error;
 /* Exact registrations owned by this KPM. Teardown must unwrap the same
  * compiler clone that install_hook resolved, and only after hook_wrap actually
  * succeeded; resolving names again during exit cannot guarantee either. */
-#define VPNHIDE_MAX_HOOK_REGISTRATIONS 16
+/* Upper bound on install_hook() calls in one init. The worst case is a 6.1+ GKI
+ * tree: 11 enumeration hooks + 2 bind hooks (sock_setsockopt AND the LTO-inlined
+ * sk_setsockopt, which 5.10/5.15 don't both need) + the 4-hook optional
+ * filesystem group = 17. The group installs last and rolls back atomically if it
+ * can't fit, so the cap must clear the full total with headroom — 16 silently
+ * dropped filesystem hiding on 6.1/6.6 once devinet_ioctl became the 13th
+ * non-fs hook. Each entry is 3 pointers (24 B), so this array is well under the
+ * BSS budget that constrains KP boot on 6.12. */
+#define VPNHIDE_MAX_HOOK_REGISTRATIONS 24
 struct vpnhide_hook_registration {
 	void *function;
 	void *before;
@@ -1635,6 +1643,7 @@ static void iterate_dir_after(hook_fargs2_t *fargs, void *udata)
  *   inet_fill_ifaddr       RTM_GETADDR v4         ✓ (in_ifaddr.ifa_dev->dev)
  *   inet6_fill_ifaddr      RTM_GETADDR v6         ✓ (inet6_ifaddr.idev->dev)
  *   dev_ioctl              SIOCGIF* by name       ✓ (ret -> -ENODEV)
+ *   devinet_ioctl          SIOCGIF{ADDR,..} name  ✓ (inet by-name -> -ENODEV)
  *   sock_ioctl             SIOCGIFCONF            ✓ (ifconf compaction)
  *   fib_dump_info          RTM_GETROUTE v4 dump   ✓ (#86; fib_info nexthop +
  *                                                   public /32 host-route via a
@@ -2004,6 +2013,13 @@ static long vpnhide_kpm_init(const char *args, const char *event,
 			     VPNHIDE_HOOK_IPV6_ROUTE_SEQ_SHOW);
 	}
 	install_hook("dev_ioctl", 5, 0, (void *)dev_ioctl_after,
+		     VPNHIDE_HOOK_DEV_IOCTL);
+	/* SIOCGIF{ADDR,BRDADDR,DSTADDR,NETMASK} by name bypass dev_ioctl — the
+	 * inet layer handles them in devinet_ioctl(net, cmd, ifr). Same cmd@arg1 /
+	 * ifr@arg2 layout, and dev_ioctl_after already gates on the get-by-name
+	 * range and reads ifr_name@0, so it applies verbatim. (SIOCGIFHWADDR is
+	 * already covered: it is dispatched inside dev_ioctl.) */
+	install_hook("devinet_ioctl", 3, 0, (void *)dev_ioctl_after,
 		     VPNHIDE_HOOK_DEV_IOCTL);
 	install_hook("sock_ioctl", 3, (void *)sock_ioctl_before,
 		     (void *)sock_ioctl_after, VPNHIDE_HOOK_SOCK_IOCTL);

@@ -149,6 +149,7 @@
     <string name="dashboard_native_backend">Native backend</string>
     <string name="dashboard_backend_lsposed">LSPosed</string>
     <string name="dashboard_backend_kmod">Kmod</string>
+    <string name="dashboard_backend_builtin">Built-in</string>
     <string name="dashboard_backend_kpm">KPM</string>
     <string name="dashboard_backend_zygisk">Zygisk</string>
     <string name="dashboard_backend_line">%1$s · %2$s</string>
@@ -396,6 +397,9 @@
     <string name="dashboard_issue_update_kmod_named">Kernel module version %1$s is older than app version %2$s. Install %3$s from the latest release via KernelSU/Magisk → Modules to update.</string>
     <string name="dashboard_issue_update_zygisk">Zygisk version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
     <string name="dashboard_issue_update_app_for_kmod">Kernel module version %1$s is newer than app version %2$s. Update the VPN Hide app.</string>
+    <string name="dashboard_issue_update_builtin">Built-in backend module version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
+    <string name="dashboard_issue_update_app_for_builtin">Built-in backend module version %1$s is newer than app version %2$s. Update the VPN Hide app.</string>
+    <string name="dashboard_issue_builtin_version_mismatch">Built-in backend module version mismatch: module %1$s, app %2$s. Open KernelSU/Magisk → Modules to update the module.</string>
     <string name="dashboard_issue_update_app_for_zygisk">Zygisk version %1$s is newer than app version %2$s. Update the VPN Hide app.</string>
     <string name="dashboard_issue_kmod_version_mismatch">Kernel module version mismatch: module %1$s, app %2$s. Open KernelSU/Magisk → Modules to update the module.</string>
     <string name="dashboard_issue_zygisk_version_mismatch">Zygisk version mismatch: module %1$s, app %2$s. Open KernelSU/Magisk → Modules to update the module.</string>

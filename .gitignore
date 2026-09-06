@@ -46,7 +46,7 @@ target/
 *.log
 /tmp/
 /*.zip
-scripts/__pycache__/
+__pycache__/
 kmod/shared/test_protocol
 kmod/module-staging/
 kmod/kpm/module-staging/

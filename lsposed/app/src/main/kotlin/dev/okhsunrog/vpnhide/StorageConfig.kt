@@ -104,8 +104,15 @@ internal fun nativeHookEntriesFor(family: NativeHookFamily): List<HookIds.Hook> 
 internal fun nativeHookFamilyFor(backend: NativeBackendId?): NativeHookFamily =
     when (backend) {
         NativeBackendId.Zygisk -> NativeHookFamily.Zygisk
+
         NativeBackendId.Kmod -> NativeHookFamily.Kmod
+
+        // The in-tree backend owns the same kernel hooks as the .ko (including the
+        // optional filesystem hook), so it shares the kmod config hook family.
+        NativeBackendId.Builtin -> NativeHookFamily.Kmod
+
         NativeBackendId.Kpm -> NativeHookFamily.Kpm
+
         null -> NativeHookFamily.Kernel
     }
 

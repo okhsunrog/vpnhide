@@ -196,7 +196,7 @@ note = "libc setsockopt() best-effort socket-interface bind denial"
 [[hook]]
 id = 27
 name = "filesystem_iface_paths"
-backends = ["kmod", "kpm", "zygisk"]
+backends = ["kmod", "kpm", "builtin", "zygisk"]
 note = "Optional sysfs/proc-sys VPN interface path concealment"
 
 # --- backend ids (protocol §4.3 `status backend <id>`) ----------------------
@@ -223,6 +223,11 @@ note = "Zygisk libc-hook backend"
 id = 3
 name = "lsposed"
 note = "LSPosed Java-hook backend (system_server)"
+
+[[backend]]
+id = 4
+name = "builtin"
+note = "in-tree, compile-time (built-in) kernel backend (CONFIG_VPNHIDE=y); same kernel hooks as .ko, no kprobes"
 
 # --- status error codes (protocol §5.1) -------------------------------------
 # A single dominant fault code returned in a `status` payload's `error` field.

@@ -226,6 +226,44 @@ fn zygisk_projection_gates_filesystem_hook_on_the_optional_feature() {
 }
 
 #[test]
+fn builtin_projection_gates_filesystem_hook_on_the_optional_feature() {
+    // The compiled-in built-in driver has no load-time gate (unlike the .ko's
+    // module_param and KPM's ensure_loaded), so its runtime mask is the ONLY
+    // gate: the filesystem toggle must be reflected there, or it never turns
+    // off. Kmod/Kpm deliberately keep the bit (they gate at load), so assert
+    // both the built-in gating AND that the load-gated families do not.
+    let disabled = parse_canonical(
+        r#"{
+          "version": 1,
+          "apps": { "com.example.full": { "native": true } }
+        }"#,
+    )
+    .unwrap();
+    let enabled = parse_canonical(
+        r#"{
+          "version": 1,
+          "settings": { "optionalFeatures": ["filesystem_iface_paths"] },
+          "apps": { "com.example.full": { "native": true } }
+        }"#,
+    )
+    .unwrap();
+    let resolver = parse_pm_packages("package:com.example.full uid:10123\n");
+    let filesystem_bit = Hook::FilesystemIfacePaths.bit();
+    let mask = |cfg: &_, family| {
+        let wire = project_native_with_resolver_for_family(cfg, &resolver, family);
+        vpnhide_protocol::parse_config(wire.as_bytes()).unwrap().targets[0].hookmask
+    };
+
+    // Built-in: gated in the mask, exactly like zygisk.
+    assert_eq!(mask(&disabled, NativeHookFamily::Builtin) & filesystem_bit, 0);
+    assert_ne!(mask(&enabled, NativeHookFamily::Builtin) & filesystem_bit, 0);
+
+    // Load-gated families keep the bit even when the feature is off.
+    assert_ne!(mask(&disabled, NativeHookFamily::Kmod) & filesystem_bit, 0);
+    assert_ne!(mask(&disabled, NativeHookFamily::Kpm) & filesystem_bit, 0);
+}
+
+#[test]
 fn native_projection_ignores_non_kernel_hook_names() {
     let cfg = parse_canonical(
         r#"{

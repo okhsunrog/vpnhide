@@ -16,6 +16,8 @@ internal object ConfigChannels {
         "{ ${activatorShellHelper()}; " +
             "if [ -f $KMOD_MODULE_DIR/module.prop ] && [ ! -f $KMOD_MODULE_DIR/disable ]; then " +
             "run_activator $KMOD_ACTIVATOR kmod; " +
+            "elif [ -f $BUILTIN_MODULE_DIR/module.prop ] && [ ! -f $BUILTIN_MODULE_DIR/disable ]; then " +
+            "run_activator $BUILTIN_ACTIVATOR builtin; " +
             "elif [ -f $KPM_MODULE_DIR/module.prop ] && [ ! -f $KPM_MODULE_DIR/disable ]; then " +
             "run_activator $KPM_ACTIVATOR KPM; " +
             "elif [ -f $ZYGISK_MODULE_DIR/module.prop ] && [ ! -f $ZYGISK_MODULE_DIR/disable ]; then " +

@@ -141,6 +141,7 @@
     <string name="dashboard_native_backend">原生后端</string>
     <string name="dashboard_backend_lsposed">LSPosed</string>
     <string name="dashboard_backend_kmod">Kmod</string>
+    <string name="dashboard_backend_builtin">内置</string>
     <string name="dashboard_backend_kpm">KPM</string>
     <string name="dashboard_backend_zygisk">Zygisk</string>
     <string name="dashboard_backend_line">%1$s · %2$s</string>
@@ -385,6 +386,9 @@
     <string name="dashboard_issue_update_kmod_named">内核模块版本 %1$s 低于应用版本 %2$s。请从最新发行版，通过 KernelSU/Magisk → 模块安装 %3$s 进行更新。</string>
     <string name="dashboard_issue_update_zygisk">Zygisk 版本 %1$s 低于应用版本 %2$s。请打开 KernelSU/Magisk → 模块进行更新。</string>
     <string name="dashboard_issue_update_app_for_kmod">内核模块版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
+    <string name="dashboard_issue_update_builtin">内置后端模块版本 %1$s 低于应用版本 %2$s。请打开 KernelSU/Magisk → 模块进行更新。</string>
+    <string name="dashboard_issue_update_app_for_builtin">内置后端模块版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
+    <string name="dashboard_issue_builtin_version_mismatch">内置后端模块版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
     <string name="dashboard_issue_update_app_for_zygisk">Zygisk 版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
     <string name="dashboard_issue_kmod_version_mismatch">内核模块版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
     <string name="dashboard_issue_zygisk_version_mismatch">Zygisk 版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>

@@ -30,6 +30,14 @@ internal const val PORTS_ACTIVATOR = "$PORTS_MODULE_DIR/activator"
 internal const val KMOD_MODULE_DIR = "/data/adb/modules/vpnhide_kmod"
 internal const val KMOD_LOAD_STATUS_FILE = "/data/adb/vpnhide_kmod/load_status"
 internal const val KMOD_LOAD_DMESG_FILE = "/data/adb/vpnhide_kmod/load_dmesg"
+
+// Built-in kernel backend — the fourth native backend. The driver is compiled
+// into the kernel (CONFIG_VPNHIDE=y), so its companion module ships only the
+// userspace activator (no .ko to insmod). It owns the same kernel hooks as the
+// .ko and speaks the same /proc/vpnhide_ctl channel; the `backend 0x4` line in
+// the control status reply is what tells it apart from the loadable .ko (0x0).
+internal const val BUILTIN_MODULE_DIR = "/data/adb/modules/vpnhide_builtin"
+internal const val BUILTIN_LOAD_STATUS_FILE = "/data/adb/vpnhide_builtin/load_status"
 internal const val ZYGISK_MODULE_DIR = "/data/adb/modules/vpnhide_zygisk"
 internal const val APP_PACKAGE_NAME = "dev.okhsunrog.vpnhide"
 internal const val ZYGISK_STATUS_FILE_NAME = "vpnhide_zygisk_active"
@@ -41,6 +49,7 @@ internal const val ZYGISK_STATUS_FILE = "/data/user/0/dev.okhsunrog.vpnhide/file
 internal const val KPM_MODULE_DIR = "/data/adb/modules/vpnhide_kpm"
 internal const val KPM_LOAD_STATUS_FILE = "/data/adb/vpnhide_kpm/load_status"
 internal const val KMOD_ACTIVATOR = "$KMOD_MODULE_DIR/activator"
+internal const val BUILTIN_ACTIVATOR = "$BUILTIN_MODULE_DIR/activator"
 internal const val KPM_ACTIVATOR = "$KPM_MODULE_DIR/activator"
 internal const val ZYGISK_ACTIVATOR = "$ZYGISK_MODULE_DIR/activator"
 

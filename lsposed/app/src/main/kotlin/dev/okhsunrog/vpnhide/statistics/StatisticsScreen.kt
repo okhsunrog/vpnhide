@@ -1022,6 +1022,7 @@ private fun backendName(backend: HookIds.Backend): String =
     stringResource(
         when (backend) {
             HookIds.Backend.KMOD -> R.string.dashboard_backend_kmod
+            HookIds.Backend.BUILTIN -> R.string.dashboard_backend_builtin
             HookIds.Backend.KPM -> R.string.dashboard_backend_kpm
             HookIds.Backend.ZYGISK -> R.string.dashboard_backend_zygisk
             HookIds.Backend.LSPOSED -> R.string.dashboard_backend_lsposed

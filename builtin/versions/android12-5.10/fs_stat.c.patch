@@ -1,0 +1,24 @@
+diff --git a/fs/stat.c b/fs/stat.c
+index c6a2e1098..e4d9f3d9c 100644
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -20,6 +20,7 @@
+ 
+ #include <linux/uaccess.h>
+ #include <asm/unistd.h>
++#include <linux/vpnhide.h>
+ 
+ #include "internal.h"
+ #include "mount.h"
+@@ -129,7 +130,10 @@ int vfs_getattr(const struct path *path, struct kstat *stat,
+ 	retval = security_inode_getattr(path);
+ 	if (retval)
+ 		return retval;
+-	return vfs_getattr_nosec(path, stat, request_mask, query_flags);
++	retval = vfs_getattr_nosec(path, stat, request_mask, query_flags);
++	if (!retval && vpnhide_should_hide_dentry(path->dentry))
++		retval = -ENOENT;
++	return retval;
+ }
+ EXPORT_SYMBOL(vfs_getattr);
+ 

@@ -93,6 +93,24 @@ module reinstall. They hold binaries and boot scripts, not user-managed config.
   `/proc/vpnhide_ctl`.
 - `vpnhide_kmod.ko`: kernel module binary.
 
+### `/data/adb/modules/vpnhide_builtin/`
+
+Companion for the in-tree (`CONFIG_VPNHIDE=y`) kernel backend. The driver is
+compiled into the kernel, so this module carries no `.ko` — only the userspace
+activator. It shares `/proc/vpnhide_ctl` with the `.ko` and is mutually
+exclusive with it (the kernel either has the driver built in or loads the
+module); the `backend 0x4` line in the control status reply is what distinguishes
+the two.
+
+- `module.prop`: module metadata (`id=vpnhide_builtin`).
+- `post-fs-data.sh`: thin root-manager entrypoint that execs `activator boot-service`
+  (no `insmod` — the driver is already live if the kernel was built with it).
+- `service.sh`: re-runs `activator boot-service` in the background as a late retry.
+- `uninstall.sh`: thin uninstall entrypoint that execs `activator uninstall`.
+- `activator`: Rust bin that verifies `/proc/vpnhide_ctl` reports the built-in
+  backend (`0x4`), delivers the config snapshot, and records liveness in
+  `/data/adb/vpnhide_builtin/load_status`. No module is loaded.
+
 ### `/data/adb/modules/vpnhide_kpm/`
 
 - `module.prop`: module metadata.
@@ -133,7 +151,7 @@ module reinstall. They hold binaries and boot scripts, not user-managed config.
 - `uninstall.sh`: thin entrypoint; the activator removes `vpnhide_out`,
   `vpnhide_out6`, and portshide diagnostics.
 
-For all four module directories, the app checks the `activator` file itself in
+For all five module directories, the app checks the `activator` file itself in
 the shared root snapshot. An enabled installation with a missing or
 non-executable activator is a bundle-integrity failure even when an old runtime
 status file still exists.
@@ -148,6 +166,12 @@ status file still exists.
 |---|---|---|---|---|
 | `load_status` | `key=value`: timestamp, boot_id, uname_r, gki_variant, kmod_version, root_manager, kprobes, kretprobes, filesystem_hiding, filesystem_config_exit, filesystem_config_error, insmod_exit, loaded, insmod_stderr | kmod activator | app dashboard | overwritten each boot |
 | `load_dmesg` | filtered dmesg excerpt | kmod activator | app dashboard/debug export | overwritten each boot |
+
+### `/data/adb/vpnhide_builtin/`
+
+| File | Format | Writer | Reader | Lifetime |
+|---|---|---|---|---|
+| `load_status` | `key=value`: timestamp, boot_id, uname_r, runtime=builtin, loaded, detail | built-in activator | app dashboard | overwritten each boot |
 
 ### `/data/adb/vpnhide_kpm/`
 

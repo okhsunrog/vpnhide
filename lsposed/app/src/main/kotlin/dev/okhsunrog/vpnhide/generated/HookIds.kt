@@ -104,6 +104,7 @@ internal object HookIds {
     const val KERNEL_HOOK_MASK = 0x20003ff
     const val KMOD_HOOK_MASK = 0x8000000
     const val KPM_HOOK_MASK = 0x8000000
+    const val BUILTIN_HOOK_MASK = 0x8000000
     const val ZYGISK_HOOK_MASK = 0xdfc0000
     const val LSPOSED_HOOK_MASK = 0x3fc00
 
@@ -142,5 +143,8 @@ internal object HookIds {
 
         // LSPosed Java-hook backend (system_server)
         LSPOSED(3),
+
+        // in-tree, compile-time (built-in) kernel backend (CONFIG_VPNHIDE=y); same kernel hooks as .ko, no kprobes
+        BUILTIN(4),
     }
 }

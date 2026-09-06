@@ -1,0 +1,41 @@
+diff --git a/net/compat.c b/net/compat.c
+index 2ec822f4e..44aa3c648 100644
+--- a/net/compat.c
++++ b/net/compat.c
+@@ -21,6 +21,7 @@
+ #include <linux/syscalls.h>
+ #include <linux/filter.h>
+ #include <linux/compat.h>
++#include <linux/vpnhide.h>
+ #include <linux/security.h>
+ #include <linux/audit.h>
+ #include <linux/export.h>
+@@ -382,6 +383,28 @@ static int compat_sock_setsockopt(struct socket *sock, int level, int optname,
+ 	    (optname == SO_RCVTIMEO || optname == SO_SNDTIMEO))
+ 		return do_set_sock_timeout(sock, level, optname, optval, optlen);
+ 
++	{
++		union vpnhide_bind_snapshot vh_snap;
++		enum vpnhide_bind_action vh_act =
++			vpnhide_setsockopt_bind_user(sock->sk, optname, optval,
++						     optlen, &vh_snap);
++
++		if (vh_act == VPNHIDE_BIND_DENY)
++			return -ENODEV;
++		if (vh_act == VPNHIDE_BIND_FAULT)
++			return -EFAULT;
++		if (vh_act == VPNHIDE_BIND_FROZEN) {
++			mm_segment_t vh_oldfs = get_fs();
++			int vh_ret;
++
++			set_fs(KERNEL_DS);
++			vh_ret = sock_setsockopt(sock, level, optname,
++						 (char __user __force *)&vh_snap,
++						 optlen);
++			set_fs(vh_oldfs);
++			return vh_ret;
++		}
++	}
+ 	return sock_setsockopt(sock, level, optname, optval, optlen);
+ }
+ 

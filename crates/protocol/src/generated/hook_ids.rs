@@ -146,6 +146,7 @@ pub const HOOK_COUNT: u32 = 28;
 pub const KERNEL_HOOK_MASK: u32 = 0x20003ff;
 pub const KMOD_HOOK_MASK: u32 = 0x8000000;
 pub const KPM_HOOK_MASK: u32 = 0x8000000;
+pub const BUILTIN_HOOK_MASK: u32 = 0x8000000;
 pub const ZYGISK_HOOK_MASK: u32 = 0xdfc0000;
 pub const LSPOSED_HOOK_MASK: u32 = 0x3fc00;
 
@@ -177,4 +178,6 @@ pub enum Backend {
     Zygisk = 2,
     /// LSPosed Java-hook backend (system_server)
     Lsposed = 3,
+    /// in-tree, compile-time (built-in) kernel backend (CONFIG_VPNHIDE=y); same kernel hooks as .ko, no kprobes
+    Builtin = 4,
 }

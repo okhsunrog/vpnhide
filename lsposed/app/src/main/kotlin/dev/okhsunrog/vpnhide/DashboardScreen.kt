@@ -979,6 +979,7 @@ private fun NativeBackendCard(
         stringResource(
             when (backend.id) {
                 NativeBackendId.Kmod -> R.string.dashboard_backend_kmod
+                NativeBackendId.Builtin -> R.string.dashboard_backend_builtin
                 NativeBackendId.Kpm -> R.string.dashboard_backend_kpm
                 NativeBackendId.Zygisk -> R.string.dashboard_backend_zygisk
             },
@@ -1193,6 +1194,13 @@ private fun NativeInstallRecommendationCard(recommendation: NativeInstallRecomme
                                 )
                             }
                         }
+
+                        // The in-tree backend is never produced by
+                        // buildNativeInstallRecommendation — it is a build-time
+                        // kernel property, not something the user installs.
+                        NativeBackendId.Builtin -> {
+                            error("built-in backend is never a native install recommendation")
+                        }
                     },
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
@@ -1203,8 +1211,11 @@ private fun NativeInstallRecommendationCard(recommendation: NativeInstallRecomme
             val note =
                 when (recommendation.recommended) {
                     NativeBackendId.Zygisk -> R.string.dashboard_install_recommendation_zygisk_warning
+
                     NativeBackendId.Kmod -> R.string.dashboard_install_recommendation_kmod_kpm_alt
-                    NativeBackendId.Kpm -> null
+
+                    // Builtin is never recommended (see the text branch above); no note.
+                    NativeBackendId.Kpm, NativeBackendId.Builtin -> null
                 }
             if (note != null) {
                 Spacer(Modifier.height(8.dp))

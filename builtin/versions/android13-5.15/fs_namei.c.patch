@@ -1,0 +1,37 @@
+diff --git a/fs/namei.c b/fs/namei.c
+index f376c938f..216a6ca79 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -39,6 +39,7 @@
+ #include <linux/bitops.h>
+ #include <linux/init_task.h>
+ #include <linux/uaccess.h>
++#include <linux/vpnhide.h>
+ 
+ #include "internal.h"
+ #include "mount.h"
+@@ -2498,6 +2499,12 @@ int filename_lookup(int dfd, struct filename *name, unsigned flags,
+ 	if (likely(!retval))
+ 		audit_inode(name, path->dentry,
+ 			    flags & LOOKUP_MOUNTPOINT ? AUDIT_INODE_NOEVAL : 0);
++	if (!retval && vpnhide_should_hide_dentry(path->dentry)) {
++		path_put(path);
++		path->mnt = NULL;
++		path->dentry = NULL;
++		retval = -ENOENT;
++	}
+ 	restore_nameidata();
+ 	return retval;
+ }
+@@ -3779,6 +3786,11 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
+ 		filp = path_openat(&nd, op, flags);
+ 	if (unlikely(filp == ERR_PTR(-ESTALE)))
+ 		filp = path_openat(&nd, op, flags | LOOKUP_REVAL);
++	if (!IS_ERR(filp) &&
++	    vpnhide_should_hide_dentry(filp->f_path.dentry)) {
++		fput(filp);
++		filp = ERR_PTR(-ENOENT);
++	}
+ 	restore_nameidata();
+ 	return filp;
+ }

@@ -66,6 +66,9 @@
             "brokenReason": null,
             "pendingReboot": false,
             "runtimeCheckable": true
+        },
+        "builtin": {
+            "kind": "not_installed"
         }
     },
     "activeBackend": {

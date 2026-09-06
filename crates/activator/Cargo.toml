@@ -24,6 +24,10 @@ name = "kpm"
 path = "src/bin/kpm.rs"
 
 [[bin]]
+name = "builtin"
+path = "src/bin/builtin.rs"
+
+[[bin]]
 name = "zygisk"
 path = "src/bin/zygisk.rs"
 

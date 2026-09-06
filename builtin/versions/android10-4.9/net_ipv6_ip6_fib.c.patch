@@ -1,0 +1,24 @@
+diff --git a/net/ipv6/ip6_fib.c b/net/ipv6/ip6_fib.c
+index f03855d35..1f258d111 100644
+--- a/net/ipv6/ip6_fib.c
++++ b/net/ipv6/ip6_fib.c
+@@ -36,6 +36,7 @@
+ 
+ #include <net/ip6_fib.h>
+ #include <net/ip6_route.h>
++#include <linux/vpnhide.h>
+ 
+ #define RT6_DEBUG 2
+ 
+@@ -1979,6 +1980,11 @@ static int ipv6_route_seq_show(struct seq_file *seq, void *v)
+ 	struct rt6_info *rt = v;
+ 	struct ipv6_route_iter *iter = seq->private;
+ 
++	if (vpnhide_hide_fib6_route(rt)) {
++		iter->w.leaf = NULL;
++		return 0;
++	}
++
+ 	seq_printf(seq, "%pi6 %02x ", &rt->rt6i_dst.addr, rt->rt6i_dst.plen);
+ 
+ #ifdef CONFIG_IPV6_SUBTREES

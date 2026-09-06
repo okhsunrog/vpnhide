@@ -37,6 +37,12 @@ docker run --rm \
 	git clone --depth=1 -b "$KMI" \
 		https://android.googlesource.com/kernel/common /tmp/linux
 	cd /tmp/linux
+	# Work around an AOSP host-tool regression on newer GKI HEADs: certs/
+	# extract-cert.c declares key_pass only under USE_PKCS11_ENGINE but uses it
+	# in the non-BoringSSL ENGINE branch, breaking the host build. Unrelated to
+	# vpnhide; make the declaration unconditional. Idempotent.
+	sed -i -z "s/#ifdef USE_PKCS11_ENGINE\nstatic const char \*key_pass;\n#endif/static const char *key_pass;/" \
+		certs/extract-cert.c || true
 	make ARCH=arm64 LLVM=1 gki_defconfig
 	./scripts/kconfig/merge_config.sh -m .config /qemu.config
 	make ARCH=arm64 LLVM=1 olddefconfig

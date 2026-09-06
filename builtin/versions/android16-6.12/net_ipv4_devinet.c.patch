@@ -1,0 +1,34 @@
+diff --git a/net/ipv4/devinet.c b/net/ipv4/devinet.c
+index 46fa50576..20174b1d4 100644
+--- a/net/ipv4/devinet.c
++++ b/net/ipv4/devinet.c
+@@ -58,6 +58,7 @@
+ #include <net/ip.h>
+ #include <net/route.h>
+ #include <net/ip_fib.h>
++#include <linux/vpnhide.h>
+ #include <net/rtnetlink.h>
+ #include <net/net_namespace.h>
+ #include <net/addrconf.h>
+@@ -1073,6 +1074,9 @@ int devinet_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr)
+ 
+ 	dev_load(net, ifr->ifr_name);
+ 
++	if (vpnhide_should_hide_ifname(ifr->ifr_name, VPNHIDE_HID_DEV_IOCTL))
++		return -ENODEV;
++
+ 	switch (cmd) {
+ 	case SIOCGIFADDR:	/* Get interface address */
+ 	case SIOCGIFBRDADDR:	/* Get the broadcast address */
+@@ -1700,6 +1704,11 @@ static int inet_fill_ifaddr(struct sk_buff *skb, const struct in_ifaddr *ifa,
+ 	u32 preferred, valid;
+ 	u32 flags;
+ 
++	if (ifa->ifa_dev && ifa->ifa_dev->dev &&
++	    vpnhide_should_hide_dev(ifa->ifa_dev->dev,
++				    VPNHIDE_HID_INET_FILL_IFADDR))
++		return 0;
++
+ 	nlh = nlmsg_put(skb, args->portid, args->seq, args->event, sizeof(*ifm),
+ 			args->flags);
+ 	if (!nlh)

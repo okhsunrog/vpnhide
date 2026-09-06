@@ -95,6 +95,7 @@
     <string name="dashboard_native_backend">Нативный бэкенд</string>
     <string name="dashboard_backend_lsposed">LSPosed</string>
     <string name="dashboard_backend_kmod">Kmod</string>
+    <string name="dashboard_backend_builtin">Встроенный</string>
     <string name="dashboard_backend_kpm">KPM</string>
     <string name="dashboard_backend_zygisk">Zygisk</string>
     <string name="dashboard_backend_line">%1$s · %2$s</string>
@@ -351,6 +352,9 @@
     <string name="dashboard_issue_update_kmod_named">Версия модуля ядра %1$s старее версии приложения %2$s. Установите %3$s из последнего релиза через KernelSU/Magisk → Модули.</string>
     <string name="dashboard_issue_update_zygisk">Версия модуля Zygisk %1$s старее версии приложения %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
     <string name="dashboard_issue_update_app_for_kmod">Версия модуля ядра %1$s новее версии приложения %2$s. Обновите приложение VPN Hide.</string>
+    <string name="dashboard_issue_update_builtin">Версия модуля встроенного бэкенда %1$s старее версии приложения %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
+    <string name="dashboard_issue_update_app_for_builtin">Версия модуля встроенного бэкенда %1$s новее версии приложения %2$s. Обновите приложение VPN Hide.</string>
+    <string name="dashboard_issue_builtin_version_mismatch">Несоответствие версий модуля встроенного бэкенда: модуль %1$s, приложение %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
     <string name="dashboard_issue_update_app_for_zygisk">Версия модуля Zygisk %1$s новее версии приложения %2$s. Обновите приложение VPN Hide.</string>
     <string name="dashboard_issue_kmod_version_mismatch">Несоответствие версий модуля ядра: модуль %1$s, приложение %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
     <string name="dashboard_issue_zygisk_version_mismatch">Несоответствие версий модуля Zygisk: модуль %1$s, приложение %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>

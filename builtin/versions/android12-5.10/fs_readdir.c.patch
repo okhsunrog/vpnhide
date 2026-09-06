@@ -1,0 +1,27 @@
+diff --git a/fs/readdir.c b/fs/readdir.c
+index 09e8ed7d4..c2fae1be2 100644
+--- a/fs/readdir.c
++++ b/fs/readdir.c
+@@ -21,6 +21,7 @@
+ #include <linux/unistd.h>
+ #include <linux/compat.h>
+ #include <linux/uaccess.h>
++#include <linux/vpnhide.h>
+ 
+ #include <asm/unaligned.h>
+ 
+@@ -60,11 +61,14 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
+ 
+ 	res = -ENOENT;
+ 	if (!IS_DEADDIR(inode)) {
++		bool vh_dir = vpnhide_readdir_begin(file, ctx);
+ 		ctx->pos = file->f_pos;
+ 		if (shared)
+ 			res = file->f_op->iterate_shared(file, ctx);
+ 		else
+ 			res = file->f_op->iterate(file, ctx);
++		if (vh_dir)
++			vpnhide_readdir_end(ctx);
+ 		file->f_pos = ctx->pos;
+ 		fsnotify_access(file);
+ 		file_accessed(file);

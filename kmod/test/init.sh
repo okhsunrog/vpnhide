@@ -45,10 +45,24 @@ run_as_target() {
 	su -s /bin/sh vpnhide-target -c "$1"
 }
 
-# --- load the module --------------------------------------------------------
-if insmod /vpnhide_kmod.ko filesystem_hiding=1; then echo "INSMOD=ok"; else echo "INSMOD=FAIL"; fi
-REGISTERED=$(dmesg | grep -c 'vpnhide:.*registered')
-echo "REGISTERED=$REGISTERED"
+# --- load / verify the backend ----------------------------------------------
+# Which backend this boot exercises. The host env does not cross into the VM, so
+# builtin/test/run.sh drops a /vpnhide_backend marker into the initramfs; default
+# is the .ko harness.
+VPNHIDE_TEST_BACKEND="${VPNHIDE_TEST_BACKEND:-$([ -f /vpnhide_backend ] && cat /vpnhide_backend 2>/dev/null || echo kmod)}"
+# kmod: insmod the .ko and count the kretprobe registrations from dmesg.
+# builtin: nothing to insmod — the driver is compiled into the kernel
+# (CONFIG_VPNHIDE=y); "loaded" == the control node exists, and every owned hook
+# is a compiled-in call site so there is no per-hook registration to count.
+if [ "${VPNHIDE_TEST_BACKEND:-kmod}" = "builtin" ]; then
+	if [ -e /proc/vpnhide_ctl ]; then echo "INSMOD=ok (builtin, in-tree)"; else echo "INSMOD=FAIL"; fi
+	REGISTERED=$([ -e /proc/vpnhide_ctl ] && echo 1 || echo 0)
+	echo "REGISTERED=$REGISTERED"
+else
+	if insmod /vpnhide_kmod.ko filesystem_hiding=1; then echo "INSMOD=ok"; else echo "INSMOD=FAIL"; fi
+	REGISTERED=$(dmesg | grep -c 'vpnhide:.*registered')
+	echo "REGISTERED=$REGISTERED"
+fi
 
 # Write a control-protocol config snapshot (docs/protocol.md) enabling every
 # kernel and optional filesystem hooks (mask 0xa0003ff) for a single UID, with
@@ -249,29 +263,64 @@ check_socket_bind() {
 	set_target "$TARGET_UID"
 	_tg=$(/bind-probe vpn0 "$_vpn_ifindex" 2>/dev/null)
 
+	# The security invariant: a target binding vpn0 must be indistinguishable
+	# from binding a genuinely-absent interface. The hook freezes in a
+	# guaranteed-absent name/index and lets the kernel answer, so the target's
+	# errno must equal the native "no such interface" errno — which the probe
+	# measures directly via BIND_ABSENT (bind of an absent name). That baseline
+	# is ENODEV where the name is resolved before the CAP_NET_RAW check, EPERM
+	# where the capability is checked first, so comparing to it is order- and
+	# version-agnostic. (The non-target is not hidden; keep_bind_device and the
+	# keep_* vectors cover that it is preserved.)
+	_abs_errno=$(bind_field "$_nt" BIND_ABSENT_ERRNO)
+	[ -n "$_abs_errno" ] || _abs_errno=-1
 	for _case in \
 		"bind_device_raw BIND_NAME_RAW" \
 		"bind_device_nul BIND_NAME_NUL" \
 		"bind_ifindex BIND_INDEX"; do
 		_vec=${_case%% *}
 		_prefix=${_case#* }
-		_nt_errno=$(bind_field "$_nt" "${_prefix}_ERRNO")
-		_nt_state=$(bind_field "$_nt" "${_prefix}_STATE")
 		_tg_errno=$(bind_field "$_tg" "${_prefix}_ERRNO")
 		_tg_state=$(bind_field "$_tg" "${_prefix}_STATE")
-		[ -n "$_nt_errno" ] || _nt_errno=-1
-		[ -n "$_nt_state" ] || _nt_state=-1
 		[ -n "$_tg_errno" ] || _tg_errno=-1
 		[ -n "$_tg_state" ] || _tg_state=-1
-		if [ "$_nt_errno" -eq 0 ] && [ "$_nt_state" -eq 1 ] && \
-			[ "$_tg_errno" -eq 19 ] && [ "$_tg_state" -eq 0 ]; then
-			echo "RESULT $_vec=PASS (notarget=bound target=ENODEV+unbound)"
+		if [ "$_tg_state" -eq 0 ] && [ "$_tg_errno" -eq "$_abs_errno" ]; then
+			echo "RESULT $_vec=PASS (target vpn0 indistinguishable from absent: errno=$_tg_errno unbound)"
+			PASS=$((PASS + 1))
+		elif [ "$_prefix" = BIND_INDEX ] && [ "$_tg_errno" -eq 92 ]; then
+			# Pre-5.1 kernels have no SO_BINDTOIFINDEX: ENOPROTOOPT means the
+			# option itself is absent, so the vector does not apply here. Both
+			# the setsockopt and the readback getsockopt return ENOPROTOOPT, so
+			# the socket state is the readback error (-92), not a bound state.
+			echo "RESULT $_vec=PASS (no SO_BINDTOIFINDEX; not applicable)"
 			PASS=$((PASS + 1))
 		else
-			echo "RESULT $_vec=FAIL (nt_errno=$_nt_errno nt_state=$_nt_state tg_errno=$_tg_errno tg_state=$_tg_state)"
+			echo "RESULT $_vec=FAIL (tg_errno=$_tg_errno tg_state=$_tg_state absent_errno=$_abs_errno)"
 			FAIL=$((FAIL + 1))
 		fi
 	done
+
+	# 32-bit (compat) bind: on pre-5.9 kernels compat setsockopt is a separate
+	# entry, so a bind hook patched only at the 64-bit __sys_setsockopt would
+	# leak here. The target's compat SO_BINDTODEVICE(vpn0) must be as hidden as
+	# the 64-bit path — unbound and returning the native absent errno.
+	if [ -x /bind-probe32 ]; then
+		set_target "$TARGET_UID"
+		_tg32=$(/bind-probe32 vpn0 "$_vpn_ifindex" 2>/dev/null)
+		_c_errno=$(bind_field "$_tg32" BIND_NAME_RAW_ERRNO)
+		_c_state=$(bind_field "$_tg32" BIND_NAME_RAW_STATE)
+		[ -n "$_c_errno" ] || _c_errno=-1
+		[ -n "$_c_state" ] || _c_state=-1
+		if [ "$_c_state" -eq 0 ] && [ "$_c_errno" -eq "$_abs_errno" ]; then
+			echo "RESULT bind_device_compat=PASS (compat vpn0 indistinguishable from absent: errno=$_c_errno unbound)"
+			PASS=$((PASS + 1))
+		else
+			echo "RESULT bind_device_compat=FAIL (errno=$_c_errno state=$_c_state absent_errno=$_abs_errno)"
+			FAIL=$((FAIL + 1))
+		fi
+	else
+		echo "RESULT bind_device_compat=SKIP (no 32-bit bind probe)"
+	fi
 
 	_nt_errno=$(bind_field "$_nt" BIND_BADPTR_ERRNO)
 	_nt_state=$(bind_field "$_nt" BIND_BADPTR_STATE)
@@ -281,9 +330,14 @@ check_socket_bind() {
 	[ -n "$_nt_state" ] || _nt_state=-1
 	[ -n "$_tg_errno" ] || _tg_errno=-1
 	[ -n "$_tg_state" ] || _tg_state=-1
-	if [ "$_nt_errno" -eq 14 ] && [ "$_nt_state" -eq 0 ] && \
-		[ "$_tg_errno" -eq 14 ] && [ "$_tg_state" -eq 0 ]; then
-		echo "RESULT bind_bad_pointer=PASS (EFAULT+unbound)"
+	# A kernel-range pointer must be rejected and leave the socket unbound.
+	# The target hits our hook's own uaccess (EFAULT); the non-target passes
+	# through to the kernel, whose rejection errno depends on check order —
+	# EFAULT where the copy runs first (5.4+), EPERM where CAP_NET_RAW is
+	# tested first (4.19/4.14). Any non-zero errno + unbound is a safe reject.
+	if [ "$_nt_errno" -ne 0 ] && [ "$_nt_state" -eq 0 ] && \
+		[ "$_tg_errno" -ne 0 ] && [ "$_tg_state" -eq 0 ]; then
+		echo "RESULT bind_bad_pointer=PASS (safe rejection+unbound: nt=$_nt_errno tg=$_tg_errno)"
 		PASS=$((PASS + 1))
 	else
 		echo "RESULT bind_bad_pointer=FAIL (nt_errno=$_nt_errno nt_state=$_nt_state tg_errno=$_tg_errno tg_state=$_tg_state)"
@@ -319,6 +373,13 @@ check_socket_bind() {
 		[ "$_tg_errno" -eq 0 ] && [ "$_tg_state" -eq 1 ]; then
 		echo "RESULT keep_bind_device=PASS (physical bind preserved)"
 		PASS=$((PASS + 1))
+	elif [ "$_nt_errno" -eq 1 ] && [ "$_nt_state" -eq 0 ] && \
+		[ "$_tg_errno" -eq 1 ] && [ "$_tg_state" -eq 0 ]; then
+		# Legacy CAP_NET_RAW gate denies the unprivileged physical bind for
+		# both actors identically — the kernel's own gate preserves the
+		# behaviour and the hook does not interfere.
+		echo "RESULT keep_bind_device=PASS (physical CAP_NET_RAW-gated)"
+		PASS=$((PASS + 1))
 	else
 		echo "RESULT keep_bind_device=FAIL (nt_errno=$_nt_errno nt_state=$_nt_state tg_errno=$_tg_errno tg_state=$_tg_state)"
 		FAIL=$((FAIL + 1))
@@ -341,6 +402,37 @@ check_socket_bind() {
 		echo "RESULT bind_absent_name=FAIL (errno=$_nt_errno state=$_nt_state)"
 		FAIL=$((FAIL + 1))
 	fi
+}
+
+# By-name SIOCGIFHWADDR / SIOCGIFADDR — bypass dev_ifsioc_locked
+# (dev_get_mac_address on 5.4+, devinet_ioctl on all). The target must get the
+# native "no such device" answer (ENODEV=19) for a hidden interface, while a
+# non-target still sees it (non-ENODEV). ENODEV is the native absent answer for
+# both ioctls (unprivileged GETs, no cap ordering involved), so no #3-style
+# comparison is needed.
+check_iface_ioctl() {
+	if [ ! -x /iface-ioctl ]; then
+		echo "RESULT ioctl_hwaddr=SKIP (no iface-ioctl probe)"
+		echo "RESULT ioctl_addr=SKIP (no iface-ioctl probe)"
+		return
+	fi
+	set_target "$NONMATCH_UID"
+	_nt=$(/iface-ioctl vpn0 2>/dev/null)
+	set_target "$TARGET_UID"
+	_tg=$(/iface-ioctl vpn0 2>/dev/null)
+	for _pair in "ioctl_hwaddr HWADDR_ERRNO" "ioctl_addr ADDR_ERRNO"; do
+		_vec=${_pair%% *}
+		_key=${_pair#* }
+		_nt_e=$(bind_field "$_nt" "$_key"); [ -n "$_nt_e" ] || _nt_e=-1
+		_tg_e=$(bind_field "$_tg" "$_key"); [ -n "$_tg_e" ] || _tg_e=-1
+		if [ "$_tg_e" -eq 19 ] && [ "$_nt_e" -ne 19 ]; then
+			echo "RESULT $_vec=PASS (target ENODEV, non-target visible: nt=$_nt_e)"
+			PASS=$((PASS + 1))
+		else
+			echo "RESULT $_vec=FAIL (nt_errno=$_nt_e tg_errno=$_tg_e)"
+			FAIL=$((FAIL + 1))
+		fi
+	done
 }
 
 # vector -> hook it exercises
@@ -376,6 +468,7 @@ esac
 check_gai
 check_ifconf                                                       # sock_ioctl size/tail
 check_socket_bind                                                  # interface socket binding
+check_iface_ioctl                                                  # by-name SIOCGIFHWADDR / SIOCGIFADDR
 
 # Non-VPN entries must survive target filtering. This catches over-trimming
 # regressions where a hook hides the whole dump instead of only vpn0 rows.
@@ -391,7 +484,18 @@ check_keep_exact keep_proc_sys_readdir "ls /proc/sys/net/ipv4/conf" "eth0"
 # Root module managers replace or remove the backend across a reboot. Keep the
 # entry-kprobe replacement text resident for that whole lifetime: ordinary
 # rmmod must fail and leave both the module and its control plane intact.
-if rmmod vpnhide_kmod >/tmp/vpnhide-rmmod.log 2>&1; then
+# The built-in backend is part of the kernel image — the strongest permanence,
+# with no module to rmmod — so the only assertion there is that the control
+# plane stays live.
+if [ "$VPNHIDE_TEST_BACKEND" = "builtin" ]; then
+	if [ -e /proc/vpnhide_ctl ]; then
+		echo "RESULT permanent_module=PASS (built-in; no module to remove, control plane live)"
+		PASS=$((PASS + 1))
+	else
+		echo "RESULT permanent_module=FAIL (built-in control plane missing)"
+		FAIL=$((FAIL + 1))
+	fi
+elif rmmod vpnhide_kmod >/tmp/vpnhide-rmmod.log 2>&1; then
 	echo "RESULT permanent_module=FAIL (rmmod unexpectedly succeeded)"
 	FAIL=$((FAIL + 1))
 elif [ -d /sys/module/vpnhide_kmod ] && [ -e /proc/vpnhide_ctl ]; then
@@ -404,7 +508,13 @@ else
 	FAIL=$((FAIL + 1))
 fi
 
-PANIC=$(dmesg | grep -ci 'Unable to handle\|Internal error\|Oops\|BUG:\|Kernel panic')
+# Match real kernel-oops markers only, precisely enough to skip benign lines
+# legacy kernels emit: "dynamic_debug:" (would match a bare BUG:) and the
+# devicetree self-test's "unittest internal error:" (would match a bare
+# "Internal error"). A real arm64 oops prints "Unable to handle kernel …" and
+# "Internal error: Oops …"; BUG_ON prints "kernel BUG at"; other reports print
+# "] BUG:". Kernel panics print "Kernel panic".
+PANIC=$(dmesg | grep -ci 'Unable to handle kernel\|Internal error: Oops\|kernel BUG at\|] BUG:\|Kernel panic')
 echo "PANIC=$PANIC"
 echo "SUMMARY pass=$PASS fail=$FAIL panic=$PANIC registered=$REGISTERED"
 echo "##### VPNHIDE-QEMU-TEST END #####"
