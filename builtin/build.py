@@ -11,6 +11,7 @@ kernel that has the driver compiled in.
 
 Output: vpnhide-builtin.zip (repo root by default).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,7 +61,9 @@ def main() -> int:
     content = module_prop.read_text(encoding="utf-8")
     content = re.sub(r"^version=.*", f"version=v{build_version}", content, flags=re.MULTILINE)
     if re.search(r"^updateJson=", content, flags=re.MULTILINE):
-        content = re.sub(r"^updateJson=.*", f"updateJson={UPDATE_JSON_URL}", content, flags=re.MULTILINE)
+        content = re.sub(
+            r"^updateJson=.*", f"updateJson={UPDATE_JSON_URL}", content, flags=re.MULTILINE
+        )
     else:
         content = content.rstrip() + f"\nupdateJson={UPDATE_JSON_URL}\n"
     module_prop.write_text(content, encoding="utf-8")

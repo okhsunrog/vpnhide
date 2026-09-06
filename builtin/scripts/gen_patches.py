@@ -14,6 +14,7 @@ The tree must be a clean git checkout of the matching KMI. Each edit asserts its
 anchor occurs exactly once, so a kernel whose source drifted enough to move or
 duplicate an anchor fails loudly here rather than silently mis-patching.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -152,7 +153,7 @@ EDITS: dict[str, dict[str, list[tuple[str, str]]]] = {
         "fs/namei.c": [
             (
                 '#include <linux/uaccess.h>\n\n#include "internal.h"',
-                '#include <linux/uaccess.h>\n' + VH_INCLUDE + '\n#include "internal.h"',
+                "#include <linux/uaccess.h>\n" + VH_INCLUDE + '\n#include "internal.h"',
             ),
             # filename_lookup: hide a resolved VPN-iface path node.
             (
@@ -313,9 +314,7 @@ EDITS: dict[str, dict[str, list[tuple[str, str]]]] = {
 #   - iterate_dir: 6.12 dropped the legacy .iterate leg (iterate_shared only).
 _612 = copy.deepcopy(EDITS["android14-6.1"])
 _612["net/socket.c"][1] = (
-    "\tconst struct proto_ops *ops;\n"
-    "\tchar *kernel_optval = NULL;\n"
-    "\tint err;\n",
+    "\tconst struct proto_ops *ops;\n\tchar *kernel_optval = NULL;\n\tint err;\n",
     "\tconst struct proto_ops *ops;\n"
     "\tchar *kernel_optval = NULL;\n"
     "\tint err;\n"
@@ -471,22 +470,19 @@ _54["net/socket.c"][2] = (
     "\t\t\toptval = (char __user __force *)kernel_optval;\n"
     "\t\t}\n",
 )
-_54["net/socket.c"].append((
-    "\t\tif (kernel_optval) {\n"
-    "\t\t\tset_fs(oldfs);\n"
-    "\t\t\tkfree(kernel_optval);\n"
-    "\t\t}\n",
-    "\t\tif (vh_frozen)\n"
-    "\t\t\tset_fs(oldfs);\n\n"
-    "\t\tif (kernel_optval) {\n"
-    "\t\t\tset_fs(oldfs);\n"
-    "\t\t\tkfree(kernel_optval);\n"
-    "\t\t}\n",
-))
+_54["net/socket.c"].append(
+    (
+        "\t\tif (kernel_optval) {\n\t\t\tset_fs(oldfs);\n\t\t\tkfree(kernel_optval);\n\t\t}\n",
+        "\t\tif (vh_frozen)\n"
+        "\t\t\tset_fs(oldfs);\n\n"
+        "\t\tif (kernel_optval) {\n"
+        "\t\t\tset_fs(oldfs);\n"
+        "\t\t\tkfree(kernel_optval);\n"
+        "\t\t}\n",
+    )
+)
 _54["fs/namei.c"][1] = (
-    "\tif (likely(!retval))\n"
-    "\t\taudit_inode(name, path->dentry, 0);\n"
-    "\trestore_nameidata();\n",
+    "\tif (likely(!retval))\n\t\taudit_inode(name, path->dentry, 0);\n\trestore_nameidata();\n",
     "\tif (likely(!retval))\n"
     "\t\taudit_inode(name, path->dentry, 0);\n"
     "\tif (!retval && vpnhide_should_hide_dentry(path->dentry)) {\n"
@@ -541,8 +537,7 @@ _54["net/compat.c"] = [
 # Pre-5.5 fib_dump_info(fi, dst, dst_len, …): no fib_rt_info, call the raw
 # variant with the fields spread across its arguments.
 _54["net/ipv4/fib_semantics.c"][1] = (
-    "\tstruct rtmsg *rtm;\n\n"
-    "\tnlh = nlmsg_put(skb, portid, seq, event, sizeof(*rtm), flags);\n",
+    "\tstruct rtmsg *rtm;\n\n\tnlh = nlmsg_put(skb, portid, seq, event, sizeof(*rtm), flags);\n",
     "\tstruct rtmsg *rtm;\n\n"
     "\tif (vpnhide_hide_fib_dump_raw(fi, dst, dst_len))\n"
     "\t\treturn 0;\n\n"
@@ -578,8 +573,7 @@ _419["net/ipv6/addrconf.c"][1] = (
 # scaffolding, so declare our own oldfs and freeze around the dispatch. Anchor
 # the decl on the optlen<0 guard to stay unique vs __sys_getsockopt.
 _419["net/socket.c"][1] = (
-    "\tint err, fput_needed;\n\tstruct socket *sock;\n\n"
-    "\tif (optlen < 0)\n\t\treturn -EINVAL;\n",
+    "\tint err, fput_needed;\n\tstruct socket *sock;\n\n\tif (optlen < 0)\n\t\treturn -EINVAL;\n",
     "\tint err, fput_needed;\n\tstruct socket *sock;\n"
     "\tunion vpnhide_bind_snapshot vh_snap;\n"
     "\tbool vh_frozen = false;\n"
@@ -632,7 +626,7 @@ _419["net/socket.c"][3] = (
 # audit_inode takes `flags & LOOKUP_PARENT` here.
 _419["fs/namei.c"][0] = (
     '#include <linux/build_bug.h>\n\n#include "internal.h"',
-    '#include <linux/build_bug.h>\n' + VH_INCLUDE + '\n#include "internal.h"',
+    "#include <linux/build_bug.h>\n" + VH_INCLUDE + '\n#include "internal.h"',
 )
 _419["fs/namei.c"][1] = (
     "\tif (likely(!retval))\n"
@@ -721,7 +715,7 @@ _49 = copy.deepcopy(_414)
 # 4.9 still uses the old <asm/uaccess.h> include path (namei + readdir).
 _49["fs/namei.c"][0] = (
     '#include <asm/uaccess.h>\n\n#include "internal.h"',
-    '#include <asm/uaccess.h>\n' + VH_INCLUDE + '\n#include "internal.h"',
+    "#include <asm/uaccess.h>\n" + VH_INCLUDE + '\n#include "internal.h"',
 )
 _49["fs/readdir.c"][0] = (
     "#include <asm/uaccess.h>\n",
@@ -767,8 +761,14 @@ _HWADDR_HIDE = (
     "\t\telse\n"
     "\t\t\tret = dev_get_mac_address(&ifr->ifr_hwaddr, net, ifr->ifr_name);\n",
 )
-for _kmi in ("android14-6.1", "android16-6.12", "android15-6.6",
-             "android13-5.15", "android12-5.10", "android11-5.4"):
+for _kmi in (
+    "android14-6.1",
+    "android16-6.12",
+    "android15-6.6",
+    "android13-5.15",
+    "android12-5.10",
+    "android11-5.4",
+):
     EDITS[_kmi]["net/core/dev_ioctl.c"].append(_HWADDR_HIDE)
 
 _DEVINET_IOCTL_HIDE = (
@@ -815,7 +815,9 @@ def main() -> int:
 
     dirty = subprocess.run(
         ["git", "-C", str(tree), "status", "--porcelain"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     if dirty:
         sys.exit(f"{tree} has uncommitted changes; refusing to edit it:\n{dirty}")
@@ -828,8 +830,7 @@ def main() -> int:
             count = text.count(anchor)
             if count != 1:
                 sys.exit(
-                    f"{relpath}: anchor occurs {count}x (need exactly 1):\n"
-                    f"----\n{anchor}\n----"
+                    f"{relpath}: anchor occurs {count}x (need exactly 1):\n----\n{anchor}\n----"
                 )
             text = text.replace(anchor, replacement, 1)
         path.write_text(text)
@@ -841,7 +842,9 @@ def main() -> int:
     for relpath in touched:
         diff = subprocess.run(
             ["git", "-C", str(tree), "diff", "--", relpath],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
         (out_dir / patch_name(relpath)).write_text(diff)
         print(f"[gen] wrote versions/{args.kmi}/{patch_name(relpath)}")
