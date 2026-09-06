@@ -65,6 +65,16 @@ if [ -x /bind-probe ] && [ -n "$VPN0_IFINDEX" ]; then
 	/bind-probe vpn0 "$VPN0_IFINDEX" 2>/dev/null
 fi
 
+# By-name SIOCGIFHWADDR (dev_get_mac_address, 5.4+) / SIOCGIFADDR (devinet_ioctl)
+# — these get-by-name ioctls do not go through dev_ifsioc_locked, and SIOCGIFADDR
+# is a separate top-level path from the dev_ioctl dispatcher, so the `ifconfig
+# vpn0` vector below (SIOCGIFFLAGS, dispatcher path) cannot isolate them. The
+# probe drops to uid 10000 and prints HWADDR_ERRNO=/ADDR_ERRNO=; run-kpm.sh diffs
+# them across the notarget/target boots.
+if [ -x /iface-ioctl ]; then
+	/iface-ioctl vpn0 2>/dev/null
+fi
+
 # Public /32 + /128 host-routes pinned to the physical uplink (eth0) — the routes
 # a VPN client installs so tunnel packets reach the server. They leak the server's
 # public IP through an RTM_GETROUTE dump even though vpn0 is hidden, so they must

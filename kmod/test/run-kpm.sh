@@ -158,6 +158,29 @@ if [ -z "$BIND" ] && [ -n "${VPNHIDE_BIND_REQUIRED:-}" ]; then
 	exit 2
 fi
 
+# --- by-name SIOCGIFHWADDR / SIOCGIFADDR probe ------------------------------
+# Isolates the get-by-name ioctls (dev_get_mac_address / devinet_ioctl) that do
+# not flow through the dev_ioctl dispatcher the `dev_ioctl` shell vector uses —
+# in particular SIOCGIFADDR (devinet_ioctl), the path the KPM #1 fix added.
+IOC=""
+if [ -n "${VPNHIDE_IOC_BIN:-}" ] && [ -x "${VPNHIDE_IOC_BIN:-}" ]; then
+	IOC="$VPNHIDE_IOC_BIN"
+	echo "[run-kpm] iface-ioctl probe: prebuilt ($IOC)"
+else
+	IOC_CC="${VPNHIDE_IOC_CC:-$(find "$HOME/Android/Sdk/ndk" -type f -path '*/toolchains/llvm/prebuilt/*/bin/aarch64-linux-android*-clang' 2>/dev/null | sort | tail -1 || true)}"
+	if [ -n "$IOC_CC" ] && [ -x "$IOC_CC" ]; then
+		IOC="$CACHE/iface-ioctl"
+		"$IOC_CC" -static -O2 -o "$IOC" "$HERE/iface-ioctl-probe.c" 2>/dev/null || IOC=""
+	fi
+	[ -n "$IOC" ] && echo "[run-kpm] iface-ioctl probe built ($(basename "$IOC_CC"))" || \
+		echo "[run-kpm] no bionic toolchain/binary — skipping by-name ioctl vectors"
+fi
+
+if [ -z "$IOC" ] && [ -n "${VPNHIDE_IOC_REQUIRED:-}" ]; then
+	echo "ERROR: iface-ioctl probe is required here (VPNHIDE_IOC_REQUIRED set) but unavailable."
+	exit 2
+fi
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -177,6 +200,7 @@ boot_phase() {
 	[ -n "$GAI" ] && { cp "$GAI" "$rfs/gai"; chmod +x "$rfs/gai"; }
 	[ -n "$IFC" ] && { cp "$IFC" "$rfs/ifconf"; chmod +x "$rfs/ifconf"; }
 	[ -n "$BIND" ] && { cp "$BIND" "$rfs/bind-probe"; chmod +x "$rfs/bind-probe"; }
+	[ -n "$IOC" ] && { cp "$IOC" "$rfs/iface-ioctl"; chmod +x "$rfs/iface-ioctl"; }
 	( cd "$rfs" && find . | cpio -o -H newc 2>/dev/null | gzip > "$WORK/initramfs.$tag.gz" )
 
 	echo "[run-kpm] $KMI: booting phase '$tag' (args='${args}')…" >&2
@@ -281,6 +305,31 @@ check_bind_pair() {
 check_bind_pair bind_device_raw BIND_NAME_RAW
 check_bind_pair bind_device_nul BIND_NAME_NUL
 check_bind_pair bind_ifindex BIND_INDEX
+
+# By-name SIOCGIFHWADDR / SIOCGIFADDR (dev_get_mac_address / devinet_ioctl): the
+# target must get the native ENODEV(19) a genuinely-absent name returns, while a
+# non-target still reads the value (non-ENODEV). Same criterion as the .ko
+# harness (init.sh check_iface_ioctl). Both are unprivileged GETs, so there is no
+# #3-style cap-ordering to reconcile.
+check_ioctl_pair() {
+	local vec="$1" key="$2" nt tg
+	nt="$(bind_field "$key" "$NT_LOG")"
+	tg="$(bind_field "$key" "$TG_LOG")"
+	if [ -z "$nt" ] || [ -z "$tg" ]; then
+		echo "RESULT $vec=SKIP (iface-ioctl probe unavailable)"
+		SKIP=$((SKIP+1))
+		return
+	fi
+	if [ "$tg" -eq 19 ] && [ "$nt" -ne 19 ]; then
+		echo "RESULT $vec=PASS (target ENODEV, non-target visible: nt=$nt)"
+		PASS=$((PASS+1))
+	else
+		echo "RESULT $vec=FAIL (nt_errno=$nt tg_errno=$tg)"
+		FAIL=$((FAIL+1))
+	fi
+}
+check_ioctl_pair ioctl_hwaddr HWADDR_ERRNO
+check_ioctl_pair ioctl_addr ADDR_ERRNO
 
 nt_bad_errno="$(bind_field BIND_BADPTR_ERRNO "$NT_LOG")"
 nt_bad_state="$(bind_field BIND_BADPTR_STATE "$NT_LOG")"
