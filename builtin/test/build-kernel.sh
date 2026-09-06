@@ -28,6 +28,12 @@ fi
 mkdir -p "$CACHE"
 echo "[build-kernel/builtin] $KMI: cloning kernel/common + baking CONFIG_VPNHIDE + building Image (slow)…"
 
+# SC2016: the single-quoted body runs INSIDE the container; $KMI reaches it via
+# `-e KMI`, the rest expand in the container shell — intentionally not expanded
+# here. kmod/test/build-kernel.sh dodges the warning by hardcoding `docker` (the
+# linter then parses the -c body as nested shell); the dynamic runtime name here
+# defeats that, so disable it explicitly.
+# shellcheck disable=SC2016
 "$CONTAINER_CMD" run --rm \
 	-v "$REPO:/repo:ro" -v "$CACHE:/out" -v "$FRAG:/qemu.config:ro" \
 	-e KMI="$KMI" "$DDK" bash -euo pipefail -c '

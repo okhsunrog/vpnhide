@@ -36,33 +36,47 @@ command -v qemu-system-aarch64 >/dev/null || { echo "ERROR: qemu-system-aarch64 
 mkdir -p "$CACHE"
 [ -f "$ALPINE_TAR" ] || { echo "[run] fetching Alpine minirootfs…"; curl -fsSL "$ALPINE_URL" -o "$ALPINE_TAR"; }
 
-# Native probes (bionic getifaddrs / SIOCGIFCONF / socket-bind) — reuse the
-# kmod/test probe sources and the NDK toolchain; SKIP when unavailable.
+# Native probes (bionic getifaddrs / SIOCGIFCONF / socket-bind / by-name ioctl /
+# 32-bit compat bind) — reuse the kmod/test probe sources. Each is taken from a
+# prebuilt VPNHIDE_*_BIN when one is provided (CI passes binaries baked into the
+# ddk-qemu image or built once as an artifact — the image has no NDK), otherwise
+# it is compiled from source with the local NDK, and SKIPs when neither is
+# available. A matching VPNHIDE_*_REQUIRED turns a SKIP into a hard error so CI
+# never silently drops a vector. The armv7 compat bind probe exercises the
+# pre-5.9 compat_sock_setsockopt entry — a bind hook patched only at the 64-bit
+# __sys_setsockopt would leak there.
 NDK_CC="$(find "$HOME/Android/Sdk/ndk" -type f -path '*/toolchains/llvm/prebuilt/*/bin/aarch64-linux-android*-clang' 2>/dev/null | sort | tail -1 || true)"
-build_probe() { # <src> <out>; echoes out path or empty
-	local src="$1" out="$2"
-	[ -n "$NDK_CC" ] && [ -x "$NDK_CC" ] || { echo ""; return; }
-	"$NDK_CC" -static -O2 -o "$out" "$src" 2>/dev/null && echo "$out" || echo ""
-}
-GAI="$(build_probe "$KMOD_TEST/gai-probe.c" "$CACHE/gai")"
-IFC="$(build_probe "$KMOD_TEST/ifconf-probe.c" "$CACHE/ifconf")"
-BIND="$(build_probe "$KMOD_TEST/bind-probe.c" "$CACHE/bind-probe")"
-IOC="$(build_probe "$KMOD_TEST/iface-ioctl-probe.c" "$CACHE/iface-ioctl")"
-[ -n "$NDK_CC" ] && echo "[run] native probes built ($(basename "$NDK_CC"))" || \
-	echo "[run] no NDK toolchain — native probes SKIP (core /proc + iproute2 vectors still run)"
-
-# 32-bit (armv7) bind probe: exercises the compat setsockopt path. On pre-5.9
-# kernels that is a separate entry (compat_sock_setsockopt), so this is what
-# catches a bind hook patched only at the 64-bit __sys_setsockopt. Same source,
-# just the armv7 toolchain; SKIP if it is unavailable.
 NDK_CC32="$(find "$HOME/Android/Sdk/ndk" -type f -path '*/toolchains/llvm/prebuilt/*/bin/armv7a-linux-androideabi*-clang' 2>/dev/null | sort | tail -1 || true)"
-BIND32=""
-if [ -n "$NDK_CC32" ] && [ -x "$NDK_CC32" ]; then
-	"$NDK_CC32" -static -O2 -o "$CACHE/bind-probe32" "$KMOD_TEST/bind-probe-compat.c" 2>/dev/null &&
-		BIND32="$CACHE/bind-probe32"
-fi
-[ -n "$BIND32" ] && echo "[run] compat (armv7) bind probe built" || \
-	echo "[run] no armv7 NDK — compat bind vector SKIP"
+build_probe() { # <cc> <src> <out>; echoes out path or empty
+	local cc="$1" src="$2" out="$3"
+	[ -n "$cc" ] && [ -x "$cc" ] || { echo ""; return; }
+	"$cc" -static -O2 -o "$out" "$src" 2>/dev/null && echo "$out" || echo ""
+}
+resolve_probe() { # <prebuilt> <cc> <src> <out>; prefers an executable prebuilt
+	local pre="$1"
+	if [ -n "$pre" ] && [ -x "$pre" ]; then echo "$pre"; return; fi
+	build_probe "$2" "$3" "$4"
+}
+require_probe() { # <resolved-path> <required-value> <label>
+	if [ -z "$1" ] && [ -n "$2" ]; then
+		echo "ERROR: $3 probe required but unavailable (no prebuilt VPNHIDE_*_BIN, no NDK)" >&2
+		exit 2
+	fi
+}
+
+GAI="$(resolve_probe "${VPNHIDE_GAI_BIN:-}" "$NDK_CC" "$KMOD_TEST/gai-probe.c" "$CACHE/gai")"
+IFC="$(resolve_probe "${VPNHIDE_IFC_BIN:-}" "$NDK_CC" "$KMOD_TEST/ifconf-probe.c" "$CACHE/ifconf")"
+BIND="$(resolve_probe "${VPNHIDE_BIND_BIN:-}" "$NDK_CC" "$KMOD_TEST/bind-probe.c" "$CACHE/bind-probe")"
+IOC="$(resolve_probe "${VPNHIDE_IOC_BIN:-}" "$NDK_CC" "$KMOD_TEST/iface-ioctl-probe.c" "$CACHE/iface-ioctl")"
+BIND32="$(resolve_probe "${VPNHIDE_BIND32_BIN:-}" "$NDK_CC32" "$KMOD_TEST/bind-probe-compat.c" "$CACHE/bind-probe32")"
+
+require_probe "$GAI"    "${VPNHIDE_GAI_REQUIRED:-}"    "getifaddrs"
+require_probe "$IFC"    "${VPNHIDE_IFC_REQUIRED:-}"    "SIOCGIFCONF"
+require_probe "$BIND"   "${VPNHIDE_BIND_REQUIRED:-}"   "socket-bind"
+require_probe "$IOC"    "${VPNHIDE_IOC_REQUIRED:-}"    "iface-ioctl"
+require_probe "$BIND32" "${VPNHIDE_BIND32_REQUIRED:-}" "compat-bind"
+
+echo "[run] probes: GAI=${GAI:-SKIP} IFC=${IFC:-SKIP} BIND=${BIND:-SKIP} IOC=${IOC:-SKIP} BIND32=${BIND32:-SKIP}"
 
 WORK="$(mktemp -d)"
 if [ -n "${VPNHIDE_QEMU_KEEP_WORK:-}" ]; then

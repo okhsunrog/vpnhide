@@ -62,6 +62,10 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Build native QEMU probes
+        # ifconf + bind-probe feed the kmod/kpm QEMU jobs. iface-ioctl (by-name
+        # SIOCGIFHWADDR/ADDR) and bind-probe-compat (armv7, the pre-5.9
+        # compat_sock_setsockopt path) additionally feed builtin-qemu — the
+        # ddk-qemu image bakes gai/ifconf/bind but not these two.
         run: |
           TC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           mkdir -p .artifacts/qemu-native-probes
@@ -69,8 +73,14 @@ jobs:
             -o .artifacts/qemu-native-probes/ifconf kmod/test/ifconf-probe.c
           "$TC/aarch64-linux-android24-clang" -static -O2 -Wall -Wextra -Werror \
             -o .artifacts/qemu-native-probes/bind-probe kmod/test/bind-probe.c
+          "$TC/aarch64-linux-android24-clang" -static -O2 -Wall -Wextra -Werror \
+            -o .artifacts/qemu-native-probes/iface-ioctl kmod/test/iface-ioctl-probe.c
+          "$TC/armv7a-linux-androideabi24-clang" -static -O2 -Wall -Wextra -Werror \
+            -o .artifacts/qemu-native-probes/bind-probe-compat kmod/test/bind-probe-compat.c
           "$TC/llvm-strip" .artifacts/qemu-native-probes/ifconf \
-            .artifacts/qemu-native-probes/bind-probe
+            .artifacts/qemu-native-probes/bind-probe \
+            .artifacts/qemu-native-probes/iface-ioctl \
+            .artifacts/qemu-native-probes/bind-probe-compat
 
       - name: Upload QEMU native probes
         uses: actions/upload-artifact@v7
@@ -194,7 +204,8 @@ jobs:
             portshide/module/uninstall.sh \
             scripts/clean-device.sh scripts/update-json.sh \
             kmod/test/run.sh kmod/test/build-kernel.sh kmod/test/init.sh \
-            kmod/test/run-kpm.sh kmod/test/init-kpm.sh kmod/test/build-source-kernel.sh
+            kmod/test/run-kpm.sh kmod/test/init-kpm.sh kmod/test/build-source-kernel.sh \
+            builtin/test/run.sh builtin/test/build-kernel.sh builtin/test/build-source-kernel.sh
           # The app's root probes. They are assembled from these files plus a
           # variable prelude, so they are checked as POSIX sh (the device shell
           # is mksh) and on their own — a stray apostrophe in one of them once
@@ -502,6 +513,85 @@ jobs:
           VPNHIDE_QEMU_IMAGE="/opt/qemu/legacy/${{ matrix.ver }}/Image" \
           VPNHIDE_QEMU_CPU=cortex-a57 \
             kmod/test/run-kpm.sh android12-5.10
+
+  # Runtime gate for the built-in (CONFIG_VPNHIDE=y) backend. Unlike kmod/kpm the
+  # driver is compiled INTO the kernel, so there is no cheap per-PR object to
+  # rebuild against a baked kernel: builtin/scripts/apply.sh integrates the
+  # backend into the baked kernel source tree (VPNHIDE_QEMU_KSRC), CONFIG_VPNHIDE
+  # is turned on, and the Image is rebuilt with the PR's patches — that rebuilt
+  # kernel is what boots. Reuses the ddk-qemu image (clang + qemu + baked kernel
+  # tree + Alpine rootfs + baked gai/ifconf/bind probes via VPNHIDE_*_BIN ENV);
+  # the by-name-ioctl and armv7 compat-bind probes come from qemu-native-probes.
+  #
+  # Modern non-LTO KMIs only for now (6.1/6.6/6.12 build fast). The full-LTO
+  # 5.10/5.15 and the legacy KMIs (a from-source build, like kpm-qemu-legacy) are
+  # a follow-up. NB: ddk-qemu prunes .cmd files, so the Image rebuild is a full
+  # kernel compile — keeping .cmd in that image would make it incremental.
+  builtin-qemu:
+    needs: [setup, qemu-native-probes]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kmi:
+          - android14-6.1
+          - android15-6.6
+          - android16-6.12
+    container:
+      image: ${{ needs.setup.outputs.ddkqemu }}:${{ matrix.kmi }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      KMI: ${{ matrix.kmi }}
+      # gai/ifconf/bind come from the image (VPNHIDE_GAI_BIN/IFC_BIN/BIND_BIN are
+      # set in the ddk-qemu Dockerfile ENV); the two extra probes come from the
+      # artifact. All five REQUIRED so a missing probe fails rather than silently
+      # dropping a vector.
+      VPNHIDE_GAI_REQUIRED: "1"
+      VPNHIDE_IFC_REQUIRED: "1"
+      VPNHIDE_BIND_REQUIRED: "1"
+      VPNHIDE_IOC_REQUIRED: "1"
+      VPNHIDE_BIND32_REQUIRED: "1"
+      VPNHIDE_IOC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/iface-ioctl
+      VPNHIDE_BIND32_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/bind-probe-compat
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Mark workspace safe
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Download QEMU native probes
+        uses: actions/download-artifact@v7
+        with:
+          name: qemu-native-probes
+          path: .artifacts/qemu-native-probes
+
+      - name: Mark QEMU native probes executable
+        run: chmod +x "$VPNHIDE_IOC_BIN" "$VPNHIDE_BIND32_BIN"
+
+      - name: Bake CONFIG_VPNHIDE into the kernel + QEMU runtime test
+        # apply.sh copies the driver + applies the per-KMI call-site patches onto
+        # the baked source tree (patch --forward, no git needed). Merge the two
+        # VPNHIDE configs onto the .config the image already built with, rebuild
+        # the Image, then boot THAT kernel — VPNHIDE_QEMU_IMAGE is overridden
+        # inline because the image otherwise points it at the plain baked kernel.
+        run: |
+          set -euo pipefail
+          CLANG_BIN="$(ls -d /opt/ddk/clang/*/bin | head -1)"
+          export PATH="$CLANG_BIN:$PATH"
+          KSRC="$VPNHIDE_QEMU_KSRC"
+          builtin/scripts/apply.sh "$KSRC" "$KMI"
+          printf 'CONFIG_VPNHIDE=y\nCONFIG_VPNHIDE_FS_HIDING=y\n' > /tmp/vpnhide.config
+          (
+            cd "$KSRC"
+            ./scripts/kconfig/merge_config.sh -m .config /tmp/vpnhide.config
+            make ARCH=arm64 LLVM=1 olddefconfig
+            grep -E 'CONFIG_VPNHIDE(_FS_HIDING)?=' .config
+            make ARCH=arm64 LLVM=1 -j"$(nproc)" Image
+          )
+          VPNHIDE_QEMU_IMAGE="$KSRC/arch/arm64/boot/Image" builtin/test/run.sh "$KMI"
 
   # The KPM ships as ONE cross-version flashable module (Magisk/KSU format,
   # APatch reads it too), not a raw .kpm: `make kpm` builds the relocatable
