@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "_comment": "Single source for the in-app offline guide. Authored here, synced into the APK assets (help/<locale>/<article-id>.md) by the app module's syncHelpAssets Gradle task, and published from the repo. Section and article order here is the order shown in the guide's table of contents. Each article body lives at <locale>/<id>.md next to this file.",
+  "sections": [
+    {
+      "id": "getting-started",
+      "title": { "en": "Getting started", "ru": "Начать пользоваться", "zh": "开始使用" },
+      "articles": []
+    },
+    {
+      "id": "configure-hiding",
+      "title": { "en": "Set up hiding", "ru": "Настроить скрытие", "zh": "设置隐藏" },
+      "articles": [
+        {
+          "id": "configure-hiding",
+          "title": { "en": "Set up hiding", "ru": "Настроить скрытие", "zh": "设置隐藏" }
+        }
+      ]
+    },
+    {
+      "id": "troubleshoot",
+      "title": { "en": "Fix a problem", "ru": "Решить проблему", "zh": "解决问题" },
+      "articles": []
+    },
+    {
+      "id": "understand-checks",
+      "title": { "en": "Understand the check results", "ru": "Понять результат проверки", "zh": "理解检查结果" },
+      "articles": []
+    },
+    {
+      "id": "capabilities-limits",
+      "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能力与限制" },
+      "articles": []
+    },
+    {
+      "id": "backends-hooks",
+      "title": { "en": "Under the hood", "ru": "Подробности", "zh": "深入了解" },
+      "articles": []
+    }
+  ]
+}

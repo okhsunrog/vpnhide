@@ -150,7 +150,21 @@ val buildRustProbe =
         }
     }
 
-tasks.named("preBuild").configure { dependsOn(buildRustProbe) }
+// The offline user guide is authored once under the repo's docs/help/ (the same
+// files are published from the repo) and copied into the APK assets so it ships
+// offline. Sync mirrors the source tree — deleting an article removes its asset.
+// help/<locale>/<id>.md + help/manifest.json land under assets/help/.
+val helpDocsDir = projectDir.parentFile.parentFile.resolve("docs/help")
+val helpAssetsDir = layout.buildDirectory.dir("help/assets")
+val syncHelpAssets =
+    tasks.register<Sync>("syncHelpAssets") {
+        group = "build"
+        description = "Copies docs/help (the offline guide source) into the APK assets."
+        from(helpDocsDir)
+        into(helpAssetsDir.map { it.dir("help") })
+    }
+
+tasks.named("preBuild").configure { dependsOn(buildRustProbe, syncHelpAssets) }
 
 android {
     namespace = "dev.okhsunrog.vpnhide"
@@ -267,6 +281,8 @@ android {
     // these dirs are populated before the merge/package tasks read them.
     sourceSets["main"].jniLibs.srcDir(rustJniLibsDir.get().asFile)
     sourceSets["main"].assets.srcDir(rustAssetsDir.get().asFile)
+    // Offline guide assets synced from docs/help by syncHelpAssets (preBuild).
+    sourceSets["main"].assets.srcDir(helpAssetsDir.get().asFile)
 
     // Skip Android Lint on test source sets. Our `src/test/` is pure JVM
     // unit-test logic (filter/recommendation builders) — no Android
