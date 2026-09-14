@@ -1,29 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Generate the vpnhide call-site patches for a KMI from a real kernel tree.
+"""Exact, uniqueness-checked integration rules shared by export and apply.
 
-Hand-written unified diffs are fragile (a fuzzed hunk can land at the wrong
-offset). Instead we apply anchor-based, uniqueness-checked string insertions to
-a clean `kernel/common` git tree, `git diff` the result into per-file
-`.patch` files under versions/<kmi>/, then restore the tree. apply.sh consumes
-the emitted patches; this script only produces them.
-
-    gen_patches.py <kernel_tree> [--kmi android14-6.1] [--keep]
-
-The tree must be a clean git checkout of the matching KMI. Each edit asserts its
-anchor occurs exactly once, so a kernel whose source drifted enough to move or
-duplicate an anchor fails loudly here rather than silently mis-patching.
+Keep kernel API variations explicit. Unknown source shapes must fail closed.
 """
 
 from __future__ import annotations
 
-import argparse
 import copy
-import subprocess
-import sys
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 VH_INCLUDE = "#include <linux/vpnhide.h>\n"
 
@@ -792,70 +776,3 @@ _DEVINET_IOCTL_HIDE_DOT = (
 )
 for _kmi in ("android10-4.14", "android10-4.9"):
     EDITS[_kmi]["net/ipv4/devinet.c"][-1] = _DEVINET_IOCTL_HIDE_DOT
-
-
-# Patch filename per source path: net/core/dev_ioctl.c -> net_core_dev_ioctl.c.patch
-def patch_name(relpath: str) -> str:
-    return relpath.replace("/", "_") + ".patch"
-
-
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("tree", type=Path, help="clean kernel/common git checkout")
-    ap.add_argument("--kmi", default="android14-6.1")
-    ap.add_argument("--keep", action="store_true", help="leave edits in the tree")
-    args = ap.parse_args()
-
-    tree: Path = args.tree
-    edits = EDITS.get(args.kmi)
-    if edits is None:
-        sys.exit(f"no edits defined for KMI {args.kmi!r}")
-    if not (tree / ".git").exists():
-        sys.exit(f"{tree} is not a git checkout (needed to diff/restore)")
-
-    dirty = subprocess.run(
-        ["git", "-C", str(tree), "status", "--porcelain"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    if dirty:
-        sys.exit(f"{tree} has uncommitted changes; refusing to edit it:\n{dirty}")
-
-    touched = []
-    for relpath, file_edits in edits.items():
-        path = tree / relpath
-        text = path.read_text()
-        for anchor, replacement in file_edits:
-            count = text.count(anchor)
-            if count != 1:
-                sys.exit(
-                    f"{relpath}: anchor occurs {count}x (need exactly 1):\n----\n{anchor}\n----"
-                )
-            text = text.replace(anchor, replacement, 1)
-        path.write_text(text)
-        touched.append(relpath)
-        print(f"[gen] edited {relpath} ({len(file_edits)} insertions)")
-
-    out_dir = REPO_ROOT / "builtin" / "versions" / args.kmi
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for relpath in touched:
-        diff = subprocess.run(
-            ["git", "-C", str(tree), "diff", "--", relpath],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        (out_dir / patch_name(relpath)).write_text(diff)
-        print(f"[gen] wrote versions/{args.kmi}/{patch_name(relpath)}")
-
-    if args.keep:
-        print("[gen] --keep: leaving edits in the tree")
-    else:
-        subprocess.run(["git", "-C", str(tree), "checkout", "--", *touched], check=True)
-        print("[gen] restored tree")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

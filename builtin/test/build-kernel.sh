@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a QEMU-bootable GKI kernel with the vpnhide built-in backend baked in
 # for <kmi>, into the per-KMI cache so run.sh can boot it. Unlike
-# kmod/test/build-kernel.sh there is NO module: builtin/scripts/apply.sh is
+# kmod/test/build-kernel.sh there is NO module: builtin/scripts/integrate.py is
 # applied to the source tree and CONFIG_VPNHIDE=y is merged, so the driver ends
 # up compiled into the Image.
 #
@@ -35,7 +35,7 @@ echo "[build-kernel/builtin] $KMI: cloning kernel/common + baking CONFIG_VPNHIDE
 # defeats that, so disable it explicitly.
 # shellcheck disable=SC2016
 "$CONTAINER_CMD" run --rm \
-	-v "$REPO:/repo:ro" -v "$CACHE:/out" -v "$FRAG:/qemu.config:ro" \
+	-v "$(command -v uv):/usr/local/bin/uv:ro" -v "$REPO:/repo:ro" -v "$CACHE:/out" -v "$FRAG:/qemu.config:ro" \
 	-e KMI="$KMI" "$DDK" bash -euo pipefail -c '
 	CLANG_BIN="$(ls -d /opt/ddk/clang/*/bin | head -1)"
 	export PATH="$CLANG_BIN:$PATH"
@@ -44,7 +44,7 @@ echo "[build-kernel/builtin] $KMI: cloning kernel/common + baking CONFIG_VPNHIDE
 		https://android.googlesource.com/kernel/common /tmp/linux
 
 	# Bake the built-in backend into the source tree.
-	/repo/builtin/scripts/apply.sh /tmp/linux "$KMI"
+	uv run --python 3.12 /repo/builtin/scripts/integrate.py apply --kernel /tmp/linux --kmi "$KMI" --output /out/review-$(date +%s)
 
 	# Work around an AOSP host-tool regression on some GKI HEADs (e.g.
 	# android15-6.6 @ 57c281246): certs/extract-cert.c declares key_pass only
