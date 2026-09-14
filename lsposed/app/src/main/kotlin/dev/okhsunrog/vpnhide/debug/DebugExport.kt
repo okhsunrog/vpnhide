@@ -17,13 +17,13 @@ import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
 import dev.okhsunrog.vpnhide.diagnostics.resolveDiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.runAllChecks
 import dev.okhsunrog.vpnhide.diagnostics.verdict
-import dev.okhsunrog.vpnhide.isVpnActiveFromSnapshot
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.readLsposedConfig
 import dev.okhsunrog.vpnhide.statistics.buildStatisticsState
 import dev.okhsunrog.vpnhide.suExec
 import dev.okhsunrog.vpnhide.toAgentStatisticsState
 import dev.okhsunrog.vpnhide.ui.components.container
+import dev.okhsunrog.vpnhide.vpnPresenceFromSnapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -174,12 +174,20 @@ internal fun captureGateFrom(
     snapshot: RootSnapshot,
     context: Context,
     selfNeedsRestart: Boolean,
-): DiagnosticGate =
-    resolveDiagnosticGate(
-        vpnActive = isVpnActiveFromSnapshot(snapshot.sections["vpn_ifaces"].orEmpty()),
-        selfRouted = GroundTruthProbe.selfRoutedThroughVpn(context),
+): DiagnosticGate {
+    if (selfNeedsRestart) return DiagnosticGate.NEEDS_RESTART
+    val presence = vpnPresenceFromSnapshot(snapshot.sections)
+    if (presence.interfaces.isEmpty()) return DiagnosticGate.VPN_OFF
+    val routed =
+        checkNotNull(GroundTruthProbe.selfRoutedThroughVpn(context, presence, snapshot.sections)) {
+            "VPN routing could not be determined"
+        }
+    return resolveDiagnosticGate(
+        vpnActive = true,
+        selfRouted = routed,
         selfNeedsRestart = selfNeedsRestart,
     )
+}
 
 /**
  * Pack a ZIP: named text entries + raw file entries. The one packaging primitive for

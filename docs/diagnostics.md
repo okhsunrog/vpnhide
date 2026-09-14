@@ -100,14 +100,33 @@ check, so all its leaks count.
 Diagnostics are meaningless if VPN Hide itself is not routed through the VPN: split-
 tunnelled out, there is no VPN artifact for its own probes to be hidden *from*, so
 every check would read misleadingly clean. Before running any checks the app asks
-`vhprobe --uid <selfUid>` (root, hook-inert) whether its own uid is routed through the
-VPN. Two passes over the policy rules (both address families): learn the VPN egress
+the root snapshot which current Android networks are VPN networks. Interface-name
+matching alone is not VPN presence: an `ipsec*` interface may belong to a carrier
+IMS/IWLAN network explicitly marked `NOT_VPN`. Such interfaces remain hidden from
+selected apps but do not activate the self-test gate. Only current NetworkAgentInfo
+records count, not VPN requests, historical events or idle VPN-manager objects.
+Unmanaged tunnels (for example root WireGuard) additionally require an up/unknown
+interface with a non-local route. A failed network/route probe is a diagnostic
+failure, not a claim that VPN is off or the app is excluded.
+
+For the resulting candidate interfaces, `vhprobe --uid <selfUid> --vpn-ifaces
+<comma-separated-ifaces>` (root, hook-inert) checks whether this uid is routed through
+the VPN. Two passes over the policy rules (both address families): learn the VPN egress
 table id(s) from rules that egress via a VPN interface (`oif tun*`), then check whether
 a `uidrange` rule steers this uid into exactly that table. This is stricter than the
 broad `netlink_getrule` diagnostic predicate — every uid sits in *some* per-network
 table (wlan/rmnet, also non-standard), so it must pin the VPN table specifically. If
 not routed, the UI shows an "add VPN Hide to your tunnel" prompt instead of clean
-results. A `null` answer (no root) does not block.
+results. Table identifiers are scoped by address family; output-interface-only
+rules are not UID membership. Native probe failures return `routed: null`, and the
+gate reports a failed check instead of using a stale gate or assuming exclusion.
+
+Unmanaged root tunnels may not have Android UID-range rules. If membership is not
+found, read-only `ip route get ... uid <selfUid>` lookups sample their routed
+prefixes in each family (public probe addresses for default routes). They send no
+packets. A lookup using a candidate tunnel establishes routing; lookup errors are
+inconclusive. This does not prove that every destination or socket mark uses the
+tunnel, nor replace a full policy-routing evaluator.
 
 ## 6. Empirical facts that shape the checks
 

@@ -1,8 +1,6 @@
 package dev.okhsunrog.vpnhide
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VpnIfaceStateParserTest {
@@ -28,13 +26,5 @@ class VpnIfaceStateParserTest {
             """.trimIndent()
 
         assertEquals(listOf("wg-client" to "up"), parseVpnIfaceStates(raw))
-    }
-
-    @Test
-    fun `vpn active evaluator treats unknown and up as active`() {
-        assertTrue(isVpnActiveFromStates(listOf("tun0" to "unknown")))
-        assertTrue(isVpnActiveFromStates(listOf("wg-client" to "up")))
-        assertFalse(isVpnActiveFromStates(listOf("tun0" to "down")))
-        assertFalse(isVpnActiveFromStates(emptyList()))
     }
 }

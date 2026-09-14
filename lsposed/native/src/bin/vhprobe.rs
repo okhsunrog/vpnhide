@@ -18,7 +18,7 @@ use std::{env, fs, process};
 use vpnhide_apatch_abi::{
     APATCH_SUPERCALL_NR, command_candidates, encode_command, parse_kernel_version_hint,
 };
-use vpnhide_checks::{run_all_json, self_routed_json};
+use vpnhide_checks::{run_all_json, self_routed_for_interfaces_json};
 
 const SUPERKEY_FILE: &str = "/data/adb/vpnhide/superkey";
 // i64, not c_long: the supercall command word is a 64-bit encoding shared with
@@ -38,7 +38,15 @@ fn main() {
             eprintln!("usage: vhprobe --uid <uid>");
             process::exit(2);
         };
-        println!("{}", self_routed_json(uid));
+        let interfaces = args
+            .iter()
+            .position(|a| a == "--vpn-ifaces")
+            .and_then(|i| args.get(i + 1))
+            .map(|s| s.split(',').map(str::to_owned).collect::<Vec<_>>());
+        println!(
+            "{}",
+            self_routed_for_interfaces_json(uid, interfaces.as_deref())
+        );
         return;
     }
     println!("{}", run_all_json());
