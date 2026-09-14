@@ -7,6 +7,7 @@ import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.StateCache
 import dev.okhsunrog.vpnhide.debug.captureGateFrom
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
@@ -95,7 +96,15 @@ internal object RoutingGateCache : StateCache<DiagnosticGate>(
         withContext(Dispatchers.IO) {
             lastLoadAtMs = SystemClock.elapsedRealtime()
             val context = requireNotNull(appContext) { "RoutingGateCache.load before ensureLoaded/refresh" }
-            val snapshot = if (force) RootSnapshotCache.refresh() else RootSnapshotCache.getOrLoad()
-            captureGateFrom(snapshot, context, selfNeedsRestart)
+            try {
+                val snapshot = if (force) RootSnapshotCache.refresh() else RootSnapshotCache.getOrLoad()
+                captureGateFrom(snapshot, context, selfNeedsRestart)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                // A previous successful gate must not survive an inconclusive probe.
+                invalidate()
+                throw error
+            }
         }
 }

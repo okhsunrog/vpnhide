@@ -227,7 +227,9 @@ to an `emit_*` line in
 **App enumeration** — `app_scan_diagnostics` (privacy-safe: per-user exit code + package counts + first stderr line, **no names/paths** — diagnoses "couldn't read all profiles" / the ARG_MAX overflow). `pm_users` / `pm_packages` carry the real names/paths and are **redacted out unless `appList` was opted in** (§10).
 
 **Network (forensic)** — `network_addr` (`ip -d addr`), `network_operstate`, `network_routes` (`ip route show table all`), `network_rules` (`ip rule`), `network_sockets` (listening localhost sockets), `connectivity_dump` (`dumpsys connectivity`, VPN/tun/agent lines), `proc_net_route` / `proc_net_ipv6_route` / `proc_net_if_inet6` / `proc_net_tcp[6]` / `proc_net_udp[6]` / `proc_net_dev` / `proc_net_fib_trie`.
-- `vpn_ifaces` — `/sys/class/net/*/operstate` for every interface. The authoritative interface list; the app's `isVpnActive` reads it.
+- `vpn_ifaces` — `/sys/class/net/*/operstate` for every interface. Tunnel-like names alone do not establish user VPN activity.
+- `vpn_networks` — current NetworkAgentInfo records from root `dumpsys connectivity` (requests and history omitted). VPN and explicitly non-VPN records distinguish user VPNs from carrier IMS. Like other network sections, it can contain network addresses and identifiers.
+- `vpn_routes4`, `vpn_routes6` — root routing tables with a terminal `probe_ok` marker. Used for unmanaged root tunnels; a missing success marker is inconclusive, not VPN-off.
 
 **Module presence flags** (one-liners, from the root snapshot) — `kmod_module_dir`, `*_activator_state`, `*_disabled`, `*_pending_update`, `superkey_saved`, `proc_exists` (does `/proc/vpnhide_ctl` exist), `ports_chain` (does the iptables chain exist), `snapshot_shell_uid` (backs `rootShell`, §6), `module_inventory` (dump of every relevant `/data/adb/modules[_update]/*`).
 

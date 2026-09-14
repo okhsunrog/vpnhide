@@ -74,6 +74,9 @@ internal val REQUIRED_ROOT_SNAPSHOT_SECTIONS =
         "ports_chain",
         "lsposed_framework",
         "vpn_ifaces",
+        "vpn_networks",
+        "vpn_routes4",
+        "vpn_routes6",
     )
 
 /**

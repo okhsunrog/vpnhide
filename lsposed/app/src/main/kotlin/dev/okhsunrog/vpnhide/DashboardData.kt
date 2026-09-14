@@ -1456,7 +1456,7 @@ private suspend fun resolveProtectionFacts(
 ): ProtectionFacts {
     VpnHideLog.i(
         TAG,
-        "vpnActive=${isVpnActiveFromSnapshot(sections["vpn_ifaces"].orEmpty())} " +
+        "vpnActive=${runCatching { vpnPresenceFromSnapshot(sections).interfaces.isNotEmpty() }.getOrNull()} " +
             "selfNeedsRestart=$selfNeedsRestart",
     )
     val nativeBackend = modules.nativeBackend

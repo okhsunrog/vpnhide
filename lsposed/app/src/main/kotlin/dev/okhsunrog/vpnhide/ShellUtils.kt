@@ -184,20 +184,6 @@ internal fun parseVpnIfaceStates(raw: String): List<Pair<String, String>> =
         }.filter { (name, _) -> IfaceLists.isVpnIface(name) }
         .toList()
 
-internal fun isVpnActiveFromStates(vpnIfaces: List<Pair<String, String>>): Boolean {
-    if (vpnIfaces.isEmpty()) {
-        VpnHideLog.d(TAG, "isVpnActive: no VPN interfaces found")
-        return false
-    }
-    return vpnIfaces.any { (iface, state) ->
-        val up = state == "unknown" || state == "up"
-        VpnHideLog.d(TAG, "isVpnActive: $iface operstate=$state up=$up")
-        up
-    }
-}
-
-internal fun isVpnActiveFromSnapshot(raw: String): Boolean = isVpnActiveFromStates(parseVpnIfaceStates(raw))
-
 /**
  * Why startup root-state preparation failed, so the UI can tell the user the
  * truth instead of always blaming root permissions. The distinction is known at

@@ -4,9 +4,12 @@ import android.content.Context
 import android.os.Build
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.VpnHideLog
+import dev.okhsunrog.vpnhide.VpnPresence
 import dev.okhsunrog.vpnhide.checks.CheckOutput
 import dev.okhsunrog.vpnhide.checks.NativeProbe
 import dev.okhsunrog.vpnhide.suExec
+import dev.okhsunrog.vpnhide.tunnelRouteProbeCommand
+import dev.okhsunrog.vpnhide.tunnelRouteProbeResult
 import java.io.File
 
 /**
@@ -56,22 +59,36 @@ object GroundTruthProbe {
     /**
      * The self-in-tunnel gate: is this app's own uid routed through the VPN?
      * Runs the probe as root with `--uid` (a hook-inert, unfiltered read of the
-     * policy rules). Returns null when root/exec is unavailable — the caller then
-     * does not block, since a no-root device is already handled as "VPN off".
+     * policy rules). Returns null when root/exec or routing evidence is unavailable;
+     * the caller reports an inconclusive check instead of blaming split tunneling.
      */
-    fun selfRoutedThroughVpn(context: Context): Boolean? {
+    internal fun selfRoutedThroughVpn(
+        context: Context,
+        presence: VpnPresence,
+        sections: Map<String, String>,
+    ): Boolean? {
         val local = extractBinary(context, "vhprobe_uid") ?: return null
         val uid = android.os.Process.myUid()
+        require(presence.interfaces.all { it.matches(Regex("[A-Za-z0-9_.:-]+")) })
+        val interfaces = presence.interfaces.joinToString(",")
         val (exit, out) =
             suExec(
-                "cp '${local.absolutePath}' $STAGED_UID && chmod 700 $STAGED_UID && $STAGED_UID --uid $uid; rm -f $STAGED_UID",
+                "cp '${local.absolutePath}' $STAGED_UID && chmod 700 $STAGED_UID && " +
+                    "$STAGED_UID --uid $uid --vpn-ifaces '$interfaces'; result=\$?; rm -f $STAGED_UID; exit \$result",
             )
         val json = out.trim()
         if (exit != 0 || !json.startsWith("{")) {
             VpnHideLog.w(TAG, "self-routed probe unavailable (exit=$exit, no root?)")
             return null
         }
-        return runCatching { org.json.JSONObject(json).getBoolean("routed") }.getOrNull()
+        val routed = runCatching { org.json.JSONObject(json).getBoolean("routed") }.getOrNull()
+        if (routed != false) return routed
+        val unmanaged = presence.interfaces - presence.frameworkInterfaces
+        if (unmanaged.isEmpty()) return false
+        val command = tunnelRouteProbeCommand(sections, unmanaged, uid)
+        if (command.isBlank()) return null
+        val (routeExit, routes) = suExec(command)
+        return if (routeExit == 0) tunnelRouteProbeResult(routes, unmanaged) else null
     }
 
     /** Prepare the shared root-executable probe for batched runtime checks. */

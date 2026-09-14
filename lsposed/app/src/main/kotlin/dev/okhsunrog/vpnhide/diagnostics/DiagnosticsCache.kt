@@ -181,7 +181,7 @@ internal object DiagnosticsCache {
             RoutingGateCache.ensureLoaded(cacheScope, appContext, selfNeedsRestart = false)
             withContext(Dispatchers.IO) { RoutingGateCache.refreshInPlace(force = true) }
             val gate = RoutingGateCache.gate.value
-            if (gate == null) {
+            if (gate == null || RoutingGateCache.error.value != null) {
                 throw IllegalStateException(RoutingGateCache.error.value ?: "routing gate unavailable")
             }
             if (gate != DiagnosticGate.ROUTED) {

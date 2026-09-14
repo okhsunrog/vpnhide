@@ -256,9 +256,20 @@ phase_lsposed_framework() {
   emit_eval lsposed_framework 'FOUND=0; for id in zygisk_vector zygisk_lsposed lsposed; do for base in /data/adb/modules /data/adb/modules_update; do dir="$base/$id"; if [ -f "$dir/module.prop" ]; then echo installed=1; if [ -f "$dir/disable" ]; then echo disabled=1; else echo disabled=0; fi; FOUND=1; break 2; fi; done; done; [ "$FOUND" = 1 ] || echo installed=0; echo probe_ok=1'
   phase_end
 }
+current_vpn_networks() {
+  # Drop requests and historical logs before transferring/caching the snapshot.
+  dumpsys connectivity 2>/dev/null | awk '
+    /^Current Networks:/ { active=1; print; next }
+    active && /^[^[:space:]]/ { exit }
+    active && /^[[:space:]]*NetworkAgentInfo/ { print }
+  '
+}
 phase_vpn_ifaces() {
   phase_start shell_probe_vpn_ifaces
   emit_cmd vpn_ifaces grep -H . /sys/class/net/*/operstate
+  emit_cmd vpn_networks current_vpn_networks
+  emit_eval vpn_routes4 'ip -4 route show table all && echo probe_ok'
+  emit_eval vpn_routes6 'ip -6 route show table all && echo probe_ok'
   phase_end
 }
 run_all_phases_sequential() {

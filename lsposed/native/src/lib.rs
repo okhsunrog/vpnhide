@@ -846,15 +846,49 @@ unsafe fn dump_fib_rules(
         for _ in 0..MAX_NETLINK_RECV_ITERS {
             let len = netlink_recv(fd, buf);
             if len <= 0 {
-                break;
+                return Err(format!("incomplete routing dump: {}", last_os_error()));
             }
-            let cont = parse_netlink_msgs(buf, len as usize, libc::RTM_NEWRULE, &mut on_rule);
-            if !cont {
-                break;
+            let complete = validate_rule_dump_chunk(&buf[..len as usize], seq)?;
+            parse_netlink_msgs(buf, len as usize, libc::RTM_NEWRULE, &mut on_rule);
+            if complete {
+                return Ok(());
             }
         }
-        Ok(())
+        Err("routing dump exceeded receive limit".to_owned())
     }
+}
+
+// A truncated/error dump is not evidence that a UID is outside the VPN.
+fn validate_rule_dump_chunk(buf: &[u8], seq: u32) -> Result<bool, String> {
+    let header = mem::size_of::<libc::nlmsghdr>();
+    let mut offset = 0;
+    let mut complete = false;
+    while offset < buf.len() {
+        let size = read_u32_ne(buf, offset).unwrap_or(0) as usize;
+        if size < header || size > buf.len() - offset {
+            return Err("truncated routing message".to_owned());
+        }
+        if read_u32_ne(buf, offset + 8) != Some(seq) {
+            return Err("unexpected routing sequence".to_owned());
+        }
+        if read_u16_ne(buf, offset + 6).unwrap_or(0) & 0x10 != 0 {
+            return Err("routing dump interrupted".to_owned());
+        }
+        let kind = read_u16_ne(buf, offset + 4).unwrap_or(0);
+        if kind == libc::NLMSG_ERROR as u16 || kind == libc::NLMSG_DONE as u16 {
+            if kind == libc::NLMSG_ERROR as u16 && size < header + 4 {
+                return Err("missing routing error status".to_owned());
+            }
+            if size >= header + 4 && read_u32_ne(buf, offset + header) != Some(0) {
+                return Err("kernel rejected routing dump".to_owned());
+            }
+            complete |= kind == libc::NLMSG_DONE as u16;
+        } else if kind == libc::RTM_NEWRULE && size < header + mem::size_of::<Rtmsg>() {
+            return Err("truncated routing rule".to_owned());
+        }
+        offset += (size + 3) & !3;
+    }
+    Ok(complete)
 }
 
 /// The address families whose policy-rule dumps together cover an Android VPN's
@@ -1106,7 +1140,7 @@ pub fn run_all_json() -> String {
 #[derive(serde::Serialize)]
 struct SelfRouted {
     uid: u32,
-    routed: bool,
+    routed: Option<bool>,
     detail: String,
 }
 
@@ -1122,7 +1156,11 @@ struct SelfRouted {
 /// rule egresses to the VPN interface (`oif tun0`), then ask whether a uidrange
 /// rule steers this UID into exactly that table.
 pub fn self_routed_json(uid: u32) -> String {
-    let (routed, detail) = uid_routed_through_vpn(uid);
+    self_routed_for_interfaces_json(uid, None)
+}
+
+pub fn self_routed_for_interfaces_json(uid: u32, interfaces: Option<&[String]>) -> String {
+    let (routed, detail) = uid_routed_through_vpn(uid, interfaces);
     let sr = SelfRouted {
         uid,
         routed,
@@ -1132,6 +1170,7 @@ pub fn self_routed_json(uid: u32) -> String {
 }
 
 struct GateRule {
+    family: u8,
     table: u32,
     uid_lo: u32,
     uid_hi: u32,
@@ -1139,14 +1178,14 @@ struct GateRule {
     oif_vpn: bool,
 }
 
-fn uid_routed_through_vpn(myuid: u32) -> (bool, String) {
+fn uid_routed_through_vpn(myuid: u32, interfaces: Option<&[String]>) -> (Option<bool>, String) {
     const FRA_TABLE: u16 = 15;
     const FRA_OIFNAME: u16 = 17;
     const FRA_UID_RANGE: u16 = 20;
 
     let fd = match open_netlink() {
         Ok(fd) => fd,
-        Err(out) => return (false, out.detail),
+        Err(out) => return (None, out.detail),
     };
 
     let mut rules: Vec<GateRule> = Vec::new();
@@ -1157,6 +1196,7 @@ fn uid_routed_through_vpn(myuid: u32) -> (bool, String) {
 
         let mut on_rule = |b: &[u8], offset: usize, msg_len: usize| {
             let mut r = GateRule {
+                family: b[offset + mem::size_of::<libc::nlmsghdr>()],
                 table: rtmsg_table(b, offset).unwrap_or(0),
                 uid_lo: 0,
                 uid_hi: 0,
@@ -1170,7 +1210,9 @@ fn uid_routed_through_vpn(myuid: u32) -> (bool, String) {
                 |rta_type, payload| match rta_type {
                     FRA_OIFNAME if !payload.is_empty() => {
                         let name = nul_terminated_bytes_to_string(payload);
-                        if is_vpn_iface(&name) {
+                        if interfaces
+                            .map_or_else(|| is_vpn_iface(&name), |names| names.contains(&name))
+                        {
                             r.oif_vpn = true;
                         }
                     }
@@ -1202,16 +1244,29 @@ fn uid_routed_through_vpn(myuid: u32) -> (bool, String) {
                 &mut buf.0,
                 &mut on_rule,
             ) {
-                return (false, format!("send error: {e}"));
+                return (None, format!("routing probe failed: {e}"));
             }
         }
     }
 
+    let (routed, vpn_tables) = classify_uid_vpn_rules(&rules, myuid);
+
+    let detail = if vpn_tables.is_empty() {
+        format!("no VPN egress rule found for uid {myuid}")
+    } else if routed {
+        format!("uid {myuid} routed into VPN table(s) {vpn_tables:?}")
+    } else {
+        format!("uid {myuid} not in any VPN table(s) {vpn_tables:?}")
+    };
+    (Some(routed), detail)
+}
+
+fn classify_uid_vpn_rules(rules: &[GateRule], myuid: u32) -> (bool, Vec<(u8, u32)>) {
     // Pass 1: the VPN egress table id(s) — tables a rule routes out via `oif tun0`.
-    let vpn_tables: Vec<u32> = rules
+    let vpn_tables: Vec<(u8, u32)> = rules
         .iter()
         .filter(|r| r.oif_vpn)
-        .map(|r| r.table)
+        .map(|r| (r.family, r.table))
         .collect();
 
     // Pass 2: is this UID steered into exactly a VPN table by a uidrange rule?
@@ -1221,17 +1276,62 @@ fn uid_routed_through_vpn(myuid: u32) -> (bool, String) {
             && r.uid_lo <= myuid
             && myuid <= r.uid_hi
             && !(r.uid_lo == 0 && r.uid_hi == u32::MAX)
-            && vpn_tables.contains(&r.table)
+            && !r.oif_vpn
+            && vpn_tables.contains(&(r.family, r.table))
     });
 
-    let detail = if vpn_tables.is_empty() {
-        format!("no VPN egress rule found for uid {myuid}")
-    } else if routed {
-        format!("uid {myuid} routed into VPN table(s) {vpn_tables:?}")
-    } else {
-        format!("uid {myuid} not in any VPN table(s) {vpn_tables:?}")
-    };
-    (routed, detail)
+    (routed, vpn_tables)
+}
+
+#[cfg(test)]
+mod routing_gate_tests {
+    use super::*;
+
+    #[test]
+    fn incomplete_and_rejected_dumps_are_not_empty_successes() {
+        let mut done = vec![0_u8; 20];
+        done[..4].copy_from_slice(&20_u32.to_ne_bytes());
+        done[4..6].copy_from_slice(&(libc::NLMSG_DONE as u16).to_ne_bytes());
+        done[8..12].copy_from_slice(&1_u32.to_ne_bytes());
+        assert_eq!(validate_rule_dump_chunk(&done, 1), Ok(true));
+        assert!(validate_rule_dump_chunk(&done[..18], 1).is_err());
+        assert!(validate_rule_dump_chunk(&done, 2).is_err());
+        done[6..8].copy_from_slice(&0x10_u16.to_ne_bytes());
+        assert!(validate_rule_dump_chunk(&done, 1).is_err());
+        done[6..8].copy_from_slice(&0_u16.to_ne_bytes());
+        done[4..6].copy_from_slice(&(libc::NLMSG_ERROR as u16).to_ne_bytes());
+        done[16..20].copy_from_slice(&(-libc::EPERM).to_ne_bytes());
+        assert!(validate_rule_dump_chunk(&done, 1).is_err());
+    }
+
+    fn rule(family: u8, table: u32, oif_vpn: bool, lo: u32, hi: u32) -> GateRule {
+        GateRule {
+            family,
+            table,
+            oif_vpn,
+            uid_lo: lo,
+            uid_hi: hi,
+            has_uidrange: true,
+        }
+    }
+
+    #[test]
+    fn table_ids_do_not_cross_address_families() {
+        let rules = [rule(2, 100, true, 0, 0), rule(10, 100, false, 10000, 19999)];
+        assert!(!classify_uid_vpn_rules(&rules, 10402).0);
+    }
+
+    #[test]
+    fn root_oif_rule_is_not_app_vpn_membership() {
+        assert!(!classify_uid_vpn_rules(&[rule(2, 100, true, 0, 0)], 10402).0);
+    }
+
+    #[test]
+    fn split_tunnel_membership_is_uid_specific() {
+        let rules = [rule(2, 100, true, 0, 0), rule(2, 100, false, 10402, 10402)];
+        assert!(classify_uid_vpn_rules(&rules, 10402).0);
+        assert!(!classify_uid_vpn_rules(&rules, 10403).0);
+    }
 }
 
 /// Log tag for anything this crate reports. Listed in the app's `LogTags` so the
