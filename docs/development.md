@@ -122,7 +122,7 @@ flashable zip. For runtime requirements and safety notes, see
 
 ```sh
 # APK
-adb install -r lsposed/app/build/outputs/apk/release/app-release.apk
+adb install --user 0 -r lsposed/app/build/outputs/apk/release/app-release.apk
 
 # Native backend: push exactly one of these, then install via the Magisk,
 # KernelSU, KernelSU-Next, or APatch manager path appropriate for the backend.
@@ -132,6 +132,12 @@ adb push vpnhide-kmod-<kmi>.zip /sdcard/Download/
 # KernelSU-Next/Magisk add it via KPatch-Next) — see kmod/kpm/README.md.
 adb push vpnhide-kpm.zip /sdcard/Download/
 ```
+
+Install the picker APK only for the main Android user (user 0). Plain `adb install`
+can install it into secondary profiles too. The main-profile picker already
+manages targets in every profile; extra picker copies share the same canonical
+configuration and can race each other's saves. Verify per-user installation state
+with `adb shell dumpsys package dev.okhsunrog.vpnhide` after installing.
 
 After flashing a native backend, reboot the device. Do not keep multiple native
 backends installed unless you are explicitly testing conflict handling; the app
