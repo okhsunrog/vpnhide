@@ -135,7 +135,7 @@
     <string name="dashboard_protection_not_verified">Не проверено</string>
     <string name="dashboard_needs_restart">VPN Hide только что включил скрытие для самого себя. Принудительно остановите VPN Hide и откройте снова, чтобы проверить скрытие — перезагрузка устройства не нужна.</string>
     <string name="vpn_off_prompt">VPN не активен. Включите его и нажмите «Повторить», чтобы проверить скрытие.</string>
-    <string name="self_not_routed_prompt">VPN активен, но VPN Hide через него не идёт. Добавьте VPN Hide в туннель вашего VPN (не исключайте его сплит-туннелем) и нажмите «Повторить» — иначе этим проверкам нечего скрывать.</string>
+    <string name="self_not_routed_prompt">VPN активен, но VPN Hide через него не идёт — этим проверкам нечего измерять. С обычным VPN-клиентом добавьте VPN Hide в туннель (не исключайте его сплит-туннелем) и нажмите «Повторить». Некоторые VPN пропускают только выбранные приложения и не дают добавить VPN Hide — тогда самопроверка просто не запускается, это ожидаемо, а не сбой; судите по тому, работает ли нужное приложение.</string>
     <string name="vpn_off_retry">Повторить</string>
     <string name="diag_failed_prompt">Не удалось выполнить проверку скрытия — возможно, отклонён root-доступ или команда завершилась с ошибкой. Нажмите «Повторить». Обычно это временно.</string>
 
@@ -406,7 +406,7 @@
     <string name="debug_export_modal_confirm">Экспорт</string>
     <string name="debug_export_collect_again">Собрать заново</string>
     <string name="capture_incomplete_vpn_off">VPN выключен. В логе не будет главного, и диагностировать по нему почти нечего. Включите VPN и проверьте ещё раз.</string>
-    <string name="capture_incomplete_not_routed">VPN включён, но VPN Hide не пропущен через туннель (split tunneling) — скрывать нечего, и лог выйдет неполным. Добавьте VPN Hide в туннель и проверьте ещё раз.</string>
+    <string name="capture_incomplete_not_routed">VPN включён, но VPN Hide через него не идёт, поэтому лог выйдет неполным. С обычным VPN-клиентом добавьте VPN Hide в туннель и проверьте ещё раз. Некоторые VPN пропускают только выбранные приложения и не дают добавить VPN Hide — тогда полный лог собрать нельзя, это ожидаемо.</string>
     <string name="capture_incomplete_recheck">Проверить VPN ещё раз</string>
     <string name="capture_checking_vpn">Проверяю VPN туннель</string>
     <string name="capture_collect_anyway">Всё равно собрать неполный лог</string>

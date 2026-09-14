@@ -87,7 +87,7 @@
     <string name="debug_export_modal_confirm">导出</string>
     <string name="debug_export_collect_again">重新收集</string>
     <string name="capture_incomplete_vpn_off">VPN 未开启。日志将缺少关键信息，几乎无法用于诊断。请开启 VPN 后重新检测。</string>
-    <string name="capture_incomplete_not_routed">VPN 已开启，但 VPN Hide 未经过其隧道（分应用代理）。日志将不完整。请将 VPN Hide 加入隧道后重新检测。</string>
+    <string name="capture_incomplete_not_routed">VPN 已开启，但 VPN Hide 未经过其隧道，日志将不完整。若使用通用 VPN 客户端，请把 VPN Hide 加入隧道后重新检测。有些 VPN 只代理选定的应用、无法加入 VPN Hide——那么就无法采集到完整日志，这是正常现象。</string>
     <string name="capture_incomplete_recheck">重新检测 VPN</string>
     <string name="capture_checking_vpn">正在检测 VPN 隧道</string>
     <string name="capture_collect_anyway">仍然收集不完整日志</string>
@@ -181,7 +181,7 @@
     <string name="dashboard_protection_not_verified">未验证</string>
     <string name="dashboard_needs_restart">VPN Hide 刚刚为自身启用了隐藏。请重启 VPN Hide（强制停止后重新打开）来检查隐藏效果——无需重启设备。</string>
     <string name="vpn_off_prompt">当前没有已开启的 VPN。请先开启 VPN，再点按“重试”运行隐藏检查。</string>
-    <string name="self_not_routed_prompt">VPN 已开启，但 VPN Hide 的流量没有走这条 VPN。请把 VPN Hide 加入 VPN 隧道（不要用分应用代理把它排除），再点按“重试”；否则这些检查没有需要隐藏的内容。</string>
+    <string name="self_not_routed_prompt">VPN 已开启，但 VPN Hide 的流量没有走这条 VPN，这些检查没有可测量的内容。若使用通用 VPN 客户端，请把 VPN Hide 加入 VPN 隧道（不要用分应用代理把它排除）再点按“重试”。有些 VPN 只代理选定的应用、无法加入 VPN Hide——那么这项自检就无法运行，这是正常现象，并非失败；请以目标应用是否正常来判断隐藏效果。</string>
     <string name="vpn_off_retry">重试</string>
     <string name="diag_failed_prompt">隐藏检查未能运行——可能是 Root 授权被拒绝，或某条命令执行失败。请点按“重试”，这通常是暂时的。</string>
 

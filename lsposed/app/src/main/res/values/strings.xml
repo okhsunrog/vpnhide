@@ -94,7 +94,7 @@
     <string name="debug_export_modal_confirm">Export</string>
     <string name="debug_export_collect_again">Collect again</string>
     <string name="capture_incomplete_vpn_off">VPN is off. This log will contain incomplete information and is little help for diagnosis. Turn the VPN on and re-check.</string>
-    <string name="capture_incomplete_not_routed">A VPN is up, but VPN Hide is not routed through it (split tunneling). This log will be incomplete. Add VPN Hide to the tunnel and re-check.</string>
+    <string name="capture_incomplete_not_routed">A VPN is up, but VPN Hide is not routed through it, so this log will be incomplete. If you use a general VPN client, add VPN Hide to the tunnel and re-check. Some VPNs route only selected apps and won\'t let you add it — then a complete capture is not possible, which is expected.</string>
     <string name="capture_incomplete_recheck">Re-check VPN</string>
     <string name="capture_checking_vpn">Checking VPN tunnel</string>
     <string name="capture_collect_anyway">Collect an incomplete log anyway</string>
@@ -189,7 +189,7 @@
     <string name="dashboard_protection_not_verified">Not verified</string>
     <string name="dashboard_needs_restart">VPN Hide just enabled hiding for itself. Restart VPN Hide (force-stop and reopen) to check hiding — no device reboot needed.</string>
     <string name="vpn_off_prompt">No active VPN. Turn it on, then tap Retry to run the hiding checks.</string>
-    <string name="self_not_routed_prompt">A VPN is active, but VPN Hide isn\'t routed through it. Add VPN Hide to your VPN\'s tunnel (don\'t exclude it with split tunneling), then tap Retry — otherwise there is nothing to hide from these checks.</string>
+    <string name="self_not_routed_prompt">A VPN is active, but VPN Hide isn\'t routed through it, so there is nothing for these checks to measure. If you use a general VPN client, add VPN Hide to the tunnel (don\'t split-tunnel it out) and tap Retry. Some VPNs route only selected apps and won\'t let you add VPN Hide — then this self-test can\'t run, which is expected, not a failure; judge hiding by whether your target app works.</string>
     <string name="vpn_off_retry">Retry</string>
     <string name="diag_failed_prompt">The hiding checks couldn\'t run — root access may have been denied or a command failed. Tap Retry. This is usually transient.</string>
 
