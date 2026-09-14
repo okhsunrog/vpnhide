@@ -62,6 +62,10 @@
     <string name="apps_help_apply_body">После сохранения Java, Native-бэкенды уровня ядра (kmod, встроенный, KPM) и правила портов применяются сразу. Перезапуска процесса требуют только Zygisk-хуки: они загружаются внутрь выбранного приложения, поэтому нужно принудительно остановить и открыть его заново. В любом случае приложение, уже выполнявшее проверку, может держать старый результат в кеше — перезапустите его перед повторной проверкой.</string>
     <string name="apps_help_zygisk_warning_title">Zygisk и банковские приложения</string>
     <string name="apps_help_zygisk_warning_body">Zygisk-хуки работают внутри процесса выбранного приложения. Банковские и платёжные приложения могут это обнаружить, если для них включён Native; оставьте Native выключенным и по возможности используйте Java.</string>
+    <string name="apps_help_open_guide">Как настроить скрытие</string>
+    <string name="help_title">Помощь и руководство</string>
+    <string name="help_search_hint">Поиск по руководству</string>
+    <string name="help_search_empty">Ничего не найдено</string>
 
     <!-- Root status -->
     <string name="secondary_profile_error_title">Откройте VPN Hide в основном профиле</string>

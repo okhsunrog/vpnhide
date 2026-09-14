@@ -62,6 +62,10 @@
     <string name="apps_help_apply_body">保存后，Java、内核级原生后端（kmod、内置、KPM）和端口规则都会立即生效。只有 Zygisk 钩子需要把指定应用强制停止并重新打开，因为它们要加载进该应用的进程。无论哪种情况，已经探测过的应用可能仍缓存着旧结果——请在重新检查前重启它。</string>
     <string name="apps_help_zygisk_warning_title">Zygisk 与银行类应用</string>
     <string name="apps_help_zygisk_warning_body">Zygisk 钩子运行在指定应用的进程内部。为其开启原生（Native）时，银行和支付类应用可能会察觉到；对这类应用请关闭原生，尽量用 Java 层隐藏。</string>
+    <string name="apps_help_open_guide">如何设置隐藏</string>
+    <string name="help_title">帮助与指南</string>
+    <string name="help_search_hint">搜索指南</string>
+    <string name="help_search_empty">未找到内容</string>
 
     <!-- Root status -->
     <string name="secondary_profile_error_title">请在主用户资料中打开 VPN Hide</string>

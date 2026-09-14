@@ -69,6 +69,10 @@
     <string name="apps_help_apply_body">After Save, Java, the kernel native backends (kmod, built-in, KPM) and ports rules all apply immediately. Only Zygisk hooks need the selected app to be force-stopped and reopened, because they load into that app\'s process. Either way, an app that already probed may have cached the old result — restart it before re-checking.</string>
     <string name="apps_help_zygisk_warning_title">Zygisk and banking apps</string>
     <string name="apps_help_zygisk_warning_body">Zygisk hooks run inside the selected app process. Banking and payment apps may detect that when Native is enabled for them; leave Native off for those apps and rely on Java where possible.</string>
+    <string name="apps_help_open_guide">How to set up hiding</string>
+    <string name="help_title">Help &amp; guide</string>
+    <string name="help_search_hint">Search the guide</string>
+    <string name="help_search_empty">Nothing found</string>
 
     <!-- Root status -->
     <string name="secondary_profile_error_title">Open VPN Hide in the main profile</string>
