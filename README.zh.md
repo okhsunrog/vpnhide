@@ -121,7 +121,7 @@ vpnhide 对选定应用隐藏三样东西，全部通过四个 **J / N / A / P**
 举例：要让某个银行应用既看不到 VPN，也看不到已安装的 WireGuard，给银行应用开 **J + N + A**，并确认 WireGuard 在隐藏名单中。WireGuard 自身不需要任何角色。
 
 
-Java 和内核级原生后端（kmod/KPM）会立即生效。Zygisk 钩子和端口规则需在选定应用被强制停止并重新打开后才会被读取。
+Java、内核级原生后端（kmod、内置、KPM）和端口规则都会立即生效。只有 Zygisk 钩子需要把选定应用强制停止并重新打开，因为它们要加载进该应用的进程。无论哪种情况，已经探测过的应用可能仍缓存着旧结果——请在重新检查前重启它。
 
 > **注意：** 某些应用在为其启用原生时会检测到 Zygisk 钩子。请对这类应用关闭原生并依赖 Java 层，或改用 kmod/KPM。
 
@@ -293,7 +293,7 @@ vpnhide 对特定应用隐藏活动的 VPN。它并非为以下用途设计：
 - `kmod` 需要带 `CONFIG_KPROBES=y` 的受支持 GKI 内核（Android 12+ 设备上为标准配置）
 - KPM 需要 KernelPatch 运行时（APatch 或 KPatch-Next-Module）；不要将 KPM 与 `.ko` 一起安装
 - `lsposed` 需要 LSPosed、LSPosed-Next 或 Vector
-- `zygisk` 仅支持 arm64
+- `zygisk` 提供 arm64-v8a 和 armeabi-v7a（注入 32 位进程）；内核级后端仅支持 arm64
 - 直接的 `svc #0` 系统调用会绕过 Zygisk 的 libc 钩子 —— 为此请使用内核级后端（kmod 或 KPM）
 - 服务端检测在客户端无法解决 —— 请使用分应用代理
 

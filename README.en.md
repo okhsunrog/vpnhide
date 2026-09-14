@@ -119,7 +119,7 @@ Common cases:
 Worked example: to keep a banking app from seeing either the VPN or the installed WireGuard, give the bank **J + N + A** and make sure WireGuard is in the hidden list. WireGuard itself needs no roles.
 
 
-Java and kernel-level Native backends (kmod/KPM) apply immediately. Zygisk hooks and Ports rules are picked up by a selected app after force-stop and reopen.
+Java, the kernel-level Native backends (kmod, built-in, KPM) and Ports rules apply immediately. Only Zygisk hooks need the selected app to be force-stopped and reopened, since they load into that app's process. Either way, an app that already probed may have cached the result — restart it before re-checking.
 
 > **Note:** some apps detect Zygisk hooks when Native is enabled for them. Leave Native off for those apps and rely on the Java layer, or use kmod/KPM instead.
 
@@ -292,7 +292,7 @@ vpnhide hides an active VPN from specific apps. It is NOT designed for:
 - `kmod` requires a supported GKI kernel with `CONFIG_KPROBES=y` (standard on Android 12+ devices)
 - KPM requires a KernelPatch runtime (APatch or KPatch-Next-Module); do not install KPM together with the `.ko`
 - `lsposed` requires LSPosed, LSPosed-Next, or Vector
-- `zygisk` is arm64 only
+- `zygisk` ships arm64-v8a and armeabi-v7a (32-bit injection); the kernel backends are arm64 only
 - Direct `svc #0` syscalls bypass Zygisk's libc hooks — use a kernel-level backend (kmod or KPM) for that
 - Server-side detection is unfixable client-side — use split tunneling
 

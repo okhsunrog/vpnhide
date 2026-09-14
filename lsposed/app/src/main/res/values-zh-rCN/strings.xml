@@ -50,16 +50,16 @@
     <string name="ports_policy_invalid">请至少输入一个 1 到 65535 之间的有效端口或范围。</string>
     <string name="apps_help_who_title">该配置哪个应用？</string>
     <string name="apps_help_who_body">角色要配置在你想对其隐藏 VPN 的那个应用上——银行、政务、电商。VPN 应用本身在这里不需要配置：它是被隐藏的一方，那份名单在“设置 → 隐藏 VPN 应用”里。</string>
-    <string name="apps_help_role_java_body">LSPosed 负责隐藏通过 Android Java API 暴露的 VPN 信号，例如 NetworkCapabilities、NetworkInfo、LinkProperties 和 NetworkInterface。</string>
-    <string name="apps_help_role_native_body">当前生效的原生后端负责隐藏内核或 libc 探测能看到的 VPN 信号。VPN Hide 会把同一份原生选择写入所有已安装的原生后端，但只有当前生效的那个会起作用。</string>
+    <string name="apps_help_role_java_body">LSPosed 负责隐藏通过 Android Java API 暴露的 VPN 信号，例如 NetworkCapabilities、NetworkInfo 和 LinkProperties。</string>
+    <string name="apps_help_role_native_body">当前生效的原生后端负责隐藏内核或 libc 探测能看到的 VPN 信号，包括网络接口列表（NetworkInterface 通过 libc 而非 Java API 读取）。VPN Hide 只保存一份原生选择，且只有当前生效的后端会起作用。</string>
     <string name="apps_help_role_apps_body">应用隐藏——观察者模式。此应用收到的是经过净化的包管理器视图，无法列出、解析或查询被 VPN Hide 标记为隐藏的软件包。</string>
     <string name="apps_help_role_ports_body">端口——观察者模式。端口模块让本地回环上的 VPN/代理守护进程探测，在此应用看来就像关闭的端口。默认情况下 P 会拦截所有本地回环端口；可在设置中限定到指定范围。</string>
     <string name="apps_help_hook_settings_title">单项钩子设置</string>
     <string name="apps_help_hook_settings_body">对于 Java、原生和端口，点按标签旁的设置图标，即可为此应用单独选择钩子或端口范围。标签上的星号（*）表示该应用有自定义设置。</string>
     <string name="apps_help_apps_hiding_title">应用隐藏</string>
-    <string name="apps_help_apps_hiding_body">VPN Hide 会自动识别应对观察者隐藏的软件包，包括声明了 VPN 服务的应用，以及可选的名称启发式匹配。手动指定的隐藏软件包在“设置 → 高级隐藏”里。系统调用方始终豁免，好让 Android 能正常安装和启动应用。</string>
+    <string name="apps_help_apps_hiding_body">VPN Hide 会自动识别应对观察者隐藏的软件包，包括声明了 VPN 服务的应用，以及可选的名称启发式匹配。手动指定的隐藏软件包在“设置 → 隐藏 VPN 应用”里。系统调用方始终豁免，好让 Android 能正常安装和启动应用。</string>
     <string name="apps_help_apply_title">应用更改</string>
-    <string name="apps_help_apply_body">保存后，Java 和内核级原生后端（kmod/KPM）立即生效；Zygisk 原生钩子和端口规则要等指定应用强制停止并重新打开后才会被读取。</string>
+    <string name="apps_help_apply_body">保存后，Java、内核级原生后端（kmod、内置、KPM）和端口规则都会立即生效。只有 Zygisk 钩子需要把指定应用强制停止并重新打开，因为它们要加载进该应用的进程。无论哪种情况，已经探测过的应用可能仍缓存着旧结果——请在重新检查前重启它。</string>
     <string name="apps_help_zygisk_warning_title">Zygisk 与银行类应用</string>
     <string name="apps_help_zygisk_warning_body">Zygisk 钩子运行在指定应用的进程内部。为其开启原生（Native）时，银行和支付类应用可能会察觉到；对这类应用请关闭原生，尽量用 Java 层隐藏。</string>
 
