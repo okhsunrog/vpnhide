@@ -77,6 +77,7 @@ import dev.okhsunrog.vpnhide.settings.LocalSettingsState
 import dev.okhsunrog.vpnhide.toEditable
 import dev.okhsunrog.vpnhide.toPortRuleOrNull
 import dev.okhsunrog.vpnhide.toUiMode
+import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -124,6 +125,7 @@ internal fun AppPickerScreen(
     onToggleSystem: () -> Unit,
     onToggleRussianOnly: () -> Unit,
     onSortModeChange: (TargetListSortMode) -> Unit,
+    onOpenHelp: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     TargetPickerScreen(
@@ -137,7 +139,7 @@ internal fun AppPickerScreen(
         modifier = modifier,
         helpPrefKey = "apps_unified",
         helpTitle = stringResource(R.string.apps_help_title),
-        help = { targets -> AppsHelpContent(targets) },
+        help = { targets -> AppsHelpContent(targets, onOpenHelp) },
         merge = { apps, t, selfPkg ->
             val nativeTargets = t.nativeTargets
             val observers = t.observerNames
@@ -268,100 +270,36 @@ internal fun AppPickerScreen(
 }
 
 @Composable
-private fun AppsHelpContent(targets: TargetsSnapshot) {
-    val fullRoleLabels = LocalSettingsState.current.fullProtectionRoleLabels
-    val primary = MaterialTheme.colorScheme.primary
-    val secondary = MaterialTheme.colorScheme.secondary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-    val error = MaterialTheme.colorScheme.error
-
+private fun AppsHelpContent(
+    targets: TargetsSnapshot,
+    onOpenHelp: (String?) -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // First, because it is the one thing people get wrong: the roles go on
-        // the app you are hiding FROM, not on the VPN app.
+        // The one thing people get wrong — roles go on the app you hide FROM,
+        // not the VPN app. The full role/backends detail lives in the guide.
         HelpInfoBlock(
             title = stringResource(R.string.apps_help_who_title),
             body = stringResource(R.string.apps_help_who_body),
             icon = Icons.Default.Info,
-            color = primary,
+            color = MaterialTheme.colorScheme.primary,
         )
-        HelpInfoBlock(
-            title =
-                roleHelpLabel(
-                    compact = stringResource(R.string.chip_java),
-                    full = stringResource(R.string.chip_java_full),
-                    fullLabels = fullRoleLabels,
-                ),
-            body = stringResource(R.string.apps_help_role_java_body),
-            icon = Icons.Default.TextFields,
-            color = primary,
-        )
-        HelpInfoBlock(
-            title =
-                roleHelpLabel(
-                    compact = stringResource(R.string.chip_native),
-                    full = stringResource(R.string.chip_native_full),
-                    fullLabels = fullRoleLabels,
-                ),
-            body = stringResource(R.string.apps_help_role_native_body),
-            icon = Icons.Default.VpnKey,
-            color = secondary,
-        )
-        HelpInfoBlock(
-            title =
-                roleHelpLabel(
-                    compact = stringResource(R.string.chip_app_hiding),
-                    full = stringResource(R.string.chip_app_hiding_full),
-                    fullLabels = fullRoleLabels,
-                ),
-            body = stringResource(R.string.apps_help_role_apps_body),
-            icon = Icons.Default.VisibilityOff,
-            color = tertiary,
-        )
-        HelpInfoBlock(
-            title =
-                roleHelpLabel(
-                    compact = stringResource(R.string.chip_ports),
-                    full = stringResource(R.string.chip_ports_full),
-                    fullLabels = fullRoleLabels,
-                ),
-            body = stringResource(R.string.apps_help_role_ports_body),
-            icon = Icons.Default.Layers,
-            color = primary,
-        )
-        HelpInfoBlock(
-            title = stringResource(R.string.apps_help_hook_settings_title),
-            body = stringResource(R.string.apps_help_hook_settings_body),
-            icon = Icons.Default.Tune,
-            color = secondary,
-        )
-        HelpInfoBlock(
-            title = stringResource(R.string.apps_help_apps_hiding_title),
-            body = stringResource(R.string.apps_help_apps_hiding_body),
-            icon = Icons.Default.VisibilityOff,
-            color = tertiary,
-        )
-        HelpInfoBlock(
-            title = stringResource(R.string.apps_help_apply_title),
-            body = stringResource(R.string.apps_help_apply_body),
-            icon = Icons.Default.Layers,
-            color = primary,
-        )
+        // State-dependent: only when Zygisk is the active native backend.
         if (targets.activeNativeBackendId == NativeBackendId.Zygisk) {
             HelpInfoBlock(
                 title = stringResource(R.string.apps_help_zygisk_warning_title),
                 body = stringResource(R.string.apps_help_zygisk_warning_body),
                 icon = Icons.Default.Warning,
-                color = error,
+                color = MaterialTheme.colorScheme.error,
             )
+        }
+        EnhancedButton(
+            onClick = { onOpenHelp("configure-hiding") },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.apps_help_open_guide))
         }
     }
 }
-
-private fun roleHelpLabel(
-    compact: String,
-    full: String,
-    fullLabels: Boolean,
-): String = if (fullLabels) "$full ($compact)" else "$compact ($full)"
 
 @Composable
 private fun HelpInfoBlock(
