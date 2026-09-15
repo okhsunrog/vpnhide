@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.picker.NativeTargetCapacityWarning
+
 internal enum class RootReceiptStatus { Idle, Running, Finished, NotStarted }
 
 internal data class RootMutationSession(
@@ -15,6 +17,7 @@ internal data class RootMutationReceipt(
     val status: RootReceiptStatus,
     val exitCode: Int?,
     val descendantFailed: Boolean,
+    val nativeCapacity: NativeTargetCapacityWarning? = null,
 )
 
 internal sealed interface RootCanonicalRead {
@@ -48,13 +51,29 @@ internal sealed interface RootMutationReply {
     data object Unavailable : RootMutationReply
 }
 
+/** An open acknowledgement starts a fresh idle sequence in the boot that was inspected. */
+internal fun openedRootMutationSession(
+    reply: RootMutationReply.Observed,
+    boot: String,
+    id: String,
+): RootMutationSession? {
+    val receipt = reply.snapshot.receipt
+    return if (reply.accepted && reply.snapshot.boot == boot && receipt.boot == boot &&
+        receipt.session == id && receipt.status == RootReceiptStatus.Idle && receipt.sequence == 0L
+    ) {
+        RootMutationSession(boot, id)
+    } else {
+        null
+    }
+}
+
 /** An exit code alone cannot decide whether an atomic replacement occurred. */
 internal fun rootMutationPhaseOutcome(
     reply: RootMutationReply,
     session: RootMutationSession,
     sequence: Long,
     phase: ConfigPhase,
-    base: CanonicalConfig,
+    base: CanonicalConfig?,
     candidate: CanonicalConfig,
 ): PhaseOutcome {
     val observation = reply as? RootMutationReply.Observed ?: return PhaseOutcome.Unknown
@@ -70,6 +89,7 @@ internal fun rootMutationPhaseOutcome(
     if (phase != ConfigPhase.Persist) {
         return if (receipt.exitCode == 0 && !receipt.descendantFailed) PhaseOutcome.Confirmed else PhaseOutcome.FailedKnown
     }
+    if (base == null && snapshot.canonical == RootCanonicalRead.Missing) return PhaseOutcome.FailedKnown
     val actual = (snapshot.canonical as? RootCanonicalRead.Available)?.config ?: return PhaseOutcome.Unknown
     return when (actual) {
         candidate -> PhaseOutcome.Confirmed

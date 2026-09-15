@@ -12,6 +12,7 @@ internal data class ConfigOperationSpec(
     val source: OperationSource,
     val writes: Set<ConfigField>,
     val phases: List<ConfigPhase> = listOf(ConfigPhase.Persist, ConfigPhase.Native),
+    val protectsDrafts: Boolean = false,
 ) {
     init {
         require(phases.isNotEmpty())
@@ -63,6 +64,9 @@ internal sealed interface ConfigOperationEvent {
         val ticket: EffectTicket,
         val base: CanonicalConfig,
         val candidate: CanonicalConfig,
+        val plan: List<ConfigPhase>? = null,
+        val writes: Set<ConfigField> = emptySet(),
+        val baseAvailable: Boolean = true,
     ) : ConfigOperationEvent
 
     data class PreparationFailed(
@@ -218,17 +222,35 @@ private fun prepareConfigOperation(
 ): Transition<ConfigOperationState, ConfigOperationEffect> {
     val active = state.active ?: return Transition(state)
     if (active.stage != OperationStage.Preparing || active.ticket != event.ticket) return Transition(state)
-    val conflicts = currentOperationConflicts(state, active.request.spec)
+    val spec = active.request.spec.copy(writes = active.request.spec.writes + configFieldSnapshot(event.writes))
+    val conflicts = currentOperationConflicts(state, spec)
     val next =
         state.copy(
             confirmed = canonicalConfigSnapshot(event.base),
-            active = active.copy(candidate = canonicalConfigSnapshot(event.candidate), conflicts = conflicts),
+            active =
+                active.copy(
+                    request = active.request.copy(spec = spec),
+                    candidate = canonicalConfigSnapshot(event.candidate),
+                    conflicts = conflicts,
+                ),
         )
     if (conflicts.isNotEmpty()) return finishConfigOperation(next, TransitionFailure.UiEditConflict)
+    val plan = event.plan ?: active.request.spec.phases
+    require(
+        plan ==
+            active.request.spec.phases
+                .filter { it in plan },
+    )
+    if (plan.isEmpty()) return finishConfigOperation(next)
     return dispatchConfigPhase(
-        next,
-        active.request.spec.phases
-            .first(),
+        next.copy(
+            active =
+                requireNotNull(next.active).copy(
+                    request = active.request.copy(spec = spec.copy(phases = plan)),
+                    outcomes = plan.associateWith { PhaseOutcome.NotAttempted },
+                ),
+        ),
+        plan.first(),
     )
 }
 
@@ -293,7 +315,7 @@ private fun currentOperationConflicts(
     state: ConfigOperationState,
     spec: ConfigOperationSpec,
 ): Set<ConfigField> =
-    if (spec.source == OperationSource.Bridge) {
+    if (spec.source == OperationSource.Bridge || spec.protectsDrafts) {
         conflictingFields(
             spec.writes,
             state.drafts.values

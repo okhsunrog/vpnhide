@@ -1,9 +1,11 @@
 use std::fs::File;
 use std::io::{self, Seek, Write};
-use std::os::fd::FromRawFd;
+use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use super::output::Output;
 use super::state::{Status, Store};
 
 /// A separate executable, never the JNI/app process: waitpid(-1) belongs exclusively to this supervisor.
@@ -20,11 +22,16 @@ pub fn execute(
         return Err(io::Error::last_os_error());
     }
     let input = script_input(script)?;
+    let (reader, writer) = UnixStream::pair()?;
+    let mut output = Output::new(reader)?;
+    let stdout = Stdio::from(OwnedFd::from(writer.try_clone()?));
+    let stderr = Stdio::from(OwnedFd::from(writer));
     let mut running = store.state.clone();
     running.sequence = sequence;
     running.status = Status::Running;
     running.exit_code = None;
     running.descendant_failed = false;
+    running.native_capacity = None;
     // Write-ahead marker must be durable BEFORE any possible fork/exec side effect.
     store.replace(running)?;
     #[cfg(target_os = "android")]
@@ -33,8 +40,8 @@ pub fn execute(
     let shell = "/bin/sh";
     let child = Command::new(shell)
         .stdin(input)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr)
         .spawn();
     let child = match child {
         Ok(child) => child,
@@ -45,12 +52,13 @@ pub fn execute(
         }
     };
     // Children read the script via an anonymous file, not argv or a durable secret-bearing staging file.
-    let result = drain(child.id() as libc::pid_t, timeout)?;
+    let result = drain(child.id() as libc::pid_t, timeout, &mut output)?;
     if let Some((exit_code, descendant_failed)) = result {
         let mut state = store.state.clone();
         state.status = Status::Finished;
         state.exit_code = Some(exit_code);
         state.descendant_failed = descendant_failed;
+        state.native_capacity = output.warning;
         store.replace(state)?;
     }
     // Deadline leaves Running durable. A released flock or absent PID cannot clear it in this boot.
@@ -75,11 +83,16 @@ fn script_input(script: &[u8]) -> io::Result<Stdio> {
     Ok(Stdio::from(file))
 }
 
-fn drain(leader: libc::pid_t, timeout: Duration) -> io::Result<Option<(i32, bool)>> {
+fn drain(
+    leader: libc::pid_t,
+    timeout: Duration,
+    output: &mut Output,
+) -> io::Result<Option<(i32, bool)>> {
     let deadline = Instant::now() + timeout;
     let mut leader_exit = None;
     let mut descendant_failed = false;
     loop {
+        let output_closed = output.drain()?;
         let mut status = 0;
         let pid = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
         if pid > 0 {
@@ -96,7 +109,10 @@ fn drain(leader: libc::pid_t, timeout: Duration) -> io::Result<Option<(i32, bool
         } else if pid < 0 {
             let error = io::Error::last_os_error();
             match error.raw_os_error() {
-                Some(libc::ECHILD) => return Ok(leader_exit.map(|code| (code, descendant_failed))),
+                Some(libc::ECHILD) if output_closed => {
+                    return Ok(leader_exit.map(|code| (code, descendant_failed)));
+                }
+                Some(libc::ECHILD) => (),
                 Some(libc::EINTR) => continue,
                 _ => return Err(error),
             }
@@ -104,7 +120,7 @@ fn drain(leader: libc::pid_t, timeout: Duration) -> io::Result<Option<(i32, bool
         if Instant::now() >= deadline {
             return Ok(None);
         }
-        if pid == 0 {
+        if pid <= 0 {
             std::thread::sleep(Duration::from_millis(10));
         }
     }

@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.picker.NativeTargetCapacityWarning
 import org.json.JSONObject
 import org.json.JSONTokener
 
@@ -64,6 +65,8 @@ private fun parseRootReceipt(json: JSONObject): RootMutationReceipt {
     require(session != null || status == RootReceiptStatus.Idle)
     require((status == RootReceiptStatus.Finished) == (exit != null))
     require(!descendantFailed || status == RootReceiptStatus.Finished)
+    val capacity = if (json.isNull("native_capacity")) null else parseNativeCapacity(json.getJSONObject("native_capacity"))
+    require(capacity == null || status == RootReceiptStatus.Finished)
     return RootMutationReceipt(
         rootInteger(json, "revision"),
         json.getString("boot").also { require(validRootIdentity(it)) },
@@ -72,7 +75,17 @@ private fun parseRootReceipt(json: JSONObject): RootMutationReceipt {
         status,
         exit,
         descendantFailed,
+        capacity,
     )
+}
+
+private fun parseNativeCapacity(json: JSONObject): NativeTargetCapacityWarning {
+    require(json.keys().asSequence().toSet() == setOf("total", "cap", "dropped"))
+    val total = rootInteger(json, "total")
+    val cap = rootInteger(json, "cap")
+    val dropped = rootInteger(json, "dropped")
+    require(total <= Int.MAX_VALUE && cap > 0 && total > cap && dropped == total - cap)
+    return NativeTargetCapacityWarning(total.toInt(), cap.toInt(), dropped.toInt())
 }
 
 private fun rootInteger(

@@ -17,6 +17,7 @@ internal data class CanonicalActivation(
 internal data class CanonicalWriteResult(
     val exitCode: Int,
     val output: String,
+    val operation: ConfigOperationResult? = null,
 ) {
     val succeeded: Boolean
         get() = exitCode == 0

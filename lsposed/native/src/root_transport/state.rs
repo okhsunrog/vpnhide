@@ -4,6 +4,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
+use super::output::NativeCapacity;
 use serde::{Deserialize, Serialize};
 
 pub const VERSION: u32 = 1;
@@ -18,7 +19,7 @@ pub enum Status {
     NotStarted,
 }
 
-/// Only lifetime metadata. Never persist the script, config or secret material.
+/// Lifetime metadata and typed numeric warnings. Never persist scripts, configs or secret material.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct State {
@@ -30,6 +31,8 @@ pub struct State {
     pub status: Status,
     pub exit_code: Option<i32>,
     pub descendant_failed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_capacity: Option<NativeCapacity>,
 }
 
 impl State {
@@ -43,6 +46,7 @@ impl State {
             status: Status::Idle,
             exit_code: None,
             descendant_failed: false,
+            native_capacity: None,
         }
     }
 
@@ -65,6 +69,9 @@ impl State {
             && (self.status == Status::Finished) == self.exit_code.is_some()
             && self.exit_code.is_none_or(|code| (0..=255).contains(&code))
             && (!self.descendant_failed || self.status == Status::Finished)
+            && self
+                .native_capacity
+                .is_none_or(|warning| self.status == Status::Finished && warning.valid())
     }
 }
 

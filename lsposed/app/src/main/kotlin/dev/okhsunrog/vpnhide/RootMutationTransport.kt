@@ -1,5 +1,25 @@
 package dev.okhsunrog.vpnhide
 
+internal interface RootMutationClient {
+    fun inspect(): RootMutationReply
+
+    fun open(
+        expected: RootMutationSnapshot,
+        sessionId: String,
+    ): RootMutationReply
+
+    fun execute(
+        session: RootMutationSession,
+        sequence: Long,
+        command: String,
+    ): RootMutationReply
+
+    fun recover(
+        session: RootMutationSession,
+        sequence: Long,
+    ): RootMutationReply
+}
+
 /**
  * One instance belongs to the process-owned config coordinator. Each phase has a session + sequence;
  * coordinator recovery calls recover(), never execute() again. Commands remain private effect inputs.
@@ -9,10 +29,10 @@ internal class RootMutationTransport(
     private val directory: String,
     private val canonicalPath: String = CANONICAL_CONFIG_FILE,
     private val runner: RootProcessRunner = RootProcessRunner(),
-) {
-    fun inspect(): RootMutationReply = call(listOf("inspect"))
+) : RootMutationClient {
+    override fun inspect(): RootMutationReply = call(listOf("inspect"))
 
-    fun open(
+    override fun open(
         expected: RootMutationSnapshot,
         sessionId: String,
     ): RootMutationReply {
@@ -20,14 +40,14 @@ internal class RootMutationTransport(
         return call(listOf("open", expected.boot, expected.receipt.revision.toString(), sessionId))
     }
 
-    fun execute(
+    override fun execute(
         session: RootMutationSession,
         sequence: Long,
         command: String,
     ): RootMutationReply = call(phaseArguments("run", session, sequence), rootMutationScriptInput(command))
 
     /** Readback plus a metadata fence for a launch still waiting in su; never replays a config effect. */
-    fun recover(
+    override fun recover(
         session: RootMutationSession,
         sequence: Long,
     ): RootMutationReply = call(phaseArguments("recover", session, sequence))

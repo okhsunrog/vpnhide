@@ -1,8 +1,8 @@
 # App mutation transport
 
-Status: implemented transport, packaged with the APK; not connected to the runtime
-config coordinator yet. Existing app writes still use `CanonicalConfigRepository`
-and `suExec`. This is the next foundation after the
+Status: implemented transport, packaged with the APK. The [coordinator engine and
+root adapter](config-coordinator.md) are implemented; existing app writes still
+use the old `CanonicalConfigRepository` mutex and `suExec` path. This follows the
 [pure transition cores](app-state-transitions.md#13-first-implementation-pure-transition-cores).
 
 ## Why a separate executable
@@ -32,7 +32,8 @@ Metadata files are `0600`; no broad SELinux policy is installed.
 
 The receipt contains protocol version 1, a monotonic revision, boot ID, random
 app-session ID, command sequence, status, shell exit code and an orphan-failure
-flag. It contains no command, config, secret or shell output. It is lifetime
+flag, plus optional validated `native_capacity` counts (`total`, `cap`, `dropped`)
+on a finished receipt. It contains no command, config, secret or raw shell output. It is lifetime
 metadata, not a persistent operation queue; there is no replay log.
 
 Statuses:
@@ -85,8 +86,12 @@ Command input is `vpnhide-script 1 BYTE_LENGTH\n` followed by exactly that many
 UTF-8 bytes and EOF. Full framing is validated before taking the lane lock. A
 truncated but syntactically valid script prefix is not executable input. The
 supervisor feeds the validated script to the shell through an anonymous `memfd`,
-not argv or an on-disk script. Shell stdout/stderr are discarded; operational
-errors must be presented through typed phase results. `suExec` command-preview
+not argv or an on-disk script. Shell stdout/stderr are drained through a nonblocking
+socket with a 256-byte line bound and a 64 KiB budget per drain pass. Only the
+exact `native_target_cap` marker with consistent, bounded numeric counts survives;
+all other output is discarded. Output cannot starve the descendant/deadline
+checks. The supervisor also drains the output endpoint before recording Finished.
+Operational errors are presented through typed phase results. `suExec` command-preview
 logging is not used by this transport.
 
 ## Bounds and interpretation
@@ -159,10 +164,14 @@ Before runtime adoption:
 3. Move every app writer, including startup/capture/bridge paths, through that
    coordinator before enabling the new lane. Add UI progress, recovery/repair
    actions, draft ownership and structured bridge results there.
-   Preserve the existing `native_target_cap` warning through typed activation
-   evidence: this transport currently discards raw command output, so redirecting
-   the old activator calls unchanged would lose that warning.
+   The existing `native_target_cap` warning is now preserved through typed
+   activation evidence; the adapter can reconstruct its safe marker for the picker.
 4. Validate real canonical writes, activation/secret failures, Activity/process
    recreation and app-originated root execution on supported devices/managers.
 
 The running app's toggle behavior is unchanged at this transport-only stage.
+
+The coordinator-stage validation also exercised the updated helper on Pixel 8 Pro:
+1 MiB of discarded output, numeric warning recovery and redaction passed alongside
+the previous lifetime/fencing checks. Scratch files were removed; the production
+config and APK were unchanged. See [coordinator implementation](config-coordinator.md).

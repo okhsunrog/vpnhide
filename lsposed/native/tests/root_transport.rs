@@ -329,3 +329,32 @@ fn skipped_sequences_and_wrong_boot_are_rejected_without_mutation() {
     );
     assert_eq!(fixture.call(&["inspect"], "")["state"]["sequence"], 0);
 }
+
+#[test]
+fn capacity_warning_survives_recovery_without_retaining_other_output() {
+    let fixture = Fixture::new();
+    fixture.open();
+    let reply = fixture.run("1", "echo private-secret; echo 'vpnhide-warning native_target_cap total=10 cap=8 dropped=2' >&2");
+    let expected = json!({"total": 10, "cap": 8, "dropped": 2});
+    assert_eq!(reply["state"]["native_capacity"], expected);
+    assert_eq!(
+        fixture.call(&["recover", &fixture.boot, SESSION_A, "1"], "")["state"]["native_capacity"],
+        expected
+    );
+    let journal = fs::read_to_string(fixture.root.join("lane/state.json")).unwrap();
+    assert!(!journal.contains("private-secret"));
+    assert!(!reply.to_string().contains("private-secret"));
+    let next = fixture.run("2", "echo other-secret");
+    assert!(next["state"]["native_capacity"].is_null());
+}
+
+#[test]
+fn large_output_cannot_block_descendant_drain_or_be_retained_in_receipt() {
+    let fixture = Fixture::new();
+    fixture.open();
+    let reply = fixture.run("1", "head -c 1048576 /dev/zero; echo; echo 'vpnhide-warning native_target_cap total=10 cap=8 dropped=2'");
+    assert_eq!(reply["state"]["status"], "finished");
+    assert_eq!(reply["state"]["exit_code"], 0);
+    assert_eq!(reply["state"]["native_capacity"]["total"], 10);
+    assert!(reply.to_string().len() < 1024);
+}

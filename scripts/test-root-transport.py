@@ -105,11 +105,24 @@ def test_receipts(fixture: DeviceFixture):
     fenced = fixture.call("recover", fixture.boot, fixture.session, "2")
     assert fenced["state"]["status"] == "not_started", fenced
     assert fixture.phase(2, "printf stale >config")["status"] == "rejected"
-    partial = fixture.phase(3, "printf partial >config; echo synthetic-private; exit 7")
+    partial = fixture.phase(
+        3,
+        "printf partial >config; head -c 1048576 /dev/zero; echo; echo synthetic-private; "
+        "echo 'vpnhide-warning native_target_cap total=10 cap=8 dropped=2' >&2; exit 7",
+    )
     assert partial["state"]["exit_code"] == 7 and partial["config"] == "partial", partial
     assert "synthetic-private" not in json.dumps(partial)
     assert "synthetic-private" not in fixture.shell(f"cat {fixture.root}/lane/state.json").stdout
-    print("PASS durable receipt, stale launch rejection, recovery fence, partial write, redaction")
+    expected = {"total": 10, "cap": 8, "dropped": 2}
+    assert partial["state"]["native_capacity"] == expected, partial
+    assert (
+        fixture.call("recover", fixture.boot, fixture.session, "3")["state"]["native_capacity"]
+        == expected
+    )
+    print(
+        "PASS durable receipt, stale launch rejection, recovery fence, "
+        "partial write, redaction, bounded capacity evidence"
+    )
 
 
 def test_descendants(fixture: DeviceFixture):

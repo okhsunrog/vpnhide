@@ -1,5 +1,6 @@
 mod execute;
 mod input;
+mod output;
 mod state;
 
 use std::fs;
@@ -128,6 +129,7 @@ fn dispatch(
                 state.status = Status::NotStarted;
                 state.exit_code = None;
                 state.descendant_failed = false;
+                state.native_capacity = None;
                 store.replace(state)?;
             } else {
                 execute::execute(store, sequence, script, Duration::from_secs(120))?;

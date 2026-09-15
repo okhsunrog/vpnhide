@@ -31,6 +31,26 @@ class RootMutationDataTest {
     ): PhaseOutcome = rootMutationPhaseOutcome(parseRootMutationReply(json.toString()), session, 1, phase, base, candidate)
 
     @Test
+    fun `capacity evidence only accepts bounded consistent counts on terminal receipt`() {
+        val json = reply().apply { getJSONObject("state").put("native_capacity", JSONObject("""{"total":10,"cap":8,"dropped":2}""")) }
+        val parsed = parseRootMutationReply(json.toString()) as RootMutationReply.Observed
+        assertEquals(
+            2,
+            parsed.snapshot.receipt.nativeCapacity
+                ?.dropped,
+        )
+        for (bad in listOf(
+            """{"total":10,"cap":0,"dropped":10}""",
+            """{"total":10,"cap":8,"dropped":1}""",
+            """{"total":2147483648,"cap":8,"dropped":2147483640}""",
+            """{"total":10,"cap":8,"dropped":2,"text":"secret"}""",
+        )) {
+            json.getJSONObject("state").put("native_capacity", JSONObject(bad))
+            assertEquals(RootMutationReply.Unavailable, parseRootMutationReply(json.toString()))
+        }
+    }
+
+    @Test
     fun `atomic persistence depends on actual readback even after command failure or success`() {
         val partial = reply().apply { getJSONObject("state").put("exit_code", 7) }
         assertEquals(PhaseOutcome.Confirmed, outcome(partial))

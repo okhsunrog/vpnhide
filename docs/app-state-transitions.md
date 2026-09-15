@@ -690,3 +690,13 @@ Recovery can consume a still-undispatched sequence in transport metadata. This
 fences a root launch delayed beyond the app timeout; it never repeats a config,
 secret or activation effect. The “read-only” recovery policy in section 3 excludes
 application mutations, while permitting this lifetime-metadata update.
+
+## 15. Coordinator engine and typed config edits
+
+`ConfigCoordinator` now executes the config reducer through identified coroutine
+effects; `ConfigRootIo` connects it to the retained root session and receipts.
+Typed edits apply to fresh preparation reads, preserve declared intent for conflict
+checks, support no-op plans and keep persistence separate from activation failure.
+The engine and adapter are exercised by coroutine/adapter tests; existing app
+writers and UI are not connected yet. The exact implementation, validation and
+all-writer migration boundary are in [config coordinator](config-coordinator.md).
