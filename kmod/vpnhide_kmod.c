@@ -2362,7 +2362,7 @@ static struct kretprobe rt6_fill_krp = {
  *
  * If single-lookup concealment is ever needed, hook rtnl_unicast instead
  * (global EXPORT_SYMBOL, ABI-stable, runs in caller context) and rewrite
- * RTA_OIF in the reply skb — see docs/ROADMAP.md.
+ * RTA_OIF in the reply skb — see docs/notes/ROADMAP.md.
  */
 
 /* ================================================================== */

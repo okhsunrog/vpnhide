@@ -6,7 +6,7 @@ hook, update the matrix here so the picture stays in one place.
 
 Scope: this file is about **detection vectors and their coverage**. For where
 runtime state is *stored* see [state.md](state.md); for forward-looking work
-see [ROADMAP.md](ROADMAP.md).
+see [ROADMAP.md](notes/ROADMAP.md).
 
 ---
 
@@ -25,7 +25,7 @@ VPN-manager app at all.
 
 Two recurring assumptions, both documented in ROADMAP:
 
-- **Split tunnel** ([split-tunnel guidance](ROADMAP.md)): the recommended setup
+- **Split tunnel** ([split-tunnel guidance](notes/ROADMAP.md)): the recommended setup
   keeps target apps *outside* the tunnel, so handing them a physical network
   identity is consistent with where their traffic actually goes.
 - Server-side signals (egress IP geolocation, DNS, latency) **cannot** be fixed
@@ -184,7 +184,7 @@ kernel's original result are overwritten.
   64-bit and modern enumeration uses netlink (which the rtnl/inet fill hooks do
   cover), so this is narrow; closing it means also hooking `compat_sock_ioctl`
   with the compat `ifconf` layout. Deferred (low priority) — see
-  [ROADMAP.md](ROADMAP.md).
+  [ROADMAP.md](notes/ROADMAP.md).
 
 The KPM backend's `filter_ifconf` compacts the fill the same way the `.ko` does,
 but does not yet reduce the `ifc_req == NULL` size query (it would need raw netdev
@@ -370,14 +370,14 @@ detectors actually probe:
   does not yet reduce the `ifc_req == NULL` size query the `.ko` handles (3A).
 - **Single-lookup route** (`rt_fill_info`) is intentionally unhooked — no stable
   static-function ABI; low value under split tunnel. See
-  [ROADMAP.md](ROADMAP.md).
+  [ROADMAP.md](notes/ROADMAP.md).
 - **Host-route logic is inert under Android `VpnService`** (`protect()` path,
   3B). Kept for desktop-style VPNs.
 - **Server-side signals are out of scope** (egress IP, DNS, RTT). Split-tunnel
   guidance is the mitigation, not code.
 - **VPN-preserving mode** (keep target traffic *inside* the tunnel while hidden)
   is future work; today the physical-handle swap assumes split tunnel. See
-  [ROADMAP.md](ROADMAP.md), issue #130.
+  [ROADMAP.md](notes/ROADMAP.md), issue #130.
 
 ---
 

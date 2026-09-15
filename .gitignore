@@ -50,3 +50,6 @@ __pycache__/
 kmod/shared/test_protocol
 kmod/module-staging/
 kmod/kpm/module-staging/
+
+# Local working notes / handoffs / design drafts — never part of a product commit.
+/scratchpad/

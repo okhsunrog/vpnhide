@@ -195,7 +195,7 @@ back into a regression.
    `regs[3]` held `table_id`, not the `rtable*`). Route *enumeration* (what
    detection apps use) goes through the global `fib_dump_info`; single lookups
    respect the caller's routing, which is physical under split-tunnel. See
-   `docs/ROADMAP.md` for the `rtnl_unicast`-based alternative if ever needed.
+   `docs/notes/ROADMAP.md` for the `rtnl_unicast`-based alternative if ever needed.
 
 7. **iproute2 over QEMU user-net.** `init.sh` apk-adds iproute2 at boot (the
    runner has internet via QEMU's slirp NAT). Prebaking it into the rootfs is a
