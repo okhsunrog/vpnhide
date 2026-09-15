@@ -63,6 +63,9 @@
     <string name="help_title">Help &amp; guide</string>
     <string name="help_search_hint">Search the guide</string>
     <string name="help_search_empty">Nothing found</string>
+    <string name="help_leave_title">Unsaved changes</string>
+    <string name="help_leave_body">Opening this link leaves the app list, and your unsaved changes there will be lost. Continue?</string>
+    <string name="help_leave_confirm">Continue</string>
 
     <!-- Root status -->
     <string name="secondary_profile_error_title">Open VPN Hide in the main profile</string>

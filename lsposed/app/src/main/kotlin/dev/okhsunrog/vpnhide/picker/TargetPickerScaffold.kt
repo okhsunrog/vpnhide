@@ -147,6 +147,7 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     onToggleSystem: () -> Unit,
     onToggleRussianOnly: () -> Unit,
     onSortModeChange: (TargetListSortMode) -> Unit,
+    onDirtyChange: (Boolean) -> Unit = {},
     modifier: Modifier,
     helpPrefKey: String,
     helpTitle: String,
@@ -181,6 +182,10 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     var snackMessage by remember { mutableStateOf<String?>(null) }
     var snackDuration by remember { mutableStateOf(SnackbarDuration.Long) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Surface unsaved-edit state so a host can guard destructive navigation
+    // (this screen is torn down by full-screen overlays, dropping its edits).
+    LaunchedEffect(dirty) { onDirtyChange(dirty) }
 
     LaunchedEffect(snackMessage, snackDuration) {
         snackMessage?.let {

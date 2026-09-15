@@ -126,6 +126,7 @@ internal fun AppPickerScreen(
     onToggleRussianOnly: () -> Unit,
     onSortModeChange: (TargetListSortMode) -> Unit,
     onOpenHelp: (String?) -> Unit,
+    onDirtyChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     TargetPickerScreen(
@@ -136,6 +137,7 @@ internal fun AppPickerScreen(
         onToggleSystem = onToggleSystem,
         onToggleRussianOnly = onToggleRussianOnly,
         onSortModeChange = onSortModeChange,
+        onDirtyChange = onDirtyChange,
         modifier = modifier,
         helpPrefKey = "apps_unified",
         helpTitle = stringResource(R.string.apps_help_title),

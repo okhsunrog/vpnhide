@@ -499,6 +499,8 @@ private fun MainScreen() {
     var showHelp by remember { mutableStateOf(false) }
     var helpInitialArticle by remember { mutableStateOf<String?>(null) }
     var settingsRequestedSub by remember { mutableStateOf<SettingsSubScreen?>(null) }
+    var protectionDirty by remember { mutableStateOf(false) }
+    var pendingHelpNav by remember { mutableStateOf<String?>(null) }
     if (showSettings) {
         BackHandler { showSettings = false }
         SettingsScreen(
@@ -547,6 +549,13 @@ private fun MainScreen() {
                 currentTab = Tab.Protection
             }
         }
+    }
+    // diagnostics/hidden-apps replace the main screen and drop the Hiding list's
+    // unsaved edits; confirm before leaving when it is dirty. hiding just selects
+    // the tab, so it never needs the guard.
+    val requestHelpNav: (String) -> Unit = { href ->
+        val tearsDown = href.endsWith("diagnostics") || href.endsWith("hidden-apps")
+        if (tearsDown && protectionDirty) pendingHelpNav = href else handleHelpNav(href)
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -783,6 +792,7 @@ private fun MainScreen() {
                                 onToggleRussianOnly = { showRussianOnly = !showRussianOnly },
                                 onSortModeChange = { targetSortMode = it },
                                 onOpenHelp = openHelp,
+                                onDirtyChange = { protectionDirty = it },
                                 modifier = Modifier.padding(innerPadding),
                             )
                         }
@@ -794,7 +804,27 @@ private fun MainScreen() {
             HelpScreen(
                 initialArticleId = helpInitialArticle,
                 onClose = { showHelp = false },
-                onNavigate = handleHelpNav,
+                onNavigate = requestHelpNav,
+            )
+        }
+        pendingHelpNav?.let { href ->
+            AlertDialog(
+                onDismissRequest = { pendingHelpNav = null },
+                title = { Text(stringResource(R.string.help_leave_title)) },
+                text = { Text(stringResource(R.string.help_leave_body)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingHelpNav = null
+                        handleHelpNav(href)
+                    }) {
+                        Text(stringResource(R.string.help_leave_confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingHelpNav = null }) {
+                        Text(stringResource(R.string.btn_cancel))
+                    }
+                },
             )
         }
     }
