@@ -16,8 +16,11 @@ Product decisions recorded on 2026-09-15: switches immediately show the requeste
 position and progress; drafts survive Activity recreation but need not survive
 process death; overlapping UI edits take priority over bridge mutations; an
 indeterminate root operation gets one automatic read-only recheck before mutations
-are paused. Diagnostic semantics require a separate investigation before deciding
-whether or when completed measurements become stale.
+are paused. The subsequent diagnostic investigation and agreed design direction
+are formalized in the [transition contract](app-state-transitions.md): independent
+execution, applicability and evidence states; explicit repeat runs; shared
+presentation for UI and bridge. That contract specifies the new transitions;
+this document explains the migration and original constraints.
 
 ## 1. Problem and historical constraints
 
@@ -78,7 +81,7 @@ behind their facades. Avoid a parallel set of global stores during migration.
 | Installed-app inventory | `AppListCache` | Refresh on inventory demand, independently of config changes |
 | Dashboard and target presentation | Existing feature facades | Derived from explicit config/observation inputs |
 | Live routing precondition | `RoutingGateCache` | Shared probe with VPN/resume/manual triggers |
-| Diagnostic execution and results | Existing `DiagnosticsCache` | Current process policy retained pending the separate semantic design |
+| Diagnostic execution and results | Coordinator behind `DiagnosticsCache` | Process-owned runs and immutable measurements; applicability derived separately |
 | Unsaved editor changes | Screen state holder | Survive recomposition and activity recreation |
 | Active capture tokens | Config coordinator | Process lifetime; released by capture cleanup |
 | Hook configuration and statistics | Existing system_server/native owners | Backend-specific; observed by the app |
@@ -226,7 +229,7 @@ Initial refresh policy:
 |---|---|
 | UI preference | Recompose presentation; no root scan |
 | Debug switch/capture | Save/apply; coalesce runtime observation; no app-icon scan or diagnostic rerun |
-| Target/hook/ports edit | Save/apply; refresh runtime; diagnostic invalidation policy deferred |
+| Target/hook/ports edit | Save/apply; refresh runtime; update applicability for relevant self-context changes, without automatic rerun |
 | VPN callback/resume | Refresh shared routing gate; reuse/coalesce root work |
 | Explicit inventory refresh | Refresh package inventory; reconcile auto-hide against current config |
 | Statistics refresh | Refresh counters; no config mutation |
@@ -264,37 +267,40 @@ Rebase untouched fields onto newly confirmed config. Unsaved UI edits win when
 another producer changes the same field. Register active draft patches with the
 coordinator so it can reject overlapping bridge mutations before persistence,
 using an explicit `ui_edit_conflict` result identifying the application and fields.
-Reject the whole conflicting bridge operation; do not silently apply its other
-fields. Unrelated operations still merge. Check conflicts at execution, within
-the same ordering boundary as writes and draft registration updates.
+Reject the whole conflicting bridge operation before mutating dispatch; do not
+silently apply its other fields. A UI edit arriving after dispatch is preserved,
+and the bridge receives a conflict with actual phase outcomes, not a false claim
+that nothing was written. See the transition contract for this ordering boundary.
+Unrelated operations still merge.
 
 The registration is process-owned and survives Activity recreation with the draft;
 release it on discard or successful save, without dropping later draft revisions.
 An operation already completed before the UI edit cannot retroactively fail: the
 new UI patch wins on its next save. Arbitrary external root writers cannot receive
 bridge errors; retain the UI patch and rebase it on the next confirmed read.
-Imports are explicit replacements and must reconcile open drafts without silently
-discarding UI edits; exact replacement UX remains to be designed.
+Imports/resets overlapping open drafts return a conflict before dispatch. The user
+can save/discard the draft and retry the replacement; no silent loss of UI edits.
 
-Save captures a fixed patch. Either disable editing during that save initially,
-or retain later edits as a separate draft revision; successful completion must
-never clear edits made after submission. Use a lifecycle state holder for activity
+Save captures a fixed patch and disables that editor until persistence is known.
+Later edits are a separate draft revision; successful completion must never clear
+edits made after submission. Use a lifecycle state holder for activity
 recreation, and retain the existing unsaved-navigation protection. Persisting
 unsaved drafts across process death is out of scope for the first implementation.
 
 ### Diagnostics
 
-Diagnostic freshness and repeat-run behavior are not accepted parts of this
-migration. First define the subject of each measurement, evidence strength,
-execution states, consumers and user-facing promises. The separate
-[diagnostics state analysis](diagnostics-state-analysis.md) documents the existing
-semantics and history, including where screens and exports diverge. It proposes
-questions and boundaries, not an approved replacement policy.
+The [diagnostics state analysis](diagnostics-state-analysis.md) documents existing
+semantics and history. The subsequent [transition contract](app-state-transitions.md)
+specifies the replacement: process-owned identified runs, immutable evidence,
+separate current eligibility and historical applicability, and one presentation
+projection for consumers. One automatic startup suite remains; completed-test
+reruns are explicit. Changes to relevant observed conditions affect applicability
+without erasing old measurements or automatically executing new probes.
 
-Keep diagnostics integration explicit while migrating the surrounding state
-machinery. Do not silently turn config refreshes into new self-test runs or change
-the meaning of `Ready`, `ROUTED` or exported verdicts. Error propagation fixes must
-be reviewed against all consumers even when they do not change rerun policy.
+Migrate this behavior as a distinct integration stage after the operation and
+observation cores. Do not silently repurpose existing `Ready`, `ROUTED` or exported
+verdict fields; define their replacement and bundle/bridge compatibility together.
+Error propagation changes must cover all consumers even before reruns are enabled.
 LSPosed's FileObserver plus fingerprint fallback remains independent; an app
 cache refresh is not an acknowledgement from system_server. Statistics remain
 sampled counters, including the existing debounced LSPosed disk publication.
@@ -318,9 +324,10 @@ Each stage must keep the app usable and remove the old path it replaces.
 4. **Switches and drafts.** Shared pending/error treatment; confirm after persistence;
    activation retry; draft conflicts and lifecycle retention. Keep local DataStore
    settings reactive, including their dashboard messages.
-5. **Profiling.** Measure whether splitting the root probe is justified. Diagnostic
-   semantics, freshness and reruns have their own design and acceptance boundary;
-   they are not implicitly included in this stage.
+5. **Diagnostic integration.** Implement the separate transition contract for run
+   ownership, context/applicability, evidence summaries and UI/bridge/capture parity.
+   Version serialized semantic changes and validate its cross-machine scenarios.
+6. **Profiling.** Measure whether splitting the root probe is justified.
 
 Required deterministic tests (fake I/O, explicitly controlled suspension points):
 
@@ -337,7 +344,7 @@ Required deterministic tests (fake I/O, explicitly controlled suspension points)
 | Toggle off during overlapping captures | Effective debug stays on until final release |
 | Capture ends twice or process restarts mid-capture | Idempotent release; startup restores user intent |
 | Partial inventory or conflicting draft | No dropped unseen roles or lost unsaved edits |
-| Bridge edit overlaps an active UI draft | Explicit application/field conflict; no partial bridge write |
+| Bridge edit overlaps an active UI draft before dispatch | Explicit application/field conflict; no partial bridge write |
 | Activity recreated with an active draft | Draft and conflict registration survive |
 | First reconciliation remains indeterminate | One automatic read-only retry, then pause and manual recheck |
 | No-op tab switch/debug-only change | No redundant inventory load/full diagnostic run |
@@ -358,12 +365,12 @@ from unit tests. No device measurements were taken for this proposal.
   commands; establish what happens to root descendants on timeout on supported
   managers. Extra small root calls may be acceptable; measure rather than assume.
 - Recovery ordering for Superkey plus JSON changes, including indeterminate writes.
-- Draft registration ordering against operations already in flight, conflict error
-  response shape, and explicit import/reset behavior with open drafts.
+- Bridge error envelope/versioning for conflicts after mutating dispatch; preserve
+  the actual phase outcomes specified by the transition contract.
 - Which runtime observations can establish application, versus command success
   only, without changing control-v2/telemetry-v1.
-- Separate diagnostic semantic contract; only then freshness keys, repeat-run
-  policy and serialization impact.
+- Backend-specific self-context projection, adapter deadlines, and serialization
+  changes implementing the diagnostic transition contract.
 
 ## Source map
 

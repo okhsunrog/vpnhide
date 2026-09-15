@@ -3,6 +3,11 @@
 Status: source and history analysis, with design questions. No runtime change or
 new freshness/rerun policy is approved by this document.
 
+The subsequent [transition contract](app-state-transitions.md) specifies the new
+design direction. This analysis remains a record of the baseline behavior and
+questions that motivated it; its open questions are historical inputs to that
+contract, not competing runtime rules.
+
 Baseline: `3818954e1615697427664a6bbcff6d9d6483f0c4`, inspected on 2026-09-15 in
 `../vpnhide_state`. Complements [diagnostics](diagnostics.md),
 [debug bundles](debug-bundle.md) and the [app state proposal](app-state-design.md).

@@ -9,7 +9,9 @@ For the hiding side (which backend covers which detection vector) see
 For the current execution states, screen/export dependencies, historical decisions
 and unresolved semantic questions, see the
 [diagnostics state analysis](diagnostics-state-analysis.md). That analysis does
-not change the runtime contract or approve a new rerun policy.
+not change the runtime contract. The proposed replacement is specified separately
+in the [app state transition contract](app-state-transitions.md) and is not yet
+implemented.
 
 Devices this was validated on: Pixel 4a (sunfish, Magisk, 4.14, kmod/KPM/Zygisk),
 Pixel 8 Pro (husky, KernelSU-Next, GKI 6.1, KPM), and an Android 13 Zygisk device.
