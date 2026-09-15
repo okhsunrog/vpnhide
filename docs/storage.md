@@ -9,6 +9,9 @@ Proposed app-side state and synchronization changes are described in
 [App state redesign](app-state-design.md). That document is a design proposal;
 the storage and activation behavior below describes the current implementation.
 
+The [mutation transport](root-mutation-transport.md) is implemented and packaged
+as a migration foundation; the existing app write path below is still active.
+
 > **Status.** This is the current storage/activation design: one canonical JSON
 > desired-state file, Rust activators that derive runtime state for native and
 > ports backends, and LSPosed reading the JSON directly from `system_server`.

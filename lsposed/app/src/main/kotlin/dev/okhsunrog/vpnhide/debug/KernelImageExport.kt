@@ -3,6 +3,7 @@ package dev.okhsunrog.vpnhide.debug
 import android.content.Context
 import android.os.Process
 import dev.okhsunrog.vpnhide.hook.HookLog
+import dev.okhsunrog.vpnhide.shellQuote
 import dev.okhsunrog.vpnhide.suExec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -242,5 +243,3 @@ private fun buildKernelImagesExportCommand(
         [ "${'$'}HAS_IMAGE" -eq 1 ] && exit 0 || exit 1
         """.trimIndent()
 }
-
-private fun shellQuote(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"

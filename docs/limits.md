@@ -139,6 +139,26 @@ warning instead of the normal success message. The canonical package selection
 is still saved in full; the warning describes the capped native runtime
 projection.
 
+## App mutation transport (not connected to runtime writers yet)
+
+These are configured allocation/input bounds, separate from the backend capacity
+measurements above. See [transport protocol and recovery](root-mutation-transport.md).
+
+| Resource | Enforced bound | Owner |
+|---|---|---|
+| UTF-8 command script | 2 MiB plus at most 64 B framing | `root_transport/input.rs`, Kotlin request adapter |
+| Canonical readback | 2 MiB | `root_transport/mod.rs` |
+| Latest receipt metadata | 4 KiB | `root_transport/state.rs` |
+| Retained helper stdout | 4 MiB | `RootProcessRunner` |
+| Outstanding process/pipe owners | 3 per retained runner | `RootProcessRunner` |
+
+The canonical JSON is embedded as a JSON string in the helper response, so escaping
+and the receipt consume part of the stdout budget. Existing persistence builders
+also base64-encode canonical data inside the script, reducing the usable canonical
+write size below the script's 2 MiB limit. Overflow reports unavailable/rejection;
+it never falls back to an empty config or silently truncates a mutation. These
+bounds do not raise or replace the 160-UID native target limit.
+
 ## Re-measuring
 
 Nothing here should be trusted because it is written down. The representative

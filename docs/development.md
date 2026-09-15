@@ -25,7 +25,7 @@ How to build vpnhide from source.
 - **`zip`** — packaging module zips.
 - **`adb`** — installing builds on a device.
 
-The Rust crate at `lsposed/native/` is built via cargo-ndk by the `buildRustProbe` Gradle `Exec` task in `lsposed/app/build.gradle.kts` (wired into `preBuild`), which bundles the resulting `libvpnhide_checks.so` into the APK's `jniLibs/` plus the root-exec'able `vhprobe` bin as an asset. There is no codegen and no extra Gradle plugin: the whole native surface is one JSON-returning JNI function (`NativeProbe.runAllChecksJson`), parsed on the Kotlin side — no manual `cargo` invocation needed.
+The Rust crate at `lsposed/native/` is built via cargo-ndk by the `buildRustProbe` Gradle `Exec` task in `lsposed/app/build.gradle.kts` (wired into `preBuild`), which bundles the resulting `libvpnhide_checks.so` into the APK's `jniLibs/` plus the root-exec'able `vhprobe` and `vhmutate` bins as assets. The latter is the [mutation transport foundation](root-mutation-transport.md), not yet connected to app writes. There is no codegen and no extra Gradle plugin; no manual `cargo` invocation is needed for the APK build.
 
 ## Repository layout
 

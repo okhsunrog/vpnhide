@@ -677,3 +677,16 @@ No APK/device or Android lifecycle validation was performed for this stage.
 6. Bundle/bridge compatibility, startup/process-death reconstruction (T25), and
    device validation. No serialized types or runtime wire semantics changed in
    this first core implementation.
+
+## 14. Mutation transport implementation
+
+The next stage implements `vhmutate` plus a bounded Kotlin process runner,
+versioned binary staging and typed receipt/readback adapters. Its protocol,
+quiescence proof, limits, device evidence and exact migration boundary are in
+[root mutation transport](root-mutation-transport.md). The transport is packaged
+but existing app writers are not connected yet.
+
+Recovery can consume a still-undispatched sequence in transport metadata. This
+fences a root launch delayed beyond the app timeout; it never repeats a config,
+secret or activation effect. The “read-only” recovery policy in section 3 excludes
+application mutations, while permitting this lifetime-metadata update.

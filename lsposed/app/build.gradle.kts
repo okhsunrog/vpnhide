@@ -1,7 +1,7 @@
-import java.io.FileInputStream
-import java.util.Properties
 import org.gradle.api.tasks.Exec
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.io.FileInputStream
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -44,7 +44,7 @@ tasks.withType<io.gitlab.arturbosch.detekt.DetektCreateBaselineTask>().configure
 tasks.register<Exec>("ktlintCheck") {
     group = "verification"
     description = "Runs ktlint on app Kotlin sources."
-    commandLine("ktlint", "${projectDir}/src/**/*.kt")
+    commandLine("ktlint", "$projectDir/src/**/*.kt")
 }
 
 // The native check probes ship two ways from one Rust crate (../native):
@@ -54,6 +54,8 @@ tasks.register<Exec>("ktlintCheck") {
 //     asset, not a jniLib: AGP 9 defaults to extractNativeLibs=false, so a
 //     jniLib isn't a real on-disk file and can't be exec'd.
 // Built with cargo-ndk (the same toolchain the zygisk module already uses).
+// The crate also ships vhmutate as an asset: a separate root mutation supervisor,
+// never loaded into the app's JNI process. See docs/root-mutation-transport.md.
 // This replaces the gobley/UniFFI plugin (and its AGP-9 fork): the whole native
 // surface is now one JSON-returning function, so codegen bindings aren't worth
 // the dependency. -P 29 matches minSdk (getifaddrs needs API >= 24).
@@ -94,7 +96,7 @@ val emulatorX86 = (project.findProperty("vpnhideEmulatorX86") as String?)?.toBoo
 val buildRustProbe =
     tasks.register<Exec>("buildRustProbe") {
         group = "build"
-        description = "Builds the vpnhide_checks cdylib + vhprobe bin via cargo-ndk."
+        description = "Builds vpnhide_checks, vhprobe and the mutation supervisor via cargo-ndk."
         workingDir = nativeCrateDir
         environment("ANDROID_NDK_HOME", rustNdkDir)
         environment("NDK_HOME", rustNdkDir)
@@ -137,8 +139,27 @@ val buildRustProbe =
         val probeDestArmv7 = rustAssetsOut.resolve("bin/armeabi-v7a/vhprobe")
         val probeBinX86 = nativeCrateDir.resolve("target/x86_64-linux-android/release/vhprobe")
         val probeDestX86 = rustAssetsOut.resolve("bin/x86_64/vhprobe")
+        val mutationBins =
+            listOf(
+                nativeCrateDir.resolve("target/aarch64-linux-android/release/vhmutate") to
+                    rustAssetsOut.resolve("bin/arm64-v8a/vhmutate"),
+                nativeCrateDir.resolve("target/armv7-linux-androideabi/release/vhmutate") to
+                    rustAssetsOut.resolve("bin/armeabi-v7a/vhmutate"),
+            ) +
+                if (emulatorX86) {
+                    listOf(
+                        nativeCrateDir.resolve("target/x86_64-linux-android/release/vhmutate") to
+                            rustAssetsOut.resolve("bin/x86_64/vhmutate"),
+                    )
+                } else {
+                    emptyList()
+                }
         val copyX86 = emulatorX86
         doLast {
+            mutationBins.forEach { (source, destination) ->
+                destination.parentFile.mkdirs()
+                source.copyTo(destination, overwrite = true)
+            }
             probeDestArm.parentFile.mkdirs()
             probeBinArm.copyTo(probeDestArm, overwrite = true)
             probeDestArmv7.parentFile.mkdirs()
@@ -194,7 +215,9 @@ android {
             .exec {
                 commandLine(
                     pythonExe,
-                    rootProject.projectDir.parentFile.resolve("scripts/build-version.py").absolutePath,
+                    rootProject.projectDir.parentFile
+                        .resolve("scripts/build-version.py")
+                        .absolutePath,
                 )
             }.standardOutput.asText
             .get()

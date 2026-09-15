@@ -38,6 +38,29 @@ The app writes it atomically via temp-file + `mv`. If it is absent, native
 activators treat it as an empty config and app startup creates a new config
 containing the mandatory VPN Hide self-target.
 
+### App mutation transport metadata (staged implementation)
+
+The new [root mutation transport](root-mutation-transport.md) is built but not yet
+connected to app writes. When its preparation API is invoked, it owns:
+
+- `/data/adb/vpnhide/app-state/` and `lane/`: root-owned `0700` directories.
+- `lane/lock`: permanent `0600` lock inode; never replace/unlink while an
+  invocation can exist.
+- `lane/state.json`: latest version-1 execution-lifetime receipt, `0600`; written
+  by `vhmutate`, read under its lock, retained across app death and reboot.
+  `lane/state.next` is its atomic replacement staging file. No commands, config,
+  secrets or output are stored here; this is not an operation replay queue.
+- `vhmutate-<sha256>`: versioned root executable, `0700`. The app stages it through
+  `stage-<uuid>`, links it into place without replacing an existing executable,
+  and verifies its digest. Interrupted staging can leave a temporary binary.
+- App-private `files/vhmutate-<sha256>` and `files/vhmutate-<uuid>.tmp`: extracted
+  APK assets, removed with app data. They contain binary code only.
+
+Old executable versions and receipts currently have no automatic cleanup; safe
+cleanup/adoption belongs to coordinator integration. A same-boot unfinished
+receipt cannot be reset merely because its PID vanished or the app restarted.
+The helper inherits the root manager's SELinux domain; no new policy is installed.
+
 ### Pre-1.0 Config Files (import inputs)
 
 Nothing writes these; up to 0.7.1 they *were* the user's config. 1.0.0 folded
