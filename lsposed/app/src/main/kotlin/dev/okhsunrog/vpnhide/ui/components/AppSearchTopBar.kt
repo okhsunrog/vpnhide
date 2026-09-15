@@ -1,4 +1,4 @@
-package dev.okhsunrog.vpnhide.picker
+package dev.okhsunrog.vpnhide.ui.components
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -21,7 +21,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import dev.okhsunrog.vpnhide.R
-import dev.okhsunrog.vpnhide.ui.components.container
 
 /**
  * The in-place search/filter top bar shared by the app-picker and hidden-apps
@@ -40,6 +39,7 @@ internal fun AppSearchTopBar(
     onQueryChange: (String) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    placeholder: String = stringResource(R.string.search_placeholder),
 ) {
     // Search is entered by an explicit user action (tapping the search icon), so
     // focus the field and raise the keyboard as soon as the bar appears.
@@ -51,7 +51,7 @@ internal fun AppSearchTopBar(
         onValueChange = onQueryChange,
         modifier = modifier.statusBarsPadding().fillMaxWidth().focusRequester(focusRequester),
         singleLine = true,
-        placeholder = { Text(stringResource(R.string.search_placeholder)) },
+        placeholder = { Text(placeholder) },
         leadingIcon = {
             IconButton(onClick = onClose) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)

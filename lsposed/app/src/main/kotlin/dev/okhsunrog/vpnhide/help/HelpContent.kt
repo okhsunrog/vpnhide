@@ -16,6 +16,7 @@ import java.io.IOException
  */
 internal class HelpContent(
     val guide: HelpGuide,
+    val faq: List<HelpFaqEntry>,
     private val blocksById: Map<String, List<MdBlock>>,
     private val plainById: Map<String, String>,
 ) {
@@ -39,9 +40,11 @@ internal fun loadHelpContent(
     val manifestText = readAsset(context, "help/manifest.json")
     if (manifestText == null) {
         VpnHideLog.w(LogTags.STARTUP, "help manifest missing from assets")
-        return HelpContent(HelpGuide(locale, emptyList()), emptyMap(), emptyMap())
+        return HelpContent(HelpGuide(locale, emptyList()), emptyList(), emptyMap(), emptyMap())
     }
-    val guide = buildGuide(helpJson.decodeFromString(manifestText), locale)
+    val manifest: HelpManifestDto = helpJson.decodeFromString(manifestText)
+    val guide = buildGuide(manifest, locale)
+    val dtoById = manifest.sections.flatMap { it.articles }.associateBy { it.id }
     val blocksById = mutableMapOf<String, List<MdBlock>>()
     val plainById = mutableMapOf<String, String>()
     for (section in guide.sections) {
@@ -52,10 +55,14 @@ internal fun loadHelpContent(
                     ?: ""
             val blocks = parseMarkdown(body)
             blocksById[article.id] = blocks
-            plainById[article.id] = plainText(blocks)
+            // Fold the article's keyword aliases into the searchable text so
+            // search matches how people phrase things, not just the doc's words.
+            val keywords = dtoById[article.id]?.let { articleKeywords(it, locale) }.orEmpty()
+            plainById[article.id] = (plainText(blocks) + "\n" + keywords.joinToString(" ")).trim()
         }
     }
-    return HelpContent(guide, blocksById, plainById)
+    val faq = buildFaq(manifest, locale, blocksById.keys)
+    return HelpContent(guide, faq, blocksById, plainById)
 }
 
 private fun readAsset(

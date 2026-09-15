@@ -55,6 +55,29 @@ class HelpModelTest {
     }
 
     @Test
+    fun `buildFaq keeps entries for present articles and drops the rest`() {
+        val m =
+            HelpManifestDto(
+                faq =
+                    listOf(
+                        HelpFaqDto("configure-hiding", mapOf("en" to "Detects VPN", "ru" to "Видит VPN")),
+                        HelpFaqDto("missing", mapOf("en" to "Nope")),
+                    ),
+            )
+        val faq = buildFaq(m, "ru", setOf("configure-hiding"))
+        assertEquals(1, faq.size)
+        assertEquals("Видит VPN", faq.single().label)
+        assertEquals("configure-hiding", faq.single().articleId)
+    }
+
+    @Test
+    fun `articleKeywords picks the locale then falls back to english`() {
+        val a = HelpArticleDto("x", keywords = mapOf("en" to listOf("bank"), "ru" to listOf("банк")))
+        assertEquals(listOf("банк"), articleKeywords(a, "ru"))
+        assertEquals(listOf("bank"), articleKeywords(a, "zh"))
+    }
+
+    @Test
     fun `search matches title and body and ignores short queries`() {
         val guide = buildGuide(manifest, "en")
         val bodies = mapOf("configure-hiding" to "Give the bank the Java and Native roles.")

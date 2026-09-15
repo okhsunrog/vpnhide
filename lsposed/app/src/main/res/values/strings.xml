@@ -61,8 +61,8 @@
     <string name="apps_help_zygisk_warning_body">Zygisk hooks run inside the selected app process. Banking and payment apps may detect that when Native is enabled for them; leave Native off for those apps and rely on Java where possible.</string>
     <string name="apps_help_open_guide">How to set up hiding</string>
     <string name="help_title">Help &amp; guide</string>
-    <string name="help_search_hint">Search the guide</string>
-    <string name="help_search_empty">Nothing found</string>
+    <string name="help_faq_title">Common questions</string>
+    <string name="help_search_placeholder">Search the guide&#8230;</string>
     <string name="help_leave_title">Unsaved changes</string>
     <string name="help_leave_body">Opening this link leaves the app list, and your unsaved changes there will be lost. Continue?</string>
     <string name="help_leave_confirm">Continue</string>

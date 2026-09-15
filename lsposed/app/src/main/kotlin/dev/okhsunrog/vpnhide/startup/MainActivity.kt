@@ -59,7 +59,6 @@ import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.diagnostics.VpnTransportWatcher
 import dev.okhsunrog.vpnhide.help.HelpScreen
 import dev.okhsunrog.vpnhide.picker.AppListCache
-import dev.okhsunrog.vpnhide.picker.AppSearchTopBar
 import dev.okhsunrog.vpnhide.picker.ProtectionScreen
 import dev.okhsunrog.vpnhide.picker.TargetFilterChips
 import dev.okhsunrog.vpnhide.picker.TargetListSortMode
@@ -77,6 +76,7 @@ import dev.okhsunrog.vpnhide.shouldRequestUpdateNotificationPermission
 import dev.okhsunrog.vpnhide.statistics.StatisticsCache
 import dev.okhsunrog.vpnhide.statistics.StatisticsScreen
 import dev.okhsunrog.vpnhide.suExec
+import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
 import dev.okhsunrog.vpnhide.ui.components.BlockingErrorCard
 import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton

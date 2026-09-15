@@ -11,6 +11,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 internal data class HelpManifestDto(
     val schema: Int = 1,
+    val faq: List<HelpFaqDto> = emptyList(),
     val sections: List<HelpSectionDto> = emptyList(),
 )
 
@@ -25,6 +26,13 @@ internal data class HelpSectionDto(
 internal data class HelpArticleDto(
     val id: String,
     val title: Map<String, String> = emptyMap(),
+    val keywords: Map<String, List<String>> = emptyMap(),
+)
+
+@Serializable
+internal data class HelpFaqDto(
+    val article: String,
+    val label: Map<String, String> = emptyMap(),
 )
 
 /** Locales we ship guide content for; everything else falls back to English. */
@@ -48,6 +56,28 @@ internal data class HelpArticleRef(
     val sectionId: String,
     val title: String,
 )
+
+/** A tappable "common question" on the table of contents that opens [articleId]. */
+internal data class HelpFaqEntry(
+    val label: String,
+    val articleId: String,
+)
+
+/** Localized FAQ chips, dropping any that point at an article not in [presentArticleIds]. */
+internal fun buildFaq(
+    manifest: HelpManifestDto,
+    locale: String,
+    presentArticleIds: Set<String>,
+): List<HelpFaqEntry> =
+    manifest.faq
+        .filter { it.article in presentArticleIds }
+        .map { HelpFaqEntry(localized(it.label, locale), it.article) }
+
+/** Search-alias keywords for an article in [locale], English otherwise. */
+internal fun articleKeywords(
+    article: HelpArticleDto,
+    locale: String,
+): List<String> = article.keywords[locale] ?: article.keywords["en"].orEmpty()
 
 /** Map an Android language tag to a shipped help locale, English otherwise. */
 internal fun resolveHelpLocale(language: String): String =

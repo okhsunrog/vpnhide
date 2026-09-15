@@ -1,8 +1,11 @@
 package dev.okhsunrog.vpnhide.help
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,10 +18,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -26,7 +29,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -38,6 +40,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.okhsunrog.vpnhide.R
+import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.Dispatchers
@@ -46,8 +49,9 @@ private const val ARTICLE_SCHEME = "article:"
 private const val IN_APP_SCHEME = "vpnhide://"
 
 /**
- * The offline guide overlay: a table of contents with search that opens into a
- * rendered article. [initialArticleId] opens straight to an article (a
+ * The offline guide overlay: a table of contents with "common questions" chips
+ * that opens into a rendered article. [initialArticleId] opens straight to an
+ * article (a
  * contextual entry); null opens the table of contents. [onNavigate] receives a
  * `vpnhide://` link so the host can leave help and go to the right screen;
  * [onClose] dismisses the overlay.
@@ -66,6 +70,8 @@ internal fun HelpScreen(
         value = kotlinx.coroutines.withContext(Dispatchers.IO) { loadHelpContent(context, language) }
     }
     var articleId by rememberSaveable { mutableStateOf(initialArticleId) }
+    var searchActive by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
     val uriHandler = LocalUriHandler.current
 
     val onLink: (String) -> Unit = { href ->
@@ -76,7 +82,22 @@ internal fun HelpScreen(
         }
     }
 
-    BackHandler { if (articleId != null) articleId = null else onClose() }
+    BackHandler {
+        when {
+            searchActive -> {
+                searchActive = false
+                query = ""
+            }
+
+            articleId != null -> {
+                articleId = null
+            }
+
+            else -> {
+                onClose()
+            }
+        }
+    }
 
     val loaded = content
     val article = loaded?.guide?.article(articleId ?: "")
@@ -84,17 +105,39 @@ internal fun HelpScreen(
         containerColor = AppColors.screenBackground,
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text(article?.title ?: stringResource(R.string.help_title)) },
-                navigationIcon = {
-                    IconButton(onClick = { if (articleId != null) articleId = null else onClose() }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.action_back),
-                        )
-                    }
-                },
-            )
+            if (searchActive && loaded != null) {
+                AppSearchTopBar(
+                    query = query,
+                    onQueryChange = { query = it },
+                    onClose = {
+                        searchActive = false
+                        query = ""
+                    },
+                    placeholder = stringResource(R.string.help_search_placeholder),
+                )
+            } else {
+                TopAppBar(
+                    title = { Text(article?.title ?: stringResource(R.string.help_title)) },
+                    navigationIcon = {
+                        IconButton(onClick = { if (articleId != null) articleId = null else onClose() }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.action_back),
+                            )
+                        }
+                    },
+                    actions = {
+                        if (loaded != null && article == null) {
+                            IconButton(onClick = { searchActive = true }) {
+                                Icon(
+                                    Icons.Filled.Search,
+                                    contentDescription = stringResource(R.string.help_search_placeholder),
+                                )
+                            }
+                        }
+                    },
+                )
+            }
         },
     ) { inner ->
         when {
@@ -104,6 +147,14 @@ internal fun HelpScreen(
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) { CircularProgressIndicator() }
+            }
+
+            searchActive -> {
+                HelpSearchResults(loaded, query, Modifier.padding(inner)) {
+                    articleId = it
+                    searchActive = false
+                    query = ""
+                }
             }
 
             article != null -> {
@@ -130,46 +181,65 @@ private fun HelpTableOfContents(
     modifier: Modifier,
     onOpenArticle: (String) -> Unit,
 ) {
-    var query by rememberSaveable { mutableStateOf("") }
-    val hits = remember(query) { content.search(query) }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding =
-            androidx.compose.foundation.layout
-                .PaddingValues(16.dp),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        item(key = "search") {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                singleLine = true,
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                placeholder = { Text(stringResource(R.string.help_search_hint)) },
-                modifier = Modifier.fillMaxWidth(),
-            )
+        if (content.faq.isNotEmpty()) {
+            item(key = "faq_title") { TocSectionLabel(stringResource(R.string.help_faq_title)) }
+            item(key = "faq_chips") {
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    content.faq.forEach { entry ->
+                        FilterChip(
+                            selected = false,
+                            onClick = { onOpenArticle(entry.articleId) },
+                            label = { Text(entry.label) },
+                        )
+                    }
+                }
+            }
         }
-        if (query.trim().length >= 2) {
-            if (hits.isEmpty()) {
-                item(key = "empty") { Text(stringResource(R.string.help_search_empty)) }
+        content.guide.sections.forEach { section ->
+            item(key = "sec_${section.id}") { TocSectionLabel(section.title) }
+            items(section.articles, key = { "art_${it.id}" }) { ref ->
+                HelpArticleRow(ref.title, null) { onOpenArticle(ref.id) }
             }
-            items(hits, key = { "hit_${it.article.id}" }) { hit ->
-                HelpArticleRow(hit.article.title, hit.snippet) { onOpenArticle(hit.article.id) }
-            }
-        } else {
-            content.guide.sections.forEach { section ->
-                item(key = "sec_${section.id}") {
-                    Text(
-                        text = section.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
-                    )
-                }
-                items(section.articles, key = { "art_${it.id}" }) { ref ->
-                    HelpArticleRow(ref.title, null) { onOpenArticle(ref.id) }
-                }
-            }
+        }
+    }
+}
+
+@Composable
+private fun TocSectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+    )
+}
+
+@Composable
+private fun HelpSearchResults(
+    content: HelpContent,
+    query: String,
+    modifier: Modifier,
+    onOpenArticle: (String) -> Unit,
+) {
+    // Backed by title + body + the manifest keyword aliases, so a query matches
+    // how people phrase things, not only the doc's wording. Short queries return
+    // nothing (handled in searchGuide), so the list is simply empty until then.
+    val hits = content.search(query)
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(hits, key = { "hit_${it.article.id}" }) { hit ->
+            HelpArticleRow(hit.article.title, hit.snippet) { onOpenArticle(hit.article.id) }
         }
     }
 }

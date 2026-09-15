@@ -54,8 +54,8 @@
     <string name="apps_help_zygisk_warning_body">Zygisk-хуки работают внутри процесса выбранного приложения. Банковские и платёжные приложения могут это обнаружить, если для них включён Native; оставьте Native выключенным и по возможности используйте Java.</string>
     <string name="apps_help_open_guide">Как настроить скрытие</string>
     <string name="help_title">Помощь и руководство</string>
-    <string name="help_search_hint">Поиск по руководству</string>
-    <string name="help_search_empty">Ничего не найдено</string>
+    <string name="help_faq_title">Частые вопросы</string>
+    <string name="help_search_placeholder">Поиск по руководству&#8230;</string>
     <string name="help_leave_title">Несохранённые изменения</string>
     <string name="help_leave_body">Переход по ссылке уведёт с экрана со списком приложений, и несохранённые изменения там пропадут. Продолжить?</string>
     <string name="help_leave_confirm">Продолжить</string>

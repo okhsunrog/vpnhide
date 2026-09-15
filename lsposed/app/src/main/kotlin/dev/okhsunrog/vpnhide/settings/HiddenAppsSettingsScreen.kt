@@ -63,12 +63,12 @@ import dev.okhsunrog.vpnhide.StatusColors
 import dev.okhsunrog.vpnhide.buildCanonicalConfigFromTargetsSnapshot
 import dev.okhsunrog.vpnhide.picker.AppAutoHideSignal
 import dev.okhsunrog.vpnhide.picker.AppListCache
-import dev.okhsunrog.vpnhide.picker.AppSearchTopBar
 import dev.okhsunrog.vpnhide.picker.AppSummary
 import dev.okhsunrog.vpnhide.picker.TargetRowShell
 import dev.okhsunrog.vpnhide.picker.TargetsCache
 import dev.okhsunrog.vpnhide.picker.manualHiddenPackages
 import dev.okhsunrog.vpnhide.picker.toAutoHideSignal
+import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
 import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
