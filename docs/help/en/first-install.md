@@ -8,6 +8,10 @@ backend, the **Java** layer via LSPosed, and an optional **Ports** module. Check
 
 1. **Install the app** — the picker APK from the project's releases. It's the
    dashboard you're reading this in.
+2. **Grant it root.** VPN Hide needs root to manage hiding. Open the app and
+   grant it in your root manager's prompt (Magisk / KernelSU / APatch). If you
+   miss the prompt, the app shows a **Root access required** screen — grant it,
+   then tap **Check again**.
 2. **Install one native backend.** The Dashboard recommends the best one for your
    device. Install its module (the ZIP) through your root manager's **Modules**
    screen — Magisk, KernelSU, APatch or FolkPatch. Install only one native

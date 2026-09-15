@@ -6,6 +6,9 @@ VPN Hide 由几部分协同工作：这个应用（选择器）、一个**原生
 ## 步骤
 
 1. **安装应用**——从项目发布页下载选择器 APK。你正在其中阅读这份帮助的仪表盘就是它。
+2. **授予 root 权限。**VPN Hide 需要 root 才能管理隐藏。打开应用并在 root 管理器
+   （Magisk / KernelSU / APatch）的弹窗中授权。若错过弹窗，应用会显示 **Root
+   access required** 界面——授予后点 **Check again**。
 2. **安装一个原生后端。** 仪表盘会针对你的设备推荐最合适的一个。通过 root 管理器的
    **模块**页面安装它的模块（ZIP）——Magisk、KernelSU、APatch 或 FolkPatch。只装一个
    原生后端；两个同时生效可能冲突。

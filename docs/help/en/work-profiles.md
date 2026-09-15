@@ -23,3 +23,7 @@ You still control that from the main-profile picker — cloned and work-profile
 apps show up there (labeled as a **Work profile** or **Cloned app** entry) and
 can be given roles like any other app. There's nothing to install on the
 secondary side.
+
+One caveat: an app you give **Native** to in more than one profile counts as a
+separate UID per profile toward the native limit, so clones use up that budget
+twice as fast — see [What it can and can't do](capabilities-limits.md).

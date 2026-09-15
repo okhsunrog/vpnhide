@@ -26,7 +26,7 @@ recommends the right one for your device and gives you its download name.
 ## Only one at a time
 
 If more than one native backend is installed, only one runs — priority is
-**kernel module → KPM → Zygisk** — and the others sit idle. Keep just the one
+**kernel module (or Built-in) → KPM → Zygisk** — and the others sit idle. Keep just the one
 you use. In particular, **never run the kernel module and KPM together**: they
 hook the same kernel functions, and having both active can hard-freeze the
 device. The app warns you on the Dashboard when it sees a conflict.
