@@ -41,6 +41,15 @@
           }
         },
         {
+          "id": "choosing-native",
+          "title": { "en": "Which native backend to use", "ru": "Какой Native-бэкенд выбрать", "zh": "该选哪个 Native 后端" },
+          "keywords": {
+            "en": ["native backend", "kmod", "kpm", "zygisk", "builtin", "kernel module", "which one", "only one", "conflict", "recommended"],
+            "ru": ["native бэкенд", "kmod", "kpm", "zygisk", "builtin", "модуль ядра", "какой выбрать", "только один", "конфликт", "рекомендуемый"],
+            "zh": ["native 后端", "kmod", "kpm", "zygisk", "内置", "内核模块", "选哪个", "只能一个", "冲突", "推荐"]
+          }
+        },
+        {
           "id": "first-setup",
           "title": { "en": "Your first app, step by step", "ru": "Первое приложение, по шагам", "zh": "你的第一个应用，分步操作" },
           "keywords": {
@@ -71,6 +80,39 @@
           "keywords": {
             "en": ["game accelerator", "accelerator", "uu", "xunyou", "tencent", "biubiu", "ping", "latency", "lag"],
             "zh": ["游戏加速器", "加速器", "uu", "迅游", "腾讯", "延迟", "卡顿"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "install-components",
+      "title": { "en": "Install a component", "ru": "Установка компонентов", "zh": "安装具体组件" },
+      "articles": [
+        {
+          "id": "kmod-install",
+          "title": { "en": "Install the kernel module", "ru": "Установка модуля ядра", "zh": "安装内核模块" },
+          "keywords": {
+            "en": ["kmod", "kernel module", "ko", "gki", "kmi variant", "install", "reboot", "wrong variant", "signature", "no kprobes"],
+            "ru": ["kmod", "модуль ядра", "ko", "gki", "вариант kmi", "установка", "перезагрузка", "не тот вариант", "подпись", "нет kprobes"],
+            "zh": ["kmod", "内核模块", "ko", "gki", "kmi 版本", "安装", "重启", "版本不对", "签名", "没有 kprobes"]
+          }
+        },
+        {
+          "id": "kpm-install",
+          "title": { "en": "Install the KPM backend", "ru": "Установка бэкенда KPM", "zh": "安装 KPM 后端" },
+          "keywords": {
+            "en": ["kpm", "kernelpatch", "apatch", "folkpatch", "kpatch-next", "superkey", "install", "runtime", "unsupported kernel", "standalone"],
+            "ru": ["kpm", "kernelpatch", "apatch", "folkpatch", "kpatch-next", "superkey", "установка", "среда", "неподдерживаемое ядро", "standalone"],
+            "zh": ["kpm", "kernelpatch", "apatch", "folkpatch", "kpatch-next", "superkey", "安装", "运行时", "内核不受支持", "独立"]
+          }
+        },
+        {
+          "id": "zygisk-install",
+          "title": { "en": "Install the Zygisk module", "ru": "Установка модуля Zygisk", "zh": "安装 Zygisk 模块" },
+          "keywords": {
+            "en": ["zygisk", "zygisknext", "neozygisk", "libc hooks", "userspace", "banking detects", "svc bypass", "force-stop", "install"],
+            "ru": ["zygisk", "zygisknext", "neozygisk", "хуки libc", "пользовательское пространство", "банк видит", "обход svc", "force-stop", "установка"],
+            "zh": ["zygisk", "zygisknext", "neozygisk", "libc 挂钩", "用户空间", "银行检测", "svc 绕过", "force-stop", "安装"]
           }
         }
       ]
