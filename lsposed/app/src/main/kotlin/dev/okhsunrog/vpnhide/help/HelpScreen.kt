@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -66,6 +67,7 @@ internal fun HelpScreen(
 ) {
     val context = LocalContext.current
     val language = LocalConfiguration.current.locales[0].language
+    val helpAssetBaseDir = remember(language) { "help/${resolveHelpLocale(language)}" }
     val content by produceState<HelpContent?>(initialValue = null, language) {
         value = kotlinx.coroutines.withContext(Dispatchers.IO) { loadHelpContent(context, language) }
     }
@@ -175,7 +177,7 @@ internal fun HelpScreen(
                             .padding(inner)
                             .verticalScroll(rememberScrollState())
                             .padding(horizontal = 16.dp, vertical = 12.dp),
-                ) { MarkdownText(loaded.doc(article.id), onLink) }
+                ) { MarkdownText(loaded.doc(article.id), onLink, context, helpAssetBaseDir) }
             }
 
             else -> {

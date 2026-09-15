@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide.help
 
+import android.content.Context
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -55,19 +58,26 @@ import org.commonmark.node.Text as CmText
  * Material theme. Links carry their normalized href to [onLink]; the caller
  * routes `vpnhide://` / `article:` to in-app navigation and the rest to the
  * browser. Soft line breaks join with a space except at a CJK–CJK boundary, so
- * the hard-wrapped Chinese article reads without spurious spaces.
+ * the hard-wrapped Chinese article reads without spurious spaces. [context] and
+ * [assetBaseDir] (the article's asset directory, e.g. `help/en`) let image
+ * blocks load their picture from the synced APK assets.
  */
 @Composable
 internal fun MarkdownText(
     document: Node,
     onLink: (String) -> Unit,
+    context: Context,
+    assetBaseDir: String,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        var child = document.firstChild
-        while (child != null) {
-            MarkdownBlock(child, onLink)
-            child = child.next
+    val env = remember(context, assetBaseDir) { HelpImageEnv(context, assetBaseDir) }
+    CompositionLocalProvider(LocalHelpImageEnv provides env) {
+        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            var child = document.firstChild
+            while (child != null) {
+                MarkdownBlock(child, onLink)
+                child = child.next
+            }
         }
     }
 }
@@ -83,7 +93,12 @@ private fun MarkdownBlock(
         }
 
         is Paragraph -> {
-            Text(inlineAnnotated(node, onLink), style = MaterialTheme.typography.bodyMedium)
+            val images = imageOnlyParagraph(node)
+            if (images != null) {
+                images.forEach { HelpBlockImage(it.destination, it.captionText()) }
+            } else {
+                Text(inlineAnnotated(node, onLink), style = MaterialTheme.typography.bodyMedium)
+            }
         }
 
         is BulletList -> {
@@ -395,3 +410,28 @@ private fun Node.firstChildText(): String {
     }
     return sb.toString()
 }
+
+/**
+ * The images of a paragraph that holds nothing but image(s) — the common
+ * documentation pattern of a picture on its own line, which we render as a block
+ * (scaled, captioned, zoomable) instead of inline alt text. Returns null when the
+ * paragraph mixes images with real text, so that stays inline. Whitespace-only
+ * text and line breaks between images are ignored.
+ */
+private fun imageOnlyParagraph(paragraph: Paragraph): List<Image>? {
+    val images = mutableListOf<Image>()
+    var child = paragraph.firstChild
+    while (child != null) {
+        when (val n = child) {
+            is Image -> images.add(n)
+            is SoftLineBreak, is HardLineBreak -> Unit
+            is CmText -> if (n.literal.isNotBlank()) return null
+            else -> return null
+        }
+        child = child.next
+    }
+    return images.ifEmpty { null }
+}
+
+/** Alt text if present, otherwise the image title — used as the block caption. */
+private fun Image.captionText(): String = firstChildText().ifBlank { title.orEmpty() }
