@@ -40,14 +40,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.okhsunrog.vpnhide.ContactModal
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.Dispatchers
-
-private const val ARTICLE_SCHEME = "article:"
-private const val IN_APP_SCHEME = "vpnhide://"
 
 /**
  * The offline guide overlay: a table of contents with "common questions" chips
@@ -73,7 +71,10 @@ internal fun HelpScreen(
     var articleId by rememberSaveable { mutableStateOf(initialArticleId) }
     var searchActive by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
+    var contactOpen by rememberSaveable { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
+
+    if (contactOpen) ContactModal(onDismiss = { contactOpen = false })
 
     val onLink: (String) -> Unit = { href ->
         when {
@@ -166,11 +167,16 @@ internal fun HelpScreen(
                             .padding(inner)
                             .verticalScroll(rememberScrollState())
                             .padding(horizontal = 16.dp, vertical = 12.dp),
-                ) { MarkdownText(loaded.blocks(article.id), onLink) }
+                ) { MarkdownText(loaded.doc(article.id), onLink) }
             }
 
             else -> {
-                HelpTableOfContents(loaded, Modifier.padding(inner)) { articleId = it }
+                HelpTableOfContents(
+                    content = loaded,
+                    modifier = Modifier.padding(inner),
+                    onContact = { contactOpen = true },
+                    onOpenArticle = { articleId = it },
+                )
             }
         }
     }
@@ -180,6 +186,7 @@ internal fun HelpScreen(
 private fun HelpTableOfContents(
     content: HelpContent,
     modifier: Modifier,
+    onContact: () -> Unit,
     onOpenArticle: (String) -> Unit,
 ) {
     LazyColumn(
@@ -209,6 +216,13 @@ private fun HelpTableOfContents(
             items(section.articles, key = { "art_${it.id}" }) { ref ->
                 HelpArticleRow(ref.title, null) { onOpenArticle(ref.id) }
             }
+        }
+        item(key = "contact_footer") {
+            HelpArticleRow(
+                title = stringResource(R.string.help_no_answer_title),
+                snippet = stringResource(R.string.help_no_answer_body),
+                onClick = onContact,
+            )
         }
     }
 }

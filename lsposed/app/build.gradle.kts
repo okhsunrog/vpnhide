@@ -335,6 +335,11 @@ dependencies {
     // Reactive theme/settings store (replaces ad-hoc SharedPreferences for UI prefs).
     implementation(libs.datastore.preferences)
     implementation(libs.kotlinx.serialization.json)
+    // CommonMark parser (+ GFM tables) for the offline help articles. We keep our
+    // own Compose renderer over its AST, so links (vpnhide://, article:, relative)
+    // and CJK soft-break joining stay under our control.
+    implementation(libs.commonmark)
+    implementation(libs.commonmark.ext.gfm.tables)
     implementation(libs.work.runtime.ktx)
     // Material You color-scheme generation + harmonization (seed -> full M3 scheme,
     // AMOLED, contrast, palette styles). Powers VpnHideTheme.

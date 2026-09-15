@@ -65,6 +65,8 @@
     <string name="help_search_placeholder">Search the guide&#8230;</string>
     <string name="help_search_prompt">Type a word or two to search the guide.</string>
     <string name="help_search_empty">Nothing found. Try another word, or browse the topics.</string>
+    <string name="help_no_answer_title">Didn\'t find an answer?</string>
+    <string name="help_no_answer_body">Ask in the Telegram group or open an issue on GitHub.</string>
     <string name="help_leave_title">Unsaved changes</string>
     <string name="help_leave_body">Opening this link leaves the app list, and your unsaved changes there will be lost. Continue?</string>
     <string name="help_leave_confirm">Continue</string>

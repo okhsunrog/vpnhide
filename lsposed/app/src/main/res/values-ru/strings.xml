@@ -58,6 +58,8 @@
     <string name="help_search_placeholder">Поиск по руководству&#8230;</string>
     <string name="help_search_prompt">Введите слово-другое для поиска по руководству.</string>
     <string name="help_search_empty">Ничего не найдено. Попробуйте другое слово или откройте темы.</string>
+    <string name="help_no_answer_title">Не нашли ответ?</string>
+    <string name="help_no_answer_body">Напишите в Telegram-группу или откройте issue на GitHub.</string>
     <string name="help_leave_title">Несохранённые изменения</string>
     <string name="help_leave_body">Переход по ссылке уведёт с экрана со списком приложений, и несохранённые изменения там пропадут. Продолжить?</string>
     <string name="help_leave_confirm">Продолжить</string>

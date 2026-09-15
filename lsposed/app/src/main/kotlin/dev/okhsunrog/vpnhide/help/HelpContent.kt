@@ -4,12 +4,13 @@ import android.content.Context
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.VpnHideLog
 import kotlinx.serialization.json.Json
+import org.commonmark.node.Node
 import java.io.IOException
 
 /**
  * The offline guide, loaded from the APK assets synced by `syncHelpAssets`:
  * `help/manifest.json` plus `help/<locale>/<id>.md`. Holds the localized
- * [guide] (table of contents), the parsed article [blocks] for rendering, and
+ * [guide] (table of contents), the parsed article AST ([doc]) for rendering, and
  * pre-flattened plain text for [search]. Built once per open by [loadHelpContent]
  * on a background dispatcher — the assets are small, so there is no app-scoped
  * cache to keep in sync.
@@ -17,11 +18,11 @@ import java.io.IOException
 internal class HelpContent(
     val guide: HelpGuide,
     val faq: List<HelpFaqEntry>,
-    private val blocksById: Map<String, List<MdBlock>>,
+    private val docById: Map<String, Node>,
     private val bodyById: Map<String, String>,
     private val searchTextById: Map<String, String>,
 ) {
-    fun blocks(articleId: String): List<MdBlock> = blocksById[articleId].orEmpty()
+    fun doc(articleId: String): Node = docById[articleId] ?: parseMarkdown("")
 
     fun search(query: String): List<HelpSearchHit> =
         searchGuide(
@@ -52,7 +53,7 @@ internal fun loadHelpContent(
     val manifest: HelpManifestDto = helpJson.decodeFromString(manifestText)
     val guide = buildGuide(manifest, locale)
     val dtoById = manifest.sections.flatMap { it.articles }.associateBy { it.id }
-    val blocksById = mutableMapOf<String, List<MdBlock>>()
+    val docById = mutableMapOf<String, Node>()
     val bodyById = mutableMapOf<String, String>()
     val searchTextById = mutableMapOf<String, String>()
     for (section in guide.sections) {
@@ -61,9 +62,9 @@ internal fun loadHelpContent(
                 readAsset(context, "help/$locale/${article.id}.md")
                     ?: readAsset(context, "help/en/${article.id}.md")
                     ?: ""
-            val blocks = parseMarkdown(body)
-            blocksById[article.id] = blocks
-            val plain = plainText(blocks)
+            val doc = parseMarkdown(body)
+            docById[article.id] = doc
+            val plain = plainText(doc)
             bodyById[article.id] = plain
             // The searchable text also carries the article's keyword aliases so a
             // query matches how people phrase things — but the shown snippet is cut
@@ -72,8 +73,8 @@ internal fun loadHelpContent(
             searchTextById[article.id] = (plain + "\n" + keywords.joinToString(" ")).trim()
         }
     }
-    val faq = buildFaq(manifest, locale, blocksById.keys)
-    return HelpContent(guide, faq, blocksById, bodyById, searchTextById)
+    val faq = buildFaq(manifest, locale, docById.keys)
+    return HelpContent(guide, faq, docById, bodyById, searchTextById)
 }
 
 private fun readAsset(
