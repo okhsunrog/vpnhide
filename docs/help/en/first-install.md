@@ -29,6 +29,4 @@ hero shows **VPN hidden** once a VPN is up and its checks pass. If a module says
 "reboot to activate" or "not active", follow the on-screen hint. Missing scope,
 a not-yet-rebooted module, or two native backends at once are the usual causes.
 
-![The Dashboard showing "VPN hidden" with every layer active](../images/dashboard-hidden.png)
-
 Then move on to [Set up hiding](configure-hiding.md).
