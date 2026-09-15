@@ -77,17 +77,20 @@ private fun Node.isBlock(): Boolean = this is org.commonmark.node.Block
 /**
  * Map a Markdown link destination to what the app should do with it: a relative
  * `*.md` link (how articles cross-reference each other, so the link also works on
- * GitHub) becomes an `article:<id>` in-app route; `vpnhide://`, `article:` and
- * absolute URLs pass through unchanged.
+ * GitHub) becomes an `article:<id>` in-app route, carrying any `#anchor` through
+ * as `article:<id>#anchor`; a bare `#anchor` (same-article) and `vpnhide://`,
+ * `article:`, absolute URLs pass through unchanged.
  */
 internal fun normalizeHelpHref(destination: String): String {
     val dest = destination.trim()
     if (dest.startsWith(ARTICLE_SCHEME) || dest.startsWith(IN_APP_SCHEME)) return dest
     if (dest.startsWith("http://") || dest.startsWith("https://")) return dest
+    if (dest.startsWith("#")) return dest
     val withoutAnchor = dest.substringBefore('#')
+    val anchor = dest.substringAfter('#', "")
     if (withoutAnchor.endsWith(".md")) {
         val id = withoutAnchor.substringAfterLast('/').removeSuffix(".md")
-        if (id.isNotEmpty()) return "$ARTICLE_SCHEME$id"
+        if (id.isNotEmpty()) return if (anchor.isEmpty()) "$ARTICLE_SCHEME$id" else "$ARTICLE_SCHEME$id#$anchor"
     }
     return dest
 }

@@ -2,7 +2,7 @@
 
 You configure hiding on the app you want to hide the VPN **from** — a bank, a
 government service, a marketplace. The VPN app itself needs nothing here: it is
-the thing being hidden.
+the thing being hidden. In a hurry? Jump straight to [the four roles](#the-four-roles).
 
 > Example: to stop your banking app from seeing the VPN, give **the bank** the
 > roles below. Your VPN client (WireGuard, for instance) is handled separately,

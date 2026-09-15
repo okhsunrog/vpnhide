@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide.help
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,12 +28,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -48,6 +51,12 @@ import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.Dispatchers
+
+/** Frames to wait for a heading to lay out before an anchor scroll gives up (~1s). */
+private const val ANCHOR_SCROLL_MAX_FRAMES = 60
+
+/** Small gap left above the target heading after an anchor scroll, in pixels. */
+private const val ANCHOR_SCROLL_GAP_PX = 8
 
 /**
  * The offline guide overlay: a table of contents with "common questions" chips
@@ -75,15 +84,30 @@ internal fun HelpScreen(
     var searchActive by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var contactOpen by rememberSaveable { mutableStateOf(false) }
+    var pendingAnchor by rememberSaveable { mutableStateOf<String?>(null) }
     val uriHandler = LocalUriHandler.current
 
     if (contactOpen) ContactModal(onDismiss = { contactOpen = false })
 
     val onLink: (String) -> Unit = { href ->
         when {
-            href.startsWith(ARTICLE_SCHEME) -> articleId = href.removePrefix(ARTICLE_SCHEME)
-            href.startsWith(IN_APP_SCHEME) -> onNavigate(href)
-            else -> runCatching { uriHandler.openUri(href) }
+            href.startsWith("#") -> {
+                pendingAnchor = href.removePrefix("#")
+            }
+
+            href.startsWith(ARTICLE_SCHEME) -> {
+                val rest = href.removePrefix(ARTICLE_SCHEME)
+                articleId = rest.substringBefore('#')
+                pendingAnchor = rest.substringAfter('#', "").ifEmpty { null }
+            }
+
+            href.startsWith(IN_APP_SCHEME) -> {
+                onNavigate(href)
+            }
+
+            else -> {
+                runCatching { uriHandler.openUri(href) }
+            }
         }
     }
 
@@ -170,14 +194,28 @@ internal fun HelpScreen(
             }
 
             article != null -> {
+                val scrollState = remember(article.id) { ScrollState(0) }
+                val anchors = remember(article.id) { HelpAnchorRegistry() }
+                LaunchedEffect(article.id, pendingAnchor) {
+                    val slug = pendingAnchor ?: return@LaunchedEffect
+                    var offset: Int? = null
+                    var frames = 0
+                    while (offset == null && frames < ANCHOR_SCROLL_MAX_FRAMES) {
+                        withFrameNanos { }
+                        offset = anchors.offsetOf(slug)
+                        frames++
+                    }
+                    offset?.let { scrollState.animateScrollTo((it - ANCHOR_SCROLL_GAP_PX).coerceAtLeast(0)) }
+                    pendingAnchor = null
+                }
                 Column(
                     modifier =
                         Modifier
                             .fillMaxSize()
                             .padding(inner)
-                            .verticalScroll(rememberScrollState())
+                            .verticalScroll(scrollState)
                             .padding(horizontal = 16.dp, vertical = 12.dp),
-                ) { MarkdownText(loaded.doc(article.id), onLink, context, helpAssetBaseDir) }
+                ) { MarkdownText(loaded.doc(article.id), onLink, context, helpAssetBaseDir, anchors) }
             }
 
             else -> {

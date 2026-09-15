@@ -21,6 +21,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -60,7 +61,8 @@ import org.commonmark.node.Text as CmText
  * browser. Soft line breaks join with a space except at a CJK–CJK boundary, so
  * the hard-wrapped Chinese article reads without spurious spaces. [context] and
  * [assetBaseDir] (the article's asset directory, e.g. `help/en`) let image
- * blocks load their picture from the synced APK assets.
+ * blocks load their picture from the synced APK assets. [anchors] records heading
+ * positions so in-article `#slug` links can scroll to them.
  */
 @Composable
 internal fun MarkdownText(
@@ -68,11 +70,15 @@ internal fun MarkdownText(
     onLink: (String) -> Unit,
     context: Context,
     assetBaseDir: String,
+    anchors: HelpAnchorRegistry,
     modifier: Modifier = Modifier,
 ) {
     val env = remember(context, assetBaseDir) { HelpImageEnv(context, assetBaseDir) }
-    CompositionLocalProvider(LocalHelpImageEnv provides env) {
-        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    CompositionLocalProvider(LocalHelpImageEnv provides env, LocalHelpAnchors provides anchors) {
+        Column(
+            modifier = modifier.onGloballyPositioned { anchors.contentRoot = it },
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             var child = document.firstChild
             while (child != null) {
                 MarkdownBlock(child, onLink)
@@ -150,11 +156,15 @@ private fun HeadingBlock(
             2 -> MaterialTheme.typography.titleMedium
             else -> MaterialTheme.typography.titleSmall
         }
+    val anchors = LocalHelpAnchors.current
+    val slug = remember(node) { headingSlug(plainText(node)) }
+    val anchorModifier =
+        if (anchors != null) Modifier.onGloballyPositioned { anchors.register(slug, it) } else Modifier
     Text(
         text = inlineAnnotated(node, onLink),
         style = style,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(top = 4.dp),
+        modifier = Modifier.padding(top = 4.dp).then(anchorModifier),
     )
 }
 
