@@ -2,6 +2,8 @@
 
 Kernel-probe module that hides VPN interfaces from selected apps. Part of [vpnhide](../README.md).
 
+> **Just using the app?** The Dashboard names the exact zip for your kernel and walks you through installing it — see **[Install the kernel module](../docs/help/en/kmod-install.md)** (or the in-app **Help & guide**). This README is for building and understanding the module.
+
 The module does not modify the target app's process: there are no userspace
 function patches, injected framework classes, or module-owned anonymous memory
 regions. Detection paths outside the hooks listed below remain out of scope.

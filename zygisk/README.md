@@ -2,6 +2,8 @@
 
 Native-layer VPN interface hiding via inline libc hooks. Part of [vpnhide](../README.md).
 
+> **Just using the app?** See **[Install the Zygisk module](../docs/help/en/zygisk-install.md)** (or the in-app **Help & guide**), including why banking/payment apps may detect Zygisk. This README is for building and understanding the module.
+
 ## What it hooks
 
 All hooks are inline on `libc.so` via ByteDance shadowhook:
@@ -117,7 +119,7 @@ cargo ndk -t arm64-v8a build --release \
 1. `adb push target/vpnhide-zygisk.zip /sdcard/Download/`
 2. KernelSU/Magisk manager -> Modules -> Install from storage -> pick the zip.
 3. Reboot.
-4. Pick target apps with the **VPN Hide app (recommended)** (the [lsposed](../lsposed/) APK). Lists all installed apps with icons, search, and checkboxes. Works on both KernelSU and Magisk. The shell equivalent is in the collapsible **For developers / advanced usage** section at the end of this file.
+4. Pick target apps in the VPN Hide app (the [lsposed](../lsposed/) APK); the shell equivalent is in the collapsible **For developers / advanced usage** section at the end of this file.
 5. Force-stop target apps: `adb shell am force-stop <pkg>`
 6. Verify: `adb logcat | grep vpnhide-zygisk`
 

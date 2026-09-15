@@ -5,6 +5,8 @@ Magisk / KernelSU / KernelSU-Next / APatch module that blocks selected apps from
 (Clash, Sing-box, V2Ray, Amnezia, etc.) from apps that probe for them
 via `connect(127.0.0.1, PORT)` / `connect(::1, PORT)`.
 
+> **Just using the app?** See **[Hide localhost ports](../docs/help/en/ports.md)** (or the in-app **Help & guide**) for installing and using the Ports role. This README is for the implementation details.
+
 ## How it works
 
 A small Rust activator reads `/data/system/vpnhide_config.json`, resolves
