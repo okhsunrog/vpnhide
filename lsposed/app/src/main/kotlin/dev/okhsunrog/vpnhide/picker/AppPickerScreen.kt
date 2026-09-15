@@ -185,9 +185,6 @@ internal fun AppPickerScreen(
             )
         },
         preserveGroup = { next, old -> next.copy(groupSelected = old.groupSelected) },
-        successMessage = { entries, res ->
-            res.getString(R.string.save_success, entries.count { it.anySelected })
-        },
         selectionChangeError = ::nativeSelectionChangeError,
         selectionSaveError = ::nativeSelectionSaveError,
     ) { app, userNames, targets, onChange ->

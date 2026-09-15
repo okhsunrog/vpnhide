@@ -72,7 +72,6 @@
     <string name="root_error_recheck">Проверить снова</string>
 
     <!-- Save feedback -->
-    <string name="save_success">Сохранено целей: %d</string>
     <string name="native_target_capacity_reached">Достигнут лимит Native: можно выбрать не более %1$d UID приложений. Сначала отключите Native у другого приложения.</string>
     <string name="save_native_target_capacity">Настройки сохранены, но Native-бэкенд может защитить только %1$d из %2$d найденных UID приложений. %3$d UID с наибольшими номерами остались без Native-защиты.</string>
 

@@ -79,7 +79,6 @@
     <string name="root_error_recheck">Check again</string>
 
     <!-- Save feedback -->
-    <string name="save_success">Saved %d target(s)</string>
     <string name="native_target_capacity_reached">Native limit reached: at most %1$d app UIDs can be selected. Disable Native for another app first.</string>
     <string name="save_native_target_capacity">Saved, but the Native backend can protect only %1$d of %2$d resolved app UIDs. The %3$d highest UIDs were left without Native protection.</string>
 

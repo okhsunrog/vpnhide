@@ -124,7 +124,6 @@ internal data class MergeResult<T : TargetEntry>(
  * @param row renders one row; call `onChange` with the updated entry to mark
  *   the list dirty.
  * @param persist persist [entries] through the canonical-config repository.
- * @param successMessage snackbar text shown after a successful save.
  */
 @Composable
 internal fun <T : TargetEntry> TargetPickerScreen(
@@ -144,7 +143,6 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     countText: (entries: List<T>, resources: Resources) -> String,
     buildConfig: (entries: List<T>, snapshot: TargetsSnapshot, selfPkg: String, partial: Boolean) -> CanonicalConfig,
     preserveGroup: (T, T) -> T = { next, _ -> next },
-    successMessage: (entries: List<T>, resources: Resources) -> String,
     selectionChangeError:
         (current: List<T>, candidate: List<T>, targets: TargetsSnapshot, selfPkg: String, resources: Resources) -> String? =
         { _, _, _, _, _ -> null },
@@ -425,10 +423,9 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                     )
                 }
 
-                result.succeeded -> {
-                    successMessage(allApps, resources)
-                }
-
+                // A plain success needs no snackbar: the switches settle, the
+                // Save button disables and the bar hides the discard action. A
+                // snackbar only covered the navigation bar for a few seconds.
                 else -> {
                     null
                 }

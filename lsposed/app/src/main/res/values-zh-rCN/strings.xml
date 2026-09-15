@@ -72,7 +72,6 @@
     <string name="root_error_recheck">重新检查</string>
 
     <!-- Save feedback -->
-    <string name="save_success">已保存 %d 个目标应用</string>
     <string name="native_target_capacity_reached">已达原生上限：最多可选 %1$d 个应用 UID。请先给其他应用关闭原生。</string>
     <string name="save_native_target_capacity">已保存，但原生后端最多只能保护 %2$d 个已解析应用 UID 中的 %1$d 个，UID 最大的 %3$d 个应用没有获得原生保护。</string>
 

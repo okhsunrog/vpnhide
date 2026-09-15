@@ -204,7 +204,12 @@ old device-validation paragraphs predate the successful installs described below
    The maintainer then verified by hand (screen recording, 2026-09-16) that a VPN
    toggle passes through one intermediate state, the confirming note, after the
    stale window was reclassified from Unknown to Checking, and that the Dashboard
-   idles at ~0% CPU without the hero icon animation.
+   idles at ~0% CPU without the hero icon animation. After a reboot (system_server
+   running the branch's module) the maintainer re-checked by hand: cold start,
+   VPN off/on from the quick settings, the Diagnostics screen in both states, a
+   role save in the Hiding tab, rotation and theme change during a run, the
+   Statistics and Hiding tabs; all as expected. Only the bundle export from
+   Settings was left for last.
    Not reproduced on the device: a save interrupting a *probing* suite (the
    bridge write reaches its first mutating dispatch 0.7-1.7 s after the request
    while the suite completes in about 0.3 s on an idle device); covered by host
