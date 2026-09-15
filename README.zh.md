@@ -62,68 +62,14 @@ vpnhide 对选定应用隐藏三样东西，全部通过四个 **J / N / A / P**
 
 从 [Releases](https://github.com/okhsunrog/vpnhide/releases) 下载最新发行版。
 
-### 第 1 步 —— VPN Hide 应用 + LSPosed
+简而言之——应用的**概览**标签页会带你逐步完成，并告诉你该装哪个模块。完整说明在内置指南里（下面的链接在 GitHub 和应用内都能打开）。
 
-1. 将 `vpnhide.apk` 作为普通应用安装
-2. 在 LSPosed 管理器中，启用 VPN Hide 模块并将 **“系统框架”** 添加到其作用域
-3. 重启设备（必需 —— LSPosed 钩子在开机时注入 `system_server`，因此模块必须在 `system_server` 启动前处于活动状态）
-4. 打开 VPN Hide 应用并授予 Root 权限（Magisk 通常会自动提示；在 KernelSU/KernelSU-Next/APatch 上，请在管理器中授权）
+1. **应用 + LSPosed。**安装 `vpnhide.apk`，在 LSPosed 中启用 **VPN Hide** 模块，把 **“系统框架”** 加入其作用域，然后重启。→ [首次安装](docs/help/zh/first-install.md)
+2. **一个 Native 后端。**概览会检测你的内核并给出文件名——kmod、KPM 或 Zygisk。通过 root 管理器安装并重启。→ [该选哪个 Native 后端](docs/help/zh/choosing-native.md) · [kmod](docs/help/zh/kmod-install.md) · [KPM](docs/help/zh/kpm-install.md) · [Zygisk](docs/help/zh/zygisk-install.md)
+3. **可选 —— Ports。**要拦截本地回环端口，安装 `vpnhide-ports.zip`。→ [隐藏 localhost 端口](docs/help/zh/ports.md)
+4. **设置隐藏。**在**隐藏**标签页，把 **J / N / A / P** 角色赋给你要对其隐藏 VPN 的应用（银行、政务）——而不是 VPN 客户端本身。→ [设置隐藏](docs/help/zh/configure-hiding.md)
 
-### 第 2 步 —— 用于接口隐藏的原生模块
-
-打开 VPN Hide 应用。**概览**标签页会检测你的设备和内核，并告诉你应安装哪个原生后端：
-
-- 对于受支持的 GKI 内核，它会推荐特定的 kmod 文件，例如 `vpnhide-kmod-android14-6.1.zip`。
-- 对于旧的/非 GKI 的 4.14 / 4.19 / 5.4 内核，它会推荐 `vpnhide-kpm.zip`。若尚未检测到 KernelPatch 运行时，应用会要求你先安装 KPatch-Next-Module，或使用 Zygisk 作为回退。
-- 对于其他内核，它会推荐 `vpnhide-zygisk.zip`。
-
-安装推荐的模块：
-- **kmod：** 通过 KernelSU-Next / KernelSU / Magisk 管理器 → 模块 → 从本地安装。
-- **KPM：** 安装 `vpnhide-kpm.zip`；在 APatch/FolkPatch 下，若运行时不提供受信任的 KernelPatch `su` 令牌，应用可能会要求你在 **设置 → 安全** 中保存 SuperKey 以便开机时激活。在 Magisk、KernelSU 和 KernelSU-Next 下，若尚未安装 KPatch-Next-Module，请先安装它。
-- **Zygisk：** 通过 KernelSU-Next、KernelSU 或 Magisk 管理器 → 模块。
-
-安装原生模块后请重启设备。
-
-### 第 3 步 —— 可选：安装端口模块
-
-若你想要本地回环端口拦截，请通过 KernelSU-Next 或 Magisk 管理器安装 `vpnhide-ports.zip`。
-
-此模块独立于原生后端，仅在应用中使用 **Ports** 角色时才需要。
-
-### 第 4 步 —— 配置隐藏
-
-打开 VPN Hide 应用 → **隐藏** 标签页。
-
-每个应用行都有角色：
-
-- **Java** —— 在 LSPosed/system_server 层通过 Android Java API 隐藏 VPN。
-- **Native** —— 活动的原生后端：kmod、KPM 或 Zygisk。VPN Hide 只保存一份原生选择；只有活动后端会生效。
-- **Apps** —— 该应用成为观察者，应收到经过净化的 PackageManager 视图，其中选定的 VPN/代理应用被隐藏。
-- **Ports** —— 阻止该应用访问本地回环端口。
-
-在设置中可将简短的 **J / N / A / P** 标记切换为完整角色标签。对于 Java、Native 和 Ports，标签旁的设置图标可打开单项钩子或端口范围设置。
-
-更改后请点按保存。
-
-#### 该配置哪个应用
-
-角色配置在**探测方应用**上——也就是你要对其隐藏 VPN 的那个（银行、政务、电商）。VPN 应用本身在这里不需要配置：它是被隐藏的一方，那份名单在“设置 → 隐藏 VPN 应用”里。
-
-常见场景：
-
-| 情况 | 需要开启 |
-|---|---|
-| 银行应用不该看到 VPN 已连接 | 在**银行应用**上：Java + Native |
-| 银行应用还会扫描已安装应用列表 | 再加上银行应用的 **Apps**。然后在“设置 → 隐藏 VPN 应用”中确认你的 VPN 在列表里：声明了 VpnService 的应用会被自动识别，其余需要手动添加 |
-| 银行应用专门针对 Zygisk 报警 | 关闭 Native，只留 Java。GKI 设备上更建议换成 kmod 或 KPM——它们在进程内部不可见 |
-| 应用探测本地回环代理端口（127.0.0.1:1080 之类） | 在该应用上再加 **Ports**（需要已安装 ports 模块） |
-
-举例：要让某个银行应用既看不到 VPN，也看不到已安装的 WireGuard，给银行应用开 **J + N + A**，并确认 WireGuard 在隐藏名单中。WireGuard 自身不需要任何角色。
-
-
-Java 和内核级原生后端（kmod/KPM）会立即生效。Zygisk 钩子和端口规则需在选定应用被强制停止并重新打开后才会被读取。
-
-> **注意：** 某些应用在为其启用原生时会检测到 Zygisk 钩子。请对这类应用关闭原生并依赖 Java 层，或改用 kmod/KPM。
+完整的离线指南已内置于应用（**设置 → 帮助与指南**），也在仓库里：[docs/help/zh](docs/help/zh/) —— 安装、配置、诊断、更新与移除、限制。
 
 <details>
 <summary><b>Shell 配置（进阶）</b></summary>
@@ -293,7 +239,7 @@ vpnhide 对特定应用隐藏活动的 VPN。它并非为以下用途设计：
 - `kmod` 需要带 `CONFIG_KPROBES=y` 的受支持 GKI 内核（Android 12+ 设备上为标准配置）
 - KPM 需要 KernelPatch 运行时（APatch 或 KPatch-Next-Module）；不要将 KPM 与 `.ko` 一起安装
 - `lsposed` 需要 LSPosed、LSPosed-Next 或 Vector
-- `zygisk` 仅支持 arm64
+- `zygisk` 提供 arm64-v8a 和 armeabi-v7a（注入 32 位进程）；内核级后端仅支持 arm64
 - 直接的 `svc #0` 系统调用会绕过 Zygisk 的 libc 钩子 —— 为此请使用内核级后端（kmod 或 KPM）
 - 服务端检测在客户端无法解决 —— 请使用分应用代理
 

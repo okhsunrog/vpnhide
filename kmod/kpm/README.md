@@ -4,6 +4,8 @@ A third native backend alongside the kretprobe `.ko`. Same job — hide VPN
 interfaces from selected UIDs at the kernel level — for the kernels the
 `.ko` **can't** serve.
 
+> **Just using the app?** See **[Install the KPM backend](../../docs/help/en/kpm-install.md)** (or the in-app **Help & guide**) for the KernelPatch-runtime and SuperKey steps. This README is for building and understanding the module.
+
 ## Why a KPM at all
 
 The `.ko` needs per-GKI kernel headers + `Module.symvers` (the DDK build

@@ -2,6 +2,8 @@
 
 Hooks `writeToParcel()` in `system_server` to strip VPN data before Binder serialization reaches target apps. Part of [vpnhide](../README.md).
 
+> **Just using the app?** See **[First install](../docs/help/en/first-install.md)** and **[Set up hiding](../docs/help/en/configure-hiding.md)** (or the in-app **Help & guide**) for enabling the module, the LSPosed scope, and picking targets. This README is for building and understanding the module.
+
 The APK also serves as the **target management UI** for the entire vpnhide project.
 It owns the canonical config at `/data/system/vpnhide_config.json`, then runs the
 installed activators for the native and ports modules. LSPosed itself reads the

@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -56,8 +57,8 @@ import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.diagnostics.GroundTruthProbe
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.diagnostics.VpnTransportWatcher
+import dev.okhsunrog.vpnhide.help.HelpScreen
 import dev.okhsunrog.vpnhide.picker.AppListCache
-import dev.okhsunrog.vpnhide.picker.AppSearchTopBar
 import dev.okhsunrog.vpnhide.picker.ProtectionScreen
 import dev.okhsunrog.vpnhide.picker.TargetFilterChips
 import dev.okhsunrog.vpnhide.picker.TargetListSortMode
@@ -70,10 +71,12 @@ import dev.okhsunrog.vpnhide.settings.LocalSettingsState
 import dev.okhsunrog.vpnhide.settings.RepositorySettingsInteractor
 import dev.okhsunrog.vpnhide.settings.SettingsRepository
 import dev.okhsunrog.vpnhide.settings.SettingsScreen
+import dev.okhsunrog.vpnhide.settings.SettingsSubScreen
 import dev.okhsunrog.vpnhide.shouldRequestUpdateNotificationPermission
 import dev.okhsunrog.vpnhide.statistics.StatisticsCache
 import dev.okhsunrog.vpnhide.statistics.StatisticsScreen
 import dev.okhsunrog.vpnhide.suExec
+import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
 import dev.okhsunrog.vpnhide.ui.components.BlockingErrorCard
 import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
@@ -493,11 +496,22 @@ private fun MainScreen() {
     }
 
     var showSettings by remember { mutableStateOf(false) }
+    var showHelp by remember { mutableStateOf(false) }
+    var helpInitialArticle by remember { mutableStateOf<String?>(null) }
+    var settingsRequestedSub by remember { mutableStateOf<SettingsSubScreen?>(null) }
+    var protectionDirty by remember { mutableStateOf(false) }
+    var pendingHelpNav by remember { mutableStateOf<String?>(null) }
     if (showSettings) {
         BackHandler { showSettings = false }
         SettingsScreen(
             selfNeedsRestart = selfNeedsRestart,
             onBack = { showSettings = false },
+            requestedSubScreen = settingsRequestedSub,
+            onRequestedSubScreenConsumed = { settingsRequestedSub = null },
+            onOpenTabFromHelp = { href ->
+                showSettings = false
+                if (href.endsWith("hiding")) currentTab = Tab.Protection
+            },
         )
         return
     }
@@ -509,244 +523,318 @@ private fun MainScreen() {
         DiagnosticsSettingsScreen(
             selfNeedsRestart = selfNeedsRestart,
             onBack = { showDiagnostics = false },
+            // Same locale-gated accelerator hint the dashboard's not-routed card
+            // shows: leave Diagnostics and open the game-accelerators article.
+            onOpenAccelerators = {
+                showDiagnostics = false
+                helpInitialArticle = "game-accelerators"
+                showHelp = true
+            },
         )
         return
     }
 
-    Scaffold(
-        containerColor = AppColors.screenBackground,
-        topBar = {
-            if (searchActive && currentTab == Tab.Protection) {
-                AppSearchTopBar(
-                    query = searchQuery,
-                    onQueryChange = { searchQuery = it },
-                    onClose = {
-                        searchActive = false
-                        searchQuery = ""
-                    },
-                )
-            } else {
-                // Dashboard on a tall screen gets an "airy" header: the brand
-                // grows and drops below the (fixed) action buttons. Everywhere
-                // else — and on short screens — it stays the compact single row.
-                // The whole thing morphs via `headerProgress` on tab switch.
-                val airy =
-                    currentTab == Tab.Dashboard &&
-                        LocalConfiguration.current.screenHeightDp >= 760
-                val headerProgress by animateFloatAsState(
-                    targetValue = if (airy) 1f else 0f,
-                    animationSpec = tween(durationMillis = 300),
-                    label = "headerAiry",
-                )
-                // Room the brand must leave for the pinned buttons in the compact
-                // state (2 actions normally, 3 on Protection with Search).
-                val actionReserve = ((if (currentTab == Tab.Protection) 3 else 2) * 52 + 24).dp
-                Surface(color = AppColors.topBarContainer) {
-                    Box(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .statusBarsPadding(),
-                    ) {
-                        AppHeaderBrand(
-                            currentTab = currentTab,
-                            progress = headerProgress,
+    val openHelp: (String?) -> Unit = { articleId ->
+        helpInitialArticle = articleId
+        showHelp = true
+    }
+    // vpnhide:// links inside a guide article leave help and go to the right
+    // screen. hidden-apps/diagnostics live under Settings; hiding is a tab.
+    val handleHelpNav: (String) -> Unit = { href ->
+        showHelp = false
+        when {
+            href.endsWith("diagnostics") -> {
+                showDiagnostics = true
+            }
+
+            href.endsWith("hidden-apps") -> {
+                settingsRequestedSub = SettingsSubScreen.HiddenApps
+                showSettings = true
+            }
+
+            else -> {
+                currentTab = Tab.Protection
+            }
+        }
+    }
+    // diagnostics/hidden-apps replace the main screen and drop the Hiding list's
+    // unsaved edits; confirm before leaving when it is dirty. hiding just selects
+    // the tab, so it never needs the guard.
+    val requestHelpNav: (String) -> Unit = { href ->
+        val tearsDown = href.endsWith("diagnostics") || href.endsWith("hidden-apps")
+        if (tearsDown && protectionDirty) pendingHelpNav = href else handleHelpNav(href)
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            // While the Help overlay covers the app, drop the screen beneath it
+            // from the a11y tree so TalkBack can't reach the hidden nav buttons.
+            modifier = if (showHelp) Modifier.clearAndSetSemantics {} else Modifier,
+            containerColor = AppColors.screenBackground,
+            topBar = {
+                if (searchActive && currentTab == Tab.Protection) {
+                    AppSearchTopBar(
+                        query = searchQuery,
+                        onQueryChange = { searchQuery = it },
+                        onClose = {
+                            searchActive = false
+                            searchQuery = ""
+                        },
+                    )
+                } else {
+                    // Dashboard on a tall screen gets an "airy" header: the brand
+                    // grows and drops below the (fixed) action buttons. Everywhere
+                    // else — and on short screens — it stays the compact single row.
+                    // The whole thing morphs via `headerProgress` on tab switch.
+                    val airy =
+                        currentTab == Tab.Dashboard &&
+                            LocalConfiguration.current.screenHeightDp >= 760
+                    val headerProgress by animateFloatAsState(
+                        targetValue = if (airy) 1f else 0f,
+                        animationSpec = tween(durationMillis = 300),
+                        label = "headerAiry",
+                    )
+                    // Room the brand must leave for the pinned buttons in the compact
+                    // state (2 actions normally, 3 on Protection with Search).
+                    val actionReserve = ((if (currentTab == Tab.Protection) 3 else 2) * 52 + 24).dp
+                    Surface(color = AppColors.topBarContainer) {
+                        Box(
                             modifier =
                                 Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(
-                                        start = 16.dp,
-                                        top = lerp(13.dp, 32.dp, headerProgress),
-                                        bottom = lerp(13.dp, 22.dp, headerProgress),
-                                        end = lerp(actionReserve, 12.dp, headerProgress),
-                                    ),
-                        )
-                        Row(
-                            modifier =
-                                Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(top = 10.dp, end = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                                    .fillMaxWidth()
+                                    .statusBarsPadding(),
                         ) {
-                            // Refresh is contextual: Protection refreshes
-                            // the app list, Dashboard refreshes the dashboard
-                            // state + update check.
-                            val refreshContext =
-                                when (currentTab) {
-                                    Tab.Dashboard -> {
-                                        RefreshContext(
-                                            loading = dashboardLoading,
-                                            onRefresh = {
-                                                startupCoordinator.refreshDashboard(scope, refreshRestart)
-                                            },
-                                        )
-                                    }
-
-                                    Tab.Statistics -> {
-                                        RefreshContext(
-                                            loading = statisticsLoading,
-                                            onRefresh = {
-                                                StatisticsCache.refresh(scope)
-                                            },
-                                        )
-                                    }
-
-                                    Tab.Protection -> {
-                                        RefreshContext(
-                                            loading = appListLoading || targetsLoading,
-                                            onRefresh = {
-                                                startupCoordinator.refreshProtection(scope)
-                                            },
-                                        )
-                                    }
-                                }
-                            if (currentTab == Tab.Protection) {
-                                // Filters (system / RU / sort) now live as chips in
-                                // the Apps list itself — see TargetFilterChips. Only
-                                // Search stays in the bar, so the 4-button crowding
-                                // on narrow/high-density screens is gone.
-                                TopBarActionButton(onClick = { searchActive = true }) {
-                                    Icon(
-                                        Icons.Default.Search,
-                                        contentDescription = null,
-                                    )
-                                }
-                            }
-                            TopBarActionButton(
-                                onClick = refreshContext.onRefresh,
-                                enabled = !refreshContext.loading,
-                            ) {
-                                if (refreshContext.loading) {
-                                    ButtonSpinner(size = 20.dp)
-                                } else {
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        contentDescription = stringResource(R.string.action_refresh),
-                                    )
-                                }
-                            }
-                            TopBarActionButton(
-                                onClick = {
-                                    showSettings = true
-                                    if (!settings.settingsHintSeen) {
-                                        scope.launch { settingsInteractor.setSettingsHintSeen(true) }
-                                    }
-                                },
+                            AppHeaderBrand(
+                                currentTab = currentTab,
+                                progress = headerProgress,
                                 modifier =
-                                    Modifier.pulse(
-                                        enabled = !settings.settingsHintSeen && settings.animationsEnabled,
-                                    ),
+                                    Modifier
+                                        .align(Alignment.TopStart)
+                                        .padding(
+                                            start = 16.dp,
+                                            top = lerp(13.dp, 32.dp, headerProgress),
+                                            bottom = lerp(13.dp, 22.dp, headerProgress),
+                                            end = lerp(actionReserve, 12.dp, headerProgress),
+                                        ),
+                            )
+                            Row(
+                                modifier =
+                                    Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(top = 10.dp, end = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(
-                                    Icons.Default.Settings,
-                                    contentDescription = stringResource(R.string.action_settings),
-                                )
+                                // Refresh is contextual: Protection refreshes
+                                // the app list, Dashboard refreshes the dashboard
+                                // state + update check.
+                                val refreshContext =
+                                    when (currentTab) {
+                                        Tab.Dashboard -> {
+                                            RefreshContext(
+                                                loading = dashboardLoading,
+                                                onRefresh = {
+                                                    startupCoordinator.refreshDashboard(scope, refreshRestart)
+                                                },
+                                            )
+                                        }
+
+                                        Tab.Statistics -> {
+                                            RefreshContext(
+                                                loading = statisticsLoading,
+                                                onRefresh = {
+                                                    StatisticsCache.refresh(scope)
+                                                },
+                                            )
+                                        }
+
+                                        Tab.Protection -> {
+                                            RefreshContext(
+                                                loading = appListLoading || targetsLoading,
+                                                onRefresh = {
+                                                    startupCoordinator.refreshProtection(scope)
+                                                },
+                                            )
+                                        }
+                                    }
+                                if (currentTab == Tab.Protection) {
+                                    // Filters (system / RU / sort) now live as chips in
+                                    // the Apps list itself — see TargetFilterChips. Only
+                                    // Search stays in the bar, so the 4-button crowding
+                                    // on narrow/high-density screens is gone.
+                                    TopBarActionButton(onClick = { searchActive = true }) {
+                                        Icon(
+                                            Icons.Default.Search,
+                                            contentDescription = null,
+                                        )
+                                    }
+                                }
+                                TopBarActionButton(
+                                    onClick = refreshContext.onRefresh,
+                                    enabled = !refreshContext.loading,
+                                ) {
+                                    if (refreshContext.loading) {
+                                        ButtonSpinner(size = 20.dp)
+                                    } else {
+                                        Icon(
+                                            Icons.Default.Refresh,
+                                            contentDescription = stringResource(R.string.action_refresh),
+                                        )
+                                    }
+                                }
+                                TopBarActionButton(
+                                    onClick = {
+                                        showSettings = true
+                                        if (!settings.settingsHintSeen) {
+                                            scope.launch { settingsInteractor.setSettingsHintSeen(true) }
+                                        }
+                                    },
+                                    modifier =
+                                        Modifier.pulse(
+                                            enabled = !settings.settingsHintSeen && settings.animationsEnabled,
+                                        ),
+                                ) {
+                                    Icon(
+                                        Icons.Default.Settings,
+                                        contentDescription = stringResource(R.string.action_settings),
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
-        },
-        bottomBar = {
-            val tabHaptic = rememberHapticTick()
-            NavigationBar(
-                containerColor = AppColors.navigationBarContainer,
-                tonalElevation = 0.dp,
-            ) {
-                NavigationBarItem(
-                    selected = currentTab == Tab.Dashboard,
-                    onClick = {
-                        tabHaptic()
-                        currentTab = Tab.Dashboard
-                    },
-                    icon = { Icon(Icons.Default.Home, contentDescription = null) },
-                    label = { Text(stringResource(R.string.tab_dashboard)) },
+            },
+            bottomBar = {
+                val tabHaptic = rememberHapticTick()
+                NavigationBar(
+                    containerColor = AppColors.navigationBarContainer,
+                    tonalElevation = 0.dp,
+                ) {
+                    NavigationBarItem(
+                        selected = currentTab == Tab.Dashboard,
+                        onClick = {
+                            tabHaptic()
+                            currentTab = Tab.Dashboard
+                        },
+                        icon = { Icon(Icons.Default.Home, contentDescription = null) },
+                        label = { Text(stringResource(R.string.tab_dashboard)) },
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == Tab.Protection,
+                        onClick = {
+                            tabHaptic()
+                            currentTab = Tab.Protection
+                        },
+                        icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                        label = { Text(stringResource(R.string.tab_protection)) },
+                    )
+                    NavigationBarItem(
+                        selected = currentTab == Tab.Statistics,
+                        onClick = {
+                            tabHaptic()
+                            currentTab = Tab.Statistics
+                        },
+                        icon = { Icon(Icons.Default.BarChart, contentDescription = null) },
+                        label = { Text(stringResource(R.string.tab_statistics)) },
+                    )
+                }
+            },
+        ) { innerPadding ->
+            val restart = selfNeedsRestart
+            val preparationFailure = selfTargetFailure
+            if (preparationFailure != null) {
+                RootPreparationErrorScreen(
+                    kind = preparationFailure.kind,
+                    detail = preparationFailure.detail,
+                    modifier = Modifier.padding(innerPadding),
+                    onRetry = { startupCoordinator.retrySelfTargets(scope) },
                 )
-                NavigationBarItem(
-                    selected = currentTab == Tab.Protection,
-                    onClick = {
-                        tabHaptic()
-                        currentTab = Tab.Protection
+            } else if (restart == null) {
+                DashboardLoadingState(modifier = Modifier.padding(innerPadding))
+            } else {
+                AnimatedContent(
+                    targetState = currentTab,
+                    transitionSpec = {
+                        if (settings.animationsEnabled) {
+                            // ImageToolbox's pervasive AnimatedContent transition: a
+                            // fade-through with a slight scale, in place (no slide).
+                            // The old tab's rows dissolve and shrink while the new
+                            // tab's rows fade and grow into the same positions, so
+                            // one set of rows reads as morphing into the other.
+                            (
+                                fadeIn(tween(300, easing = AppEasing.Alpha)) +
+                                    scaleIn(tween(400, easing = AppEasing.Scale), initialScale = 0.92f)
+                            ) togetherWith (
+                                fadeOut(tween(300, easing = AppEasing.Alpha)) +
+                                    scaleOut(tween(400, easing = AppEasing.Scale), targetScale = 0.92f)
+                            )
+                        } else {
+                            EnterTransition.None togetherWith ExitTransition.None
+                        }
                     },
-                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
-                    label = { Text(stringResource(R.string.tab_protection)) },
-                )
-                NavigationBarItem(
-                    selected = currentTab == Tab.Statistics,
-                    onClick = {
-                        tabHaptic()
-                        currentTab = Tab.Statistics
-                    },
-                    icon = { Icon(Icons.Default.BarChart, contentDescription = null) },
-                    label = { Text(stringResource(R.string.tab_statistics)) },
-                )
-            }
-        },
-    ) { innerPadding ->
-        val restart = selfNeedsRestart
-        val preparationFailure = selfTargetFailure
-        if (preparationFailure != null) {
-            RootPreparationErrorScreen(
-                kind = preparationFailure.kind,
-                detail = preparationFailure.detail,
-                modifier = Modifier.padding(innerPadding),
-                onRetry = { startupCoordinator.retrySelfTargets(scope) },
-            )
-        } else if (restart == null) {
-            DashboardLoadingState(modifier = Modifier.padding(innerPadding))
-        } else {
-            AnimatedContent(
-                targetState = currentTab,
-                transitionSpec = {
-                    if (settings.animationsEnabled) {
-                        // ImageToolbox's pervasive AnimatedContent transition: a
-                        // fade-through with a slight scale, in place (no slide).
-                        // The old tab's rows dissolve and shrink while the new
-                        // tab's rows fade and grow into the same positions, so
-                        // one set of rows reads as morphing into the other.
-                        (
-                            fadeIn(tween(300, easing = AppEasing.Alpha)) +
-                                scaleIn(tween(400, easing = AppEasing.Scale), initialScale = 0.92f)
-                        ) togetherWith (
-                            fadeOut(tween(300, easing = AppEasing.Alpha)) +
-                                scaleOut(tween(400, easing = AppEasing.Scale), targetScale = 0.92f)
-                        )
-                    } else {
-                        EnterTransition.None togetherWith ExitTransition.None
-                    }
-                },
-                label = "tabContent",
-            ) { tab ->
-                when (tab) {
-                    Tab.Dashboard -> {
-                        DashboardScreen(
-                            selfNeedsRestart = restart,
-                            onOpenDiagnostics = { showDiagnostics = true },
-                            modifier = Modifier.padding(innerPadding),
-                        )
-                    }
+                    label = "tabContent",
+                ) { tab ->
+                    when (tab) {
+                        Tab.Dashboard -> {
+                            DashboardScreen(
+                                selfNeedsRestart = restart,
+                                onOpenDiagnostics = { showDiagnostics = true },
+                                onOpenAccelerators = { openHelp("game-accelerators") },
+                                onOpenHelp = openHelp,
+                                modifier = Modifier.padding(innerPadding),
+                            )
+                        }
 
-                    Tab.Statistics -> {
-                        StatisticsScreen(
-                            modifier = Modifier.padding(innerPadding),
-                        )
-                    }
+                        Tab.Statistics -> {
+                            StatisticsScreen(
+                                modifier = Modifier.padding(innerPadding),
+                            )
+                        }
 
-                    Tab.Protection -> {
-                        ProtectionScreen(
-                            searchQuery = searchQuery,
-                            showSystem = showSystem,
-                            showRussianOnly = showRussianOnly,
-                            sortMode = targetSortMode,
-                            onToggleSystem = { showSystem = !showSystem },
-                            onToggleRussianOnly = { showRussianOnly = !showRussianOnly },
-                            onSortModeChange = { targetSortMode = it },
-                            modifier = Modifier.padding(innerPadding),
-                        )
+                        Tab.Protection -> {
+                            ProtectionScreen(
+                                searchQuery = searchQuery,
+                                showSystem = showSystem,
+                                showRussianOnly = showRussianOnly,
+                                sortMode = targetSortMode,
+                                onToggleSystem = { showSystem = !showSystem },
+                                onToggleRussianOnly = { showRussianOnly = !showRussianOnly },
+                                onSortModeChange = { targetSortMode = it },
+                                onOpenHelp = openHelp,
+                                onDirtyChange = { protectionDirty = it },
+                                modifier = Modifier.padding(innerPadding),
+                            )
+                        }
                     }
                 }
             }
+        }
+        if (showHelp) {
+            HelpScreen(
+                initialArticleId = helpInitialArticle,
+                onClose = { showHelp = false },
+                onNavigate = requestHelpNav,
+            )
+        }
+        pendingHelpNav?.let { href ->
+            AlertDialog(
+                onDismissRequest = { pendingHelpNav = null },
+                title = { Text(stringResource(R.string.help_leave_title)) },
+                text = { Text(stringResource(R.string.help_leave_body)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingHelpNav = null
+                        handleHelpNav(href)
+                    }) {
+                        Text(stringResource(R.string.help_leave_confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingHelpNav = null }) {
+                        Text(stringResource(R.string.btn_cancel))
+                    }
+                },
+            )
         }
     }
 }

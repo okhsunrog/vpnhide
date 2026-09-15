@@ -50,18 +50,19 @@
     <string name="ports_policy_invalid">Укажите хотя бы один корректный порт или диапазон от 1 до 65535.</string>
     <string name="apps_help_who_title">Какое приложение настраивать?</string>
     <string name="apps_help_who_body">Роли ставятся на приложение, ОТ которого вы прячете VPN — банк, госуслуги, маркетплейс. Само VPN-приложение здесь настраивать не нужно: оно то, что прячут, и его список находится в Настройки → «Скрытие VPN-приложений».</string>
-    <string name="apps_help_role_java_body">LSPosed скрывает VPN-сигналы в Java API Android: NetworkCapabilities, NetworkInfo, LinkProperties и NetworkInterface.</string>
-    <string name="apps_help_role_native_body">Активный Native-бэкенд скрывает VPN-сигналы, видимые через проверки ядра и libc. VPN Hide сохраняет один выбор Native для всех установленных Native-бэкендов; работает только активный.</string>
-    <string name="apps_help_role_apps_body">Apps скрывает выбранные пакеты от этого приложения: оно получает очищенный ответ PackageManager и не может перечислять, находить или запрашивать пакеты, которые VPN Hide пометил скрытыми.</string>
-    <string name="apps_help_role_ports_body">Ports скрывает localhost-проверки VPN- и прокси-демонов: для этого приложения они выглядят как закрытые порты. По умолчанию P блокирует все localhost-порты; в настройках можно ограничить блокировку выбранными диапазонами.</string>
-    <string name="apps_help_hook_settings_title">Индивидуальные настройки</string>
-    <string name="apps_help_hook_settings_body">Для Java, Native и Ports нажмите значок настройки рядом с названием, чтобы выбрать отдельные хуки или диапазоны портов. Звёздочка означает, что для приложения включены индивидуальные настройки.</string>
-    <string name="apps_help_apps_hiding_title">Скрытие приложений</string>
-    <string name="apps_help_apps_hiding_body">VPN Hide автоматически находит пакеты, которые стоит скрывать от приложений-наблюдателей: приложения с VPN-сервисом и, если включено, совпадения по имени. Ручной список скрытых пакетов находится в Настройки → Расширенное скрытие. Системные вызовы исключены, чтобы Android мог продолжать устанавливать и запускать приложения.</string>
-    <string name="apps_help_apply_title">Применение изменений</string>
-    <string name="apps_help_apply_body">После сохранения Java и Native-бэкенды уровня ядра (kmod/KPM) применяются сразу. Zygisk-хуки и правила портов применяются для выбранного приложения после принудительной остановки и повторного запуска.</string>
     <string name="apps_help_zygisk_warning_title">Zygisk и банковские приложения</string>
     <string name="apps_help_zygisk_warning_body">Zygisk-хуки работают внутри процесса выбранного приложения. Банковские и платёжные приложения могут это обнаружить, если для них включён Native; оставьте Native выключенным и по возможности используйте Java.</string>
+    <string name="apps_help_open_guide">Как настроить скрытие</string>
+    <string name="help_title">Помощь и руководство</string>
+    <string name="help_faq_title">Частые вопросы</string>
+    <string name="help_search_placeholder">Поиск по руководству&#8230;</string>
+    <string name="help_search_prompt">Введите слово-другое для поиска по руководству.</string>
+    <string name="help_search_empty">Ничего не найдено. Попробуйте другое слово или откройте темы.</string>
+    <string name="help_no_answer_title">Не нашли ответ?</string>
+    <string name="help_no_answer_body">Напишите в Telegram-группу или откройте issue на GitHub.</string>
+    <string name="help_leave_title">Несохранённые изменения</string>
+    <string name="help_leave_body">Переход по ссылке уведёт с экрана со списком приложений, и несохранённые изменения там пропадут. Продолжить?</string>
+    <string name="help_leave_confirm">Продолжить</string>
 
     <!-- Root status -->
     <string name="secondary_profile_error_title">Откройте VPN Hide в основном профиле</string>
@@ -135,7 +136,8 @@
     <string name="dashboard_protection_not_verified">Не проверено</string>
     <string name="dashboard_needs_restart">VPN Hide только что включил скрытие для самого себя. Принудительно остановите VPN Hide и откройте снова, чтобы проверить скрытие — перезагрузка устройства не нужна.</string>
     <string name="vpn_off_prompt">VPN не активен. Включите его и нажмите «Повторить», чтобы проверить скрытие.</string>
-    <string name="self_not_routed_prompt">VPN активен, но VPN Hide через него не идёт. Добавьте VPN Hide в туннель вашего VPN (не исключайте его сплит-туннелем) и нажмите «Повторить» — иначе этим проверкам нечего скрывать.</string>
+    <string name="self_not_routed_prompt">VPN активен, но VPN Hide через него не идёт — этим проверкам нечего измерять. С обычным VPN-клиентом добавьте VPN Hide в туннель (не исключайте его сплит-туннелем) и нажмите «Повторить». Некоторые VPN пропускают только выбранные приложения и не дают добавить VPN Hide — тогда самопроверка просто не запускается, это ожидаемо, а не сбой; судите по тому, работает ли нужное приложение.</string>
+    <string name="self_not_routed_accelerators">Пользуетесь игровым акселератором?</string>
     <string name="vpn_off_retry">Повторить</string>
     <string name="diag_failed_prompt">Не удалось выполнить проверку скрытия — возможно, отклонён root-доступ или команда завершилась с ошибкой. Нажмите «Повторить». Обычно это временно.</string>
 
@@ -314,6 +316,7 @@
     <string name="dashboard_info">Информация (%d)</string>
     <string name="dashboard_issue_checks_failed">Не все проверки скрытия пройдены.</string>
     <string name="dashboard_action_details">Подробности</string>
+    <string name="dashboard_action_learn_more">Подробнее</string>
     <string name="dashboard_issue_kmod_capable_but_zygisk">Ваше ядро поддерживает модуль ядра — он работает в пространстве ядра и невидим для анти-тампер проверок. Zygisk тоже работает, но банковские и платёжные приложения могут обнаружить его хуки, если для них включён Native. Установите %1$s и удалите Zygisk-модуль.</string>
     <string name="dashboard_issue_native_conflict_kernel">Модуль ядра (.ko) и KPM установлены одновременно. Они перехватывают одни и те же функции ядра, и при одновременной работе устройство может полностью зависнуть. Оставьте только один — удалите либо модуль ядра, либо KPM.</string>
     <string name="dashboard_issue_native_conflict_deferred">Модуль ядра (.ko) и KPM установлены одновременно. KPM отключился при загрузке, чтобы не подвесить устройство, и сейчас бездействует. Оставьте только один — удалите KPM (или модуль ядра).</string>
@@ -330,7 +333,7 @@
     <string name="dashboard_issue_native_partial_hooks">Нативный бэкенд загрузился, но на этом ядре встало только %1$d хуков из %2$d — не удалось найти: %3$s. Проверки, которые они закрывают, этим бэкендом не защищены; их может закрывать другой слой. Переустановка не поможет: в этой сборке ядра нужные функции названы иначе или отсутствуют.</string>
     <string name="dashboard_issue_kpm_load_failed">KPM установлен, но не загрузился: %1$s. Чтобы приложить полный лог загрузки к отчёту об ошибке, нажмите Настройки → Отладка → Собрать отладочный лог, либо переустановите vpnhide-kpm.zip из последнего релиза.</string>
     <string name="dashboard_issue_multiple_native">Установлено больше одного Native-бэкенда. Активным может быть только один (приоритет: модуль ядра, затем KPM, затем Zygisk), остальные простаивают. Удалите неиспользуемые, чтобы не засорять систему.</string>
-    <string name="dashboard_issue_debug_logging_on">Отладочные логи включены. VPN Hide пишет подробные строки в logcat, которые может прочитать любой с root-доступом. Выключите переключатель в Настройки → Отладка после сбора отчёта об ошибке.</string>
+    <string name="dashboard_issue_debug_logging_on">Отладочные логи включены. VPN Hide пишет подробные строки в logcat, которые может прочитать любой с root-доступом. Выключите переключатель в Настройки → Для разработчиков после сбора отчёта об ошибке.</string>
     <string name="dashboard_issue_agent_bridge_on">Agent control включён. VPN Hide запускает локальный отладочный мост; по открытому порту другие приложения на устройстве могут обнаружить VPN Hide. Выключите его в Настройки → Для разработчиков, когда закончите.</string>
     <string name="dashboard_issue_selinux_permissive">SELinux в режиме Permissive. Шесть векторов обнаружения, которые VPN Hide рассчитывает блокировать на уровне ядра (RTM_GETROUTE, /proc/net/{tcp,udp,dev,fib_trie}, /sys/class/net), стали доступны выбранным приложениям. Выполните `setenforce 1` и проверьте, что перевело SELinux в этот режим.</string>
     <string name="dashboard_issue_self_multi_profile">VPN Hide установлен в %1$d профилях. Рабочая копия — в основном профиле: LSPosed перехватывает system_server, а он запущен только в основном профиле; экран выбора там уже видит приложения из всех профилей и применяет фильтры ко всем. Копии в дополнительных профилях избыточны и могут одновременно записывать общий конфиг. Удалите VPN Hide из рабочего профиля / Second Space / других дополнительных профилей.</string>
@@ -406,7 +409,7 @@
     <string name="debug_export_modal_confirm">Экспорт</string>
     <string name="debug_export_collect_again">Собрать заново</string>
     <string name="capture_incomplete_vpn_off">VPN выключен. В логе не будет главного, и диагностировать по нему почти нечего. Включите VPN и проверьте ещё раз.</string>
-    <string name="capture_incomplete_not_routed">VPN включён, но VPN Hide не пропущен через туннель (split tunneling) — скрывать нечего, и лог выйдет неполным. Добавьте VPN Hide в туннель и проверьте ещё раз.</string>
+    <string name="capture_incomplete_not_routed">VPN включён, но VPN Hide через него не идёт, поэтому лог выйдет неполным. С обычным VPN-клиентом добавьте VPN Hide в туннель и проверьте ещё раз. Некоторые VPN пропускают только выбранные приложения и не дают добавить VPN Hide — тогда полный лог собрать нельзя, это ожидаемо.</string>
     <string name="capture_incomplete_recheck">Проверить VPN ещё раз</string>
     <string name="capture_checking_vpn">Проверяю VPN туннель</string>
     <string name="capture_collect_anyway">Всё равно собрать неполный лог</string>
@@ -545,7 +548,7 @@
     <string name="settings_hidden_apps_sub">Скрыто: %1$d; автоматически: %2$d; вручную: %3$d</string>
     <string name="settings_hidden_apps_excluded_sub">Исключения автоскрытия: %1$d</string>
     <string name="settings_hidden_apps_empty">Нет приложений для этого фильтра.</string>
-    <string name="settings_hidden_help_body">На этой странице выбирается, какие VPN-пакеты скрывать от приложений с ролью Apps на вкладке Hiding. VPN-приложения можно находить автоматически по VpnService или названию, скрывать вручную или исключать из автоскрытия, если совпадение ошибочное.</string>
+    <string name="settings_hidden_help_body">На этой странице выбирается, какие VPN-пакеты скрывать от приложений с ролью Apps на вкладке «Скрытие». VPN-приложения можно находить автоматически по VpnService или названию, скрывать вручную или исключать из автоскрытия, если совпадение ошибочное.</string>
     <string name="settings_hidden_filter_all">Все</string>
     <string name="settings_hidden_filter_automatic">Авто</string>
     <string name="settings_hidden_filter_manual">Вручную</string>

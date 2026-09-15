@@ -13,7 +13,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -79,6 +78,7 @@ import java.util.zip.ZipOutputStream
 fun DiagnosticsScreen(
     selfNeedsRestart: Boolean,
     modifier: Modifier = Modifier,
+    onOpenAccelerators: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -168,7 +168,7 @@ fun DiagnosticsScreen(
             }
 
             liveGate == DiagnosticGate.SELF_NOT_ROUTED -> {
-                SelfNotRoutedPrompt(onRetry = onRetry)
+                SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators)
             }
 
             // ROUTED: the live gate says the measurement is meaningful — render from

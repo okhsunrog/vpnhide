@@ -17,6 +17,8 @@ internal fun ProtectionScreen(
     onToggleSystem: () -> Unit,
     onToggleRussianOnly: () -> Unit,
     onSortModeChange: (TargetListSortMode) -> Unit,
+    onOpenHelp: (String?) -> Unit,
+    onDirtyChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AppPickerScreen(
@@ -27,6 +29,8 @@ internal fun ProtectionScreen(
         onToggleSystem = onToggleSystem,
         onToggleRussianOnly = onToggleRussianOnly,
         onSortModeChange = onSortModeChange,
+        onOpenHelp = onOpenHelp,
+        onDirtyChange = onDirtyChange,
         modifier = modifier,
     )
 }

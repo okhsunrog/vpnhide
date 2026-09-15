@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide.ui.theme
 
+import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
@@ -10,13 +11,27 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import com.materialkolor.PaletteStyle
 import com.materialkolor.rememberDynamicColorScheme
 import dev.okhsunrog.vpnhide.settings.AppSettings
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
 import dev.okhsunrog.vpnhide.settings.ThemeMode
+
+/**
+ * The resolved dark/light state — honours the in-app [ThemeMode] override, not
+ * just the system setting. Read this (never `isSystemInDarkTheme()`) for any
+ * theme-aware colour outside the Material colorScheme, e.g. the pinned
+ * [dev.okhsunrog.vpnhide.StatusColors]; otherwise a manual Dark override drifts
+ * to light banners/icons when the system is Light.
+ */
+val LocalDarkTheme = staticCompositionLocalOf { false }
 
 /**
  * Root theme for the picker app.
@@ -34,12 +49,26 @@ fun VpnHideTheme(content: @Composable () -> Unit) {
 
     val colorScheme = rememberAppColorScheme(settings, dark)
 
-    MaterialExpressiveTheme(
-        colorScheme = colorScheme,
-        motionScheme = AppMotionScheme,
-        shapes = appShapes(settings.cornerStyle),
-        content = content,
-    )
+    // Keep the system bars' icon appearance in sync with the resolved theme, so a
+    // manual Dark override still gets light bar icons when the system is Light.
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !dark
+            controller.isAppearanceLightNavigationBars = !dark
+        }
+    }
+
+    CompositionLocalProvider(LocalDarkTheme provides dark) {
+        MaterialExpressiveTheme(
+            colorScheme = colorScheme,
+            motionScheme = AppMotionScheme,
+            shapes = appShapes(settings.cornerStyle),
+            content = content,
+        )
+    }
 }
 
 @Composable

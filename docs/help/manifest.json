@@ -1,0 +1,322 @@
+{
+  "schema": 1,
+  "_comment": "Single source for the in-app offline guide. Authored here, synced into the APK assets (help/<locale>/<article-id>.md) by the app module's syncHelpAssets Gradle task, and published from the repo. Section/article order is the guide's table-of-contents order. Each article body lives at <locale>/<id>.md. `faq` drives the tappable 'common questions' chips on the table of contents (recognition over recall); `keywords` are per-article search aliases (how people actually phrase things) matched alongside the body text.",
+  "faq": [
+    { "article": "configure-hiding", "label": { "en": "App detects the VPN", "ru": "Приложение видит VPN", "zh": "应用检测到 VPN" } },
+    { "article": "configure-hiding", "label": { "en": "Finds an installed VPN", "ru": "Находит установленный VPN", "zh": "找到已安装的 VPN" } },
+    { "article": "game-accelerators", "label": { "en": "Game accelerator", "zh": "游戏加速器" }, "locales": ["en", "zh"] },
+    { "article": "configure-hiding", "label": { "en": "The J / N / A / P roles", "ru": "Роли J / N / A / P", "zh": "J / N / A / P 角色" } },
+    { "article": "saving-applying", "label": { "en": "When changes apply", "ru": "Когда применяются изменения", "zh": "更改何时生效" } }
+  ],
+  "sections": [
+    {
+      "id": "getting-started",
+      "title": { "en": "Getting started", "ru": "Начать пользоваться", "zh": "开始使用" },
+      "articles": [
+        {
+          "id": "what-is-vpnhide",
+          "title": { "en": "What VPN Hide does", "ru": "Что делает VPN Hide", "zh": "VPN Hide 是做什么的" },
+          "keywords": {
+            "en": ["what is", "overview", "external ip", "server-side", "root", "split tunneling", "limits"],
+            "ru": ["что это", "обзор", "внешний ip", "сервер", "root", "рут", "split tunneling", "ограничения"],
+            "zh": ["是什么", "概述", "外部 ip", "服务器", "限制"]
+          }
+        },
+        {
+          "id": "requirements",
+          "title": { "en": "Requirements and compatibility", "ru": "Требования и совместимость", "zh": "要求与兼容性" },
+          "keywords": {
+            "en": ["requirements", "compatibility", "android version", "abi", "armv7", "arm64", "kernel", "root manager", "lsposed"],
+            "ru": ["требования", "совместимость", "версия android", "abi", "armv7", "arm64", "ядро", "root-менеджер", "lsposed"],
+            "zh": ["要求", "兼容", "android 版本", "abi", "armv7", "arm64", "内核", "root 管理器", "lsposed"]
+          }
+        },
+        {
+          "id": "first-install",
+          "title": { "en": "First install", "ru": "Первая установка", "zh": "首次安装" },
+          "keywords": {
+            "en": ["install", "setup", "lsposed scope", "system framework", "reboot", "module", "not active", "verify"],
+            "ru": ["установка", "установить", "scope lsposed", "system framework", "перезагрузка", "модуль", "не активен", "проверка"],
+            "zh": ["安装", "配置", "lsposed 作用域", "系统框架", "重启", "模块", "未生效", "验证"]
+          }
+        },
+        {
+          "id": "choosing-native",
+          "title": { "en": "Which native backend to use", "ru": "Какой Native-бэкенд выбрать", "zh": "该选哪个 Native 后端" },
+          "keywords": {
+            "en": ["native backend", "kmod", "kpm", "zygisk", "builtin", "kernel module", "which one", "only one", "conflict", "recommended"],
+            "ru": ["native бэкенд", "kmod", "kpm", "zygisk", "builtin", "модуль ядра", "какой выбрать", "только один", "конфликт", "рекомендуемый"],
+            "zh": ["native 后端", "kmod", "kpm", "zygisk", "内置", "内核模块", "选哪个", "只能一个", "冲突", "推荐"]
+          }
+        },
+        {
+          "id": "first-setup",
+          "title": { "en": "Your first app, step by step", "ru": "Первое приложение, по шагам", "zh": "你的第一个应用，分步操作" },
+          "keywords": {
+            "en": ["first app", "example", "bank", "walkthrough", "steps", "save"],
+            "ru": ["первое приложение", "пример", "банк", "разбор", "шаги", "сохранить"],
+            "zh": ["第一个应用", "示例", "银行", "步骤", "保存"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "configure-hiding",
+      "title": { "en": "Set up hiding", "ru": "Настроить скрытие", "zh": "设置隐藏" },
+      "articles": [
+        {
+          "id": "configure-hiding",
+          "title": { "en": "Set up hiding", "ru": "Настроить скрытие", "zh": "设置隐藏" },
+          "keywords": {
+            "en": ["bank", "detects vpn", "vpn detected", "roles", "java", "native", "apps", "ports", "hide vpn", "installed vpn", "wireguard", "cached", "restart"],
+            "ru": ["банк", "не пускает", "обнаруживает vpn", "определяет vpn", "роли", "порты", "скрыть впн", "спрятать vpn", "установленный vpn", "wireguard", "кеш", "перезапуск"],
+            "zh": ["银行", "检测到 vpn", "角色", "端口", "隐藏 vpn", "已安装的 vpn", "缓存", "重启"]
+          }
+        },
+        {
+          "id": "game-accelerators",
+          "title": { "en": "Game accelerators", "zh": "游戏加速器" },
+          "locales": ["en", "zh"],
+          "keywords": {
+            "en": ["game accelerator", "accelerator", "uu", "xunyou", "tencent", "biubiu", "ping", "latency", "lag"],
+            "zh": ["游戏加速器", "加速器", "uu", "迅游", "腾讯", "延迟", "卡顿"]
+          }
+        },
+        {
+          "id": "split-tunneling",
+          "title": { "en": "Direct access or through the tunnel", "ru": "Напрямую или через туннель", "zh": "直连还是走隧道" },
+          "keywords": {
+            "en": ["split tunnel", "split tunneling", "per-app routing", "direct", "kill switch", "block without vpn", "real ip", "not routed"],
+            "ru": ["раздельное туннелирование", "split tunnel", "маршрутизация по приложениям", "напрямую", "kill switch", "блокировка без vpn", "реальный ip", "не через vpn"],
+            "zh": ["分流", "分应用路由", "直连", "断网保护", "kill switch", "无 vpn 阻断", "真实 ip", "没走 vpn"]
+          }
+        },
+        {
+          "id": "ports",
+          "title": { "en": "Hide localhost ports", "ru": "Скрыть localhost-порты", "zh": "隐藏 localhost 端口" },
+          "keywords": {
+            "en": ["ports", "localhost", "loopback", "127.0.0.1", "clash", "sing-box", "v2ray", "proxy", "port ranges", "connection refused"],
+            "ru": ["порты", "localhost", "loopback", "127.0.0.1", "clash", "sing-box", "v2ray", "прокси", "диапазоны портов", "connection refused"],
+            "zh": ["端口", "localhost", "loopback", "127.0.0.1", "clash", "sing-box", "v2ray", "代理", "端口范围", "连接被拒绝"]
+          }
+        },
+        {
+          "id": "work-profiles",
+          "title": { "en": "Work profiles, clones and second space", "ru": "Рабочие профили, клоны и второе пространство", "zh": "工作资料、克隆与第二空间" },
+          "keywords": {
+            "en": ["work profile", "clone", "cloned app", "second space", "dual apps", "multiple profiles", "main profile"],
+            "ru": ["рабочий профиль", "клон", "клонированное приложение", "второе пространство", "клоны", "несколько профилей", "основной профиль"],
+            "zh": ["工作资料", "克隆", "分身", "第二空间", "双开", "多资料", "主资料"]
+          }
+        },
+        {
+          "id": "saving-applying",
+          "title": { "en": "When changes take effect", "ru": "Когда применяются изменения", "zh": "更改何时生效" },
+          "keywords": {
+            "en": ["apply", "save", "takes effect", "force stop", "restart app", "reboot", "cached", "not applying"],
+            "ru": ["применить", "сохранить", "вступает в силу", "остановить приложение", "перезапуск", "перезагрузка", "кеш", "не применяется"],
+            "zh": ["生效", "保存", "应用更改", "强制停止", "重启应用", "重启", "缓存", "没生效"]
+          }
+        },
+        {
+          "id": "experimental-protection",
+          "title": { "en": "Experimental protection (filesystem paths)", "ru": "Экспериментальная защита (пути в файловой системе)", "zh": "实验性保护（文件系统路径）" },
+          "keywords": {
+            "en": ["experimental protection", "filesystem paths", "hide vpn filesystem", "sys class net", "proc sys net", "vfs hooks", "not covered"],
+            "ru": ["экспериментальная защита", "пути файловой системы", "скрыть файловую систему vpn", "sys class net", "proc sys net", "хуки vfs", "вне зоны"],
+            "zh": ["实验性保护", "文件系统路径", "隐藏 vpn 文件系统", "sys class net", "proc sys net", "vfs 挂钩", "未覆盖"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "install-components",
+      "title": { "en": "Install a component", "ru": "Установка компонентов", "zh": "安装具体组件" },
+      "articles": [
+        {
+          "id": "kmod-install",
+          "title": { "en": "Install the kernel module", "ru": "Установка модуля ядра", "zh": "安装内核模块" },
+          "keywords": {
+            "en": ["kmod", "kernel module", "ko", "gki", "kmi variant", "install", "reboot", "wrong variant", "signature", "no kprobes"],
+            "ru": ["kmod", "модуль ядра", "ko", "gki", "вариант kmi", "установка", "перезагрузка", "не тот вариант", "подпись", "нет kprobes"],
+            "zh": ["kmod", "内核模块", "ko", "gki", "kmi 版本", "安装", "重启", "版本不对", "签名", "没有 kprobes"]
+          }
+        },
+        {
+          "id": "kpm-install",
+          "title": { "en": "Install the KPM backend", "ru": "Установка бэкенда KPM", "zh": "安装 KPM 后端" },
+          "keywords": {
+            "en": ["kpm", "kernelpatch", "apatch", "folkpatch", "kpatch-next", "superkey", "install", "runtime", "unsupported kernel", "standalone"],
+            "ru": ["kpm", "kernelpatch", "apatch", "folkpatch", "kpatch-next", "superkey", "установка", "среда", "неподдерживаемое ядро", "standalone"],
+            "zh": ["kpm", "kernelpatch", "apatch", "folkpatch", "kpatch-next", "superkey", "安装", "运行时", "内核不受支持", "独立"]
+          }
+        },
+        {
+          "id": "zygisk-install",
+          "title": { "en": "Install the Zygisk module", "ru": "Установка модуля Zygisk", "zh": "安装 Zygisk 模块" },
+          "keywords": {
+            "en": ["zygisk", "zygisknext", "neozygisk", "libc hooks", "userspace", "banking detects", "svc bypass", "force-stop", "install"],
+            "ru": ["zygisk", "zygisknext", "neozygisk", "хуки libc", "пользовательское пространство", "банк видит", "обход svc", "force-stop", "установка"],
+            "zh": ["zygisk", "zygisknext", "neozygisk", "libc 挂钩", "用户空间", "银行检测", "svc 绕过", "force-stop", "安装"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "troubleshoot",
+      "title": { "en": "Fix a problem", "ru": "Решить проблему", "zh": "解决问题" },
+      "articles": [
+        {
+          "id": "module-not-active",
+          "title": { "en": "A module is installed but not active", "ru": "Модуль установлен, но не активен", "zh": "模块已安装但未生效" },
+          "keywords": {
+            "en": ["not active", "inactive", "reboot to activate", "scope", "superkey", "activator missing", "conflict", "unsupported kernel"],
+            "ru": ["не активен", "неактивен", "перезагрузите для активации", "scope", "superkey", "активатор отсутствует", "конфликт", "неподдерживаемое ядро"],
+            "zh": ["未生效", "不生效", "重启以激活", "作用域", "superkey", "激活器缺失", "冲突", "内核不受支持"]
+          }
+        },
+        {
+          "id": "broke-after-update",
+          "title": { "en": "It stopped working after an update", "ru": "Перестало работать после обновления", "zh": "更新后不工作了" },
+          "keywords": {
+            "en": ["after update", "stopped working", "version mismatch", "kernel changed", "unknown symbol", "scope reset"],
+            "ru": ["после обновления", "перестало работать", "несовпадение версий", "сменилось ядро", "unknown symbol", "сбросился scope"],
+            "zh": ["更新后", "不工作", "版本不一致", "内核变了", "unknown symbol", "作用域丢失"]
+          }
+        },
+        {
+          "id": "app-still-requires-vpn-off",
+          "title": { "en": "An app still asks you to turn off the VPN", "ru": "Приложение всё ещё требует выключить VPN", "zh": "应用仍要求关闭 VPN" },
+          "keywords": {
+            "en": ["turn off vpn", "still detects", "won't open", "disable vpn", "refuses", "checklist", "server-side"],
+            "ru": ["выключите vpn", "всё равно видит", "не открывается", "отключите vpn", "отказывается", "чек-лист", "серверная проверка"],
+            "zh": ["关闭 vpn", "仍检测到", "打不开", "禁用 vpn", "拒绝", "清单", "服务器端"]
+          }
+        },
+        {
+          "id": "collect-report",
+          "title": { "en": "Collect a debug report", "ru": "Собрать отчёт для диагностики", "zh": "收集调试报告" },
+          "keywords": {
+            "en": ["debug report", "bug report", "logcat", "debug logging", "export", "bundle", "diagnostics"],
+            "ru": ["отчёт", "баг-репорт", "logcat", "debug logging", "экспорт", "архив", "диагностика"],
+            "zh": ["调试报告", "bug 报告", "logcat", "debug logging", "导出", "调试包", "诊断"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "understand-checks",
+      "title": { "en": "Understand the check results", "ru": "Понять результат проверки", "zh": "理解检查结果" },
+      "articles": [
+        {
+          "id": "what-the-check-proves",
+          "title": { "en": "What the self-test checks", "ru": "Что проверяет самопроверка", "zh": "自检检查什么" },
+          "keywords": {
+            "en": ["self-test", "diagnostics", "what it proves", "root differential", "passed", "not routed"],
+            "ru": ["самопроверка", "диагностика", "что доказывает", "root", "пройдено", "не идёт через vpn"],
+            "zh": ["自检", "诊断", "证明什么", "root", "通过", "没走 vpn"]
+          }
+        },
+        {
+          "id": "check-result-meanings",
+          "title": { "en": "What each result means", "ru": "Что означает каждый результат", "zh": "每个结果是什么意思" },
+          "keywords": {
+            "en": ["hidden", "detected", "leak", "selinux", "not measured", "gate", "outcome"],
+            "ru": ["скрыто", "обнаружено", "утечка", "selinux", "не измерено", "гейт", "исход"],
+            "zh": ["已隐藏", "被检测到", "泄露", "selinux", "未测量", "门槛", "结果"]
+          }
+        },
+        {
+          "id": "tester-finds-vpn",
+          "title": { "en": "A third-party tester still finds the VPN", "ru": "Сторонний тестер всё равно находит VPN", "zh": "第三方检测器仍发现 VPN" },
+          "keywords": {
+            "en": ["tester", "detector", "still detects", "exit ip", "cached", "rknhardering"],
+            "ru": ["тестер", "детектор", "всё равно находит", "выходной ip", "кеш", "rknhardering"],
+            "zh": ["检测器", "测试", "仍发现", "出口 ip", "缓存", "rknhardering"]
+          }
+        },
+        {
+          "id": "statistics",
+          "title": { "en": "Reading the statistics", "ru": "Как читать статистику", "zh": "如何看统计" },
+          "keywords": {
+            "en": ["statistics", "counters", "interception", "capture session", "probes", "per-hook", "since boot"],
+            "ru": ["статистика", "счётчики", "перехваты", "сессия захвата", "прощупывания", "по хукам", "с загрузки"],
+            "zh": ["统计", "计数", "拦截", "捕获会话", "探测", "按挂钩", "自开机"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "manage",
+      "title": { "en": "Update, back up, remove", "ru": "Обновить, сохранить, удалить", "zh": "更新、备份与移除" },
+      "articles": [
+        {
+          "id": "updating",
+          "title": { "en": "Updating the app and modules", "ru": "Обновление приложения и модулей", "zh": "更新应用与模块" },
+          "keywords": {
+            "en": ["update", "upgrade", "new version", "version mismatch", "module older", "module newer", "reinstall"],
+            "ru": ["обновление", "обновить", "новая версия", "несовпадение версий", "модуль старее", "модуль новее", "переустановка"],
+            "zh": ["更新", "升级", "新版本", "版本不一致", "模块较旧", "模块较新", "重装"]
+          }
+        },
+        {
+          "id": "config-backup",
+          "title": { "en": "Back up, restore and transfer your config", "ru": "Резервная копия и перенос конфигурации", "zh": "备份、恢复与迁移配置" },
+          "keywords": {
+            "en": ["backup", "restore", "export json", "import json", "transfer", "another device", "migrate", "pre-1.0", "old configuration"],
+            "ru": ["резервная копия", "восстановление", "export json", "import json", "перенос", "другое устройство", "миграция", "до 1.0", "старая конфигурация"],
+            "zh": ["备份", "恢复", "导出 json", "导入 json", "迁移", "另一台设备", "转移", "1.0 之前", "旧配置"]
+          }
+        },
+        {
+          "id": "remove-vpnhide",
+          "title": { "en": "Turning it off, resetting and uninstalling", "ru": "Отключение, сброс и удаление", "zh": "关闭、重置与卸载" },
+          "keywords": {
+            "en": ["uninstall", "remove", "reset", "leftover files", "disable", "turn off", "clean up", "delete config"],
+            "ru": ["удаление", "удалить", "сброс", "оставшиеся файлы", "отключить", "выключить", "очистка", "удалить конфиг"],
+            "zh": ["卸载", "移除", "重置", "残留文件", "停用", "关闭", "清理", "删除配置"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "capabilities-limits",
+      "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能力与限制" },
+      "articles": [
+        {
+          "id": "capabilities-limits",
+          "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能力与限制" },
+          "keywords": {
+            "en": ["limits", "limitations", "external ip", "server-side", "anti-fraud", "root", "split tunneling", "anti-cheat"],
+            "ru": ["ограничения", "пределы", "внешний ip", "сервер", "антифрод", "root", "split tunneling"],
+            "zh": ["限制", "外部 ip", "服务器端", "反欺诈", "root", "分应用代理", "反作弊"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "backends-hooks",
+      "title": { "en": "Under the hood", "ru": "Подробности", "zh": "深入了解" },
+      "articles": [
+        {
+          "id": "detection-vectors",
+          "title": { "en": "Detection vectors and coverage", "ru": "Способы обнаружения и покрытие", "zh": "检测向量与覆盖" },
+          "keywords": {
+            "en": ["detection vectors", "coverage", "networkinterface", "getifaddrs", "netlink", "raw syscall", "svc", "selinux", "java vs native"],
+            "ru": ["векторы обнаружения", "покрытие", "networkinterface", "getifaddrs", "netlink", "raw syscall", "svc", "selinux"],
+            "zh": ["检测向量", "覆盖", "networkinterface", "getifaddrs", "netlink", "原始系统调用", "svc", "selinux"]
+          }
+        },
+        {
+          "id": "glossary",
+          "title": { "en": "Glossary", "ru": "Словарь терминов", "zh": "术语表" },
+          "keywords": {
+            "en": ["glossary", "terms", "definitions", "kmi", "gki", "uid", "backend", "hook", "profile", "loopback", "selinux"],
+            "ru": ["словарь", "термины", "определения", "kmi", "gki", "uid", "бэкенд", "хук", "профиль", "loopback", "selinux"],
+            "zh": ["术语", "词汇", "定义", "kmi", "gki", "uid", "后端", "挂钩", "资料", "loopback", "selinux"]
+          }
+        }
+      ]
+    }
+  ]
+}

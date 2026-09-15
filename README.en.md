@@ -60,68 +60,14 @@ See [Install](#install) for step-by-step instructions.
 
 Download the latest release from [Releases](https://github.com/okhsunrog/vpnhide/releases).
 
-### Step 1 — VPN Hide app + LSPosed
+In short — the app's **Dashboard** tab walks you through it and tells you which module to install. Full instructions live in the built-in guide (the links below open both on GitHub and inside the app).
 
-1. Install `vpnhide.apk` as a regular app
-2. In LSPosed manager, enable the VPN Hide module and add **"System Framework"** to its scope
-3. Reboot the device (required — LSPosed hooks are injected into `system_server` at boot, so the module must be active before `system_server` starts)
-4. Open the VPN Hide app and grant it root access (Magisk usually prompts automatically; on KernelSU/KernelSU-Next/APatch, grant permission in the manager)
+1. **App + LSPosed.** Install `vpnhide.apk`, enable the **VPN Hide** module in LSPosed, add **"System Framework"** to its scope, and reboot. → [First install](docs/help/en/first-install.md)
+2. **One Native backend.** The Dashboard detects your kernel and names the file — kmod, KPM, or Zygisk. Install it through your root manager and reboot. → [Which native backend to use](docs/help/en/choosing-native.md) · [kmod](docs/help/en/kmod-install.md) · [KPM](docs/help/en/kpm-install.md) · [Zygisk](docs/help/en/zygisk-install.md)
+3. **Optional — Ports.** For localhost port blocking, install `vpnhide-ports.zip`. → [Hide localhost ports](docs/help/en/ports.md)
+4. **Set up hiding.** In the **Hiding** tab, give the **J / N / A / P** roles to the apps you're hiding the VPN from (a bank, a government service) — not the VPN client itself. → [Set up hiding](docs/help/en/configure-hiding.md)
 
-### Step 2 — Native module for interface hiding
-
-Open the VPN Hide app. The **Dashboard** tab will detect your device and kernel, and tell you which Native backend to install:
-
-- For a supported GKI kernel, it recommends a specific kmod file, e.g. `vpnhide-kmod-android14-6.1.zip`.
-- For old/non-GKI 4.14 / 4.19 / 5.4 kernels, it recommends `vpnhide-kpm.zip`. If no KernelPatch runtime is detected yet, the app asks you to install KPatch-Next-Module first or use Zygisk as a fallback.
-- For other kernels, it recommends `vpnhide-zygisk.zip`.
-
-Install the recommended module:
-- **kmod:** via KernelSU-Next / KernelSU / Magisk manager → Modules → Install from storage.
-- **KPM:** install `vpnhide-kpm.zip`; under APatch/FolkPatch the app may ask you to save the SuperKey in **Settings → Security** for boot-time activation if the runtime does not expose a trusted KernelPatch `su` token. Under Magisk, KernelSU, and KernelSU-Next, install KPatch-Next-Module first if it is not already installed.
-- **Zygisk:** via KernelSU-Next, KernelSU, or Magisk manager → Modules.
-
-Reboot the device after installing the native module.
-
-### Step 3 — Optional: install the Ports module
-
-If you want localhost port blocking, install `vpnhide-ports.zip` via KernelSU-Next or Magisk manager.
-
-This module is independent from the Native backend and is only needed for the **Ports** role in the app.
-
-### Step 4 — Configure hiding
-
-Open the VPN Hide app → **Hiding** tab.
-
-Each app row has roles:
-
-- **Java** — hide VPN through Android Java APIs at the LSPosed/system_server level.
-- **Native** — the active Native backend: kmod, KPM, or Zygisk. VPN Hide stores one Native selection; only the active backend acts.
-- **Apps** — the app becomes an observer that should receive a sanitized PackageManager view with selected VPN/proxy apps hidden.
-- **Ports** — block this app from reaching localhost ports.
-
-Settings can switch from short **J / N / A / P** chips to full role labels. For Java, Native, and Ports, the settings icon next to the label opens per-hook or port-range settings.
-
-Tap Save after making changes.
-
-#### Which app gets configured
-
-Roles go on the **detector app** — the one you are hiding the VPN from (a bank, a government service, a marketplace). The VPN app itself needs no roles here: it is the thing being hidden, and *that* list lives in Settings → **VPN app hiding**.
-
-Common cases:
-
-| What is happening | What to enable |
-|---|---|
-| A bank must not see that a VPN is up | On the **bank**: Java + Native |
-| The bank also scans the installed-app list | Add **Apps** on the bank. Then check Settings → VPN app hiding actually lists your VPN: apps declaring a VpnService are found automatically, anything else is added by hand |
-| The bank objects to Zygisk specifically | Turn Native off and keep Java. On a GKI device, switching to kmod or KPM is better — they are invisible from inside the process |
-| The app probes a localhost proxy port (127.0.0.1:1080 and friends) | Add **Ports** on that app (needs the ports module installed) |
-
-Worked example: to keep a banking app from seeing either the VPN or the installed WireGuard, give the bank **J + N + A** and make sure WireGuard is in the hidden list. WireGuard itself needs no roles.
-
-
-Java and kernel-level Native backends (kmod/KPM) apply immediately. Zygisk hooks and Ports rules are picked up by a selected app after force-stop and reopen.
-
-> **Note:** some apps detect Zygisk hooks when Native is enabled for them. Leave Native off for those apps and rely on the Java layer, or use kmod/KPM instead.
+The full offline guide is built into the app (**Settings → Help & guide**) and lives in the repo: [docs/help/en](docs/help/en/) — install, configuration, diagnostics, updating and removal, limits.
 
 <details>
 <summary><b>Shell configuration (advanced)</b></summary>
@@ -292,7 +238,7 @@ vpnhide hides an active VPN from specific apps. It is NOT designed for:
 - `kmod` requires a supported GKI kernel with `CONFIG_KPROBES=y` (standard on Android 12+ devices)
 - KPM requires a KernelPatch runtime (APatch or KPatch-Next-Module); do not install KPM together with the `.ko`
 - `lsposed` requires LSPosed, LSPosed-Next, or Vector
-- `zygisk` is arm64 only
+- `zygisk` ships arm64-v8a and armeabi-v7a (32-bit injection); the kernel backends are arm64 only
 - Direct `svc #0` syscalls bypass Zygisk's libc hooks — use a kernel-level backend (kmod or KPM) for that
 - Server-side detection is unfixable client-side — use split tunneling
 

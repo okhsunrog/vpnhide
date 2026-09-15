@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.BugReport
@@ -95,6 +96,7 @@ import dev.okhsunrog.vpnhide.canonicalConfigJson
 import dev.okhsunrog.vpnhide.debug.setDebugLoggingEnabled
 import dev.okhsunrog.vpnhide.diagnostics.DebugToolsSection
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsScreen
+import dev.okhsunrog.vpnhide.help.HelpScreen
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.parseImportedCanonicalConfig
 import dev.okhsunrog.vpnhide.parseLegacyConfigCandidate
@@ -136,16 +138,37 @@ private fun SettingsStatusLine(status: String?) {
     }
 }
 
+/** A Settings sub-screen the guide can deep-link into. */
+enum class SettingsSubScreen {
+    Diagnostics,
+    HiddenApps,
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     selfNeedsRestart: Boolean?,
     onBack: () -> Unit,
+    requestedSubScreen: SettingsSubScreen? = null,
+    onRequestedSubScreenConsumed: () -> Unit = {},
+    onOpenTabFromHelp: (String) -> Unit = {},
 ) {
     val settings = LocalSettingsState.current
     val interactor = LocalSettingsInteractor.current
     var diagnosticsOpen by remember { mutableStateOf(false) }
     var hiddenAppsOpen by remember { mutableStateOf(false) }
+    var helpOpen by remember { mutableStateOf(false) }
+
+    // A guide link (e.g. from the Hiding tab's help) can ask Settings to open a
+    // specific sub-screen; apply it once, then let the host clear the request.
+    LaunchedEffect(requestedSubScreen) {
+        when (requestedSubScreen) {
+            SettingsSubScreen.Diagnostics -> diagnosticsOpen = true
+            SettingsSubScreen.HiddenApps -> hiddenAppsOpen = true
+            null -> Unit
+        }
+        if (requestedSubScreen != null) onRequestedSubScreenConsumed()
+    }
 
     if (diagnosticsOpen) {
         DiagnosticsSettingsScreen(
@@ -156,6 +179,21 @@ fun SettingsScreen(
     }
     if (hiddenAppsOpen) {
         HiddenAppsSettingsScreen(onBack = { hiddenAppsOpen = false })
+        return
+    }
+    if (helpOpen) {
+        HelpScreen(
+            initialArticleId = null,
+            onClose = { helpOpen = false },
+            onNavigate = { href ->
+                helpOpen = false
+                when {
+                    href.endsWith("hidden-apps") -> hiddenAppsOpen = true
+                    href.endsWith("diagnostics") -> diagnosticsOpen = true
+                    else -> onOpenTabFromHelp(href)
+                }
+            },
+        )
         return
     }
 
@@ -190,6 +228,12 @@ fun SettingsScreen(
                     .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
+            PreferenceRow(
+                title = stringResource(R.string.help_title),
+                icon = Icons.AutoMirrored.Filled.HelpOutline,
+                onClick = { helpOpen = true },
+            )
+
             // ── Appearance ── one grouped block of four rows.
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 SettingsSectionHeader(stringResource(R.string.settings_appearance))
@@ -373,6 +417,7 @@ private fun CommunitySettingsSection() {
 internal fun DiagnosticsSettingsScreen(
     selfNeedsRestart: Boolean?,
     onBack: () -> Unit,
+    onOpenAccelerators: (() -> Unit)? = null,
 ) {
     BackHandler(onBack = onBack)
     Scaffold(
@@ -408,6 +453,7 @@ internal fun DiagnosticsSettingsScreen(
             DiagnosticsScreen(
                 selfNeedsRestart = selfNeedsRestart,
                 modifier = Modifier.padding(padding),
+                onOpenAccelerators = onOpenAccelerators,
             )
         }
     }
