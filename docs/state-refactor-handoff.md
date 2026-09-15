@@ -127,8 +127,8 @@ Signing is configured locally; never print keystore secrets. APK:
 SDK: `/home/okhsunrog/Android/Sdk`; apksigner is in `build-tools/35.0.0`.
 
 Device last used: Pixel 8 Pro, serial `3B241FDJG003LP`. Check availability before use.
-Installed version: the deferred-reconcile build of this branch (after `68cc1c5c`),
-user 0 only. On 2026-09-15 the device had only user 0 (`pm list users`); profiles
+Installed version: the `252a225e` build of this branch (self-target preparation
+as root gate), user 0 only. On 2026-09-15 the device had only user 0 (`pm list users`); profiles
 10 and 11 no longer existed. `adb install --user 0 -r` alone is not proof that
 other profiles are clean. Inspect `pm list users` and `dumpsys package
 dev.okhsunrog.vpnhide` after installation.
