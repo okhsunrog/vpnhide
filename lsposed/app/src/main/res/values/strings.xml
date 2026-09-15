@@ -129,6 +129,7 @@
     <string name="diag_banner_application_unknown">The last configuration change could not be confirmed. Re-check it in Settings, then run the check again.</string>
     <string name="diag_banner_application_failed">The last configuration change did not apply. Repair it from the switch that failed, then run the check again.</string>
     <string name="diag_banner_routing_unknown">Couldn\'t determine whether VPN Hide is routed through the VPN. Tap Retry to check again.</string>
+    <string name="diag_banner_probe_unavailable">The diagnostic helper did not finish its last check and cannot start a new one until it returns. If this persists, restart the app.</string>
     <string name="diag_banner_interrupted">The check was interrupted by a change in the VPN, routing or configuration before it finished. Tap Retry.</string>
     <string name="diag_notice_interrupted">The latest check was interrupted by a change in the VPN, routing or configuration. The results below are from the previous complete check.</string>
     <string name="diag_notice_failed">The latest check couldn\'t run. The results below are from the previous complete check.</string>
@@ -184,6 +185,7 @@
     <string name="dashboard_hero_unprotected_subtitle">Hiding is not active</string>
     <string name="dashboard_hero_vpnoff_title">VPN is off</string>
     <string name="dashboard_hero_vpnoff_subtitle">Hiding is inactive without a VPN</string>
+    <string name="dashboard_hero_note_probe_unavailable">Diagnostic helper unresponsive</string>
     <string name="dashboard_hero_note_applying">A configuration change is still being applied</string>
     <string name="dashboard_hero_note_application_unknown">The last configuration change could not be confirmed</string>
     <string name="dashboard_hero_note_application_failed">The last configuration change did not apply</string>

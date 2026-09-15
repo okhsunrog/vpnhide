@@ -114,6 +114,17 @@ class DiagnosticPresentationDataTest {
         assertTrue(presentation.currentSuccess)
     }
 
+    @Test
+    fun `a quarantined probe resource is exposed without touching the retained measurement`() {
+        val view = viewWith(completed(context))
+        assertFalse(diagnosticPresentation(view, eligible(context), 0, uncertain = false).probeUnavailable)
+        val quarantined = view.copy(core = view.core.copy(quarantined = true))
+        val presentation = diagnosticPresentation(quarantined, eligible(context), 0, uncertain = false)
+        assertTrue(presentation.probeUnavailable)
+        assertEquals(1L, presentation.measurement?.runId)
+        assertEquals(MeasurementApplicability.MatchesLastObservation, presentation.applicability)
+    }
+
     private fun eligible(context: MeasurementContext) = DiagnosticContextObservation(DiagnosticEligibility.Eligible, context)
 
     private fun plan() = NATIVE_CHECKS.map { ProbePlanEntry(it.id) }

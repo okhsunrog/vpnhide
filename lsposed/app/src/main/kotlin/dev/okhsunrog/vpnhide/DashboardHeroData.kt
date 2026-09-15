@@ -20,6 +20,9 @@ internal enum class HeroNote(
     val explainsCondition: Boolean = false,
 ) {
     None(false),
+
+    /** The probe helper of an earlier run has not returned, so nothing can be measured at all. */
+    ProbeUnavailable(true, explainsCondition = true),
     Applying(true, explainsCondition = true),
     ApplicationUnknown(true, explainsCondition = true),
     ApplicationFailed(true, explainsCondition = true),
@@ -73,8 +76,11 @@ internal fun heroDecision(
     return HeroDecision(status, note, showsFailedPrompt = protection is ProtectionCheck.Failed && !note.explainsCondition)
 }
 
-/** Current conditions, then the latest attempt, then sufficiency, then applicability. */
+/** The process first, then current conditions, then the latest attempt, then sufficiency, then applicability. */
 private fun heroNote(presentation: DiagnosticPresentation): HeroNote {
+    // A quarantined probe cannot measure whatever the conditions are, so it is
+    // named before the eligibility that would otherwise promise a re-check.
+    if (presentation.probeUnavailable) return HeroNote.ProbeUnavailable
     conditionNote(presentation)?.let { return it }
     val attempt = presentation.lastAttempt
     if (presentation.measurement != null && attempt != null && attempt.outcome != RunOutcome.Completed) {

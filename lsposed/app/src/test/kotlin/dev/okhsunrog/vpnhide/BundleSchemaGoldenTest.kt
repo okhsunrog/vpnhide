@@ -196,4 +196,5 @@ private fun sampleDiagnosticSummary(): DiagnosticSummaryInfo =
                 conclusion = EvidenceConclusion.NoObservedLeak,
             ),
         currentSuccess = false,
+        probeUnavailable = true,
     )

@@ -27,6 +27,13 @@ internal enum class DiagnosticBanner {
     /** Routing could not be determined; explicit, never an endless spinner (T17). */
     RoutingUnknown,
 
+    /**
+     * The probe resource is quarantined: a helper of an earlier run never returned,
+     * so no new check can start until it does. Says so instead of offering a
+     * Re-check button that is silently rejected.
+     */
+    ProbeUnavailable,
+
     /** The latest attempt failed and there is no complete measurement to fall back on. */
     Failed,
 
@@ -60,6 +67,12 @@ internal data class DiagnosticScreenDecision(
 
 internal fun diagnosticScreenDecision(presentation: DiagnosticPresentation): DiagnosticScreenDecision {
     blockedBanner(presentation)?.let { return it }
+    // A current condition still outranks it — it explains the same "cannot measure
+    // now" with more detail — but a quarantined probe outranks the history itself,
+    // which would otherwise carry a Re-check button that does nothing.
+    if (presentation.probeUnavailable) {
+        return DiagnosticScreenDecision(DiagnosticBanner.ProbeUnavailable, results = presentation.measurementResults)
+    }
     val active = presentation.activeStage
     if (active != null && presentation.activeResults != null && active != DiagnosticStage.Draining) {
         return DiagnosticScreenDecision(DiagnosticBanner.Progress, results = presentation.activeResults, complete = false)

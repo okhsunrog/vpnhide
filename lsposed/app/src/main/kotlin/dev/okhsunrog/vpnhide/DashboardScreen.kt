@@ -666,6 +666,7 @@ private data class HeroVisual(
 private fun heroNoteRes(note: HeroNote): Int? =
     when (note) {
         HeroNote.None -> null
+        HeroNote.ProbeUnavailable -> R.string.dashboard_hero_note_probe_unavailable
         HeroNote.Applying -> R.string.dashboard_hero_note_applying
         HeroNote.ApplicationUnknown -> R.string.dashboard_hero_note_application_unknown
         HeroNote.ApplicationFailed -> R.string.dashboard_hero_note_application_failed

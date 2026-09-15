@@ -38,12 +38,24 @@ private sealed interface CoordinatorMessage {
 
 /**
  * Lifecycle of accepted operations, published synchronously from the actor in
- * dispatch order: acceptance (before any effect), each mutating root dispatch,
- * and the one result delivery, plus a later manual recovery of an unresolved one.
- * Callbacks must only record or invalidate; they never read back or wait.
+ * dispatch order: acceptance (before any effect), preparation (the write set as
+ * the fresh config actually turned out, before the first dispatch), each mutating
+ * root dispatch, and the one result delivery, plus a later manual recovery of an
+ * unresolved one. Callbacks must only record or invalidate; they never read back
+ * or wait.
  */
 internal interface ConfigOperationObserver {
     fun accepted(
+        id: Long,
+        spec: ConfigOperationSpec,
+    )
+
+    /**
+     * The operation's spec with the prepared write set merged in. A mutation that
+     * carries only a `transform` declares nothing at submission, so this is the
+     * first moment its real write set is known (§19).
+     */
+    fun prepared(
         id: Long,
         spec: ConfigOperationSpec,
     )
@@ -59,6 +71,11 @@ internal interface ConfigOperationObserver {
 
     object None : ConfigOperationObserver {
         override fun accepted(
+            id: Long,
+            spec: ConfigOperationSpec,
+        ) = Unit
+
+        override fun prepared(
             id: Long,
             spec: ConfigOperationSpec,
         ) = Unit
@@ -239,8 +256,21 @@ internal class ConfigCoordinator(
             available = false
         }
         publish()
+        // The reducer has merged the prepared write set into the spec; observers see
+        // it before this reduction's first Execute effect reports a mutating dispatch.
+        if (event is ConfigOperationEvent.Prepared) {
+            preparedSpec(event.ticket.owner)?.let { spec -> runCatching { observer.prepared(event.ticket.owner, spec) } }
+        }
         transition.effects.forEach(::effect)
     }
+
+    /** Null when the preparation did not leave this operation active (a conflict or an empty plan finished it). */
+    private fun preparedSpec(id: Long): ConfigOperationSpec? =
+        core
+            ?.active
+            ?.request
+            ?.takeIf { it.id == id }
+            ?.spec
 
     private fun publish() {
         val state = core ?: return

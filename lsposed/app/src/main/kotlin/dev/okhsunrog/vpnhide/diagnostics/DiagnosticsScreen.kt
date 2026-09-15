@@ -242,6 +242,10 @@ private fun DiagnosticBannerContent(
             DiagnosticsRetryPrompt(R.string.diag_banner_routing_unknown, onRetry)
         }
 
+        DiagnosticBanner.ProbeUnavailable -> {
+            NeutralBanner(R.string.diag_banner_probe_unavailable, StatusColors.warningContainer())
+        }
+
         DiagnosticBanner.Failed -> {
             DiagnosticsFailedPrompt(onRetry = onRetry)
         }

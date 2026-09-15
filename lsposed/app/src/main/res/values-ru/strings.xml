@@ -120,6 +120,7 @@
     <string name="dashboard_hero_unprotected_subtitle">Скрытие не активно</string>
     <string name="dashboard_hero_vpnoff_title">VPN выключен</string>
     <string name="dashboard_hero_vpnoff_subtitle">Скрытие неактивно без VPN</string>
+    <string name="dashboard_hero_note_probe_unavailable">Помощник диагностики не отвечает</string>
     <string name="dashboard_hero_note_applying">Изменение настроек ещё применяется</string>
     <string name="dashboard_hero_note_application_unknown">Не удалось подтвердить последнее изменение настроек</string>
     <string name="dashboard_hero_note_application_failed">Последнее изменение настроек не применилось</string>
@@ -453,6 +454,7 @@
     <string name="diag_banner_application_unknown">Не удалось подтвердить последнее изменение настроек. Перепроверьте его в настройках и запустите проверку снова.</string>
     <string name="diag_banner_application_failed">Последнее изменение настроек не применилось. Исправьте его с того переключателя, где произошла ошибка, и запустите проверку снова.</string>
     <string name="diag_banner_routing_unknown">Не удалось определить, идёт ли VPN Hide через VPN. Нажмите «Повторить».</string>
+    <string name="diag_banner_probe_unavailable">Помощник диагностики не завершил прошлую проверку и не сможет начать новую, пока не вернётся. Если так и остаётся, перезапустите приложение.</string>
     <string name="diag_banner_interrupted">Проверку прервало изменение VPN, маршрутизации или настроек. Нажмите «Повторить».</string>
     <string name="diag_notice_interrupted">Последнюю проверку прервало изменение VPN, маршрутизации или настроек. Ниже результаты предыдущей завершённой проверки.</string>
     <string name="diag_notice_failed">Последняя проверка не выполнилась. Ниже результаты предыдущей завершённой проверки.</string>

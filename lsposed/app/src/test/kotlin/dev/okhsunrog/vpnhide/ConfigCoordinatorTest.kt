@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.operationAffectsSelfMeasurement
 import dev.okhsunrog.vpnhide.picker.NativeTargetCapacityWarning
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +25,7 @@ class ConfigCoordinatorTest {
             coordinator.initialize()
             val caller = async { coordinator.submit(toggle(CanonicalToggle.Filesystem, true)) }
             assertEquals("accepted:1:[settings/optionalFeatures]", observed.receive())
+            assertEquals("prepared:1:[settings/optionalFeatures]", observed.receive())
             assertEquals("dispatched:1:Persist", observed.receive())
             io.executions.receive().finish(PhaseOutcome.Confirmed)
             assertEquals("dispatched:1:Native", observed.receive())
@@ -31,6 +33,36 @@ class ConfigCoordinatorTest {
             assertTrue(caller.await().succeeded)
             assertEquals("settled:1:null", observed.receive())
             assertTrue(observed.tryReceive().isFailure)
+        }
+
+    @Test
+    fun `a transform-only mutation declares nothing but is relevant from its prepared write set`() =
+        coordinatorTest {
+            coordinator.initialize()
+            val self = "dev.okhsunrog.vpnhide"
+            val caller =
+                async {
+                    coordinator.submit(
+                        CanonicalMutation(
+                            emptyList(),
+                            source = OperationSource.System,
+                            transform = { it.copy(apps = it.apps + (self to CanonicalApp(java = true))) },
+                        ),
+                    )
+                }
+            // Nothing was declared at submission, so the submitted spec classifies as irrelevant.
+            assertEquals("accepted:1:[]", observed.receive())
+            val (id, spec) = preparedSpecs.receive()
+            assertEquals(1L, id)
+            assertTrue(operationAffectsSelfMeasurement(spec, self))
+            assertFalse(operationAffectsSelfMeasurement(ConfigOperationSpec(OperationSource.System, emptySet()), self))
+            // …and the observer learns it before the first mutating dispatch.
+            assertEquals("prepared:1:[apps/$self/java]", observed.receive())
+            assertEquals("dispatched:1:Persist", observed.receive())
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            assertEquals("dispatched:1:Native", observed.receive())
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            assertTrue(caller.await().succeeded)
         }
 
     @Test
@@ -468,6 +500,7 @@ private class CoordinatorFixture(
     val refreshStarted = Channel<Unit>(Channel.UNLIMITED)
     val refreshRelease = CompletableDeferred<Unit>()
     val observed = Channel<String>(Channel.UNLIMITED)
+    val preparedSpecs = Channel<Pair<Long, ConfigOperationSpec>>(Channel.UNLIMITED)
     val coordinator =
         ConfigCoordinator(
             io,
@@ -487,6 +520,14 @@ private class CoordinatorFixture(
                         spec: ConfigOperationSpec,
                     ) {
                         observed.trySend("accepted:$id:${spec.writes.map { it.segments.joinToString("/") }}")
+                    }
+
+                    override fun prepared(
+                        id: Long,
+                        spec: ConfigOperationSpec,
+                    ) {
+                        observed.trySend("prepared:$id:${spec.writes.map { it.segments.joinToString("/") }}")
+                        preparedSpecs.trySend(id to spec)
                     }
 
                     override fun dispatched(

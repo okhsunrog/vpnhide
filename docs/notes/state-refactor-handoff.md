@@ -164,19 +164,25 @@ old device-validation paragraphs predate the successful installs described below
    under Applying / ApplicationUnknown / ApplicationFailed / RoutingUnknown, the
    existing prompts still replace it); the Dashboard showed the "diagnostics failed"
    prompt for a run that never started because of a current condition the hero note
-   already named (`HeroDecision.showsFailedPrompt`). Still open, with the decision
-   recorded: (a) probe quarantine after a drain deadline is invisible to the user
-   (admission `Rejected(ResourceUnavailable)` is dropped by `run`/`retry`, the
-   presentation has no quarantine field, and only the hung job's return lifts it);
-   (b) relevance is classified from the submitted write set, so a `transform`-only
-   write to `apps/<self>` (`writeStartupCanonical`, `mutateAgentApp`) is not a known
-   change until the prepared write set is republished to the observer; (c) the
+   already named (`HeroDecision.showsFailedPrompt`). Also fixed since that audit:
+   (a) probe quarantine after a drain deadline was invisible to the user (admission
+   `Rejected(ResourceUnavailable)` is dropped by `run`/`retry`, so the screen kept
+   offering a Re-check that did nothing) — the presentation now carries
+   `probeUnavailable` from `DiagnosticRunState.quarantined` and the Diagnostics
+   banner, the Dashboard hero note and the bundle/bridge summary all say the
+   diagnostic helper has not returned and no new check can start until it does;
+   (b) relevance was classified from the submitted write set, so a `transform`-only
+   write to `apps/<self>` (`writeStartupCanonical`, `mutateAgentApp`) was never a
+   known change — `ConfigOperationObserver.prepared` now republishes the spec with
+   the prepared write set merged in, before the operation's first mutating dispatch,
+   and `DiagnosticImpactEvent.Prepared` turns that into the usual delay-then-interrupt
+   (relevance only increases). Still open, with the decision recorded: (c) the
    Diagnostics list and the Dashboard tiles rebuild the report of a retained
    measurement against the *current* backend (§6 says coverage is never recalculated
    with a new backend); bounded because a backend change makes the measurement
    `Changed`, so the re-attributed list only ever sits under a "results changed"
-   banner. (a) and (b) are the next stage; (c) needs the backend stored in
-   `MeasurementContext` and the report built from it, deferred. Latent, not
+   banner. (c) needs the backend stored in `MeasurementContext` and the report built
+   from it, deferred. Latent, not
    reachable today: `DiagnosticRunCoordinator.handle()` for an evicted attempt id
    would return a deferred that never completes; `ensure` only passes the latest
    attempt id. Then validate on the device: root failures/timeouts, agent/UI

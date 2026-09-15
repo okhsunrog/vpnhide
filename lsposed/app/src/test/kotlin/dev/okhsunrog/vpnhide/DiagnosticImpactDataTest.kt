@@ -56,6 +56,40 @@ class DiagnosticImpactDataTest {
     }
 
     @Test
+    fun `a write set discovered at preparation delays runs and its dispatch interrupts them once`() {
+        var state = reduceDiagnosticImpact(DiagnosticImpactState(), DiagnosticImpactEvent.Accepted(9, relevant = false)).state
+        assertEquals(DiagnosticImpactState(), state)
+
+        val prepared = reduceDiagnosticImpact(state, DiagnosticImpactEvent.Prepared(9, relevant = true))
+        assertEquals(listOf(DiagnosticImpactEffect.DelayRuns(9)), prepared.effects)
+        assertEquals(ConfigReadiness.Applying, configReadiness(prepared.state))
+        state = prepared.state
+
+        val dispatched = reduceDiagnosticImpact(state, DiagnosticImpactEvent.Dispatched(9, ConfigPhase.Persist))
+        assertEquals(listOf(DiagnosticImpactEffect.InterruptRuns), dispatched.effects)
+        assertEquals(1L, dispatched.state.changeEpoch)
+        val native = reduceDiagnosticImpact(dispatched.state, DiagnosticImpactEvent.Dispatched(9, ConfigPhase.Native))
+        assertTrue(native.effects.isEmpty())
+        assertEquals(1L, native.state.changeEpoch)
+
+        val settled = reduceDiagnosticImpact(native.state, DiagnosticImpactEvent.Settled(9, null))
+        assertEquals(listOf(DiagnosticImpactEffect.SettleRuns(9, null)), settled.effects)
+        assertEquals(ConfigReadiness.Settled, configReadiness(settled.state))
+    }
+
+    @Test
+    fun `preparing an already relevant operation changes nothing and an irrelevant candidate stays irrelevant`() {
+        val accepted = reduceDiagnosticImpact(DiagnosticImpactState(), DiagnosticImpactEvent.Accepted(2, relevant = true)).state
+        val again = reduceDiagnosticImpact(accepted, DiagnosticImpactEvent.Prepared(2, relevant = true))
+        assertTrue(again.effects.isEmpty())
+        assertEquals(accepted, again.state)
+
+        val irrelevant = reduceDiagnosticImpact(DiagnosticImpactState(), DiagnosticImpactEvent.Prepared(3, relevant = false))
+        assertTrue(irrelevant.effects.isEmpty())
+        assertEquals(DiagnosticImpactState(), irrelevant.state)
+    }
+
+    @Test
     fun `irrelevant operations produce no effects and no epoch change`() {
         var state = DiagnosticImpactState()
         for (

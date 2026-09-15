@@ -72,8 +72,10 @@ internal sealed interface DiagnosticCaptureOutcome {
  * on every accepted operation that can change this process's own measurement
  * (its roles and hooks, global optional features, whole replacements) and waits
  * for them; the first mutating dispatch of such an operation interrupts an active
- * run and advances the change epoch. Other apps' edits, debug logging and the
- * startup runtime reconcile neither delay nor interrupt a suite.
+ * run and advances the change epoch. Relevance is decided again on the prepared
+ * write set, so a mutation that only carries a transform still counts once its
+ * candidate is known. Other apps' edits, debug logging and the startup runtime
+ * reconcile neither delay nor interrupt a suite.
  */
 internal object DiagnosticsCache {
     sealed interface State {
@@ -253,6 +255,11 @@ internal class DiagnosticImpactObserver(
         id: Long,
         spec: ConfigOperationSpec,
     ) = DiagnosticsCache.configOperation(DiagnosticImpactEvent.Accepted(id, operationAffectsSelfMeasurement(spec, selfPackage())))
+
+    override fun prepared(
+        id: Long,
+        spec: ConfigOperationSpec,
+    ) = DiagnosticsCache.configOperation(DiagnosticImpactEvent.Prepared(id, operationAffectsSelfMeasurement(spec, selfPackage())))
 
     override fun dispatched(
         id: Long,

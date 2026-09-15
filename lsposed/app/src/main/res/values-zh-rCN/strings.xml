@@ -121,6 +121,7 @@
     <string name="diag_banner_application_unknown">无法确认上一次配置更改。请在“设置”中重新检查，然后再次运行检查。</string>
     <string name="diag_banner_application_failed">上一次配置更改未能应用。请从出错的开关处修复，然后再次运行检查。</string>
     <string name="diag_banner_routing_unknown">无法确定 VPN Hide 是否经过 VPN。请点按“重试”再次检查。</string>
+    <string name="diag_banner_probe_unavailable">诊断助手未完成上一次检查，在其返回之前无法开始新的检查。如果此情况持续，请重启应用。</string>
     <string name="diag_banner_interrupted">检查在完成前被 VPN、路由或配置的变化中断。请点按“重试”。</string>
     <string name="diag_notice_interrupted">最近一次检查被 VPN、路由或配置的变化中断。下方是上一次完整检查的结果。</string>
     <string name="diag_notice_failed">最近一次检查未能运行。下方是上一次完整检查的结果。</string>
@@ -176,6 +177,7 @@
     <string name="dashboard_hero_unprotected_subtitle">隐藏尚未生效</string>
     <string name="dashboard_hero_vpnoff_title">VPN 已关闭</string>
     <string name="dashboard_hero_vpnoff_subtitle">未开启 VPN，隐藏不生效</string>
+    <string name="dashboard_hero_note_probe_unavailable">诊断助手无响应</string>
     <string name="dashboard_hero_note_applying">配置更改仍在应用中</string>
     <string name="dashboard_hero_note_application_unknown">无法确认上一次配置更改</string>
     <string name="dashboard_hero_note_application_failed">上一次配置更改未能应用</string>

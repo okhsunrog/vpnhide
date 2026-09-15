@@ -47,7 +47,8 @@
             "uncoveredLeaks": 0,
             "conclusion": "NoObservedLeak"
         },
-        "currentSuccess": false
+        "currentSuccess": false,
+        "probeUnavailable": true
     },
     "nativeVerdict": "Ok",
     "javaVerdict": "Ok",

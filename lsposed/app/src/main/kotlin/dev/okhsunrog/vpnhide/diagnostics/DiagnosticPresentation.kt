@@ -11,6 +11,12 @@ package dev.okhsunrog.vpnhide.diagnostics
  * [currentSuccess] is the only positive claim: completed execution, sufficient
  * evidence, an applicable measurement and eligible current conditions. Everything
  * else is history with its qualifier ([applicability], [lastAttempt]).
+ *
+ * [probeUnavailable] is a property of this process, not of any measurement: the
+ * probe helper of an earlier run never returned within its drain deadline, so the
+ * resource stays quarantined (§7) and every new request is rejected until that
+ * helper returns. The retained results are as good as they were; what is gone is
+ * the ability to take a new one, and the user has to be told that (§1).
  */
 internal data class DiagnosticPresentation(
     val eligibility: DiagnosticEligibility,
@@ -24,6 +30,7 @@ internal data class DiagnosticPresentation(
     val applicability: MeasurementApplicability,
     val evidence: MeasurementEvidence?,
     val currentSuccess: Boolean,
+    val probeUnavailable: Boolean,
 ) {
     /** The latest attempt did not complete while an older complete measurement still exists. */
     val staleFailureVisible: Boolean
@@ -59,5 +66,6 @@ internal fun diagnosticPresentation(
         applicability = applicability,
         evidence = measurement?.let(::summarizeMeasurement),
         currentSuccess = canPresentCurrentSuccess(measurement, applicability, eligibility),
+        probeUnavailable = core.quarantined,
     )
 }

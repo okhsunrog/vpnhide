@@ -937,5 +937,15 @@ per-check list and the Dashboard tiles still build the retained measurement's
 report against the current backend, not the measurement's own coverage (§6); a
 backend change makes the measurement `Changed`, so this only shows under a
 "results changed" banner until the backend is carried in `MeasurementContext`.
-Probe quarantine is not yet visible in the presentation, and relevance (§19) is
-classified from the submitted write set only; both are the next stage.
+Probe quarantine is now a presentation condition: `DiagnosticPresentation.probeUnavailable`
+carries `DiagnosticRunState.quarantined`, the Diagnostics screen words it as its
+own banner (outranked by a current condition, outranking the retained history it
+keeps listed, because the Re-check button under that history would only be
+rejected), the Dashboard hero names it before any eligibility note, and the
+bundle/bridge summary carries the same flag. Relevance (§19) is no longer
+classified from the submitted write set alone: `ConfigOperationObserver.prepared`
+publishes the spec with the prepared write set merged in — the diff of the
+transformed candidate against the fresh base — right after the `Prepared` event
+is reduced and before its first `Execute`, so a `transform`-only write to
+`apps/<self>` delays new runs from that moment and its first mutating dispatch
+interrupts an active one. Relevance only ever increases.

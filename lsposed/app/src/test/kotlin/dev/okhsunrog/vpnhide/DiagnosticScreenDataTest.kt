@@ -64,6 +64,19 @@ class DiagnosticScreenDataTest {
     }
 
     @Test
+    fun `a quarantined probe outranks history but not a current condition`() {
+        val measured = base(measurement = measurement()).copy(probeUnavailable = true)
+        val quarantined = decide(measured)
+        assertEquals(DiagnosticBanner.ProbeUnavailable, quarantined.banner)
+        // History stays listed: the measurement is as good as it was, only a new one cannot start.
+        assertEquals(measured.measurementResults, quarantined.results)
+        assertNull(quarantined.attemptNotice)
+        // A condition that explains the same impossibility in more detail still wins.
+        assertEquals(DiagnosticBanner.VpnOff, decide(measured.copy(eligibility = DiagnosticEligibility.VpnOff)).banner)
+        assertEquals(DiagnosticBanner.ProbeUnavailable, decide(base().copy(probeUnavailable = true)).banner)
+    }
+
+    @Test
     fun `an active run shows progress and its partial evidence as incomplete`() {
         val core = decide(base().copy(activeRunId = 2, activeStage = DiagnosticStage.Core))
         assertEquals(DiagnosticBanner.Progress, core.banner)
@@ -140,5 +153,6 @@ class DiagnosticScreenDataTest {
             applicability = if (measurement == null) MeasurementApplicability.Absent else MeasurementApplicability.MatchesLastObservation,
             evidence = measurement?.let(::summarizeMeasurement),
             currentSuccess = false,
+            probeUnavailable = false,
         )
 }

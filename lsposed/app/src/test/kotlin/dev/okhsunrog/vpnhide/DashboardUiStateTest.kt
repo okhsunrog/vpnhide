@@ -269,6 +269,24 @@ class DashboardUiStateTest {
         assertFalse(heroDecision(dashboardState(), good.copy(eligibility = DiagnosticEligibility.Applying), 0, 0).showsFailedPrompt)
     }
 
+    @Test
+    fun `a quarantined probe is named before any eligibility and replaces the failed prompt`() {
+        val good = presentation().copy(probeUnavailable = true)
+        val checked = dashboardState(protection = ProtectionCheck.Checked(ok, ok))
+        assertEquals(
+            HeroDecision(HeroStatus.Attention, HeroNote.ProbeUnavailable, showsFailedPrompt = false),
+            heroDecision(checked, good, 0, 0),
+        )
+        // Even an eligibility that would otherwise word its own note is outranked.
+        assertEquals(
+            HeroNote.ProbeUnavailable,
+            heroDecision(checked, good.copy(eligibility = DiagnosticEligibility.Applying), 0, 0).note,
+        )
+        val decision = heroDecision(dashboardState(protection = ProtectionCheck.Failed), good, 0, 0)
+        assertFalse(decision.showsFailedPrompt)
+        assertEquals(HeroNote.ProbeUnavailable, decision.note)
+    }
+
     private val sufficient = MeasurementEvidence(5, 0, 0, 0, 0, 0, 0, EvidenceConclusion.NoObservedLeak)
     private val insufficient = MeasurementEvidence(0, 0, 5, 0, 0, 0, 0, EvidenceConclusion.Insufficient)
 
@@ -289,6 +307,7 @@ class DashboardUiStateTest {
             applicability = MeasurementApplicability.MatchesLastObservation,
             evidence = sufficient,
             currentSuccess = true,
+            probeUnavailable = false,
         )
     }
 

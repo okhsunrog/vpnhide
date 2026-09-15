@@ -20,6 +20,8 @@ internal data class DiagnosticSummaryInfo(
     val applicability: MeasurementApplicability,
     val evidence: MeasurementEvidence?,
     val currentSuccess: Boolean,
+    /** The probe helper did not return from an earlier run, so no new run can start. */
+    val probeUnavailable: Boolean,
 )
 
 @Serializable
@@ -56,4 +58,5 @@ internal fun diagnosticSummary(presentation: DiagnosticPresentation): Diagnostic
         applicability = presentation.applicability,
         evidence = presentation.evidence,
         currentSuccess = presentation.currentSuccess,
+        probeUnavailable = presentation.probeUnavailable,
     )

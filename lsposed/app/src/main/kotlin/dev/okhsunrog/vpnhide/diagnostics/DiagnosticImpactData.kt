@@ -11,6 +11,10 @@ import dev.okhsunrog.vpnhide.TransitionFailure
  * whole replacements (import, reset, removal), which are conservatively relevant.
  * Not relevant: other apps' roles, debug logging, auto-hide bookkeeping, and a
  * forced activation with no write at all (the startup runtime reconcile).
+ *
+ * Applied twice per operation: to the submitted write set at acceptance, and to
+ * the prepared one once preparation has diffed the candidate against the fresh
+ * config — a `transform`-only mutation is relevant only from that second call.
  */
 internal fun operationAffectsSelfMeasurement(
     spec: ConfigOperationSpec,
@@ -44,6 +48,16 @@ internal data class DiagnosticImpactState(
 
 internal sealed interface DiagnosticImpactEvent {
     data class Accepted(
+        val id: Long,
+        val relevant: Boolean,
+    ) : DiagnosticImpactEvent
+
+    /**
+     * The operation's write set as preparation discovered it. A `transform` writing
+     * `apps/<self>` declares nothing at submission, so this is where it becomes a
+     * known change; relevance never decreases here.
+     */
+    data class Prepared(
         val id: Long,
         val relevant: Boolean,
     ) : DiagnosticImpactEvent
@@ -85,6 +99,16 @@ internal fun reduceDiagnosticImpact(
     when (event) {
         is DiagnosticImpactEvent.Accepted -> {
             if (event.relevant) {
+                Transition(state.copy(relevant = state.relevant + event.id), listOf(DiagnosticImpactEffect.DelayRuns(event.id)))
+            } else {
+                Transition(state)
+            }
+        }
+
+        is DiagnosticImpactEvent.Prepared -> {
+            // Late relevance only ever adds: the operation now delays new runs, and
+            // its first mutating dispatch interrupts an active one as usual.
+            if (event.relevant && event.id !in state.relevant) {
                 Transition(state.copy(relevant = state.relevant + event.id), listOf(DiagnosticImpactEffect.DelayRuns(event.id)))
             } else {
                 Transition(state)

@@ -52,6 +52,18 @@ class DiagnosticSummaryDataTest {
         assertEquals(presentation.applicability, summary.applicability)
         assertEquals(presentation.evidence, summary.evidence)
         assertEquals(presentation.currentSuccess, summary.currentSuccess)
+        assertFalse(summary.probeUnavailable)
+    }
+
+    @Test
+    fun `a quarantined probe resource is carried into the bundle and the bridge`() {
+        val measurement = completed(context)
+        val view = viewWith(measurement).let { it.copy(core = it.core.copy(quarantined = true)) }
+
+        val summary = diagnosticSummary(diagnosticPresentation(view, eligible(context), changeEpoch = 0, uncertain = false))
+
+        assertTrue(summary.probeUnavailable)
+        assertEquals(1L, summary.measurement?.runId)
     }
 
     @Test
