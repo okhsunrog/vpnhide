@@ -201,6 +201,10 @@ old device-validation paragraphs predate the successful installs described below
    never received a callback (default `NOT_VPN` capability; and the app's own hook
    drops VPN-transport dispatches for the self target), so a VPN toggle was not
    noticed until a manual refresh; it now also watches the default network.
+   The maintainer then verified by hand (screen recording, 2026-09-16) that a VPN
+   toggle passes through one intermediate state, the confirming note, after the
+   stale window was reclassified from Unknown to Checking, and that the Dashboard
+   idles at ~0% CPU without the hero icon animation.
    Not reproduced on the device: a save interrupting a *probing* suite (the
    bridge write reaches its first mutating dispatch 0.7-1.7 s after the request
    while the suite completes in about 0.3 s on an idle device); covered by host
