@@ -40,23 +40,10 @@ localhost port; you can limit it to specific ranges in the per-app settings.
 
 ### You use a game accelerator
 
-A game accelerator (UU, Xunyou, Tencent and the like) is itself a VPN: on
-Android it builds a VpnService tunnel and routes the games you pick through it.
-The system therefore sees an active VPN and an installed VPN app, and other apps
-can react to that. If a bank or another app refuses to run "because a VPN is on"
-while your accelerator is active, hide the VPN from *that* app with **Java +
-Native**, and add the accelerator to the hidden VPN-apps list so package scans
-don't spot it. Because the accelerator only routes the games you select, the app
-you are hiding from is off the tunnel anyway.
-
-This is about hiding the accelerator's VPN from *other* apps. Hiding it from the
-game you are accelerating, to get past that game's own checks, is a different
-matter and not something VPN Hide can promise.
-
-Accelerators usually route a fixed game list, not arbitrary apps, so they often
-won't let you add VPN Hide to their tunnel. That is why the Overview self-test
-may report that it can't run while the accelerator is on — that is expected, not
-a failure. Judge hiding by whether your target app works.
+A game accelerator is itself a VPN, so VPN Hide treats it like any other — hide
+its VPN from the apps that object, and hide the accelerator from package scans.
+See **[Game accelerators](game-accelerators.md)** for the details, including why
+the self-test can't run while the accelerator is on.
 
 ### When do my changes take effect?
 

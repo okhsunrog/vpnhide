@@ -89,6 +89,42 @@ class HelpModelTest {
     }
 
     @Test
+    fun `buildGuide drops a locale-gated article outside its locales`() {
+        val m =
+            HelpManifestDto(
+                sections =
+                    listOf(
+                        HelpSectionDto(
+                            id = "s",
+                            title = mapOf("en" to "S"),
+                            articles =
+                                listOf(
+                                    HelpArticleDto("always", mapOf("en" to "A")),
+                                    HelpArticleDto("enzh", mapOf("en" to "B"), locales = listOf("en", "zh")),
+                                ),
+                        ),
+                    ),
+            )
+        assertEquals(
+            listOf("always"),
+            buildGuide(m, "ru")
+                .sections
+                .single()
+                .articles
+                .map { it.id },
+        )
+        assertEquals(
+            setOf("always", "enzh"),
+            buildGuide(m, "en")
+                .sections
+                .single()
+                .articles
+                .map { it.id }
+                .toSet(),
+        )
+    }
+
+    @Test
     fun `articleKeywords picks the locale then falls back to english`() {
         val a = HelpArticleDto("x", keywords = mapOf("en" to listOf("bank"), "ru" to listOf("банк")))
         assertEquals(listOf("банк"), articleKeywords(a, "ru"))

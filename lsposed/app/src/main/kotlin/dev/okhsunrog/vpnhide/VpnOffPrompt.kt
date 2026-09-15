@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
@@ -36,7 +38,20 @@ internal fun VpnOffPrompt(
 internal fun SelfNotRoutedPrompt(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
-) = RetryPromptCard(R.string.self_not_routed_prompt, onRetry, modifier)
+    onOpenAccelerators: (() -> Unit)? = null,
+) {
+    // The accelerator link only makes sense where that guide article exists (en/zh)
+    // — accelerator users are the main people this state is expected for.
+    val language = LocalConfiguration.current.locales[0].language
+    val accelerators = onOpenAccelerators?.takeIf { language == "en" || language == "zh" }
+    RetryPromptCard(
+        messageRes = R.string.self_not_routed_prompt,
+        onRetry = onRetry,
+        modifier = modifier,
+        secondaryLabelRes = R.string.self_not_routed_accelerators.takeIf { accelerators != null },
+        onSecondary = accelerators,
+    )
+}
 
 /**
  * Banner + retry button for a diagnostics run that *failed* (root dropped, shell
@@ -54,6 +69,8 @@ private fun RetryPromptCard(
     messageRes: Int,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    secondaryLabelRes: Int? = null,
+    onSecondary: (() -> Unit)? = null,
 ) {
     EnhancedCard(
         modifier = modifier.fillMaxWidth(),
@@ -74,6 +91,11 @@ private fun RetryPromptCard(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.vpn_off_retry))
+            }
+            if (secondaryLabelRes != null && onSecondary != null) {
+                TextButton(onClick = onSecondary, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(secondaryLabelRes))
+                }
             }
         }
     }

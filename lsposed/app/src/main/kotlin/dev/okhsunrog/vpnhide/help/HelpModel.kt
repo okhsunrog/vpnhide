@@ -27,6 +27,9 @@ internal data class HelpArticleDto(
     val id: String,
     val title: Map<String, String> = emptyMap(),
     val keywords: Map<String, List<String>> = emptyMap(),
+    // Null = every locale; otherwise only these (e.g. game-accelerators is en/zh —
+    // the RU audience's motivation is RKN/banks, not accelerators).
+    val locales: List<String>? = null,
 )
 
 @Serializable
@@ -108,7 +111,9 @@ internal fun buildGuide(
     val sections =
         manifest.sections.mapNotNull { section ->
             val articles =
-                section.articles.map { HelpArticleRef(it.id, section.id, localized(it.title, locale)) }
+                section.articles
+                    .filter { it.locales == null || locale in it.locales }
+                    .map { HelpArticleRef(it.id, section.id, localized(it.title, locale)) }
             if (articles.isEmpty()) {
                 null
             } else {

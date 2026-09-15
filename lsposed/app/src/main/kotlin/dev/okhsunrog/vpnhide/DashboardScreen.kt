@@ -68,6 +68,7 @@ fun DashboardScreen(
     selfNeedsRestart: Boolean,
     onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenAccelerators: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -258,7 +259,7 @@ fun DashboardScreen(
 
             (protection as? ProtectionCheck.Blocked)?.gate == DiagnosticGate.SELF_NOT_ROUTED -> {
                 Spacer(Modifier.height(12.dp))
-                SelfNotRoutedPrompt(onRetry = onRetry)
+                SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators)
             }
 
             protection is ProtectionCheck.Failed -> {

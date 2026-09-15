@@ -183,6 +183,7 @@
     <string name="dashboard_needs_restart">VPN Hide 刚刚为自身启用了隐藏。请重启 VPN Hide（强制停止后重新打开）来检查隐藏效果——无需重启设备。</string>
     <string name="vpn_off_prompt">当前没有已开启的 VPN。请先开启 VPN，再点按“重试”运行隐藏检查。</string>
     <string name="self_not_routed_prompt">VPN 已开启，但 VPN Hide 的流量没有走这条 VPN，这些检查没有可测量的内容。若使用通用 VPN 客户端，请把 VPN Hide 加入 VPN 隧道（不要用分应用代理把它排除）再点按“重试”。有些 VPN 只代理选定的应用、无法加入 VPN Hide——那么这项自检就无法运行，这是正常现象，并非失败；请以目标应用是否正常来判断隐藏效果。</string>
+    <string name="self_not_routed_accelerators">在用游戏加速器？</string>
     <string name="vpn_off_retry">重试</string>
     <string name="diag_failed_prompt">隐藏检查未能运行——可能是 Root 授权被拒绝，或某条命令执行失败。请点按“重试”，这通常是暂时的。</string>
 

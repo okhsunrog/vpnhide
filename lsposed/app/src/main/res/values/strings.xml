@@ -191,6 +191,7 @@
     <string name="dashboard_needs_restart">VPN Hide just enabled hiding for itself. Restart VPN Hide (force-stop and reopen) to check hiding — no device reboot needed.</string>
     <string name="vpn_off_prompt">No active VPN. Turn it on, then tap Retry to run the hiding checks.</string>
     <string name="self_not_routed_prompt">A VPN is active, but VPN Hide isn\'t routed through it, so there is nothing for these checks to measure. If you use a general VPN client, add VPN Hide to the tunnel (don\'t split-tunnel it out) and tap Retry. Some VPNs route only selected apps and won\'t let you add VPN Hide — then this self-test can\'t run, which is expected, not a failure; judge hiding by whether your target app works.</string>
+    <string name="self_not_routed_accelerators">Using a game accelerator?</string>
     <string name="vpn_off_retry">Retry</string>
     <string name="diag_failed_prompt">The hiding checks couldn\'t run — root access may have been denied or a command failed. Tap Retry. This is usually transient.</string>
 
