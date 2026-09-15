@@ -32,7 +32,12 @@ internal class AppDiagnosticRunIo(
         // process, so no network fact could make a measurement meaningful.
         if (current.selfNeedsRestart) return DiagnosticContextObservation(DiagnosticEligibility.RestartApp, null)
         RoutingGateCache.ensureLoaded(ObservationRuntime.scope, current.context, selfNeedsRestart = false)
-        withContext(Dispatchers.IO) { RoutingGateCache.refreshInPlace(force = true) }
+        // A not-invalidated observation is fresh; only a stale or absent one costs a root shell.
+        when (routingReadPlan(RoutingGateCache.observation.value)) {
+            RoutingRead.Reuse -> Unit
+            RoutingRead.Join -> withContext(Dispatchers.IO) { RoutingGateCache.refreshInPlace(force = false) }
+            RoutingRead.Refresh -> withContext(Dispatchers.IO) { RoutingGateCache.refreshInPlace(force = true) }
+        }
         val observation =
             buildDiagnosticContextObservation(
                 selfNeedsRestart = false,

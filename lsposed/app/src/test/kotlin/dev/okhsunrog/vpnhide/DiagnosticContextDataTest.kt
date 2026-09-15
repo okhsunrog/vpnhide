@@ -15,6 +15,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.EXTRA_JAVA_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_EXTRA_CHECKS
+import dev.okhsunrog.vpnhide.diagnostics.RoutingRead
 import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticContextObservation
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticProbePlan
@@ -24,6 +25,7 @@ import dev.okhsunrog.vpnhide.diagnostics.mergeDiagnosticEvidence
 import dev.okhsunrog.vpnhide.diagnostics.plannedOutcomes
 import dev.okhsunrog.vpnhide.diagnostics.projectDiagnosticAttempt
 import dev.okhsunrog.vpnhide.diagnostics.projectDiagnosticState
+import dev.okhsunrog.vpnhide.diagnostics.routingReadPlan
 import dev.okhsunrog.vpnhide.diagnostics.selfConfigurationIdentity
 import dev.okhsunrog.vpnhide.diagnostics.selfRoutingObservation
 import org.junit.Assert.assertEquals
@@ -56,6 +58,19 @@ class DiagnosticContextDataTest {
         assertEquals(DiagnosticEligibility.Unknown, observation.eligibility)
         assertNull(observation.context)
         assertNull(selfRoutingObservation(current(DiagnosticGate.NEEDS_RESTART)).lastGood)
+    }
+
+    @Test
+    fun `routing read reuses a current observation joins an in-flight read and refreshes only stale state`() {
+        val fresh = current(DiagnosticGate.ROUTED)
+        assertEquals(RoutingRead.Reuse, routingReadPlan(fresh))
+        assertEquals(RoutingRead.Refresh, routingReadPlan(ObservationState<DiagnosticGate>()))
+        assertEquals(RoutingRead.Refresh, routingReadPlan(fresh.copy(generation = 1)))
+        assertEquals(RoutingRead.Refresh, routingReadPlan(fresh.copy(error = TransitionFailure.ReadFailed)))
+        assertEquals(RoutingRead.Refresh, routingReadPlan(fresh.copy(quarantined = true, quarantineRequestId = 1)))
+        val loading = fresh.copy(active = ObservationRequest(2, 0, 1))
+        assertEquals(RoutingRead.Join, routingReadPlan(loading))
+        assertEquals(RoutingRead.Join, routingReadPlan(loading.copy(generation = 1)))
     }
 
     @Test

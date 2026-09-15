@@ -40,11 +40,14 @@ Dashboard loading placeholder and remains available for manual retry.
 
 Diagnostic runs are now owned by the process-lived `DiagnosticRunCoordinator`
 behind `DiagnosticsCache` (transition contract §18). Its eligibility read at
-Checking and its end-context read at Verifying both force a routing-gate refresh,
-so one suite reloads the root snapshot twice and invalidates root dependents twice.
-Dashboard derivation joins the run through its own handle; the second invalidation
-supersedes the in-flight derivation, whose successor then reads the finished
-attempt without starting another suite.
+Checking and its end-context read at Verifying reuse a current routing-gate
+observation, join an in-flight read, and force a refresh (root snapshot plus
+routing probe) only when the observation is stale, failed or absent. An
+undisturbed suite therefore shares the startup root read and adds no second
+shell. When a VPN callback or config write invalidated the gate during the run,
+the Verifying refresh invalidates root dependents; Dashboard derivation, which
+joins the run through its own handle, is then superseded and its successor reads
+the finished attempt without starting another suite.
 
 Invalidation advances the generation synchronously. A result from an older
 generation cannot publish either a value or an error. Its completion starts one

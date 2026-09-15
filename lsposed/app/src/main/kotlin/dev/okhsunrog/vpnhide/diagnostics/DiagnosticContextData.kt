@@ -86,6 +86,23 @@ private fun DiagnosticGate.toSelfRouting(): SelfRouting? =
         DiagnosticGate.NEEDS_RESTART -> null
     }
 
+/** How a context effect obtains the routing observation it folds. */
+internal enum class RoutingRead { Reuse, Join, Refresh }
+
+/**
+ * "Fresh" means not invalidated: a current observation is reused as is, an
+ * in-flight read is joined, and only a stale, failed or absent observation forces
+ * a new root snapshot plus routing probe. VPN callbacks and config writes
+ * invalidate the observation, so a known change always causes a new read; this
+ * keeps the end-context read of an undisturbed run free of a second root shell.
+ */
+internal fun <T> routingReadPlan(state: ObservationState<T>): RoutingRead =
+    when {
+        currentObservationValue(state) != null -> RoutingRead.Reuse
+        state.active != null -> RoutingRead.Join
+        else -> RoutingRead.Refresh
+    }
+
 /** The legacy blocking gate a NotStarted attempt renders as, or null when the reason has no gate vocabulary. */
 internal fun DiagnosticEligibility.blockedGate(): DiagnosticGate? =
     when (this) {

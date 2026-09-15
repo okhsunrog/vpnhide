@@ -741,17 +741,22 @@ core evidence beside the previous complete measurement (T11). Explicit cancel
 drains the run's outstanding helper jobs; an unproven drain quarantines the probe
 resource until the late helper returns, and requests are rejected meanwhile (T23).
 
-The context effect goes through the shared `RoutingGateCache` (forced refresh,
-which also reloads the root snapshot) and folds it with `diagnosticEligibility`
-into `DiagnosticContextObservation`. A blocked Checking observation is the new
+The context effect goes through the shared `RoutingGateCache` and folds it with
+`diagnosticEligibility` into `DiagnosticContextObservation`. "Fresh" means not
+invalidated (`routingReadPlan`): a current observation is reused, an in-flight
+read is joined, and only a stale, failed or absent observation forces a new root
+snapshot plus routing probe. VPN callbacks and config writes invalidate it, so a
+known change always causes a new read, while the end-context read of an
+undisturbed run costs no second root shell. A blocked Checking observation is the new
 `NotEligible` reducer event: a terminal `NotStarted` attempt that records the
 eligibility, launches no probe and does not consume the startup automatic intent.
 An eligible observation yields the `MeasurementContext`: process/boot subject, the
 self UID's role and hook selection plus global optional features, the observed VPN
 interfaces with this UID's routing verdict, and backend/optional-hook/LSPosed
 coverage, with the root observation ID. The same observation runs again at
-Verifying; a changed identity finishes the run as Interrupted with its evidence
-retained (T14/T15 for changes visible between the two reads).
+Verifying under the same freshness rule; a changed identity finishes the run as
+Interrupted with its evidence retained (T14/T15 for changes visible between the
+two reads).
 
 Every check result now carries a stable id: `NATIVE_CHECKS` for the Rust probes,
 `NATIVE_EXTRA_CHECKS`, `CORE_JAVA_CHECKS` and `EXTRA_JAVA_CHECKS` for the
