@@ -185,15 +185,31 @@ old device-validation paragraphs predate the successful installs described below
    from it, deferred. Latent, not
    reachable today: `DiagnosticRunCoordinator.handle()` for an evicted attempt id
    would return a deferred that never completes; `ensure` only passes the latest
-   attempt id. Then validate on the device: root failures/timeouts, agent/UI
-   conflicts, lifecycle changes during work, interrupted capture, plus the audit's
-   device questions: whether `vhmutate` receipts prove descendant quiescence for a
-   late success line; whether a VPN change between the Java probe window and the
-   root sample is caught by the Verifying identity re-read (T15); how permanent a
-   probe quarantine is in practice; the interrupt path for a save issued while a
-   suite is probing; whether routing invalidation on every root refresh makes
-   ResultsUnverified the steady-state banner. Host tests and successful launch are
-   not full acceptance.
+   attempt id.
+   Device pass of 2026-09-16 (Pixel 8 Pro, Java + built-in + ports backends,
+   through the agent bridge and screenshots): the bridge and bundle `diagnostics`
+   object matches the UI; a save for another app during the automatic suite does
+   not interrupt it and the measurement stays applicable; a relevant save at rest
+   (VPN Hide's own `ports` role) makes the measurement `Changed`, the hero says so,
+   and the manual refresh runs a new suite that restores Protected (no automatic
+   rerun at rest, per I16/T12); VPN off and VPN on are now noticed without a
+   refresh (see the watcher fix below); the hero, tiles and VPN-off prompt render
+   as decided. Two bugs found and fixed on the way, both older than the branch:
+   the bridge crashed the app when its client vanished mid-request (an in-flight
+   connection is reset the moment VPN Hide becomes a ports target, since the ports
+   module rejects the app's own loopback traffic), and `VpnTransportWatcher`
+   never received a callback (default `NOT_VPN` capability; and the app's own hook
+   drops VPN-transport dispatches for the self target), so a VPN toggle was not
+   noticed until a manual refresh; it now also watches the default network.
+   Not reproduced on the device: a save interrupting a *probing* suite (the
+   bridge write reaches its first mutating dispatch 0.7-1.7 s after the request
+   while the suite completes in about 0.3 s on an idle device); covered by host
+   tests T14/T24. Still owed: root failures/timeouts, lifecycle changes during
+   work, interrupted capture, whether `vhmutate` receipts prove descendant
+   quiescence for a late success line, T15 (a VPN change between the Java probe
+   window and the root sample), how permanent a probe quarantine is in practice,
+   and a bundle export from the Settings screen. Host tests and successful launch
+   are not full acceptance.
 
 The batched root reader now waits for its launcher and pipe readers to finish.
 The diagnostic run coordinator joins its own effect jobs when draining and
@@ -252,6 +268,7 @@ Method: `adb logcat -c`, `am force-stop` + `am start -W`, then read the
 | whole-snapshot seed from the self-target read (`00b94862`) | 1717, 1702, 1710 | `root_snapshot_seeded`, no second shell before paint |
 | self-target preparation is the root gate (`252a225e`) | 1617, 1586, 1470 | no separate `su -c id`; preparation starts at ~90 ms |
 | `vhmutate adopt`: inspect + open in one round trip (installed) | 1470, 1481, 1478 | config init 220 ms (staging 105 + adopt 110) instead of 320 |
+| `c744612f` (presentation, audit fixes), 2026-09-16 | 3062, 2583, 2722, then 1266, 1372 | first three with the device loaded (4.6 GB swap used); a control build of `3c5d170a` measured 2815, 2727 in the same state, so no regression; later runs on the idle device |
 
 Where the remaining ~1.5 s goes (run 2): helper staging `su` 105 ms; `adopt`
 110 ms; the preparation root shell about 0.82 s (about 650 ms of section work
@@ -265,7 +282,14 @@ folding helper staging into the adopt round trip (~100 ms).
 Measurement caveat: with the screen dozing and the keyguard showing, the app
 launches in the background scheduling group and every phase runs about three
 times slower (`dashboard_ready` about 5 s). Check `dumpsys power` for
-`mWakefulness=Awake` before trusting a trace.
+`mWakefulness=Awake` before trusting a trace. A loaded device (heavy swap use)
+doubles every phase, root shell sections included; before blaming a build, build
+the previous reference commit and measure it in the same state.
+
+Follow-up for main, not this branch: the Dashboard hero's breathing icon
+(`Modifier.pulse`, an infinite `graphicsLayer` scale) keeps the app at ~95% of a
+core with about 12 ms of render per frame at 120 Hz while the Dashboard is
+visible (the Hiding tab idles at 0%). Present on main and on the reference build.
 
 Hardware checks completed: reproduced old theme-change navigation reset, then
 verified Settings, a nested help article and selected Statistics tab survive

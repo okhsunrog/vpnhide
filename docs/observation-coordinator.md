@@ -25,12 +25,20 @@ It is useful display history, not evidence of current readiness. `current` is nu
 while loading, stale, failed or quarantined. `RoutingGateCache.gate` uses `current`:
 a VPN transition marks it stale immediately, before the 750 ms debounced recheck.
 This changes readiness freshness, not diagnostic result classification or retention.
-`VpnTransportWatcher` records the VPN networks that exist when it registers its
-callback and ignores their replayed `onAvailable` / first capabilities delivery
-(`reduceVpnTransport`): that replay is knowledge of the current state, not a
-transition, and must not invalidate a gate that already reflects it. (On the
-Pixel 8 Pro cold-start traces of 2026-09-15 no callback fired at all during the
-first 18 s; the hardening is for platforms that do replay.)
+`VpnTransportWatcher` is only a trigger; the gate value always comes from the
+root probe. It listens two ways, because one is blind by design: a
+`TRANSPORT_VPN` listen (without the builder's default `NOT_VPN` capability, which
+had made it match nothing), which the app's own Java hook drops for target uids,
+VPN Hide included; and the default-network callback, which the hook sanitizes
+but delivers. ConnectivityService dispatches `onAvailable` on the default
+callback only when the satisfying network changes, so every delivery after the
+registration replay counts as a switch (`reduceDefaultNetwork`); handles are not
+compared, since for this uid the hook rewrites the VPN network into its
+underlying one and a VPN toggle arrives as the same handle. Replays at
+registration are knowledge of the current state, not transitions
+(`reduceVpnTransport`, `DefaultNetworkKnowledge.replayed`), and must not
+invalidate a gate that already reflects them. Verified on the Pixel 8 Pro on
+2026-09-16: VPN off and on each produced one root re-read within a second.
 
 Dashboard derivation initializes/joins diagnostics when needed, then observes its
 terminal result, including Blocked or Failed, without retrying it. Explicit
