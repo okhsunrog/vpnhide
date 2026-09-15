@@ -31,16 +31,32 @@ internal fun diagnosticEligibility(
 ): DiagnosticEligibility =
     when {
         !initialized -> DiagnosticEligibility.Initializing
+
         restart == RestartRequirement.Device -> DiagnosticEligibility.RestartDevice
+
         restart == RestartRequirement.App -> DiagnosticEligibility.RestartApp
+
         config == ConfigReadiness.Applying -> DiagnosticEligibility.Applying
+
         config == ConfigReadiness.Unknown -> DiagnosticEligibility.ApplicationUnknown
+
         config == ConfigReadiness.Failed -> DiagnosticEligibility.ApplicationFailed
+
         routing.active != null -> DiagnosticEligibility.Checking
+
         routing.quarantined || routing.error != null -> DiagnosticEligibility.Unknown
+
         routing.lastGood == null -> if (routing.attempted) DiagnosticEligibility.Unknown else DiagnosticEligibility.Checking
-        routing.lastGood.request.generation != routing.generation -> DiagnosticEligibility.Unknown
+
+        // Invalidated without a failure: a re-read is owed (the VPN watcher's
+        // debounce, a config write's refresh). That is a check in progress, not an
+        // inability to determine; Unknown would flash "couldn't determine" on
+        // every VPN toggle for the 750 ms before the read starts.
+        routing.lastGood.request.generation != routing.generation -> DiagnosticEligibility.Checking
+
         routing.lastGood.value == SelfRouting.VpnOff -> DiagnosticEligibility.VpnOff
+
         routing.lastGood.value == SelfRouting.Excluded -> DiagnosticEligibility.SelfExcluded
+
         else -> DiagnosticEligibility.Eligible
     }

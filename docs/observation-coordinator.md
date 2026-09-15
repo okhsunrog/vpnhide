@@ -25,6 +25,11 @@ It is useful display history, not evidence of current readiness. `current` is nu
 while loading, stale, failed or quarantined. `RoutingGateCache.gate` uses `current`:
 a VPN transition marks it stale immediately, before the 750 ms debounced recheck.
 This changes readiness freshness, not diagnostic result classification or retention.
+For eligibility, an invalidated observation that still awaits its re-read is
+`Checking` (the hero says "confirming the last check still applies"); `Unknown` is
+reserved for a read that failed, a quarantined source, or an attempt that never
+produced a value. Mapping the stale window to `Unknown` flashed "couldn't determine
+whether VPN Hide is routed" on every VPN toggle.
 `VpnTransportWatcher` is only a trigger; the gate value always comes from the
 root probe. It listens two ways, because one is blind by design: a
 `TRANSPORT_VPN` listen (without the builder's default `NOT_VPN` capability, which

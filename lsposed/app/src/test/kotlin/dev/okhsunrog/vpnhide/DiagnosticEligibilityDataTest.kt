@@ -24,6 +24,26 @@ class DiagnosticEligibilityDataTest {
     }
 
     @Test
+    fun `an invalidated observation awaiting its re-read is checking, a failed one is unknown`() {
+        val loading = reduceObservation(ObservationState<SelfRouting>(), ObservationEvent.Ensure(1)).state
+        val known = reduceObservation(loading, ObservationEvent.Loaded(1, SelfRouting.Routed, 2)).state
+        assertEquals(DiagnosticEligibility.Eligible, eligibility(known))
+        // A VPN transition marks the observation stale before the debounced re-read starts.
+        val stale = reduceObservation(known, ObservationEvent.Invalidate(3, start = false)).state
+        assertEquals(DiagnosticEligibility.Checking, eligibility(stale))
+        val reading = reduceObservation(stale, ObservationEvent.Ensure(4)).state
+        assertEquals(DiagnosticEligibility.Checking, eligibility(reading))
+        val off = reduceObservation(reading, ObservationEvent.Loaded(2, SelfRouting.VpnOff, 5)).state
+        assertEquals(DiagnosticEligibility.VpnOff, eligibility(off))
+        val failed =
+            reduceObservation(
+                reduceObservation(off, ObservationEvent.Refresh(6)).state,
+                ObservationEvent.Failed(3, TransitionFailure.ReadFailed, 7),
+            ).state
+        assertEquals(DiagnosticEligibility.Unknown, eligibility(failed))
+    }
+
+    @Test
     fun `initialization restart and application uncertainty outrank stale network facts`() {
         val unknown = ObservationState<SelfRouting>()
         assertEquals(
