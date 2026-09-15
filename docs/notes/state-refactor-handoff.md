@@ -104,6 +104,35 @@ old device-validation paragraphs predate the successful installs described below
    the Dashboard hero/tiles, the bridge and the bundle from it instead of the
    legacy `State` plus live-gate overlay, with a bundle schema bump for the new
    applicability/eligibility fields.
+   Plan for that half, decided 2026-09-15 (classify-then-render, per
+   `lsposed/AGENTS.md`):
+   - A pure `diagnosticBanner(presentation)` decision in `diagnostics/*Data.kt`
+     with precedence: Initializing/Checking → progress; RestartApp → restart
+     banner; VpnOff / SelfExcluded → the existing prompts; Applying,
+     ApplicationUnknown, ApplicationFailed and routing Unknown → new explicit
+     banners with a recheck action (no endless spinner, T17); then the run:
+     active stage → progress; a non-completed latest attempt → its own banner
+     (Interrupted: conditions changed during the check; Failed: the existing
+     failed prompt) shown together with the last complete measurement; then
+     applicability of that measurement: MatchesLastObservation → ready banner,
+     Changed → "measured before <reason>, re-run", Unverified → "checking whether
+     the results still apply"; Insufficient evidence → explicit, never green.
+     The per-check list renders `measurementResults` (or active partial results)
+     through `buildDiagnosticReport` as today.
+   - Dashboard: hero from the presentation instead of `liveGate` overlaid on the
+     cached `ProtectionCheck` (eligibility already includes routing currentness).
+     `currentSuccess` plus no error issues → Protected; a measurement that is
+     Changed/Unverified → Attention with a subtitle naming it; blocked eligibility
+     → the existing prompts. Tiles keep coming from the cached report.
+   - Bridge/bundle: additive `diagnostics` object on `VpnHideState` (eligibility,
+     active run id, latest attempt outcome/failure, measurement run id and
+     start/end, applicability, evidence counts and conclusion, currentSuccess);
+     `gate`/`report` stay for compatibility; golden refresh, no schema bump
+     unless a field changes meaning. `AgentControl.getState` fills it from
+     `DiagnosticsCache.presentation.value`.
+   - Strings EN/RU/ZH for the new banners; pure tests for the banner decision
+     and the hero derivation; then a device pass over the VPN off/on, save
+     during run and interrupted-run cases.
    Historical note on the previous state of this item: current source IDs reject obsolete cache computations,
    but screens still publish independently and retain last-good values. An atomic
    presentation revision including diagnostic measurement applicability is not
