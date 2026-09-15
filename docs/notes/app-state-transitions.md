@@ -932,4 +932,10 @@ state, and docs/debug-bundle.md says so. The logcat recorder leaves the object
 null. With this, every consumer named in §21 renders the one projection.
 
 Boundary: capture reservation, cancellation and packaging still use the older
-orchestration (§20); the §9 capture machine is deliberately not implemented.
+orchestration (§20); the §9 capture machine is deliberately not implemented. The
+per-check list and the Dashboard tiles still build the retained measurement's
+report against the current backend, not the measurement's own coverage (§6); a
+backend change makes the measurement `Changed`, so this only shows under a
+"results changed" banner until the backend is carried in `MeasurementContext`.
+Probe quarantine is not yet visible in the presentation, and relevance (§19) is
+classified from the submitted write set only; both are the next stage.

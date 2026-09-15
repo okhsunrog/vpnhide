@@ -235,9 +235,10 @@ fun DashboardScreen(
         val infos = loadedState.messages.filter { it.severity == DashboardMessageSeverity.INFO }
 
         // Hero: the whole setup's health at a glance.
+        val decision = heroDecision(loadedState, presentation, errorCount = errors.size, warningCount = warnings.size)
         DashboardHeroCard(
             state = effectiveState,
-            decision = heroDecision(loadedState, presentation, errorCount = errors.size, warningCount = warnings.size),
+            decision = decision,
             errorCount = errors.size,
             warningCount = warnings.size,
         )
@@ -279,7 +280,7 @@ fun DashboardScreen(
                 SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators)
             }
 
-            protection is ProtectionCheck.Failed -> {
+            decision.showsFailedPrompt -> {
                 Spacer(Modifier.height(12.dp))
                 DiagnosticsFailedPrompt(onRetry = onRetry)
             }

@@ -86,6 +86,32 @@ class DiagnosticImpactDataTest {
         assertEquals(ConfigReadiness.Settled, configReadiness(state))
     }
 
+    @Test
+    fun `an unresolved operation stays unresolved when a queued operation is paused behind it`() {
+        var state = DiagnosticImpactState()
+        state = reduceDiagnosticImpact(state, DiagnosticImpactEvent.Accepted(1, relevant = true)).state
+        state = reduceDiagnosticImpact(state, DiagnosticImpactEvent.Accepted(2, relevant = true)).state
+        // The held lane reports the first operation unresolved, then pauses the queued one.
+        state = reduceDiagnosticImpact(state, DiagnosticImpactEvent.Settled(1, TransitionFailure.ApplicationUnknown)).state
+        state = reduceDiagnosticImpact(state, DiagnosticImpactEvent.Settled(2, TransitionFailure.MutationPaused)).state
+        assertEquals(ConfigReadiness.Unknown, configReadiness(state))
+        // Only the recovery of that operation resolves it.
+        state = reduceDiagnosticImpact(state, DiagnosticImpactEvent.Recovered(2, null)).state
+        assertEquals(ConfigReadiness.Unknown, configReadiness(state))
+        state = reduceDiagnosticImpact(state, DiagnosticImpactEvent.Recovered(1, null)).state
+        assertEquals(ConfigReadiness.Settled, configReadiness(state))
+    }
+
+    @Test
+    fun `recovering an irrelevant operation is not a known change`() {
+        var state = reduceDiagnosticImpact(DiagnosticImpactState(), DiagnosticImpactEvent.Accepted(1, relevant = false)).state
+        state = reduceDiagnosticImpact(state, DiagnosticImpactEvent.Settled(1, TransitionFailure.ApplicationUnknown)).state
+        assertEquals(ConfigReadiness.Settled, configReadiness(state))
+        val recovered = reduceDiagnosticImpact(state, DiagnosticImpactEvent.Recovered(1, TransitionFailure.ExecutionFailed))
+        assertEquals(state, recovered.state)
+        assertEquals(ConfigReadiness.Settled, configReadiness(recovered.state))
+    }
+
     private fun relevant(spec: ConfigOperationSpec) = operationAffectsSelfMeasurement(spec, self)
 
     private fun field(vararg segments: String) = spec(setOf(ConfigField(segments.toList())))

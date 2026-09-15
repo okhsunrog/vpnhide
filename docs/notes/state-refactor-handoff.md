@@ -153,9 +153,41 @@ old device-validation paragraphs predate the successful installs described below
    on unknown self-routing. Still using the older orchestration: capture
    reservation, cancellation and packaging as the agreed §9 capture machine, and
    `LogcatRecorder`.
-4. **Final acceptance.** Audit actual wiring against scenario traces, then validate
-   root failures/timeouts, agent/UI conflicts, lifecycle changes during work and
-   interrupted capture. Host tests and successful launch are not full acceptance.
+4. **Final acceptance: wiring audit done, device pass owed.** The code was audited
+   against §10 invariants and §11 traces on 2026-09-15 (independent read, then each
+   finding re-verified against source). Fixed: an unresolved relevant operation was
+   downgraded to `ApplicationFailed` when a queued operation settled `MutationPaused`
+   behind it (I13; `unresolved` is now a set of operation ids cleared only by that
+   operation's recovery); recovering an irrelevant operation (debug logging, another
+   app) set `failed` for the self measurement; the explicit condition banners on the
+   Diagnostics screen hid the last complete measurement (T17: history stays listed
+   under Applying / ApplicationUnknown / ApplicationFailed / RoutingUnknown, the
+   existing prompts still replace it); the Dashboard showed the "diagnostics failed"
+   prompt for a run that never started because of a current condition the hero note
+   already named (`HeroDecision.showsFailedPrompt`). Still open, with the decision
+   recorded: (a) probe quarantine after a drain deadline is invisible to the user
+   (admission `Rejected(ResourceUnavailable)` is dropped by `run`/`retry`, the
+   presentation has no quarantine field, and only the hung job's return lifts it);
+   (b) relevance is classified from the submitted write set, so a `transform`-only
+   write to `apps/<self>` (`writeStartupCanonical`, `mutateAgentApp`) is not a known
+   change until the prepared write set is republished to the observer; (c) the
+   Diagnostics list and the Dashboard tiles rebuild the report of a retained
+   measurement against the *current* backend (§6 says coverage is never recalculated
+   with a new backend); bounded because a backend change makes the measurement
+   `Changed`, so the re-attributed list only ever sits under a "results changed"
+   banner. (a) and (b) are the next stage; (c) needs the backend stored in
+   `MeasurementContext` and the report built from it, deferred. Latent, not
+   reachable today: `DiagnosticRunCoordinator.handle()` for an evicted attempt id
+   would return a deferred that never completes; `ensure` only passes the latest
+   attempt id. Then validate on the device: root failures/timeouts, agent/UI
+   conflicts, lifecycle changes during work, interrupted capture, plus the audit's
+   device questions: whether `vhmutate` receipts prove descendant quiescence for a
+   late success line; whether a VPN change between the Java probe window and the
+   root sample is caught by the Verifying identity re-read (T15); how permanent a
+   probe quarantine is in practice; the interrupt path for a save issued while a
+   suite is probing; whether routing invalidation on every root refresh makes
+   ResultsUnverified the steady-state banner. Host tests and successful launch are
+   not full acceptance.
 
 The batched root reader now waits for its launcher and pipe readers to finish.
 The diagnostic run coordinator joins its own effect jobs when draining and

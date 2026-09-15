@@ -210,10 +210,10 @@ class DashboardUiStateTest {
     fun `heroDecision overlays blocked eligibility and keeps protected only for an applicable sufficient measurement`() {
         val checked = dashboardState(protection = ProtectionCheck.Checked(ok, ok))
         val good = presentation()
-        assertEquals(HeroDecision(HeroStatus.Protected, HeroNote.None), heroDecision(checked, good, 0, 0))
+        assertEquals(HeroDecision(HeroStatus.Protected, HeroNote.None, showsFailedPrompt = false), heroDecision(checked, good, 0, 0))
         assertEquals(HeroStatus.VpnOff, heroDecision(checked, good.copy(eligibility = DiagnosticEligibility.VpnOff), 0, 0).status)
         assertEquals(
-            HeroDecision(HeroStatus.Attention, HeroNote.None),
+            HeroDecision(HeroStatus.Attention, HeroNote.None, showsFailedPrompt = false),
             heroDecision(checked, good.copy(eligibility = DiagnosticEligibility.SelfExcluded), 0, 0),
         )
         assertEquals(
@@ -223,21 +223,21 @@ class DashboardUiStateTest {
         assertEquals(HeroNote.Applying, heroDecision(checked, good.copy(eligibility = DiagnosticEligibility.Applying), 0, 0).note)
         assertEquals(HeroStatus.Attention, heroDecision(checked, good.copy(eligibility = DiagnosticEligibility.Unknown), 0, 0).status)
         assertEquals(
-            HeroDecision(HeroStatus.Attention, HeroNote.ResultsChanged),
+            HeroDecision(HeroStatus.Attention, HeroNote.ResultsChanged, showsFailedPrompt = false),
             heroDecision(checked, good.copy(applicability = MeasurementApplicability.Changed), 0, 0),
         )
         // A refresh in flight names itself but does not flip a protected hero.
         assertEquals(
-            HeroDecision(HeroStatus.Protected, HeroNote.ResultsUnverified),
+            HeroDecision(HeroStatus.Protected, HeroNote.ResultsUnverified, showsFailedPrompt = false),
             heroDecision(checked, good.copy(applicability = MeasurementApplicability.Unverified), 0, 0),
         )
         assertEquals(
-            HeroDecision(HeroStatus.Attention, HeroNote.InsufficientEvidence),
+            HeroDecision(HeroStatus.Attention, HeroNote.InsufficientEvidence, showsFailedPrompt = false),
             heroDecision(checked, good.copy(evidence = insufficient), 0, 0),
         )
         val interrupted = DiagnosticAttempt(2, RunOutcome.Interrupted, TransitionFailure.ContextChanged)
         assertEquals(
-            HeroDecision(HeroStatus.Attention, HeroNote.Interrupted),
+            HeroDecision(HeroStatus.Attention, HeroNote.Interrupted, showsFailedPrompt = false),
             heroDecision(checked, good.copy(lastAttempt = interrupted), 0, 0),
         )
         // Errors still outrank: an unprotected hero is never lifted by a note.
@@ -246,6 +246,27 @@ class DashboardUiStateTest {
             HeroNote.Checking,
             heroDecision(checked, good.copy(measurement = null, eligibility = DiagnosticEligibility.Checking), 0, 0).note,
         )
+    }
+
+    @Test
+    fun `the failed prompt is shown for an execution failure but not for a run blocked by a current condition`() {
+        val failed = dashboardState(protection = ProtectionCheck.Failed)
+        val good = presentation()
+        assertTrue(heroDecision(failed, good, 0, 0).showsFailedPrompt)
+        for (
+        eligibility in
+        listOf(
+            DiagnosticEligibility.Applying,
+            DiagnosticEligibility.ApplicationUnknown,
+            DiagnosticEligibility.ApplicationFailed,
+            DiagnosticEligibility.Unknown,
+        )
+        ) {
+            val decision = heroDecision(failed, good.copy(eligibility = eligibility), 0, 0)
+            assertFalse("$eligibility", decision.showsFailedPrompt)
+            assertTrue("$eligibility", decision.note.explainsCondition)
+        }
+        assertFalse(heroDecision(dashboardState(), good.copy(eligibility = DiagnosticEligibility.Applying), 0, 0).showsFailedPrompt)
     }
 
     private val sufficient = MeasurementEvidence(5, 0, 0, 0, 0, 0, 0, EvidenceConclusion.NoObservedLeak)

@@ -16,13 +16,15 @@ import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
  */
 internal enum class HeroNote(
     val downgrades: Boolean,
+    /** Names a current condition that explains why nothing could be measured. */
+    val explainsCondition: Boolean = false,
 ) {
     None(false),
-    Applying(true),
-    ApplicationUnknown(true),
-    ApplicationFailed(true),
-    RoutingUnknown(true),
-    Checking(true),
+    Applying(true, explainsCondition = true),
+    ApplicationUnknown(true, explainsCondition = true),
+    ApplicationFailed(true, explainsCondition = true),
+    RoutingUnknown(true, explainsCondition = true),
+    Checking(true, explainsCondition = true),
     Interrupted(true),
     Failed(true),
     ResultsChanged(true),
@@ -33,6 +35,13 @@ internal enum class HeroNote(
 internal data class HeroDecision(
     val status: HeroStatus,
     val note: HeroNote,
+    /**
+     * Whether the "diagnostics failed, retry" prompt belongs under the hero. A run
+     * that never started because of a current condition is not an execution
+     * failure (I13): the note already names the condition, so the prompt would
+     * contradict it in the same frame.
+     */
+    val showsFailedPrompt: Boolean,
 )
 
 /**
@@ -61,7 +70,7 @@ internal fun heroDecision(
     val base = computeHeroStatus(state.copy(protection = protection), errorCount, warningCount)
     val note = heroNote(presentation)
     val status = if (base == HeroStatus.Protected && note.downgrades) HeroStatus.Attention else base
-    return HeroDecision(status, note)
+    return HeroDecision(status, note, showsFailedPrompt = protection is ProtectionCheck.Failed && !note.explainsCondition)
 }
 
 /** Current conditions, then the latest attempt, then sufficiency, then applicability. */

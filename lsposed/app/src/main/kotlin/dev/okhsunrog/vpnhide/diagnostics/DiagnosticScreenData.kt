@@ -80,7 +80,12 @@ internal fun diagnosticScreenDecision(presentation: DiagnosticPresentation): Dia
     return DiagnosticScreenDecision(measurementBanner(presentation), notice, presentation.measurementResults)
 }
 
-/** Current conditions outrank everything; a Checking observation keeps an existing measurement visible as unverified. */
+/**
+ * Current conditions outrank everything. The existing prompts (restart, VPN off,
+ * self excluded) replace the list as before; the explicit condition banners and a
+ * Checking observation keep the last complete measurement listed, so history stays
+ * visible while the banner says why it cannot be confirmed right now (T17).
+ */
 private fun blockedBanner(presentation: DiagnosticPresentation): DiagnosticScreenDecision? =
     when (presentation.eligibility) {
         DiagnosticEligibility.Initializing -> {
@@ -108,19 +113,19 @@ private fun blockedBanner(presentation: DiagnosticPresentation): DiagnosticScree
         }
 
         DiagnosticEligibility.Applying -> {
-            DiagnosticScreenDecision(DiagnosticBanner.Applying)
+            DiagnosticScreenDecision(DiagnosticBanner.Applying, results = presentation.measurementResults)
         }
 
         DiagnosticEligibility.ApplicationUnknown -> {
-            DiagnosticScreenDecision(DiagnosticBanner.ApplicationUnknown)
+            DiagnosticScreenDecision(DiagnosticBanner.ApplicationUnknown, results = presentation.measurementResults)
         }
 
         DiagnosticEligibility.ApplicationFailed -> {
-            DiagnosticScreenDecision(DiagnosticBanner.ApplicationFailed)
+            DiagnosticScreenDecision(DiagnosticBanner.ApplicationFailed, results = presentation.measurementResults)
         }
 
         DiagnosticEligibility.Unknown -> {
-            DiagnosticScreenDecision(DiagnosticBanner.RoutingUnknown)
+            DiagnosticScreenDecision(DiagnosticBanner.RoutingUnknown, results = presentation.measurementResults)
         }
 
         DiagnosticEligibility.Eligible -> {

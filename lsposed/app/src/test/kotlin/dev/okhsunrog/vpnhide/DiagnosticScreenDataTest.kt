@@ -40,7 +40,22 @@ class DiagnosticScreenDataTest {
             decide(measured.copy(eligibility = DiagnosticEligibility.ApplicationFailed)).banner,
         )
         assertEquals(DiagnosticBanner.RoutingUnknown, decide(measured.copy(eligibility = DiagnosticEligibility.Unknown)).banner)
+        // The existing prompts replace the list; the explicit condition banners keep history visible (T17).
         assertNull(decide(measured.copy(eligibility = DiagnosticEligibility.VpnOff)).results)
+        assertNull(decide(measured.copy(eligibility = DiagnosticEligibility.SelfExcluded)).results)
+        assertNull(decide(measured.copy(eligibility = DiagnosticEligibility.RestartApp)).results)
+        for (
+        eligibility in
+        listOf(
+            DiagnosticEligibility.Applying,
+            DiagnosticEligibility.ApplicationUnknown,
+            DiagnosticEligibility.ApplicationFailed,
+            DiagnosticEligibility.Unknown,
+        )
+        ) {
+            assertEquals("$eligibility", measured.measurementResults, decide(measured.copy(eligibility = eligibility)).results)
+            assertNull("$eligibility", decide(base().copy(eligibility = eligibility)).results)
+        }
         // Re-checking routing keeps an existing measurement on screen as unverified.
         val checking = decide(measured.copy(eligibility = DiagnosticEligibility.Checking))
         assertEquals(DiagnosticBanner.ResultsUnverified, checking.banner)

@@ -37,7 +37,8 @@ internal data class DiagnosticImpactState(
     val relevant: Set<Long> = emptySet(),
     val dispatched: Set<Long> = emptySet(),
     val changeEpoch: Long = 0,
-    val unresolved: Boolean = false,
+    /** Relevant operations that settled unresolved and have not been recovered yet (I13). */
+    val unresolved: Set<Long> = emptySet(),
     val failed: Boolean = false,
 )
 
@@ -105,12 +106,16 @@ internal fun reduceDiagnosticImpact(
 
         is DiagnosticImpactEvent.Settled -> {
             if (event.id in state.relevant) {
+                // An unresolved outcome stays unresolved until its own recovery; a
+                // later settlement of another operation (a queued one paused by the
+                // same lane, for instance) neither clears nor downgrades it.
+                val unknown = event.failure == TransitionFailure.ApplicationUnknown
                 Transition(
                     state.copy(
                         relevant = state.relevant - event.id,
                         dispatched = state.dispatched - event.id,
-                        unresolved = event.failure == TransitionFailure.ApplicationUnknown,
-                        failed = event.failure != null && event.failure != TransitionFailure.ApplicationUnknown,
+                        unresolved = if (unknown) state.unresolved + event.id else state.unresolved,
+                        failed = event.failure != null && !unknown,
                     ),
                     listOf(DiagnosticImpactEffect.SettleRuns(event.id, event.failure)),
                 )
@@ -120,14 +125,20 @@ internal fun reduceDiagnosticImpact(
         }
 
         is DiagnosticImpactEvent.Recovered -> {
-            Transition(state.copy(unresolved = false, failed = event.failure != null))
+            // Only a relevant unresolved operation shapes readiness; recovering an
+            // irrelevant one (debug logging, another app) is not a known change.
+            if (event.id in state.unresolved) {
+                Transition(state.copy(unresolved = state.unresolved - event.id, failed = event.failure != null))
+            } else {
+                Transition(state)
+            }
         }
     }
 
 /** Precedence for eligibility: an unresolved outcome outranks in-flight work, which outranks a known failure. */
 internal fun configReadiness(state: DiagnosticImpactState): ConfigReadiness =
     when {
-        state.unresolved -> ConfigReadiness.Unknown
+        state.unresolved.isNotEmpty() -> ConfigReadiness.Unknown
         state.relevant.isNotEmpty() -> ConfigReadiness.Applying
         state.failed -> ConfigReadiness.Failed
         else -> ConfigReadiness.Settled
