@@ -1,7 +1,9 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.DefaultNetworkKnowledge
 import dev.okhsunrog.vpnhide.diagnostics.VpnTransportEvent
 import dev.okhsunrog.vpnhide.diagnostics.VpnTransportKnowledge
+import dev.okhsunrog.vpnhide.diagnostics.reduceDefaultNetwork
 import dev.okhsunrog.vpnhide.diagnostics.reduceVpnTransport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -40,5 +42,27 @@ class VpnTransportDataTest {
         val decision = reduceVpnTransport(VpnTransportKnowledge(), VpnTransportEvent.CapabilitiesChanged, 9)
         assertFalse(decision.transition)
         assertEquals(VpnTransportKnowledge(known = setOf(9), capabilitiesSeen = setOf(9)), decision.knowledge)
+    }
+
+    @Test
+    fun `the default network replay is consumed once and every later switch or loss is a transition`() {
+        val registered = DefaultNetworkKnowledge(replayed = false)
+        val (afterReplay, replay) = reduceDefaultNetwork(registered, VpnTransportEvent.Available)
+        assertFalse(replay)
+        assertTrue(afterReplay.replayed)
+        // The same handle again (a VPN rewritten into its underlying network) still counts.
+        val (afterSwitch, switched) = reduceDefaultNetwork(afterReplay, VpnTransportEvent.Available)
+        assertTrue(switched)
+        val (_, lost) = reduceDefaultNetwork(afterSwitch, VpnTransportEvent.Lost)
+        assertTrue(lost)
+    }
+
+    @Test
+    fun `with no default network at registration the first arrival is a transition and capabilities never are`() {
+        val none = DefaultNetworkKnowledge(replayed = true)
+        assertTrue(reduceDefaultNetwork(none, VpnTransportEvent.Available).second)
+        val (unchanged, capabilities) = reduceDefaultNetwork(none, VpnTransportEvent.CapabilitiesChanged)
+        assertFalse(capabilities)
+        assertEquals(none, unchanged)
     }
 }

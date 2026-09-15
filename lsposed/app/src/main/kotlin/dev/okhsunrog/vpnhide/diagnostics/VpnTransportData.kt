@@ -49,3 +49,32 @@ internal fun reduceVpnTransport(
             )
         }
     }
+
+/**
+ * What the default-network callback has delivered so far. Registering it replays
+ * the current default network as one `onAvailable` when a default exists; that
+ * replay is knowledge, not a transition. Network handles are deliberately not
+ * compared: for this app's own uid the hooks rewrite a VPN network into its
+ * underlying network, so the handle can look unchanged across a real switch.
+ */
+internal data class DefaultNetworkKnowledge(
+    /** True once the registration replay has been consumed, or when none was expected. */
+    val replayed: Boolean,
+)
+
+/**
+ * ConnectivityService dispatches `onAvailable` to a default-network callback
+ * only when the network satisfying the default request changes, so every
+ * delivery after the replay is a switch (VPN up, VPN down, Wi-Fi to mobile);
+ * a loss with no replacement is one as well. Capability changes are frequent
+ * and, for this app, sanitized, so they never count.
+ */
+internal fun reduceDefaultNetwork(
+    knowledge: DefaultNetworkKnowledge,
+    event: VpnTransportEvent,
+): Pair<DefaultNetworkKnowledge, Boolean> =
+    when (event) {
+        VpnTransportEvent.Available -> DefaultNetworkKnowledge(replayed = true) to knowledge.replayed
+        VpnTransportEvent.Lost -> DefaultNetworkKnowledge(replayed = true) to true
+        VpnTransportEvent.CapabilitiesChanged -> knowledge to false
+    }
