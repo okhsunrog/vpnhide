@@ -21,6 +21,15 @@
             "ru": ["что это", "обзор", "внешний ip", "сервер", "root", "рут", "split tunneling", "ограничения"],
             "zh": ["是什么", "概述", "外部 ip", "服务器", "限制"]
           }
+        },
+        {
+          "id": "requirements",
+          "title": { "en": "Requirements and compatibility", "ru": "Требования и совместимость", "zh": "要求与兼容性" },
+          "keywords": {
+            "en": ["requirements", "compatibility", "android version", "abi", "armv7", "arm64", "kernel", "root manager", "lsposed"],
+            "ru": ["требования", "совместимость", "версия android", "abi", "armv7", "arm64", "ядро", "root-менеджер", "lsposed"],
+            "zh": ["要求", "兼容", "android 版本", "abi", "armv7", "arm64", "内核", "root 管理器", "lsposed"]
+          }
         }
       ]
     },
