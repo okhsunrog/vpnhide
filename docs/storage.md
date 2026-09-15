@@ -5,6 +5,10 @@ each backend. This is the layer *above* the wire protocol: [protocol.md](protoco
 defines the bytes exchanged with the kernel/native backends at runtime; this file
 defines the single on-disk source of truth those bytes are derived from.
 
+Proposed app-side state and synchronization changes are described in
+[App state redesign](app-state-design.md). That document is a design proposal;
+the storage and activation behavior below describes the current implementation.
+
 > **Status.** This is the current storage/activation design: one canonical JSON
 > desired-state file, Rust activators that derive runtime state for native and
 > ports backends, and LSPosed reading the JSON directly from `system_server`.
