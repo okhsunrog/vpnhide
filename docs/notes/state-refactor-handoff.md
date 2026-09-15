@@ -290,10 +290,11 @@ times slower (`dashboard_ready` about 5 s). Check `dumpsys power` for
 doubles every phase, root shell sections included; before blaming a build, build
 the previous reference commit and measure it in the same state.
 
-Follow-up for main, not this branch: the Dashboard hero's breathing icon
-(`Modifier.pulse`, an infinite `graphicsLayer` scale) keeps the app at ~95% of a
-core with about 12 ms of render per frame at 120 Hz while the Dashboard is
-visible (the Hiding tab idles at 0%). Present on main and on the reference build.
+Found on the way and fixed on this branch (`df16ebf3`): the Dashboard hero's
+breathing icon (`Modifier.pulse`, an infinite `graphicsLayer` scale) kept the app
+at ~95% of a core with about 12 ms of render per frame at 120 Hz while the
+Dashboard was visible (the Hiding tab idled at 0%). It was present on main and on
+the reference build, so it never showed in the cold-start numbers.
 
 Hardware checks completed: reproduced old theme-change navigation reset, then
 verified Settings, a nested help article and selected Statistics tab survive
