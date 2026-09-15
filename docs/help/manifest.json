@@ -12,7 +12,17 @@
     {
       "id": "getting-started",
       "title": { "en": "Getting started", "ru": "Начать пользоваться", "zh": "开始使用" },
-      "articles": []
+      "articles": [
+        {
+          "id": "what-is-vpnhide",
+          "title": { "en": "What VPN Hide does", "ru": "Что делает VPN Hide", "zh": "VPN Hide 是做什么的" },
+          "keywords": {
+            "en": ["what is", "overview", "external ip", "server-side", "root", "split tunneling", "limits"],
+            "ru": ["что это", "обзор", "внешний ip", "сервер", "root", "рут", "split tunneling", "ограничения"],
+            "zh": ["是什么", "概述", "外部 ip", "服务器", "限制"]
+          }
+        }
+      ]
     },
     {
       "id": "configure-hiding",
