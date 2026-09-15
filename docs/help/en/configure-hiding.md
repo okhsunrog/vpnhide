@@ -17,6 +17,13 @@ Android exposes to apps through its Java APIs; Native covers what the app can
 see through the kernel or libc. Most detectors are caught by one of the two, so
 enabling both is the reliable choice.
 
+One exception: if your active Native backend is **Zygisk** and a banking or
+payment app starts refusing to open once you enable Native for it, turn Native
+off for that app and rely on Java — Zygisk runs inside the app's own process and
+some of those apps detect it. That lowers coverage and doesn't guarantee the app
+works; a kernel backend (kmod / KPM), where your device supports one, avoids the
+problem.
+
 ### The app looks for an installed VPN client
 
 Some apps don't probe the connection — they scan the list of installed packages
@@ -65,7 +72,22 @@ Open [Diagnostics](vpnhide://diagnostics) and run the checks. They test VPN
 Hide's own hiding, not the specific behaviour of the other app, so a passing
 result means the layers are working — the app may still refuse for its own
 reasons (server-side checks, an installed-app scan you haven't covered, a cached
-result). See **Fix a problem** for the next steps.
+result).
+
+If an app still won't cooperate, work through this in order:
+
+- Check the roles are on the right app — the one you hide *from*, not the VPN
+  client — and on the right profile.
+- Tap **Save**, then force-stop and reopen the app so it probes again.
+- Make sure the app's traffic goes where you expect (direct, or through the
+  tunnel).
+- If it scans for an installed VPN client, turn on **Apps** for it and hide the
+  client.
+- Still stuck? Collect a debug report from Diagnostics.
+
+If networking broke or the app crashes after a change, undo your last change and
+re-check **Ports** and **Native** one at a time — don't assume split tunneling is
+the cause.
 
 ## The four roles
 

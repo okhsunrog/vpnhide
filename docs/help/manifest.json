@@ -4,7 +4,7 @@
   "faq": [
     { "article": "configure-hiding", "label": { "en": "App detects the VPN", "ru": "Приложение видит VPN", "zh": "应用检测到 VPN" } },
     { "article": "configure-hiding", "label": { "en": "Finds an installed VPN", "ru": "Находит установленный VPN", "zh": "找到已安装的 VPN" } },
-    { "article": "configure-hiding", "label": { "en": "Game accelerator", "ru": "Игровой акселератор", "zh": "游戏加速器" } },
+    { "article": "configure-hiding", "label": { "en": "Game accelerator", "zh": "游戏加速器" }, "locales": ["en", "zh"] },
     { "article": "configure-hiding", "label": { "en": "The J / N / A / P roles", "ru": "Роли J / N / A / P", "zh": "J / N / A / P 角色" } },
     { "article": "configure-hiding", "label": { "en": "When changes apply", "ru": "Когда применяются изменения", "zh": "更改何时生效" } }
   ],
@@ -23,7 +23,7 @@
           "title": { "en": "Set up hiding", "ru": "Настроить скрытие", "zh": "设置隐藏" },
           "keywords": {
             "en": ["bank", "detects vpn", "vpn detected", "game accelerator", "accelerator", "roles", "java", "native", "apps", "ports", "hide vpn", "installed vpn", "wireguard", "cached", "restart"],
-            "ru": ["банк", "не пускает", "обнаруживает vpn", "определяет vpn", "игровой акселератор", "акселератор", "роли", "порты", "скрыть впн", "спрятать vpn", "установленный vpn", "wireguard", "кеш", "перезапуск"],
+            "ru": ["банк", "не пускает", "обнаруживает vpn", "определяет vpn", "роли", "порты", "скрыть впн", "спрятать vpn", "установленный vpn", "wireguard", "кеш", "перезапуск"],
             "zh": ["银行", "检测到 vpn", "游戏加速器", "加速器", "角色", "端口", "隐藏 vpn", "已安装的 vpn", "缓存", "重启"]
           }
         }

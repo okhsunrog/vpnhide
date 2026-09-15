@@ -18,11 +18,18 @@ internal class HelpContent(
     val guide: HelpGuide,
     val faq: List<HelpFaqEntry>,
     private val blocksById: Map<String, List<MdBlock>>,
-    private val plainById: Map<String, String>,
+    private val bodyById: Map<String, String>,
+    private val searchTextById: Map<String, String>,
 ) {
     fun blocks(articleId: String): List<MdBlock> = blocksById[articleId].orEmpty()
 
-    fun search(query: String): List<HelpSearchHit> = searchGuide(guide, query) { plainById[it].orEmpty() }
+    fun search(query: String): List<HelpSearchHit> =
+        searchGuide(
+            guide = guide,
+            query = query,
+            matchTextOf = { searchTextById[it].orEmpty() },
+            snippetTextOf = { bodyById[it].orEmpty() },
+        )
 }
 
 private val helpJson = Json { ignoreUnknownKeys = true }
@@ -40,13 +47,14 @@ internal fun loadHelpContent(
     val manifestText = readAsset(context, "help/manifest.json")
     if (manifestText == null) {
         VpnHideLog.w(LogTags.STARTUP, "help manifest missing from assets")
-        return HelpContent(HelpGuide(locale, emptyList()), emptyList(), emptyMap(), emptyMap())
+        return HelpContent(HelpGuide(locale, emptyList()), emptyList(), emptyMap(), emptyMap(), emptyMap())
     }
     val manifest: HelpManifestDto = helpJson.decodeFromString(manifestText)
     val guide = buildGuide(manifest, locale)
     val dtoById = manifest.sections.flatMap { it.articles }.associateBy { it.id }
     val blocksById = mutableMapOf<String, List<MdBlock>>()
-    val plainById = mutableMapOf<String, String>()
+    val bodyById = mutableMapOf<String, String>()
+    val searchTextById = mutableMapOf<String, String>()
     for (section in guide.sections) {
         for (article in section.articles) {
             val body =
@@ -55,14 +63,17 @@ internal fun loadHelpContent(
                     ?: ""
             val blocks = parseMarkdown(body)
             blocksById[article.id] = blocks
-            // Fold the article's keyword aliases into the searchable text so
-            // search matches how people phrase things, not just the doc's words.
+            val plain = plainText(blocks)
+            bodyById[article.id] = plain
+            // The searchable text also carries the article's keyword aliases so a
+            // query matches how people phrase things — but the shown snippet is cut
+            // from bodyById, never from these aliases.
             val keywords = dtoById[article.id]?.let { articleKeywords(it, locale) }.orEmpty()
-            plainById[article.id] = (plainText(blocks) + "\n" + keywords.joinToString(" ")).trim()
+            searchTextById[article.id] = (plain + "\n" + keywords.joinToString(" ")).trim()
         }
     }
     val faq = buildFaq(manifest, locale, blocksById.keys)
-    return HelpContent(guide, faq, blocksById, plainById)
+    return HelpContent(guide, faq, blocksById, bodyById, searchTextById)
 }
 
 private fun readAsset(

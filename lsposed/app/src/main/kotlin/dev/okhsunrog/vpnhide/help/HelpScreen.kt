@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
@@ -230,9 +231,17 @@ private fun HelpSearchResults(
     onOpenArticle: (String) -> Unit,
 ) {
     // Backed by title + body + the manifest keyword aliases, so a query matches
-    // how people phrase things, not only the doc's wording. Short queries return
-    // nothing (handled in searchGuide), so the list is simply empty until then.
+    // how people phrase things, not only the doc's wording; the snippet is always
+    // cut from the body, never the aliases.
+    if (query.trim().length < 2) {
+        HelpSearchNotice(stringResource(R.string.help_search_prompt), modifier)
+        return
+    }
     val hits = content.search(query)
+    if (hits.isEmpty()) {
+        HelpSearchNotice(stringResource(R.string.help_search_empty), modifier)
+        return
+    }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -241,6 +250,25 @@ private fun HelpSearchResults(
         items(hits, key = { "hit_${it.article.id}" }) { hit ->
             HelpArticleRow(hit.article.title, hit.snippet) { onOpenArticle(hit.article.id) }
         }
+    }
+}
+
+@Composable
+private fun HelpSearchNotice(
+    text: String,
+    modifier: Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

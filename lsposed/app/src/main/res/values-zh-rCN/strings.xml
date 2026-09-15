@@ -56,6 +56,8 @@
     <string name="help_title">帮助与指南</string>
     <string name="help_faq_title">常见问题</string>
     <string name="help_search_placeholder">搜索指南…</string>
+    <string name="help_search_prompt">输入一两个词来搜索指南。</string>
+    <string name="help_search_empty">未找到内容。换个词，或浏览下面的主题。</string>
     <string name="help_leave_title">未保存的更改</string>
     <string name="help_leave_body">打开此链接将离开应用列表，其中未保存的更改会丢失。是否继续？</string>
     <string name="help_leave_confirm">继续</string>

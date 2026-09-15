@@ -33,6 +33,9 @@ internal data class HelpArticleDto(
 internal data class HelpFaqDto(
     val article: String,
     val label: Map<String, String> = emptyMap(),
+    // Null = every locale; otherwise only these (e.g. the accelerator question is
+    // en/zh, since the RU article deliberately has no accelerator section).
+    val locales: List<String>? = null,
 )
 
 /** Locales we ship guide content for; everything else falls back to English. */
@@ -70,7 +73,7 @@ internal fun buildFaq(
     presentArticleIds: Set<String>,
 ): List<HelpFaqEntry> =
     manifest.faq
-        .filter { it.article in presentArticleIds }
+        .filter { it.article in presentArticleIds && (it.locales == null || locale in it.locales) }
         .map { HelpFaqEntry(localized(it.label, locale), it.article) }
 
 /** Search-alias keywords for an article in [locale], English otherwise. */
@@ -121,25 +124,30 @@ internal data class HelpSearchHit(
 )
 
 /**
- * Case-insensitive search over article titles and bodies. [bodyOf] returns the
- * plain-text body for an article id (see [plainText]); kept as a parameter so
- * this stays pure and testable, with asset IO in the caller. Queries shorter
- * than two characters return nothing.
+ * Case-insensitive search over article titles and bodies. [matchTextOf] is what a
+ * query is matched against (title + body + keyword aliases); [snippetTextOf] is
+ * the article body the shown snippet is cut from — kept separate so a keyword-only
+ * match never renders the alias list as the snippet. Both are parameters so this
+ * stays pure and testable, with asset IO in the caller. Queries shorter than two
+ * characters return nothing.
  */
 internal fun searchGuide(
     guide: HelpGuide,
     query: String,
-    bodyOf: (String) -> String,
+    matchTextOf: (String) -> String,
+    snippetTextOf: (String) -> String,
 ): List<HelpSearchHit> {
     val needle = query.trim().lowercase()
     if (needle.length < 2) return emptyList()
     val hits = mutableListOf<HelpSearchHit>()
     for (section in guide.sections) {
         for (article in section.articles) {
-            val body = bodyOf(article.id)
-            val bodyIdx = body.lowercase().indexOf(needle)
-            if (article.title.lowercase().contains(needle) || bodyIdx >= 0) {
-                hits += HelpSearchHit(article, snippetAround(body, bodyIdx))
+            val matches =
+                article.title.lowercase().contains(needle) ||
+                    matchTextOf(article.id).lowercase().contains(needle)
+            if (matches) {
+                val body = snippetTextOf(article.id)
+                hits += HelpSearchHit(article, snippetAround(body, body.lowercase().indexOf(needle)))
             }
         }
     }

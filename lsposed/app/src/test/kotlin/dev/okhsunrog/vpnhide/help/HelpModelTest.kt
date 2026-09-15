@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide.help
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -71,6 +72,23 @@ class HelpModelTest {
     }
 
     @Test
+    fun `buildFaq drops a locale-gated entry outside its locales`() {
+        val m =
+            HelpManifestDto(
+                faq =
+                    listOf(
+                        HelpFaqDto(
+                            article = "configure-hiding",
+                            label = mapOf("en" to "Accelerator", "zh" to "加速器"),
+                            locales = listOf("en", "zh"),
+                        ),
+                    ),
+            )
+        assertTrue(buildFaq(m, "ru", setOf("configure-hiding")).isEmpty())
+        assertEquals(1, buildFaq(m, "en", setOf("configure-hiding")).size)
+    }
+
+    @Test
     fun `articleKeywords picks the locale then falls back to english`() {
         val a = HelpArticleDto("x", keywords = mapOf("en" to listOf("bank"), "ru" to listOf("банк")))
         assertEquals(listOf("банк"), articleKeywords(a, "ru"))
@@ -80,14 +98,26 @@ class HelpModelTest {
     @Test
     fun `search matches title and body and ignores short queries`() {
         val guide = buildGuide(manifest, "en")
-        val bodies = mapOf("configure-hiding" to "Give the bank the Java and Native roles.")
+        val body = mapOf("configure-hiding" to "Give the bank the Java and Native roles.")
 
-        val byTitle = searchGuide(guide, "hiding") { bodies[it].orEmpty() }
+        val byTitle = searchGuide(guide, "hiding", { body[it].orEmpty() }, { body[it].orEmpty() })
         assertEquals("configure-hiding", byTitle.single().article.id)
 
-        val byBody = searchGuide(guide, "native roles") { bodies[it].orEmpty() }
+        val byBody = searchGuide(guide, "native roles", { body[it].orEmpty() }, { body[it].orEmpty() })
         assertTrue(byBody.single().snippet.contains("Native roles"))
 
-        assertTrue(searchGuide(guide, "z") { bodies[it].orEmpty() }.isEmpty())
+        assertTrue(searchGuide(guide, "z", { body[it].orEmpty() }, { body[it].orEmpty() }).isEmpty())
+    }
+
+    @Test
+    fun `keyword-only match never leaks the alias list into the snippet`() {
+        val guide = buildGuide(manifest, "en")
+        val body = mapOf("configure-hiding" to "Give the bank the Java and Native roles.")
+        // The alias "accelerator" is only in the match text, not the body.
+        val matchText = mapOf("configure-hiding" to body.getValue("configure-hiding") + "\naccelerator")
+
+        val hit = searchGuide(guide, "accelerator", { matchText[it].orEmpty() }, { body[it].orEmpty() }).single()
+        assertEquals("configure-hiding", hit.article.id)
+        assertFalse(hit.snippet.contains("accelerator"))
     }
 }
