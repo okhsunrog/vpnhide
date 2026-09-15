@@ -65,17 +65,32 @@ old device-validation paragraphs predate the successful installs described below
   readiness so a refresh cannot repeatedly retrigger failed diagnostics.
 - Navigation restoration: `a43cc3f0`, using `rememberSaveable` for tabs, overlays,
   nested settings, search and filters. Editor drafts have separate ViewModel owners.
-- Last verification: 655 JVM tests, warnings-as-errors compilation, ktlint, detekt,
-  CPD, Android lintDebug, signed release build and signature verification passed.
+- Diagnostic execution runtime (transition contract §18): `DiagnosticsCache` is a
+  facade over the process-owned `DiagnosticRunCoordinator` executing
+  `reduceDiagnosticRun` with identified effects (`AppDiagnosticRunIo`). Runs are
+  identified immutable attempts that survive screen changes; retry is a new run;
+  a blocked eligibility is the `NotEligible` reducer event; measurement context
+  (process/boot, self role and hooks, VPN interfaces and self routing, coverage)
+  is captured at start and end; every check result has a stable id and the probe
+  plan is derived from the four spec registries. Consumers still render the legacy
+  `DiagnosticsCache.State` projection; `DiagnosticsCache.runs` exposes the view.
+- Last verification: 671 JVM tests, warnings-as-errors compilation, ktlint, detekt,
+  CPD and Android lintDebug passed for the diagnostic execution stage. The signed
+  release build and signature verification were last run at `a43cc3f0`.
 
 ## Remaining implementation and next bounded step
 
-1. **Diagnostic execution and applicability.** Pure models/reducers already exist;
-   connect them to real requests, identified effects and immutable run results.
-   Start by mapping `DiagnosticsCache`, `RoutingGateCache`, Dashboard, bridge and
-   export consumers to the contract. Identify precise self-context inputs and
-   operation impacts, then implement one runnable slice with focused transition
-   tests. Preserve the feedback-cycle fixes above.
+1. **Operation impacts on diagnostics.** The run coordinator treats config
+   readiness as settled and keeps `changeEpoch` at zero. Next: derive request
+   dependencies from `CanonicalConfigRepository.state.operations`, observe their
+   settlement (`OperationSettled`, including `Paused` → `ApplicationUnknown`),
+   advance `changeEpoch` / send `ContextChanged` on a mutating dispatch with a
+   relevant self projection, map `Applying`/`ApplicationUnknown` into eligibility,
+   and make the startup automatic suite wait for the startup runtime reconcile
+   instead of racing it. Then surface applicability (`measurementApplicability`)
+   and evidence sufficiency in a shared presentation projection instead of the
+   legacy `State` (interrupted attempts currently render as `Failed`).
+   Preserve the feedback-cycle fixes above.
 2. **Shared presentation.** Current source IDs reject obsolete cache computations,
    but screens still publish independently and retain last-good values. An atomic
    presentation revision including diagnostic measurement applicability is not
@@ -88,9 +103,13 @@ old device-validation paragraphs predate the successful installs described below
    interrupted capture. Host tests and successful launch are not full acceptance.
 
 The batched root reader now waits for its launcher and pipe readers to finish.
-Other legacy shell/probe adapters inside diagnostics and Dashboard have not gained
-that guarantee. Coroutine cancellation/return does not prove descendant quiescence.
-Do not mask this with a global root lock or make config writes await diagnostics.
+The diagnostic run coordinator joins its own effect jobs when draining and
+quarantines the probe resource on drain deadline, but the probe helpers
+themselves (`GroundTruthProbe`, in-process JNI) are still blocking `su`/native
+calls whose return is not proof of descendant quiescence; the debug export still
+runs `runAllChecks` outside the coordinator. Coroutine cancellation/return does
+not prove descendant quiescence. Do not mask this with a global root lock or make
+config writes await diagnostics.
 
 ## Build and device
 

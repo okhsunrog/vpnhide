@@ -6,19 +6,24 @@ For the hiding side (which backend covers which detection vector) see
 [detection-vectors.md](detection-vectors.md); for the app↔backend wire see
 [protocol.md](protocol.md).
 
-For the current execution states, screen/export dependencies, historical decisions
-and unresolved semantic questions, see the
-[diagnostics state analysis](diagnostics-state-analysis.md). That analysis does
-not change the runtime contract. The proposed replacement is specified separately
-in the [app state transition contract](app-state-transitions.md) and is not yet
-implemented.
+For the baseline execution states, screen/export dependencies, historical decisions
+and the semantic questions that motivated the redesign, see the
+[diagnostics state analysis](diagnostics-state-analysis.md). The replacement is
+specified in the [app state transition contract](app-state-transitions.md);
+its diagnostic execution stage (§18) is implemented, while operation impacts,
+the shared presentation revision and capture reservation are not.
 
-The [observation coordinator](observation-coordinator.md) now owns cache refreshes.
-Dashboard cache derivation observes terminal diagnostics without implicitly
-retrying Blocked/Failed; explicit refresh and existing diagnostic triggers still
-use the current retry policy. This prevents diagnostic root refreshes from
-recursively retriggering themselves through Dashboard invalidation. Measurement
-classification and the completed-run retention policy below are unchanged.
+The [observation coordinator](observation-coordinator.md) owns cache refreshes,
+and a process-owned `DiagnosticRunCoordinator` behind `DiagnosticsCache` owns
+suite execution: each run is an identified, immutable attempt that survives
+screen changes and Activity recreation, a retry is a new run, and a run records
+its measurement context (process, self configuration, VPN routing, coverage) at
+start and end. Dashboard cache derivation observes terminal diagnostics without
+implicitly retrying Blocked/Failed; explicit refresh and existing diagnostic
+triggers still use the current retry policy. This prevents diagnostic root
+refreshes from recursively retriggering themselves through Dashboard
+invalidation. Measurement classification and the completed-run retention policy
+below are unchanged.
 
 Devices this was validated on: Pixel 4a (sunfish, Magisk, 4.14, kmod/KPM/Zygisk),
 Pixel 8 Pro (husky, KernelSU-Next, GKI 6.1, KPM), and an Android 13 Zygisk device.

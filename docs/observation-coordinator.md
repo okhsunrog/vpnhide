@@ -38,6 +38,14 @@ Screen retry triggers observe known routing transitions: a temporary unknown val
 during refresh does not count as VPN returning. A terminal failure leaves the
 Dashboard loading placeholder and remains available for manual retry.
 
+Diagnostic runs are now owned by the process-lived `DiagnosticRunCoordinator`
+behind `DiagnosticsCache` (transition contract §18). Its eligibility read at
+Checking and its end-context read at Verifying both force a routing-gate refresh,
+so one suite reloads the root snapshot twice and invalidates root dependents twice.
+Dashboard derivation joins the run through its own handle; the second invalidation
+supersedes the in-flight derivation, whose successor then reads the finished
+attempt without starting another suite.
+
 Invalidation advances the generation synchronously. A result from an older
 generation cannot publish either a value or an error. Its completion starts one
 successor for the newest requested generation. Equivalent refreshes join the

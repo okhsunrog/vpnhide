@@ -37,7 +37,7 @@ you add to any of them:
 | name | what it actually is |
 |---|---|
 | `DiagnosticsScreen`, *Detailed diagnostics* | the user-facing check suite |
-| `DiagnosticsCache` | the **run state** of that suite (NotRun / Running / Failed) |
+| `DiagnosticsCache`, `DiagnosticRunCoordinator` | the **run state** of that suite: identified, process-owned runs (`DiagnosticRunView`) projected onto NotRun / Running / Blocked / Failed / Ready |
 | `DiagnosticReport`, `buildDiagnosticReport`, `DiagnosticCheck` | the **canonical model** the screen and the bundle both render — see `docs/diagnostics.md` |
 | `DiagnosticGate`, `RoutingGateCache`, `resolveDiagnosticGate` | the **precondition** for a meaningful run (VPN up, this app routed) — not a check |
 | `HookDiagnostics`, `ConnectivityAttachDiagnostics`, `KpmDiagnostics` | attach/telemetry for the hooks themselves; **not part of the suite** |
@@ -87,6 +87,16 @@ directions, since `internal` is module-wide and the compiler will not.
   loading needs application context plus restart state. Readiness must use `current`,
   not retained `value`. See `docs/observation-coordinator.md` for lifecycle and
   publication rules. Diagnostic runs are a separate domain, not an observation cache.
+- **`DiagnosticRunCoordinator` / `DiagnosticsCache`** — the one owner of the
+  self-test suite. It executes the pure `reduceDiagnosticRun` with identified
+  effects (`DiagnosticRunIo`: context observation and phased probes) on the
+  process scope; a waiter detaching never cancels a run, and a retry is a new run.
+  Request a suite through `DiagnosticsCache.run` (automatic intent) / `retry`
+  (explicit) / `awaitTerminal` (join or read the latest attempt); never launch
+  `runCoreChecks` from a screen or bypass the coordinator's probe ownership.
+  The probe plan and per-run outcomes are keyed by the stable check ids in
+  `NATIVE_CHECKS` / `NATIVE_EXTRA_CHECKS` / `CORE_JAVA_CHECKS` / `EXTRA_JAVA_CHECKS`
+  — a new probe is a new spec entry with an id, not a bare list item.
 - **`RootSnapshotCache`** — the single batched root read. Need new system state
   on the Dashboard/Hiding path? Add a section to its shell snapshot; don't
   add an ad-hoc `suExec` that races the snapshot.

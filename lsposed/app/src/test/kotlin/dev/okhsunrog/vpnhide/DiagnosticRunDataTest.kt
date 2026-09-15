@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.diagnostics.ActiveDiagnosticRun
 import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticRequest
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticRunEffect
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticRunEvent
@@ -237,6 +238,25 @@ class DiagnosticRunDataTest {
         assertEquals(current, fixture.active.ticket)
         assertEquals(DiagnosticStage.Checking, fixture.active.stage)
         fixture.context()
+        assertEquals(DiagnosticStage.Core, fixture.active.stage)
+    }
+
+    @Test
+    fun `blocked checking observation finishes with its reason and keeps the automatic intent`() {
+        val fixture = RunFixture()
+        fixture.request(automatic = true)
+        fixture.send(DiagnosticRunEvent.NotEligible(fixture.active.ticket, DiagnosticEligibility.VpnOff))
+        val attempt = fixture.completed.single()
+        assertEquals(RunOutcome.NotStarted, attempt.outcome)
+        assertEquals(DiagnosticEligibility.VpnOff, attempt.eligibility)
+        assertEquals(null, attempt.failure)
+        assertEquals(null, attempt.measurement)
+        assertTrue(fixture.state.automaticAvailable)
+        assertTrue(fixture.effects.none { it is DiagnosticRunEffect.Probe })
+        // Only a Checking observation can block; a late one after probes started is not a new outcome.
+        fixture.request(automatic = true)
+        fixture.context()
+        fixture.send(DiagnosticRunEvent.NotEligible(fixture.active.ticket, DiagnosticEligibility.VpnOff))
         assertEquals(DiagnosticStage.Core, fixture.active.stage)
     }
 }

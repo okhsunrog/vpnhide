@@ -170,10 +170,24 @@ pipe readers finish. These bounds are separate from the mutation runner's 4 MiB
 reply and three retained owners.
 
 Other observation deadlines are 60 seconds, except Dashboard (120 seconds while
-its loader still awaits the existing diagnostic suite). A read waiter can follow
+its loader still awaits the diagnostic suite). A read waiter can follow
 superseded generations for at most twice its cache deadline. This bounds waiting,
 not the lifetime of an uncooperative worker. See
 [observation coordinator](observation-coordinator.md) for quarantine and retry rules.
+
+## Diagnostic runs
+
+One diagnostic run has a **120-second** whole-run deadline armed at admission
+(`DIAGNOSTIC_RUN_DEADLINE_MS`): it covers the eligibility read, both probe phases
+and the end-context read. Expiry finishes the run as not started or interrupted
+and, if probes were already launched, begins a separate **30-second** drain
+(`DIAGNOSTIC_DRAIN_DEADLINE_MS`). Draining joins the run's outstanding helper
+jobs; it cannot interrupt a blocking `su` probe. If the drain deadline passes
+first, the probe resource is quarantined and every new request is rejected with
+`ResourceUnavailable` until the late helper actually returns. The coordinator
+retains raw evidence for at most the latest attempt and the latest complete
+measurement, plus the results of the eight most recent finished attempts for
+already-issued handles. See [app state transitions](app-state-transitions.md) §18.
 
 ## Re-measuring
 

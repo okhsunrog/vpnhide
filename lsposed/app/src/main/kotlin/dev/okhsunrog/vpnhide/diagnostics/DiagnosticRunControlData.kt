@@ -17,6 +17,17 @@ internal fun interruptRunForContext(
     }
 }
 
+/** A blocked Checking observation is a terminal NotStarted attempt; it neither probes nor consumes the automatic intent. */
+internal fun blockDiagnosticRun(
+    state: DiagnosticRunState,
+    event: DiagnosticRunEvent.NotEligible,
+    now: Long,
+): Transition<DiagnosticRunState, DiagnosticRunEffect> {
+    val active = state.active ?: return Transition(state)
+    if (active.ticket != event.ticket || active.stage != DiagnosticStage.Checking) return Transition(state)
+    return finishDiagnosticRun(state, RunOutcome.NotStarted, failure = null, now = now, eligibility = event.eligibility)
+}
+
 internal fun beginDiagnosticDrain(
     state: DiagnosticRunState,
     outcome: RunOutcome,

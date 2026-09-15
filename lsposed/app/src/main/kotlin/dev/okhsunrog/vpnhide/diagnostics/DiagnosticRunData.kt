@@ -25,6 +25,8 @@ internal data class DiagnosticAttempt(
     val outcome: RunOutcome,
     val failure: TransitionFailure? = null,
     val measurement: DiagnosticMeasurement? = null,
+    /** The blocking eligibility of a NotStarted attempt; null for every other outcome. */
+    val eligibility: DiagnosticEligibility? = null,
 )
 
 internal data class ActiveDiagnosticRun(
@@ -61,6 +63,12 @@ internal sealed interface DiagnosticRunEvent {
     data class ContextReady(
         val ticket: EffectTicket,
         val context: MeasurementContext,
+    ) : DiagnosticRunEvent
+
+    /** The fresh Checking observation found the suite blocked: no probe starts and the reason is retained. */
+    data class NotEligible(
+        val ticket: EffectTicket,
+        val eligibility: DiagnosticEligibility,
     ) : DiagnosticRunEvent
 
     data class Failed(
@@ -157,6 +165,10 @@ internal fun reduceDiagnosticRun(
 
         is DiagnosticRunEvent.ContextReady -> {
             receiveRunContext(state, event, now)
+        }
+
+        is DiagnosticRunEvent.NotEligible -> {
+            blockDiagnosticRun(state, event, now)
         }
 
         is DiagnosticRunEvent.ProbesFinished -> {
@@ -309,6 +321,7 @@ internal fun finishDiagnosticRun(
     outcome: RunOutcome,
     failure: TransitionFailure?,
     now: Long,
+    eligibility: DiagnosticEligibility? = null,
 ): Transition<DiagnosticRunState, DiagnosticRunEffect> {
     val active = requireNotNull(state.active)
     val measurement =
@@ -325,7 +338,7 @@ internal fun finishDiagnosticRun(
                 endContext = active.endContext,
             )
         }
-    val attempt = DiagnosticAttempt(active.id, outcome, failure, measurement)
+    val attempt = DiagnosticAttempt(active.id, outcome, failure, measurement, eligibility)
     val next =
         state.copy(
             active = null,

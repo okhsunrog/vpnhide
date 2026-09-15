@@ -1,8 +1,9 @@
 # App state: transition contract
 
-Status: configuration and observation coordinators are connected to the app.
-Diagnostic execution and capture orchestration still use their existing paths.
-Sections 13–17 record the implementation stages and their exact boundaries.
+Status: configuration, observation and diagnostic-run coordinators are connected
+to the app. Operation impacts on diagnostics, the shared presentation revision and
+capture orchestration still use their existing paths.
+Sections 13–18 record the implementation stages and their exact boundaries.
 This formalizes the direction
 agreed on 2026-09-15. It extends [app state design](app-state-design.md) and follows
 the [diagnostics investigation](diagnostics-state-analysis.md). Existing runtime
@@ -727,3 +728,63 @@ diagnostic measurements. The existing diagnostic run lifecycle, capture stages
 and their legacy subprocesses remain outside this connection. Concrete deadlines,
 retry behavior, dependencies and validation are documented in
 [observation coordinator](observation-coordinator.md).
+
+## 18. Diagnostic execution runtime connection
+
+`DiagnosticsCache` is now a facade over a process-owned `DiagnosticRunCoordinator`
+that executes `reduceDiagnosticRun` under one short lock and runs its identified
+effects on the observation runtime scope. Every suite is an immutable, identified
+attempt; leaving a screen or recreating the Activity detaches a waiter and never
+cancels or restarts a run (T9). An explicit retry allocates a new run whose handle
+resolves only with that run's own result (T10). A slow-phase failure retains the
+core evidence beside the previous complete measurement (T11). Explicit cancel
+drains the run's outstanding helper jobs; an unproven drain quarantines the probe
+resource until the late helper returns, and requests are rejected meanwhile (T23).
+
+The context effect goes through the shared `RoutingGateCache` (forced refresh,
+which also reloads the root snapshot) and folds it with `diagnosticEligibility`
+into `DiagnosticContextObservation`. A blocked Checking observation is the new
+`NotEligible` reducer event: a terminal `NotStarted` attempt that records the
+eligibility, launches no probe and does not consume the startup automatic intent.
+An eligible observation yields the `MeasurementContext`: process/boot subject, the
+self UID's role and hook selection plus global optional features, the observed VPN
+interfaces with this UID's routing verdict, and backend/optional-hook/LSPosed
+coverage, with the root observation ID. The same observation runs again at
+Verifying; a changed identity finishes the run as Interrupted with its evidence
+retained (T14/T15 for changes visible between the two reads).
+
+Every check result now carries a stable id: `NATIVE_CHECKS` for the Rust probes,
+`NATIVE_EXTRA_CHECKS`, `CORE_JAVA_CHECKS` and `EXTRA_JAVA_CHECKS` for the
+Java-implemented ones. The probe plan is derived from these registries at request
+time, per-run outcomes are keyed by id, and the report uses the ids instead of
+list position or an empty string. The bundle schema is unchanged: the report's
+`id` field existed and was empty for Java checks.
+
+Boundaries of this stage:
+
+- Config readiness is treated as settled and `changeEpoch` stays at zero.
+  Operation dependencies (Waiting on accepted config operations), epoch
+  advancement at mutating dispatch, `Applying`/`ApplicationUnknown` eligibility
+  and re-triggering after settlement are the next stage. The startup runtime
+  reconcile can therefore still overlap the automatic suite; a self-projection
+  change during a run is still detected by the end-context identity.
+- Screens, Dashboard, bridge and export keep rendering the legacy
+  `DiagnosticsCache.State` projection (`NotRun`/`Running`/`Blocked`/`Failed`/
+  `Ready`). An interrupted or deadline-expired attempt renders as `Failed`;
+  applicability, evidence sufficiency and the shared presentation revision are
+  not surfaced yet. The identified view is available as `DiagnosticsCache.runs`.
+- `awaitTerminal` (Dashboard derivation, agent `getState`) joins the active run or
+  returns the latest finished attempt; it never retries a terminal Blocked/Failed
+  attempt, so a dependent observation invalidated by the eligibility read cannot
+  form a cycle. `retry` keeps the existing policy: a completed suite is reused.
+- Debug export still runs its own independent `runAllChecks`; capture reservation
+  through the run coordinator is the capture stage.
+- Probe ownership in the frozen plan is structural (Java-implemented native-level
+  probes are unowned); backend-scoped ownership is still applied by the report.
+
+Validation on 2026-09-15: 671 JVM tests passed (16 added for this stage: a
+coordinator test with gated fake effects and deadlines, a context/projection test
+and a reducer test), warnings-as-errors compilation, ktlint, detekt, CPD and
+Android `lintDebug` passed. No APK was installed for this stage; Activity
+recreation during a real run, root timeouts and the VPN transition between the
+two context reads remain device-validation items.
