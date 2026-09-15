@@ -1,13 +1,12 @@
 # App state and synchronization redesign
 
-Status: proposed design; runtime behavior has not changed.
-
-The first pure reducer implementation and its validation boundary are recorded in
-[transition contract section 13](app-state-transitions.md#13-first-implementation-pure-transition-cores).
-Root/UI/coroutine integration remains a subsequent step.
-
-The [root mutation transport](root-mutation-transport.md) is also implemented and
-tested in isolation; all app writers still await coordinator integration.
+Status: historical design proposal, superseded. The direction it argued for was
+formalized in the [transition contract](app-state-transitions.md) and implemented
+in stages; the current runtime is documented in
+[config coordinator](../config-coordinator.md),
+[observation coordinator](../observation-coordinator.md) and
+[root mutation transport](../root-mutation-transport.md). Read this file for the
+reasoning behind the design, not for current behavior.
 
 Baseline: `3818954e1615697427664a6bbcff6d9d6483f0c4` (2026-09-15).
 Worktree: `../vpnhide_state`, branch `refactor/app-state`, created from the
@@ -15,8 +14,8 @@ inspected checkout's committed HEAD. Concurrent uncommitted help work is not
 part of this branch. Rebase/integration with that work is a separate step.
 
 This proposal covers the Android app's ownership of configuration, operations,
-observations and editor drafts. [Storage](storage.md), [wire protocol](protocol.md)
-and [diagnostics](diagnostics.md) remain the current implementation contracts.
+observations and editor drafts. [Storage](../storage.md), [wire protocol](../protocol.md)
+and [diagnostics](../diagnostics.md) remain the current implementation contracts.
 The proposal becomes authoritative only as its implementation stages land.
 
 Product decisions recorded on 2026-09-15: switches immediately show the requested

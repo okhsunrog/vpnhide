@@ -9,15 +9,15 @@ questions that motivated it; its open questions are historical inputs to that
 contract, not competing runtime rules.
 
 Baseline: `3818954e1615697427664a6bbcff6d9d6483f0c4`, inspected on 2026-09-15 in
-`../vpnhide_state`. Complements [diagnostics](diagnostics.md),
-[debug bundles](debug-bundle.md) and the [app state proposal](app-state-design.md).
+`../vpnhide_state`. Complements [diagnostics](../diagnostics.md),
+[debug bundles](../debug-bundle.md) and the [app state proposal](app-state-design.md).
 Claims about reachable behavior below come from source inspection, not a new
 device reproduction. Historical device results in commit messages are historical
 evidence, not validation of this checkout.
 
 ## 1. What “diagnostics” currently means
 
-The [Kotlin glossary](../lsposed/AGENTS.md) already identifies seven uses. They
+The [Kotlin glossary](../../lsposed/AGENTS.md) already identifies seven uses. They
 answer different questions and have different lifetimes:
 
 | Meaning | Concrete owner / data | What it can answer |

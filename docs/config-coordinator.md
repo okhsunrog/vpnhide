@@ -5,7 +5,7 @@ process-lived coordinator and root runner. Settings, both app editors, startup,
 legacy cleanup, import/reset, capture logging and bridge mutations use this lane.
 The previous mutex/full-snapshot write API and direct activation bypasses are gone.
 
-This implements the configuration portion of the [transition contract](app-state-transitions.md)
+This implements the configuration portion of the [transition contract](notes/app-state-transitions.md)
 through the [root transport](root-mutation-transport.md). Observation generations
 are now connected through the [observation coordinator](observation-coordinator.md).
 Diagnostic runs and capture reservation/packaging remain separate migration work.
@@ -210,4 +210,4 @@ establish app-originated root permissions or visible behavior on a physical devi
 Observation generations have since been connected; see the
 [observation coordinator](observation-coordinator.md) for their publication boundary.
 Diagnostic invalidation, eligibility, execution and capture reservation must follow the separately reviewed
-[diagnostic semantics](diagnostics-state-analysis.md) and transition contract.
+[diagnostic semantics](notes/diagnostics-state-analysis.md) and transition contract.

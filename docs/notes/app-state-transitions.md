@@ -7,7 +7,7 @@ Sections 13–18 record the implementation stages and their exact boundaries.
 This formalizes the direction
 agreed on 2026-09-15. It extends [app state design](app-state-design.md) and follows
 the [diagnostics investigation](diagnostics-state-analysis.md). Existing runtime
-behavior remains documented in [storage](storage.md) and [diagnostics](diagnostics.md).
+behavior remains documented in [storage](../storage.md) and [diagnostics](../diagnostics.md).
 
 Scope: process-owned config operations, drafts, observations, diagnostic runs,
 measurement applicability and capture integration. Names below are domain names,
@@ -689,7 +689,7 @@ No APK/device or Android lifecycle validation was performed for this stage.
 The next stage implements `vhmutate` plus a bounded Kotlin process runner,
 versioned binary staging and typed receipt/readback adapters. Its protocol,
 quiescence proof, limits, device evidence and exact migration boundary are in
-[root mutation transport](root-mutation-transport.md). The transport is packaged
+[root mutation transport](../root-mutation-transport.md). The transport is packaged
 but existing app writers are not connected yet.
 
 Recovery can consume a still-undispatched sequence in transport metadata. This
@@ -705,7 +705,7 @@ Typed edits apply to fresh preparation reads, preserve declared intent for confl
 checks, support no-op plans and keep persistence separate from activation failure.
 The engine and adapter are exercised by coroutine/adapter tests; existing app
 writers and UI are not connected yet. The exact implementation, validation and
-all-writer migration boundary are in [config coordinator](config-coordinator.md).
+all-writer migration boundary are in [config coordinator](../config-coordinator.md).
 
 
 ## 16. Configuration runtime connection
@@ -715,7 +715,7 @@ Settings switches render optimistic intent with progress; Activity ViewModels
 retain editor drafts and acknowledge only saved revisions. Capture logging tokens,
 bridge conflicts, cleanup/reset and startup share this ownership. Implementation,
 validation boundaries and remaining observation/diagnostic work are tracked in
-[config coordinator](config-coordinator.md). Earlier implementation sections above
+[config coordinator](../config-coordinator.md). Earlier implementation sections above
 record the intermediate stages; their disconnected-runtime statements are historical.
 
 ## 17. Observation runtime connection
@@ -731,7 +731,7 @@ This does not implement an atomic presentation revision across all screens and
 diagnostic measurements. The existing diagnostic run lifecycle, capture stages
 and their legacy subprocesses remain outside this connection. Concrete deadlines,
 retry behavior, dependencies and validation are documented in
-[observation coordinator](observation-coordinator.md).
+[observation coordinator](../observation-coordinator.md).
 
 ## 18. Diagnostic execution runtime connection
 

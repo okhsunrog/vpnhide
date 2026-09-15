@@ -187,7 +187,7 @@ first, the probe resource is quarantined and every new request is rejected with
 `ResourceUnavailable` until the late helper actually returns. The coordinator
 retains raw evidence for at most the latest attempt and the latest complete
 measurement, plus the results of the eight most recent finished attempts for
-already-issued handles. See [app state transitions](app-state-transitions.md) §18.
+already-issued handles. See [app state transitions](notes/app-state-transitions.md) §18.
 
 ## Re-measuring
 

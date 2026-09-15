@@ -8,8 +8,8 @@ For the hiding side (which backend covers which detection vector) see
 
 For the baseline execution states, screen/export dependencies, historical decisions
 and the semantic questions that motivated the redesign, see the
-[diagnostics state analysis](diagnostics-state-analysis.md). The replacement is
-specified in the [app state transition contract](app-state-transitions.md);
+[diagnostics state analysis](notes/diagnostics-state-analysis.md). The replacement is
+specified in the [app state transition contract](notes/app-state-transitions.md);
 its diagnostic execution stage (§18) is implemented, while operation impacts,
 the shared presentation revision and capture reservation are not.
 

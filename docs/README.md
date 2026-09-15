@@ -33,6 +33,9 @@ Stable references for anyone changing the code. Read the relevant one before a P
 | [avd-magisk-testing.md](avd-magisk-testing.md) | Testing on a rooted x86_64 AVD (Magisk + Zygisk + LSPosed) |
 | [changelog.md](changelog.md) | Changelog storage (`changelog.d/` fragments) and `scripts/changelog.py` |
 | [releasing.md](releasing.md) | `scripts/release.py` usage and the version-bump flow |
+| [config-coordinator.md](config-coordinator.md) | How app configuration writes are owned: the process-owned coordinator, typed edits, drafts, phase outcomes and recovery |
+| [observation-coordinator.md](observation-coordinator.md) | How root/app observations are read, invalidated, joined and quarantined; Dashboard/diagnostics refresh rules |
+| [root-mutation-transport.md](root-mutation-transport.md) | The `vhmutate` helper: receipts, sessions, late-launch fencing and the isolated device fixture |
 
 Module-specific developer docs live next to their code:
 [kmod/BUILDING.md](../kmod/BUILDING.md), [kmod/kpm/README.md](../kmod/kpm/README.md),
@@ -47,3 +50,7 @@ a release commitment — lives in **[`notes/`](notes/)**:
 
 - [notes/ROADMAP.md](notes/ROADMAP.md) — larger product directions
 - [notes/setup-wizard-design.md](notes/setup-wizard-design.md) — design proposal for the first-run setup wizard (not yet implemented)
+- [notes/app-state-transitions.md](notes/app-state-transitions.md) — the app state transition contract: machines, scenario traces and the implemented stages; partly still a plan
+- [notes/state-refactor-handoff.md](notes/state-refactor-handoff.md) — working notes for the state refactor: status, decisions, cold-start measurements, next steps
+- [notes/diagnostics-state-analysis.md](notes/diagnostics-state-analysis.md) — historical analysis of what "diagnostics" meant before the refactor and why
+- [notes/app-state-design.md](notes/app-state-design.md) — the original state redesign proposal (superseded by the contract)

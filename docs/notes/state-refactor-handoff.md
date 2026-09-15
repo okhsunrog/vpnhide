@@ -16,15 +16,15 @@ Snapshot: 2026-09-15, implementation HEAD `a43cc3f0` before this document.
 
 ## Read in this order
 
-1. [Observation coordinator](observation-coordinator.md): current cache runtime,
+1. [Observation coordinator](../observation-coordinator.md): current cache runtime,
    dependencies, deadlines and limits.
-2. [Config coordinator](config-coordinator.md): implemented write lane and UI.
+2. [Config coordinator](../config-coordinator.md): implemented write lane and UI.
 3. [Diagnostics state analysis](diagnostics-state-analysis.md): meanings of
    diagnostics, source history, semantic problems and acceptance questions.
 4. [Transition contract](app-state-transitions.md): agreed machines and 30 scenario
    traces, especially diagnostic, presentation, capture and resource ownership.
-5. [Diagnostics](diagnostics.md), [debug bundle](debug-bundle.md),
-   [root mutation transport](root-mutation-transport.md), plus scoped instructions.
+5. [Diagnostics](../diagnostics.md), [debug bundle](../debug-bundle.md),
+   [root mutation transport](../root-mutation-transport.md), plus scoped instructions.
 
 The documents record successive stages: statements such as "not connected yet"
 in early implementation sections are historical. Check the current status and
@@ -111,6 +111,16 @@ runs `runAllChecks` outside the coordinator. Coroutine cancellation/return does
 not prove descendant quiescence. Do not mask this with a global root lock or make
 config writes await diagnostics.
 
+## Changelog fragments: consolidate before release
+
+The branch accumulated fragments per stage. Before the next release, rewrite
+them relative to the last released version, not to the branch history: users
+never saw intermediate states, so a fragment must not describe adding and then
+removing something that only existed on this branch for hours (the
+RebootRequired fragment was already dropped for that reason). Merge the several
+cold-start fragments into one entry, and check that each remaining fragment
+names a change visible against the last release.
+
 ## Build and device
 
 Run from `/home/okhsunrog/code/vpnhide_state/lsposed`:
@@ -131,7 +141,7 @@ Installed version: the build that removed RebootRequired (after `eeb01a47`),
 user 0 only. The isolated device transport fixture
 (`scripts/test-root-transport.py`) passed on it, including the `adopt` steps.
 Decision 2026-09-15: no reboot is demanded for first adoption; see
-[config coordinator](config-coordinator.md) for the accepted risk. On 2026-09-15 the device had only user 0 (`pm list users`); profiles
+[config coordinator](../config-coordinator.md) for the accepted risk. On 2026-09-15 the device had only user 0 (`pm list users`); profiles
 10 and 11 no longer existed. `adb install --user 0 -r` alone is not proof that
 other profiles are clean. Inspect `pm list users` and `dumpsys package
 dev.okhsunrog.vpnhide` after installation.
