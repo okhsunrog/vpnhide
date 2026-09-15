@@ -2,6 +2,10 @@
 
 Status: proposed design; runtime behavior has not changed.
 
+The first pure reducer implementation and its validation boundary are recorded in
+[transition contract section 13](app-state-transitions.md#13-first-implementation-pure-transition-cores).
+Root/UI/coroutine integration remains a subsequent step.
+
 Baseline: `3818954e1615697427664a6bbcff6d9d6483f0c4` (2026-09-15).
 Worktree: `../vpnhide_state`, branch `refactor/app-state`, created from the
 inspected checkout's committed HEAD. Concurrent uncommitted help work is not

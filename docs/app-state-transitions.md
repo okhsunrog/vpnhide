@@ -1,6 +1,8 @@
 # App state: transition contract
 
-Status: implementation design, not implemented. This formalizes the direction
+Status: implementation design; the pure reducer core is implemented, but the
+runtime still uses its existing paths. See section 13 for the exact boundary.
+This formalizes the direction
 agreed on 2026-09-15. It extends [app state design](app-state-design.md) and follows
 the [diagnostics investigation](diagnostics-state-analysis.md). Existing runtime
 behavior remains documented in [storage](storage.md) and [diagnostics](diagnostics.md).
@@ -598,3 +600,80 @@ Run applicable Kotlin tests, ktlint, detekt, CPD and Android lint for code chang
 Then separately validate root timeouts/late effects, real VPN transitions, Activity
 recreation, process restarts and capture cleanup on devices. Pure reducer tests
 prove decisions for supplied events; they cannot prove the adapters report reality.
+
+## 13. First implementation: pure transition cores
+
+The first implementation adds ordinary Kotlin data models and top-level pure
+functions, without a new dependency, store singleton, coroutine scope, JSON schema
+or backend protocol. Effects are values; nothing in these reducers executes root
+commands or calls Android services. Existing facades are not connected yet.
+
+Paths below are relative to `lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/`:
+
+| Core | Implemented behavior | Tests in `src/test/kotlin/dev/okhsunrog/vpnhide/` |
+|---|---|---|
+| `ConfigOperationData.kt`, `ConfigRecoveryData.kt` | Ordered admission/preparation, identified phase effects, early confirmed config, independent failures, bounded readback, held mutations, manual recovery, before/after-dispatch UI conflicts | `ConfigOperationDataTest.kt` |
+| `CanonicalSnapshotData.kt`, `StateTransitionData.kt` | Safe effect identities/error categories; detach concrete config and field-path collections at retention boundaries | Config operation snapshot/conflict cases |
+| `ObservationData.kt` | Generation-aware load publication, equivalent-request join, successor-generation wait, last-good retention, failure and identified resource recovery | `ObservationDataTest.kt` |
+| `DraftData.kt` | Untouched-field rebase, revision-aware save acknowledgement, capture token/user intent versus confirmed logging | `DraftDataTest.kt` |
+| `diagnostics/DiagnosticRunData.kt`, `diagnostics/DiagnosticRunControlData.kt` | Identified runs, bounded pending admission, operation dependencies, progressive evidence, context interruption, independent drain deadlines, quarantine, immutable latest attempt/complete measurement | `DiagnosticRunDataTest.kt` |
+| `diagnostics/MeasurementData.kt` | Original/start/end context, applicability and scoped evidence summaries; current success also requires eligible conditions | `MeasurementDataTest.kt` |
+| `diagnostics/DiagnosticEligibilityData.kt` | Shared readiness precedence; unknown routing cannot reuse historical routed state as eligibility | `DiagnosticEligibilityDataTest.kt` |
+
+The tests supply effect responses explicitly, including obsolete responses and
+duplicate deadline events. They do not sleep or depend on actual coroutine
+scheduling. A request deadline and the subsequent drain deadline have different
+identities; replaying the former cannot expire the latter. Recovery evidence also
+belongs to the specific quarantined effect, preventing an old successful cleanup
+response from releasing a newer quarantine.
+
+### What these tests establish
+
+- T1–T8: operation sequencing, independent phase results/recovery, field overlap and
+  revision behavior. T1 currently proves when preparation happens; typed canonical
+  patch construction and real fresh reads remain to be integrated.
+- T10–T17: new run identity after old failure, partial evidence retention, context
+  change/uncertainty and evidence sufficiency. T17 also exercises the pure shared
+  eligibility decision against a failed observation with historical routed data.
+- T18/T23/T24: incompatible capture identities cannot join a run, draining resources
+  cannot be reused, and failed operation dependencies finish waiting requests.
+  Actual logging/baseline preparation for T18 is still capture-adapter work.
+- T19: token ownership and desired versus confirmed logging, including duplicate
+  release and late confirmation. T29: canonical/secret phase independence; the
+  core types never take a secret or arbitrary root-output string.
+
+These are core portions of the traces, not completion of all thirty integration
+scenarios. These pure tests do not exercise Android Activity recreation or
+coroutine ownership. Likewise, explicit fake responses establish
+reducer ordering, not truthful root acknowledgements or hardware behavior.
+
+Validation on 2026-09-15: `./gradlew :app:testDebugUnitTest :app:detekt cpdCheck
+:app:ktlintCheck :app:lintDebug` from `lsposed/` passed. The unit suite contains
+570 tests, including 44 new transition-core tests; none failed or were skipped.
+No APK/device or Android lifecycle validation was performed for this stage.
+
+### Remaining work before runtime connection
+
+1. Startup/config availability and predecessor-quiescence transport. The operation
+   core currently starts with an already-readable confirmed config and proven
+   predecessor quiescence; its constructor documents this precondition.
+2. Typed config intents, their authoritative write/impact sets, validation and
+   no-op planning. `Prepare` identifies the operation; the future coordinator
+   must associate that ID with its typed intent and read current canonical data
+   before constructing the candidate. It must not reuse a screen's full snapshot.
+   Whole import/reset and auto-hide draft rules still need their typed producers.
+3. The process-owned dispatcher/effect runner: publish before executing effects,
+   associate each handle with its own completion, and forward relevant operation
+   acceptance/dispatch/completion events to diagnostic dependencies/context.
+   Decide absolute adapter deadlines and cancellation authority there. Generic
+   observation/draft payloads must be immutable values supplied by their adapters.
+4. Connect the existing `StateCache`, config and diagnostic facades; compute real
+   self-context projections and probe plans with stable IDs. The pure request
+   deadline is armed once on admission, including for pending requests; drain
+   effects arm a separate cleanup deadline.
+5. Capture reservation/collection/packaging and deferred cleanup through the config
+   barrier (T20/T21/T30); UI lifecycle holders and a common presentation revision
+   (T9/T28); import/reset integration (T26) and concrete impact classification (T27).
+6. Bundle/bridge compatibility, startup/process-death reconstruction (T25), and
+   device validation. No serialized types or runtime wire semantics changed in
+   this first core implementation.
