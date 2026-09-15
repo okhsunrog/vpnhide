@@ -216,10 +216,13 @@ internal fun reduceDiagnosticRun(
         }
     }
 
+/** Identity is plan and capture; dependencies are admission state (an active run already carries every accepted one). */
 private fun matchingRun(
     run: ActiveDiagnosticRun?,
     request: DiagnosticRequest,
-): Boolean = run != null && run.stage != DiagnosticStage.Draining && run.request.copy(automatic = false) == request.copy(automatic = false)
+): Boolean =
+    run != null && run.stage != DiagnosticStage.Draining &&
+        run.request.copy(automatic = false, dependencies = emptySet()) == request.copy(automatic = false, dependencies = emptySet())
 
 private fun requestDiagnosticRun(
     state: DiagnosticRunState,

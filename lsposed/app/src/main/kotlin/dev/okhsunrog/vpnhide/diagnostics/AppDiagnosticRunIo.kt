@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
  */
 internal class AppDiagnosticRunIo(
     private val inputs: () -> ContextObservationInputs?,
+    private val impact: () -> DiagnosticImpactState = { DiagnosticImpactState() },
     private val clock: () -> Long = System::currentTimeMillis,
 ) : DiagnosticRunIo {
     override suspend fun observe(
@@ -38,6 +39,7 @@ internal class AppDiagnosticRunIo(
             RoutingRead.Join -> withContext(Dispatchers.IO) { RoutingGateCache.refreshInPlace(force = false) }
             RoutingRead.Refresh -> withContext(Dispatchers.IO) { RoutingGateCache.refreshInPlace(force = true) }
         }
+        val impact = impact()
         val observation =
             buildDiagnosticContextObservation(
                 selfNeedsRestart = false,
@@ -47,6 +49,8 @@ internal class AppDiagnosticRunIo(
                 selfPackage = current.context.packageName,
                 processIdentity = "pid:${Process.myPid()};uid:${Process.myUid()}",
                 now = clock(),
+                readiness = configReadiness(impact),
+                changeEpoch = impact.changeEpoch,
             )
         if (stage == DiagnosticStage.Checking) traceEligibility(observation.eligibility)
         return observation

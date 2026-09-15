@@ -123,6 +123,23 @@ internal class DiagnosticRunCoordinator(
         synchronized(lock) { dispatch(DiagnosticRunEvent.Cancel(id)) }
     }
 
+    /** A relevant config operation was accepted: waiting/checking runs depend on it until it settles. */
+    fun operationAccepted(id: Long) {
+        synchronized(lock) { dispatch(DiagnosticRunEvent.OperationAccepted(id)) }
+    }
+
+    fun operationSettled(
+        id: Long,
+        failure: TransitionFailure?,
+    ) {
+        synchronized(lock) { dispatch(DiagnosticRunEvent.OperationSettled(id, failure)) }
+    }
+
+    /** A known relevant change: an active run is interrupted (draining) and never certified against the new state. */
+    fun contextChanged(known: Boolean = true) {
+        synchronized(lock) { dispatch(DiagnosticRunEvent.ContextChanged(known)) }
+    }
+
     private fun handle(id: Long): DiagnosticRunHandle {
         val deferred =
             finished[id]?.let { CompletableDeferred(it) }

@@ -37,6 +37,44 @@ private sealed interface CoordinatorMessage {
 }
 
 /**
+ * Lifecycle of accepted operations, published synchronously from the actor in
+ * dispatch order: acceptance (before any effect), each mutating root dispatch,
+ * and the one result delivery, plus a later manual recovery of an unresolved one.
+ * Callbacks must only record or invalidate; they never read back or wait.
+ */
+internal interface ConfigOperationObserver {
+    fun accepted(
+        id: Long,
+        spec: ConfigOperationSpec,
+    )
+
+    fun dispatched(
+        id: Long,
+        phase: ConfigPhase,
+    )
+
+    fun settled(result: ConfigOperationResult)
+
+    fun recovered(result: ConfigOperationResult)
+
+    object None : ConfigOperationObserver {
+        override fun accepted(
+            id: Long,
+            spec: ConfigOperationSpec,
+        ) = Unit
+
+        override fun dispatched(
+            id: Long,
+            phase: ConfigPhase,
+        ) = Unit
+
+        override fun settled(result: ConfigOperationResult) = Unit
+
+        override fun recovered(result: ConfigOperationResult) = Unit
+    }
+}
+
+/**
  * One actor publishes before launching identified effects. Its scope must belong to the process.
  * Cancelling a caller only stops that caller's wait; it never cancels an accepted root operation.
  */
@@ -47,6 +85,7 @@ internal class ConfigCoordinator(
     refresh: suspend () -> Unit = {},
     private val manageLogging: Boolean = false,
     private val invalidateObservations: () -> Unit = {},
+    private val observer: ConfigOperationObserver = ConfigOperationObserver.None,
 ) {
     private val messages = Channel<CoordinatorMessage>(Channel.UNLIMITED)
     private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
@@ -233,6 +272,8 @@ internal class ConfigCoordinator(
             }
 
             is ConfigOperationEffect.Execute -> {
+                // Observers learn about the known change before the root effect starts.
+                runCatching { observer.dispatched(effect.ticket.owner, effect.phase) }
                 execute(effect)
             }
 
@@ -248,10 +289,12 @@ internal class ConfigCoordinator(
             }
 
             is ConfigOperationEffect.Completed -> {
+                runCatching { observer.settled(effect.result) }
                 complete(effect.result)
             }
 
             is ConfigOperationEffect.Recovered -> {
+                runCatching { observer.recovered(effect.result) }
                 mutableView.value =
                     view.value.copy(
                         lastResult = effect.result,
@@ -279,10 +322,23 @@ internal class ConfigCoordinator(
                 refreshRequests.trySend(Unit)
             }
 
+            is ConfigOperationEffect.Accepted -> {
+                // Admission itself is published by input(); observers only learn the identity and intent.
+                acceptedSpec(effect.id)?.let { spec -> runCatching { observer.accepted(effect.id, spec) } }
+            }
+
             else -> {
-                // Admission is published by input(); no additional effect work is needed.
+                // CancelRejected needs no effect work.
             }
         }
+    }
+
+    private fun acceptedSpec(id: Long): ConfigOperationSpec? {
+        val state = core ?: return null
+        return state.active
+            ?.request
+            ?.takeIf { it.id == id }
+            ?.spec ?: state.queue.firstOrNull { it.id == id }?.spec
     }
 
     private fun prepare(effect: ConfigOperationEffect.Prepare) {

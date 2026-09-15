@@ -80,17 +80,19 @@ old device-validation paragraphs predate the successful installs described below
 
 ## Remaining implementation and next bounded step
 
-1. **Operation impacts on diagnostics.** The run coordinator treats config
-   readiness as settled and keeps `changeEpoch` at zero. Next: derive request
-   dependencies from `CanonicalConfigRepository.state.operations`, observe their
-   settlement (`OperationSettled`, including `Paused` → `ApplicationUnknown`),
-   advance `changeEpoch` / send `ContextChanged` on a mutating dispatch with a
-   relevant self projection, map `Applying`/`ApplicationUnknown` into eligibility,
-   and make the startup automatic suite wait for the startup runtime reconcile
-   instead of racing it. Then surface applicability (`measurementApplicability`)
-   and evidence sufficiency in a shared presentation projection instead of the
-   legacy `State` (interrupted attempts currently render as `Failed`).
-   Preserve the feedback-cycle fixes above.
+1. **Operation impacts on diagnostics: done** (transition contract §19). The
+   config coordinator publishes operation acceptance, mutating dispatches and
+   results to `DiagnosticImpactObserver`; `reduceDiagnosticImpact` classifies
+   relevance from the declared write set (own roles/hooks, global optional
+   features, whole replacements), delays new runs on accepted relevant
+   operations, interrupts a probing run at the first mutating dispatch, advances
+   `changeEpoch`, and maps unresolved/failed operations into eligibility. The
+   startup runtime reconcile is a forced activation without a write and is
+   therefore not relevant: it neither delays nor interrupts the automatic suite
+   (user decision, 2026-09-15). Next: surface applicability
+   (`measurementApplicability`) and evidence sufficiency in a shared presentation
+   projection instead of the legacy `State` (interrupted and operation-blocked
+   attempts currently render as `Failed`). Preserve the feedback-cycle fixes above.
 2. **Shared presentation.** Current source IDs reject obsolete cache computations,
    but screens still publish independently and retain last-good values. An atomic
    presentation revision including diagnostic measurement applicability is not

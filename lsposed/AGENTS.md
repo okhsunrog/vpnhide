@@ -97,6 +97,10 @@ directions, since `internal` is module-wide and the compiler will not.
   The probe plan and per-run outcomes are keyed by the stable check ids in
   `NATIVE_CHECKS` / `NATIVE_EXTRA_CHECKS` / `CORE_JAVA_CHECKS` / `EXTRA_JAVA_CHECKS`
   — a new probe is a new spec entry with an id, not a bare list item.
+  Config operations reach the suite only through `DiagnosticImpactObserver`
+  (registered by `CanonicalConfigRepository`): relevance is decided by the pure
+  `operationAffectsSelfMeasurement`, so a new kind of write must be classified
+  there, never by adding a wait or a retry to a screen.
 - **`RootSnapshotCache`** — the single batched root read. Need new system state
   on the Dashboard/Hiding path? Add a section to its shell snapshot; don't
   add an ad-hoc `suExec` that races the snapshot.

@@ -1,6 +1,10 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
 import android.content.Context
+import dev.okhsunrog.vpnhide.ConfigOperationObserver
+import dev.okhsunrog.vpnhide.ConfigOperationResult
+import dev.okhsunrog.vpnhide.ConfigOperationSpec
+import dev.okhsunrog.vpnhide.ConfigPhase
 import dev.okhsunrog.vpnhide.ContextObservationInputs
 import dev.okhsunrog.vpnhide.ObservationRuntime
 import dev.okhsunrog.vpnhide.ProjectedStateFlow
@@ -18,13 +22,15 @@ import kotlinx.coroutines.flow.StateFlow
  * of the coordinator's view onto the legacy vocabulary every consumer renders:
  *
  * - [State.NotRun] — no attempt has finished yet and none is active.
- * - [State.Running] — a run is checking eligibility or probing its core phase.
+ * - [State.Running] — a run is waiting for a relevant config operation, checking
+ *   eligibility or probing its core phase.
  * - [State.Blocked] — the latest attempt found the suite not eligible (VPN off,
  *   this app split-tunnelled out, or a pending self-restart); carries the
  *   [DiagnosticGate] so the banner explains which.
  * - [State.Failed] — the latest attempt could not measure: execution failure,
- *   deadline, cancellation or a context change during the run. Distinct from a
- *   VPN-off gate so an active-VPN user is not told their VPN is off.
+ *   deadline, cancellation, a config operation that failed or stayed unresolved,
+ *   or a context change during the run. Distinct from a VPN-off gate so an
+ *   active-VPN user is not told their VPN is off.
  * - [State.Ready] — evidence exists; [State.Ready.complete] is false while the
  *   slow Java phase of the active run is still filling in.
  *
@@ -32,6 +38,13 @@ import kotlinx.coroutines.flow.StateFlow
  * probed, and a blocked attempt does not consume it. [retry] keeps the existing
  * policy — a completed suite is reused, anything else is requested again as a
  * new run. Neither observation refreshes nor recomposition rerun a completed suite.
+ *
+ * Config operations reach the suite through [configOperation]: a request depends
+ * on every accepted operation that can change this process's own measurement
+ * (its roles and hooks, global optional features, whole replacements) and waits
+ * for them; the first mutating dispatch of such an operation interrupts an active
+ * run and advances the change epoch. Other apps' edits, debug logging and the
+ * startup runtime reconcile neither delay nor interrupt a suite.
  */
 internal object DiagnosticsCache {
     sealed interface State {
@@ -63,7 +76,13 @@ internal object DiagnosticsCache {
     // a caller that does not know it (the agent bridge) can safely pass false.
     @Volatile private var restartPending = false
 
-    private val coordinator by lazy { DiagnosticRunCoordinator(ObservationRuntime.scope, AppDiagnosticRunIo(inputs = { inputs })) }
+    private val impactLock = Any()
+
+    @Volatile private var impact = DiagnosticImpactState()
+
+    private val coordinator by lazy {
+        DiagnosticRunCoordinator(ObservationRuntime.scope, AppDiagnosticRunIo(inputs = { inputs }, impact = { impact }))
+    }
 
     /** The identified run state: active run, latest attempt, latest complete measurement and their evidence. */
     val runs: StateFlow<DiagnosticRunView> get() = coordinator.view
@@ -77,7 +96,7 @@ internal object DiagnosticsCache {
         selfNeedsRestart: Boolean,
     ) {
         updateInputs(context, selfNeedsRestart)
-        coordinator.request(diagnosticRequest(automatic = true))
+        coordinator.request(request(automatic = true))
     }
 
     /** Explicit retry from the VPN-off / failed banners and Dashboard refresh: a new run unless the last one completed. */
@@ -87,7 +106,7 @@ internal object DiagnosticsCache {
         selfNeedsRestart: Boolean,
     ) {
         updateInputs(context, selfNeedsRestart)
-        if (diagnosticRetryAllowed(coordinator.view.value.core)) coordinator.request(diagnosticRequest())
+        if (diagnosticRetryAllowed(coordinator.view.value.core)) coordinator.request(request(automatic = false))
     }
 
     /**
@@ -101,10 +120,24 @@ internal object DiagnosticsCache {
         selfNeedsRestart: Boolean,
     ): State {
         updateInputs(context, selfNeedsRestart)
-        val handle = coordinator.ensure(diagnosticRequest(automatic = true)) ?: return state.value
+        val handle = coordinator.ensure(request(automatic = true)) ?: return state.value
         val result = handle.await()
         return projectDiagnosticAttempt(result.attempt, result.results)
     }
+
+    /** Config-operation lifecycle from the coordinator's observer; effects go to the run coordinator in order. */
+    fun configOperation(event: DiagnosticImpactEvent) {
+        val transition = synchronized(impactLock) { reduceDiagnosticImpact(impact, event).also { impact = it.state } }
+        transition.effects.forEach { effect ->
+            when (effect) {
+                is DiagnosticImpactEffect.DelayRuns -> coordinator.operationAccepted(effect.id)
+                DiagnosticImpactEffect.InterruptRuns -> coordinator.contextChanged(known = true)
+                is DiagnosticImpactEffect.SettleRuns -> coordinator.operationSettled(effect.id, effect.failure)
+            }
+        }
+    }
+
+    private fun request(automatic: Boolean): DiagnosticRequest = diagnosticRequest(automatic).copy(dependencies = impact.relevant)
 
     private fun updateInputs(
         context: Context,
@@ -113,4 +146,25 @@ internal object DiagnosticsCache {
         restartPending = restartPending || selfNeedsRestart
         inputs = ContextObservationInputs(context.applicationContext, restartPending)
     }
+}
+
+/** The config coordinator's observer: classifies each operation against this app's own measurement. */
+internal class DiagnosticImpactObserver(
+    private val selfPackage: () -> String,
+) : ConfigOperationObserver {
+    override fun accepted(
+        id: Long,
+        spec: ConfigOperationSpec,
+    ) = DiagnosticsCache.configOperation(DiagnosticImpactEvent.Accepted(id, operationAffectsSelfMeasurement(spec, selfPackage())))
+
+    override fun dispatched(
+        id: Long,
+        phase: ConfigPhase,
+    ) = DiagnosticsCache.configOperation(DiagnosticImpactEvent.Dispatched(id, phase))
+
+    override fun settled(result: ConfigOperationResult) =
+        DiagnosticsCache.configOperation(DiagnosticImpactEvent.Settled(result.id, result.failure))
+
+    override fun recovered(result: ConfigOperationResult) =
+        DiagnosticsCache.configOperation(DiagnosticImpactEvent.Recovered(result.id, result.failure))
 }

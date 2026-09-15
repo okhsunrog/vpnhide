@@ -1,9 +1,9 @@
 # App state: transition contract
 
 Status: configuration, observation and diagnostic-run coordinators are connected
-to the app. Operation impacts on diagnostics, the shared presentation revision and
-capture orchestration still use their existing paths.
-Sections 13–18 record the implementation stages and their exact boundaries.
+to the app, and config operations feed diagnostic admission and context. The
+shared presentation revision and capture orchestration still use their existing
+paths. Sections 13–19 record the implementation stages and their exact boundaries.
 This formalizes the direction
 agreed on 2026-09-15. It extends [app state design](app-state-design.md) and follows
 the [diagnostics investigation](diagnostics-state-analysis.md). Existing runtime
@@ -797,3 +797,49 @@ and a reducer test), warnings-as-errors compilation, ktlint, detekt, CPD and
 Android `lintDebug` passed. No APK was installed for this stage; Activity
 recreation during a real run, root timeouts and the VPN transition between the
 two context reads remain device-validation items.
+
+## 19. Operation impacts on diagnostic runs
+
+The config coordinator publishes each accepted operation's lifecycle to a
+`ConfigOperationObserver` synchronously from its actor, in dispatch order:
+acceptance (before any effect, with the operation's spec), every mutating root
+dispatch (phase), the single result delivery, and a later manual recovery.
+`DiagnosticsCache` receives it through `DiagnosticImpactObserver` and the pure
+`reduceDiagnosticImpact`:
+
+- Relevance (`operationAffectsSelfMeasurement`) is decided from the declared
+  write set: this app's own roles and hook selection (`apps/<self>/…` or the
+  whole `apps` domain), global optional features (`settings/optionalFeatures` or
+  the whole `settings` domain), and whole replacements (import, reset, removal).
+  Other apps' roles, debug logging, auto-hide bookkeeping and a forced activation
+  without a write (the startup runtime reconcile) are not relevant: they neither
+  delay nor interrupt a suite (T27, and the decision recorded in §2 and §6).
+- An accepted relevant operation is added to every new request's dependencies
+  and sent as `OperationAccepted` to the run reducer, so a waiting or checking
+  run waits for it. Request identity ignores dependencies: a request made while
+  a run is active joins it (the active run already carries every accepted
+  operation) instead of queueing a second suite.
+- The first mutating dispatch of a relevant operation advances `changeEpoch` and
+  sends `ContextChanged(known)`: a probing run drains and finishes Interrupted,
+  a checking run finishes NotStarted(context_changed). Later phases of the same
+  operation belong to that change.
+- Settlement sends `OperationSettled(id, failure)`: a waiting run proceeds to a
+  fresh Checking observation; a failed or unresolved (Paused) operation finishes
+  the waiting run NotStarted with that failure (T24).
+- Readiness for eligibility comes from the same state: an unresolved relevant
+  operation is `ApplicationUnknown`, an in-flight one `Applying`, a known-failed
+  one `ApplicationFailed` until a later relevant operation succeeds or manual
+  recovery resolves it; `changeEpoch` enters the measurement context.
+
+Boundaries: the epoch is only advanced by config operations; VPN transitions
+still enter through the routing gate invalidation and the end-context identity
+comparison, and `uncertaintyEpoch` is not implemented. Screens keep rendering the
+legacy projection; a run finished NotStarted because of a failed or unresolved
+operation renders as `Failed`.
+
+Validation on 2026-09-15: JVM tests (impact reducer and relevance, coordinator
+dependency/settlement/interrupt scenarios, observer ordering in the config
+coordinator, readiness in the context builder, join ignoring dependencies),
+warnings-as-errors compilation, ktlint, detekt, CPD, Android `lintDebug` and the
+signed release build. Device validation of a save during a running suite is
+pending.

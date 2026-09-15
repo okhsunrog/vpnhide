@@ -19,6 +19,21 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class ConfigCoordinatorTest {
     @Test
+    fun `the operation observer sees acceptance, each mutating dispatch and the single result in order`() =
+        coordinatorTest {
+            coordinator.initialize()
+            val caller = async { coordinator.submit(toggle(CanonicalToggle.Filesystem, true)) }
+            assertEquals("accepted:1:[settings/optionalFeatures]", observed.receive())
+            assertEquals("dispatched:1:Persist", observed.receive())
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            assertEquals("dispatched:1:Native", observed.receive())
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            assertTrue(caller.await().succeeded)
+            assertEquals("settled:1:null", observed.receive())
+            assertTrue(observed.tryReceive().isFailure)
+        }
+
+    @Test
     fun `phase completion invalidates observations before the next phase and caller completion`() =
         coordinatorTest {
             coordinator.initialize()
@@ -452,13 +467,44 @@ private class CoordinatorFixture(
     val invalidations = AtomicInteger()
     val refreshStarted = Channel<Unit>(Channel.UNLIMITED)
     val refreshRelease = CompletableDeferred<Unit>()
+    val observed = Channel<String>(Channel.UNLIMITED)
     val coordinator =
-        ConfigCoordinator(io, owner, manageLogging = manageLogging, invalidateObservations = {
-            invalidations.incrementAndGet()
-        }, refresh = {
-            refreshStarted.send(Unit)
-            refreshRelease.await()
-        })
+        ConfigCoordinator(
+            io,
+            owner,
+            manageLogging = manageLogging,
+            invalidateObservations = {
+                invalidations.incrementAndGet()
+            },
+            refresh = {
+                refreshStarted.send(Unit)
+                refreshRelease.await()
+            },
+            observer =
+                object : ConfigOperationObserver {
+                    override fun accepted(
+                        id: Long,
+                        spec: ConfigOperationSpec,
+                    ) {
+                        observed.trySend("accepted:$id:${spec.writes.map { it.segments.joinToString("/") }}")
+                    }
+
+                    override fun dispatched(
+                        id: Long,
+                        phase: ConfigPhase,
+                    ) {
+                        observed.trySend("dispatched:$id:$phase")
+                    }
+
+                    override fun settled(result: ConfigOperationResult) {
+                        observed.trySend("settled:${result.id}:${result.failure}")
+                    }
+
+                    override fun recovered(result: ConfigOperationResult) {
+                        observed.trySend("recovered:${result.id}:${result.failure}")
+                    }
+                },
+        )
 
     fun close() {
         owner.cancel()

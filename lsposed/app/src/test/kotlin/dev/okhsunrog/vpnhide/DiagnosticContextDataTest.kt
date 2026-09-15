@@ -5,6 +5,7 @@ import dev.okhsunrog.vpnhide.diagnostics.CORE_JAVA_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
 import dev.okhsunrog.vpnhide.diagnostics.CheckResult
 import dev.okhsunrog.vpnhide.diagnostics.CheckResults
+import dev.okhsunrog.vpnhide.diagnostics.ConfigReadiness
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticAttempt
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
@@ -71,6 +72,28 @@ class DiagnosticContextDataTest {
         val loading = fresh.copy(active = ObservationRequest(2, 0, 1))
         assertEquals(RoutingRead.Join, routingReadPlan(loading))
         assertEquals(RoutingRead.Join, routingReadPlan(loading.copy(generation = 1)))
+    }
+
+    @Test
+    fun `config readiness and change epoch from the impact state reach eligibility and the context`() {
+        val applying =
+            buildDiagnosticContextObservation(
+                selfNeedsRestart = false,
+                routing = current(DiagnosticGate.ROUTED),
+                snapshot = RootSnapshot(snapshotSections(), observationId = 7, generation = 3),
+                config = CanonicalConfig(),
+                selfPackage = selfPackage,
+                processIdentity = "pid:1;uid:10",
+                now = 42,
+                readiness = ConfigReadiness.Applying,
+                changeEpoch = 3,
+            )
+        assertEquals(DiagnosticEligibility.Applying, applying.eligibility)
+        assertEquals(3L, applying.context?.changeEpoch)
+        val unknown = observe(routing = current(DiagnosticGate.ROUTED), readiness = ConfigReadiness.Unknown)
+        assertEquals(DiagnosticEligibility.ApplicationUnknown, unknown.eligibility)
+        val failed = observe(routing = current(DiagnosticGate.ROUTED), readiness = ConfigReadiness.Failed)
+        assertEquals(DiagnosticEligibility.ApplicationFailed, failed.eligibility)
     }
 
     @Test
@@ -199,6 +222,7 @@ class DiagnosticContextDataTest {
     private fun observe(
         selfNeedsRestart: Boolean = false,
         routing: ObservationState<DiagnosticGate>,
+        readiness: ConfigReadiness = ConfigReadiness.Settled,
     ) = buildDiagnosticContextObservation(
         selfNeedsRestart = selfNeedsRestart,
         routing = routing,
@@ -207,6 +231,7 @@ class DiagnosticContextDataTest {
         selfPackage = selfPackage,
         processIdentity = "pid:1;uid:10",
         now = 42,
+        readiness = readiness,
     )
 
     private fun snapshotSections(): Map<String, String> =

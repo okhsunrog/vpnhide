@@ -115,10 +115,11 @@ internal fun DiagnosticEligibility.blockedGate(): DiagnosticGate? =
 /**
  * Fold the adapter's observations into eligibility plus the measurement context.
  *
- * Config readiness is treated as settled and the change epoch stays at zero: the
- * operation-impact stage (dependencies on accepted config operations, epoch
- * advancement at dispatch) is not connected yet. A config change during a run is
- * still detected through the self configuration identity at end-context time.
+ * [readiness] and [changeEpoch] come from the config-operation impact state
+ * ([DiagnosticImpactState]): a relevant operation in flight makes the suite
+ * Applying, an unresolved one ApplicationUnknown, and every mutating dispatch of
+ * a relevant operation advances the epoch so an older measurement reads as
+ * Changed. A config change is also caught by the self configuration identity.
  */
 internal fun buildDiagnosticContextObservation(
     selfNeedsRestart: Boolean,
@@ -128,9 +129,11 @@ internal fun buildDiagnosticContextObservation(
     selfPackage: String,
     processIdentity: String,
     now: Long,
+    readiness: ConfigReadiness = ConfigReadiness.Settled,
+    changeEpoch: Long = 0,
 ): DiagnosticContextObservation {
     val restart = if (selfNeedsRestart) RestartRequirement.App else RestartRequirement.None
-    val eligibility = diagnosticEligibility(initialized = true, restart, ConfigReadiness.Settled, selfRoutingObservation(routing))
+    val eligibility = diagnosticEligibility(initialized = true, restart, readiness, selfRoutingObservation(routing))
     val gate = currentObservationValue(routing)
     val context =
         if (gate != null && snapshot != null) {
@@ -139,7 +142,7 @@ internal fun buildDiagnosticContextObservation(
                 configuration = selfConfigurationIdentity(config, selfPackage),
                 routing = routingIdentity(snapshot.sections, gate),
                 coverage = coverageIdentity(snapshot.sections),
-                changeEpoch = 0,
+                changeEpoch = changeEpoch,
                 observationId = snapshot.observationId,
                 observedAt = now,
             )

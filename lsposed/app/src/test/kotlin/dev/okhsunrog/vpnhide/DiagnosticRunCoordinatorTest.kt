@@ -244,6 +244,58 @@ class DiagnosticRunCoordinatorTest {
             assertNull(f.owner.view.value.core.active)
         }
 
+    @Test
+    fun `a run waits for its relevant config operation and starts checking when it settles`() =
+        fixture { f ->
+            val handle = f.accept(diagnosticRequest().copy(dependencies = setOf(11)))
+            assertEquals(
+                DiagnosticStage.Waiting,
+                f.owner.view.value.core.active
+                    ?.stage,
+            )
+            assertTrue(f.observations.tryReceive().isFailure)
+            f.owner.operationAccepted(12)
+            f.owner.operationSettled(11, null)
+            assertEquals(
+                DiagnosticStage.Waiting,
+                f.owner.view.value.core.active
+                    ?.stage,
+            )
+            f.owner.operationSettled(12, null)
+            f.eligible()
+            f.core()
+            f.slow()
+            f.eligible()
+            assertEquals(RunOutcome.Completed, handle.await().attempt.outcome)
+        }
+
+    @Test
+    fun `a paused config operation finishes a waiting run without probes and a dispatch interrupts a probing one`() =
+        fixture { f ->
+            val waiting = f.accept(diagnosticRequest().copy(dependencies = setOf(21)))
+            f.owner.operationSettled(21, TransitionFailure.ApplicationUnknown)
+            val blocked = waiting.await().attempt
+            assertEquals(RunOutcome.NotStarted, blocked.outcome)
+            assertEquals(TransitionFailure.ApplicationUnknown, blocked.failure)
+            assertTrue(f.probes.tryReceive().isFailure)
+
+            val probing = f.accept(diagnosticRequest())
+            f.eligible()
+            val late = f.probes.receive()
+            f.owner.contextChanged(known = true)
+            assertEquals(
+                DiagnosticStage.Draining,
+                f.owner.view.value.core.active
+                    ?.stage,
+            )
+            late.result.complete(coreResults())
+            val interrupted = probing.await().attempt
+            assertEquals(RunOutcome.Interrupted, interrupted.outcome)
+            assertEquals(TransitionFailure.ContextChanged, interrupted.failure)
+            assertNull(f.owner.view.value.core.lastComplete)
+            assertFalse(f.owner.view.value.core.quarantined)
+        }
+
     private fun fixture(block: suspend (Fixture) -> Unit) =
         runBlocking {
             val fixture = Fixture()

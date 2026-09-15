@@ -259,6 +259,19 @@ class DiagnosticRunDataTest {
         fixture.send(DiagnosticRunEvent.NotEligible(fixture.active.ticket, DiagnosticEligibility.VpnOff))
         assertEquals(DiagnosticStage.Core, fixture.active.stage)
     }
+
+    @Test
+    fun `a request with different dependencies joins the active run instead of queueing a second suite`() {
+        val fixture = RunFixture()
+        fixture.request(dependencies = setOf(4))
+        fixture.request()
+        assertEquals(DiagnosticRunEffect.Accepted(1, joined = true), fixture.effects.last())
+        assertEquals(null, fixture.state.pending)
+        fixture.send(DiagnosticRunEvent.OperationSettled(4))
+        fixture.request(dependencies = setOf(9))
+        assertEquals(DiagnosticRunEffect.Accepted(1, joined = true), fixture.effects.last())
+        assertEquals(DiagnosticStage.Checking, fixture.active.stage)
+    }
 }
 
 internal fun runContext(): MeasurementContext = MeasurementContext("process:1/uid:10", "self-config:1", "vpn:1", "kpm:1", 1, 1, 10)
