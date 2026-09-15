@@ -122,6 +122,16 @@ private class FakeMutationClient : RootMutationClient {
         return inspect()
     }
 
+    /** Mirrors vhmutate's adoption policy: a rejected adoption still returns the receipt. */
+    override fun adopt(sessionId: String): RootMutationReply {
+        val receipt = snapshot.receipt
+        if (receipt.session == sessionId && receipt.boot == snapshot.boot) return inspect()
+        if (!snapshot.quiescent || (receipt.session == null && receipt.boot == snapshot.boot)) {
+            return RootMutationReply.Observed(false, snapshot)
+        }
+        return open(snapshot, sessionId)
+    }
+
     override fun execute(
         session: RootMutationSession,
         sequence: Long,

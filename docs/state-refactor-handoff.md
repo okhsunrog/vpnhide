@@ -127,8 +127,9 @@ Signing is configured locally; never print keystore secrets. APK:
 SDK: `/home/okhsunrog/Android/Sdk`; apksigner is in `build-tools/35.0.0`.
 
 Device last used: Pixel 8 Pro, serial `3B241FDJG003LP`. Check availability before use.
-Installed version: the `252a225e` build of this branch (self-target preparation
-as root gate), user 0 only. On 2026-09-15 the device had only user 0 (`pm list users`); profiles
+Installed version: the `vhmutate adopt` build of this branch (after `252a225e`),
+user 0 only. The isolated device transport fixture
+(`scripts/test-root-transport.py`) passed on it, including the `adopt` steps. On 2026-09-15 the device had only user 0 (`pm list users`); profiles
 10 and 11 no longer existed. `adb install --user 0 -r` alone is not proof that
 other profiles are clean. Inspect `pm list users` and `dumpsys package
 dev.okhsunrog.vpnhide` after installation.
@@ -144,18 +145,22 @@ Method: `adb logcat -c`, `am force-stop` + `am start -W`, then read the
 | `68cc1c5c` (diagnostic coordinator + Verifying reuse) | 4014, 3884, 3834 | startup reconcile invalidated root ~430 ms after the first snapshot; Verifying joined the reload |
 | deferred reconcile (`a9900b13`) | 2470, 2329, 2472 | reconcile and its refresh run after first paint |
 | whole-snapshot seed from the self-target read (`00b94862`) | 1717, 1702, 1710 | `root_snapshot_seeded`, no second shell before paint |
-| self-target preparation is the root gate (installed) | 1617, 1586, 1470 | no separate `su -c id`; preparation starts at ~90 ms |
+| self-target preparation is the root gate (`252a225e`) | 1617, 1586, 1470 | no separate `su -c id`; preparation starts at ~90 ms |
+| `vhmutate adopt`: inspect + open in one round trip (installed) | 1470, 1481, 1478 | config init 220 ms (staging 105 + adopt 110) instead of 320 |
 
-Where the remaining ~1.5 s goes (run 2): config coordinator initialization
-320 ms (`vhmutate` inspect + open, two privileged round trips); the preparation
-root shell about 0.8 s (about 650 ms of section work plus `su`/process overhead);
-routing probe 0.12 s; suite 0.13 s; derivation 0.05 s. The deferred reconcile
-then costs a background root snapshot (about 1.2 s, including package inventory)
-and a repeated derivation after paint.
-Next candidates: let the activator report "runtime unchanged" so the reconcile
-skips its refresh (needs a redacted marker through the transport, like the
-capacity warning); merge inspect+open into one `vhmutate` round trip; reduce `su`
-spawns inside the suite (uid probe plus root `vhprobe`).
+Where the remaining ~1.5 s goes (run 2): helper staging `su` 105 ms; `adopt`
+110 ms; the preparation root shell about 0.82 s (about 650 ms of section work
+plus `su`/process overhead); routing probe 0.12 s; suite 0.14 s; derivation
+0.05 s. The deferred reconcile then costs a background root snapshot (about
+1.2 s, including package inventory) and a repeated derivation after paint.
+Deferred by the user's decision: an activator "runtime unchanged" marker so the
+reconcile skips its refresh; fewer `su` spawns inside the suite. Untouched:
+folding helper staging into the adopt round trip (~100 ms).
+
+Measurement caveat: with the screen dozing and the keyguard showing, the app
+launches in the background scheduling group and every phase runs about three
+times slower (`dashboard_ready` about 5 s). Check `dumpsys power` for
+`mWakefulness=Awake` before trusting a trace.
 
 Hardware checks completed: reproduced old theme-change navigation reset, then
 verified Settings, a nested help article and selected Statistics tab survive

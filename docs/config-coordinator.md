@@ -92,6 +92,10 @@ RebootRequired. A newly created same-boot lane returns RebootRequired: it cannot
 prove old-version untracked commands have stopped. A verified boot boundary can
 open a fresh session. A same-boot Running predecessor stays paused. Neither case
 causes a reboot, deletes metadata or launches application config effects.
+Initialization uses the helper's `adopt` verb: one privileged round trip that
+inspects and opens under the helper's lock, with this policy mirrored in the
+helper so a rejected adoption still returns the receipt the mode is decided from
+(`inspect` + `open` were two round trips on every cold start).
 
 Execution and recovery are associated with an operation ID and phase as well as
 the transport session/sequence. Recovery for another operation or phase cannot

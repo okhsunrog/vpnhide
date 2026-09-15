@@ -8,6 +8,9 @@ internal interface RootMutationClient {
         sessionId: String,
     ): RootMutationReply
 
+    /** inspect + open under one lock and one privileged round trip; rejection still carries the receipt. */
+    fun adopt(sessionId: String): RootMutationReply
+
     fun execute(
         session: RootMutationSession,
         sequence: Long,
@@ -38,6 +41,11 @@ internal class RootMutationTransport(
     ): RootMutationReply {
         require(validRootIdentity(expected.boot) && validRootIdentity(sessionId))
         return call(listOf("open", expected.boot, expected.receipt.revision.toString(), sessionId))
+    }
+
+    override fun adopt(sessionId: String): RootMutationReply {
+        require(validRootIdentity(sessionId))
+        return call(listOf("adopt", sessionId))
     }
 
     override fun execute(

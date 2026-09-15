@@ -16,30 +16,31 @@ internal class ConfigRootIo(
 
     override suspend fun initialize(): ConfigInitialization {
         val client = transport ?: prepare()?.also { transport = it } ?: return ConfigInitialization(ConfigCoordinatorMode.Unavailable)
-        val inspected = client.inspect() as? RootMutationReply.Observed ?: return ConfigInitialization(ConfigCoordinatorMode.Unavailable)
-        if (!inspected.accepted) return ConfigInitialization(ConfigCoordinatorMode.Unavailable)
-        val snapshot = inspected.snapshot
-        if (!snapshot.quiescent) {
-            return ConfigInitialization(
-                ConfigCoordinatorMode.Paused,
-                (snapshot.canonical as? RootCanonicalRead.Available)?.config,
-            )
-        }
-        // First adoption cannot prove that commands from the old, untracked transport stopped in this boot.
-        if (snapshot.receipt.session == null &&
-            snapshot.receipt.boot == snapshot.boot
-        ) {
-            return ConfigInitialization(
-                ConfigCoordinatorMode.RebootRequired,
-                (snapshot.canonical as? RootCanonicalRead.Available)?.config,
-            )
-        }
+        // One privileged round trip: the helper inspects and opens under its lock, and a
+        // rejected adoption still returns the receipt this policy is decided from.
         val id = UUID.randomUUID().toString()
-        val opened =
-            client.open(snapshot, id) as? RootMutationReply.Observed ?: return ConfigInitialization(ConfigCoordinatorMode.Unavailable)
-        session = openedRootMutationSession(opened, snapshot.boot, id) ?: return ConfigInitialization(ConfigCoordinatorMode.Unavailable)
-        sequence = opened.snapshot.receipt.sequence
-        return when (val read = opened.snapshot.canonical) {
+        val adopted = client.adopt(id) as? RootMutationReply.Observed ?: return ConfigInitialization(ConfigCoordinatorMode.Unavailable)
+        val snapshot = adopted.snapshot
+        if (!adopted.accepted) {
+            val config = (snapshot.canonical as? RootCanonicalRead.Available)?.config
+            return when {
+                !snapshot.quiescent -> {
+                    ConfigInitialization(ConfigCoordinatorMode.Paused, config)
+                }
+
+                // First adoption cannot prove that commands from the old, untracked transport stopped in this boot.
+                snapshot.receipt.session == null && snapshot.receipt.boot == snapshot.boot -> {
+                    ConfigInitialization(ConfigCoordinatorMode.RebootRequired, config)
+                }
+
+                else -> {
+                    ConfigInitialization(ConfigCoordinatorMode.Unavailable)
+                }
+            }
+        }
+        session = openedRootMutationSession(adopted, snapshot.boot, id) ?: return ConfigInitialization(ConfigCoordinatorMode.Unavailable)
+        sequence = snapshot.receipt.sequence
+        return when (val read = snapshot.canonical) {
             is RootCanonicalRead.Available -> ConfigInitialization(ConfigCoordinatorMode.Open, read.config)
             RootCanonicalRead.Missing -> ConfigInitialization(ConfigCoordinatorMode.Missing)
             RootCanonicalRead.Invalid -> ConfigInitialization(ConfigCoordinatorMode.Invalid)

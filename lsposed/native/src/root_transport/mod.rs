@@ -91,6 +91,28 @@ fn dispatch(
 ) -> io::Result<bool> {
     match (verb, args) {
         ("inspect", []) => Ok(true),
+        // inspect + open in one privileged round trip, under the same lock. The
+        // app's adoption policy is mirrored here so the reply is decisive: a lane
+        // never opened in this boot cannot prove untracked predecessors stopped
+        // (the app then asks for a reboot), and a running predecessor keeps the
+        // lane paused. Either way the reply carries the receipt the app needs.
+        ("adopt", [session]) => {
+            if !valid_id(session) {
+                return Ok(false);
+            }
+            if store.state.matches(boot, session) {
+                return Ok(true);
+            }
+            if !store.state.quiescent(boot)
+                || (store.state.session.is_none() && store.state.boot == boot)
+            {
+                return Ok(false);
+            }
+            let mut state = State::idle(boot);
+            state.session = Some(session.clone());
+            store.replace(state)?;
+            Ok(true)
+        }
         ("open", [expected_boot, expected_revision, session]) => {
             let revision = number(expected_revision)?;
             if expected_boot != boot || !valid_id(session) {

@@ -217,40 +217,37 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
 
             LaunchedEffect(Unit) { probeRoot(false) }
 
-            when (rootState) {
-                null -> {
-                    StartupLoadingScreen()
+            if (rootState == RootState.Denied) {
+                LaunchedEffect(Unit) { StartupTrace.rootDeniedReady() }
+                RootDeniedScreen(onRecheck = { probeRoot(true) })
+            } else {
+                // The main screen composes immediately, while the root gate is still
+                // resolving: its own loading skeleton sits inside the real scaffold,
+                // so the header and the tab bar do not jump once data arrives, and
+                // navigation stays available during the startup preparation. One
+                // call site for both states keeps the screen's saved state intact.
+                val granted = rootState == RootState.Granted
+                // Only prompt about background update checks once the app is
+                // actually usable (root granted) — never over the no-root gate.
+                var showBackgroundUpdatePrompt by remember { mutableStateOf(false) }
+                LaunchedEffect(granted, settingsLoaded, settings.backgroundUpdateChecksConfigured) {
+                    showBackgroundUpdatePrompt =
+                        granted && settingsLoaded && !settings.backgroundUpdateChecksConfigured
                 }
-
-                RootState.Denied -> {
-                    LaunchedEffect(Unit) { StartupTrace.rootDeniedReady() }
-                    RootDeniedScreen(onRecheck = { probeRoot(true) })
+                if (showBackgroundUpdatePrompt) {
+                    BackgroundUpdatePromptDialog(
+                        onEnable = {
+                            showBackgroundUpdatePrompt = false
+                            settingsInteractor.setBackgroundUpdateChecksEnabled(true)
+                            requestUpdateNotificationsIfNeeded()
+                        },
+                        onDismiss = {
+                            showBackgroundUpdatePrompt = false
+                            settingsInteractor.setBackgroundUpdateChecksEnabled(false)
+                        },
+                    )
                 }
-
-                RootState.Granted -> {
-                    // Only prompt about background update checks once the app is
-                    // actually usable (root granted) — not over the loading or
-                    // no-root gate, where nothing else works yet.
-                    var showBackgroundUpdatePrompt by remember { mutableStateOf(false) }
-                    LaunchedEffect(settingsLoaded, settings.backgroundUpdateChecksConfigured) {
-                        showBackgroundUpdatePrompt =
-                            settingsLoaded && !settings.backgroundUpdateChecksConfigured
-                    }
-                    if (showBackgroundUpdatePrompt) {
-                        BackgroundUpdatePromptDialog(
-                            onEnable = {
-                                showBackgroundUpdatePrompt = false
-                                settingsInteractor.setBackgroundUpdateChecksEnabled(true)
-                                requestUpdateNotificationsIfNeeded()
-                            },
-                            onDismiss = {
-                                showBackgroundUpdatePrompt = false
-                                settingsInteractor.setBackgroundUpdateChecksEnabled(false)
-                            },
-                        )
-                    }
-                    ConfigFeedbackProvider { MainScreen() }
-                }
+                ConfigFeedbackProvider { MainScreen() }
             }
         }
     }
@@ -278,44 +275,6 @@ private fun tabLabel(tab: Tab): String =
         Tab.Statistics -> stringResource(R.string.tab_statistics)
         Tab.Protection -> stringResource(R.string.tab_protection)
     }
-
-@Composable
-private fun AppTopBarTitle(currentTab: Tab) {
-    val tabLabel = tabLabel(currentTab)
-    // The full-size brand block (logo + wordmark) wants ~190dp. Material3's
-    // TopAppBar hands the title only the width left over after the action
-    // buttons, so on very narrow / high-density screens that slot shrinks.
-    // Scale the logo and the two text lines down together (never below 70%) so
-    // the brand stays on a single line instead of wrapping.
-    BoxWithConstraints {
-        val scale = (maxWidth.value / 200f).coerceIn(0.6f, 1f)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                painter = painterResource(R.drawable.topbar_mark),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(46.dp * scale),
-            )
-            Spacer(Modifier.width(12.dp * scale))
-            Column {
-                Text(
-                    text = stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontSize = MaterialTheme.typography.headlineSmall.fontSize * scale,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                )
-                Text(
-                    text = tabLabel,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontSize = MaterialTheme.typography.labelLarge.fontSize * scale,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
-}
 
 /**
  * Brand block (logo + wordmark + tab label) for the main header, able to grow.
@@ -847,26 +806,6 @@ private fun MainScreen() {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun StartupLoadingScreen() {
-    Scaffold(
-        containerColor = AppColors.screenBackground,
-        topBar = {
-            TopAppBar(
-                title = { AppTopBarTitle(Tab.Dashboard) },
-                colors =
-                    TopAppBarDefaults.topAppBarColors(
-                        containerColor = AppColors.topBarContainer,
-                        scrolledContainerColor = AppColors.topBarScrolledContainer,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    ),
-            )
-        },
-    ) { innerPadding ->
-        DashboardLoadingState(modifier = Modifier.padding(innerPadding))
-    }
-}
-
 private fun selfTargetErrorBodyRes(kind: SelfTargetFailureKind): Int =
     when (kind) {
         SelfTargetFailureKind.RootUnavailable -> R.string.self_targets_error_body_root

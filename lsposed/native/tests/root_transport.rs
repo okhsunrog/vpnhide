@@ -85,6 +85,36 @@ impl Fixture {
 }
 
 #[test]
+fn adopt_opens_in_one_round_trip_only_after_a_tracked_predecessor() {
+    let fixture = Fixture::new();
+    // A lane never opened in this boot cannot prove untracked predecessors stopped.
+    let first = fixture.call(&["adopt", SESSION_A], "");
+    assert_eq!(first["status"], "rejected");
+    assert_eq!(first["state"]["session"], Value::Null);
+    assert_eq!(first["config_status"], "readable");
+    fixture.open();
+    assert_eq!(fixture.run("1", "exit 0")["state"]["status"], "finished");
+    // A quiescent tracked session from a previous app process is replaced atomically.
+    let adopted = fixture.call(&["adopt", SESSION_B], "");
+    assert_eq!(adopted["status"], "ok");
+    assert_eq!(adopted["state"]["session"], SESSION_B);
+    assert_eq!(adopted["state"]["sequence"], 0);
+    assert_eq!(adopted["state"]["status"], "idle");
+    // Repeating a lost reply acknowledges the same session without resetting it.
+    assert_eq!(
+        fixture.call(&["run", &fixture.boot, SESSION_B, "1"], "exit 0")["state"]["status"],
+        "finished"
+    );
+    let repeated = fixture.call(&["adopt", SESSION_B], "");
+    assert_eq!(repeated["status"], "ok");
+    assert_eq!(repeated["state"]["sequence"], 1);
+    assert_eq!(
+        fixture.call(&["adopt", "not-a-uuid"], "")["status"],
+        "rejected"
+    );
+}
+
+#[test]
 fn incomplete_stdin_is_not_executed_and_delayed_input_cannot_cross_a_recovery_fence() {
     let fixture = Fixture::new();
     fixture.open();

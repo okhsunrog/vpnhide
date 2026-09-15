@@ -68,6 +68,7 @@ commands return one JSON reply (`version`, `status`, `boot`, `state`,
 |---|---|---|
 | `inspect` | none | Read the latest receipt and, if quiescent, the canonical file |
 | `open` | current boot, expected revision, new session UUID | Compare-and-set session replacement after predecessor quiescence; an identical retry returns the current receipt without resetting it |
+| `adopt` | new session UUID | `inspect` + `open` under one lock and one privileged round trip, with the app's adoption policy mirrored: rejected while a predecessor is running or when the lane was never opened in this boot (the app then reports Paused or RebootRequired from the returned receipt); an identical retry acknowledges the session without resetting it. The app's startup uses this verb |
 | `run` | current boot, session UUID, next sequence | Validate identity/order, persist `running`, execute exactly once, drain, persist result |
 | `recover` | current boot, session UUID, attempted sequence | Read existing receipt, or consume an undispatched sequence as `not_started` so its late launch cannot run |
 

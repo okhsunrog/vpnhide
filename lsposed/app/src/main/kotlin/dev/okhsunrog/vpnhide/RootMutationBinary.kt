@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide
 
 import android.content.Context
 import android.os.Build
+import dev.okhsunrog.vpnhide.startup.StartupTrace
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
@@ -30,8 +31,14 @@ internal fun prepareRootMutationTransport(
         val executable = "$MUTATION_DIRECTORY/vhmutate-$digest"
         val command = buildRootMutationStageCommand(local.absolutePath, MUTATION_DIRECTORY, digest, UUID.randomUUID().toString())
         when (runner.run(listOf("su", "-c", command))) {
-            is RootProcessResult.Completed -> RootMutationTransport(executable, "$MUTATION_DIRECTORY/lane", runner = runner)
-            RootProcessResult.Uncertain -> null
+            is RootProcessResult.Completed -> {
+                StartupTrace.mark("config_transport_staged")
+                RootMutationTransport(executable, "$MUTATION_DIRECTORY/lane", runner = runner)
+            }
+
+            RootProcessResult.Uncertain -> {
+                null
+            }
         }
     } catch (_: Exception) {
         null
