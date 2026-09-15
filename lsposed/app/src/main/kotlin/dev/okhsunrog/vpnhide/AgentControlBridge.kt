@@ -182,6 +182,11 @@ private class BridgeServer(
             }
         } catch (_: SocketTimeoutException) {
             // Stalled/idle peer hit the read deadline; drop the connection quietly.
+        } catch (e: IOException) {
+            // The peer went away mid-request: closed, reset by a firewall rule (the
+            // ports module rejects this app's own loopback traffic once VPN Hide is
+            // a ports target), or closed by stop(). Nobody is left to answer.
+            VpnHideLog.w(TAG, "Agent bridge client disconnected: ${e.message}")
         } catch (e: IllegalArgumentException) {
             writeError(client, 400, "Bad Request", e.message ?: "Invalid request")
         } catch (e: SerializationException) {
@@ -252,7 +257,13 @@ private fun writeError(
     reason: String,
     error: String,
 ) {
-    writeJson(client, status, reason, AgentBridgeJson.encodeToString(AgentBridgeError(error)))
+    // Best effort: the client may already be gone, and an error response that
+    // throws again would escape the single serve thread and take the process down.
+    try {
+        writeJson(client, status, reason, AgentBridgeJson.encodeToString(AgentBridgeError(error)))
+    } catch (e: IOException) {
+        VpnHideLog.w(TAG, "Agent bridge could not deliver HTTP $status: ${e.message}")
+    }
 }
 
 private fun writeJson(
