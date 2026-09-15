@@ -78,7 +78,35 @@
     {
       "id": "troubleshoot",
       "title": { "en": "Fix a problem", "ru": "Решить проблему", "zh": "解决问题" },
-      "articles": []
+      "articles": [
+        {
+          "id": "module-not-active",
+          "title": { "en": "A module is installed but not active", "ru": "Модуль установлен, но не активен", "zh": "模块已安装但未生效" },
+          "keywords": {
+            "en": ["not active", "inactive", "reboot to activate", "scope", "superkey", "activator missing", "conflict", "unsupported kernel"],
+            "ru": ["не активен", "неактивен", "перезагрузите для активации", "scope", "superkey", "активатор отсутствует", "конфликт", "неподдерживаемое ядро"],
+            "zh": ["未生效", "不生效", "重启以激活", "作用域", "superkey", "激活器缺失", "冲突", "内核不受支持"]
+          }
+        },
+        {
+          "id": "broke-after-update",
+          "title": { "en": "It stopped working after an update", "ru": "Перестало работать после обновления", "zh": "更新后不工作了" },
+          "keywords": {
+            "en": ["after update", "stopped working", "version mismatch", "kernel changed", "unknown symbol", "scope reset"],
+            "ru": ["после обновления", "перестало работать", "несовпадение версий", "сменилось ядро", "unknown symbol", "сбросился scope"],
+            "zh": ["更新后", "不工作", "版本不一致", "内核变了", "unknown symbol", "作用域丢失"]
+          }
+        },
+        {
+          "id": "collect-report",
+          "title": { "en": "Collect a debug report", "ru": "Собрать отчёт для диагностики", "zh": "收集调试报告" },
+          "keywords": {
+            "en": ["debug report", "bug report", "logcat", "debug logging", "export", "bundle", "diagnostics"],
+            "ru": ["отчёт", "баг-репорт", "logcat", "debug logging", "экспорт", "архив", "диагностика"],
+            "zh": ["调试报告", "bug 报告", "logcat", "debug logging", "导出", "调试包", "诊断"]
+          }
+        }
+      ]
     },
     {
       "id": "understand-checks",
