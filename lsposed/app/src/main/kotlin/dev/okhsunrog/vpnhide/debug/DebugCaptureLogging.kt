@@ -1,13 +1,10 @@
 package dev.okhsunrog.vpnhide.debug
 
-import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.CanonicalMutation
 import dev.okhsunrog.vpnhide.CanonicalWriteResult
 import dev.okhsunrog.vpnhide.CaptureLoggingEvent
 import dev.okhsunrog.vpnhide.OperationSource
-import dev.okhsunrog.vpnhide.RootSnapshot
-import dev.okhsunrog.vpnhide.parseCanonicalConfig
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
@@ -113,19 +110,3 @@ private fun captureStep(
     commandExit = result.exitCode,
     detail = result.operation?.failure?.name ?: result.output,
 )
-
-/**
- * Parse canonical config from snapshot and clone it with only [`debug`] changed.
- * Callers are responsible for having canonical JSON available as the source of
- * truth.
- */
-internal fun debugToggledCanonicalConfig(
-    snapshot: RootSnapshot?,
-    enabled: Boolean,
-): CanonicalConfig? =
-    snapshot
-        ?.sections
-        ?.get("canonical_config")
-        ?.let {
-            runCatching { parseCanonicalConfig(it) }.getOrNull()
-        }?.copy(debug = enabled)

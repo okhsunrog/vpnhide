@@ -45,13 +45,6 @@ internal object ConfigChannels {
 }
 
 /**
- * If capture left debug enabled, return a canonical copy with effective debug
- * snapped back to user intent for startup reconciliation.
- */
-internal fun canonicalConfigForStartupDebugReconcile(config: CanonicalConfig): CanonicalConfig? =
-    if (config.debug != config.debugSwitch) config.copy(debug = config.debugSwitch) else null
-
-/**
  * Run the startup runtime-config reconcile. Canonical JSON already contains
  * debug, so reconcile only needs to re-run activators to pick up the current
  * file state. Blocking — call from a background dispatcher. Best-effort: a

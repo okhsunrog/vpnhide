@@ -100,7 +100,7 @@ directions, since `internal` is module-wide and the compiler will not.
 - **`RootSnapshotCache`** — the single batched root read. Need new system state
   on the Dashboard/Hiding path? Add a section to its shell snapshot; don't
   add an ad-hoc `suExec` that races the snapshot.
-- **`ShellUtils`** — `suExec`/`suExecAsync`, and the parsers `parseConfigLines`,
+- **`ShellUtils`** — `suExec`, and the parsers `parseConfigLines`,
   `parseKeyValueLines`, `parsePackageUidMap`. **Never write another `pm list`
   or `key=value` parser** — there used to be four; there is now one of each.
 - **`ConfigChannels`** — the one place that invokes the single active native

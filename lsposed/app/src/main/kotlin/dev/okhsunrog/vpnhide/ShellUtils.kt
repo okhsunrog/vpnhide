@@ -4,8 +4,6 @@ import android.util.Log
 import dev.okhsunrog.vpnhide.generated.IfaceLists
 import dev.okhsunrog.vpnhide.picker.parsePackageUidLine
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -116,11 +114,6 @@ private fun commandPreview(cmd: String): String {
             .joinToString("\n")
     return if (preview.length <= 800) preview else preview.take(800) + "..."
 }
-
-internal suspend fun suExecAsync(
-    cmd: String,
-    timeoutSec: Long = SU_DEFAULT_TIMEOUT_SEC,
-): Pair<Int, String> = withContext(Dispatchers.IO) { suExec(cmd, timeoutSec) }
 
 /**
  * Lines of a vpnhide config file: trimmed, with blank lines and `#`-comments
