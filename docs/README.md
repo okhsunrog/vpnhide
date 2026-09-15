@@ -43,5 +43,7 @@ Repo conventions and the PR/changelog process are in
 ## Roadmap, plans & working notes
 
 Forward-looking, non-reference material — directions, plans and TODOs that aren't
-a release commitment — lives in **[`notes/`](notes/)**, starting with
-[notes/ROADMAP.md](notes/ROADMAP.md).
+a release commitment — lives in **[`notes/`](notes/)**:
+
+- [notes/ROADMAP.md](notes/ROADMAP.md) — larger product directions
+- [notes/setup-wizard-design.md](notes/setup-wizard-design.md) — design proposal for the first-run setup wizard (not yet implemented)
