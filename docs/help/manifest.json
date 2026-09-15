@@ -6,7 +6,7 @@
     { "article": "configure-hiding", "label": { "en": "Finds an installed VPN", "ru": "Находит установленный VPN", "zh": "找到已安装的 VPN" } },
     { "article": "game-accelerators", "label": { "en": "Game accelerator", "zh": "游戏加速器" }, "locales": ["en", "zh"] },
     { "article": "configure-hiding", "label": { "en": "The J / N / A / P roles", "ru": "Роли J / N / A / P", "zh": "J / N / A / P 角色" } },
-    { "article": "configure-hiding", "label": { "en": "When changes apply", "ru": "Когда применяются изменения", "zh": "更改何时生效" } }
+    { "article": "saving-applying", "label": { "en": "When changes apply", "ru": "Когда применяются изменения", "zh": "更改何时生效" } }
   ],
   "sections": [
     {
@@ -80,6 +80,51 @@
           "keywords": {
             "en": ["game accelerator", "accelerator", "uu", "xunyou", "tencent", "biubiu", "ping", "latency", "lag"],
             "zh": ["游戏加速器", "加速器", "uu", "迅游", "腾讯", "延迟", "卡顿"]
+          }
+        },
+        {
+          "id": "split-tunneling",
+          "title": { "en": "Direct access or through the tunnel", "ru": "Напрямую или через туннель", "zh": "直连还是走隧道" },
+          "keywords": {
+            "en": ["split tunnel", "split tunneling", "per-app routing", "direct", "kill switch", "block without vpn", "real ip", "not routed"],
+            "ru": ["раздельное туннелирование", "split tunnel", "маршрутизация по приложениям", "напрямую", "kill switch", "блокировка без vpn", "реальный ip", "не через vpn"],
+            "zh": ["分流", "分应用路由", "直连", "断网保护", "kill switch", "无 vpn 阻断", "真实 ip", "没走 vpn"]
+          }
+        },
+        {
+          "id": "ports",
+          "title": { "en": "Hide localhost ports", "ru": "Скрыть localhost-порты", "zh": "隐藏 localhost 端口" },
+          "keywords": {
+            "en": ["ports", "localhost", "loopback", "127.0.0.1", "clash", "sing-box", "v2ray", "proxy", "port ranges", "connection refused"],
+            "ru": ["порты", "localhost", "loopback", "127.0.0.1", "clash", "sing-box", "v2ray", "прокси", "диапазоны портов", "connection refused"],
+            "zh": ["端口", "localhost", "loopback", "127.0.0.1", "clash", "sing-box", "v2ray", "代理", "端口范围", "连接被拒绝"]
+          }
+        },
+        {
+          "id": "work-profiles",
+          "title": { "en": "Work profiles, clones and second space", "ru": "Рабочие профили, клоны и второе пространство", "zh": "工作资料、克隆与第二空间" },
+          "keywords": {
+            "en": ["work profile", "clone", "cloned app", "second space", "dual apps", "multiple profiles", "main profile"],
+            "ru": ["рабочий профиль", "клон", "клонированное приложение", "второе пространство", "клоны", "несколько профилей", "основной профиль"],
+            "zh": ["工作资料", "克隆", "分身", "第二空间", "双开", "多资料", "主资料"]
+          }
+        },
+        {
+          "id": "saving-applying",
+          "title": { "en": "When changes take effect", "ru": "Когда применяются изменения", "zh": "更改何时生效" },
+          "keywords": {
+            "en": ["apply", "save", "takes effect", "force stop", "restart app", "reboot", "cached", "not applying"],
+            "ru": ["применить", "сохранить", "вступает в силу", "остановить приложение", "перезапуск", "перезагрузка", "кеш", "не применяется"],
+            "zh": ["生效", "保存", "应用更改", "强制停止", "重启应用", "重启", "缓存", "没生效"]
+          }
+        },
+        {
+          "id": "experimental-protection",
+          "title": { "en": "Experimental protection (filesystem paths)", "ru": "Экспериментальная защита (пути в файловой системе)", "zh": "实验性保护（文件系统路径）" },
+          "keywords": {
+            "en": ["experimental protection", "filesystem paths", "hide vpn filesystem", "sys class net", "proc sys net", "vfs hooks", "not covered"],
+            "ru": ["экспериментальная защита", "пути файловой системы", "скрыть файловую систему vpn", "sys class net", "proc sys net", "хуки vfs", "вне зоны"],
+            "zh": ["实验性保护", "文件系统路径", "隐藏 vpn 文件系统", "sys class net", "proc sys net", "vfs 挂钩", "未覆盖"]
           }
         }
       ]
