@@ -50,16 +50,6 @@
     <string name="ports_policy_invalid">Укажите хотя бы один корректный порт или диапазон от 1 до 65535.</string>
     <string name="apps_help_who_title">Какое приложение настраивать?</string>
     <string name="apps_help_who_body">Роли ставятся на приложение, ОТ которого вы прячете VPN — банк, госуслуги, маркетплейс. Само VPN-приложение здесь настраивать не нужно: оно то, что прячут, и его список находится в Настройки → «Скрытие VPN-приложений».</string>
-    <string name="apps_help_role_java_body">LSPosed скрывает VPN-сигналы в Java API Android: NetworkCapabilities, NetworkInfo и LinkProperties.</string>
-    <string name="apps_help_role_native_body">Активный Native-бэкенд скрывает VPN-сигналы, видимые через проверки ядра и libc, в том числе список сетевых интерфейсов (NetworkInterface читает его через libc, а не через Java API). VPN Hide хранит один выбор Native; работает только активный.</string>
-    <string name="apps_help_role_apps_body">Apps скрывает выбранные пакеты от этого приложения: оно получает очищенный ответ PackageManager и не может перечислять, находить или запрашивать пакеты, которые VPN Hide пометил скрытыми.</string>
-    <string name="apps_help_role_ports_body">Ports скрывает localhost-проверки VPN- и прокси-демонов: для этого приложения они выглядят как закрытые порты. По умолчанию P блокирует все localhost-порты; в настройках можно ограничить блокировку выбранными диапазонами.</string>
-    <string name="apps_help_hook_settings_title">Индивидуальные настройки</string>
-    <string name="apps_help_hook_settings_body">Для Java, Native и Ports нажмите значок настройки рядом с названием, чтобы выбрать отдельные хуки или диапазоны портов. Звёздочка означает, что для приложения включены индивидуальные настройки.</string>
-    <string name="apps_help_apps_hiding_title">Скрытие приложений</string>
-    <string name="apps_help_apps_hiding_body">VPN Hide автоматически находит пакеты, которые стоит скрывать от приложений-наблюдателей: приложения с VPN-сервисом и, если включено, совпадения по имени. Ручной список скрытых пакетов находится в Настройки → «Скрытие VPN-приложений». Системные вызовы исключены, чтобы Android мог продолжать устанавливать и запускать приложения.</string>
-    <string name="apps_help_apply_title">Применение изменений</string>
-    <string name="apps_help_apply_body">После сохранения Java, Native-бэкенды уровня ядра (kmod, встроенный, KPM) и правила портов применяются сразу. Перезапуска процесса требуют только Zygisk-хуки: они загружаются внутрь выбранного приложения, поэтому нужно принудительно остановить и открыть его заново. В любом случае приложение, уже выполнявшее проверку, может держать старый результат в кеше — перезапустите его перед повторной проверкой.</string>
     <string name="apps_help_zygisk_warning_title">Zygisk и банковские приложения</string>
     <string name="apps_help_zygisk_warning_body">Zygisk-хуки работают внутри процесса выбранного приложения. Банковские и платёжные приложения могут это обнаружить, если для них включён Native; оставьте Native выключенным и по возможности используйте Java.</string>
     <string name="apps_help_open_guide">Как настроить скрытие</string>

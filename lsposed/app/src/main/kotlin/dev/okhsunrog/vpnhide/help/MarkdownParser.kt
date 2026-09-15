@@ -105,8 +105,7 @@ private fun collectQuote(
     var i = start
     val sb = StringBuilder()
     while (i < lines.size && lines[i].startsWith(">")) {
-        if (sb.isNotEmpty()) sb.append(' ')
-        sb.append(lines[i].removePrefix(">").trim())
+        appendWrapped(sb, lines[i].removePrefix(">"))
         i++
     }
     out += MdBlock.Quote(parseInline(sb.toString()))
@@ -131,7 +130,7 @@ private fun collectList(
             }
 
             line.isNotBlank() && line[0] == ' ' && items.isNotEmpty() -> {
-                items.last().append(' ').append(line.trim())
+                appendWrapped(items.last(), line)
             }
 
             else -> {
@@ -160,13 +159,37 @@ private fun collectParagraph(
         ) {
             break
         }
-        if (sb.isNotEmpty()) sb.append(' ')
-        sb.append(line.trim())
+        appendWrapped(sb, line)
         i++
     }
     out += MdBlock.Paragraph(parseInline(sb.toString()))
     return i
 }
+
+/**
+ * Append a soft-wrapped continuation [raw] to [target], inserting a joining
+ * space — except at a CJK–CJK boundary. Latin scripts wrap on spaces so the
+ * join needs one; the Chinese article is hard-wrapped mid-sentence and CJK has
+ * no inter-word spaces, so a space there would show up inside the text.
+ */
+private fun appendWrapped(
+    target: StringBuilder,
+    raw: String,
+) {
+    val piece = raw.trim()
+    if (piece.isEmpty()) return
+    if (target.isNotEmpty() && !(target.last().isCjk() && piece.first().isCjk())) {
+        target.append(' ')
+    }
+    target.append(piece)
+}
+
+/** CJK ideographs, kana, and CJK/fullwidth punctuation — scripts written without spaces. */
+private fun Char.isCjk(): Boolean =
+    this in '　'..'〿' || // CJK symbols and punctuation
+        this in '぀'..'ヿ' || // hiragana + katakana
+        this in '㐀'..'鿿' || // CJK unified ideographs (+ ext A)
+        this in '＀'..'￯' // halfwidth and fullwidth forms
 
 /** Flatten blocks to plain text (headings, paragraphs, items) for search. */
 internal fun plainText(blocks: List<MdBlock>): String =

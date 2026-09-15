@@ -23,6 +23,14 @@ class MarkdownParserTest {
     }
 
     @Test
+    fun `cjk soft-wrap joins without inserting a space`() {
+        // The Chinese article is hard-wrapped mid-sentence; CJK has no spaces.
+        val blocks = parseMarkdown("保存后立即\n生效")
+        val p = blocks.single() as MdBlock.Paragraph
+        assertEquals("保存后立即生效", (p.spans.single() as MdSpan.Text).text)
+    }
+
+    @Test
     fun `blank line separates two paragraphs`() {
         val blocks = parseMarkdown("one\n\ntwo")
         assertEquals(2, blocks.filterIsInstance<MdBlock.Paragraph>().size)

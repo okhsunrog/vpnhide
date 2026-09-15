@@ -31,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
@@ -40,7 +41,6 @@ import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.Dispatchers
-import java.util.Locale
 
 private const val ARTICLE_SCHEME = "article:"
 private const val IN_APP_SCHEME = "vpnhide://"
@@ -61,7 +61,7 @@ internal fun HelpScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val language = Locale.getDefault().language
+    val language = LocalConfiguration.current.locales[0].language
     val content by produceState<HelpContent?>(initialValue = null, language) {
         value = kotlinx.coroutines.withContext(Dispatchers.IO) { loadHelpContent(context, language) }
     }
