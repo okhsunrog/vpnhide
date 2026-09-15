@@ -417,6 +417,7 @@ private fun CommunitySettingsSection() {
 internal fun DiagnosticsSettingsScreen(
     selfNeedsRestart: Boolean?,
     onBack: () -> Unit,
+    onOpenAccelerators: (() -> Unit)? = null,
 ) {
     BackHandler(onBack = onBack)
     Scaffold(
@@ -452,6 +453,7 @@ internal fun DiagnosticsSettingsScreen(
             DiagnosticsScreen(
                 selfNeedsRestart = selfNeedsRestart,
                 modifier = Modifier.padding(padding),
+                onOpenAccelerators = onOpenAccelerators,
             )
         }
     }

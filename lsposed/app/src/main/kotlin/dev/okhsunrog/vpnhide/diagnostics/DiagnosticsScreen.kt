@@ -78,6 +78,7 @@ import java.util.zip.ZipOutputStream
 fun DiagnosticsScreen(
     selfNeedsRestart: Boolean,
     modifier: Modifier = Modifier,
+    onOpenAccelerators: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -167,7 +168,7 @@ fun DiagnosticsScreen(
             }
 
             liveGate == DiagnosticGate.SELF_NOT_ROUTED -> {
-                SelfNotRoutedPrompt(onRetry = onRetry)
+                SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators)
             }
 
             // ROUTED: the live gate says the measurement is meaningful — render from

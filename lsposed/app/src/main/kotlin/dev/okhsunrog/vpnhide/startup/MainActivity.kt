@@ -523,6 +523,13 @@ private fun MainScreen() {
         DiagnosticsSettingsScreen(
             selfNeedsRestart = selfNeedsRestart,
             onBack = { showDiagnostics = false },
+            // Same locale-gated accelerator hint the dashboard's not-routed card
+            // shows: leave Diagnostics and open the game-accelerators article.
+            onOpenAccelerators = {
+                showDiagnostics = false
+                helpInitialArticle = "game-accelerators"
+                showHelp = true
+            },
         )
         return
     }
