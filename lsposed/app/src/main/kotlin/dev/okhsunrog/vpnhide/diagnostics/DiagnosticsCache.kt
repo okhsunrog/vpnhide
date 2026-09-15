@@ -1,6 +1,8 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
 import android.content.Context
+import android.os.Process
+import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.ConfigOperationObserver
 import dev.okhsunrog.vpnhide.ConfigOperationResult
 import dev.okhsunrog.vpnhide.ConfigOperationSpec
@@ -8,8 +10,14 @@ import dev.okhsunrog.vpnhide.ConfigPhase
 import dev.okhsunrog.vpnhide.ContextObservationInputs
 import dev.okhsunrog.vpnhide.ObservationRuntime
 import dev.okhsunrog.vpnhide.ProjectedStateFlow
+import dev.okhsunrog.vpnhide.RootSnapshotCache
+import dev.okhsunrog.vpnhide.currentObservationValue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 
 /**
  * Facade over the process-owned diagnostic run coordinator.
@@ -77,8 +85,8 @@ internal object DiagnosticsCache {
     @Volatile private var restartPending = false
 
     private val impactLock = Any()
-
-    @Volatile private var impact = DiagnosticImpactState()
+    private val impactFlow = MutableStateFlow(DiagnosticImpactState())
+    private val impact: DiagnosticImpactState get() = impactFlow.value
 
     private val coordinator by lazy {
         DiagnosticRunCoordinator(ObservationRuntime.scope, AppDiagnosticRunIo(inputs = { inputs }, impact = { impact }))
@@ -88,6 +96,48 @@ internal object DiagnosticsCache {
     val runs: StateFlow<DiagnosticRunView> get() = coordinator.view
 
     val state: StateFlow<State> by lazy { ProjectedStateFlow(coordinator.view, ::projectDiagnosticState) }
+
+    /**
+     * The shared projection every consumer should render: one value per change of
+     * the run view, the routing observation, the root snapshot, the confirmed
+     * config or the operation impact, so eligibility, the selected measurement and
+     * its applicability always come from the same instant.
+     */
+    val presentation: StateFlow<DiagnosticPresentation> by lazy {
+        combine(
+            coordinator.view,
+            RoutingGateCache.observation,
+            RootSnapshotCache.snapshot,
+            CanonicalConfigRepository.state,
+            impactFlow,
+        ) { view, routing, snapshot, config, impact ->
+            val current = inputs
+            val observation =
+                if (routing.attempted) {
+                    buildDiagnosticContextObservation(
+                        selfNeedsRestart = current?.selfNeedsRestart ?: false,
+                        routing = routing,
+                        snapshot = snapshot,
+                        config = config.confirmed,
+                        selfPackage = current?.context?.packageName.orEmpty(),
+                        processIdentity = processIdentity(),
+                        now = System.currentTimeMillis(),
+                        readiness = configReadiness(impact),
+                        changeEpoch = impact.changeEpoch,
+                        initialized = current != null,
+                    )
+                } else {
+                    null
+                }
+            diagnosticPresentation(view, observation, impact.changeEpoch, uncertain = currentObservationValue(routing) == null)
+        }.stateIn(
+            ObservationRuntime.scope,
+            SharingStarted.Eagerly,
+            diagnosticPresentation(coordinator.view.value, null, 0, uncertain = true),
+        )
+    }
+
+    private fun processIdentity(): String = "pid:${Process.myPid()};uid:${Process.myUid()}"
 
     /** Automatic suite request: idempotent, consumed by the first suite that actually probes. */
     fun run(
@@ -127,7 +177,7 @@ internal object DiagnosticsCache {
 
     /** Config-operation lifecycle from the coordinator's observer; effects go to the run coordinator in order. */
     fun configOperation(event: DiagnosticImpactEvent) {
-        val transition = synchronized(impactLock) { reduceDiagnosticImpact(impact, event).also { impact = it.state } }
+        val transition = synchronized(impactLock) { reduceDiagnosticImpact(impact, event).also { impactFlow.value = it.state } }
         transition.effects.forEach { effect ->
             when (effect) {
                 is DiagnosticImpactEffect.DelayRuns -> coordinator.operationAccepted(effect.id)

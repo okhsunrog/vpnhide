@@ -131,9 +131,10 @@ internal fun buildDiagnosticContextObservation(
     now: Long,
     readiness: ConfigReadiness = ConfigReadiness.Settled,
     changeEpoch: Long = 0,
+    initialized: Boolean = true,
 ): DiagnosticContextObservation {
     val restart = if (selfNeedsRestart) RestartRequirement.App else RestartRequirement.None
-    val eligibility = diagnosticEligibility(initialized = true, restart, readiness, selfRoutingObservation(routing))
+    val eligibility = diagnosticEligibility(initialized, restart, readiness, selfRoutingObservation(routing))
     val gate = currentObservationValue(routing)
     val context =
         if (gate != null && snapshot != null) {

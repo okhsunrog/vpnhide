@@ -843,3 +843,30 @@ coordinator, readiness in the context builder, join ignoring dependencies),
 warnings-as-errors compilation, ktlint, detekt, CPD, Android `lintDebug` and the
 signed release build. Device validation of a save during a running suite is
 pending.
+
+## 21. Shared presentation projection
+
+Deviation from §1 and §8, recorded deliberately: there is no global dispatcher
+and no single presentation revision published per logical event. The three
+coordinators publish immutable states independently; `DiagnosticsCache.presentation`
+is a `combine` of the run view, the routing observation, the root snapshot, the
+confirmed config and the operation impact, mapped by the pure
+`diagnosticPresentation`. Each emission is computed from one instant of all five
+sources, which is the property §8 needed; ordering across coordinators remains
+"the app received it in this order", as §1 already said.
+
+`DiagnosticPresentation` carries the shared eligibility, the active run (id,
+stage, partial evidence), the latest attempt with its evidence, the latest
+complete measurement with its evidence, its applicability
+(`measurementApplicability`: Absent / Changed / Unverified /
+MatchesLastObservation), the evidence summary and `currentSuccess`
+(`canPresentCurrentSuccess`). A routing observation that is loading, invalidated,
+failed or quarantined makes the measurement Unverified; a consistent reobservation
+restores it (T13). A known change (epoch or identity) makes it Changed while the
+history stays visible (T12). A failed later attempt is exposed beside the last
+complete measurement (T11). All-unmeasured evidence is Insufficient (T16).
+
+Boundary: this stage adds the projection and its tests only. Screens, the
+bridge and the bundle still render the legacy `DiagnosticsCache.State` plus the
+live gate overlay; moving them onto the projection (and the bundle/bridge schema
+decision this implies) is the next stage.

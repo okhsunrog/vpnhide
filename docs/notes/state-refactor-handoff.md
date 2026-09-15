@@ -93,7 +93,18 @@ old device-validation paragraphs predate the successful installs described below
    (`measurementApplicability`) and evidence sufficiency in a shared presentation
    projection instead of the legacy `State` (interrupted and operation-blocked
    attempts currently render as `Failed`). Preserve the feedback-cycle fixes above.
-2. **Shared presentation.** Current source IDs reject obsolete cache computations,
+2. **Shared presentation, first half done** (transition contract §21):
+   `DiagnosticsCache.presentation` combines the run view, routing observation,
+   root snapshot, confirmed config and operation impact into one
+   `DiagnosticPresentation` (eligibility, active run, latest attempt, latest
+   complete measurement, applicability, evidence summary, `currentSuccess`),
+   built by the pure `diagnosticPresentation`. Decided deviation: no global
+   dispatcher; a `combine` of the coordinators' immutable states gives each
+   emission one instant of all sources. Next half: render the Diagnostics screen,
+   the Dashboard hero/tiles, the bridge and the bundle from it instead of the
+   legacy `State` plus live-gate overlay, with a bundle schema bump for the new
+   applicability/eligibility fields.
+   Historical note on the previous state of this item: current source IDs reject obsolete cache computations,
    but screens still publish independently and retain last-good values. An atomic
    presentation revision including diagnostic measurement applicability is not
    implemented. Do not describe the cache stage as full cross-screen consistency.
