@@ -75,7 +75,6 @@
     <string name="save_success">Сохранено целей: %d</string>
     <string name="native_target_capacity_reached">Достигнут лимит Native: можно выбрать не более %1$d UID приложений. Сначала отключите Native у другого приложения.</string>
     <string name="save_native_target_capacity">Настройки сохранены, но Native-бэкенд может защитить только %1$d из %2$d найденных UID приложений. %3$d UID с наибольшими номерами остались без Native-защиты.</string>
-    <string name="save_failed_root">Ошибка сохранения: root-доступ запрещён</string>
 
     <!-- Dashboard -->
     <string name="dashboard_modules">Модули</string>
@@ -567,7 +566,6 @@
     <string name="settings_unavailable_configured_failed">Не удалось удалить недоступные приложения.</string>
     <string name="settings_role_hidden">Скрыто</string>
     <string name="settings_auto_hide_saved">Настройки скрытия приложений сохранены.</string>
-    <string name="settings_auto_hide_failed">Не удалось обновить настройки скрытия приложений.</string>
     <string name="settings_security">Безопасность</string>
     <string name="settings_superkey_title">APatch/FolkPatch SuperKey</string>
     <string name="settings_superkey_saved">Сохранён для активации KPM при загрузке.</string>
@@ -595,4 +593,6 @@
     <string name="config_applying">Сохранение и применение конфигурации…</string>
     <string name="config_rechecking">Проверка результата предыдущей операции…</string>
     <string name="config_capture_logging">Отладочные логи остаются включены, пока идёт сбор данных.</string>
+    <string name="config_changes_unavailable">Изменение конфигурации недоступно</string>
+    <string name="config_close">Закрыть</string>
 </resources>

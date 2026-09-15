@@ -129,22 +129,23 @@ fun PreferenceRowSwitch(
     index: Int = -1,
     count: Int = 1,
     progress: Boolean = false,
+    onDisabledClick: (() -> Unit)? = null,
 ) {
     PreferenceRow(
         title = title,
         modifier = modifier,
         subtitle = subtitle,
         icon = icon,
-        enabled = enabled,
+        enabled = enabled || onDisabledClick != null,
         index = index,
         count = count,
-        onClick = { onCheckedChange(!checked) },
+        onClick = { if (enabled) onCheckedChange(!checked) else onDisabledClick?.invoke() },
         trailing = {
-            if (progress) androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
             EnhancedSwitch(
                 checked = checked,
                 onCheckedChange = null,
                 enabled = enabled,
+                progress = progress,
             )
         },
     )

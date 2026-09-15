@@ -84,12 +84,12 @@ import dev.okhsunrog.vpnhide.CanonicalMutation
 import dev.okhsunrog.vpnhide.CanonicalPreferenceSwitch
 import dev.okhsunrog.vpnhide.CanonicalToggle
 import dev.okhsunrog.vpnhide.ConfigCoordinatorMode
-import dev.okhsunrog.vpnhide.ConfigOperationStatus
 import dev.okhsunrog.vpnhide.ContactModal
 import dev.okhsunrog.vpnhide.DonateModal
 import dev.okhsunrog.vpnhide.FullResetDialog
 import dev.okhsunrog.vpnhide.LegacyImportDialog
 import dev.okhsunrog.vpnhide.LegacyImportPrompt
+import dev.okhsunrog.vpnhide.LocalConfigWriteAccess
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.buildCanonicalConfigFromTargetsSnapshot
@@ -230,7 +230,6 @@ fun SettingsScreen(
                     .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            ConfigOperationStatus()
             PreferenceRow(
                 title = stringResource(R.string.help_title),
                 icon = Icons.AutoMirrored.Filled.HelpOutline,
@@ -466,7 +465,6 @@ internal fun DiagnosticsSettingsScreen(
 private fun DebugToolsSettingsSection(selfNeedsRestart: Boolean?) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SettingsSectionHeader(stringResource(R.string.settings_debug_section))
-        ConfigOperationStatus()
         DebugToolsSection(selfNeedsRestart = selfNeedsRestart)
     }
 }
@@ -526,6 +524,7 @@ private fun DiagnosticsSettingsSection(onOpen: () -> Unit) {
 private fun ConfigBackupSection() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val checkWrite = LocalConfigWriteAccess.current
     val targets by TargetsCache.snapshot.collectAsState()
     var operation by remember { mutableStateOf(ConfigOperation.Idle) }
     var pendingExport by remember { mutableStateOf<String?>(null) }
@@ -570,6 +569,9 @@ private fun ConfigBackupSection() {
             ActivityResultContracts.OpenDocument(),
         ) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
+            if (CanonicalConfigRepository.state.value.mode != ConfigCoordinatorMode.Missing && !checkWrite()) {
+                return@rememberLauncherForActivityResult
+            }
             operation = ConfigOperation.Import
             status = null
             scope.launch {
@@ -640,7 +642,8 @@ private fun ConfigBackupSection() {
                 Text(stringResource(R.string.settings_config_export))
             }
             EnhancedButton(
-                onClick = {
+                onClick = import@{
+                    if (CanonicalConfigRepository.state.value.mode != ConfigCoordinatorMode.Missing && !checkWrite()) return@import
                     importLauncher.launch(
                         arrayOf(
                             "application/json",
@@ -859,7 +862,7 @@ private fun SuperkeySettingsSection() {
     val targets by TargetsCache.snapshot.collectAsState()
     val repository by CanonicalConfigRepository.state.collectAsState()
     val pending = CanonicalToggle.RememberSuperkey in repository.pending
-    val writable = repository.mode == ConfigCoordinatorMode.Open
+    val checkWrite = LocalConfigWriteAccess.current
     var superkey by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -899,7 +902,8 @@ private fun SuperkeySettingsSection() {
         )
         Row(modifier = Modifier.fillMaxWidth()) {
             TextButton(
-                onClick = {
+                onClick = write@{
+                    if (!checkWrite()) return@write
                     saving = true
                     status = null
                     scope.launch {
@@ -911,13 +915,14 @@ private fun SuperkeySettingsSection() {
                         }
                     }
                 },
-                enabled = !saving && !pending && writable && targets != null,
+                enabled = !saving && !pending && targets != null,
             ) {
                 Text(stringResource(R.string.settings_superkey_clear))
             }
             Spacer(Modifier.width(8.dp))
             EnhancedButton(
-                onClick = {
+                onClick = write@{
+                    if (!checkWrite()) return@write
                     saving = true
                     status = null
                     val keyToWrite = superkey
@@ -930,7 +935,7 @@ private fun SuperkeySettingsSection() {
                         }
                     }
                 },
-                enabled = !saving && !pending && writable && superkey.isNotBlank() && targets != null,
+                enabled = !saving && !pending && superkey.isNotBlank() && targets != null,
                 modifier = Modifier.weight(1f),
             ) {
                 if (saving || pending) {
@@ -1058,9 +1063,11 @@ private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
                 )
             }
         }
-    val canWrite = repository.mode == ConfigCoordinatorMode.Open && targets != null && apps != null && saving == null
+    val dataReady = targets != null && apps != null && saving == null
+    val checkWrite = LocalConfigWriteAccess.current
 
     fun removeUnavailableConfigured(packages: Set<String>) {
+        if (!checkWrite()) return
         saving = AutoHideSetting.UnavailableConfigured
         status = null
         scope.launch {
@@ -1125,7 +1132,7 @@ private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
             icon = Icons.Default.VisibilityOff,
             index = 2,
             count = 4,
-            enabled = canWrite,
+            enabled = dataReady,
             onClick = onOpenHiddenApps,
         )
         PreferenceRow(
@@ -1139,8 +1146,8 @@ private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
             icon = Icons.Default.Delete,
             index = 3,
             count = 4,
-            enabled = canWrite && unavailableConfigured.isNotEmpty(),
-            onClick = { unavailableDialogOpen = true },
+            enabled = dataReady && unavailableConfigured.isNotEmpty(),
+            onClick = { if (checkWrite()) unavailableDialogOpen = true },
         )
         SettingsStatusLine(status)
     }

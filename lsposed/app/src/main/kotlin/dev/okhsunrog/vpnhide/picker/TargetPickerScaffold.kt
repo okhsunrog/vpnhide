@@ -35,8 +35,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -66,8 +64,9 @@ import androidx.core.graphics.drawable.toBitmap
 import dev.okhsunrog.vpnhide.CanonicalActivation
 import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
-import dev.okhsunrog.vpnhide.ConfigCoordinatorMode
 import dev.okhsunrog.vpnhide.HelpAccordion
+import dev.okhsunrog.vpnhide.LocalConfigSnackbar
+import dev.okhsunrog.vpnhide.LocalConfigWriteAccess
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.StatusBanner
 import dev.okhsunrog.vpnhide.StatusColors
@@ -175,7 +174,8 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     var allApps by remember { mutableStateOf<List<T>>(emptyList()) }
     var snackMessage by remember { mutableStateOf<String?>(null) }
     var snackDuration by remember { mutableStateOf(SnackbarDuration.Long) }
-    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarHostState = LocalConfigSnackbar.current
+    val checkWrite = LocalConfigWriteAccess.current
 
     // The Activity ViewModel retains edits across overlays and Activity recreation.
     LaunchedEffect(dirty) { onDirtyChange(dirty) }
@@ -364,13 +364,6 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                     },
                 )
             }
-            SnackbarHost(
-                hostState = snackbarHostState,
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-            )
             Surface(tonalElevation = 3.dp) {
                 Row(
                     modifier =
@@ -389,7 +382,8 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                         Text(stringResource(R.string.config_discard_draft))
                     }
                     EnhancedButton(
-                        onClick = {
+                        onClick = save@{
+                            if (!checkWrite()) return@save
                             val error =
                                 targets.let { currentTargets ->
                                     selectionSaveError(allApps, currentTargets, context.packageName, resources)
@@ -406,7 +400,7 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                                 }
                             }
                         },
-                        enabled = dirty && !saving && repository.mode == ConfigCoordinatorMode.Open,
+                        enabled = dirty && !saving,
                     ) {
                         if (saving) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Text(stringResource(R.string.btn_save))
@@ -436,7 +430,7 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                 }
 
                 else -> {
-                    resources.getString(R.string.save_failed_root)
+                    null
                 }
             }
     }

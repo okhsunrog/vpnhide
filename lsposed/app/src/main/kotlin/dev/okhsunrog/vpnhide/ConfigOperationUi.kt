@@ -1,9 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import androidx.compose.foundation.layout.Row
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -32,6 +28,7 @@ internal fun CanonicalPreferenceSwitch(
 ) {
     val state by CanonicalConfigRepository.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val checkWrite = LocalConfigWriteAccess.current
     var requested by remember { mutableStateOf<Boolean?>(null) }
     val pending = state.pending[field]
     PreferenceRowSwitch(
@@ -48,55 +45,20 @@ internal fun CanonicalPreferenceSwitch(
         checked = requested ?: pending ?: state.confirmed?.let { canonicalToggle(it, field) } ?: false,
         enabled = enabled && state.mode == ConfigCoordinatorMode.Open && requested == null && pending == null,
         progress = requested != null || pending != null,
-        onCheckedChange = { value ->
+        onDisabledClick =
+            if (state.mode != ConfigCoordinatorMode.Open) {
+                { checkWrite() }
+            } else {
+                null
+            },
+        onCheckedChange = change@{ value ->
+            if (!checkWrite()) return@change
             requested = value
             scope.launch(start = CoroutineStart.UNDISPATCHED) {
                 try {
                     write(value)
                 } finally {
                     requested = null
-                }
-            }
-        },
-    )
-}
-
-@Composable
-internal fun ConfigOperationStatus() {
-    val view by CanonicalConfigRepository.state.collectAsState()
-    val scope = rememberCoroutineScope()
-    val status = configStatus(view) ?: return
-    val message =
-        when (status.message) {
-            ConfigStatusMessage.Initializing -> R.string.config_initializing
-            ConfigStatusMessage.RebootRequired -> R.string.config_reboot_required
-            ConfigStatusMessage.Paused -> R.string.config_paused
-            ConfigStatusMessage.Unavailable -> R.string.config_unavailable
-            ConfigStatusMessage.Invalid -> R.string.config_invalid
-            ConfigStatusMessage.Missing -> R.string.config_missing
-            ConfigStatusMessage.Conflict -> R.string.config_ui_conflict
-            ConfigStatusMessage.SecretFailed -> R.string.config_secret_failed
-            ConfigStatusMessage.CleanupFailed -> R.string.config_cleanup_failed
-            ConfigStatusMessage.ApplyFailed -> R.string.config_apply_failed
-            ConfigStatusMessage.WriteFailed -> R.string.config_write_failed
-            ConfigStatusMessage.Applying -> R.string.config_applying
-            ConfigStatusMessage.Rechecking -> R.string.config_rechecking
-        }
-    StatusBanner(
-        text = stringResource(message),
-        containerColor = StatusColors.warningContainer(),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        action = {
-            Row {
-                if (status.canRecheck) {
-                    TextButton(
-                        onClick = CanonicalConfigRepository::retry,
-                    ) { Text(stringResource(R.string.config_recheck)) }
-                }
-                if (status.canApply) {
-                    TextButton(onClick = {
-                        scope.launch { CanonicalConfigRepository.reconcile(ports = true) }
-                    }) { Text(stringResource(R.string.config_apply_again)) }
                 }
             }
         },

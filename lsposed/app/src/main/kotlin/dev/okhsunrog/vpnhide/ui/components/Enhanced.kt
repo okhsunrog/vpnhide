@@ -242,6 +242,7 @@ fun EnhancedSwitch(
     onCheckedChange: ((Boolean) -> Unit)?,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    progress: Boolean = false,
 ) {
     val tick = rememberHapticTick()
     Switch(
@@ -255,5 +256,11 @@ fun EnhancedSwitch(
             },
         modifier = modifier,
         enabled = enabled,
+        thumbContent =
+            if (progress) {
+                { ButtonSpinner(size = 16.dp, color = MaterialTheme.colorScheme.onSurface) }
+            } else {
+                null
+            },
     )
 }

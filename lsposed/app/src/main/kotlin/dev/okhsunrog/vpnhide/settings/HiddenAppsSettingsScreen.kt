@@ -33,8 +33,6 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -57,8 +55,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.ConfigCoordinatorMode
-import dev.okhsunrog.vpnhide.ConfigOperationStatus
 import dev.okhsunrog.vpnhide.HelpAccordion
+import dev.okhsunrog.vpnhide.LocalConfigSnackbar
+import dev.okhsunrog.vpnhide.LocalConfigWriteAccess
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.StatusColors
 import dev.okhsunrog.vpnhide.picker.AppListCache
@@ -81,7 +80,8 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val apps by AppListCache.apps.collectAsState()
     val userNames by AppListCache.userNames.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarHostState = LocalConfigSnackbar.current
+    val checkWrite = LocalConfigWriteAccess.current
     var filter by remember { mutableStateOf(HiddenAppsFilter.All) }
     var query by remember { mutableStateOf("") }
     var searchActive by remember { mutableStateOf(false) }
@@ -90,14 +90,13 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
     val repository by CanonicalConfigRepository.state.collectAsState()
     var snackMessage by remember { mutableStateOf<String?>(null) }
     val savedMessage = stringResource(R.string.settings_auto_hide_saved)
-    val failedMessage = stringResource(R.string.settings_auto_hide_failed)
 
     LaunchedEffect(Unit) {
         TargetsCache.ensureLoaded(scope, context)
         AppListCache.ensureLoaded(scope, context)
     }
     LaunchedEffect(editor.result) {
-        editor.result?.let { snackMessage = if (it.succeeded) savedMessage else failedMessage }
+        editor.result?.let { snackMessage = if (it.succeeded) savedMessage else null }
     }
 
     LaunchedEffect(snackMessage) {
@@ -213,23 +212,21 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
             HiddenAppsSaveBar(
                 summary = summary,
                 dirty = dirty,
-                canSave = repository.mode == ConfigCoordinatorMode.Open,
                 saving = saving,
                 onDiscard = editor::discard,
-                onSave = {
+                onSave = save@{
+                    if (!checkWrite()) return@save
                     val selfPkg = context.packageName
                     editor.save { fresh -> applyAutoHiddenPackages(fresh, selfPkg, signals) }
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         if (canonical == null || appList == null) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                ConfigOperationStatus()
                 if (repository.mode == ConfigCoordinatorMode.Initializing || appList == null) CircularProgressIndicator()
             }
             return@Scaffold
@@ -257,7 +254,6 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
                 selected = filter,
                 onSelected = { filter = it },
             )
-            ConfigOperationStatus()
             if (visibleStates.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxWidth().weight(1f),
@@ -429,7 +425,6 @@ private fun autoHideReasonLabel(reason: AutoHideReason): String =
 private fun HiddenAppsSaveBar(
     summary: HiddenAppsSummary,
     dirty: Boolean,
-    canSave: Boolean,
     saving: Boolean,
     onSave: () -> Unit,
     onDiscard: () -> Unit,
@@ -460,7 +455,7 @@ private fun HiddenAppsSaveBar(
             androidx.compose.material3.TextButton(onClick = onDiscard, enabled = dirty && !saving) {
                 Text(stringResource(R.string.config_discard_draft))
             }
-            EnhancedButton(onClick = onSave, enabled = dirty && canSave && !saving) {
+            EnhancedButton(onClick = onSave, enabled = dirty && !saving) {
                 if (saving) {
                     ButtonSpinner()
                     Spacer(Modifier.width(8.dp))

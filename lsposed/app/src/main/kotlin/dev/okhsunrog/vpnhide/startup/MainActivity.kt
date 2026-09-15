@@ -48,7 +48,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.okhsunrog.vpnhide.AgentControlBridge
 import dev.okhsunrog.vpnhide.BackgroundUpdateChecks
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
-import dev.okhsunrog.vpnhide.ConfigOperationStatus
+import dev.okhsunrog.vpnhide.ConfigFeedbackProvider
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DashboardLoadingState
 import dev.okhsunrog.vpnhide.DashboardScreen
@@ -249,7 +249,7 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
                             },
                         )
                     }
-                    MainScreen()
+                    ConfigFeedbackProvider { MainScreen() }
                 }
             }
         }
@@ -743,7 +743,6 @@ private fun MainScreen() {
             },
         ) { innerPadding ->
             Column(Modifier.padding(innerPadding)) {
-                ConfigOperationStatus()
                 val restart = selfNeedsRestart
                 val preparationFailure = selfTargetFailure
                 if (preparationFailure != null) {

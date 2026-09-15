@@ -27,6 +27,7 @@ import dev.okhsunrog.vpnhide.CanonicalEdit
 import dev.okhsunrog.vpnhide.CanonicalMutation
 import dev.okhsunrog.vpnhide.CanonicalToggle
 import dev.okhsunrog.vpnhide.ConfigCoordinatorMode
+import dev.okhsunrog.vpnhide.LocalConfigWriteAccess
 import dev.okhsunrog.vpnhide.NativeBackendId
 import dev.okhsunrog.vpnhide.OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS
 import dev.okhsunrog.vpnhide.R
@@ -44,6 +45,7 @@ import kotlinx.coroutines.withContext
 internal fun FilesystemHidingSettingsSection() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val checkWrite = LocalConfigWriteAccess.current
     val rootSnapshot by RootSnapshotCache.snapshot.collectAsState()
     var saving by remember { mutableStateOf(false) }
     var confirmationOpen by remember { mutableStateOf(false) }
@@ -77,6 +79,7 @@ internal fun FilesystemHidingSettingsSection() {
     val failedMessage = stringResource(R.string.settings_filesystem_hiding_failed)
 
     fun persist(value: Boolean) {
+        if (!checkWrite()) return
         saving = true
         requested = value
         saveStatus = null
@@ -139,10 +142,17 @@ internal fun FilesystemHidingSettingsSection() {
             icon = Icons.Default.VisibilityOff,
             checked = enabled,
             progress = saving || pending != null,
+            onDisabledClick =
+                if (repository.mode != ConfigCoordinatorMode.Open) {
+                    { checkWrite() }
+                } else {
+                    null
+                },
             enabled =
                 repository.mode == ConfigCoordinatorMode.Open && !saving && pending == null &&
                     (runtimeState.nativeBackendInstalled || enabled),
-            onCheckedChange = { value ->
+            onCheckedChange = change@{ value ->
+                if (!checkWrite()) return@change
                 if (value) confirmationOpen = true else persist(false)
             },
         )

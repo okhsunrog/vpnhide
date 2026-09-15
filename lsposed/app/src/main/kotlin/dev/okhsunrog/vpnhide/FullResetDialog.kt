@@ -56,6 +56,7 @@ internal fun FullResetDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val checkWrite = LocalConfigWriteAccess.current
     val dash by DashboardCache.state.collectAsState()
     val snap by RootSnapshotCache.snapshot.collectAsState()
 
@@ -139,7 +140,8 @@ internal fun FullResetDialog(
 
                 ready -> {
                     TextButton(
-                        onClick = {
+                        onClick = reset@{
+                            if (!checkWrite()) return@reset
                             running = true
                             scope.launch {
                                 val result =

@@ -136,6 +136,22 @@ action; backend activation cannot repair them. Initial/automatic/manual readback
 has visible progress, and a continued unknown outcome pauses config writes.
 Agent control remains an ordinary DataStore preference and does not use root.
 
+Configuration feedback has one UI owner across screen navigation. Routine saves
+show progress inside the switch thumb without inserting status rows or changing
+the control width. Success is silent. Known failures use an overlay Snackbar;
+confirmed persistence followed by activation failure offers explicit activation
+repair. Invalid/unavailable state, adoption requiring a reboot, and uncertainty
+remaining after automatic readback use a dismissible dialog. Dismissal does not
+reopen it on ordinary recomposition/navigation; an attempted configuration change
+opens it again without submitting the mutation. Manual rechecking shows progress
+inside the dialog. Browsing retained app lists remains available while writes are
+paused. Neither notifications nor recovery add a permanent settings entry.
+
+The feedback update passes 632 JVM tests, warnings-as-errors compilation, ktlint,
+detekt, CPD and Android lint. Tests cover dialog acknowledgement/reopening, quiet
+automatic readback, failure classification and repeated activation repair. Visual
+verification of this update on a physical device remains outstanding.
+
 Startup preparation is process-owned and single-flight. A recreated Activity
 joins the same preparation. Admission reopening triggers fresh self-target
 preparation. A first-adoption reboot requirement leaves the read interface

@@ -75,7 +75,6 @@
     <string name="save_success">已保存 %d 个目标应用</string>
     <string name="native_target_capacity_reached">已达原生上限：最多可选 %1$d 个应用 UID。请先给其他应用关闭原生。</string>
     <string name="save_native_target_capacity">已保存，但原生后端最多只能保护 %2$d 个已解析应用 UID 中的 %1$d 个，UID 最大的 %3$d 个应用没有获得原生保护。</string>
-    <string name="save_failed_root">保存失败：Root 权限被拒绝</string>
 
     <!-- Diagnostics -->
     <string name="diag_summary_tally">已隐藏 %1$d 项 · 暴露 %2$d 项</string>
@@ -555,7 +554,6 @@
     <string name="settings_unavailable_configured_failed">移除不可用应用失败。</string>
     <string name="settings_role_hidden">已隐藏</string>
     <string name="settings_auto_hide_saved">应用隐藏设置已保存。</string>
-    <string name="settings_auto_hide_failed">更新应用隐藏设置失败。</string>
     <string name="settings_security">安全</string>
     <string name="settings_superkey_title">APatch/FolkPatch SuperKey</string>
     <string name="settings_superkey_saved">已保存，用于开机时激活 KPM。</string>
@@ -583,4 +581,6 @@
     <string name="config_applying">正在保存并应用配置…</string>
     <string name="config_rechecking">正在检查之前操作的结果…</string>
     <string name="config_capture_logging">采集进行期间，调试日志保持开启。</string>
+    <string name="config_changes_unavailable">暂时无法更改配置</string>
+    <string name="config_close">关闭</string>
 </resources>

@@ -91,9 +91,11 @@ internal fun LegacyImportDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val checkWrite = LocalConfigWriteAccess.current
     var state by remember { mutableStateOf<LegacyImportUiState>(LegacyImportUiState.Choosing) }
 
     fun run(action: LegacyImportAction) {
+        if (!checkWrite()) return
         state = LegacyImportUiState.Running
         scope.launch {
             state = LegacyImportUiState.Done(LegacyConfigImporter.run(action, context.packageName))
