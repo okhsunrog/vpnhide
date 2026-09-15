@@ -2,7 +2,6 @@ package dev.okhsunrog.vpnhide
 
 import android.content.Context
 import android.content.Intent
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +32,7 @@ import androidx.core.content.FileProvider
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
 import dev.okhsunrog.vpnhide.ui.components.container
+import dev.okhsunrog.vpnhide.ui.theme.LocalDarkTheme
 import java.io.File
 
 /**
@@ -50,7 +50,7 @@ internal object StatusColors {
         darkArgb: Long,
         darkAlpha: Float,
         lightArgb: Long,
-    ): Color = if (isSystemInDarkTheme()) Color(darkArgb).copy(alpha = darkAlpha) else Color(lightArgb)
+    ): Color = if (LocalDarkTheme.current) Color(darkArgb).copy(alpha = darkAlpha) else Color(lightArgb)
 
     @Composable fun successContainer() = container(0xFF0A4A43, 0.34f, 0xFFE4F7F1)
 
@@ -66,11 +66,11 @@ internal object StatusColors {
     // recommendation card uses a brown tint where warnings use orange.
     @Composable fun zygiskRecommendContainer() = container(0xFF4A3A2A, 0.34f, 0xFFFFF0DC)
 
-    @Composable fun errorHeader() = if (isSystemInDarkTheme()) Color(0xFFFFB3C0) else Color(0xFFC9184A)
+    @Composable fun errorHeader() = if (LocalDarkTheme.current) Color(0xFFFFB3C0) else Color(0xFFC9184A)
 
-    @Composable fun warningHeader() = if (isSystemInDarkTheme()) Color(0xFFFFC56D) else Color(0xFFC96A00)
+    @Composable fun warningHeader() = if (LocalDarkTheme.current) Color(0xFFFFC56D) else Color(0xFFC96A00)
 
-    @Composable fun neutralHeader() = if (isSystemInDarkTheme()) Color(0xFFCBD5E1) else Color(0xFF475569)
+    @Composable fun neutralHeader() = if (LocalDarkTheme.current) Color(0xFFCBD5E1) else Color(0xFF475569)
 
     // Accent colors (status dots / status text / pass-fail badges). These are
     // fixed regardless of theme — they sit on the tinted containers above.
