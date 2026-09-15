@@ -185,6 +185,15 @@
           }
         },
         {
+          "id": "app-still-requires-vpn-off",
+          "title": { "en": "An app still asks you to turn off the VPN", "ru": "Приложение всё ещё требует выключить VPN", "zh": "应用仍要求关闭 VPN" },
+          "keywords": {
+            "en": ["turn off vpn", "still detects", "won't open", "disable vpn", "refuses", "checklist", "server-side"],
+            "ru": ["выключите vpn", "всё равно видит", "не открывается", "отключите vpn", "отказывается", "чек-лист", "серверная проверка"],
+            "zh": ["关闭 vpn", "仍检测到", "打不开", "禁用 vpn", "拒绝", "清单", "服务器端"]
+          }
+        },
+        {
           "id": "collect-report",
           "title": { "en": "Collect a debug report", "ru": "Собрать отчёт для диагностики", "zh": "收集调试报告" },
           "keywords": {
@@ -224,6 +233,15 @@
             "en": ["tester", "detector", "still detects", "exit ip", "cached", "rknhardering"],
             "ru": ["тестер", "детектор", "всё равно находит", "выходной ip", "кеш", "rknhardering"],
             "zh": ["检测器", "测试", "仍发现", "出口 ip", "缓存", "rknhardering"]
+          }
+        },
+        {
+          "id": "statistics",
+          "title": { "en": "Reading the statistics", "ru": "Как читать статистику", "zh": "如何看统计" },
+          "keywords": {
+            "en": ["statistics", "counters", "interception", "capture session", "probes", "per-hook", "since boot"],
+            "ru": ["статистика", "счётчики", "перехваты", "сессия захвата", "прощупывания", "по хукам", "с загрузки"],
+            "zh": ["统计", "计数", "拦截", "捕获会话", "探测", "按挂钩", "自开机"]
           }
         }
       ]
@@ -287,6 +305,15 @@
             "en": ["detection vectors", "coverage", "networkinterface", "getifaddrs", "netlink", "raw syscall", "svc", "selinux", "java vs native"],
             "ru": ["векторы обнаружения", "покрытие", "networkinterface", "getifaddrs", "netlink", "raw syscall", "svc", "selinux"],
             "zh": ["检测向量", "覆盖", "networkinterface", "getifaddrs", "netlink", "原始系统调用", "svc", "selinux"]
+          }
+        },
+        {
+          "id": "glossary",
+          "title": { "en": "Glossary", "ru": "Словарь терминов", "zh": "术语表" },
+          "keywords": {
+            "en": ["glossary", "terms", "definitions", "kmi", "gki", "uid", "backend", "hook", "profile", "loopback", "selinux"],
+            "ru": ["словарь", "термины", "определения", "kmi", "gki", "uid", "бэкенд", "хук", "профиль", "loopback", "selinux"],
+            "zh": ["术语", "词汇", "定义", "kmi", "gki", "uid", "后端", "挂钩", "资料", "loopback", "selinux"]
           }
         }
       ]
