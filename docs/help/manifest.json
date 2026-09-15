@@ -30,6 +30,24 @@
             "ru": ["требования", "совместимость", "версия android", "abi", "armv7", "arm64", "ядро", "root-менеджер", "lsposed"],
             "zh": ["要求", "兼容", "android 版本", "abi", "armv7", "arm64", "内核", "root 管理器", "lsposed"]
           }
+        },
+        {
+          "id": "first-install",
+          "title": { "en": "First install", "ru": "Первая установка", "zh": "首次安装" },
+          "keywords": {
+            "en": ["install", "setup", "lsposed scope", "system framework", "reboot", "module", "not active", "verify"],
+            "ru": ["установка", "установить", "scope lsposed", "system framework", "перезагрузка", "модуль", "не активен", "проверка"],
+            "zh": ["安装", "配置", "lsposed 作用域", "系统框架", "重启", "模块", "未生效", "验证"]
+          }
+        },
+        {
+          "id": "first-setup",
+          "title": { "en": "Your first app, step by step", "ru": "Первое приложение, по шагам", "zh": "你的第一个应用，分步操作" },
+          "keywords": {
+            "en": ["first app", "example", "bank", "walkthrough", "steps", "save"],
+            "ru": ["первое приложение", "пример", "банк", "разбор", "шаги", "сохранить"],
+            "zh": ["第一个应用", "示例", "银行", "步骤", "保存"]
+          }
         }
       ]
     },
