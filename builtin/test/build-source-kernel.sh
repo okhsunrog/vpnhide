@@ -4,7 +4,7 @@
 # (there is no ddk-min image below android12-5.10). Same pinned AOSP sources and
 # Bootlin gcc 7.3 as kmod/test/build-source-kernel.sh (that compiler is old
 # enough to build these trees; a modern clang trips on -Werror), but instead of
-# leaving the tree stock this applies builtin/scripts/apply.sh + CONFIG_VPNHIDE=y
+# leaving the tree stock this applies builtin/scripts/integrate.py + CONFIG_VPNHIDE=y
 # so the driver is compiled into the Image.
 #
 #   4.9 / 4.14 / 4.19  (AOSP common, cuttlefish_defconfig)
@@ -86,9 +86,10 @@ esac
 # The source tree is cached across reruns, so revert any call-site patches from
 # a previous run to pristine before re-applying (patch --forward otherwise
 # rejects already-applied hunks). The untracked security/vpnhide/ driver dir is
-# replaced by apply.sh itself.
+# removed from this disposable test tree before integration.
 git -C "$SRC" checkout -- . 2>/dev/null || true
-"$REPO/builtin/scripts/apply.sh" "$SRC" "$KMI"
+rm -rf "$SRC/security/vpnhide" "$SRC/include/linux/vpnhide.h"
+uv run --python 3.12 "$REPO/builtin/scripts/integrate.py" apply --kernel "$SRC" --kmi "$KMI" --output "$OUT/review-$(date +%s)"
 
 cd "$SRC"
 mk() { make ARCH=arm64 CROSS_COMPILE="$CROSS" "$@"; }

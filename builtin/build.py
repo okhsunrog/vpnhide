@@ -3,7 +3,7 @@
 
 Unlike kmod/build.py this compiles no kernel object and is KMI-agnostic: the
 driver is baked into the user's kernel (CONFIG_VPNHIDE=y, via builtin/scripts/
-apply.sh), so the zip ships only the userspace glue — the Rust `builtin`
+integrate.py), so the zip ships only the userspace glue — the Rust `builtin`
 activator plus the boot scripts in builtin/module/. One zip works on every
 kernel that has the driver compiled in.
 

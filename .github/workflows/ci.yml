@@ -19,6 +19,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  builtin-integrator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: "0.12.10"
+      - run: uv run --python 3.12 --no-project python -m unittest discover -s builtin/scripts -p 'test_*.py' -v
+
   setup:
     runs-on: ubuntu-latest
     outputs:
@@ -522,7 +531,7 @@ jobs:
 
   # Runtime gate for the built-in (CONFIG_VPNHIDE=y) backend. Unlike kmod/kpm the
   # driver is compiled INTO the kernel, so there is no cheap per-PR object to
-  # rebuild against a baked kernel: builtin/scripts/apply.sh integrates the
+  # rebuild against a baked kernel: builtin/scripts/integrate.py integrates the
   # backend into the baked kernel source tree (VPNHIDE_QEMU_KSRC), CONFIG_VPNHIDE
   # is turned on, and the Image is rebuilt with the PR's patches — that rebuilt
   # kernel is what boots. Reuses the ddk-qemu image (clang + qemu + baked kernel
@@ -564,6 +573,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: "0.12.10"
 
       - name: Mark workspace safe
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -578,8 +590,8 @@ jobs:
         run: chmod +x "$VPNHIDE_IOC_BIN" "$VPNHIDE_BIND32_BIN"
 
       - name: Bake CONFIG_VPNHIDE into the kernel + QEMU runtime test
-        # apply.sh copies the driver + applies the per-KMI call-site patches onto
-        # the baked source tree (patch --forward, no git needed). Merge the two
+        # integrate.py exports and verifies exact transformations before writing
+        # the baked source tree (Git is used only in temporary trees). Merge the two
         # VPNHIDE configs onto the .config the image already built with, rebuild
         # the Image, then boot THAT kernel — VPNHIDE_QEMU_IMAGE is overridden
         # inline because the image otherwise points it at the plain baked kernel.
@@ -588,7 +600,7 @@ jobs:
           CLANG_BIN="$(ls -d /opt/ddk/clang/*/bin | head -1)"
           export PATH="$CLANG_BIN:$PATH"
           KSRC="$VPNHIDE_QEMU_KSRC"
-          builtin/scripts/apply.sh "$KSRC" "$KMI"
+          uv run --python 3.12 builtin/scripts/integrate.py apply --kernel "$KSRC" --kmi "$KMI" --output /tmp/vpnhide-review
           printf 'CONFIG_VPNHIDE=y\nCONFIG_VPNHIDE_FS_HIDING=y\n' > /tmp/vpnhide.config
           (
             cd "$KSRC"
@@ -598,6 +610,14 @@ jobs:
             make ARCH=arm64 LLVM=1 -j"$(nproc)" Image
           )
           VPNHIDE_QEMU_IMAGE="$KSRC/arch/arm64/boot/Image" builtin/test/run.sh "$KMI"
+
+      - name: Upload built-in integration review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: builtin-review-${{ matrix.kmi }}
+          path: /tmp/vpnhide-review
+          if-no-files-found: warn
 
   # The KPM ships as ONE cross-version flashable module (Magisk/KSU format,
   # APatch reads it too), not a raw .kpm: `make kpm` builds the relocatable
@@ -863,7 +883,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [kmod, kpm, builtin, zygisk, lsposed, portshide]
+    needs: [builtin-integrator, kmod, kpm, builtin, zygisk, lsposed, portshide]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     # Only the release job needs write — used by softprops/action-gh-release
