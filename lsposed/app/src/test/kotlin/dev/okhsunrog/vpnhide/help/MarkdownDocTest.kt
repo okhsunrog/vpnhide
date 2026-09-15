@@ -25,7 +25,8 @@ class MarkdownDocTest {
     @Test
     fun `relative md links become in-app article routes`() {
         assertEquals("article:configure-hiding", normalizeHelpHref("configure-hiding.md"))
-        assertEquals("article:game-accelerators", normalizeHelpHref("game-accelerators.md#roles"))
+        // A cross-article link keeps its anchor so the target article scrolls to it.
+        assertEquals("article:game-accelerators#roles", normalizeHelpHref("game-accelerators.md#roles"))
         assertEquals("article:x", normalizeHelpHref("docs/x.md"))
     }
 
