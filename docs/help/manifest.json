@@ -111,7 +111,35 @@
     {
       "id": "understand-checks",
       "title": { "en": "Understand the check results", "ru": "Понять результат проверки", "zh": "理解检查结果" },
-      "articles": []
+      "articles": [
+        {
+          "id": "what-the-check-proves",
+          "title": { "en": "What the self-test checks", "ru": "Что проверяет самопроверка", "zh": "自检检查什么" },
+          "keywords": {
+            "en": ["self-test", "diagnostics", "what it proves", "root differential", "passed", "not routed"],
+            "ru": ["самопроверка", "диагностика", "что доказывает", "root", "пройдено", "не идёт через vpn"],
+            "zh": ["自检", "诊断", "证明什么", "root", "通过", "没走 vpn"]
+          }
+        },
+        {
+          "id": "check-result-meanings",
+          "title": { "en": "What each result means", "ru": "Что означает каждый результат", "zh": "每个结果是什么意思" },
+          "keywords": {
+            "en": ["hidden", "detected", "leak", "selinux", "not measured", "gate", "outcome"],
+            "ru": ["скрыто", "обнаружено", "утечка", "selinux", "не измерено", "гейт", "исход"],
+            "zh": ["已隐藏", "被检测到", "泄露", "selinux", "未测量", "门槛", "结果"]
+          }
+        },
+        {
+          "id": "tester-finds-vpn",
+          "title": { "en": "A third-party tester still finds the VPN", "ru": "Сторонний тестер всё равно находит VPN", "zh": "第三方检测器仍发现 VPN" },
+          "keywords": {
+            "en": ["tester", "detector", "still detects", "exit ip", "cached", "rknhardering"],
+            "ru": ["тестер", "детектор", "всё равно находит", "выходной ip", "кеш", "rknhardering"],
+            "zh": ["检测器", "测试", "仍发现", "出口 ip", "缓存", "rknhardering"]
+          }
+        }
+      ]
     },
     {
       "id": "capabilities-limits",
