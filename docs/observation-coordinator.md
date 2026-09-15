@@ -23,8 +23,14 @@ once when rendering an app-list response.
 `value` retains the last successful observation while loading and after failure.
 It is useful display history, not evidence of current readiness. `current` is null
 while loading, stale, failed or quarantined. `RoutingGateCache.gate` uses `current`:
-a VPN callback marks it stale immediately, before the 750 ms debounced recheck.
+a VPN transition marks it stale immediately, before the 750 ms debounced recheck.
 This changes readiness freshness, not diagnostic result classification or retention.
+`VpnTransportWatcher` records the VPN networks that exist when it registers its
+callback and ignores their replayed `onAvailable` / first capabilities delivery
+(`reduceVpnTransport`): that replay is knowledge of the current state, not a
+transition, and must not invalidate a gate that already reflects it. (On the
+Pixel 8 Pro cold-start traces of 2026-09-15 no callback fired at all during the
+first 18 s; the hardening is for platforms that do replay.)
 
 Dashboard derivation initializes/joins diagnostics when needed, then observes its
 terminal result, including Blocked or Failed, without retrying it. Explicit
@@ -73,6 +79,16 @@ The mutation coordinator invalidates root observations at every matching phase
 completion/recovery before exposing phase evidence. Its separate refresh worker
 awaits this shared reload. It never waits for Dashboard/diagnostics before accepting
 the next config operation.
+
+The startup runtime reconcile (a forced native activation with no config edit) is
+one such operation. Cold-start traces on Pixel 8 Pro (2026-09-15, VPN up) showed
+its completion invalidating the root snapshot about 430 ms after the first read,
+which restarted the routing gate and the targets/Dashboard derivations while the
+first derivation and the diagnostic suite were still in flight: a second root
+snapshot (about 1.1 s, including package inventory) plus a repeated derivation on
+the critical path, `dashboard_ready` at about 3.9 s instead of 2.4 s. The
+reconcile is therefore started only after the Dashboard has painted; its
+invalidation then refreshes observations in the background.
 
 App inventory subscribes to changes in the accepted `pm_packages` / `pm_users`
 sections instead of every root refresh. Config-only or statistics-only changes

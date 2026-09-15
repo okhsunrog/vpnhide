@@ -185,14 +185,24 @@ internal class StartupCoordinator(
         }
     }
 
+    /**
+     * Protection parses the shared root snapshot from memory as soon as it exists.
+     * The runtime reconcile (a forced native activation) waits for [dashboardReady]:
+     * its completion invalidates every root observation, and running it while the
+     * first Dashboard derivation and the diagnostic suite are still in flight put a
+     * second root snapshot plus a repeated derivation on the cold-start critical path
+     * (measured at roughly 1.4 s on Pixel 8 Pro). After first paint the same
+     * refresh happens in the background.
+     */
     fun ensureProtectionCacheAfterRootSnapshot(
         scope: CoroutineScope,
         selfNeedsRestart: Boolean?,
         rootSnapshot: RootSnapshot?,
+        dashboardReady: Boolean,
     ) {
         if (selfNeedsRestart != null && rootSnapshot != null) {
             TargetsCache.ensureLoaded(scope, appContext)
-            if (reconcileStarted.compareAndSet(false, true)) {
+            if (dashboardReady && reconcileStarted.compareAndSet(false, true)) {
                 owner.launch(Dispatchers.IO) { reconcileRuntimeConfigNow() }
             }
         }

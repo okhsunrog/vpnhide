@@ -449,15 +449,16 @@ private fun MainScreen() {
     // cannot make startup immediately do a second expensive retry. As soon
     // as that shared snapshot exists, TargetsCache parses it from memory and
     // Protection is still prewarmed before a normal tab switch.
-    LaunchedEffect(selfNeedsRestart, rootSnapshot) {
-        VpnHideLog.setFromRootSnapshot(rootSnapshot)
-        startupCoordinator.ensureProtectionCacheAfterRootSnapshot(scope, selfNeedsRestart, rootSnapshot)
-    }
-
     // Mark startup readiness once the main shell has shown either usable
     // dashboard data or a terminal load error. Users see the dashboard loading
     // state in place while this happens.
     val uiReady = startupCoordinator.isUiReady(dashboardState, dashboardError)
+    LaunchedEffect(selfNeedsRestart, rootSnapshot, uiReady) {
+        VpnHideLog.setFromRootSnapshot(rootSnapshot)
+        // The runtime reconcile is deferred past first paint; see the coordinator.
+        startupCoordinator.ensureProtectionCacheAfterRootSnapshot(scope, selfNeedsRestart, rootSnapshot, uiReady)
+    }
+
     var startupTraceMarked by remember { mutableStateOf(false) }
     LaunchedEffect(uiReady) {
         if (uiReady && !startupTraceMarked) {

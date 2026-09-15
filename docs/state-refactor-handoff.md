@@ -127,11 +127,30 @@ Signing is configured locally; never print keystore secrets. APK:
 SDK: `/home/okhsunrog/Android/Sdk`; apksigner is in `build-tools/35.0.0`.
 
 Device last used: Pixel 8 Pro, serial `3B241FDJG003LP`. Check availability before use.
-Installed version: `1.2.5-128-ga43cc3f0`, code 10205. Last verified installation
-flags: user 0=true; user 10 (Private space)=false; user 11 (test user 2)=false.
-Copies in 10 and 11 were explicitly removed at the user's request. `adb install
---user 0 -r` alone is not proof that other profiles are clean. Inspect `pm list
-users` and `dumpsys package dev.okhsunrog.vpnhide` after installation.
+Installed version: the deferred-reconcile build of this branch (after `68cc1c5c`),
+user 0 only. On 2026-09-15 the device had only user 0 (`pm list users`); profiles
+10 and 11 no longer existed. `adb install --user 0 -r` alone is not proof that
+other profiles are clean. Inspect `pm list users` and `dumpsys package
+dev.okhsunrog.vpnhide` after installation.
+
+## Cold-start measurements (Pixel 8 Pro, VPN up, self routed)
+
+Method: `adb logcat -c`, `am force-stop` + `am start -W`, then read the
+`VpnHide-Startup` marks (Debug logging must be on). `dashboard_ready` in ms:
+
+| Build | Runs | Notes |
+|---|---|---|
+| installed before this session (`1.2.5-139-g998ac6f7`, another branch) | 2980, 3059 | second root snapshot right after the first |
+| `68cc1c5c` (diagnostic coordinator + Verifying reuse) | 4014, 3884, 3834 | startup reconcile invalidated root ~430 ms after the first snapshot; Verifying joined the reload |
+| deferred reconcile (this stage) | 2470, 2329, 2472 | reconcile and its refresh run after first paint |
+
+Where the remaining ~2.4 s goes (run 2): root check 186 ms; self-target
+preparation 1.14 s (one root shell that already reads every snapshot section,
+about 650 ms of section work plus process overhead); root snapshot 0.61 s (the
+same sections again); routing probe 0.12 s; suite 0.15 s; derivation 0.05 s.
+Next candidates, in order of expected gain: seed the whole root snapshot from the
+self-target read when it wrote nothing (saves the 0.6 s snapshot), then fold the
+root check into that shell, then reduce `su` spawns inside the suite.
 
 Hardware checks completed: reproduced old theme-change navigation reset, then
 verified Settings, a nested help article and selected Statistics tab survive
