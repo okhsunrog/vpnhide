@@ -67,6 +67,14 @@ internal fun DiagnosticsFailedPrompt(
     modifier: Modifier = Modifier,
 ) = RetryPromptCard(R.string.diag_failed_prompt, onRetry, modifier)
 
+/** The same retry card for any other explicit, actionable diagnostic state (routing unknown, interrupted, results changed). */
+@Composable
+internal fun DiagnosticsRetryPrompt(
+    messageRes: Int,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) = RetryPromptCard(messageRes, onRetry, modifier)
+
 @Composable
 private fun RetryPromptCard(
     messageRes: Int,

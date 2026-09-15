@@ -177,7 +177,9 @@ internal object DiagnosticsCache {
         selfNeedsRestart: Boolean,
     ) {
         updateInputs(context, selfNeedsRestart)
-        if (diagnosticRetryAllowed(coordinator.view.value.core)) coordinator.request(request(automatic = false))
+        // A completed suite is reused unless a known change made its measurement inapplicable.
+        val changed = presentation.value.applicability == MeasurementApplicability.Changed
+        if (changed || diagnosticRetryAllowed(coordinator.view.value.core)) coordinator.request(request(automatic = false))
     }
 
     /**

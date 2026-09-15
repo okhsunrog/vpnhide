@@ -439,6 +439,16 @@
     <string name="banner_ready">VPN активен. Для этого приложения включено скрытие. Результаты проверок ниже.</string>
     <string name="banner_added_self">Для VPN Hide включено скрытие. Принудительно остановите VPN Hide и откройте снова, чтобы нативные проверки начали работать — перезагрузка устройства не нужна.</string>
     <string name="banner_network_blocked">Доступ к сети отключён для этого приложения. Проверки ioctl (SIOCGIFFLAGS, SIOCGIFMTU, SIOCGIFCONF) не могут быть выполнены. Включите в Настройки → Приложения → VPN Hide → Мобильный интернет и Wi-Fi.</string>
+    <string name="diag_banner_applying">Изменение настроек ещё применяется. Проверка запустится, как только оно завершится.</string>
+    <string name="diag_banner_application_unknown">Не удалось подтвердить последнее изменение настроек. Перепроверьте его в настройках и запустите проверку снова.</string>
+    <string name="diag_banner_application_failed">Последнее изменение настроек не применилось. Исправьте его с того переключателя, где произошла ошибка, и запустите проверку снова.</string>
+    <string name="diag_banner_routing_unknown">Не удалось определить, идёт ли VPN Hide через VPN. Нажмите «Повторить».</string>
+    <string name="diag_banner_interrupted">Проверку прервало изменение VPN, маршрутизации или настроек. Нажмите «Повторить».</string>
+    <string name="diag_notice_interrupted">Последнюю проверку прервало изменение VPN, маршрутизации или настроек. Ниже результаты предыдущей завершённой проверки.</string>
+    <string name="diag_notice_failed">Последняя проверка не выполнилась. Ниже результаты предыдущей завершённой проверки.</string>
+    <string name="diag_banner_results_changed">С момента этой проверки изменились VPN, маршрутизация или настройки. Запустите проверку снова.</string>
+    <string name="diag_banner_results_unverified">Проверяем, относятся ли эти результаты к текущему состоянию VPN…</string>
+    <string name="diag_banner_insufficient">Проверка прошла, но ни один вектор не удалось отнести к слою скрытия, поэтому она ничего не доказывает. Подробности ниже.</string>
     <string name="section_native">Нативный уровень (kmod / KPM / Zygisk)</string>
     <string name="section_native_uncovered">Вне зоны активного модуля</string>
     <string name="diag_uncovered_caption">Способы обнаружения, которые активный модуль не покрывает — это не ошибка работающего модуля. VPN-пути в файловой системе (например /sys/class/net) закрываются включением «Экспериментальной защиты» в Настройках; остальные могут потребовать модуль уровня ядра (kmod / KPM), если устройство его поддерживает.</string>

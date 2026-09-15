@@ -893,7 +893,19 @@ restores it (T13). A known change (epoch or identity) makes it Changed while the
 history stays visible (T12). A failed later attempt is exposed beside the last
 complete measurement (T11). All-unmeasured evidence is Insufficient (T16).
 
-Boundary: this stage adds the projection and its tests only. Screens, the
-bridge and the bundle still render the legacy `DiagnosticsCache.State` plus the
-live gate overlay; moving them onto the projection (and the bundle/bridge schema
-decision this implies) is the next stage.
+The Diagnostics screen renders the projection through the pure
+`diagnosticScreenDecision` (classify, then word): current conditions first
+(Initializing/Checking → progress, or an existing measurement shown as unverified
+while routing is re-read; RestartApp; VpnOff; SelfExcluded; Applying;
+ApplicationUnknown; ApplicationFailed; routing Unknown with a retry, never an
+endless spinner), then a run in flight (progress, partial evidence listed as
+incomplete), then a failed or interrupted latest attempt (its own prompt when no
+complete measurement exists, a notice beside the history otherwise), then the
+latest complete measurement: Insufficient evidence outranks applicability, and
+applicability words the banner (ready, results changed with a retry that starts
+a new run, results unverified). The screen no longer overlays the live gate on
+the legacy state; the live gate remains the trigger for the automatic suite.
+
+Boundary: the Dashboard hero, the bridge and the bundle still render the legacy
+`DiagnosticsCache.State` plus the live gate overlay; moving them onto the
+projection (and the bundle/bridge schema decision this implies) is the next stage.

@@ -117,6 +117,16 @@
     <string name="banner_ready">VPN 已开启，且已为此应用启用隐藏。检查结果见下方。</string>
     <string name="banner_added_self">已为 VPN Hide 自身启用隐藏。请重启 VPN Hide（强制停止后重新打开），原生级检查才会生效——无需重启设备。</string>
     <string name="banner_network_blocked">此应用的网络访问已被关闭，ioctl 检查（SIOCGIFFLAGS、SIOCGIFMTU、SIOCGIFCONF）因此无法运行。请在“设置 → 应用 → VPN Hide → 移动数据和 WLAN”中开启。</string>
+    <string name="diag_banner_applying">配置更改仍在应用中。完成后将自动运行检查。</string>
+    <string name="diag_banner_application_unknown">无法确认上一次配置更改。请在“设置”中重新检查，然后再次运行检查。</string>
+    <string name="diag_banner_application_failed">上一次配置更改未能应用。请从出错的开关处修复，然后再次运行检查。</string>
+    <string name="diag_banner_routing_unknown">无法确定 VPN Hide 是否经过 VPN。请点按“重试”再次检查。</string>
+    <string name="diag_banner_interrupted">检查在完成前被 VPN、路由或配置的变化中断。请点按“重试”。</string>
+    <string name="diag_notice_interrupted">最近一次检查被 VPN、路由或配置的变化中断。下方是上一次完整检查的结果。</string>
+    <string name="diag_notice_failed">最近一次检查未能运行。下方是上一次完整检查的结果。</string>
+    <string name="diag_banner_results_changed">自这些结果测得以来，VPN、路由或配置已发生变化。请再次运行检查。</string>
+    <string name="diag_banner_results_unverified">正在确认这些结果是否仍适用于当前 VPN 状态…</string>
+    <string name="diag_banner_insufficient">检查已运行，但没有任何向量能归因于某个隐藏层，因此它无法证明隐藏是否生效。详情见下方。</string>
     <string name="section_native">原生层（kmod / KPM / Zygisk）</string>
     <string name="section_native_uncovered">当前后端覆盖不到的部分</string>
     <string name="diag_uncovered_caption">这些检测面当前后端未覆盖——并不是运行中的模块出了问题。VPN 文件系统路径（如 /sys/class/net）可在设置中开启“实验性保护”来关闭；其他检测面可能需要内核级后端（kmod / KPM），前提是设备支持。</string>

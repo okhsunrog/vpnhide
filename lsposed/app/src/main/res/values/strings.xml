@@ -125,6 +125,16 @@
     <string name="banner_ready">VPN is active. Hiding is enabled for this app. Results below.</string>
     <string name="banner_added_self">Enabled hiding for VPN Hide. Restart VPN Hide (force-stop and reopen) for native-level checks to take effect — no device reboot needed.</string>
     <string name="banner_network_blocked">Network access is disabled for this app. ioctl checks (SIOCGIFFLAGS, SIOCGIFMTU, SIOCGIFCONF) cannot run without it. Enable in Settings → Apps → VPN Hide → Mobile data &amp; Wi-Fi.</string>
+    <string name="diag_banner_applying">A configuration change is still being applied. The check will run once it has settled.</string>
+    <string name="diag_banner_application_unknown">The last configuration change could not be confirmed. Re-check it in Settings, then run the check again.</string>
+    <string name="diag_banner_application_failed">The last configuration change did not apply. Repair it from the switch that failed, then run the check again.</string>
+    <string name="diag_banner_routing_unknown">Couldn\'t determine whether VPN Hide is routed through the VPN. Tap Retry to check again.</string>
+    <string name="diag_banner_interrupted">The check was interrupted by a change in the VPN, routing or configuration before it finished. Tap Retry.</string>
+    <string name="diag_notice_interrupted">The latest check was interrupted by a change in the VPN, routing or configuration. The results below are from the previous complete check.</string>
+    <string name="diag_notice_failed">The latest check couldn\'t run. The results below are from the previous complete check.</string>
+    <string name="diag_banner_results_changed">The VPN, routing or configuration has changed since these results were measured. Run the check again.</string>
+    <string name="diag_banner_results_unverified">Checking whether these results still apply to the current VPN state…</string>
+    <string name="diag_banner_insufficient">The check ran, but no vector could be attributed to a hiding layer, so it proves nothing about hiding. See the details below.</string>
     <string name="section_native">Native level (kmod / KPM / Zygisk)</string>
     <string name="section_native_uncovered">Outside the active backend\'s reach</string>
     <string name="diag_uncovered_caption">Detection surfaces the active backend doesn\'t cover — not a failure of the running module. VPN filesystem paths (e.g. /sys/class/net) are closed by turning on Experimental protection in Settings; other surfaces may need a kernel-level backend (kmod / KPM) where the device supports one.</string>
