@@ -15,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -25,7 +26,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -35,6 +39,31 @@ import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
 import kotlinx.coroutines.launch
 
 internal val LocalConfigSnackbar = staticCompositionLocalOf<SnackbarHostState> { error("Missing configuration feedback host") }
+
+/**
+ * What the snackbar must clear at the bottom of the screen. The host is one
+ * overlay across navigation, so it cannot know which screen is under it; the
+ * screens report their bottom furniture instead, and the snackbar rises above
+ * the app's navigation bar and a screen's own action bar (the picker's
+ * Save / Discard row) rather than covering the controls the user reaches for.
+ */
+internal class ConfigSnackbarInsets {
+    /** The tab navigation bar while a tab scaffold shows it; includes the system bar inset it absorbs. */
+    var navigation by mutableStateOf(0.dp)
+
+    /** A screen's own bottom action bar, stacked on top of [navigation]. */
+    var actionBar by mutableStateOf(0.dp)
+}
+
+internal val LocalConfigSnackbarInsets = staticCompositionLocalOf<ConfigSnackbarInsets> { error("Missing configuration feedback host") }
+
+/** Report this element's height as a snackbar inset while it is composed; cleared when it leaves. */
+@Composable
+internal fun Modifier.reportConfigSnackbarInset(report: (Dp) -> Unit): Modifier {
+    val density = LocalDensity.current
+    DisposableEffect(report) { onDispose { report(0.dp) } }
+    return onSizeChanged { report(with(density) { it.height.toDp() }) }
+}
 
 /** A rejected UI action explains the gate without submitting or replaying a mutation. */
 internal val LocalConfigWriteAccess = staticCompositionLocalOf<() -> Boolean> { error("Missing configuration feedback host") }
@@ -50,6 +79,7 @@ internal class ConfigFeedbackViewModel : ViewModel() {
 internal fun ConfigFeedbackProvider(content: @Composable () -> Unit) {
     val view by CanonicalConfigRepository.state.collectAsState()
     val host = remember { SnackbarHostState() }
+    val insets = remember { ConfigSnackbarInsets() }
     val owner = LocalLifecycleOwner.current as ViewModelStoreOwner
     val feedback = ViewModelProvider(owner)[ConfigFeedbackViewModel::class.java]
 
@@ -67,17 +97,22 @@ internal fun ConfigFeedbackProvider(content: @Composable () -> Unit) {
         }
     CompositionLocalProvider(
         LocalConfigSnackbar provides host,
+        LocalConfigSnackbarInsets provides insets,
         LocalConfigWriteAccess provides checkWrite,
     ) {
         Box(Modifier.fillMaxSize()) {
             content()
+            // The reported navigation bar already absorbs the system bar inset;
+            // only a screen without one (Settings, Help) needs the system padding.
+            val bottom = if (insets.navigation > 0.dp) Modifier.padding(bottom = insets.navigation) else Modifier.navigationBarsPadding()
             SnackbarHost(
                 hostState = host,
                 modifier =
                     Modifier
                         .align(Alignment.BottomCenter)
                         .imePadding()
-                        .navigationBarsPadding()
+                        .then(bottom)
+                        .padding(bottom = insets.actionBar)
                         .padding(12.dp),
             )
         }

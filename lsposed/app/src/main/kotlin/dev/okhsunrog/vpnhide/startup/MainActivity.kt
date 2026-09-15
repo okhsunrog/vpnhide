@@ -53,6 +53,7 @@ import dev.okhsunrog.vpnhide.ConfigFeedbackProvider
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DashboardLoadingState
 import dev.okhsunrog.vpnhide.DashboardScreen
+import dev.okhsunrog.vpnhide.LocalConfigSnackbarInsets
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.SelfTargetFailureKind
@@ -68,6 +69,7 @@ import dev.okhsunrog.vpnhide.picker.TargetListSortMode
 import dev.okhsunrog.vpnhide.picker.TargetsCache
 import dev.okhsunrog.vpnhide.picker.isMainAppProfile
 import dev.okhsunrog.vpnhide.rememberCanonicalEditor
+import dev.okhsunrog.vpnhide.reportConfigSnackbarInset
 import dev.okhsunrog.vpnhide.settings.AppSettings
 import dev.okhsunrog.vpnhide.settings.DiagnosticsSettingsScreen
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
@@ -669,7 +671,9 @@ private fun MainScreen() {
             },
             bottomBar = {
                 val tabHaptic = rememberHapticTick()
+                val snackbarInsets = LocalConfigSnackbarInsets.current
                 NavigationBar(
+                    modifier = Modifier.reportConfigSnackbarInset { snackbarInsets.navigation = it },
                     containerColor = AppColors.navigationBarContainer,
                     tonalElevation = 0.dp,
                 ) {

@@ -66,11 +66,13 @@ import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.HelpAccordion
 import dev.okhsunrog.vpnhide.LocalConfigSnackbar
+import dev.okhsunrog.vpnhide.LocalConfigSnackbarInsets
 import dev.okhsunrog.vpnhide.LocalConfigWriteAccess
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.StatusBanner
 import dev.okhsunrog.vpnhide.StatusColors
 import dev.okhsunrog.vpnhide.rememberCanonicalEditor
+import dev.okhsunrog.vpnhide.reportConfigSnackbarInset
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import io.github.oikvpqya.compose.fastscroller.VerticalScrollbar
 import io.github.oikvpqya.compose.fastscroller.indicator.IndicatorConstants
@@ -362,7 +364,12 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                     },
                 )
             }
-            Surface(tonalElevation = 3.dp) {
+            val snackbarInsets = LocalConfigSnackbarInsets.current
+            Surface(
+                tonalElevation = 3.dp,
+                // A save error's snackbar rises above this bar, not over Save / Discard.
+                modifier = Modifier.reportConfigSnackbarInset { snackbarInsets.actionBar = it },
+            ) {
                 Row(
                     modifier =
                         Modifier
