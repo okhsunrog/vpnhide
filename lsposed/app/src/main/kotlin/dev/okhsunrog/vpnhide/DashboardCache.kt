@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -24,14 +25,23 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardState
 ) {
     val state: StateFlow<DashboardState?> = ProjectedStateFlow(value) { it?.value }
 
+    override fun beforeRefresh(inputs: ContextObservationInputs) {
+        DiagnosticsCache.retry(ObservationRuntime.scope, inputs.context, inputs.selfNeedsRestart)
+    }
+
     override suspend fun load(
         @Suppress("UNUSED_PARAMETER") request: ObservationRequest,
     ): RootProjection<DashboardState> {
         val (context, selfNeedsRestart) = requireNotNull(inputs)
+        val diagnosticObservation = DiagnosticsCache.observeTerminal(context, selfNeedsRestart)
         val rootSnapshot =
             RootSnapshotCache.getOrLoad()
         return withContext(Dispatchers.IO) {
-            RootProjection(rootSnapshot.observationId, rootSnapshot.generation, loadDashboardState(context, selfNeedsRestart, rootSnapshot))
+            RootProjection(
+                rootSnapshot.observationId,
+                rootSnapshot.generation,
+                loadDashboardState(context, selfNeedsRestart, rootSnapshot, diagnosticObservation),
+            )
         }
     }
 }

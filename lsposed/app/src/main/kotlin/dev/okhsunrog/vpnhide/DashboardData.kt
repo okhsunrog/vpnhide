@@ -1457,6 +1457,7 @@ private suspend fun resolveProtectionFacts(
     modules: ModuleFacts,
     lsposedActive: Boolean,
     sections: Map<String, String>,
+    diagnosticObservation: DiagnosticsCache.State?,
 ): ProtectionFacts {
     VpnHideLog.i(
         TAG,
@@ -1468,7 +1469,7 @@ private suspend fun resolveProtectionFacts(
         installedNativeOptionalHooks(nativeBackend.id, sections, modules.currentBootId)
     var report: DiagnosticReport? = null
     val check: ProtectionCheck =
-        when (val terminal = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart)) {
+        when (val terminal = diagnosticObservation ?: DiagnosticsCache.awaitTerminal(context, selfNeedsRestart)) {
             is DiagnosticsCache.State.Blocked -> {
                 ProtectionCheck.Blocked(terminal.gate)
             }
@@ -1549,6 +1550,7 @@ internal suspend fun loadDashboardState(
     context: android.content.Context,
     selfNeedsRestart: Boolean,
     rootSnapshot: RootSnapshot,
+    diagnosticObservation: DiagnosticsCache.State? = null,
 ): DashboardState {
     VpnHideLog.i(TAG, "=== Loading dashboard state ===")
     StartupTrace.mark("dashboard_derive_start")
@@ -1591,6 +1593,7 @@ internal suspend fun loadDashboardState(
             modules = modules,
             lsposedActive = lsposed.state is LsposedState.Active,
             sections = sections,
+            diagnosticObservation = diagnosticObservation,
         )
     VpnHideLog.i(TAG, "protection=${protection.check}")
     StartupTrace.mark("dashboard_protection_done")

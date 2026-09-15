@@ -34,8 +34,12 @@ internal abstract class ContextStateCache<T>(
         selfNeedsRestart: Boolean,
     ) {
         updateInputs(context, selfNeedsRestart)
+        beforeRefresh(requireNotNull(inputs))
         forceRefresh(scope)
     }
+
+    /** Explicit refresh only; dependency invalidation must not trigger other effect owners. */
+    protected open fun beforeRefresh(inputs: ContextObservationInputs) = Unit
 
     private fun updateInputs(
         context: Context,

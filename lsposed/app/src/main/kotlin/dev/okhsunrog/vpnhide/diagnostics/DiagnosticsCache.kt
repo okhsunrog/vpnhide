@@ -154,9 +154,16 @@ internal object DiagnosticsCache {
         selfNeedsRestart: Boolean,
     ): State {
         run(cacheScope, context, selfNeedsRestart)
-        return state.first {
-            it is State.Blocked || it is State.Failed || (it is State.Ready && it.complete)
-        }
+        return state.first(::isTerminalDiagnosticState)
+    }
+
+    /** Cache derivation observes the existing terminal state; retry belongs to an explicit trigger. */
+    suspend fun observeTerminal(
+        context: Context,
+        selfNeedsRestart: Boolean,
+    ): State {
+        if (selfNeedsRestart) run(cacheScope, context, selfNeedsRestart = true)
+        return awaitDiagnosticObservation(state) { run(cacheScope, context, selfNeedsRestart) }
     }
 
     /** The complete check results, or null when the terminal state carried no

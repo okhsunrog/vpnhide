@@ -46,6 +46,8 @@ import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.VpnTransportWatcher
 import dev.okhsunrog.vpnhide.diagnostics.blockedOrNull
+import dev.okhsunrog.vpnhide.diagnostics.isTerminalDiagnosticState
+import dev.okhsunrog.vpnhide.diagnostics.routedTransitions
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
@@ -78,6 +80,8 @@ fun DashboardScreen(
 
     val state by DashboardCache.state.collectAsState()
     val loadError by DashboardCache.error.collectAsState()
+    val loading by DashboardCache.loading.collectAsState()
+    val diagnosticState by DiagnosticsCache.state.collectAsState()
     val updateInfo by UpdateCheckCache.info.collectAsState()
     // The LIVE gate — kept fresh by VpnTransportWatcher on every VPN transport change —
     // overlays onto the cached DashboardCache.state.protection below so the hero and the
@@ -144,6 +148,15 @@ fun DashboardScreen(
         return
     }
 
+    LaunchedEffect(selfNeedsRestart) {
+        RoutingGateCache.gate.routedTransitions().collect {
+            val cached = DashboardCache.state.value
+            if (cached != null && cached.protection !is ProtectionCheck.Checked) {
+                DashboardCache.refresh(scope, context, selfNeedsRestart)
+            }
+        }
+    }
+
     // Routed but no tiles yet: the app was opened with the VPN off (checks never ran),
     // then the VPN came up. We have no routed protection to show, so refresh and render
     // the same full-screen skeleton as the initial load — ABOVE the scrolling Column,
@@ -152,12 +165,9 @@ fun DashboardScreen(
     // its Checked tiles via the sticky DiagnosticsCache, so it never lands here.)
     val gateState = state
     if (gateState != null && loadError == null &&
-        liveGate == DiagnosticGate.ROUTED && gateState.protection !is ProtectionCheck.Checked
+        liveGate == DiagnosticGate.ROUTED && gateState.protection !is ProtectionCheck.Checked &&
+        (loading || !isTerminalDiagnosticState(diagnosticState))
     ) {
-        LaunchedEffect(Unit) {
-            DashboardCache.refresh(scope, context, selfNeedsRestart)
-            DiagnosticsCache.retry(scope, context, selfNeedsRestart)
-        }
         DashboardLoadingState(modifier = modifier)
         return
     }
@@ -212,8 +222,8 @@ fun DashboardScreen(
         // Overlay the live gate onto the cached protection: a live block (VPN off /
         // self-not-routed / needs-restart) always wins over whatever DashboardCache last
         // measured, so the hero/prompt react to a VPN toggle immediately. The ROUTED-but-
-        // no-tiles-yet case is handled above the scroll container (full-screen skeleton),
-        // so here the live gate is either a block or ROUTED with Checked tiles.
+        // no-tiles-yet case shows a skeleton above while work is pending. A terminal
+        // failure must remain visible here instead of retriggering work indefinitely.
         val effectiveProtection: ProtectionCheck =
             liveGate?.blockedOrNull()?.let { ProtectionCheck.Blocked(it) } ?: loadedState.protection
         val effectiveState = loadedState.copy(protection = effectiveProtection)

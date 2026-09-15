@@ -113,9 +113,10 @@ fun DiagnosticsScreen(
     // VPN comes up (or this app becomes routed), the results must be measured even if
     // DiagnosticsCache is still sitting on a stale Blocked/Failed from before. run() is
     // idempotent — a no-op on an already-complete Ready — so this is cheap on every
-    // recomposition where liveGate hasn't changed.
-    LaunchedEffect(liveGate) {
-        if (liveGate == DiagnosticGate.ROUTED) {
+    // known routed transition. Temporary unknown readiness while the gate refreshes
+    // must not retrigger a failed run when the same routed value returns.
+    LaunchedEffect(selfNeedsRestart) {
+        RoutingGateCache.gate.routedTransitions().collect {
             DiagnosticsCache.run(scope, context, selfNeedsRestart)
         }
     }

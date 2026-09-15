@@ -13,6 +13,13 @@ not change the runtime contract. The proposed replacement is specified separatel
 in the [app state transition contract](app-state-transitions.md) and is not yet
 implemented.
 
+The [observation coordinator](observation-coordinator.md) now owns cache refreshes.
+Dashboard cache derivation observes terminal diagnostics without implicitly
+retrying Blocked/Failed; explicit refresh and existing diagnostic triggers still
+use the current retry policy. This prevents diagnostic root refreshes from
+recursively retriggering themselves through Dashboard invalidation. Measurement
+classification and the completed-run retention policy below are unchanged.
+
 Devices this was validated on: Pixel 4a (sunfish, Magisk, 4.14, kmod/KPM/Zygisk),
 Pixel 8 Pro (husky, KernelSU-Next, GKI 6.1, KPM), and an Android 13 Zygisk device.
 

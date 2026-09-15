@@ -24,7 +24,19 @@ once when rendering an app-list response.
 It is useful display history, not evidence of current readiness. `current` is null
 while loading, stale, failed or quarantined. `RoutingGateCache.gate` uses `current`:
 a VPN callback marks it stale immediately, before the 750 ms debounced recheck.
-This changes readiness freshness, not diagnostic result validity or run policy.
+This changes readiness freshness, not diagnostic result classification or retention.
+
+Dashboard derivation initializes/joins diagnostics when needed, then observes its
+terminal result, including Blocked or Failed, without retrying it. Explicit
+Dashboard refresh still requests the existing diagnostic retry policy. This removes
+a dependency cycle: diagnostics refreshes the routing/root source, which invalidates
+Dashboard; that successor must not start diagnostics again just because VPN is off.
+The existing startup, live-routed screen triggers and explicit retry remain. A
+config-only background invalidation does not itself retry a terminal diagnostic.
+Completed-result retention and measurement classification are unchanged.
+Screen retry triggers observe known routing transitions: a temporary unknown value
+during refresh does not count as VPN returning. A terminal failure leaves the
+Dashboard loading placeholder and remains available for manual retry.
 
 Invalidation advances the generation synchronously. A result from an older
 generation cannot publish either a value or an error. Its completion starts one
@@ -92,10 +104,11 @@ Host tests control load and timer gates to cover stale success/failure, coalesci
 fresh-since requests, waiter cancellation, missing inputs, retry/quarantine and
 source invalidation during a slow projection. Additional tests cover grouped
 projections, inventory dependency filtering, config-phase invalidation ordering
-and process/pipe draining. These tests do not establish Android PackageManager,
+and process/pipe draining. A diagnostic-observation integration test rejects the
+VPN-off feedback cycle described above. These tests do not establish Android PackageManager,
 Binder/root-manager timing or visible behavior on a physical phone.
 
-Validation on 2026-09-15: all 651 JVM tests passed, including 19 new tests, with
+Validation on 2026-09-15: all 655 JVM tests passed, including 23 new tests, with
 no failures or skips. Kotlin warnings-as-errors compilation, ktlint, detekt, CPD
 and Android `lintDebug` passed. The source and tests were held unchanged throughout
 the final combined Gradle run.
