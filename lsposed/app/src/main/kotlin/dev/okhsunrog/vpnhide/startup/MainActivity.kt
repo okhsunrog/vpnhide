@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -550,6 +551,9 @@ private fun MainScreen() {
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
+            // While the Help overlay covers the app, drop the screen beneath it
+            // from the a11y tree so TalkBack can't reach the hidden nav buttons.
+            modifier = if (showHelp) Modifier.clearAndSetSemantics {} else Modifier,
             containerColor = AppColors.screenBackground,
             topBar = {
                 if (searchActive && currentTab == Tab.Protection) {

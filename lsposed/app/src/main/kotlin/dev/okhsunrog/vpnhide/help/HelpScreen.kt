@@ -88,7 +88,10 @@ internal fun HelpScreen(
                 title = { Text(article?.title ?: stringResource(R.string.help_title)) },
                 navigationIcon = {
                     IconButton(onClick = { if (articleId != null) articleId = null else onClose() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.action_back),
+                        )
                     }
                 },
             )
@@ -146,7 +149,7 @@ private fun HelpTableOfContents(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (query.isNotBlank()) {
+        if (query.trim().length >= 2) {
             if (hits.isEmpty()) {
                 item(key = "empty") { Text(stringResource(R.string.help_search_empty)) }
             }
