@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
@@ -69,6 +71,7 @@ fun DashboardScreen(
     onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenAccelerators: (() -> Unit)? = null,
+    onOpenHelp: (String?) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -305,9 +308,18 @@ fun DashboardScreen(
         }
 
         val onContact = { showContact = true }
-        MessageSection(errors, R.string.dashboard_issues, errorHeader, errorBg, onBannerColor, onOpenDiagnostics, onContact)
-        MessageSection(warnings, R.string.dashboard_warnings, warningHeader, warningBg, onBannerColor, onOpenDiagnostics, onContact)
-        MessageSection(infos, R.string.dashboard_info, infoHeader, infoBg, onBannerColor, onOpenDiagnostics, onContact)
+        MessageSection(errors, R.string.dashboard_issues, errorHeader, errorBg, onBannerColor, onOpenDiagnostics, onContact, onOpenHelp)
+        MessageSection(
+            warnings,
+            R.string.dashboard_warnings,
+            warningHeader,
+            warningBg,
+            onBannerColor,
+            onOpenDiagnostics,
+            onContact,
+            onOpenHelp,
+        )
+        MessageSection(infos, R.string.dashboard_info, infoHeader, infoBg, onBannerColor, onOpenDiagnostics, onContact, onOpenHelp)
 
         // Asks for support only on a setup that provably works, and only once —
         // see shouldShowDonatePrompt for the full gate.
@@ -333,7 +345,45 @@ fun DashboardScreen(
             )
         }
 
+        Spacer(Modifier.height(20.dp))
+        HelpGuideEntry(onClick = { onOpenHelp(null) })
+
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+// A quiet, always-present entry into the offline guide's table of contents — the
+// contextual entries on issue banners deep-link into specific articles; this is
+// the general "open the whole guide" affordance.
+@Composable
+private fun HelpGuideEntry(onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = AppColors.cardContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.HelpOutline,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = stringResource(R.string.help_title),
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -351,6 +401,7 @@ private fun MessageSection(
     contentColor: Color,
     onOpenDiagnostics: () -> Unit,
     onContact: () -> Unit,
+    onOpenHelp: (String?) -> Unit,
 ) {
     if (messages.isEmpty()) return
     Spacer(Modifier.height(20.dp))
@@ -361,7 +412,7 @@ private fun MessageSection(
             text = message.text,
             containerColor = containerColor,
             contentColor = contentColor,
-            action = messageActionSlot(message, onOpenDiagnostics, onContact),
+            action = messageActionSlot(message, onOpenDiagnostics, onContact, onOpenHelp),
         )
         Spacer(Modifier.height(6.dp))
     }
@@ -370,27 +421,39 @@ private fun MessageSection(
 // Maps a message's data-layer action tag to the actual button + handler in ONE
 // place, so a new action is an enum case + one branch here — not an edit in
 // every message loop. The data layer stays UI-free (it only emits the tag).
+// Precedence: a concrete fix (download the zip) first, then a tagged action,
+// then the contextual "Learn more" link into the guide.
 private fun messageActionSlot(
     message: DashboardMessage,
     onOpenDiagnostics: () -> Unit,
     onContactAuthor: () -> Unit,
+    onOpenHelp: (String?) -> Unit,
 ): (@Composable () -> Unit)? {
-    // A message that names a downloadable module zip (wrong variant, outdated
-    // version, …) gets a download button; otherwise fall back to its action tag.
     message.downloadArtifact?.let { artifact ->
         return { ModuleDownloadButton(artifact) }
     }
-    return when (message.action) {
-        DashboardMessageAction.ContactAuthor -> ({ ContactAuthorButton(onClick = onContactAuthor) })
-        DashboardMessageAction.OpenDiagnostics -> ({ DetailsButton(onClick = onOpenDiagnostics) })
-        null -> null
+    when (message.action) {
+        DashboardMessageAction.ContactAuthor -> return ({ ContactAuthorButton(onClick = onContactAuthor) })
+        DashboardMessageAction.OpenDiagnostics -> return ({ DetailsButton(onClick = onOpenDiagnostics) })
+        null -> Unit
     }
+    message.helpArticle?.let { article ->
+        return { LearnMoreButton(onClick = { onOpenHelp(article) }) }
+    }
+    return null
 }
 
 @Composable
 private fun DetailsButton(onClick: () -> Unit) {
     EnhancedOutlinedButton(onClick = onClick) {
         Text(stringResource(R.string.dashboard_action_details))
+    }
+}
+
+@Composable
+private fun LearnMoreButton(onClick: () -> Unit) {
+    EnhancedOutlinedButton(onClick = onClick) {
+        Text(stringResource(R.string.dashboard_action_learn_more))
     }
 }
 

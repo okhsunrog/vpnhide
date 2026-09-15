@@ -773,6 +773,7 @@ private fun MainScreen() {
                                 selfNeedsRestart = restart,
                                 onOpenDiagnostics = { showDiagnostics = true },
                                 onOpenAccelerators = { openHelp("game-accelerators") },
+                                onOpenHelp = openHelp,
                                 modifier = Modifier.padding(innerPadding),
                             )
                         }

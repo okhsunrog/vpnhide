@@ -350,6 +350,7 @@
     <string name="dashboard_info">信息（%d）</string>
     <string name="dashboard_issue_checks_failed">并非所有隐藏检查都已通过。</string>
     <string name="dashboard_action_details">详情</string>
+    <string name="dashboard_action_learn_more">了解更多</string>
     <string name="dashboard_issue_kmod_capable_but_zygisk">当前内核支持内核模块——它在内核空间挂钩，对防篡改检测不可见。Zygisk 也能用，但为其开启原生时，银行和支付类应用可能会检测到它的钩子。请安装 %1$s 并卸载 Zygisk 模块，以获得更干净的覆盖。</string>
     <string name="dashboard_issue_native_conflict_kernel">内核模块（.ko）和 KPM 同时装着。它们挂钩相同的内核函数，两个都生效可能导致设备硬冻结。请只保留其一——卸载内核模块或 KPM。</string>
     <string name="dashboard_issue_native_conflict_deferred">内核模块（.ko）和 KPM 同时装着。KPM 已在开机时主动让位以避免冻结，因此没有起任何作用。请只保留其一——卸载 KPM（或内核模块）。</string>

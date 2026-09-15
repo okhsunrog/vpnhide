@@ -316,6 +316,7 @@
     <string name="dashboard_info">Информация (%d)</string>
     <string name="dashboard_issue_checks_failed">Не все проверки скрытия пройдены.</string>
     <string name="dashboard_action_details">Подробности</string>
+    <string name="dashboard_action_learn_more">Подробнее</string>
     <string name="dashboard_issue_kmod_capable_but_zygisk">Ваше ядро поддерживает модуль ядра — он работает в пространстве ядра и невидим для анти-тампер проверок. Zygisk тоже работает, но банковские и платёжные приложения могут обнаружить его хуки, если для них включён Native. Установите %1$s и удалите Zygisk-модуль.</string>
     <string name="dashboard_issue_native_conflict_kernel">Модуль ядра (.ko) и KPM установлены одновременно. Они перехватывают одни и те же функции ядра, и при одновременной работе устройство может полностью зависнуть. Оставьте только один — удалите либо модуль ядра, либо KPM.</string>
     <string name="dashboard_issue_native_conflict_deferred">Модуль ядра (.ko) и KPM установлены одновременно. KPM отключился при загрузке, чтобы не подвесить устройство, и сейчас бездействует. Оставьте только один — удалите KPM (или модуль ядра).</string>

@@ -318,6 +318,10 @@ internal data class DashboardMessage(
     // When set, the banner renders a "download this zip" button that grabs this
     // named artifact from the latest release (wrong variant, outdated module, …).
     val downloadArtifact: String? = null,
+    // When set (and there is no download/other action), the banner shows a
+    // "Learn more" button that opens this help article — the contextual entry
+    // from an issue to the guide section that explains and fixes it.
+    val helpArticle: String? = null,
 )
 
 @Serializable

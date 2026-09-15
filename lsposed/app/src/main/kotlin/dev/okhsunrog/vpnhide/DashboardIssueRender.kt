@@ -28,17 +28,37 @@ internal fun DashboardIssue.toMessage(
 private fun err(
     text: String,
     downloadArtifact: String? = null,
-) = DashboardMessage(DashboardMessageSeverity.ERROR, text, downloadArtifact = downloadArtifact)
+    helpArticle: String? = null,
+) = DashboardMessage(DashboardMessageSeverity.ERROR, text, downloadArtifact = downloadArtifact, helpArticle = helpArticle)
 
 private fun warn(
     text: String,
     downloadArtifact: String? = null,
-) = DashboardMessage(DashboardMessageSeverity.WARNING, text, downloadArtifact = downloadArtifact)
+    helpArticle: String? = null,
+) = DashboardMessage(DashboardMessageSeverity.WARNING, text, downloadArtifact = downloadArtifact, helpArticle = helpArticle)
 
 private fun info(
     text: String,
     action: DashboardMessageAction? = null,
-) = DashboardMessage(DashboardMessageSeverity.INFO, text, action)
+    helpArticle: String? = null,
+) = DashboardMessage(DashboardMessageSeverity.INFO, text, action, helpArticle = helpArticle)
+
+// Help article ids (see docs/help/manifest.json) an issue banner can link to,
+// so "Learn more" lands on the section that explains and fixes that issue.
+private object HelpArticle {
+    const val CHOOSING_NATIVE = "choosing-native"
+    const val KPM_INSTALL = "kpm-install"
+    const val FIRST_INSTALL = "first-install"
+    const val MODULE_NOT_ACTIVE = "module-not-active"
+    const val UPDATING = "updating"
+    const val FIRST_SETUP = "first-setup"
+    const val PORTS = "ports"
+    const val EXPERIMENTAL_PROTECTION = "experimental-protection"
+    const val WORK_PROFILES = "work-profiles"
+    const val DETECTION_VECTORS = "detection-vectors"
+    const val CHECK_RESULT_MEANINGS = "check-result-meanings"
+    const val COLLECT_REPORT = "collect-report"
+}
 
 private fun DashboardIssue.Native.nativeMessage(res: Resources): DashboardMessage =
     when (this) {
@@ -47,7 +67,7 @@ private fun DashboardIssue.Native.nativeMessage(res: Resources): DashboardMessag
         }
 
         DashboardIssue.NoNativeBackend -> {
-            err(res.getString(R.string.dashboard_issue_no_native))
+            err(res.getString(R.string.dashboard_issue_no_native), helpArticle = HelpArticle.CHOOSING_NATIVE)
         }
 
         is DashboardIssue.BetterBackendAvailable -> {
@@ -59,23 +79,24 @@ private fun DashboardIssue.Native.nativeMessage(res: Resources): DashboardMessag
                     },
                     artifact,
                 ),
+                helpArticle = HelpArticle.CHOOSING_NATIVE,
             )
         }
 
         DashboardIssue.NativeConflictKernel -> {
-            err(res.getString(R.string.dashboard_issue_native_conflict_kernel))
+            err(res.getString(R.string.dashboard_issue_native_conflict_kernel), helpArticle = HelpArticle.CHOOSING_NATIVE)
         }
 
         DashboardIssue.MultipleNativeActive -> {
-            warn(res.getString(R.string.dashboard_issue_multiple_native))
+            warn(res.getString(R.string.dashboard_issue_multiple_native), helpArticle = HelpArticle.CHOOSING_NATIVE)
         }
 
         DashboardIssue.NativeConflictDeferred -> {
-            warn(res.getString(R.string.dashboard_issue_native_conflict_deferred))
+            warn(res.getString(R.string.dashboard_issue_native_conflict_deferred), helpArticle = HelpArticle.CHOOSING_NATIVE)
         }
 
         DashboardIssue.KpmAwaitingSuperkey -> {
-            warn(res.getString(R.string.dashboard_issue_kpm_awaiting_superkey))
+            warn(res.getString(R.string.dashboard_issue_kpm_awaiting_superkey), helpArticle = HelpArticle.KPM_INSTALL)
         }
     }
 
@@ -85,11 +106,11 @@ private fun DashboardIssue.Lsposed.lsposedMessage(
 ): DashboardMessage =
     when (this) {
         DashboardIssue.LsposedNotInstalled -> {
-            err(res.getString(R.string.dashboard_issue_lsposed_not_installed))
+            err(res.getString(R.string.dashboard_issue_lsposed_not_installed), helpArticle = HelpArticle.FIRST_INSTALL)
         }
 
         DashboardIssue.LsposedNeedsReboot -> {
-            err(res.getString(R.string.dashboard_issue_reboot))
+            err(res.getString(R.string.dashboard_issue_reboot), helpArticle = HelpArticle.MODULE_NOT_ACTIVE)
         }
 
         DashboardIssue.LsposedConfigUnreadable -> {
@@ -97,11 +118,11 @@ private fun DashboardIssue.Lsposed.lsposedMessage(
         }
 
         DashboardIssue.LsposedNotEnabled -> {
-            err(res.getString(R.string.dashboard_issue_lsposed_not_enabled))
+            err(res.getString(R.string.dashboard_issue_lsposed_not_enabled), helpArticle = HelpArticle.FIRST_INSTALL)
         }
 
         DashboardIssue.LsposedNoSystemScope -> {
-            err(res.getString(R.string.dashboard_issue_lsposed_no_system_scope))
+            err(res.getString(R.string.dashboard_issue_lsposed_no_system_scope), helpArticle = HelpArticle.FIRST_INSTALL)
         }
 
         is DashboardIssue.LsposedExtraScope -> {
@@ -137,28 +158,32 @@ private fun DashboardIssue.Module.moduleMessage(res: Resources): DashboardMessag
                     recommendedArtifact = recommendedArtifact,
                 ),
                 downloadArtifact = downloadArtifact,
+                helpArticle = HelpArticle.UPDATING,
             )
         }
 
         // Text and artifact were resolved with the module's card diagnosis; see
         // DashboardIssue.ModuleBroken.
         is DashboardIssue.ModuleBroken -> {
-            err(problem.text, problem.downloadArtifact)
+            err(problem.text, problem.downloadArtifact, helpArticle = HelpArticle.MODULE_NOT_ACTIVE)
         }
 
         is DashboardIssue.ModuleNeedsReboot -> {
-            warn(res.getString(R.string.dashboard_issue_module_reboot_to_activate, kind.displayName))
+            warn(
+                res.getString(R.string.dashboard_issue_module_reboot_to_activate, kind.displayName),
+                helpArticle = HelpArticle.MODULE_NOT_ACTIVE,
+            )
         }
     }
 
 private fun DashboardIssue.Target.targetMessage(res: Resources): DashboardMessage =
     when (this) {
         DashboardIssue.NoTargets -> {
-            info(res.getString(R.string.dashboard_issue_no_targets))
+            info(res.getString(R.string.dashboard_issue_no_targets), helpArticle = HelpArticle.FIRST_SETUP)
         }
 
         DashboardIssue.PortsNoObservers -> {
-            info(res.getString(R.string.dashboard_issue_ports_no_observers))
+            info(res.getString(R.string.dashboard_issue_ports_no_observers), helpArticle = HelpArticle.PORTS)
         }
 
         is DashboardIssue.PortsRulesInactive -> {
@@ -168,6 +193,7 @@ private fun DashboardIssue.Target.targetMessage(res: Resources): DashboardMessag
                 } else {
                     res.getString(R.string.dashboard_issue_ports_apply_failed, failureDetail)
                 },
+                helpArticle = HelpArticle.PORTS,
             )
         }
     }
@@ -184,19 +210,26 @@ private fun DashboardIssue.Environment.environmentMessage(res: Resources): Dashb
                         else -> R.string.dashboard_issue_filesystem_hiding_pending_disable
                     },
                 ),
+                helpArticle = HelpArticle.EXPERIMENTAL_PROTECTION,
             )
         }
 
         is DashboardIssue.FilesystemHidingBootError -> {
-            err(res.getString(R.string.dashboard_issue_filesystem_hiding_boot_error, detail))
+            err(
+                res.getString(R.string.dashboard_issue_filesystem_hiding_boot_error, detail),
+                helpArticle = HelpArticle.EXPERIMENTAL_PROTECTION,
+            )
         }
 
         DashboardIssue.FilesystemHidingSetupError -> {
-            err(res.getString(R.string.dashboard_issue_filesystem_hiding_setup_error))
+            err(
+                res.getString(R.string.dashboard_issue_filesystem_hiding_setup_error),
+                helpArticle = HelpArticle.EXPERIMENTAL_PROTECTION,
+            )
         }
 
         DashboardIssue.DebugLoggingOn -> {
-            info(res.getString(R.string.dashboard_issue_debug_logging_on))
+            info(res.getString(R.string.dashboard_issue_debug_logging_on), helpArticle = HelpArticle.COLLECT_REPORT)
         }
 
         DashboardIssue.AgentBridgeOn -> {
@@ -204,11 +237,11 @@ private fun DashboardIssue.Environment.environmentMessage(res: Resources): Dashb
         }
 
         DashboardIssue.SelinuxPermissive -> {
-            warn(res.getString(R.string.dashboard_issue_selinux_permissive))
+            warn(res.getString(R.string.dashboard_issue_selinux_permissive), helpArticle = HelpArticle.CHECK_RESULT_MEANINGS)
         }
 
         is DashboardIssue.InstalledInMultipleProfiles -> {
-            warn(res.getString(R.string.dashboard_issue_self_multi_profile, profileCount))
+            warn(res.getString(R.string.dashboard_issue_self_multi_profile, profileCount), helpArticle = HelpArticle.WORK_PROFILES)
         }
     }
 
@@ -224,12 +257,13 @@ private fun DashboardIssue.Protection.protectionMessage(res: Resources): Dashboa
                     expected,
                     missing.joinToString(", ") { it.hookName },
                 ),
+                helpArticle = HelpArticle.DETECTION_VECTORS,
             )
         }
 
         is DashboardIssue.LsposedVersionMismatch -> {
             val text = res.getString(R.string.dashboard_issue_version_mismatch, runningVersion, appVersion)
-            if (degraded) warn(text) else info(text)
+            if (degraded) warn(text, helpArticle = HelpArticle.UPDATING) else info(text, helpArticle = HelpArticle.UPDATING)
         }
 
         DashboardIssue.ChecksFailed -> {
