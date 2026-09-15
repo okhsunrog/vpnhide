@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,9 +83,9 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
     val userNames by AppListCache.userNames.collectAsState()
     val snackbarHostState = LocalConfigSnackbar.current
     val checkWrite = LocalConfigWriteAccess.current
-    var filter by remember { mutableStateOf(HiddenAppsFilter.All) }
-    var query by remember { mutableStateOf("") }
-    var searchActive by remember { mutableStateOf(false) }
+    var filter by rememberSaveable { mutableStateOf(HiddenAppsFilter.All) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var searchActive by rememberSaveable { mutableStateOf(false) }
     val editor = rememberCanonicalEditor("hidden_apps")
     val saving = editor.saving
     val repository by CanonicalConfigRepository.state.collectAsState()

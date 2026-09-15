@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -409,12 +410,12 @@ private fun MainScreen() {
     val startupCoordinator = remember(appContext) { StartupCoordinator.forProcess(appContext) }
     val settings = LocalSettingsState.current
     val settingsInteractor = LocalSettingsInteractor.current
-    var currentTab by remember { mutableStateOf(Tab.Dashboard) }
-    var searchQuery by remember { mutableStateOf("") }
-    var searchActive by remember { mutableStateOf(false) }
-    var showSystem by remember { mutableStateOf(false) }
-    var showRussianOnly by remember { mutableStateOf(false) }
-    var targetSortMode by remember { mutableStateOf(TargetListSortMode.ConfiguredFirst) }
+    var currentTab by rememberSaveable { mutableStateOf(Tab.Dashboard) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var searchActive by rememberSaveable { mutableStateOf(false) }
+    var showSystem by rememberSaveable { mutableStateOf(false) }
+    var showRussianOnly by rememberSaveable { mutableStateOf(false) }
+    var targetSortMode by rememberSaveable { mutableStateOf(TargetListSortMode.ConfiguredFirst) }
     val appListLoading by AppListCache.loading.collectAsState()
     val targetsLoading by TargetsCache.loading.collectAsState()
     val dashboardLoading by DashboardCache.loading.collectAsState()
@@ -496,13 +497,15 @@ private fun MainScreen() {
         searchQuery = ""
     }
 
-    var showSettings by remember { mutableStateOf(false) }
-    var showHelp by remember { mutableStateOf(false) }
-    var helpInitialArticle by remember { mutableStateOf<String?>(null) }
-    var settingsRequestedSub by remember { mutableStateOf<SettingsSubScreen?>(null) }
+    // Navigation survives configuration changes independently of process-owned work and editor drafts.
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showHelp by rememberSaveable { mutableStateOf(false) }
+    var helpInitialArticle by rememberSaveable { mutableStateOf<String?>(null) }
+    var settingsRequestedSub by rememberSaveable { mutableStateOf<SettingsSubScreen?>(null) }
+    var showDiagnostics by rememberSaveable { mutableStateOf(false) }
     var protectionDirty by remember { mutableStateOf(false) }
     val protectionEditor = rememberCanonicalEditor("apps_unified")
-    var pendingHelpNav by remember { mutableStateOf<String?>(null) }
+    var pendingHelpNav by rememberSaveable { mutableStateOf<String?>(null) }
     if (showSettings) {
         BackHandler { showSettings = false }
         SettingsScreen(
@@ -520,7 +523,6 @@ private fun MainScreen() {
 
     // Full-screen diagnostics overlay, reachable from a Dashboard message's
     // "Details" button (the same screen Settings → Diagnostics opens).
-    var showDiagnostics by remember { mutableStateOf(false) }
     if (showDiagnostics) {
         DiagnosticsSettingsScreen(
             selfNeedsRestart = selfNeedsRestart,

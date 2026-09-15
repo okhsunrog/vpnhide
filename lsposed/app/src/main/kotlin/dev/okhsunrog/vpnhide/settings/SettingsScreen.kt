@@ -68,6 +68,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -157,9 +158,9 @@ fun SettingsScreen(
 ) {
     val settings = LocalSettingsState.current
     val interactor = LocalSettingsInteractor.current
-    var diagnosticsOpen by remember { mutableStateOf(false) }
-    var hiddenAppsOpen by remember { mutableStateOf(false) }
-    var helpOpen by remember { mutableStateOf(false) }
+    var diagnosticsOpen by rememberSaveable { mutableStateOf(false) }
+    var hiddenAppsOpen by rememberSaveable { mutableStateOf(false) }
+    var helpOpen by rememberSaveable { mutableStateOf(false) }
 
     // A guide link (e.g. from the Hiding tab's help) can ask Settings to open a
     // specific sub-screen; apply it once, then let the host clear the request.
