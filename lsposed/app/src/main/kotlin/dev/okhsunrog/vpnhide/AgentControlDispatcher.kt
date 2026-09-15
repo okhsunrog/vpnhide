@@ -111,7 +111,9 @@ internal object AgentControlDispatcher {
             },
             function<SetAppProtectionArgs, AgentMutationResult>(
                 name = "setAppProtection",
-                description = "Set high-level protection roles for one package. Null or omitted role arguments leave that role unchanged.",
+                description =
+                    "Set high-level protection roles for one package. Null or omitted role arguments leave that role unchanged. " +
+                        "VPN Hide's own roles are fixed (java, native and hidden on, ports off); a change to them is a no-op.",
                 inputSchema =
                     schema(
                         required("packageName", stringSchema()),

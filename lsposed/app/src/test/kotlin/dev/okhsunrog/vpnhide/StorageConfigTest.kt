@@ -476,6 +476,33 @@ class StorageConfigTest {
     }
 
     @Test
+    fun `self target merge never keeps a ports role for this app`() {
+        val cfg =
+            CanonicalConfig(
+                apps =
+                    mapOf(
+                        "dev.okhsunrog.vpnhide" to
+                            CanonicalApp(
+                                java = true,
+                                native = NativeRole.All,
+                                hidden = true,
+                                ports = true,
+                                portPolicy = PortPolicy(rules = listOf(PortRule(start = 1080))),
+                            ),
+                        "com.bank" to CanonicalApp(ports = true),
+                    ),
+            )
+
+        val updated = canonicalConfigWithSelfTarget(cfg, "dev.okhsunrog.vpnhide")
+
+        assertEquals(
+            CanonicalApp(java = true, native = NativeRole.All, hidden = true),
+            updated.apps.getValue("dev.okhsunrog.vpnhide"),
+        )
+        assertEquals(CanonicalApp(ports = true), updated.apps.getValue("com.bank"))
+    }
+
+    @Test
     fun `import parser accepts canonical json and adds self target`() {
         val cfg =
             requireNotNull(
