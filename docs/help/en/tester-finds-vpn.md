@@ -15,7 +15,7 @@ a VPN. That's not necessarily a contradiction — the two measure different thin
     **Ports**.
   - **A cached result.** Force-stop and reopen the tester so it probes again.
 
-## If VPN Hide itself reports "detected"
+## If VPN Hide itself reports Leak
 
 Then a vector really is leaking. Turn on the role or backend that covers it
 (see [What each result means](check-result-meanings.md)) and re-check. If it
