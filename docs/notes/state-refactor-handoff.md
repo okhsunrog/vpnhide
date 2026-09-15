@@ -165,15 +165,16 @@ calls whose return is not proof of descendant quiescence. Coroutine
 cancellation/return does not prove descendant quiescence. Do not mask this with a global root lock or make
 config writes await diagnostics.
 
-## Changelog fragments: consolidate before release
+## Changelog fragments: consolidated
 
-The branch accumulated fragments per stage. Before the next release, rewrite
-them relative to the last released version, not to the branch history: users
-never saw intermediate states, so a fragment must not describe adding and then
-removing something that only existed on this branch for hours (the
-RebootRequired fragment was already dropped for that reason). Merge the several
-cold-start fragments into one entry, and check that each remaining fragment
-names a change visible against the last release.
+The branch accumulated one fragment per stage; on 2026-09-15 they were rewritten
+relative to the last released version (1.2.5), not to the branch history: users
+never saw intermediate states, so no fragment describes adding and then removing
+something that only existed on this branch for hours (the RebootRequired sentence
+was dropped for that reason). The four cold-start fragments became one entry, the
+two configuration-switch fragments one, the two status-wording fragments one, and
+the bundle/bridge and debug-log fragments one. Any later stage adds a fragment as
+usual; re-check the set once more at release time.
 
 ## Build and device
 
