@@ -101,8 +101,12 @@ internal class DiagnosticRunCoordinator(
             val accepted = effects.filterIsInstance<DiagnosticRunEffect.Accepted>().firstOrNull()
             val rejected = effects.filterIsInstance<DiagnosticRunEffect.Rejected>().firstOrNull()
             when {
-                accepted != null -> DiagnosticAdmission.Accepted(handle(accepted.id), accepted.joined)
+                // The run just admitted is live, or finished within this same dispatch (blocked
+                // eligibility), so its handle always exists.
+                accepted != null -> DiagnosticAdmission.Accepted(checkNotNull(handle(accepted.id)), accepted.joined)
+
                 rejected != null -> DiagnosticAdmission.Rejected(rejected.reason)
+
                 else -> DiagnosticAdmission.Ignored
             }
         }
@@ -140,10 +144,17 @@ internal class DiagnosticRunCoordinator(
         synchronized(lock) { dispatch(DiagnosticRunEvent.ContextChanged(known)) }
     }
 
-    private fun handle(id: Long): DiagnosticRunHandle {
-        val deferred =
-            finished[id]?.let { CompletableDeferred(it) }
-                ?: CompletableDeferred<DiagnosticRunResult>().also { waiters.getOrPut(id) { mutableListOf() } += it }
+    /**
+     * A handle for a finished run (its retained result) or a live one (a waiter
+     * that its completion resolves). Null for an id that is neither: a result
+     * evicted from retention has no handle, rather than a deferred nobody will
+     * ever complete (I5: every handle has its own result).
+     */
+    private fun handle(id: Long): DiagnosticRunHandle? {
+        finished[id]?.let { return DiagnosticRunHandle(id, CompletableDeferred(it)) }
+        val core = mutableView.value.core
+        if (core.active?.id != id && core.pending?.id != id) return null
+        val deferred = CompletableDeferred<DiagnosticRunResult>().also { waiters.getOrPut(id) { mutableListOf() } += it }
         return DiagnosticRunHandle(id, deferred)
     }
 

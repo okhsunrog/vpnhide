@@ -182,10 +182,10 @@ old device-validation paragraphs predate the successful installs described below
    with a new backend); bounded because a backend change makes the measurement
    `Changed`, so the re-attributed list only ever sits under a "results changed"
    banner. (c) needs the backend stored in `MeasurementContext` and the report built
-   from it, deferred. Latent, not
-   reachable today: `DiagnosticRunCoordinator.handle()` for an evicted attempt id
-   would return a deferred that never completes; `ensure` only passes the latest
-   attempt id.
+   from it, deferred. The latent hazard in `DiagnosticRunCoordinator.handle()` (a
+   deferred nobody completes for an attempt id evicted from retention) is closed:
+   a handle exists only for a retained result or a live run, `ensure` returns null
+   otherwise (I5).
    Device pass of 2026-09-16 (Pixel 8 Pro, Java + built-in + ports backends,
    through the agent bridge and screenshots): the bridge and bundle `diagnostics`
    object matches the UI; a save for another app during the automatic suite does

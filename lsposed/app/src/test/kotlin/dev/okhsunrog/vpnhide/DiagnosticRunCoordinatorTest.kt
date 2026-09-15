@@ -148,6 +148,22 @@ class DiagnosticRunCoordinatorTest {
         }
 
     @Test
+    fun `ensure keeps resolving the latest attempt after many finished runs left retention`() =
+        fixture { f ->
+            var last: DiagnosticRunHandle? = null
+            repeat(12) {
+                val handle = f.accept(diagnosticRequest())
+                f.complete(handle)
+                assertEquals(RunOutcome.Completed, handle.await().attempt.outcome)
+                last = handle
+            }
+            val latest = requireNotNull(f.owner.ensure(diagnosticRequest()))
+            assertEquals(requireNotNull(last).id, latest.id)
+            assertEquals(RunOutcome.Completed, latest.await().attempt.outcome)
+            assertNull(f.owner.view.value.core.active)
+        }
+
+    @Test
     fun `dependent observation invalidated by the eligibility read cannot form a retry cycle`() =
         fixture { f ->
             val loads = AtomicInteger()
