@@ -10,8 +10,9 @@ For the baseline execution states, screen/export dependencies, historical decisi
 and the semantic questions that motivated the redesign, see the
 [diagnostics state analysis](notes/diagnostics-state-analysis.md). The replacement is
 specified in the [app state transition contract](notes/app-state-transitions.md);
-its diagnostic execution stage (§18) is implemented, while operation impacts,
-the shared presentation revision and capture reservation are not.
+its diagnostic execution (§18), operation impacts (§19), capture through the run
+coordinator (§20) and the shared presentation projection (§21) are implemented;
+only the §9 capture machine (reservation, cancellation, packaging) is not.
 
 The [observation coordinator](observation-coordinator.md) owns cache refreshes,
 and a process-owned `DiagnosticRunCoordinator` behind `DiagnosticsCache` owns

@@ -208,8 +208,14 @@ old device-validation paragraphs predate the successful installs described below
    running the branch's module) the maintainer re-checked by hand: cold start,
    VPN off/on from the quick settings, the Diagnostics screen in both states, a
    role save in the Hiding tab, rotation and theme change during a run, the
-   Statistics and Hiding tabs; all as expected. Only the bundle export from
-   Settings was left for last.
+   Statistics and Hiding tabs; all as expected. The bundle exported from Settings
+   (`vpnhide_debug_20260916_023618.zip`) was checked on the host: the capture ran
+   its own suite (`selfTestRunId` 2), `diagnostics.measurement.runId` is the same
+   run, applicability `MatchesLastObservation`, `currentSuccess` true, evidence
+   17 hidden / 8 system-blocked / 1 nothing-to-leak / 0 leaks, `report.gate`
+   `ROUTED` and `errors` empty, all consistent with the screens. The maintainer
+   also verified by hand that a failed save's snackbar now sits above the
+   Save / Discard bar and the tab navigation (root revoked for a minute).
    Not reproduced on the device: a save interrupting a *probing* suite (the
    bridge write reaches its first mutating dispatch 0.7-1.7 s after the request
    while the suite completes in about 0.3 s on an idle device); covered by host
@@ -217,8 +223,27 @@ old device-validation paragraphs predate the successful installs described below
    work, interrupted capture, whether `vhmutate` receipts prove descendant
    quiescence for a late success line, T15 (a VPN change between the Java probe
    window and the root sample), how permanent a probe quarantine is in practice,
-   and a bundle export from the Settings screen. Host tests and successful launch
-   are not full acceptance.
+   Host tests and successful launch are not full acceptance.
+   Independent review of the whole branch on 2026-09-16 (read-only, no prior
+   context): no code-level blocker. Its findings and the decisions: (1) a
+   descendant of the read-only root snapshot shell that never closes its
+   inherited stdout parks one IO thread in `RootProcessRunner.execute`'s final
+   `pipes.await()` and keeps that observation quarantined until the descendant
+   returns or the process restarts. Deliberate: the return of the shell is not
+   proof of descendant quiescence, and the observation coordinator's quarantine
+   is exactly the state for "not proven quiescent" (the test "observation worker
+   stays occupied until inherited pipes close" pins it). Single-flight, so bounded
+   to one thread; the eligibility shows as Unknown with a retry that cannot lift
+   it, which is honest. (2) The bridge's legacy `gate`/`report` come from
+   `awaitTerminal` and `diagnostics` from the presentation, two instants;
+   documented in docs/debug-bundle.md and pinned by the golden. (3)
+   `DiagnosticsCache.presentation` is an eager `combine` that re-derives the
+   context (backend detection, coverage identity) on every emission of any
+   source, on every tab; cheap string work today, memoising per snapshot
+   observation id is a follow-up. (4) `DiagnosticImpactState.failed` is one flag
+   cleared by the next relevant success, unlike `unresolved`; defensible (the
+   later write is the current truth) and tested. (5) docs/diagnostics.md still
+   said §19/§21 were not implemented; fixed.
 
 The batched root reader now waits for its launcher and pipe readers to finish.
 The diagnostic run coordinator joins its own effect jobs when draining and
