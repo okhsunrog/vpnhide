@@ -19,6 +19,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.MethodSurface
 import dev.okhsunrog.vpnhide.diagnostics.buildAppProbeStats
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
+import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
 import dev.okhsunrog.vpnhide.diagnostics.diffCapture
 import dev.okhsunrog.vpnhide.diagnostics.snapshotCounters
 import dev.okhsunrog.vpnhide.generated.HookIds
@@ -93,6 +94,8 @@ internal object AgentControl {
                 shellSnapshot = shellSnapshot,
                 gate = gate,
                 checkResults = checkResults,
+                // The same projection the screens render, so getState and the UI agree.
+                diagnostics = diagnosticSummary(DiagnosticsCache.presentation.value),
                 dmesg = if (options.forensics) suExec("dmesg 2>/dev/null").second else "",
                 logcat = "",
                 bootLsposedLogcat = if (options.forensics) captureBootLsposedLogcat() else "",

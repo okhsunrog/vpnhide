@@ -93,19 +93,21 @@ old device-validation paragraphs predate the successful installs described below
    (`measurementApplicability`) and evidence sufficiency in a shared presentation
    projection instead of the legacy `State` (interrupted and operation-blocked
    attempts currently render as `Failed`). Preserve the feedback-cycle fixes above.
-2. **Shared presentation, first half done** (transition contract §21):
+2. **Shared presentation: done** (transition contract §21):
    `DiagnosticsCache.presentation` combines the run view, routing observation,
    root snapshot, confirmed config and operation impact into one
    `DiagnosticPresentation` (eligibility, active run, latest attempt, latest
    complete measurement, applicability, evidence summary, `currentSuccess`),
    built by the pure `diagnosticPresentation`. Decided deviation: no global
    dispatcher; a `combine` of the coordinators' immutable states gives each
-   emission one instant of all sources. Next half: render the Diagnostics screen,
-   the Dashboard hero/tiles, the bridge and the bundle from it instead of the
-   legacy `State` plus live-gate overlay, with a bundle schema bump for the new
-   applicability/eligibility fields.
-   Plan for that half, decided 2026-09-15 (classify-then-render, per
-   `lsposed/AGENTS.md`):
+   emission one instant of all sources. The Diagnostics screen
+   (`diagnosticScreenDecision`), the Dashboard hero (`heroDecision`), the bridge
+   and the bundle (additive `diagnostics` object, no schema bump, golden refreshed)
+   all render it; the legacy `State` remains only as the cached per-check report
+   the tiles and the check list draw from. Device acceptance of the screen
+   behaviour (VPN off/on, save during a run, interrupted run, manual recheck) is
+   still owed under item 4. The plan that was executed, decided 2026-09-15
+   (classify-then-render, per `lsposed/AGENTS.md`):
    - A pure `diagnosticBanner(presentation)` decision in `diagnostics/*Data.kt`
      with precedence: Initializing/Checking → progress; RestartApp → restart
      banner; VpnOff / SelfExcluded → the existing prompts; Applying,

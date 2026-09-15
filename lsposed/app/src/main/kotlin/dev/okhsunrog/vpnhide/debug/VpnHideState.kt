@@ -17,6 +17,7 @@ import dev.okhsunrog.vpnhide.detectPortsModule
 import dev.okhsunrog.vpnhide.diagnostics.CheckResults
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSummaryInfo
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import dev.okhsunrog.vpnhide.displayNativeBackend
@@ -100,6 +101,11 @@ internal data class VpnHideState(
     // the capture ran no suite, or when no run was admitted at all (the reason is
     // then in [errors]). Lets a bundle be matched against the run's own attempt.
     val selfTestRunId: Long? = null,
+    // The shared diagnostic presentation at assembly time: eligibility, active run,
+    // latest attempt, latest complete measurement with its applicability and
+    // evidence sufficiency — the same projection the screens render, so a bundle
+    // or an agent read cannot disagree with the UI. Null for the logcat recorder.
+    val diagnostics: DiagnosticSummaryInfo? = null,
     // Verdicts are gate-checked getters on the report (not stored fields), so they
     // would not otherwise serialize — surface them explicitly, computed once here.
     val nativeVerdict: Verdict?,
@@ -254,6 +260,7 @@ internal fun buildVpnHideState(
     gate: DiagnosticGate?,
     checkResults: CheckResults?,
     selfTestRunId: Long? = null,
+    diagnostics: DiagnosticSummaryInfo? = null,
     dmesg: String,
     logcat: String,
     bootLsposedLogcat: String,
@@ -309,6 +316,7 @@ internal fun buildVpnHideState(
         selfNeedsRestart = selfNeedsRestart,
         gate = report?.gate,
         selfTestRunId = selfTestRunId,
+        diagnostics = diagnostics,
         nativeVerdict = report?.nativeVerdict,
         javaVerdict = report?.javaVerdict,
         report = report,

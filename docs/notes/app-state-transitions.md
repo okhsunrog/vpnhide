@@ -2,8 +2,9 @@
 
 Status: configuration, observation and diagnostic-run coordinators are connected
 to the app, and config operations feed diagnostic admission and context. The
-shared presentation revision and capture orchestration still use their existing
-paths. Sections 13–19 record the implementation stages and their exact boundaries.
+screens, the bridge and the bundle render one shared presentation projection;
+capture runs through the run coordinator but keeps its older orchestration.
+Sections 13–21 record the implementation stages and their exact boundaries.
 This formalizes the direction
 agreed on 2026-09-15. It extends [app state design](app-state-design.md) and follows
 the [diagnostics investigation](diagnostics-state-analysis.md). Existing runtime
@@ -919,5 +920,16 @@ Dashboard refresh does not flicker; this is a deliberate softening of §8's
 routing re-read. The skeleton gate uses the projection's active run instead of
 the legacy terminal state.
 
-Boundary: the bridge and the bundle still serialize the legacy `gate`/`report`
-fields; adding the projection to them (schema decision included) is the next stage.
+The bridge (`AgentControl.getState`) and the debug bundle carry the same
+projection as an additive `diagnostics` object on `VpnHideState`
+(`DiagnosticSummaryInfo`: eligibility, active run id and stage, latest attempt
+outcome/failure/blocking eligibility, measurement run id, start/end and
+observation id, applicability, evidence counts and conclusion, `currentSuccess`),
+filled from `DiagnosticsCache.presentation.value` at assembly time. The legacy
+`gate`/`report` fields stay with their meaning, so the bundle schema is not
+bumped; a `ROUTED` report next to `applicability: Changed` describes an earlier
+state, and docs/debug-bundle.md says so. The logcat recorder leaves the object
+null. With this, every consumer named in §21 renders the one projection.
+
+Boundary: capture reservation, cancellation and packaging still use the older
+orchestration (§20); the §9 capture machine is deliberately not implemented.

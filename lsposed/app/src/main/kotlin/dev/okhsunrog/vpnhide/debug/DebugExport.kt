@@ -13,6 +13,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.GroundTruthProbe
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
+import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
 import dev.okhsunrog.vpnhide.diagnostics.resolveDiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.next
@@ -152,6 +153,8 @@ private suspend fun buildDebugState(
             gate = selfTest.gate,
             checkResults = selfTest.checkResults,
             selfTestRunId = selfTest.runId,
+            // The projection after the capture's own run settled: what the screens show now.
+            diagnostics = diagnosticSummary(DiagnosticsCache.presentation.value),
             dmesg = dmesg,
             logcat = logcat,
             bootLsposedLogcat = if (options.forensics) captureBootLsposedLogcat() else "",

@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
+import kotlinx.serialization.Serializable
+
 internal data class ProbePlanEntry(
     val id: String,
     val owned: Boolean = true,
@@ -53,6 +55,7 @@ internal fun measurementApplicability(
 
 internal enum class EvidenceConclusion { OwnedLeak, Insufficient, Partial, NoObservedLeak }
 
+@Serializable
 internal data class MeasurementEvidence(
     val hidden: Int,
     val systemBlocked: Int,

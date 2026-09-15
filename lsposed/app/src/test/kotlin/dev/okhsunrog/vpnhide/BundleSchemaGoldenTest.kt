@@ -7,7 +7,16 @@ import dev.okhsunrog.vpnhide.debug.VPNHIDE_STATE_SCHEMA
 import dev.okhsunrog.vpnhide.debug.VpnHideState
 import dev.okhsunrog.vpnhide.debug.toJson
 import dev.okhsunrog.vpnhide.diagnostics.CheckResults
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticAttemptInfo
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticMeasurementInfo
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticStage
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSummaryInfo
+import dev.okhsunrog.vpnhide.diagnostics.EvidenceConclusion
+import dev.okhsunrog.vpnhide.diagnostics.MeasurementApplicability
+import dev.okhsunrog.vpnhide.diagnostics.MeasurementEvidence
+import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -106,6 +115,7 @@ internal fun sampleBundleState(): VpnHideState {
         selfNeedsRestart = false,
         gate = report.gate,
         selfTestRunId = 4,
+        diagnostics = sampleDiagnosticSummary(),
         nativeVerdict = report.nativeVerdict,
         javaVerdict = report.javaVerdict,
         report = report,
@@ -151,4 +161,39 @@ private fun sampleDashboard(
         kmodLoadStatus = null,
         protection = ProtectionCheck.Blocked(DiagnosticGate.VPN_OFF),
         messages = emptyList(),
+    )
+
+/**
+ * The presentation block with every optional field set: a run in flight, a
+ * failed later attempt and an older complete measurement whose conditions
+ * changed since, so the golden pins each nested shape and every enum wire name.
+ */
+private fun sampleDiagnosticSummary(): DiagnosticSummaryInfo =
+    DiagnosticSummaryInfo(
+        eligibility = DiagnosticEligibility.Eligible,
+        activeRunId = 5,
+        activeStage = DiagnosticStage.Core,
+        lastAttempt = DiagnosticAttemptInfo(4, RunOutcome.Failed, TransitionFailure.ExecutionFailed, eligibility = null),
+        measurement =
+            DiagnosticMeasurementInfo(
+                runId = 3,
+                startedAt = 1_755_856_800_000,
+                endedAt = 1_755_856_802_000,
+                completed = true,
+                interrupted = false,
+                observationId = 7,
+            ),
+        applicability = MeasurementApplicability.Changed,
+        evidence =
+            MeasurementEvidence(
+                hidden = 9,
+                systemBlocked = 1,
+                nothingToLeak = 2,
+                leaks = 0,
+                notMeasured = 0,
+                notRun = 0,
+                uncoveredLeaks = 0,
+                conclusion = EvidenceConclusion.NoObservedLeak,
+            ),
+        currentSuccess = false,
     )
