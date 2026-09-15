@@ -137,9 +137,20 @@ old device-validation paragraphs predate the successful installs described below
    but screens still publish independently and retain last-good values. An atomic
    presentation revision including diagnostic measurement applicability is not
    implemented. Do not describe the cache stage as full cross-screen consistency.
-3. **Capture ownership.** Logging tokens already use the config coordinator.
-   Capture reservation, collection, cancellation, packaging and cleanup still use
-   their older orchestration and need the agreed capture machine.
+3. **Capture through the run coordinator: done** (transition contract §20). The
+   debug export no longer runs its own `runAllChecks`. `DiagnosticsCache.captureRun`
+   requests an explicit run carrying a unique `captureId`, which is part of the
+   request identity, so a capture never joins a suite whose probes began before its
+   logging and counter baseline; the forensic order (acquire logging, clear dmesg,
+   then run) is unchanged. The pure `debugSelfTestFrom` maps the terminal attempt
+   onto the bundle's `gate` / `checkResults` / `selfTestRunId` / `errors` — only a
+   completed run may be `ROUTED`, a blocked eligibility becomes its gate, and an
+   interrupted, failed or never-admitted run contributes its evidence plus a reason.
+   `exportDebug` returns `Written(file, errors)` or `Failed(reason)` instead of a
+   bare `File?`, so an export can no longer vanish because `captureGateFrom` threw
+   on unknown self-routing. Still using the older orchestration: capture
+   reservation, cancellation and packaging as the agreed §9 capture machine, and
+   `LogcatRecorder`.
 4. **Final acceptance.** Audit actual wiring against scenario traces, then validate
    root failures/timeouts, agent/UI conflicts, lifecycle changes during work and
    interrupted capture. Host tests and successful launch are not full acceptance.
@@ -148,9 +159,8 @@ The batched root reader now waits for its launcher and pipe readers to finish.
 The diagnostic run coordinator joins its own effect jobs when draining and
 quarantines the probe resource on drain deadline, but the probe helpers
 themselves (`GroundTruthProbe`, in-process JNI) are still blocking `su`/native
-calls whose return is not proof of descendant quiescence; the debug export still
-runs `runAllChecks` outside the coordinator. Coroutine cancellation/return does
-not prove descendant quiescence. Do not mask this with a global root lock or make
+calls whose return is not proof of descendant quiescence. Coroutine
+cancellation/return does not prove descendant quiescence. Do not mask this with a global root lock or make
 config writes await diagnostics.
 
 ## Changelog fragments: consolidate before release

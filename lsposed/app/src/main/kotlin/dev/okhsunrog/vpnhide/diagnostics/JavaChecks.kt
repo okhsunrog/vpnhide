@@ -211,14 +211,6 @@ private fun List<CheckResult>.logged(): List<CheckResult> =
         VpnHideLog.i(TAG, "[${c.name}] $status: ${c.detail}")
     }
 
-/** Run both phases and return the complete results. Used where blocking on the
- * slow probes is fine (debug export); the live cache runs the phased builders
- * directly so Settings → Detailed diagnostics can show the fast phase first. */
-internal fun runAllChecks(
-    cm: ConnectivityManager,
-    context: android.content.Context,
-): CheckResults = runCoreChecks(cm, context).copy(extraJava = runExtraJavaChecks(cm, context))
-
 private fun nativeCheckResult(
     id: String,
     name: String,

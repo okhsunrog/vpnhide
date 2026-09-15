@@ -1,6 +1,5 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
-import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -44,6 +43,7 @@ import dev.okhsunrog.vpnhide.SelfNotRoutedPrompt
 import dev.okhsunrog.vpnhide.StatusBanner
 import dev.okhsunrog.vpnhide.StatusColors
 import dev.okhsunrog.vpnhide.VpnOffPrompt
+import dev.okhsunrog.vpnhide.debug.DebugExportOutcome
 import dev.okhsunrog.vpnhide.debug.LogcatRecorder
 import dev.okhsunrog.vpnhide.debug.StateContentOptions
 import dev.okhsunrog.vpnhide.debug.exportDebug
@@ -329,7 +329,6 @@ private fun DebugExportSheet(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    val cm = context.getSystemService(ConnectivityManager::class.java)
     val scope = rememberCoroutineScope()
     var exporting by remember { mutableStateOf(false) }
     var resultFile by remember { mutableStateOf<File?>(null) }
@@ -404,7 +403,11 @@ private fun DebugExportSheet(
                     val kernel = optKernelImage
                     exporting = true
                     scope.launch {
-                        resultFile = exportDebug(cm, context, restartState, options, kernel)
+                        // A Failed export produced no file: the sheet returns to its
+                        // configure phase exactly as it did for the old null result.
+                        // Everything else — including a self-test that could not
+                        // measure — is a written bundle carrying its own reasons.
+                        resultFile = (exportDebug(context, restartState, options, kernel) as? DebugExportOutcome.Written)?.file
                         exporting = false
                     }
                 }

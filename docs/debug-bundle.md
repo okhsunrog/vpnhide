@@ -98,7 +98,8 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 | `app` | `{packageName, version}` — `version` is `"1.2.5 (10205)"` (name + versionCode). |
 | `device` | `{manufacturer, model, androidRelease, sdk, abis}`. |
 | `selfNeedsRestart` | The picker app added itself as a target but its own hooks aren't applied to this process yet → checks can't measure; user must reboot. |
-| `gate` | `DiagnosticGate` — see §4. `null` for logcat/kernel captures (no check run). |
+| `gate` | `DiagnosticGate` — see §4. `null` for logcat/kernel captures (no check run), and for a debug capture whose run did not complete (the reason is in `errors`). Only a completed run reports `ROUTED`. |
+| `selfTestRunId` | The identified diagnostic run this capture took its evidence from, for matching the bundle against that run's own attempt. `null` when the capture ran no suite, or when no run was admitted at all (`errors` says which). |
 | `nativeVerdict` / `javaVerdict` | `Ok`/`Partial`/`Broken`, or `null` if not a measured (`ROUTED`) run. |
 | `report` | The full `DiagnosticReport` (§4). `null` when no checks ran. |
 | `backends` | Per-module state for `kmod` / `kpm` / `zygisk` (installed? active? version? `brokenReason`? `pendingReboot`?). |

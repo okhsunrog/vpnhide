@@ -1,7 +1,6 @@
 package dev.okhsunrog.vpnhide.debug
 
 import android.content.Context
-import android.net.ConnectivityManager
 import android.os.Build
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.LsposedConfig
@@ -15,7 +14,6 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.GroundTruthProbe
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
 import dev.okhsunrog.vpnhide.diagnostics.resolveDiagnosticGate
-import dev.okhsunrog.vpnhide.diagnostics.runAllChecks
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.readLsposedConfig
@@ -31,6 +29,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -41,6 +40,9 @@ internal data class DiagnosticFileEntry(
     val file: File,
 )
 
+/** Capture identity: unique per export, so a capture's request can never join an earlier suite. */
+private val nextDebugCaptureId = AtomicLong(1L)
+
 // ==========================================================================
 //  Debug export — one canonical JSON
 // ==========================================================================
@@ -50,40 +52,47 @@ internal data class DiagnosticFileEntry(
  * [options] (forensics / app-list) drive the JSON content — the SAME type the agent
  * bridge getState takes — and [attachKernelImage] decides the container: a plain
  * `.json`, or a `.zip` bundling the boot/kernel images next to that same state.json.
+ *
+ * The outcome is explicit: a bundle whose self-test could not measure is still
+ * [DebugExportOutcome.Written], carrying the reason. [DebugExportOutcome.Failed]
+ * means collection or packaging itself threw and no file exists.
  */
 internal suspend fun exportDebug(
-    cm: ConnectivityManager,
     context: Context,
     selfNeedsRestart: Boolean,
     options: StateContentOptions,
     attachKernelImage: Boolean,
-): File? =
+): DebugExportOutcome =
     withContext(Dispatchers.IO) {
         try {
-            val state = buildDebugState(cm, context, selfNeedsRestart, options)
+            val state = buildDebugState(context, selfNeedsRestart, options)
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            if (attachKernelImage) {
-                writeKernelBundleZip(context, timestamp, state.toJson())
-            } else {
-                // Bundle the single state.json in a .zip too: forums/messengers (4pda,
-                // the main report channel) whitelist .zip but reject a bare .json, and
-                // the JSON compresses ~10x. Every export kind is now a .zip carrying
-                // state.json, so the caller has one format to handle.
-                File(context.cacheDir, "vpnhide_debug_$timestamp.zip").also {
-                    writeDiagnosticZip(it, mapOf("state.json" to state.toJson()))
+            val file =
+                if (attachKernelImage) {
+                    // Packaging tens of MB of partition images can fail on its own (a
+                    // full /data); it reports that as a missing file, not an exception.
+                    writeKernelBundleZip(context, timestamp, state.toJson())
+                        ?: return@withContext DebugExportOutcome.Failed("kernel image packaging produced no archive")
+                } else {
+                    // Bundle the single state.json in a .zip too: forums/messengers (4pda,
+                    // the main report channel) whitelist .zip but reject a bare .json, and
+                    // the JSON compresses ~10x. Every export kind is now a .zip carrying
+                    // state.json, so the caller has one format to handle.
+                    File(context.cacheDir, "vpnhide_debug_$timestamp.zip").also {
+                        writeDiagnosticZip(it, mapOf("state.json" to state.toJson()))
+                    }
                 }
-            }
+            DebugExportOutcome.Written(file, state.errors)
         } catch (c: CancellationException) {
             throw c
         } catch (e: Exception) {
             VpnHideLog.e(TAG, "Debug export failed", e)
-            null
+            DebugExportOutcome.Failed(e.message ?: e.javaClass.simpleName)
         }
     }
 
 @Suppress("LongMethod")
 private suspend fun buildDebugState(
-    cm: ConnectivityManager,
     context: Context,
     selfNeedsRestart: Boolean,
     options: StateContentOptions,
@@ -97,7 +106,15 @@ private suspend fun buildDebugState(
         val counterBaseline = if (options.forensics) collectHookCounterSnapshot() else null
         // Clear dmesg so we only capture output from the hooks the checks fire.
         if (options.forensics) suExec("dmesg -c > /dev/null 2>&1")
-        val checkResults = runAllChecks(cm, context)
+        // The suite belongs to the run coordinator, not to the export: this is a fresh
+        // capture-identified run that cannot join one whose probes started before the
+        // logging and counter baseline above. Its terminal attempt is recorded either
+        // way — a blocked, interrupted or failed run is evidence, not a dead export.
+        val selfTest =
+            debugSelfTestFrom(
+                DiagnosticsCache.captureRun(context, selfNeedsRestart, nextDebugCaptureId.getAndIncrement()),
+            )
+        errors += selfTest.errors
 
         // Authoritative module/liveness state — the SAME snapshot the dashboard
         // derives from. This is what fixes the old export path silently reading
@@ -123,8 +140,6 @@ private suspend fun buildDebugState(
         val session = loggingSession?.let { it.withRestore(restoreDebugCaptureLogging(it)) }
         restoreAttempted = true
 
-        // Same gate the collect-warning shows, off the snapshot just refreshed above.
-        val gate = captureGateFrom(rootSnapshot, context, selfNeedsRestart)
         buildVpnHideState(
             context = context,
             captureKind = "debug",
@@ -132,8 +147,11 @@ private suspend fun buildDebugState(
             selfNeedsRestart = selfNeedsRestart,
             rootSnapshot = rootSnapshot,
             shellSnapshot = shellSnapshot,
-            gate = gate,
-            checkResults = checkResults,
+            // The gate is the run's own outcome now, never a second independent probe:
+            // only a completed run is ROUTED, and an unmeasurable one says why in errors.
+            gate = selfTest.gate,
+            checkResults = selfTest.checkResults,
+            selfTestRunId = selfTest.runId,
             dmesg = dmesg,
             logcat = logcat,
             bootLsposedLogcat = if (options.forensics) captureBootLsposedLogcat() else "",
@@ -163,12 +181,15 @@ internal fun isoNow(): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Local
 
 /**
  * The gate that decides whether a debug/logcat capture taken *right now* would be
- * meaningful, computed from a root snapshot. The ONE place both the export and the
- * pre-collect warning derive it, so they can never disagree. Cheap and stateless —
- * a VPN-iface read plus one self-routing probe — and independent of the
- * once-per-process [DiagnosticsCache]; that cache freezes its verdict on the first
- * run (typically with the VPN up), which is exactly why it must NOT back a "is a
- * capture worth taking now" check.
+ * meaningful, computed from a root snapshot. Cheap and stateless — a VPN-iface read
+ * plus one self-routing probe — it backs `RoutingGateCache`, which is both the
+ * pre-collect warning on the Collect sheet and the routing observation every
+ * diagnostic run folds into its eligibility.
+ *
+ * It is NOT what the bundle reports: an export's gate comes from its own run's
+ * outcome ([debugSelfTestFrom]), so an interrupted or failed run can never be
+ * written up as ROUTED. Note that this function throws when self-routing cannot be
+ * determined — a caller must be able to treat that as an observation error.
  */
 internal fun captureGateFrom(
     snapshot: RootSnapshot,

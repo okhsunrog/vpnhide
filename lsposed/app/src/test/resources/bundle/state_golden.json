@@ -17,6 +17,7 @@
     },
     "selfNeedsRestart": false,
     "gate": "ROUTED",
+    "selfTestRunId": 4,
     "nativeVerdict": "Ok",
     "javaVerdict": "Ok",
     "report": {

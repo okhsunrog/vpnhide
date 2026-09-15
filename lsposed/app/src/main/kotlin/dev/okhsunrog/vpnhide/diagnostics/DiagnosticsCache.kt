@@ -11,6 +11,7 @@ import dev.okhsunrog.vpnhide.ContextObservationInputs
 import dev.okhsunrog.vpnhide.ObservationRuntime
 import dev.okhsunrog.vpnhide.ProjectedStateFlow
 import dev.okhsunrog.vpnhide.RootSnapshotCache
+import dev.okhsunrog.vpnhide.TransitionFailure
 import dev.okhsunrog.vpnhide.currentObservationValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +19,24 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+
+/**
+ * What a capture got out of the suite. A capture never renders the legacy
+ * projection: it records the identified attempt (or the reason it never got one)
+ * in the bundle, so a bundle can say "the run was interrupted" instead of
+ * silently carrying no report.
+ */
+internal sealed interface DiagnosticCaptureOutcome {
+    /** The capture's own run reached a terminal attempt; [result] carries it with whatever evidence exists. */
+    data class Ran(
+        val result: DiagnosticRunResult,
+    ) : DiagnosticCaptureOutcome
+
+    /** No run was admitted (another suite owns the lane, or the probe resource is quarantined). */
+    data class NotAdmitted(
+        val reason: TransitionFailure,
+    ) : DiagnosticCaptureOutcome
+}
 
 /**
  * Facade over the process-owned diagnostic run coordinator.
@@ -46,6 +65,8 @@ import kotlinx.coroutines.flow.stateIn
  * probed, and a blocked attempt does not consume it. [retry] keeps the existing
  * policy — a completed suite is reused, anything else is requested again as a
  * new run. Neither observation refreshes nor recomposition rerun a completed suite.
+ * [captureRun] is the debug export's entry: an explicit, capture-identified run
+ * that never joins an existing suite and whose terminal attempt is reported as is.
  *
  * Config operations reach the suite through [configOperation]: a request depends
  * on every accepted operation that can change this process's own measurement
@@ -173,6 +194,30 @@ internal object DiagnosticsCache {
         val handle = coordinator.ensure(request(automatic = true)) ?: return state.value
         val result = handle.await()
         return projectDiagnosticAttempt(result.attempt, result.results)
+    }
+
+    /**
+     * A capture's own fresh, identified run. [captureId] is part of the request
+     * identity, so a capture can never join a suite whose probes began before its
+     * logging and counter baseline (§9); it is admitted as a pending run instead
+     * and waits for the active one to settle. The terminal attempt is returned as
+     * is — blocked, interrupted and failed included — because a capture records
+     * the outcome rather than retrying it.
+     */
+    suspend fun captureRun(
+        context: Context,
+        selfNeedsRestart: Boolean,
+        captureId: Long,
+    ): DiagnosticCaptureOutcome {
+        updateInputs(context, selfNeedsRestart)
+        return when (val admission = coordinator.request(request(automatic = false).copy(captureId = captureId))) {
+            is DiagnosticAdmission.Accepted -> DiagnosticCaptureOutcome.Ran(admission.handle.await())
+
+            is DiagnosticAdmission.Rejected -> DiagnosticCaptureOutcome.NotAdmitted(admission.reason)
+
+            // Only an automatic request can be ignored; a capture request never is.
+            DiagnosticAdmission.Ignored -> DiagnosticCaptureOutcome.NotAdmitted(TransitionFailure.Busy)
+        }
     }
 
     /** Config-operation lifecycle from the coordinator's observer; effects go to the run coordinator in order. */

@@ -105,6 +105,7 @@ internal fun sampleBundleState(): VpnHideState {
         device = DeviceInfo("Google", "Pixel 8 Pro", "17", 36, listOf("arm64-v8a")),
         selfNeedsRestart = false,
         gate = report.gate,
+        selfTestRunId = 4,
         nativeVerdict = report.nativeVerdict,
         javaVerdict = report.javaVerdict,
         report = report,
@@ -112,24 +113,7 @@ internal fun sampleBundleState(): VpnHideState {
         activeBackend = displayNativeBackend(backends),
         ports = ModuleState.NotInstalled,
         kmodLoadStatus = null,
-        // The bridge-only block, included here on purpose: LsposedState and
-        // ProtectionCheck are only reachable through it, and they are exactly the
-        // sealed types whose discriminators used to be fully-qualified names.
-        dashboard =
-            DashboardState(
-                kmod = kmod,
-                kpm = ModuleState.NotInstalled,
-                zygisk = backends.zygisk,
-                lsposed = LsposedState.Active(version = "1.2.5", targetCount = 3),
-                ports = ModuleState.NotInstalled,
-                nativeTargetCount = 3,
-                portsTargetCount = 0,
-                nativeBackend = displayNativeBackend(backends),
-                nativeInstallRecommendation = null,
-                kmodLoadStatus = null,
-                protection = ProtectionCheck.Blocked(DiagnosticGate.VPN_OFF),
-                messages = emptyList(),
-            ),
+        dashboard = sampleDashboard(kmod, backends),
         rootShell =
             RootShellDiag.from(
                 mapOf("snapshot_shell_uid" to "uid=0\nid=uid=0(root)\ncontext=u:r:ksu:s0\nerrno_ctl=ok"),
@@ -144,3 +128,27 @@ internal fun sampleBundleState(): VpnHideState {
         errors = emptyList(),
     )
 }
+
+/**
+ * The bridge-only block, included in the golden on purpose: LsposedState and
+ * ProtectionCheck are only reachable through it, and they are exactly the sealed
+ * types whose discriminators used to be fully-qualified names.
+ */
+private fun sampleDashboard(
+    kmod: ModuleState,
+    backends: NativeBackendStates,
+): DashboardState =
+    DashboardState(
+        kmod = kmod,
+        kpm = ModuleState.NotInstalled,
+        zygisk = backends.zygisk,
+        lsposed = LsposedState.Active(version = "1.2.5", targetCount = 3),
+        ports = ModuleState.NotInstalled,
+        nativeTargetCount = 3,
+        portsTargetCount = 0,
+        nativeBackend = displayNativeBackend(backends),
+        nativeInstallRecommendation = null,
+        kmodLoadStatus = null,
+        protection = ProtectionCheck.Blocked(DiagnosticGate.VPN_OFF),
+        messages = emptyList(),
+    )

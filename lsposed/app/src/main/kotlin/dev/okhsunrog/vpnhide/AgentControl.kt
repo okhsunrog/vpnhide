@@ -1,7 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.Context
-import android.net.ConnectivityManager
+import dev.okhsunrog.vpnhide.debug.DebugExportOutcome
 import dev.okhsunrog.vpnhide.debug.LogcatRecorder
 import dev.okhsunrog.vpnhide.debug.StateContentOptions
 import dev.okhsunrog.vpnhide.debug.VpnHideState
@@ -112,18 +112,17 @@ internal object AgentControl {
      */
     suspend fun exportKernelImages(context: Context): AgentDebugZipExport =
         withAppContext(context) { context ->
-            val connectivityManager =
-                context.getSystemService(ConnectivityManager::class.java)
-                    ?: error("ConnectivityManager unavailable")
-            val file =
+            val outcome =
                 exportDebug(
-                    cm = connectivityManager,
                     context = context,
                     selfNeedsRestart = false,
                     options = StateContentOptions(forensics = true),
                     attachKernelImage = true,
-                ) ?: error("Kernel image export failed")
-            file.toAgentDebugZipExport()
+                )
+            when (outcome) {
+                is DebugExportOutcome.Written -> outcome.file.toAgentDebugZipExport()
+                is DebugExportOutcome.Failed -> error("Kernel image export failed: ${outcome.reason}")
+            }
         }
 
     /**

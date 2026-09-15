@@ -786,8 +786,9 @@ Boundaries of this stage:
   returns the latest finished attempt; it never retries a terminal Blocked/Failed
   attempt, so a dependent observation invalidated by the eligibility read cannot
   form a cycle. `retry` keeps the existing policy: a completed suite is reused.
-- Debug export still runs its own independent `runAllChecks`; capture reservation
-  through the run coordinator is the capture stage.
+- Debug export no longer runs its own independent `runAllChecks`: it requests a
+  capture-identified run from the coordinator (§20). The rest of the capture
+  machine — reservation, its own states and deadlines — is still not implemented.
 - Probe ownership in the frozen plan is structural (Java-implemented native-level
   probes are unowned); backend-scoped ownership is still applied by the report.
 
@@ -843,6 +844,32 @@ coordinator, readiness in the context builder, join ignoring dependencies),
 warnings-as-errors compilation, ktlint, detekt, CPD, Android `lintDebug` and the
 signed release build. Device validation of a save during a running suite is
 pending.
+
+## 20. Capture through the run coordinator
+
+The debug export no longer measures on its own. `DiagnosticsCache.captureRun`
+submits an explicit request carrying a unique `captureId`, which is part of the
+request identity, so a capture can never join a suite whose probes began before
+its logging and counter baseline (§9); with a run active it is admitted as the
+pending run and waits. Forensic order is unchanged: acquire the logging token,
+clear dmesg, then run.
+
+The bundle now reports the run's own outcome. `debugSelfTestFrom` maps the
+terminal attempt onto `gate` / `checkResults` / `selfTestRunId` / `errors`: only
+`Completed` may be `ROUTED`; a blocked eligibility becomes its gate; an
+interrupted, failed, not-started or never-admitted run contributes its partial
+evidence and an explicit reason instead of a verdict. `exportDebug` returns
+`Written(file, errors)` or `Failed(reason)`, so an export can no longer be
+silently lost — the old path derived the gate with `captureGateFrom`, which
+throws when self-routing is unknown and returned `null` for the whole export.
+`captureGateFrom` stays: it backs `RoutingGateCache`, the pre-collect warning
+and the runs' routing observation.
+
+Not implemented, deliberately: the §9 capture machine itself — Queued /
+PreparingLogging / Baseline / CollectingEvidence / ReleasingLogging / Packaging,
+its suite reservation, its own deadlines and cancellation path. Capture-logging
+acquire/release keeps its current `finally` semantics, and `LogcatRecorder` is
+untouched.
 
 ## 21. Shared presentation projection
 
