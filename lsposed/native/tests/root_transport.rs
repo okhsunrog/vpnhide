@@ -85,14 +85,14 @@ impl Fixture {
 }
 
 #[test]
-fn adopt_opens_in_one_round_trip_only_after_a_tracked_predecessor() {
+fn adopt_opens_in_one_round_trip_and_replaces_a_quiescent_predecessor() {
     let fixture = Fixture::new();
-    // A lane never opened in this boot cannot prove untracked predecessors stopped.
+    // A lane never opened in this boot is adopted directly: pre-transport commands
+    // are untracked writers, not a reason to demand a reboot.
     let first = fixture.call(&["adopt", SESSION_A], "");
-    assert_eq!(first["status"], "rejected");
-    assert_eq!(first["state"]["session"], Value::Null);
+    assert_eq!(first["status"], "ok");
+    assert_eq!(first["state"]["session"], SESSION_A);
     assert_eq!(first["config_status"], "readable");
-    fixture.open();
     assert_eq!(fixture.run("1", "exit 0")["state"]["status"], "finished");
     // A quiescent tracked session from a previous app process is replaced atomically.
     let adopted = fixture.call(&["adopt", SESSION_B], "");
@@ -285,6 +285,11 @@ fn killed_supervisor_never_turns_an_unlocked_lane_into_known_completion() {
     assert_eq!(fixture.run("2", "exit 0")["status"], "rejected");
     assert_eq!(
         fixture.call(&["open", &fixture.boot, "2", SESSION_B], "")["status"],
+        "rejected"
+    );
+    // One-shot adoption is refused for the same reason: the predecessor is still running.
+    assert_eq!(
+        fixture.call(&["adopt", SESSION_B], "")["status"],
         "rejected"
     );
     fs::write(fixture.root.join("release"), "").unwrap();

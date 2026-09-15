@@ -127,9 +127,11 @@ Signing is configured locally; never print keystore secrets. APK:
 SDK: `/home/okhsunrog/Android/Sdk`; apksigner is in `build-tools/35.0.0`.
 
 Device last used: Pixel 8 Pro, serial `3B241FDJG003LP`. Check availability before use.
-Installed version: the `vhmutate adopt` build of this branch (after `252a225e`),
+Installed version: the build that removed RebootRequired (after `eeb01a47`),
 user 0 only. The isolated device transport fixture
-(`scripts/test-root-transport.py`) passed on it, including the `adopt` steps. On 2026-09-15 the device had only user 0 (`pm list users`); profiles
+(`scripts/test-root-transport.py`) passed on it, including the `adopt` steps.
+Decision 2026-09-15: no reboot is demanded for first adoption; see
+[config coordinator](config-coordinator.md) for the accepted risk. On 2026-09-15 the device had only user 0 (`pm list users`); profiles
 10 and 11 no longer existed. `adb install --user 0 -r` alone is not proof that
 other profiles are clean. Inspect `pm list users` and `dumpsys package
 dev.okhsunrog.vpnhide` after installation.

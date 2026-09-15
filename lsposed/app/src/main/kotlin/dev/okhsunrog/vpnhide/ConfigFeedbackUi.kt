@@ -141,7 +141,6 @@ private fun ConfigBlockedDialog(
 private fun configStatusText(message: ConfigStatusMessage): Int =
     when (message) {
         ConfigStatusMessage.Initializing -> R.string.config_initializing
-        ConfigStatusMessage.RebootRequired -> R.string.config_reboot_required
         ConfigStatusMessage.Paused -> R.string.config_paused
         ConfigStatusMessage.Unavailable -> R.string.config_unavailable
         ConfigStatusMessage.Invalid -> R.string.config_invalid

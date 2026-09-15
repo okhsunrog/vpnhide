@@ -55,7 +55,6 @@ class ConfigStatusDataTest {
             ConfigCoordinatorMode.Paused,
             ConfigCoordinatorMode.Invalid,
             ConfigCoordinatorMode.Unavailable,
-            ConfigCoordinatorMode.RebootRequired,
         )) {
             assertTrue(configNeedsAttention(mode))
             assertNull(configFailureNotice(failed(ConfigPhase.Native).copy(mode = mode)))

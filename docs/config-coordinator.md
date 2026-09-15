@@ -87,13 +87,16 @@ sequence. Its factory must capture one retained `RootProcessRunner` when wired t
 `prepareRootMutationTransport`; replacing the runner during retries would defeat
 its bound on outstanding processes/pipe owners.
 
-Initialization distinguishes Open, Missing, Invalid, Unavailable, Paused and
-RebootRequired. A newly created same-boot lane returns RebootRequired: it cannot
-prove old-version untracked commands have stopped. A verified boot boundary can
-open a fresh session. A same-boot Running predecessor stays paused. Neither case
-causes a reboot, deletes metadata or launches application config effects.
-Initialization uses the helper's `adopt` verb: one privileged round trip that
-inspects and opens under the helper's lock, with this policy mirrored in the
+Initialization distinguishes Open, Missing, Invalid, Unavailable and Paused. A
+same-boot Running predecessor stays paused; pausing never deletes metadata or
+launches application config effects. A lane never opened in this boot (fresh
+install, or the first start after updating from a build without this transport)
+is adopted directly: commands issued before the transport existed are untracked
+writers in the same class as module boot scripts and manual activator runs, their
+overlap with the first new-session command is bounded by one activator run
+(hundreds of milliseconds) and idempotent, so demanding a reboot for that case was
+removed. Initialization uses the helper's `adopt` verb: one privileged round trip
+that inspects and opens under the helper's lock, with this policy mirrored in the
 helper so a rejected adoption still returns the receipt the mode is decided from
 (`inspect` + `open` were two round trips on every cold start).
 
@@ -145,7 +148,7 @@ Configuration feedback has one UI owner across screen navigation. Routine saves
 show progress inside the switch thumb without inserting status rows or changing
 the control width. Success is silent. Known failures use an overlay Snackbar;
 confirmed persistence followed by activation failure offers explicit activation
-repair. Invalid/unavailable state, adoption requiring a reboot, and uncertainty
+repair. Invalid/unavailable state and uncertainty
 remaining after automatic readback use a dismissible dialog. Dismissal does not
 reopen it on ordinary recomposition/navigation; an attempted configuration change
 opens it again without submitting the mutation. Manual rechecking shows progress
@@ -159,8 +162,8 @@ verification of this update on a physical device remains outstanding.
 
 Startup preparation is process-owned and single-flight. A recreated Activity
 joins the same preparation. Admission reopening triggers fresh self-target
-preparation. A first-adoption reboot requirement leaves the read interface
-available; the app never reboots the device itself.
+preparation. A paused lane leaves the read interface available; the app never
+reboots the device itself.
 
 Logging capture acquisition/release is ordered with all writes. Effective debug
 is fresh user intent OR at least one active token. Release updates token ownership
@@ -200,7 +203,7 @@ cancellation. Root dispatch tests use controlled coroutine gates, and reset test
 run the actual shell builder against isolated temporary paths.
 
 Device acceptance remains outstanding: install the signed APK, exercise first
-adoption and its boot boundary, root authorization delay, activity recreation,
+adoption, root authorization delay, activity recreation,
 bridge/UI conflicts, and capture cleanup. Host tests and APK compilation do not
 establish app-originated root permissions or visible behavior on a physical device.
 

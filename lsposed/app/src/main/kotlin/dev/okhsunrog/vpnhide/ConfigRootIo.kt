@@ -22,20 +22,14 @@ internal class ConfigRootIo(
         val adopted = client.adopt(id) as? RootMutationReply.Observed ?: return ConfigInitialization(ConfigCoordinatorMode.Unavailable)
         val snapshot = adopted.snapshot
         if (!adopted.accepted) {
+            // Only a running tracked predecessor pauses the lane. Commands issued before
+            // this transport existed are untracked writers, like boot scripts; a lane
+            // never opened in this boot is adopted without a reboot.
             val config = (snapshot.canonical as? RootCanonicalRead.Available)?.config
-            return when {
-                !snapshot.quiescent -> {
-                    ConfigInitialization(ConfigCoordinatorMode.Paused, config)
-                }
-
-                // First adoption cannot prove that commands from the old, untracked transport stopped in this boot.
-                snapshot.receipt.session == null && snapshot.receipt.boot == snapshot.boot -> {
-                    ConfigInitialization(ConfigCoordinatorMode.RebootRequired, config)
-                }
-
-                else -> {
-                    ConfigInitialization(ConfigCoordinatorMode.Unavailable)
-                }
+            return if (!snapshot.quiescent) {
+                ConfigInitialization(ConfigCoordinatorMode.Paused, config)
+            } else {
+                ConfigInitialization(ConfigCoordinatorMode.Unavailable)
             }
         }
         session = openedRootMutationSession(adopted, snapshot.boot, id) ?: return ConfigInitialization(ConfigCoordinatorMode.Unavailable)

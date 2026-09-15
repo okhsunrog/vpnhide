@@ -2,7 +2,6 @@ package dev.okhsunrog.vpnhide
 
 internal enum class ConfigStatusMessage {
     Initializing,
-    RebootRequired,
     Paused,
     Unavailable,
     Invalid,
@@ -73,7 +72,6 @@ internal fun reduceConfigDialog(
 internal fun configNeedsAttention(mode: ConfigCoordinatorMode): Boolean =
     mode in
         setOf(
-            ConfigCoordinatorMode.RebootRequired,
             ConfigCoordinatorMode.Paused,
             ConfigCoordinatorMode.Unavailable,
             ConfigCoordinatorMode.Invalid,
@@ -92,7 +90,6 @@ internal fun configStatus(view: ConfigCoordinatorView): ConfigStatus? {
     val modeMessage =
         when (view.mode) {
             ConfigCoordinatorMode.Initializing -> ConfigStatusMessage.Initializing
-            ConfigCoordinatorMode.RebootRequired -> ConfigStatusMessage.RebootRequired
             ConfigCoordinatorMode.Paused -> ConfigStatusMessage.Paused
             ConfigCoordinatorMode.Unavailable -> ConfigStatusMessage.Unavailable
             ConfigCoordinatorMode.Invalid -> ConfigStatusMessage.Invalid

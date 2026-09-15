@@ -9,15 +9,16 @@ import org.junit.Test
 
 class ConfigRootIoTest {
     @Test
-    fun `first adoption requires a boot boundary and preserves readable config`() =
+    fun `first adoption opens a never-opened same-boot lane in one round trip`() =
         runBlocking {
             val client = FakeMutationClient()
             val io = ConfigRootIo { client }
-            assertEquals(ConfigInitialization(ConfigCoordinatorMode.RebootRequired, CanonicalConfig()), io.initialize())
-            assertEquals(0, client.opens)
-            client.snapshot = client.snapshot.copy(receipt = client.snapshot.receipt.copy(boot = OLD_BOOT))
-            assertEquals(ConfigCoordinatorMode.Open, io.initialize().mode)
+            assertEquals(ConfigInitialization(ConfigCoordinatorMode.Open, CanonicalConfig()), io.initialize())
             assertEquals(1, client.opens)
+            // A quiescent lane from a previous boot is adopted the same way.
+            client.snapshot = client.snapshot.copy(receipt = client.snapshot.receipt.copy(boot = OLD_BOOT, session = null))
+            assertEquals(ConfigCoordinatorMode.Open, ConfigRootIo { client }.initialize().mode)
+            assertEquals(2, client.opens)
         }
 
     @Test
@@ -126,9 +127,7 @@ private class FakeMutationClient : RootMutationClient {
     override fun adopt(sessionId: String): RootMutationReply {
         val receipt = snapshot.receipt
         if (receipt.session == sessionId && receipt.boot == snapshot.boot) return inspect()
-        if (!snapshot.quiescent || (receipt.session == null && receipt.boot == snapshot.boot)) {
-            return RootMutationReply.Observed(false, snapshot)
-        }
+        if (!snapshot.quiescent) return RootMutationReply.Observed(false, snapshot)
         return open(snapshot, sessionId)
     }
 

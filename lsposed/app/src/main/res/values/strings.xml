@@ -607,7 +607,6 @@
     <string name="settings_superkey_cleared">SuperKey cleared.</string>
     <string name="settings_superkey_failed">SuperKey update failed.</string>
     <string name="config_initializing">Checking configuration and previous operations…</string>
-    <string name="config_reboot_required">Restart the device to finish adopting the new configuration manager. Reading and other app features remain available.</string>
     <string name="config_paused">The outcome of a configuration operation is still unknown. New changes are paused. Check again to continue.</string>
     <string name="config_unavailable">Configuration is unavailable. Check root access and try again.</string>
     <string name="config_invalid">The saved configuration cannot be read. Configuration changes are paused.</string>

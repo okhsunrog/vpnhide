@@ -92,6 +92,10 @@ readback plus one repeat, then Paused rule as an in-process timeout. A new app P
 does not prove an old privileged descendant stopped. The transport must supply
 discoverable execution-lifetime evidence across app restarts, or safely remain
 paused; no full persistent operation journal or automatic command replay is assumed.
+Commands issued by builds that predate the transport are untracked writers, like
+module boot scripts: a lane never opened in this boot is adopted directly, and
+their bounded, idempotent overlap with the first new-session command is an
+accepted risk, not a reboot requirement (decided 2026-09-15).
 
 Startup's automatic self-test intent is armed until initialization is complete and
 the first eligible conditions are observed. It is consumed when a suite actually

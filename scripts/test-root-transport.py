@@ -29,10 +29,9 @@ class DeviceFixture:
         initial = self.call("inspect")
         self.boot = initial["boot"]
         assert initial["state"]["revision"] == 0, initial
-        # A lane never opened in this boot refuses one-shot adoption (the app asks for a reboot).
-        assert self.call("adopt", self.session)["status"] == "rejected"
-        opened = self.call("open", self.boot, "0", self.session)
-        assert opened["status"] == "ok", opened
+        # A lane never opened in this boot is adopted in one round trip (the app's startup path).
+        adopted = self.call("adopt", self.session)
+        assert adopted["status"] == "ok" and adopted["state"]["session"] == self.session, adopted
         # A repeated adoption of the tracked session acknowledges it without resetting it.
         assert self.call("adopt", self.session)["state"]["session"] == self.session
 

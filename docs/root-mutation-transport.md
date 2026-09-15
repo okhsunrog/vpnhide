@@ -68,7 +68,7 @@ commands return one JSON reply (`version`, `status`, `boot`, `state`,
 |---|---|---|
 | `inspect` | none | Read the latest receipt and, if quiescent, the canonical file |
 | `open` | current boot, expected revision, new session UUID | Compare-and-set session replacement after predecessor quiescence; an identical retry returns the current receipt without resetting it |
-| `adopt` | new session UUID | `inspect` + `open` under one lock and one privileged round trip, with the app's adoption policy mirrored: rejected while a predecessor is running or when the lane was never opened in this boot (the app then reports Paused or RebootRequired from the returned receipt); an identical retry acknowledges the session without resetting it. The app's startup uses this verb |
+| `adopt` | new session UUID | `inspect` + `open` under one lock and one privileged round trip, with the app's adoption policy mirrored: rejected only while a tracked predecessor is running (the app then reports Paused from the returned receipt); a lane never opened in this boot is adopted directly; an identical retry acknowledges the session without resetting it. The app's startup uses this verb |
 | `run` | current boot, session UUID, next sequence | Validate identity/order, persist `running`, execute exactly once, drain, persist result |
 | `recover` | current boot, session UUID, attempted sequence | Read existing receipt, or consume an undispatched sequence as `not_started` so its late launch cannot run |
 
@@ -155,11 +155,13 @@ was performed.
 
 ## Runtime adoption
 
-The coordinator now connects every app writer and activation path. First adoption
-uses a verified boot boundary: a newly created same-boot lane cannot establish
-that old untracked descendants or delayed root prompts have stopped. An unresolved
-predecessor remains paused. External boot services and manual root writers are
-outside this app-only lock.
+The coordinator now connects every app writer and activation path. A lane never
+opened in this boot is adopted directly. Commands issued by builds without this
+transport are untracked writers in the same class as module boot scripts and
+manual activator runs: their overlap with the first new-session command is
+bounded by one activator run and idempotent, so it is an accepted risk rather
+than a reboot requirement. An unresolved tracked predecessor remains paused.
+External boot services and manual root writers are outside this app-only lock.
 
 Typed field intents, retained drafts, optimistic switches, recovery actions and
 structured bridge outcomes are connected in the app. A fresh session does not

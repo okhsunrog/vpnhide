@@ -2,7 +2,7 @@ package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.picker.NativeTargetCapacityWarning
 
-internal enum class ConfigCoordinatorMode { Initializing, Open, Missing, Invalid, Unavailable, Paused, RebootRequired }
+internal enum class ConfigCoordinatorMode { Initializing, Open, Missing, Invalid, Unavailable, Paused }
 
 internal data class ConfigCoordinatorView(
     val mode: ConfigCoordinatorMode = ConfigCoordinatorMode.Initializing,

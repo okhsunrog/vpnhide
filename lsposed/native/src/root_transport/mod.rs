@@ -92,10 +92,12 @@ fn dispatch(
     match (verb, args) {
         ("inspect", []) => Ok(true),
         // inspect + open in one privileged round trip, under the same lock. The
-        // app's adoption policy is mirrored here so the reply is decisive: a lane
-        // never opened in this boot cannot prove untracked predecessors stopped
-        // (the app then asks for a reboot), and a running predecessor keeps the
-        // lane paused. Either way the reply carries the receipt the app needs.
+        // app's adoption policy is mirrored here so the reply is decisive: only a
+        // running tracked predecessor keeps the lane paused, and the rejected
+        // reply still carries the receipt the app reports from. Commands issued
+        // before this transport existed are untracked writers like boot scripts;
+        // their overlap is bounded by one activator run and idempotent, so a lane
+        // never opened in this boot is adopted without a reboot.
         ("adopt", [session]) => {
             if !valid_id(session) {
                 return Ok(false);
@@ -103,9 +105,7 @@ fn dispatch(
             if store.state.matches(boot, session) {
                 return Ok(true);
             }
-            if !store.state.quiescent(boot)
-                || (store.state.session.is_none() && store.state.boot == boot)
-            {
+            if !store.state.quiescent(boot) {
                 return Ok(false);
             }
             let mut state = State::idle(boot);

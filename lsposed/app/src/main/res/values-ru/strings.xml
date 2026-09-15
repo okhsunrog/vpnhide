@@ -577,7 +577,6 @@
     <string name="settings_superkey_cleared">SuperKey удалён.</string>
     <string name="settings_superkey_failed">Не удалось обновить SuperKey.</string>
     <string name="config_initializing">Проверяем конфигурацию и предыдущие операции…</string>
-    <string name="config_reboot_required">Перезагрузите устройство для завершения перехода на новую схему сохранения. Чтение данных и остальные функции доступны.</string>
     <string name="config_paused">Результат изменения конфигурации пока неизвестен. Новые записи приостановлены. Повторите проверку, чтобы продолжить.</string>
     <string name="config_unavailable">Конфигурация недоступна. Проверьте root-доступ и повторите проверку.</string>
     <string name="config_invalid">Сохранённая конфигурация повреждена или имеет неподдерживаемый формат. Изменения приостановлены.</string>

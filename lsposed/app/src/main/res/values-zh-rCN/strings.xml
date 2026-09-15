@@ -565,7 +565,6 @@
     <string name="settings_superkey_cleared">SuperKey 已清除。</string>
     <string name="settings_superkey_failed">SuperKey 更新失败。</string>
     <string name="config_initializing">正在检查配置和之前的操作…</string>
-    <string name="config_reboot_required">请重启设备以完成切换到新的配置管理器。仍可读取数据和使用应用的其他功能。</string>
     <string name="config_paused">配置操作的结果仍不确定，已暂停新的更改。请重新检查以继续。</string>
     <string name="config_unavailable">配置不可用。请检查 root 权限后重试。</string>
     <string name="config_invalid">无法读取已保存的配置。配置更改已暂停。</string>
