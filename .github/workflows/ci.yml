@@ -142,12 +142,13 @@ jobs:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       # Codegen — regenerate from the data/*.toml sources and fail on drift.
-      - name: Verify generated files are up to date (iface lists + hook registry)
+      - name: Verify generated files are up to date (iface lists + hook registry + help index)
         run: |
           python3 scripts/codegen-interfaces.py
           python3 scripts/codegen-hooks.py
+          python3 scripts/gen-help-index.py
           if ! git diff --quiet; then
-            echo "::error::a data/*.toml is out of sync with generated files. Run scripts/codegen-interfaces.py and scripts/codegen-hooks.py and commit the result." >&2
+            echo "::error::a generated file is out of sync. Run scripts/codegen-interfaces.py, scripts/codegen-hooks.py and scripts/gen-help-index.py and commit the result." >&2
             git --no-pager diff
             exit 1
           fi

@@ -24,11 +24,6 @@ internal class HelpAnchorRegistry {
         if (slug.isNotEmpty()) headings[slug] = coordinates
     }
 
-    fun clear() {
-        headings.clear()
-        contentRoot = null
-    }
-
     /**
      * Offset of [slug]'s heading from the top of the scrolling content, or null if
      * the heading is unknown or its layout isn't attached yet. Both coordinates

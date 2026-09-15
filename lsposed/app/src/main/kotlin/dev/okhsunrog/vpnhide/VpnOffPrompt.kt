@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.okhsunrog.vpnhide.help.resolveHelpLocale
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 
@@ -40,10 +41,12 @@ internal fun SelfNotRoutedPrompt(
     modifier: Modifier = Modifier,
     onOpenAccelerators: (() -> Unit)? = null,
 ) {
-    // The accelerator link only makes sense where that guide article exists (en/zh)
-    // — accelerator users are the main people this state is expected for.
+    // Show the accelerator link exactly where the guide actually offers that
+    // article — every locale that resolves to the en/zh guide (i.e. not ru), which
+    // is how buildGuide gates the game-accelerators article. Accelerator users are
+    // the main people this state is expected for.
     val language = LocalConfiguration.current.locales[0].language
-    val accelerators = onOpenAccelerators?.takeIf { language == "en" || language == "zh" }
+    val accelerators = onOpenAccelerators?.takeIf { resolveHelpLocale(language) != "ru" }
     RetryPromptCard(
         messageRes = R.string.self_not_routed_prompt,
         onRetry = onRetry,

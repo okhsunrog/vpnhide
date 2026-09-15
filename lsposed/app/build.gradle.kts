@@ -161,6 +161,9 @@ val syncHelpAssets =
         group = "build"
         description = "Copies docs/help (the offline guide source) into the APK assets."
         from(helpDocsDir)
+        // README.md is the GitHub-facing guide index; the app reads the manifest,
+        // not this, so keep it out of the APK.
+        exclude("README.md")
         into(helpAssetsDir.map { it.dir("help") })
     }
 

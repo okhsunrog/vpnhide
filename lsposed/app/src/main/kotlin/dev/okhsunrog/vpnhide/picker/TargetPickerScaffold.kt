@@ -41,6 +41,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -186,6 +187,10 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     // Surface unsaved-edit state so a host can guard destructive navigation
     // (this screen is torn down by full-screen overlays, dropping its edits).
     LaunchedEffect(dirty) { onDirtyChange(dirty) }
+    // On teardown (tab switch, overlay) the local `dirty` is gone with the edits,
+    // so tell the host they're no longer pending — otherwise a later guarded nav
+    // warns about unsaved changes that don't exist any more.
+    DisposableEffect(Unit) { onDispose { onDirtyChange(false) } }
 
     LaunchedEffect(snackMessage, snackDuration) {
         snackMessage?.let {

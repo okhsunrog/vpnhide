@@ -218,19 +218,46 @@ private fun rememberAssetImage(
     context: Context,
     assetPath: String,
 ): ImageBitmap? {
+    // Downsample to ~2x the screen width: enough for a full-width image and its
+    // zoom view, without holding a many-megapixel bitmap for a phone-sized screen.
+    val reqWidth = context.resources.displayMetrics.widthPixels * 2
     val value by produceState<ImageBitmap?>(initialValue = null, assetPath) {
-        value =
-            withContext(Dispatchers.IO) {
-                try {
-                    context.assets
-                        .open(assetPath)
-                        .use { BitmapFactory.decodeStream(it) }
-                        ?.asImageBitmap()
-                } catch (e: IOException) {
-                    VpnHideLog.w(LogTags.STARTUP, "help image asset unavailable: $assetPath (${e.message})")
-                    null
-                }
-            }
+        value = withContext(Dispatchers.IO) { decodeSampledAsset(context, assetPath, reqWidth) }
     }
     return value
+}
+
+private fun decodeSampledAsset(
+    context: Context,
+    assetPath: String,
+    reqWidth: Int,
+): ImageBitmap? =
+    try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.assets.open(assetPath).use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0) {
+            null
+        } else {
+            val opts = BitmapFactory.Options().apply { inSampleSize = sampleSizeFor(bounds.outWidth, reqWidth) }
+            context.assets
+                .open(assetPath)
+                .use { BitmapFactory.decodeStream(it, null, opts) }
+                ?.asImageBitmap()
+        }
+    } catch (e: IOException) {
+        VpnHideLog.w(LogTags.STARTUP, "help image asset unavailable: $assetPath (${e.message})")
+        null
+    } catch (e: OutOfMemoryError) {
+        VpnHideLog.w(LogTags.STARTUP, "help image too large to decode: $assetPath (${e.message})")
+        null
+    }
+
+/** Largest power-of-two subsample that keeps the decoded width at or above [reqWidth]. */
+private fun sampleSizeFor(
+    srcWidth: Int,
+    reqWidth: Int,
+): Int {
+    var sample = 1
+    while (reqWidth > 0 && srcWidth / (sample * 2) >= reqWidth) sample *= 2
+    return sample
 }

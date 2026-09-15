@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -208,6 +209,11 @@ internal fun HelpScreen(
                     offset?.let { scrollState.animateScrollTo((it - ANCHOR_SCROLL_GAP_PX).coerceAtLeast(0)) }
                     pendingAnchor = null
                 }
+                // Leaving the article view (back to the TOC or search) before the
+                // scroll resolves would otherwise strand a pending anchor and apply
+                // it to the next article opened. Article→article keeps this branch,
+                // so a cross-article #anchor still survives navigation.
+                DisposableEffect(Unit) { onDispose { pendingAnchor = null } }
                 Column(
                     modifier =
                         Modifier
