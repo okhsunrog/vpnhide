@@ -229,6 +229,39 @@
       ]
     },
     {
+      "id": "manage",
+      "title": { "en": "Update, back up, remove", "ru": "Обновить, сохранить, удалить", "zh": "更新、备份与移除" },
+      "articles": [
+        {
+          "id": "updating",
+          "title": { "en": "Updating the app and modules", "ru": "Обновление приложения и модулей", "zh": "更新应用与模块" },
+          "keywords": {
+            "en": ["update", "upgrade", "new version", "version mismatch", "module older", "module newer", "reinstall"],
+            "ru": ["обновление", "обновить", "новая версия", "несовпадение версий", "модуль старее", "модуль новее", "переустановка"],
+            "zh": ["更新", "升级", "新版本", "版本不一致", "模块较旧", "模块较新", "重装"]
+          }
+        },
+        {
+          "id": "config-backup",
+          "title": { "en": "Back up, restore and transfer your config", "ru": "Резервная копия и перенос конфигурации", "zh": "备份、恢复与迁移配置" },
+          "keywords": {
+            "en": ["backup", "restore", "export json", "import json", "transfer", "another device", "migrate", "pre-1.0", "old configuration"],
+            "ru": ["резервная копия", "восстановление", "export json", "import json", "перенос", "другое устройство", "миграция", "до 1.0", "старая конфигурация"],
+            "zh": ["备份", "恢复", "导出 json", "导入 json", "迁移", "另一台设备", "转移", "1.0 之前", "旧配置"]
+          }
+        },
+        {
+          "id": "remove-vpnhide",
+          "title": { "en": "Turning it off, resetting and uninstalling", "ru": "Отключение, сброс и удаление", "zh": "关闭、重置与卸载" },
+          "keywords": {
+            "en": ["uninstall", "remove", "reset", "leftover files", "disable", "turn off", "clean up", "delete config"],
+            "ru": ["удаление", "удалить", "сброс", "оставшиеся файлы", "отключить", "выключить", "очистка", "удалить конфиг"],
+            "zh": ["卸载", "移除", "重置", "残留文件", "停用", "关闭", "清理", "删除配置"]
+          }
+        }
+      ]
+    },
+    {
       "id": "capabilities-limits",
       "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能力与限制" },
       "articles": [
