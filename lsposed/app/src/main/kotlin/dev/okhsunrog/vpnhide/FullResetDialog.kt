@@ -142,7 +142,17 @@ internal fun FullResetDialog(
                         onClick = {
                             running = true
                             scope.launch {
-                                val (exit, _) = suExecAsync(buildFullResetCommand())
+                                val result =
+                                    CanonicalConfigRepository.commit(
+                                        CanonicalMutation(
+                                            emptyList(),
+                                            protectAllDrafts = true,
+                                            removesCanonical = true,
+                                            coupledCommands = listOf(buildFullResetCommand()),
+                                            activation = CanonicalActivation(native = false),
+                                        ),
+                                    )
+                                val exit = result.exitCode
                                 running = false
                                 done = exit == 0
                                 if (exit == 0) {

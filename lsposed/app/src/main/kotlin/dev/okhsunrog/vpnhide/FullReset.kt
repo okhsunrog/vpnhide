@@ -41,8 +41,15 @@ internal val FULL_RESET_DIRS =
 internal fun buildFullResetCommand(): String =
     (
         listOf("rm -f " + FULL_RESET_FILES.joinToString(" ")) +
-            FULL_RESET_DIRS.map { "rm -rf $it" }
-    ).joinToString(" ; ")
+            FULL_RESET_DIRS.map { directory ->
+                if (directory == "/data/adb/vpnhide") {
+                    "for entry in /data/adb/vpnhide/* /data/adb/vpnhide/.[!.]* /data/adb/vpnhide/..?*; do " +
+                        "case \"${'$'}entry\" in /data/adb/vpnhide/app-state) ;; *) rm -rf \"${'$'}entry\" || exit 1 ;; esac; done"
+                } else {
+                    "rm -rf $directory"
+                }
+            }
+    ).joinToString(" && ")
 
 // A reason the full reset must wait — something VPN Hide left running is still
 // installed/active, so deleting its state now is unsafe (a live .ko keeps

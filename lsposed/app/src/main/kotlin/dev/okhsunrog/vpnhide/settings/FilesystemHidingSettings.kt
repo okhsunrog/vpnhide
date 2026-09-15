@@ -22,8 +22,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.okhsunrog.vpnhide.CanonicalActivation
-import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
+import dev.okhsunrog.vpnhide.CanonicalEdit
+import dev.okhsunrog.vpnhide.CanonicalMutation
+import dev.okhsunrog.vpnhide.CanonicalToggle
+import dev.okhsunrog.vpnhide.ConfigCoordinatorMode
 import dev.okhsunrog.vpnhide.NativeBackendId
 import dev.okhsunrog.vpnhide.OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS
 import dev.okhsunrog.vpnhide.R
@@ -41,18 +44,21 @@ import kotlinx.coroutines.withContext
 internal fun FilesystemHidingSettingsSection() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val targets by TargetsCache.snapshot.collectAsState()
     val rootSnapshot by RootSnapshotCache.snapshot.collectAsState()
     var saving by remember { mutableStateOf(false) }
     var confirmationOpen by remember { mutableStateOf(false) }
     var saveStatus by remember { mutableStateOf<String?>(null) }
-    val enabledFeatures =
-        targets
-            ?.canonicalConfig
-            ?.settings
-            ?.optionalFeatures
-            .orEmpty()
-    val enabled = OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS in enabledFeatures
+    val repository by CanonicalConfigRepository.state.collectAsState()
+    var requested by remember { mutableStateOf<Boolean?>(null) }
+    val pending = repository.pending[CanonicalToggle.Filesystem]
+    val enabled =
+        requested ?: pending ?: (
+            OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS in
+                repository.confirmed
+                    ?.settings
+                    ?.optionalFeatures
+                    .orEmpty()
+        )
     val runtimeState =
         remember(enabled, rootSnapshot) {
             resolveFilesystemHidingState(
@@ -72,12 +78,13 @@ internal fun FilesystemHidingSettingsSection() {
 
     fun persist(value: Boolean) {
         saving = true
+        requested = value
         saveStatus = null
         scope.launch {
             val exit = withContext(Dispatchers.IO) { writeFilesystemHidingSetting(value) }
             saving = false
+            requested = null
             saveStatus = if (exit == 0) savedMessage else failedMessage
-            if (exit == 0) TargetsCache.refreshAfterSave(scope, context)
         }
     }
 
@@ -131,7 +138,10 @@ internal fun FilesystemHidingSettingsSection() {
             subtitle = filesystemHidingStatusText(runtimeState),
             icon = Icons.Default.VisibilityOff,
             checked = enabled,
-            enabled = targets != null && !saving && (runtimeState.nativeBackendInstalled || enabled),
+            progress = saving || pending != null,
+            enabled =
+                repository.mode == ConfigCoordinatorMode.Open && !saving && pending == null &&
+                    (runtimeState.nativeBackendInstalled || enabled),
             onCheckedChange = { value ->
                 if (value) confirmationOpen = true else persist(false)
             },
@@ -199,24 +209,11 @@ private fun filesystemHidingStatusText(state: FilesystemHidingState): String =
         }
     }
 
-private suspend fun writeFilesystemHidingSetting(enabled: Boolean): Int {
-    val snapshot = TargetsCache.snapshot.value ?: return 1
-    // The config as stored, not a rebuild from the snapshot's per-role sets —
-    // flipping an optional feature must leave the app list byte-identical.
-    val base = snapshot.canonicalConfig ?: CanonicalConfig()
-    val canonical =
-        base.copy(
-            settings =
-                base.settings.copy(
-                    optionalFeatures =
-                        if (enabled) {
-                            base.settings.optionalFeatures + OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS
-                        } else {
-                            base.settings.optionalFeatures - OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS
-                        },
-                ),
-        )
-    return CanonicalConfigRepository
-        .commit(canonical, activation = CanonicalActivation(native = false))
-        .exitCode
-}
+private suspend fun writeFilesystemHidingSetting(enabled: Boolean): Int =
+    CanonicalConfigRepository
+        .commit(
+            CanonicalMutation(
+                listOf(CanonicalEdit.Toggle(CanonicalToggle.Filesystem, enabled)),
+                activation = CanonicalActivation(native = false),
+            ),
+        ).exitCode

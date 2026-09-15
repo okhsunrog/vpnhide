@@ -1,6 +1,6 @@
 package dev.okhsunrog.vpnhide
 
-internal enum class ConfigPhase { Persist, Secret, Native, Ports }
+internal enum class ConfigPhase { Persist, Secret, Cleanup, Native, Ports }
 
 internal enum class PhaseOutcome { NotAttempted, Running, Confirmed, FailedKnown, Unknown }
 
@@ -13,6 +13,7 @@ internal data class ConfigOperationSpec(
     val writes: Set<ConfigField>,
     val phases: List<ConfigPhase> = listOf(ConfigPhase.Persist, ConfigPhase.Native),
     val protectsDrafts: Boolean = false,
+    val removesCanonical: Boolean = false,
 ) {
     init {
         require(phases.isNotEmpty())

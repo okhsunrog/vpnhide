@@ -3,12 +3,48 @@ package dev.okhsunrog.vpnhide
 import android.content.ContextWrapper
 import dev.okhsunrog.vpnhide.startup.StartupCoordinator
 import dev.okhsunrog.vpnhide.startup.StartupSelfTargetState
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class StartupCoordinatorTest {
+    @Test
+    fun `recreated Activity joins preparation after previous waiter is cancelled`() =
+        runBlocking {
+            withTimeout(10_000) {
+                val started = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                var calls = 0
+                val coordinator =
+                    StartupCoordinator(
+                        appContext = FakeContext("dev.okhsunrog.vpnhide"),
+                        initializeConfig = {},
+                        prepareSelfTargetsCommand = {
+                            calls += 1
+                            started.complete(Unit)
+                            release.await()
+                            SelfTargetPreparation(rootAvailable = true, selfNeedsRestart = false, currentBootId = "boot-1")
+                        },
+                        cleanupZygiskStatus = { _, _ -> },
+                        seedRootSnapshotInventory = {},
+                        markStartupEvent = {},
+                    )
+                val previous = async { coordinator.prepareSelfTargets() }
+                started.await()
+                previous.cancel()
+                val recreated = async { coordinator.prepareSelfTargets() }
+                release.complete(Unit)
+                recreated.await()
+                coordinator.prepareSelfTargets()
+                assertEquals(1, calls)
+                assertEquals(StartupSelfTargetState.Ready(false), coordinator.selfTargetState.value)
+            }
+        }
+
     @Test
     fun `successful self target preparation seeds package list and cleanup boot id`() =
         runBlocking {
@@ -17,6 +53,7 @@ class StartupCoordinatorTest {
             var cleanupBootId: String? = null
             val coordinator =
                 StartupCoordinator(
+                    initializeConfig = {},
                     appContext = FakeContext("dev.okhsunrog.vpnhide"),
                     prepareSelfTargetsCommand = { pkg ->
                         assertEquals("dev.okhsunrog.vpnhide", pkg)
@@ -55,6 +92,7 @@ class StartupCoordinatorTest {
             var cleanupBootId: String? = null
             val coordinator =
                 StartupCoordinator(
+                    initializeConfig = {},
                     appContext = FakeContext("dev.okhsunrog.vpnhide"),
                     prepareSelfTargetsCommand = {
                         SelfTargetPreparation(

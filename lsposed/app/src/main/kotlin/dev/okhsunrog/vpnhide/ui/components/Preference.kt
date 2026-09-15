@@ -128,6 +128,7 @@ fun PreferenceRowSwitch(
     enabled: Boolean = true,
     index: Int = -1,
     count: Int = 1,
+    progress: Boolean = false,
 ) {
     PreferenceRow(
         title = title,
@@ -139,6 +140,7 @@ fun PreferenceRowSwitch(
         count = count,
         onClick = { onCheckedChange(!checked) },
         trailing = {
+            if (progress) androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
             EnhancedSwitch(
                 checked = checked,
                 onCheckedChange = null,

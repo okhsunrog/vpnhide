@@ -16,11 +16,13 @@ internal object VpnHideLog : GatedLogger() {
      * the settings UI to be opened.
      */
     fun init() {
-        enabled = debugFromCanonicalSnapshot(RootSnapshotCache.snapshot.value)
+        enabled = CanonicalConfigRepository.state.value.confirmed
+            ?.debug ?: debugFromCanonicalSnapshot(RootSnapshotCache.snapshot.value)
     }
 
     fun setFromRootSnapshot(rootSnapshot: RootSnapshot?) {
-        enabled = debugFromCanonicalSnapshot(rootSnapshot)
+        enabled = CanonicalConfigRepository.state.value.confirmed
+            ?.debug ?: debugFromCanonicalSnapshot(rootSnapshot)
     }
 
     override fun emit(

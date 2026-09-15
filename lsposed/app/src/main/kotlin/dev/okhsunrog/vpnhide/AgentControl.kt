@@ -243,7 +243,14 @@ internal object AgentControl {
             val canonical =
                 parseImportedCanonicalConfig(json, context.packageName)
                     ?: throw IllegalArgumentException("Invalid canonical JSON")
-            applyCanonicalConfig(context = context, canonical = canonical)
+            applyCanonicalMutationForAgent(
+                CanonicalMutation(
+                    listOf(CanonicalEdit.Replace(canonical)),
+                    bootstrap = true,
+                    source = OperationSource.Bridge,
+                    activation = CanonicalActivation(ports = true),
+                ),
+            )
         }
 
     /**
@@ -267,25 +274,36 @@ internal object AgentControl {
     ): AgentMutationResult =
         withAppContext(context) { context ->
             val pkg = requirePackageName(packageName)
-            val base = currentCanonicalConfig(refresh = true)
-            val current = base.apps[pkg] ?: CanonicalApp()
-            val nextPorts = ports ?: current.ports
-            val next =
-                current.copy(
-                    java = java ?: current.java,
-                    javaHooks = current.javaHooks.takeIf { java != false },
-                    native =
-                        when (native) {
-                            true -> current.native.takeIf { it.enabled } ?: NativeRole.All
-                            false -> NativeRole.Disabled
-                            null -> current.native
-                        },
-                    appHiding = appHiding ?: current.appHiding,
-                    ports = nextPorts,
-                    portPolicy = current.portPolicy.takeIf { nextPorts },
-                    hidden = hidden ?: current.hidden,
+            val fields =
+                listOfNotNull(
+                    CanonicalAppField.Java.takeIf { java != null },
+                    CanonicalAppField.Native.takeIf { native != null },
+                    CanonicalAppField.AppHiding.takeIf { appHiding != null },
+                    CanonicalAppField.Ports.takeIf { ports != null },
+                    CanonicalAppField.Hidden.takeIf {
+                        hidden !=
+                            null
+                    },
                 )
-            applyCanonicalConfig(context, base.withApp(pkg, next))
+            mutateAgentApp(context, pkg, fields) { current ->
+                val nextPorts = ports ?: current.ports
+                val next =
+                    current.copy(
+                        java = java ?: current.java,
+                        javaHooks = current.javaHooks.takeIf { java != false },
+                        native =
+                            when (native) {
+                                true -> current.native.takeIf { it.enabled } ?: NativeRole.All
+                                false -> NativeRole.Disabled
+                                null -> current.native
+                            },
+                        appHiding = appHiding ?: current.appHiding,
+                        ports = nextPorts,
+                        portPolicy = current.portPolicy.takeIf { nextPorts },
+                        hidden = hidden ?: current.hidden,
+                    )
+                next
+            }
         }
 
     /**
@@ -302,16 +320,16 @@ internal object AgentControl {
         withAppContext(context) { context ->
             val pkg = requirePackageName(packageName)
             val hooks = resolveHookIds(hookIds, LsposedJavaHookEntries)
-            val base = currentCanonicalConfig(refresh = true)
-            val current = base.apps[pkg] ?: CanonicalApp()
-            val selected = resolveHookSelection(LsposedJavaHookEntries.map { it.hookName }, hooks.toSet())
-            val next =
-                if (selected.isNullOrEmpty() && hooks.isEmpty()) {
-                    current.copy(java = false, javaHooks = null)
-                } else {
-                    current.copy(java = true, javaHooks = selected)
-                }
-            applyCanonicalConfig(context, base.withApp(pkg, next))
+            mutateAgentApp(context, pkg, listOf(CanonicalAppField.Java)) { current ->
+                val selected = resolveHookSelection(LsposedJavaHookEntries.map { it.hookName }, hooks.toSet())
+                val next =
+                    if (selected.isNullOrEmpty() && hooks.isEmpty()) {
+                        current.copy(java = false, javaHooks = null)
+                    } else {
+                        current.copy(java = true, javaHooks = selected)
+                    }
+                next
+            }
         }
 
     /**
@@ -333,24 +351,22 @@ internal object AgentControl {
             val hookFamily = family?.let(::parseNativeHookFamily) ?: snapshot.nativeHookFamily
             val entries = nativeHookEntriesFor(hookFamily)
             val hooks = resolveHookIds(hookIds, entries)
-            // Derive base from the snapshot already fetched (not a second cache
-            // read), so this read-modify-write can't depend on cache ordering.
-            val base = snapshot.canonicalConfig ?: buildCanonicalConfigFromTargetsSnapshot(snapshot)
-            val current = base.apps[pkg] ?: CanonicalApp()
-            val selected = resolveNativeHookSelection(entries.map { it.hookName }, hooks.toSet())
-            val next =
-                if (selected.isNullOrEmpty() && hooks.isEmpty()) {
-                    current.copy(native = NativeRole.Disabled)
-                } else {
-                    current.copy(
-                        native =
-                            NativeRole(
-                                enabled = true,
-                                overrides = current.native.overrides.withHooksFor(hookFamily, selected),
-                            ),
-                    )
-                }
-            applyCanonicalConfig(context, base.withApp(pkg, next))
+            mutateAgentApp(context, pkg, listOf(CanonicalAppField.Native)) { current ->
+                val selected = resolveNativeHookSelection(entries.map { it.hookName }, hooks.toSet())
+                val next =
+                    if (selected.isNullOrEmpty() && hooks.isEmpty()) {
+                        current.copy(native = NativeRole.Disabled)
+                    } else {
+                        current.copy(
+                            native =
+                                NativeRole(
+                                    enabled = true,
+                                    overrides = current.native.overrides.withHooksFor(hookFamily, selected),
+                                ),
+                        )
+                    }
+                next
+            }
         }
 
     /**
@@ -371,10 +387,10 @@ internal object AgentControl {
         withAppContext(context) { context ->
             val pkg = requirePackageName(packageName)
             val policy = parseAgentPortPolicy(mode, preset, rules.orEmpty())
-            val base = currentCanonicalConfig(refresh = true)
-            val current = base.apps[pkg] ?: CanonicalApp()
-            val next = current.copy(ports = true, portPolicy = policy)
-            applyCanonicalConfig(context, base.withApp(pkg, next), targetRestartRecommended = true)
+            mutateAgentApp(context, pkg, listOf(CanonicalAppField.Ports)) { current ->
+                val next = current.copy(ports = true, portPolicy = policy)
+                next
+            }
         }
 
     /**
@@ -390,19 +406,34 @@ internal object AgentControl {
     ): AgentMutationResult =
         withAppContext(context) { context ->
             val apps = AppListCache.loadForAgent(context, force = true)
-            val base = currentCanonicalConfig(refresh = true)
-            val nextSettings =
-                base.settings.copy(
-                    autoHideVpnServices = autoHideVpnServices ?: base.settings.autoHideVpnServices,
-                    autoHideVpnName = autoHideVpnName ?: base.settings.autoHideVpnName,
+            val edits =
+                listOfNotNull(
+                    autoHideVpnServices?.let {
+                        CanonicalEdit.Toggle(CanonicalToggle.AutoHideServices, it)
+                    },
+                    autoHideVpnName?.let { CanonicalEdit.Toggle(CanonicalToggle.AutoHideName, it) },
                 )
-            val next =
-                applyAutoHiddenPackages(
-                    config = base.copy(settings = nextSettings),
-                    selfPkg = context.packageName,
-                    signals = apps.map(AppSummary::toAutoHideSignal),
-                )
-            applyCanonicalConfig(context, next)
+            applyCanonicalMutationForAgent(
+                CanonicalMutation(
+                    edits,
+                    source = OperationSource.Bridge,
+                    activation = CanonicalActivation(ports = true),
+                    transform = { base ->
+                        val nextSettings =
+                            base.settings.copy(
+                                autoHideVpnServices = autoHideVpnServices ?: base.settings.autoHideVpnServices,
+                                autoHideVpnName = autoHideVpnName ?: base.settings.autoHideVpnName,
+                            )
+                        val next =
+                            applyAutoHiddenPackages(
+                                config = base.copy(settings = nextSettings),
+                                selfPkg = context.packageName,
+                                signals = apps.map(AppSummary::toAutoHideSignal),
+                            )
+                        canonicalConfigWithSelfTarget(next, context.packageName)
+                    },
+                ),
+            )
         }
 
     /**
@@ -416,18 +447,30 @@ internal object AgentControl {
     ): AgentMutationResult =
         withAppContext(context) { context ->
             val apps = AppListCache.loadForAgent(context, force = true)
-            val base = currentCanonicalConfig(refresh = true)
             val visiblePackages = apps.mapTo(mutableSetOf()) { it.packageName }
             val selected = packageNames.map(::requirePackageName).toSortedSet()
-            val next =
-                updateManualHiddenPackages(
-                    config = base,
-                    selfPkg = context.packageName,
-                    visiblePackages = visiblePackages,
-                    selectedManualHiddenPackages = selected,
-                    signals = apps.map(AppSummary::toAutoHideSignal),
-                )
-            applyCanonicalConfig(context, next)
+            applyCanonicalMutationForAgent(
+                CanonicalMutation(
+                    emptyList(),
+                    source = OperationSource.Bridge,
+                    declaredWrites = (visiblePackages + selected).mapTo(linkedSetOf()) { ConfigField(listOf("apps", it, "hidden")) },
+                    activation =
+                        CanonicalActivation(
+                            ports = true,
+                        ),
+                    transform = { base ->
+                        val next =
+                            updateManualHiddenPackages(
+                                config = base,
+                                selfPkg = context.packageName,
+                                visiblePackages = visiblePackages,
+                                selectedManualHiddenPackages = selected,
+                                signals = apps.map(AppSummary::toAutoHideSignal),
+                            )
+                        canonicalConfigWithSelfTarget(next, context.packageName)
+                    },
+                ),
+            )
         }
 
     /**
@@ -442,10 +485,14 @@ internal object AgentControl {
         withAppContext(context) { context ->
             val packages = packageNames.map(::requirePackageName).toSortedSet()
             if (packages.isEmpty()) return@withAppContext AgentMutationResult(ok = true, message = "No packages to remove")
-            val base = currentCanonicalConfig(refresh = true)
-            applyCanonicalConfig(
-                context = context,
-                canonical = removeConfiguredPackages(base, packages, context.packageName),
+            applyCanonicalMutationForAgent(
+                CanonicalMutation(
+                    (packages - context.packageName).map {
+                        CanonicalEdit.RemoveApp(it)
+                    },
+                    source = OperationSource.Bridge,
+                    activation = CanonicalActivation(ports = true),
+                ),
             )
         }
 
@@ -459,8 +506,7 @@ internal object AgentControl {
         enabled: Boolean,
     ): AgentMutationResult =
         withAppContext(context) { context ->
-            setDebugLoggingEnabled(enabled)
-            AgentMutationResult(ok = true, message = "Debug logging updated", changed = true)
+            setDebugLoggingEnabled(enabled, OperationSource.Bridge).toAgentMutationResult()
         }
 
     /**
@@ -468,7 +514,7 @@ internal object AgentControl {
      */
     suspend fun activateConfig(context: Context): AgentMutationResult =
         withAppContext(context) { context ->
-            runActivation(changed = false)
+            CanonicalConfigRepository.reconcile(ports = true).toAgentMutationResult()
         }
 }
 
@@ -477,57 +523,43 @@ private suspend fun <T> withAppContext(
     block: suspend (Context) -> T,
 ): T =
     withContext(Dispatchers.IO) {
+        CanonicalConfigRepository.initialize(context.applicationContext)
         block(context.applicationContext)
     }
 
 private suspend fun rootSnapshot(refresh: Boolean): RootSnapshot =
     if (refresh) RootSnapshotCache.refresh() else RootSnapshotCache.getOrLoad()
 
-private suspend fun targetsSnapshot(refresh: Boolean): TargetsSnapshot = parseTargetsSnapshot(rootSnapshot(refresh))
-
-private suspend fun currentCanonicalConfig(refresh: Boolean): CanonicalConfig {
-    val snapshot = targetsSnapshot(refresh)
-    return snapshot.canonicalConfig
-        ?: buildCanonicalConfigFromTargetsSnapshot(snapshot)
+private suspend fun targetsSnapshot(refresh: Boolean): TargetsSnapshot {
+    val snapshot = parseTargetsSnapshot(rootSnapshot(refresh))
+    return snapshot.copy(canonicalConfig = CanonicalConfigRepository.state.value.confirmed ?: snapshot.canonicalConfig)
 }
 
-private suspend fun applyCanonicalConfig(
+private suspend fun currentCanonicalConfig(refresh: Boolean): CanonicalConfig =
+    CanonicalConfigRepository.state.value.confirmed
+        ?: requireNotNull(targetsSnapshot(refresh).canonicalConfig) { "Canonical configuration unavailable" }
+
+private suspend fun mutateAgentApp(
     context: Context,
-    canonical: CanonicalConfig,
-    targetRestartRecommended: Boolean = true,
+    pkg: String,
+    fields: List<CanonicalAppField>,
+    transform: (CanonicalApp) -> CanonicalApp,
 ): AgentMutationResult {
-    val next = canonicalConfigWithSelfTarget(canonical, context.packageName)
-    val write =
-        CanonicalConfigRepository.commit(
-            next,
-            activation = CanonicalActivation(native = true, ports = true),
+    val mutation =
+        CanonicalMutation(
+            emptyList(),
+            source = OperationSource.Bridge,
+            activation = CanonicalActivation(ports = true),
+            declaredWrites = fields.mapTo(linkedSetOf()) { ConfigField(listOf("apps", pkg, it.name.replaceFirstChar(Char::lowercase))) },
+            transform = { fresh ->
+                canonicalConfigWithSelfTarget(fresh.withApp(pkg, transform(fresh.apps[pkg] ?: CanonicalApp())), context.packageName)
+            },
         )
-    val result = write.toAgentMutationResult(changed = true)
-    return result.copy(targetRestartRecommended = result.ok && targetRestartRecommended)
+    return applyCanonicalMutationForAgent(mutation)
 }
 
-private fun runActivation(changed: Boolean): AgentMutationResult = runActivationCommand(changed = changed)
-
-private fun runActivationCommand(changed: Boolean): AgentMutationResult {
-    val parts =
-        listOf(
-            ConfigChannels.reconcileCommand(),
-            ConfigChannels.portsActivatorCommand(),
-        )
-    val (exit, output) = suExec(parts.joinToString(" && "))
-    return CanonicalWriteResult(exit, output).toAgentMutationResult(changed)
-}
-
-private fun CanonicalWriteResult.toAgentMutationResult(changed: Boolean): AgentMutationResult =
-    if (succeeded) {
-        AgentMutationResult(ok = true, message = "Activation completed", changed = changed)
-    } else {
-        AgentMutationResult(
-            ok = false,
-            message = "Root command failed with exit=$exitCode: ${output.trim()}",
-            changed = false,
-        )
-    }
+private suspend fun applyCanonicalMutationForAgent(mutation: CanonicalMutation): AgentMutationResult =
+    CanonicalConfigRepository.commit(mutation).toAgentMutationResult(restartTargets = true)
 
 private fun buildProtectionState(snapshot: TargetsSnapshot): AgentProtectionState {
     val canonical =

@@ -1,14 +1,14 @@
 # Config coordinator implementation
 
-Status: the coordinator engine and its root adapter are implemented and tested.
-The production `CanonicalConfigRepository.commit(config)` path still uses its
-existing mutex/`suExec` implementation. Screens, startup, capture and the bridge
-have **not** been migrated; the running app's switch behavior is unchanged.
+Status: connected to the running app. `CanonicalConfigRepository` now owns one
+process-lived coordinator and root runner. Settings, both app editors, startup,
+legacy cleanup, import/reset, capture logging and bridge mutations use this lane.
+The previous mutex/full-snapshot write API and direct activation bypasses are gone.
 
-This is the execution layer for the [transition contract](app-state-transitions.md),
-following the [root transport](root-mutation-transport.md). Keeping it disconnected
-until all producers migrate is deliberate: a mixture of tracked and untracked
-root writers cannot satisfy the single-mutation guarantee.
+This implements the configuration portion of the [transition contract](app-state-transitions.md)
+through the [root transport](root-mutation-transport.md). Observation generations,
+diagnostic runs and capture reservation/packaging retain their existing execution
+model; they are separate remaining parts of the larger design.
 
 ## Ownership and effects
 
@@ -17,7 +17,9 @@ process lifetime, a `ConfigCoordinatorIo`, and callbacks for confirmed config an
 observation refresh. It owns one event channel, the existing config reducer,
 private effect inputs and one completion per accepted operation. Its public flow
 is read-only and includes confirmed config, pending toggle intent, active/queued
-operation IDs, availability and the latest phase result.
+operation IDs, availability, active logging tokens and phase results. A separately
+retained recovery result lets an editor acknowledge its own earlier unknown save
+even when a later operation has already replaced the latest result.
 
 - Event handling publishes state before dispatching the next identified effect.
   Effects run on IO workers outside the actor. The operation lane stays occupied
@@ -57,15 +59,18 @@ Preparation unions their actual diff with the declared intent fields before the
 conflict check. Explicit same-value setters keep their intent fields: a bridge
 request cannot evade an existing UI draft conflict simply because the current
 value already matches its argument. Whole replacement and system reconciliation
-also protect registered UI fields. Producers still need their domain-specific
-self-target, auto-hide, import and capture policies during migration.
+also protect registered UI fields. Self-target and auto-hide policies run on the
+fresh prepared config. Imports explicitly replace all domains; manual hidden-app
+selection declares only its hidden fields, allowing unrelated role drafts.
 
 The pre-dispatch guard rejects an overlapping operation as a whole. A draft that
 arrives after dispatch is retained; the result reports the conflict together with
 actual phase outcomes. Draft registration before initialization and across an
-explicit initialization retry is retained. This registry is not an Android draft
-ViewModel: Activity retention and revision-aware save acknowledgement remain UI
-integration work.
+explicit initialization retry is retained. Activity-owned `CanonicalEditorViewModel`
+instances retain field drafts through recreation and overlays without persisting
+them across process death. Confirmation removes only submitted revisions. A new
+edit made while saving, including a return to the old confirmed value, survives
+the old acknowledgement. Discard advances the revision to prevent accidental reuse.
 
 Preparation verifies serialization/readback equality and validates each planned
 command's transport framing before persistence can begin. Invalid or oversized
@@ -121,22 +126,64 @@ The production canonical file and activators were not touched; no APK was
 installed and the device was not rebooted. This does not validate Activity
 recreation or the root permission domain of app-originated execution.
 
-## Next integration boundary
+## Connected UI and lifecycle
 
-Switch production ownership in one coherent migration, not one screen at a time:
+Canonical switches display requested intent immediately and remain busy through
+their operation. Known persistence failure returns to confirmed state. Persistence
+success followed by activation failure keeps the saved value and offers explicit
+activation repair. Secret and cleanup failures direct the user to the original
+action; backend activation cannot repair them. Initial/automatic/manual readback
+has visible progress, and a continued unknown outcome pauses config writes.
+Agent control remains an ordinary DataStore preference and does not use root.
 
-1. Retain the coordinator and runner behind `CanonicalConfigRepository`; connect
-   startup availability/recheck UI and publish confirmed config independently of
-   stale observation caches.
-2. Convert every producer: settings, app/hidden-app editors, filesystem settings,
-   imports/legacy cleanup, startup self-target/debug reconciliation, automatic
-   hiding, capture and bridge activation. Remove full stale-snapshot writes and
-   direct activation bypasses. Capture tokens must share admission ordering with
-   the debug intent; bridge results must expose actual per-phase outcomes.
-3. Add immediate switch/progress presentation and retained UI drafts with their
-   original editor base and field revisions. Feed the registry synchronously when
-   edits occur, and acknowledge only the submitted revision.
-4. Validate the connected paths on a device, including first adoption, interrupted
-   root authorization, phase failures, Activity/process recreation and capture
-   cleanup. Observation and diagnostic execution migration remains a subsequent
-   part of the larger state design.
+Startup preparation is process-owned and single-flight. A recreated Activity
+joins the same preparation. Admission reopening triggers fresh self-target
+preparation. A first-adoption reboot requirement leaves the read interface
+available; the app never reboots the device itself.
+
+Logging capture acquisition/release is ordered with all writes. Effective debug
+is fresh user intent OR at least one active token. Release updates token ownership
+even while writes are paused. After successful manual recovery, the coordinator
+can submit a fresh logging reconciliation if the released token left debug on;
+this is distinct from replaying the interrupted operation. The switch explains
+when a capture is keeping logs enabled. Forensic capture reservation and bundle
+assembly are not migrated by this logging integration.
+
+Full reset has a separate Cleanup phase, validates canonical-file absence, and
+publishes Missing. It preserves `/data/adb/vpnhide/app-state/`, including the
+permanent lock inode and receipts. It rejects active logging capture and any open
+draft. Ordinary queued edits cannot resurrect a removed config; only explicit
+startup/import bootstrap may create it. Invalid or inaccessible canonical data
+remain a read/recheck gate; they are never silently replaced with defaults.
+
+Bridge results retain `ok`, `changed` and restart advice and add `errorCode`,
+`phases`, `conflicts` (path segment arrays), and `draftPending`. `changed` reports
+confirmed persistence even when activation or a late UI conflict fails. Results
+do not claim that an uncertain phase failed or that unattempted work ran.
+
+## Runtime integration validation
+
+The signed release APK built successfully with R8 and release vital lint; its
+signature verified, and both ARM64/ARMv7 mutation helpers are packaged. No APK
+was installed and no device reboot was performed for this integration stage.
+
+On 2026-09-15, all 624 JVM tests passed (17 added for this integration), with
+no failures or skips. Kotlin compilation with `-PvpnhideWarningsAsErrors`, ktlint,
+detekt, CPD and Android `lintDebug` passed. New status text covers EN/RU/ZH. The local checks used two Gradle workers
+and a separate single-use daemon for lint; no project lint rules were disabled.
+
+The JVM suite covers capture/user intent ordering, release during paused recovery,
+reset readback and lock-inode preservation, editor merge/acknowledgement, bridge
+phase/conflict reporting, presentation decisions and joined startup after waiter
+cancellation. Root dispatch tests use controlled coroutine gates, and reset tests
+run the actual shell builder against isolated temporary paths.
+
+Device acceptance remains outstanding: install the signed APK, exercise first
+adoption and its boot boundary, root authorization delay, activity recreation,
+bridge/UI conflicts, and capture cleanup. Host tests and APK compilation do not
+establish app-originated root permissions or visible behavior on a physical device.
+
+After this configuration integration, the next architectural stage is observation
+generations and coherent screen projections. Diagnostic invalidation, eligibility,
+execution and capture reservation must then follow the separately reviewed
+[diagnostic semantics](diagnostics-state-analysis.md) and transition contract.

@@ -45,6 +45,7 @@ internal class ConfigCoordinator(
     private val scope: CoroutineScope,
     private val confirmed: (CanonicalConfig) -> Unit = {},
     refresh: suspend () -> Unit = {},
+    private val manageLogging: Boolean = false,
 ) {
     private val messages = Channel<CoordinatorMessage>(Channel.UNLIMITED)
     private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
@@ -54,6 +55,7 @@ internal class ConfigCoordinator(
     private var initializing = false
     private var initialized = false
     private var available = false
+    private var logging = CaptureLoggingState(false)
     private val drafts = mutableMapOf<Long, Set<ConfigField>>()
     private val requests = linkedMapOf<Long, CoordinatorMessage.Submit>()
     private val capacities = mutableMapOf<Long, NativeTargetCapacityWarning>()
@@ -150,8 +152,14 @@ internal class ConfigCoordinator(
     }
 
     private fun submitRequest(request: CoordinatorMessage.Submit) {
+        request.mutation.captureEvent?.let { logging = reduceCaptureLogging(logging, it) }
+        mutableView.value = view.value.copy(activeCaptures = logging.tokens.size)
         val state = core
-        if (state == null || initializing || (!available && !request.mutation.bootstrap)) {
+        if (request.mutation.removesCanonical && logging.tokens.isNotEmpty()) {
+            request.completion.complete(CanonicalWriteResult(-1, "capture_active"))
+            return
+        }
+        if (state == null || initializing || (!available && !request.mutation.bootstrap && !request.mutation.removesCanonical)) {
             request.completion.complete(CanonicalWriteResult(-1, view.value.mode.name))
             return
         }
@@ -160,8 +168,9 @@ internal class ConfigCoordinator(
             ConfigOperationSpec(
                 request.mutation.source,
                 request.mutation.writes,
-                configMutationPlan(request.mutation, changed = true),
+                configMutationPlan(request.mutation, changed = true, loggingChanged = manageLogging && !request.mutation.removesCanonical),
                 request.mutation.protectsDrafts,
+                request.mutation.removesCanonical,
             )
         input(ConfigOperationEvent.Submit(spec))
     }
@@ -182,6 +191,12 @@ internal class ConfigCoordinator(
             event.outcome == PhaseOutcome.Confirmed && state.active.phase == ConfigPhase.Persist
         ) {
             available = true
+        }
+        if (event is ConfigOperationEvent.PhaseFinished && event.ticket == state.active?.ticket &&
+            state.active.request.spec.removesCanonical && state.active.phase == ConfigPhase.Cleanup &&
+            event.outcome == PhaseOutcome.Confirmed
+        ) {
+            available = false
         }
         publish()
         transition.effects.forEach(::effect)
@@ -205,6 +220,7 @@ internal class ConfigCoordinator(
                 confirmed = state.confirmed.takeIf { available },
                 pending = pendingConfigToggles(ids.mapNotNull { requests[it]?.mutation }),
                 operations = ids,
+                rechecking = state.active?.stage == OperationStage.Reconciling,
             )
         if (available) runCatching { confirmed(state.confirmed) }
     }
@@ -235,8 +251,22 @@ internal class ConfigCoordinator(
             }
 
             is ConfigOperationEffect.Recovered -> {
-                mutableView.value = view.value.copy(lastResult = effect.result, lastNativeCapacity = capacities.remove(effect.result.id))
+                mutableView.value =
+                    view.value.copy(
+                        lastResult = effect.result,
+                        recoveredResult = effect.result,
+                        lastNativeCapacity = capacities.remove(effect.result.id),
+                    )
                 publish()
+                val config = view.value.confirmed
+                if (manageLogging && config != null && config.debug != (config.debugSwitch || logging.tokens.isNotEmpty())) {
+                    messages.trySend(
+                        CoordinatorMessage.Submit(
+                            CanonicalMutation(emptyList(), source = OperationSource.System),
+                            CompletableDeferred(),
+                        ),
+                    )
+                }
             }
 
             is ConfigOperationEffect.Rejected -> {
@@ -256,10 +286,11 @@ internal class ConfigCoordinator(
 
     private fun prepare(effect: ConfigOperationEffect.Prepare) {
         val mutation = requests.getValue(effect.ticket.owner).mutation
+        val captureEnabled = logging.tokens.isNotEmpty().takeIf { manageLogging }
         scope.launch(Dispatchers.IO) {
             val event =
                 runCatching {
-                    prepareConfigMutation(effect.ticket, io.read(), mutation)
+                    prepareConfigMutation(effect.ticket, io.read(), mutation, captureEnabled)
                 }.getOrElse { ConfigOperationEvent.PreparationFailed(effect.ticket, TransitionFailure.ReadFailed) }
             messages.send(CoordinatorMessage.Input(event))
         }
@@ -287,13 +318,20 @@ internal class ConfigCoordinator(
     private fun executed(message: CoordinatorMessage.Executed) {
         val active = core?.active ?: return
         if (active.ticket != message.ticket) return
-        message.evidence.nativeCapacity?.let { capacities[active.request.id] = it }
+        val evidence = configCompletionEvidence(active, message.evidence)
+        if (active.request.spec.removesCanonical && active.phase == ConfigPhase.Cleanup &&
+            evidence.canonical == RootCanonicalRead.Missing &&
+            evidence.outcome != PhaseOutcome.Unknown
+        ) {
+            available = false
+        }
+        evidence.nativeCapacity?.let { capacities[active.request.id] = it }
         if (message.recovery) {
-            val recovered = configRecoveryEvidence(active, message.evidence, available)
+            val recovered = configRecoveryEvidence(active, evidence, available)
             if (recovered != null) available = message.evidence.canonical is RootCanonicalRead.Available
             input(ConfigOperationEvent.RecoveryFinished(message.ticket, recovered))
         } else {
-            input(ConfigOperationEvent.PhaseFinished(message.ticket, message.evidence.outcome))
+            input(ConfigOperationEvent.PhaseFinished(message.ticket, evidence.outcome))
         }
     }
 

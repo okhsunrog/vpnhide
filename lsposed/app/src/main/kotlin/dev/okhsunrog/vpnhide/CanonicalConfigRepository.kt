@@ -1,12 +1,12 @@
 package dev.okhsunrog.vpnhide
 
+import android.content.Context
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.picker.TargetsCache
 import dev.okhsunrog.vpnhide.statistics.StatisticsCache
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.SupervisorJob
 
 /** Runtime channels that must be re-derived after the canonical config changes. */
 internal data class CanonicalActivation(
@@ -24,45 +24,49 @@ internal data class CanonicalWriteResult(
 }
 
 /**
- * Build the one root transaction used for canonical-config persistence.
- *
- * Every step is joined with `&&`: activators must never run against stale
- * state when the atomic write (or a coupled secret write) failed.
- */
-internal fun buildCanonicalPersistenceCommand(
-    config: CanonicalConfig,
-    coupledCommands: List<String> = emptyList(),
-    activation: CanonicalActivation = CanonicalActivation(),
-): String =
-    buildList {
-        add(buildCanonicalConfigWriteCommand(config))
-        addAll(coupledCommands)
-        if (activation.native) add(ConfigChannels.nativeActivatorCommand())
-        if (activation.ports) add(ConfigChannels.portsActivatorCommand())
-    }.joinToString(" && ")
-
-/**
  * Sole app-side coordinator for canonical JSON writes and runtime activation.
  *
- * The monitor prevents two background UI operations from interleaving root
- * writes in this process. The filesystem write itself remains atomic for
- * system_server and native readers.
+ * The process-owned actor serializes fresh field edits through root receipt recovery.
+ * The filesystem write remains atomic for system_server and native readers.
  */
 internal object CanonicalConfigRepository {
-    private val writeMutex = Mutex()
+    internal val processScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val runner = RootProcessRunner()
 
-    suspend fun commit(
-        config: CanonicalConfig,
-        coupledCommands: List<String> = emptyList(),
-        activation: CanonicalActivation = CanonicalActivation(),
-        timeoutSec: Long = SU_DEFAULT_TIMEOUT_SEC,
-    ): CanonicalWriteResult =
-        writeMutex.withLock {
-            val command = buildCanonicalPersistenceCommand(config, coupledCommands, activation)
-            val (exit, output) = withContext(Dispatchers.IO) { suExec(command, timeoutSec) }
-            if (exit == 0) refreshDerivedCaches()
-            CanonicalWriteResult(exit, output)
-        }
+    @Volatile private var appContext: Context? = null
+    private val coordinator =
+        ConfigCoordinator(
+            ConfigRootIo { appContext?.let { prepareRootMutationTransport(it, runner) } },
+            processScope,
+            confirmed = { VpnHideLog.enabled = it.debug },
+            refresh = { refreshDerivedCaches() },
+            manageLogging = true,
+        )
+    val state = coordinator.view
+
+    suspend fun initialize(context: Context): ConfigCoordinatorMode {
+        appContext = context.applicationContext
+        return coordinator.initialize()
+    }
+
+    fun retry() = coordinator.retry()
+
+    fun draftChanged(
+        id: Long,
+        fields: Set<ConfigField>,
+    ) = coordinator.draftChanged(id, fields)
+
+    suspend fun commit(mutation: CanonicalMutation): CanonicalWriteResult = coordinator.submit(mutation)
+
+    suspend fun reconcile(ports: Boolean = false): CanonicalWriteResult =
+        commit(
+            CanonicalMutation(
+                emptyList(),
+                source = OperationSource.System,
+                activation = CanonicalActivation(ports = ports),
+                forceActivation = true,
+            ),
+        )
 
     /**
      * The caches whose value is *derived from the canonical config*, and which a

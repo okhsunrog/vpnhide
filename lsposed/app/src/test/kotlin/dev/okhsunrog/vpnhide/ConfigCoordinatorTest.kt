@@ -18,6 +18,133 @@ import org.junit.Test
 
 class ConfigCoordinatorTest {
     @Test
+    fun `healing interrupted capture propagates debug even during a settings only write`() =
+        coordinatorTest(manageLogging = true) {
+            io.config = CanonicalConfig(debug = true, debugSwitch = false)
+            coordinator.initialize()
+            val caller =
+                async {
+                    coordinator.submit(
+                        CanonicalMutation(
+                            listOf(CanonicalEdit.Toggle(CanonicalToggle.Filesystem, true)),
+                            activation = CanonicalActivation(native = false),
+                        ),
+                    )
+                }
+            val write = io.executions.receive()
+            assertFalse(write.candidate.debug)
+            write.finish(PhaseOutcome.Confirmed)
+            val activation = io.executions.receive()
+            assertEquals(ConfigPhase.Native, activation.phase)
+            activation.finish(PhaseOutcome.Confirmed)
+            assertTrue(caller.await().succeeded)
+        }
+
+    @Test
+    fun `overlapping captures preserve user choice and release only the last logging owner`() =
+        coordinatorTest(manageLogging = true) {
+            coordinator.initialize()
+            val capture = async { coordinator.submit(logging(CaptureLoggingEvent.Acquire(1))) }
+            val enable = io.executions.receive()
+            assertTrue(enable.candidate.debug)
+            assertFalse(enable.candidate.debugSwitch)
+            enable.finish(PhaseOutcome.Confirmed)
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            assertTrue(capture.await().succeeded)
+            assertTrue(coordinator.submit(logging(CaptureLoggingEvent.Acquire(2))).succeeded)
+            assertTrue(coordinator.submit(toggle(CanonicalToggle.DebugSwitch, false)).succeeded)
+            assertTrue(coordinator.submit(logging(CaptureLoggingEvent.Release(1))).succeeded)
+            assertTrue(requireNotNull(coordinator.view.value.confirmed).debug)
+            assertEquals(1, coordinator.view.value.activeCaptures)
+            val release = async { coordinator.submit(logging(CaptureLoggingEvent.Release(2))) }
+            val disable = io.executions.receive()
+            assertFalse(disable.candidate.debug)
+            disable.finish(PhaseOutcome.Confirmed)
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            assertTrue(release.await().succeeded)
+            assertEquals(0, coordinator.view.value.activeCaptures)
+        }
+
+    @Test
+    fun `release during pause is retained and reconciled after manual recovery`() =
+        coordinatorTest(manageLogging = true) {
+            coordinator.initialize()
+            val capture = async { coordinator.submit(logging(CaptureLoggingEvent.Acquire(1))) }
+            val write = io.executions.receive()
+            io.config = write.candidate
+            write.finish(PhaseOutcome.Unknown)
+            repeat(2) { io.recoveries.receive().complete(ConfigPhaseEvidence(PhaseOutcome.Unknown, RootCanonicalRead.Unavailable)) }
+            assertFalse(capture.await().succeeded)
+            assertFalse(coordinator.submit(logging(CaptureLoggingEvent.Release(1))).succeeded)
+            assertEquals(0, coordinator.view.value.activeCaptures)
+            coordinator.retry()
+            io.recoveries.receive().complete(
+                ConfigPhaseEvidence(PhaseOutcome.Confirmed, RootCanonicalRead.Available(requireNotNull(io.config))),
+            )
+            val repair = io.executions.receive()
+            assertEquals(ConfigPhase.Persist, repair.phase)
+            assertFalse(repair.candidate.debug)
+            repair.finish(PhaseOutcome.Confirmed)
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            val view = coordinator.view.first { it.mode == ConfigCoordinatorMode.Open && it.operations.isEmpty() }
+            assertFalse(requireNotNull(view.confirmed).debug)
+            assertEquals(PhaseOutcome.Confirmed, view.recoveredResult?.phases?.get(ConfigPhase.Persist))
+            assertEquals(PhaseOutcome.NotAttempted, view.recoveredResult?.phases?.get(ConfigPhase.Native))
+        }
+
+    @Test
+    fun `reset publishes missing and subsequent edits cannot recreate deleted config`() =
+        coordinatorTest {
+            coordinator.initialize()
+            val reset = async { coordinator.submit(resetMutation()) }
+            val cleanup = io.executions.receive()
+            assertEquals(ConfigPhase.Cleanup, cleanup.phase)
+            io.config = null
+            cleanup.finish(PhaseOutcome.Confirmed)
+            assertTrue(reset.await().succeeded)
+            assertEquals(ConfigCoordinatorMode.Missing, coordinator.view.value.mode)
+            assertEquals(null, coordinator.view.value.confirmed)
+            assertFalse(coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true)).succeeded)
+            assertTrue(io.executions.tryReceive().isFailure)
+        }
+
+    @Test
+    fun `reset validates deletion and protects drafts and active capture`() =
+        coordinatorTest(manageLogging = true) {
+            coordinator.initialize()
+            val reset = async { coordinator.submit(resetMutation()) }
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            assertEquals(
+                PhaseOutcome.FailedKnown,
+                reset
+                    .await()
+                    .operation
+                    ?.phases
+                    ?.get(ConfigPhase.Cleanup),
+            )
+            coordinator.draftChanged(1, setOf(ConfigField(listOf("apps", "com.example.app", "java"))))
+            assertEquals(TransitionFailure.UiEditConflict, coordinator.submit(resetMutation()).operation?.failure)
+            coordinator.draftChanged(1, emptySet())
+            val capture = async { coordinator.submit(logging(CaptureLoggingEvent.Acquire(1))) }
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            capture.await()
+            assertEquals("capture_active", coordinator.submit(resetMutation()).output)
+            assertTrue(io.executions.tryReceive().isFailure)
+        }
+
+    private fun logging(event: CaptureLoggingEvent) = CanonicalMutation(emptyList(), source = OperationSource.System, captureEvent = event)
+
+    private fun resetMutation() =
+        CanonicalMutation(
+            emptyList(),
+            removesCanonical = true,
+            protectAllDrafts = true,
+            coupledCommands = listOf("reset-config"),
+            activation = CanonicalActivation(native = false),
+        )
+
+    @Test
     fun `manual activation readback publishes warning without rewriting historical unknown result`() =
         coordinatorTest {
             coordinator.initialize()
@@ -287,27 +414,30 @@ private fun toggle(
     source: OperationSource = OperationSource.Ui,
 ) = CanonicalMutation(listOf(CanonicalEdit.Toggle(field, enabled)), source = source, activation = CanonicalActivation(ports = ports))
 
-private fun coordinatorTest(block: suspend CoordinatorFixture.() -> Unit) =
-    runBlocking {
-        withTimeout(10_000) {
-            val fixture = CoordinatorFixture(this)
-            try {
-                fixture.block()
-            } finally {
-                fixture.close()
-            }
+private fun coordinatorTest(
+    manageLogging: Boolean = false,
+    block: suspend CoordinatorFixture.() -> Unit,
+) = runBlocking {
+    withTimeout(10_000) {
+        val fixture = CoordinatorFixture(this, manageLogging)
+        try {
+            fixture.block()
+        } finally {
+            fixture.close()
         }
     }
+}
 
 private class CoordinatorFixture(
     callerScope: CoroutineScope,
+    manageLogging: Boolean,
 ) : CoroutineScope by callerScope {
     private val owner = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val io = FakeConfigIo()
     val refreshStarted = Channel<Unit>(Channel.UNLIMITED)
     val refreshRelease = CompletableDeferred<Unit>()
     val coordinator =
-        ConfigCoordinator(io, owner, refresh = {
+        ConfigCoordinator(io, owner, manageLogging = manageLogging, refresh = {
             refreshStarted.send(Unit)
             refreshRelease.await()
         })

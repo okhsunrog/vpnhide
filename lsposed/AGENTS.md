@@ -67,11 +67,13 @@ directions, since `internal` is module-wide and the compiler will not.
   (`DashboardState`, `TargetsSnapshot`) derived in pure functions → Compose.
   Dashboard and Hiding derive from the *same* snapshot so their counts can't
   drift.
-- **Write path (Save):** typed entries → canonical JSON
-  (`/data/system/vpnhide_config.json`) → `ConfigChannels` / module activators
-  derive runtime state for the installed native and ports backends. LSPosed
-  reads the canonical JSON directly from `system_server`. See `docs/state.md`
-  for every path's owner/reader/lifetime.
+- **Write path:** field intents → process-owned `CanonicalConfigRepository` /
+  `ConfigCoordinator` → fresh canonical read → tracked root phases for JSON,
+  secret/cleanup and native/ports activation. Switches observe coordinator intent
+  and confirmed values; Activity `CanonicalEditorViewModel` instances retain
+  drafts and register conflicts. Observation refresh happens separately. LSPosed
+  reads canonical JSON directly from `system_server`. See
+  `docs/config-coordinator.md` for ownership, recovery and current migration limits.
 
 ## Load-bearing abstractions — reuse these
 
@@ -93,6 +95,11 @@ directions, since `internal` is module-wide and the compiler will not.
   is invoked alongside it. Save, the debug toggle, and startup reconcile go
   through it. **Don't** hand-build per-backend runtime config in Kotlin; the
   activators derive each backend's wire from the canonical JSON.
+- **`CanonicalConfigRepository`** — all app configuration writes, superkey and
+  cleanup actions, and activation go through its coordinator. Submit field intent
+  or a pure transform of the fresh config; never save a cached full snapshot or
+  call a config/activation shell through `suExec`. Root outcome can be unknown:
+  preserve phase evidence and let the coordinator reconcile it.
 - **`StorageConfig` / `ShellCommandBuilders`** — canonical JSON schema,
   migration helpers, and root-safe file writes (`buildCanonicalConfigWriteCommand`
   in `StorageConfig` wraps the generic `buildAtomicSystemDataRawWriteCommand` in

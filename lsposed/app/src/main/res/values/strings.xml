@@ -82,8 +82,6 @@
     <string name="save_success">Saved %d target(s)</string>
     <string name="native_target_capacity_reached">Native limit reached: at most %1$d app UIDs can be selected. Disable Native for another app first.</string>
     <string name="save_native_target_capacity">Saved, but the Native backend can protect only %1$d of %2$d resolved app UIDs. The %3$d highest UIDs were left without Native protection.</string>
-    <string name="save_failed_exit">Save failed (exit code %d)</string>
-    <string name="save_failed_error">Save failed: %s</string>
     <string name="save_failed_root">Save failed: root access denied</string>
 
     <!-- Diagnostics -->
@@ -610,4 +608,21 @@
     <string name="settings_superkey_stored">SuperKey stored.</string>
     <string name="settings_superkey_cleared">SuperKey cleared.</string>
     <string name="settings_superkey_failed">SuperKey update failed.</string>
+    <string name="config_initializing">Checking configuration and previous operations…</string>
+    <string name="config_reboot_required">Restart the device to finish adopting the new configuration manager. Reading and other app features remain available.</string>
+    <string name="config_paused">The outcome of a configuration operation is still unknown. New changes are paused. Check again to continue.</string>
+    <string name="config_unavailable">Configuration is unavailable. Check root access and try again.</string>
+    <string name="config_invalid">The saved configuration cannot be read. Configuration changes are paused.</string>
+    <string name="config_missing">No saved configuration is available. Startup preparation may still be needed.</string>
+    <string name="config_ui_conflict">This operation overlaps unsaved edits in an app editor. Your edits are retained. Save or discard them before retrying.</string>
+    <string name="config_secret_failed">The superkey operation failed. The configuration may already be saved. Repeat the key action in settings.</string>
+    <string name="config_apply_failed">Configuration saved, but applying it did not finish successfully. You can apply it again.</string>
+    <string name="config_write_failed">The requested configuration change failed. The last confirmed values are shown.</string>
+    <string name="config_recheck">Check again</string>
+    <string name="config_apply_again">Apply again</string>
+    <string name="config_discard_draft">Discard edits</string>
+    <string name="config_cleanup_failed">Cleanup did not finish successfully. Repeat the cleanup action after checking its prerequisites.</string>
+    <string name="config_applying">Saving and applying configuration…</string>
+    <string name="config_rechecking">Checking the outcome of the previous operation…</string>
+    <string name="config_capture_logging">Debug logging remains active while a capture is running.</string>
 </resources>

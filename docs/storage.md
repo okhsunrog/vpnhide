@@ -547,3 +547,15 @@ redefining the other contracts:
 LSPosed reads canonical JSON directly (§3), while the Rust activator serialises
 control v2 for the selected native backend (§4). The app persists desired state
 and invokes that activator; it does not hand-build per-channel wire payloads.
+
+
+## App-side operation ownership
+
+`CanonicalConfigRepository` owns one process-lived configuration coordinator.
+Every app write and native/ports activation uses its tracked root lane; screens
+submit field intent applied to a fresh canonical read. Persistence, secret or
+cleanup commands, and backend activation have independent outcomes. Confirmed
+config reaches controls before slower observation-cache refresh completes.
+See [config coordinator](config-coordinator.md) for conflicts, logging ownership,
+unknown-outcome recovery and first-adoption behavior. This does not change the
+canonical schema, backend protocol or LSPosed direct-read contract.

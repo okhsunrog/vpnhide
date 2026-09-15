@@ -34,14 +34,16 @@ The single managed desired-state file.
 - Permissions: `0640 root:system`, SELinux `system_data_file`.
 - Lifetime: persistent across reboot, module reinstall, and app reinstall.
 
-The app writes it atomically via temp-file + `mv`. If it is absent, native
+The process-owned `CanonicalConfigRepository` orders all app writes and activation
+through root receipts. It publishes confirmed JSON separately from observation
+caches. The app writes the file atomically via temp-file + `mv`. If it is absent, native
 activators treat it as an empty config and app startup creates a new config
 containing the mandatory VPN Hide self-target.
 
-### App mutation transport metadata (staged implementation)
+### App mutation transport metadata
 
-The new [root mutation transport](root-mutation-transport.md) is built but not yet
-connected to app writes. When its preparation API is invoked, it owns:
+The app uses the [root mutation transport](root-mutation-transport.md) for
+configuration writes and activation. Its preparation API owns:
 
 - `/data/adb/vpnhide/app-state/` and `lane/`: root-owned `0700` directories.
 - `lane/lock`: permanent `0600` lock inode; never replace/unlink while an
@@ -53,6 +55,10 @@ connected to app writes. When its preparation API is invoked, it owns:
 - `vhmutate-<sha256>`: versioned root executable, `0700`. The app stages it through
   `stage-<uuid>`, links it into place without replacing an existing executable,
   and verifies its digest. Interrupted staging can leave a temporary binary.
+
+Full reset preserves this entire directory: unlinking its lock while the reset
+operation holds it would allow a second independent lock inode. Config, superkey
+and backend service state outside this metadata directory are still removed.
 - App-private `files/vhmutate-<sha256>` and `files/vhmutate-<uuid>.tmp`: extracted
   APK assets, removed with app data. They contain binary code only.
 

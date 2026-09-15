@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -37,9 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.lifecycle.Lifecycle
@@ -47,6 +47,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.okhsunrog.vpnhide.AgentControlBridge
 import dev.okhsunrog.vpnhide.BackgroundUpdateChecks
+import dev.okhsunrog.vpnhide.CanonicalConfigRepository
+import dev.okhsunrog.vpnhide.ConfigOperationStatus
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DashboardLoadingState
 import dev.okhsunrog.vpnhide.DashboardScreen
@@ -64,6 +66,7 @@ import dev.okhsunrog.vpnhide.picker.TargetFilterChips
 import dev.okhsunrog.vpnhide.picker.TargetListSortMode
 import dev.okhsunrog.vpnhide.picker.TargetsCache
 import dev.okhsunrog.vpnhide.picker.isMainAppProfile
+import dev.okhsunrog.vpnhide.rememberCanonicalEditor
 import dev.okhsunrog.vpnhide.settings.AppSettings
 import dev.okhsunrog.vpnhide.settings.DiagnosticsSettingsScreen
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
@@ -79,8 +82,6 @@ import dev.okhsunrog.vpnhide.suExec
 import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
 import dev.okhsunrog.vpnhide.ui.components.BlockingErrorCard
 import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
-import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
-import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.components.pulse
 import dev.okhsunrog.vpnhide.ui.components.rememberHapticTick
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
@@ -99,7 +100,7 @@ class MainActivity : ComponentActivity() {
         if (mainProfile) {
             RootSnapshotCache.setRuntimeProbeSource(GroundTruthProbe.prepare(this)?.absolutePath)
             // Load canonical debug state before runtime work so first suExec and dashboard bootstrap agree.
-            VpnHideLog.init()
+            if (CanonicalConfigRepository.state.value.confirmed == null) VpnHideLog.init()
             // Process-scoped, registered once: auto-refreshes RoutingGateCache on VPN
             // up/down so Diagnostics/Dashboard/export/logcat react without a manual
             // re-check. Safe before RoutingGateCache has ever loaded — its trigger is
@@ -405,7 +406,7 @@ private fun MainScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val appContext = context.applicationContext
-    val startupCoordinator = remember(appContext) { StartupCoordinator(appContext) }
+    val startupCoordinator = remember(appContext) { StartupCoordinator.forProcess(appContext) }
     val settings = LocalSettingsState.current
     val settingsInteractor = LocalSettingsInteractor.current
     var currentTab by remember { mutableStateOf(Tab.Dashboard) }
@@ -500,6 +501,7 @@ private fun MainScreen() {
     var helpInitialArticle by remember { mutableStateOf<String?>(null) }
     var settingsRequestedSub by remember { mutableStateOf<SettingsSubScreen?>(null) }
     var protectionDirty by remember { mutableStateOf(false) }
+    val protectionEditor = rememberCanonicalEditor("apps_unified")
     var pendingHelpNav by remember { mutableStateOf<String?>(null) }
     if (showSettings) {
         BackHandler { showSettings = false }
@@ -740,70 +742,73 @@ private fun MainScreen() {
                 }
             },
         ) { innerPadding ->
-            val restart = selfNeedsRestart
-            val preparationFailure = selfTargetFailure
-            if (preparationFailure != null) {
-                RootPreparationErrorScreen(
-                    kind = preparationFailure.kind,
-                    detail = preparationFailure.detail,
-                    modifier = Modifier.padding(innerPadding),
-                    onRetry = { startupCoordinator.retrySelfTargets(scope) },
-                )
-            } else if (restart == null) {
-                DashboardLoadingState(modifier = Modifier.padding(innerPadding))
-            } else {
-                AnimatedContent(
-                    targetState = currentTab,
-                    transitionSpec = {
-                        if (settings.animationsEnabled) {
-                            // ImageToolbox's pervasive AnimatedContent transition: a
-                            // fade-through with a slight scale, in place (no slide).
-                            // The old tab's rows dissolve and shrink while the new
-                            // tab's rows fade and grow into the same positions, so
-                            // one set of rows reads as morphing into the other.
-                            (
-                                fadeIn(tween(300, easing = AppEasing.Alpha)) +
-                                    scaleIn(tween(400, easing = AppEasing.Scale), initialScale = 0.92f)
-                            ) togetherWith (
-                                fadeOut(tween(300, easing = AppEasing.Alpha)) +
-                                    scaleOut(tween(400, easing = AppEasing.Scale), targetScale = 0.92f)
-                            )
-                        } else {
-                            EnterTransition.None togetherWith ExitTransition.None
-                        }
-                    },
-                    label = "tabContent",
-                ) { tab ->
-                    when (tab) {
-                        Tab.Dashboard -> {
-                            DashboardScreen(
-                                selfNeedsRestart = restart,
-                                onOpenDiagnostics = { showDiagnostics = true },
-                                onOpenAccelerators = { openHelp("game-accelerators") },
-                                onOpenHelp = openHelp,
-                                modifier = Modifier.padding(innerPadding),
-                            )
-                        }
+            Column(Modifier.padding(innerPadding)) {
+                ConfigOperationStatus()
+                val restart = selfNeedsRestart
+                val preparationFailure = selfTargetFailure
+                if (preparationFailure != null) {
+                    RootPreparationErrorScreen(
+                        kind = preparationFailure.kind,
+                        detail = preparationFailure.detail,
+                        modifier = Modifier,
+                        onRetry = { startupCoordinator.retrySelfTargets(scope) },
+                    )
+                } else if (restart == null) {
+                    DashboardLoadingState(modifier = Modifier)
+                } else {
+                    AnimatedContent(
+                        targetState = currentTab,
+                        transitionSpec = {
+                            if (settings.animationsEnabled) {
+                                // ImageToolbox's pervasive AnimatedContent transition: a
+                                // fade-through with a slight scale, in place (no slide).
+                                // The old tab's rows dissolve and shrink while the new
+                                // tab's rows fade and grow into the same positions, so
+                                // one set of rows reads as morphing into the other.
+                                (
+                                    fadeIn(tween(300, easing = AppEasing.Alpha)) +
+                                        scaleIn(tween(400, easing = AppEasing.Scale), initialScale = 0.92f)
+                                ) togetherWith (
+                                    fadeOut(tween(300, easing = AppEasing.Alpha)) +
+                                        scaleOut(tween(400, easing = AppEasing.Scale), targetScale = 0.92f)
+                                )
+                            } else {
+                                EnterTransition.None togetherWith ExitTransition.None
+                            }
+                        },
+                        label = "tabContent",
+                    ) { tab ->
+                        when (tab) {
+                            Tab.Dashboard -> {
+                                DashboardScreen(
+                                    selfNeedsRestart = restart,
+                                    onOpenDiagnostics = { showDiagnostics = true },
+                                    onOpenAccelerators = { openHelp("game-accelerators") },
+                                    onOpenHelp = openHelp,
+                                    modifier = Modifier,
+                                )
+                            }
 
-                        Tab.Statistics -> {
-                            StatisticsScreen(
-                                modifier = Modifier.padding(innerPadding),
-                            )
-                        }
+                            Tab.Statistics -> {
+                                StatisticsScreen(
+                                    modifier = Modifier,
+                                )
+                            }
 
-                        Tab.Protection -> {
-                            ProtectionScreen(
-                                searchQuery = searchQuery,
-                                showSystem = showSystem,
-                                showRussianOnly = showRussianOnly,
-                                sortMode = targetSortMode,
-                                onToggleSystem = { showSystem = !showSystem },
-                                onToggleRussianOnly = { showRussianOnly = !showRussianOnly },
-                                onSortModeChange = { targetSortMode = it },
-                                onOpenHelp = openHelp,
-                                onDirtyChange = { protectionDirty = it },
-                                modifier = Modifier.padding(innerPadding),
-                            )
+                            Tab.Protection -> {
+                                ProtectionScreen(
+                                    searchQuery = searchQuery,
+                                    showSystem = showSystem,
+                                    showRussianOnly = showRussianOnly,
+                                    sortMode = targetSortMode,
+                                    onToggleSystem = { showSystem = !showSystem },
+                                    onToggleRussianOnly = { showRussianOnly = !showRussianOnly },
+                                    onSortModeChange = { targetSortMode = it },
+                                    onOpenHelp = openHelp,
+                                    onDirtyChange = { protectionDirty = it },
+                                    modifier = Modifier,
+                                )
+                            }
                         }
                     }
                 }
@@ -824,6 +829,7 @@ private fun MainScreen() {
                 confirmButton = {
                     TextButton(onClick = {
                         pendingHelpNav = null
+                        protectionEditor.discard()
                         handleHelpNav(href)
                     }) {
                         Text(stringResource(R.string.help_leave_confirm))

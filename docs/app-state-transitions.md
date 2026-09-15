@@ -700,3 +700,14 @@ checks, support no-op plans and keep persistence separate from activation failur
 The engine and adapter are exercised by coroutine/adapter tests; existing app
 writers and UI are not connected yet. The exact implementation, validation and
 all-writer migration boundary are in [config coordinator](config-coordinator.md).
+
+
+## 16. Configuration runtime connection
+
+All app configuration producers now use the coordinator and root transport.
+Settings switches render optimistic intent with progress; Activity ViewModels
+retain editor drafts and acknowledge only saved revisions. Capture logging tokens,
+bridge conflicts, cleanup/reset and startup share this ownership. Implementation,
+validation boundaries and remaining observation/diagnostic work are tracked in
+[config coordinator](config-coordinator.md). Earlier implementation sections above
+record the intermediate stages; their disconnected-runtime statements are historical.

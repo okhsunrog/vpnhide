@@ -75,8 +75,6 @@
     <string name="save_success">已保存 %d 个目标应用</string>
     <string name="native_target_capacity_reached">已达原生上限：最多可选 %1$d 个应用 UID。请先给其他应用关闭原生。</string>
     <string name="save_native_target_capacity">已保存，但原生后端最多只能保护 %2$d 个已解析应用 UID 中的 %1$d 个，UID 最大的 %3$d 个应用没有获得原生保护。</string>
-    <string name="save_failed_exit">保存失败（退出码 %d）</string>
-    <string name="save_failed_error">保存失败：%s</string>
     <string name="save_failed_root">保存失败：Root 权限被拒绝</string>
 
     <!-- Diagnostics -->
@@ -568,4 +566,21 @@
     <string name="settings_superkey_stored">SuperKey 已保存。</string>
     <string name="settings_superkey_cleared">SuperKey 已清除。</string>
     <string name="settings_superkey_failed">SuperKey 更新失败。</string>
+    <string name="config_initializing">正在检查配置和之前的操作…</string>
+    <string name="config_reboot_required">请重启设备以完成切换到新的配置管理器。仍可读取数据和使用应用的其他功能。</string>
+    <string name="config_paused">配置操作的结果仍不确定，已暂停新的更改。请重新检查以继续。</string>
+    <string name="config_unavailable">配置不可用。请检查 root 权限后重试。</string>
+    <string name="config_invalid">无法读取已保存的配置。配置更改已暂停。</string>
+    <string name="config_missing">没有可用的已保存配置。可能仍需完成启动准备。</string>
+    <string name="config_ui_conflict">此操作与应用编辑器中未保存的更改冲突。更改已保留，请保存或放弃后重试。</string>
+    <string name="config_secret_failed">Superkey 操作失败。配置可能已保存，请在设置中重试密钥操作。</string>
+    <string name="config_apply_failed">配置已保存，但未能完成应用。您可以重新应用。</string>
+    <string name="config_write_failed">配置更改失败。当前显示最后确认的值。</string>
+    <string name="config_recheck">重新检查</string>
+    <string name="config_apply_again">重新应用</string>
+    <string name="config_discard_draft">放弃更改</string>
+    <string name="config_cleanup_failed">清理未成功完成。请检查前置条件后重试清理操作。</string>
+    <string name="config_applying">正在保存并应用配置…</string>
+    <string name="config_rechecking">正在检查之前操作的结果…</string>
+    <string name="config_capture_logging">采集进行期间，调试日志保持开启。</string>
 </resources>

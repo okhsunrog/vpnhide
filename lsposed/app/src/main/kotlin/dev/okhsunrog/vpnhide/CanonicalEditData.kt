@@ -3,6 +3,7 @@ package dev.okhsunrog.vpnhide
 internal enum class CanonicalToggle(
     val path: List<String>,
 ) {
+    Filesystem(listOf("settings", "optionalFeatures")),
     Debug(listOf("debug")),
     DebugSwitch(listOf("debugSwitch")),
     RememberSuperkey(listOf("settings", "rememberSuperkey")),
@@ -45,6 +46,7 @@ internal fun canonicalToggle(
     field: CanonicalToggle,
 ): Boolean =
     when (field) {
+        CanonicalToggle.Filesystem -> OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS in config.settings.optionalFeatures
         CanonicalToggle.Debug -> config.debug
         CanonicalToggle.DebugSwitch -> config.debugSwitch
         CanonicalToggle.RememberSuperkey -> config.settings.rememberSuperkey
@@ -69,7 +71,7 @@ internal fun canonicalEdits(
 ): List<CanonicalEdit> =
     buildList {
         val next = canonicalConfigSnapshot(desired)
-        CanonicalToggle.entries.forEach {
+        CanonicalToggle.entries.filter { it != CanonicalToggle.Filesystem }.forEach {
             if (canonicalToggle(base, it) !=
                 canonicalToggle(next, it)
             ) {
@@ -108,11 +110,40 @@ internal fun applyCanonicalEdit(
     when (edit) {
         is CanonicalEdit.Toggle -> {
             when (edit.field) {
-                CanonicalToggle.Debug -> config.copy(debug = edit.enabled)
-                CanonicalToggle.DebugSwitch -> config.copy(debugSwitch = edit.enabled)
-                CanonicalToggle.RememberSuperkey -> config.copy(settings = config.settings.copy(rememberSuperkey = edit.enabled))
-                CanonicalToggle.AutoHideServices -> config.copy(settings = config.settings.copy(autoHideVpnServices = edit.enabled))
-                CanonicalToggle.AutoHideName -> config.copy(settings = config.settings.copy(autoHideVpnName = edit.enabled))
+                CanonicalToggle.Filesystem -> {
+                    config.copy(
+                        settings =
+                            config.settings.copy(
+                                optionalFeatures =
+                                    if (edit.enabled) {
+                                        config.settings.optionalFeatures +
+                                            OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS
+                                    } else {
+                                        config.settings.optionalFeatures - OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS
+                                    },
+                            ),
+                    )
+                }
+
+                CanonicalToggle.Debug -> {
+                    config.copy(debug = edit.enabled)
+                }
+
+                CanonicalToggle.DebugSwitch -> {
+                    config.copy(debugSwitch = edit.enabled)
+                }
+
+                CanonicalToggle.RememberSuperkey -> {
+                    config.copy(settings = config.settings.copy(rememberSuperkey = edit.enabled))
+                }
+
+                CanonicalToggle.AutoHideServices -> {
+                    config.copy(settings = config.settings.copy(autoHideVpnServices = edit.enabled))
+                }
+
+                CanonicalToggle.AutoHideName -> {
+                    config.copy(settings = config.settings.copy(autoHideVpnName = edit.enabled))
+                }
             }
         }
 
@@ -161,13 +192,20 @@ internal class CanonicalMutation(
     val activation: CanonicalActivation = CanonicalActivation(),
     coupledCommands: List<String> = emptyList(),
     val bootstrap: Boolean = false,
+    val declaredWrites: Set<ConfigField> = emptySet(),
+    val removesCanonical: Boolean = false,
+    val cleanup: Boolean = false,
+    val captureEvent: CaptureLoggingEvent? = null,
+    val protectAllDrafts: Boolean = false,
     val forceActivation: Boolean = false,
     val transform: (CanonicalConfig) -> CanonicalConfig = { it },
 ) {
     val edits: List<CanonicalEdit> = edits.map(::canonicalEditSnapshot)
     val coupledCommands: List<String> = coupledCommands.toList()
-    val writes: Set<ConfigField> = this.edits.flatMapTo(linkedSetOf(), ::canonicalEditFields)
-    val protectsDrafts: Boolean = source == OperationSource.System || this.edits.any { it is CanonicalEdit.Replace }
+    val writes: Set<ConfigField> =
+        this.edits.flatMapTo(linkedSetOf(), ::canonicalEditFields) + configFieldSnapshot(declaredWrites) +
+            if (protectAllDrafts) setOf("apps", "settings", "debug", "debugSwitch").map { ConfigField(listOf(it)) } else emptySet()
+    val protectsDrafts: Boolean = protectAllDrafts || source == OperationSource.System || this.edits.any { it is CanonicalEdit.Replace }
 }
 
 internal fun applyCanonicalMutation(

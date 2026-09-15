@@ -75,8 +75,6 @@
     <string name="save_success">Сохранено целей: %d</string>
     <string name="native_target_capacity_reached">Достигнут лимит Native: можно выбрать не более %1$d UID приложений. Сначала отключите Native у другого приложения.</string>
     <string name="save_native_target_capacity">Настройки сохранены, но Native-бэкенд может защитить только %1$d из %2$d найденных UID приложений. %3$d UID с наибольшими номерами остались без Native-защиты.</string>
-    <string name="save_failed_exit">Ошибка сохранения (код выхода %d)</string>
-    <string name="save_failed_error">Ошибка сохранения: %s</string>
     <string name="save_failed_root">Ошибка сохранения: root-доступ запрещён</string>
 
     <!-- Dashboard -->
@@ -580,4 +578,21 @@
     <string name="settings_superkey_stored">SuperKey сохранён.</string>
     <string name="settings_superkey_cleared">SuperKey удалён.</string>
     <string name="settings_superkey_failed">Не удалось обновить SuperKey.</string>
+    <string name="config_initializing">Проверяем конфигурацию и предыдущие операции…</string>
+    <string name="config_reboot_required">Перезагрузите устройство для завершения перехода на новую схему сохранения. Чтение данных и остальные функции доступны.</string>
+    <string name="config_paused">Результат изменения конфигурации пока неизвестен. Новые записи приостановлены. Повторите проверку, чтобы продолжить.</string>
+    <string name="config_unavailable">Конфигурация недоступна. Проверьте root-доступ и повторите проверку.</string>
+    <string name="config_invalid">Сохранённая конфигурация повреждена или имеет неподдерживаемый формат. Изменения приостановлены.</string>
+    <string name="config_missing">Сохранённая конфигурация отсутствует. Может потребоваться повторная начальная подготовка.</string>
+    <string name="config_ui_conflict">Операция пересекается с несохранёнными правками в редакторе приложений. Правки сохранены в черновике. Сохраните или отмените их перед повтором.</string>
+    <string name="config_secret_failed">Операция с ключом завершилась ошибкой. Конфигурация могла уже сохраниться. Повторите действие с ключом в настройках.</string>
+    <string name="config_apply_failed">Конфигурация сохранена, но применить её полностью не удалось. Можно повторить применение.</string>
+    <string name="config_write_failed">Не удалось выполнить изменение конфигурации. Показаны последние подтверждённые значения.</string>
+    <string name="config_recheck">Проверить снова</string>
+    <string name="config_apply_again">Применить снова</string>
+    <string name="config_discard_draft">Отменить правки</string>
+    <string name="config_cleanup_failed">Очистка не завершилась успешно. Проверьте её условия и повторите действие очистки.</string>
+    <string name="config_applying">Сохранение и применение конфигурации…</string>
+    <string name="config_rechecking">Проверка результата предыдущей операции…</string>
+    <string name="config_capture_logging">Отладочные логи остаются включены, пока идёт сбор данных.</string>
 </resources>

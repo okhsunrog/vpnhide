@@ -10,13 +10,48 @@ class FullResetTest {
     private val activeLsposed = LsposedState.Active(version = "1.0", targetCount = 0)
 
     @Test
+    fun `reset preserves mutation lock inode and removes ordinary and hidden state`() {
+        val root =
+            kotlin.io.path
+                .createTempDirectory("reset-state")
+                .toFile()
+        try {
+            val state = root.resolve("data/adb/vpnhide/app-state").apply { mkdirs() }
+            val lock = state.resolve("lock").apply { writeText("held") }
+            val inode =
+                java.nio.file.Files
+                    .getAttribute(lock.toPath(), "unix:ino")
+            root.resolve("data/adb/vpnhide/superkey").writeText("private")
+            root.resolve("data/adb/vpnhide/.old").writeText("stale")
+            root.resolve("data/adb/vpnhide/..old").writeText("stale")
+            root.resolve("data/system").mkdirs()
+            root.resolve("data/system/vpnhide_config.json").writeText("{}")
+            val command = buildFullResetCommand().replace("/data/", "${root.absolutePath}/data/")
+            repeat(2) {
+                val process = ProcessBuilder("sh", "-c", command).redirectErrorStream(true).start()
+                val output = process.inputStream.bufferedReader().readText()
+                assertEquals(output, 0, process.waitFor())
+            }
+            assertEquals(
+                inode,
+                java.nio.file.Files
+                    .getAttribute(lock.toPath(), "unix:ino"),
+            )
+            assertEquals(listOf("app-state"), requireNotNull(state.parentFile).list()?.toList())
+            assertFalse(root.resolve("data/system/vpnhide_config.json").exists())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `reset command removes every leftover service path`() {
         val cmd = buildFullResetCommand()
         // Canonical config, current status files, and backend-owned state dirs.
         assertTrue(cmd.contains(CANONICAL_CONFIG_FILE))
         assertTrue(cmd.contains(LSPOSED_STATE_FILE))
         assertTrue(cmd.contains(LEGACY_HOOK_STATUS_FILE))
-        assertTrue(cmd.contains("rm -rf /data/adb/vpnhide "))
+        assertTrue(cmd.contains("/data/adb/vpnhide/app-state) ;;"))
         listOf("kmod", "kpm", "ports").forEach {
             assertTrue("missing /data/adb/vpnhide_$it", cmd.contains("rm -rf /data/adb/vpnhide_$it"))
         }

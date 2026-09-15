@@ -2,13 +2,13 @@ package dev.okhsunrog.vpnhide.debug
 
 import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
-import dev.okhsunrog.vpnhide.LogTags
+import dev.okhsunrog.vpnhide.CanonicalEdit
+import dev.okhsunrog.vpnhide.CanonicalMutation
+import dev.okhsunrog.vpnhide.CanonicalToggle
+import dev.okhsunrog.vpnhide.CanonicalWriteResult
+import dev.okhsunrog.vpnhide.OperationSource
 import dev.okhsunrog.vpnhide.RootSnapshot
-import dev.okhsunrog.vpnhide.RootSnapshotCache
-import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
-
-private const val TAG = LogTags.DEBUG_CONFIG
 
 private fun canonicalFromSnapshot(snapshot: RootSnapshot?): CanonicalConfig? =
     snapshot
@@ -29,29 +29,8 @@ internal fun debugFromCanonicalSnapshot(rootSnapshot: RootSnapshot?): Boolean =
  * SU commands may fail on unusual root states, so callers should run this from
  * an IO dispatcher and still tolerate a temporary mismatch if needed.
  */
-internal suspend fun setDebugLoggingEnabled(enabled: Boolean) {
-    // Re-read canonical from disk rather than the cached StateFlow: a prior
-    // toggle in the same Settings visit invalidates RootSnapshotCache, and
-    // nothing on the Settings screen repopulates it, so `.snapshot.value` would
-    // be null and this write would silently no-op.
-    val snapshot =
-        runCatching { RootSnapshotCache.getOrLoad() }.getOrNull()
-            ?: RootSnapshotCache.snapshot.value
-    val canonical =
-        canonicalFromSnapshot(snapshot)
-            ?.copy(
-                debug = enabled,
-                debugSwitch = enabled,
-            )
-            ?: return
-
-    val result = CanonicalConfigRepository.commit(canonical)
-    if (!result.succeeded) {
-        VpnHideLog.e(
-            TAG,
-            "write canonical debug command failed: exit=${result.exitCode}: ${result.output.trim()}",
-        )
-    }
-
-    VpnHideLog.enabled = enabled
-}
+internal suspend fun setDebugLoggingEnabled(
+    enabled: Boolean,
+    source: OperationSource = OperationSource.Ui,
+): CanonicalWriteResult =
+    CanonicalConfigRepository.commit(CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, enabled)), source = source))

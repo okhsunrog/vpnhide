@@ -267,8 +267,10 @@ internal suspend fun ensureSelfInTargets(
         return selfTargetPreparationFailure(failure.kind, failure.detail)
     }
     val update = buildCanonicalSelfUpdate(sections, selfPkg)
-    if (update.writeRequired) {
-        writeStartupCanonical(update.canonical, update.legacyImported, timeoutSec)?.let {
+    if (update.writeRequired &&
+        CanonicalConfigRepository.state.value.mode in setOf(ConfigCoordinatorMode.Open, ConfigCoordinatorMode.Missing)
+    ) {
+        writeStartupCanonical(selfPkg, update.legacyImported)?.let {
             return selfTargetPreparationFailure(SelfTargetFailureKind.ConfigWriteFailed, it)
         }
         RootSnapshotCache.invalidate()
@@ -359,18 +361,33 @@ private fun buildCanonicalSelfUpdate(
 }
 
 private suspend fun writeStartupCanonical(
-    canonical: CanonicalConfig,
+    selfPkg: String,
     legacyImported: LegacyConfigCandidate?,
-    timeoutSec: Long,
 ): String? {
     val result =
         CanonicalConfigRepository.commit(
-            canonical,
-            // Same transaction as the config write: the legacy files are only
-            // retired once their contents are safely in the canonical JSON.
-            coupledCommands = if (legacyImported != null) listOf(buildLegacyConfigDeleteCommand()) else emptyList(),
-            activation = CanonicalActivation(native = true, ports = true),
-            timeoutSec = timeoutSec,
+            CanonicalMutation(
+                emptyList(),
+                bootstrap = true,
+                source = OperationSource.System,
+                transform = { fresh ->
+                    require(legacyImported == null || !hasUserConfiguredApps(fresh, selfPkg))
+                    val imported =
+                        if (legacyImported !=
+                            null
+                        ) {
+                            applyLegacyImport(fresh, legacyImported, LegacyImportMode.Merge, selfPkg)
+                        } else {
+                            fresh
+                        }
+                    canonicalConfigWithSelfTarget(imported, selfPkg)
+                },
+                // Same transaction as the config write: the legacy files are only
+                // retired once their contents are safely in the canonical JSON.
+                cleanup = true,
+                coupledCommands = if (legacyImported != null) listOf(buildLegacyConfigDeleteCommand()) else emptyList(),
+                activation = CanonicalActivation(native = true, ports = true),
+            ),
         )
     if (result.succeeded) return null
     VpnHideLog.w(

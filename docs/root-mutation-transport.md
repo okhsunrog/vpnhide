@@ -1,9 +1,10 @@
 # App mutation transport
 
-Status: implemented transport, packaged with the APK. The [coordinator engine and
-root adapter](config-coordinator.md) are implemented; existing app writes still
-use the old `CanonicalConfigRepository` mutex and `suExec` path. This follows the
-[pure transition cores](app-state-transitions.md#13-first-implementation-pure-transition-cores).
+Status: implemented, packaged and connected through the process-owned
+[config coordinator](config-coordinator.md). All app config writes, coupled
+secret/cleanup commands and native/ports activation use this transport.
+The native supervisor implementation and its wire protocol are unchanged by
+the runtime connection stage.
 
 ## Why a separate executable
 
@@ -151,25 +152,22 @@ Other root managers and app-originated `su` permission domains are not validated
 by this test. A previous-boot receipt is simulated on the host; no device reboot
 was performed.
 
-Before runtime adoption:
+## Runtime adoption
 
-1. Establish a boundary for commands launched by the **old** untracked transport.
-   A newly created lane does not prove legacy `su` descendants or delayed root
-   prompts are absent; first adoption needs a verified boot boundary or equivalent
-   evidence. Likewise, external boot services/manual root writers are not covered
-   by this app-only lock.
-2. Connect typed config intents and process-owned initialization/dispatch to the
-   existing repository; retain per-phase receipts until their operation settles.
-   A fresh session may not turn unknown old outcomes into successful operations.
-3. Move every app writer, including startup/capture/bridge paths, through that
-   coordinator before enabling the new lane. Add UI progress, recovery/repair
-   actions, draft ownership and structured bridge results there.
-   The existing `native_target_cap` warning is now preserved through typed
-   activation evidence; the adapter can reconstruct its safe marker for the picker.
-4. Validate real canonical writes, activation/secret failures, Activity/process
-   recreation and app-originated root execution on supported devices/managers.
+The coordinator now connects every app writer and activation path. First adoption
+uses a verified boot boundary: a newly created same-boot lane cannot establish
+that old untracked descendants or delayed root prompts have stopped. An unresolved
+predecessor remains paused. External boot services and manual root writers are
+outside this app-only lock.
 
-The running app's toggle behavior is unchanged at this transport-only stage.
+Typed field intents, retained drafts, optimistic switches, recovery actions and
+structured bridge outcomes are connected in the app. A fresh session does not
+turn an unknown predecessor into a successful operation. Full reset preserves the
+transport directory and its permanent lock inode.
+
+Real canonical writes, activation/secret failures, Activity/process recreation and
+app-originated root execution still need device acceptance. See
+[config coordinator](config-coordinator.md) for the current boundary.
 
 The coordinator-stage validation also exercised the updated helper on Pixel 8 Pro:
 1 MiB of discarded output, numeric warning recovery and redaction passed alongside
