@@ -21,6 +21,15 @@ internal class RootProcessRunner {
     // One timed-out invocation must leave room for its two recovery attempts. Hung drains retain a slot.
     private val slots = Semaphore(3)
 
+    /** For an observation worker with its own deadline: return only after the process and pipes drain. */
+    fun runAndDrain(
+        arguments: List<String>,
+        timeoutMillis: Long = 10_000,
+    ): RootProcessResult {
+        require(timeoutMillis in 1..120_000)
+        return execute(arguments, byteArrayOf(), System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis), 16 * 1024 * 1024)
+    }
+
     fun run(
         arguments: List<String>,
         input: ByteArray = byteArrayOf(),
@@ -81,6 +90,7 @@ internal class RootProcessRunner {
             RootProcessResult.Uncertain
         } finally {
             process.destroyForcibly()
+            process.waitFor()
             // Caller has its own deadline. Retain the slot until inherited pipes actually close.
             pipes.await()
         }

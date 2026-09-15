@@ -65,8 +65,9 @@ directions, since `internal` is module-wide and the compiler will not.
 
 - **Read path:** one batched root shell → `RootSnapshotCache` → typed snapshots
   (`DashboardState`, `TargetsSnapshot`) derived in pure functions → Compose.
-  Dashboard and Hiding derive from the *same* snapshot so their counts can't
-  drift.
+  Root-derived projections carry the source observation ID. Dependent invalidation
+  rejects obsolete loads; retained last-good screen values can temporarily belong
+  to different observations while refreshes finish.
 - **Write path:** field intents → process-owned `CanonicalConfigRepository` /
   `ConfigCoordinator` → fresh canonical read → tracked root phases for JSON,
   secret/cleanup and native/ports activation. Switches observe coordinator intent
@@ -77,12 +78,15 @@ directions, since `internal` is module-wide and the compiler will not.
 
 ## Load-bearing abstractions — reuse these
 
-- **`StateCache<T>`** — base for every app-scoped, lazily-loaded cache
-  (loading/error/value flows + single-flight job). A new cache **extends this**;
-  never hand-roll `inflight`/`loading` again. If its value is derived from the
-  canonical config, also add it to `CanonicalConfigRepository.derivedCaches` —
-  that list, and only that list, is what a config write refreshes. Membership
-  rule and the deliberate non-members are documented on it.
+- **`StateCache<T>`** — base for app-scoped observation caches. It delegates to
+  process-owned `ObservationCoordinator`; loading/error/value flows project one
+  immutable observation. A new observation cache **extends this**; never hand-roll
+  jobs or publish side metadata inside `load`. Root-derived caches declare
+  `source = RootSnapshotCache.dependency`; app inventory uses `inventoryDependency`
+  to avoid scanning icons after config-only changes. Use `ContextStateCache` when
+  loading needs application context plus restart state. Readiness must use `current`,
+  not retained `value`. See `docs/observation-coordinator.md` for lifecycle and
+  publication rules. Diagnostic runs are a separate domain, not an observation cache.
 - **`RootSnapshotCache`** — the single batched root read. Need new system state
   on the Dashboard/Hiding path? Add a section to its shell snapshot; don't
   add an ad-hoc `suExec` that races the snapshot.

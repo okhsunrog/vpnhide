@@ -6,9 +6,9 @@ legacy cleanup, import/reset, capture logging and bridge mutations use this lane
 The previous mutex/full-snapshot write API and direct activation bypasses are gone.
 
 This implements the configuration portion of the [transition contract](app-state-transitions.md)
-through the [root transport](root-mutation-transport.md). Observation generations,
-diagnostic runs and capture reservation/packaging retain their existing execution
-model; they are separate remaining parts of the larger design.
+through the [root transport](root-mutation-transport.md). Observation generations
+are now connected through the [observation coordinator](observation-coordinator.md).
+Diagnostic runs and capture reservation/packaging remain separate migration work.
 
 ## Ownership and effects
 
@@ -32,10 +32,11 @@ even when a later operation has already replaced the latest result.
 - Confirmed persistence publishes the candidate immediately. Activation failure
   keeps that value and reports the failing phase; unattempted phases remain
   explicit. Observation refresh cannot delay the result or the next operation.
-- Refresh uses one conflated worker: overlapping refresh requests request at most
-  one subsequent refresh. Its failures cannot kill the mutation actor. This does
-  not yet migrate `StateCache` generation handling or establish a common revision
-  across all existing screen caches.
+- Each matching phase completion/recovery synchronously invalidates the root
+  observation before publishing phase evidence or resolving callers. Registered
+  dependents advance their own generations immediately. A conflated worker awaits
+  the shared root reload independently of mutations; it no longer loops through
+  and refreshes each derived cache. Its failures cannot kill the mutation actor.
 - Unknown effects trigger the existing initial readback and one repeat. Continued
   uncertainty delivers an immutable unknown result, rejects queued handles, and
   holds mutation admission. Manual readback can release the hold without changing
@@ -199,7 +200,7 @@ adoption and its boot boundary, root authorization delay, activity recreation,
 bridge/UI conflicts, and capture cleanup. Host tests and APK compilation do not
 establish app-originated root permissions or visible behavior on a physical device.
 
-After this configuration integration, the next architectural stage is observation
-generations and coherent screen projections. Diagnostic invalidation, eligibility,
-execution and capture reservation must then follow the separately reviewed
+Observation generations have since been connected; see the
+[observation coordinator](observation-coordinator.md) for their publication boundary.
+Diagnostic invalidation, eligibility, execution and capture reservation must follow the separately reviewed
 [diagnostic semantics](diagnostics-state-analysis.md) and transition contract.

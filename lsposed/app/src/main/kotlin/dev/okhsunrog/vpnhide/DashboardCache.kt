@@ -1,7 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import android.content.Context
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -18,43 +16,22 @@ import kotlinx.coroutines.withContext
  * while a refresh is in flight so tab switches feel instant even when
  * data changes underneath.
  */
-internal object DashboardCache : StateCache<DashboardState>(
+internal object DashboardCache : ContextStateCache<RootProjection<DashboardState>>(
     traceName = "dashboard_state",
     logTag = LogTags.DASHBOARD,
+    source = RootSnapshotCache.dependency,
+    timeoutMillis = 120_000,
 ) {
-    val state: StateFlow<DashboardState?> get() = value
+    val state: StateFlow<DashboardState?> = ProjectedStateFlow(value) { it?.value }
 
-    @Volatile private var appContext: Context? = null
-
-    @Volatile private var selfNeedsRestart: Boolean = false
-
-    fun ensureLoaded(
-        scope: CoroutineScope,
-        context: Context,
-        selfNeedsRestart: Boolean,
-    ) {
-        this.appContext = context.applicationContext
-        this.selfNeedsRestart = selfNeedsRestart
-        ensure(scope)
-    }
-
-    fun refresh(
-        scope: CoroutineScope,
-        context: Context,
-        selfNeedsRestart: Boolean,
-    ) {
-        this.appContext = context.applicationContext
-        this.selfNeedsRestart = selfNeedsRestart
-        RootSnapshotCache.invalidate()
-        forceRefresh(scope)
-    }
-
-    override suspend fun load(force: Boolean): DashboardState {
-        val context = requireNotNull(appContext) { "DashboardCache.load before ensureLoaded/refresh" }
+    override suspend fun load(
+        @Suppress("UNUSED_PARAMETER") request: ObservationRequest,
+    ): RootProjection<DashboardState> {
+        val (context, selfNeedsRestart) = requireNotNull(inputs)
         val rootSnapshot =
-            if (force) RootSnapshotCache.refresh() else RootSnapshotCache.getOrLoad()
+            RootSnapshotCache.getOrLoad()
         return withContext(Dispatchers.IO) {
-            loadDashboardState(context, selfNeedsRestart, rootSnapshot)
+            RootProjection(rootSnapshot.observationId, rootSnapshot.generation, loadDashboardState(context, selfNeedsRestart, rootSnapshot))
         }
     }
 }

@@ -15,8 +15,23 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 class ConfigCoordinatorTest {
+    @Test
+    fun `phase completion invalidates observations before the next phase and caller completion`() =
+        coordinatorTest {
+            coordinator.initialize()
+            val caller = async { coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true)) }
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            val activation = io.executions.receive()
+            assertEquals(1, invalidations.get())
+            activation.finish(PhaseOutcome.Confirmed)
+            assertTrue(caller.await().succeeded)
+            assertEquals(2, invalidations.get())
+            assertFalse(refreshRelease.isCompleted)
+        }
+
     @Test
     fun `healing interrupted capture propagates debug even during a settings only write`() =
         coordinatorTest(manageLogging = true) {
@@ -434,10 +449,13 @@ private class CoordinatorFixture(
 ) : CoroutineScope by callerScope {
     private val owner = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val io = FakeConfigIo()
+    val invalidations = AtomicInteger()
     val refreshStarted = Channel<Unit>(Channel.UNLIMITED)
     val refreshRelease = CompletableDeferred<Unit>()
     val coordinator =
-        ConfigCoordinator(io, owner, manageLogging = manageLogging, refresh = {
+        ConfigCoordinator(io, owner, manageLogging = manageLogging, invalidateObservations = {
+            invalidations.incrementAndGet()
+        }, refresh = {
             refreshStarted.send(Unit)
             refreshRelease.await()
         })

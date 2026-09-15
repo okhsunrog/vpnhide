@@ -1,7 +1,8 @@
 # App state: transition contract
 
-Status: implementation design; the pure reducer core is implemented, but the
-runtime still uses its existing paths. See section 13 for the exact boundary.
+Status: configuration and observation coordinators are connected to the app.
+Diagnostic execution and capture orchestration still use their existing paths.
+Sections 13–17 record the implementation stages and their exact boundaries.
 This formalizes the direction
 agreed on 2026-09-15. It extends [app state design](app-state-design.md) and follows
 the [diagnostics investigation](diagnostics-state-analysis.md). Existing runtime
@@ -711,3 +712,18 @@ bridge conflicts, cleanup/reset and startup share this ownership. Implementation
 validation boundaries and remaining observation/diagnostic work are tracked in
 [config coordinator](config-coordinator.md). Earlier implementation sections above
 record the intermediate stages; their disconnected-runtime statements are historical.
+
+## 17. Observation runtime connection
+
+`StateCache` now executes the observation reducer in a process-owned coordinator.
+Root invalidation synchronously advances dependent generations; obsolete success
+and failure cannot publish. Awaiters join shared reads and can detach without
+cancelling the worker. Read deadlines quarantine a still-running worker until it
+returns, with no overlapping replacement. App inventory metadata is published
+with its app list, and root-derived projections carry source observation IDs.
+
+This does not implement an atomic presentation revision across all screens and
+diagnostic measurements. The existing diagnostic run lifecycle, capture stages
+and their legacy subprocesses remain outside this connection. Concrete deadlines,
+retry behavior, dependencies and validation are documented in
+[observation coordinator](observation-coordinator.md).

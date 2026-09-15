@@ -213,8 +213,9 @@ internal object AgentControl {
         refresh: Boolean? = null,
     ): List<AgentInstalledApp> =
         withAppContext(context) { context ->
-            val apps = AppListCache.loadForAgent(context, force = refresh == true)
-            val userNames = AppListCache.userNames.value
+            val scan = AppListCache.loadSnapshotForAgent(context, force = refresh == true)
+            val apps = scan.apps
+            val userNames = scan.userNames
             val protection = buildProtectionState(targetsSnapshot(refresh = false))
             val rolesByPackage = protection.configuredApps.associateBy { it.packageName }
             apps

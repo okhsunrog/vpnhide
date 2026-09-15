@@ -139,7 +139,7 @@ warning instead of the normal success message. The canonical package selection
 is still saved in full; the warning describes the capped native runtime
 projection.
 
-## App mutation transport (not connected to runtime writers yet)
+## App mutation transport
 
 These are configured allocation/input bounds, separate from the backend capacity
 measurements above. See [transport protocol and recovery](root-mutation-transport.md).
@@ -158,6 +158,22 @@ also base64-encode canonical data inside the script, reducing the usable canonic
 write size below the script's 2 MiB limit. Overflow reports unavailable/rejection;
 it never falls back to an empty config or silently truncates a mutation. These
 bounds do not raise or replace the 160-UID native target limit.
+
+## App observation reads
+
+The batched root snapshot retains at most **16 MiB of stdout**. Overflow drains
+the remaining output but rejects the entire snapshot; it never publishes truncated
+sections. Stderr is drained without retention. The shell deadline is 10 seconds;
+the observation coordinator reports failure at 15 seconds if the worker has not
+returned. It holds the single root-read lane until the launcher process and its
+pipe readers finish. These bounds are separate from the mutation runner's 4 MiB
+reply and three retained owners.
+
+Other observation deadlines are 60 seconds, except Dashboard (120 seconds while
+its loader still awaits the existing diagnostic suite). A read waiter can follow
+superseded generations for at most twice its cache deadline. This bounds waiting,
+not the lifetime of an uncooperative worker. See
+[observation coordinator](observation-coordinator.md) for quarantine and retry rules.
 
 ## Re-measuring
 

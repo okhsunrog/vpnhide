@@ -46,6 +46,7 @@ internal class ConfigCoordinator(
     private val confirmed: (CanonicalConfig) -> Unit = {},
     refresh: suspend () -> Unit = {},
     private val manageLogging: Boolean = false,
+    private val invalidateObservations: () -> Unit = {},
 ) {
     private val messages = Channel<CoordinatorMessage>(Channel.UNLIMITED)
     private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
@@ -318,6 +319,8 @@ internal class ConfigCoordinator(
     private fun executed(message: CoordinatorMessage.Executed) {
         val active = core?.active ?: return
         if (active.ticket != message.ticket) return
+        // Advance observation generations before publishing phase evidence or resolving callers.
+        runCatching { invalidateObservations() }
         val evidence = configCompletionEvidence(active, message.evidence)
         if (active.request.spec.removesCanonical && active.phase == ConfigPhase.Cleanup &&
             evidence.canonical == RootCanonicalRead.Missing &&

@@ -76,6 +76,8 @@ internal object VpnTransportWatcher {
                 ) = signal()
 
                 private fun signal() {
+                    // Invalidate readiness now; debounce only the expensive read.
+                    RoutingGateCache.markStale()
                     watcherScope.launch { events.emit(Unit) }
                 }
             }

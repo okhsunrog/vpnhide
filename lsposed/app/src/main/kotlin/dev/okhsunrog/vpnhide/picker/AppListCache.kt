@@ -10,6 +10,8 @@ import android.net.VpnService
 import android.os.Build
 import android.os.Process
 import dev.okhsunrog.vpnhide.LogTags
+import dev.okhsunrog.vpnhide.ObservationRequest
+import dev.okhsunrog.vpnhide.ProjectedStateFlow
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.StateCache
@@ -17,9 +19,7 @@ import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.bit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
@@ -92,11 +92,19 @@ internal fun labelWithUsers(
  * their per-screen target flags reactively off `apps` + the targets
  * snapshot, so nothing keys off a manual refresh counter anymore.
  */
-internal object AppListCache : StateCache<List<AppSummary>>(
+internal data class AppListSnapshot(
+    val apps: List<AppSummary>,
+    val userNames: Map<Int, String>,
+    val warning: PackageScanWarning?,
+    val rootObservationId: Long,
+)
+
+internal object AppListCache : StateCache<AppListSnapshot>(
     traceName = "app_list_cache",
     logTag = LogTags.APP_LIST,
+    source = RootSnapshotCache.inventoryDependency,
 ) {
-    val apps: StateFlow<List<AppSummary>?> get() = value
+    val apps: StateFlow<List<AppSummary>?> = ProjectedStateFlow(value) { it?.apps }
 
     /** user_id → display profile name (e.g. 10 → "Work"). Populated
      * from `pm list users` alongside the package scan. Profiles the OS
@@ -106,18 +114,14 @@ internal object AppListCache : StateCache<List<AppSummary>>(
      * if root isn't available or parsing failed — `labelWithUsers`
      * falls back to numeric IDs in that case.
      */
-    private val _userNames = MutableStateFlow<Map<Int, String>>(emptyMap())
-    val userNames: StateFlow<Map<Int, String>> = _userNames.asStateFlow()
+    val userNames: StateFlow<Map<Int, String>> = ProjectedStateFlow(value) { it?.userNames.orEmpty() }
 
-    /** Non-null when the last load's inventory was partial for a profile
-     * other than user 0. `StateCache.error` conflates "load failed" with
-     * "load succeeded", so partiality needs its own flow — the picker keeps
-     * showing the list and renders a soft banner instead of the hard-fail
-     * card. */
-    private val _scanWarning = MutableStateFlow<PackageScanWarning?>(null)
-    val scanWarning: StateFlow<PackageScanWarning?> = _scanWarning.asStateFlow()
+    /** Partial inventory is successful data with a warning, published in the
+     * same packet as the app list. It is distinct from a failed observation. */
+    val scanWarning: StateFlow<PackageScanWarning?> = ProjectedStateFlow(value) { it?.warning }
 
     @Volatile private var appContext: Context? = null
+    override val ready: Boolean get() = appContext != null
 
     /** Kick off an initial load if not already loaded or loading. */
     fun ensureLoaded(
@@ -134,37 +138,37 @@ internal object AppListCache : StateCache<List<AppSummary>>(
         context: Context,
     ) {
         appContext = context.applicationContext
-        _scanWarning.value = null
-        RootSnapshotCache.invalidate()
-        forceRefresh(scope)
-    }
-
-    override fun invalidate() {
-        _scanWarning.value = null
-        super.invalidate()
+        RootSnapshotCache.inventoryDependency.refresh()
+        invalidate()
+        ensure(scope)
     }
 
     suspend fun loadForAgent(
         context: Context,
         force: Boolean,
-    ): List<AppSummary> {
+    ): List<AppSummary> = loadSnapshotForAgent(context, force).apps
+
+    suspend fun loadSnapshotForAgent(
+        context: Context,
+        force: Boolean,
+    ): AppListSnapshot {
         appContext = context.applicationContext
-        return if (!force) {
-            apps.value ?: load(force = false)
-        } else {
-            RootSnapshotCache.invalidate()
-            load(force = true)
+        if (force) {
+            RootSnapshotCache.inventoryDependency.refresh()
+            invalidate()
         }
+        return awaitValue()
     }
 
     override suspend fun load(
-        @Suppress("UNUSED_PARAMETER") force: Boolean,
-    ): List<AppSummary> {
+        @Suppress("UNUSED_PARAMETER") request: ObservationRequest,
+    ): AppListSnapshot {
         val appContext = requireNotNull(appContext) { "AppListCache.load before ensureLoaded/refresh" }
         return withContext(Dispatchers.IO) {
             val pm = appContext.packageManager
             val vpnServicePkgs = queryVpnServiceProviders(pm)
-            val sections = RootSnapshotCache.getOrLoad().sections
+            val rootSnapshot = RootSnapshotCache.getOrLoad()
+            val sections = rootSnapshot.sections
             val rawInventory =
                 parsePackageInventory(
                     packagesRaw = sections["pm_packages"].orEmpty(),
@@ -179,37 +183,39 @@ internal object AppListCache : StateCache<List<AppSummary>>(
                     currentUserId = currentUserId,
                 )
             val inventory = rawInventory.copy(packages = mergedPackages).requireNonEmpty()
-            _userNames.value =
+            val profileNames =
                 inventory.profiles.mapValues { (_, profile) -> profileDisplayName(appContext, profile) }
-            updateScanWarning(inventory, currentUserId, _userNames.value)
-            inventory.packages.entries
-                .map { (pkg, meta) ->
-                    val info = runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull()
-                    val archiveInfo =
-                        if (info == null) loadArchiveApplicationInfo(pm, meta.apkPath) else null
-                    val effectiveInfo = info ?: archiveInfo
+            val warning = scanWarning(inventory, currentUserId, profileNames)
+            val apps =
+                inventory.packages.entries
+                    .map { (pkg, meta) ->
+                        val info = runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull()
+                        val archiveInfo =
+                            if (info == null) loadArchiveApplicationInfo(pm, meta.apkPath) else null
+                        val effectiveInfo = info ?: archiveInfo
 
-                    // Archive-parsed ApplicationInfo doesn't carry FLAG_SYSTEM
-                    // (that bit is attached by PM at install time, not stored in
-                    // the manifest), so use the APK path for secondary-only apps.
-                    val isSystem =
-                        if (info != null) {
-                            (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                        } else {
-                            !meta.apkPath.orEmpty().startsWith("/data/app/")
-                        }
-                    val label = effectiveInfo?.loadLabel(pm)?.toString() ?: pkg
+                        // Archive-parsed ApplicationInfo doesn't carry FLAG_SYSTEM
+                        // (that bit is attached by PM at install time, not stored in
+                        // the manifest), so use the APK path for secondary-only apps.
+                        val isSystem =
+                            if (info != null) {
+                                (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                            } else {
+                                !meta.apkPath.orEmpty().startsWith("/data/app/")
+                            }
+                        val label = effectiveInfo?.loadLabel(pm)?.toString() ?: pkg
 
-                    AppSummary(
-                        packageName = pkg,
-                        label = label,
-                        icon = effectiveInfo?.let { runCatching { pm.getApplicationIcon(it) }.getOrNull() },
-                        isSystem = isSystem,
-                        userIds = meta.userIds,
-                        declaresVpnService = pkg in vpnServicePkgs,
-                        nameContainsVpn = !isSystem && looksLikeVpnAppName(label),
-                    )
-                }.sortedBy { it.label.lowercase() }
+                        AppSummary(
+                            packageName = pkg,
+                            label = label,
+                            icon = effectiveInfo?.let { runCatching { pm.getApplicationIcon(it) }.getOrNull() },
+                            isSystem = isSystem,
+                            userIds = meta.userIds,
+                            declaresVpnService = pkg in vpnServicePkgs,
+                            nameContainsVpn = !isSystem && looksLikeVpnAppName(label),
+                        )
+                    }.sortedBy { it.label.lowercase() }
+            AppListSnapshot(apps, profileNames, warning, rootSnapshot.observationId)
         }
     }
 
@@ -219,16 +225,16 @@ internal object AppListCache : StateCache<List<AppSummary>>(
      * are worth flagging — those are the ones the app genuinely couldn't
      * enumerate this run.
      */
-    private fun updateScanWarning(
+    private fun scanWarning(
         inventory: PackageInventory,
         user0Id: Int,
         profileNames: Map<Int, String>,
-    ) {
+    ): PackageScanWarning? {
         val otherProfileFailures = inventory.failedUserIds - user0Id
         if (otherProfileFailures.isNotEmpty()) {
             VpnHideLog.w(LogTags.APP_LIST, inventory.partialMessage(profileNames))
         }
-        _scanWarning.value = otherProfileFailures.takeIf { it.isNotEmpty() }?.let(::PackageScanWarning)
+        return otherProfileFailures.takeIf { it.isNotEmpty() }?.let(::PackageScanWarning)
     }
 
     /**

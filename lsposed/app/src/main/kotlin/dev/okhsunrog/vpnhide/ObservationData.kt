@@ -14,6 +14,13 @@ internal data class ObservedValue<T>(
 
 internal enum class ObservationCompletion { Published, Failed, Superseded }
 
+/** A retained observation is useful history, but cannot answer a current-readiness question. */
+internal fun <T> currentObservationValue(state: ObservationState<T>): T? =
+    state.lastGood
+        ?.takeIf {
+            state.active == null && !state.quarantined && state.error == null && it.request.generation == state.generation
+        }?.value
+
 /** Load state for the existing StateCache facade; no jobs or global store live here. */
 internal data class ObservationState<T>(
     val lastGood: ObservedValue<T>? = null,
@@ -22,6 +29,7 @@ internal data class ObservationState<T>(
     val nextId: Long = 1,
     val error: TransitionFailure? = null,
     val attempted: Boolean = false,
+    val attemptedGeneration: Long? = null,
     val quarantined: Boolean = false,
     val quarantineRequestId: Long? = null,
 )
@@ -38,6 +46,7 @@ internal sealed interface ObservationEvent<out T> {
 
     data class Invalidate(
         val now: Long,
+        val start: Boolean = true,
     ) : ObservationEvent<Nothing>
 
     data class Loaded<T>(
@@ -56,6 +65,7 @@ internal sealed interface ObservationEvent<out T> {
     data class ResourceRecovered(
         val id: Long,
         val now: Long,
+        val retry: Boolean = true,
     ) : ObservationEvent<Nothing>
 }
 
@@ -88,7 +98,11 @@ internal fun <T> reduceObservation(
 ): Transition<ObservationState<T>, ObservationEffect> =
     when (event) {
         is ObservationEvent.Ensure -> {
-            if (state.attempted) Transition(state) else startObservation(state, event.now)
+            if (state.active != null || (state.attempted && state.attemptedGeneration == state.generation)) {
+                Transition(state)
+            } else {
+                startObservation(state, event.now)
+            }
         }
 
         is ObservationEvent.Refresh -> {
@@ -96,7 +110,7 @@ internal fun <T> reduceObservation(
         }
 
         is ObservationEvent.Invalidate -> {
-            invalidateObservation(state, event.now)
+            invalidateObservation(state, event.now, event.start)
         }
 
         is ObservationEvent.Loaded -> {
@@ -109,7 +123,8 @@ internal fun <T> reduceObservation(
 
         is ObservationEvent.ResourceRecovered -> {
             if (state.quarantined && state.quarantineRequestId == event.id) {
-                startObservation(state.copy(quarantined = false, quarantineRequestId = null), event.now)
+                val recovered = state.copy(quarantined = false, quarantineRequestId = null)
+                if (event.retry) startObservation(recovered, event.now) else Transition(recovered)
             } else {
                 Transition(state)
             }
@@ -123,7 +138,7 @@ private fun <T> startObservation(
     if (state.quarantined) return Transition(state, listOf(ObservationEffect.Unavailable(TransitionFailure.ResourceUnavailable)))
     val request = ObservationRequest(state.nextId, state.generation, now)
     return Transition(
-        state.copy(active = request, nextId = state.nextId + 1, attempted = true),
+        state.copy(active = request, nextId = state.nextId + 1, attempted = true, attemptedGeneration = state.generation),
         listOf(ObservationEffect.Load(request)),
     )
 }
@@ -144,9 +159,10 @@ private fun <T> refreshObservation(
 private fun <T> invalidateObservation(
     state: ObservationState<T>,
     now: Long,
+    start: Boolean,
 ): Transition<ObservationState<T>, ObservationEffect> {
     val next = state.copy(generation = state.generation + 1)
-    return if (state.active == null) startObservation(next, now) else Transition(next)
+    return if (state.active == null && start) startObservation(next, now) else Transition(next)
 }
 
 private fun <T> finishObservation(
@@ -161,7 +177,7 @@ private fun <T> finishObservation(
     if (active.id != id) return Transition(state)
     if (!quiescent) {
         return Transition(
-            state.copy(active = null, quarantined = true, quarantineRequestId = id, error = TransitionFailure.ResourceUnavailable),
+            state.copy(active = null, quarantined = true, quarantineRequestId = id, error = error ?: TransitionFailure.ResourceUnavailable),
             listOf(ObservationEffect.Finished(id, ObservationCompletion.Failed)),
         )
     }

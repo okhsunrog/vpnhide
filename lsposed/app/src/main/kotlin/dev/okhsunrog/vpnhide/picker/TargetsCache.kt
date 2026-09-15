@@ -2,10 +2,12 @@ package dev.okhsunrog.vpnhide.picker
 
 import android.content.Context
 import dev.okhsunrog.vpnhide.CanonicalConfig
-import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.NativeBackendId
 import dev.okhsunrog.vpnhide.NativeHookFamily
+import dev.okhsunrog.vpnhide.ObservationRequest
+import dev.okhsunrog.vpnhide.ProjectedStateFlow
+import dev.okhsunrog.vpnhide.RootProjection
 import dev.okhsunrog.vpnhide.RootSnapshot
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.StateCache
@@ -95,11 +97,12 @@ internal data class TargetsSnapshot(
         get() = observerNames.flatMapTo(mutableSetOf()) { packageUids[it].orEmpty() }
 }
 
-internal object TargetsCache : StateCache<TargetsSnapshot>(
+internal object TargetsCache : StateCache<RootProjection<TargetsSnapshot>>(
     traceName = "targets_cache",
     logTag = LogTags.TARGETS,
+    source = RootSnapshotCache.dependency,
 ) {
-    val snapshot: StateFlow<TargetsSnapshot?> get() = value
+    val snapshot: StateFlow<TargetsSnapshot?> = ProjectedStateFlow(value) { it?.value }
 
     // The snapshot is parsed entirely from the shared RootSnapshotCache, so
     // `load` needs no context — the parameter is kept only for call-site
@@ -113,34 +116,15 @@ internal object TargetsCache : StateCache<TargetsSnapshot>(
         scope: CoroutineScope,
         @Suppress("UNUSED_PARAMETER") context: Context,
     ) {
-        RootSnapshotCache.invalidate()
         forceRefresh(scope)
     }
 
-    fun refreshAfterSave(
-        scope: CoroutineScope,
-        context: Context,
-    ) {
-        DashboardCache.invalidate()
-        refresh(scope, context)
-    }
-
-    /** Drop the cached snapshot (and the shared root snapshot it derives
-     * from) so the next subscriber triggers a fresh load. Use
-     * [refreshAfterSave] when a Protection save should also invalidate
-     * Dashboard counts.
-     */
-    override fun invalidate() {
-        super.invalidate()
-        RootSnapshotCache.invalidate()
-    }
-
     override suspend fun load(
-        @Suppress("UNUSED_PARAMETER") force: Boolean,
-    ): TargetsSnapshot {
+        @Suppress("UNUSED_PARAMETER") request: ObservationRequest,
+    ): RootProjection<TargetsSnapshot> {
         val rootSnapshot = RootSnapshotCache.getOrLoad()
         requireNonEmptyPackageInventory(rootSnapshot.sections)
-        return parseTargetsSnapshot(rootSnapshot)
+        return RootProjection(rootSnapshot.observationId, rootSnapshot.generation, parseTargetsSnapshot(rootSnapshot))
     }
 }
 

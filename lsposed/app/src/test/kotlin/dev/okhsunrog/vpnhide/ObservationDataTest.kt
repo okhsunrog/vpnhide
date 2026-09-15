@@ -12,7 +12,7 @@ class ObservationDataTest {
         state = reduceObservation(state, ObservationEvent.Refresh(10)).state
         val obsolete = requireNotNull(state.active).id
         repeat(3) { state = reduceObservation(state, ObservationEvent.Invalidate(11)).state }
-        assertEquals(obsolete, state.active?.id)
+        assertEquals(obsolete, state.active.id)
         val next = reduceObservation(state, ObservationEvent.Loaded(obsolete, "obsolete", 12))
         assertEquals("original", next.state.lastGood?.value)
         assertEquals(1, next.effects.filterIsInstance<ObservationEffect.Load>().size)
