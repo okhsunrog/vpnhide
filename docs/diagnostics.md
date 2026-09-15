@@ -6,6 +6,11 @@ For the hiding side (which backend covers which detection vector) see
 [detection-vectors.md](detection-vectors.md); for the app↔backend wire see
 [protocol.md](protocol.md).
 
+For the current execution states, screen/export dependencies, historical decisions
+and unresolved semantic questions, see the
+[diagnostics state analysis](diagnostics-state-analysis.md). That analysis does
+not change the runtime contract or approve a new rerun policy.
+
 Devices this was validated on: Pixel 4a (sunfish, Magisk, 4.14, kmod/KPM/Zygisk),
 Pixel 8 Pro (husky, KernelSU-Next, GKI 6.1, KPM), and an Android 13 Zygisk device.
 

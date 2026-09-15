@@ -12,6 +12,13 @@ observations and editor drafts. [Storage](storage.md), [wire protocol](protocol.
 and [diagnostics](diagnostics.md) remain the current implementation contracts.
 The proposal becomes authoritative only as its implementation stages land.
 
+Product decisions recorded on 2026-09-15: switches immediately show the requested
+position and progress; drafts survive Activity recreation but need not survive
+process death; overlapping UI edits take priority over bridge mutations; an
+indeterminate root operation gets one automatic read-only recheck before mutations
+are paused. Diagnostic semantics require a separate investigation before deciding
+whether or when completed measurements become stale.
+
 ## 1. Problem and historical constraints
 
 Debug logging currently stays in its old position while root persistence,
@@ -71,7 +78,7 @@ behind their facades. Avoid a parallel set of global stores during migration.
 | Installed-app inventory | `AppListCache` | Refresh on inventory demand, independently of config changes |
 | Dashboard and target presentation | Existing feature facades | Derived from explicit config/observation inputs |
 | Live routing precondition | `RoutingGateCache` | Shared probe with VPN/resume/manual triggers |
-| Last diagnostic measurement | `DiagnosticsCache` | Results plus measurement context and freshness |
+| Diagnostic execution and results | Existing `DiagnosticsCache` | Current process policy retained pending the separate semantic design |
 | Unsaved editor changes | Screen state holder | Survive recomposition and activity recreation |
 | Active capture tokens | Config coordinator | Process lifetime; released by capture cleanup |
 | Hook configuration and statistics | Existing system_server/native owners | Backend-specific; observed by the app |
@@ -128,7 +135,12 @@ publication and moving observations out of this queue, not overlapping writes.
 
 Do not silently coalesce accepted mutations in the first version. While a switch
 operation is pending, disable repeat input for that control and show its requested
-value with a progress indicator. Other changes can enter the ordered queue.
+value with a progress indicator immediately. Other changes can enter the ordered
+queue. On a confirmed persistence failure, remove the pending intent, restore the
+latest confirmed position and show the error. After successful persistence but
+failed activation, retain the saved position and show the activation problem.
+An indeterminate result keeps an explicit unresolved operation state until checked;
+it must not be presented as a confirmed rollback.
 
 ### Result model
 
@@ -153,7 +165,12 @@ success. `suExec` currently drains output after execution and kills the direct
 process on timeout; it is not yet a sufficient transport for streaming phase
 acknowledgements or proving descendant processes have stopped. Define and test
 that transport before allowing a timed-out mutation's successor to execute.
-If completion cannot be established, pause mutations and expose reconciliation.
+If completion cannot be established, automatically repeat the read-only
+reconciliation check once. Hold successor mutations while this check runs. If the
+outcome is still indeterminate, pause mutations, explain the uncertainty and offer
+a manual recheck. Do not repeat the write or activation automatically. Reads and
+unrelated UI remain available. A matching JSON alone cannot prove a timed-out
+activator or its descendants have finished.
 
 Secret content never enters observable operation state or command diagnostics.
 Superkey changes need a specific phase/recovery plan: canonical preference and
@@ -209,7 +226,7 @@ Initial refresh policy:
 |---|---|
 | UI preference | Recompose presentation; no root scan |
 | Debug switch/capture | Save/apply; coalesce runtime observation; no app-icon scan or diagnostic rerun |
-| Target/hook/ports edit | Save/apply; refresh runtime; mark affected diagnostic context stale |
+| Target/hook/ports edit | Save/apply; refresh runtime; diagnostic invalidation policy deferred |
 | VPN callback/resume | Refresh shared routing gate; reuse/coalesce root work |
 | Explicit inventory refresh | Refresh package inventory; reconcile auto-hide against current config |
 | Statistics refresh | Refresh counters; no config mutation |
@@ -243,29 +260,44 @@ activation cannot be presented as their live logging acknowledgement.
 ### Editor drafts
 
 Keep a base config identity plus a patch of edited fields, not a stale full config.
-Rebase untouched fields onto newly confirmed config. If the same field changed
-externally, show a conflict and preserve the draft; do not silently overwrite it.
-Imports are explicit replacements and must invalidate/reconcile existing drafts.
+Rebase untouched fields onto newly confirmed config. Unsaved UI edits win when
+another producer changes the same field. Register active draft patches with the
+coordinator so it can reject overlapping bridge mutations before persistence,
+using an explicit `ui_edit_conflict` result identifying the application and fields.
+Reject the whole conflicting bridge operation; do not silently apply its other
+fields. Unrelated operations still merge. Check conflicts at execution, within
+the same ordering boundary as writes and draft registration updates.
+
+The registration is process-owned and survives Activity recreation with the draft;
+release it on discard or successful save, without dropping later draft revisions.
+An operation already completed before the UI edit cannot retroactively fail: the
+new UI patch wins on its next save. Arbitrary external root writers cannot receive
+bridge errors; retain the UI patch and rebase it on the next confirmed read.
+Imports are explicit replacements and must reconcile open drafts without silently
+discarding UI edits; exact replacement UX remains to be designed.
 
 Save captures a fixed patch. Either disable editing during that save initially,
 or retain later edits as a separate draft revision; successful completion must
 never clear edits made after submission. Use a lifecycle state holder for activity
-recreation, and retain the existing unsaved-navigation protection. Process-death
-draft persistence is a separate decision, not an implied guarantee of `remember`.
+recreation, and retain the existing unsaved-navigation protection. Persisting
+unsaved drafts across process death is out of scope for the first implementation.
 
 ### Diagnostics
 
-Keep one shared measurement executor and the separate live routing gate. Attach
-measurement context: process/boot identity, relevant self-target configuration,
-backend and routing evidence. Debug-only changes do not invalidate a measurement.
-Mark potentially affected results stale without automatically rerunning all probes.
-Freshness must be visible when a report would otherwise imply current protection.
+Diagnostic freshness and repeat-run behavior are not accepted parts of this
+migration. First define the subject of each measurement, evidence strength,
+execution states, consumers and user-facing promises. The separate
+[diagnostics state analysis](diagnostics-state-analysis.md) documents the existing
+semantics and history, including where screens and exports diverge. It proposes
+questions and boundaries, not an approved replacement policy.
 
-This changes the current process-sticky result policy and belongs in its own stage
-with updates to diagnostics documentation and bundle schema where applicable.
-LSPosed's FileObserver plus fingerprint fallback remains independent; an app cache
-refresh is not an acknowledgement from system_server. Statistics remain sampled
-counters, including the existing debounced LSPosed disk publication.
+Keep diagnostics integration explicit while migrating the surrounding state
+machinery. Do not silently turn config refreshes into new self-test runs or change
+the meaning of `Ready`, `ROUTED` or exported verdicts. Error propagation fixes must
+be reviewed against all consumers even when they do not change rerun policy.
+LSPosed's FileObserver plus fingerprint fallback remains independent; an app
+cache refresh is not an acknowledgement from system_server. Statistics remain
+sampled counters, including the existing debounced LSPosed disk publication.
 
 ## 6. Migration and acceptance gates
 
@@ -286,8 +318,9 @@ Each stage must keep the app usable and remove the old path it replaces.
 4. **Switches and drafts.** Shared pending/error treatment; confirm after persistence;
    activation retry; draft conflicts and lifecycle retention. Keep local DataStore
    settings reactive, including their dashboard messages.
-5. **Measurement freshness and profiling.** Add context-aware diagnostic freshness,
-   then measure whether splitting the root probe is justified.
+5. **Profiling.** Measure whether splitting the root probe is justified. Diagnostic
+   semantics, freshness and reruns have their own design and acceptance boundary;
+   they are not implicitly included in this stage.
 
 Required deterministic tests (fake I/O, explicitly controlled suspension points):
 
@@ -304,6 +337,9 @@ Required deterministic tests (fake I/O, explicitly controlled suspension points)
 | Toggle off during overlapping captures | Effective debug stays on until final release |
 | Capture ends twice or process restarts mid-capture | Idempotent release; startup restores user intent |
 | Partial inventory or conflicting draft | No dropped unseen roles or lost unsaved edits |
+| Bridge edit overlaps an active UI draft | Explicit application/field conflict; no partial bridge write |
+| Activity recreated with an active draft | Draft and conflict registration survive |
+| First reconciliation remains indeterminate | One automatic read-only retry, then pause and manual recheck |
 | No-op tab switch/debug-only change | No redundant inventory load/full diagnostic run |
 
 Run applicable Kotlin unit tests, ktlint, detekt, CPD and Android lint for code
@@ -322,10 +358,12 @@ from unit tests. No device measurements were taken for this proposal.
   commands; establish what happens to root descendants on timeout on supported
   managers. Extra small root calls may be acceptable; measure rather than assume.
 - Recovery ordering for Superkey plus JSON changes, including indeterminate writes.
-- Exact draft conflict UI and whether draft retention must survive process death.
+- Draft registration ordering against operations already in flight, conflict error
+  response shape, and explicit import/reset behavior with open drafts.
 - Which runtime observations can establish application, versus command success
   only, without changing control-v2/telemetry-v1.
-- Diagnostics freshness keys and serialization impact, scoped to stage 5.
+- Separate diagnostic semantic contract; only then freshness keys, repeat-run
+  policy and serialization impact.
 
 ## Source map
 
