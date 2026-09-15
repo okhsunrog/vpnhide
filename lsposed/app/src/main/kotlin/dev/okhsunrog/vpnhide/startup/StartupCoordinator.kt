@@ -58,6 +58,7 @@ internal class StartupCoordinator(
     private val prepareSelfTargetsCommand: suspend (String) -> SelfTargetPreparation = ::ensureSelfInTargets,
     private val cleanupZygiskStatus: (Context, String?) -> Unit = ::cleanupStaleZygiskStatus,
     private val seedRootSnapshotInventory: (PackageInventorySeed?) -> Unit = RootSnapshotCache::seedPackageInventory,
+    private val seedRootSnapshot: (Map<String, String>) -> Unit = RootSnapshotCache::seedSnapshot,
     private val markStartupEvent: (String) -> Unit = StartupTrace::mark,
     private val reconcileRuntimeConfig: suspend () -> Unit = { runRuntimeConfigReconcile() },
     private val reconcileAutoHidden: suspend (List<AppAutoHideSignal>) -> Unit =
@@ -126,7 +127,10 @@ internal class StartupCoordinator(
                         } else {
                             null
                         }
-                    seedRootSnapshotInventory(inventory)
+                    // A read that wrote nothing seeds the whole snapshot (no second
+                    // root shell); after a write only the package inventory survives.
+                    val sections = next.sections
+                    if (sections != null) seedRootSnapshot(sections) else seedRootSnapshotInventory(inventory)
                     cleanupZygiskStatus(appContext, next.currentBootId)
                 }
                 next

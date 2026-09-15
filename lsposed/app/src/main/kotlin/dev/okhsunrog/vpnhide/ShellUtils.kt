@@ -209,6 +209,13 @@ internal data class SelfTargetPreparation(
     val currentBootId: String?,
     val pmPackages: String? = null,
     val pmUsers: String? = null,
+    /**
+     * The complete validated root snapshot sections the preparation read, when it
+     * wrote nothing afterwards: the same command the snapshot cache runs, so the
+     * cache can be seeded whole and the cold start skips a second identical shell.
+     * Null after a config write (the on-disk state changed after the read).
+     */
+    val sections: Map<String, String>? = null,
     val error: String? = null,
     val failureKind: SelfTargetFailureKind = SelfTargetFailureKind.Unknown,
 )
@@ -267,6 +274,7 @@ internal suspend fun ensureSelfInTargets(
         return selfTargetPreparationFailure(failure.kind, failure.detail)
     }
     val update = buildCanonicalSelfUpdate(sections, selfPkg)
+    var written = false
     if (update.writeRequired &&
         CanonicalConfigRepository.state.value.mode in setOf(ConfigCoordinatorMode.Open, ConfigCoordinatorMode.Missing)
     ) {
@@ -274,6 +282,7 @@ internal suspend fun ensureSelfInTargets(
             return selfTargetPreparationFailure(SelfTargetFailureKind.ConfigWriteFailed, it)
         }
         RootSnapshotCache.invalidate()
+        written = true
     }
     val pmPackages = sections["pm_packages"]?.trimEnd()?.takeIf { it.isNotBlank() }
     val pmUsers = sections["pm_users"]?.trimEnd()?.takeIf { it.isNotBlank() }
@@ -285,6 +294,7 @@ internal suspend fun ensureSelfInTargets(
         currentBootId = currentBootId,
         pmPackages = pmPackages,
         pmUsers = pmUsers,
+        sections = sections.takeUnless { written },
     )
 }
 
@@ -303,7 +313,11 @@ private data class SelfTargetFailureDetail(
 )
 
 private fun loadStartupRootSections(timeoutSec: Long): Pair<Map<String, String>?, SelfTargetFailureDetail?> {
-    val (exitCode, out) = suExec(buildRootShellSnapshotCommand(includePmPackages = true), timeoutSec = timeoutSec)
+    // The same command (including the runtime probe) as RootSnapshotCache, so the
+    // result can seed the cache whole instead of being read a second time.
+    val command =
+        buildRootShellSnapshotCommand(includePmPackages = true, runtimeProbeSource = RootSnapshotCache.runtimeProbeSourcePath)
+    val (exitCode, out) = suExec(command, timeoutSec = timeoutSec)
     if (exitCode != 0) {
         VpnHideLog.w(TAG, "ensureSelfInTargets: root snapshot failed (exit=$exitCode): ${out.trim()}")
         return null to SelfTargetFailureDetail(SelfTargetFailureKind.RootUnavailable, "exit=$exitCode")

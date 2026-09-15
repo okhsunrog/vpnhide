@@ -142,15 +142,17 @@ Method: `adb logcat -c`, `am force-stop` + `am start -W`, then read the
 |---|---|---|
 | installed before this session (`1.2.5-139-g998ac6f7`, another branch) | 2980, 3059 | second root snapshot right after the first |
 | `68cc1c5c` (diagnostic coordinator + Verifying reuse) | 4014, 3884, 3834 | startup reconcile invalidated root ~430 ms after the first snapshot; Verifying joined the reload |
-| deferred reconcile (this stage) | 2470, 2329, 2472 | reconcile and its refresh run after first paint |
+| deferred reconcile (`a9900b13`) | 2470, 2329, 2472 | reconcile and its refresh run after first paint |
+| whole-snapshot seed from the self-target read (installed) | 1717, 1702, 1710 | `root_snapshot_seeded`, no second shell before paint |
 
-Where the remaining ~2.4 s goes (run 2): root check 186 ms; self-target
-preparation 1.14 s (one root shell that already reads every snapshot section,
-about 650 ms of section work plus process overhead); root snapshot 0.61 s (the
-same sections again); routing probe 0.12 s; suite 0.15 s; derivation 0.05 s.
-Next candidates, in order of expected gain: seed the whole root snapshot from the
-self-target read when it wrote nothing (saves the 0.6 s snapshot), then fold the
-root check into that shell, then reduce `su` spawns inside the suite.
+Where the remaining ~1.7 s goes (run 2): root check 186 ms; self-target
+preparation 1.15 s (one root shell reading every snapshot section, about 650 ms
+of section work plus `su`/process overhead); routing probe 0.11 s; suite 0.13 s;
+derivation 0.05 s. The deferred reconcile then costs a background root snapshot
+(about 1.2 s, including package inventory) and a repeated derivation after paint.
+Next candidates: fold the root check into the preparation shell (~0.2 s); make
+the reconcile skip its refresh when the activator reports no runtime change;
+reduce `su` spawns inside the suite (uid probe plus root `vhprobe`).
 
 Hardware checks completed: reproduced old theme-change navigation reset, then
 verified Settings, a nested help article and selected Statistics tab survive

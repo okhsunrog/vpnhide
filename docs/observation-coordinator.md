@@ -80,6 +80,14 @@ completion/recovery before exposing phase evidence. Its separate refresh worker
 awaits this shared reload. It never waits for Dashboard/diagnostics before accepting
 the next config operation.
 
+Startup self-target preparation runs the same snapshot command as the cache
+(including the runtime probe). When it writes nothing, its validated sections seed
+the cache's next load whole (`seedSnapshot`), so the cold start does not pay a
+second identical root shell; after a config write only the package inventory
+seed survives, and any invalidation or explicit refresh discards both seeds. A
+seeded value is an observation like any other: it gets the request's observation
+ID and generation when consumed.
+
 The startup runtime reconcile (a forced native activation with no config edit) is
 one such operation. Cold-start traces on Pixel 8 Pro (2026-09-15, VPN up) showed
 its completion invalidating the root snapshot about 430 ms after the first read,

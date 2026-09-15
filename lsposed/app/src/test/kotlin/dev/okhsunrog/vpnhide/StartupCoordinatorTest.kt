@@ -85,6 +85,38 @@ class StartupCoordinatorTest {
         }
 
     @Test
+    fun `a preparation that wrote nothing seeds the whole snapshot instead of the inventory`() =
+        runBlocking {
+            var seededInventory: PackageInventorySeed? = null
+            var seededSections: Map<String, String>? = null
+            val sections = mapOf("current_boot_id" to "boot-1", "pm_packages" to "package:a uid:1", "pm_users" to "UserInfo{0:O:c13}")
+            val coordinator =
+                StartupCoordinator(
+                    initializeConfig = {},
+                    appContext = FakeContext("dev.okhsunrog.vpnhide"),
+                    prepareSelfTargetsCommand = {
+                        SelfTargetPreparation(
+                            rootAvailable = true,
+                            selfNeedsRestart = false,
+                            currentBootId = "boot-1",
+                            pmPackages = "package:a uid:1",
+                            pmUsers = "UserInfo{0:O:c13}",
+                            sections = sections,
+                        )
+                    },
+                    cleanupZygiskStatus = { _, _ -> },
+                    seedRootSnapshotInventory = { seededInventory = it },
+                    seedRootSnapshot = { seededSections = it },
+                    markStartupEvent = {},
+                )
+
+            coordinator.prepareSelfTargets()
+
+            assertEquals(sections, seededSections)
+            assertNull(seededInventory)
+        }
+
+    @Test
     fun `failed self target preparation reports error without seeding or cleanup`() =
         runBlocking {
             val markers = mutableListOf<String>()

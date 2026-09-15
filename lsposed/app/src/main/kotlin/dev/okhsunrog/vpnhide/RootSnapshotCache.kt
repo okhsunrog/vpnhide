@@ -94,7 +94,13 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
     private val reader = RootProcessRunner()
     private var preloadedPackageInventory: PackageInventorySeed? = null
 
+    // A complete validated snapshot read by startup with the same command; consumed
+    // by the next load instead of a second shell. Any invalidation or explicit
+    // refresh discards it, so a config write after the read can never be masked.
+    private var preloadedSections: Map<String, String>? = null
+
     @Volatile private var runtimeProbeSource: String? = null
+    val runtimeProbeSourcePath: String? get() = runtimeProbeSource
 
     val dependency =
         object : ObservationDependency {
@@ -124,12 +130,18 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
     suspend fun getOrLoad(): RootSnapshot = awaitValue()
 
     suspend fun refresh(notBefore: Long = Long.MIN_VALUE): RootSnapshot {
-        synchronized(inputLock) { preloadedPackageInventory = null }
+        synchronized(inputLock) {
+            preloadedPackageInventory = null
+            preloadedSections = null
+        }
         return awaitValue(refresh = true, notBefore = notBefore)
     }
 
     override fun invalidate() {
-        synchronized(inputLock) { preloadedPackageInventory = null }
+        synchronized(inputLock) {
+            preloadedPackageInventory = null
+            preloadedSections = null
+        }
         super.invalidate()
     }
 
@@ -137,12 +149,26 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
         synchronized(inputLock) { preloadedPackageInventory = seed }
     }
 
+    /** Seed the next load with a complete startup read; a config write invalidates it like any other observation. */
+    fun seedSnapshot(sections: Map<String, String>?) {
+        synchronized(inputLock) { preloadedSections = sections?.toMap() }
+    }
+
     override suspend fun load(request: ObservationRequest): RootSnapshot {
-        val inventory =
+        val (seeded, inventory) =
             synchronized(inputLock) {
-                preloadedPackageInventory.also { preloadedPackageInventory = null }
+                Pair(preloadedSections, preloadedPackageInventory).also {
+                    preloadedSections = null
+                    preloadedPackageInventory = null
+                }
             }
-        val sections = loadRootShellSnapshot(inventory, runtimeProbeSource, reader)
+        val sections =
+            if (seeded != null) {
+                StartupTrace.mark("root_snapshot_seeded")
+                seeded.also(::validateRootSnapshotSections)
+            } else {
+                loadRootShellSnapshot(inventory, runtimeProbeSource, reader)
+            }
         return RootSnapshot(sections.toMap(), request.id, request.generation)
     }
 
