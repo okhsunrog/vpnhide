@@ -79,7 +79,6 @@ import dev.okhsunrog.vpnhide.settings.SettingsSubScreen
 import dev.okhsunrog.vpnhide.shouldRequestUpdateNotificationPermission
 import dev.okhsunrog.vpnhide.statistics.StatisticsCache
 import dev.okhsunrog.vpnhide.statistics.StatisticsScreen
-import dev.okhsunrog.vpnhide.suExec
 import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
 import dev.okhsunrog.vpnhide.ui.components.BlockingErrorCard
 import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
@@ -118,11 +117,6 @@ private sealed interface RootState {
     data object Granted : RootState
 
     data object Denied : RootState
-}
-
-private fun checkRootAccess(): Boolean {
-    val (exitCode, stdout) = suExec("id")
-    return exitCode == 0 && stdout.contains("uid=0")
 }
 
 @Composable
@@ -204,19 +198,24 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
         VpnHideTheme {
             var rootState by remember { mutableStateOf<RootState?>(null) }
             val rootCheckScope = rememberCoroutineScope()
-            // Re-probe root without relaunching the app: clears to the loading
-            // state, then re-runs the check. Lets the no-root gate offer a
-            // "Check again" button after the user grants root in their manager.
-            val probeRoot: () -> Unit = {
+            val startupCoordinator = remember(context) { StartupCoordinator.forProcess(context.applicationContext) }
+            // The root gate is the self-target preparation itself: its first root
+            // shell is the earliest privileged work of the process, so a separate
+            // `su -c id` probe in front of it only added a serial su spawn (about
+            // 190 ms on Pixel 8 Pro) to every cold start. A denied or interrupted
+            // su surfaces as RootUnavailable; every other failure is shown by the
+            // main screen, as before. "Check again" forces a fresh preparation.
+            val probeRoot: (Boolean) -> Unit = { force ->
                 rootState = null
                 rootCheckScope.launch {
-                    val granted = withContext(Dispatchers.IO) { checkRootAccess() }
-                    rootState = if (granted) RootState.Granted else RootState.Denied
+                    startupCoordinator.prepareSelfTargets(force = force)
+                    val failure = startupCoordinator.selfTargetState.value as? StartupSelfTargetState.Failed
+                    rootState = if (failure?.kind == SelfTargetFailureKind.RootUnavailable) RootState.Denied else RootState.Granted
                     StartupTrace.mark("root_check_done")
                 }
             }
 
-            LaunchedEffect(Unit) { probeRoot() }
+            LaunchedEffect(Unit) { probeRoot(false) }
 
             when (rootState) {
                 null -> {
@@ -225,7 +224,7 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
 
                 RootState.Denied -> {
                     LaunchedEffect(Unit) { StartupTrace.rootDeniedReady() }
-                    RootDeniedScreen(onRecheck = probeRoot)
+                    RootDeniedScreen(onRecheck = { probeRoot(true) })
                 }
 
                 RootState.Granted -> {

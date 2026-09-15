@@ -81,7 +81,7 @@ class StartupCoordinatorTest {
                 seededInventory,
             )
             assertEquals("boot-1", cleanupBootId)
-            assertEquals(listOf("self_targets_start", "self_targets_done"), markers)
+            assertEquals(listOf("self_targets_start", "config_init_done", "self_targets_done"), markers)
         }
 
     @Test
@@ -149,7 +149,7 @@ class StartupCoordinatorTest {
             assertNull(seededInventory)
             assertNull(cleanupBootId)
             assertEquals(
-                listOf("self_targets_start", "self_targets_done", "self_targets_failed"),
+                listOf("self_targets_start", "config_init_done", "self_targets_done", "self_targets_failed"),
                 markers,
             )
         }

@@ -117,6 +117,7 @@ internal class StartupCoordinator(
         _selfTargetState.value = StartupSelfTargetState.Preparing
         markStartupEvent("self_targets_start")
         initializeConfig()
+        markStartupEvent("config_init_done")
         val preparation =
             withContext(Dispatchers.IO) {
                 val next = prepareSelfTargetsCommand(appContext.packageName)
