@@ -59,7 +59,6 @@ import dev.okhsunrog.vpnhide.ui.components.IconBubble
 import dev.okhsunrog.vpnhide.ui.components.MetricTile
 import dev.okhsunrog.vpnhide.ui.components.SectionHeader
 import dev.okhsunrog.vpnhide.ui.components.container
-import dev.okhsunrog.vpnhide.ui.components.pulse
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -682,9 +681,8 @@ private fun heroNoteRes(note: HeroNote): Int? =
 /**
  * The big at-a-glance status card at the top of the Dashboard. Summarizes the
  * whole setup's health into one of four states with a tinted container, accent
- * icon and headline; the icon breathes when fully protected. [decision] also
- * carries the note that qualifies the subtitle when the measurement is not the
- * whole story.
+ * icon and headline. [decision] also carries the note that qualifies the
+ * subtitle when the measurement is not the whole story.
  */
 @Composable
 private fun DashboardHeroCard(
@@ -693,7 +691,6 @@ private fun DashboardHeroCard(
     errorCount: Int,
     warningCount: Int,
 ) {
-    val animations = LocalSettingsState.current.animationsEnabled
     val status = decision.status
     val visual =
         when (status) {
@@ -747,17 +744,13 @@ private fun DashboardHeroCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // No idle animation here: a looping scale on this icon kept the whole
+                // Dashboard rendering at the display's refresh rate (~95% of a core)
+                // for a movement nobody noticed.
                 IconBubble(
                     icon = visual.icon,
                     tint = visual.accent,
                     container = visual.container,
-                    modifier =
-                        Modifier.pulse(
-                            enabled = status == HeroStatus.Protected && animations,
-                            min = 0.94f,
-                            max = 1.05f,
-                            durationMillis = 1300,
-                        ),
                 )
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
