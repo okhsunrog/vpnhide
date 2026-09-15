@@ -120,6 +120,16 @@
     <string name="dashboard_hero_unprotected_subtitle">Скрытие не активно</string>
     <string name="dashboard_hero_vpnoff_title">VPN выключен</string>
     <string name="dashboard_hero_vpnoff_subtitle">Скрытие неактивно без VPN</string>
+    <string name="dashboard_hero_note_applying">Изменение настроек ещё применяется</string>
+    <string name="dashboard_hero_note_application_unknown">Не удалось подтвердить последнее изменение настроек</string>
+    <string name="dashboard_hero_note_application_failed">Последнее изменение настроек не применилось</string>
+    <string name="dashboard_hero_note_routing_unknown">Не удалось определить, идёт ли VPN Hide через VPN</string>
+    <string name="dashboard_hero_note_checking">Проверяем состояние VPN…</string>
+    <string name="dashboard_hero_note_interrupted">Последняя проверка прервана, показан предыдущий результат</string>
+    <string name="dashboard_hero_note_failed">Последняя проверка не выполнилась, показан предыдущий результат</string>
+    <string name="dashboard_hero_note_results_changed">После последней проверки изменились VPN или настройки, запустите её снова</string>
+    <string name="dashboard_hero_note_results_unverified">Проверяем, актуальна ли последняя проверка…</string>
+    <string name="dashboard_hero_note_insufficient">Последняя проверка не смогла отнести ни один вектор к слою скрытия</string>
     <string name="dashboard_summary_modules">Модули</string>
     <string name="dashboard_summary_issues">Проблемы</string>
     <string name="dashboard_native_protection">Нативный уровень</string>

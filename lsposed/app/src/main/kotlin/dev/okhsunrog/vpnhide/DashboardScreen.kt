@@ -39,14 +39,13 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.VpnTransportWatcher
-import dev.okhsunrog.vpnhide.diagnostics.blockedOrNull
-import dev.okhsunrog.vpnhide.diagnostics.isTerminalDiagnosticState
 import dev.okhsunrog.vpnhide.diagnostics.routedTransitions
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
@@ -81,12 +80,13 @@ fun DashboardScreen(
     val state by DashboardCache.state.collectAsState()
     val loadError by DashboardCache.error.collectAsState()
     val loading by DashboardCache.loading.collectAsState()
-    val diagnosticState by DiagnosticsCache.state.collectAsState()
     val updateInfo by UpdateCheckCache.info.collectAsState()
-    // The LIVE gate — kept fresh by VpnTransportWatcher on every VPN transport change —
-    // overlays onto the cached DashboardCache.state.protection below so the hero and the
-    // blocked-prompt react to a VPN toggling on/off without waiting for a manual refresh.
-    val liveGate by RoutingGateCache.gate.collectAsState()
+    // The shared diagnostic projection: current eligibility (kept fresh by the routing
+    // gate the VPN transport watcher refreshes), the run in flight, the latest attempt
+    // and the latest measurement's applicability. The hero and the prompt under it are
+    // decided from it purely (heroDecision / effectiveProtection), never by overlaying
+    // flows of different vintages here.
+    val presentation by DiagnosticsCache.presentation.collectAsState()
     var showChangelog by remember { mutableStateOf(false) }
     var changelogData by remember { mutableStateOf<ChangelogData?>(null) }
     var showContact by remember { mutableStateOf(false) }
@@ -165,8 +165,8 @@ fun DashboardScreen(
     // its Checked tiles via the sticky DiagnosticsCache, so it never lands here.)
     val gateState = state
     if (gateState != null && loadError == null &&
-        liveGate == DiagnosticGate.ROUTED && gateState.protection !is ProtectionCheck.Checked &&
-        (loading || !isTerminalDiagnosticState(diagnosticState))
+        presentation.eligibility == DiagnosticEligibility.Eligible && gateState.protection !is ProtectionCheck.Checked &&
+        (loading || presentation.activeRunId != null)
     ) {
         DashboardLoadingState(modifier = modifier)
         return
@@ -224,8 +224,7 @@ fun DashboardScreen(
         // measured, so the hero/prompt react to a VPN toggle immediately. The ROUTED-but-
         // no-tiles-yet case shows a skeleton above while work is pending. A terminal
         // failure must remain visible here instead of retriggering work indefinitely.
-        val effectiveProtection: ProtectionCheck =
-            liveGate?.blockedOrNull()?.let { ProtectionCheck.Blocked(it) } ?: loadedState.protection
+        val effectiveProtection = effectiveProtection(loadedState.protection, presentation.eligibility)
         val effectiveState = loadedState.copy(protection = effectiveProtection)
 
         // Messages split by severity. Only errors/warnings affect the hero:
@@ -236,7 +235,12 @@ fun DashboardScreen(
         val infos = loadedState.messages.filter { it.severity == DashboardMessageSeverity.INFO }
 
         // Hero: the whole setup's health at a glance.
-        DashboardHeroCard(state = effectiveState, errorCount = errors.size, warningCount = warnings.size)
+        DashboardHeroCard(
+            state = effectiveState,
+            decision = heroDecision(loadedState, presentation, errorCount = errors.size, warningCount = warnings.size),
+            errorCount = errors.size,
+            warningCount = warnings.size,
+        )
 
         // Critical protection states sit right under the hero (not in a separate
         // mid-screen section): the VPN needs turning on, or a self-restart is
@@ -657,19 +661,38 @@ private data class HeroVisual(
     val subtitleRes: Int,
 )
 
+/** The subtitle a hero note replaces the status subtitle with; null keeps the status wording. */
+private fun heroNoteRes(note: HeroNote): Int? =
+    when (note) {
+        HeroNote.None -> null
+        HeroNote.Applying -> R.string.dashboard_hero_note_applying
+        HeroNote.ApplicationUnknown -> R.string.dashboard_hero_note_application_unknown
+        HeroNote.ApplicationFailed -> R.string.dashboard_hero_note_application_failed
+        HeroNote.RoutingUnknown -> R.string.dashboard_hero_note_routing_unknown
+        HeroNote.Checking -> R.string.dashboard_hero_note_checking
+        HeroNote.Interrupted -> R.string.dashboard_hero_note_interrupted
+        HeroNote.Failed -> R.string.dashboard_hero_note_failed
+        HeroNote.ResultsChanged -> R.string.dashboard_hero_note_results_changed
+        HeroNote.ResultsUnverified -> R.string.dashboard_hero_note_results_unverified
+        HeroNote.InsufficientEvidence -> R.string.dashboard_hero_note_insufficient
+    }
+
 /**
  * The big at-a-glance status card at the top of the Dashboard. Summarizes the
  * whole setup's health into one of four states with a tinted container, accent
- * icon and headline; the icon breathes when fully protected.
+ * icon and headline; the icon breathes when fully protected. [decision] also
+ * carries the note that qualifies the subtitle when the measurement is not the
+ * whole story.
  */
 @Composable
 private fun DashboardHeroCard(
     state: DashboardState,
+    decision: HeroDecision,
     errorCount: Int,
     warningCount: Int,
 ) {
     val animations = LocalSettingsState.current.animationsEnabled
-    val status = computeHeroStatus(state, errorCount, warningCount)
+    val status = decision.status
     val visual =
         when (status) {
             HeroStatus.Protected -> {
@@ -743,7 +766,7 @@ private fun DashboardHeroCard(
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = stringResource(visual.subtitleRes),
+                        text = stringResource(heroNoteRes(decision.note) ?: visual.subtitleRes),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -184,6 +184,16 @@
     <string name="dashboard_hero_unprotected_subtitle">Hiding is not active</string>
     <string name="dashboard_hero_vpnoff_title">VPN is off</string>
     <string name="dashboard_hero_vpnoff_subtitle">Hiding is inactive without a VPN</string>
+    <string name="dashboard_hero_note_applying">A configuration change is still being applied</string>
+    <string name="dashboard_hero_note_application_unknown">The last configuration change could not be confirmed</string>
+    <string name="dashboard_hero_note_application_failed">The last configuration change did not apply</string>
+    <string name="dashboard_hero_note_routing_unknown">Couldn\'t determine whether VPN Hide is routed through the VPN</string>
+    <string name="dashboard_hero_note_checking">Checking the VPN state…</string>
+    <string name="dashboard_hero_note_interrupted">The latest check was interrupted; showing the previous result</string>
+    <string name="dashboard_hero_note_failed">The latest check couldn\'t run; showing the previous result</string>
+    <string name="dashboard_hero_note_results_changed">The VPN or configuration changed since the last check; run it again</string>
+    <string name="dashboard_hero_note_results_unverified">Confirming the last check still applies…</string>
+    <string name="dashboard_hero_note_insufficient">The last check could not attribute any vector to a hiding layer</string>
     <string name="dashboard_summary_modules">Modules</string>
     <string name="dashboard_summary_issues">Issues</string>
     <string name="dashboard_native_protection">Native level</string>

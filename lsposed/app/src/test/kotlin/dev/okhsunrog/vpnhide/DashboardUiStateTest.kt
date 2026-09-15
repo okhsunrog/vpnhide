@@ -1,7 +1,19 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticAttempt
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticMeasurement
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticPresentation
+import dev.okhsunrog.vpnhide.diagnostics.EvidenceConclusion
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
+import dev.okhsunrog.vpnhide.diagnostics.MeasurementApplicability
+import dev.okhsunrog.vpnhide.diagnostics.MeasurementContext
+import dev.okhsunrog.vpnhide.diagnostics.MeasurementEvidence
+import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
+import dev.okhsunrog.vpnhide.diagnostics.ProbePlanEntry
+import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -192,6 +204,71 @@ class DashboardUiStateTest {
         // Native layer counts once (kmod active); +LSPosed = 2 of the 3 layers.
         assertEquals(2, activeModuleCount(state))
         assertEquals("2/3", moduleSummaryText(state))
+    }
+
+    @Test
+    fun `heroDecision overlays blocked eligibility and keeps protected only for an applicable sufficient measurement`() {
+        val checked = dashboardState(protection = ProtectionCheck.Checked(ok, ok))
+        val good = presentation()
+        assertEquals(HeroDecision(HeroStatus.Protected, HeroNote.None), heroDecision(checked, good, 0, 0))
+        assertEquals(HeroStatus.VpnOff, heroDecision(checked, good.copy(eligibility = DiagnosticEligibility.VpnOff), 0, 0).status)
+        assertEquals(
+            HeroDecision(HeroStatus.Attention, HeroNote.None),
+            heroDecision(checked, good.copy(eligibility = DiagnosticEligibility.SelfExcluded), 0, 0),
+        )
+        assertEquals(
+            ProtectionCheck.Blocked(DiagnosticGate.NEEDS_RESTART),
+            effectiveProtection(ProtectionCheck.Checked(ok, ok), DiagnosticEligibility.RestartApp),
+        )
+        assertEquals(HeroNote.Applying, heroDecision(checked, good.copy(eligibility = DiagnosticEligibility.Applying), 0, 0).note)
+        assertEquals(HeroStatus.Attention, heroDecision(checked, good.copy(eligibility = DiagnosticEligibility.Unknown), 0, 0).status)
+        assertEquals(
+            HeroDecision(HeroStatus.Attention, HeroNote.ResultsChanged),
+            heroDecision(checked, good.copy(applicability = MeasurementApplicability.Changed), 0, 0),
+        )
+        // A refresh in flight names itself but does not flip a protected hero.
+        assertEquals(
+            HeroDecision(HeroStatus.Protected, HeroNote.ResultsUnverified),
+            heroDecision(checked, good.copy(applicability = MeasurementApplicability.Unverified), 0, 0),
+        )
+        assertEquals(
+            HeroDecision(HeroStatus.Attention, HeroNote.InsufficientEvidence),
+            heroDecision(checked, good.copy(evidence = insufficient), 0, 0),
+        )
+        val interrupted = DiagnosticAttempt(2, RunOutcome.Interrupted, TransitionFailure.ContextChanged)
+        assertEquals(
+            HeroDecision(HeroStatus.Attention, HeroNote.Interrupted),
+            heroDecision(checked, good.copy(lastAttempt = interrupted), 0, 0),
+        )
+        // Errors still outrank: an unprotected hero is never lifted by a note.
+        assertEquals(HeroStatus.Unprotected, heroDecision(checked, good, errorCount = 1, warningCount = 0).status)
+        assertEquals(
+            HeroNote.Checking,
+            heroDecision(checked, good.copy(measurement = null, eligibility = DiagnosticEligibility.Checking), 0, 0).note,
+        )
+    }
+
+    private val sufficient = MeasurementEvidence(5, 0, 0, 0, 0, 0, 0, EvidenceConclusion.NoObservedLeak)
+    private val insufficient = MeasurementEvidence(0, 0, 5, 0, 0, 0, 0, EvidenceConclusion.Insufficient)
+
+    private fun presentation(): DiagnosticPresentation {
+        val plan = NATIVE_CHECKS.map { ProbePlanEntry(it.id) }
+        val context = MeasurementContext("pid:1;uid:10", "self", "vpn=tun0;self=ROUTED", "backend=Kmod", 0, 1, 10)
+        val measurement =
+            DiagnosticMeasurement(1, context, plan, plan.associate { it.id to CheckOutcome.HiddenByBackend }, true, false, 20)
+        return DiagnosticPresentation(
+            eligibility = DiagnosticEligibility.Eligible,
+            activeRunId = null,
+            activeStage = null,
+            activeResults = null,
+            lastAttempt = DiagnosticAttempt(1, RunOutcome.Completed, measurement = measurement),
+            lastAttemptResults = null,
+            measurement = measurement,
+            measurementResults = null,
+            applicability = MeasurementApplicability.MatchesLastObservation,
+            evidence = sufficient,
+            currentSuccess = true,
+        )
     }
 
     private fun dashboardState(

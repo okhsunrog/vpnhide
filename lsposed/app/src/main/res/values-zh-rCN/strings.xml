@@ -176,6 +176,16 @@
     <string name="dashboard_hero_unprotected_subtitle">隐藏尚未生效</string>
     <string name="dashboard_hero_vpnoff_title">VPN 已关闭</string>
     <string name="dashboard_hero_vpnoff_subtitle">未开启 VPN，隐藏不生效</string>
+    <string name="dashboard_hero_note_applying">配置更改仍在应用中</string>
+    <string name="dashboard_hero_note_application_unknown">无法确认上一次配置更改</string>
+    <string name="dashboard_hero_note_application_failed">上一次配置更改未能应用</string>
+    <string name="dashboard_hero_note_routing_unknown">无法确定 VPN Hide 是否经过 VPN</string>
+    <string name="dashboard_hero_note_checking">正在检测 VPN 状态…</string>
+    <string name="dashboard_hero_note_interrupted">最近一次检查被中断，显示的是上一次结果</string>
+    <string name="dashboard_hero_note_failed">最近一次检查未能运行，显示的是上一次结果</string>
+    <string name="dashboard_hero_note_results_changed">上次检查后 VPN 或配置已变化，请再次运行检查</string>
+    <string name="dashboard_hero_note_results_unverified">正在确认上次检查是否仍然适用…</string>
+    <string name="dashboard_hero_note_insufficient">上次检查无法将任何向量归因于某个隐藏层</string>
     <string name="dashboard_summary_modules">模块</string>
     <string name="dashboard_summary_issues">问题</string>
     <string name="dashboard_native_protection">原生层</string>

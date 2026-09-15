@@ -906,6 +906,18 @@ applicability words the banner (ready, results changed with a retry that starts
 a new run, results unverified). The screen no longer overlays the live gate on
 the legacy state; the live gate remains the trigger for the automatic suite.
 
-Boundary: the Dashboard hero, the bridge and the bundle still render the legacy
-`DiagnosticsCache.State` plus the live gate overlay; moving them onto the
-projection (and the bundle/bridge schema decision this implies) is the next stage.
+The Dashboard hero renders the projection through the pure `heroDecision`: the
+cached tiles are overlaid with the current eligibility (`effectiveProtection`,
+which replaces the former live-gate overlay), and a `HeroNote` qualifies the
+subtitle. Notes that make a positive claim unsafe (a configuration change
+applying, unresolved or failed; unknown routing; a checking state with no
+measurement; an interrupted or failed latest attempt; a changed measurement;
+insufficient evidence) downgrade a Protected hero to Attention. ResultsUnverified
+only names a refresh in flight and keeps the previous status, so a routine
+Dashboard refresh does not flicker; this is a deliberate softening of §8's
+"positive summary requires MatchesLastObservation" for the duration of one
+routing re-read. The skeleton gate uses the projection's active run instead of
+the legacy terminal state.
+
+Boundary: the bridge and the bundle still serialize the legacy `gate`/`report`
+fields; adding the projection to them (schema decision included) is the next stage.
