@@ -144,12 +144,32 @@
     {
       "id": "capabilities-limits",
       "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能力与限制" },
-      "articles": []
+      "articles": [
+        {
+          "id": "capabilities-limits",
+          "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能力与限制" },
+          "keywords": {
+            "en": ["limits", "limitations", "external ip", "server-side", "anti-fraud", "root", "split tunneling", "anti-cheat"],
+            "ru": ["ограничения", "пределы", "внешний ip", "сервер", "антифрод", "root", "split tunneling"],
+            "zh": ["限制", "外部 ip", "服务器端", "反欺诈", "root", "分应用代理", "反作弊"]
+          }
+        }
+      ]
     },
     {
       "id": "backends-hooks",
       "title": { "en": "Under the hood", "ru": "Подробности", "zh": "深入了解" },
-      "articles": []
+      "articles": [
+        {
+          "id": "detection-vectors",
+          "title": { "en": "Detection vectors and coverage", "ru": "Способы обнаружения и покрытие", "zh": "检测向量与覆盖" },
+          "keywords": {
+            "en": ["detection vectors", "coverage", "networkinterface", "getifaddrs", "netlink", "raw syscall", "svc", "selinux", "java vs native"],
+            "ru": ["векторы обнаружения", "покрытие", "networkinterface", "getifaddrs", "netlink", "raw syscall", "svc", "selinux"],
+            "zh": ["检测向量", "覆盖", "networkinterface", "getifaddrs", "netlink", "原始系统调用", "svc", "selinux"]
+          }
+        }
+      ]
     }
   ]
 }
