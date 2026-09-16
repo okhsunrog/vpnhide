@@ -45,21 +45,23 @@ internal data class TargetsSnapshot(
     val canonicalConfig: CanonicalConfig?,
     val apatchSuperkeySaved: Boolean = false,
     val activeNativeBackendId: NativeBackendId? = null,
+    val builtinModuleInstalled: Boolean = false,
     /** Exact package → UID projection from the shared per-user package
      * inventory. The picker uses it to enforce native capacity before Save,
      * including profiles and shared UIDs. */
     val packageUids: Map<String, List<Int>> = emptyMap(),
 ) {
-    /** True if any native backend is installed (kmod / KPM / Zygisk). The
+    /** True if any native backend is installed (kmod / built-in / KPM / Zygisk). The
      * picker's "N" toggle is meaningful only when at least one is present. */
     val anyNativeInstalled: Boolean
-        get() = kmodModuleInstalled || kpmModuleInstalled || zygiskModuleInstalled
+        get() = kmodModuleInstalled || builtinModuleInstalled || kpmModuleInstalled || zygiskModuleInstalled
 
     val displayNativeBackendId: NativeBackendId?
         get() =
             activeNativeBackendId
                 ?: when {
                     kmodModuleInstalled -> NativeBackendId.Kmod
+                    builtinModuleInstalled -> NativeBackendId.Builtin
                     kpmModuleInstalled -> NativeBackendId.Kpm
                     zygiskModuleInstalled -> NativeBackendId.Zygisk
                     else -> null
@@ -138,6 +140,7 @@ internal fun parseTargetsSnapshot(rootSnapshot: RootSnapshot): TargetsSnapshot {
     // fields — there is nothing to fill in here beyond the config itself.
     return TargetsSnapshot(
         kmodModuleInstalled = sections["kmod_module_dir"]?.trim() == "1",
+        builtinModuleInstalled = sections["builtin_module_dir"]?.trim() == "1",
         kpmModuleInstalled = sections["kpm_module_dir"]?.trim() == "1",
         zygiskModuleInstalled = sections["zygisk_module_dir"]?.trim() == "1",
         portsModuleInstalled = portsInstalled,

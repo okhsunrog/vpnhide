@@ -303,7 +303,7 @@
     <string name="reset_button_sub">Удалить все файлы конфигов, состояния и целей, которые VPN Hide оставил на устройстве</string>
     <string name="reset_title">Удалить оставшиеся файлы</string>
     <string name="reset_warning">Будут безвозвратно удалены все файлы конфигов, состояния, статистики и целей, которые VPN Hide и его модули записывали вне своих модульных каталогов. Действие необратимо.</string>
-    <string name="reset_instructions">Выполняйте сброс только после того, как удалили все модули VPN Hide в root-менеджере, выключили LSPosed-модуль VPN Hide и перезагрузили устройство. Каталоги модулей, само приложение и временное состояние здесь не трогаются — они удаляются после шагов выше.</string>
+    <string name="reset_instructions">Выполняйте сброс только после того, как удалили все модули VPN Hide в root-менеджере, выключили LSPosed-модуль VPN Hide и перезагрузили устройство. Каталоги модулей, само приложение и временное состояние здесь не трогаются — они удаляются после шагов выше. Для встроенного бэкенда также загрузите ядро без VPN Hide: удаление companion-модуля не удаляет хуки ядра.</string>
     <string name="reset_checking">Проверка состояния модулей…</string>
     <string name="reset_running">Удаление файлов…</string>
     <string name="reset_blocked_intro">Пока нельзя — VPN Hide ещё активен. Сначала удалите это и перезагрузитесь:</string>
@@ -311,7 +311,7 @@
     <string name="reset_blocker_kpm">KPM ещё установлен</string>
     <string name="reset_blocker_zygisk">Модуль Zygisk ещё установлен</string>
     <string name="reset_blocker_ports">Модуль портов ещё установлен</string>
-    <string name="reset_blocker_kernel">Хук ядра ещё загружен — нужна перезагрузка</string>
+    <string name="reset_blocker_kernel">Хуки ядра ещё присутствуют. После удаления загружаемого модуля нужна перезагрузка; для встроенного бэкенда нужно ядро без VPN Hide.</string>
     <string name="reset_blocker_lsposed">LSPosed-хук ещё активен</string>
     <string name="reset_confirm">Удалить всё</string>
     <string name="reset_done_body">Готово. Все оставшиеся файлы удалены. Теперь можно удалить VPN Hide.</string>
@@ -325,7 +325,7 @@
     <string name="dashboard_action_details">Подробности</string>
     <string name="dashboard_action_learn_more">Подробнее</string>
     <string name="dashboard_issue_kmod_capable_but_zygisk">Ваше ядро поддерживает модуль ядра — он работает в пространстве ядра и невидим для анти-тампер проверок. Zygisk тоже работает, но банковские и платёжные приложения могут обнаружить его хуки, если для них включён Native. Установите %1$s и удалите Zygisk-модуль.</string>
-    <string name="dashboard_issue_native_conflict_kernel">Модуль ядра (.ko) и KPM установлены одновременно. Они перехватывают одни и те же функции ядра, и при одновременной работе устройство может полностью зависнуть. Оставьте только один — удалите либо модуль ядра, либо KPM.</string>
+    <string name="dashboard_issue_native_conflict_kernel">Бэкенд ядра (.ko или встроенный) и KPM активны одновременно. Они перехватывают одни и те же функции ядра и могут вызвать зависание устройства. Оставьте один бэкенд ядра; при встроенном бэкенде удалите KPM.</string>
     <string name="dashboard_issue_native_conflict_deferred">Модуль ядра (.ko) и KPM установлены одновременно. KPM отключился при загрузке, чтобы не подвесить устройство, и сейчас бездействует. Оставьте только один — удалите KPM (или модуль ядра).</string>
     <string name="dashboard_issue_kpm_awaiting_superkey">KPM установлен, но не активен: APatch/FolkPatch не смог загрузить его через доверенный su-токен. Сохраните SuperKey в Настройки → Безопасность и перезагрузитесь для активации нативного скрытия.</string>
     <string name="dashboard_issue_module_reboot_to_activate">Модуль %1$s установлен, но ещё не активен — перезагрузите устройство, чтобы он заработал.</string>
@@ -615,4 +615,5 @@
     <string name="config_capture_logging">Отладочные логи остаются включены, пока идёт сбор данных.</string>
     <string name="config_changes_unavailable">Изменение конфигурации недоступно</string>
     <string name="config_close">Закрыть</string>
+    <string name="reset_blocker_builtin">Companion-модуль встроенного бэкенда ещё установлен</string>
 </resources>

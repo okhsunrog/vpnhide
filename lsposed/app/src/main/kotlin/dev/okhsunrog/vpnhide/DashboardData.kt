@@ -159,7 +159,7 @@ internal enum class MultiNativeSeverity { None, Warning, Error }
 
 /**
  * Severity of having more than one native backend active at runtime
- * (docs/storage.md §4.3). The .ko + KPM pair is an ERROR because they wrap the same kernel
+ * (docs/storage.md §4.3). The .ko/built-in + KPM pair is an ERROR because they wrap the same kernel
  * functions and co-residence can hard-freeze the kernel; any other active
  * overlap is a WARNING (merely redundant — the backstops pick one).
  */
@@ -167,11 +167,12 @@ internal fun classifyMultiNative(
     kmodActive: Boolean,
     kpmActive: Boolean,
     zygiskActive: Boolean,
+    builtinActive: Boolean = false,
 ): MultiNativeSeverity {
-    val count = listOf(kmodActive, kpmActive, zygiskActive).count { it }
+    val count = listOf(kmodActive, builtinActive, kpmActive, zygiskActive).count { it }
     return when {
         count <= 1 -> MultiNativeSeverity.None
-        kmodActive && kpmActive -> MultiNativeSeverity.Error
+        (kmodActive || builtinActive) && kpmActive -> MultiNativeSeverity.Error
         else -> MultiNativeSeverity.Warning
     }
 }

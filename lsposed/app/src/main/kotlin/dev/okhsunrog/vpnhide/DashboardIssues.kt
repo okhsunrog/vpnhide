@@ -457,6 +457,7 @@ private fun multiNativeIssues(facts: DashboardFacts): List<DashboardIssue> {
     val severity =
         classifyMultiNative(
             kmodActive = moduleActive(modules.kmod.state),
+            builtinActive = moduleActive(modules.builtin.state),
             kpmActive = moduleActive(modules.kpm.state),
             zygiskActive = moduleActive(modules.zygisk.state),
         )

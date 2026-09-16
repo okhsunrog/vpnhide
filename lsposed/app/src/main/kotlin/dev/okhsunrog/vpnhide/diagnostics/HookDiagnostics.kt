@@ -4,6 +4,7 @@ import android.content.Context
 import dev.okhsunrog.vpnhide.DebugShellSnapshot
 import dev.okhsunrog.vpnhide.Protocol
 import dev.okhsunrog.vpnhide.RootSnapshot
+import dev.okhsunrog.vpnhide.backendId
 import dev.okhsunrog.vpnhide.expectedInstalledHooks
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.hasHook
@@ -88,8 +89,8 @@ internal fun buildHookDiagnosticsText(
 }
 
 private fun statusByBackend(shellSnapshot: DebugShellSnapshot): Map<HookIds.Backend, Protocol.Status?> =
-    BACKEND_STATE_SECTIONS.mapValues { (_, section) ->
-        parseProtocolStatusBlock(shellSnapshot.sections[section].orEmpty())
+    BACKEND_STATE_SECTIONS.mapValues { (backend, section) ->
+        parseProtocolStatusBlock(shellSnapshot.sections[section].orEmpty())?.takeIf { it.backendId == backend }
     }
 
 private fun StringBuilder.appendBackendStatus(

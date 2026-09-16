@@ -66,6 +66,12 @@ class DebugShellSnapshotTest {
 
         // Paths reach the script through the assignment prelude; check both the
         // value Kotlin passes and the script's use of it.
+        assertTrue(command.contains("VPNHIDE_BUILTIN_DIR='$BUILTIN_MODULE_DIR'"))
+        assertTrue(command.contains("VPNHIDE_BUILTIN_ACTIVATOR='$BUILTIN_ACTIVATOR'"))
+        assertTrue(command.contains("VPNHIDE_BUILTIN_LOAD_STATUS='$BUILTIN_LOAD_STATUS_FILE'"))
+        assertTrue(command.contains("emit_file builtin_prop"))
+        assertTrue(command.contains("emit_eval builtin_module_state"))
+        assertTrue(command.contains("emit_file builtin_load_status"))
         assertTrue(command.contains("VPNHIDE_KPM_ACTIVATOR='$KPM_ACTIVATOR'"))
         assertTrue(command.contains("${'$'}VPNHIDE_KPM_ACTIVATOR state"))
         assertTrue(command.contains("VPNHIDE_KPM_LOAD_STATUS='$KPM_LOAD_STATUS_FILE'"))
