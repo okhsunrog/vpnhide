@@ -978,3 +978,77 @@ measurement, else the blocking eligibility, else null) as its `diagnostics`
 summary, so the two no longer describe different instants. The Dashboard's
 routed-transition refresh keys on the presentation's latest attempt not being
 `Completed`, which is what the legacy `!is Checked` test meant.
+
+## 22. Situation and read reasons
+
+Implemented 2026-09-16 after the design review in
+[ui-state-presentation-review.md](ui-state-presentation-review.md), which found
+that §21's decomposition (cached tiles overlaid with the current eligibility,
+qualified by a note) let the hero claim "VPN hidden" while the VPN state was the
+very thing being re-read, and let the hero and the Diagnostics banner keep two
+precedence orders that had already drifted apart. This section supersedes §21's
+"softening" paragraph and the routed-transition rule above.
+
+Every re-read of an observation states its cause. `ReadReason` is `Background`
+(our own process invalidated it: a root dependency after a config phase or the
+startup reconcile, the foreground-return safety net, the run coordinator's own
+gate reads), `Transition` (the VPN transport or default-network callback said the
+fact may have changed) or `Explicit` (the user asked). The observation reducer
+keeps a `StaleMark(reason, since)` from the moment a re-read is owed until the
+current generation publishes or fails; overlapping causes keep the earliest
+`since` and the strongest reason, and the request that starts carries it.
+
+The presentation carries routing as knowledge, not as an admission decision:
+`RoutingKnowledge.Known(fact, observedAt)`, `Verifying(lastKnown, reason, since)`
+while a re-read is owed or running, or `Unknown(cause, lastKnown)` after a failed
+or quarantined read. Its branches mirror `diagnosticEligibility`'s routing branches
+exactly, so eligibility keeps its values for the run coordinator and the bundle.
+The presentation also names whether the active run is automatic.
+
+`situation(presentation, now)` classifies once, in one precedence, into an
+exhaustive `Situation`: `Initializing`; `Checking(what, lastKnown, reason, since)`
+with `what` = the VPN state, the suite or a configuration change being applied;
+`VpnOff`; `NotMeasurable` (self excluded); `ActionNeeded(RestartApp |
+RestartDevice | ApplicationFailed | ApplicationUnknown)`; `CouldNotCheck(
+RoutingUnknown | RunFailed | Interrupted | ProbeUnavailable)`; `Measured(evidence,
+staleness)` with staleness `Current`, `Changed` or `Confirming(reason, since)`.
+Precedence: process health (initialization, a quarantined probe) → the action the
+user owes → a configuration change applying → routing knowledge → a run in flight
+→ the latest attempt → the measurement. A `Verifying` read is `Checking` at once
+for `Explicit` and `Transition` causes and after a 2 s grace for `Background`
+ones; inside that grace the last known fact stands and the measurement is
+`Confirming`, which every surface renders exactly like `Current`. That grace is
+the bounded, reasoned form of §21's softening: a routine top-up by our own process
+draws nothing, a user-visible cause or a slow read is named. An automatic
+confirmation of a still-applicable measurement is silent for the length of the run
+(the run coordinator's deadline bounds it); an explicit re-run is `Checking(Suite)`.
+A run that never started because of a condition (`DiagnosticAttempt.blocked`) is
+never a failed check (I13). `DiagnosticsCache.situation` publishes one value per
+presentation plus a single re-emission when a Background grace expires while the
+read is still in flight; it words, it never schedules a run (I16).
+
+The Dashboard hero and the Diagnostics banner are two wording maps over the
+Situation (`heroVisual`, `diagnosticScreenDecision`); the tiles, the issue counts,
+the results list and the attempt notice stay per-surface side channels. The hero's
+colour is a function of the case: `Checking` is neutral grey with a progress
+indicator in the icon bubble and a subtitle naming what is checked, keeping the
+last known condition's prompt with a busy button; `VpnOff` and `NotMeasurable`
+are neutral; `ActionNeeded` and `CouldNotCheck` are Attention with the action or
+the cause in the subtitle and the matching prompt; `Measured` takes the worst
+signal of the tiles and the dashboard issues, and a changed or insufficient
+measurement is at least Attention without ever softening a red one. The bridge
+overlays the same condition on its tiles (`overlayCondition`) so its legacy gate
+says "VPN off" whenever the hero does. The top-bar indicator follows only
+`Explicit` derivations. An explicit re-check always requests a new suite, and a
+known VPN off → on while the Dashboard is up requests one confirmation suite as
+a `Transition` (an event, not a rerun at rest; a gate already routed when the
+screen composes is not a transition). Own-roles saves keep `Changed` plus a manual
+re-check, and the foreground-return re-probe stays `Background`, both by the
+maintainer's decision.
+
+Boundary: the activator does not report whether a forced activation changed
+anything, so the startup reconcile still invalidates root observations and the
+Background grace is what keeps that re-read silent; a targeted invalidation of
+runtime-only sections is the cheaper follow-up if the background work matters.
+The bundle carries `lastKnownRouting` and `routingRead(reason, pendingMs)` but not
+the Situation itself.

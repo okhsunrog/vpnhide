@@ -1,8 +1,17 @@
 # UI state presentation: design review
 
 Status: review of branch `refactor/app-state-cleanup` (PR #338) as of commit
-`4f6209e7`, 2026-09-16. Read-only; nothing here is implemented. Paths are
-relative to `lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/`.
+`4f6209e7`, 2026-09-16, written read-only. Approach C (§3, §4) was then
+implemented on branch `refactor/ui-situation` the same day; the record of what
+runs is transition contract §22. Decisions on the open questions (§4): 1 re-run
+on explicit; 2 one confirmation suite on a routed transition while the Dashboard
+is up; 3 Transition grace 0; 4 neutral grey, no fifth colour; 5 self excluded
+neutral; 6 own-roles save keeps Changed plus a manual re-check (earlier
+maintainer decision); 7 foreground return is Background; 8 additive bundle
+fields, no bump. Stage 8 (activator "runtime unchanged" marker) was declined in
+favour of a targeted invalidation if the background work ever matters. Paths
+below are relative to `lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/` and
+describe the code as it was before the change.
 
 Scope: the Dashboard hero (title, colour, subtitle), the prompts under it, the
 skeleton gate, and the Diagnostics banners, all of which render

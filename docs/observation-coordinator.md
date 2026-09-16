@@ -26,10 +26,14 @@ while loading, stale, failed or quarantined. `RoutingGateCache.gate` uses `curre
 a VPN transition marks it stale immediately, before the 750 ms debounced recheck.
 This changes readiness freshness, not diagnostic result classification or retention.
 For eligibility, an invalidated observation that still awaits its re-read is
-`Checking` (the hero says "confirming the last check still applies"); `Unknown` is
-reserved for a read that failed, a quarantined source, or an attempt that never
-produced a value. Mapping the stale window to `Unknown` flashed "couldn't determine
-whether VPN Hide is routed" on every VPN toggle.
+`Checking`; `Unknown` is reserved for a read that failed, a quarantined source, or
+an attempt that never produced a value. Mapping the stale window to `Unknown`
+flashed "couldn't determine whether VPN Hide is routed" on every VPN toggle. What
+the screens render during that window is not the eligibility but the routing
+knowledge the presentation keeps (`RoutingKnowledge.Verifying` with the last
+known fact and the read's reason): a user-requested or network-triggered re-read
+shows a neutral "Checking…" at once, a background one keeps the last known state
+for a 2 s grace (transition contract §22).
 `VpnTransportWatcher` is only a trigger; the gate value always comes from the
 root probe. It listens two ways, because one is blind by design: a
 `TRANSPORT_VPN` listen (without the builder's default `NOT_VPN` capability, which
