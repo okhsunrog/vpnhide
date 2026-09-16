@@ -54,7 +54,7 @@ jobs:
       portshide: ${{ steps.decide.outputs.portshide }}
       # Any kernel-side area: the QEMU probes feed kmod, kpm and builtin.
       native: ${{ steps.decide.outputs.native }}
-      # The Rust workspace (crates, zygisk) and lsposed/native.
+      # The Rust workspace (including app-native crates and zygisk).
       rust: ${{ steps.decide.outputs.rust }}
     steps:
       # For pull requests the filter reads the diff through the API; no checkout.
@@ -297,7 +297,7 @@ jobs:
           gcc -O2 -Wall -Wextra -Werror -I.. -o /tmp/test_protocol test_protocol.c
           /tmp/test_protocol protocol_vectors.tsv
 
-  # Rust workspace and lsposed/native: format, clippy for every target, tests.
+  # Rust workspace: format, clippy for every target, tests.
   rust:
     needs: [setup, changes]
     if: needs.changes.outputs.rust == 'true'
@@ -320,23 +320,18 @@ jobs:
           targets: |
             target
             zygisk/target
-            lsposed/native/target
       - name: rustfmt
-        run: |
-          cargo fmt --check
-          cd lsposed/native && cargo fmt --check
+        run: cargo fmt --check
       - name: clippy (protocol + activator)
         run: cargo clippy -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator --all-targets -- -D warnings
       - name: rustup target add armv7 (zygisk 32-bit)
         run: rustup target add armv7-linux-androideabi
       - name: clippy (zygisk)
         run: cargo ndk -t arm64-v8a -t armeabi-v7a clippy -p vpnhide_zygisk --tests -- -D warnings
-      - name: clippy (lsposed native)
-        run: cd lsposed/native && cargo ndk -t arm64-v8a -t armeabi-v7a clippy --tests -- -D warnings
+      - name: clippy (app native)
+        run: cargo ndk -t arm64-v8a -t armeabi-v7a clippy -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_app_helper --tests -- -D warnings
       - name: cargo test (workspace)
-        run: cargo test -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_zygisk
-      - name: cargo test (lsposed native)
-        run: cd lsposed/native && cargo test
+        run: cargo test -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_zygisk -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_app_helper
 
   kmod-activator:
     needs: [setup, changes]
@@ -875,7 +870,7 @@ jobs:
       - uses: ./.github/actions/cargo-cache
         with:
           key: android
-          targets: lsposed/native/target
+          targets: target
 
       # Gradle cache (deps + configuration cache + wrapper). cache-read-only
       # on PRs so only main pushes write the cache.

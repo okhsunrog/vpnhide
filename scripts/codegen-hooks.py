@@ -13,7 +13,7 @@ and status error codes for every language that touches the protocol:
   - kmod/KPM   C   -> kmod/generated/hook_ids.h
   - protocol   Rust-> crates/protocol/src/generated/hook_ids.rs
   - zygisk     Rust-> zygisk/src/generated/hook_ids.rs
-  - lsposed    Rust-> lsposed/native/src/generated/hook_ids.rs
+  - lsposed    Kotlin-> .../generated/HookIds.kt
   - app        Kotlin-> .../generated/HookIds.kt
 
 Re-run after editing data/hooks.toml and commit the regenerated files. CI's
@@ -44,8 +44,8 @@ TOML_PATH = REPO_ROOT / "data" / "hooks.toml"
 
 # Targets are only the protocol participants (§1.3): the kernel backends (C),
 # the Zygisk backend (Rust), and the app + system_server hook (Kotlin). NOT
-# lsposed/native — that Rust crate is the diagnostic-probe cdylib; it
-# consumes iface_lists (VPN-name matching) but never the protocol/registry.
+# The app-native checks crate is a diagnostic-probe library; it consumes
+# iface_lists (VPN-name matching) but never the protocol/registry.
 OUT_KMOD = REPO_ROOT / "kmod" / "generated" / "hook_ids.h"
 OUT_PROTOCOL_RS = REPO_ROOT / "crates" / "protocol" / "src" / "generated" / "hook_ids.rs"
 OUT_ZYGISK = REPO_ROOT / "zygisk" / "src" / "generated" / "hook_ids.rs"

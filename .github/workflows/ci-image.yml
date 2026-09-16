@@ -8,7 +8,7 @@ on:
       - .github/workflows/ci-image.yml
       - lsposed/gradle/libs.versions.toml
       - lsposed/gradle/wrapper/gradle-wrapper.properties
-      - lsposed/native/Cargo.lock
+      - Cargo.lock
       - zygisk/Cargo.lock
   schedule:
     - cron: '0 3 1 * *'

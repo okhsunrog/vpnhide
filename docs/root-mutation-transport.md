@@ -12,8 +12,9 @@ Destroying the Java `Process` for `su` does not establish that a privileged chil
 stopped. A delayed root authorization can also launch a command after the caller
 already timed out. Both cases need evidence beyond the app's job/PID lifetime.
 
-`vhmutate` is a short-lived supervisor, built in `lsposed/native/` from the existing
-Rust dependencies. It holds a nonblocking exclusive `flock` and enables Linux
+`vhmutate` is a short-lived supervisor, built as the `vpnhide_app_helper` binary in
+`crates/app-helper/` from the existing Rust dependencies. It holds a nonblocking
+exclusive `flock` and enables Linux
 [`PR_SET_CHILD_SUBREAPER`](https://man7.org/linux/man-pages/man2/PR_SET_CHILD_SUBREAPER.2const.html).
 Orphaned descendants return to this supervisor; it uses
 [`waitpid`](https://man7.org/linux/man-pages/man2/wait.2.html) until its shell has an

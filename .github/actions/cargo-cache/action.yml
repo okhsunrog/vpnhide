@@ -24,7 +24,6 @@ runs:
           /usr/local/cargo/registry
           /usr/local/cargo/git
           ${{ inputs.targets }}
-        # Both lock files feed every key: a job that does not build lsposed/native
-        # invalidates a little too often, which beats a stale registry.
-        key: cargo-${{ runner.os }}-${{ inputs.key }}-${{ hashFiles('Cargo.lock', 'lsposed/native/Cargo.lock') }}
+        # One workspace lockfile feeds every native and host build.
+        key: cargo-${{ runner.os }}-${{ inputs.key }}-${{ hashFiles('Cargo.lock') }}
         restore-keys: cargo-${{ runner.os }}-${{ inputs.key }}-

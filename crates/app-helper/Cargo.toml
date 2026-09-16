@@ -1,0 +1,23 @@
+[package]
+name = "vpnhide_app_helper"
+version = "1.2.5"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Root observations and supervised app mutations for vpnhide."
+
+[[bin]]
+name = "vhprobe"
+path = "src/bin/vhprobe.rs"
+
+[[bin]]
+name = "vhmutate"
+path = "src/bin/vhmutate.rs"
+
+[dependencies]
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+vpnhide_activator = { path = "../activator" }
+vpnhide_apatch_abi = { path = "../apatch-abi" }
+vpnhide_checks = { path = "../checks" }

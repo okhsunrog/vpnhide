@@ -8,7 +8,7 @@ import dev.okhsunrog.vpnhide.generated.HookIds
 /**
  * One native (kmod / KPM / zygisk-covered) detection probe. [id] is the stable,
  * non-localized key that matches the Rust probe registry (`run_all` in
- * lsposed/native) — the app joins probe results to these specs by id. [labelRes]
+ * crates/checks) — the app joins probe results to these specs by id. [labelRes]
  * is the user-facing localized name shown on the Diagnostics screen;
  * [expectedHooks] are the hooks that should cover this vector.
  */

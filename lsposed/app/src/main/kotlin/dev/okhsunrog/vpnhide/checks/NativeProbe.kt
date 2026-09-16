@@ -35,7 +35,7 @@ object NativeProbe {
      *
      * A probe parses whatever the kernel returns on an arbitrary vendor build,
      * so the native side catches its own panics and rethrows them here as a
-     * Java exception (see the JNI entry in lsposed/native). Swallowing it costs
+     * Java exception (see the JNI entry in crates/checks-jni). Swallowing it costs
      * one check run — the alternative is the whole app going down on a device
      * whose kernel returns something we did not anticipate. The panic message
      * and its file:line are in logcat under `VpnHide-Native`.

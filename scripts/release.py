@@ -20,7 +20,7 @@ What it does, atomically:
   * Patch the pinned version in:
       - `{kmod,zygisk,portshide}/module/module.prop` (version, versionCode)
       - `zygisk/Cargo.toml`                            (first `version = "..."`)
-      - `lsposed/native/Cargo.toml`                    (first `version = "..."`)
+      - app-native Cargo manifests under `crates/`     (first `version = "..."`)
       - `lsposed/app/build.gradle.kts`                 (versionCode; versionName
         is derived from `build-version.py`/the git tag, not patched)
 
@@ -135,8 +135,10 @@ def patch_all_sources(version: str, version_code: int, *, dry_run: bool) -> None
     update_module_prop(REPO_ROOT / "portshide/module/module.prop", version, vc, dry_run=dry_run)
     update_cargo_toml(REPO_ROOT / "crates/protocol/Cargo.toml", version, dry_run=dry_run)
     update_cargo_toml(REPO_ROOT / "crates/activator/Cargo.toml", version, dry_run=dry_run)
+    update_cargo_toml(REPO_ROOT / "crates/checks/Cargo.toml", version, dry_run=dry_run)
+    update_cargo_toml(REPO_ROOT / "crates/checks-jni/Cargo.toml", version, dry_run=dry_run)
+    update_cargo_toml(REPO_ROOT / "crates/app-helper/Cargo.toml", version, dry_run=dry_run)
     update_cargo_toml(REPO_ROOT / "zygisk/Cargo.toml", version, dry_run=dry_run)
-    update_cargo_toml(REPO_ROOT / "lsposed/native/Cargo.toml", version, dry_run=dry_run)
     update_gradle_kts(REPO_ROOT / "lsposed/app/build.gradle.kts", vc, dry_run=dry_run)
 
 
@@ -149,7 +151,7 @@ def sync_cargo_locks() -> None:
     "X.Y.Z-dirty". `cargo update --offline --workspace` only bumps the workspace
     members' own versions (no registry access, no dependency churn).
     """
-    for lock_dir in (REPO_ROOT, REPO_ROOT / "lsposed" / "native"):
+    for lock_dir in (REPO_ROOT,):
         subprocess.run(
             ["cargo", "update", "--offline", "--workspace"],
             cwd=lock_dir,
@@ -196,9 +198,11 @@ def main() -> int:
         REPO_ROOT / "portshide/module/module.prop",
         REPO_ROOT / "crates/protocol/Cargo.toml",
         REPO_ROOT / "crates/activator/Cargo.toml",
+        REPO_ROOT / "crates/checks/Cargo.toml",
+        REPO_ROOT / "crates/checks-jni/Cargo.toml",
+        REPO_ROOT / "crates/app-helper/Cargo.toml",
         REPO_ROOT / "zygisk/Cargo.toml",
         REPO_ROOT / "lsposed/app/build.gradle.kts",
-        REPO_ROOT / "lsposed/native/Cargo.toml",
     ]
     for f in files:
         if not f.exists():
@@ -234,13 +238,13 @@ def main() -> int:
     console.print("  [green]✓[/green] zygisk/module/module.prop")
     console.print("  [green]✓[/green] portshide/module/module.prop")
     console.print("  [green]✓[/green] zygisk/Cargo.toml")
-    console.print("  [green]✓[/green] lsposed/native/Cargo.toml")
+    console.print("  [green]✓[/green] app-native Cargo.toml files")
     console.print("  [green]✓[/green] lsposed/app/build.gradle.kts")
 
     # Keep Cargo.lock in step with the bumped Cargo.toml versions so the release
     # build starts from a clean tree (otherwise every artifact gets "-dirty").
     sync_cargo_locks()
-    console.print("  [green]✓[/green] Cargo.lock (+ lsposed/native)")
+    console.print("  [green]✓[/green] Cargo.lock")
 
     console.print()
     console.print("[bold]Next steps:[/bold]")

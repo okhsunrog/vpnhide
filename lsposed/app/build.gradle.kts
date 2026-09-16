@@ -83,7 +83,10 @@ val rustNdkDir =
         ?.takeIf { it.isDirectory }
         ?.absolutePath
         ?: rustSdkDir.resolve("ndk/$rustNdkVersion").absolutePath
-val nativeCrateDir = projectDir.parentFile.resolve("native")
+val repoDir = projectDir.parentFile.parentFile
+val appNativeCrates =
+    listOf("checks", "checks-jni", "app-helper", "activator", "apatch-abi", "protocol")
+        .map { repoDir.resolve("crates/$it") }
 val rustAssetsOut = rustAssetsDir.get().asFile
 
 // Opt-in x86_64 native + APK ABI for running the app on an Android x86_64
@@ -93,15 +96,23 @@ val rustAssetsOut = rustAssetsDir.get().asFile
 // `debug` build type honours it. See docs/avd-magisk-testing.md.
 val emulatorX86 = (project.findProperty("vpnhideEmulatorX86") as String?)?.toBoolean() == true
 
-val buildRustProbe =
-    tasks.register<Exec>("buildRustProbe") {
+val buildAppNative =
+    tasks.register<Exec>("buildAppNative") {
         group = "build"
         description = "Builds vpnhide_checks, vhprobe and the mutation supervisor via cargo-ndk."
-        workingDir = nativeCrateDir
+        workingDir = repoDir
         environment("ANDROID_NDK_HOME", rustNdkDir)
         environment("NDK_HOME", rustNdkDir)
-        inputs.dir(nativeCrateDir.resolve("src")).withPathSensitivity(PathSensitivity.RELATIVE)
-        inputs.file(nativeCrateDir.resolve("Cargo.toml"))
+        appNativeCrates.forEach { crateDir ->
+            inputs
+                .files(
+                    fileTree(crateDir) {
+                        include("src/**", "Cargo.toml", "build.rs")
+                    },
+                ).withPathSensitivity(PathSensitivity.RELATIVE)
+        }
+        inputs.file(repoDir.resolve("Cargo.toml"))
+        inputs.file(repoDir.resolve("Cargo.lock"))
         outputs.dir(rustJniLibsDir)
         outputs.dir(rustAssetsDir)
         commandLine(
@@ -127,28 +138,33 @@ val buildRustProbe =
                 // --locked: fail if Cargo.lock drifted rather than rewriting it
                 // (a dirtied tree stamps the build "-dirty" via git describe).
                 add("build")
-                add("--release")
+                add("--profile")
+                add("app-native")
+                add("--package")
+                add("vpnhide_checks_jni")
+                add("--package")
+                add("vpnhide_app_helper")
                 add("--locked")
             },
         )
         // Locals (not top-level script vals) so the doLast action captures only
         // File/Boolean values — required for configuration-cache serialization.
-        val probeBinArm = nativeCrateDir.resolve("target/aarch64-linux-android/release/vhprobe")
+        val probeBinArm = repoDir.resolve("target/aarch64-linux-android/app-native/vhprobe")
         val probeDestArm = rustAssetsOut.resolve("bin/arm64-v8a/vhprobe")
-        val probeBinArmv7 = nativeCrateDir.resolve("target/armv7-linux-androideabi/release/vhprobe")
+        val probeBinArmv7 = repoDir.resolve("target/armv7-linux-androideabi/app-native/vhprobe")
         val probeDestArmv7 = rustAssetsOut.resolve("bin/armeabi-v7a/vhprobe")
-        val probeBinX86 = nativeCrateDir.resolve("target/x86_64-linux-android/release/vhprobe")
+        val probeBinX86 = repoDir.resolve("target/x86_64-linux-android/app-native/vhprobe")
         val probeDestX86 = rustAssetsOut.resolve("bin/x86_64/vhprobe")
         val mutationBins =
             listOf(
-                nativeCrateDir.resolve("target/aarch64-linux-android/release/vhmutate") to
+                repoDir.resolve("target/aarch64-linux-android/app-native/vhmutate") to
                     rustAssetsOut.resolve("bin/arm64-v8a/vhmutate"),
-                nativeCrateDir.resolve("target/armv7-linux-androideabi/release/vhmutate") to
+                repoDir.resolve("target/armv7-linux-androideabi/app-native/vhmutate") to
                     rustAssetsOut.resolve("bin/armeabi-v7a/vhmutate"),
             ) +
                 if (emulatorX86) {
                     listOf(
-                        nativeCrateDir.resolve("target/x86_64-linux-android/release/vhmutate") to
+                        repoDir.resolve("target/x86_64-linux-android/app-native/vhmutate") to
                             rustAssetsOut.resolve("bin/x86_64/vhmutate"),
                     )
                 } else {
@@ -188,7 +204,7 @@ val syncHelpAssets =
         into(helpAssetsDir.map { it.dir("help") })
     }
 
-tasks.named("preBuild").configure { dependsOn(buildRustProbe, syncHelpAssets) }
+tasks.named("preBuild").configure { dependsOn(buildAppNative, syncHelpAssets) }
 
 android {
     namespace = "dev.okhsunrog.vpnhide"
@@ -302,8 +318,8 @@ android {
         resources.excludes += "META-INF/*.kotlin_module"
     }
 
-    // Pick up the cargo-ndk outputs (buildRustProbe): cdylib as a jniLib, the
-    // ground-truth probe bin as an asset. buildRustProbe runs via preBuild, so
+    // Pick up the cargo-ndk outputs (buildAppNative): cdylib as a jniLib, the
+    // ground-truth probe bin as an asset. buildAppNative runs via preBuild, so
     // these dirs are populated before the merge/package tasks read them.
     sourceSets["main"].jniLibs.srcDir(rustJniLibsDir.get().asFile)
     sourceSets["main"].assets.srcDir(rustAssetsDir.get().asFile)
