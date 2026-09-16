@@ -466,6 +466,14 @@ class HookEntry : IXposedHookLoadPackage {
     // NetworkInfo API (setDetailedState(...) sets state+detailedState; there's
     // no public type setter, so reconstruct via the public ctor like here) the
     // same way NC was moved to public mutators, and drop NI from the smoke-check.
+    //
+    // A connected VPN NetworkInfo becomes the platform's *disconnected VPN* type,
+    // not a connected Wi-Fi: the old Wi-Fi disguise answered "a Wi-Fi network is
+    // connected", which contradicts the handle (now null, §nullVpnHandleResult)
+    // and the legacy type answer (disconnected VPN, #337). This branch is a
+    // backstop — the by-network paths null a VPN handle before it reaches here —
+    // so it must not invent a connected network of any kind. Inactive VPN is left
+    // exactly as the platform built it (#337).
     @Suppress("DEPRECATION")
     private fun sanitizedNetworkInfo(ni: NetworkInfo): NetworkInfo {
         val type = XposedHelpers.getIntField(ni, "mNetworkType")
@@ -479,9 +487,9 @@ class HookEntry : IXposedHookLoadPackage {
                 String::class.java,
             )
         ctor.isAccessible = true
-        val copy = ctor.newInstance(ConnectivityManager.TYPE_WIFI, 0, "WIFI", "") as NetworkInfo
-        XposedHelpers.setObjectField(copy, "mState", XposedHelpers.getObjectField(ni, "mState"))
-        XposedHelpers.setObjectField(copy, "mDetailedState", XposedHelpers.getObjectField(ni, "mDetailedState"))
+        val copy = ctor.newInstance(ConnectivityManager.TYPE_VPN, 0, "VPN", "") as NetworkInfo
+        XposedHelpers.setObjectField(copy, "mState", NetworkInfo.State.DISCONNECTED)
+        XposedHelpers.setObjectField(copy, "mDetailedState", NetworkInfo.DetailedState.DISCONNECTED)
         XposedHelpers.setBooleanField(copy, "mIsAvailable", XposedHelpers.getBooleanField(ni, "mIsAvailable"))
         return copy
     }
@@ -781,7 +789,7 @@ class HookEntry : IXposedHookLoadPackage {
                         }
                         param.result = null
                         LsposedStats.record(callerUid, HookIds.Hook.LSPOSED_NETWORK_INFO)
-                        HookLog.i("VpnHide-NI: uid=$callerUid STRIPPED VPN (disguised as WIFI)")
+                        HookLog.i("VpnHide-NI: uid=$callerUid STRIPPED VPN (forced disconnected VPN)")
                     } catch (t: Throwable) {
                         HookLog.e("VpnHide: NI.writeToParcel error: ${t.message}")
                     }
@@ -1101,6 +1109,12 @@ class HookEntry : IXposedHookLoadPackage {
                         override fun afterHookedMethod(param: MethodHookParam) {
                             rememberConnectivityService(param.thisObject)
                             if (param.hasThrowable() || bypassConnectivitySanitize.get() == true) return
+                            // A query about a specific VPN Network handle returns null —
+                            // exactly as the platform answers for an unknown netId — so a
+                            // handle the app held from before hiding, or built by scanning
+                            // netIds, describes no network at all instead of a contradictory
+                            // transport-less/interfaceless one.
+                            if (nullVpnHandleResult(method, param)) return
                             // Legacy type queries must retain the platform's disconnected
                             // VPN entry. A null or a connected WIFI replacement is observable.
                             if (sanitizeLegacyNetworkInfoResult(method, param)) return
@@ -1201,6 +1215,31 @@ class HookEntry : IXposedHookLoadPackage {
         HookLog.i("VpnHide: suppressed getNetworkForType(TYPE_VPN) for uid=${effectiveCallerUid()}")
     }
 
+    // A ConnectivityService result method that takes the queried Network as its
+    // first argument (getNetworkCapabilities, getLinkProperties, getNetworkInfo-
+    // ForUid). When that Network is a VPN one and the answer is destined for a
+    // target, null the result — the AOSP behaviour for a netId that no longer
+    // exists. Returns true when handled (nulled), so the caller skips the
+    // strip/disguise sanitizers that would otherwise emit a contradictory object.
+    private fun nullVpnHandleResult(
+        method: String,
+        param: XC_MethodHook.MethodHookParam,
+    ): Boolean {
+        if (method !in BY_NETWORK_RESULT_METHODS) return false
+        if (param.result == null) return false
+        val network = param.args.getOrNull(0) as? Network ?: return false
+        val cs = param.thisObject ?: return false
+        // getNetworkInfoForUid(network, uid, ignoreBlocked): the uid the answer is
+        // for is the second arg; the other two are plain caller queries.
+        val explicitUid = if (method == "getNetworkInfoForUid") param.args.getOrNull(1) as? Int else null
+        if (!isTargetCallerOrUid(HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT, explicitUid)) return false
+        if (!isVpnNetwork(cs, network)) return false
+        param.result = null
+        LsposedStats.record(explicitUid ?: effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT)
+        HookLog.i("VpnHide: nulled $method for a VPN handle, uid=${explicitUid ?: effectiveCallerUid()}")
+        return true
+    }
+
     private fun sanitizeLegacyNetworkInfoResult(
         method: String,
         param: XC_MethodHook.MethodHookParam,
@@ -1297,6 +1336,12 @@ class HookEntry : IXposedHookLoadPackage {
         // Result methods that take a legacy connectivity type as arg 0 and may be
         // queried with TYPE_VPN to probe for an active VPN (issue #85).
         private val LEGACY_TYPE_INFO_METHODS = setOf("getNetworkInfo", "getNetworkInfoForType")
+
+        // Result methods whose first argument is the queried Network — a VPN one
+        // is answered null for a target (nullVpnHandleResult). getNetworkInfo(int)
+        // is a legacy *type* query, not a by-Network one, and stays out of this set.
+        private val BY_NETWORK_RESULT_METHODS =
+            setOf("getNetworkCapabilities", "getLinkProperties", "getNetworkInfoForUid")
         private val CONNECTIVITY_RESULT_METHODS =
             listOf(
                 "getActiveLinkProperties" to null,
