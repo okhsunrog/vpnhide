@@ -44,7 +44,6 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
-import dev.okhsunrog.vpnhide.diagnostics.VpnTransportWatcher
 import dev.okhsunrog.vpnhide.diagnostics.routedTransitions
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor

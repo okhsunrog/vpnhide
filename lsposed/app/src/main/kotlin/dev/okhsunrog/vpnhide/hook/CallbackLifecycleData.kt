@@ -39,3 +39,27 @@ internal fun transitionCallback(
     }
 
 internal fun isPassiveNetworkRequest(type: String?): Boolean = type == "LISTEN"
+
+/** Physical delivery follows the same visible registration history as rewritten VPN events. */
+internal fun transitionPhysicalCallback(
+    held: Int?,
+    source: Int,
+    event: CallbackEventKind,
+): CallbackTransition =
+    when {
+        event == CallbackEventKind.Available -> {
+            CallbackTransition(source, if (held == source) CallbackDelivery.Suppress else CallbackDelivery.Forward)
+        }
+
+        held != source -> {
+            CallbackTransition(held, CallbackDelivery.Suppress)
+        }
+
+        event == CallbackEventKind.Lost -> {
+            CallbackTransition(null, CallbackDelivery.Forward, source)
+        }
+
+        else -> {
+            CallbackTransition(held, CallbackDelivery.Forward)
+        }
+    }

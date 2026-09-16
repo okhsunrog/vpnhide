@@ -34,20 +34,23 @@ knowledge the presentation keeps (`RoutingKnowledge.Verifying` with the last
 known fact and the read's reason): a user-requested or network-triggered re-read
 shows a neutral "Checking…" at once, a background one keeps the last known state
 for a 2 s grace (transition contract §22).
-`VpnTransportWatcher` is only a trigger; the gate value always comes from the
-root probe. It listens two ways, because one is blind by design: a
-`TRANSPORT_VPN` listen (without the builder's default `NOT_VPN` capability, which
-had made it match nothing), which the app's own Java hook drops for target uids,
-VPN Hide included; and the default-network callback, which the hook sanitizes
-but delivers. ConnectivityService dispatches `onAvailable` on the default
-callback only when the satisfying network changes, so every delivery after the
-registration replay counts as a switch (`reduceDefaultNetwork`); handles are not
-compared, since for this uid the hook rewrites the VPN network into its
-underlying one and a VPN toggle arrives as the same handle. Replays at
-registration are knowledge of the current state, not transitions
-(`reduceVpnTransport`, `DefaultNetworkKnowledge.replayed`), and must not
-invalidate a gate that already reflects them. Verified on the Pixel 8 Pro on
-2026-09-16: VPN off and on each produced one root re-read within a second.
+`VpnStatePoller` runs while the main UI is RESUMED, with a one-second delay
+between completed samples. It uses the shared root snapshot script's network-only
+mode (interfaces, current framework networks, routes and policy rules), without
+package inventory or backend probes. Samples are process-owned `StateCache` reads,
+so detached lifecycle waiters do not release a still-running worker. Quarantined
+workers are not replaced by the timer. Unchanged samples do not invalidate the
+gate; a changed sample triggers the normal fresh root/gate refresh. An observation
+failure triggers a refresh once and is never interpreted as VPN-off. Initial
+sampling and recovery also refresh to close startup/resume races. ON_RESUME retains
+its throttled refresh, and explicit Retry remains available.
+
+There is no ConnectivityManager listener for VPN-state auto-refresh. The app's own
+Java backend intentionally hides VPN lifecycle changes when its visible network
+is unchanged, so those callbacks cannot be a reliable trigger. Diagnostic callback
+registrations remain: they measure hiding rather than drive readiness refresh.
+Device validation on 2026-09-17 is recorded in
+[the polling/callback report](notes/vpn-poll-device-validation.md).
 
 Dashboard derivation initializes/joins diagnostics when needed, then observes its
 terminal result, including a blocked or failed attempt, without retrying it; what

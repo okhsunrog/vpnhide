@@ -227,6 +227,7 @@ internal fun validateRootSnapshotSections(sections: Map<String, String>) {
 internal fun buildRootShellSnapshotCommand(
     includePmPackages: Boolean = true,
     runtimeProbeSource: String? = null,
+    networkOnly: Boolean = false,
 ): String {
     val runtimeProbeDigest = appHelperDigest(runtimeProbeSource)
     val runtimeProbePath = runtimeProbeDigest?.let(::appHelperStagedPath).orEmpty()
@@ -249,6 +250,7 @@ internal fun buildRootShellSnapshotCommand(
                 "VPNHIDE_PM_USER_END" to PM_USER_END_PREFIX,
                 "VPNHIDE_PM_STDERR_TO_STDOUT" to "0",
                 "VPNHIDE_WITH_PM" to if (includePmPackages) "1" else "0",
+                "VPNHIDE_NETWORK_ONLY" to if (networkOnly) "1" else "0",
                 "VPNHIDE_KMOD_DIR" to KMOD_MODULE_DIR,
                 "VPNHIDE_BUILTIN_DIR" to BUILTIN_MODULE_DIR,
                 "VPNHIDE_KPM_DIR" to KPM_MODULE_DIR,

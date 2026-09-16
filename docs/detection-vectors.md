@@ -421,3 +421,16 @@ The interface-name patterns (`tun`/`tap`/`wg`/`ppp`/`ipsec`/`xfrm`/`utun`/`l2tp`
 `tailscale`/`zt`/`he-ipv6`, substring `vpn`, and the `if<digits>` renamed-tunnel
 form from issue #86) are generated identically for all layers from
 `data/interfaces.toml`.
+
+### Callback lifecycle consistency
+
+Default/request callback registrations retain their own visible network history.
+VPN-up and VPN-down over an unchanged cover do not announce it twice. A late
+physical loss for a replaced network is suppressed, while loss of the held network
+and subsequent recovery are delivered. At Bundle delivery, recipient-redacted
+capabilities/link properties and blocked state are compared per registration;
+duplicate AVAILABLE emits only changed properties, and equal property updates
+are suppressed. Passive listeners still suppress VPN matches independently.
+Legacy dispatchers without a Bundle boundary retain lifecycle filtering but do
+not have the Bundle property-deduplication adapter. Device acceptance, especially
+legacy/OEM paths, is required; unit tests alone do not establish ROM behavior.

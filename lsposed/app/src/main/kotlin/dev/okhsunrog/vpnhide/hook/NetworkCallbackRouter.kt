@@ -30,6 +30,7 @@ internal class NetworkCallbackRouter(
 ) {
     private val states = WeakHashMap<Any, Int>()
     private val forwarding = ThreadLocal<Boolean>()
+    private val payloads = CallbackPayloadFilter()
     private val builder =
         serviceClass.declaredMethods
             .firstOrNull {
@@ -52,8 +53,11 @@ internal class NetworkCallbackRouter(
         request: NetworkRequest?,
     ): Boolean {
         if (param.method.name != "callCallbackForRequest") return false
-        if (forwarding.get() == true) return true
         val bundle = param.args.getOrNull(2) as? Bundle
+        if (forwarding.get() == true) {
+            if (bundle != null) payloads.filter(param, bundle)
+            return true
+        }
         if (hasBundleDispatcher && bundle == null) return true
         val nri = param.args[0]
         val source =
@@ -69,36 +73,56 @@ internal class NetworkCallbackRouter(
         }
         val type = (if (bundle != null) param.args[1] else param.args[2]) as Int
         val held = synchronized(states) { states[nri] }
+        val event = eventKind(type)
         if (!vpn) {
-            // Ordinary physical events are also part of this registration's history.
-            observePhysical(nri, type, source)
+            val next = transitionPhysicalCallback(held, netId(source), event)
+            filterPhysical(param, next, type, bundle)
+            remember(nri, next)
             return true
         }
         LsposedStats.record(uid, HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK)
         val cover = coverFor(param.thisObject, uid)
-        val event =
-            when (type) {
-                available -> CallbackEventKind.Available
-                lost -> CallbackEventKind.Lost
-                losing -> CallbackEventKind.Losing
-                else -> CallbackEventKind.Changed
+        val transition = transitionCallback(held, cover?.let(::netId), event)
+        // A duplicate AVAILABLE may still carry new properties; filter the rebuilt Bundle.
+        val next =
+            if (bundle != null && cover != null && type == available && transition.delivery == CallbackDelivery.Suppress) {
+                transition.copy(delivery = CallbackDelivery.Forward)
+            } else {
+                transition
             }
-        val next = transitionCallback(held, cover?.let(::netId), event)
         if (!deliver(param, request, next, cover, type, bundle)) return true
-        synchronized(states) {
-            if (next.held == null) states.remove(nri) else states[nri] = next.held
-        }
+        remember(nri, next)
         return true
     }
 
-    private fun observePhysical(
-        nri: Any,
+    private fun filterPhysical(
+        param: XC_MethodHook.MethodHookParam,
+        next: CallbackTransition,
         type: Int,
-        source: Network,
+        bundle: Bundle?,
     ) {
+        if (next.delivery == CallbackDelivery.Suppress && !(type == available && bundle != null)) {
+            param.result = null
+        } else if (bundle != null) {
+            payloads.filter(param, bundle)
+        }
+    }
+
+    private fun eventKind(type: Int): CallbackEventKind =
+        when (type) {
+            available -> CallbackEventKind.Available
+            lost -> CallbackEventKind.Lost
+            losing -> CallbackEventKind.Losing
+            else -> CallbackEventKind.Changed
+        }
+
+    private fun remember(
+        nri: Any,
+        next: CallbackTransition,
+    ) {
+        if (next.held == null) payloads.forget(nri)
         synchronized(states) {
-            if (type == available) states[nri] = netId(source)
-            if (type == lost && states[nri] == netId(source)) states.remove(nri)
+            if (next.held == null) states.remove(nri) else states[nri] = next.held
         }
     }
 

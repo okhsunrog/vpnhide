@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
  * - [Background] — our own process invalidated it: a root dependency after a
  *   config phase or the startup reconcile, or the foreground-return safety net.
  * - [Transition] — an external signal that the observed fact may have changed
- *   (the VPN transport / default-network callback).
+ *   (a changed root network observation).
  * - [Explicit] — the user asked: Retry, refresh, pull-to-refresh, a manual re-check.
  */
 @Serializable

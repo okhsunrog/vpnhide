@@ -271,4 +271,10 @@ run_all_phases_sequential() {
   phase_lsposed_framework
   phase_vpn_ifaces
 }
-run_all_phases_sequential
+if [ "$VPNHIDE_NETWORK_ONLY" = 1 ]; then
+  phase_vpn_ifaces
+  emit_eval vpn_rules4 'ip -4 rule show && echo probe_ok'
+  emit_eval vpn_rules6 'ip -6 rule show && echo probe_ok'
+else
+  run_all_phases_sequential
+fi
