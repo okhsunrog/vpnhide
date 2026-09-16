@@ -97,6 +97,52 @@ internal fun captureNetworkView(
     )
 }
 
+/**
+ * The synchronous half of the network view — every handle and the facts each
+ * answers, the legacy type answers, the netId scan, and the invariants over
+ * them — with no callback window, no PendingIntent and no Context. The app's
+ * diagnostics run this as a self-test after the routing gate has confirmed the
+ * VPN is up and this app is routed, so [expectHidden] is true and the
+ * VPN-absence invariants apply. The push-path invariants come out
+ * not-applicable (no callbacks captured); [checkNetworkCallbackVpn] guards
+ * those separately without a second callback window.
+ */
+internal fun captureSyncNetworkView(
+    cm: ConnectivityManager,
+    uid: Int,
+    expectHidden: Boolean,
+): NetworkViewSnapshot {
+    val errors = mutableListOf<String>()
+    val active = guard(errors, "activeNetwork") { cm.activeNetwork?.netId() }
+    val all = guard(errors, "allNetworks") { cm.allNetworks.mapNotNull { it.netId() } }.orEmpty()
+    val sources = linkedMapOf<Int, MutableSet<String>>()
+    all.forEach { sources.getOrPut(it) { linkedSetOf() } += "all" }
+    active?.let { sources.getOrPut(it) { linkedSetOf() } += "active" }
+    val phantoms = scanPhantoms(cm, all, DEFAULT_SCAN_BEYOND)
+    phantoms.forEach { sources.getOrPut(it) { linkedSetOf() } += "scan" }
+    val networks = sources.map { (netId, from) -> factsFor(cm, netId, from.toList()) }
+    val legacy = captureLegacy(cm, errors)
+    val observed = NetworkViewObservations(active, all, networks, legacy, phantoms, emptyList(), null)
+    return NetworkViewSnapshot(
+        uid = uid,
+        packageName = "self",
+        sdk = Build.VERSION.SDK_INT,
+        capturedAt = isoNow(),
+        captureMs = 0,
+        expectHidden = expectHidden,
+        activeNetwork = active,
+        boundNetwork = null,
+        allNetworks = all,
+        networks = networks,
+        legacy = legacy,
+        phantomNetworks = phantoms,
+        callbacks = emptyList(),
+        pendingIntent = null,
+        invariants = evaluateNetworkView(observed, expectHidden),
+        errors = errors,
+    )
+}
+
 private inline fun <T> guard(
     errors: MutableList<String>,
     what: String,

@@ -18,12 +18,16 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkInfo
 import android.os.Build
+import android.os.Process
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.checks.CheckOutput
 import dev.okhsunrog.vpnhide.checks.CheckStatus
 import dev.okhsunrog.vpnhide.checks.NativeProbe
+import dev.okhsunrog.vpnhide.debug.NET_VIEW_NA
+import dev.okhsunrog.vpnhide.debug.NET_VIEW_VIOLATED
+import dev.okhsunrog.vpnhide.debug.captureSyncNetworkView
 import dev.okhsunrog.vpnhide.generated.IfaceLists
 import dev.okhsunrog.vpnhide.next
 import java.net.NetworkInterface
@@ -96,6 +100,7 @@ internal val EXTRA_JAVA_CHECKS: List<JavaCheckSpec> =
         JavaCheckSpec("network_callback", R.string.check_network_callback, ::checkNetworkCallbackVpn),
         JavaCheckSpec("link_properties_routes", R.string.check_link_properties_routes, ::checkLinkPropertiesRoutes),
         JavaCheckSpec("network_info_vpn", R.string.check_network_info_vpn, ::checkNetworkInfoVpn),
+        JavaCheckSpec("network_view", R.string.check_network_view, ::checkNetworkViewConsistency),
     )
 
 /**
@@ -463,21 +468,34 @@ internal fun checkNetworkCallbackVpn(
     name: String,
 ): CheckResult {
     val latch = CountDownLatch(1)
-    val seen = AtomicReference<NetworkCapabilities?>(null)
+    val seenNetwork = AtomicReference<Network?>(null)
+    val seenCaps = AtomicReference<NetworkCapabilities?>(null)
+    val seenLp = AtomicReference<LinkProperties?>(null)
+    // The callback delivers the capabilities and the link properties in separate
+    // events; the latch trips on the capabilities, and the link properties that
+    // arrived up to then are compared. Under the gate both arrive promptly.
     val callback =
         object : ConnectivityManager.NetworkCallback() {
+            override fun onLinkPropertiesChanged(
+                network: Network,
+                lp: LinkProperties,
+            ) {
+                seenLp.set(lp)
+            }
+
             override fun onCapabilitiesChanged(
                 network: Network,
                 caps: NetworkCapabilities,
             ) {
-                seen.set(caps)
+                seenNetwork.set(network)
+                seenCaps.set(caps)
                 latch.countDown()
             }
         }
     return try {
         cm.registerDefaultNetworkCallback(callback)
         val fired = latch.await(3, TimeUnit.SECONDS)
-        val caps = seen.get()
+        val caps = seenCaps.get()
         if (!fired || caps == null) {
             // No callback within the deadline is a non-observation, not evidence
             // of hiding: reporting it clean (green) would mask a broken/slow
@@ -485,22 +503,41 @@ internal fun checkNetworkCallbackVpn(
             // promptly, so this is a rare edge — surface it as not-measured.
             javaCheck(name, null, "no callback delivered")
         } else {
-            val hasVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-            val notVpn = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-            val leaked = hasVpn || !notVpn
-            val detail =
-                if (!leaked) {
-                    "callback caps clean (no VPN transport, NOT_VPN present)"
-                } else {
-                    "callback leaks VPN: hasTransport(VPN)=$hasVpn, NOT_VPN=$notVpn"
-                }
-            javaCheck(name, !leaked, detail)
+            val (detail, clean) = callbackCleanAndCoherent(cm, seenNetwork.get(), caps, seenLp.get())
+            javaCheck(name, clean, detail)
         }
     } catch (e: Exception) {
         javaCheck(name, false, e.message ?: e.javaClass.simpleName)
     } finally {
         runCatching { cm.unregisterNetworkCallback(callback) }
     }
+}
+
+/**
+ * A pushed default-network callback must be clean (no VPN transport, NOT_VPN
+ * present) AND coherent with the synchronous view: the link properties it
+ * carried must name the same interface that `getLinkProperties(handle)` returns
+ * for the handle it delivered. A cover handle pushed with the VPN's emptied link
+ * properties — the exact incoherence the network-view work fixes — trips the
+ * second half even when the capabilities read clean.
+ */
+private fun callbackCleanAndCoherent(
+    cm: ConnectivityManager,
+    network: Network?,
+    caps: NetworkCapabilities,
+    lp: LinkProperties?,
+): Pair<String, Boolean> {
+    val hasVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+    val notVpn = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+    if (hasVpn || !notVpn) {
+        return "callback leaks VPN: hasTransport(VPN)=$hasVpn, NOT_VPN=$notVpn" to false
+    }
+    val callbackIface = lp?.interfaceName
+    val syncIface = network?.let { runCatching { cm.getLinkProperties(it)?.interfaceName }.getOrNull() }
+    if (callbackIface != null && syncIface != null && callbackIface != syncIface) {
+        return "callback handle $network carries iface=$callbackIface but sync says $syncIface" to false
+    }
+    return "callback caps clean and link properties coherent (iface=$callbackIface)" to true
 }
 
 internal fun checkLinkPropertiesIfname(
@@ -559,3 +596,27 @@ private fun checkNetworkInfoVpn(
 }
 
 private fun NetworkInfo.legacySnapshot(): LegacyVpnInfoSnapshot = LegacyVpnInfoSnapshot(type, state.name, detailedState.name, isAvailable)
+
+// Cross-vector consistency, not a single leak: the synchronous network model this
+// app sees must hold together — the active handle is listed, a listed network has
+// a transport, a connected one has an interface, its NetworkInfo type names a
+// transport it has, and no VPN handle answers outside the enumeration. Reuses the
+// same invariants the debug bundle and the external probe evaluate. The push-path
+// invariants are guarded by [checkNetworkCallbackVpn]; this one needs no callback
+// window. Under the gate the VPN is up and this app is routed, so a VPN still
+// visible anywhere here is a leak.
+private fun checkNetworkViewConsistency(
+    cm: ConnectivityManager,
+    name: String,
+): CheckResult {
+    val snapshot = captureSyncNetworkView(cm, Process.myUid(), expectHidden = true)
+    val violations = snapshot.invariants.filter { it.status == NET_VIEW_VIOLATED }
+    val checked = snapshot.invariants.count { it.status != NET_VIEW_NA }
+    val detail =
+        if (violations.isEmpty()) {
+            "$checked invariants hold across ${snapshot.allNetworks.size} network(s)"
+        } else {
+            violations.joinToString("; ") { "${it.id}: ${it.detail}" }
+        }
+    return javaCheck(name, violations.isEmpty(), detail)
+}
