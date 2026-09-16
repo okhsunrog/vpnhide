@@ -30,6 +30,9 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -37,9 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.lifecycle.Lifecycle
@@ -47,9 +48,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.okhsunrog.vpnhide.AgentControlBridge
 import dev.okhsunrog.vpnhide.BackgroundUpdateChecks
+import dev.okhsunrog.vpnhide.CanonicalConfigRepository
+import dev.okhsunrog.vpnhide.ConfigFeedbackProvider
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DashboardLoadingState
 import dev.okhsunrog.vpnhide.DashboardScreen
+import dev.okhsunrog.vpnhide.LocalConfigSnackbarInsets
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.SelfTargetFailureKind
@@ -64,6 +68,8 @@ import dev.okhsunrog.vpnhide.picker.TargetFilterChips
 import dev.okhsunrog.vpnhide.picker.TargetListSortMode
 import dev.okhsunrog.vpnhide.picker.TargetsCache
 import dev.okhsunrog.vpnhide.picker.isMainAppProfile
+import dev.okhsunrog.vpnhide.rememberCanonicalEditor
+import dev.okhsunrog.vpnhide.reportConfigSnackbarInset
 import dev.okhsunrog.vpnhide.settings.AppSettings
 import dev.okhsunrog.vpnhide.settings.DiagnosticsSettingsScreen
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
@@ -75,12 +81,9 @@ import dev.okhsunrog.vpnhide.settings.SettingsSubScreen
 import dev.okhsunrog.vpnhide.shouldRequestUpdateNotificationPermission
 import dev.okhsunrog.vpnhide.statistics.StatisticsCache
 import dev.okhsunrog.vpnhide.statistics.StatisticsScreen
-import dev.okhsunrog.vpnhide.suExec
 import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
 import dev.okhsunrog.vpnhide.ui.components.BlockingErrorCard
 import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
-import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
-import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.components.pulse
 import dev.okhsunrog.vpnhide.ui.components.rememberHapticTick
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
@@ -99,7 +102,7 @@ class MainActivity : ComponentActivity() {
         if (mainProfile) {
             RootSnapshotCache.setRuntimeProbeSource(GroundTruthProbe.prepare(this)?.absolutePath)
             // Load canonical debug state before runtime work so first suExec and dashboard bootstrap agree.
-            VpnHideLog.init()
+            if (CanonicalConfigRepository.state.value.confirmed == null) VpnHideLog.init()
             // Process-scoped, registered once: auto-refreshes RoutingGateCache on VPN
             // up/down so Diagnostics/Dashboard/export/logcat react without a manual
             // re-check. Safe before RoutingGateCache has ever loaded — its trigger is
@@ -116,11 +119,6 @@ private sealed interface RootState {
     data object Granted : RootState
 
     data object Denied : RootState
-}
-
-private fun checkRootAccess(): Boolean {
-    val (exitCode, stdout) = suExec("id")
-    return exitCode == 0 && stdout.contains("uid=0")
 }
 
 @Composable
@@ -202,54 +200,56 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
         VpnHideTheme {
             var rootState by remember { mutableStateOf<RootState?>(null) }
             val rootCheckScope = rememberCoroutineScope()
-            // Re-probe root without relaunching the app: clears to the loading
-            // state, then re-runs the check. Lets the no-root gate offer a
-            // "Check again" button after the user grants root in their manager.
-            val probeRoot: () -> Unit = {
+            val startupCoordinator = remember(context) { StartupCoordinator.forProcess(context.applicationContext) }
+            // The root gate is the self-target preparation itself: its first root
+            // shell is the earliest privileged work of the process, so a separate
+            // `su -c id` probe in front of it only added a serial su spawn (about
+            // 190 ms on Pixel 8 Pro) to every cold start. A denied or interrupted
+            // su surfaces as RootUnavailable; every other failure is shown by the
+            // main screen, as before. "Check again" forces a fresh preparation.
+            val probeRoot: (Boolean) -> Unit = { force ->
                 rootState = null
                 rootCheckScope.launch {
-                    val granted = withContext(Dispatchers.IO) { checkRootAccess() }
-                    rootState = if (granted) RootState.Granted else RootState.Denied
+                    startupCoordinator.prepareSelfTargets(force = force)
+                    val failure = startupCoordinator.selfTargetState.value as? StartupSelfTargetState.Failed
+                    rootState = if (failure?.kind == SelfTargetFailureKind.RootUnavailable) RootState.Denied else RootState.Granted
                     StartupTrace.mark("root_check_done")
                 }
             }
 
-            LaunchedEffect(Unit) { probeRoot() }
+            LaunchedEffect(Unit) { probeRoot(false) }
 
-            when (rootState) {
-                null -> {
-                    StartupLoadingScreen()
+            if (rootState == RootState.Denied) {
+                LaunchedEffect(Unit) { StartupTrace.rootDeniedReady() }
+                RootDeniedScreen(onRecheck = { probeRoot(true) })
+            } else {
+                // The main screen composes immediately, while the root gate is still
+                // resolving: its own loading skeleton sits inside the real scaffold,
+                // so the header and the tab bar do not jump once data arrives, and
+                // navigation stays available during the startup preparation. One
+                // call site for both states keeps the screen's saved state intact.
+                val granted = rootState == RootState.Granted
+                // Only prompt about background update checks once the app is
+                // actually usable (root granted) — never over the no-root gate.
+                var showBackgroundUpdatePrompt by remember { mutableStateOf(false) }
+                LaunchedEffect(granted, settingsLoaded, settings.backgroundUpdateChecksConfigured) {
+                    showBackgroundUpdatePrompt =
+                        granted && settingsLoaded && !settings.backgroundUpdateChecksConfigured
                 }
-
-                RootState.Denied -> {
-                    LaunchedEffect(Unit) { StartupTrace.rootDeniedReady() }
-                    RootDeniedScreen(onRecheck = probeRoot)
+                if (showBackgroundUpdatePrompt) {
+                    BackgroundUpdatePromptDialog(
+                        onEnable = {
+                            showBackgroundUpdatePrompt = false
+                            settingsInteractor.setBackgroundUpdateChecksEnabled(true)
+                            requestUpdateNotificationsIfNeeded()
+                        },
+                        onDismiss = {
+                            showBackgroundUpdatePrompt = false
+                            settingsInteractor.setBackgroundUpdateChecksEnabled(false)
+                        },
+                    )
                 }
-
-                RootState.Granted -> {
-                    // Only prompt about background update checks once the app is
-                    // actually usable (root granted) — not over the loading or
-                    // no-root gate, where nothing else works yet.
-                    var showBackgroundUpdatePrompt by remember { mutableStateOf(false) }
-                    LaunchedEffect(settingsLoaded, settings.backgroundUpdateChecksConfigured) {
-                        showBackgroundUpdatePrompt =
-                            settingsLoaded && !settings.backgroundUpdateChecksConfigured
-                    }
-                    if (showBackgroundUpdatePrompt) {
-                        BackgroundUpdatePromptDialog(
-                            onEnable = {
-                                showBackgroundUpdatePrompt = false
-                                settingsInteractor.setBackgroundUpdateChecksEnabled(true)
-                                requestUpdateNotificationsIfNeeded()
-                            },
-                            onDismiss = {
-                                showBackgroundUpdatePrompt = false
-                                settingsInteractor.setBackgroundUpdateChecksEnabled(false)
-                            },
-                        )
-                    }
-                    MainScreen()
-                }
+                ConfigFeedbackProvider { MainScreen() }
             }
         }
     }
@@ -277,44 +277,6 @@ private fun tabLabel(tab: Tab): String =
         Tab.Statistics -> stringResource(R.string.tab_statistics)
         Tab.Protection -> stringResource(R.string.tab_protection)
     }
-
-@Composable
-private fun AppTopBarTitle(currentTab: Tab) {
-    val tabLabel = tabLabel(currentTab)
-    // The full-size brand block (logo + wordmark) wants ~190dp. Material3's
-    // TopAppBar hands the title only the width left over after the action
-    // buttons, so on very narrow / high-density screens that slot shrinks.
-    // Scale the logo and the two text lines down together (never below 70%) so
-    // the brand stays on a single line instead of wrapping.
-    BoxWithConstraints {
-        val scale = (maxWidth.value / 200f).coerceIn(0.6f, 1f)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                painter = painterResource(R.drawable.topbar_mark),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(46.dp * scale),
-            )
-            Spacer(Modifier.width(12.dp * scale))
-            Column {
-                Text(
-                    text = stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontSize = MaterialTheme.typography.headlineSmall.fontSize * scale,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                )
-                Text(
-                    text = tabLabel,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontSize = MaterialTheme.typography.labelLarge.fontSize * scale,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
-}
 
 /**
  * Brand block (logo + wordmark + tab label) for the main header, able to grow.
@@ -405,15 +367,15 @@ private fun MainScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val appContext = context.applicationContext
-    val startupCoordinator = remember(appContext) { StartupCoordinator(appContext) }
+    val startupCoordinator = remember(appContext) { StartupCoordinator.forProcess(appContext) }
     val settings = LocalSettingsState.current
     val settingsInteractor = LocalSettingsInteractor.current
-    var currentTab by remember { mutableStateOf(Tab.Dashboard) }
-    var searchQuery by remember { mutableStateOf("") }
-    var searchActive by remember { mutableStateOf(false) }
-    var showSystem by remember { mutableStateOf(false) }
-    var showRussianOnly by remember { mutableStateOf(false) }
-    var targetSortMode by remember { mutableStateOf(TargetListSortMode.ConfiguredFirst) }
+    var currentTab by rememberSaveable { mutableStateOf(Tab.Dashboard) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var searchActive by rememberSaveable { mutableStateOf(false) }
+    var showSystem by rememberSaveable { mutableStateOf(false) }
+    var showRussianOnly by rememberSaveable { mutableStateOf(false) }
+    var targetSortMode by rememberSaveable { mutableStateOf(TargetListSortMode.ConfiguredFirst) }
     val appListLoading by AppListCache.loading.collectAsState()
     val targetsLoading by TargetsCache.loading.collectAsState()
     val dashboardLoading by DashboardCache.loading.collectAsState()
@@ -447,15 +409,16 @@ private fun MainScreen() {
     // cannot make startup immediately do a second expensive retry. As soon
     // as that shared snapshot exists, TargetsCache parses it from memory and
     // Protection is still prewarmed before a normal tab switch.
-    LaunchedEffect(selfNeedsRestart, rootSnapshot) {
-        VpnHideLog.setFromRootSnapshot(rootSnapshot)
-        startupCoordinator.ensureProtectionCacheAfterRootSnapshot(scope, selfNeedsRestart, rootSnapshot)
-    }
-
     // Mark startup readiness once the main shell has shown either usable
     // dashboard data or a terminal load error. Users see the dashboard loading
     // state in place while this happens.
     val uiReady = startupCoordinator.isUiReady(dashboardState, dashboardError)
+    LaunchedEffect(selfNeedsRestart, rootSnapshot, uiReady) {
+        VpnHideLog.setFromRootSnapshot(rootSnapshot)
+        // The runtime reconcile is deferred past first paint; see the coordinator.
+        startupCoordinator.ensureProtectionCacheAfterRootSnapshot(scope, selfNeedsRestart, rootSnapshot, uiReady)
+    }
+
     var startupTraceMarked by remember { mutableStateOf(false) }
     LaunchedEffect(uiReady) {
         if (uiReady && !startupTraceMarked) {
@@ -495,12 +458,15 @@ private fun MainScreen() {
         searchQuery = ""
     }
 
-    var showSettings by remember { mutableStateOf(false) }
-    var showHelp by remember { mutableStateOf(false) }
-    var helpInitialArticle by remember { mutableStateOf<String?>(null) }
-    var settingsRequestedSub by remember { mutableStateOf<SettingsSubScreen?>(null) }
+    // Navigation survives configuration changes independently of process-owned work and editor drafts.
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showHelp by rememberSaveable { mutableStateOf(false) }
+    var helpInitialArticle by rememberSaveable { mutableStateOf<String?>(null) }
+    var settingsRequestedSub by rememberSaveable { mutableStateOf<SettingsSubScreen?>(null) }
+    var showDiagnostics by rememberSaveable { mutableStateOf(false) }
     var protectionDirty by remember { mutableStateOf(false) }
-    var pendingHelpNav by remember { mutableStateOf<String?>(null) }
+    val protectionEditor = rememberCanonicalEditor("apps_unified")
+    var pendingHelpNav by rememberSaveable { mutableStateOf<String?>(null) }
     if (showSettings) {
         BackHandler { showSettings = false }
         SettingsScreen(
@@ -518,7 +484,6 @@ private fun MainScreen() {
 
     // Full-screen diagnostics overlay, reachable from a Dashboard message's
     // "Details" button (the same screen Settings → Diagnostics opens).
-    var showDiagnostics by remember { mutableStateOf(false) }
     if (showDiagnostics) {
         DiagnosticsSettingsScreen(
             selfNeedsRestart = selfNeedsRestart,
@@ -706,7 +671,9 @@ private fun MainScreen() {
             },
             bottomBar = {
                 val tabHaptic = rememberHapticTick()
+                val snackbarInsets = LocalConfigSnackbarInsets.current
                 NavigationBar(
+                    modifier = Modifier.reportConfigSnackbarInset { snackbarInsets.navigation = it },
                     containerColor = AppColors.navigationBarContainer,
                     tonalElevation = 0.dp,
                 ) {
@@ -740,70 +707,72 @@ private fun MainScreen() {
                 }
             },
         ) { innerPadding ->
-            val restart = selfNeedsRestart
-            val preparationFailure = selfTargetFailure
-            if (preparationFailure != null) {
-                RootPreparationErrorScreen(
-                    kind = preparationFailure.kind,
-                    detail = preparationFailure.detail,
-                    modifier = Modifier.padding(innerPadding),
-                    onRetry = { startupCoordinator.retrySelfTargets(scope) },
-                )
-            } else if (restart == null) {
-                DashboardLoadingState(modifier = Modifier.padding(innerPadding))
-            } else {
-                AnimatedContent(
-                    targetState = currentTab,
-                    transitionSpec = {
-                        if (settings.animationsEnabled) {
-                            // ImageToolbox's pervasive AnimatedContent transition: a
-                            // fade-through with a slight scale, in place (no slide).
-                            // The old tab's rows dissolve and shrink while the new
-                            // tab's rows fade and grow into the same positions, so
-                            // one set of rows reads as morphing into the other.
-                            (
-                                fadeIn(tween(300, easing = AppEasing.Alpha)) +
-                                    scaleIn(tween(400, easing = AppEasing.Scale), initialScale = 0.92f)
-                            ) togetherWith (
-                                fadeOut(tween(300, easing = AppEasing.Alpha)) +
-                                    scaleOut(tween(400, easing = AppEasing.Scale), targetScale = 0.92f)
-                            )
-                        } else {
-                            EnterTransition.None togetherWith ExitTransition.None
-                        }
-                    },
-                    label = "tabContent",
-                ) { tab ->
-                    when (tab) {
-                        Tab.Dashboard -> {
-                            DashboardScreen(
-                                selfNeedsRestart = restart,
-                                onOpenDiagnostics = { showDiagnostics = true },
-                                onOpenAccelerators = { openHelp("game-accelerators") },
-                                onOpenHelp = openHelp,
-                                modifier = Modifier.padding(innerPadding),
-                            )
-                        }
+            Column(Modifier.padding(innerPadding)) {
+                val restart = selfNeedsRestart
+                val preparationFailure = selfTargetFailure
+                if (preparationFailure != null) {
+                    RootPreparationErrorScreen(
+                        kind = preparationFailure.kind,
+                        detail = preparationFailure.detail,
+                        modifier = Modifier,
+                        onRetry = { startupCoordinator.retrySelfTargets(scope) },
+                    )
+                } else if (restart == null) {
+                    DashboardLoadingState(modifier = Modifier)
+                } else {
+                    AnimatedContent(
+                        targetState = currentTab,
+                        transitionSpec = {
+                            if (settings.animationsEnabled) {
+                                // ImageToolbox's pervasive AnimatedContent transition: a
+                                // fade-through with a slight scale, in place (no slide).
+                                // The old tab's rows dissolve and shrink while the new
+                                // tab's rows fade and grow into the same positions, so
+                                // one set of rows reads as morphing into the other.
+                                (
+                                    fadeIn(tween(300, easing = AppEasing.Alpha)) +
+                                        scaleIn(tween(400, easing = AppEasing.Scale), initialScale = 0.92f)
+                                ) togetherWith (
+                                    fadeOut(tween(300, easing = AppEasing.Alpha)) +
+                                        scaleOut(tween(400, easing = AppEasing.Scale), targetScale = 0.92f)
+                                )
+                            } else {
+                                EnterTransition.None togetherWith ExitTransition.None
+                            }
+                        },
+                        label = "tabContent",
+                    ) { tab ->
+                        when (tab) {
+                            Tab.Dashboard -> {
+                                DashboardScreen(
+                                    selfNeedsRestart = restart,
+                                    onOpenDiagnostics = { showDiagnostics = true },
+                                    onOpenAccelerators = { openHelp("game-accelerators") },
+                                    onOpenHelp = openHelp,
+                                    modifier = Modifier,
+                                )
+                            }
 
-                        Tab.Statistics -> {
-                            StatisticsScreen(
-                                modifier = Modifier.padding(innerPadding),
-                            )
-                        }
+                            Tab.Statistics -> {
+                                StatisticsScreen(
+                                    modifier = Modifier,
+                                )
+                            }
 
-                        Tab.Protection -> {
-                            ProtectionScreen(
-                                searchQuery = searchQuery,
-                                showSystem = showSystem,
-                                showRussianOnly = showRussianOnly,
-                                sortMode = targetSortMode,
-                                onToggleSystem = { showSystem = !showSystem },
-                                onToggleRussianOnly = { showRussianOnly = !showRussianOnly },
-                                onSortModeChange = { targetSortMode = it },
-                                onOpenHelp = openHelp,
-                                onDirtyChange = { protectionDirty = it },
-                                modifier = Modifier.padding(innerPadding),
-                            )
+                            Tab.Protection -> {
+                                ProtectionScreen(
+                                    searchQuery = searchQuery,
+                                    showSystem = showSystem,
+                                    showRussianOnly = showRussianOnly,
+                                    sortMode = targetSortMode,
+                                    onToggleSystem = { showSystem = !showSystem },
+                                    onToggleRussianOnly = { showRussianOnly = !showRussianOnly },
+                                    onSortModeChange = { targetSortMode = it },
+                                    onOpenHelp = openHelp,
+                                    onDirtyChange = { protectionDirty = it },
+                                    modifier = Modifier,
+                                )
+                            }
                         }
                     }
                 }
@@ -824,6 +793,7 @@ private fun MainScreen() {
                 confirmButton = {
                     TextButton(onClick = {
                         pendingHelpNav = null
+                        protectionEditor.discard()
                         handleHelpNav(href)
                     }) {
                         Text(stringResource(R.string.help_leave_confirm))
@@ -840,26 +810,6 @@ private fun MainScreen() {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun StartupLoadingScreen() {
-    Scaffold(
-        containerColor = AppColors.screenBackground,
-        topBar = {
-            TopAppBar(
-                title = { AppTopBarTitle(Tab.Dashboard) },
-                colors =
-                    TopAppBarDefaults.topAppBarColors(
-                        containerColor = AppColors.topBarContainer,
-                        scrolledContainerColor = AppColors.topBarScrolledContainer,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    ),
-            )
-        },
-    ) { innerPadding ->
-        DashboardLoadingState(modifier = Modifier.padding(innerPadding))
-    }
-}
-
 private fun selfTargetErrorBodyRes(kind: SelfTargetFailureKind): Int =
     when (kind) {
         SelfTargetFailureKind.RootUnavailable -> R.string.self_targets_error_body_root

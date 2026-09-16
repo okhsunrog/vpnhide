@@ -4,16 +4,13 @@ import dev.okhsunrog.vpnhide.picker.PM_USERS_STATUS_PREFIX
 import dev.okhsunrog.vpnhide.picker.PM_USER_BEGIN_PREFIX
 import dev.okhsunrog.vpnhide.picker.PM_USER_END_PREFIX
 import dev.okhsunrog.vpnhide.startup.StartupTrace
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
+import java.util.concurrent.CopyOnWriteArrayList
 
 internal data class RootSnapshot(
     val sections: Map<String, String>,
+    val observationId: Long = 0,
+    val generation: Long = 0,
 )
 
 internal data class PackageInventorySeed(
@@ -82,84 +79,128 @@ internal val REQUIRED_ROOT_SNAPSHOT_SECTIONS =
 /**
  * Single in-process source for root-owned/system state. Dashboard and
  * Protection derive different UI models from the same cached snapshot, so
- * their counts/statuses cannot drift because two independent shell snapshots
- * raced.
+ * each projection carries the source observation identity. Retained screen values
+ * may differ while a dependent refresh is still running.
  */
-internal object RootSnapshotCache {
-    private val _snapshot = MutableStateFlow<RootSnapshot?>(null)
-    val snapshot: StateFlow<RootSnapshot?> = _snapshot.asStateFlow()
-
-    private val _loading = MutableStateFlow(false)
-    val loading: StateFlow<Boolean> = _loading.asStateFlow()
-
-    private val mutex = Mutex()
+internal object RootSnapshotCache : StateCache<RootSnapshot>(
+    traceName = "root_snapshot",
+    logTag = LogTags.APP,
+    timeoutMillis = 15_000,
+) {
+    val snapshot: StateFlow<RootSnapshot?> get() = value
+    private val dependents = CopyOnWriteArrayList<() -> Unit>()
+    private val inventoryDependents = CopyOnWriteArrayList<() -> Unit>()
+    private val inputLock = Any()
+    private val reader = RootProcessRunner()
     private var preloadedPackageInventory: PackageInventorySeed? = null
-    private var runtimeProbeSource: String? = null
+
+    // A complete validated snapshot read by startup with the same command; consumed
+    // by the next load instead of a second shell. Any invalidation or explicit
+    // refresh discards it, so a config write after the read can never be masked.
+    private var preloadedSections: Map<String, String>? = null
+
+    @Volatile private var runtimeProbeSource: String? = null
+    val runtimeProbeSourcePath: String? get() = runtimeProbeSource
+
+    val dependency =
+        object : ObservationDependency {
+            override fun subscribe(invalidate: () -> Unit) {
+                dependents.add(invalidate)
+            }
+
+            override fun refresh() {
+                requestRefresh()
+            }
+        }
+    val inventoryDependency =
+        object : ObservationDependency {
+            override fun subscribe(invalidate: () -> Unit) {
+                inventoryDependents.add(invalidate)
+            }
+
+            override fun refresh() {
+                requestRefresh()
+            }
+        }
 
     fun setRuntimeProbeSource(path: String?) {
         runtimeProbeSource = path?.takeIf { it.matches(Regex("/[A-Za-z0-9_./-]+")) }
     }
 
-    suspend fun getOrLoad(): RootSnapshot =
-        withContext(Dispatchers.IO) {
-            _snapshot.value?.let { return@withContext it }
-            mutex.withLock {
-                _snapshot.value ?: loadLocked()
-            }
-        }
+    suspend fun getOrLoad(): RootSnapshot = awaitValue()
 
-    suspend fun refresh(): RootSnapshot =
-        withContext(Dispatchers.IO) {
-            mutex.withLock {
-                preloadedPackageInventory = null
-                loadLocked()
-            }
+    suspend fun refresh(notBefore: Long = Long.MIN_VALUE): RootSnapshot {
+        synchronized(inputLock) {
+            preloadedPackageInventory = null
+            preloadedSections = null
         }
+        return awaitValue(refresh = true, notBefore = notBefore)
+    }
 
-    fun invalidate() {
-        _snapshot.value = null
-        preloadedPackageInventory = null
+    override fun invalidate() {
+        synchronized(inputLock) {
+            preloadedPackageInventory = null
+            preloadedSections = null
+        }
+        super.invalidate()
     }
 
     fun seedPackageInventory(seed: PackageInventorySeed?) {
-        preloadedPackageInventory = seed
+        synchronized(inputLock) { preloadedPackageInventory = seed }
     }
 
-    private fun loadLocked(): RootSnapshot {
-        _loading.value = true
-        return try {
-            StartupTrace.mark("root_snapshot_start")
-            val inventory = preloadedPackageInventory
-            preloadedPackageInventory = null
-            val sections = loadRootShellSnapshot(inventoryOverride = inventory, runtimeProbeSource = runtimeProbeSource)
-            val snapshot = RootSnapshot(sections)
-            _snapshot.value = snapshot
-            StartupTrace.mark("root_snapshot_done")
-            snapshot
-        } catch (e: Exception) {
-            StartupTrace.mark("root_snapshot_failed")
-            throw e
-        } finally {
-            _loading.value = false
-        }
+    /** Seed the next load with a complete startup read; a config write invalidates it like any other observation. */
+    fun seedSnapshot(sections: Map<String, String>?) {
+        synchronized(inputLock) { preloadedSections = sections?.toMap() }
+    }
+
+    override suspend fun load(request: ObservationRequest): RootSnapshot {
+        val (seeded, inventory) =
+            synchronized(inputLock) {
+                Pair(preloadedSections, preloadedPackageInventory).also {
+                    preloadedSections = null
+                    preloadedPackageInventory = null
+                }
+            }
+        val sections =
+            if (seeded != null) {
+                StartupTrace.mark("root_snapshot_seeded")
+                seeded.also(::validateRootSnapshotSections)
+            } else {
+                loadRootShellSnapshot(inventory, runtimeProbeSource, reader)
+            }
+        return RootSnapshot(sections.toMap(), request.id, request.generation)
+    }
+
+    override fun observationChanged(
+        previous: ObservationState<RootSnapshot>,
+        next: ObservationState<RootSnapshot>,
+    ) {
+        if (rootObservationInvalidatesDependents(previous, next)) dependents.forEach { it() }
+        if (rootObservationInvalidatesInventory(previous, next)) inventoryDependents.forEach { it() }
     }
 }
 
 private fun loadRootShellSnapshot(
     inventoryOverride: PackageInventorySeed?,
     runtimeProbeSource: String?,
+    reader: RootProcessRunner,
 ): Map<String, String> {
-    val (exitCode, raw) =
-        suExec(
-            buildRootShellSnapshotCommand(
-                includePmPackages = inventoryOverride == null,
-                runtimeProbeSource = runtimeProbeSource,
+    val result =
+        reader.runAndDrain(
+            listOf(
+                "su",
+                "-c",
+                buildRootShellSnapshotCommand(
+                    includePmPackages = inventoryOverride == null,
+                    runtimeProbeSource = runtimeProbeSource,
+                ),
             ),
-            timeoutSec = ROOT_SNAPSHOT_TIMEOUT_SEC,
+            timeoutMillis = ROOT_SNAPSHOT_TIMEOUT_SEC * 1_000,
         )
-    if (exitCode != 0) {
-        throw RootSnapshotException("root snapshot command failed with exit=$exitCode")
-    }
+    val raw =
+        (result as? RootProcessResult.Completed)?.output
+            ?: throw RootSnapshotException("root snapshot read failed or exceeded its limits")
     val sections = parseRootShellSnapshot(raw).toMutableMap()
     if (inventoryOverride != null) {
         sections["pm_packages"] = inventoryOverride.packages

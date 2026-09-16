@@ -374,6 +374,12 @@ internal fun canonicalConfigWithSelfTarget(
             javaHooks = null,
             native = NativeRole.All,
             hidden = true,
+            // Never a ports target: the ports module would reject this app's own
+            // loopback traffic, which cuts the agent bridge off, and no self-check
+            // measures localhost hiding. Reachable only through the bridge or an
+            // import; the picker does not list this app.
+            ports = false,
+            portPolicy = null,
         )
     if (updated == current && config.apps.containsKey(selfPkg)) return config
     return config.copy(apps = (config.apps + (selfPkg to updated)).toSortedMap())

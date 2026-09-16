@@ -128,21 +128,24 @@ fun PreferenceRowSwitch(
     enabled: Boolean = true,
     index: Int = -1,
     count: Int = 1,
+    progress: Boolean = false,
+    onDisabledClick: (() -> Unit)? = null,
 ) {
     PreferenceRow(
         title = title,
         modifier = modifier,
         subtitle = subtitle,
         icon = icon,
-        enabled = enabled,
+        enabled = enabled || onDisabledClick != null,
         index = index,
         count = count,
-        onClick = { onCheckedChange(!checked) },
+        onClick = { if (enabled) onCheckedChange(!checked) else onDisabledClick?.invoke() },
         trailing = {
             EnhancedSwitch(
                 checked = checked,
                 onCheckedChange = null,
                 enabled = enabled,
+                progress = progress,
             )
         },
     )

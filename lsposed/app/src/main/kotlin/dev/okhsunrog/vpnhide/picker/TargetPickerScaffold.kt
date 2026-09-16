@@ -31,13 +31,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -64,11 +61,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
-import dev.okhsunrog.vpnhide.CanonicalWriteResult
+import dev.okhsunrog.vpnhide.CanonicalActivation
+import dev.okhsunrog.vpnhide.CanonicalConfig
+import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.HelpAccordion
+import dev.okhsunrog.vpnhide.LocalConfigSnackbar
+import dev.okhsunrog.vpnhide.LocalConfigSnackbarInsets
+import dev.okhsunrog.vpnhide.LocalConfigWriteAccess
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.StatusBanner
 import dev.okhsunrog.vpnhide.StatusColors
+import dev.okhsunrog.vpnhide.rememberCanonicalEditor
+import dev.okhsunrog.vpnhide.reportConfigSnackbarInset
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import io.github.oikvpqya.compose.fastscroller.VerticalScrollbar
 import io.github.oikvpqya.compose.fastscroller.indicator.IndicatorConstants
@@ -107,24 +111,9 @@ internal data class MergeResult<T : TargetEntry>(
 )
 
 /**
- * Everything a Save needs beyond the row entries themselves. The scaffold
- * supplies the self package (always a hidden Java/native target) and current
- * debug flag; UID resolution happens in the native activator. [partial] is
- * true when [AppListCache.scanWarning] is set at Save time — some profile
- * other than user 0 didn't scan this run, so the visible entries don't cover
- * every previously-configured package; screens use it to avoid dropping
- * settings for packages the picker simply couldn't see.
- */
-internal data class SaveContext(
-    val selfPkg: String,
-    val debug: Boolean,
-    val partial: Boolean = false,
-)
-
-/**
  * Shared scaffold for app-role picker screens. Owns all the
  * machinery they had copy-pasted: the cached-apps / targets subscription,
- * the dirty-guarded merge, search/system/Russian/configured filtering, the alphabetical
+ * the merge with retained field edits, search/system/Russian/configured filtering, the alphabetical
  * fast-scrollbar, the bottom save bar, the snackbar, and the save lifecycle
  * (including the exit-code → message mapping). Screens supply only what is
  * genuinely screen-specific via the parameters below.
@@ -137,7 +126,6 @@ internal data class SaveContext(
  * @param row renders one row; call `onChange` with the updated entry to mark
  *   the list dirty.
  * @param persist persist [entries] through the canonical-config repository.
- * @param successMessage snackbar text shown after a successful save.
  */
 @Composable
 internal fun <T : TargetEntry> TargetPickerScreen(
@@ -155,8 +143,8 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     help: @Composable (TargetsSnapshot) -> Unit,
     merge: (apps: List<AppSummary>, targets: TargetsSnapshot, selfPkg: String) -> MergeResult<T>,
     countText: (entries: List<T>, resources: Resources) -> String,
-    persist: suspend (entries: List<T>, ctx: SaveContext) -> CanonicalWriteResult,
-    successMessage: (entries: List<T>, resources: Resources) -> String,
+    buildConfig: (entries: List<T>, snapshot: TargetsSnapshot, selfPkg: String, partial: Boolean) -> CanonicalConfig,
+    preserveGroup: (T, T) -> T = { next, _ -> next },
     selectionChangeError:
         (current: List<T>, candidate: List<T>, targets: TargetsSnapshot, selfPkg: String, resources: Resources) -> String? =
         { _, _, _, _, _ -> null },
@@ -174,18 +162,22 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     val appListError by AppListCache.error.collectAsState()
     val userNames by AppListCache.userNames.collectAsState()
     val scanWarning by AppListCache.scanWarning.collectAsState()
-    val targets by TargetsCache.snapshot.collectAsState()
+    val cachedTargets by TargetsCache.snapshot.collectAsState()
+    val repository by CanonicalConfigRepository.state.collectAsState()
+    val editor = rememberCanonicalEditor(helpPrefKey)
+    val targets = cachedTargets?.copy(canonicalConfig = editor.state.current ?: repository.confirmed ?: cachedTargets?.canonicalConfig)
+    val saving = editor.saving
+    var resaveNeeded by remember { mutableStateOf(false) }
+    val dirty = editor.state.dirty || resaveNeeded
     val targetsError by TargetsCache.error.collectAsState()
 
     var allApps by remember { mutableStateOf<List<T>>(emptyList()) }
-    var saving by remember { mutableStateOf(false) }
-    var dirty by remember { mutableStateOf(false) }
     var snackMessage by remember { mutableStateOf<String?>(null) }
     var snackDuration by remember { mutableStateOf(SnackbarDuration.Long) }
-    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarHostState = LocalConfigSnackbar.current
+    val checkWrite = LocalConfigWriteAccess.current
 
-    // Surface unsaved-edit state so a host can guard destructive navigation
-    // (this screen is torn down by full-screen overlays, dropping its edits).
+    // The Activity ViewModel retains edits across overlays and Activity recreation.
     LaunchedEffect(dirty) { onDirtyChange(dirty) }
     // On teardown (tab switch, overlay) the local `dirty` is gone with the edits,
     // so tell the host they're no longer pending — otherwise a later guarded nav
@@ -236,17 +228,15 @@ internal fun <T : TargetEntry> TargetPickerScreen(
         return
     }
 
-    // While `dirty` is true the user has unsaved checkbox edits — don't
-    // overwrite them with a fresh snapshot. Caches can refresh under us
-    // (ON_RESUME, another screen calling `TargetsCache.refresh()`) and
-    // silently dropping the edits is the worst outcome.
+    // Merge confirmed changes with the field draft; keep list grouping stable while editing.
     LaunchedEffect(cachedApps, targets) {
-        if (dirty) return@LaunchedEffect
         val apps = cachedApps ?: return@LaunchedEffect
         val t = targets ?: return@LaunchedEffect
         val merged = merge(apps, t, context.packageName)
-        allApps = merged.entries
-        dirty = merged.resaveNeeded
+        val old = allApps.associateBy { it.packageName }
+        allApps =
+            merged.entries.map { next -> if (editor.state.dirty) old[next.packageName]?.let { preserveGroup(next, it) } ?: next else next }
+        resaveNeeded = merged.resaveNeeded
     }
 
     val loading = cachedApps == null || targets == null
@@ -280,8 +270,16 @@ internal fun <T : TargetEntry> TargetPickerScreen(
             snackDuration = SnackbarDuration.Long
             snackMessage = error
         } else {
-            allApps = candidate
-            dirty = true
+            val snapshot = targets
+            if (snapshot != null && editor.state.current != null) {
+                // Compare the displayed rows before/after this interaction. A confirmed
+                // change can arrive before the row merge effect; it is not a UI edit.
+                editor.change(
+                    buildConfig(allApps, snapshot, context.packageName, scanWarning != null),
+                    buildConfig(candidate, snapshot, context.packageName, scanWarning != null),
+                )
+                allApps = candidate
+            }
         }
     }
 
@@ -321,14 +319,14 @@ internal fun <T : TargetEntry> TargetPickerScreen(
             val currentTargets = targets
             val indexLabels =
                 remember(visibleSections, currentTargets) {
-                    targetListIndexLabels(visibleSections, hasHelpItem = currentTargets != null)
+                    targetListIndexLabels(visibleSections, hasHelpItem = true)
                 }
             Box(modifier = Modifier.weight(1f)) {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    if (currentTargets != null) {
+                    run {
                         item(key = "help") {
                             Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                                 HelpAccordion(prefKey = helpPrefKey, title = helpTitle) {
@@ -355,9 +353,7 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                             }
                         }
                         items(section.entries, key = { it.packageName }) { app ->
-                            if (currentTargets != null) {
-                                row(app, userNames, currentTargets, onChange)
-                            }
+                            row(app, userNames, currentTargets, onChange)
                         }
                     }
                 }
@@ -368,14 +364,12 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                     },
                 )
             }
-            SnackbarHost(
-                hostState = snackbarHostState,
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-            )
-            Surface(tonalElevation = 3.dp) {
+            val snackbarInsets = LocalConfigSnackbarInsets.current
+            Surface(
+                tonalElevation = 3.dp,
+                // A save error's snackbar rises above this bar, not over Save / Discard.
+                modifier = Modifier.reportConfigSnackbarInset { snackbarInsets.actionBar = it },
+            ) {
                 Row(
                     modifier =
                         Modifier
@@ -389,22 +383,31 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
+                    androidx.compose.material3.TextButton(onClick = editor::discard, enabled = editor.state.dirty && !saving) {
+                        Text(stringResource(R.string.config_discard_draft))
+                    }
                     EnhancedButton(
-                        onClick = {
+                        onClick = save@{
+                            if (!checkWrite()) return@save
                             val error =
-                                targets?.let { currentTargets ->
+                                targets.let { currentTargets ->
                                     selectionSaveError(allApps, currentTargets, context.packageName, resources)
                                 }
                             if (error != null) {
                                 snackDuration = SnackbarDuration.Long
                                 snackMessage = error
                             } else {
-                                saving = true
-                                dirty = false
+                                val selfPkg = context.packageName
+                                val signals = cachedApps.orEmpty().map(AppSummary::toAutoHideSignal)
+                                val partial = scanWarning != null
+                                editor.save(CanonicalActivation(ports = true)) { fresh ->
+                                    applyAutoHiddenPackages(fresh, selfPkg, signals, partial)
+                                }
                             }
                         },
                         enabled = dirty && !saving,
                     ) {
+                        if (saving) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Text(stringResource(R.string.btn_save))
                     }
                 }
@@ -412,56 +415,28 @@ internal fun <T : TargetEntry> TargetPickerScreen(
         }
     }
 
-    if (saving) {
-        LaunchedEffect(Unit) {
-            val entries = allApps
-            val selfPkg = context.packageName
-            val ctx =
-                SaveContext(
-                    selfPkg = selfPkg,
-                    debug = targets?.canonicalConfig?.debugSwitch ?: (targets?.canonicalConfig?.debug ?: false),
-                    partial = scanWarning != null,
-                )
-            try {
-                val result = persist(entries, ctx)
-                when (result.exitCode) {
-                    0 -> {
-                        val capacityWarning = parseNativeTargetCapacityWarning(result.output)
-                        if (capacityWarning != null) {
-                            snackDuration = SnackbarDuration.Long
-                            snackMessage =
-                                resources.getString(
-                                    R.string.save_native_target_capacity,
-                                    capacityWarning.capacity,
-                                    capacityWarning.total,
-                                    capacityWarning.dropped,
-                                )
-                        } else {
-                            snackDuration = SnackbarDuration.Short
-                            snackMessage = successMessage(entries, resources)
-                        }
-                        TargetsCache.refreshAfterSave(scope, context)
-                    }
-
-                    -1 -> {
-                        snackDuration = SnackbarDuration.Long
-                        snackMessage = resources.getString(R.string.save_failed_root)
-                        dirty = true
-                    }
-
-                    else -> {
-                        snackDuration = SnackbarDuration.Long
-                        snackMessage = resources.getString(R.string.save_failed_exit, result.exitCode)
-                        dirty = true
-                    }
+    LaunchedEffect(editor.result) {
+        val result = editor.result ?: return@LaunchedEffect
+        val warning = parseNativeTargetCapacityWarning(result.output)
+        snackDuration = SnackbarDuration.Long
+        snackMessage =
+            when {
+                warning != null -> {
+                    resources.getString(
+                        R.string.save_native_target_capacity,
+                        warning.capacity,
+                        warning.total,
+                        warning.dropped,
+                    )
                 }
-            } catch (e: Exception) {
-                snackDuration = SnackbarDuration.Long
-                snackMessage = resources.getString(R.string.save_failed_error, e.message ?: "")
-                dirty = true
+
+                // A plain success needs no snackbar: the switches settle, the
+                // Save button disables and the bar hides the discard action. A
+                // snackbar only covered the navigation bar for a few seconds.
+                else -> {
+                    null
+                }
             }
-            saving = false
-        }
     }
 }
 

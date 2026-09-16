@@ -72,12 +72,8 @@
     <string name="root_error_recheck">Проверить снова</string>
 
     <!-- Save feedback -->
-    <string name="save_success">Сохранено целей: %d</string>
     <string name="native_target_capacity_reached">Достигнут лимит Native: можно выбрать не более %1$d UID приложений. Сначала отключите Native у другого приложения.</string>
     <string name="save_native_target_capacity">Настройки сохранены, но Native-бэкенд может защитить только %1$d из %2$d найденных UID приложений. %3$d UID с наибольшими номерами остались без Native-защиты.</string>
-    <string name="save_failed_exit">Ошибка сохранения (код выхода %d)</string>
-    <string name="save_failed_error">Ошибка сохранения: %s</string>
-    <string name="save_failed_root">Ошибка сохранения: root-доступ запрещён</string>
 
     <!-- Dashboard -->
     <string name="dashboard_modules">Модули</string>
@@ -123,6 +119,17 @@
     <string name="dashboard_hero_unprotected_subtitle">Скрытие не активно</string>
     <string name="dashboard_hero_vpnoff_title">VPN выключен</string>
     <string name="dashboard_hero_vpnoff_subtitle">Скрытие неактивно без VPN</string>
+    <string name="dashboard_hero_note_probe_unavailable">Помощник диагностики не отвечает</string>
+    <string name="dashboard_hero_note_applying">Изменение настроек ещё применяется</string>
+    <string name="dashboard_hero_note_application_unknown">Не удалось подтвердить последнее изменение настроек</string>
+    <string name="dashboard_hero_note_application_failed">Последнее изменение настроек не применилось</string>
+    <string name="dashboard_hero_note_routing_unknown">Не удалось определить, идёт ли VPN Hide через VPN</string>
+    <string name="dashboard_hero_note_checking">Проверяем состояние VPN…</string>
+    <string name="dashboard_hero_note_interrupted">Последняя проверка прервана, показан предыдущий результат</string>
+    <string name="dashboard_hero_note_failed">Последняя проверка не выполнилась, показан предыдущий результат</string>
+    <string name="dashboard_hero_note_results_changed">После последней проверки изменились VPN или настройки, запустите её снова</string>
+    <string name="dashboard_hero_note_results_unverified">Проверяем, актуальна ли последняя проверка…</string>
+    <string name="dashboard_hero_note_insufficient">Последняя проверка не смогла отнести ни один вектор к слою скрытия</string>
     <string name="dashboard_summary_modules">Модули</string>
     <string name="dashboard_summary_issues">Проблемы</string>
     <string name="dashboard_native_protection">Нативный уровень</string>
@@ -442,6 +449,17 @@
     <string name="banner_ready">VPN активен. Для этого приложения включено скрытие. Результаты проверок ниже.</string>
     <string name="banner_added_self">Для VPN Hide включено скрытие. Принудительно остановите VPN Hide и откройте снова, чтобы нативные проверки начали работать — перезагрузка устройства не нужна.</string>
     <string name="banner_network_blocked">Доступ к сети отключён для этого приложения. Проверки ioctl (SIOCGIFFLAGS, SIOCGIFMTU, SIOCGIFCONF) не могут быть выполнены. Включите в Настройки → Приложения → VPN Hide → Мобильный интернет и Wi-Fi.</string>
+    <string name="diag_banner_applying">Изменение настроек ещё применяется. Проверка запустится, как только оно завершится.</string>
+    <string name="diag_banner_application_unknown">Не удалось подтвердить последнее изменение настроек. Перепроверьте его в настройках и запустите проверку снова.</string>
+    <string name="diag_banner_application_failed">Последнее изменение настроек не применилось. Исправьте его с того переключателя, где произошла ошибка, и запустите проверку снова.</string>
+    <string name="diag_banner_routing_unknown">Не удалось определить, идёт ли VPN Hide через VPN. Нажмите «Повторить».</string>
+    <string name="diag_banner_probe_unavailable">Помощник диагностики не завершил прошлую проверку и не сможет начать новую, пока не вернётся. Если так и остаётся, перезапустите приложение.</string>
+    <string name="diag_banner_interrupted">Проверку прервало изменение VPN, маршрутизации или настроек. Нажмите «Повторить».</string>
+    <string name="diag_notice_interrupted">Последнюю проверку прервало изменение VPN, маршрутизации или настроек. Ниже результаты предыдущей завершённой проверки.</string>
+    <string name="diag_notice_failed">Последняя проверка не выполнилась. Ниже результаты предыдущей завершённой проверки.</string>
+    <string name="diag_banner_results_changed">С момента этой проверки изменились VPN, маршрутизация или настройки. Запустите проверку снова.</string>
+    <string name="diag_banner_results_unverified">Проверяем, относятся ли эти результаты к текущему состоянию VPN…</string>
+    <string name="diag_banner_insufficient">Проверка прошла, но ни один вектор не удалось отнести к слою скрытия, поэтому она ничего не доказывает. Подробности ниже.</string>
     <string name="section_native">Нативный уровень (kmod / KPM / Zygisk)</string>
     <string name="section_native_uncovered">Вне зоны активного модуля</string>
     <string name="diag_uncovered_caption">Способы обнаружения, которые активный модуль не покрывает — это не ошибка работающего модуля. VPN-пути в файловой системе (например /sys/class/net) закрываются включением «Экспериментальной защиты» в Настройках; остальные могут потребовать модуль уровня ядра (kmod / KPM), если устройство его поддерживает.</string>
@@ -569,7 +587,6 @@
     <string name="settings_unavailable_configured_failed">Не удалось удалить недоступные приложения.</string>
     <string name="settings_role_hidden">Скрыто</string>
     <string name="settings_auto_hide_saved">Настройки скрытия приложений сохранены.</string>
-    <string name="settings_auto_hide_failed">Не удалось обновить настройки скрытия приложений.</string>
     <string name="settings_security">Безопасность</string>
     <string name="settings_superkey_title">APatch/FolkPatch SuperKey</string>
     <string name="settings_superkey_saved">Сохранён для активации KPM при загрузке.</string>
@@ -580,4 +597,22 @@
     <string name="settings_superkey_stored">SuperKey сохранён.</string>
     <string name="settings_superkey_cleared">SuperKey удалён.</string>
     <string name="settings_superkey_failed">Не удалось обновить SuperKey.</string>
+    <string name="config_initializing">Проверяем конфигурацию и предыдущие операции…</string>
+    <string name="config_paused">Результат изменения конфигурации пока неизвестен. Новые записи приостановлены. Повторите проверку, чтобы продолжить.</string>
+    <string name="config_unavailable">Конфигурация недоступна. Проверьте root-доступ и повторите проверку.</string>
+    <string name="config_invalid">Сохранённая конфигурация повреждена или имеет неподдерживаемый формат. Изменения приостановлены.</string>
+    <string name="config_missing">Сохранённая конфигурация отсутствует. Может потребоваться повторная начальная подготовка.</string>
+    <string name="config_ui_conflict">Операция пересекается с несохранёнными правками в редакторе приложений. Правки сохранены в черновике. Сохраните или отмените их перед повтором.</string>
+    <string name="config_secret_failed">Операция с ключом завершилась ошибкой. Конфигурация могла уже сохраниться. Повторите действие с ключом в настройках.</string>
+    <string name="config_apply_failed">Конфигурация сохранена, но применить её полностью не удалось. Можно повторить применение.</string>
+    <string name="config_write_failed">Не удалось выполнить изменение конфигурации. Показаны последние подтверждённые значения.</string>
+    <string name="config_recheck">Проверить снова</string>
+    <string name="config_apply_again">Применить снова</string>
+    <string name="config_discard_draft">Отменить правки</string>
+    <string name="config_cleanup_failed">Очистка не завершилась успешно. Проверьте её условия и повторите действие очистки.</string>
+    <string name="config_applying">Сохранение и применение конфигурации…</string>
+    <string name="config_rechecking">Проверка результата предыдущей операции…</string>
+    <string name="config_capture_logging">Отладочные логи остаются включены, пока идёт сбор данных.</string>
+    <string name="config_changes_unavailable">Изменение конфигурации недоступно</string>
+    <string name="config_close">Закрыть</string>
 </resources>

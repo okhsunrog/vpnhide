@@ -1,7 +1,6 @@
 package dev.okhsunrog.vpnhide
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -9,33 +8,30 @@ import java.io.File
 class CanonicalConfigRepositoryTest {
     @Test
     fun `persistence command orders write coupled state and activators`() {
-        val command =
-            buildCanonicalPersistenceCommand(
-                CanonicalConfig(debug = true),
+        val mutation =
+            CanonicalMutation(
+                emptyList(),
                 coupledCommands = listOf("write-secret"),
                 activation = CanonicalActivation(native = true, ports = true),
             )
 
-        val canonical = command.indexOf(CANONICAL_CONFIG_FILE)
-        val secret = command.indexOf("write-secret")
-        val native = command.indexOf(ConfigChannels.nativeActivatorCommand())
-        val ports = command.indexOf(ConfigChannels.portsActivatorCommand())
-        assertTrue(canonical >= 0)
-        assertTrue(secret > canonical)
-        assertTrue(native > secret)
-        assertTrue(ports > native)
-        assertFalse(command.contains(" ; "))
+        assertEquals(
+            listOf(ConfigPhase.Persist, ConfigPhase.Secret, ConfigPhase.Native, ConfigPhase.Ports),
+            configMutationPlan(mutation, true),
+        )
+        assertTrue(configPhaseCommand(ConfigPhase.Persist, CanonicalConfig(debug = true), mutation).contains(CANONICAL_CONFIG_FILE))
+        assertEquals("write-secret", configPhaseCommand(ConfigPhase.Secret, CanonicalConfig(), mutation))
     }
 
     @Test
     fun `activation can be disabled for settings-only writes`() {
-        val command =
-            buildCanonicalPersistenceCommand(
-                CanonicalConfig(),
+        val mutation =
+            CanonicalMutation(
+                emptyList(),
                 activation = CanonicalActivation(native = false, ports = false),
             )
 
-        assertFalse(command.contains("activator"))
+        assertEquals(listOf(ConfigPhase.Persist), configMutationPlan(mutation, true))
     }
 
     @Test

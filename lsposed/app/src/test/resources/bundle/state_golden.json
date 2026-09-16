@@ -17,6 +17,39 @@
     },
     "selfNeedsRestart": false,
     "gate": "ROUTED",
+    "selfTestRunId": 4,
+    "diagnostics": {
+        "eligibility": "Eligible",
+        "activeRunId": 5,
+        "activeStage": "Core",
+        "lastAttempt": {
+            "runId": 4,
+            "outcome": "Failed",
+            "failure": "ExecutionFailed",
+            "eligibility": null
+        },
+        "measurement": {
+            "runId": 3,
+            "startedAt": 1755856800000,
+            "endedAt": 1755856802000,
+            "completed": true,
+            "interrupted": false,
+            "observationId": 7
+        },
+        "applicability": "Changed",
+        "evidence": {
+            "hidden": 9,
+            "systemBlocked": 1,
+            "nothingToLeak": 2,
+            "leaks": 0,
+            "notMeasured": 0,
+            "notRun": 0,
+            "uncoveredLeaks": 0,
+            "conclusion": "NoObservedLeak"
+        },
+        "currentSuccess": false,
+        "probeUnavailable": true
+    },
     "nativeVerdict": "Ok",
     "javaVerdict": "Ok",
     "report": {

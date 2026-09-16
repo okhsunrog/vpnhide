@@ -21,11 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -49,9 +45,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import dev.okhsunrog.vpnhide.CanonicalActivation
-import dev.okhsunrog.vpnhide.CanonicalConfigRepository
-import dev.okhsunrog.vpnhide.CanonicalWriteResult
 import dev.okhsunrog.vpnhide.EditablePortRule
 import dev.okhsunrog.vpnhide.LsposedJavaHookEntries
 import dev.okhsunrog.vpnhide.NativeBackendId
@@ -78,8 +71,6 @@ import dev.okhsunrog.vpnhide.toEditable
 import dev.okhsunrog.vpnhide.toPortRuleOrNull
 import dev.okhsunrog.vpnhide.toUiMode
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /**
  * One row per app across every VPN-hiding role. The unified list keeps role
@@ -183,18 +174,17 @@ internal fun AppPickerScreen(
         countText = { entries, res ->
             res.getString(R.string.selected_count, entries.count { it.anySelected })
         },
-        persist = { entries, ctx ->
-            withContext(Dispatchers.IO) {
-                persistUnifiedSelection(
-                    ctx = ctx,
-                    selections = entries.map(AppEntry::toRoleSelection),
-                    autoHideSignals = entries.map(AppEntry::toAutoHideSignal),
-                )
-            }
+        buildConfig = { entries, snapshot, selfPkg, partial ->
+            buildCanonicalConfigForAppPickerSave(
+                snapshot.canonicalConfig?.debug ?: false,
+                selfPkg,
+                entries.map(AppEntry::toRoleSelection),
+                snapshot,
+                entries.map(AppEntry::toAutoHideSignal),
+                partial,
+            )
         },
-        successMessage = { entries, res ->
-            res.getString(R.string.save_success, entries.count { it.anySelected })
-        },
+        preserveGroup = { next, old -> next.copy(groupSelected = old.groupSelected) },
         selectionChangeError = ::nativeSelectionChangeError,
         selectionSaveError = ::nativeSelectionSaveError,
     ) { app, userNames, targets, onChange ->
@@ -350,26 +340,6 @@ private fun HelpInfoBlock(
  * running the installed activator; LSPosed reads the JSON directly; the ports
  * activator derives its observer set from the same JSON.
  */
-private suspend fun persistUnifiedSelection(
-    ctx: SaveContext,
-    selections: Collection<AppRoleSelection>,
-    autoHideSignals: Collection<AppAutoHideSignal>,
-): CanonicalWriteResult {
-    val canonical =
-        buildCanonicalConfigForAppPickerSave(
-            debug = ctx.debug,
-            selfPkg = ctx.selfPkg,
-            selections = selections,
-            snapshot = TargetsCache.snapshot.value,
-            autoHideSignals = autoHideSignals,
-            partial = ctx.partial,
-        )
-    return CanonicalConfigRepository.commit(
-        canonical,
-        activation = CanonicalActivation(native = true, ports = true),
-    )
-}
-
 private fun AppEntry.toAutoHideSignal(): AppAutoHideSignal =
     AppAutoHideSignal(
         packageName = packageName,

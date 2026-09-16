@@ -37,7 +37,7 @@ you add to any of them:
 | name | what it actually is |
 |---|---|
 | `DiagnosticsScreen`, *Detailed diagnostics* | the user-facing check suite |
-| `DiagnosticsCache` | the **run state** of that suite (NotRun / Running / Failed) |
+| `DiagnosticsCache`, `DiagnosticRunCoordinator` | the **run state** of that suite: identified, process-owned runs (`DiagnosticRunView`) projected onto NotRun / Running / Blocked / Failed / Ready |
 | `DiagnosticReport`, `buildDiagnosticReport`, `DiagnosticCheck` | the **canonical model** the screen and the bundle both render — see `docs/diagnostics.md` |
 | `DiagnosticGate`, `RoutingGateCache`, `resolveDiagnosticGate` | the **precondition** for a meaningful run (VPN up, this app routed) — not a check |
 | `HookDiagnostics`, `ConnectivityAttachDiagnostics`, `KpmDiagnostics` | attach/telemetry for the hooks themselves; **not part of the suite** |
@@ -65,26 +65,46 @@ directions, since `internal` is module-wide and the compiler will not.
 
 - **Read path:** one batched root shell → `RootSnapshotCache` → typed snapshots
   (`DashboardState`, `TargetsSnapshot`) derived in pure functions → Compose.
-  Dashboard and Hiding derive from the *same* snapshot so their counts can't
-  drift.
-- **Write path (Save):** typed entries → canonical JSON
-  (`/data/system/vpnhide_config.json`) → `ConfigChannels` / module activators
-  derive runtime state for the installed native and ports backends. LSPosed
-  reads the canonical JSON directly from `system_server`. See `docs/state.md`
-  for every path's owner/reader/lifetime.
+  Root-derived projections carry the source observation ID. Dependent invalidation
+  rejects obsolete loads; retained last-good screen values can temporarily belong
+  to different observations while refreshes finish.
+- **Write path:** field intents → process-owned `CanonicalConfigRepository` /
+  `ConfigCoordinator` → fresh canonical read → tracked root phases for JSON,
+  secret/cleanup and native/ports activation. Switches observe coordinator intent
+  and confirmed values; Activity `CanonicalEditorViewModel` instances retain
+  drafts and register conflicts. Observation refresh happens separately. LSPosed
+  reads canonical JSON directly from `system_server`. See
+  `docs/config-coordinator.md` for ownership, recovery and current migration limits.
 
 ## Load-bearing abstractions — reuse these
 
-- **`StateCache<T>`** — base for every app-scoped, lazily-loaded cache
-  (loading/error/value flows + single-flight job). A new cache **extends this**;
-  never hand-roll `inflight`/`loading` again. If its value is derived from the
-  canonical config, also add it to `CanonicalConfigRepository.derivedCaches` —
-  that list, and only that list, is what a config write refreshes. Membership
-  rule and the deliberate non-members are documented on it.
+- **`StateCache<T>`** — base for app-scoped observation caches. It delegates to
+  process-owned `ObservationCoordinator`; loading/error/value flows project one
+  immutable observation. A new observation cache **extends this**; never hand-roll
+  jobs or publish side metadata inside `load`. Root-derived caches declare
+  `source = RootSnapshotCache.dependency`; app inventory uses `inventoryDependency`
+  to avoid scanning icons after config-only changes. Use `ContextStateCache` when
+  loading needs application context plus restart state. Readiness must use `current`,
+  not retained `value`. See `docs/observation-coordinator.md` for lifecycle and
+  publication rules. Diagnostic runs are a separate domain, not an observation cache.
+- **`DiagnosticRunCoordinator` / `DiagnosticsCache`** — the one owner of the
+  self-test suite. It executes the pure `reduceDiagnosticRun` with identified
+  effects (`DiagnosticRunIo`: context observation and phased probes) on the
+  process scope; a waiter detaching never cancels a run, and a retry is a new run.
+  Request a suite through `DiagnosticsCache.run` (automatic intent) / `retry`
+  (explicit) / `awaitTerminal` (join or read the latest attempt); never launch
+  `runCoreChecks` from a screen or bypass the coordinator's probe ownership.
+  The probe plan and per-run outcomes are keyed by the stable check ids in
+  `NATIVE_CHECKS` / `NATIVE_EXTRA_CHECKS` / `CORE_JAVA_CHECKS` / `EXTRA_JAVA_CHECKS`
+  — a new probe is a new spec entry with an id, not a bare list item.
+  Config operations reach the suite only through `DiagnosticImpactObserver`
+  (registered by `CanonicalConfigRepository`): relevance is decided by the pure
+  `operationAffectsSelfMeasurement`, so a new kind of write must be classified
+  there, never by adding a wait or a retry to a screen.
 - **`RootSnapshotCache`** — the single batched root read. Need new system state
   on the Dashboard/Hiding path? Add a section to its shell snapshot; don't
   add an ad-hoc `suExec` that races the snapshot.
-- **`ShellUtils`** — `suExec`/`suExecAsync`, and the parsers `parseConfigLines`,
+- **`ShellUtils`** — `suExec`, and the parsers `parseConfigLines`,
   `parseKeyValueLines`, `parsePackageUidMap`. **Never write another `pm list`
   or `key=value` parser** — there used to be four; there is now one of each.
 - **`ConfigChannels`** — the one place that invokes the single active native
@@ -93,6 +113,11 @@ directions, since `internal` is module-wide and the compiler will not.
   is invoked alongside it. Save, the debug toggle, and startup reconcile go
   through it. **Don't** hand-build per-backend runtime config in Kotlin; the
   activators derive each backend's wire from the canonical JSON.
+- **`CanonicalConfigRepository`** — all app configuration writes, superkey and
+  cleanup actions, and activation go through its coordinator. Submit field intent
+  or a pure transform of the fresh config; never save a cached full snapshot or
+  call a config/activation shell through `suExec`. Root outcome can be unknown:
+  preserve phase evidence and let the coordinator reconcile it.
 - **`StorageConfig` / `ShellCommandBuilders`** — canonical JSON schema,
   migration helpers, and root-safe file writes (`buildCanonicalConfigWriteCommand`
   in `StorageConfig` wraps the generic `buildAtomicSystemDataRawWriteCommand` in

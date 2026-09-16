@@ -34,9 +34,38 @@ The single managed desired-state file.
 - Permissions: `0640 root:system`, SELinux `system_data_file`.
 - Lifetime: persistent across reboot, module reinstall, and app reinstall.
 
-The app writes it atomically via temp-file + `mv`. If it is absent, native
+The process-owned `CanonicalConfigRepository` orders all app writes and activation
+through root receipts. It publishes confirmed JSON separately from observation
+caches. The app writes the file atomically via temp-file + `mv`. If it is absent, native
 activators treat it as an empty config and app startup creates a new config
 containing the mandatory VPN Hide self-target.
+
+### App mutation transport metadata
+
+The app uses the [root mutation transport](root-mutation-transport.md) for
+configuration writes and activation. Its preparation API owns:
+
+- `/data/adb/vpnhide/app-state/` and `lane/`: root-owned `0700` directories.
+- `lane/lock`: permanent `0600` lock inode; never replace/unlink while an
+  invocation can exist.
+- `lane/state.json`: latest version-1 execution-lifetime receipt, `0600`; written
+  by `vhmutate`, read under its lock, retained across app death and reboot.
+  `lane/state.next` is its atomic replacement staging file. No commands, config,
+  secrets or output are stored here; this is not an operation replay queue.
+- `vhmutate-<sha256>`: versioned root executable, `0700`. The app stages it through
+  `stage-<uuid>`, links it into place without replacing an existing executable,
+  and verifies its digest. Interrupted staging can leave a temporary binary.
+
+Full reset preserves this entire directory: unlinking its lock while the reset
+operation holds it would allow a second independent lock inode. Config, superkey
+and backend service state outside this metadata directory are still removed.
+- App-private `files/vhmutate-<sha256>` and `files/vhmutate-<uuid>.tmp`: extracted
+  APK assets, removed with app data. They contain binary code only.
+
+Old executable versions and receipts currently have no automatic cleanup; safe
+cleanup/adoption belongs to coordinator integration. A same-boot unfinished
+receipt cannot be reset merely because its PID vanished or the app restarted.
+The helper inherits the root manager's SELinux domain; no new policy is installed.
 
 ### Pre-1.0 Config Files (import inputs)
 

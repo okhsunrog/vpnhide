@@ -139,6 +139,56 @@ warning instead of the normal success message. The canonical package selection
 is still saved in full; the warning describes the capped native runtime
 projection.
 
+## App mutation transport
+
+These are configured allocation/input bounds, separate from the backend capacity
+measurements above. See [transport protocol and recovery](root-mutation-transport.md).
+
+| Resource | Enforced bound | Owner |
+|---|---|---|
+| UTF-8 command script | 2 MiB plus at most 64 B framing | `root_transport/input.rs`, Kotlin request adapter |
+| Canonical readback | 2 MiB | `root_transport/mod.rs` |
+| Latest receipt metadata | 4 KiB | `root_transport/state.rs` |
+| Retained helper stdout | 4 MiB | `RootProcessRunner` |
+| Outstanding process/pipe owners | 3 per retained runner | `RootProcessRunner` |
+
+The canonical JSON is embedded as a JSON string in the helper response, so escaping
+and the receipt consume part of the stdout budget. Existing persistence builders
+also base64-encode canonical data inside the script, reducing the usable canonical
+write size below the script's 2 MiB limit. Overflow reports unavailable/rejection;
+it never falls back to an empty config or silently truncates a mutation. These
+bounds do not raise or replace the 160-UID native target limit.
+
+## App observation reads
+
+The batched root snapshot retains at most **16 MiB of stdout**. Overflow drains
+the remaining output but rejects the entire snapshot; it never publishes truncated
+sections. Stderr is drained without retention. The shell deadline is 10 seconds;
+the observation coordinator reports failure at 15 seconds if the worker has not
+returned. It holds the single root-read lane until the launcher process and its
+pipe readers finish. These bounds are separate from the mutation runner's 4 MiB
+reply and three retained owners.
+
+Other observation deadlines are 60 seconds, except Dashboard (120 seconds while
+its loader still awaits the diagnostic suite). A read waiter can follow
+superseded generations for at most twice its cache deadline. This bounds waiting,
+not the lifetime of an uncooperative worker. See
+[observation coordinator](observation-coordinator.md) for quarantine and retry rules.
+
+## Diagnostic runs
+
+One diagnostic run has a **120-second** whole-run deadline armed at admission
+(`DIAGNOSTIC_RUN_DEADLINE_MS`): it covers the eligibility read, both probe phases
+and the end-context read. Expiry finishes the run as not started or interrupted
+and, if probes were already launched, begins a separate **30-second** drain
+(`DIAGNOSTIC_DRAIN_DEADLINE_MS`). Draining joins the run's outstanding helper
+jobs; it cannot interrupt a blocking `su` probe. If the drain deadline passes
+first, the probe resource is quarantined and every new request is rejected with
+`ResourceUnavailable` until the late helper actually returns. The coordinator
+retains raw evidence for at most the latest attempt and the latest complete
+measurement, plus the results of the eight most recent finished attempts for
+already-issued handles. See [app state transitions](notes/app-state-transitions.md) §18.
+
 ## Re-measuring
 
 Nothing here should be trusted because it is written down. The representative

@@ -1,50 +1,81 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
 import android.content.Context
-import android.net.ConnectivityManager
-import dev.okhsunrog.vpnhide.LogTags
-import dev.okhsunrog.vpnhide.VpnHideLog
-import dev.okhsunrog.vpnhide.debug.captureGateFrom
-import dev.okhsunrog.vpnhide.startup.StartupTrace
-import kotlinx.coroutines.CancellationException
+import android.os.Process
+import dev.okhsunrog.vpnhide.CanonicalConfigRepository
+import dev.okhsunrog.vpnhide.ConfigOperationObserver
+import dev.okhsunrog.vpnhide.ConfigOperationResult
+import dev.okhsunrog.vpnhide.ConfigOperationSpec
+import dev.okhsunrog.vpnhide.ConfigPhase
+import dev.okhsunrog.vpnhide.ContextObservationInputs
+import dev.okhsunrog.vpnhide.ObservationRuntime
+import dev.okhsunrog.vpnhide.ProjectedStateFlow
+import dev.okhsunrog.vpnhide.RootSnapshotCache
+import dev.okhsunrog.vpnhide.TransitionFailure
+import dev.okhsunrog.vpnhide.currentObservationValue
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.job
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 
 /**
- * Cache for `runAllChecks` results.
+ * What a capture got out of the suite. A capture never renders the legacy
+ * projection: it records the identified attempt (or the reason it never got one)
+ * in the bundle, so a bundle can say "the run was interrupted" instead of
+ * silently carrying no report.
+ */
+internal sealed interface DiagnosticCaptureOutcome {
+    /** The capture's own run reached a terminal attempt; [result] carries it with whatever evidence exists. */
+    data class Ran(
+        val result: DiagnosticRunResult,
+    ) : DiagnosticCaptureOutcome
+
+    /** No run was admitted (another suite owns the lane, or the probe resource is quarantined). */
+    data class NotAdmitted(
+        val reason: TransitionFailure,
+    ) : DiagnosticCaptureOutcome
+}
+
+/**
+ * Facade over the process-owned diagnostic run coordinator.
  *
- * Diagnostics answer one question: *do the hooks work for this app
- * process right now?* The hooks themselves are fixed at process
- * creation time — kmod loads at boot, LSPosed injects into
- * system_server at its boot, Zygisk hooks fire at zygote fork —
- * so a run's result is valid for the entire lifetime of this app
- * process. Re-running every tab switch is pure waste.
+ * Diagnostics answer one question: *did the hooks work for this app process in a
+ * measured run?* Each run is an identified, immutable attempt executed by
+ * [DiagnosticRunCoordinator] on the process scope, so leaving a screen or
+ * recreating the Activity never cancels or restarts a suite (a caller's scope is
+ * accepted for source compatibility only). [state] is a synchronous projection
+ * of the coordinator's view onto the legacy vocabulary every consumer renders:
  *
- * State machine:
- * - [State.NotRun] — fresh, nothing attempted yet.
- * - [State.Running] — a run is in flight.
- * - [State.Blocked] — the gate stopped the run (VPN off, or this app split-tunnelled
- *   out); carries the [DiagnosticGate] so the banner explains which.
- * - [State.Failed] — last run threw (root dropped, shell exec failure). VPN may
- *   well be on; the user gets a "diagnostics failed, retry" banner — distinct
- *   from a [State.Blocked] VPN-off gate so an active-VPN user isn't told their VPN is off.
- * - [State.Ready] — at least the fast phase is captured; [State.Ready.complete]
- *   flips to true when the slow Java probes have filled in too. Dashboard waits
- *   for the complete result, while Diagnostics can show the fast result first.
+ * - [State.NotRun] — no attempt has finished yet and none is active.
+ * - [State.Running] — a run is waiting for a relevant config operation, checking
+ *   eligibility or probing its core phase.
+ * - [State.Blocked] — the latest attempt found the suite not eligible (VPN off,
+ *   this app split-tunnelled out, or a pending self-restart); carries the
+ *   [DiagnosticGate] so the banner explains which.
+ * - [State.Failed] — the latest attempt could not measure: execution failure,
+ *   deadline, cancellation, a config operation that failed or stayed unresolved,
+ *   or a context change during the run. Distinct from a VPN-off gate so an
+ *   active-VPN user is not told their VPN is off.
+ * - [State.Ready] — evidence exists; [State.Ready.complete] is false while the
+ *   slow Java phase of the active run is still filling in.
  *
- * Once a complete [State.Ready] is reached, [run] becomes a no-op — results
- * don't change mid-process. The only path back to "please retry" is killing
- * the process (a new launch starts with a fresh cache).
+ * [run] is the automatic intent: it starts a suite only until one has actually
+ * probed, and a blocked attempt does not consume it. [retry] keeps the existing
+ * policy — a completed suite is reused, anything else is requested again as a
+ * new run. Neither observation refreshes nor recomposition rerun a completed suite.
+ * [captureRun] is the debug export's entry: an explicit, capture-identified run
+ * that never joins an existing suite and whose terminal attempt is reported as is.
+ *
+ * Config operations reach the suite through [configOperation]: a request depends
+ * on every accepted operation that can change this process's own measurement
+ * (its roles and hooks, global optional features, whole replacements) and waits
+ * for them; the first mutating dispatch of such an operation interrupts an active
+ * run and advances the change epoch. Relevance is decided again on the prepared
+ * write set, so a mutation that only carries a transform still counts once its
+ * candidate is known. Other apps' edits, debug logging and the startup runtime
+ * reconcile neither delay nor interrupt a suite.
  */
 internal object DiagnosticsCache {
     sealed interface State {
@@ -52,10 +83,7 @@ internal object DiagnosticsCache {
 
         data object Running : State
 
-        // The gate blocked the run: no active VPN, or a VPN is up but this app is
-        // split-tunnelled out of it (nothing to hide from us). Carries the shared
-        // [DiagnosticGate] so every consumer speaks one vocabulary and no one
-        // re-folds the reason. Never [DiagnosticGate.ROUTED] — that becomes [Ready].
+        // Never [DiagnosticGate.ROUTED] — that outcome is a measured [Ready].
         data class Blocked(
             val gate: DiagnosticGate,
         ) : State {
@@ -68,176 +96,179 @@ internal object DiagnosticsCache {
 
         data class Ready(
             val results: CheckResults,
-            // false after the fast core phase (native + VPN-presence Java) —
-            // enough for early Diagnostics UI; true once the slow Java probes
-            // (push callback etc.) have filled in too.
             val complete: Boolean,
         ) : State
     }
 
-    private val _state = MutableStateFlow<State>(State.NotRun)
-    val state: StateFlow<State> = _state.asStateFlow()
+    @Volatile private var inputs: ContextObservationInputs? = null
 
-    private var inflight: Job? = null
-
-    // Owns runs kicked off from a non-UI caller (the Dashboard's protection
-    // summary), so they survive even if no screen scope is active.
-    private val cacheScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
-    // Whether this app's own hooks need a reboot to apply (it was just added as a
-    // target). Process-constant, so it is sticky-OR: the first run() call sets it and
-    // no later caller can clear it. When set, a run measures nothing (the hooks aren't
-    // in this process), so the cache parks at Blocked(NEEDS_RESTART) and never probes.
+    // Whether this app's own hooks need a restart to apply (it was just added as a
+    // target). Process-constant, so it is sticky-OR: once any caller reports true,
+    // a caller that does not know it (the agent bridge) can safely pass false.
     @Volatile private var restartPending = false
 
-    /** Start a run if one isn't already in flight and we don't have a
-     * completed result yet. Idempotent — safe to call from both
-     * Dashboard and Diagnostics screens on every composition.
-     *
-     * [selfNeedsRestart] is the shared gate signal: once any caller reports true the
-     * cache stays at Blocked(NEEDS_RESTART) (a run would be meaningless), so a caller
-     * that doesn't know it — the agent bridge — can safely pass false.
+    private val impactLock = Any()
+    private val impactFlow = MutableStateFlow(DiagnosticImpactState())
+    private val impact: DiagnosticImpactState get() = impactFlow.value
+
+    private val coordinator by lazy {
+        DiagnosticRunCoordinator(ObservationRuntime.scope, AppDiagnosticRunIo(inputs = { inputs }, impact = { impact }))
+    }
+
+    /** The identified run state: active run, latest attempt, latest complete measurement and their evidence. */
+    val runs: StateFlow<DiagnosticRunView> get() = coordinator.view
+
+    val state: StateFlow<State> by lazy { ProjectedStateFlow(coordinator.view, ::projectDiagnosticState) }
+
+    /**
+     * The shared projection every consumer should render: one value per change of
+     * the run view, the routing observation, the root snapshot, the confirmed
+     * config or the operation impact, so eligibility, the selected measurement and
+     * its applicability always come from the same instant.
      */
-    @Synchronized
+    val presentation: StateFlow<DiagnosticPresentation> by lazy {
+        combine(
+            coordinator.view,
+            RoutingGateCache.observation,
+            RootSnapshotCache.snapshot,
+            CanonicalConfigRepository.state,
+            impactFlow,
+        ) { view, routing, snapshot, config, impact ->
+            val current = inputs
+            val observation =
+                if (routing.attempted) {
+                    buildDiagnosticContextObservation(
+                        selfNeedsRestart = current?.selfNeedsRestart ?: false,
+                        routing = routing,
+                        snapshot = snapshot,
+                        config = config.confirmed,
+                        selfPackage = current?.context?.packageName.orEmpty(),
+                        processIdentity = processIdentity(),
+                        now = System.currentTimeMillis(),
+                        readiness = configReadiness(impact),
+                        changeEpoch = impact.changeEpoch,
+                        initialized = current != null,
+                    )
+                } else {
+                    null
+                }
+            diagnosticPresentation(view, observation, impact.changeEpoch, uncertain = currentObservationValue(routing) == null)
+        }.stateIn(
+            ObservationRuntime.scope,
+            SharingStarted.Eagerly,
+            diagnosticPresentation(coordinator.view.value, null, 0, uncertain = true),
+        )
+    }
+
+    private fun processIdentity(): String = "pid:${Process.myPid()};uid:${Process.myUid()}"
+
+    /** Automatic suite request: idempotent, consumed by the first suite that actually probes. */
     fun run(
-        scope: CoroutineScope,
+        @Suppress("UNUSED_PARAMETER") scope: CoroutineScope,
         context: Context,
         selfNeedsRestart: Boolean,
     ) {
-        restartPending = restartPending || selfNeedsRestart
-        if (restartPending) {
-            // Publish the gate synchronously and never launch doRun — this keeps the
-            // Job/cancellation machinery reserved for the real run. selfNeedsRestart is
-            // process-constant, so this is decided on the first run() and never flips
-            // out from under an in-flight run.
-            _state.value = State.Blocked(DiagnosticGate.NEEDS_RESTART)
-            return
-        }
-        val current = _state.value
-        when (current) {
-            is State.Ready -> {
-                if (current.complete) return
-            }
-
-            State.Running -> {
-                // Only bail if a run is genuinely still in flight. If the
-                // launching scope was cancelled mid-run, the state stays
-                // Running but the job is dead — fall through and relaunch so
-                // Diagnostics/Dashboard don't wedge on a stale Running forever.
-                if (inflight?.isActive == true) return
-            }
-
-            State.NotRun, is State.Blocked, State.Failed -> { /* proceed */ }
-        }
-        if (inflight?.isActive == true) return
-        inflight = scope.launch { doRun(context.applicationContext) }
+        updateInputs(context, selfNeedsRestart)
+        coordinator.request(request(automatic = true))
     }
 
-    /** Used by the retry button in the "VPN off" / "failed" banners — a readable
-     * alias for [run] at the call site (the [run] guard already permits a re-run
-     * from NotRun, Blocked, and Failed).
-     */
+    /** Explicit retry from the VPN-off / failed banners and Dashboard refresh: a new run unless the last one completed. */
     fun retry(
-        scope: CoroutineScope,
+        @Suppress("UNUSED_PARAMETER") scope: CoroutineScope,
         context: Context,
         selfNeedsRestart: Boolean,
-    ) = run(scope, context, selfNeedsRestart)
+    ) {
+        updateInputs(context, selfNeedsRestart)
+        // A completed suite is reused unless a known change made its measurement inapplicable.
+        val changed = presentation.value.applicability == MeasurementApplicability.Changed
+        if (changed || diagnosticRetryAllowed(coordinator.view.value.core)) coordinator.request(request(automatic = false))
+    }
 
     /**
-     * Suspend until the full Diagnostics result is available. Dashboard uses
-     * this path so the top-level "OK" state is backed by every protection
-     * probe shown in Settings → Detailed diagnostics, including the slow push-callback
-     * and route/NetworkInfo Java checks.
+     * Suspend until a terminal attempt is available: the active run's own result,
+     * the latest finished attempt, or the automatic suite when nothing ran yet. A
+     * terminal Blocked/Failed attempt is returned as is; retry belongs to an
+     * explicit trigger, so a dependent derivation cannot form a refresh cycle.
      */
     suspend fun awaitTerminal(
         context: Context,
         selfNeedsRestart: Boolean,
     ): State {
-        run(cacheScope, context, selfNeedsRestart)
-        return state.first {
-            it is State.Blocked || it is State.Failed || (it is State.Ready && it.complete)
-        }
-    }
-
-    /** The complete check results, or null when the terminal state carried no
-     * measurement (blocked or failed). Callers that need to distinguish *why*
-     * there are no results should use [awaitTerminal] — reading [state] again
-     * after a null here would race a subsequent run. */
-    suspend fun awaitFullResults(
-        context: Context,
-        selfNeedsRestart: Boolean,
-    ): CheckResults? = (awaitTerminal(context, selfNeedsRestart) as? State.Ready)?.results
-
-    private suspend fun doRun(appContext: Context) {
-        _state.value = State.Running
-        try {
-            StartupTrace.mark("diagnostics_cache_start")
-            // The gate now comes from the shared RoutingGateCache (folded through the
-            // same resolveDiagnosticGate / captureGateFrom every other surface uses),
-            // so the live path, the debug export, and the dashboard can never disagree
-            // about VPN-off / self-not-routed / routed. selfNeedsRestart=false below is
-            // safe — run()'s restartPending guard already ensures doRun is only reached
-            // once every caller reporting into this cache has reported false.
-            RoutingGateCache.ensureLoaded(cacheScope, appContext, selfNeedsRestart = false)
-            withContext(Dispatchers.IO) { RoutingGateCache.refreshInPlace(force = true) }
-            val gate = RoutingGateCache.gate.value
-            if (gate == null || RoutingGateCache.error.value != null) {
-                throw IllegalStateException(RoutingGateCache.error.value ?: "routing gate unavailable")
-            }
-            if (gate != DiagnosticGate.ROUTED) {
-                _state.value = State.Blocked(gate)
-                StartupTrace.mark(
-                    if (gate == DiagnosticGate.VPN_OFF) "diagnostics_cache_vpn_off" else "diagnostics_cache_self_not_routed",
-                )
-                return
-            }
-            val cm = appContext.getSystemService(ConnectivityManager::class.java)
-            // Phase 1 (fast): native + VPN-presence Java probes. Publish
-            // immediately so Settings → Detailed diagnostics can show progress without
-            // waiting for the slow phase below.
-            val core = withContext(Dispatchers.IO) { runCoreChecks(cm, appContext) }
-            _state.value = State.Ready(core, complete = false)
-            StartupTrace.mark("diagnostics_cache_core_done")
-            // Phase 2 (slow): remaining Java probes, incl. the push callback
-            // that blocks for up to 3s. Dashboard waits for this full result.
-            val extraJava = withContext(Dispatchers.IO) { runExtraJavaChecks(cm, appContext) }
-            _state.value = State.Ready(core.copy(extraJava = extraJava), complete = true)
-            StartupTrace.mark("diagnostics_cache_done")
-        } catch (e: CancellationException) {
-            // A cancelled job (e.g. the screen left) must propagate so
-            // structured concurrency unwinds — never get reinterpreted as a
-            // Blocked/Failed result. If we were cancelled before publishing a
-            // result, reset Running back to NotRun so a later run() can relaunch.
-            resetRunningIfStillOurs(coroutineContext.job)
-            throw e
-        } catch (e: Exception) {
-            // A real failure (root dropped, shell exec failure) — distinct from a
-            // VPN-off gate so an active-VPN user isn't wrongly told their VPN is off.
-            // Both states offer a retry; these causes are usually transient.
-            _state.value = State.Failed
-            StartupTrace.mark("diagnostics_cache_failed")
-            VpnHideLog.w(LogTags.DIAG, "runAllChecks failed: ${e.message}")
-        }
+        updateInputs(context, selfNeedsRestart)
+        val handle = coordinator.ensure(request(automatic = true)) ?: return state.value
+        val result = handle.await()
+        return projectDiagnosticAttempt(result.attempt, result.results)
     }
 
     /**
-     * Reset a stranded [State.Running] back to [State.NotRun] on cancellation —
-     * but only if [self] is still the current [inflight] job.
-     *
-     * [doRun]'s catch runs asynchronously on a dispatcher after [run] has
-     * already returned and released the monitor. Between a run's cancellation
-     * (its job goes `!isActive`) and its catch actually landing, a later [run]
-     * can fall through the dead-job guard and relaunch — setting `inflight` to
-     * the new job and `_state = Running` for *its* run. An unconditional reset
-     * from the cancelled run would then clobber the live run's state with a
-     * spurious NotRun. Guarding on job identity (and doing the read-modify-write
-     * under the same monitor [run] uses) keeps only our own cancellation able to
-     * reset, atomically against a concurrent relaunch.
+     * A capture's own fresh, identified run. [captureId] is part of the request
+     * identity, so a capture can never join a suite whose probes began before its
+     * logging and counter baseline (§9); it is admitted as a pending run instead
+     * and waits for the active one to settle. The terminal attempt is returned as
+     * is — blocked, interrupted and failed included — because a capture records
+     * the outcome rather than retrying it.
      */
-    @Synchronized
-    private fun resetRunningIfStillOurs(self: Job?) {
-        if (inflight === self && _state.value is State.Running) {
-            _state.value = State.NotRun
+    suspend fun captureRun(
+        context: Context,
+        selfNeedsRestart: Boolean,
+        captureId: Long,
+    ): DiagnosticCaptureOutcome {
+        updateInputs(context, selfNeedsRestart)
+        return when (val admission = coordinator.request(request(automatic = false).copy(captureId = captureId))) {
+            is DiagnosticAdmission.Accepted -> DiagnosticCaptureOutcome.Ran(admission.handle.await())
+
+            is DiagnosticAdmission.Rejected -> DiagnosticCaptureOutcome.NotAdmitted(admission.reason)
+
+            // Only an automatic request can be ignored; a capture request never is.
+            DiagnosticAdmission.Ignored -> DiagnosticCaptureOutcome.NotAdmitted(TransitionFailure.Busy)
         }
     }
+
+    /** Config-operation lifecycle from the coordinator's observer; effects go to the run coordinator in order. */
+    fun configOperation(event: DiagnosticImpactEvent) {
+        val transition = synchronized(impactLock) { reduceDiagnosticImpact(impact, event).also { impactFlow.value = it.state } }
+        transition.effects.forEach { effect ->
+            when (effect) {
+                is DiagnosticImpactEffect.DelayRuns -> coordinator.operationAccepted(effect.id)
+                DiagnosticImpactEffect.InterruptRuns -> coordinator.contextChanged(known = true)
+                is DiagnosticImpactEffect.SettleRuns -> coordinator.operationSettled(effect.id, effect.failure)
+            }
+        }
+    }
+
+    private fun request(automatic: Boolean): DiagnosticRequest = diagnosticRequest(automatic).copy(dependencies = impact.relevant)
+
+    private fun updateInputs(
+        context: Context,
+        selfNeedsRestart: Boolean,
+    ) {
+        restartPending = restartPending || selfNeedsRestart
+        inputs = ContextObservationInputs(context.applicationContext, restartPending)
+    }
+}
+
+/** The config coordinator's observer: classifies each operation against this app's own measurement. */
+internal class DiagnosticImpactObserver(
+    private val selfPackage: () -> String,
+) : ConfigOperationObserver {
+    override fun accepted(
+        id: Long,
+        spec: ConfigOperationSpec,
+    ) = DiagnosticsCache.configOperation(DiagnosticImpactEvent.Accepted(id, operationAffectsSelfMeasurement(spec, selfPackage())))
+
+    override fun prepared(
+        id: Long,
+        spec: ConfigOperationSpec,
+    ) = DiagnosticsCache.configOperation(DiagnosticImpactEvent.Prepared(id, operationAffectsSelfMeasurement(spec, selfPackage())))
+
+    override fun dispatched(
+        id: Long,
+        phase: ConfigPhase,
+    ) = DiagnosticsCache.configOperation(DiagnosticImpactEvent.Dispatched(id, phase))
+
+    override fun settled(result: ConfigOperationResult) =
+        DiagnosticsCache.configOperation(DiagnosticImpactEvent.Settled(result.id, result.failure))
+
+    override fun recovered(result: ConfigOperationResult) =
+        DiagnosticsCache.configOperation(DiagnosticImpactEvent.Recovered(result.id, result.failure))
 }

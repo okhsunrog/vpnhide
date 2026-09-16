@@ -319,13 +319,18 @@ internal object LegacyConfigImporter {
             parseLegacyConfigCandidate(snapshot.sections, targets.uidToPkg)
                 ?: return LegacyImportOutcome.NothingToImport
         val mode = action.mode ?: return discard()
-        val updated =
-            applyLegacyImport(targets.canonicalConfig ?: CanonicalConfig(), candidate, mode, selfPkg)
         val result =
             CanonicalConfigRepository.commit(
-                updated,
-                coupledCommands = listOf(buildLegacyConfigDeleteCommand()),
-                activation = CanonicalActivation(native = true, ports = true),
+                CanonicalMutation(
+                    emptyList(),
+                    protectAllDrafts = true,
+                    transform = { fresh ->
+                        applyLegacyImport(fresh, candidate, mode, selfPkg)
+                    },
+                    cleanup = true,
+                    coupledCommands = listOf(buildLegacyConfigDeleteCommand()),
+                    activation = CanonicalActivation(native = true, ports = true),
+                ),
             )
         if (!result.succeeded) {
             VpnHideLog.w(
@@ -345,12 +350,21 @@ internal object LegacyConfigImporter {
      * disappear without a manual refresh.
      */
     private suspend fun discard(): LegacyImportOutcome {
-        val (exit, output) = suExecAsync(buildLegacyConfigDeleteCommand())
+        val result =
+            CanonicalConfigRepository.commit(
+                CanonicalMutation(
+                    emptyList(),
+                    cleanup = true,
+                    coupledCommands = listOf(buildLegacyConfigDeleteCommand()),
+                    activation = CanonicalActivation(native = false),
+                ),
+            )
+        val exit = result.exitCode
+        val output = result.output
         if (exit != 0) {
             VpnHideLog.w(LogTags.APP, "legacy discard failed (exit=$exit): ${output.trim()}")
             return LegacyImportOutcome.Failed("exit=$exit")
         }
-        CanonicalConfigRepository.refreshDerivedCaches()
         VpnHideLog.i(LogTags.APP, "legacy config files deleted without importing")
         return LegacyImportOutcome.Discarded
     }

@@ -79,12 +79,8 @@
     <string name="root_error_recheck">Check again</string>
 
     <!-- Save feedback -->
-    <string name="save_success">Saved %d target(s)</string>
     <string name="native_target_capacity_reached">Native limit reached: at most %1$d app UIDs can be selected. Disable Native for another app first.</string>
     <string name="save_native_target_capacity">Saved, but the Native backend can protect only %1$d of %2$d resolved app UIDs. The %3$d highest UIDs were left without Native protection.</string>
-    <string name="save_failed_exit">Save failed (exit code %d)</string>
-    <string name="save_failed_error">Save failed: %s</string>
-    <string name="save_failed_root">Save failed: root access denied</string>
 
     <!-- Diagnostics -->
     <string name="diag_summary_tally">%1$d hidden · %2$d leaking</string>
@@ -128,6 +124,17 @@
     <string name="banner_ready">VPN is active. Hiding is enabled for this app. Results below.</string>
     <string name="banner_added_self">Enabled hiding for VPN Hide. Restart VPN Hide (force-stop and reopen) for native-level checks to take effect — no device reboot needed.</string>
     <string name="banner_network_blocked">Network access is disabled for this app. ioctl checks (SIOCGIFFLAGS, SIOCGIFMTU, SIOCGIFCONF) cannot run without it. Enable in Settings → Apps → VPN Hide → Mobile data &amp; Wi-Fi.</string>
+    <string name="diag_banner_applying">A configuration change is still being applied. The check will run once it has settled.</string>
+    <string name="diag_banner_application_unknown">The last configuration change could not be confirmed. Re-check it in Settings, then run the check again.</string>
+    <string name="diag_banner_application_failed">The last configuration change did not apply. Repair it from the switch that failed, then run the check again.</string>
+    <string name="diag_banner_routing_unknown">Couldn\'t determine whether VPN Hide is routed through the VPN. Tap Retry to check again.</string>
+    <string name="diag_banner_probe_unavailable">The diagnostic helper did not finish its last check and cannot start a new one until it returns. If this persists, restart the app.</string>
+    <string name="diag_banner_interrupted">The check was interrupted by a change in the VPN, routing or configuration before it finished. Tap Retry.</string>
+    <string name="diag_notice_interrupted">The latest check was interrupted by a change in the VPN, routing or configuration. The results below are from the previous complete check.</string>
+    <string name="diag_notice_failed">The latest check couldn\'t run. The results below are from the previous complete check.</string>
+    <string name="diag_banner_results_changed">The VPN, routing or configuration has changed since these results were measured. Run the check again.</string>
+    <string name="diag_banner_results_unverified">Checking whether these results still apply to the current VPN state…</string>
+    <string name="diag_banner_insufficient">The check ran, but no vector could be attributed to a hiding layer, so it proves nothing about hiding. See the details below.</string>
     <string name="section_native">Native level (kmod / KPM / Zygisk)</string>
     <string name="section_native_uncovered">Outside the active backend\'s reach</string>
     <string name="diag_uncovered_caption">Detection surfaces the active backend doesn\'t cover — not a failure of the running module. VPN filesystem paths (e.g. /sys/class/net) are closed by turning on Experimental protection in Settings; other surfaces may need a kernel-level backend (kmod / KPM) where the device supports one.</string>
@@ -177,6 +184,17 @@
     <string name="dashboard_hero_unprotected_subtitle">Hiding is not active</string>
     <string name="dashboard_hero_vpnoff_title">VPN is off</string>
     <string name="dashboard_hero_vpnoff_subtitle">Hiding is inactive without a VPN</string>
+    <string name="dashboard_hero_note_probe_unavailable">Diagnostic helper unresponsive</string>
+    <string name="dashboard_hero_note_applying">A configuration change is still being applied</string>
+    <string name="dashboard_hero_note_application_unknown">The last configuration change could not be confirmed</string>
+    <string name="dashboard_hero_note_application_failed">The last configuration change did not apply</string>
+    <string name="dashboard_hero_note_routing_unknown">Couldn\'t determine whether VPN Hide is routed through the VPN</string>
+    <string name="dashboard_hero_note_checking">Checking the VPN state…</string>
+    <string name="dashboard_hero_note_interrupted">The latest check was interrupted; showing the previous result</string>
+    <string name="dashboard_hero_note_failed">The latest check couldn\'t run; showing the previous result</string>
+    <string name="dashboard_hero_note_results_changed">The VPN or configuration changed since the last check; run it again</string>
+    <string name="dashboard_hero_note_results_unverified">Confirming the last check still applies…</string>
+    <string name="dashboard_hero_note_insufficient">The last check could not attribute any vector to a hiding layer</string>
     <string name="dashboard_summary_modules">Modules</string>
     <string name="dashboard_summary_issues">Issues</string>
     <string name="dashboard_native_protection">Native level</string>
@@ -599,7 +617,6 @@
     <string name="settings_unavailable_configured_failed">Failed to remove unavailable apps.</string>
     <string name="settings_role_hidden">Hidden</string>
     <string name="settings_auto_hide_saved">App hiding settings saved.</string>
-    <string name="settings_auto_hide_failed">Failed to update app hiding settings.</string>
     <string name="settings_security">Security</string>
     <string name="settings_superkey_title">APatch/FolkPatch SuperKey</string>
     <string name="settings_superkey_saved">Saved for boot-time KPM activation.</string>
@@ -610,4 +627,22 @@
     <string name="settings_superkey_stored">SuperKey stored.</string>
     <string name="settings_superkey_cleared">SuperKey cleared.</string>
     <string name="settings_superkey_failed">SuperKey update failed.</string>
+    <string name="config_initializing">Checking configuration and previous operations…</string>
+    <string name="config_paused">The outcome of a configuration operation is still unknown. New changes are paused. Check again to continue.</string>
+    <string name="config_unavailable">Configuration is unavailable. Check root access and try again.</string>
+    <string name="config_invalid">The saved configuration cannot be read. Configuration changes are paused.</string>
+    <string name="config_missing">No saved configuration is available. Startup preparation may still be needed.</string>
+    <string name="config_ui_conflict">This operation overlaps unsaved edits in an app editor. Your edits are retained. Save or discard them before retrying.</string>
+    <string name="config_secret_failed">The superkey operation failed. The configuration may already be saved. Repeat the key action in settings.</string>
+    <string name="config_apply_failed">Configuration saved, but applying it did not finish successfully. You can apply it again.</string>
+    <string name="config_write_failed">The requested configuration change failed. The last confirmed values are shown.</string>
+    <string name="config_recheck">Check again</string>
+    <string name="config_apply_again">Apply again</string>
+    <string name="config_discard_draft">Discard edits</string>
+    <string name="config_cleanup_failed">Cleanup did not finish successfully. Repeat the cleanup action after checking its prerequisites.</string>
+    <string name="config_applying">Saving and applying configuration…</string>
+    <string name="config_rechecking">Checking the outcome of the previous operation…</string>
+    <string name="config_capture_logging">Debug logging remains active while a capture is running.</string>
+    <string name="config_changes_unavailable">Configuration changes are unavailable</string>
+    <string name="config_close">Close</string>
 </resources>

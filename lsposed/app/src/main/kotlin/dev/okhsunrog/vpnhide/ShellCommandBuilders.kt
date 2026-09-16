@@ -4,6 +4,8 @@ import java.util.Base64
 
 internal const val SYSTEM_DATA_FILE_CONTEXT = "u:object_r:system_data_file:s0"
 
+internal fun shellQuote(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
+
 internal fun buildAtomicRootOnlyRawWriteCommand(
     path: String,
     content: String,

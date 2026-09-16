@@ -44,7 +44,58 @@ data class CheckResult(
     // (e.g. "root: 42 routes, no VPN" is WHY a SELinux-blocked read reads as nothing
     // to leak). Null for Java checks and any probe without a root differential.
     val groundTruthDetail: String? = null,
+    // Stable, non-localized probe identity: the id of the [NativeCheckSpec] /
+    // [JavaCheckSpec] that produced this result. It is the key the probe plan and
+    // the per-run outcome map use, so a result is matched by id, never by label
+    // or list position. The suite runners always set it; only test fixtures rely
+    // on the empty default.
+    val id: String = "",
 )
+
+/**
+ * One Java-implemented probe: the stable [id] the probe plan keys on, the
+ * localized label and the runner. [NATIVE_EXTRA_CHECKS], [CORE_JAVA_CHECKS] and
+ * [EXTRA_JAVA_CHECKS] are the single registry of these probes, mirroring
+ * [NATIVE_CHECKS] for the Rust suite.
+ */
+internal data class JavaCheckSpec(
+    val id: String,
+    val labelRes: Int,
+    val run: (ConnectivityManager, String) -> CheckResult,
+)
+
+/** Java-implemented native-level probes: no hook ownership and no root differential. */
+internal val NATIVE_EXTRA_CHECKS: List<JavaCheckSpec> =
+    listOf(
+        // NetworkInterface.getNetworkInterfaces() is the canonical Java iface-enum a
+        // detector uses; kept even though the Rust getifaddrs probe covers the same
+        // syscall. (The /proc/net/route Java duplicate was dropped — the Rust probe
+        // covers that vector with proper attribution, and the Java one could only
+        // report a misleading "OK" on the SELinux denial for want of a root diff.)
+        JavaCheckSpec("net_iface_enum", R.string.check_net_iface_enum) { _, name -> checkNetworkInterfaceEnum(name) },
+    )
+
+/** VPN-presence framework probes of the fast core phase. */
+internal val CORE_JAVA_CHECKS: List<JavaCheckSpec> =
+    listOf(
+        JavaCheckSpec("has_transport_vpn", R.string.check_has_transport_vpn, ::checkHasTransportVpn),
+        JavaCheckSpec("has_capability_not_vpn", R.string.check_has_capability_not_vpn, ::checkHasCapabilityNotVpn),
+        JavaCheckSpec("transport_info", R.string.check_transport_info, ::checkTransportInfo),
+        JavaCheckSpec("all_networks_vpn", R.string.check_all_networks_vpn, ::checkAllNetworksVpn),
+        JavaCheckSpec("link_properties", R.string.check_link_properties, ::checkLinkPropertiesIfname),
+    )
+
+/** Remaining framework probes of the slow phase, including the blocking push callback. */
+internal val EXTRA_JAVA_CHECKS: List<JavaCheckSpec> =
+    listOf(
+        JavaCheckSpec("network_for_type_vpn", R.string.check_network_for_type_vpn, ::checkNetworkForTypeVpn),
+        JavaCheckSpec("active_network_handle", R.string.check_active_network_handle, ::checkActiveNetworkHandle),
+        JavaCheckSpec("all_networks_handles", R.string.check_all_networks_handles, ::checkAllNetworksHandles),
+        JavaCheckSpec("active_network_vpn", R.string.check_active_network_vpn, ::checkActiveNetworkVpn),
+        JavaCheckSpec("network_callback", R.string.check_network_callback, ::checkNetworkCallbackVpn),
+        JavaCheckSpec("link_properties_routes", R.string.check_link_properties_routes, ::checkLinkPropertiesRoutes),
+        JavaCheckSpec("network_info_vpn", R.string.check_network_info_vpn, ::checkNetworkInfoVpn),
+    )
 
 /**
  * Build a Java-level [CheckResult] from a raw tri-state observation. Java and
@@ -127,50 +178,26 @@ internal fun runCoreChecks(
             val groundTruth = nativeGroundTruth[spec.id]
             val outcome = classifyNativeOutcome(out, groundTruth)
             VpnHideLog.i(TAG, "[outcome] ${spec.id}: ${outcome.token()}")
-            nativeCheckResult(res.getString(spec.labelRes), out, outcome, groundTruth?.detail)
+            nativeCheckResult(spec.id, res.getString(spec.labelRes), out, outcome, groundTruth?.detail)
         }
-
-    // NetworkInterface.getNetworkInterfaces() is the canonical Java iface-enum a
-    // detector uses; kept even though the Rust getifaddrs probe covers the same
-    // syscall. (The /proc/net/route Java duplicate was dropped — the Rust probe
-    // covers that vector with proper attribution, and the Java one could only
-    // report a misleading "OK" on the SELinux denial for want of a root diff.)
-    val nativeExtra =
-        listOf(
-            checkNetworkInterfaceEnum(res.getString(R.string.check_net_iface_enum)),
-        ).logged()
-
-    val coreJava =
-        listOf(
-            checkHasTransportVpn(cm, res.getString(R.string.check_has_transport_vpn)),
-            checkHasCapabilityNotVpn(cm, res.getString(R.string.check_has_capability_not_vpn)),
-            checkTransportInfo(cm, res.getString(R.string.check_transport_info)),
-            checkAllNetworksVpn(cm, res.getString(R.string.check_all_networks_vpn)),
-            checkLinkPropertiesIfname(cm, res.getString(R.string.check_link_properties)),
-        ).logged()
 
     return CheckResults(
         native = native,
-        nativeExtra = nativeExtra,
-        coreJava = coreJava,
+        nativeExtra = NATIVE_EXTRA_CHECKS.run(cm, res),
+        coreJava = CORE_JAVA_CHECKS.run(cm, res),
     )
 }
 
 internal fun runExtraJavaChecks(
     cm: ConnectivityManager,
     context: android.content.Context,
-): List<CheckResult> {
-    val res = context.resources
-    return listOf(
-        checkNetworkForTypeVpn(cm, res.getString(R.string.check_network_for_type_vpn)),
-        checkActiveNetworkHandle(cm, res.getString(R.string.check_active_network_handle)),
-        checkAllNetworksHandles(cm, res.getString(R.string.check_all_networks_handles)),
-        checkActiveNetworkVpn(cm, res.getString(R.string.check_active_network_vpn)),
-        checkNetworkCallbackVpn(cm, res.getString(R.string.check_network_callback)),
-        checkLinkPropertiesRoutes(cm, res.getString(R.string.check_link_properties_routes)),
-        checkNetworkInfoVpn(cm, res.getString(R.string.check_network_info_vpn)),
-    ).logged()
-}
+): List<CheckResult> = EXTRA_JAVA_CHECKS.run(cm, context.resources)
+
+/** Run a spec registry in order, stamping each result with its stable id. */
+private fun List<JavaCheckSpec>.run(
+    cm: ConnectivityManager,
+    res: android.content.res.Resources,
+): List<CheckResult> = map { spec -> spec.run(cm, res.getString(spec.labelRes)).copy(id = spec.id) }.logged()
 
 /** Log each Java check result; native probes already log via [nativeCheck]. */
 private fun List<CheckResult>.logged(): List<CheckResult> =
@@ -184,22 +211,15 @@ private fun List<CheckResult>.logged(): List<CheckResult> =
         VpnHideLog.i(TAG, "[${c.name}] $status: ${c.detail}")
     }
 
-/** Run both phases and return the complete results. Used where blocking on the
- * slow probes is fine (debug export); the live cache runs the phased builders
- * directly so Settings → Detailed diagnostics can show the fast phase first. */
-internal fun runAllChecks(
-    cm: ConnectivityManager,
-    context: android.content.Context,
-): CheckResults = runCoreChecks(cm, context).copy(extraJava = runExtraJavaChecks(cm, context))
-
 private fun nativeCheckResult(
+    id: String,
     name: String,
     out: CheckOutput,
     outcome: CheckOutcome,
     groundTruthDetail: String? = null,
 ): CheckResult {
     VpnHideLog.i(TAG, "[$name] ${out.status}: ${out.detail}")
-    return CheckResult(name, out.detail, outcome = outcome, groundTruthDetail = groundTruthDetail)
+    return CheckResult(name, out.detail, outcome = outcome, groundTruthDetail = groundTruthDetail, id = id)
 }
 
 // ==========================================================================

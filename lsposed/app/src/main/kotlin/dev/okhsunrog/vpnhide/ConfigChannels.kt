@@ -3,7 +3,6 @@ package dev.okhsunrog.vpnhide
 import android.content.Context
 import dev.okhsunrog.vpnhide.picker.AppAutoHideSignal
 import dev.okhsunrog.vpnhide.picker.applyAutoHiddenPackages
-import dev.okhsunrog.vpnhide.picker.autoHiddenPackagesNeedReconcile
 
 /**
  * Launches the native activators. The app does not fan out wire snapshots
@@ -46,28 +45,17 @@ internal object ConfigChannels {
 }
 
 /**
- * If capture left debug enabled, return a canonical copy with effective debug
- * snapped back to user intent for startup reconciliation.
- */
-internal fun canonicalConfigForStartupDebugReconcile(config: CanonicalConfig): CanonicalConfig? =
-    if (config.debug != config.debugSwitch) config.copy(debug = config.debugSwitch) else null
-
-/**
  * Run the startup runtime-config reconcile. Canonical JSON already contains
  * debug, so reconcile only needs to re-run activators to pick up the current
  * file state. Blocking — call from a background dispatcher. Best-effort: a
  * non-zero exit is logged, not fatal.
  */
-internal fun runRuntimeConfigReconcile() {
-    val parts = mutableListOf<String>()
-    parts += ConfigChannels.reconcileCommand()
-    val cmd = parts.joinToString(" ; ")
-    val (exit, _) = suExec(cmd)
-    if (exit != 0) VpnHideLog.w(LogTags.STARTUP, "runtime config reconcile failed (exit=$exit)")
+internal suspend fun runRuntimeConfigReconcile() {
+    CanonicalConfigRepository.reconcile()
 }
 
 /**
- * Re-materialize `settings.autoHiddenPackages` for the on-disk [config] against
+ * Re-materialize `settings.autoHiddenPackages` for the fresh on-disk config against
  * fresh VpnService [signals], and persist it iff the auto-hidden set changed.
  * This keeps a newly-installed VPN app hidden from observers after a Hiding-tab
  * Refresh or a cold start, without the user having to open the picker and Save.
@@ -80,13 +68,15 @@ internal fun runRuntimeConfigReconcile() {
  */
 internal suspend fun reconcileAutoHiddenPackages(
     context: Context,
-    config: CanonicalConfig,
     signals: Collection<AppAutoHideSignal>,
 ): Boolean {
     val selfPkg = context.packageName
-    if (!autoHiddenPackagesNeedReconcile(config, selfPkg, signals)) return false
-    val next = applyAutoHiddenPackages(config, selfPkg, signals)
-    val result = CanonicalConfigRepository.commit(next)
+    val result =
+        CanonicalConfigRepository.commit(
+            CanonicalMutation(emptyList(), source = OperationSource.System, transform = { fresh ->
+                applyAutoHiddenPackages(fresh, selfPkg, signals)
+            }),
+        )
     if (!result.succeeded) {
         VpnHideLog.w(
             LogTags.STARTUP,
@@ -94,9 +84,5 @@ internal suspend fun reconcileAutoHiddenPackages(
         )
         return false
     }
-    VpnHideLog.i(
-        LogTags.STARTUP,
-        "auto-hide reconcile: ${next.settings.autoHiddenPackages.size} auto-hidden package(s)",
-    )
-    return true
+    return result.operation?.phases?.get(ConfigPhase.Persist) == PhaseOutcome.Confirmed
 }

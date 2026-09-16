@@ -33,8 +33,6 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -46,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,48 +54,52 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
+import dev.okhsunrog.vpnhide.ConfigCoordinatorMode
 import dev.okhsunrog.vpnhide.HelpAccordion
+import dev.okhsunrog.vpnhide.LocalConfigSnackbar
+import dev.okhsunrog.vpnhide.LocalConfigWriteAccess
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.StatusColors
-import dev.okhsunrog.vpnhide.buildCanonicalConfigFromTargetsSnapshot
-import dev.okhsunrog.vpnhide.picker.AppAutoHideSignal
 import dev.okhsunrog.vpnhide.picker.AppListCache
 import dev.okhsunrog.vpnhide.picker.AppSummary
 import dev.okhsunrog.vpnhide.picker.TargetRowShell
 import dev.okhsunrog.vpnhide.picker.TargetsCache
+import dev.okhsunrog.vpnhide.picker.applyAutoHiddenPackages
 import dev.okhsunrog.vpnhide.picker.manualHiddenPackages
 import dev.okhsunrog.vpnhide.picker.toAutoHideSignal
+import dev.okhsunrog.vpnhide.rememberCanonicalEditor
 import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
 import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val targets by TargetsCache.snapshot.collectAsState()
     val apps by AppListCache.apps.collectAsState()
     val userNames by AppListCache.userNames.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-    var filter by remember { mutableStateOf(HiddenAppsFilter.All) }
-    var query by remember { mutableStateOf("") }
-    var searchActive by remember { mutableStateOf(false) }
-    var saving by remember { mutableStateOf(false) }
+    val snackbarHostState = LocalConfigSnackbar.current
+    val checkWrite = LocalConfigWriteAccess.current
+    var filter by rememberSaveable { mutableStateOf(HiddenAppsFilter.All) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var searchActive by rememberSaveable { mutableStateOf(false) }
+    val editor = rememberCanonicalEditor("hidden_apps")
+    val saving = editor.saving
+    val repository by CanonicalConfigRepository.state.collectAsState()
     var snackMessage by remember { mutableStateOf<String?>(null) }
     val savedMessage = stringResource(R.string.settings_auto_hide_saved)
-    val failedMessage = stringResource(R.string.settings_auto_hide_failed)
 
     LaunchedEffect(Unit) {
         TargetsCache.ensureLoaded(scope, context)
         AppListCache.ensureLoaded(scope, context)
     }
+    LaunchedEffect(editor.result) {
+        editor.result?.let { snackMessage = if (it.succeeded) savedMessage else null }
+    }
+
     LaunchedEffect(snackMessage) {
         snackMessage?.let {
             snackbarHostState.showSnackbar(it, duration = SnackbarDuration.Short)
@@ -104,18 +107,11 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
         }
     }
 
-    val canonical = targets?.let(::buildCanonicalConfigFromTargetsSnapshot)
+    val canonical = editor.state.base
+    val edited = editor.state.current
     val appList = apps
-    val initialManual =
-        remember(canonical, context.packageName) {
-            canonical?.let { manualHiddenPackages(it, context.packageName) }.orEmpty()
-        }
-    val initialExcluded =
-        remember(canonical, context.packageName) {
-            canonical?.settings?.autoHideExcludedPackages.orEmpty() - context.packageName
-        }
-    var selectedManual by remember(initialManual) { mutableStateOf(initialManual) }
-    var excludedPackages by remember(initialExcluded) { mutableStateOf(initialExcluded) }
+    val selectedManual = edited?.let { manualHiddenPackages(it, context.packageName) }.orEmpty()
+    val excludedPackages = edited?.settings?.autoHideExcludedPackages.orEmpty() - context.packageName
     val signals = remember(appList) { appList.orEmpty().map(AppSummary::toAutoHideSignal) }
     val baseStates =
         remember(canonical, context.packageName, signals) {
@@ -156,7 +152,7 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
                 labelsByPackage = labelsByPackage,
             )
         }
-    val dirty = selectedManual != initialManual || excludedPackages != initialExcluded
+    val dirty = editor.state.dirty
 
     BackHandler {
         if (searchActive) {
@@ -218,31 +214,21 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
                 summary = summary,
                 dirty = dirty,
                 saving = saving,
-                onSave = {
-                    val config = canonical ?: return@HiddenAppsSaveBar
-                    saving = true
-                    scope.launch {
-                        val exit =
-                            withContext(Dispatchers.IO) {
-                                writeHiddenApps(context, config, visiblePackageScope, selectedManual, excludedPackages, signals)
-                            }
-                        saving = false
-                        snackMessage = if (exit == 0) savedMessage else failedMessage
-                        if (exit == 0) {
-                            TargetsCache.refreshAfterSave(scope, context)
-                        }
-                    }
+                onDiscard = editor::discard,
+                onSave = save@{
+                    if (!checkWrite()) return@save
+                    val selfPkg = context.packageName
+                    editor.save { fresh -> applyAutoHiddenPackages(fresh, selfPkg, signals) }
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         if (canonical == null || appList == null) {
-            Box(
+            Column(
                 modifier = Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                CircularProgressIndicator()
+                if (repository.mode == ConfigCoordinatorMode.Initializing || appList == null) CircularProgressIndicator()
             }
             return@Scaffold
         }
@@ -292,16 +278,31 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
                             userNames = userNames,
                             checked = state.hidden,
                             onCheckedChange = { checked ->
+                                val before = editor.state.current ?: return@HiddenAppRow
                                 val hasAutoSource = state.automatic || state.reasons.isNotEmpty()
-                                if (checked) {
-                                    excludedPackages = excludedPackages - state.packageName
-                                    if (!hasAutoSource) selectedManual = selectedManual + state.packageName
-                                } else {
-                                    selectedManual = selectedManual - state.packageName
-                                    if (hasAutoSource) {
-                                        excludedPackages = excludedPackages + state.packageName
+                                val excluded =
+                                    if (checked) {
+                                        excludedPackages - state.packageName
+                                    } else if (hasAutoSource) {
+                                        excludedPackages +
+                                            state.packageName
+                                    } else {
+                                        excludedPackages
                                     }
-                                }
+                                val selected =
+                                    if (checked &&
+                                        !hasAutoSource
+                                    ) {
+                                        selectedManual + state.packageName
+                                    } else if (!checked) {
+                                        selectedManual - state.packageName
+                                    } else {
+                                        selectedManual
+                                    }
+                                editor.change(
+                                    before,
+                                    updateHiddenAppsConfig(before, context.packageName, visiblePackageScope, selected, excluded, signals),
+                                )
                             },
                         )
                     }
@@ -427,6 +428,7 @@ private fun HiddenAppsSaveBar(
     dirty: Boolean,
     saving: Boolean,
     onSave: () -> Unit,
+    onDiscard: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp) {
         Row(
@@ -451,6 +453,9 @@ private fun HiddenAppsSaveBar(
                     )
                 }
             }
+            androidx.compose.material3.TextButton(onClick = onDiscard, enabled = dirty && !saving) {
+                Text(stringResource(R.string.config_discard_draft))
+            }
             EnhancedButton(onClick = onSave, enabled = dirty && !saving) {
                 if (saving) {
                     ButtonSpinner()
@@ -460,24 +465,4 @@ private fun HiddenAppsSaveBar(
             }
         }
     }
-}
-
-private suspend fun writeHiddenApps(
-    context: android.content.Context,
-    base: CanonicalConfig,
-    visiblePackages: Set<String>,
-    selectedManualHiddenPackages: Set<String>,
-    excludedPackages: Set<String>,
-    signals: Collection<AppAutoHideSignal>,
-): Int {
-    val canonical =
-        updateHiddenAppsConfig(
-            config = base,
-            selfPkg = context.packageName,
-            visiblePackages = visiblePackages,
-            selectedManualHiddenPackages = selectedManualHiddenPackages,
-            excludedPackages = excludedPackages,
-            signals = signals,
-        )
-    return CanonicalConfigRepository.commit(canonical).exitCode
 }

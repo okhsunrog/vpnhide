@@ -1,12 +1,10 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
-import dev.okhsunrog.vpnhide.picker.TargetsCache
-import dev.okhsunrog.vpnhide.statistics.StatisticsCache
+import android.content.Context
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticImpactObserver
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.SupervisorJob
 
 /** Runtime channels that must be re-derived after the canonical config changes. */
 internal data class CanonicalActivation(
@@ -17,88 +15,61 @@ internal data class CanonicalActivation(
 internal data class CanonicalWriteResult(
     val exitCode: Int,
     val output: String,
+    val operation: ConfigOperationResult? = null,
 ) {
     val succeeded: Boolean
         get() = exitCode == 0
 }
 
 /**
- * Build the one root transaction used for canonical-config persistence.
- *
- * Every step is joined with `&&`: activators must never run against stale
- * state when the atomic write (or a coupled secret write) failed.
- */
-internal fun buildCanonicalPersistenceCommand(
-    config: CanonicalConfig,
-    coupledCommands: List<String> = emptyList(),
-    activation: CanonicalActivation = CanonicalActivation(),
-): String =
-    buildList {
-        add(buildCanonicalConfigWriteCommand(config))
-        addAll(coupledCommands)
-        if (activation.native) add(ConfigChannels.nativeActivatorCommand())
-        if (activation.ports) add(ConfigChannels.portsActivatorCommand())
-    }.joinToString(" && ")
-
-/**
  * Sole app-side coordinator for canonical JSON writes and runtime activation.
  *
- * The monitor prevents two background UI operations from interleaving root
- * writes in this process. The filesystem write itself remains atomic for
- * system_server and native readers.
+ * The process-owned actor serializes fresh field edits through root receipt recovery.
+ * The filesystem write remains atomic for system_server and native readers.
  */
 internal object CanonicalConfigRepository {
-    private val writeMutex = Mutex()
+    internal val processScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val runner = RootProcessRunner()
 
-    suspend fun commit(
-        config: CanonicalConfig,
-        coupledCommands: List<String> = emptyList(),
-        activation: CanonicalActivation = CanonicalActivation(),
-        timeoutSec: Long = SU_DEFAULT_TIMEOUT_SEC,
-    ): CanonicalWriteResult =
-        writeMutex.withLock {
-            val command = buildCanonicalPersistenceCommand(config, coupledCommands, activation)
-            val (exit, output) = withContext(Dispatchers.IO) { suExec(command, timeoutSec) }
-            if (exit == 0) refreshDerivedCaches()
-            CanonicalWriteResult(exit, output)
-        }
+    @Volatile private var appContext: Context? = null
+    private val coordinator =
+        ConfigCoordinator(
+            ConfigRootIo { appContext?.let { prepareRootMutationTransport(it, runner) } },
+            processScope,
+            confirmed = { VpnHideLog.enabled = it.debug },
+            refresh = { refreshDerivedCaches() },
+            manageLogging = true,
+            invalidateObservations = RootSnapshotCache::invalidate,
+            observer = DiagnosticImpactObserver { requireNotNull(appContext).packageName },
+        )
+    val state = coordinator.view
 
-    /**
-     * The caches whose value is *derived from the canonical config*, and which a
-     * write therefore leaves stale. That is the whole membership rule — add a cache
-     * here if and only if its `load` reads the config (directly, or via the root
-     * snapshot's config-bearing sections).
-     *
-     * Deliberately NOT members: `AppListCache` (an `AppSummary` carries no config
-     * state — the picker merges target flags in reactively), `UpdateCheckCache` and
-     * `DiagnosticsCache` (unrelated to the config), and `SystemServerConfigCache`
-     * (lives in the system_server process, unreachable from here — its own
-     * `SystemDataFileWatcher` invalidates it).
-     *
-     * `RootSnapshotCache` is the shared upstream rather than a member; see
-     * [refreshDerivedCaches].
-     */
-    private val derivedCaches: List<StateCache<*>> =
-        listOf(TargetsCache, DashboardCache, StatisticsCache, RoutingGateCache)
+    suspend fun initialize(context: Context): ConfigCoordinatorMode {
+        appContext = context.applicationContext
+        return coordinator.initialize()
+    }
 
-    /**
-     * Reload every config-derived cache in place — swap old→new, so no observer sees
-     * a null blank between the write and the reload (the toggle-flicker fix).
-     *
-     * The root snapshot goes first and alone: the others all derive from it, so they
-     * follow with `force = false` to reuse it. Passing `force = true` here would be a
-     * silent, invisible cost — each cache would invalidate the snapshot and re-run the
-     * whole root shell for itself, once per member. Iterating a list instead of
-     * open-coding the calls is what keeps the order and the flag structural rather
-     * than a comment someone has to notice.
-     *
-     * A failure keeps the stale value (the cache records its own error), so one
-     * unhappy cache can't abort the rest.
-     */
+    fun retry() = coordinator.retry()
+
+    fun draftChanged(
+        id: Long,
+        fields: Set<ConfigField>,
+    ) = coordinator.draftChanged(id, fields)
+
+    suspend fun commit(mutation: CanonicalMutation): CanonicalWriteResult = coordinator.submit(mutation)
+
+    suspend fun reconcile(ports: Boolean = false): CanonicalWriteResult =
+        commit(
+            CanonicalMutation(
+                emptyList(),
+                source = OperationSource.System,
+                activation = CanonicalActivation(ports = ports),
+                forceActivation = true,
+            ),
+        )
+
+    /** Root invalidation synchronously marks registered dependents obsolete; loading is independent of writes. */
     internal suspend fun refreshDerivedCaches() {
-        runCatching { RootSnapshotCache.refresh() }
-        derivedCaches.forEach { cache ->
-            if (!cache.pristine) runCatching { cache.refreshInPlace(force = false) }
-        }
+        RootSnapshotCache.getOrLoad()
     }
 }

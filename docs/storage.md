@@ -5,6 +5,16 @@ each backend. This is the layer *above* the wire protocol: [protocol.md](protoco
 defines the bytes exchanged with the kernel/native backends at runtime; this file
 defines the single on-disk source of truth those bytes are derived from.
 
+App-side state ownership (config operations, observations, diagnostic runs) is
+documented in [config coordinator](config-coordinator.md),
+[observation coordinator](observation-coordinator.md) and the
+[transition contract](notes/app-state-transitions.md); the original proposal is
+kept in [notes/app-state-design.md](notes/app-state-design.md). The storage and
+activation behavior below describes the current on-disk implementation.
+
+The [mutation transport](root-mutation-transport.md) is implemented and packaged
+as a migration foundation; the existing app write path below is still active.
+
 > **Status.** This is the current storage/activation design: one canonical JSON
 > desired-state file, Rust activators that derive runtime state for native and
 > ports backends, and LSPosed reading the JSON directly from `system_server`.
@@ -540,3 +550,15 @@ redefining the other contracts:
 LSPosed reads canonical JSON directly (§3), while the Rust activator serialises
 control v2 for the selected native backend (§4). The app persists desired state
 and invokes that activator; it does not hand-build per-channel wire payloads.
+
+
+## App-side operation ownership
+
+`CanonicalConfigRepository` owns one process-lived configuration coordinator.
+Every app write and native/ports activation uses its tracked root lane; screens
+submit field intent applied to a fresh canonical read. Persistence, secret or
+cleanup commands, and backend activation have independent outcomes. Confirmed
+config reaches controls before slower observation-cache refresh completes.
+See [config coordinator](config-coordinator.md) for conflicts, logging ownership,
+unknown-outcome recovery and first-adoption behavior. This does not change the
+canonical schema, backend protocol or LSPosed direct-read contract.

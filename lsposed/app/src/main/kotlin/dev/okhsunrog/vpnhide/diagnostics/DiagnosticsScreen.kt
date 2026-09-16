@@ -1,6 +1,5 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
-import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -37,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DiagnosticsFailedPrompt
+import dev.okhsunrog.vpnhide.DiagnosticsRetryPrompt
 import dev.okhsunrog.vpnhide.FileSaveShareRow
 import dev.okhsunrog.vpnhide.LsposedState
 import dev.okhsunrog.vpnhide.R
@@ -44,6 +44,7 @@ import dev.okhsunrog.vpnhide.SelfNotRoutedPrompt
 import dev.okhsunrog.vpnhide.StatusBanner
 import dev.okhsunrog.vpnhide.StatusColors
 import dev.okhsunrog.vpnhide.VpnOffPrompt
+import dev.okhsunrog.vpnhide.debug.DebugExportOutcome
 import dev.okhsunrog.vpnhide.debug.LogcatRecorder
 import dev.okhsunrog.vpnhide.debug.StateContentOptions
 import dev.okhsunrog.vpnhide.debug.exportDebug
@@ -83,17 +84,17 @@ fun DiagnosticsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val diagState by DiagnosticsCache.state.collectAsState()
+    // One projection for everything above the check list: eligibility, the run in
+    // flight, the latest attempt and the latest complete measurement with its
+    // applicability, all from the same instant. The screen only words the pure
+    // decision made in diagnosticScreenDecision; it never combines flows itself.
+    val presentation by DiagnosticsCache.presentation.collectAsState()
+    val decision = diagnosticScreenDecision(presentation)
     // The dashboard state carries which native backend is active + the optional hooks
     // it installed — the inputs needed to rebuild the canonical DiagnosticReport here,
     // so each check can be shown against the vectors the backend actually OWNS. Null
     // until the dashboard has loaded (then we fall back to the raw, ownership-less list).
     val dashState by DashboardCache.state.collectAsState()
-    // The LIVE gate — kept fresh by VpnTransportWatcher on every VPN transport change —
-    // decides which blocking banner to show. DiagnosticsCache's own gate (inside
-    // State.Blocked) is process-sticky and only re-derived on an explicit retry, so it
-    // must not drive the banner here (see the module doc on RoutingGateCache).
-    val liveGate by RoutingGateCache.gate.collectAsState()
     val tallyFmt = stringResource(R.string.diag_summary_tally)
 
     // Kick off the diagnostics run once per process. The cache parks at
@@ -113,14 +114,15 @@ fun DiagnosticsScreen(
     // VPN comes up (or this app becomes routed), the results must be measured even if
     // DiagnosticsCache is still sitting on a stale Blocked/Failed from before. run() is
     // idempotent — a no-op on an already-complete Ready — so this is cheap on every
-    // recomposition where liveGate hasn't changed.
-    LaunchedEffect(liveGate) {
-        if (liveGate == DiagnosticGate.ROUTED) {
+    // known routed transition. Temporary unknown readiness while the gate refreshes
+    // must not retrigger a failed run when the same routed value returns.
+    LaunchedEffect(selfNeedsRestart) {
+        RoutingGateCache.gate.routedTransitions().collect {
             DiagnosticsCache.run(scope, context, selfNeedsRestart)
         }
     }
 
-    val results = (diagState as? DiagnosticsCache.State.Ready)?.results
+    val results = decision.results
     // Native probes that couldn't run (ECONNREFUSED from socket()) classify as
     // NotMeasured(NoNetworkPermission). Java-level checks never produce that state,
     // so this isolates the "app has no network permission" banner from everything else.
@@ -143,92 +145,143 @@ fun DiagnosticsScreen(
             DiagnosticsCache.retry(scope, context, selfNeedsRestart)
             DashboardCache.refresh(scope, context, selfNeedsRestart)
         }
-        when {
-            // Still probing (first load, or a re-check in flight before the shared gate
-            // has a value yet).
-            liveGate == null -> {
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
+        DiagnosticBannerContent(decision.banner, onRetry, onOpenAccelerators)
+        decision.attemptNotice?.let { notice ->
+            Spacer(Modifier.height(6.dp))
+            StatusBanner(
+                text =
+                    stringResource(
+                        when (notice) {
+                            DiagnosticAttemptNotice.Interrupted -> R.string.diag_notice_interrupted
+                            DiagnosticAttemptNotice.Failed -> R.string.diag_notice_failed
+                        },
+                    ),
+                containerColor = StatusColors.warningContainer(),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            )
+        }
 
-            liveGate == DiagnosticGate.NEEDS_RESTART -> {
-                StatusBanner(
-                    text = stringResource(R.string.banner_added_self),
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                )
-            }
+        if (networkBlocked) {
+            Spacer(Modifier.height(6.dp))
+            StatusBanner(
+                text = stringResource(R.string.banner_network_blocked),
+                containerColor = StatusColors.errorContainer(),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            )
+        }
 
-            liveGate == DiagnosticGate.VPN_OFF -> {
-                VpnOffPrompt(onRetry = onRetry)
-            }
-
-            liveGate == DiagnosticGate.SELF_NOT_ROUTED -> {
-                SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators)
-            }
-
-            // ROUTED: the live gate says the measurement is meaningful — render from
-            // DiagnosticsCache's own (frozen, process-scoped) results exactly as before.
-            diagState is DiagnosticsCache.State.Failed -> {
-                DiagnosticsFailedPrompt(onRetry = onRetry)
-            }
-
-            diagState is DiagnosticsCache.State.Running ||
-                diagState is DiagnosticsCache.State.NotRun ||
-                diagState is DiagnosticsCache.State.Blocked -> {
-                // Transitional: the LaunchedEffect(liveGate) above already kicked off
-                // (or will kick off) a run now that the gate is ROUTED.
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
-
-            diagState is DiagnosticsCache.State.Ready -> {
-                StatusBanner(
-                    text = stringResource(R.string.banner_ready),
-                    containerColor = StatusColors.successContainer(),
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                )
-
-                if (networkBlocked) {
-                    Spacer(Modifier.height(6.dp))
-                    StatusBanner(
-                        text = stringResource(R.string.banner_network_blocked),
-                        containerColor = StatusColors.errorContainer(),
-                        contentColor = MaterialTheme.colorScheme.onSurface,
+        results?.let { r ->
+            // Build the canonical report when the dashboard has loaded so each
+            // check knows whether the active backend OWNS its vector; otherwise
+            // render the raw list (every leak reads as a leak — the pre-report
+            // behaviour, used only in the brief window before the dashboard loads).
+            val report =
+                dashState?.let { ds ->
+                    buildDiagnosticReport(
+                        gate = DiagnosticGate.ROUTED,
+                        results = r,
+                        backend = ds.nativeBackend,
+                        lsposedActive = ds.lsposed is LsposedState.Active,
+                        complete = decision.complete,
+                        installedOptionalHooks = ds.installedOptionalHooks,
                     )
                 }
-
-                results?.let { r ->
-                    // Build the canonical report when the dashboard has loaded so each
-                    // check knows whether the active backend OWNS its vector; otherwise
-                    // render the raw list (every leak reads as a leak — the pre-report
-                    // behaviour, used only in the brief window before the dashboard loads).
-                    val report =
-                        dashState?.let { ds ->
-                            buildDiagnosticReport(
-                                gate = DiagnosticGate.ROUTED,
-                                results = r,
-                                backend = ds.nativeBackend,
-                                lsposedActive = ds.lsposed is LsposedState.Active,
-                                complete = (diagState as? DiagnosticsCache.State.Ready)?.complete == true,
-                                installedOptionalHooks = ds.installedOptionalHooks,
-                            )
-                        }
-                    DiagnosticsResults(report = report, results = r, tallyFmt = tallyFmt)
-                }
-            }
+            DiagnosticsResults(report = report, results = r, tallyFmt = tallyFmt)
         }
 
         Spacer(Modifier.height(16.dp))
     }
+}
+
+/** Words one [DiagnosticBanner]; the decision itself is pure and tested, this only renders it. */
+@Composable
+private fun DiagnosticBannerContent(
+    banner: DiagnosticBanner,
+    onRetry: () -> Unit,
+    onOpenAccelerators: (() -> Unit)?,
+) {
+    when (banner) {
+        DiagnosticBanner.Progress -> {
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+
+        DiagnosticBanner.RestartApp -> {
+            StatusBanner(
+                text = stringResource(R.string.banner_added_self),
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+        }
+
+        DiagnosticBanner.VpnOff -> {
+            VpnOffPrompt(onRetry = onRetry)
+        }
+
+        DiagnosticBanner.SelfExcluded -> {
+            SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators)
+        }
+
+        DiagnosticBanner.Applying -> {
+            NeutralBanner(R.string.diag_banner_applying, StatusColors.neutralContainer())
+        }
+
+        DiagnosticBanner.ApplicationUnknown -> {
+            NeutralBanner(R.string.diag_banner_application_unknown, StatusColors.warningContainer())
+        }
+
+        DiagnosticBanner.ApplicationFailed -> {
+            NeutralBanner(R.string.diag_banner_application_failed, StatusColors.errorContainer())
+        }
+
+        DiagnosticBanner.RoutingUnknown -> {
+            DiagnosticsRetryPrompt(R.string.diag_banner_routing_unknown, onRetry)
+        }
+
+        DiagnosticBanner.ProbeUnavailable -> {
+            NeutralBanner(R.string.diag_banner_probe_unavailable, StatusColors.warningContainer())
+        }
+
+        DiagnosticBanner.Failed -> {
+            DiagnosticsFailedPrompt(onRetry = onRetry)
+        }
+
+        DiagnosticBanner.Interrupted -> {
+            DiagnosticsRetryPrompt(R.string.diag_banner_interrupted, onRetry)
+        }
+
+        DiagnosticBanner.Ready -> {
+            NeutralBanner(R.string.banner_ready, StatusColors.successContainer())
+        }
+
+        DiagnosticBanner.ResultsChanged -> {
+            DiagnosticsRetryPrompt(R.string.diag_banner_results_changed, onRetry)
+        }
+
+        DiagnosticBanner.ResultsUnverified -> {
+            NeutralBanner(R.string.diag_banner_results_unverified, StatusColors.neutralContainer())
+        }
+
+        DiagnosticBanner.InsufficientEvidence -> {
+            NeutralBanner(R.string.diag_banner_insufficient, StatusColors.warningContainer())
+        }
+    }
+}
+
+@Composable
+private fun NeutralBanner(
+    textRes: Int,
+    containerColor: Color,
+) {
+    StatusBanner(
+        text = stringResource(textRes),
+        containerColor = containerColor,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    )
 }
 
 /**
@@ -328,7 +381,6 @@ private fun DebugExportSheet(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    val cm = context.getSystemService(ConnectivityManager::class.java)
     val scope = rememberCoroutineScope()
     var exporting by remember { mutableStateOf(false) }
     var resultFile by remember { mutableStateOf<File?>(null) }
@@ -403,7 +455,11 @@ private fun DebugExportSheet(
                     val kernel = optKernelImage
                     exporting = true
                     scope.launch {
-                        resultFile = exportDebug(cm, context, restartState, options, kernel)
+                        // A Failed export produced no file: the sheet returns to its
+                        // configure phase exactly as it did for the old null result.
+                        // Everything else — including a self-test that could not
+                        // measure — is a written bundle carrying its own reasons.
+                        resultFile = (exportDebug(context, restartState, options, kernel) as? DebugExportOutcome.Written)?.file
                         exporting = false
                     }
                 }

@@ -13,6 +13,14 @@ data class AgentMutationResult(
     val changed: Boolean = false,
     /** True when a selected app force-stop/reopen is needed for all effects to apply. */
     val targetRestartRecommended: Boolean = false,
+    /** Stable machine-readable failure, including ui_edit_conflict. */
+    val errorCode: String? = null,
+    /** Invocation outcomes for persist, secret, native and ports; not proof of target-process consumption. */
+    val phases: Map<String, String> = emptyMap(),
+    /** Segment paths: package names containing dots remain a single segment. */
+    val conflicts: List<List<String>> = emptyList(),
+    /** The overlapping user draft remains unsaved. */
+    val draftPending: Boolean = false,
 )
 
 /** Debug ZIP export metadata for agent-controlled diagnostics capture. */

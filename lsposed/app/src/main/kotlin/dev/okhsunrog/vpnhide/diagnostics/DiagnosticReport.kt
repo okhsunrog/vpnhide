@@ -138,9 +138,11 @@ internal fun buildDiagnosticReport(
 ): DiagnosticReport {
     val nativeChecks = nativeDiagnosticChecks(results, backend, installedOptionalHooks)
     // The per-check outcome is the single source of truth; the by-id map the layer
-    // summary needs is derived here (owned spec checks only), not stored a second
-    // time on CheckResults.
-    val nativeOutcomes = nativeChecks.filter { it.id.isNotEmpty() }.associate { it.id to it.outcome }
+    // summary needs is derived here (Rust spec checks only — the Java-implemented
+    // native-level probes have their own ids but no hook ownership), not stored a
+    // second time on CheckResults.
+    val specIds = NATIVE_CHECKS.mapTo(HashSet()) { it.id }
+    val nativeOutcomes = nativeChecks.filter { it.id in specIds }.associate { it.id to it.outcome }
     val unowned =
         if (results == null) {
             0
@@ -203,7 +205,7 @@ private fun nativeDiagnosticChecks(
     val extra =
         results.nativeExtra.map { cr ->
             DiagnosticCheck(
-                id = "",
+                id = cr.id,
                 label = cr.name,
                 layer = CheckLayer.NATIVE,
                 outcome = cr.outcome,
@@ -221,7 +223,7 @@ private fun javaDiagnosticChecks(results: CheckResults?): List<DiagnosticCheck> 
         ?.java
         ?.map { cr ->
             DiagnosticCheck(
-                id = "",
+                id = cr.id,
                 label = cr.name,
                 layer = CheckLayer.JAVA,
                 outcome = cr.outcome,

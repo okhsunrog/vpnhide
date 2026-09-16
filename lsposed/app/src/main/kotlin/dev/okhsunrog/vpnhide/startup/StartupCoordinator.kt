@@ -2,19 +2,16 @@ package dev.okhsunrog.vpnhide.startup
 
 import android.content.Context
 import dev.okhsunrog.vpnhide.BuildConfig
-import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
+import dev.okhsunrog.vpnhide.ConfigCoordinatorMode
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DashboardState
-import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.PackageInventorySeed
 import dev.okhsunrog.vpnhide.RootSnapshot
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.SelfTargetFailureKind
 import dev.okhsunrog.vpnhide.SelfTargetPreparation
 import dev.okhsunrog.vpnhide.UpdateCheckCache
-import dev.okhsunrog.vpnhide.VpnHideLog
-import dev.okhsunrog.vpnhide.canonicalConfigForStartupDebugReconcile
 import dev.okhsunrog.vpnhide.cleanupStaleZygiskStatus
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
@@ -23,17 +20,22 @@ import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.picker.AppAutoHideSignal
 import dev.okhsunrog.vpnhide.picker.AppListCache
 import dev.okhsunrog.vpnhide.picker.TargetsCache
-import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import dev.okhsunrog.vpnhide.picker.toAutoHideSignal
 import dev.okhsunrog.vpnhide.reconcileAutoHiddenPackages
 import dev.okhsunrog.vpnhide.runRuntimeConfigReconcile
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 internal sealed interface StartupSelfTargetState {
@@ -52,16 +54,40 @@ internal sealed interface StartupSelfTargetState {
 internal class StartupCoordinator(
     private val appContext: Context,
     private val appVersionName: String = BuildConfig.VERSION_NAME,
+    private val initializeConfig: suspend () -> Unit = { CanonicalConfigRepository.initialize(appContext) },
     private val prepareSelfTargetsCommand: suspend (String) -> SelfTargetPreparation = ::ensureSelfInTargets,
     private val cleanupZygiskStatus: (Context, String?) -> Unit = ::cleanupStaleZygiskStatus,
     private val seedRootSnapshotInventory: (PackageInventorySeed?) -> Unit = RootSnapshotCache::seedPackageInventory,
+    private val seedRootSnapshot: (Map<String, String>) -> Unit = RootSnapshotCache::seedSnapshot,
     private val markStartupEvent: (String) -> Unit = StartupTrace::mark,
-    private val reconcileRuntimeConfig: () -> Unit = { runRuntimeConfigReconcile() },
-    private val reconcileAutoHidden: suspend (CanonicalConfig, List<AppAutoHideSignal>) -> Unit =
-        { config, signals -> reconcileAutoHiddenPackages(appContext, config, signals) },
-    private val loadCanonicalConfig: suspend () -> CanonicalConfig? =
-        { parseTargetsSnapshot(RootSnapshotCache.getOrLoad()).canonicalConfig },
+    private val reconcileRuntimeConfig: suspend () -> Unit = { runRuntimeConfigReconcile() },
+    private val reconcileAutoHidden: suspend (List<AppAutoHideSignal>) -> Unit =
+        { signals -> reconcileAutoHiddenPackages(appContext, signals) },
 ) {
+    private val owner = CanonicalConfigRepository.processScope
+    private val prepareMutex = Mutex()
+    private var prepareTask: Deferred<Unit>? = null
+
+    companion object {
+        @Volatile private var instance: StartupCoordinator? = null
+
+        fun forProcess(context: Context): StartupCoordinator =
+            synchronized(this) {
+                instance ?: StartupCoordinator(context.applicationContext).also { coordinator ->
+                    instance = coordinator
+                    coordinator.observeAvailability()
+                }
+            }
+    }
+
+    private fun observeAvailability() {
+        owner.launch {
+            CanonicalConfigRepository.state.map { it.mode }.distinctUntilChanged().collect { mode ->
+                if (mode == ConfigCoordinatorMode.Open) prepareSelfTargets(force = true)
+            }
+        }
+    }
+
     private val _selfTargetState = MutableStateFlow<StartupSelfTargetState>(StartupSelfTargetState.Preparing)
     val selfTargetState: StateFlow<StartupSelfTargetState> = _selfTargetState.asStateFlow()
 
@@ -78,9 +104,20 @@ internal class StartupCoordinator(
         java.util.concurrent.atomic
             .AtomicBoolean(false)
 
-    suspend fun prepareSelfTargets() {
+    suspend fun prepareSelfTargets(force: Boolean = false) {
+        val task =
+            prepareMutex.withLock {
+                if (force && prepareTask?.isCompleted == true) prepareTask = null
+                prepareTask ?: owner.async { prepareSelfTargetsOnce() }.also { prepareTask = it }
+            }
+        task.await()
+    }
+
+    private suspend fun prepareSelfTargetsOnce() {
         _selfTargetState.value = StartupSelfTargetState.Preparing
         markStartupEvent("self_targets_start")
+        initializeConfig()
+        markStartupEvent("config_init_done")
         val preparation =
             withContext(Dispatchers.IO) {
                 val next = prepareSelfTargetsCommand(appContext.packageName)
@@ -91,7 +128,10 @@ internal class StartupCoordinator(
                         } else {
                             null
                         }
-                    seedRootSnapshotInventory(inventory)
+                    // A read that wrote nothing seeds the whole snapshot (no second
+                    // root shell); after a write only the package inventory survives.
+                    val sections = next.sections
+                    if (sections != null) seedRootSnapshot(sections) else seedRootSnapshotInventory(inventory)
                     cleanupZygiskStatus(appContext, next.currentBootId)
                 }
                 next
@@ -110,7 +150,7 @@ internal class StartupCoordinator(
     }
 
     fun retrySelfTargets(scope: CoroutineScope) {
-        scope.launch { prepareSelfTargets() }
+        scope.launch { prepareSelfTargets(force = true) }
     }
 
     fun ensureInitialCaches(
@@ -126,7 +166,7 @@ internal class StartupCoordinator(
         // The cache parks at Blocked(NEEDS_RESTART) itself when selfNeedsRestart — this
         // is also the first run() call, so it stamps the process-constant flag.
         DiagnosticsCache.run(scope, appContext, selfNeedsRestart)
-        startAutoHideReconcile(scope)
+        startAutoHideReconcile()
     }
 
     /**
@@ -141,48 +181,40 @@ internal class StartupCoordinator(
      * so by the time the app list emits, the config is non-null — a null read
      * means no root, and the reconcile is simply skipped.
      */
-    private fun startAutoHideReconcile(scope: CoroutineScope) {
+    private fun startAutoHideReconcile() {
         if (!autoHideReconcileStarted.compareAndSet(false, true)) return
-        scope.launch(Dispatchers.IO) {
+        owner.launch(Dispatchers.IO) {
             AppListCache.apps.filterNotNull().collect { apps ->
-                val config = loadCanonicalConfig() ?: return@collect
-                reconcileAutoHidden(config, apps.map { it.toAutoHideSignal() })
+                reconcileAutoHidden(apps.map { it.toAutoHideSignal() })
             }
         }
     }
 
+    /**
+     * Protection parses the shared root snapshot from memory as soon as it exists.
+     * The runtime reconcile (a forced native activation) waits for [dashboardReady]:
+     * its completion invalidates every root observation, and running it while the
+     * first Dashboard derivation and the diagnostic suite are still in flight put a
+     * second root snapshot plus a repeated derivation on the cold-start critical path
+     * (measured at roughly 1.4 s on Pixel 8 Pro). After first paint the same
+     * refresh happens in the background.
+     */
     fun ensureProtectionCacheAfterRootSnapshot(
         scope: CoroutineScope,
         selfNeedsRestart: Boolean?,
         rootSnapshot: RootSnapshot?,
+        dashboardReady: Boolean,
     ) {
         if (selfNeedsRestart != null && rootSnapshot != null) {
             TargetsCache.ensureLoaded(scope, appContext)
-            if (reconcileStarted.compareAndSet(false, true)) {
-                scope.launch(Dispatchers.IO) { reconcileRuntimeConfigNow(rootSnapshot) }
+            if (dashboardReady && reconcileStarted.compareAndSet(false, true)) {
+                owner.launch(Dispatchers.IO) { reconcileRuntimeConfigNow() }
             }
         }
     }
 
-    private suspend fun reconcileRuntimeConfigNow(rootSnapshot: RootSnapshot) {
-        val canonicalConfig = parseTargetsSnapshot(rootSnapshot).canonicalConfig
-        val reconciled = canonicalConfig?.let { canonicalConfigForStartupDebugReconcile(it) }
-        // A capture interrupted mid-flight left effective `debug` out of sync with
-        // the user's `debugSwitch`: write the healed config and run the activator
-        // once. Otherwise nothing needs writing — just re-run the activator to pick
-        // up the current file state. Never both (the write command already runs it).
-        if (reconciled == null) {
-            reconcileRuntimeConfig()
-            return
-        }
-        val result = CanonicalConfigRepository.commit(reconciled)
-        if (!result.succeeded) {
-            VpnHideLog.w(
-                LogTags.STARTUP,
-                "startup debug reconcile failed (exit=${result.exitCode}): ${result.output.trim()}",
-            )
-            return
-        }
+    private suspend fun reconcileRuntimeConfigNow() {
+        reconcileRuntimeConfig()
     }
 
     fun ensureUpdateFresh(scope: CoroutineScope) {

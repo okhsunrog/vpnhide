@@ -17,6 +17,7 @@ import dev.okhsunrog.vpnhide.detectPortsModule
 import dev.okhsunrog.vpnhide.diagnostics.CheckResults
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSummaryInfo
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import dev.okhsunrog.vpnhide.displayNativeBackend
@@ -96,6 +97,15 @@ internal data class VpnHideState(
     // The measured diagnostics run. Null when the capture did not run checks
     // (e.g. the full-logcat recorder just bundles state, no probe run).
     val gate: DiagnosticGate?,
+    // The identified diagnostic run this capture took its evidence from. Null when
+    // the capture ran no suite, or when no run was admitted at all (the reason is
+    // then in [errors]). Lets a bundle be matched against the run's own attempt.
+    val selfTestRunId: Long? = null,
+    // The shared diagnostic presentation at assembly time: eligibility, active run,
+    // latest attempt, latest complete measurement with its applicability and
+    // evidence sufficiency — the same projection the screens render, so a bundle
+    // or an agent read cannot disagree with the UI. Null for the logcat recorder.
+    val diagnostics: DiagnosticSummaryInfo? = null,
     // Verdicts are gate-checked getters on the report (not stored fields), so they
     // would not otherwise serialize — surface them explicitly, computed once here.
     val nativeVerdict: Verdict?,
@@ -235,7 +245,9 @@ private fun parseCanonicalConfigSection(raw: String?): JsonElement? =
  *
  * Pure and non-suspending: every input is captured by the caller. [gate] +
  * [checkResults] are non-null only for a real diagnostics run (the debug export);
- * the logcat/kernel captures pass null and carry no [report].
+ * the logcat/kernel captures pass null and carry no [report]. [selfTestRunId]
+ * identifies the run those two came from, and is recorded even when the run was
+ * blocked, interrupted or failed and therefore contributed no report.
  */
 @Suppress("LongParameterList", "LongMethod")
 internal fun buildVpnHideState(
@@ -247,6 +259,8 @@ internal fun buildVpnHideState(
     shellSnapshot: DebugShellSnapshot?,
     gate: DiagnosticGate?,
     checkResults: CheckResults?,
+    selfTestRunId: Long? = null,
+    diagnostics: DiagnosticSummaryInfo? = null,
     dmesg: String,
     logcat: String,
     bootLsposedLogcat: String,
@@ -301,6 +315,8 @@ internal fun buildVpnHideState(
             ),
         selfNeedsRestart = selfNeedsRestart,
         gate = report?.gate,
+        selfTestRunId = selfTestRunId,
+        diagnostics = diagnostics,
         nativeVerdict = report?.nativeVerdict,
         javaVerdict = report?.javaVerdict,
         report = report,

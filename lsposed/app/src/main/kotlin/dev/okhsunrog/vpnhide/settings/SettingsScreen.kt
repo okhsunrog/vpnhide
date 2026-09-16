@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -69,6 +68,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,20 +80,23 @@ import androidx.compose.ui.unit.dp
 import dev.okhsunrog.vpnhide.CanonicalActivation
 import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
-import dev.okhsunrog.vpnhide.CanonicalSettings
+import dev.okhsunrog.vpnhide.CanonicalEdit
+import dev.okhsunrog.vpnhide.CanonicalMutation
+import dev.okhsunrog.vpnhide.CanonicalPreferenceSwitch
+import dev.okhsunrog.vpnhide.CanonicalToggle
+import dev.okhsunrog.vpnhide.ConfigCoordinatorMode
 import dev.okhsunrog.vpnhide.ContactModal
 import dev.okhsunrog.vpnhide.DonateModal
 import dev.okhsunrog.vpnhide.FullResetDialog
 import dev.okhsunrog.vpnhide.LegacyImportDialog
 import dev.okhsunrog.vpnhide.LegacyImportPrompt
+import dev.okhsunrog.vpnhide.LocalConfigWriteAccess
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.RootSnapshotCache
-import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.buildCanonicalConfigFromTargetsSnapshot
 import dev.okhsunrog.vpnhide.buildSuperkeyClearCommand
 import dev.okhsunrog.vpnhide.buildSuperkeyWriteCommand
 import dev.okhsunrog.vpnhide.canonicalConfigJson
-import dev.okhsunrog.vpnhide.debug.setDebugLoggingEnabled
 import dev.okhsunrog.vpnhide.diagnostics.DebugToolsSection
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsScreen
 import dev.okhsunrog.vpnhide.help.HelpScreen
@@ -155,9 +158,9 @@ fun SettingsScreen(
 ) {
     val settings = LocalSettingsState.current
     val interactor = LocalSettingsInteractor.current
-    var diagnosticsOpen by remember { mutableStateOf(false) }
-    var hiddenAppsOpen by remember { mutableStateOf(false) }
-    var helpOpen by remember { mutableStateOf(false) }
+    var diagnosticsOpen by rememberSaveable { mutableStateOf(false) }
+    var hiddenAppsOpen by rememberSaveable { mutableStateOf(false) }
+    var helpOpen by rememberSaveable { mutableStateOf(false) }
 
     // A guide link (e.g. from the Hiding tab's help) can ask Settings to open a
     // specific sub-screen; apply it once, then let the host clear the request.
@@ -471,12 +474,6 @@ private fun DebugToolsSettingsSection(selfNeedsRestart: Boolean?) {
 private fun DeveloperSettingsSection() {
     val settings = LocalSettingsState.current
     val interactor = LocalSettingsInteractor.current
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val debugLoggingByCanonicalConfig by TargetsCache.snapshot.collectAsState()
-    val debugLogging =
-        debugLoggingByCanonicalConfig?.canonicalConfig?.debugSwitch
-            ?: VpnHideLog.enabled
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SettingsSectionHeader(stringResource(R.string.settings_developer_section))
         PreferenceRowSwitch(
@@ -500,16 +497,13 @@ private fun DeveloperSettingsSection() {
             checked = settings.agentControlEnabled,
             onCheckedChange = interactor::setAgentControlEnabled,
         )
-        PreferenceRowSwitch(
+        CanonicalPreferenceSwitch(
+            field = CanonicalToggle.DebugSwitch,
             title = stringResource(R.string.diag_debug_logging_title),
             subtitle = stringResource(R.string.settings_debug_logging_sub),
             icon = Icons.Default.BugReport,
             index = 2,
             count = 3,
-            checked = debugLogging,
-            onCheckedChange = { value ->
-                scope.launch(Dispatchers.IO) { setDebugLoggingEnabled(value) }
-            },
         )
     }
 }
@@ -531,6 +525,7 @@ private fun DiagnosticsSettingsSection(onOpen: () -> Unit) {
 private fun ConfigBackupSection() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val checkWrite = LocalConfigWriteAccess.current
     val targets by TargetsCache.snapshot.collectAsState()
     var operation by remember { mutableStateOf(ConfigOperation.Idle) }
     var pendingExport by remember { mutableStateOf<String?>(null) }
@@ -575,6 +570,9 @@ private fun ConfigBackupSection() {
             ActivityResultContracts.OpenDocument(),
         ) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
+            if (CanonicalConfigRepository.state.value.mode != ConfigCoordinatorMode.Missing && !checkWrite()) {
+                return@rememberLauncherForActivityResult
+            }
             operation = ConfigOperation.Import
             status = null
             scope.launch {
@@ -583,7 +581,6 @@ private fun ConfigBackupSection() {
                 status =
                     when (result) {
                         ConfigImportResult.Success -> {
-                            TargetsCache.refreshAfterSave(scope, context)
                             importDone
                         }
 
@@ -646,7 +643,8 @@ private fun ConfigBackupSection() {
                 Text(stringResource(R.string.settings_config_export))
             }
             EnhancedButton(
-                onClick = {
+                onClick = import@{
+                    if (CanonicalConfigRepository.state.value.mode != ConfigCoordinatorMode.Missing && !checkWrite()) return@import
                     importLauncher.launch(
                         arrayOf(
                             "application/json",
@@ -863,6 +861,9 @@ private fun SuperkeySettingsSection() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val targets by TargetsCache.snapshot.collectAsState()
+    val repository by CanonicalConfigRepository.state.collectAsState()
+    val pending = CanonicalToggle.RememberSuperkey in repository.pending
+    val checkWrite = LocalConfigWriteAccess.current
     var superkey by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -902,7 +903,8 @@ private fun SuperkeySettingsSection() {
         )
         Row(modifier = Modifier.fillMaxWidth()) {
             TextButton(
-                onClick = {
+                onClick = write@{
+                    if (!checkWrite()) return@write
                     saving = true
                     status = null
                     scope.launch {
@@ -911,17 +913,17 @@ private fun SuperkeySettingsSection() {
                         status = if (exit == 0) clearedMessage else failedMessage
                         if (exit == 0) {
                             superkey = ""
-                            TargetsCache.refresh(scope, context)
                         }
                     }
                 },
-                enabled = !saving && targets != null,
+                enabled = !saving && !pending && targets != null,
             ) {
                 Text(stringResource(R.string.settings_superkey_clear))
             }
             Spacer(Modifier.width(8.dp))
             EnhancedButton(
-                onClick = {
+                onClick = write@{
+                    if (!checkWrite()) return@write
                     saving = true
                     status = null
                     val keyToWrite = superkey
@@ -931,14 +933,13 @@ private fun SuperkeySettingsSection() {
                         status = if (exit == 0) storedMessage else failedMessage
                         if (exit == 0) {
                             superkey = ""
-                            TargetsCache.refresh(scope, context)
                         }
                     }
                 },
-                enabled = !saving && superkey.isNotBlank() && targets != null,
+                enabled = !saving && !pending && superkey.isNotBlank() && targets != null,
                 modifier = Modifier.weight(1f),
             ) {
-                if (saving) {
+                if (saving || pending) {
                     ButtonSpinner(Modifier.padding(end = 8.dp))
                 }
                 Text(stringResource(R.string.settings_superkey_store))
@@ -952,17 +953,14 @@ private suspend fun writeSuperkeySetting(
     remember: Boolean,
     superkey: String,
 ): Int {
-    // Read the config itself, never a rebuild from the snapshot's projections:
-    // this toggles one settings field and must not rewrite the app list on its
-    // way past. A missing config means there is nothing to preserve yet.
-    val base = TargetsCache.snapshot.value?.canonicalConfig ?: CanonicalConfig()
-    val canonical = base.copy(settings = base.settings.copy(rememberSuperkey = remember))
     val secretCommand = if (remember) buildSuperkeyWriteCommand(superkey) else buildSuperkeyClearCommand()
     return CanonicalConfigRepository
         .commit(
-            canonical,
-            coupledCommands = listOf(secretCommand),
-            activation = CanonicalActivation(native = remember),
+            CanonicalMutation(
+                listOf(CanonicalEdit.Toggle(CanonicalToggle.RememberSuperkey, remember)),
+                coupledCommands = listOf(secretCommand),
+                activation = CanonicalActivation(native = remember),
+            ),
         ).exitCode
 }
 
@@ -980,7 +978,7 @@ private enum class ConfigOperation {
 }
 
 private fun buildConfigExportCanonical(snapshot: TargetsSnapshot?): CanonicalConfig =
-    when {
+    CanonicalConfigRepository.state.value.confirmed ?: when {
         snapshot?.canonicalConfig != null -> snapshot.canonicalConfig
         snapshot != null -> buildCanonicalConfigFromTargetsSnapshot(snapshot)
         else -> CanonicalConfig()
@@ -1013,11 +1011,13 @@ private suspend fun importConfigFromUri(
     val canonical = parseImportedCanonicalConfig(raw, context.packageName) ?: return ConfigImportResult.InvalidJson
     val result =
         CanonicalConfigRepository.commit(
-            canonical,
-            activation = CanonicalActivation(native = true, ports = true),
+            CanonicalMutation(
+                listOf(CanonicalEdit.Replace(canonical)),
+                bootstrap = true,
+                activation = CanonicalActivation(native = true, ports = true),
+            ),
         )
     if (!result.succeeded) return ConfigImportResult.RootFailed
-    VpnHideLog.enabled = canonical.debug
     return ConfigImportResult.Success
 }
 
@@ -1030,12 +1030,10 @@ private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
     var saving by remember { mutableStateOf<AutoHideSetting?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     var unavailableDialogOpen by remember { mutableStateOf(false) }
-    val savedMessage = stringResource(R.string.settings_auto_hide_saved)
-    val failedMessage = stringResource(R.string.settings_auto_hide_failed)
     val unavailableRemovedMessage = stringResource(R.string.settings_unavailable_configured_removed)
     val unavailableFailedMessage = stringResource(R.string.settings_unavailable_configured_failed)
-    val canonical = targets?.let(::buildCanonicalConfigFromTargetsSnapshot)
-    val settings = canonical?.settings ?: CanonicalSettings()
+    val repository by CanonicalConfigRepository.state.collectAsState()
+    val canonical = repository.confirmed
     val hiddenSummary =
         remember(canonical, apps, context.packageName) {
             val cfg = canonical
@@ -1066,26 +1064,11 @@ private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
                 )
             }
         }
-    val canWrite = targets != null && apps != null && saving == null
-
-    fun updateSetting(
-        setting: AutoHideSetting,
-        transform: (CanonicalSettings) -> CanonicalSettings,
-    ) {
-        saving = setting
-        status = null
-        val appSignals = apps.orEmpty()
-        scope.launch {
-            val exit = withContext(Dispatchers.IO) { writeAutoHideSetting(context, appSignals, transform) }
-            saving = null
-            status = if (exit == 0) savedMessage else failedMessage
-            if (exit == 0) {
-                TargetsCache.refreshAfterSave(scope, context)
-            }
-        }
-    }
+    val dataReady = targets != null && apps != null && saving == null
+    val checkWrite = LocalConfigWriteAccess.current
 
     fun removeUnavailableConfigured(packages: Set<String>) {
+        if (!checkWrite()) return
         saving = AutoHideSetting.UnavailableConfigured
         status = null
         scope.launch {
@@ -1094,7 +1077,6 @@ private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
             status = if (exit == 0) unavailableRemovedMessage else unavailableFailedMessage
             if (exit == 0) {
                 unavailableDialogOpen = false
-                TargetsCache.refreshAfterSave(scope, context)
             }
         }
     }
@@ -1106,28 +1088,40 @@ private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
 
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SettingsSectionHeader(stringResource(R.string.settings_advanced_protection))
-        PreferenceRowSwitch(
+        CanonicalPreferenceSwitch(
+            field = CanonicalToggle.AutoHideServices,
             title = stringResource(R.string.settings_auto_hide_vpn_services),
             subtitle = stringResource(R.string.settings_auto_hide_vpn_services_sub),
             icon = Icons.Default.VpnKey,
             index = 0,
             count = 4,
-            checked = settings.autoHideVpnServices,
-            enabled = canWrite,
-            onCheckedChange = { enabled ->
-                updateSetting(AutoHideSetting.VpnService) { it.copy(autoHideVpnServices = enabled) }
+            enabled = apps != null,
+            write = { enabled ->
+                val selfPkg = context.packageName
+                val signals = apps.orEmpty().map(AppSummary::toAutoHideSignal)
+                CanonicalConfigRepository.commit(
+                    CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.AutoHideServices, enabled)), transform = { fresh ->
+                        applyAutoHiddenPackages(fresh, selfPkg, signals)
+                    }),
+                )
             },
         )
-        PreferenceRowSwitch(
+        CanonicalPreferenceSwitch(
+            field = CanonicalToggle.AutoHideName,
             title = stringResource(R.string.settings_auto_hide_vpn_name),
             subtitle = stringResource(R.string.settings_auto_hide_vpn_name_sub),
             icon = Icons.Default.TextFields,
             index = 1,
             count = 4,
-            checked = settings.autoHideVpnName,
-            enabled = canWrite,
-            onCheckedChange = { enabled ->
-                updateSetting(AutoHideSetting.VpnName) { it.copy(autoHideVpnName = enabled) }
+            enabled = apps != null,
+            write = { enabled ->
+                val selfPkg = context.packageName
+                val signals = apps.orEmpty().map(AppSummary::toAutoHideSignal)
+                CanonicalConfigRepository.commit(
+                    CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.AutoHideName, enabled)), transform = { fresh ->
+                        applyAutoHiddenPackages(fresh, selfPkg, signals)
+                    }),
+                )
             },
         )
         PreferenceRow(
@@ -1139,7 +1133,7 @@ private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
             icon = Icons.Default.VisibilityOff,
             index = 2,
             count = 4,
-            enabled = canWrite,
+            enabled = dataReady,
             onClick = onOpenHiddenApps,
         )
         PreferenceRow(
@@ -1153,8 +1147,8 @@ private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
             icon = Icons.Default.Delete,
             index = 3,
             count = 4,
-            enabled = canWrite && unavailableConfigured.isNotEmpty(),
-            onClick = { unavailableDialogOpen = true },
+            enabled = dataReady && unavailableConfigured.isNotEmpty(),
+            onClick = { if (checkWrite()) unavailableDialogOpen = true },
         )
         SettingsStatusLine(status)
     }
@@ -1260,36 +1254,17 @@ private fun UnavailableConfiguredAppRow(
     }
 }
 
-private suspend fun writeAutoHideSetting(
-    context: android.content.Context,
-    apps: List<AppSummary>,
-    transform: (CanonicalSettings) -> CanonicalSettings,
-): Int {
-    val snapshot = TargetsCache.snapshot.value
-    val base =
-        snapshot?.let(::buildCanonicalConfigFromTargetsSnapshot)
-            ?: CanonicalConfig()
-    val canonical =
-        applyAutoHiddenPackages(
-            config = base.copy(settings = transform(base.settings)),
-            selfPkg = context.packageName,
-            signals = apps.map(AppSummary::toAutoHideSignal),
-        )
-    return CanonicalConfigRepository.commit(canonical).exitCode
-}
-
 private suspend fun writeRemoveUnavailableConfiguredApps(
     context: android.content.Context,
     packages: Set<String>,
 ): Int {
     if (packages.isEmpty()) return 0
-    val snapshot = TargetsCache.snapshot.value ?: return 1
-    val base = buildCanonicalConfigFromTargetsSnapshot(snapshot)
-    val canonical = removeConfiguredPackages(base, packages, context.packageName)
     return CanonicalConfigRepository
         .commit(
-            canonical,
-            activation = CanonicalActivation(native = true, ports = true),
+            CanonicalMutation(
+                (packages - context.packageName).map { CanonicalEdit.RemoveApp(it) },
+                activation = CanonicalActivation(ports = true),
+            ),
         ).exitCode
 }
 
