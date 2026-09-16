@@ -12,6 +12,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticPresentation
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticStage
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementApplicability
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementContext
+import dev.okhsunrog.vpnhide.diagnostics.MeasurementCoverage
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.NotMeasuredReason
 import dev.okhsunrog.vpnhide.diagnostics.ProbePlanEntry
@@ -77,6 +78,19 @@ class DiagnosticScreenDataTest {
     }
 
     @Test
+    fun `a retained measurement carries the layers it was measured against, partial evidence does not`() {
+        val measured = base(measurement = measurement())
+        assertEquals(measured.measurement?.context?.coverageLayers, decide(measured).coverage)
+        assertEquals(
+            measured.measurement?.context?.coverageLayers,
+            decide(measured.copy(eligibility = DiagnosticEligibility.Unknown)).coverage,
+        )
+        val partial = results(CheckOutcome.HiddenByBackend)
+        val running = decide(measured.copy(activeRunId = 2, activeStage = DiagnosticStage.Slow, activeResults = partial))
+        assertNull(running.coverage)
+    }
+
+    @Test
     fun `an active run shows progress and its partial evidence as incomplete`() {
         val core = decide(base().copy(activeRunId = 2, activeStage = DiagnosticStage.Core))
         assertEquals(DiagnosticBanner.Progress, core.banner)
@@ -128,7 +142,9 @@ class DiagnosticScreenDataTest {
 
     private fun measurement(outcome: CheckOutcome = CheckOutcome.HiddenByBackend): DiagnosticMeasurement {
         val plan = NATIVE_CHECKS.map { ProbePlanEntry(it.id) }
-        val context = MeasurementContext("pid:1;uid:10", "self", "vpn=tun0;self=ROUTED", "backend=Kmod", 0, 1, 10)
+        val layers =
+            MeasurementCoverage(DisplayNativeBackend(NativeBackendId.Kmod, ModuleState.NotInstalled), emptySet(), lsposedActive = true)
+        val context = MeasurementContext("pid:1;uid:10", "self", "vpn=tun0;self=ROUTED", "backend=Kmod", 0, 1, 10, coverageLayers = layers)
         return DiagnosticMeasurement(
             1,
             context,

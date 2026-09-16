@@ -63,10 +63,18 @@ internal data class DiagnosticScreenDecision(
     val results: CheckResults? = null,
     /** False while the listed results are an active run's partial evidence. */
     val complete: Boolean = true,
+    /** The layers the listed measurement was taken against; null for partial evidence, whose report uses the live layers. */
+    val coverage: MeasurementCoverage? = null,
 )
 
 internal fun diagnosticScreenDecision(presentation: DiagnosticPresentation): DiagnosticScreenDecision {
-    blockedBanner(presentation)?.let { return it }
+    val decision = blockedBanner(presentation) ?: runOrHistory(presentation)
+    // A retained measurement is attributed with the backend it was measured against (§6).
+    val retained = decision.results != null && decision.results === presentation.measurementResults
+    return if (retained) decision.copy(coverage = presentation.measurement?.context?.coverageLayers) else decision
+}
+
+private fun runOrHistory(presentation: DiagnosticPresentation): DiagnosticScreenDecision {
     // A current condition still outranks it — it explains the same "cannot measure
     // now" with more detail — but a quarantined probe outranks the history itself,
     // which would otherwise carry a Re-check button that does nothing.

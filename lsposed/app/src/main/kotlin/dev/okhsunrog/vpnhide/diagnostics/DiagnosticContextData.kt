@@ -8,9 +8,9 @@ import dev.okhsunrog.vpnhide.currentObservationValue
 import dev.okhsunrog.vpnhide.detectNativeBackendStates
 import dev.okhsunrog.vpnhide.displayNativeBackend
 import dev.okhsunrog.vpnhide.lsposedHooksActiveThisBoot
-import dev.okhsunrog.vpnhide.moduleActive
 import dev.okhsunrog.vpnhide.settings.installedNativeOptionalHooks
 import dev.okhsunrog.vpnhide.vpnPresenceFromSnapshot
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Result of one context observation effect: the shared eligibility decision plus
@@ -138,14 +138,16 @@ internal fun buildDiagnosticContextObservation(
     val gate = currentObservationValue(routing)
     val context =
         if (gate != null && snapshot != null) {
+            val coverage = measurementCoverageFor(snapshot)
             MeasurementContext(
                 subject = "$processIdentity;boot:${snapshot.sections["current_boot_id"].orEmpty().trim()}",
                 configuration = selfConfigurationIdentity(config, selfPackage),
                 routing = routingIdentity(snapshot.sections, gate),
-                coverage = coverageIdentity(snapshot.sections),
+                coverage = coverage.identity,
                 changeEpoch = changeEpoch,
                 observationId = snapshot.observationId,
                 observedAt = now,
+                coverageLayers = coverage,
             )
         } else {
             null
@@ -180,11 +182,27 @@ internal fun routingIdentity(
     return "vpn=$interfaces;self=${gate.name}"
 }
 
-/** Coverage identity: the active native backend, its installed optional hooks and LSPosed liveness this boot. */
-internal fun coverageIdentity(sections: Map<String, String>): String {
+/** The hiding layers a root snapshot shows: the active native backend, its installed optional hooks and LSPosed liveness this boot. */
+internal fun measurementCoverage(sections: Map<String, String>): MeasurementCoverage {
     val bootId = sections["current_boot_id"].orEmpty().trim()
     val backend = displayNativeBackend(detectNativeBackendStates(sections, currentBootId = bootId))
-    val hooks = installedNativeOptionalHooks(backend.id, sections, bootId).map { it.name }.sorted()
-    val lsposed = lsposedHooksActiveThisBoot(sections["lsposed_state"].orEmpty(), bootId)
-    return "backend=${backend.id};active=${moduleActive(backend.state)};hooks=$hooks;lsposed=$lsposed"
+    return MeasurementCoverage(
+        backend = backend,
+        installedOptionalHooks = installedNativeOptionalHooks(backend.id, sections, bootId),
+        lsposedActive = lsposedHooksActiveThisBoot(sections["lsposed_state"].orEmpty(), bootId),
+    )
+}
+
+/** Coverage identity string of a snapshot; see [MeasurementCoverage.identity]. */
+internal fun coverageIdentity(sections: Map<String, String>): String = measurementCoverage(sections).identity
+
+// The presentation projection re-derives the context on every emission of any of
+// its sources, on every tab; backend detection over the snapshot sections is the
+// only non-trivial part, and a snapshot's sections never change under one
+// observation id, so the last derivation is kept.
+private val coverageMemo = AtomicReference<Pair<Long, MeasurementCoverage>?>(null)
+
+internal fun measurementCoverageFor(snapshot: RootSnapshot): MeasurementCoverage {
+    coverageMemo.get()?.let { (id, coverage) -> if (id == snapshot.observationId) return coverage }
+    return measurementCoverage(snapshot.sections).also { coverageMemo.set(snapshot.observationId to it) }
 }

@@ -175,15 +175,22 @@ fun DiagnosticsScreen(
             // check knows whether the active backend OWNS its vector; otherwise
             // render the raw list (every leak reads as a leak — the pre-report
             // behaviour, used only in the brief window before the dashboard loads).
+            // A retained measurement keeps the layers it was measured against; only an
+            // active run's partial evidence is attributed with the live Dashboard state.
+            val layers =
+                decision.coverage
+                    ?: dashState?.let { ds ->
+                        MeasurementCoverage(ds.nativeBackend, ds.installedOptionalHooks, ds.lsposed is LsposedState.Active)
+                    }
             val report =
-                dashState?.let { ds ->
+                layers?.let { c ->
                     buildDiagnosticReport(
                         gate = DiagnosticGate.ROUTED,
                         results = r,
-                        backend = ds.nativeBackend,
-                        lsposedActive = ds.lsposed is LsposedState.Active,
+                        backend = c.backend,
+                        lsposedActive = c.lsposedActive,
                         complete = decision.complete,
-                        installedOptionalHooks = ds.installedOptionalHooks,
+                        installedOptionalHooks = c.installedOptionalHooks,
                     )
                 }
             DiagnosticsResults(report = report, results = r, tallyFmt = tallyFmt)

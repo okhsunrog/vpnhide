@@ -104,6 +104,12 @@ class DiagnosticContextDataTest {
         assertEquals("pid:1;uid:10;boot:boot-1", context.subject)
         assertEquals("vpn=tun0;self=ROUTED", context.routing)
         assertEquals("backend=null;active=false;hooks=[];lsposed=false", context.coverage)
+        // The typed layers behind the identity travel with the measurement so its
+        // report is built against them later, whatever backend is active by then.
+        val layers = requireNotNull(context.coverageLayers)
+        assertEquals(context.coverage, layers.identity)
+        assertEquals(null, layers.backend.id)
+        assertEquals(false, layers.lsposedActive)
         assertEquals(7L, context.observationId)
         assertEquals(0L, context.changeEpoch)
         assertEquals(42L, context.observedAt)
