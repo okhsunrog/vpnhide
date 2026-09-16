@@ -6,6 +6,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticMeasurement
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticPresentation
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticStage
 import dev.okhsunrog.vpnhide.diagnostics.EvidenceConclusion
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementApplicability
@@ -239,6 +240,24 @@ class DashboardUiStateTest {
         assertEquals(
             HeroDecision(HeroStatus.Attention, HeroNote.Interrupted, showsFailedPrompt = false),
             heroDecision(checked, good.copy(lastAttempt = interrupted), 0, 0),
+        )
+        // A run that never started because the VPN was off is a condition, not a failed
+        // check: once the condition clears the measured hero stays protected, and while a
+        // re-check is in flight it only names the confirmation (the retry-with-VPN-off case).
+        val blocked = DiagnosticAttempt(2, RunOutcome.NotStarted, eligibility = DiagnosticEligibility.VpnOff)
+        assertEquals(
+            HeroDecision(HeroStatus.Protected, HeroNote.None, showsFailedPrompt = false),
+            heroDecision(checked, good.copy(lastAttempt = blocked), 0, 0),
+        )
+        assertEquals(
+            HeroDecision(HeroStatus.Protected, HeroNote.ResultsUnverified, showsFailedPrompt = false),
+            heroDecision(checked, good.copy(lastAttempt = blocked, activeRunId = 3, activeStage = DiagnosticStage.Checking), 0, 0),
+        )
+        val failed = DiagnosticAttempt(2, RunOutcome.Failed, TransitionFailure.ExecutionFailed)
+        assertEquals(HeroNote.Failed, heroDecision(checked, good.copy(lastAttempt = failed), 0, 0).note)
+        assertEquals(
+            HeroNote.ResultsUnverified,
+            heroDecision(checked, good.copy(lastAttempt = failed, activeRunId = 3, activeStage = DiagnosticStage.Core), 0, 0).note,
         )
         // Errors still outrank: an unprotected hero is never lifted by a note.
         assertEquals(HeroStatus.Unprotected, heroDecision(checked, good, errorCount = 1, warningCount = 0).status)

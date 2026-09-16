@@ -268,8 +268,13 @@ old device-validation paragraphs predate the successful installs described below
    bundle's `gate` vocabulary), `DashboardState.protection` cached at derivation
    time (the derivation still awaits the suite, which keeps the startup runtime
    reconcile off the cold-start critical path, see docs/observation-coordinator.md).
-   Host-verified only; a device pass of the Dashboard after a failed re-check is
-   owed with the item 4 leftovers.
+   Device pass 2026-09-16 (Pixel 8 Pro, screen recording): cold start after a
+   reboot, VPN off/on and Retry all render; the recording caught the hero flipping
+   to Attention ("the latest check couldn't run") after a Retry with the VPN off
+   and again while the suite re-ran once the VPN came back, because a blocked
+   attempt was worded as a failed one. Fixed: `DiagnosticAttempt.blocked` carries
+   no notice on the hero or beside the Diagnostics history, and a re-check in
+   flight only names the confirmation.
 
 The batched root reader now waits for its launcher and pipe readers to finish.
 The diagnostic run coordinator joins its own effect jobs when draining and

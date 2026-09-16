@@ -76,14 +76,22 @@ internal fun heroDecision(
     return HeroDecision(status, note, showsFailedPrompt = protection is ProtectionCheck.Failed && !note.explainsCondition)
 }
 
-/** The process first, then current conditions, then the latest attempt, then sufficiency, then applicability. */
+/**
+ * The process first, then current conditions, then a re-check in flight, then the
+ * latest attempt, then sufficiency, then applicability.
+ */
 private fun heroNote(presentation: DiagnosticPresentation): HeroNote {
     // A quarantined probe cannot measure whatever the conditions are, so it is
     // named before the eligibility that would otherwise promise a re-check.
     if (presentation.probeUnavailable) return HeroNote.ProbeUnavailable
     conditionNote(presentation)?.let { return it }
+    // A run in flight is re-confirming the measured tiles; naming the attempt it is
+    // about to replace would flip the hero to Attention for the length of the run.
+    if (presentation.measurement != null && presentation.activeRunId != null) return HeroNote.ResultsUnverified
     val attempt = presentation.lastAttempt
-    if (presentation.measurement != null && attempt != null && attempt.outcome != RunOutcome.Completed) {
+    // A run that never started because of a condition is not a failed check: the
+    // condition is named while it holds and is stale history once it clears.
+    if (presentation.measurement != null && attempt != null && attempt.outcome != RunOutcome.Completed && !attempt.blocked) {
         return if (attempt.outcome == RunOutcome.Interrupted) HeroNote.Interrupted else HeroNote.Failed
     }
     if (presentation.evidence?.conclusion == EvidenceConclusion.Insufficient) return HeroNote.InsufficientEvidence

@@ -965,7 +965,14 @@ against its own `coverageLayers` is `Checked`; without one, a latest attempt
 that never started because of a gated eligibility is `Blocked`; everything else
 is `Failed`. A later attempt that failed or was interrupted therefore leaves the
 measured tiles in place and is named by the hero note (T11), where the legacy
-projection blanked the tiles. The bridge's legacy `gate`/`report` come from the
+projection blanked the tiles. An attempt that never started because of a
+condition (`DiagnosticAttempt.blocked`: NotStarted, no failure, an eligibility)
+is not a failed check (I13): the hero and the Diagnostics history carry no
+notice for it, since the condition is named by the eligibility while it holds
+and is stale once it clears; and while a re-check is in flight the hero only
+names the confirmation (ResultsUnverified) instead of the attempt it is about to
+replace. Found on the device: a Retry with the VPN off, then the VPN coming back,
+flipped a protected hero to Attention twice with "the latest check couldn't run". The bridge's legacy `gate`/`report` come from the
 same presentation value (`reportGate`: `ROUTED` for a retained complete
 measurement, else the blocking eligibility, else null) as its `diagnostics`
 summary, so the two no longer describe different instants. The Dashboard's
