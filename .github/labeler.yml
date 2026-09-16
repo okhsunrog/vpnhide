@@ -1,0 +1,40 @@
+# Area labels applied to pull requests from the paths they touch
+# (.github/workflows/labeler.yml). The same areas gate the CI jobs in ci.yml,
+# where the diff itself decides; a label only ever adds a run (`area:*` forces
+# that area, `ci:full` forces everything), it never removes one.
+'area:kmod':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'kmod/**'
+'area:kpm':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'kmod/kpm/**'
+'area:builtin':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'builtin/**'
+'area:zygisk':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'zygisk/**'
+'area:lsposed':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'lsposed/**'
+          - 'tools/agent-mcp/**'
+'area:portshide':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'portshide/**'
+'area:docs':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - '**/*.md'
+          - 'changelog.d/**'
+'area:ci':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+          - 'scripts/**'

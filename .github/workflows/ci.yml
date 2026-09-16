@@ -20,7 +20,10 @@ concurrency:
 
 jobs:
   builtin-integrator:
+    needs: changes
+    if: needs.changes.outputs.builtin == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
@@ -28,8 +31,101 @@ jobs:
           version: "0.12.10"
       - run: uv run --python 3.12 --no-project python -m unittest discover -s builtin/scripts -p 'test_*.py' -v
 
+
+  # Decide which areas this run exercises. A pull request runs the jobs whose
+  # paths changed, plus everything an area shares (the protocol/activator
+  # crates, kmod/shared, the QEMU probes, the code generators). An `area:*`
+  # label forces that area and `ci:full` forces everything, whatever the diff;
+  # a change under .github runs everything; pushes to main, tags and manual
+  # dispatches always run everything. A skipped job counts as passing for
+  # `ci-ok`, the one check branch protection requires.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      kmod: ${{ steps.decide.outputs.kmod }}
+      kpm: ${{ steps.decide.outputs.kpm }}
+      builtin: ${{ steps.decide.outputs.builtin }}
+      zygisk: ${{ steps.decide.outputs.zygisk }}
+      lsposed: ${{ steps.decide.outputs.lsposed }}
+      portshide: ${{ steps.decide.outputs.portshide }}
+      # Any kernel-side area: the QEMU probes feed kmod, kpm and builtin.
+      native: ${{ steps.decide.outputs.native }}
+    steps:
+      # For pull requests the filter reads the diff through the API; no checkout.
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
+        if: github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            shared:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/**'
+              - 'kmod/shared/**'
+              - 'kmod/test/**'
+              - 'kmod/generated/**'
+              - 'scripts/codegen*.py'
+              - 'scripts/build_lib.py'
+              - 'scripts/build-version.py'
+            ci:
+              - '.github/**'
+            kmod:
+              - 'kmod/**'
+              - '!kmod/kpm/**'
+            kpm:
+              - 'kmod/kpm/**'
+            builtin:
+              - 'builtin/**'
+            zygisk:
+              - 'zygisk/**'
+            lsposed:
+              - 'lsposed/**'
+            portshide:
+              - 'portshide/**'
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+          F_SHARED: ${{ steps.filter.outputs.shared }}
+          F_CI: ${{ steps.filter.outputs.ci }}
+          F_KMOD: ${{ steps.filter.outputs.kmod }}
+          F_KPM: ${{ steps.filter.outputs.kpm }}
+          F_BUILTIN: ${{ steps.filter.outputs.builtin }}
+          F_ZYGISK: ${{ steps.filter.outputs.zygisk }}
+          F_LSPOSED: ${{ steps.filter.outputs.lsposed }}
+          F_PORTSHIDE: ${{ steps.filter.outputs.portshide }}
+        run: |
+          full=false
+          [ "$EVENT" != pull_request ] && full=true
+          [ "$F_CI" = true ] && full=true
+          case " $LABELS " in *" ci:full "*) full=true ;; esac
+          native=false
+          area() {
+            local name=$1 changed=$2 on=false
+            if [ "$full" = true ] || [ "$changed" = true ] || [ "$F_SHARED" = true ]; then on=true; fi
+            case " $LABELS " in *" area:$name "*) on=true ;; esac
+            echo "$name=$on" >> "$GITHUB_OUTPUT"
+            echo "$name: $on"
+            [ "$on" = true ] && case "$name" in kmod|kpm|builtin) native=true ;; esac
+            return 0
+          }
+          echo "event=$EVENT full=$full shared=${F_SHARED:-n/a} labels='$LABELS'"
+          area kmod "$F_KMOD"
+          area kpm "$F_KPM"
+          area builtin "$F_BUILTIN"
+          area zygisk "$F_ZYGISK"
+          area lsposed "$F_LSPOSED"
+          area portshide "$F_PORTSHIDE"
+          echo "native=$native" >> "$GITHUB_OUTPUT"
+          echo "native: $native"
+
   setup:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       image: ${{ steps.img.outputs.image }}
       ddkqemu: ${{ steps.img.outputs.ddkqemu }}
@@ -59,8 +155,10 @@ jobs:
   # copies, but relying on them makes a PR that changes a probe fail until the
   # post-merge image rebuild catches up.
   qemu-native-probes:
-    needs: setup
+    needs: [setup, changes]
+    if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials:
@@ -101,6 +199,7 @@ jobs:
   lint:
     needs: setup
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials:
@@ -268,8 +367,10 @@ jobs:
             :app:detekt cpdCheck :app:lintDebug :app:testDebugUnitTest
 
   kmod-activator:
-    needs: setup
+    needs: [setup, changes]
+    if: needs.changes.outputs.kmod == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials:
@@ -305,8 +406,10 @@ jobs:
           if-no-files-found: error
 
   kmod:
-    needs: kmod-activator
+    needs: [changes, kmod-activator]
+    if: ${{ !cancelled() && needs.changes.outputs.kmod == 'true' && needs.kmod-activator.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         kmi:
@@ -358,8 +461,10 @@ jobs:
   # tree; the module is built here against that tree so it matches the kernel.
   # QEMU runs under TCG (no KVM on hosted runners) — slow but fine. See kmod/test/.
   kmod-qemu:
-    needs: [setup, qemu-native-probes]
+    needs: [setup, changes, qemu-native-probes]
+    if: ${{ !cancelled() && needs.changes.outputs.kmod == 'true' && needs.qemu-native-probes.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -417,8 +522,10 @@ jobs:
   # baked Image/rootfs + KernelPatch tool/runtime (VPNHIDE_KP_BIN) make this
   # hermetic. Legacy kernels (4.9/4.14/4.19/5.4) are a separate job/image.
   kpm-qemu:
-    needs: [setup, qemu-native-probes]
+    needs: [setup, changes, qemu-native-probes]
+    if: ${{ !cancelled() && needs.changes.outputs.kpm == 'true' && needs.qemu-native-probes.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -480,8 +587,10 @@ jobs:
   # compiled in, so the user/kernel pointer-domain bug class is caught here on
   # the exact cores where it lives.
   kpm-qemu-legacy:
-    needs: [setup, qemu-native-probes]
+    needs: [setup, changes, qemu-native-probes]
+    if: ${{ !cancelled() && needs.changes.outputs.kpm == 'true' && needs.qemu-native-probes.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -544,8 +653,10 @@ jobs:
   # a follow-up. NB: ddk-qemu prunes .cmd files, so the Image rebuild is a full
   # kernel compile — keeping .cmd in that image would make it incremental.
   builtin-qemu:
-    needs: [setup, qemu-native-probes]
+    needs: [setup, changes, qemu-native-probes]
+    if: ${{ !cancelled() && needs.changes.outputs.builtin == 'true' && needs.qemu-native-probes.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -626,8 +737,10 @@ jobs:
   # The kpm-qemu / kpm-qemu-legacy jobs above are the runtime *test* gate; this
   # job is the *publish* gate.
   kpm:
-    needs: setup
+    needs: [setup, changes]
+    if: needs.changes.outputs.kpm == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials:
@@ -663,8 +776,10 @@ jobs:
           if-no-files-found: error
 
   zygisk:
-    needs: setup
+    needs: [setup, changes]
+    if: needs.changes.outputs.zygisk == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials:
@@ -716,8 +831,10 @@ jobs:
   # builtin/module/ into one KMI-agnostic vpnhide-builtin.zip. The builtin-qemu
   # jobs are the runtime *test* gate; this is the *publish* gate.
   builtin:
-    needs: setup
+    needs: [setup, changes]
+    if: needs.changes.outputs.builtin == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials:
@@ -755,8 +872,10 @@ jobs:
           if-no-files-found: error
 
   lsposed:
-    needs: setup
+    needs: [setup, changes]
+    if: needs.changes.outputs.lsposed == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials:
@@ -843,8 +962,10 @@ jobs:
           if-no-files-found: error
 
   portshide:
-    needs: setup
+    needs: [setup, changes]
+    if: needs.changes.outputs.portshide == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials:
@@ -886,6 +1007,7 @@ jobs:
   release:
     needs: [builtin-integrator, kmod, kpm, builtin, zygisk, lsposed, portshide]
     if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     # Only the release job needs write — used by softprops/action-gh-release
     # below to create the draft GitHub release. lint/build jobs run on the
@@ -923,3 +1045,39 @@ jobs:
             dist/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The one status branch protection requires. Green when every job above
+  # succeeded or was skipped by `changes`; red on any failure or cancellation,
+  # including a job that was skipped because a job it needs failed.
+  ci-ok:
+    needs:
+      - changes
+      - builtin-integrator
+      - qemu-native-probes
+      - lint
+      - kmod-activator
+      - kmod
+      - kmod-qemu
+      - kpm-qemu
+      - kpm-qemu-legacy
+      - builtin-qemu
+      - kpm
+      - zygisk
+      - builtin
+      - lsposed
+      - portshide
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.value.result)\t\(.key)"' | sort
+          bad=$(echo "$NEEDS" | jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key')
+          if [ -n "$bad" ]; then
+            echo "::error::jobs failed or were cancelled: $(echo "$bad" | tr '\n' ' ')"
+            exit 1
+          fi
+          # A gated job skipped because its dependency failed shows as skipped here
+          # while the dependency itself shows as failure, so the check above is enough.
