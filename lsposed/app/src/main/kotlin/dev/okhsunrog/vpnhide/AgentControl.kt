@@ -73,11 +73,13 @@ internal object AgentControl {
             // cleared here.
             val diagnostics = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart = false)
             val derived = loadDashboardState(context, selfNeedsRestart = false, rootSnapshot = rootSnapshot, diagnostics = diagnostics)
-            // The Dashboard screen overlays the current eligibility on the derived
-            // tiles before rendering; the bridge does the same, so its dashboard and
-            // legacy gate/report say "VPN off" whenever the screen does, instead of
-            // presenting a retained measurement as measurable right now.
-            val protection = effectiveProtection(derived.protection, diagnostics.eligibility)
+            // The screens classify one Situation and render it; the bridge overlays the
+            // same condition on the derived tiles, so its dashboard and legacy gate/report
+            // say "VPN off" whenever the hero does, instead of presenting a retained
+            // measurement as measurable right now. The Situation is read at assembly time:
+            // it is published from the same presentation flow but on its own schedule, so
+            // it is not guaranteed to be the very instant [diagnostics] came from.
+            val protection = overlayCondition(derived.protection, DiagnosticsCache.situation.value)
             val dashboard = derived.copy(protection = protection)
             val statistics = buildStatisticsState(rootSnapshot).toAgentStatisticsState(selfPackage = context.packageName)
             val config = AgentBridgeJson.parseToJsonElement(canonicalConfigJson(currentCanonicalConfig(refresh = false)))

@@ -1,9 +1,11 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.ActionNeededKind
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticPresentation
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementCoverage
+import dev.okhsunrog.vpnhide.diagnostics.Situation
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import dev.okhsunrog.vpnhide.diagnostics.reportGate
 
@@ -52,8 +54,36 @@ internal fun protectionVerdict(
     }
 
 /**
+ * The tiles overlaid with the condition the user is currently in: a condition that
+ * makes measurement impossible right now always wins over whatever was measured
+ * earlier, so a consumer that reports one gate (the bridge) says "VPN off" the
+ * moment the hero does instead of presenting a retained measurement as current.
+ * Everything else — a check in flight, a failed read, a stale measurement — leaves
+ * the tiles alone; those are named by the hero, not by the gate vocabulary.
+ */
+internal fun overlayCondition(
+    tiles: ProtectionCheck,
+    situation: Situation,
+): ProtectionCheck =
+    when (situation) {
+        Situation.VpnOff -> ProtectionCheck.Blocked(DiagnosticGate.VPN_OFF)
+        Situation.NotMeasurable -> ProtectionCheck.Blocked(DiagnosticGate.SELF_NOT_ROUTED)
+        is Situation.ActionNeeded -> restartOverlay(situation.kind, tiles)
+        else -> tiles
+    }
+
+private fun restartOverlay(
+    kind: ActionNeededKind,
+    tiles: ProtectionCheck,
+): ProtectionCheck =
+    when (kind) {
+        ActionNeededKind.RestartApp, ActionNeededKind.RestartDevice -> ProtectionCheck.Blocked(DiagnosticGate.NEEDS_RESTART)
+        ActionNeededKind.ApplicationUnknown, ActionNeededKind.ApplicationFailed -> tiles
+    }
+
+/**
  * The legacy bundle gate of a bridge read, in the vocabulary of the tiles as the
- * screen shows them (after the eligibility overlay): a blocking condition is its
+ * screen shows them (after the condition overlay): a blocking condition is its
  * gate, measured tiles are `ROUTED`, and "could not measure" has no gate.
  */
 internal fun bridgeGate(protection: ProtectionCheck): DiagnosticGate? =

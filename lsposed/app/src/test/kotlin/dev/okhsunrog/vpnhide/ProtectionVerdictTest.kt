@@ -1,11 +1,15 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.ActionNeededKind
 import dev.okhsunrog.vpnhide.diagnostics.CheckResults
+import dev.okhsunrog.vpnhide.diagnostics.CheckingWhat
+import dev.okhsunrog.vpnhide.diagnostics.CouldNotCheckCause
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticAttempt
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticMeasurement
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticPresentation
+import dev.okhsunrog.vpnhide.diagnostics.EvidenceConclusion
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementApplicability
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementContext
@@ -14,6 +18,8 @@ import dev.okhsunrog.vpnhide.diagnostics.ProbePlanEntry
 import dev.okhsunrog.vpnhide.diagnostics.RoutingKnowledge
 import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
 import dev.okhsunrog.vpnhide.diagnostics.SelfRouting
+import dev.okhsunrog.vpnhide.diagnostics.Situation
+import dev.okhsunrog.vpnhide.diagnostics.Staleness
 import dev.okhsunrog.vpnhide.diagnostics.reportGate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -76,8 +82,37 @@ class ProtectionVerdictTest {
 
         assertEquals(DiagnosticGate.ROUTED, bridgeGate(measured))
         // The VPN went off after the measurement: the overlay the screen applies wins.
-        assertEquals(DiagnosticGate.VPN_OFF, bridgeGate(effectiveProtection(measured, DiagnosticEligibility.VpnOff)))
+        assertEquals(DiagnosticGate.VPN_OFF, bridgeGate(overlayCondition(measured, Situation.VpnOff)))
         assertNull(bridgeGate(ProtectionCheck.Failed))
+    }
+
+    @Test
+    fun `only a condition that makes measurement impossible right now overlays the tiles`() {
+        val measured = protectionVerdict(presentation(measurement = measurement(measuredLayers)), liveLayers).check
+
+        assertEquals(ProtectionCheck.Blocked(DiagnosticGate.VPN_OFF), overlayCondition(measured, Situation.VpnOff))
+        assertEquals(ProtectionCheck.Blocked(DiagnosticGate.SELF_NOT_ROUTED), overlayCondition(measured, Situation.NotMeasurable))
+        for (kind in listOf(ActionNeededKind.RestartApp, ActionNeededKind.RestartDevice)) {
+            assertEquals(
+                "$kind",
+                ProtectionCheck.Blocked(DiagnosticGate.NEEDS_RESTART),
+                overlayCondition(measured, Situation.ActionNeeded(kind)),
+            )
+        }
+        // A configuration change that failed, a check in flight, a failed read and a
+        // stale measurement all leave the evidence alone — the hero names them.
+        val untouched =
+            listOf(
+                Situation.ActionNeeded(ActionNeededKind.ApplicationFailed),
+                Situation.ActionNeeded(ActionNeededKind.ApplicationUnknown),
+                Situation.Initializing,
+                Situation.Checking(CheckingWhat.Suite, SelfRouting.Routed, ReadReason.Explicit, 0),
+                Situation.CouldNotCheck(CouldNotCheckCause.RunFailed(TransitionFailure.ExecutionFailed)),
+                Situation.Measured(EvidenceConclusion.NoObservedLeak, Staleness.Changed),
+            )
+        for (situation in untouched) {
+            assertEquals("$situation", measured, overlayCondition(measured, situation))
+        }
     }
 
     @Test
