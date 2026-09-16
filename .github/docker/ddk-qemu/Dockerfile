@@ -48,7 +48,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         qemu-system-arm cpio gzip curl ca-certificates git \
         bc bison flex libelf-dev libssl-dev patch \
-        gcc-aarch64-linux-gnu && \
+        gcc-aarch64-linux-gnu ccache && \
     rm -rf /var/lib/apt/lists/*
 
 # Build the kernel and KEEP its tree: the test module must be built against the

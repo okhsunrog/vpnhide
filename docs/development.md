@@ -172,6 +172,10 @@ does. Pushes to `main`, tags and manual dispatches run everything. The `ci-ok` j
 is green when every job succeeded or was skipped by `changes` and red on any
 failure, so it is the one status branch protection requires.
 
+`builtin-qemu` builds a kernel per KMI; it compiles through ccache with the
+cache restored from the newest run for that KMI (`ccache-builtin-<kmi>-*`), so a
+run that changes nothing in the tree mostly links. The job prints `ccache -s`.
+
 Container jobs that run cargo share the composite action
 `.github/actions/cargo-cache` (safe.directory plus the registry and target
 caches). Actions are pinned to commit SHAs with a version comment; Dependabot

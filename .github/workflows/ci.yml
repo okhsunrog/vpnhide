@@ -634,6 +634,10 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     env:
       KMI: ${{ matrix.kmi }}
+      # The kernel build is the job's cost (about 13 of its 15 minutes). ccache
+      # keyed per KMI turns a rebuild of an unchanged tree into a link.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1G
       # gai/ifconf/bind come from the image (VPNHIDE_GAI_BIN/IFC_BIN/BIND_BIN are
       # set in the ddk-qemu Dockerfile ENV); the two extra probes come from the
       # artifact. All five REQUIRED so a missing probe fails rather than silently
@@ -664,6 +668,27 @@ jobs:
       - name: Mark QEMU native probes executable
         run: chmod +x "$VPNHIDE_IOC_BIN" "$VPNHIDE_BIND32_BIN"
 
+      - name: Restore kernel ccache
+        # restore + explicit save instead of the combined action: the combined
+        # post step saves whatever is on disk even for a cancelled job, and one
+        # cancelled run left a 1.5 KB cache that shadowed the real one by prefix.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          # A fresh key every run so a save carries today's objects; the prefix
+          # restores the newest one for this KMI.
+          key: ccache-builtin-${{ matrix.kmi }}-${{ github.run_id }}
+          restore-keys: ccache-builtin-${{ matrix.kmi }}-
+
+      - name: ccache
+        # The ddk-qemu image installs ccache; an image built before that did not.
+        run: |
+          if ! command -v ccache >/dev/null; then
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends ccache >/dev/null
+          fi
+          ccache --version | head -1
+          ccache -z
+
       - name: Bake CONFIG_VPNHIDE into the kernel + QEMU runtime test
         # integrate.py exports and verifies exact transformations before writing
         # the baked source tree (Git is used only in temporary trees). Merge the two
@@ -680,12 +705,25 @@ jobs:
           (
             cd "$KSRC"
             ./scripts/kconfig/merge_config.sh -m .config /tmp/vpnhide.config
-            make ARCH=arm64 LLVM=1 olddefconfig
+            make ARCH=arm64 LLVM=1 CC="ccache clang" olddefconfig
             grep -E 'CONFIG_VPNHIDE(_FS_HIDING)?=' .config
-            make ARCH=arm64 LLVM=1 -j"$(nproc)" Image
+            make ARCH=arm64 LLVM=1 CC="ccache clang" -j"$(nproc)" Image
           )
+          ccache -s
+          # Save only when the build compiled something new; a run that hit the
+          # cache for everything would just re-upload the same objects.
+          misses=$(ccache -s | awk '/^ *Misses:/ {print $2; exit}')
+          echo "ccache_save=$([ "${misses:-0}" -gt 0 ] && echo true || echo false)" >> "$GITHUB_ENV"
           VPNHIDE_QEMU_IMAGE="$KSRC/arch/arm64/boot/Image" builtin/test/run.sh "$KMI"
 
+      - name: Save kernel ccache
+        # Only a successful build with new objects is worth keeping; a failed or
+        # cancelled job must never publish a partial or empty cache.
+        if: success() && env.ccache_save == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-builtin-${{ matrix.kmi }}-${{ github.run_id }}
       - name: Upload built-in integration review
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
