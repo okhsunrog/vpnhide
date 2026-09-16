@@ -1,18 +1,19 @@
 package dev.okhsunrog.vpnhide.hook
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The cover-selection policy: which network a target uid is shown in place of the
- * VPN, given candidates already in AOSP priority order (underlying, default,
- * heuristic). Each case is a routing situation the resolver must get right.
+ * The per-candidate cover-usability policy. The source sequencing (underlying →
+ * default → heuristic, and heuristic only when the AOSP methods are absent) lives
+ * in [VisibleNetworkResolver] against the live service; this pins what makes a
+ * single candidate a usable cover at all.
  */
 class NetworkViewResolverDataTest {
     private fun candidate(
-        source: String,
-        netId: Int,
+        source: String = "underlying",
+        netId: Int = 100,
         isVpn: Boolean = false,
         hasInternet: Boolean = true,
         notRestricted: Boolean = true,
@@ -20,80 +21,30 @@ class NetworkViewResolverDataTest {
     ) = CoverCandidate(source, netId, isVpn, hasInternet, notRestricted, blocked)
 
     @Test
-    fun `the vpn underlying network wins over the heuristic-best`() {
-        val chosen =
-            selectCoverIndex(
-                listOf(
-                    candidate("underlying", 101),
-                    candidate("heuristic", 114),
-                ),
-                underlyingDeclaredEmpty = false,
-            )
-        assertEquals(0, chosen)
+    fun `a non-vpn internet network the uid can use is a usable cover`() {
+        assertTrue(isUsableCover(candidate()))
     }
 
     @Test
-    fun `an unusable underlying falls through to the default network`() {
-        // The underlying is briefly restricted/no-internet during handover.
-        val chosen =
-            selectCoverIndex(
-                listOf(
-                    candidate("underlying", 101, hasInternet = false),
-                    candidate("default", 114),
-                    candidate("heuristic", 114),
-                ),
-                underlyingDeclaredEmpty = false,
-            )
-        assertEquals(1, chosen)
+    fun `a vpn candidate is never a usable cover`() {
+        assertFalse(isUsableCover(candidate(isVpn = true)))
     }
 
     @Test
-    fun `a restricted or blocked candidate is never a cover`() {
-        val chosen =
-            selectCoverIndex(
-                listOf(
-                    candidate("default", 120, notRestricted = false),
-                    candidate("default", 121, blocked = true),
-                    candidate("heuristic", 114),
-                ),
-                underlyingDeclaredEmpty = false,
-            )
-        assertEquals(2, chosen)
+    fun `a candidate without internet is not usable`() {
+        // A transient underlying still coming up has no capabilities yet.
+        assertFalse(isUsableCover(candidate(hasInternet = false)))
     }
 
     @Test
-    fun `a vpn candidate is never chosen even first in order`() {
-        val chosen =
-            selectCoverIndex(
-                listOf(
-                    candidate("underlying", 113, isVpn = true),
-                    candidate("heuristic", 114),
-                ),
-                underlyingDeclaredEmpty = false,
-            )
-        assertEquals(1, chosen)
+    fun `a restricted candidate is not usable`() {
+        assertFalse(isUsableCover(candidate(notRestricted = false)))
     }
 
     @Test
-    fun `an explicitly empty underlying means no cover, never the heuristic`() {
-        val chosen =
-            selectCoverIndex(
-                listOf(candidate("heuristic", 114)),
-                underlyingDeclaredEmpty = true,
-            )
-        assertNull(chosen)
-    }
-
-    @Test
-    fun `no usable candidate resolves to no cover`() {
-        val chosen =
-            selectCoverIndex(
-                listOf(
-                    candidate("default", 120, hasInternet = false),
-                    candidate("heuristic", 121, notRestricted = false),
-                ),
-                underlyingDeclaredEmpty = false,
-            )
-        assertNull(chosen)
+    fun `a candidate blocked for the uid is not usable`() {
+        // A background uid whose networks are blocked by the per-uid firewall: no
+        // cover, so the caller reports no active network — as a no-VPN uid would.
+        assertFalse(isUsableCover(candidate(blocked = true)))
     }
 }
