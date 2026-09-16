@@ -150,15 +150,19 @@ internal object DiagnosticsCache {
         coordinator.request(request(automatic = true))
     }
 
-    /** Explicit retry from the VPN-off / failed banners and Dashboard refresh: a new run unless the last one completed. */
+    /**
+     * Explicit re-check from the prompts, the Diagnostics screen and the Dashboard
+     * refresh: always a new run. The user asked for a fresh verdict and the hero says
+     * "Running the hiding checks…" while it runs, so reusing a completed suite would
+     * promise a measurement and deliver the old one. A run already in flight is
+     * joined by the coordinator; nothing here reruns a suite at rest on its own (I16).
+     */
     fun retry(
         context: Context,
         selfNeedsRestart: Boolean,
     ) {
         updateInputs(context, selfNeedsRestart)
-        // A completed suite is reused unless a known change made its measurement inapplicable.
-        val changed = presentation.value.applicability == MeasurementApplicability.Changed
-        if (changed || diagnosticRetryAllowed(coordinator.view.value.core)) coordinator.request(request(automatic = false))
+        coordinator.request(request(automatic = false))
     }
 
     /**
