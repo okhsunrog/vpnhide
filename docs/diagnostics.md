@@ -57,7 +57,8 @@ Priority: an empty ground truth is checked **before** EACCES — if root sees no
 the SELinux block is moot, it is simply nothing-to-leak.
 
 **Ground truth is the same Rust probe binary run as root**, not shell `ip`/`cat`.
-`GroundTruthProbe` extracts `vhprobe` from the APK, stages it to `/data/local/tmp`,
+`GroundTruthProbe` extracts `vhhelper` from the APK, stages its immutable
+content-addressed copy to `/data/local/tmp`,
 and execs it via `su`; it emits the same JSON as the in-process JNI path
 (`run_all_json`), so the two views are directly comparable per check id. (This
 replaced an earlier gobley/UniFFI binding — the whole native surface is now one
@@ -129,7 +130,7 @@ Unmanaged tunnels (for example root WireGuard) additionally require an up/unknow
 interface with a non-local route. A failed network/route probe is a diagnostic
 failure, not a claim that VPN is off or the app is excluded.
 
-For the resulting candidate interfaces, `vhprobe --uid <selfUid> --vpn-ifaces
+For the resulting candidate interfaces, `vhhelper probe routing --uid <selfUid> --vpn-ifaces
 <comma-separated-ifaces>` (root, hook-inert) checks whether this uid is routed through
 the VPN. Two passes over the policy rules (both address families): learn the VPN egress
 table id(s) from rules that egress via a VPN interface (`oif tun*`), then check whether

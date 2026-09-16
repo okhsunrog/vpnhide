@@ -9,7 +9,7 @@ internal fun buildRootMutationStageCommand(
 ): String {
     require(digest.matches(Regex("[0-9a-f]{64}")) && validRootIdentity(nonce))
     val root = shellQuote(directory)
-    val target = shellQuote("$directory/vhmutate-$digest")
+    val target = shellQuote("$directory/vhhelper-$digest")
     val temporary = shellQuote("$directory/stage-$nonce")
     return "umask 077; mkdir -p $root && chmod 700 $root && " +
         "{ if [ ! -f $target ]; then " +

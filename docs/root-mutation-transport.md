@@ -12,7 +12,8 @@ Destroying the Java `Process` for `su` does not establish that a privileged chil
 stopped. A delayed root authorization can also launch a command after the caller
 already timed out. Both cases need evidence beyond the app's job/PID lifetime.
 
-`vhmutate` is a short-lived supervisor, built as the `vpnhide_app_helper` binary in
+The `vhhelper mutation` command is a short-lived supervisor, built as the
+`vpnhide_app_helper` binary in
 `crates/app-helper/` from the existing Rust dependencies. It holds a nonblocking
 exclusive `flock` and enables Linux
 [`PR_SET_CHILD_SUBREAPER`](https://man7.org/linux/man-pages/man2/PR_SET_CHILD_SUBREAPER.2const.html).
@@ -60,7 +61,7 @@ boundary are coordinator/migration work.
 
 ## Protocol and late-launch fencing
 
-Invocation: `vhmutate STATE_DIRECTORY CANONICAL_PATH VERB ...`. Paths are explicit
+Invocation: `vhhelper mutation STATE_DIRECTORY CANONICAL_PATH VERB ...`. Paths are explicit
 to support isolated host/device tests. Android execution requires UID 0. All
 commands return one JSON reply (`version`, `status`, `boot`, `state`,
 `config_status`, `config`). `busy` and `unavailable` never establish completion.
@@ -143,7 +144,7 @@ Device reproduction (isolated scratch files, no APK install or live activators):
 
 ```sh
 uv run scripts/test-root-transport.py --serial SERIAL \
-  --binary lsposed/app/build/rustNative/assets/bin/arm64-v8a/vhmutate
+  --binary lsposed/app/build/rustNative/assets/bin/arm64-v8a/vhhelper
 ```
 
 Verified on 2026-09-15 on Pixel 8 Pro, through `adb shell su` in the KernelSU
@@ -157,7 +158,7 @@ was performed.
 ## Native companion selection
 
 The supervisor exports its own executable path as `VPNHIDE_MUTATION_HELPER` to
-the command shell. The native phase invokes that helper with `activate-native`.
+the command shell. The native phase invokes that helper with `activate native`.
 This entry point delegates live kernel identity parsing and companion selection
 to the shared activator/protocol crates, then executes the installed companion's
 activator, preserving its output and exit status. The selector and activator

@@ -10,7 +10,7 @@ import kotlinx.serialization.json.Json
  * Replaces the UniFFI-generated types: the whole native surface is now one
  * JSON-returning function ([NativeProbe.runAllChecksJson]), so the Rust crate
  * builds with plain cargo-ndk (no gobley plugin / AGP-9 fork). The same JSON is
- * produced in-process (app view) and by the root-exec'd `vhprobe` bin (ground
+ * produced in-process (app view) and by the root-exec'd `vhhelper probe checks` command (ground
  * truth), so this parser serves both.
  */
 enum class CheckStatus { PASS, FAIL, SELINUX_BLOCKED, NETWORK_BLOCKED }

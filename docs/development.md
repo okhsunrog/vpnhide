@@ -25,7 +25,7 @@ How to build vpnhide from source.
 - **`zip`** — packaging module zips.
 - **`adb`** — installing builds on a device.
 
-The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNative` Gradle `Exec` task in `lsposed/app/build.gradle.kts` (wired into `preBuild`). It bundles `libvpnhide_checks.so` into the APK's `jniLibs/` plus the root-exec'able `vhprobe` and `vhmutate` bins as assets. The latter is the [mutation transport foundation](root-mutation-transport.md), not yet connected to app writes. The task tracks every app-native path dependency, manifest, lockfile and build script, so changing a shared crate invalidates the APK native build. There is no extra Gradle plugin; no manual `cargo` invocation is needed for the APK build.
+The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNative` Gradle `Exec` task in `lsposed/app/build.gradle.kts` (wired into `preBuild`). It bundles `libvpnhide_checks.so` into the APK's `jniLibs/` plus the root-exec'able `vhhelper` bin as an asset. The helper's `probe` and `mutation` subcommands preserve the diagnostic and [mutation transport](root-mutation-transport.md) boundaries. The task tracks every app-native path dependency, manifest, lockfile and build script, so changing a shared crate invalidates the APK native build. There is no extra Gradle plugin; no manual `cargo` invocation is needed for the APK build.
 
 ## Repository layout
 

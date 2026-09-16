@@ -565,7 +565,7 @@ canonical schema, backend protocol or LSPosed direct-read contract.
 
 ### Live kernel ownership before activation
 
-App activation invokes the packaged `vhmutate activate-native` entry point under
+App activation invokes the packaged `vhhelper activate native` entry point under
 the mutation supervisor. Selection lives in the shared activator crate and uses
 the protocol crate's status parser and generated backend enum; the app shell
 does not parse status. When `/proc/vpnhide_ctl` is present, its complete status

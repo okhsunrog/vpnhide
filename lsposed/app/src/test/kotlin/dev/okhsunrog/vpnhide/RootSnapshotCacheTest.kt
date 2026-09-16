@@ -147,10 +147,14 @@ class RootSnapshotCacheTest {
 
     @Test
     fun `snapshot stages APatch runtime probe only from validated app path`() {
-        val command = buildRootShellSnapshotCommand(runtimeProbeSource = "/data/user/0/dev.okhsunrog.vpnhide/files/vhprobe")
+        val command =
+            buildRootShellSnapshotCommand(
+                runtimeProbeSource =
+                    "/data/user/0/dev.okhsunrog.vpnhide/files/vhhelper-" + "a".repeat(64),
+            )
 
-        assertTrue(command.contains("VPNHIDE_KPM_PROBE_SOURCE='/data/user/0/dev.okhsunrog.vpnhide/files/vhprobe'"))
-        assertTrue(command.contains("--apatch-kpm-list"))
+        assertTrue(command.contains("VPNHIDE_KPM_PROBE_SOURCE='/data/user/0/dev.okhsunrog.vpnhide/files/vhhelper-" + "a".repeat(64) + "'"))
+        assertTrue(command.contains("observe kpm-list"))
         assertTrue(command.contains("\"${'$'}KPATCH\" kpm list"))
         assertTrue(command.contains("rm -f \"${'$'}KPM_PROBE\""))
     }

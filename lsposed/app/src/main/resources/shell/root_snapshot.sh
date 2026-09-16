@@ -166,7 +166,7 @@ phase_runtime_status_files() {
     elif [ -d /data/adb/ap ] && [ -f "$KPM_RUNTIME_PROBE_SOURCE" ]; then
       KPM_PROBE=/data/local/tmp/vpnhide_kpm_probe.$$
       if cp "$KPM_RUNTIME_PROBE_SOURCE" "$KPM_PROBE" && chmod 700 "$KPM_PROBE"; then
-        "$KPM_PROBE" --apatch-kpm-list 2>/dev/null || echo available=0
+        "$KPM_PROBE" observe kpm-list 2>/dev/null || echo available=0
       else
         echo available=0
       fi

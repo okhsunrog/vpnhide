@@ -12,7 +12,7 @@ use crate::generated::iface_lists::matches_vpn;
 
 // ── Probe outcome types — serialized to JSON on both transports ───────
 // In-process (app view) via the JNI export below; root ground-truth via the
-// `vhprobe` bin. Same code, same JSON schema on both sides.
+// `vhhelper probe checks`. Same code, same JSON schema on both sides.
 
 #[derive(serde::Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -907,7 +907,7 @@ fn check_netlink_getrule() -> CheckOutput {
     check_netlink_getrule_uid(unsafe { libc::getuid() })
 }
 
-/// RTM_GETRULE for a specific uid. The `vhprobe --uid` self-routing gate reuses
+/// RTM_GETRULE for a specific uid. The `vhhelper probe routing` self-routing gate reuses
 /// this to answer "is <uid> routed through the VPN?" — a matching policy rule
 /// (or a VPN-named iif/oif) means yes.
 fn check_netlink_getrule_uid(myuid: u32) -> CheckOutput {
@@ -1093,7 +1093,7 @@ fn check_proc_net_dev() -> CheckOutput {
 // ── Registry + JSON transport ─────────────────────────────────────────────
 // One code path, two transports: the JNI export runs this in the app's own
 // process (app view — real uid + SELinux domain + zygisk/kernel hooks); the
-// `vhprobe` bin runs it as root (ground truth — uid 0 is not a hook target).
+// `vhhelper probe checks` runs it as root (ground truth — uid 0 is not a hook target).
 // Both emit the same JSON; the app classifies by comparing per-`id`.
 
 #[derive(serde::Serialize)]
@@ -1131,7 +1131,7 @@ fn run_all() -> Vec<CheckJson> {
 }
 
 /// Run every native probe in display order and serialize to a JSON array of
-/// `{id, status, detail}`. Public so both the JNI export and the `vhprobe` bin
+/// `{id, status, detail}`. Public so both the JNI export and the `vhhelper` bin
 /// call the exact same code.
 pub fn run_all_json() -> String {
     serde_json::to_string(&run_all()).unwrap_or_else(|_| "[]".to_string())

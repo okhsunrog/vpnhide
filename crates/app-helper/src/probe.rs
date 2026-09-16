@@ -14,7 +14,7 @@
 
 use std::ffi::CString;
 use std::os::raw::{c_long, c_void};
-use std::{env, fs, process};
+use std::{fs, process};
 use vpnhide_apatch_abi::{
     APATCH_SUPERCALL_NR, command_candidates, encode_command, parse_kernel_version_hint,
 };
@@ -27,16 +27,15 @@ const SUPERKEY_FILE: &str = "/data/adb/vpnhide/superkey";
 // against the i64 API; on arm64 c_long is already i64, so behaviour is unchanged.
 const SUPERCALL_KPM_LIST: i64 = 0x1031;
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.get(1).is_some_and(|arg| arg == "--apatch-kpm-list") {
+pub fn run(args: &[String]) -> i32 {
+    if args.first().is_some_and(|arg| arg == "--apatch-kpm-list") {
         print_apatch_kpm_list();
-        return;
+        return 0;
     }
     if let Some(i) = args.iter().position(|a| a == "--uid") {
         let Some(uid) = args.get(i + 1).and_then(|s| s.parse::<u32>().ok()) else {
-            eprintln!("usage: vhprobe --uid <uid>");
-            process::exit(2);
+            eprintln!("usage: vhhelper probe routing --uid <uid>");
+            return 2;
         };
         let interfaces = args
             .iter()
@@ -47,9 +46,10 @@ fn main() {
             "{}",
             self_routed_for_interfaces_json(uid, interfaces.as_deref())
         );
-        return;
+        return 0;
     }
     println!("{}", run_all_json());
+    0
 }
 
 fn print_apatch_kpm_list() {

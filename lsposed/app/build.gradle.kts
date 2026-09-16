@@ -50,12 +50,13 @@ tasks.register<Exec>("ktlintCheck") {
 // The native check probes ship two ways from one Rust crate (../native):
 //   - libvpnhide_checks.so — a cdylib loaded in-process (System.loadLibrary)
 //     for the app-view probe (real uid + SELinux domain + zygisk/kernel hooks);
-//   - vhprobe — a root-exec'able bin for the ground-truth probe. Shipped as an
-//     asset, not a jniLib: AGP 9 defaults to extractNativeLibs=false, so a
-//     jniLib isn't a real on-disk file and can't be exec'd.
+//   - vhhelper — one root-exec'able bin for checks, observations and the
+//     mutation supervisor. Shipped as an asset, not a jniLib: AGP 9 defaults
+//     to extractNativeLibs=false, so a jniLib isn't a real on-disk file and
+//     can't be exec'd.
 // Built with cargo-ndk (the same toolchain the zygisk module already uses).
-// The crate also ships vhmutate as an asset: a separate root mutation supervisor,
-// never loaded into the app's JNI process. See docs/root-mutation-transport.md.
+// The helper is never loaded into the app's JNI process. See
+// docs/root-mutation-transport.md.
 // This replaces the gobley/UniFFI plugin (and its AGP-9 fork): the whole native
 // surface is now one JSON-returning function, so codegen bindings aren't worth
 // the dependency. -P 29 matches minSdk (getifaddrs needs API >= 24).
@@ -99,18 +100,13 @@ val emulatorX86 = (project.findProperty("vpnhideEmulatorX86") as String?)?.toBoo
 val buildAppNative =
     tasks.register<Exec>("buildAppNative") {
         group = "build"
-        description = "Builds vpnhide_checks, vhprobe and the mutation supervisor via cargo-ndk."
+        description = "Builds the checks JNI library and unified vhhelper via cargo-ndk."
         workingDir = repoDir
         environment("ANDROID_NDK_HOME", rustNdkDir)
         environment("NDK_HOME", rustNdkDir)
-        appNativeCrates.forEach { crateDir ->
-            inputs
-                .files(
-                    fileTree(crateDir) {
-                        include("src/**", "Cargo.toml", "build.rs")
-                    },
-                ).withPathSensitivity(PathSensitivity.RELATIVE)
-        }
+        // These crate roots contain only source/manifests/build scripts; target
+        // output lives at the workspace root and is deliberately not an input.
+        inputs.files(appNativeCrates).withPathSensitivity(PathSensitivity.RELATIVE)
         inputs.file(repoDir.resolve("Cargo.toml"))
         inputs.file(repoDir.resolve("Cargo.lock"))
         outputs.dir(rustJniLibsDir)
@@ -149,41 +145,26 @@ val buildAppNative =
         )
         // Locals (not top-level script vals) so the doLast action captures only
         // File/Boolean values — required for configuration-cache serialization.
-        val probeBinArm = repoDir.resolve("target/aarch64-linux-android/app-native/vhprobe")
-        val probeDestArm = rustAssetsOut.resolve("bin/arm64-v8a/vhprobe")
-        val probeBinArmv7 = repoDir.resolve("target/armv7-linux-androideabi/app-native/vhprobe")
-        val probeDestArmv7 = rustAssetsOut.resolve("bin/armeabi-v7a/vhprobe")
-        val probeBinX86 = repoDir.resolve("target/x86_64-linux-android/app-native/vhprobe")
-        val probeDestX86 = rustAssetsOut.resolve("bin/x86_64/vhprobe")
-        val mutationBins =
-            listOf(
-                repoDir.resolve("target/aarch64-linux-android/app-native/vhmutate") to
-                    rustAssetsOut.resolve("bin/arm64-v8a/vhmutate"),
-                repoDir.resolve("target/armv7-linux-androideabi/app-native/vhmutate") to
-                    rustAssetsOut.resolve("bin/armeabi-v7a/vhmutate"),
-            ) +
-                if (emulatorX86) {
-                    listOf(
-                        repoDir.resolve("target/x86_64-linux-android/app-native/vhmutate") to
-                            rustAssetsOut.resolve("bin/x86_64/vhmutate"),
-                    )
-                } else {
-                    emptyList()
-                }
+        val helperBinArm = repoDir.resolve("target/aarch64-linux-android/app-native/vhhelper")
+        val helperDestArm = rustAssetsOut.resolve("bin/arm64-v8a/vhhelper")
+        val helperBinArmv7 = repoDir.resolve("target/armv7-linux-androideabi/app-native/vhhelper")
+        val helperDestArmv7 = rustAssetsOut.resolve("bin/armeabi-v7a/vhhelper")
+        val helperBinX86 = repoDir.resolve("target/x86_64-linux-android/app-native/vhhelper")
+        val helperDestX86 = rustAssetsOut.resolve("bin/x86_64/vhhelper")
         val copyX86 = emulatorX86
+        val obsoleteAssets = rustAssetsOut.resolve("bin")
+        doFirst {
+            // Remove obsolete split-helper assets left by pre-helper builds;
+            // this generated APK directory is disposable, unlike root staging.
+            obsoleteAssets.deleteRecursively()
+        }
         doLast {
-            mutationBins.forEach { (source, destination) ->
-                destination.parentFile.mkdirs()
-                source.copyTo(destination, overwrite = true)
-            }
-            probeDestArm.parentFile.mkdirs()
-            probeBinArm.copyTo(probeDestArm, overwrite = true)
-            probeDestArmv7.parentFile.mkdirs()
-            probeBinArmv7.copyTo(probeDestArmv7, overwrite = true)
-            if (copyX86) {
-                probeDestX86.parentFile.mkdirs()
-                probeBinX86.copyTo(probeDestX86, overwrite = true)
-            }
+            listOf(helperBinArm to helperDestArm, helperBinArmv7 to helperDestArmv7)
+                .plus(if (copyX86) listOf(helperBinX86 to helperDestX86) else emptyList())
+                .forEach { (source, destination) ->
+                    destination.parentFile.mkdirs()
+                    source.copyTo(destination, overwrite = true)
+                }
         }
     }
 

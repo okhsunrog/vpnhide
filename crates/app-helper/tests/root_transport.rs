@@ -19,7 +19,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "vhmutate-test-{}-{}",
+            "vhhelper-test-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
@@ -35,7 +35,8 @@ impl Fixture {
     }
 
     fn start(&self, args: &[&str]) -> Child {
-        Command::new(env!("CARGO_BIN_EXE_vhmutate"))
+        Command::new(env!("CARGO_BIN_EXE_vhhelper"))
+            .arg("mutation")
             .arg(self.root.join("lane"))
             .arg(self.root.join("config"))
             .args(args)
@@ -92,7 +93,7 @@ fn command_receives_the_supervisors_helper_path() {
     assert_eq!(fixture.run("1", &script)["state"]["status"], "finished");
     assert_eq!(
         fs::read_to_string(fixture.root.join("helper-path")).unwrap(),
-        env!("CARGO_BIN_EXE_vhmutate")
+        env!("CARGO_BIN_EXE_vhhelper")
     );
 }
 

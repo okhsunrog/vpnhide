@@ -7,12 +7,8 @@ license.workspace = true
 description = "Root observations and supervised app mutations for vpnhide."
 
 [[bin]]
-name = "vhprobe"
-path = "src/bin/vhprobe.rs"
-
-[[bin]]
-name = "vhmutate"
-path = "src/bin/vhmutate.rs"
+name = "vhhelper"
+path = "src/main.rs"
 
 [dependencies]
 libc = "0.2"

@@ -102,7 +102,7 @@ for Studio/debugger work. That variant can be much larger and may make the first
 launch after updating the Xposed module slow enough to hit Android's process
 start timeout.
 
-The build cross-compiles the app-native crates under `crates/` for `aarch64-linux-android` and `armeabi-v7a` via cargo-ndk, bundling `libvpnhide_checks.so` into the APK's `jniLibs/` and the root-exec'able `vhprobe`/`vhmutate` binaries as assets. This is driven by the `buildAppNative` Gradle `Exec` task in `app/build.gradle.kts` (wired into `preBuild`) — no manual `cargo` invocation needed, and no codegen: the whole native surface is one JSON-returning JNI function parsed by `NativeProbe`. See [../docs/development.md](../docs/development.md#prerequisites) for the full prereq list.
+The build cross-compiles the app-native crates under `crates/` for `aarch64-linux-android` and `armeabi-v7a` via cargo-ndk, bundling `libvpnhide_checks.so` into the APK's `jniLibs/` and the root-exec'able `vhhelper` binary as an asset. This is driven by the `buildAppNative` Gradle `Exec` task in `app/build.gradle.kts` (wired into `preBuild`) — no manual `cargo` invocation needed, and no codegen: the whole native surface is one JSON-returning JNI function parsed by `NativeProbe`. See [../docs/development.md](../docs/development.md#prerequisites) for the full prereq list.
 
 ## License
 

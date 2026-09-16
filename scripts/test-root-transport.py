@@ -45,7 +45,7 @@ class DeviceFixture:
 
     def helper(self, args: tuple[str, ...]) -> str:
         return shlex.join(
-            [f"{self.root}/helper", f"{self.root}/lane", f"{self.root}/config", *args]
+            [f"{self.root}/helper", "mutation", f"{self.root}/lane", f"{self.root}/config", *args]
         )
 
     def call(self, *args: str, script: str = "") -> dict:
