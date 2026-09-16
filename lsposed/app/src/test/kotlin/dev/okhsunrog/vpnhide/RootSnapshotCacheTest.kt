@@ -146,19 +146,21 @@ class RootSnapshotCacheTest {
     }
 
     @Test
-    fun `snapshot stages APatch runtime probe only from validated app path`() {
+    fun `snapshot stages one helper and delegates KPM enumeration to it`() {
+        val digest = "a".repeat(64)
+        val source = "/data/user/0/dev.okhsunrog.vpnhide/files/vhhelper-$digest"
         val command =
             buildRootShellSnapshotCommand(
-                runtimeProbeSource =
-                    "/data/user/0/dev.okhsunrog.vpnhide/files/vhhelper-" + "a".repeat(64),
+                runtimeProbeSource = source,
             )
 
-        assertTrue(command.contains("VPNHIDE_KPM_PROBE_SOURCE='/data/user/0/dev.okhsunrog.vpnhide/files/vhhelper-" + "a".repeat(64) + "'"))
-        assertTrue(command.contains("VPNHIDE_KPM_PROBE_DIGEST='" + "a".repeat(64) + "'"))
+        assertTrue(command.contains("cp '$source'"))
+        assertTrue(command.contains("VPNHIDE_KPM_PROBE_PATH='/data/local/tmp/vpnhide-vhhelper-$digest'"))
+        assertTrue(command.contains("sha256sum '/data/local/tmp/vpnhide-vhhelper-$digest'"))
         assertTrue(command.contains("observe kpm-list"))
-        assertTrue(command.contains("\"${'$'}KPATCH\" kpm list"))
-        assertTrue(command.contains("rm -f \"${'$'}KPM_STAGE\""))
-        assertFalse(command.contains("vpnhide_kpm_probe."))
+        assertFalse(command.contains("kpm_observation_from_cli"))
+        assertFalse(command.contains("kpm list 2>/dev/null"))
+        assertFalse(command.contains("\"version\":1"))
     }
 
     @Test
@@ -175,17 +177,16 @@ class RootSnapshotCacheTest {
     }
 
     @Test
-    fun `snapshot command remains valid POSIX shell with runtime probe`() {
+    fun `snapshot command remains valid POSIX shell without a staged helper`() {
         val process = ProcessBuilder("sh", "-c", buildRootShellSnapshotCommand(includePmPackages = false)).start()
         val stdout = process.inputStream.bufferedReader().readText()
         val stderr = process.errorStream.bufferedReader().readText()
 
         assertEquals("shell stderr: $stderr", 0, process.waitFor())
         val sections = parseRootShellSnapshot(stdout, recordMetric = { _, _ -> })
-        assertEquals(
-            "{\"version\":1,\"kind\":\"kpm_list\",\"status\":\"error\",\"error\":\"unavailable\"}",
-            sections["kpm_runtime_modules"],
-        )
+        // The shell does not synthesize helper protocol. An absent helper leaves
+        // the section empty, which the Kotlin consumer rejects as malformed.
+        assertEquals("", sections["kpm_runtime_modules"])
     }
 
     // Anti-drift guard: the detectors and the debug export read sections by name

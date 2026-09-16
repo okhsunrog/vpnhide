@@ -227,43 +227,53 @@ internal fun validateRootSnapshotSections(sections: Map<String, String>) {
 internal fun buildRootShellSnapshotCommand(
     includePmPackages: Boolean = true,
     runtimeProbeSource: String? = null,
-): String =
-    shellVariables(
-        mapOf(
-            "VPNHIDE_SECTION_BEGIN" to ROOT_SNAPSHOT_BEGIN_PREFIX,
-            "VPNHIDE_SECTION_END" to ROOT_SNAPSHOT_END_PREFIX,
-            "VPNHIDE_TIMING" to ROOT_TIMING_PREFIX,
-            "VPNHIDE_PM_USERS_STATUS" to PM_USERS_STATUS_PREFIX,
-            "VPNHIDE_PM_USER_BEGIN" to PM_USER_BEGIN_PREFIX,
-            "VPNHIDE_PM_USER_END" to PM_USER_END_PREFIX,
-            "VPNHIDE_PM_STDERR_TO_STDOUT" to "0",
-            "VPNHIDE_WITH_PM" to if (includePmPackages) "1" else "0",
-            "VPNHIDE_KPM_PROBE_SOURCE" to runtimeProbeSource.orEmpty(),
-            "VPNHIDE_KPM_PROBE_DIGEST" to appHelperDigest(runtimeProbeSource).orEmpty(),
-            "VPNHIDE_KMOD_DIR" to KMOD_MODULE_DIR,
-            "VPNHIDE_BUILTIN_DIR" to BUILTIN_MODULE_DIR,
-            "VPNHIDE_KPM_DIR" to KPM_MODULE_DIR,
-            "VPNHIDE_ZYGISK_DIR" to ZYGISK_MODULE_DIR,
-            "VPNHIDE_PORTS_DIR" to PORTS_MODULE_DIR,
-            "VPNHIDE_KMOD_ACTIVATOR" to KMOD_ACTIVATOR,
-            "VPNHIDE_BUILTIN_ACTIVATOR" to BUILTIN_ACTIVATOR,
-            "VPNHIDE_KPM_ACTIVATOR" to KPM_ACTIVATOR,
-            "VPNHIDE_ZYGISK_ACTIVATOR" to ZYGISK_ACTIVATOR,
-            "VPNHIDE_PORTS_ACTIVATOR" to PORTS_ACTIVATOR,
-            "VPNHIDE_CONFIG_FILE" to CANONICAL_CONFIG_FILE,
-            "VPNHIDE_SUPERKEY_FILE" to SUPERKEY_FILE,
-            "VPNHIDE_KMOD_LOAD_STATUS" to KMOD_LOAD_STATUS_FILE,
-            "VPNHIDE_KMOD_LOAD_DMESG" to KMOD_LOAD_DMESG_FILE,
-            "VPNHIDE_BUILTIN_LOAD_STATUS" to BUILTIN_LOAD_STATUS_FILE,
-            "VPNHIDE_ZYGISK_STATUS" to ZYGISK_STATUS_FILE,
-            "VPNHIDE_KPM_LOAD_STATUS" to KPM_LOAD_STATUS_FILE,
-            "VPNHIDE_PORTS_LOAD_STATUS" to PORTS_LOAD_STATUS_FILE,
-            "VPNHIDE_PROC_CTL" to PROC_CTL,
-            "VPNHIDE_LSPOSED_STATE" to LSPOSED_STATE_FILE,
-            "VPNHIDE_LEGACY_SECTIONS" to
-                LEGACY_CONFIG_SECTIONS.entries.joinToString(" ") { (section, path) -> "$section=$path" },
-        ),
-    ) + ShellScripts.load("package_inventory.sh") + "\n" + ShellScripts.load("root_snapshot.sh")
+): String {
+    val runtimeProbeDigest = appHelperDigest(runtimeProbeSource)
+    val runtimeProbePath = runtimeProbeDigest?.let(::appHelperStagedPath).orEmpty()
+    val stagePrelude =
+        if (runtimeProbeSource != null && runtimeProbeDigest != null) {
+            "VPNHIDE_KPM_PROBE_PATH=''\n" +
+                "if ${buildAppHelperStageCommand(runtimeProbeSource, runtimeProbeDigest)} >/dev/null 2>&1; then " +
+                "VPNHIDE_KPM_PROBE_PATH=${shellQuote(runtimeProbePath)}; fi\n"
+        } else {
+            "VPNHIDE_KPM_PROBE_PATH=''\n"
+        }
+    return stagePrelude +
+        shellVariables(
+            mapOf(
+                "VPNHIDE_SECTION_BEGIN" to ROOT_SNAPSHOT_BEGIN_PREFIX,
+                "VPNHIDE_SECTION_END" to ROOT_SNAPSHOT_END_PREFIX,
+                "VPNHIDE_TIMING" to ROOT_TIMING_PREFIX,
+                "VPNHIDE_PM_USERS_STATUS" to PM_USERS_STATUS_PREFIX,
+                "VPNHIDE_PM_USER_BEGIN" to PM_USER_BEGIN_PREFIX,
+                "VPNHIDE_PM_USER_END" to PM_USER_END_PREFIX,
+                "VPNHIDE_PM_STDERR_TO_STDOUT" to "0",
+                "VPNHIDE_WITH_PM" to if (includePmPackages) "1" else "0",
+                "VPNHIDE_KMOD_DIR" to KMOD_MODULE_DIR,
+                "VPNHIDE_BUILTIN_DIR" to BUILTIN_MODULE_DIR,
+                "VPNHIDE_KPM_DIR" to KPM_MODULE_DIR,
+                "VPNHIDE_ZYGISK_DIR" to ZYGISK_MODULE_DIR,
+                "VPNHIDE_PORTS_DIR" to PORTS_MODULE_DIR,
+                "VPNHIDE_KMOD_ACTIVATOR" to KMOD_ACTIVATOR,
+                "VPNHIDE_BUILTIN_ACTIVATOR" to BUILTIN_ACTIVATOR,
+                "VPNHIDE_KPM_ACTIVATOR" to KPM_ACTIVATOR,
+                "VPNHIDE_ZYGISK_ACTIVATOR" to ZYGISK_ACTIVATOR,
+                "VPNHIDE_PORTS_ACTIVATOR" to PORTS_ACTIVATOR,
+                "VPNHIDE_CONFIG_FILE" to CANONICAL_CONFIG_FILE,
+                "VPNHIDE_SUPERKEY_FILE" to SUPERKEY_FILE,
+                "VPNHIDE_KMOD_LOAD_STATUS" to KMOD_LOAD_STATUS_FILE,
+                "VPNHIDE_KMOD_LOAD_DMESG" to KMOD_LOAD_DMESG_FILE,
+                "VPNHIDE_BUILTIN_LOAD_STATUS" to BUILTIN_LOAD_STATUS_FILE,
+                "VPNHIDE_ZYGISK_STATUS" to ZYGISK_STATUS_FILE,
+                "VPNHIDE_KPM_LOAD_STATUS" to KPM_LOAD_STATUS_FILE,
+                "VPNHIDE_PORTS_LOAD_STATUS" to PORTS_LOAD_STATUS_FILE,
+                "VPNHIDE_PROC_CTL" to PROC_CTL,
+                "VPNHIDE_LSPOSED_STATE" to LSPOSED_STATE_FILE,
+                "VPNHIDE_LEGACY_SECTIONS" to
+                    LEGACY_CONFIG_SECTIONS.entries.joinToString(" ") { (section, path) -> "$section=$path" },
+            ),
+        ) + ShellScripts.load("package_inventory.sh") + "\n" + ShellScripts.load("root_snapshot.sh")
+}
 
 private fun appHelperDigest(path: String?): String? =
     path

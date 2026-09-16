@@ -41,12 +41,47 @@ internal fun appHelperStagedPath(digest: String): String {
 }
 
 /** Stage once by inode and verify the digest; an existing inode is never replaced. */
-internal fun buildAppHelperStageCommand(asset: AppHelperAsset): String {
-    val target = appHelperStagedPath(asset.digest)
-    val temporary = "$target.tmp-${UUID.randomUUID()}"
-    return "umask 077; if [ ! -f ${shellQuote(target)} ]; then " +
-        "cp ${shellQuote(asset.local.absolutePath)} ${shellQuote(temporary)} && chmod 700 ${shellQuote(temporary)} && " +
-        "{ ln ${shellQuote(temporary)} ${shellQuote(target)} 2>/dev/null || true; }; " +
-        "rm -f ${shellQuote(temporary)}; fi; " +
-        "[ \"\$(sha256sum ${shellQuote(target)} | cut -d ' ' -f 1)\" = '${asset.digest}' ]"
+internal fun buildAppHelperStageCommand(asset: AppHelperAsset): String = buildAppHelperStageCommand(asset.local.absolutePath, asset.digest)
+
+internal fun buildAppHelperStageCommand(
+    source: String,
+    digest: String,
+): String {
+    val target = appHelperStagedPath(digest)
+    return buildContentAddressedExecutableStageCommand(
+        source = source,
+        target = target,
+        digest = digest,
+        temporary = "$target.tmp-${UUID.randomUUID()}",
+    )
+}
+
+/**
+ * Shared staging algorithm for every helper destination. The destination path
+ * may differ for SELinux reasons, while publication and digest verification do not.
+ */
+internal fun buildContentAddressedExecutableStageCommand(
+    source: String,
+    target: String,
+    digest: String,
+    temporary: String,
+    directory: String? = null,
+): String {
+    require(digest.matches(Regex("[0-9a-f]{64}")))
+    val prepareDirectory =
+        directory
+            ?.let {
+                "mkdir -p ${shellQuote(it)} && chmod 700 ${shellQuote(it)} && "
+            }.orEmpty()
+    val quotedTemporary = shellQuote(temporary)
+    val quotedTarget = shellQuote(target)
+    return "umask 077; $prepareDirectory" +
+        "rm -f $quotedTemporary && (" +
+        "if [ ! -f $quotedTarget ]; then " +
+        "cp ${shellQuote(source)} $quotedTemporary && chmod 700 $quotedTemporary && " +
+        "{ ln $quotedTemporary $quotedTarget 2>/dev/null || [ -f $quotedTarget ]; }; " +
+        "VPNHIDE_STAGE_RC=\$?; rm -f $quotedTemporary; " +
+        "[ \"\$VPNHIDE_STAGE_RC\" -eq 0 ] || exit \"\$VPNHIDE_STAGE_RC\"; fi; " +
+        "[ -f $quotedTarget ] && " +
+        "[ \"\$(sha256sum $quotedTarget | cut -d ' ' -f 1)\" = '$digest' ])"
 }

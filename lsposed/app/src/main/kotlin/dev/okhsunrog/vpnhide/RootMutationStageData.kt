@@ -8,13 +8,11 @@ internal fun buildRootMutationStageCommand(
     nonce: String,
 ): String {
     require(digest.matches(Regex("[0-9a-f]{64}")) && validRootIdentity(nonce))
-    val root = shellQuote(directory)
-    val target = shellQuote("$directory/vhhelper-$digest")
-    val temporary = shellQuote("$directory/stage-$nonce")
-    return "umask 077; mkdir -p $root && chmod 700 $root && " +
-        "{ if [ ! -f $target ]; then " +
-        "cp ${shellQuote(local)} $temporary && chmod 700 $temporary && " +
-        "{ ln $temporary $target 2>/dev/null || [ -f $target ]; }; " +
-        "fi; } && rm -f $temporary && " +
-        "[ \"\$(sha256sum $target | cut -d ' ' -f 1)\" = '$digest' ]"
+    return buildContentAddressedExecutableStageCommand(
+        source = local,
+        target = "$directory/vhhelper-$digest",
+        digest = digest,
+        temporary = "$directory/stage-$nonce",
+        directory = directory,
+    )
 }

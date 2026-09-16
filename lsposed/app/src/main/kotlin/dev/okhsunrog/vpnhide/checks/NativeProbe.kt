@@ -167,7 +167,7 @@ object NativeProbe {
         val routed =
             when (routedElement) {
                 JsonNull -> null
-                is JsonPrimitive -> routedElement.booleanOrNull
+                is JsonPrimitive -> routedElement.takeUnless(JsonPrimitive::isString)?.booleanOrNull
                 else -> null
             }
         if (routedElement !is JsonNull && routed == null) {

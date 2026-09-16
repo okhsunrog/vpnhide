@@ -67,6 +67,8 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'crates/**'
+              # Shared producer/consumer vectors: run both Rust and Android tests.
+              - 'fixtures/app-helper/**'
               - 'kmod/shared/**'
               - 'kmod/test/**'
               - 'kmod/generated/**'

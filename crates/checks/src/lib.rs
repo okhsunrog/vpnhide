@@ -1170,6 +1170,54 @@ pub fn self_routed_for_interfaces_json(uid: u32, interfaces: Option<&[String]>) 
     observation::routing(&sr)
 }
 
+#[cfg(test)]
+mod observation_fixture_tests {
+    use super::*;
+    use serde_json::Value;
+
+    fn fixture(raw: &str) -> Value {
+        serde_json::from_str(raw).unwrap()
+    }
+
+    fn produced(raw: String) -> Value {
+        serde_json::from_str(&raw).unwrap()
+    }
+
+    #[test]
+    fn real_checks_payload_matches_shared_fixtures() {
+        assert_eq!(
+            produced(observation::checks(&Vec::<CheckJson>::new())),
+            fixture(include_str!(
+                "../../../fixtures/app-helper/checks-empty.json"
+            ))
+        );
+        assert_eq!(
+            produced(observation::checks(&[CheckJson {
+                id: "ioctl_flags",
+                status: CheckStatus::Pass,
+                detail: "no VPN".to_owned(),
+            }])),
+            fixture(include_str!(
+                "../../../fixtures/app-helper/checks-pass.json"
+            ))
+        );
+    }
+
+    #[test]
+    fn real_routing_payload_matches_shared_fixture() {
+        assert_eq!(
+            produced(observation::routing(&SelfRouted {
+                uid: 10042,
+                routed: None,
+                detail: "netlink unavailable".to_owned(),
+            })),
+            fixture(include_str!(
+                "../../../fixtures/app-helper/routing-null.json"
+            ))
+        );
+    }
+}
+
 struct GateRule {
     family: u8,
     table: u32,

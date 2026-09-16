@@ -366,9 +366,10 @@ the app when Vector is active.
 `/data/user/0/dev.okhsunrog.vpnhide/files/vhhelper-<sha256>`
 
 - Format: immutable executable Rust helper extracted from the APK asset.
-- Writer/reader: the app creates it once per content digest; root diagnostics copy it to
-  `/data/local/tmp/vpnhide-vhhelper-<sha256>` for root-differential checks and reuse
-  that same digest-named inode for APatch KPM listing.
+- Writer/reader: the app creates it once per content digest; root diagnostics use the
+  shared immutable staging builder to copy it to
+  `/data/local/tmp/vpnhide-vhhelper-<sha256>` for root-differential checks and KPM
+  enumeration through either KPatch-Next or APatch/FolkPatch.
 - Lifetime: app-private and retained across launches. Staged copies are immutable
   and may remain after an app update so a supervisor can finish using its inode.
 

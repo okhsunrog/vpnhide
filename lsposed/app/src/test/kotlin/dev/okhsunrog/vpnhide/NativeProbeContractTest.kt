@@ -12,6 +12,15 @@ import org.junit.Test
 
 class NativeProbeContractTest {
     @Test
+    fun `known checks fixture preserves the Rust payload fields`() {
+        val response = NativeProbe.parseChecks(fixture("checks-pass.json")) as ChecksResponse.Success
+        val check = response.checks.getValue("ioctl_flags")
+
+        assertEquals(CheckStatus.PASS, check.status)
+        assertEquals("no VPN", check.detail)
+    }
+
+    @Test
     fun `empty checks fixture is a successful empty observation`() {
         val response = NativeProbe.parseChecks(fixture("checks-empty.json"))
 
@@ -34,13 +43,22 @@ class NativeProbeContractTest {
     }
 
     @Test
+    fun `routing string boolean is rejected`() {
+        val response = NativeProbe.parseRouting(fixture("routing-string-boolean.json")) as RoutingResponse.Failure
+
+        assertEquals(ObservationError.Malformed, response.error)
+    }
+
+    @Test
     fun `kpm empty and unavailable stay distinct`() {
         val empty = NativeProbe.parseKpmList(fixture("kpm-empty.json")) as KpmListResponse.Success
         val unavailable = NativeProbe.parseKpmList(fixture("kpm-unavailable.json")) as KpmListResponse.Failure
+        val malformed = NativeProbe.parseKpmList(fixture("kpm-malformed.json")) as KpmListResponse.Failure
 
         assertTrue(empty.observation.available)
         assertTrue(empty.observation.modules.isEmpty())
         assertEquals(ObservationError.Unavailable, unavailable.error)
+        assertEquals(ObservationError.Malformed, malformed.error)
     }
 
     @Test

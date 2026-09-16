@@ -65,8 +65,11 @@ replaced an earlier gobley/UniFFI binding — the whole native surface is now on
 JSON-returning function built with plain cargo-ndk.)
 
 The same Rust executable also has a read-only `observe kpm-list` mode used by
-the dashboard's installation-integrity check. Together with `kpatch kpm list`
-on KPatch-Next, it detects a runtime-loaded `vpnhide` KPM when the
+the dashboard's installation-integrity check. The helper owns both runtime
+paths: it invokes `kpatch kpm list` when the KPatch-Next CLI is present and
+otherwise tries the APatch/FolkPatch list supercall. The root snapshot shell
+only stages and invokes the helper; it does not parse module names or construct
+the observation JSON. This detects a runtime-loaded `vpnhide` KPM when the
 `/data/adb/modules/vpnhide_kpm` flashable module is absent. That combination
 indicates that the user loaded or embedded the inner `vpnhide.kpm` file without
 installing the complete `vpnhide-kpm.zip`; the app explains that the raw file
@@ -90,10 +93,17 @@ typed `data` value:
 
 An unavailable root/runtime observation is an error object such as
 `{"version":1,"kind":"kpm_list","status":"error","error":"unavailable"}`.
+KernelPatch and KPatch-Next produce an empty buffer or module names separated by
+newlines. The helper also reads `kpm num` through the same runtime and requires
+the parsed name count to match. A successful command with any other output, a
+truncated/full buffer, a count mismatch, invalid UTF-8, an unsafe/numeric name,
+a blank record, or a duplicate name is
+`{"version":1,"kind":"kpm_list","status":"error","error":"malformed"}`;
+it is never interpreted as an empty list.
 The app treats malformed/truncated JSON, an unsupported version, a wrong kind
 and unknown status/error codes as unusable observations; none can become a
 clean check or a false routing result. A valid empty KPM list (`available: true,
-modules: []`) remains distinct from unavailable. KPM credentials and tool
+modules: []`) remains distinct from unavailable and malformed output. KPM credentials and tool
 diagnostics never enter this stdout envelope.
 
 ## 3. Per-check outcome (`CheckOutcome`)
