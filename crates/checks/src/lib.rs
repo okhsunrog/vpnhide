@@ -1,4 +1,5 @@
 mod generated;
+pub mod observation;
 
 use std::ffi::CStr;
 use std::fs;
@@ -12,7 +13,7 @@ use crate::generated::iface_lists::matches_vpn;
 
 // ── Probe outcome types — serialized to JSON on both transports ───────
 // In-process (app view) via the JNI export below; root ground-truth via the
-// `vhprobe` bin. Same code, same JSON schema on both sides.
+// `vhhelper probe checks`. Same code, same JSON schema on both sides.
 
 #[derive(serde::Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -907,7 +908,7 @@ fn check_netlink_getrule() -> CheckOutput {
     check_netlink_getrule_uid(unsafe { libc::getuid() })
 }
 
-/// RTM_GETRULE for a specific uid. The `vhprobe --uid` self-routing gate reuses
+/// RTM_GETRULE for a specific uid. The `vhhelper probe routing` self-routing gate reuses
 /// this to answer "is <uid> routed through the VPN?" — a matching policy rule
 /// (or a VPN-named iif/oif) means yes.
 fn check_netlink_getrule_uid(myuid: u32) -> CheckOutput {
@@ -1093,7 +1094,7 @@ fn check_proc_net_dev() -> CheckOutput {
 // ── Registry + JSON transport ─────────────────────────────────────────────
 // One code path, two transports: the JNI export runs this in the app's own
 // process (app view — real uid + SELinux domain + zygisk/kernel hooks); the
-// `vhprobe` bin runs it as root (ground truth — uid 0 is not a hook target).
+// `vhhelper probe checks` runs it as root (ground truth — uid 0 is not a hook target).
 // Both emit the same JSON; the app classifies by comparing per-`id`.
 
 #[derive(serde::Serialize)]
@@ -1130,11 +1131,11 @@ fn run_all() -> Vec<CheckJson> {
     ]
 }
 
-/// Run every native probe in display order and serialize to a JSON array of
-/// `{id, status, detail}`. Public so both the JNI export and the `vhprobe` bin
-/// call the exact same code.
+/// Run every native probe in display order and serialize the versioned checks
+/// envelope containing `{id, status, detail}` rows. Public so both the JNI
+/// export and the `vhhelper` bin call the exact same code.
 pub fn run_all_json() -> String {
-    serde_json::to_string(&run_all()).unwrap_or_else(|_| "[]".to_string())
+    observation::checks(&run_all())
 }
 
 #[derive(serde::Serialize)]
@@ -1166,7 +1167,55 @@ pub fn self_routed_for_interfaces_json(uid: u32, interfaces: Option<&[String]>) 
         routed,
         detail,
     };
-    serde_json::to_string(&sr).unwrap_or_else(|_| "{}".to_string())
+    observation::routing(&sr)
+}
+
+#[cfg(test)]
+mod observation_fixture_tests {
+    use super::*;
+    use serde_json::Value;
+
+    fn fixture(raw: &str) -> Value {
+        serde_json::from_str(raw).unwrap()
+    }
+
+    fn produced(raw: String) -> Value {
+        serde_json::from_str(&raw).unwrap()
+    }
+
+    #[test]
+    fn real_checks_payload_matches_shared_fixtures() {
+        assert_eq!(
+            produced(observation::checks(&Vec::<CheckJson>::new())),
+            fixture(include_str!(
+                "../../../fixtures/app-helper/checks-empty.json"
+            ))
+        );
+        assert_eq!(
+            produced(observation::checks(&[CheckJson {
+                id: "ioctl_flags",
+                status: CheckStatus::Pass,
+                detail: "no VPN".to_owned(),
+            }])),
+            fixture(include_str!(
+                "../../../fixtures/app-helper/checks-pass.json"
+            ))
+        );
+    }
+
+    #[test]
+    fn real_routing_payload_matches_shared_fixture() {
+        assert_eq!(
+            produced(observation::routing(&SelfRouted {
+                uid: 10042,
+                routed: None,
+                detail: "netlink unavailable".to_owned(),
+            })),
+            fixture(include_str!(
+                "../../../fixtures/app-helper/routing-null.json"
+            ))
+        );
+    }
 }
 
 struct GateRule {
@@ -1332,80 +1381,4 @@ mod routing_gate_tests {
         assert!(classify_uid_vpn_rules(&rules, 10402).0);
         assert!(!classify_uid_vpn_rules(&rules, 10403).0);
     }
-}
-
-/// Log tag for anything this crate reports. Listed in the app's `LogTags` so the
-/// debug bundle's logcat filter picks it up.
-#[cfg(target_os = "android")]
-const LOG_TAG: &str = "VpnHide-Native";
-
-#[cfg(target_os = "android")]
-unsafe extern "C" {
-    fn __android_log_write(
-        prio: libc::c_int,
-        tag: *const libc::c_char,
-        text: *const libc::c_char,
-    ) -> libc::c_int;
-}
-
-/// Send one line to logcat. Best effort: a message with an interior NUL is
-/// dropped rather than truncated at a surprising place.
-#[cfg(target_os = "android")]
-fn log_error(message: &str) {
-    use std::ffi::CString;
-
-    const ANDROID_LOG_ERROR: libc::c_int = 6;
-    let (Ok(tag), Ok(text)) = (CString::new(LOG_TAG), CString::new(message)) else {
-        return;
-    };
-    // SAFETY: both pointers are NUL-terminated and outlive the call.
-    unsafe {
-        __android_log_write(ANDROID_LOG_ERROR, tag.as_ptr(), text.as_ptr());
-    }
-}
-
-/// Route panics to logcat.
-///
-/// The default hook writes to stderr, which for an Android app process goes
-/// nowhere — so a panic in here used to be invisible: the process just died (or,
-/// since the switch to unwinding, surfaced as a Java exception with no location).
-/// The hook runs under either panic strategy and carries what actually matters
-/// for a bug report: the message and the `file:line` that raised it. Backtraces
-/// are deliberately not attempted; this crate is built with fat LTO and stripped,
-/// so they would be unsymbolised addresses.
-#[cfg(target_os = "android")]
-fn install_panic_hook() {
-    use std::sync::Once;
-
-    static HOOK: Once = Once::new();
-    HOOK.call_once(|| {
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            log_error(&format!("panic in native probe: {info}"));
-            previous(info);
-        }));
-    });
-}
-
-/// In-process (app-view) entry. Class/package must match the Kotlin
-/// `object dev.okhsunrog.vpnhide.checks.NativeProbe`.
-///
-/// A panic here must not take the app down with it: the probes parse whatever
-/// the kernel hands back on an arbitrary vendor build, and this runs on every
-/// cold start. `with_env` catches the unwind (which is why the crate builds with
-/// `panic = "unwind"`) and `ThrowRuntimeExAndDefault` turns it into a Java
-/// exception the caller can report as a failed check run.
-#[cfg(target_os = "android")]
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_okhsunrog_vpnhide_checks_NativeProbe_runAllChecksJson<'local>(
-    mut env: jni::EnvUnowned<'local>,
-    _class: jni::objects::JClass<'local>,
-) -> jni::objects::JString<'local> {
-    install_panic_hook();
-    env.with_env(
-        |env| -> jni::errors::Result<jni::objects::JString<'local>> {
-            env.new_string(run_all_json())
-        },
-    )
-    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }

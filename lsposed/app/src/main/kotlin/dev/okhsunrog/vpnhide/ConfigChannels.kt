@@ -11,7 +11,7 @@ import dev.okhsunrog.vpnhide.picker.applyAutoHiddenPackages
  */
 internal object ConfigChannels {
     /** The current mutation helper delegates selection to the shared native activation layer. */
-    fun nativeActivatorCommand(): String = "\"${'$'}{VPNHIDE_MUTATION_HELPER:?mutation helper not supplied}\" activate-native"
+    fun nativeActivatorCommand(): String = "\"${'$'}{VPNHIDE_MUTATION_HELPER:?mutation helper not supplied}\" activate native"
 
     /** Shell part running the optional ports activator when its module is enabled. */
     fun portsActivatorCommand(): String =

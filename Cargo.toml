@@ -1,13 +1,15 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/app-helper",
     "crates/apatch-abi",
     "crates/activator",
+    "crates/checks",
+    "crates/checks-jni",
     "crates/protocol",
     "crates/protocol-diff",
     "zygisk",
 ]
-exclude = ["lsposed/native"]
 
 [workspace.package]
 edition = "2024"
@@ -24,3 +26,11 @@ panic = "abort"
 [profile.dev]
 opt-level = 1
 panic = "abort"
+
+# Android app native artifacts must unwind across the thin JNI adapter so it
+# can translate a failed probe into a Java exception instead of aborting the
+# app process. Every APK entry point selects this profile explicitly.
+[profile.app-native]
+inherits = "release"
+opt-level = "z"
+panic = "unwind"

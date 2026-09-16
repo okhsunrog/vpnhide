@@ -3,7 +3,7 @@
 data/interfaces.toml.
 
 Generates one match function per target (kmod C, zygisk Rust,
-lsposed/native Rust, lsposed Kotlin) so all four platforms agree on
+crates/checks Rust, lsposed Kotlin) so all four platforms agree on
 which interface names are VPN tunnels, plus per-language test files
 seeded from the same [[test]] vectors so CI catches drift instantly.
 
@@ -36,7 +36,7 @@ TOML_PATH = REPO_ROOT / "data" / "interfaces.toml"
 OUT_KMOD = REPO_ROOT / "kmod" / "generated" / "iface_lists.h"
 OUT_KMOD_TEST = REPO_ROOT / "kmod" / "test_iface_lists.c"
 OUT_ZYGISK = REPO_ROOT / "zygisk" / "src" / "generated" / "iface_lists.rs"
-OUT_LSP_NATIVE = REPO_ROOT / "lsposed" / "native" / "src" / "generated" / "iface_lists.rs"
+OUT_LSP_NATIVE = REPO_ROOT / "crates" / "checks" / "src" / "generated" / "iface_lists.rs"
 OUT_LSP_KT = lsposed_generated_kt("IfaceLists.kt")
 OUT_LSP_KT_TEST = lsposed_generated_kt("IfaceListsGeneratedTest.kt", test=True)
 
@@ -352,7 +352,7 @@ def emit_kmod_test(tests: list[TestVector]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Rust emitter (zygisk + lsposed/native — same body)
+# Rust emitter (zygisk + crates/checks — same body)
 # ---------------------------------------------------------------------------
 
 

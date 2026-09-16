@@ -5,7 +5,7 @@
 # Inputs (assigned by the Kotlin caller, see ShellScripts.kt): VPNHIDE_SECTION_*,
 # VPNHIDE_TIMING, the module/file paths, VPNHIDE_LEGACY_SECTIONS
 # ("name=path name=path"), VPNHIDE_WITH_PM (1 = include the package inventory)
-# and VPNHIDE_KPM_PROBE_SOURCE.
+# and VPNHIDE_KPM_PROBE_PATH.
 #
 # vpnhide_package_inventory() comes from package_inventory.sh, which the caller
 # concatenates ahead of this file.
@@ -17,7 +17,7 @@
 # Read inside a single-quoted emit_eval body below, which shellcheck
 # cannot follow.
 # shellcheck disable=SC2034
-KPM_RUNTIME_PROBE_SOURCE="$VPNHIDE_KPM_PROBE_SOURCE"
+KPM_RUNTIME_PROBE="$VPNHIDE_KPM_PROBE_PATH"
 emit_cmd() {
   NAME="$1"
   shift
@@ -155,24 +155,8 @@ phase_runtime_status_files() {
   emit_eval kmod_state '[ -e $VPNHIDE_PROC_CTL ] && cat $VPNHIDE_PROC_CTL || true'
   emit_eval kpm_state 'if [ -x $VPNHIDE_KPM_ACTIVATOR ] && [ ! -f $VPNHIDE_KPM_DIR/disable ]; then $VPNHIDE_KPM_ACTIVATOR state; fi'
   emit_eval kpm_runtime_modules '
-    KPATCH=""
-    for CANDIDATE in kpatch /data/adb/modules/KPatch-Next/bin/kpatch /data/adb/modules/kpatch-next/bin/kpatch; do
-      if command -v "$CANDIDATE" >/dev/null 2>&1; then KPATCH="$CANDIDATE"; break; fi
-      if [ -x "$CANDIDATE" ]; then KPATCH="$CANDIDATE"; break; fi
-    done
-    if [ -n "$KPATCH" ]; then
-      KPM_LIST="$("$KPATCH" kpm list 2>/dev/null)"
-      if [ $? -eq 0 ]; then printf "available=1\\n%s\\n" "$KPM_LIST"; else echo available=0; fi
-    elif [ -d /data/adb/ap ] && [ -f "$KPM_RUNTIME_PROBE_SOURCE" ]; then
-      KPM_PROBE=/data/local/tmp/vpnhide_kpm_probe.$$
-      if cp "$KPM_RUNTIME_PROBE_SOURCE" "$KPM_PROBE" && chmod 700 "$KPM_PROBE"; then
-        "$KPM_PROBE" --apatch-kpm-list 2>/dev/null || echo available=0
-      else
-        echo available=0
-      fi
-      rm -f "$KPM_PROBE"
-    else
-      echo available=0
+    if [ -x "$KPM_RUNTIME_PROBE" ]; then
+      "$KPM_RUNTIME_PROBE" observe kpm-list 2>/dev/null
     fi'
   emit_file lsposed_state "$VPNHIDE_LSPOSED_STATE"
   emit_cmd getenforce getenforce

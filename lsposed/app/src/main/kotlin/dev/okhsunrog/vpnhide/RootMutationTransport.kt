@@ -75,7 +75,9 @@ internal class RootMutationTransport(
     ): RootMutationReply {
         require(script.size <= 2 * 1024 * 1024 + 64)
         // -c contains paths and receipt IDs only; scripts/secrets travel on stdin and never through suExec logging.
-        val command = (listOf(executable, directory, canonicalPath) + arguments).joinToString(" ", transform = ::shellQuote)
+        val command =
+            (listOf(executable, "mutation", directory, canonicalPath) + arguments)
+                .joinToString(" ", transform = ::shellQuote)
         return when (val result = runner.run(listOf("su", "-c", command), script)) {
             is RootProcessResult.Completed -> parseRootMutationReply(result.output)
             RootProcessResult.Uncertain -> RootMutationReply.Unavailable

@@ -19,7 +19,7 @@ class RootMutationStageDataTest {
             val command = buildRootMutationStageCommand(source.path, destination.path, hash, UUID.randomUUID().toString())
             val runner = RootProcessRunner()
             assertEquals(RootProcessResult.Completed(""), runner.run(listOf("sh", "-c", command)))
-            val target = destination.resolve("vhmutate-$hash")
+            val target = destination.resolve("vhhelper-$hash")
             val original = Files.getAttribute(target.toPath(), "unix:ino")
             assertEquals(RootProcessResult.Completed(""), runner.run(listOf("sh", "-c", command)))
             assertEquals(original, Files.getAttribute(target.toPath(), "unix:ino"))

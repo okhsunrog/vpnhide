@@ -6,7 +6,7 @@ How to build vpnhide from source.
 
 - **JDK 17 or later** — what the CI image installs (`openjdk-17-jdk-headless`); local builds with JDK 21 also work. The `lsposed/app` Gradle build sets `sourceCompatibility = 17` and `jvmTarget = "17"`.
 - **Android SDK** — install `platforms;android-35`, `build-tools;35.0.0`, `platform-tools` (via Android Studio or `cmdline-tools`). Export `ANDROID_HOME`.
-- **Android NDK r28 or later** — export `ANDROID_NDK_HOME` (or drop it in `$ANDROID_HOME/ndk/<version>/`, the scripts auto-detect). The `lsposed/app` `buildRustProbe` task reads `ANDROID_NDK_HOME` (falling back to `ANDROID_NDK_ROOT`, then the SDK-managed `ndk/<version>`) and passes it to cargo-ndk. r27c builds compile, but the resulting cdylibs trigger an Android 16 KiB-page-size compatibility warning at app start on Pixel 8 Pro / future hardware (`сегмент LOAD не выровнен`); r28+ aligns LOAD segments on 16 KiB by default. (`zygisk/build.rs` and `lsposed/native/build.rs` also pass `-Wl,-z,max-page-size=16384` explicitly so older NDKs stay compatible — defence in depth.)
+- **Android NDK r28 or later** — export `ANDROID_NDK_HOME` (or drop it in `$ANDROID_HOME/ndk/<version>/`, the scripts auto-detect). The `lsposed/app` `buildAppNative` task reads `ANDROID_NDK_HOME` (falling back to `ANDROID_NDK_ROOT`, then the SDK-managed `ndk/<version>`) and passes it to cargo-ndk. r27c builds compile, but the resulting cdylibs trigger an Android 16 KiB-page-size compatibility warning at app start on Pixel 8 Pro / future hardware (`сегмент LOAD не выровнен`); r28+ aligns LOAD segments on 16 KiB by default. (`crates/checks-jni/build.rs` and `zygisk/build.rs` also pass `-Wl,-z,max-page-size=16384` explicitly so older NDKs stay compatible — defence in depth.)
 - **Rust** (latest stable) with the Android target:
   ```sh
   rustup target add aarch64-linux-android
@@ -25,7 +25,7 @@ How to build vpnhide from source.
 - **`zip`** — packaging module zips.
 - **`adb`** — installing builds on a device.
 
-The Rust crate at `lsposed/native/` is built via cargo-ndk by the `buildRustProbe` Gradle `Exec` task in `lsposed/app/build.gradle.kts` (wired into `preBuild`), which bundles the resulting `libvpnhide_checks.so` into the APK's `jniLibs/` plus the root-exec'able `vhprobe` and `vhmutate` bins as assets. The latter is the [mutation transport foundation](root-mutation-transport.md), not yet connected to app writes. There is no codegen and no extra Gradle plugin; no manual `cargo` invocation is needed for the APK build.
+The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNative` Gradle `Exec` task in `lsposed/app/build.gradle.kts` (wired into `preBuild`). It bundles `libvpnhide_checks.so` into the APK's `jniLibs/` plus the root-exec'able `vhhelper` bin as an asset. The helper's `probe` and `mutation` subcommands preserve the diagnostic and [mutation transport](root-mutation-transport.md) boundaries. The task tracks every app-native path dependency, manifest, lockfile and build script, so changing a shared crate invalidates the APK native build. There is no extra Gradle plugin; no manual `cargo` invocation is needed for the APK build.
 
 ## Repository layout
 
@@ -165,7 +165,7 @@ which areas a pull request exercises, and every area job is gated on it:
 
 `lint-python` (ruff, generated files), `lint-shell-c` (shellcheck, clang-format,
 the host-side C tests) and `setup` always run. `rust` (rustfmt, clippy, cargo
-tests for the workspace and `lsposed/native`) runs for the shared inputs, `zygisk`
+tests for the workspace and app-native crates) runs for the shared inputs, `zygisk`
 and `lsposed`; `android` (ktlint, detekt, CPD, Android lint, unit tests and the APK
 in one Gradle run) for `lsposed`; `qemu-native-probes` when any kernel-side area
 does. Pushes to `main`, tags and manual dispatches run everything. The `ci-ok` job
@@ -198,9 +198,9 @@ uvx ruff check
 
 # Rust
 cd zygisk && cargo fmt --check && cargo ndk -t arm64-v8a clippy -- -D warnings
-cd ../lsposed/native && cargo fmt --check && cargo ndk -t arm64-v8a clippy -- -D warnings
+cd .. && cargo fmt --check && cargo ndk -t arm64-v8a clippy -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_app_helper --tests -- -D warnings
 cd ../zygisk && cargo test
-cd ../lsposed/native && cargo test
+cargo test -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_app_helper
 
 # C (kernel module)
 scripts/clang-format-c.sh --check

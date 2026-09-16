@@ -47,15 +47,16 @@ tasks.register<Exec>("ktlintCheck") {
     commandLine("ktlint", "$projectDir/src/**/*.kt")
 }
 
-// The native check probes ship two ways from one Rust crate (../native):
+// The native check probes ship two ways from the shared `crates/checks` crate:
 //   - libvpnhide_checks.so — a cdylib loaded in-process (System.loadLibrary)
 //     for the app-view probe (real uid + SELinux domain + zygisk/kernel hooks);
-//   - vhprobe — a root-exec'able bin for the ground-truth probe. Shipped as an
-//     asset, not a jniLib: AGP 9 defaults to extractNativeLibs=false, so a
-//     jniLib isn't a real on-disk file and can't be exec'd.
+//   - vhhelper — one root-exec'able bin for checks, observations and the
+//     mutation supervisor. Shipped as an asset, not a jniLib: AGP 9 defaults
+//     to extractNativeLibs=false, so a jniLib isn't a real on-disk file and
+//     can't be exec'd.
 // Built with cargo-ndk (the same toolchain the zygisk module already uses).
-// The crate also ships vhmutate as an asset: a separate root mutation supervisor,
-// never loaded into the app's JNI process. See docs/root-mutation-transport.md.
+// The helper is never loaded into the app's JNI process. See
+// docs/root-mutation-transport.md.
 // This replaces the gobley/UniFFI plugin (and its AGP-9 fork): the whole native
 // surface is now one JSON-returning function, so codegen bindings aren't worth
 // the dependency. -P 29 matches minSdk (getifaddrs needs API >= 24).
@@ -83,7 +84,10 @@ val rustNdkDir =
         ?.takeIf { it.isDirectory }
         ?.absolutePath
         ?: rustSdkDir.resolve("ndk/$rustNdkVersion").absolutePath
-val nativeCrateDir = projectDir.parentFile.resolve("native")
+val repoDir = projectDir.parentFile.parentFile
+val appNativeCrates =
+    listOf("checks", "checks-jni", "app-helper", "activator", "apatch-abi", "protocol")
+        .map { repoDir.resolve("crates/$it") }
 val rustAssetsOut = rustAssetsDir.get().asFile
 
 // Opt-in x86_64 native + APK ABI for running the app on an Android x86_64
@@ -93,15 +97,18 @@ val rustAssetsOut = rustAssetsDir.get().asFile
 // `debug` build type honours it. See docs/avd-magisk-testing.md.
 val emulatorX86 = (project.findProperty("vpnhideEmulatorX86") as String?)?.toBoolean() == true
 
-val buildRustProbe =
-    tasks.register<Exec>("buildRustProbe") {
+val buildAppNative =
+    tasks.register<Exec>("buildAppNative") {
         group = "build"
-        description = "Builds vpnhide_checks, vhprobe and the mutation supervisor via cargo-ndk."
-        workingDir = nativeCrateDir
+        description = "Builds the checks JNI library and unified vhhelper via cargo-ndk."
+        workingDir = repoDir
         environment("ANDROID_NDK_HOME", rustNdkDir)
         environment("NDK_HOME", rustNdkDir)
-        inputs.dir(nativeCrateDir.resolve("src")).withPathSensitivity(PathSensitivity.RELATIVE)
-        inputs.file(nativeCrateDir.resolve("Cargo.toml"))
+        // These crate roots contain only source/manifests/build scripts; target
+        // output lives at the workspace root and is deliberately not an input.
+        inputs.files(appNativeCrates).withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.file(repoDir.resolve("Cargo.toml"))
+        inputs.file(repoDir.resolve("Cargo.lock"))
         outputs.dir(rustJniLibsDir)
         outputs.dir(rustAssetsDir)
         commandLine(
@@ -127,47 +134,37 @@ val buildRustProbe =
                 // --locked: fail if Cargo.lock drifted rather than rewriting it
                 // (a dirtied tree stamps the build "-dirty" via git describe).
                 add("build")
-                add("--release")
+                add("--profile")
+                add("app-native")
+                add("--package")
+                add("vpnhide_checks_jni")
+                add("--package")
+                add("vpnhide_app_helper")
                 add("--locked")
             },
         )
         // Locals (not top-level script vals) so the doLast action captures only
         // File/Boolean values — required for configuration-cache serialization.
-        val probeBinArm = nativeCrateDir.resolve("target/aarch64-linux-android/release/vhprobe")
-        val probeDestArm = rustAssetsOut.resolve("bin/arm64-v8a/vhprobe")
-        val probeBinArmv7 = nativeCrateDir.resolve("target/armv7-linux-androideabi/release/vhprobe")
-        val probeDestArmv7 = rustAssetsOut.resolve("bin/armeabi-v7a/vhprobe")
-        val probeBinX86 = nativeCrateDir.resolve("target/x86_64-linux-android/release/vhprobe")
-        val probeDestX86 = rustAssetsOut.resolve("bin/x86_64/vhprobe")
-        val mutationBins =
-            listOf(
-                nativeCrateDir.resolve("target/aarch64-linux-android/release/vhmutate") to
-                    rustAssetsOut.resolve("bin/arm64-v8a/vhmutate"),
-                nativeCrateDir.resolve("target/armv7-linux-androideabi/release/vhmutate") to
-                    rustAssetsOut.resolve("bin/armeabi-v7a/vhmutate"),
-            ) +
-                if (emulatorX86) {
-                    listOf(
-                        nativeCrateDir.resolve("target/x86_64-linux-android/release/vhmutate") to
-                            rustAssetsOut.resolve("bin/x86_64/vhmutate"),
-                    )
-                } else {
-                    emptyList()
-                }
+        val helperBinArm = repoDir.resolve("target/aarch64-linux-android/app-native/vhhelper")
+        val helperDestArm = rustAssetsOut.resolve("bin/arm64-v8a/vhhelper")
+        val helperBinArmv7 = repoDir.resolve("target/armv7-linux-androideabi/app-native/vhhelper")
+        val helperDestArmv7 = rustAssetsOut.resolve("bin/armeabi-v7a/vhhelper")
+        val helperBinX86 = repoDir.resolve("target/x86_64-linux-android/app-native/vhhelper")
+        val helperDestX86 = rustAssetsOut.resolve("bin/x86_64/vhhelper")
         val copyX86 = emulatorX86
+        val obsoleteAssets = rustAssetsOut.resolve("bin")
+        doFirst {
+            // Remove obsolete split-helper assets left by pre-helper builds;
+            // this generated APK directory is disposable, unlike root staging.
+            obsoleteAssets.deleteRecursively()
+        }
         doLast {
-            mutationBins.forEach { (source, destination) ->
-                destination.parentFile.mkdirs()
-                source.copyTo(destination, overwrite = true)
-            }
-            probeDestArm.parentFile.mkdirs()
-            probeBinArm.copyTo(probeDestArm, overwrite = true)
-            probeDestArmv7.parentFile.mkdirs()
-            probeBinArmv7.copyTo(probeDestArmv7, overwrite = true)
-            if (copyX86) {
-                probeDestX86.parentFile.mkdirs()
-                probeBinX86.copyTo(probeDestX86, overwrite = true)
-            }
+            listOf(helperBinArm to helperDestArm, helperBinArmv7 to helperDestArmv7)
+                .plus(if (copyX86) listOf(helperBinX86 to helperDestX86) else emptyList())
+                .forEach { (source, destination) ->
+                    destination.parentFile.mkdirs()
+                    source.copyTo(destination, overwrite = true)
+                }
         }
     }
 
@@ -188,7 +185,7 @@ val syncHelpAssets =
         into(helpAssetsDir.map { it.dir("help") })
     }
 
-tasks.named("preBuild").configure { dependsOn(buildRustProbe, syncHelpAssets) }
+tasks.named("preBuild").configure { dependsOn(buildAppNative, syncHelpAssets) }
 
 android {
     namespace = "dev.okhsunrog.vpnhide"
@@ -302,11 +299,14 @@ android {
         resources.excludes += "META-INF/*.kotlin_module"
     }
 
-    // Pick up the cargo-ndk outputs (buildRustProbe): cdylib as a jniLib, the
-    // ground-truth probe bin as an asset. buildRustProbe runs via preBuild, so
+    // Pick up the cargo-ndk outputs (buildAppNative): cdylib as a jniLib, the
+    // ground-truth probe bin as an asset. buildAppNative runs via preBuild, so
     // these dirs are populated before the merge/package tasks read them.
     sourceSets["main"].jniLibs.srcDir(rustJniLibsDir.get().asFile)
     sourceSets["main"].assets.srcDir(rustAssetsDir.get().asFile)
+    // Shared helper response fixtures are consumed by the JVM parser tests and
+    // the Rust checks crate, so a contract change cannot update only one side.
+    sourceSets["test"].resources.srcDir(repoDir.resolve("fixtures/app-helper"))
     // Offline guide assets synced from docs/help by syncHelpAssets (preBuild).
     sourceSets["main"].assets.srcDir(helpAssetsDir.get().asFile)
 

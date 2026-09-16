@@ -1,72 +1,270 @@
 package dev.okhsunrog.vpnhide.checks
 
 import android.util.Log
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
-/**
- * Native detection-probe outcome, shared by both transports.
- *
- * Replaces the UniFFI-generated types: the whole native surface is now one
- * JSON-returning function ([NativeProbe.runAllChecksJson]), so the Rust crate
- * builds with plain cargo-ndk (no gobley plugin / AGP-9 fork). The same JSON is
- * produced in-process (app view) and by the root-exec'd `vhprobe` bin (ground
- * truth), so this parser serves both.
- */
-enum class CheckStatus { PASS, FAIL, SELINUX_BLOCKED, NETWORK_BLOCKED }
+private const val OBSERVATION_VERSION = 1
+
+/** Native result status. Unknown future statuses stay visible as UNKNOWN. */
+enum class CheckStatus { PASS, FAIL, SELINUX_BLOCKED, NETWORK_BLOCKED, UNKNOWN }
 
 data class CheckOutput(
     val status: CheckStatus,
     val detail: String,
 )
 
+/** Errors in the app/helper observation envelope. */
+sealed interface ObservationError {
+    data object Malformed : ObservationError
+
+    data class UnsupportedVersion(
+        val version: Long,
+    ) : ObservationError
+
+    data class WrongKind(
+        val kind: String,
+    ) : ObservationError
+
+    data class UnknownStatus(
+        val status: String,
+    ) : ObservationError
+
+    data object Unavailable : ObservationError
+
+    data class UnknownError(
+        val error: String,
+    ) : ObservationError
+}
+
+sealed interface ChecksResponse {
+    data class Success(
+        val checks: Map<String, CheckOutput>,
+    ) : ChecksResponse
+
+    data class Failure(
+        val error: ObservationError,
+    ) : ChecksResponse
+}
+
+data class RoutingObservation(
+    val uid: Long,
+    val routed: Boolean?,
+    val detail: String,
+)
+
+sealed interface RoutingResponse {
+    data class Success(
+        val observation: RoutingObservation,
+    ) : RoutingResponse
+
+    data class Failure(
+        val error: ObservationError,
+    ) : RoutingResponse
+}
+
+data class KpmListObservation(
+    val available: Boolean,
+    val modules: Set<String>,
+)
+
+sealed interface KpmListResponse {
+    data class Success(
+        val observation: KpmListObservation,
+    ) : KpmListResponse
+
+    data class Failure(
+        val error: ObservationError,
+    ) : KpmListResponse
+}
+
 /** JNI entry to the in-process (app-view) probe run. */
 object NativeProbe {
-    init {
-        System.loadLibrary("vpnhide_checks")
-    }
+    private const val CHECKS_KIND = "checks"
+    private const val ROUTING_KIND = "routing"
+    private const val KPM_LIST_KIND = "kpm_list"
+    private val probeJson = Json { ignoreUnknownKeys = true }
 
-    /** Runs every native probe in this process and returns a JSON array of
-     * `{id, status, detail}`. Backed by the Rust `run_all_json`. */
+    // Keep parsing usable in JVM unit tests that do not have an Android JNI
+    // library. The library is loaded only for the actual in-process run.
+    private val nativeLibrary = lazy { System.loadLibrary("vpnhide_checks") }
+
+    /** Runs every native probe in this process and returns the versioned envelope. */
     external fun runAllChecksJson(): String
 
     /** In-process (app-view) run: probes execute as this app (real uid +
-     * SELinux domain + zygisk/kernel hooks), keyed by stable check id.
-     *
-     * A probe parses whatever the kernel returns on an arbitrary vendor build,
-     * so the native side catches its own panics and rethrows them here as a
-     * Java exception (see the JNI entry in lsposed/native). Swallowing it costs
-     * one check run — the alternative is the whole app going down on a device
-     * whose kernel returns something we did not anticipate. The panic message
-     * and its file:line are in logcat under `VpnHide-Native`.
-     */
+     * SELinux domain + zygisk/kernel hooks), keyed by stable check id. */
     fun runAll(): Map<String, CheckOutput> =
-        runCatching { parse(runAllChecksJson()) }
-            .onFailure { Log.e("VpnHide-Native", "native probe run failed", it) }
-            .getOrDefault(emptyMap())
-
-    /** Parse a probe JSON blob (from either transport) into id -> outcome. */
-    fun parse(json: String): Map<String, CheckOutput> =
         runCatching {
-            probeJson.decodeFromString<List<CheckJson>>(json).associate { c ->
-                c.id to CheckOutput(statusOf(c.status), c.detail)
-            }
-        }.getOrDefault(emptyMap())
+            nativeLibrary.value
+            runAllChecksJson()
+        }.onFailure { Log.e("VpnHide-Native", "native probe run failed", it) }
+            .getOrElse { return emptyMap() }
+            .let { json ->
+                when (val response = parseChecks(json)) {
+                    is ChecksResponse.Success -> {
+                        response.checks
+                    }
 
-    private val probeJson = Json { ignoreUnknownKeys = true }
+                    is ChecksResponse.Failure -> {
+                        Log.e("VpnHide-Native", "native observation rejected: ${response.error}")
+                        emptyMap()
+                    }
+                }
+            }
+
+    /** Parse a checks response from either JNI or root helper transport. */
+    fun parseChecks(json: String): ChecksResponse =
+        when (val envelope = parseEnvelope(json, CHECKS_KIND)) {
+            is Envelope.Success -> parseChecksData(envelope.data)
+            is Envelope.Failure -> ChecksResponse.Failure(envelope.error)
+        }
+
+    /** Parse the self-routing response from the root helper transport. */
+    fun parseRouting(json: String): RoutingResponse =
+        when (val envelope = parseEnvelope(json, ROUTING_KIND)) {
+            is Envelope.Success -> parseRoutingData(envelope.data)
+            is Envelope.Failure -> RoutingResponse.Failure(envelope.error)
+        }
+
+    /** Parse the structured runtime KPM listing used by the root snapshot. */
+    fun parseKpmList(json: String): KpmListResponse =
+        when (val envelope = parseEnvelope(json, KPM_LIST_KIND)) {
+            is Envelope.Success -> parseKpmListData(envelope.data)
+            is Envelope.Failure -> KpmListResponse.Failure(envelope.error)
+        }
+
+    /** Compatibility projection for callers that only need check values. */
+    fun parse(json: String): Map<String, CheckOutput> = (parseChecks(json) as? ChecksResponse.Success)?.checks.orEmpty()
+
+    private fun parseChecksData(data: JsonElement): ChecksResponse {
+        val array = data as? JsonArray ?: return ChecksResponse.Failure(ObservationError.Malformed)
+        val checks = linkedMapOf<String, CheckOutput>()
+        for (element in array) {
+            val item = element as? JsonObject ?: return ChecksResponse.Failure(ObservationError.Malformed)
+            val id = item.stringField("id") ?: return ChecksResponse.Failure(ObservationError.Malformed)
+            if (id.isEmpty()) return ChecksResponse.Failure(ObservationError.Malformed)
+            val status = item.stringField("status") ?: return ChecksResponse.Failure(ObservationError.Malformed)
+            val detail = item.stringField("detail") ?: return ChecksResponse.Failure(ObservationError.Malformed)
+            if (checks.put(id, CheckOutput(statusOf(status), detail)) != null) {
+                return ChecksResponse.Failure(ObservationError.Malformed)
+            }
+        }
+        return ChecksResponse.Success(checks)
+    }
+
+    private fun parseRoutingData(data: JsonElement): RoutingResponse {
+        val item = data as? JsonObject ?: return RoutingResponse.Failure(ObservationError.Malformed)
+        val uid = item.longField("uid") ?: return RoutingResponse.Failure(ObservationError.Malformed)
+        if (uid < 0) return RoutingResponse.Failure(ObservationError.Malformed)
+        if (!item.containsKey("routed")) return RoutingResponse.Failure(ObservationError.Malformed)
+        val routedElement = item["routed"]
+        val routed =
+            when (routedElement) {
+                JsonNull -> null
+                is JsonPrimitive -> routedElement.takeUnless(JsonPrimitive::isString)?.booleanOrNull
+                else -> null
+            }
+        if (routedElement !is JsonNull && routed == null) {
+            return RoutingResponse.Failure(ObservationError.Malformed)
+        }
+        val detail = item.stringField("detail") ?: return RoutingResponse.Failure(ObservationError.Malformed)
+        return RoutingResponse.Success(RoutingObservation(uid, routed, detail))
+    }
+
+    private fun parseKpmListData(data: JsonElement): KpmListResponse {
+        val item = data as? JsonObject ?: return KpmListResponse.Failure(ObservationError.Malformed)
+        val available =
+            (item["available"] as? JsonPrimitive)?.let { primitive ->
+                if (primitive.isString) null else primitive.booleanOrNull
+            } ?: return KpmListResponse.Failure(ObservationError.Malformed)
+        val modules = item["modules"] as? JsonArray ?: return KpmListResponse.Failure(ObservationError.Malformed)
+        if (!available) return KpmListResponse.Failure(ObservationError.Malformed)
+        val names = linkedSetOf<String>()
+        for (module in modules) {
+            val name =
+                (module as? JsonPrimitive)?.takeIf { it.isString }?.content
+                    ?: return KpmListResponse.Failure(ObservationError.Malformed)
+            if (name.isEmpty()) return KpmListResponse.Failure(ObservationError.Malformed)
+            names += name
+        }
+        return KpmListResponse.Success(KpmListObservation(available = true, modules = names))
+    }
 
     private fun statusOf(raw: String): CheckStatus =
         when (raw) {
             "pass" -> CheckStatus.PASS
             "fail" -> CheckStatus.FAIL
             "selinux_blocked" -> CheckStatus.SELINUX_BLOCKED
-            else -> CheckStatus.NETWORK_BLOCKED
+            "network_blocked" -> CheckStatus.NETWORK_BLOCKED
+            else -> CheckStatus.UNKNOWN
         }
 
-    @Serializable
-    private data class CheckJson(
-        val id: String,
-        val status: String,
-        val detail: String,
-    )
+    private sealed interface Envelope {
+        data class Success(
+            val data: JsonElement,
+        ) : Envelope
+
+        data class Failure(
+            val error: ObservationError,
+        ) : Envelope
+    }
+
+    private fun parseEnvelope(
+        json: String,
+        expectedKind: String,
+    ): Envelope {
+        val objectValue =
+            runCatching { probeJson.parseToJsonElement(json) as? JsonObject }
+                .getOrNull()
+                ?: return Envelope.Failure(ObservationError.Malformed)
+        val version = objectValue.longField("version") ?: return Envelope.Failure(ObservationError.Malformed)
+        if (version != OBSERVATION_VERSION.toLong()) {
+            return Envelope.Failure(ObservationError.UnsupportedVersion(version))
+        }
+        val kind = objectValue.stringField("kind") ?: return Envelope.Failure(ObservationError.Malformed)
+        if (kind != expectedKind) return Envelope.Failure(ObservationError.WrongKind(kind))
+        return when (val status = objectValue.stringField("status")) {
+            "ok" -> {
+                objectValue["data"]?.let(Envelope::Success)
+                    ?: Envelope.Failure(ObservationError.Malformed)
+            }
+
+            "error" -> {
+                parseError(objectValue)
+            }
+
+            null -> {
+                Envelope.Failure(ObservationError.Malformed)
+            }
+
+            else -> {
+                Envelope.Failure(ObservationError.UnknownStatus(status))
+            }
+        }
+    }
+
+    private fun parseError(objectValue: JsonObject): Envelope =
+        when (val code = objectValue.stringField("error")) {
+            null -> Envelope.Failure(ObservationError.Malformed)
+            "unavailable" -> Envelope.Failure(ObservationError.Unavailable)
+            "malformed" -> Envelope.Failure(ObservationError.Malformed)
+            else -> Envelope.Failure(ObservationError.UnknownError(code))
+        }
+
+    private fun JsonObject.stringField(name: String): String? =
+        (this[name] as? JsonPrimitive)
+            ?.takeIf(JsonPrimitive::isString)
+            ?.content
+
+    private fun JsonObject.longField(name: String): Long? =
+        (this[name] as? JsonPrimitive)
+            ?.takeUnless(JsonPrimitive::isString)
+            ?.content
+            ?.toLongOrNull()
 }

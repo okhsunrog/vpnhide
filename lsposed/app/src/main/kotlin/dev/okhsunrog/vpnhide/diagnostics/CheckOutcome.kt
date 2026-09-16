@@ -51,6 +51,7 @@ enum class NotMeasuredReason(
 ) {
     NoNetworkPermission("not_measured_no_network"),
     NoGroundTruth("not_measured_no_ground_truth"),
+    UnknownNativeStatus("not_measured_unknown_native_status"),
 }
 
 /**
@@ -71,6 +72,12 @@ fun classifyNativeOutcome(
 
         CheckStatus.NETWORK_BLOCKED -> {
             CheckOutcome.NotMeasured(NotMeasuredReason.NoNetworkPermission)
+        }
+
+        // A future wire status is a usable enum value for parsing, but it is
+        // not evidence of either a leak or successful hiding.
+        CheckStatus.UNKNOWN -> {
+            CheckOutcome.NotMeasured(NotMeasuredReason.UnknownNativeStatus)
         }
 
         // App saw no VPN (PASS or SELINUX_BLOCKED): who hid it? Ask the ground truth.

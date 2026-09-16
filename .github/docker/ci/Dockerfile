@@ -64,7 +64,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
 # ── Android NDK (for zygisk) ─────────────────────────────────────────
 ENV ANDROID_NDK_VERSION=r28c
 ENV ANDROID_NDK_HOME=/opt/android-ndk
-# cargo-ndk (invoked by the buildRustProbe Gradle task) reads ANDROID_NDK_HOME;
+# cargo-ndk (invoked by the buildAppNative Gradle task) reads ANDROID_NDK_HOME;
 # set ANDROID_NDK_ROOT too for any tool that looks it up instead.
 ENV ANDROID_NDK_ROOT=/opt/android-ndk
 

@@ -35,7 +35,7 @@ Stable references for anyone changing the code. Read the relevant one before a P
 | [releasing.md](releasing.md) | `scripts/release.py` usage and the version-bump flow |
 | [config-coordinator.md](config-coordinator.md) | How app configuration writes are owned: the process-owned coordinator, typed edits, drafts, phase outcomes and recovery |
 | [observation-coordinator.md](observation-coordinator.md) | How root/app observations are read, invalidated, joined and quarantined; Dashboard/diagnostics refresh rules |
-| [root-mutation-transport.md](root-mutation-transport.md) | The `vhmutate` helper: receipts, sessions, late-launch fencing and the isolated device fixture |
+| [root-mutation-transport.md](root-mutation-transport.md) | The `vhhelper mutation` supervisor: receipts, sessions, late-launch fencing and the isolated device fixture |
 
 Module-specific developer docs live next to their code:
 [kmod/BUILDING.md](../kmod/BUILDING.md), [kmod/kpm/README.md](../kmod/kpm/README.md),

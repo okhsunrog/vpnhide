@@ -57,15 +57,19 @@ Priority: an empty ground truth is checked **before** EACCES — if root sees no
 the SELinux block is moot, it is simply nothing-to-leak.
 
 **Ground truth is the same Rust probe binary run as root**, not shell `ip`/`cat`.
-`GroundTruthProbe` extracts `vhprobe` from the APK, stages it to `/data/local/tmp`,
+`GroundTruthProbe` extracts `vhhelper` from the APK, stages its immutable
+content-addressed copy to `/data/local/tmp`,
 and execs it via `su`; it emits the same JSON as the in-process JNI path
 (`run_all_json`), so the two views are directly comparable per check id. (This
 replaced an earlier gobley/UniFFI binding — the whole native surface is now one
 JSON-returning function built with plain cargo-ndk.)
 
-The same Rust executable also has a read-only `--apatch-kpm-list` mode used by
-the dashboard's installation-integrity check. Together with `kpatch kpm list`
-on KPatch-Next, it detects a runtime-loaded `vpnhide` KPM when the
+The same Rust executable also has a read-only `observe kpm-list` mode used by
+the dashboard's installation-integrity check. The helper owns both runtime
+paths: it invokes `kpatch kpm list` when the KPatch-Next CLI is present and
+otherwise tries the APatch/FolkPatch list supercall. The root snapshot shell
+only stages and invokes the helper; it does not parse module names or construct
+the observation JSON. This detects a runtime-loaded `vpnhide` KPM when the
 `/data/adb/modules/vpnhide_kpm` flashable module is absent. That combination
 indicates that the user loaded or embedded the inner `vpnhide.kpm` file without
 installing the complete `vpnhide-kpm.zip`; the app explains that the raw file
@@ -74,11 +78,44 @@ remove the raw KPM, install the ZIP through the root manager's Modules screen,
 and reboot. APatch authentication uses the saved root-only SuperKey or its
 trusted `su` token; the probe never prints either credential.
 
+### Helper observation envelope
+
+`vhhelper` and the JNI library share a small app/helper response contract. Every
+observation is one JSON object with `version: 1`, a `kind` (`checks`, `routing`
+or `kpm_list`) and a `status` (`ok` or `error`). Successful responses carry a
+typed `data` value:
+
+```json
+{"version":1,"kind":"checks","status":"ok","data":[{"id":"...","status":"pass","detail":"..."}]}
+{"version":1,"kind":"routing","status":"ok","data":{"uid":10042,"routed":null,"detail":"netlink unavailable"}}
+{"version":1,"kind":"kpm_list","status":"ok","data":{"available":true,"modules":[]}}
+```
+
+An unavailable root/runtime observation is an error object such as
+`{"version":1,"kind":"kpm_list","status":"error","error":"unavailable"}`.
+KernelPatch and KPatch-Next produce an empty buffer or module names separated by
+newlines. The helper also reads `kpm num` through the same runtime and requires
+the parsed name count to match. A successful command with any other output, a
+truncated/full buffer, a count mismatch, invalid UTF-8, an unsafe/numeric name,
+a blank record, or a duplicate name is
+`{"version":1,"kind":"kpm_list","status":"error","error":"malformed"}`;
+it is never interpreted as an empty list.
+For the direct APatch supercall path, a successful zero module count returns an
+empty observation without calling the list operation: older KernelPatch versions
+leave the kernel list buffer uninitialized when there are no modules. This is an
+observation at count time, not an atomic count/list snapshot.
+The app treats malformed/truncated JSON, an unsupported version, a wrong kind
+and unknown status/error codes as unusable observations; none can become a
+clean check or a false routing result. A valid empty KPM list (`available: true,
+modules: []`) remains distinct from unavailable and malformed output. KPM credentials and tool
+diagnostics never enter this stdout envelope.
+
 ## 3. Per-check outcome (`CheckOutcome`)
 
 `Leak` · `HiddenByBackend` · `HiddenBySelinux` · `NothingToLeak` ·
 `NotMeasured(reason)`. Wire/log tokens: `leak`, `hidden_backend`, `hidden_selinux`,
-`nothing_to_leak`, `not_measured_no_network`, `not_measured_no_ground_truth`.
+`nothing_to_leak`, `not_measured_no_network`, `not_measured_no_ground_truth`,
+`not_measured_unknown_native_status`.
 
 The Rust probe reports `Pass` / `Fail` / `SelinuxBlocked` (EACCES/EPERM, no longer
 folded into `Pass`) / `NetworkBlocked` (ECONNREFUSED from `socket()` — no network
@@ -129,7 +166,7 @@ Unmanaged tunnels (for example root WireGuard) additionally require an up/unknow
 interface with a non-local route. A failed network/route probe is a diagnostic
 failure, not a claim that VPN is off or the app is excluded.
 
-For the resulting candidate interfaces, `vhprobe --uid <selfUid> --vpn-ifaces
+For the resulting candidate interfaces, `vhhelper probe routing --uid <selfUid> --vpn-ifaces
 <comma-separated-ifaces>` (root, hook-inert) checks whether this uid is routed through
 the VPN. Two passes over the policy rules (both address families): learn the VPN egress
 table id(s) from rules that egress via a VPN interface (`oif tun*`), then check whether

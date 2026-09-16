@@ -49,23 +49,26 @@ configuration writes and activation. Its preparation API owns:
 - `lane/lock`: permanent `0600` lock inode; never replace/unlink while an
   invocation can exist.
 - `lane/state.json`: latest version-1 execution-lifetime receipt, `0600`; written
-  by `vhmutate`, read under its lock, retained across app death and reboot.
+  by `vhhelper mutation`, read under its lock, retained across app death and reboot.
   `lane/state.next` is its atomic replacement staging file. No commands, config,
   secrets or output are stored here; this is not an operation replay queue.
-- `vhmutate-<sha256>`: versioned root executable, `0700`. The app stages it through
+- `vhhelper-<sha256>`: versioned root executable, `0700`. The app stages it through
   `stage-<uuid>`, links it into place without replacing an existing executable,
   and verifies its digest. Interrupted staging can leave a temporary binary.
 
 Full reset preserves this entire directory: unlinking its lock while the reset
 operation holds it would allow a second independent lock inode. Config, superkey
 and backend service state outside this metadata directory are still removed.
-- App-private `files/vhmutate-<sha256>` and `files/vhmutate-<uuid>.tmp`: extracted
+- App-private `files/vhhelper-<sha256>` and `files/vhhelper-<uuid>.tmp`: extracted
   APK assets, removed with app data. They contain binary code only.
 
 Old executable versions and receipts currently have no automatic cleanup; safe
 cleanup/adoption belongs to coordinator integration. A same-boot unfinished
 receipt cannot be reset merely because its PID vanished or the app restarted.
 The helper inherits the root manager's SELinux domain; no new policy is installed.
+During the helper rename, any already-staged `vhmutate-<sha256>` inode remains
+untouched so an older supervisor can finish. New sessions use the same lane and
+stage `vhhelper-<sha256>` alongside those older files.
 
 ### Pre-1.0 Config Files (import inputs)
 
@@ -360,14 +363,15 @@ the app when Vector is active.
 - Reader: app root snapshot/dashboard/startup cleanup.
 - Lifetime: per app launch, stale records removed when boot_id changes.
 
-`/data/user/0/dev.okhsunrog.vpnhide/files/vhprobe`
+`/data/user/0/dev.okhsunrog.vpnhide/files/vhhelper-<sha256>`
 
-- Format: executable Rust diagnostic probe extracted from the APK asset.
-- Writer/reader: the app overwrites it on launch; root diagnostics copy it to
-  `/data/local/tmp/vpnhide_vhprobe` for root-differential checks or to the
-  per-process `/data/local/tmp/vpnhide_kpm_probe.<pid>` for APatch KPM listing.
-- Lifetime: app-private and replaced on launch. Every `/data/local/tmp` copy is
-  deleted immediately after execution.
+- Format: immutable executable Rust helper extracted from the APK asset.
+- Writer/reader: the app creates it once per content digest; root diagnostics use the
+  shared immutable staging builder to copy it to
+  `/data/local/tmp/vpnhide-vhhelper-<sha256>` for root-differential checks and KPM
+  enumeration through either KPatch-Next or APatch/FolkPatch.
+- Lifetime: app-private and retained across launches. Staged copies are immutable
+  and may remain after an app update so a supervisor can finish using its inode.
 
 ### `cacheDir`
 
@@ -449,7 +453,7 @@ zygote app fork:
 |---|---|
 | In-kernel per boot | `/proc/vpnhide_ctl` state, KPM in-kernel state, iptables chains |
 | Per boot / last apply files | `/data/adb/vpnhide_kmod/load_status`, `/data/adb/vpnhide_kmod/load_dmesg`, `/data/adb/vpnhide_kpm/load_status`, `/data/adb/vpnhide_ports/load_status`, `/data/adb/vpnhide_ports/load_log`, `/data/system/vpnhide_lsposed_state` |
-| Per app launch | `filesDir/vpnhide_zygisk_active`, `filesDir/vhprobe` |
+| Per app launch | `filesDir/vpnhide_zygisk_active`, content-addressed `filesDir/vhhelper-<sha256>` |
 | Persistent root-managed | `/data/system/vpnhide_config.json`, `/data/adb/vpnhide/superkey` |
 | Module-dir derived state | `/data/adb/modules/vpnhide_zygisk/targets.txt` |
 | Removed on module uninstall | `/data/adb/vpnhide_kmod/`, `/data/adb/vpnhide_kpm/`, `/data/adb/vpnhide_ports/` when empty after deleting module-specific files |

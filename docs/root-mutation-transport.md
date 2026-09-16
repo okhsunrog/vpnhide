@@ -6,14 +6,21 @@ secret/cleanup commands and native/ports activation use this transport.
 The native supervisor implementation and its wire protocol are unchanged by
 the runtime connection stage.
 
+Observation commands use the separate versioned app/helper envelope documented
+in [diagnostics](diagnostics.md#helper-observation-envelope). Mutation receipts
+continue to use the existing transport schema; observation payloads never carry
+sessions, receipts or canonical configuration.
+
 ## Why a separate executable
 
 Destroying the Java `Process` for `su` does not establish that a privileged child
 stopped. A delayed root authorization can also launch a command after the caller
 already timed out. Both cases need evidence beyond the app's job/PID lifetime.
 
-`vhmutate` is a short-lived supervisor, built in `lsposed/native/` from the existing
-Rust dependencies. It holds a nonblocking exclusive `flock` and enables Linux
+The `vhhelper mutation` command is a short-lived supervisor, built as the
+`vpnhide_app_helper` binary in
+`crates/app-helper/` from the existing Rust dependencies. It holds a nonblocking
+exclusive `flock` and enables Linux
 [`PR_SET_CHILD_SUBREAPER`](https://man7.org/linux/man-pages/man2/PR_SET_CHILD_SUBREAPER.2const.html).
 Orphaned descendants return to this supervisor; it uses
 [`waitpid`](https://man7.org/linux/man-pages/man2/wait.2.html) until its shell has an
@@ -59,7 +66,7 @@ boundary are coordinator/migration work.
 
 ## Protocol and late-launch fencing
 
-Invocation: `vhmutate STATE_DIRECTORY CANONICAL_PATH VERB ...`. Paths are explicit
+Invocation: `vhhelper mutation STATE_DIRECTORY CANONICAL_PATH VERB ...`. Paths are explicit
 to support isolated host/device tests. Android execution requires UID 0. All
 commands return one JSON reply (`version`, `status`, `boot`, `state`,
 `config_status`, `config`). `busy` and `unavailable` never establish completion.
@@ -142,7 +149,7 @@ Device reproduction (isolated scratch files, no APK install or live activators):
 
 ```sh
 uv run scripts/test-root-transport.py --serial SERIAL \
-  --binary lsposed/app/build/rustNative/assets/bin/arm64-v8a/vhmutate
+  --binary lsposed/app/build/rustNative/assets/bin/arm64-v8a/vhhelper
 ```
 
 Verified on 2026-09-15 on Pixel 8 Pro, through `adb shell su` in the KernelSU
@@ -156,7 +163,7 @@ was performed.
 ## Native companion selection
 
 The supervisor exports its own executable path as `VPNHIDE_MUTATION_HELPER` to
-the command shell. The native phase invokes that helper with `activate-native`.
+the command shell. The native phase invokes that helper with `activate native`.
 This entry point delegates live kernel identity parsing and companion selection
 to the shared activator/protocol crates, then executes the installed companion's
 activator, preserving its output and exit status. The selector and activator

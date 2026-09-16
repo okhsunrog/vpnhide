@@ -37,7 +37,7 @@ class CanonicalConfigRepositoryTest {
     @Test
     fun `native activation delegates to supervised helper without parsing wire`() {
         assertEquals(
-            "\"${'$'}{VPNHIDE_MUTATION_HELPER:?mutation helper not supplied}\" activate-native",
+            "\"${'$'}{VPNHIDE_MUTATION_HELPER:?mutation helper not supplied}\" activate native",
             ConfigChannels.nativeActivatorCommand(),
         )
     }
