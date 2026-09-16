@@ -126,6 +126,19 @@ internal object DiagnosticsCache {
         )
     }
 
+    /**
+     * The one classification the surfaces render: [presentation] folded into a
+     * [Situation], plus the single re-emission that ends a Background grace. It
+     * words the presentation and never triggers a read or a run (I16).
+     */
+    val situation: StateFlow<Situation> by lazy {
+        situationFlow(presentation, ObservationClock::now).stateIn(
+            ObservationRuntime.scope,
+            SharingStarted.Eagerly,
+            situation(presentation.value, ObservationClock.now()),
+        )
+    }
+
     private fun processIdentity(): String = "pid:${Process.myPid()};uid:${Process.myUid()}"
 
     /** Automatic suite request: idempotent, consumed by the first suite that actually probes. */

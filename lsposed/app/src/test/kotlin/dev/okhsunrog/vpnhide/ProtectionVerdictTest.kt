@@ -102,6 +102,7 @@ class ProtectionVerdictTest {
         eligibility = DiagnosticEligibility.Eligible,
         routing = RoutingKnowledge.Known(SelfRouting.Routed, 0),
         activeRunId = null,
+        activeRunAutomatic = null,
         activeStage = null,
         activeResults = null,
         lastAttempt = lastAttempt,

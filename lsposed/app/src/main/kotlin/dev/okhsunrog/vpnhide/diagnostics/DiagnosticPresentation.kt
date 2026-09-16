@@ -28,6 +28,8 @@ internal data class DiagnosticPresentation(
     val eligibility: DiagnosticEligibility,
     val routing: RoutingKnowledge,
     val activeRunId: Long?,
+    /** The intent of the run in flight: automatic (our own confirmation) or explicit (somebody asked); null when none runs. */
+    val activeRunAutomatic: Boolean?,
     val activeStage: DiagnosticStage?,
     val activeResults: CheckResults?,
     val lastAttempt: DiagnosticAttempt?,
@@ -75,6 +77,7 @@ internal fun diagnosticPresentation(
         eligibility = eligibility,
         routing = routing,
         activeRunId = core.active?.id,
+        activeRunAutomatic = core.active?.request?.automatic,
         activeStage = core.active?.stage,
         activeResults = view.activeResults,
         lastAttempt = core.lastAttempt,

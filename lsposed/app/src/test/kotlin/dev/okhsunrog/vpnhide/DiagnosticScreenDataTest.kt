@@ -170,6 +170,7 @@ class DiagnosticScreenDataTest {
             eligibility = DiagnosticEligibility.Eligible,
             routing = RoutingKnowledge.Known(SelfRouting.Routed, 0),
             activeRunId = null,
+            activeRunAutomatic = null,
             activeStage = null,
             activeResults = null,
             lastAttempt = measurement?.let { DiagnosticAttempt(it.runId, RunOutcome.Completed, measurement = it) },
