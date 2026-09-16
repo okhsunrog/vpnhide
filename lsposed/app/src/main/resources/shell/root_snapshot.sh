@@ -5,7 +5,7 @@
 # Inputs (assigned by the Kotlin caller, see ShellScripts.kt): VPNHIDE_SECTION_*,
 # VPNHIDE_TIMING, the module/file paths, VPNHIDE_LEGACY_SECTIONS
 # ("name=path name=path"), VPNHIDE_WITH_PM (1 = include the package inventory)
-# and VPNHIDE_KPM_PROBE_SOURCE.
+# and VPNHIDE_KPM_PROBE_SOURCE / VPNHIDE_KPM_PROBE_DIGEST.
 #
 # vpnhide_package_inventory() comes from package_inventory.sh, which the caller
 # concatenates ahead of this file.
@@ -18,6 +18,7 @@
 # cannot follow.
 # shellcheck disable=SC2034
 KPM_RUNTIME_PROBE_SOURCE="$VPNHIDE_KPM_PROBE_SOURCE"
+KPM_RUNTIME_PROBE_DIGEST="$VPNHIDE_KPM_PROBE_DIGEST"
 emit_cmd() {
   NAME="$1"
   shift
@@ -40,6 +41,47 @@ emit_eval() {
   echo "${VPNHIDE_SECTION_BEGIN}$NAME"
   eval "$*" 2>/dev/null || true
   echo "${VPNHIDE_SECTION_END}$NAME"
+}
+# Keep KPatch-Next CLI output on the same typed observation boundary as the
+# APatch helper. Module names are restricted to the characters accepted by the
+# Rust parser; tool diagnostics, ids and key=value material are discarded.
+kpm_observation_from_cli() {
+  if [ "$1" != 0 ]; then
+    printf '%s\n' '{"version":1,"kind":"kpm_list","status":"error","error":"unavailable"}'
+    return
+  fi
+  KPM_MODULES_JSON=""
+  KPM_OLD_IFS="$IFS"
+  IFS='
+'
+  set -f
+  for KPM_LINE in $2; do
+    IFS="$KPM_OLD_IFS"
+    # Intentional field splitting: the KPatch compatibility row is parsed into
+    # a numeric id and a module name.
+    # shellcheck disable=SC2086
+    set -- $KPM_LINE
+    if [ "$#" -eq 1 ]; then
+      KPM_NAME="$1"
+    elif [ "$#" -ge 2 ]; then
+      case "$1" in
+        ''|*[!0-9]*) continue ;;
+      esac
+      KPM_NAME="$2"
+    else
+      continue
+    fi
+    IFS='
+'
+    case "$KPM_NAME" in
+      ''|*[!A-Za-z0-9_.-]*|active|disabled|enabled|id|inactive|loaded|module|modules|name|status) continue ;;
+    esac
+    if [ -n "$KPM_MODULES_JSON" ]; then KPM_MODULES_JSON="$KPM_MODULES_JSON,"; fi
+    KPM_MODULES_JSON="$KPM_MODULES_JSON\"$KPM_NAME\""
+  done
+  set +f
+  IFS="$KPM_OLD_IFS"
+  printf '%s\n' "{\"version\":1,\"kind\":\"kpm_list\",\"status\":\"ok\",\"data\":{\"available\":true,\"modules\":[${KPM_MODULES_JSON}]}}"
 }
 activator_state() {
   if [ -x "$1" ]; then
@@ -162,17 +204,25 @@ phase_runtime_status_files() {
     done
     if [ -n "$KPATCH" ]; then
       KPM_LIST="$("$KPATCH" kpm list 2>/dev/null)"
-      if [ $? -eq 0 ]; then printf "available=1\\n%s\\n" "$KPM_LIST"; else echo available=0; fi
-    elif [ -d /data/adb/ap ] && [ -f "$KPM_RUNTIME_PROBE_SOURCE" ]; then
-      KPM_PROBE=/data/local/tmp/vpnhide_kpm_probe.$$
-      if cp "$KPM_RUNTIME_PROBE_SOURCE" "$KPM_PROBE" && chmod 700 "$KPM_PROBE"; then
-        "$KPM_PROBE" observe kpm-list 2>/dev/null || echo available=0
-      else
-        echo available=0
+      KPM_RC=$?
+      kpm_observation_from_cli "$KPM_RC" "$KPM_LIST"
+    elif [ -d /data/adb/ap ] && [ -f "$KPM_RUNTIME_PROBE_SOURCE" ] &&
+      [ -n "$KPM_RUNTIME_PROBE_DIGEST" ]; then
+      KPM_PROBE=/data/local/tmp/vpnhide-vhhelper-$KPM_RUNTIME_PROBE_DIGEST
+      KPM_STAGE="$KPM_PROBE.tmp.$$"
+      if [ ! -f "$KPM_PROBE" ]; then
+        cp "$KPM_RUNTIME_PROBE_SOURCE" "$KPM_STAGE" && chmod 700 "$KPM_STAGE" &&
+          { ln "$KPM_STAGE" "$KPM_PROBE" 2>/dev/null || true; } && rm -f "$KPM_STAGE"
       fi
-      rm -f "$KPM_PROBE"
+      if [ -f "$KPM_PROBE" ] &&
+        [ "$(sha256sum "$KPM_PROBE" | cut -d ' ' -f 1)" = "$KPM_RUNTIME_PROBE_DIGEST" ]; then
+        "$KPM_PROBE" observe kpm-list 2>/dev/null || printf "%s\\n" "{\"version\":1,\"kind\":\"kpm_list\",\"status\":\"error\",\"error\":\"unavailable\"}"
+      else
+        rm -f "$KPM_STAGE"
+        printf "%s\\n" "{\"version\":1,\"kind\":\"kpm_list\",\"status\":\"error\",\"error\":\"unavailable\"}"
+      fi
     else
-      echo available=0
+      printf "%s\\n" "{\"version\":1,\"kind\":\"kpm_list\",\"status\":\"error\",\"error\":\"unavailable\"}"
     fi'
   emit_file lsposed_state "$VPNHIDE_LSPOSED_STATE"
   emit_cmd getenforce getenforce

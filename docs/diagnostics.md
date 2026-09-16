@@ -64,7 +64,7 @@ and execs it via `su`; it emits the same JSON as the in-process JNI path
 replaced an earlier gobley/UniFFI binding — the whole native surface is now one
 JSON-returning function built with plain cargo-ndk.)
 
-The same Rust executable also has a read-only `--apatch-kpm-list` mode used by
+The same Rust executable also has a read-only `observe kpm-list` mode used by
 the dashboard's installation-integrity check. Together with `kpatch kpm list`
 on KPatch-Next, it detects a runtime-loaded `vpnhide` KPM when the
 `/data/adb/modules/vpnhide_kpm` flashable module is absent. That combination
@@ -75,11 +75,33 @@ remove the raw KPM, install the ZIP through the root manager's Modules screen,
 and reboot. APatch authentication uses the saved root-only SuperKey or its
 trusted `su` token; the probe never prints either credential.
 
+### Helper observation envelope
+
+`vhhelper` and the JNI library share a small app/helper response contract. Every
+observation is one JSON object with `version: 1`, a `kind` (`checks`, `routing`
+or `kpm_list`) and a `status` (`ok` or `error`). Successful responses carry a
+typed `data` value:
+
+```json
+{"version":1,"kind":"checks","status":"ok","data":[{"id":"...","status":"pass","detail":"..."}]}
+{"version":1,"kind":"routing","status":"ok","data":{"uid":10042,"routed":null,"detail":"netlink unavailable"}}
+{"version":1,"kind":"kpm_list","status":"ok","data":{"available":true,"modules":[]}}
+```
+
+An unavailable root/runtime observation is an error object such as
+`{"version":1,"kind":"kpm_list","status":"error","error":"unavailable"}`.
+The app treats malformed/truncated JSON, an unsupported version, a wrong kind
+and unknown status/error codes as unusable observations; none can become a
+clean check or a false routing result. A valid empty KPM list (`available: true,
+modules: []`) remains distinct from unavailable. KPM credentials and tool
+diagnostics never enter this stdout envelope.
+
 ## 3. Per-check outcome (`CheckOutcome`)
 
 `Leak` · `HiddenByBackend` · `HiddenBySelinux` · `NothingToLeak` ·
 `NotMeasured(reason)`. Wire/log tokens: `leak`, `hidden_backend`, `hidden_selinux`,
-`nothing_to_leak`, `not_measured_no_network`, `not_measured_no_ground_truth`.
+`nothing_to_leak`, `not_measured_no_network`, `not_measured_no_ground_truth`,
+`not_measured_unknown_native_status`.
 
 The Rust probe reports `Pass` / `Fail` / `SelinuxBlocked` (EACCES/EPERM, no longer
 folded into `Pass`) / `NetworkBlocked` (ECONNREFUSED from `socket()` — no network

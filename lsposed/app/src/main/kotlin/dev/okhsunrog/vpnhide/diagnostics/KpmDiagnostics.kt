@@ -7,6 +7,8 @@ import dev.okhsunrog.vpnhide.ModuleBrokenReason
 import dev.okhsunrog.vpnhide.ModuleProblem
 import dev.okhsunrog.vpnhide.ModuleState
 import dev.okhsunrog.vpnhide.R
+import dev.okhsunrog.vpnhide.checks.KpmListResponse
+import dev.okhsunrog.vpnhide.checks.NativeProbe
 
 internal sealed interface KpmProblemKind {
     val reason: ModuleBrokenReason?
@@ -113,12 +115,9 @@ internal fun standaloneKpmLoaded(
     runtimeModulesSection: String,
 ): Boolean {
     if (kpm is ModuleState.Installed) return false
-    val lines =
-        runtimeModulesSection
-            .lineSequence()
-            .map(String::trim)
-            .filter(String::isNotEmpty)
-            .toList()
-    if (lines.firstOrNull() != "available=1") return false
-    return lines.drop(1).flatMap { it.split(Regex("\\s+")) }.any { it == "vpnhide" }
+    val observation =
+        (NativeProbe.parseKpmList(runtimeModulesSection) as? KpmListResponse.Success)
+            ?.observation
+            ?: return false
+    return observation.available && "vpnhide" in observation.modules
 }

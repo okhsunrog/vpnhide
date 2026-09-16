@@ -47,7 +47,7 @@ tasks.register<Exec>("ktlintCheck") {
     commandLine("ktlint", "$projectDir/src/**/*.kt")
 }
 
-// The native check probes ship two ways from one Rust crate (../native):
+// The native check probes ship two ways from the shared `crates/checks` crate:
 //   - libvpnhide_checks.so — a cdylib loaded in-process (System.loadLibrary)
 //     for the app-view probe (real uid + SELinux domain + zygisk/kernel hooks);
 //   - vhhelper — one root-exec'able bin for checks, observations and the
@@ -304,6 +304,9 @@ android {
     // these dirs are populated before the merge/package tasks read them.
     sourceSets["main"].jniLibs.srcDir(rustJniLibsDir.get().asFile)
     sourceSets["main"].assets.srcDir(rustAssetsDir.get().asFile)
+    // Shared helper response fixtures are consumed by the JVM parser tests and
+    // the Rust checks crate, so a contract change cannot update only one side.
+    sourceSets["test"].resources.srcDir(repoDir.resolve("fixtures/app-helper"))
     // Offline guide assets synced from docs/help by syncHelpAssets (preBuild).
     sourceSets["main"].assets.srcDir(helpAssetsDir.get().asFile)
 

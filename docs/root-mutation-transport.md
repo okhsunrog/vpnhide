@@ -6,6 +6,11 @@ secret/cleanup commands and native/ports activation use this transport.
 The native supervisor implementation and its wire protocol are unchanged by
 the runtime connection stage.
 
+Observation commands use the separate versioned app/helper envelope documented
+in [diagnostics](diagnostics.md#helper-observation-envelope). Mutation receipts
+continue to use the existing transport schema; observation payloads never carry
+sessions, receipts or canonical configuration.
+
 ## Why a separate executable
 
 Destroying the Java `Process` for `su` does not establish that a privileged child

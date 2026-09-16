@@ -37,11 +37,20 @@ object GroundTruthProbe {
                     " && $staged probe checks; result=\$?; exit \$result",
             )
         val json = out.trim()
-        if (exit != 0 || !json.startsWith("[")) {
+        if (exit != 0) {
             VpnHideLog.w(TAG, "ground-truth probe unavailable (exit=$exit, no root?)")
             return emptyMap()
         }
-        return NativeProbe.parse(json)
+        return when (val response = NativeProbe.parseChecks(json)) {
+            is dev.okhsunrog.vpnhide.checks.ChecksResponse.Success -> {
+                response.checks
+            }
+
+            is dev.okhsunrog.vpnhide.checks.ChecksResponse.Failure -> {
+                VpnHideLog.w(TAG, "ground-truth probe rejected: ${response.error}")
+                emptyMap()
+            }
+        }
     }
 
     /**
@@ -66,11 +75,21 @@ object GroundTruthProbe {
                     " && $staged probe routing --uid $uid --vpn-ifaces '$interfaces'; result=\$?; exit \$result",
             )
         val json = out.trim()
-        if (exit != 0 || !json.startsWith("{")) {
+        if (exit != 0) {
             VpnHideLog.w(TAG, "self-routed probe unavailable (exit=$exit, no root?)")
             return null
         }
-        val routed = runCatching { org.json.JSONObject(json).getBoolean("routed") }.getOrNull()
+        val routed =
+            when (val response = NativeProbe.parseRouting(json)) {
+                is dev.okhsunrog.vpnhide.checks.RoutingResponse.Success -> {
+                    response.observation.routed
+                }
+
+                is dev.okhsunrog.vpnhide.checks.RoutingResponse.Failure -> {
+                    VpnHideLog.w(TAG, "self-routed probe rejected: ${response.error}")
+                    return null
+                }
+            }
         if (routed != false) return routed
         val unmanaged = presence.interfaces - presence.frameworkInterfaces
         if (unmanaged.isEmpty()) return false

@@ -1,4 +1,5 @@
 mod generated;
+pub mod observation;
 
 use std::ffi::CStr;
 use std::fs;
@@ -1130,11 +1131,11 @@ fn run_all() -> Vec<CheckJson> {
     ]
 }
 
-/// Run every native probe in display order and serialize to a JSON array of
-/// `{id, status, detail}`. Public so both the JNI export and the `vhhelper` bin
-/// call the exact same code.
+/// Run every native probe in display order and serialize the versioned checks
+/// envelope containing `{id, status, detail}` rows. Public so both the JNI
+/// export and the `vhhelper` bin call the exact same code.
 pub fn run_all_json() -> String {
-    serde_json::to_string(&run_all()).unwrap_or_else(|_| "[]".to_string())
+    observation::checks(&run_all())
 }
 
 #[derive(serde::Serialize)]
@@ -1166,7 +1167,7 @@ pub fn self_routed_for_interfaces_json(uid: u32, interfaces: Option<&[String]>) 
         routed,
         detail,
     };
-    serde_json::to_string(&sr).unwrap_or_else(|_| "{}".to_string())
+    observation::routing(&sr)
 }
 
 struct GateRule {

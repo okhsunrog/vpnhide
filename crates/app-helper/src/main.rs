@@ -1,4 +1,6 @@
+mod activate;
 mod mutation;
+mod observations;
 mod probe;
 
 fn main() {
@@ -6,18 +8,25 @@ fn main() {
     std::panic::set_hook(Box::new(|_| {}));
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = match args.as_slice() {
-        [command, mode, rest @ ..] if command == "probe" && mode == "checks" => probe::run(rest),
-        [command, mode, rest @ ..] if command == "probe" && mode == "routing" => probe::run(rest),
+        [command, mode] if command == "probe" && mode == "checks" => probe::checks(&[]),
+        [command, mode, rest @ ..] if command == "probe" && mode == "routing" => {
+            probe::routing(rest)
+        }
         [command, mode] if command == "observe" && mode == "kpm-list" => {
-            probe::run(&["--apatch-kpm-list".to_owned()])
+            observations::kpm_list(&[])
         }
-        [command, rest @ ..] if command == "mutation" => mutation::run(rest),
-        [command, mode] if command == "activate" && mode == "native" => {
-            mutation::run(&["activate".to_owned(), "native".to_owned()])
+        [command, rest @ ..] if command == "mutation" && mutation::valid_command(rest) => {
+            mutation::run(rest)
         }
-        // A malformed command is passed through the mature transport parser,
-        // which returns its existing versioned error envelope.
-        _ => mutation::run(&args),
+        [command, mode] if command == "activate" && mode == "native" => activate::run(&[]),
+        _ => usage_error(),
     };
     std::process::exit(code);
+}
+
+fn usage_error() -> i32 {
+    eprintln!(
+        "usage: vhhelper probe checks | probe routing --uid <uid> [--vpn-ifaces <list>] | observe kpm-list | mutation <directory> <config> <inspect|adopt|open|run|recover> ... | activate native"
+    );
+    2
 }

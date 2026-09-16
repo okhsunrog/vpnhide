@@ -367,8 +367,8 @@ the app when Vector is active.
 
 - Format: immutable executable Rust helper extracted from the APK asset.
 - Writer/reader: the app creates it once per content digest; root diagnostics copy it to
-  `/data/local/tmp/vpnhide-vhhelper-<sha256>` for root-differential checks or to the
-  per-process `/data/local/tmp/vpnhide_kpm_probe.<pid>` for APatch KPM listing.
+  `/data/local/tmp/vpnhide-vhhelper-<sha256>` for root-differential checks and reuse
+  that same digest-named inode for APatch KPM listing.
 - Lifetime: app-private and retained across launches. Staged copies are immutable
   and may remain after an app update so a supervisor can finish using its inode.
 

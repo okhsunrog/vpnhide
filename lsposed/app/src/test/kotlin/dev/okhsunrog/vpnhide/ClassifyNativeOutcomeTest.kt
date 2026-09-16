@@ -40,6 +40,14 @@ class ClassifyNativeOutcomeTest {
         )
     }
 
+    @Test
+    fun `unknown native wire status is not interpreted as a leak or a pass`() {
+        assertEquals(
+            CheckOutcome.NotMeasured(NotMeasuredReason.UnknownNativeStatus),
+            classifyNativeOutcome(out(CheckStatus.UNKNOWN), out(CheckStatus.FAIL)),
+        )
+    }
+
     // ── Clean app view (PASS): who hid it? ────────────────────────────────
 
     @Test
@@ -117,6 +125,10 @@ class ClassifyNativeOutcomeTest {
         assertEquals(
             "not_measured_no_ground_truth",
             CheckOutcome.NotMeasured(NotMeasuredReason.NoGroundTruth).token(),
+        )
+        assertEquals(
+            "not_measured_unknown_native_status",
+            CheckOutcome.NotMeasured(NotMeasuredReason.UnknownNativeStatus).token(),
         )
     }
 }

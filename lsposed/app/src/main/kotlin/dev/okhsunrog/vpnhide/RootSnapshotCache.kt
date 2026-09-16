@@ -239,6 +239,7 @@ internal fun buildRootShellSnapshotCommand(
             "VPNHIDE_PM_STDERR_TO_STDOUT" to "0",
             "VPNHIDE_WITH_PM" to if (includePmPackages) "1" else "0",
             "VPNHIDE_KPM_PROBE_SOURCE" to runtimeProbeSource.orEmpty(),
+            "VPNHIDE_KPM_PROBE_DIGEST" to appHelperDigest(runtimeProbeSource).orEmpty(),
             "VPNHIDE_KMOD_DIR" to KMOD_MODULE_DIR,
             "VPNHIDE_BUILTIN_DIR" to BUILTIN_MODULE_DIR,
             "VPNHIDE_KPM_DIR" to KPM_MODULE_DIR,
@@ -263,6 +264,11 @@ internal fun buildRootShellSnapshotCommand(
                 LEGACY_CONFIG_SECTIONS.entries.joinToString(" ") { (section, path) -> "$section=$path" },
         ),
     ) + ShellScripts.load("package_inventory.sh") + "\n" + ShellScripts.load("root_snapshot.sh")
+
+private fun appHelperDigest(path: String?): String? =
+    path
+        ?.substringAfterLast("vhhelper-", missingDelimiterValue = "")
+        ?.takeIf { it.matches(Regex("[0-9a-f]{64}")) }
 
 internal fun parseRootShellSnapshot(
     raw: String,
