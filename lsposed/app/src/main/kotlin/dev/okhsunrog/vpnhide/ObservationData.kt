@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import kotlinx.serialization.Serializable
+
 /**
  * Why an observation is being re-read. Declared in ascending strength, so
  * `maxOf` picks the stronger of two overlapping causes and a weaker one never
@@ -11,6 +13,7 @@ package dev.okhsunrog.vpnhide
  *   (the VPN transport / default-network callback).
  * - [Explicit] — the user asked: Retry, refresh, pull-to-refresh, a manual re-check.
  */
+@Serializable
 internal enum class ReadReason { Background, Transition, Explicit }
 
 /** An observation owed a re-read: why it is owed, and since when. */

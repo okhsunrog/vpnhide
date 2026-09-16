@@ -70,6 +70,7 @@ internal fun selfRoutingObservation(state: ObservationState<DiagnosticGate>): Ob
             },
         active = state.active,
         generation = state.generation,
+        stale = state.stale,
         nextId = state.nextId,
         error = state.error,
         attempted = state.attempted,

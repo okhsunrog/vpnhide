@@ -14,7 +14,9 @@ import dev.okhsunrog.vpnhide.diagnostics.MeasurementContext
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementEvidence
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.ProbePlanEntry
+import dev.okhsunrog.vpnhide.diagnostics.RoutingKnowledge
 import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
+import dev.okhsunrog.vpnhide.diagnostics.SelfRouting
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -316,6 +318,7 @@ class DashboardUiStateTest {
             DiagnosticMeasurement(1, context, plan, plan.associate { it.id to CheckOutcome.HiddenByBackend }, true, false, 20)
         return DiagnosticPresentation(
             eligibility = DiagnosticEligibility.Eligible,
+            routing = RoutingKnowledge.Known(SelfRouting.Routed, 0),
             activeRunId = null,
             activeStage = null,
             activeResults = null,

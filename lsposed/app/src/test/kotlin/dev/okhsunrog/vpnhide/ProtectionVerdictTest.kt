@@ -11,7 +11,9 @@ import dev.okhsunrog.vpnhide.diagnostics.MeasurementApplicability
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementContext
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementCoverage
 import dev.okhsunrog.vpnhide.diagnostics.ProbePlanEntry
+import dev.okhsunrog.vpnhide.diagnostics.RoutingKnowledge
 import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
+import dev.okhsunrog.vpnhide.diagnostics.SelfRouting
 import dev.okhsunrog.vpnhide.diagnostics.reportGate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -98,6 +100,7 @@ class ProtectionVerdictTest {
         lastAttempt: DiagnosticAttempt? = measurement?.let { DiagnosticAttempt(it.runId, RunOutcome.Completed, measurement = it) },
     ) = DiagnosticPresentation(
         eligibility = DiagnosticEligibility.Eligible,
+        routing = RoutingKnowledge.Known(SelfRouting.Routed, 0),
         activeRunId = null,
         activeStage = null,
         activeResults = null,

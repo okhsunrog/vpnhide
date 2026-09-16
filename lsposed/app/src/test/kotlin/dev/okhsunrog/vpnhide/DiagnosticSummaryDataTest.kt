@@ -13,7 +13,9 @@ import dev.okhsunrog.vpnhide.diagnostics.MeasurementApplicability
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementContext
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.ProbePlanEntry
+import dev.okhsunrog.vpnhide.diagnostics.RoutingKnowledge
 import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
+import dev.okhsunrog.vpnhide.diagnostics.SelfRouting
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticPresentation
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticRequest
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
@@ -25,6 +27,7 @@ import org.junit.Test
 
 class DiagnosticSummaryDataTest {
     private val context = MeasurementContext("pid:1;uid:10", "self=x", "vpn=tun0;self=ROUTED", "backend=Kmod", 0, 7, 10)
+    private val routed = RoutingKnowledge.Known(SelfRouting.Routed, 10)
 
     @Test
     fun `the summary carries the presentation's decisions and identities without the results`() {
@@ -32,9 +35,9 @@ class DiagnosticSummaryDataTest {
         val attempt = DiagnosticAttempt(2, RunOutcome.Failed, TransitionFailure.ExecutionFailed)
         val active = ActiveDiagnosticRun(3, diagnosticRequest(), stage = DiagnosticStage.Slow)
         val view = viewWith(measurement).let { it.copy(core = it.core.copy(lastAttempt = attempt, active = active)) }
-        val presentation = diagnosticPresentation(view, eligible(context), changeEpoch = 0, uncertain = false)
+        val presentation = diagnosticPresentation(view, eligible(context), changeEpoch = 0, routing = routed)
 
-        val summary = diagnosticSummary(presentation)
+        val summary = diagnosticSummary(presentation, now = 100)
 
         assertEquals(presentation.eligibility, summary.eligibility)
         assertEquals(3L, summary.activeRunId)
@@ -53,6 +56,33 @@ class DiagnosticSummaryDataTest {
         assertEquals(presentation.evidence, summary.evidence)
         assertEquals(presentation.currentSuccess, summary.currentSuccess)
         assertFalse(summary.probeUnavailable)
+        assertEquals(SelfRouting.Routed, summary.lastKnownRouting)
+        assertNull(summary.routingRead)
+    }
+
+    @Test
+    fun `a routing re-read reaches the bundle with its reason, its age and the fact it kept`() {
+        val view = viewWith(completed(context))
+        val verifying = RoutingKnowledge.Verifying(SelfRouting.VpnOff, ReadReason.Transition, since = 40)
+
+        val summary = diagnosticSummary(diagnosticPresentation(view, null, 0, verifying), now = 100)
+
+        assertEquals(SelfRouting.VpnOff, summary.lastKnownRouting)
+        assertEquals(ReadReason.Transition, summary.routingRead?.reason)
+        assertEquals(60L, summary.routingRead?.pendingMs)
+        // A capture assembled before the mark's own timestamp never reports a negative age.
+        assertEquals(0L, diagnosticSummary(diagnosticPresentation(view, null, 0, verifying), now = 10).routingRead?.pendingMs)
+    }
+
+    @Test
+    fun `a failed routing read reports no pending read and keeps its last fact as history`() {
+        val view = viewWith(completed(context))
+        val unknown = RoutingKnowledge.Unknown(TransitionFailure.ReadFailed, SelfRouting.Routed)
+
+        val summary = diagnosticSummary(diagnosticPresentation(view, null, 0, unknown), now = 100)
+
+        assertEquals(SelfRouting.Routed, summary.lastKnownRouting)
+        assertNull(summary.routingRead)
     }
 
     @Test
@@ -60,7 +90,7 @@ class DiagnosticSummaryDataTest {
         val measurement = completed(context)
         val view = viewWith(measurement).let { it.copy(core = it.core.copy(quarantined = true)) }
 
-        val summary = diagnosticSummary(diagnosticPresentation(view, eligible(context), changeEpoch = 0, uncertain = false))
+        val summary = diagnosticSummary(diagnosticPresentation(view, eligible(context), changeEpoch = 0, routing = routed))
 
         assertTrue(summary.probeUnavailable)
         assertEquals(1L, summary.measurement?.runId)
@@ -72,7 +102,8 @@ class DiagnosticSummaryDataTest {
         val view = DiagnosticRunView(core = DiagnosticRunState(lastAttempt = blocked, nextId = 2))
         val vpnOff = DiagnosticContextObservation(DiagnosticEligibility.VpnOff, context.copy(routing = "vpn=;self=VPN_OFF"))
 
-        val summary = diagnosticSummary(diagnosticPresentation(view, vpnOff, changeEpoch = 0, uncertain = false))
+        val off = RoutingKnowledge.Known(SelfRouting.VpnOff, observedAt = 12)
+        val summary = diagnosticSummary(diagnosticPresentation(view, vpnOff, changeEpoch = 0, routing = off))
 
         assertEquals(DiagnosticEligibility.VpnOff, summary.eligibility)
         assertEquals(DiagnosticEligibility.VpnOff, summary.lastAttempt?.eligibility)

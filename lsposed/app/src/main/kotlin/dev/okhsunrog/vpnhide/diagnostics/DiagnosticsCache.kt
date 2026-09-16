@@ -8,10 +8,10 @@ import dev.okhsunrog.vpnhide.ConfigOperationResult
 import dev.okhsunrog.vpnhide.ConfigOperationSpec
 import dev.okhsunrog.vpnhide.ConfigPhase
 import dev.okhsunrog.vpnhide.ContextObservationInputs
+import dev.okhsunrog.vpnhide.ObservationClock
 import dev.okhsunrog.vpnhide.ObservationRuntime
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.TransitionFailure
-import dev.okhsunrog.vpnhide.currentObservationValue
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -112,11 +112,17 @@ internal object DiagnosticsCache {
                 } else {
                     null
                 }
-            diagnosticPresentation(view, observation, impact.changeEpoch, uncertain = currentObservationValue(routing) == null)
+            val knowledge = routingKnowledge(selfRoutingObservation(routing), ObservationClock.now())
+            diagnosticPresentation(view, observation, impact.changeEpoch, knowledge)
         }.stateIn(
             ObservationRuntime.scope,
             SharingStarted.Eagerly,
-            diagnosticPresentation(coordinator.view.value, null, 0, uncertain = true),
+            diagnosticPresentation(
+                coordinator.view.value,
+                null,
+                0,
+                routingKnowledge(selfRoutingObservation(RoutingGateCache.observation.value), ObservationClock.now()),
+            ),
         )
     }
 

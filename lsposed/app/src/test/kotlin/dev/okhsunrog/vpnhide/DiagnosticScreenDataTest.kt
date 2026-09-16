@@ -16,7 +16,9 @@ import dev.okhsunrog.vpnhide.diagnostics.MeasurementCoverage
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.NotMeasuredReason
 import dev.okhsunrog.vpnhide.diagnostics.ProbePlanEntry
+import dev.okhsunrog.vpnhide.diagnostics.RoutingKnowledge
 import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
+import dev.okhsunrog.vpnhide.diagnostics.SelfRouting
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticScreenDecision
 import dev.okhsunrog.vpnhide.diagnostics.summarizeMeasurement
 import org.junit.Assert.assertEquals
@@ -166,6 +168,7 @@ class DiagnosticScreenDataTest {
     private fun base(measurement: DiagnosticMeasurement? = null): DiagnosticPresentation =
         DiagnosticPresentation(
             eligibility = DiagnosticEligibility.Eligible,
+            routing = RoutingKnowledge.Known(SelfRouting.Routed, 0),
             activeRunId = null,
             activeStage = null,
             activeResults = null,

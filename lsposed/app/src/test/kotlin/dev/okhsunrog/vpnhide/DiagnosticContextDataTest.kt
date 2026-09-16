@@ -16,6 +16,7 @@ import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_EXTRA_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.RoutingRead
 import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
+import dev.okhsunrog.vpnhide.diagnostics.SelfRouting
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticContextObservation
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticProbePlan
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticRequest
@@ -55,6 +56,22 @@ class DiagnosticContextDataTest {
         assertEquals(DiagnosticEligibility.Unknown, observation.eligibility)
         assertNull(observation.context)
         assertNull(selfRoutingObservation(current(DiagnosticGate.NEEDS_RESTART)).lastGood)
+    }
+
+    /**
+     * The projection rebuilds the state field by field, so every field a consumer
+     * reads has to be carried: the stale mark is what tells the presentation why a
+     * re-read is owed and since when, and dropping it silently degrades every
+     * re-read to Background/now.
+     */
+    @Test
+    fun `the self routing projection carries the stale mark of the gate observation`() {
+        val mark = StaleMark(ReadReason.Transition, since = 11)
+        val invalidated = current(DiagnosticGate.ROUTED).copy(generation = 1, stale = mark)
+        val projected = selfRoutingObservation(invalidated)
+        assertEquals(mark, projected.stale)
+        assertEquals(SelfRouting.Routed, projected.lastGood?.value)
+        assertNull(selfRoutingObservation(current(DiagnosticGate.ROUTED)).stale)
     }
 
     @Test

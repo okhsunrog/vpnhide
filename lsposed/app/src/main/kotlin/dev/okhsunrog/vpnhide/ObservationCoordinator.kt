@@ -13,13 +13,24 @@ internal class ObservationReadException(
     val reason: TransitionFailure,
 ) : RuntimeException(reason.name)
 
+/**
+ * The monotonic millisecond base every observation timestamp is expressed in:
+ * [ObservationRequest.startedAt], [StaleMark.since] and anything derived from
+ * them (how long a re-read has been owed). It is not a wall clock and must never
+ * be formatted as a date — `System.currentTimeMillis()` stays the base for a
+ * measurement's `observedAt` and the bundle's dates.
+ */
+internal object ObservationClock {
+    fun now(): Long = System.nanoTime() / 1_000_000
+}
+
 /** Process-owned reads. A waiter owns neither the worker nor its cancellation. */
 internal class ObservationCoordinator<T>(
     private val scope: CoroutineScope,
     private val load: suspend (ObservationRequest) -> T,
     private val ready: () -> Boolean = { true },
     private val timeoutMillis: Long = 60_000,
-    private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+    private val clock: () -> Long = ObservationClock::now,
     private val deadline: suspend () -> Unit = { delay(timeoutMillis) },
     private val changed: (ObservationState<T>, ObservationState<T>) -> Unit = { _, _ -> },
 ) {
