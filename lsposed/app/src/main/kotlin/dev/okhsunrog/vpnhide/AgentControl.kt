@@ -91,7 +91,7 @@ internal object AgentControl {
             val errors = mutableListOf<String>()
             val networkView =
                 if (options.forensics) {
-                    runCatching { captureSelfNetworkView(context, diagnostics.reportGate() == DiagnosticGate.ROUTED) }
+                    runCatching { captureSelfNetworkView(context, bridgeGate(protection) == DiagnosticGate.ROUTED) }
                         .onFailure { errors += "network view: ${it.message}" }
                         .getOrNull()
                 } else {
