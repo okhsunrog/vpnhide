@@ -100,6 +100,10 @@ truncated/full buffer, a count mismatch, invalid UTF-8, an unsafe/numeric name,
 a blank record, or a duplicate name is
 `{"version":1,"kind":"kpm_list","status":"error","error":"malformed"}`;
 it is never interpreted as an empty list.
+For the direct APatch supercall path, a successful zero module count returns an
+empty observation without calling the list operation: older KernelPatch versions
+leave the kernel list buffer uninitialized when there are no modules. This is an
+observation at count time, not an atomic count/list snapshot.
 The app treats malformed/truncated JSON, an unsupported version, a wrong kind
 and unknown status/error codes as unusable observations; none can become a
 clean check or a false routing result. A valid empty KPM list (`available: true,

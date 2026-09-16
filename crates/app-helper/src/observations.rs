@@ -117,33 +117,52 @@ fn apatch_kpm_list() -> KpmListRead {
             let Ok(expected_count) = usize::try_from(count) else {
                 continue;
             };
-            let mut buffer = [0_u8; MAX_KPM_LIST_BYTES];
-            let buffer_len = c_long::try_from(buffer.len()).expect("KPM list buffer fits c_long");
-            let rc = unsafe {
-                libc::syscall(
-                    APATCH_SUPERCALL_NR as c_long,
-                    key.as_ptr(),
-                    encode_command(style, SUPERCALL_KPM_LIST),
-                    buffer.as_mut_ptr().cast::<c_void>(),
-                    buffer_len,
-                )
-            };
-            if rc >= 0 {
-                // Upstream `list_modules()` always terminates the list with NUL.
-                // Its supercall return value is the copy length on some kernel
-                // families, not the string length, so the terminator is the only
-                // portable completeness boundary.
-                let Some(length) = buffer.iter().position(|byte| *byte == 0) else {
-                    return KpmListRead::Malformed;
-                };
-                return KpmListRead::Available {
-                    raw: buffer[..length].to_vec(),
-                    expected_count,
-                };
+            if let Some(read) = read_apatch_modules(expected_count, |buffer| {
+                let buffer_len =
+                    c_long::try_from(buffer.len()).expect("KPM list buffer fits c_long");
+                unsafe {
+                    libc::syscall(
+                        APATCH_SUPERCALL_NR as c_long,
+                        key.as_ptr(),
+                        encode_command(style, SUPERCALL_KPM_LIST),
+                        buffer.as_mut_ptr().cast::<c_void>(),
+                        buffer_len,
+                    )
+                }
+            }) {
+                return read;
             }
         }
     }
     KpmListRead::Unavailable
+}
+
+/// A successful count of zero is already an empty observation. Older
+/// KernelPatch list calls copy an uninitialized kernel buffer in this case.
+/// Count and list are separate observations, not an atomic snapshot.
+fn read_apatch_modules(
+    expected_count: usize,
+    list: impl FnOnce(&mut [u8]) -> c_long,
+) -> Option<KpmListRead> {
+    if expected_count == 0 {
+        return Some(KpmListRead::Available {
+            raw: Vec::new(),
+            expected_count,
+        });
+    }
+    let mut buffer = [0_u8; MAX_KPM_LIST_BYTES];
+    if list(&mut buffer) < 0 {
+        return None; // Let the caller try the next authentication/ABI candidate.
+    }
+    // Nonempty upstream lists are NUL-terminated. The return value may be a
+    // copy length rather than a string length, so inspect the buffer itself.
+    let Some(length) = buffer.iter().position(|byte| *byte == 0) else {
+        return Some(KpmListRead::Malformed);
+    };
+    Some(KpmListRead::Available {
+        raw: buffer[..length].to_vec(),
+        expected_count,
+    })
 }
 
 fn kpm_list_response(read: KpmListRead) -> String {
@@ -224,6 +243,35 @@ mod tests {
 
     fn response(read: KpmListRead) -> Value {
         serde_json::from_str(&kpm_list_response(read)).unwrap()
+    }
+
+    #[test]
+    fn zero_apatch_count_never_enumerates_and_matches_empty_fixture() {
+        let read = read_apatch_modules(0, |_| panic!("empty count must not call KPM_LIST"));
+        assert_eq!(response(read.unwrap()), fixture("kpm-empty.json"));
+    }
+
+    #[test]
+    fn nonzero_apatch_count_enumerates_and_preserves_failures() {
+        let read = read_apatch_modules(1, |buffer| {
+            buffer[..8].copy_from_slice(b"vpnhide\0");
+            buffer.len() as c_long
+        });
+        assert_eq!(response(read.unwrap()), fixture("kpm-vpnhide.json"));
+        assert_eq!(read_apatch_modules(1, |_| -1), None);
+        assert_eq!(
+            read_apatch_modules(1, |buffer| {
+                buffer.fill(b'x');
+                buffer.len() as c_long
+            }),
+            Some(KpmListRead::Malformed)
+        );
+        // A concurrent unload must not turn an expected nonempty list into a
+        // successful empty observation.
+        assert_eq!(
+            response(read_apatch_modules(1, |_| 0).unwrap()),
+            fixture("kpm-malformed.json")
+        );
     }
 
     #[test]
