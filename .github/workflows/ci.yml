@@ -307,6 +307,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          # zygisk builds against the android-inline-hook submodule.
+          submodules: recursive
           fetch-depth: 0
       - uses: ./.github/actions/cargo-cache
         with:
