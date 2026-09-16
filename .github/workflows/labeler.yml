@@ -1,0 +1,27 @@
+name: Labels
+
+# Applies the `area:*` labels from .github/labeler.yml. pull_request_target
+# runs with the base branch's workflow and a token that may write labels, and
+# never checks out or executes the pull request's code.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/labeler@b8dd2d9be0f68b860e7dae5dae7d772984eacd6d # v6
+        with:
+          # Drop an area label the diff no longer matches; manual labels
+          # (`ci:full`) are not in the config and stay untouched.
+          sync-labels: true

@@ -147,6 +147,33 @@ uses priority `kmod > KPM > Zygisk`, and `.ko` + KPM together is unsafe.
 
 CI runs the same checks. See [.github/workflows/ci.yml](../.github/workflows/ci.yml) for the authoritative list.
 
+### Which CI jobs a pull request runs
+
+The `changes` job at the top of `ci.yml` decides from the diff (`dorny/paths-filter`)
+which areas a pull request exercises, and every area job is gated on it:
+
+| Paths | Area jobs |
+|---|---|
+| `kmod/**` (except `kmod/kpm/`) | `kmod-activator`, `kmod`, `kmod-qemu` |
+| `kmod/kpm/**` | `kpm`, `kpm-qemu`, `kpm-qemu-legacy` |
+| `builtin/**` | `builtin`, `builtin-integrator`, `builtin-qemu` |
+| `zygisk/**` | `zygisk` |
+| `lsposed/**` | `lsposed` |
+| `portshide/**` | `portshide` |
+| shared: `crates/**`, `Cargo.*`, `kmod/shared/**`, `kmod/test/**`, `kmod/generated/**`, the code generators | every area |
+| `.github/**` | every area |
+
+`lint` and `setup` always run; `qemu-native-probes` runs when any kernel-side
+area does. Pushes to `main`, tags and manual dispatches run everything. The
+`ci-ok` job is green when every job succeeded or was skipped by `changes` and
+red on any failure, so it is the one status branch protection requires.
+
+The `Labels` workflow applies `area:*` labels from the same paths
+(`.github/labeler.yml`). Labels only ever add runs: put `area:kmod` on a pull
+request to force the kernel-module jobs whatever the diff, or `ci:full` to run
+the whole matrix. The decision is taken when the run starts, so re-run the
+workflow after adding a label.
+
 ```sh
 # Codegen drift — run after editing data/interfaces.toml; CI fails on diff
 python3 scripts/codegen-interfaces.py
