@@ -72,10 +72,10 @@ class DiagnosticPresentationDataTest {
                 it.copy(core = it.core.copy(lastAttempt = attempt), attemptResults = it.attemptResults + (2L to results(CheckOutcome.Leak)))
             }
         val presentation = diagnosticPresentation(view, eligible(context), changeEpoch = 0, uncertain = false)
-        assertTrue(presentation.staleFailureVisible)
         assertEquals(RunOutcome.Failed, presentation.lastAttempt?.outcome)
         assertEquals(1L, presentation.measurement?.runId)
-        assertEquals(view.attemptResults[2L], presentation.lastAttemptResults)
+        // The measurement's own evidence is what stays listed, never the failed attempt's.
+        assertEquals(view.attemptResults[1L], presentation.measurementResults)
         assertTrue(presentation.currentSuccess)
     }
 

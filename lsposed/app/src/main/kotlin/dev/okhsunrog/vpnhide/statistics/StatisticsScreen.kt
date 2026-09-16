@@ -26,7 +26,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,7 +93,6 @@ private object CaptureSession {
 
 @Composable
 fun StatisticsScreen(modifier: Modifier = Modifier) {
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val state by StatisticsCache.state.collectAsState()
     val loadError by StatisticsCache.error.collectAsState()
@@ -112,10 +110,10 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
     var nowMs by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(Unit) {
-        StatisticsCache.ensureLoaded(scope)
+        StatisticsCache.ensureLoaded()
         // Resolve UID → app icon + friendly label for the per-app list, the
         // same package scan the Apps tab uses (cached app-wide).
-        AppListCache.ensureLoaded(scope, context)
+        AppListCache.ensureLoaded(context)
     }
     // Tick the elapsed clock while a capture session is active.
     LaunchedEffect(captureBaseline != null) {
@@ -133,7 +131,7 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
     LaunchedEffect(captureBaseline != null) {
         while (captureBaseline != null) {
             delay(CAPTURE_POLL_MS)
-            if (!StatisticsCache.loading.value) StatisticsCache.refresh(scope)
+            if (!StatisticsCache.loading.value) StatisticsCache.refresh()
         }
     }
 
@@ -151,7 +149,7 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
         if (error != null) {
             StatisticsLoadErrorCard(
                 previousDataVisible = s != null,
-                onRetry = { StatisticsCache.refresh(scope) },
+                onRetry = { StatisticsCache.refresh() },
             )
             Spacer(Modifier.height(12.dp))
             if (s == null) return@Column

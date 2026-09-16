@@ -951,3 +951,30 @@ transformed candidate against the fresh base — right after the `Prepared` even
 is reduced and before its first `Execute`, so a `transform`-only write to
 `apps/<self>` delays new runs from that moment and its first mutating dispatch
 interrupts an active one. Relevance only ever increases.
+
+The legacy `DiagnosticsCache.State` projection (`NotRun`/`Running`/`Blocked`/
+`Failed`/`Ready`) is retired, together with the `DiagnosticsCache.runs` accessor,
+the presentation's unrendered `lastAttemptResults` / `staleFailureVisible` and
+`StateCache.pristine`, none of which had a consumer. The Dashboard derivation and the bridge still join
+the active run or the automatic suite through `awaitTerminal`, which now returns
+the shared presentation once it reflects the terminal attempt (attempt ids are
+monotonic and runs finish in admission order, so the first presentation whose
+latest attempt id reaches the awaited run's id is that instant). The tiles come
+from the pure `protectionVerdict`: the latest complete measurement rendered
+against its own `coverageLayers` is `Checked`; without one, a latest attempt
+that never started because of a gated eligibility is `Blocked`; everything else
+is `Failed`. A later attempt that failed or was interrupted therefore leaves the
+measured tiles in place and is named by the hero note (T11), where the legacy
+projection blanked the tiles. An attempt that never started because of a
+condition (`DiagnosticAttempt.blocked`: NotStarted, no failure, an eligibility)
+is not a failed check (I13): the hero and the Diagnostics history carry no
+notice for it, since the condition is named by the eligibility while it holds
+and is stale once it clears; and while a re-check is in flight the hero only
+names the confirmation (ResultsUnverified) instead of the attempt it is about to
+replace. Found on the device: a Retry with the VPN off, then the VPN coming back,
+flipped a protected hero to Attention twice with "the latest check couldn't run". The bridge's legacy `gate`/`report` come from the
+same presentation value (`reportGate`: `ROUTED` for a retained complete
+measurement, else the blocking eligibility, else null) as its `diagnostics`
+summary, so the two no longer describe different instants. The Dashboard's
+routed-transition refresh keys on the presentation's latest attempt not being
+`Completed`, which is what the legacy `!is Checked` test meant.

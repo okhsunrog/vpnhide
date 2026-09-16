@@ -116,6 +116,13 @@ class DiagnosticScreenDataTest {
         assertEquals(DiagnosticBanner.Ready, withHistory.banner)
         assertEquals(DiagnosticAttemptNotice.Interrupted, withHistory.attemptNotice)
         assertEquals(results(CheckOutcome.HiddenByBackend), withHistory.results)
+
+        // A run that never started because the VPN was off is not a failed check: once
+        // the condition has cleared, the history is listed without a notice.
+        val blocked = DiagnosticAttempt(3, RunOutcome.NotStarted, eligibility = DiagnosticEligibility.VpnOff)
+        val blockedHistory = decide(base(measurement = measurement()).copy(lastAttempt = blocked))
+        assertEquals(DiagnosticBanner.Ready, blockedHistory.banner)
+        assertNull(blockedHistory.attemptNotice)
     }
 
     @Test
@@ -163,7 +170,6 @@ class DiagnosticScreenDataTest {
             activeStage = null,
             activeResults = null,
             lastAttempt = measurement?.let { DiagnosticAttempt(it.runId, RunOutcome.Completed, measurement = it) },
-            lastAttemptResults = measurement?.let { results(it.outcomes.values.first()) },
             measurement = measurement,
             measurementResults = measurement?.let { results(it.outcomes.values.first()) },
             applicability = if (measurement == null) MeasurementApplicability.Absent else MeasurementApplicability.MatchesLastObservation,

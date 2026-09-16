@@ -401,7 +401,7 @@ private fun MainScreen() {
     // root shell.
     LaunchedEffect(selfNeedsRestart) {
         val r = selfNeedsRestart ?: return@LaunchedEffect
-        startupCoordinator.ensureInitialCaches(scope, r)
+        startupCoordinator.ensureInitialCaches(r)
     }
 
     // Protection depends on the same root snapshot as Dashboard. Let
@@ -416,7 +416,7 @@ private fun MainScreen() {
     LaunchedEffect(selfNeedsRestart, rootSnapshot, uiReady) {
         VpnHideLog.setFromRootSnapshot(rootSnapshot)
         // The runtime reconcile is deferred past first paint; see the coordinator.
-        startupCoordinator.ensureProtectionCacheAfterRootSnapshot(scope, selfNeedsRestart, rootSnapshot, uiReady)
+        startupCoordinator.ensureProtectionCacheAfterRootSnapshot(selfNeedsRestart, rootSnapshot, uiReady)
     }
 
     var startupTraceMarked by remember { mutableStateOf(false) }
@@ -440,7 +440,7 @@ private fun MainScreen() {
                     // return (throttled), covering the case where the background VPN
                     // transport callback was frozen/missed while we were away — e.g. the
                     // user left to toggle their VPN in another app and came back.
-                    RoutingGateCache.refreshIfStale(scope)
+                    RoutingGateCache.refreshIfStale()
                 }
             }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -608,7 +608,7 @@ private fun MainScreen() {
                                             RefreshContext(
                                                 loading = statisticsLoading,
                                                 onRefresh = {
-                                                    StatisticsCache.refresh(scope)
+                                                    StatisticsCache.refresh()
                                                 },
                                             )
                                         }
@@ -617,7 +617,7 @@ private fun MainScreen() {
                                             RefreshContext(
                                                 loading = appListLoading || targetsLoading,
                                                 onRefresh = {
-                                                    startupCoordinator.refreshProtection(scope)
+                                                    startupCoordinator.refreshProtection()
                                                 },
                                             )
                                         }

@@ -18,7 +18,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.okhsunrog.vpnhide.CanonicalActivation
@@ -43,7 +42,6 @@ import kotlinx.coroutines.withContext
 
 @Composable
 internal fun FilesystemHidingSettingsSection() {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val checkWrite = LocalConfigWriteAccess.current
     val rootSnapshot by RootSnapshotCache.snapshot.collectAsState()
@@ -91,7 +89,7 @@ internal fun FilesystemHidingSettingsSection() {
         }
     }
 
-    LaunchedEffect(Unit) { TargetsCache.ensureLoaded(scope, context) }
+    LaunchedEffect(Unit) { TargetsCache.ensureLoaded() }
 
     if (confirmationOpen) {
         AlertDialog(

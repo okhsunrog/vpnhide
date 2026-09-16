@@ -27,7 +27,16 @@ internal data class DiagnosticAttempt(
     val measurement: DiagnosticMeasurement? = null,
     /** The blocking eligibility of a NotStarted attempt; null for every other outcome. */
     val eligibility: DiagnosticEligibility? = null,
-)
+) {
+    /**
+     * The run never started because of a current condition (VPN off, self excluded,
+     * restart pending, a change applying). That is not a failure of the suite: the
+     * condition is named by the eligibility while it holds, and is stale history
+     * once it clears, so no surface should word it as "the check failed" (I13).
+     */
+    val blocked: Boolean
+        get() = outcome == RunOutcome.NotStarted && failure == null && eligibility != null
+}
 
 internal data class ActiveDiagnosticRun(
     val id: Long,

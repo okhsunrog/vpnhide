@@ -44,6 +44,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
+import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.VpnTransportWatcher
 import dev.okhsunrog.vpnhide.diagnostics.routedTransitions
@@ -110,7 +111,7 @@ fun DashboardScreen(
     // populated or an inflight job hasn't finished yet.
     LaunchedEffect(state == null && loadError == null, selfNeedsRestart) {
         if (state == null && loadError == null) {
-            DashboardCache.ensureLoaded(scope, context, selfNeedsRestart)
+            DashboardCache.ensureLoaded(context, selfNeedsRestart)
         }
         UpdateCheckCache.ensureFresh(scope, BuildConfig.VERSION_NAME)
     }
@@ -147,11 +148,15 @@ fun DashboardScreen(
         return
     }
 
+    // Routing came back: a latest attempt that never measured (blocked while the VPN
+    // was off, failed, or none yet) is requested again through the refresh; a complete
+    // measurement is kept, since nothing reruns a suite at rest (I16) and the tiles
+    // still show it under the eligibility overlay.
     LaunchedEffect(selfNeedsRestart) {
         RoutingGateCache.gate.routedTransitions().collect {
-            val cached = DashboardCache.state.value
-            if (cached != null && cached.protection !is ProtectionCheck.Checked) {
-                DashboardCache.refresh(scope, context, selfNeedsRestart)
+            val latest = DiagnosticsCache.presentation.value.lastAttempt
+            if (DashboardCache.state.value != null && latest?.outcome != RunOutcome.Completed) {
+                DashboardCache.refresh(context, selfNeedsRestart)
             }
         }
     }
@@ -211,7 +216,7 @@ fun DashboardScreen(
                 containerColor = errorBg,
                 titleColor = errorHeader,
                 contentColor = onBannerColor,
-                onRetry = { DashboardCache.refresh(scope, context, selfNeedsRestart) },
+                onRetry = { DashboardCache.refresh(context, selfNeedsRestart) },
             )
             Spacer(Modifier.height(12.dp))
             if (s == null) return@Column
@@ -254,9 +259,9 @@ fun DashboardScreen(
         // sheet / logcat card banners update immediately too, plus the two caches
         // that actually re-derive their own state off the (now shared) gate.
         val onRetry = {
-            RoutingGateCache.refresh(scope, context, selfNeedsRestart)
-            DashboardCache.refresh(scope, context, selfNeedsRestart)
-            DiagnosticsCache.retry(scope, context, selfNeedsRestart)
+            RoutingGateCache.refresh(context, selfNeedsRestart)
+            DashboardCache.refresh(context, selfNeedsRestart)
+            DiagnosticsCache.retry(context, selfNeedsRestart)
         }
         val protection = effectiveProtection
         when {

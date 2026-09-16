@@ -24,18 +24,27 @@ internal data class DiagnosticPresentation(
     val activeStage: DiagnosticStage?,
     val activeResults: CheckResults?,
     val lastAttempt: DiagnosticAttempt?,
-    val lastAttemptResults: CheckResults?,
     val measurement: DiagnosticMeasurement?,
     val measurementResults: CheckResults?,
     val applicability: MeasurementApplicability,
     val evidence: MeasurementEvidence?,
     val currentSuccess: Boolean,
     val probeUnavailable: Boolean,
-) {
-    /** The latest attempt did not complete while an older complete measurement still exists. */
-    val staleFailureVisible: Boolean
-        get() = lastAttempt != null && lastAttempt.outcome != RunOutcome.Completed && measurement != null
-}
+)
+
+/**
+ * The legacy gate the Dashboard tiles and the bridge's `gate`/`report` are built
+ * under: `ROUTED` only for a complete measurement whose evidence is retained,
+ * otherwise the blocking eligibility of a latest attempt that never started, or
+ * null when nothing measurable is known (no attempt, a failed or interrupted one,
+ * a condition with no gate vocabulary). Read [applicability] next to it: a `ROUTED`
+ * gate describes the measurement, not necessarily the current conditions.
+ */
+internal fun DiagnosticPresentation.reportGate(): DiagnosticGate? =
+    when {
+        measurement != null && measurementResults != null -> DiagnosticGate.ROUTED
+        else -> lastAttempt?.eligibility?.blockedGate()
+    }
 
 /**
  * [current] is the context observation built from the current routing
@@ -60,7 +69,6 @@ internal fun diagnosticPresentation(
         activeStage = core.active?.stage,
         activeResults = view.activeResults,
         lastAttempt = core.lastAttempt,
-        lastAttemptResults = core.lastAttempt?.let { view.attemptResults[it.id] },
         measurement = measurement,
         measurementResults = measurement?.let { view.attemptResults[it.runId] },
         applicability = applicability,

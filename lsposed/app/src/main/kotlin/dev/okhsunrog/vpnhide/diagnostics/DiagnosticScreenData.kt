@@ -98,7 +98,10 @@ private fun runOrHistory(presentation: DiagnosticPresentation): DiagnosticScreen
             },
         )
     }
-    return DiagnosticScreenDecision(measurementBanner(presentation), notice, presentation.measurementResults)
+    // A blocked attempt beside history is either a current condition, which the
+    // banner above already replaced this with, or stale once it cleared: no notice.
+    val historyNotice = notice.takeUnless { attempt?.blocked == true }
+    return DiagnosticScreenDecision(measurementBanner(presentation), historyNotice, presentation.measurementResults)
 }
 
 /**

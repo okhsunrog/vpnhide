@@ -82,7 +82,6 @@ fun DiagnosticsScreen(
     onOpenAccelerators: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     // One projection for everything above the check list: eligibility, the run in
     // flight, the latest attempt and the latest complete measurement with its
@@ -101,14 +100,14 @@ fun DiagnosticsScreen(
     // Blocked(NEEDS_RESTART) itself when selfNeedsRestart (hooks aren't applied to this
     // app yet, so a run would be meaningless); run is idempotent otherwise.
     LaunchedEffect(selfNeedsRestart) {
-        DiagnosticsCache.run(scope, context, selfNeedsRestart)
+        DiagnosticsCache.run(context, selfNeedsRestart)
         // Ensure the backend/ownership state is available even when the user opens
         // Diagnostics without visiting the Dashboard first (cheap no-op if cached).
-        DashboardCache.ensureLoaded(scope, context, selfNeedsRestart)
+        DashboardCache.ensureLoaded(context, selfNeedsRestart)
         // Same belt-and-suspenders init as DashboardCache above: usually already
         // seeded by StartupCoordinator.ensureInitialCaches, but a cheap no-op here
         // guarantees the shared gate is ready even if Diagnostics is opened first.
-        RoutingGateCache.ensureLoaded(scope, context, selfNeedsRestart)
+        RoutingGateCache.ensureLoaded(context, selfNeedsRestart)
     }
     // The live gate is the trigger to (re)compute the frozen check results: once the
     // VPN comes up (or this app becomes routed), the results must be measured even if
@@ -118,7 +117,7 @@ fun DiagnosticsScreen(
     // must not retrigger a failed run when the same routed value returns.
     LaunchedEffect(selfNeedsRestart) {
         RoutingGateCache.gate.routedTransitions().collect {
-            DiagnosticsCache.run(scope, context, selfNeedsRestart)
+            DiagnosticsCache.run(context, selfNeedsRestart)
         }
     }
 
@@ -141,9 +140,9 @@ fun DiagnosticsScreen(
         // sheet / logcat card banners update immediately too, plus the two caches
         // that actually re-derive their own state off the (now shared) gate.
         val onRetry = {
-            RoutingGateCache.refresh(scope, context, selfNeedsRestart)
-            DiagnosticsCache.retry(scope, context, selfNeedsRestart)
-            DashboardCache.refresh(scope, context, selfNeedsRestart)
+            RoutingGateCache.refresh(context, selfNeedsRestart)
+            DiagnosticsCache.retry(context, selfNeedsRestart)
+            DashboardCache.refresh(context, selfNeedsRestart)
         }
         DiagnosticBannerContent(decision.banner, onRetry, onOpenAccelerators)
         decision.attemptNotice?.let { notice ->
@@ -766,7 +765,7 @@ private fun rememberCaptureGate(selfNeedsRestart: Boolean?): CaptureGate {
         selfNeedsRestart?.let { needsRestart ->
             awaitingFreshSinceOpen = true
             scope.launch {
-                RoutingGateCache.ensureLoaded(scope, context, needsRestart)
+                RoutingGateCache.ensureLoaded(context, needsRestart)
                 RoutingGateCache.refreshInPlace(force = true)
                 awaitingFreshSinceOpen = false
             }

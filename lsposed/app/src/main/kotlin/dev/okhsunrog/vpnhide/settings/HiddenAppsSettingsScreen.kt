@@ -43,7 +43,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,7 +77,6 @@ import dev.okhsunrog.vpnhide.ui.theme.AppColors
 @Composable
 internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val apps by AppListCache.apps.collectAsState()
     val userNames by AppListCache.userNames.collectAsState()
     val snackbarHostState = LocalConfigSnackbar.current
@@ -93,8 +91,8 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
     val savedMessage = stringResource(R.string.settings_auto_hide_saved)
 
     LaunchedEffect(Unit) {
-        TargetsCache.ensureLoaded(scope, context)
-        AppListCache.ensureLoaded(scope, context)
+        TargetsCache.ensureLoaded()
+        AppListCache.ensureLoaded(context)
     }
     LaunchedEffect(editor.result) {
         editor.result?.let { snackMessage = if (it.succeeded) savedMessage else null }

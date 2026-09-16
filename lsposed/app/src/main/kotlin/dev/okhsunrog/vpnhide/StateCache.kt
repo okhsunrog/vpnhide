@@ -48,7 +48,6 @@ internal abstract class StateCache<T>(
     val loading: StateFlow<Boolean> by lazy { ProjectedStateFlow(observation) { it.active != null } }
     val error: StateFlow<String?> by lazy { ProjectedStateFlow(observation) { if (it.active == null) it.error?.name else null } }
     val current: StateFlow<T?> by lazy { ProjectedStateFlow(observation, ::currentObservationValue) }
-    val pristine: Boolean get() = !observation.value.attempted
     protected open val ready: Boolean get() = true
 
     protected abstract suspend fun load(request: ObservationRequest): T
@@ -58,14 +57,10 @@ internal abstract class StateCache<T>(
         next: ObservationState<T>,
     ) = Unit
 
-    // Caller scopes remain in the facade for compatibility; leaving a screen only detaches its collectors.
-    protected fun ensure(
-        @Suppress("UNUSED_PARAMETER") scope: CoroutineScope,
-    ) = coordinator.ensure()
+    // Loads run on the process-owned ObservationRuntime scope; leaving a screen only detaches its collectors.
+    protected fun ensure() = coordinator.ensure()
 
-    protected fun forceRefresh(
-        @Suppress("UNUSED_PARAMETER") scope: CoroutineScope,
-    ) {
+    protected fun forceRefresh() {
         if (!ready) return
         source?.refresh()
         coordinator.refresh()

@@ -46,8 +46,10 @@ invalidate a gate that already reflects them. Verified on the Pixel 8 Pro on
 2026-09-16: VPN off and on each produced one root re-read within a second.
 
 Dashboard derivation initializes/joins diagnostics when needed, then observes its
-terminal result, including Blocked or Failed, without retrying it. Explicit
-Dashboard refresh still requests the existing diagnostic retry policy. This removes
+terminal result, including a blocked or failed attempt, without retrying it; what
+it renders is the shared diagnostic presentation once it reflects that attempt
+(`DiagnosticsCache.awaitTerminal`), the same projection the screens collect.
+Explicit Dashboard refresh still requests the existing diagnostic retry policy. This removes
 a dependency cycle: diagnostics refreshes the routing/root source, which invalidates
 Dashboard; that successor must not start diagnostics again just because VPN is off.
 The existing startup, live-routed screen triggers and explicit retry remain. A

@@ -5,7 +5,6 @@ import android.os.Process
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.ContextObservationInputs
 import dev.okhsunrog.vpnhide.EffectTicket
-import dev.okhsunrog.vpnhide.ObservationRuntime
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.startup.StartupTrace
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +31,7 @@ internal class AppDiagnosticRunIo(
         // A pending self-restart is process readiness: the hooks are not in this
         // process, so no network fact could make a measurement meaningful.
         if (current.selfNeedsRestart) return DiagnosticContextObservation(DiagnosticEligibility.RestartApp, null)
-        RoutingGateCache.ensureLoaded(ObservationRuntime.scope, current.context, selfNeedsRestart = false)
+        RoutingGateCache.ensureLoaded(current.context, selfNeedsRestart = false)
         // A not-invalidated observation is fresh; only a stale or absent one costs a root shell.
         when (routingReadPlan(RoutingGateCache.observation.value)) {
             RoutingRead.Reuse -> Unit
