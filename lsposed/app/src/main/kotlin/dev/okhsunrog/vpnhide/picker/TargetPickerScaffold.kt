@@ -44,7 +44,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -156,7 +155,6 @@ internal fun <T : TargetEntry> TargetPickerScreen(
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
-    val scope = rememberCoroutineScope()
 
     val cachedApps by AppListCache.apps.collectAsState()
     val appListError by AppListCache.error.collectAsState()
@@ -198,8 +196,8 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     // AppListCache is normally prewarmed at startup, but ensuring it here too
     // keeps the picker self-sufficient instead of silently depending on that.
     LaunchedEffect(Unit) {
-        AppListCache.ensureLoaded(scope, context)
-        TargetsCache.ensureLoaded(scope, context)
+        AppListCache.ensureLoaded(context)
+        TargetsCache.ensureLoaded()
     }
 
     // Surface either cache's failure: a failed app-list scan used to leave
@@ -212,8 +210,8 @@ internal fun <T : TargetEntry> TargetPickerScreen(
         val packageScanFailed = appListError != null && cachedApps == null
         TargetsLoadErrorCard(
             onRetry = {
-                AppListCache.refresh(scope, context)
-                TargetsCache.refresh(scope, context)
+                AppListCache.refresh(context)
+                TargetsCache.refresh()
             },
             title =
                 stringResource(

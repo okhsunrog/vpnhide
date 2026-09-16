@@ -257,7 +257,13 @@ old device-validation paragraphs predate the successful installs described below
    failed or was interrupted keeps the measured tiles and is named by the hero
    note, where the legacy projection blanked them; the Dashboard's
    routed-transition refresh now keys on the latest attempt not being
-   `Completed`. Deliberately kept: `LogcatRecorder` and the capture packaging
+   `Completed`. The `CoroutineScope` (and, for `TargetsCache`, the `Context`) the
+   cache facades accepted "for source compatibility" after the observation
+   coordinator took over every load is gone from `StateCache`, `ContextStateCache`,
+   `DiagnosticsCache.run`/`retry`, `RoutingGateCache.refreshIfStale`, `AppListCache`,
+   `TargetsCache`, `StatisticsCache` and the `StartupCoordinator` pass-throughs;
+   `UpdateCheckCache` and `LogcatRecorder` keep theirs because they launch on it.
+   Deliberately kept: `LogcatRecorder` and the capture packaging
    (§9 capture machine not implemented, user decision), `blockedGate` (the
    bundle's `gate` vocabulary), `DashboardState.protection` cached at derivation
    time (the derivation still awaits the suite, which keeps the startup runtime

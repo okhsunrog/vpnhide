@@ -61,7 +61,7 @@ internal fun FullResetDialog(
     val snap by RootSnapshotCache.snapshot.collectAsState()
 
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        DashboardCache.ensureLoaded(scope, context, selfNeedsRestart)
+        DashboardCache.ensureLoaded(context, selfNeedsRestart)
     }
 
     var running by remember { mutableStateOf(false) }
@@ -158,7 +158,7 @@ internal fun FullResetDialog(
                                 running = false
                                 done = exit == 0
                                 if (exit == 0) {
-                                    DashboardCache.refresh(scope, context, selfNeedsRestart)
+                                    DashboardCache.refresh(context, selfNeedsRestart)
                                 }
                             }
                         },

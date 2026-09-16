@@ -1,6 +1,5 @@
 package dev.okhsunrog.vpnhide.picker
 
-import android.content.Context
 import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.NativeBackendId
@@ -18,7 +17,6 @@ import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.parseCanonicalConfig
 import dev.okhsunrog.vpnhide.parsePackageUidMap
 import dev.okhsunrog.vpnhide.suExec
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -105,18 +103,11 @@ internal object TargetsCache : StateCache<RootProjection<TargetsSnapshot>>(
     val snapshot: StateFlow<TargetsSnapshot?> = ProjectedStateFlow(value) { it?.value }
 
     // The snapshot is parsed entirely from the shared RootSnapshotCache, so
-    // `load` needs no context — the parameter is kept only for call-site
-    // symmetry with the other caches.
-    fun ensureLoaded(
-        scope: CoroutineScope,
-        @Suppress("UNUSED_PARAMETER") context: Context,
-    ) = ensure(scope)
+    // neither entry point needs a context.
+    fun ensureLoaded() = ensure()
 
-    fun refresh(
-        scope: CoroutineScope,
-        @Suppress("UNUSED_PARAMETER") context: Context,
-    ) {
-        forceRefresh(scope)
+    fun refresh() {
+        forceRefresh()
     }
 
     override suspend fun load(

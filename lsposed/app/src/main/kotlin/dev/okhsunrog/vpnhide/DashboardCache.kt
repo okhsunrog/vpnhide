@@ -26,7 +26,7 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardState
     val state: StateFlow<DashboardState?> = ProjectedStateFlow(value) { it?.value }
 
     override fun beforeRefresh(inputs: ContextObservationInputs) {
-        DiagnosticsCache.retry(ObservationRuntime.scope, inputs.context, inputs.selfNeedsRestart)
+        DiagnosticsCache.retry(inputs.context, inputs.selfNeedsRestart)
     }
 
     override suspend fun load(

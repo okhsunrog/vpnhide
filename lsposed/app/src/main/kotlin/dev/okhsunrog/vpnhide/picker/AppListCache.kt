@@ -17,7 +17,6 @@ import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.StateCache
 import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.bit
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -124,23 +123,17 @@ internal object AppListCache : StateCache<AppListSnapshot>(
     override val ready: Boolean get() = appContext != null
 
     /** Kick off an initial load if not already loaded or loading. */
-    fun ensureLoaded(
-        scope: CoroutineScope,
-        context: Context,
-    ) {
+    fun ensureLoaded(context: Context) {
         appContext = context.applicationContext
-        ensure(scope)
+        ensure()
     }
 
     /** Force a reload of the package + icon list. */
-    fun refresh(
-        scope: CoroutineScope,
-        context: Context,
-    ) {
+    fun refresh(context: Context) {
         appContext = context.applicationContext
         RootSnapshotCache.inventoryDependency.refresh()
         invalidate()
-        ensure(scope)
+        ensure()
     }
 
     suspend fun loadForAgent(

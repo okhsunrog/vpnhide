@@ -111,7 +111,7 @@ fun DashboardScreen(
     // populated or an inflight job hasn't finished yet.
     LaunchedEffect(state == null && loadError == null, selfNeedsRestart) {
         if (state == null && loadError == null) {
-            DashboardCache.ensureLoaded(scope, context, selfNeedsRestart)
+            DashboardCache.ensureLoaded(context, selfNeedsRestart)
         }
         UpdateCheckCache.ensureFresh(scope, BuildConfig.VERSION_NAME)
     }
@@ -156,7 +156,7 @@ fun DashboardScreen(
         RoutingGateCache.gate.routedTransitions().collect {
             val latest = DiagnosticsCache.presentation.value.lastAttempt
             if (DashboardCache.state.value != null && latest?.outcome != RunOutcome.Completed) {
-                DashboardCache.refresh(scope, context, selfNeedsRestart)
+                DashboardCache.refresh(context, selfNeedsRestart)
             }
         }
     }
@@ -216,7 +216,7 @@ fun DashboardScreen(
                 containerColor = errorBg,
                 titleColor = errorHeader,
                 contentColor = onBannerColor,
-                onRetry = { DashboardCache.refresh(scope, context, selfNeedsRestart) },
+                onRetry = { DashboardCache.refresh(context, selfNeedsRestart) },
             )
             Spacer(Modifier.height(12.dp))
             if (s == null) return@Column
@@ -259,9 +259,9 @@ fun DashboardScreen(
         // sheet / logcat card banners update immediately too, plus the two caches
         // that actually re-derive their own state off the (now shared) gate.
         val onRetry = {
-            RoutingGateCache.refresh(scope, context, selfNeedsRestart)
-            DashboardCache.refresh(scope, context, selfNeedsRestart)
-            DiagnosticsCache.retry(scope, context, selfNeedsRestart)
+            RoutingGateCache.refresh(context, selfNeedsRestart)
+            DashboardCache.refresh(context, selfNeedsRestart)
+            DiagnosticsCache.retry(context, selfNeedsRestart)
         }
         val protection = effectiveProtection
         when {

@@ -12,7 +12,6 @@ import dev.okhsunrog.vpnhide.ObservationRuntime
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.TransitionFailure
 import dev.okhsunrog.vpnhide.currentObservationValue
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -44,8 +43,7 @@ internal sealed interface DiagnosticCaptureOutcome {
  * Diagnostics answer one question: *did the hooks work for this app process in a
  * measured run?* Each run is an identified, immutable attempt executed by
  * [DiagnosticRunCoordinator] on the process scope, so leaving a screen or
- * recreating the Activity never cancels or restarts a suite (a caller's scope is
- * accepted for source compatibility only). Every consumer renders one projection,
+ * recreating the Activity never cancels or restarts a suite. Every consumer renders one projection,
  * [presentation]: the screens collect it, the Dashboard derivation and the bridge
  * read it once it reflects a terminal attempt ([awaitTerminal]), the bundle
  * summarises it. The identified run view behind it is [runs].
@@ -129,7 +127,6 @@ internal object DiagnosticsCache {
 
     /** Automatic suite request: idempotent, consumed by the first suite that actually probes. */
     fun run(
-        @Suppress("UNUSED_PARAMETER") scope: CoroutineScope,
         context: Context,
         selfNeedsRestart: Boolean,
     ) {
@@ -139,7 +136,6 @@ internal object DiagnosticsCache {
 
     /** Explicit retry from the VPN-off / failed banners and Dashboard refresh: a new run unless the last one completed. */
     fun retry(
-        @Suppress("UNUSED_PARAMETER") scope: CoroutineScope,
         context: Context,
         selfNeedsRestart: Boolean,
     ) {

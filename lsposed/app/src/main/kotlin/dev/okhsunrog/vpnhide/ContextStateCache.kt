@@ -1,7 +1,6 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.Context
-import kotlinx.coroutines.CoroutineScope
 
 internal data class ContextObservationInputs(
     val context: Context,
@@ -20,22 +19,20 @@ internal abstract class ContextStateCache<T>(
     override val ready: Boolean get() = inputs != null
 
     fun ensureLoaded(
-        scope: CoroutineScope,
         context: Context,
         selfNeedsRestart: Boolean,
     ) {
         updateInputs(context, selfNeedsRestart)
-        ensure(scope)
+        ensure()
     }
 
     fun refresh(
-        scope: CoroutineScope,
         context: Context,
         selfNeedsRestart: Boolean,
     ) {
         updateInputs(context, selfNeedsRestart)
         beforeRefresh(requireNotNull(inputs))
-        forceRefresh(scope)
+        forceRefresh()
     }
 
     /** Explicit refresh only; dependency invalidation must not trigger other effect owners. */

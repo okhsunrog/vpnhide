@@ -6,7 +6,6 @@ import dev.okhsunrog.vpnhide.ProjectedStateFlow
 import dev.okhsunrog.vpnhide.RootProjection
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.StateCache
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -18,12 +17,12 @@ internal object StatisticsCache : StateCache<RootProjection<StatisticsState>>(
 ) {
     val state: StateFlow<StatisticsState?> = ProjectedStateFlow(value) { it?.value }
 
-    fun ensureLoaded(scope: CoroutineScope) {
-        ensure(scope)
+    fun ensureLoaded() {
+        ensure()
     }
 
-    fun refresh(scope: CoroutineScope) {
-        forceRefresh(scope)
+    fun refresh() {
+        forceRefresh()
     }
 
     override suspend fun load(

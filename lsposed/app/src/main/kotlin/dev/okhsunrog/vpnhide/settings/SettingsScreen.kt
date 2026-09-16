@@ -611,7 +611,7 @@ private fun ConfigBackupSection() {
         }
 
     LaunchedEffect(Unit) {
-        TargetsCache.ensureLoaded(scope, context)
+        TargetsCache.ensureLoaded()
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -858,7 +858,6 @@ private fun packageListFormatLabel(format: PackageListFormat): String =
 
 @Composable
 private fun SuperkeySettingsSection() {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val targets by TargetsCache.snapshot.collectAsState()
     val repository by CanonicalConfigRepository.state.collectAsState()
@@ -873,7 +872,7 @@ private fun SuperkeySettingsSection() {
     val failedMessage = stringResource(R.string.settings_superkey_failed)
 
     LaunchedEffect(Unit) {
-        TargetsCache.ensureLoaded(scope, context)
+        TargetsCache.ensureLoaded()
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1082,8 +1081,8 @@ private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
-        TargetsCache.ensureLoaded(scope, context)
-        AppListCache.ensureLoaded(scope, context)
+        TargetsCache.ensureLoaded()
+        AppListCache.ensureLoaded(context)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {

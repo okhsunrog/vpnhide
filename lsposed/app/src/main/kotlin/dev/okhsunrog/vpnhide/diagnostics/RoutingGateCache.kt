@@ -8,7 +8,6 @@ import dev.okhsunrog.vpnhide.ObservationRequest
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.StateCache
 import dev.okhsunrog.vpnhide.debug.captureGateFrom
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -56,13 +55,10 @@ internal object RoutingGateCache : ContextStateCache<DiagnosticGate>(
      * stale (e.g. still-null → false) `selfNeedsRestart`, clobbering the real one. No-op
      * until the cache has been initialized at least once.
      */
-    fun refreshIfStale(
-        scope: CoroutineScope,
-        throttleMs: Long = RESUME_REFRESH_THROTTLE_MS,
-    ) {
+    fun refreshIfStale(throttleMs: Long = RESUME_REFRESH_THROTTLE_MS) {
         if (!ready) return
         if (SystemClock.elapsedRealtime() - lastLoadAtMs < throttleMs) return
-        forceRefresh(scope)
+        forceRefresh()
     }
 
     // Always on IO: captureGateFrom runs the blocking `su` self-routing probe, so a

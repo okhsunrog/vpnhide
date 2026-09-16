@@ -153,19 +153,16 @@ internal class StartupCoordinator(
         scope.launch { prepareSelfTargets(force = true) }
     }
 
-    fun ensureInitialCaches(
-        scope: CoroutineScope,
-        selfNeedsRestart: Boolean,
-    ) {
-        AppListCache.ensureLoaded(scope, appContext)
-        DashboardCache.ensureLoaded(scope, appContext, selfNeedsRestart)
+    fun ensureInitialCaches(selfNeedsRestart: Boolean) {
+        AppListCache.ensureLoaded(appContext)
+        DashboardCache.ensureLoaded(appContext, selfNeedsRestart)
         // Seed the shared routing gate as early as selfNeedsRestart is known — this is
         // also the earliest point the process-scoped VPN transport watcher (Phase 3)
         // can find inputs to refresh against.
-        RoutingGateCache.ensureLoaded(scope, appContext, selfNeedsRestart)
+        RoutingGateCache.ensureLoaded(appContext, selfNeedsRestart)
         // The cache parks at Blocked(NEEDS_RESTART) itself when selfNeedsRestart — this
         // is also the first run() call, so it stamps the process-constant flag.
-        DiagnosticsCache.run(scope, appContext, selfNeedsRestart)
+        DiagnosticsCache.run(appContext, selfNeedsRestart)
         startAutoHideReconcile()
     }
 
@@ -200,13 +197,12 @@ internal class StartupCoordinator(
      * refresh happens in the background.
      */
     fun ensureProtectionCacheAfterRootSnapshot(
-        scope: CoroutineScope,
         selfNeedsRestart: Boolean?,
         rootSnapshot: RootSnapshot?,
         dashboardReady: Boolean,
     ) {
         if (selfNeedsRestart != null && rootSnapshot != null) {
-            TargetsCache.ensureLoaded(scope, appContext)
+            TargetsCache.ensureLoaded()
             if (dashboardReady && reconcileStarted.compareAndSet(false, true)) {
                 owner.launch(Dispatchers.IO) { reconcileRuntimeConfigNow() }
             }
@@ -225,13 +221,13 @@ internal class StartupCoordinator(
         scope: CoroutineScope,
         selfNeedsRestart: Boolean,
     ) {
-        DashboardCache.refresh(scope, appContext, selfNeedsRestart)
+        DashboardCache.refresh(appContext, selfNeedsRestart)
         UpdateCheckCache.refresh(scope, appVersionName)
     }
 
-    fun refreshProtection(scope: CoroutineScope) {
-        AppListCache.refresh(scope, appContext)
-        TargetsCache.refresh(scope, appContext)
+    fun refreshProtection() {
+        AppListCache.refresh(appContext)
+        TargetsCache.refresh()
     }
 
     fun isUiReady(

@@ -58,14 +58,10 @@ internal abstract class StateCache<T>(
         next: ObservationState<T>,
     ) = Unit
 
-    // Caller scopes remain in the facade for compatibility; leaving a screen only detaches its collectors.
-    protected fun ensure(
-        @Suppress("UNUSED_PARAMETER") scope: CoroutineScope,
-    ) = coordinator.ensure()
+    // Loads run on the process-owned ObservationRuntime scope; leaving a screen only detaches its collectors.
+    protected fun ensure() = coordinator.ensure()
 
-    protected fun forceRefresh(
-        @Suppress("UNUSED_PARAMETER") scope: CoroutineScope,
-    ) {
+    protected fun forceRefresh() {
         if (!ready) return
         source?.refresh()
         coordinator.refresh()
