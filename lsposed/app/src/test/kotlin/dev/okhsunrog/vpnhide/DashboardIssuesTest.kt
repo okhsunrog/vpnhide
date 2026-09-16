@@ -19,6 +19,14 @@ import org.junit.Test
 class DashboardIssuesTest {
     // ── Fixtures — a healthy device, so each test states only its own deviation ──
 
+    @Test
+    fun `live builtin warns about redundant kmod and missing companion`() {
+        val redundant = moduleFacts(kmod = installed(active = false), builtin = installed())
+        assertTrue(dashboardIssues(facts(modules = redundant)).contains(DashboardIssue.RedundantKmodWithBuiltin))
+        val missing = moduleFacts(kmod = installed(active = false)).copy(builtinKernelPresent = true)
+        assertTrue(dashboardIssues(facts(modules = missing)).contains(DashboardIssue.BuiltinCompanionMissing))
+    }
+
     private val bootId = "boot-1"
 
     private fun installed(

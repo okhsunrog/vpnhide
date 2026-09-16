@@ -1,7 +1,8 @@
 # Built-in backend app integration audit
 
 Scope: application consumers of native-backend identity, based on main
-`eec0d95f` (2026-09-16). Kernel hook implementations are outside this audit.
+`eec0d95f` (2026-09-16). Kernel hook implementations are outside this audit. Companion loading and
+activation guards are included in the follow-up below.
 
 Confirmed gaps addressed:
 
@@ -27,3 +28,13 @@ Regression tests cover built-in-only row selection, inactive companion display,
 statistics before/after the first interception, optional-hook expectations and
 reset blocking. Existing shell syntax checks cover the expanded debug collector.
 Full reset must not be exercised against a working test phone.
+
+## Companion ownership guards
+
+The follow-up prevents the kmod loader from attempting insmod when the live
+kernel channel is present or cannot be identified. Both activators verify the
+open control file before writing a family-specific config. App activation
+selects the companion matching the live kernel, refuses an unavailable owner,
+and reports redundant kmod or missing built-in companions on the dashboard.
+A missing node retains the existing installed-module priority. Manual root
+insmod remains outside these userspace guards.

@@ -1266,6 +1266,21 @@ private fun deriveModuleFact(
 }
 
 /** Every module's state, as the cards show it and the banners read it. */
+private fun deriveKmodFact(
+    raw: NativeBackendStates,
+    sections: Map<String, String>,
+    recommendation: NativeInstallRecommendation?,
+    loadStatus: KmodLoadStatus?,
+    res: android.content.res.Resources,
+): ModuleFact =
+    deriveModuleFact(FlashableModuleKind.Kmod, raw.kmod, sections, KMOD_ACTIVATOR, res) {
+        if (parseCtlBackendId(sections) == BUILTIN_BACKEND_ID) {
+            null // The redundant-companion banner explains why this .ko must stay unloaded.
+        } else {
+            classifyKmodProblem(raw.kmod, recommendation, loadStatus)?.let { renderKmodProblem(it, res) }
+        }
+    }
+
 private fun deriveModuleFacts(
     sections: Map<String, String>,
     res: android.content.res.Resources,
@@ -1285,10 +1300,7 @@ private fun deriveModuleFacts(
         )
     VpnHideLog.i(TAG, "kmodLoadStatus=$kmodLoadStatus")
 
-    val kmod =
-        deriveModuleFact(FlashableModuleKind.Kmod, raw.kmod, sections, KMOD_ACTIVATOR, res) {
-            classifyKmodProblem(raw.kmod, kernelRecommendation, kmodLoadStatus)?.let { renderKmodProblem(it, res) }
-        }
+    val kmod = deriveKmodFact(raw, sections, kernelRecommendation, kmodLoadStatus, res)
     // The in-tree backend has no .ko to diagnose, so it needs no classifier —
     // only the shared integrity/pending-reboot checks on its companion activator.
     val builtin = deriveModuleFact(FlashableModuleKind.Builtin, raw.builtin, sections, BUILTIN_ACTIVATOR, res)
@@ -1314,6 +1326,7 @@ private fun deriveModuleFacts(
     return ModuleFacts(
         kmod = kmod,
         builtin = builtin,
+        builtinKernelPresent = sections["proc_exists"]?.trim() == "1" && parseCtlBackendId(sections) == BUILTIN_BACKEND_ID,
         kpm = kpm,
         zygisk = zygisk,
         ports = ports,
@@ -1501,7 +1514,7 @@ private fun DashboardFacts.toDashboardState(
         // yet. Wrong-variant / broken / unsupported-kernel cases already emit a red
         // error with the same call to action — showing both duplicates it.
         nativeInstallRecommendation =
-            kernelRecommendation?.takeIf { modules.backends.noneInstalled && !modules.standaloneKpm },
+            kernelRecommendation?.takeIf { modules.backends.noneInstalled && !modules.standaloneKpm && !modules.builtinKernelPresent },
         kmodLoadStatus = modules.kmodLoadStatus,
         protection = protection.check,
         messages = messages,

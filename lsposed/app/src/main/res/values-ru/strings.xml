@@ -616,4 +616,6 @@
     <string name="config_changes_unavailable">Изменение конфигурации недоступно</string>
     <string name="config_close">Закрыть</string>
     <string name="reset_blocker_builtin">Companion-модуль встроенного бэкенда ещё установлен</string>
+    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide встроен в работающее ядро. Удалите лишний модуль kmod и оставьте companion-модуль встроенного бэкенда.</string>
+    <string name="dashboard_issue_builtin_companion_missing">VPN Hide встроен в это ядро, но companion-модуль отсутствует. Установите companion-модуль встроенного бэкенда VPN Hide для настройки защиты.</string>
 </resources>

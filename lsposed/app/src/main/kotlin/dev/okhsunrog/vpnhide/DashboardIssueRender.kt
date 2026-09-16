@@ -87,6 +87,14 @@ private fun DashboardIssue.Native.nativeMessage(res: Resources): DashboardMessag
             err(res.getString(R.string.dashboard_issue_native_conflict_kernel), helpArticle = HelpArticle.CHOOSING_NATIVE)
         }
 
+        DashboardIssue.BuiltinCompanionMissing -> {
+            err(res.getString(R.string.dashboard_issue_builtin_companion_missing), helpArticle = HelpArticle.CHOOSING_NATIVE)
+        }
+
+        DashboardIssue.RedundantKmodWithBuiltin -> {
+            warn(res.getString(R.string.dashboard_issue_redundant_kmod_builtin), helpArticle = HelpArticle.CHOOSING_NATIVE)
+        }
+
         DashboardIssue.MultipleNativeActive -> {
             warn(res.getString(R.string.dashboard_issue_multiple_native), helpArticle = HelpArticle.CHOOSING_NATIVE)
         }

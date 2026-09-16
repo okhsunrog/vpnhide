@@ -647,4 +647,6 @@
     <string name="config_changes_unavailable">Configuration changes are unavailable</string>
     <string name="config_close">Close</string>
     <string name="reset_blocker_builtin">Built-in companion module is still installed</string>
+    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide is built into the running kernel. Remove the unnecessary kmod module and keep the built-in companion module.</string>
+    <string name="dashboard_issue_builtin_companion_missing">VPN Hide is built into this kernel, but its companion module is missing. Install the VPN Hide built-in companion module to configure protection.</string>
 </resources>

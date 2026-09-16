@@ -12,8 +12,9 @@ import dev.okhsunrog.vpnhide.picker.applyAutoHiddenPackages
 internal object ConfigChannels {
     /** Shell part running exactly one native activator by backend priority. */
     fun nativeActivatorCommand(): String =
-        "{ ${activatorShellHelper()}; " +
-            "if [ -f $KMOD_MODULE_DIR/module.prop ] && [ ! -f $KMOD_MODULE_DIR/disable ]; then " +
+        "{ ${activatorShellHelper()}; vh_activate_native() { " +
+            "if [ -e $PROC_CTL ]; then ${liveKernelActivatorCommand()}; " +
+            "elif [ -f $KMOD_MODULE_DIR/module.prop ] && [ ! -f $KMOD_MODULE_DIR/disable ]; then " +
             "run_activator $KMOD_ACTIVATOR kmod; " +
             "elif [ -f $BUILTIN_MODULE_DIR/module.prop ] && [ ! -f $BUILTIN_MODULE_DIR/disable ]; then " +
             "run_activator $BUILTIN_ACTIVATOR builtin; " +
@@ -21,7 +22,28 @@ internal object ConfigChannels {
             "run_activator $KPM_ACTIVATOR KPM; " +
             "elif [ -f $ZYGISK_MODULE_DIR/module.prop ] && [ ! -f $ZYGISK_MODULE_DIR/disable ]; then " +
             "run_activator $ZYGISK_ACTIVATOR Zygisk; " +
-            "else true; fi; }"
+            "else true; fi; }; vh_activate_native; }"
+
+    /** Read live identity before choosing a companion; never configure a foreign kernel backend. */
+    private fun liveKernelActivatorCommand(): String =
+        "VH_CTL_STATUS=${'$'}(cat $PROC_CTL) || return 1; " +
+            "VH_CTL_BACKEND=${'$'}(printf '%s\\n' \"${'$'}VH_CTL_STATUS\" | " +
+            "awk '/^[[:space:]]*#/ || NF == 0 { next } " +
+            "/^vpnhide 1 status${'$'}/ { if (status) bad=1; status=1; next } " +
+            "/^vpnhide / { if (status) exit; bad=1 } " +
+            "status { if (NF != 2 || ${'$'}2 !~ /^0x[0-9a-fA-F]+${'$'}/ || " +
+            "${'$'}1 !~ /^(backend|kver|hooks|error)${'$'}/ || seen[${'$'}1]++) bad=1; " +
+            "if (${'$'}1 == \"backend\") value=${'$'}2; fields++ } " +
+            "END { if (!bad && status && fields == 4) print value; else exit 1 }') || " +
+            "{ echo 'Cannot identify live kernel backend' >&2; return 1; }; " +
+            "case \"${'$'}VH_CTL_BACKEND\" in " +
+            "0x4) if [ -f $BUILTIN_MODULE_DIR/module.prop ] && [ ! -f $BUILTIN_MODULE_DIR/disable ]; then " +
+            "run_activator $BUILTIN_ACTIVATOR builtin; else " +
+            "echo 'Built-in kernel backend requires an enabled VPN Hide built-in companion module' >&2; return 1; fi ;; " +
+            "0x0) if [ -f $KMOD_MODULE_DIR/module.prop ] && [ ! -f $KMOD_MODULE_DIR/disable ]; then " +
+            "run_activator $KMOD_ACTIVATOR kmod; else " +
+            "echo 'Live kmod requires an enabled VPN Hide kmod companion module' >&2; return 1; fi ;; " +
+            "*) echo 'Unknown live kernel backend; activation refused' >&2; return 1 ;; esac"
 
     /** Shell part running the optional ports activator when its module is enabled. */
     fun portsActivatorCommand(): String =

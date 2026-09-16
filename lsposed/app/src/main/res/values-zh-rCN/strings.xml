@@ -604,4 +604,6 @@
     <string name="config_changes_unavailable">暂时无法更改配置</string>
     <string name="config_close">关闭</string>
     <string name="reset_blocker_builtin">内置后端配套模块仍已安装</string>
+    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide 已内置于当前内核。请移除多余的 kmod 模块，并保留内置后端配套模块。</string>
+    <string name="dashboard_issue_builtin_companion_missing">VPN Hide 已内置于此内核，但缺少配套模块。请安装 VPN Hide 内置后端配套模块以配置保护。</string>
 </resources>
