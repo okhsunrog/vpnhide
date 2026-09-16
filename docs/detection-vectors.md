@@ -310,7 +310,7 @@ summary:
 | Legacy VPN handle | `getNetworkForType(TYPE_VPN)` | return `null` (no connected VPN handle) |
 | VPN handle facts | `getNetworkCapabilities(Network)` / `getLinkProperties(Network)` / `getNetworkInfo(Network)` on a VPN handle | return `null` — the AOSP answer for an unknown netId, so a retained or scanned VPN handle describes no network (never a transport-less capability set, an interfaceless link, or a connected Wi-Fi) |
 | Interface name / routes / DNS | `LinkProperties.{getInterfaceName,getRoutes,getDnsServers}` | null `mIfaceName`, filter `mRoutes`, recurse into stacked links |
-| Async push | `registerDefaultNetworkCallback()` / `registerNetworkCallback()` | suppress VPN-requested callbacks; stash recipient UID across dispatch (issue #70) |
+| Async push | `registerDefaultNetworkCallback()` / `registerNetworkCallback()` / PendingIntent variants | suppress a VPN-specific request and a passive listen's VPN match; rewrite a default/request callback to the cover network — its handle, capabilities and link properties together — so the pushed event is self-consistent; swap the PendingIntent's network before its async parcel (issue #70) |
 
 `TYPE_VPN` support is not evidence of an active VPN. AOSP 9–16 returns a
 disconnected `NetworkInfo` for that supported type even when no VPN exists.
@@ -327,8 +327,14 @@ held from before hiding — or built by scanning netIds — is consistently gone
 rather than answering a transport-less capability set or a connected Wi-Fi. The
 legacy VPN *type* answer stays the platform's disconnected VPN (#337); a connected
 VPN `NetworkInfo` reaching the parcel backstop is forced to that same disconnected
-VPN, never a connected Wi-Fi. Callback coherence with the cover network is the
-remaining separate work (issue #130 territory).
+VPN, never a connected Wi-Fi. Pushed callbacks are made coherent the same way the
+synchronous answers are: a default or request callback that would deliver the VPN
+is rewritten to the cover network as one unit (handle, capabilities and link
+properties all the cover's), a passive listen's VPN match is dropped so the app
+only sees the physical networks it already gets, and a PendingIntent's network is
+swapped before it is parcelled on the broadcast queue. Whether the cover may be
+bound and so bypass the tunnel is the split-tunnel assumption, unchanged here
+(issue #130 territory).
 
 ### 3E. Package visibility — "is the VPN-manager app installed?"
 

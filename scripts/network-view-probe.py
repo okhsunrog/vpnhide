@@ -181,13 +181,32 @@ def compare(args: argparse.Namespace) -> int:
         b = base_facts.get(net["netId"])
         if b is None or net["netId"] in vpn:
             continue
-        for key in ("capabilities", "linkProperties", "networkInfo"):
+        for key in ("capabilities", "linkProperties"):
             check(
                 f"net {net['netId']} {key} equals baseline",
                 net.get(key) == b.get(key),
                 "same"
                 if net.get(key) == b.get(key)
                 else f"target={net.get(key)}\n      base={b.get(key)}",
+            )
+        # NetworkInfo connection state (state/detailedState/available/extraInfo)
+        # is the platform's per-uid blocked policy — a foregrounded uid reads
+        # CONNECTED where a backgrounded one reads DISCONNECTED/BLOCKED — so
+        # comparing it across two uids is not a hiding check. Compare only the
+        # network identity (type); a state difference is reported as info.
+        ti, bi = net.get("networkInfo") or {}, b.get("networkInfo") or {}
+        identity = ("type", "typeName", "subtype")
+        t_id = {k: ti.get(k) for k in identity}
+        b_id = {k: bi.get(k) for k in identity}
+        check(
+            f"net {net['netId']} networkInfo type equals baseline",
+            t_id == b_id,
+            f"target={t_id} base={b_id}",
+        )
+        if ti.get("state") != bi.get("state"):
+            print(
+                f"  ... net {net['netId']} state differs (target={ti.get('state')} "
+                f"base={bi.get('state')}) — per-uid blocked policy, not a hiding check"
             )
     for inv in target["invariants"]:
         if inv["status"] == "violated":
