@@ -8,6 +8,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
+import dev.okhsunrog.vpnhide.diagnostics.MeasurementCoverage
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import dev.okhsunrog.vpnhide.diagnostics.classifyKpmProblem
@@ -1479,14 +1480,18 @@ private suspend fun resolveProtectionFacts(
                 // debug bundle renders), so the on-screen verdict and the exported
                 // one can never diverge. Tiles judge each backend on the vectors it
                 // owns; unowned leaks are left to the issue list.
+                // The layers the measurement was taken against, not the ones the
+                // Dashboard sees now: a backend switch makes the measurement Changed
+                // rather than re-attributing its evidence to a backend that never ran it.
+                val layers = terminal.coverage ?: MeasurementCoverage(nativeBackend, installedOptionalHooks, lsposedActive)
                 val built =
                     buildDiagnosticReport(
                         gate = DiagnosticGate.ROUTED,
                         results = terminal.results,
-                        backend = nativeBackend,
-                        lsposedActive = lsposedActive,
+                        backend = layers.backend,
+                        lsposedActive = layers.lsposedActive,
                         complete = true,
-                        installedOptionalHooks = installedOptionalHooks,
+                        installedOptionalHooks = layers.installedOptionalHooks,
                     )
                 report = built
                 ProtectionCheck.Checked(built.native.status, built.java.status)

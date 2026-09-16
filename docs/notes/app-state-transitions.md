@@ -932,11 +932,13 @@ state, and docs/debug-bundle.md says so. The logcat recorder leaves the object
 null. With this, every consumer named in §21 renders the one projection.
 
 Boundary: capture reservation, cancellation and packaging still use the older
-orchestration (§20); the §9 capture machine is deliberately not implemented. The
-per-check list and the Dashboard tiles still build the retained measurement's
-report against the current backend, not the measurement's own coverage (§6); a
-backend change makes the measurement `Changed`, so this only shows under a
-"results changed" banner until the backend is carried in `MeasurementContext`.
+orchestration (§20); the §9 capture machine is deliberately not implemented.
+`MeasurementContext.coverageLayers` carries the typed layers behind the coverage
+identity (backend, installed optional hooks, LSPosed liveness), and the per-check
+list and the Dashboard tiles build a retained measurement's report from them
+(§6); only an active run's partial evidence is attributed with the live layers.
+The derivation is memoised per snapshot observation id, since the presentation
+re-derives the context on every emission of any source.
 Probe quarantine is now a presentation condition: `DiagnosticPresentation.probeUnavailable`
 carries `DiagnosticRunState.quarantined`, the Diagnostics screen words it as its
 own banner (outranked by a current condition, outranking the retained history it

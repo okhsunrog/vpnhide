@@ -97,6 +97,8 @@ internal object DiagnosticsCache {
         data class Ready(
             val results: CheckResults,
             val complete: Boolean,
+            /** The layers the measurement was taken against; null for an active run's partial evidence. */
+            val coverage: MeasurementCoverage? = null,
         ) : State
     }
 

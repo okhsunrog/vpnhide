@@ -7,7 +7,8 @@ internal fun projectDiagnosticAttempt(
 ): DiagnosticsCache.State =
     when (attempt.outcome) {
         RunOutcome.Completed -> {
-            results?.let { DiagnosticsCache.State.Ready(it, complete = true) } ?: DiagnosticsCache.State.Failed
+            results?.let { DiagnosticsCache.State.Ready(it, complete = true, coverage = attempt.measurement?.context?.coverageLayers) }
+                ?: DiagnosticsCache.State.Failed
         }
 
         RunOutcome.NotStarted -> {

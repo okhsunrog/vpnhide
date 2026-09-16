@@ -1,5 +1,8 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
+import dev.okhsunrog.vpnhide.DisplayNativeBackend
+import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.moduleActive
 import kotlinx.serialization.Serializable
 
 internal data class ProbePlanEntry(
@@ -16,7 +19,26 @@ internal data class MeasurementContext(
     val changeEpoch: Long,
     val observationId: Long,
     val observedAt: Long,
+    /** The layers behind [coverage], kept so a retained measurement's report is built against them, never against the current backend (§6). */
+    val coverageLayers: MeasurementCoverage? = null,
 )
+
+/**
+ * The hiding layers a measurement was taken against: the active native backend,
+ * its installed optional hooks and LSPosed liveness. [identity] is the string
+ * the applicability comparison uses; the typed fields are what the per-check
+ * report needs to decide which vectors that backend owned at the time.
+ */
+internal data class MeasurementCoverage(
+    val backend: DisplayNativeBackend,
+    val installedOptionalHooks: Set<HookIds.Hook>,
+    val lsposedActive: Boolean,
+) {
+    val identity: String
+        get() = "backend=${backend.id};active=${moduleActive(
+            backend.state,
+        )};hooks=${installedOptionalHooks.map { it.name }.sorted()};lsposed=$lsposedActive"
+}
 
 internal fun sameMeasurementConditions(
     first: MeasurementContext,

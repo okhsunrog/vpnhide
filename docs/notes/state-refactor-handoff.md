@@ -181,8 +181,7 @@ old device-validation paragraphs predate the successful installs described below
    measurement against the *current* backend (§6 says coverage is never recalculated
    with a new backend); bounded because a backend change makes the measurement
    `Changed`, so the re-attributed list only ever sits under a "results changed"
-   banner. (c) needs the backend stored in `MeasurementContext` and the report built
-   from it, deferred. The latent hazard in `DiagnosticRunCoordinator.handle()` (a
+   banner. (c) is closed in the follow-up: `MeasurementContext.coverageLayers` carries the typed layers and both render sites build the retained report from them. The latent hazard in `DiagnosticRunCoordinator.handle()` (a
    deferred nobody completes for an attempt id evicted from retention) is closed:
    a handle exists only for a retained result or a live run, `ensure` returns null
    otherwise (I5).
