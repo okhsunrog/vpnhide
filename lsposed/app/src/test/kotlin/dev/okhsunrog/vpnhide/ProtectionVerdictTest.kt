@@ -69,6 +69,16 @@ class ProtectionVerdictTest {
     }
 
     @Test
+    fun `the bridge gate follows the tiles the screen shows`() {
+        val measured = protectionVerdict(presentation(measurement = measurement(measuredLayers)), liveLayers).check
+
+        assertEquals(DiagnosticGate.ROUTED, bridgeGate(measured))
+        // The VPN went off after the measurement: the overlay the screen applies wins.
+        assertEquals(DiagnosticGate.VPN_OFF, bridgeGate(effectiveProtection(measured, DiagnosticEligibility.VpnOff)))
+        assertNull(bridgeGate(ProtectionCheck.Failed))
+    }
+
+    @Test
     fun `a measurement whose evidence is gone is not routed`() {
         val presentation = presentation(measurement = measurement(measuredLayers), measurementResults = null)
 

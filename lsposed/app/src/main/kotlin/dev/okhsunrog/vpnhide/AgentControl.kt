@@ -22,7 +22,6 @@ import dev.okhsunrog.vpnhide.diagnostics.buildAppProbeStats
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
 import dev.okhsunrog.vpnhide.diagnostics.diffCapture
-import dev.okhsunrog.vpnhide.diagnostics.reportGate
 import dev.okhsunrog.vpnhide.diagnostics.snapshotCounters
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.picker.AppListCache
@@ -73,7 +72,13 @@ internal object AgentControl {
             // safe: the cache's sticky flag keeps a UI-set NEEDS_RESTART from being
             // cleared here.
             val diagnostics = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart = false)
-            val dashboard = loadDashboardState(context, selfNeedsRestart = false, rootSnapshot = rootSnapshot, diagnostics = diagnostics)
+            val derived = loadDashboardState(context, selfNeedsRestart = false, rootSnapshot = rootSnapshot, diagnostics = diagnostics)
+            // The Dashboard screen overlays the current eligibility on the derived
+            // tiles before rendering; the bridge does the same, so its dashboard and
+            // legacy gate/report say "VPN off" whenever the screen does, instead of
+            // presenting a retained measurement as measurable right now.
+            val protection = effectiveProtection(derived.protection, diagnostics.eligibility)
+            val dashboard = derived.copy(protection = protection)
             val statistics = buildStatisticsState(rootSnapshot).toAgentStatisticsState(selfPackage = context.packageName)
             val config = AgentBridgeJson.parseToJsonElement(canonicalConfigJson(currentCanonicalConfig(refresh = false)))
 
@@ -97,8 +102,8 @@ internal object AgentControl {
                 selfNeedsRestart = false,
                 rootSnapshot = rootSnapshot,
                 shellSnapshot = shellSnapshot,
-                gate = diagnostics.reportGate(),
-                checkResults = diagnostics.measurementResults,
+                gate = bridgeGate(protection),
+                checkResults = diagnostics.measurementResults.takeIf { protection is ProtectionCheck.Checked },
                 // The same projection the screens render, so getState and the UI agree.
                 diagnostics = diagnosticSummary(diagnostics),
                 dmesg = if (options.forensics) suExec("dmesg 2>/dev/null").second else "",

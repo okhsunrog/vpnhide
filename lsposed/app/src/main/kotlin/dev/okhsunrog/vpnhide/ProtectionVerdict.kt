@@ -50,3 +50,15 @@ internal fun protectionVerdict(
             ProtectionVerdict(ProtectionCheck.Blocked(gate), report = null)
         }
     }
+
+/**
+ * The legacy bundle gate of a bridge read, in the vocabulary of the tiles as the
+ * screen shows them (after the eligibility overlay): a blocking condition is its
+ * gate, measured tiles are `ROUTED`, and "could not measure" has no gate.
+ */
+internal fun bridgeGate(protection: ProtectionCheck): DiagnosticGate? =
+    when (protection) {
+        is ProtectionCheck.Blocked -> protection.gate
+        is ProtectionCheck.Checked -> DiagnosticGate.ROUTED
+        ProtectionCheck.Failed -> null
+    }
