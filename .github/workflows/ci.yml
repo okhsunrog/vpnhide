@@ -665,11 +665,14 @@ jobs:
         run: chmod +x "$VPNHIDE_IOC_BIN" "$VPNHIDE_BIND32_BIN"
 
       - name: Restore kernel ccache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        # restore + explicit save instead of the combined action: the combined
+        # post step saves whatever is on disk even for a cancelled job, and one
+        # cancelled run left a 1.5 KB cache that shadowed the real one by prefix.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.CCACHE_DIR }}
-          # A fresh key every run so the cache is saved with today's objects;
-          # the prefix restores the newest one for this KMI.
+          # A fresh key every run so a save carries today's objects; the prefix
+          # restores the newest one for this KMI.
           key: ccache-builtin-${{ matrix.kmi }}-${{ github.run_id }}
           restore-keys: ccache-builtin-${{ matrix.kmi }}-
 
@@ -703,8 +706,20 @@ jobs:
             make ARCH=arm64 LLVM=1 CC="ccache clang" -j"$(nproc)" Image
           )
           ccache -s
+          # Save only when the build compiled something new; a run that hit the
+          # cache for everything would just re-upload the same objects.
+          misses=$(ccache -s | awk '/^ *Misses:/ {print $2; exit}')
+          echo "ccache_save=$([ "${misses:-0}" -gt 0 ] && echo true || echo false)" >> "$GITHUB_ENV"
           VPNHIDE_QEMU_IMAGE="$KSRC/arch/arm64/boot/Image" builtin/test/run.sh "$KMI"
 
+      - name: Save kernel ccache
+        # Only a successful build with new objects is worth keeping; a failed or
+        # cancelled job must never publish a partial or empty cache.
+        if: success() && env.ccache_save == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-builtin-${{ matrix.kmi }}-${{ github.run_id }}
       - name: Upload built-in integration review
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
