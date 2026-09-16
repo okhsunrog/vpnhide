@@ -33,17 +33,28 @@ internal class VisibleNetworkResolver(
     private val rawCapabilities: (Any, Network) -> NetworkCapabilities?,
     private val heuristicOrder: (Any) -> List<Network>,
 ) {
-    // Reflection outcome: a method that threw (absent) is distinct from one that
-    // ran and returned a value (possibly null).
+    // Reflection outcome, three-way: the method is not present at all (an old ROM),
+    // it is present but its call threw (a runtime error — the AOSP resolution path
+    // exists, so we must not fall back to the heuristic), or it ran and returned a
+    // value (possibly null). Only [Absent] leaves the heuristic in play.
     private sealed interface Reflected<out T> {
         data object Absent : Reflected<Nothing>
+
+        data object Errored : Reflected<Nothing>
 
         data class Present<T>(
             val value: T,
         ) : Reflected<T>
     }
 
-    /** The cover network for [uid], or null when the platform resolves none. */
+    /**
+     * The cover network for [uid], or null when the platform resolves none. A
+     * priority cascade over the sources (underlying → per-uid default → global
+     * default → heuristic), each with a present/errored/absent branch; the
+     * branching is the point, so the complexity gate is opted out here rather than
+     * fragmented across helpers.
+     */
+    @Suppress("CyclomaticComplexMethod")
     fun coverFor(
         cs: Any,
         uid: Int,
@@ -61,6 +72,12 @@ internal class VisibleNetworkResolver(
                 }
             }
 
+            // Present-but-errored: the method exists, so the AOSP path is available;
+            // fall to the default source, never the heuristic.
+            Reflected.Errored -> {
+                trustedResolution = true
+            }
+
             Reflected.Absent -> {
                 Unit
             }
@@ -74,11 +91,21 @@ internal class VisibleNetworkResolver(
                 perUid.value?.let { usableCover(cs, uid, "default", it)?.let { c -> return logCover(uid, "default", c) } }
             }
 
+            Reflected.Errored -> {
+                trustedResolution = true
+            }
+
+            // The per-uid method is not present (<= Android 11): the global default
+            // is the version fallback, not a substitute for a null per-uid one.
             Reflected.Absent -> {
                 when (val global = reflectNetwork(cs, "getDefaultNetwork")) {
                     is Reflected.Present -> {
                         trustedResolution = true
                         global.value?.let { usableCover(cs, uid, "default", it)?.let { c -> return logCover(uid, "default", c) } }
+                    }
+
+                    Reflected.Errored -> {
+                        trustedResolution = true
                     }
 
                     Reflected.Absent -> {
@@ -115,50 +142,66 @@ internal class VisibleNetworkResolver(
         return if (isUsableCover(candidate)) network else null
     }
 
-    // getVpnUnderlyingNetworks(int): Present(array) when the method ran (the array
-    // may be empty = "no default network", or its elements the underlying nets),
-    // Present(null) when no VPN applies to the uid, Absent when the method threw.
+    // getVpnUnderlyingNetworks(int): Present(array) when it ran (empty = "no default
+    // network", elements = the underlying nets), Present(null) when no VPN applies
+    // to the uid, Absent when the method is not present, Errored when it threw.
     private fun vpnUnderlyingNetworks(
         cs: Any,
         uid: Int,
     ): Reflected<Array<Network>?> =
-        runCatching {
-            val value =
-                (XposedHelpers.callMethod(cs, "getVpnUnderlyingNetworks", uid) as? Array<*>)
-                    ?.filterIsInstance<Network>()
-                    ?.toTypedArray()
-            Reflected.Present(value)
-        }.getOrDefault(Reflected.Absent)
+        classify {
+            (XposedHelpers.callMethod(cs, "getVpnUnderlyingNetworks", uid) as? Array<*>)
+                ?.filterIsInstance<Network>()
+                ?.toTypedArray()
+        }
 
     // A ConnectivityService method returning a NetworkAgentInfo, reduced to its
-    // Network. Present(network-or-null) when it ran, Absent when it threw.
+    // Network. Present(network-or-null) when it ran, Absent/Errored otherwise.
     private fun reflectNetwork(
         cs: Any,
         method: String,
         vararg args: Any?,
     ): Reflected<Network?> =
-        runCatching {
+        classify {
             val nai = XposedHelpers.callMethod(cs, method, *args)
-            Reflected.Present(nai?.let { XposedHelpers.getObjectField(it, "network") as? Network })
-        }.getOrDefault(Reflected.Absent)
+            nai?.let { XposedHelpers.getObjectField(it, "network") as? Network }
+        }
 
-    // isNetworkWithCapabilitiesBlocked(nc, uid, false) (12+); false when the method
-    // is absent — see [CoverCandidate.blocked] for why undeterminable means usable.
+    // Run a reflective call and classify the outcome: a value (Present), a missing
+    // method (Absent — a NoSuchMethod error), or a runtime failure (Errored).
+    private fun <T> classify(block: () -> T): Reflected<T> =
+        try {
+            Reflected.Present(block())
+        } catch (_: NoSuchMethodError) {
+            Reflected.Absent
+        } catch (_: NoSuchMethodException) {
+            Reflected.Absent
+        } catch (_: Throwable) {
+            Reflected.Errored
+        }
+
+    // isNetworkWithCapabilitiesBlocked(nc, uid, false) (12+): the platform's own
+    // per-uid blocked verdict. When the method is absent OR its call fails the
+    // verdict is undeterminable; it resolves to false (usable) because the source
+    // network is one AOSP already chose as the underlying/default — see
+    // [CoverCandidate.blocked]. This never *manufactures* a blocked network.
     private fun isBlockedForUid(
         cs: Any,
         caps: NetworkCapabilities,
         uid: Int,
     ): Boolean =
-        runCatching {
-            XposedHelpers.callMethod(
-                cs,
-                "isNetworkWithCapabilitiesBlocked",
-                arrayOf(NetworkCapabilities::class.java, Integer.TYPE, java.lang.Boolean.TYPE),
-                caps,
-                uid,
-                false,
-            ) as? Boolean
-        }.getOrNull() ?: false
+        (
+            classify {
+                XposedHelpers.callMethod(
+                    cs,
+                    "isNetworkWithCapabilitiesBlocked",
+                    arrayOf(NetworkCapabilities::class.java, Integer.TYPE, java.lang.Boolean.TYPE),
+                    caps,
+                    uid,
+                    false,
+                ) as? Boolean
+            } as? Reflected.Present
+        )?.value ?: false
 
     private fun logCover(
         uid: Int,

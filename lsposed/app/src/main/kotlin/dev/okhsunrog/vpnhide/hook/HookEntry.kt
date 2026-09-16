@@ -80,9 +80,17 @@ class HookEntry : IXposedHookLoadPackage {
     // netIds this process has hidden from targets (a VPN swapped to the cover, or a
     // VPN listen suppressed). Remembered so a deferred CALLBACK_LOST that fires
     // after ConnectivityService has already removed the VPN — when its capabilities
-    // no longer identify it as a VPN — is still recognised and suppressed instead of
-    // delivering the real VPN netId. Bounded; entries are dropped on their LOST.
+    // no longer identify it as a VPN — is still recognised. An entry is NOT dropped
+    // on a loss: several registrations each get their own deferred onLost for the
+    // same VPN, so a single delivery must not stop recognising the rest. Bounded, so
+    // entries age out by LRU as newer VPNs are hidden.
     private val hiddenVpnNetIds = java.util.Collections.synchronizedSet(LinkedHashSet<Int>())
+
+    // The cover netId last delivered to each target uid's default/request callback.
+    // When the VPN is lost and no cover remains (the app is going offline), an
+    // onLost for this held network is delivered so the app does not keep a stale
+    // "network available" state. Bounded by LRU.
+    private val deliveredCoverByUid = java.util.Collections.synchronizedMap(LinkedHashMap<Int, Int>())
 
     // ConnectivityManager.CALLBACK_LOST — the notification type of an onLost
     // dispatch. Resolved from the framework so a value change is picked up; the
@@ -479,10 +487,20 @@ class HookEntry : IXposedHookLoadPackage {
 
     private fun isHiddenVpn(netId: Int?): Boolean = netId != null && hiddenVpnNetIds.contains(netId)
 
-    private fun forgetHiddenVpn(netId: Int?) {
-        netId ?: return
-        hiddenVpnNetIds.remove(netId)
+    private fun rememberDeliveredCover(
+        uid: Int,
+        coverNetId: Int,
+    ) {
+        synchronized(deliveredCoverByUid) {
+            deliveredCoverByUid[uid] = coverNetId
+            while (deliveredCoverByUid.size > MAX_HIDDEN_VPN_NETIDS) {
+                val oldest = deliveredCoverByUid.keys.iterator().next()
+                deliveredCoverByUid.remove(oldest)
+            }
+        }
     }
+
+    private fun takeDeliveredCover(uid: Int): Int? = synchronized(deliveredCoverByUid) { deliveredCoverByUid.remove(uid) }
 
     private fun Network.netIdOrNull(): Int? = toString().toIntOrNull()
 
@@ -1366,31 +1384,33 @@ class HookEntry : IXposedHookLoadPackage {
         val cs = connectivityServiceInstance ?: return
         val naiIndex = param.args.indexOfFirst { hasNetworkField(it) }
         val network =
-            if (naiIndex >=
-                0
-            ) {
-                XposedHelpers.getObjectField(param.args[naiIndex], "network") as? Network
-            } else {
-                dispatchedNetwork(param)
-            }
+            if (naiIndex >= 0) XposedHelpers.getObjectField(param.args[naiIndex], "network") as? Network else dispatchedNetwork(param)
         network ?: return
         val netId = network.netIdOrNull()
-        if (!isVpnNetwork(cs, network) && !isHiddenVpn(netId)) {
-            // A physical network's own event — deliver unchanged.
-            return
-        }
-        if (dispatchNotificationType(param) == callbackLostType) {
-            forgetHiddenVpn(netId)
-            suppressDispatch(param, uid, "VPN-lost")
-            return
-        }
+        // A remembered hidden VPN netId counts only when it no longer resolves to a
+        // live network (a deferred loss after ConnectivityService dropped the VPN),
+        // so a netId since recycled to a real physical network is not misfired on.
+        val liveCaps = rawNetworkCapabilities(cs, network)
+        val isVpn = liveCaps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true || (liveCaps == null && isHiddenVpn(netId))
+        if (!isVpn) return // physical network event — deliver unchanged.
+
+        val isLost = dispatchNotificationType(param) == callbackLostType
         if (requestIsListen(request)) {
+            // The app never received the VPN through a listen (its onAvailable was
+            // suppressed), so its onLost is meaningless too. The netId stays
+            // remembered — a later registration may still get a deferred loss.
             rememberHiddenVpn(netId)
-            suppressDispatch(param, uid, "VPN-listen")
+            suppressDispatch(param, uid, if (isLost) "VPN-listen-lost" else "VPN-listen")
             return
         }
-        val coverNai =
-            if (naiIndex >= 0) coverNetworkFor(cs, uid)?.let { coverNetworkAgentInfo(cs, it) } else null
+        // A default/request callback was given the cover, so its lifecycle must
+        // follow the cover, not the VPN.
+        if (isLost) {
+            handleVpnLostForDefault(param, uid, cs)
+            return
+        }
+        val cover = coverNetworkFor(cs, uid)
+        val coverNai = if (naiIndex >= 0) cover?.let { coverNetworkAgentInfo(cs, it) } else null
         if (coverNai == null) {
             // No NAI arg to swap (a bundle-only dispatch), or no cover resolved:
             // suppress rather than leak the VPN handle or an empty network.
@@ -1400,6 +1420,7 @@ class HookEntry : IXposedHookLoadPackage {
         }
         param.args[naiIndex] = coverNai
         rememberHiddenVpn(netId)
+        cover?.netIdOrNull()?.let { rememberDeliveredCover(uid, it) }
         // Backstop for a ROM where the swap somehow leaves a VPN object in the sent
         // event: the parcel hooks then sanitise it for this recipient.
         inCallbackDispatch.set(true)
@@ -1407,6 +1428,48 @@ class HookEntry : IXposedHookLoadPackage {
         LsposedStats.record(uid, HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK)
         HookLog.i("VpnHide-CB: uid=$uid re-pointed ${param.method.name} to cover=${coverNetworkAgentNetId(coverNai)}")
     }
+
+    // The VPN was lost for a default/request target that we had handed the cover.
+    // If the uid still has a usable cover, its own network is not lost — any change
+    // of default arrives as its own onAvailable, so suppress the VPN loss. If no
+    // cover resolves, the app is going offline and must receive an onLost for the
+    // network it actually holds, or it keeps a stale "network available" state — so
+    // re-point the loss to the last cover delivered to this uid.
+    private fun handleVpnLostForDefault(
+        param: XC_MethodHook.MethodHookParam,
+        uid: Int,
+        cs: Any,
+    ) {
+        if (coverNetworkFor(cs, uid) != null) {
+            suppressDispatch(param, uid, "VPN-lost (cover intact)")
+            return
+        }
+        val heldCover = takeDeliveredCover(uid)
+        val coverNetwork = heldCover?.let { buildNetworkForNetId(it) }
+        if (coverNetwork == null || !repointDispatchNetwork(param, coverNetwork)) {
+            suppressDispatch(param, uid, "VPN-lost (no held cover)")
+            return
+        }
+        LsposedStats.record(uid, HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK)
+        HookLog.i("VpnHide-CB: uid=$uid re-pointed VPN-lost to held cover=net$heldCover")
+    }
+
+    // Replace the network a dispatch carries (a bundle-only onLost, or a NAI arg).
+    // Returns false when neither could be rewritten, so the caller suppresses.
+    private fun repointDispatchNetwork(
+        param: XC_MethodHook.MethodHookParam,
+        replacement: Network,
+    ): Boolean {
+        val bundle = param.args.getOrNull(CALLBACK_BUNDLE_ARG_INDEX) as? Bundle
+        if (bundle != null && bundle.getParcelable<Network>(Network::class.java.simpleName) != null) {
+            bundle.putParcelable(Network::class.java.simpleName, replacement)
+            return true
+        }
+        return false
+    }
+
+    private fun buildNetworkForNetId(netId: Int): Network? =
+        runCatching { XposedHelpers.newInstance(Network::class.java, netId) as Network }.getOrNull()
 
     private fun hasNetworkField(arg: Any?): Boolean =
         arg != null && runCatching { XposedHelpers.getObjectField(arg, "network") as? Network }.getOrNull() != null

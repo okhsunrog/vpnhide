@@ -472,46 +472,54 @@ internal fun checkNetworkCallbackVpn(
     // onLinkPropertiesChanged), so the latch must trip only once BOTH have
     // arrived for the same handle — not on the capabilities alone, which would
     // race the link properties and let a mismatched interface pass unread.
+    // The capabilities and the link properties must be observed for the SAME
+    // handle: Android delivers them in separate events, and the default can switch
+    // mid-capture, so the latch trips only when both are present and belong to one
+    // network — otherwise a caps reading for one network could be paired with a
+    // link-properties reading for another.
     val latch = CountDownLatch(1)
-    val seenNetwork = AtomicReference<Network?>(null)
-    val seenCaps = AtomicReference<NetworkCapabilities?>(null)
-    val seenLp = AtomicReference<LinkProperties?>(null)
+    val capsNetwork = AtomicReference<Network?>(null)
+    val caps = AtomicReference<NetworkCapabilities?>(null)
+    val lpNetwork = AtomicReference<Network?>(null)
+    val lp = AtomicReference<LinkProperties?>(null)
 
     fun completeIfReady() {
-        if (seenNetwork.get() != null && seenCaps.get() != null && seenLp.get() != null) latch.countDown()
+        val n = capsNetwork.get() ?: return
+        if (caps.get() != null && lp.get() != null && lpNetwork.get() == n) latch.countDown()
     }
     val callback =
         object : ConnectivityManager.NetworkCallback() {
             override fun onLinkPropertiesChanged(
                 network: Network,
-                lp: LinkProperties,
+                linkProperties: LinkProperties,
             ) {
-                seenLp.set(lp)
+                lpNetwork.set(network)
+                lp.set(linkProperties)
                 completeIfReady()
             }
 
             override fun onCapabilitiesChanged(
                 network: Network,
-                caps: NetworkCapabilities,
+                networkCapabilities: NetworkCapabilities,
             ) {
-                seenNetwork.set(network)
-                seenCaps.set(caps)
+                capsNetwork.set(network)
+                caps.set(networkCapabilities)
                 completeIfReady()
             }
         }
     return try {
         cm.registerDefaultNetworkCallback(callback)
         val fired = latch.await(3, TimeUnit.SECONDS)
-        val caps = seenCaps.get()
-        val lp = seenLp.get()
-        if (!fired || caps == null || lp == null) {
-            // The full event pair did not arrive within the deadline: a
-            // non-observation, not evidence of hiding. Reporting it clean would
-            // mask a broken/slow push path — surface it as not-measured, and say
-            // which half was missing so a genuinely slow device is diagnosable.
-            javaCheck(name, null, "no complete callback (caps=${caps != null}, linkProperties=${lp != null})")
+        val network = capsNetwork.get()
+        val capsValue = caps.get()
+        val lpValue = lp.get()
+        if (!fired || network == null || capsValue == null || lpValue == null || lpNetwork.get() != network) {
+            // The full event pair for one handle did not arrive within the
+            // deadline: a non-observation, not evidence of hiding. Reporting it
+            // clean would mask a broken/slow push path — surface it as not-measured.
+            javaCheck(name, null, "no complete callback for one handle (caps=${capsValue != null}, linkProperties=${lpValue != null})")
         } else {
-            val (detail, clean) = callbackCleanAndCoherent(cm, seenNetwork.get(), caps, lp)
+            val (detail, clean) = callbackCoherence(cm, network, capsValue, lpValue)
             javaCheck(name, clean, detail)
         }
     } catch (e: Exception) {
@@ -523,26 +531,36 @@ internal fun checkNetworkCallbackVpn(
 
 /**
  * A pushed default-network callback must be clean (no VPN transport, NOT_VPN
- * present) AND coherent with the synchronous view: the link properties it
- * carried must name the same interface that `getLinkProperties(handle)` returns
- * for the handle it delivered. A cover handle pushed with the VPN's emptied link
- * properties — the exact incoherence the network-view work fixes — trips the
- * second half even when the capabilities read clean.
+ * present) AND coherent with the synchronous view: the link properties it carried
+ * must name the same interface that `getLinkProperties(handle)` returns for the
+ * handle it delivered. A cover handle pushed with the VPN's emptied link
+ * properties — the exact incoherence the network-view work fixes — trips it even
+ * when the capabilities read clean.
+ *
+ * `clean` is a tri-state: false = leak, true = coherent, null = could not be
+ * measured (the synchronous side was unreadable, so neither hidden nor leaked).
  */
-private fun callbackCleanAndCoherent(
+private fun callbackCoherence(
     cm: ConnectivityManager,
-    network: Network?,
+    network: Network,
     caps: NetworkCapabilities,
-    lp: LinkProperties?,
-): Pair<String, Boolean> {
+    lp: LinkProperties,
+): Pair<String, Boolean?> {
     val hasVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
     val notVpn = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
     if (hasVpn || !notVpn) {
         return "callback leaks VPN: hasTransport(VPN)=$hasVpn, NOT_VPN=$notVpn" to false
     }
-    val callbackIface = lp?.interfaceName
-    val syncIface = network?.let { runCatching { cm.getLinkProperties(it)?.interfaceName }.getOrNull() }
-    if (callbackIface != null && syncIface != null && callbackIface != syncIface) {
+    // Compare the callback's interface against the synchronous answer for the SAME
+    // handle. A failed sync read, or none at all (the network already gone), cannot
+    // establish coherence — that is not-measured, not a pass.
+    val syncLp = runCatching { cm.getLinkProperties(network) }
+    if (syncLp.isFailure) return "sync getLinkProperties threw: ${syncLp.exceptionOrNull()?.message}" to null
+    val syncIface = syncLp.getOrNull()?.interfaceName ?: return "no synchronous link properties for $network" to null
+    val callbackIface = lp.interfaceName
+    // Includes a null/blank callback interface against a real sync one — the exact
+    // incoherence of a cover handle pushed with an emptied link-properties object.
+    if (callbackIface != syncIface) {
         return "callback handle $network carries iface=$callbackIface but sync says $syncIface" to false
     }
     return "callback caps clean and link properties coherent (iface=$callbackIface)" to true
