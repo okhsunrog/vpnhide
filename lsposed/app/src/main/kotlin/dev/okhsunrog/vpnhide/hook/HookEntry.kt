@@ -419,18 +419,33 @@ class HookEntry : IXposedHookLoadPackage {
     // keep traffic inside the tunnel while hiding VPN state.
     // TODO: add a VPN-preserving concealment mode for that use case
     // (tracked by GitHub issue 130).
-    private fun findPhysicalNetwork(cs: Any): Network? {
-        val scored =
-            rawAllNetworks(cs).mapNotNull { network ->
+    private val visibleNetworks =
+        VisibleNetworkResolver(
+            rawCapabilities = ::rawNetworkCapabilities,
+            heuristicOrder = ::physicalNetworksByScore,
+        )
+
+    // The cover network for a uid, resolved the way AOSP resolves the network
+    // behind its VPN (underlying → default → heuristic). Null when the platform
+    // resolves none, in which case the caller must not invent one.
+    private fun coverNetworkFor(
+        cs: Any,
+        uid: Int,
+    ): Network? = visibleNetworks.coverFor(cs, uid)
+
+    // The last-resort ordering the resolver falls back to on a ROM without the
+    // per-uid AOSP methods: non-VPN networks with a physical transport, best first.
+    private fun physicalNetworksByScore(cs: Any): List<Network> =
+        rawAllNetworks(cs)
+            .mapNotNull { network ->
                 val caps = rawNetworkCapabilities(cs, network) ?: return@mapNotNull null
                 if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) || !hasPhysicalTransport(caps)) {
                     null
                 } else {
                     network to physicalNetworkScore(caps)
                 }
-            }
-        return scored.maxByOrNull { it.second }?.first
-    }
+            }.sortedByDescending { it.second }
+            .map { it.first }
 
     private fun sanitizedNetworkCapabilities(nc: NetworkCapabilities): NetworkCapabilities {
         val copy = NetworkCapabilities(nc)
@@ -706,7 +721,7 @@ class HookEntry : IXposedHookLoadPackage {
                     val network = param.thisObject as Network
                     try {
                         if (!isVpnNetwork(cs, network)) return
-                        val replacement = findPhysicalNetwork(cs) ?: return
+                        val replacement = coverNetworkFor(cs, effectiveCallerUid()) ?: return
                         val parcel = param.args[0] as android.os.Parcel
                         val flags = param.args[1] as Int
                         writingCopy.set(true)
@@ -1152,11 +1167,11 @@ class HookEntry : IXposedHookLoadPackage {
         val network = param.result as? Network ?: return
         val cs = param.thisObject ?: return
         if (!isVpnNetwork(cs, network)) return
-        val replacement = findPhysicalNetwork(cs)
+        val replacement = coverNetworkFor(cs, effectiveCallerUid())
         if (replacement == null) {
             HookLog.i(
                 "VpnHide: kept active VPN Network handle for uid=${effectiveCallerUid()}; " +
-                    "no physical replacement found",
+                    "no cover network resolved",
             )
             return
         }
