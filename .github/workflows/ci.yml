@@ -75,9 +75,13 @@ jobs:
               - 'scripts/build-version.py'
             ci:
               - '.github/**'
+            # No negation here: in paths-filter a lone `!kmod/kpm/**` matches every
+            # path outside kmod/kpm, which made a docs-only change run the kmod jobs.
+            # kmod/shared, kmod/test and kmod/generated are `shared` above;
+            # kmod/third_party is the KernelPatch submodule (kpm).
             kmod:
-              - 'kmod/**'
-              - '!kmod/kpm/**'
+              - 'kmod/*'
+              - 'kmod/module/**'
             kpm:
               - 'kmod/kpm/**'
             builtin:
