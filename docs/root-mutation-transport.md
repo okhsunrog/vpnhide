@@ -153,6 +153,16 @@ Other root managers and app-originated `su` permission domains are not validated
 by this test. A previous-boot receipt is simulated on the host; no device reboot
 was performed.
 
+## Native companion selection
+
+The supervisor exports its own executable path as `VPNHIDE_MUTATION_HELPER` to
+the command shell. The native phase invokes that helper with `activate-native`.
+This entry point delegates live kernel identity parsing and companion selection
+to the shared activator/protocol crates, then executes the installed companion's
+activator, preserving its output and exit status. The selector and activator
+remain supervised descendants of the existing mutation; they do not open a
+second coordinator operation. No protocol parsing is embedded in shell text.
+
 ## Runtime adoption
 
 The coordinator now connects every app writer and activation path. A lane never

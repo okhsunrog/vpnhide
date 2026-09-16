@@ -125,3 +125,17 @@ clamp|aaa\nbbb\nccc\n|6|aaa
 clamp|aaa\nbbb\nccc\n|4|aaa
 # not even the first line fits -> empty
 clamp|aaa\nbbb\nccc\n|2|
+
+# Status consumer parity. ? preserves absent fields; activation requires completeness.
+status_fields|vpnhide 1 status\nbackend 0x4\nkver 0x60100\nhooks 0x3ff\nerror 0x0\n|4,60100,3ff,0
+status_fields| # comment\r\n\t vpnhide\t1\tstatus\r\nerror\t0X0\r\nhooks 0XfF\r\nkver 0x0\r\nbackend 0x0004\r\nfuture 0x42\n|4,0,ff,0
+status_fields|vpnhide 1 status\n|?,?,?,?
+status_fields|vpnhide 1 status\nbackend 4\nkver 0x0\nhooks 0x0\nerror 0x0|?,0,0,0
+status_fields|vpnhide 1 status\nbackend 0x100000000\nkver 0x0\nhooks 0x0\nerror 0x0|?,0,0,0
+status_fields|vpnhide 1 status\nbackend 0x0\nbackend 0x4\nkver 0x0\nhooks 0x0\nerror 0x0|4,0,0,0
+status_fields|vpnhide 1 status\nbackend 0x4\nkver 0x0\nhooks 0x0\nerror 0x0\nvpnhide 1 stats\nbackend 0x0\n|4,0,0,0
+status_fields|vpnhide 2 status\nbackend 0x4|INVALID
+status_fields|vpnhide 1 stats\nbackend 0x4|INVALID
+status_fields|\xff\nvpnhide 1 status\nbackend 0x4|INVALID
+status_fields|vpnhide 1 status\nbackend 0x4\nbackend \xff\nkver 0x0\nhooks 0x0\nerror 0x0|4,0,0,0
+status_fields|vpnhide 1 status\nbackend 0x4 # inline comments are not supported\nkver 0x0\nhooks 0x0\nerror 0x0|?,0,0,0

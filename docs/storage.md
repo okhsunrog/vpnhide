@@ -565,8 +565,11 @@ canonical schema, backend protocol or LSPosed direct-read contract.
 
 ### Live kernel ownership before activation
 
-When `/proc/vpnhide_ctl` is present, app activation reads its status before
-selecting a companion. Backend `0x4` requires the enabled built-in companion;
+App activation invokes the packaged `vhmutate activate-native` entry point under
+the mutation supervisor. Selection lives in the shared activator crate and uses
+the protocol crate's status parser and generated backend enum; the app shell
+does not parse status. When `/proc/vpnhide_ctl` is present, its complete status
+determines the companion. Backend `0x4` requires the enabled built-in companion;
 `0x0` requires the enabled kmod companion. An unreadable, malformed or unknown
 status aborts activation. A missing/disabled matching companion is an error,
 not permission to invoke another installed backend. The installed-module

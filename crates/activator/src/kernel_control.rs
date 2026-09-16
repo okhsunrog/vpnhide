@@ -6,39 +6,16 @@ use std::path::Path;
 
 use crate::Result;
 
-pub(crate) const BUILTIN_BACKEND_ID: u32 = 4;
-pub(crate) const KMOD_BACKEND_ID: u32 = 0;
+use vpnhide_protocol::{hook_ids::Backend, parse_status_fields};
+
+pub(crate) const BUILTIN_BACKEND_ID: u32 = Backend::Builtin as u32;
+pub(crate) const KMOD_BACKEND_ID: u32 = Backend::Kmod as u32;
 
 pub(crate) fn parse_backend(text: &str) -> Result<u32> {
-    let mut status = false;
-    let mut fields = std::collections::BTreeMap::new();
-    for line in text.lines().map(str::trim) {
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if !status {
-            if line != "vpnhide 1 status" {
-                return Err("kernel control: missing status header".into());
-            }
-            status = true;
-            continue;
-        }
-        if line.starts_with("vpnhide ") {
-            break;
-        }
-        let words: Vec<_> = line.split_whitespace().collect();
-        if words.len() != 2 || !["backend", "kver", "hooks", "error"].contains(&words[0]) {
-            return Err("kernel control: malformed status field".into());
-        }
-        let value = u32::from_str_radix(words[1].strip_prefix("0x").unwrap_or(words[1]), 16)?;
-        if fields.insert(words[0], value).is_some() {
-            return Err("kernel control: duplicate status field".into());
-        }
-    }
-    if fields.len() != 4 {
-        return Err("kernel control: incomplete status".into());
-    }
-    Ok(fields["backend"])
+    parse_status_fields(text.as_bytes())
+        .and_then(|fields| fields.complete())
+        .map(|status| status.backend)
+        .ok_or_else(|| "kernel control: invalid or incomplete status".into())
 }
 
 pub(crate) fn observed_backend(path: &Path) -> Result<Option<u32>> {
@@ -121,7 +98,7 @@ mod tests {
             parse_backend(&format!("{text}vpnhide 1 stats\n0x1234 0x0:0x1\n")).unwrap(),
             4
         );
-        assert!(parse_backend(&format!("{text}backend 0x0\n")).is_err());
+        assert_eq!(parse_backend(&format!("{text}backend 0x0\n")).unwrap(), 0);
         assert!(parse_backend("vpnhide 1 status\nbackend 0x4\n").is_err());
     }
 

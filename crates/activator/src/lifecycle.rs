@@ -319,7 +319,7 @@ pub fn boot_service_kmod() -> Result<()> {
 /// Backend id the in-tree driver reports in its /proc/vpnhide_ctl `status` line
 /// (data/hooks.toml -> VPNHIDE_BACKEND_BUILTIN). The .ko reports 0; the two share
 /// the node and are mutually exclusive, so this is how we tell which is live.
-const BUILTIN_BACKEND_ID: u32 = 4;
+const BUILTIN_BACKEND_ID: u32 = vpnhide_protocol::hook_ids::Backend::Builtin as u32;
 
 /// Parse the `backend 0x<n>` field from a /proc/vpnhide_ctl status read.
 fn observed_ctl_backend() -> Option<u32> {

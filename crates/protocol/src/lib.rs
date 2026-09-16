@@ -272,6 +272,62 @@ pub fn peek_kind(buf: &[u8]) -> Option<Kind> {
     parse_header(buf).map(|(k, _)| k)
 }
 
+/// Telemetry fields preserve absence: a valid header alone must not establish
+/// backend zero. Display consumers may default missing fields; ownership checks
+/// require a complete observation. Unknown/malformed records are skipped (§4.5).
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct StatusFields {
+    pub backend: Option<u32>,
+    pub kver: Option<u32>,
+    pub hooks: Option<u32>,
+    pub error: Option<u32>,
+}
+
+impl StatusFields {
+    pub fn complete(self) -> Option<Status> {
+        Some(Status {
+            backend: self.backend?,
+            kver: self.kver?,
+            hooks: self.hooks?,
+            error: self.error?,
+        })
+    }
+}
+
+pub fn parse_status_fields(buf: &[u8]) -> Option<StatusFields> {
+    let (kind, rest) = parse_header(buf)?;
+    if kind != Kind::Status {
+        return None;
+    }
+    let mut fields = StatusFields::default();
+    for line in lines(rest).filter_map(significant) {
+        let mut words = tokens(line);
+        let key = words.next()?;
+        // A proc read concatenates status and stats; stop at the next block.
+        if key == b"vpnhide" {
+            break;
+        }
+        let Some(value) = words.next().and_then(|v| {
+            v.strip_prefix(b"0x")
+                .or_else(|| v.strip_prefix(b"0X"))
+                .and_then(|hex| parse_hex_bare(hex, 32))
+        }) else {
+            continue;
+        };
+        if words.next().is_some() {
+            continue;
+        }
+        match key {
+            b"backend" => fields.backend = Some(value as u32),
+            b"kver" => fields.kver = Some(value as u32),
+            b"hooks" => fields.hooks = Some(value as u32),
+            b"error" => fields.error = Some(value as u32),
+            _ => (),
+        }
+    }
+    Some(fields)
+}
+
 // --- config parse (§4.3) ---------------------------------------------------
 
 /// Parse a `config` payload. `None` if rejected whole.
@@ -684,6 +740,17 @@ mod tests {
                 ["kind", input, expect] => run_kind(input, expect),
                 ["stats", entries, expect] => run_stats(entries, expect),
                 ["status", fields, expect] => run_status(fields, expect),
+                ["status_fields", input, expect] => {
+                    let parsed = parse_status_fields(&decode(input));
+                    let actual = parsed
+                        .map(|s| {
+                            [s.backend, s.kver, s.hooks, s.error]
+                                .map(|v| v.map(|n| format!("{n:x}")).unwrap_or("?".into()))
+                                .join(",")
+                        })
+                        .unwrap_or("INVALID".into());
+                    assert_eq!(actual, *expect, "status fields: {input}");
+                }
                 ["clamp", full, outlen, expect] => run_clamp(full, outlen, expect),
                 _ => panic!("unrecognised vector: {line}"),
             }

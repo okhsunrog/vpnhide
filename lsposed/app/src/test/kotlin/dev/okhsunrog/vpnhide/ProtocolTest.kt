@@ -128,12 +128,37 @@ class ProtocolTest {
             // parse — the C and Rust ends are its only readers and hold that
             // parity between themselves.
             when (f[0]) {
-                "cfg" -> return@forEachLine
-                "kind" -> runKind(f[1], f[2])
-                "stats" -> runStats(f[1], f[2])
-                "status" -> runStatus(f[1], f[2])
-                "clamp" -> runClamp(f[1], f[2], f[3])
-                else -> error("unrecognised vector: $line")
+                "cfg" -> {
+                    return@forEachLine
+                }
+
+                "kind" -> {
+                    runKind(f[1], f[2])
+                }
+
+                "stats" -> {
+                    runStats(f[1], f[2])
+                }
+
+                "status" -> {
+                    runStatus(f[1], f[2])
+                }
+
+                "status_fields" -> {
+                    val parsed = Protocol.parseStatusFields(decode(f[1]))
+                    val actual =
+                        parsed?.let { listOf(it.backend, it.kver, it.hooks, it.error).joinToString(",") { v -> v?.toString(16) ?: "?" } }
+                            ?: "INVALID"
+                    assertEquals("status fields: ${f[1]}", f[2], actual)
+                }
+
+                "clamp" -> {
+                    runClamp(f[1], f[2], f[3])
+                }
+
+                else -> {
+                    error("unrecognised vector: $line")
+                }
             }
             count++
         }

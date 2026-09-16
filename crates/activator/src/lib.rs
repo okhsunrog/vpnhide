@@ -107,6 +107,8 @@ mod kpm;
 mod lifecycle;
 mod model;
 mod ports;
+mod selection;
+pub use selection::activate_native_companion;
 
 use kpm::*;
 pub use lifecycle::*;

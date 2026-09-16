@@ -994,16 +994,7 @@ internal fun resolveLsposedState(
 // A null id must never be treated as "the other backend"; callers keep their
 // existing honest behaviour when it is null.
 internal fun parseCtlBackendId(sections: Map<String, String>): Int? =
-    sections["kmod_state"]
-        .orEmpty()
-        .lineSequence()
-        .firstNotNullOfOrNull { line ->
-            Regex("""\bbackend\s+0x([0-9a-fA-F]+)\b""")
-                .find(line)
-                ?.groupValues
-                ?.get(1)
-                ?.toIntOrNull(16)
-        }
+    Protocol.parseStatusFields(sections["kmod_state"].orEmpty())?.backend?.toInt()
 
 private val BUILTIN_BACKEND_ID = HookIds.Backend.BUILTIN.id
 

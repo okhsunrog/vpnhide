@@ -85,6 +85,18 @@ impl Fixture {
 }
 
 #[test]
+fn command_receives_the_supervisors_helper_path() {
+    let fixture = Fixture::new();
+    fixture.open();
+    let script = fixture.script("printf '%s' \"$VPNHIDE_MUTATION_HELPER\" > helper-path");
+    assert_eq!(fixture.run("1", &script)["state"]["status"], "finished");
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("helper-path")).unwrap(),
+        env!("CARGO_BIN_EXE_vhmutate")
+    );
+}
+
+#[test]
 fn adopt_opens_in_one_round_trip_and_replaces_a_quiescent_predecessor() {
     let fixture = Fixture::new();
     // A lane never opened in this boot is adopted directly: pre-transport commands

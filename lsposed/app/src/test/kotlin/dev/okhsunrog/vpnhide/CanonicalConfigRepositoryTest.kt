@@ -35,23 +35,11 @@ class CanonicalConfigRepositoryTest {
     }
 
     @Test
-    fun `native activator stderr is folded into save output`() {
-        val command = ConfigChannels.nativeActivatorCommand()
-
-        assertTrue(command.contains("\"${'$'}ACTIVATOR_PATH\" 2>&1"))
-        assertTrue(command.contains("run_activator $KMOD_ACTIVATOR kmod"))
-        assertTrue(command.contains("run_activator $KPM_ACTIVATOR KPM"))
-        assertTrue(command.contains("run_activator $ZYGISK_ACTIVATOR Zygisk"))
-    }
-
-    @Test
-    fun `activation selects installed backend before validating its activator`() {
-        val command = ConfigChannels.nativeActivatorCommand()
-
-        assertTrue(command.contains("[ -f $KMOD_MODULE_DIR/module.prop ]"))
-        assertTrue(command.contains("run_activator $KMOD_ACTIVATOR kmod"))
-        assertTrue(command.indexOf("$KMOD_MODULE_DIR/module.prop") < command.indexOf("$KPM_MODULE_DIR/module.prop"))
-        assertTrue(command.contains("return 1"))
+    fun `native activation delegates to supervised helper without parsing wire`() {
+        assertEquals(
+            "\"${'$'}{VPNHIDE_MUTATION_HELPER:?mutation helper not supplied}\" activate-native",
+            ConfigChannels.nativeActivatorCommand(),
+        )
     }
 
     @Test
