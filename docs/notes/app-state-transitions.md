@@ -953,7 +953,9 @@ is reduced and before its first `Execute`, so a `transform`-only write to
 interrupts an active one. Relevance only ever increases.
 
 The legacy `DiagnosticsCache.State` projection (`NotRun`/`Running`/`Blocked`/
-`Failed`/`Ready`) is retired. The Dashboard derivation and the bridge still join
+`Failed`/`Ready`) is retired, together with the `DiagnosticsCache.runs` accessor,
+the presentation's unrendered `lastAttemptResults` / `staleFailureVisible` and
+`StateCache.pristine`, none of which had a consumer. The Dashboard derivation and the bridge still join
 the active run or the automatic suite through `awaitTerminal`, which now returns
 the shared presentation once it reflects the terminal attempt (attempt ids are
 monotonic and runs finish in admission order, so the first presentation whose

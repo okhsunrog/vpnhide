@@ -48,7 +48,6 @@ internal abstract class StateCache<T>(
     val loading: StateFlow<Boolean> by lazy { ProjectedStateFlow(observation) { it.active != null } }
     val error: StateFlow<String?> by lazy { ProjectedStateFlow(observation) { if (it.active == null) it.error?.name else null } }
     val current: StateFlow<T?> by lazy { ProjectedStateFlow(observation, ::currentObservationValue) }
-    val pristine: Boolean get() = !observation.value.attempted
     protected open val ready: Boolean get() = true
 
     protected abstract suspend fun load(request: ObservationRequest): T

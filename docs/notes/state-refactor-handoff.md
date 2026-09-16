@@ -72,9 +72,9 @@ old device-validation paragraphs predate the successful installs described below
   a blocked eligibility is the `NotEligible` reducer event; measurement context
   (process/boot, self role and hooks, VPN interfaces and self routing, coverage)
   is captured at start and end; every check result has a stable id and the probe
-  plan is derived from the four spec registries. `DiagnosticsCache.runs` exposes
-  the view; the legacy `DiagnosticsCache.State` projection consumers rendered at
-  this stage was retired after item 4 (see item 5).
+  plan is derived from the four spec registries. The legacy `DiagnosticsCache.State`
+  projection consumers rendered at this stage, and the `runs` view accessor next to
+  it, were retired after item 4 (see item 5).
 - Last verification: 671 JVM tests, warnings-as-errors compilation, ktlint, detekt,
   CPD and Android lintDebug passed for the diagnostic execution stage. The signed
   release build and signature verification were last run at `a43cc3f0`.

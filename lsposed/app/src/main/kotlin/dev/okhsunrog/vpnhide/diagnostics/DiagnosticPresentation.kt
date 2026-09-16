@@ -24,18 +24,13 @@ internal data class DiagnosticPresentation(
     val activeStage: DiagnosticStage?,
     val activeResults: CheckResults?,
     val lastAttempt: DiagnosticAttempt?,
-    val lastAttemptResults: CheckResults?,
     val measurement: DiagnosticMeasurement?,
     val measurementResults: CheckResults?,
     val applicability: MeasurementApplicability,
     val evidence: MeasurementEvidence?,
     val currentSuccess: Boolean,
     val probeUnavailable: Boolean,
-) {
-    /** The latest attempt did not complete while an older complete measurement still exists. */
-    val staleFailureVisible: Boolean
-        get() = lastAttempt != null && lastAttempt.outcome != RunOutcome.Completed && measurement != null
-}
+)
 
 /**
  * The legacy gate the Dashboard tiles and the bridge's `gate`/`report` are built
@@ -74,7 +69,6 @@ internal fun diagnosticPresentation(
         activeStage = core.active?.stage,
         activeResults = view.activeResults,
         lastAttempt = core.lastAttempt,
-        lastAttemptResults = core.lastAttempt?.let { view.attemptResults[it.id] },
         measurement = measurement,
         measurementResults = measurement?.let { view.attemptResults[it.runId] },
         applicability = applicability,

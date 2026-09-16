@@ -301,7 +301,6 @@ class DashboardUiStateTest {
             activeStage = null,
             activeResults = null,
             lastAttempt = DiagnosticAttempt(1, RunOutcome.Completed, measurement = measurement),
-            lastAttemptResults = null,
             measurement = measurement,
             measurementResults = null,
             applicability = MeasurementApplicability.MatchesLastObservation,

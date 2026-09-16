@@ -92,7 +92,6 @@ class ProtectionVerdictTest {
         activeStage = null,
         activeResults = null,
         lastAttempt = lastAttempt,
-        lastAttemptResults = null,
         measurement = measurement,
         measurementResults = measurementResults,
         applicability = if (measurement == null) MeasurementApplicability.Absent else MeasurementApplicability.MatchesLastObservation,

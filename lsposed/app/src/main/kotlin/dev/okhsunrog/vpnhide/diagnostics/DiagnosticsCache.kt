@@ -46,7 +46,7 @@ internal sealed interface DiagnosticCaptureOutcome {
  * recreating the Activity never cancels or restarts a suite. Every consumer renders one projection,
  * [presentation]: the screens collect it, the Dashboard derivation and the bridge
  * read it once it reflects a terminal attempt ([awaitTerminal]), the bundle
- * summarises it. The identified run view behind it is [runs].
+ * summarises it.
  *
  * [run] is the automatic intent: it starts a suite only until one has actually
  * probed, and a blocked attempt does not consume it. [retry] keeps the existing
@@ -79,9 +79,6 @@ internal object DiagnosticsCache {
     private val coordinator by lazy {
         DiagnosticRunCoordinator(ObservationRuntime.scope, AppDiagnosticRunIo(inputs = { inputs }, impact = { impact }))
     }
-
-    /** The identified run state: active run, latest attempt, latest complete measurement and their evidence. */
-    val runs: StateFlow<DiagnosticRunView> get() = coordinator.view
 
     /**
      * The shared projection every consumer should render: one value per change of

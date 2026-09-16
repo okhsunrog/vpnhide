@@ -163,7 +163,6 @@ class DiagnosticScreenDataTest {
             activeStage = null,
             activeResults = null,
             lastAttempt = measurement?.let { DiagnosticAttempt(it.runId, RunOutcome.Completed, measurement = it) },
-            lastAttemptResults = measurement?.let { results(it.outcomes.values.first()) },
             measurement = measurement,
             measurementResults = measurement?.let { results(it.outcomes.values.first()) },
             applicability = if (measurement == null) MeasurementApplicability.Absent else MeasurementApplicability.MatchesLastObservation,
