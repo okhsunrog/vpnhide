@@ -1,0 +1,30 @@
+name: Cargo cache
+description: >-
+  Mark the checkout safe for git inside the CI container and restore the cargo
+  registry, git checkouts and the job's target directories. Every container job
+  that runs cargo used to repeat these two steps with a slightly different key.
+inputs:
+  key:
+    description: Job-specific segment of the cache key (the job name).
+    required: true
+  targets:
+    description: Newline-separated target directories to cache alongside the registry.
+    required: false
+    default: target
+runs:
+  using: composite
+  steps:
+    - name: Mark workspace safe
+      shell: bash
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+    - name: Cache cargo
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: |
+          /usr/local/cargo/registry
+          /usr/local/cargo/git
+          ${{ inputs.targets }}
+        # Both lock files feed every key: a job that does not build lsposed/native
+        # invalidates a little too often, which beats a stale registry.
+        key: cargo-${{ runner.os }}-${{ inputs.key }}-${{ hashFiles('Cargo.lock', 'lsposed/native/Cargo.lock') }}
+        restore-keys: cargo-${{ runner.os }}-${{ inputs.key }}-

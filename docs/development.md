@@ -158,15 +158,24 @@ which areas a pull request exercises, and every area job is gated on it:
 | `kmod/kpm/**` | `kpm`, `kpm-qemu`, `kpm-qemu-legacy` |
 | `builtin/**` | `builtin`, `builtin-integrator`, `builtin-qemu` |
 | `zygisk/**` | `zygisk` |
-| `lsposed/**` | `lsposed` |
+| `lsposed/**` | `android` |
 | `portshide/**` | `portshide` |
 | shared: `crates/**`, `Cargo.*`, `kmod/shared/**`, `kmod/test/**`, `kmod/generated/**`, the code generators | every area |
 | `.github/**` | every area |
 
-`lint` and `setup` always run; `qemu-native-probes` runs when any kernel-side
-area does. Pushes to `main`, tags and manual dispatches run everything. The
-`ci-ok` job is green when every job succeeded or was skipped by `changes` and
-red on any failure, so it is the one status branch protection requires.
+`lint-python` (ruff, generated files), `lint-shell-c` (shellcheck, clang-format,
+the host-side C tests) and `setup` always run. `rust` (rustfmt, clippy, cargo
+tests for the workspace and `lsposed/native`) runs for the shared inputs, `zygisk`
+and `lsposed`; `android` (ktlint, detekt, CPD, Android lint, unit tests and the APK
+in one Gradle run) for `lsposed`; `qemu-native-probes` when any kernel-side area
+does. Pushes to `main`, tags and manual dispatches run everything. The `ci-ok` job
+is green when every job succeeded or was skipped by `changes` and red on any
+failure, so it is the one status branch protection requires.
+
+Container jobs that run cargo share the composite action
+`.github/actions/cargo-cache` (safe.directory plus the registry and target
+caches). Actions are pinned to commit SHAs with a version comment; Dependabot
+opens a monthly pull request to move the pins.
 
 The `Labels` workflow applies `area:*` labels from the same paths
 (`.github/labeler.yml`). Labels only ever add runs: put `area:kmod` on a pull

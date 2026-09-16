@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
         with:
           version: "0.12.10"
@@ -54,6 +54,8 @@ jobs:
       portshide: ${{ steps.decide.outputs.portshide }}
       # Any kernel-side area: the QEMU probes feed kmod, kpm and builtin.
       native: ${{ steps.decide.outputs.native }}
+      # The Rust workspace (crates, zygisk) and lsposed/native.
+      rust: ${{ steps.decide.outputs.rust }}
     steps:
       # For pull requests the filter reads the diff through the API; no checkout.
       - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
@@ -104,6 +106,7 @@ jobs:
           [ "$F_CI" = true ] && full=true
           case " $LABELS " in *" ci:full "*) full=true ;; esac
           native=false
+          rust=false
           area() {
             local name=$1 changed=$2 on=false
             if [ "$full" = true ] || [ "$changed" = true ] || [ "$F_SHARED" = true ]; then on=true; fi
@@ -111,6 +114,7 @@ jobs:
             echo "$name=$on" >> "$GITHUB_OUTPUT"
             echo "$name: $on"
             [ "$on" = true ] && case "$name" in kmod|kpm|builtin) native=true ;; esac
+            [ "$on" = true ] && case "$name" in zygisk|lsposed) rust=true ;; esac
             return 0
           }
           echo "event=$EVENT full=$full shared=${F_SHARED:-n/a} labels='$LABELS'"
@@ -122,6 +126,9 @@ jobs:
           area portshide "$F_PORTSHIDE"
           echo "native=$native" >> "$GITHUB_OUTPUT"
           echo "native: $native"
+          if [ "$full" = true ] || [ "$F_SHARED" = true ]; then rust=true; fi
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "rust: $rust"
 
   setup:
     runs-on: ubuntu-latest
@@ -166,7 +173,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Build native QEMU probes
         # ifconf + bind-probe feed the kmod/kpm QEMU jobs. iface-ioctl (by-name
@@ -190,66 +197,28 @@ jobs:
             .artifacts/qemu-native-probes/bind-probe-compat
 
       - name: Upload QEMU native probes
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: qemu-native-probes
           path: .artifacts/qemu-native-probes
           if-no-files-found: error
 
-  lint:
-    needs: setup
+  # Python style and generated files: seconds on a plain runner, no container.
+  lint-python:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    container:
-      image: ${{ needs.setup.outputs.image }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-          fetch-depth: 0
-      - name: Mark workspace safe
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      # Python lint + format (ruff). Fast (~100 ms on 1800 LoC) so it
-      # runs first — fails before the slow Rust/Gradle steps.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: ruff format
-        uses: astral-sh/ruff-action@v4.0.0
+        uses: astral-sh/ruff-action@0ce1b0bf8b818ef400413f810f8a11cdbda0034b # v4.0.0
         with:
           version: ${{ env.RUFF_VERSION }}
           args: format --check
       - name: ruff check
-        uses: astral-sh/ruff-action@v4.0.0
+        uses: astral-sh/ruff-action@0ce1b0bf8b818ef400413f810f8a11cdbda0034b # v4.0.0
         with:
           version: ${{ env.RUFF_VERSION }}
           args: check
-
-      # Cache cargo deps + target dirs for clippy/test. Same key shape as
-      # zygisk + lsposed jobs — when those run on the same Cargo.lock the
-      # restore-keys fallback shares warm artifacts across jobs.
-      - name: Cache cargo
-        uses: actions/cache@v6
-        with:
-          path: |
-            /usr/local/cargo/registry
-            /usr/local/cargo/git
-            target
-            zygisk/target
-            lsposed/native/target
-          key: cargo-${{ runner.os }}-lint-${{ hashFiles('Cargo.lock', 'lsposed/native/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-lint-
-
-      # Gradle cache (deps + configuration cache + wrapper). cache-read-only
-      # on PRs so only main pushes write — keeps the cache from churning on
-      # every PR's branch-scoped key.
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-read-only: ${{ github.event_name == 'pull_request' }}
-
-      # Codegen — regenerate from the data/*.toml sources and fail on drift.
       - name: Verify generated files are up to date (iface lists + hook registry + help index)
         run: |
           python3 scripts/codegen-interfaces.py
@@ -261,35 +230,22 @@ jobs:
             exit 1
           fi
 
-      # Rust
-      - name: rustfmt
-        run: |
-          cargo fmt --check
-          cd lsposed/native && cargo fmt --check
-      - name: clippy (protocol + activator)
-        run: cargo clippy -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator --all-targets -- -D warnings
-      # `--tests` so generated test modules are also linted
-      # (catches `bool_assert_comparison`-style regressions in
-      # codegen output).
-      # armv7 target for the 32-bit zygisk build. Baked into the CI image
-      # (see .github/docker/ci/Dockerfile), but added here too so a PR that
-      # introduces it is green before the post-merge image rebuild catches
-      # up — rustup is a no-op once the image already carries the target.
-      - name: rustup target add armv7 (zygisk 32-bit)
-        run: rustup target add armv7-linux-androideabi
-      - name: clippy (zygisk)
-        run: cargo ndk -t arm64-v8a -t armeabi-v7a clippy -p vpnhide_zygisk --tests -- -D warnings
-      - name: clippy (lsposed native)
-        run: cd lsposed/native && cargo ndk -t arm64-v8a -t armeabi-v7a clippy --tests -- -D warnings
-      - name: cargo test (workspace)
-        run: cargo test -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_zygisk
-      - name: cargo test (lsposed native)
-        run: cd lsposed/native && cargo test
-
-      # Shell — module-side scripts (Magisk/KSU) and host-side dev tooling.
-      # shellcheck is preinstalled in the CI image (apt). The list is
-      # explicit so we don't accidentally pick up vendored .sh from
-      # zygisk/third_party.
+  # Shell scripts, C formatting and the host-side C tests of the shared kernel logic.
+  lint-shell-c:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: ${{ needs.setup.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+      - name: Mark workspace safe
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: shellcheck
         # SC2034: `SKIPUNZIP` and the `for i in seq …` counters look unused
         #         to shellcheck — Magisk reads SKIPUNZIP externally, the
@@ -329,10 +285,6 @@ jobs:
           cd kmod
           gcc -O2 -Wall -Werror -o /tmp/test_iface_lists test_iface_lists.c
           /tmp/test_iface_lists
-      # Shared backend-agnostic logic + the control/stats protocol parser /
-      # serialiser. The protocol harness runs the language-independent golden
-      # vectors (kmod/shared/protocol_vectors.tsv) — the C side of the
-      # cross-language parity check (docs/protocol.md §8).
       - name: shared-logic + protocol host tests
         run: |
           cd kmod/shared
@@ -341,30 +293,44 @@ jobs:
           gcc -O2 -Wall -Wextra -Werror -I.. -o /tmp/test_protocol test_protocol.c
           /tmp/test_protocol protocol_vectors.tsv
 
-      # Kotlin
-      # ktlint = formatting/style; detekt = complexity/length/dead-code/bug
-      # patterns; cpdCheck = cross-file copy-paste. detekt runs clean with no
-      # baseline (inherent spots are @Suppress-ed at the call site); cpdCheck
-      # is clean at its 100-token threshold. See lsposed/config/detekt/ and
-      # the cpd block in lsposed/build.gradle.kts.
-      - name: ktlint
-        run: ktlint "lsposed/app/src/**/*.kt"
-      # Single Gradle invocation: detekt + cpd + lint + tests share one
-      # configuration phase + warm daemon. Runs the buildRustProbe (cargo-ndk)
-      # task once instead of four times. ANDROID_NDK_HOME/_ROOT are baked into
-      # the CI image (Dockerfile ENV), no manual export needed.
-      - name: detekt + CPD + Android lint + Kotlin unit tests
-        # `:app:lintDebug` (not `:app:lint`) runs Lint on the debug
-        # variant only — release-variant Lint covers R8/ProGuard issues
-        # and is reserved for ad-hoc local runs / future tag CI.
-        # -PvpnhideWarningsAsErrors: the module compiles with zero Kotlin
-        # warnings; this keeps it that way. Off by default so a warning mid-edit
-        # doesn't stop a local build. A toolchain bump that introduces new
-        # warnings fails here — fix or @Suppress them in the bump.
+  # Rust workspace and lsposed/native: format, clippy for every target, tests.
+  rust:
+    needs: [setup, changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ${{ needs.setup.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/cargo-cache
+        with:
+          key: rust
+          targets: |
+            target
+            zygisk/target
+            lsposed/native/target
+      - name: rustfmt
         run: |
-          cd lsposed
-          ./gradlew -PvpnhideWarningsAsErrors=true \
-            :app:detekt cpdCheck :app:lintDebug :app:testDebugUnitTest
+          cargo fmt --check
+          cd lsposed/native && cargo fmt --check
+      - name: clippy (protocol + activator)
+        run: cargo clippy -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator --all-targets -- -D warnings
+      - name: rustup target add armv7 (zygisk 32-bit)
+        run: rustup target add armv7-linux-androideabi
+      - name: clippy (zygisk)
+        run: cargo ndk -t arm64-v8a -t armeabi-v7a clippy -p vpnhide_zygisk --tests -- -D warnings
+      - name: clippy (lsposed native)
+        run: cd lsposed/native && cargo ndk -t arm64-v8a -t armeabi-v7a clippy --tests -- -D warnings
+      - name: cargo test (workspace)
+        run: cargo test -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_zygisk
+      - name: cargo test (lsposed native)
+        run: cd lsposed/native && cargo test
 
   kmod-activator:
     needs: [setup, changes]
@@ -378,28 +344,19 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
-      - name: Mark workspace safe
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Cache cargo
-        uses: actions/cache@v6
+      - uses: ./.github/actions/cargo-cache
         with:
-          path: |
-            /usr/local/cargo/registry
-            /usr/local/cargo/git
-            target
-          key: cargo-${{ runner.os }}-kmod-activator-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-kmod-activator-
+          key: kmod-activator
 
       - name: Build kmod activator
         run: cargo ndk -t arm64-v8a build --release -p vpnhide_activator --bin kmod
 
       - name: Upload kmod activator
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: kmod-activator
           path: target/aarch64-linux-android/release/kmod
@@ -428,7 +385,7 @@ jobs:
       KMI: ${{ matrix.kmi }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -436,7 +393,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Download kmod activator
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: kmod-activator
           path: .artifacts/kmod-activator
@@ -447,7 +404,7 @@ jobs:
         run: python3 kmod/build.py --kmi $KMI --inside-container
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vpnhide-kmod-${{ matrix.kmi }}
           path: vpnhide-kmod-${{ matrix.kmi }}.zip
@@ -493,13 +450,13 @@ jobs:
       VPNHIDE_IOC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/iface-ioctl
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Mark workspace safe
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Download QEMU native probes
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: qemu-native-probes
           path: .artifacts/qemu-native-probes
@@ -549,7 +506,7 @@ jobs:
       VPNHIDE_IOC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/iface-ioctl
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive   # KernelPatch headers needed by `make kpm`
 
@@ -557,7 +514,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Download QEMU native probes
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: qemu-native-probes
           path: .artifacts/qemu-native-probes
@@ -606,7 +563,7 @@ jobs:
       VPNHIDE_IOC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/iface-ioctl
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive   # KernelPatch headers needed by `make kpm`
 
@@ -614,7 +571,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Download QEMU native probes
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: qemu-native-probes
           path: .artifacts/qemu-native-probes
@@ -684,7 +641,7 @@ jobs:
       VPNHIDE_BIND32_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/bind-probe-compat
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
         with:
           version: "0.12.10"
@@ -693,7 +650,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Download QEMU native probes
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: qemu-native-probes
           path: .artifacts/qemu-native-probes
@@ -725,7 +682,7 @@ jobs:
 
       - name: Upload built-in integration review
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: builtin-review-${{ matrix.kmi }}
           path: /tmp/vpnhide-review
@@ -748,7 +705,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive   # KernelPatch headers needed by `make kpm`
           fetch-depth: 0           # get_build_version's `git describe`
@@ -769,7 +726,7 @@ jobs:
           python3 kmod/kpm/build.py
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vpnhide-kpm
           path: vpnhide-kpm.zip
@@ -787,23 +744,15 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Mark workspace safe
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Cache cargo
-        uses: actions/cache@v6
+      - uses: ./.github/actions/cargo-cache
         with:
-          path: |
-            /usr/local/cargo/registry
-            /usr/local/cargo/git
-            zygisk/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-
+          key: zygisk
+          targets: zygisk/target
 
       # armv7 target for the 32-bit zygisk .so. Baked into the CI image, but
       # added here too so this PR is green before the post-merge image rebuild
@@ -819,7 +768,7 @@ jobs:
           python3 ./build.py
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vpnhide-zygisk
           path: zygisk/target/vpnhide-zygisk.zip
@@ -842,22 +791,13 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0           # get_build_version's `git describe`
 
-      - name: Mark workspace safe
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Cache cargo
-        uses: actions/cache@v6
+      - uses: ./.github/actions/cargo-cache
         with:
-          path: |
-            /usr/local/cargo/registry
-            /usr/local/cargo/git
-            target
-          key: cargo-${{ runner.os }}-builtin-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-builtin-
+          key: builtin
 
       - name: Build module zip
         env:
@@ -865,13 +805,15 @@ jobs:
         run: python3 builtin/build.py
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vpnhide-builtin
           path: vpnhide-builtin.zip
           if-no-files-found: error
 
-  lsposed:
+  # The Android app: ktlint, detekt, CPD, Android lint, unit tests and the APK
+  # in one Gradle invocation, so the checks and the build share one daemon.
+  android:
     needs: [setup, changes]
     if: needs.changes.outputs.lsposed == 'true'
     runs-on: ubuntu-latest
@@ -882,30 +824,24 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
-      - name: Mark workspace safe
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Cache cargo
-        uses: actions/cache@v6
+      - uses: ./.github/actions/cargo-cache
         with:
-          path: |
-            /usr/local/cargo/registry
-            /usr/local/cargo/git
-            lsposed/native/target
-          key: cargo-${{ runner.os }}-lsposed-${{ hashFiles('lsposed/native/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-lsposed-
+          key: android
+          targets: lsposed/native/target
 
       # Gradle cache (deps + configuration cache + wrapper). cache-read-only
       # on PRs so only main pushes write the cache.
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
+      - name: ktlint
+        run: ktlint "lsposed/app/src/**/*.kt"
       - name: Set up keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -940,22 +876,19 @@ jobs:
       # ready for the GitHub release). PRs and main pushes get assembleDebug
       # — same code paths exercised, no R8 step (~1.5–2 min faster).
       # `case` instead of `[[`: container jobs default to /bin/sh (POSIX).
-      - name: Build APK
+      - name: detekt + CPD + Android lint + unit tests + APK
         run: |
           cd "$GITHUB_WORKSPACE/lsposed"
           case "$GITHUB_REF" in
-            refs/tags/v*)
-              ./gradlew -PvpnhideWarningsAsErrors=true assembleRelease
-              cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/vpnhide.apk"
-              ;;
-            *)
-              ./gradlew -PvpnhideWarningsAsErrors=true assembleDebug
-              cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/vpnhide.apk"
-              ;;
+            refs/tags/v*) variant=Release; out=release/app-release.apk ;;
+            *)            variant=Debug;   out=debug/app-debug.apk ;;
           esac
+          ./gradlew -PvpnhideWarningsAsErrors=true \
+            :app:detekt cpdCheck :app:lintDebug :app:testDebugUnitTest "assemble$variant"
+          cp "app/build/outputs/apk/$out" "$GITHUB_WORKSPACE/vpnhide.apk"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vpnhide-apk
           path: vpnhide.apk
@@ -972,22 +905,13 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
-      - name: Mark workspace safe
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Cache cargo
-        uses: actions/cache@v6
+      - uses: ./.github/actions/cargo-cache
         with:
-          path: |
-            /usr/local/cargo/registry
-            /usr/local/cargo/git
-            target
-          key: cargo-${{ runner.os }}-portshide-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-portshide-
+          key: portshide
 
       - name: Package ports module zip
         env:
@@ -998,14 +922,14 @@ jobs:
           mv vpnhide-ports.zip "$GITHUB_WORKSPACE/vpnhide-ports.zip"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vpnhide-ports
           path: vpnhide-ports.zip
           if-no-files-found: error
 
   release:
-    needs: [builtin-integrator, kmod, kpm, builtin, zygisk, lsposed, portshide]
+    needs: [builtin-integrator, kmod, kpm, builtin, zygisk, android, portshide]
     if: startsWith(github.ref, 'refs/tags/v')
     timeout-minutes: 15
     runs-on: ubuntu-latest
@@ -1015,12 +939,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: dist/
           merge-multiple: true
@@ -1034,7 +958,7 @@ jobs:
           cat release-notes.md
 
       - name: Create draft release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ github.ref_name }}
           body_path: release-notes.md
@@ -1054,7 +978,9 @@ jobs:
       - changes
       - builtin-integrator
       - qemu-native-probes
-      - lint
+      - lint-python
+      - lint-shell-c
+      - rust
       - kmod-activator
       - kmod
       - kmod-qemu
@@ -1064,7 +990,7 @@ jobs:
       - kpm
       - zygisk
       - builtin
-      - lsposed
+      - android
       - portshide
     if: always()
     runs-on: ubuntu-latest
