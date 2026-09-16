@@ -454,7 +454,7 @@ class HookEntry : IXposedHookLoadPackage {
     @Suppress("DEPRECATION")
     private fun sanitizedNetworkInfo(ni: NetworkInfo): NetworkInfo {
         val type = XposedHelpers.getIntField(ni, "mNetworkType")
-        if (type != ConnectivityManager.TYPE_VPN) return ni
+        if (type != ConnectivityManager.TYPE_VPN || isInactiveVpnInfo(ni)) return ni
 
         val ctor =
             NetworkInfo::class.java.getDeclaredConstructor(
@@ -754,6 +754,7 @@ class HookEntry : IXposedHookLoadPackage {
                     try {
                         if (!isVpn) return
                         val copy = sanitizedNetworkInfo(ni)
+                        if (copy === ni) return
 
                         val parcel = param.args[0] as android.os.Parcel
                         val flags = param.args[1] as Int
@@ -1084,13 +1085,10 @@ class HookEntry : IXposedHookLoadPackage {
                     object : XC_MethodHook() {
                         override fun afterHookedMethod(param: MethodHookParam) {
                             rememberConnectivityService(param.thisObject)
-                            // getNetworkInfo(int networkType): an app that probes the
-                            // legacy VPN type directly (getNetworkInfo(TYPE_VPN)) must
-                            // get null — disguising the result as a *connected* WIFI
-                            // NetworkInfo still answers "a VPN-type network exists and
-                            // is connected", which isConnectedOrConnecting() reports as
-                            // true. See issue #85 (Улыбка радуги).
-                            if (method in LEGACY_TYPE_INFO_METHODS && suppressLegacyVpnTypeQuery(param)) return
+                            if (param.hasThrowable() || bypassConnectivitySanitize.get() == true) return
+                            // Legacy type queries must retain the platform's disconnected
+                            // VPN entry. A null or a connected WIFI replacement is observable.
+                            if (sanitizeLegacyNetworkInfoResult(method, param)) return
                             val explicitUid = uidArgIndex?.let { param.args.getOrNull(it) as? Int }
                             sanitizeMethodResult(param, explicitUid)
                         }
@@ -1188,19 +1186,47 @@ class HookEntry : IXposedHookLoadPackage {
         HookLog.i("VpnHide: suppressed getNetworkForType(TYPE_VPN) for uid=${effectiveCallerUid()}")
     }
 
-    // getNetworkInfo(int networkType) — null the result for a target caller that
-    // probes TYPE_VPN directly. Returns true when the call was a TYPE_VPN query
-    // (handled: either already null or nulled here), so the caller skips the
-    // disguise-as-WIFI path that would otherwise leak a connected NetworkInfo.
-    // Non-VPN types and non-target callers fall through to normal sanitizing.
-    private fun suppressLegacyVpnTypeQuery(param: XC_MethodHook.MethodHookParam): Boolean {
-        val type = param.args.getOrNull(0) as? Int ?: return false
-        if (type != ConnectivityManager.TYPE_VPN) return false
-        if (param.result == null) return true
-        if (!isTargetCallerOrUid(HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT)) return false
-        param.result = null
-        LsposedStats.record(effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT)
-        HookLog.i("VpnHide: suppressed getNetworkInfo(TYPE_VPN) for uid=${effectiveCallerUid()}")
+    private fun sanitizeLegacyNetworkInfoResult(
+        method: String,
+        param: XC_MethodHook.MethodHookParam,
+    ): Boolean {
+        val requestedType = if (method in LEGACY_TYPE_INFO_METHODS) param.args.getOrNull(0) as? Int else null
+        if (requestedType != ConnectivityManager.TYPE_VPN && method != "getAllNetworkInfo") return false
+        // Handle VPN type queries, including null and non-target replies,
+        // so none accidentally falls through to the generic VPN-to-WIFI conversion.
+        if (!isTargetCallerOrUid(HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT)) return true
+        val uid = effectiveCallerUid()
+        try {
+            fun normalize(info: NetworkInfo?): NetworkInfo? =
+                normalizeLegacyVpnInfo(info, requestedType, NetworkInfo::getType, ::isInactiveVpnInfo) {
+                    withConnectivitySanitizeBypassed { disconnectedVpnInfo(param.thisObject, uid) }
+                }
+            val original = param.result
+            val replacement =
+                when (original) {
+                    is NetworkInfo -> {
+                        normalize(original)
+                    }
+
+                    is Array<*> -> {
+                        if (original.javaClass.componentType != NetworkInfo::class.java) return true
+                        val copy = original.map { normalize(it as? NetworkInfo) }.toTypedArray()
+                        if (copy.indices.all { copy[it] === original[it] }) original else copy
+                    }
+
+                    else -> {
+                        original
+                    }
+                }
+            if (replacement !== original) {
+                param.result = replacement
+                LsposedStats.record(uid, HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT)
+            }
+        } catch (t: Throwable) {
+            // Unknown OEM policy: retain the original result/exception rather than
+            // inventing a disconnected state that ignores that platform's restrictions.
+            HookLog.e("VpnHide: legacy NetworkInfo normalize error: ${t.message}")
+        }
         return true
     }
 

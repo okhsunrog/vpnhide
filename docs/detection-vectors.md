@@ -306,9 +306,23 @@ summary:
 | VPN transport flag | `NetworkCapabilities.hasTransport(TRANSPORT_VPN)` | strip `TRANSPORT_VPN`, add `NET_CAPABILITY_NOT_VPN`, clear `TransportInfo` |
 | Active network is VPN | `getActiveNetwork()` / `Network.writeToParcel` | swap VPN `Network` handle for best physical one |
 | Network enumeration | `getAllNetworks()` | drop VPN handles from the array |
-| Legacy VPN type | `getNetworkInfo(TYPE_VPN)` / `getNetworkForType(TYPE_VPN)` | return `null`; otherwise disguise `NetworkInfo` `TYPE_VPN`→`TYPE_WIFI` |
+| Legacy VPN type state | `getNetworkInfo(TYPE_VPN)` / `getAllNetworkInfo()` | retain inactive VPN entries; replace active entries with the platform's absent-network state (`DISCONNECTED` or policy `BLOCKED`); preserve original `null` |
+| Legacy VPN handle | `getNetworkForType(TYPE_VPN)` | return `null` (no connected VPN handle) |
 | Interface name / routes / DNS | `LinkProperties.{getInterfaceName,getRoutes,getDnsServers}` | null `mIfaceName`, filter `mRoutes`, recurse into stacked links |
 | Async push | `registerDefaultNetworkCallback()` / `registerNetworkCallback()` | suppress VPN-requested callbacks; stash recipient UID across dispatch (issue #70) |
+
+`TYPE_VPN` support is not evidence of an active VPN. AOSP 9–16 returns a
+disconnected `NetworkInfo` for that supported type even when no VPN exists.
+Legacy type normalization uses AOSP 12+'s `makeFakeNetworkInfo(type, uid)` or
+the AOSP 9–11 empty `NetworkState` plus `filterNetworkStateForUid` path, keeping
+the platform's caller-specific blocked policy. Existing inactive replies,
+nulls and exceptions remain unchanged; the parcel hook preserves inactive VPN
+entries instead of renaming them to Wi-Fi. An unknown OEM policy implementation
+is logged and the result is left unchanged rather than guessing its state.
+
+This does not redesign network-handle queries: active VPN `NetworkInfo` objects
+returned through other paths still use the existing VPN-to-Wi-Fi fallback.
+Full consistency with the selected physical network remains separate work.
 
 ### 3E. Package visibility — "is the VPN-manager app installed?"
 
