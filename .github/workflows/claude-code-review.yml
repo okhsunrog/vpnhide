@@ -16,6 +16,10 @@ concurrency:
 
 jobs:
   claude-review:
+    # Bot-authored pull requests (Dependabot's pin bumps) get no review: the
+    # action refuses non-human actors by default and a pin bump has nothing to
+    # review. Skipping the job leaves no failed check behind.
+    if: github.event.pull_request.user.type != 'Bot'
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||
