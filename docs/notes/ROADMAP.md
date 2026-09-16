@@ -63,6 +63,22 @@ Follow-up work:
   active/type network could be over-stripped there (the by-network and callback
   paths no longer are). Not observed on test devices; revisit if reported.
 
+### Callback lifecycle: onLost when a hidden VPN target goes fully offline
+
+A default/request target is handed the cover network in place of the VPN, and the
+VPN's own `onLost` is suppressed (the app never held the VPN handle). A change of
+default arrives as its own `onAvailable(cover)`, so a network switch is delivered
+correctly. The remaining gap is the fully-offline transition: when the VPN and its
+underlying both drop and there is no network left, a no-VPN app would receive an
+`onLost` for its network, but the hidden target receives nothing and can keep a
+stale "network available" state until connectivity returns (at which point it gets
+a fresh `onAvailable`). Synthesising that `onLost(cover)` correctly needs a
+per-registration lifecycle state machine that tracks the network delivered to each
+`NetworkRequestInfo` (not per-uid, which conflates a uid's registrations) and
+rewrites the loss across both dispatch overloads and the older single-method form.
+This is a UX-completeness gap, not a hiding leak — the VPN netId never reaches the
+app — so it is deferred rather than shipped half-working.
+
 ## Kernel Module (kmod)
 
 ### Single-lookup route concealment (low priority)

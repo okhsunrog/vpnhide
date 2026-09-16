@@ -467,25 +467,21 @@ internal fun checkNetworkCallbackVpn(
     cm: ConnectivityManager,
     name: String,
 ): CheckResult {
-    // Both the capabilities and the link properties are needed, and Android
-    // delivers them in separate events (onAvailable → onCapabilitiesChanged →
-    // onLinkPropertiesChanged), so the latch must trip only once BOTH have
-    // arrived for the same handle — not on the capabilities alone, which would
-    // race the link properties and let a mismatched interface pass unread.
-    // The capabilities and the link properties must be observed for the SAME
-    // handle: Android delivers them in separate events, and the default can switch
-    // mid-capture, so the latch trips only when both are present and belong to one
-    // network — otherwise a caps reading for one network could be paired with a
-    // link-properties reading for another.
-    val latch = CountDownLatch(1)
+    // The capabilities carry the leak signal (a VPN transport) and arrive first;
+    // the link properties carry the coherence signal and arrive in a later event
+    // for the SAME handle. So the capabilities are awaited first — a VPN in them is
+    // a leak whether or not the link properties ever arrive — and only the coherence
+    // half waits for the link properties of that same handle.
+    val capsLatch = CountDownLatch(1)
+    val lpLatch = CountDownLatch(1)
     val capsNetwork = AtomicReference<Network?>(null)
     val caps = AtomicReference<NetworkCapabilities?>(null)
     val lpNetwork = AtomicReference<Network?>(null)
     val lp = AtomicReference<LinkProperties?>(null)
 
-    fun completeIfReady() {
+    fun maybeCompleteLp() {
         val n = capsNetwork.get() ?: return
-        if (caps.get() != null && lp.get() != null && lpNetwork.get() == n) latch.countDown()
+        if (lp.get() != null && lpNetwork.get() == n) lpLatch.countDown()
     }
     val callback =
         object : ConnectivityManager.NetworkCallback() {
@@ -495,7 +491,7 @@ internal fun checkNetworkCallbackVpn(
             ) {
                 lpNetwork.set(network)
                 lp.set(linkProperties)
-                completeIfReady()
+                maybeCompleteLp()
             }
 
             override fun onCapabilitiesChanged(
@@ -504,24 +500,33 @@ internal fun checkNetworkCallbackVpn(
             ) {
                 capsNetwork.set(network)
                 caps.set(networkCapabilities)
-                completeIfReady()
+                capsLatch.countDown()
+                maybeCompleteLp()
             }
         }
     return try {
         cm.registerDefaultNetworkCallback(callback)
-        val fired = latch.await(3, TimeUnit.SECONDS)
+        val start = System.nanoTime()
+        val capsFired = capsLatch.await(CALLBACK_DEADLINE_MS, TimeUnit.MILLISECONDS)
         val network = capsNetwork.get()
         val capsValue = caps.get()
-        val lpValue = lp.get()
-        if (!fired || network == null || capsValue == null || lpValue == null || lpNetwork.get() != network) {
-            // The full event pair for one handle did not arrive within the
-            // deadline: a non-observation, not evidence of hiding. Reporting it
-            // clean would mask a broken/slow push path — surface it as not-measured.
-            javaCheck(name, null, "no complete callback for one handle (caps=${capsValue != null}, linkProperties=${lpValue != null})")
-        } else {
-            val (detail, clean) = callbackCoherence(cm, network, capsValue, lpValue)
-            javaCheck(name, clean, detail)
+        if (!capsFired || network == null || capsValue == null) {
+            return javaCheck(name, null, "no capabilities callback delivered")
         }
+        // A VPN in the pushed capabilities is a leak — reported now, before and
+        // regardless of the link properties (an incomplete observation must never
+        // mask a proven leak).
+        capabilityLeakDetail(capsValue)?.let { return javaCheck(name, false, it) }
+        // Clean capabilities: the coherence half needs the link properties of this
+        // same handle. Wait out the remaining budget for them.
+        val remainingMs = CALLBACK_DEADLINE_MS - (System.nanoTime() - start) / 1_000_000
+        lpLatch.await(remainingMs.coerceAtLeast(0), TimeUnit.MILLISECONDS)
+        val lpValue = if (lpNetwork.get() == network) lp.get() else null
+        if (lpValue == null) {
+            return javaCheck(name, null, "capabilities clean but no link properties for the handle")
+        }
+        val (detail, clean) = callbackCoherence(cm, network, lpValue)
+        javaCheck(name, clean, detail)
     } catch (e: Exception) {
         javaCheck(name, false, e.message ?: e.javaClass.simpleName)
     } finally {
@@ -529,41 +534,41 @@ internal fun checkNetworkCallbackVpn(
     }
 }
 
+private const val CALLBACK_DEADLINE_MS = 3_000L
+
+/** A VPN transport (or missing NOT_VPN) in a pushed capability set is a leak; else null (clean). */
+internal fun capabilityLeakDetail(caps: NetworkCapabilities): String? {
+    val hasVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+    val notVpn = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+    return if (hasVpn || !notVpn) "callback leaks VPN: hasTransport(VPN)=$hasVpn, NOT_VPN=$notVpn" else null
+}
+
 /**
- * A pushed default-network callback must be clean (no VPN transport, NOT_VPN
- * present) AND coherent with the synchronous view: the link properties it carried
- * must name the same interface that `getLinkProperties(handle)` returns for the
- * handle it delivered. A cover handle pushed with the VPN's emptied link
- * properties — the exact incoherence the network-view work fixes — trips it even
- * when the capabilities read clean.
+ * With the capabilities already found clean, a pushed default-network callback must
+ * be coherent with the synchronous view: the link properties it carried must name
+ * the same interface `getLinkProperties(handle)` returns for the same handle. A
+ * cover handle pushed with the VPN's emptied link properties — the exact
+ * incoherence the network-view work fixes — trips it.
  *
- * `clean` is a tri-state: false = leak, true = coherent, null = could not be
+ * `clean` is a tri-state: false = incoherent, true = coherent, null = could not be
  * measured (the synchronous side was unreadable, so neither hidden nor leaked).
  */
 private fun callbackCoherence(
     cm: ConnectivityManager,
     network: Network,
-    caps: NetworkCapabilities,
     lp: LinkProperties,
 ): Pair<String, Boolean?> {
-    val hasVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-    val notVpn = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-    if (hasVpn || !notVpn) {
-        return "callback leaks VPN: hasTransport(VPN)=$hasVpn, NOT_VPN=$notVpn" to false
-    }
-    // Compare the callback's interface against the synchronous answer for the SAME
-    // handle. A failed sync read, or none at all (the network already gone), cannot
-    // establish coherence — that is not-measured, not a pass.
     val syncLp = runCatching { cm.getLinkProperties(network) }
     if (syncLp.isFailure) return "sync getLinkProperties threw: ${syncLp.exceptionOrNull()?.message}" to null
     val syncIface = syncLp.getOrNull()?.interfaceName ?: return "no synchronous link properties for $network" to null
     val callbackIface = lp.interfaceName
     // Includes a null/blank callback interface against a real sync one — the exact
     // incoherence of a cover handle pushed with an emptied link-properties object.
-    if (callbackIface != syncIface) {
-        return "callback handle $network carries iface=$callbackIface but sync says $syncIface" to false
+    return if (callbackIface != syncIface) {
+        "callback handle $network carries iface=$callbackIface but sync says $syncIface" to false
+    } else {
+        "callback capabilities clean and link properties coherent (iface=$callbackIface)" to true
     }
-    return "callback caps clean and link properties coherent (iface=$callbackIface)" to true
 }
 
 internal fun checkLinkPropertiesIfname(
@@ -636,22 +641,29 @@ private fun checkNetworkViewConsistency(
     name: String,
 ): CheckResult {
     val snapshot = captureSyncNetworkView(cm, Process.myUid(), expectHidden = true)
-    // A capture that hit an error read a partial model: active/allNetworks or a
-    // per-network fact could not be read, so an empty or truncated snapshot could
-    // show "no violations" without having observed anything. That is not-measured,
-    // not a pass — the absence of a violation must never be manufactured from a
-    // failed read. (The invariant evaluation only proves a *populated* model
-    // holds together.)
-    if (snapshot.errors.isNotEmpty()) {
-        return javaCheck(name, null, "capture incomplete: ${snapshot.errors.joinToString("; ")}")
-    }
     val violations = snapshot.invariants.filter { it.status == NET_VIEW_VIOLATED }
     val checked = snapshot.invariants.count { it.status != NET_VIEW_NA }
     val detail =
-        if (violations.isEmpty()) {
-            "$checked invariants hold across ${snapshot.allNetworks.size} network(s)"
-        } else {
-            violations.joinToString("; ") { "${it.id}: ${it.detail}" }
+        when {
+            violations.isNotEmpty() -> violations.joinToString("; ") { "${it.id}: ${it.detail}" }
+            snapshot.errors.isNotEmpty() -> "capture incomplete: ${snapshot.errors.joinToString("; ")}"
+            else -> "$checked invariants hold across ${snapshot.allNetworks.size} network(s)"
         }
-    return javaCheck(name, violations.isEmpty(), detail)
+    return javaCheck(name, networkViewClean(violations.isNotEmpty(), snapshot.errors.isNotEmpty()), detail)
 }
+
+/**
+ * The tri-state verdict for the network-view self-test. A confirmed violation is a
+ * leak regardless of any capture error — a proven leak must never be masked by
+ * incompleteness elsewhere (the diagnostic principle). Only a clean-but-incomplete
+ * capture is not-measured; a clean, complete one holds.
+ */
+internal fun networkViewClean(
+    hasViolation: Boolean,
+    hasError: Boolean,
+): Boolean? =
+    when {
+        hasViolation -> false
+        hasError -> null
+        else -> true
+    }
