@@ -14,12 +14,9 @@ internal data class CoverCandidate(
     val isVpn: Boolean,
     val hasInternet: Boolean,
     val notRestricted: Boolean,
-    // The platform's own per-uid blocked verdict (data saver, background chain,
-    // lockdown). Undeterminable (the method is absent) resolves to false — a
-    // network AOSP itself handed back as the underlying/default is trusted rather
-    // than withheld, which is what keeps a foreground online app from being told
-    // it is offline.
-    val blocked: Boolean,
+    // Null means the platform policy could not be evaluated, not permission to
+    // use the network. Version-specific policy calls live in the resolver.
+    val blocked: Boolean?,
 )
 
 /**
@@ -30,4 +27,4 @@ internal data class CoverCandidate(
  * usable, report no active network exactly as a uid with no VPN would see.
  */
 internal fun isUsableCover(candidate: CoverCandidate): Boolean =
-    !candidate.isVpn && candidate.hasInternet && candidate.notRestricted && !candidate.blocked
+    !candidate.isVpn && candidate.hasInternet && candidate.notRestricted && candidate.blocked == false

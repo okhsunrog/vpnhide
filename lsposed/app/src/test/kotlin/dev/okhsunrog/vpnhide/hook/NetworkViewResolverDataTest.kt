@@ -17,7 +17,7 @@ class NetworkViewResolverDataTest {
         isVpn: Boolean = false,
         hasInternet: Boolean = true,
         notRestricted: Boolean = true,
-        blocked: Boolean = false,
+        blocked: Boolean? = false,
     ) = CoverCandidate(source, netId, isVpn, hasInternet, notRestricted, blocked)
 
     @Test
@@ -46,5 +46,10 @@ class NetworkViewResolverDataTest {
         // A background uid whose networks are blocked by the per-uid firewall: no
         // cover, so the caller reports no active network — as a no-VPN uid would.
         assertFalse(isUsableCover(candidate(blocked = true)))
+    }
+
+    @Test
+    fun `an unknown UID policy must not authorize the cover`() {
+        assertFalse(isUsableCover(candidate(blocked = null)))
     }
 }

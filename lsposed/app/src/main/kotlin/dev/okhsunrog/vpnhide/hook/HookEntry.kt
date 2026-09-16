@@ -8,7 +8,6 @@ import android.net.NetworkInfo
 import android.net.RouteInfo
 import android.os.Binder
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import de.robv.android.xposed.IXposedHookLoadPackage
@@ -59,22 +58,10 @@ class HookEntry : IXposedHookLoadPackage {
     // it can be triggered from either the direct lookup or the addService catch.
     private val connectivityHooked = AtomicBoolean(false)
 
-    // During a push callback (registerNetworkCallback dispatch), the
-    // writeToParcel hooks run under system_server's identity, so
-    // Binder.getCallingUid() is 1000 — not the recipient app. hookConnectivity-
-    // Service stashes the real recipient UID here so those hooks sanitize the
-    // pushed data exactly like a synchronous call. See issue #70 (VTB and other
-    // apps that detect VPN only via registerDefaultNetworkCallback).
+    // Compatibility parcel backstop scoped to PendingIntent construction. Callback
+    // objects instead use NetworkCallbackRouter and CS's recipient-redacted builder.
     private val currentCallbackUid = ThreadLocal<Int>()
     private val bypassConnectivitySanitize = ThreadLocal<Boolean>()
-
-    // True for the duration of a VPN callback dispatch to a target. It gates the
-    // LinkProperties parcel hook so its VPN-interface strip runs only as a callback
-    // backstop and never on a synchronous reply (where it would blank a carrier IMS
-    // ipsec* link that is not a VPN). The callback's own coherence is achieved by
-    // swapping the dispatched NetworkAgentInfo for the cover's before the method
-    // builds the event, so ConnectivityService itself produces the cover's
-    // capabilities and link properties, redacted for the recipient.
     private val inCallbackDispatch = ThreadLocal<Boolean>()
 
     // netIds this process has hidden from targets (a VPN swapped to the cover, or a
@@ -83,17 +70,8 @@ class HookEntry : IXposedHookLoadPackage {
     // no longer identify it as a VPN — is still recognised. An entry is NOT dropped
     // on a loss: several registrations each get their own deferred onLost for the
     // same VPN, so a single delivery must not stop recognising the rest. Bounded, so
-    // entries age out by LRU as newer VPNs are hidden.
+    // the oldest entries age out as newer VPNs are hidden.
     private val hiddenVpnNetIds = java.util.Collections.synchronizedSet(LinkedHashSet<Int>())
-
-    // ConnectivityManager.CALLBACK_LOST — the notification type of an onLost
-    // dispatch. Resolved from the framework so a value change is picked up; the
-    // stable literal is the fallback.
-    private val callbackLostType: Int by lazy {
-        runCatching {
-            XposedHelpers.getStaticIntField(ConnectivityManager::class.java, "CALLBACK_LOST")
-        }.getOrDefault(CALLBACK_LOST_FALLBACK)
-    }
 
     @Volatile private var connectivityServiceInstance: Any? = null
 
@@ -1056,10 +1034,9 @@ class HookEntry : IXposedHookLoadPackage {
      * Hook the two ConnectivityService dispatch points that *push* network state
      * to apps: callCallbackForRequest (registerNetworkCallback with a callback
      * object) and sendPendingIntentForRequest (registerNetworkCallback with a
-     * PendingIntent). On both, the writeToParcel hooks would see
-     * getCallingUid()==1000 instead of the recipient app and skip sanitizing, so
-     * we stash the recipient UID in currentCallbackUid for the dispatch's
-     * duration. If the app explicitly requested a VPN network, drop the dispatch
+     * PendingIntent). The callback router owns per-registration lifecycle and
+     * uses the service's own recipient-redacted payload builder. PendingIntents
+     * swap their NAI before the asynchronous intent is constructed. If the app explicitly requested a VPN network, drop the dispatch
      * entirely — don't reveal a VPN exists. Fixes apps (e.g. VTB, issue #70) that
      * detect VPN only via callbacks.
      */
@@ -1085,6 +1062,21 @@ class HookEntry : IXposedHookLoadPackage {
         val resultCounts = installConnectivityServiceResultHooks(csClass)
         val networkCounts = installConnectivityServiceNetworkHooks(csClass)
 
+        val callbackRouter =
+            NetworkCallbackRouter(
+                csClass,
+                isVpn = { cs, network ->
+                    val caps = rawNetworkCapabilities(cs, network)
+                    val vpn =
+                        caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true ||
+                            (caps == null && isHiddenVpn(network.netIdOrNull()))
+                    if (vpn) rememberHiddenVpn(network.netIdOrNull())
+                    vpn
+                },
+                coverFor = ::coverNetworkFor,
+                isListen = ::requestIsListen,
+            )
+
         // Both methods take the NetworkRequestInfo as their first arg, so the
         // same handler covers the callback-object and PendingIntent paths.
         val dispatchHook =
@@ -1102,13 +1094,16 @@ class HookEntry : IXposedHookLoadPackage {
                         suppressDispatch(param, uid, "VPN-request")
                         return
                     }
-                    // Both the callback-object and PendingIntent dispatch points are
-                    // handled the same way — re-point the dispatched NetworkAgentInfo
-                    // at the cover. A PendingIntent is parcelled asynchronously by the
-                    // broadcast queue, outside this dispatch, so re-pointing the
-                    // argument (rather than patching the sent object) is what makes it
-                    // carry the cover there too.
-                    prepareDispatch(param, uid, request)
+                    // Callback objects need lifecycle tracking at the final delivery
+                    // boundary. PendingIntents instead carry an asynchronously
+                    // parcelled EXTRA_NETWORK, so swap their NAI before construction.
+                    try {
+                        if (!callbackRouter.dispatch(param, uid, request)) preparePendingIntentDispatch(param, uid, request)
+                    } catch (t: Throwable) {
+                        // A failed adapter must not resume the original VPN delivery.
+                        suppressDispatch(param, uid, "callback adapter failed")
+                        HookLog.e("VpnHide: callback adapter: ${t.message}")
+                    }
                 }
 
                 override fun afterHookedMethod(param: MethodHookParam) {
@@ -1343,77 +1338,34 @@ class HookEntry : IXposedHookLoadPackage {
         return true
     }
 
-    // Handle a callback/PendingIntent dispatch of a network to a target when the
-    // network is the VPN (or a netId this process has already hidden — so a
-    // deferred onLost after ConnectivityService dropped the VPN is still caught).
-    // The event is rewritten as one unit rather than having its content patched:
-    //  - onLost of the VPN → suppress (the app was given the cover, never the VPN,
-    //    so a LOST for a handle it never had would only reveal the netId);
-    //  - a passive listen match → suppress (the app already gets the physical
-    //    networks as themselves);
-    //  - a default/request event → re-point the dispatched NetworkAgentInfo at the
-    //    cover's, so ConnectivityService builds the cover's own capabilities and
-    //    link properties, redacted for the recipient — no system-view substitution;
-    //  - no cover → suppress rather than deliver a handle with no facts.
-    private fun prepareDispatch(
+    // PendingIntents carry an AVAILABLE network extra rather than a callback
+    // lifecycle. Rewrite the NAI before CS constructs the asynchronously sent intent.
+    private fun preparePendingIntentDispatch(
         param: XC_MethodHook.MethodHookParam,
         uid: Int,
         request: android.net.NetworkRequest?,
     ) {
         val cs = connectivityServiceInstance ?: return
         val naiIndex = param.args.indexOfFirst { hasNetworkField(it) }
-        val network =
-            if (naiIndex >= 0) XposedHelpers.getObjectField(param.args[naiIndex], "network") as? Network else dispatchedNetwork(param)
-        network ?: return
-        val netId = network.netIdOrNull()
-        // A remembered hidden VPN netId counts only when it no longer resolves to a
-        // live network (a deferred loss after ConnectivityService dropped the VPN),
-        // so a netId since recycled to a real physical network is not misfired on.
-        val liveCaps = rawNetworkCapabilities(cs, network)
-        val isVpn = liveCaps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true || (liveCaps == null && isHiddenVpn(netId))
-        if (!isVpn) return // physical network event — deliver unchanged.
-
-        val isLost = dispatchNotificationType(param) == callbackLostType
-        if (isLost) {
-            // Suppress the VPN's own loss: the app never held the VPN handle (a
-            // listen's VPN match was suppressed; a default/request got the cover),
-            // so an onLost for it would only reveal the netId. A change of the
-            // default network arrives as its own onAvailable(cover), so a switch is
-            // still delivered. The remaining gap — synthesising an onLost(cover)
-            // when the app goes fully offline (no network at all) — needs a
-            // per-registration lifecycle state machine and is tracked as follow-up
-            // (ROADMAP: network-view callback lifecycle).
-            rememberHiddenVpn(netId)
-            suppressDispatch(param, uid, "VPN-lost")
-            return
-        }
+        if (naiIndex < 0) return
+        val network = XposedHelpers.getObjectField(param.args[naiIndex], "network") as? Network ?: return
+        if (!isVpnNetwork(cs, network)) return
+        rememberHiddenVpn(network.netIdOrNull())
         if (requestIsListen(request)) {
-            // The app already receives the physical networks as themselves, so a VPN
-            // match on a passive listen is a duplicate — suppress it.
-            rememberHiddenVpn(netId)
-            suppressDispatch(param, uid, "VPN-listen")
+            suppressDispatch(param, uid, "VPN-listen PendingIntent")
             return
         }
-        // A default/request event: re-point it to the cover so ConnectivityService
-        // builds the cover's own capabilities and link properties, redacted for the
-        // recipient.
         val cover = coverNetworkFor(cs, uid)
-        val coverNai = if (naiIndex >= 0) cover?.let { coverNetworkAgentInfo(cs, it) } else null
+        val coverNai = cover?.let { coverNetworkAgentInfo(cs, it) }
         if (coverNai == null) {
-            // No NAI arg to swap (a bundle-only dispatch), or no cover resolved:
-            // suppress rather than leak the VPN handle or an empty network.
-            rememberHiddenVpn(netId)
-            suppressDispatch(param, uid, "VPN-default (no cover)")
+            suppressDispatch(param, uid, "VPN PendingIntent (no cover)")
             return
         }
         param.args[naiIndex] = coverNai
-        rememberHiddenVpn(netId)
-        // Backstop for a ROM where the swap somehow leaves a VPN object in the sent
-        // event: the parcel hooks then sanitise it for this recipient.
         inCallbackDispatch.set(true)
         currentCallbackUid.set(uid)
         LsposedStats.record(uid, HookIds.Hook.LSPOSED_CONNECTIVITY_CALLBACK)
-        HookLog.i("VpnHide-CB: uid=$uid re-pointed ${param.method.name} to cover=${coverNetworkAgentNetId(coverNai)}")
+        HookLog.i("VpnHide-CB: uid=$uid re-pointed PendingIntent to cover=${coverNetworkAgentNetId(coverNai)}")
     }
 
     private fun hasNetworkField(arg: Any?): Boolean =
@@ -1421,11 +1373,6 @@ class HookEntry : IXposedHookLoadPackage {
 
     private fun coverNetworkAgentNetId(nai: Any): Int? =
         runCatching { (XposedHelpers.getObjectField(nai, "network") as? Network)?.netIdOrNull() }.getOrNull()
-
-    // The notification type of a dispatch (CALLBACK_AVAILABLE / _LOST / …): the
-    // first Int argument after the NetworkRequestInfo, across both the outer
-    // (nri, nai, type, arg1) and inner (nri, type, bundle, arg1) overloads.
-    private fun dispatchNotificationType(param: XC_MethodHook.MethodHookParam): Int? = param.args.drop(1).firstOrNull { it is Int } as? Int
 
     private fun suppressDispatch(
         param: XC_MethodHook.MethodHookParam,
@@ -1437,29 +1384,15 @@ class HookEntry : IXposedHookLoadPackage {
         HookLog.i("VpnHide-CB: uid=$uid suppressed $reason dispatch")
     }
 
-    // The network a callback dispatch is about: a NetworkAgentInfo argument exposes
-    // it in its `network` field (the outer/legacy overloads), else the callback
-    // Bundle carries it (the inner overload). Null for a lost/unavailable dispatch
-    // that names no live network.
-    private fun dispatchedNetwork(param: XC_MethodHook.MethodHookParam): Network? {
-        param.args.forEach { arg ->
-            if (arg is Network) return arg
-            val fromNai = runCatching { XposedHelpers.getObjectField(arg, "network") as? Network }.getOrNull()
-            if (fromNai != null) return fromNai
-        }
-        val bundle = param.args.getOrNull(CALLBACK_BUNDLE_ARG_INDEX) as? Bundle
-        @Suppress("DEPRECATION")
-        return bundle?.getParcelable(Network::class.java.simpleName)
-    }
-
-    // A passive LISTEN (or LISTEN_FOR_BEST) enumerates networks; a VPN match is
-    // suppressed. Any other request type (TRACK_DEFAULT, REQUEST) wants a network
+    // Only LISTEN enumerates all matches. LISTEN_FOR_BEST, like TRACK_DEFAULT
+    // and REQUEST, tracks one best match and needs the same visible lifecycle.
+    // A passive VPN match is suppressed; other request types want a network
     // delivered, so its VPN match is rewritten to the cover instead. NetworkRequest
     // exposes its type publicly; an unreadable type is treated as non-listen so
     // connectivity is never silently withheld.
     private fun requestIsListen(request: android.net.NetworkRequest?): Boolean {
         val type = runCatching { XposedHelpers.getObjectField(request, "type")?.toString() }.getOrNull()
-        return type == "LISTEN" || type == "LISTEN_FOR_BEST"
+        return isPassiveNetworkRequest(type)
     }
 
     // The callback recipient UID lives on the NetworkRequestInfo arg under
@@ -1500,15 +1433,10 @@ class HookEntry : IXposedHookLoadPackage {
 
     companion object {
         private const val SYSTEM_UID = 1000
-        private const val CALLBACK_BUNDLE_ARG_INDEX = 2
-
-        // ConnectivityManager.CALLBACK_LOST, stable across versions; the reflective
-        // lookup in [callbackLostType] falls back to this.
-        private const val CALLBACK_LOST_FALLBACK = 4
 
         // Cap on remembered hidden VPN netIds. A boot rarely has more than a handful
-        // of VPN sessions at once; entries are removed on their onLost, so this only
-        // bounds the leak if a LOST is never observed.
+        // of VPN sessions at once. Retain retired IDs for deferred losses from
+        // other registrations, without growing system_server state indefinitely.
         private const val MAX_HIDDEN_VPN_NETIDS = 64
 
         // Path D poll cadence: connectivity registers within a few seconds of

@@ -35,6 +35,7 @@ internal object NetworkViewProbeMain {
         }
 
     @JvmStatic
+    @Suppress("DEPRECATION") // Os.setgid/setuid are the only way to drop uid here.
     fun main(args: Array<String>) {
         val opts = parseArgs(args)
         // ActivityThread's handler needs a Looper on this thread; nothing ever
@@ -112,7 +113,7 @@ internal object NetworkViewProbeMain {
         val serviceManager = Class.forName("android.os.ServiceManager")
         val binder = serviceManager.getMethod("getService", String::class.java).invoke(null, "connectivity") as IBinder
         val stub = Class.forName("android.net.IConnectivityManager\$Stub")
-        return stub.getMethod("asInterface", IBinder::class.java).invoke(null, binder)
+        return stub.getMethod("asInterface", IBinder::class.java).invoke(null, binder)!!
     }
 
     // The system context's op package is "android"; ConnectivityManager sends

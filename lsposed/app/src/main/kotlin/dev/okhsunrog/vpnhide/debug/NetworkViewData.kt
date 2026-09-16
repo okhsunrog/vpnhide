@@ -185,12 +185,14 @@ private val INACTIVE_DETAILED_STATES = setOf("DISCONNECTED", "BLOCKED")
 /** Everything a capture observed, before the invariants are evaluated over it. */
 internal data class NetworkViewObservations(
     val activeNetwork: Int?,
-    val allNetworks: List<Int>,
+    val allNetworks: List<Int>?,
     val networks: List<NetworkFacts>,
     val legacy: LegacyTypeView,
     val phantomNetworks: List<Int>,
     val callbacks: List<CallbackEvent>,
     val pendingIntent: PendingIntentResult?,
+    val scanComplete: Boolean = true,
+    val topologyStable: Boolean = true,
 )
 
 /**
@@ -201,7 +203,7 @@ internal fun evaluateNetworkView(
     observed: NetworkViewObservations,
     expectHidden: Boolean,
 ): List<InvariantResult> {
-    val all = observed.allNetworks
+    val all = observed.allNetworks.orEmpty()
     val byId = observed.networks.associateBy { it.netId }
     val listed = observed.networks.filter { it.netId in all }
     return listOf(
@@ -214,8 +216,38 @@ internal fun evaluateNetworkView(
         callbacksMatchSync(observed.callbacks, byId, all),
         callbacksOnlyListed(observed.callbacks, all),
         pendingIntentOnlyListed(observed.pendingIntent, all),
-    ) + if (expectHidden) vpnAbsent(listed, observed.legacy, observed.callbacks) else emptyList()
+    ).map { result ->
+        when {
+            !observed.topologyStable -> {
+                notApplicable(result.id, "network topology changed during capture")
+            }
+
+            observed.allNetworks == null && result.id in ENUMERATION_INVARIANTS -> {
+                notApplicable(result.id, "network enumeration unavailable")
+            }
+
+            !observed.scanComplete && result.id == "no_phantom_networks" && result.status != NET_VIEW_VIOLATED -> {
+                notApplicable(result.id, "network scan incomplete")
+            }
+
+            else -> {
+                result
+            }
+        }
+    } + if (expectHidden) vpnAbsent(observed.networks, observed.legacy, observed.callbacks) else emptyList()
 }
+
+// These comparisons require a successful enumeration, not an empty error fallback.
+private val ENUMERATION_INVARIANTS =
+    setOf(
+        "active_in_all_networks",
+        "listed_networks_have_transport",
+        "connected_network_has_interface",
+        "info_type_matches_transport",
+        "no_phantom_networks",
+        "callbacks_only_for_listed_networks",
+        "pending_intent_only_listed_networks",
+    )
 
 private fun ok(
     id: String,

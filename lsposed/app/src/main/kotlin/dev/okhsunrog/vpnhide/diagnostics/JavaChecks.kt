@@ -33,7 +33,6 @@ import dev.okhsunrog.vpnhide.next
 import java.net.NetworkInterface
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 private const val TAG = LogTags.TEST
 
@@ -467,68 +466,41 @@ internal fun checkNetworkCallbackVpn(
     cm: ConnectivityManager,
     name: String,
 ): CheckResult {
-    // The capabilities carry the leak signal (a VPN transport) and arrive first;
-    // the link properties carry the coherence signal and arrive in a later event
-    // for the SAME handle. So the capabilities are awaited first — a VPN in them is
-    // a leak whether or not the link properties ever arrive — and only the coherence
-    // half waits for the link properties of that same handle.
-    val capsLatch = CountDownLatch(1)
-    val lpLatch = CountDownLatch(1)
-    val capsNetwork = AtomicReference<Network?>(null)
-    val caps = AtomicReference<NetworkCapabilities?>(null)
-    val lpNetwork = AtomicReference<Network?>(null)
-    val lp = AtomicReference<LinkProperties?>(null)
-
-    fun maybeCompleteLp() {
-        val n = capsNetwork.get() ?: return
-        if (lp.get() != null && lpNetwork.get() == n) lpLatch.countDown()
-    }
+    val ready = CountDownLatch(1)
+    val evidence = CallbackProbeEvidence()
     val callback =
         object : ConnectivityManager.NetworkCallback() {
-            override fun onLinkPropertiesChanged(
-                network: Network,
-                linkProperties: LinkProperties,
-            ) {
-                lpNetwork.set(network)
-                lp.set(linkProperties)
-                maybeCompleteLp()
-            }
-
             override fun onCapabilitiesChanged(
                 network: Network,
                 networkCapabilities: NetworkCapabilities,
             ) {
-                capsNetwork.set(network)
-                caps.set(networkCapabilities)
-                capsLatch.countDown()
-                maybeCompleteLp()
+                evidence.capabilities(network.toString().toInt(), capabilityLeakDetail(networkCapabilities))
+                if (evidence.snapshot() != null) ready.countDown()
+            }
+
+            override fun onLinkPropertiesChanged(
+                network: Network,
+                linkProperties: LinkProperties,
+            ) {
+                evidence.linkProperties(network.toString().toInt(), linkProperties.interfaceName)
+                if (evidence.snapshot() != null) ready.countDown()
             }
         }
     return try {
         cm.registerDefaultNetworkCallback(callback)
-        val start = System.nanoTime()
-        val capsFired = capsLatch.await(CALLBACK_DEADLINE_MS, TimeUnit.MILLISECONDS)
-        val network = capsNetwork.get()
-        val capsValue = caps.get()
-        if (!capsFired || network == null || capsValue == null) {
-            return javaCheck(name, null, "no capabilities callback delivered")
-        }
-        // A VPN in the pushed capabilities is a leak — reported now, before and
-        // regardless of the link properties (an incomplete observation must never
-        // mask a proven leak).
-        capabilityLeakDetail(capsValue)?.let { return javaCheck(name, false, it) }
-        // Clean capabilities: the coherence half needs the link properties of this
-        // same handle. Wait out the remaining budget for them.
-        val remainingMs = CALLBACK_DEADLINE_MS - (System.nanoTime() - start) / 1_000_000
-        lpLatch.await(remainingMs.coerceAtLeast(0), TimeUnit.MILLISECONDS)
-        val lpValue = if (lpNetwork.get() == network) lp.get() else null
-        if (lpValue == null) {
-            return javaCheck(name, null, "capabilities clean but no link properties for the handle")
-        }
-        val (detail, clean) = callbackCoherence(cm, network, lpValue)
+        ready.await(CALLBACK_DEADLINE_MS, TimeUnit.MILLISECONDS)
+        val observation = evidence.snapshot() ?: return javaCheck(name, null, "no complete callback for one handle")
+        observation.leak?.let { return javaCheck(name, false, it) }
+        val network =
+            dev.okhsunrog.vpnhide.debug
+                .networkForNetId(observation.network)
+        val (detail, clean) = callbackCoherence(cm, network, observation.interfaceName)
+        // A leak arriving during the synchronous read still outranks the clean pair.
+        evidence.snapshot()?.leak?.let { return javaCheck(name, false, it) }
         javaCheck(name, clean, detail)
     } catch (e: Exception) {
-        javaCheck(name, false, e.message ?: e.javaClass.simpleName)
+        val leak = evidence.snapshot()?.leak
+        javaCheck(name, if (leak != null) false else null, leak ?: "callback measurement failed: ${e.message}")
     } finally {
         runCatching { cm.unregisterNetworkCallback(callback) }
     }
@@ -556,12 +528,11 @@ internal fun capabilityLeakDetail(caps: NetworkCapabilities): String? {
 private fun callbackCoherence(
     cm: ConnectivityManager,
     network: Network,
-    lp: LinkProperties,
+    callbackIface: String?,
 ): Pair<String, Boolean?> {
     val syncLp = runCatching { cm.getLinkProperties(network) }
     if (syncLp.isFailure) return "sync getLinkProperties threw: ${syncLp.exceptionOrNull()?.message}" to null
     val syncIface = syncLp.getOrNull()?.interfaceName ?: return "no synchronous link properties for $network" to null
-    val callbackIface = lp.interfaceName
     // Includes a null/blank callback interface against a real sync one — the exact
     // incoherence of a cover handle pushed with an emptied link-properties object.
     return if (callbackIface != syncIface) {
@@ -651,19 +622,3 @@ private fun checkNetworkViewConsistency(
         }
     return javaCheck(name, networkViewClean(violations.isNotEmpty(), snapshot.errors.isNotEmpty()), detail)
 }
-
-/**
- * The tri-state verdict for the network-view self-test. A confirmed violation is a
- * leak regardless of any capture error — a proven leak must never be masked by
- * incompleteness elsewhere (the diagnostic principle). Only a clean-but-incomplete
- * capture is not-measured; a clean, complete one holds.
- */
-internal fun networkViewClean(
-    hasViolation: Boolean,
-    hasError: Boolean,
-): Boolean? =
-    when {
-        hasViolation -> false
-        hasError -> null
-        else -> true
-    }

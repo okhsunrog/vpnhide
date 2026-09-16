@@ -58,7 +58,8 @@ internal fun captureNetworkView(
     val errors = mutableListOf<String>()
     val active = guard(errors, "activeNetwork") { cm.activeNetwork?.netId() }
     val bound = guard(errors, "boundNetworkForProcess") { cm.boundNetworkForProcess?.netId() }
-    val all = guard(errors, "allNetworks") { cm.allNetworks.mapNotNull { it.netId() } }.orEmpty()
+    val enumeration = guard(errors, "allNetworks") { cm.allNetworks.mapNotNull { it.netId() } }
+    val all = enumeration.orEmpty()
     val sources = linkedMapOf<Int, MutableSet<String>>()
     all.forEach { sources.getOrPut(it) { linkedSetOf() } += "all" }
     active?.let { sources.getOrPut(it) { linkedSetOf() } += "active" }
@@ -68,11 +69,14 @@ internal fun captureNetworkView(
     val pendingIntent = if (options.includePendingIntent) capturePendingIntent(context, cm, options.captureMs) else null
     pendingIntent?.let { it.netIds + it.requestNetIds }?.forEach { sources.getOrPut(it) { linkedSetOf() } += "callback" }
 
-    val phantoms = scanPhantoms(cm, all, options.scanBeyond)
+    val scanErrorsBefore = errors.size
+    val phantoms = if (enumeration != null) scanPhantoms(cm, all, options.scanBeyond, errors) else emptyList()
+    val scanComplete = enumeration != null && errors.size == scanErrorsBefore
     phantoms.forEach { sources.getOrPut(it) { linkedSetOf() } += "scan" }
 
     val networks = sources.map { (netId, from) -> factsFor(cm, netId, from.toList(), errors) }
     val legacy = captureLegacy(cm, errors)
+    val topologyStable = verifyTopology(cm, active, enumeration, errors)
     return NetworkViewSnapshot(
         uid = uid,
         packageName = packageName,
@@ -90,7 +94,17 @@ internal fun captureNetworkView(
         pendingIntent = pendingIntent,
         invariants =
             evaluateNetworkView(
-                NetworkViewObservations(active, all, networks, legacy, phantoms, callbacks, pendingIntent),
+                NetworkViewObservations(
+                    active,
+                    enumeration,
+                    networks,
+                    legacy,
+                    phantoms,
+                    callbacks,
+                    pendingIntent,
+                    scanComplete,
+                    topologyStable,
+                ),
                 options.expectHidden,
             ),
         errors = errors,
@@ -114,15 +128,19 @@ internal fun captureSyncNetworkView(
 ): NetworkViewSnapshot {
     val errors = mutableListOf<String>()
     val active = guard(errors, "activeNetwork") { cm.activeNetwork?.netId() }
-    val all = guard(errors, "allNetworks") { cm.allNetworks.mapNotNull { it.netId() } }.orEmpty()
+    val enumeration = guard(errors, "allNetworks") { cm.allNetworks.mapNotNull { it.netId() } }
+    val all = enumeration.orEmpty()
     val sources = linkedMapOf<Int, MutableSet<String>>()
     all.forEach { sources.getOrPut(it) { linkedSetOf() } += "all" }
     active?.let { sources.getOrPut(it) { linkedSetOf() } += "active" }
-    val phantoms = scanPhantoms(cm, all, DEFAULT_SCAN_BEYOND)
+    val scanErrorsBefore = errors.size
+    val phantoms = if (enumeration != null) scanPhantoms(cm, all, DEFAULT_SCAN_BEYOND, errors) else emptyList()
+    val scanComplete = enumeration != null && errors.size == scanErrorsBefore
     phantoms.forEach { sources.getOrPut(it) { linkedSetOf() } += "scan" }
     val networks = sources.map { (netId, from) -> factsFor(cm, netId, from.toList(), errors) }
     val legacy = captureLegacy(cm, errors)
-    val observed = NetworkViewObservations(active, all, networks, legacy, phantoms, emptyList(), null)
+    val topologyStable = verifyTopology(cm, active, enumeration, errors)
+    val observed = NetworkViewObservations(active, enumeration, networks, legacy, phantoms, emptyList(), null, scanComplete, topologyStable)
     return NetworkViewSnapshot(
         uid = uid,
         packageName = "self",
@@ -141,6 +159,23 @@ internal fun captureSyncNetworkView(
         invariants = evaluateNetworkView(observed, expectHidden),
         errors = errors,
     )
+}
+
+// A sequential API snapshot cannot be treated as a simultaneous model when the
+// active handle/enumeration changed while we read it. Direct VPN observations
+// remain valid; comparisons across time are inconclusive.
+private fun verifyTopology(
+    cm: ConnectivityManager,
+    active: Int?,
+    enumeration: List<Int>?,
+    errors: MutableList<String>,
+): Boolean {
+    val before = errors.size
+    val endActive = guard(errors, "activeNetwork at end") { cm.activeNetwork?.netId() }
+    val endAll = guard(errors, "allNetworks at end") { cm.allNetworks.mapNotNull { it.netId() } }
+    val stable = before == errors.size && active == endActive && enumeration?.toSet() == endAll?.toSet()
+    if (!stable) errors += "network topology changed or could not be verified during capture"
+    return stable
 }
 
 private inline fun <T> guard(
@@ -244,10 +279,11 @@ private fun scanPhantoms(
     cm: ConnectivityManager,
     all: List<Int>,
     beyond: Int,
+    errors: MutableList<String>,
 ): List<Int> {
     val upper = (all.maxOrNull() ?: FIRST_NET_ID) + beyond
     return (FIRST_NET_ID..upper).filter { netId ->
-        netId !in all && runCatching { cm.getNetworkCapabilities(networkForNetId(netId)) }.getOrNull() != null
+        netId !in all && guard(errors, "scan capabilities($netId)") { cm.getNetworkCapabilities(networkForNetId(netId)) } != null
     }
 }
 

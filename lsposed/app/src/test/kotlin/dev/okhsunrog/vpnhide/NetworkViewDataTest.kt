@@ -38,16 +38,18 @@ class NetworkViewDataTest {
 
     private fun evaluate(
         active: Int? = 100,
-        all: List<Int> = listOf(100),
+        all: List<Int>? = listOf(100),
         networks: List<NetworkFacts> = listOf(wifi),
         legacyView: LegacyTypeView = legacy,
         phantoms: List<Int> = emptyList(),
         callbacks: List<CallbackEvent> = emptyList(),
         pendingIntent: PendingIntentResult? = null,
         expectHidden: Boolean = true,
+        scanComplete: Boolean = true,
+        topologyStable: Boolean = true,
     ): Map<String, InvariantResult> =
         evaluateNetworkView(
-            NetworkViewObservations(active, all, networks, legacyView, phantoms, callbacks, pendingIntent),
+            NetworkViewObservations(active, all, networks, legacyView, phantoms, callbacks, pendingIntent, scanComplete, topologyStable),
             expectHidden,
         ).associateBy { it.id }
 
@@ -155,5 +157,33 @@ class NetworkViewDataTest {
     fun `any delivery on a TRANSPORT_VPN listen is a leak`() {
         val results = evaluate(callbacks = listOf(CallbackEvent("listen_vpn", "available", 103, 4)))
         assertEquals(NET_VIEW_VIOLATED, results.getValue("vpn_listen_silent").status)
+    }
+
+    @Test
+    fun `failed enumeration is not an empty successful enumeration`() {
+        val result = evaluate(all = null)
+        assertEquals(NET_VIEW_NA, result.getValue("active_in_all_networks").status)
+        assertEquals(NET_VIEW_NA, result.getValue("no_phantom_networks").status)
+        assertTrue(result.values.none { it.status == NET_VIEW_VIOLATED })
+    }
+
+    @Test
+    fun `VPN observed through active handle survives enumeration failure`() {
+        val vpn = wifi.copy(capabilities = wifiCaps.copy(transports = listOf("VPN")))
+        assertEquals(NET_VIEW_VIOLATED, evaluate(all = null, networks = listOf(vpn)).getValue("no_vpn_transport").status)
+    }
+
+    @Test
+    fun `failed scan is not proof that phantom networks are absent`() {
+        assertEquals(NET_VIEW_NA, evaluate(scanComplete = false).getValue("no_phantom_networks").status)
+        assertEquals(NET_VIEW_VIOLATED, evaluate(phantoms = listOf(103), scanComplete = false).getValue("no_phantom_networks").status)
+    }
+
+    @Test
+    fun `topology change invalidates comparisons but not direct VPN evidence`() {
+        val vpn = wifi.copy(capabilities = wifiCaps.copy(transports = listOf("VPN")))
+        val results = evaluate(active = 103, networks = listOf(vpn), topologyStable = false)
+        assertEquals(NET_VIEW_NA, results.getValue("active_in_all_networks").status)
+        assertEquals(NET_VIEW_VIOLATED, results.getValue("no_vpn_transport").status)
     }
 }

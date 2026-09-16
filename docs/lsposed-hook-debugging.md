@@ -49,6 +49,16 @@ transports passes but ActiveNetwork handle fails on the same active network**:
 the returned handle is still the VPN's netId, yet its capabilities come back
 clean. Family 1 sanitized the capabilities; family 2 never swapped the handle.
 
+Callback payload construction and delivery are separated in `NetworkCallbackRouter`.
+On services with the Bundle dispatcher, the outer builder and frozen-receiver
+queue keep the original VPN identity; rewriting happens only at final delivery.
+The router asks the service to build recipient-redacted cover payloads, tracks
+one visible best handle per registration, and maps loss to that delivered handle.
+`LISTEN_FOR_BEST` uses that lifecycle; only an ordinary `LISTEN` suppresses VPN
+matches without replacement. On older single-dispatch services, LOST is sent
+using the platform's NetworkRequest/Network message shape. PendingIntents retain
+a separate NAI adapter because their extras are parcelled asynchronously.
+
 ## 2. Where the truth lives: `/data/system/vpnhide_lsposed_state`
 
 The module publishes a small text "control channel" from `system_server`; the

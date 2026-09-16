@@ -63,21 +63,20 @@ Follow-up work:
   active/type network could be over-stripped there (the by-network and callback
   paths no longer are). Not observed on test devices; revisit if reported.
 
-### Callback lifecycle: onLost when a hidden VPN target goes fully offline
+### Callback lifecycle validation across Android versions
 
-A default/request target is handed the cover network in place of the VPN, and the
-VPN's own `onLost` is suppressed (the app never held the VPN handle). A change of
-default arrives as its own `onAvailable(cover)`, so a network switch is delivered
-correctly. The remaining gap is the fully-offline transition: when the VPN and its
-underlying both drop and there is no network left, a no-VPN app would receive an
-`onLost` for its network, but the hidden target receives nothing and can keep a
-stale "network available" state until connectivity returns (at which point it gets
-a fresh `onAvailable`). Synthesising that `onLost(cover)` correctly needs a
-per-registration lifecycle state machine that tracks the network delivered to each
-`NetworkRequestInfo` (not per-uid, which conflates a uid's registrations) and
-rewrites the loss across both dispatch overloads and the older single-method form.
-This is a UX-completeness gap, not a hiding leak — the VPN netId never reaches the
-app — so it is deferred rather than shipped half-working.
+Callback delivery now tracks the visible best network per NetworkRequestInfo.
+A change of cover announces AVAILABLE before its property updates; losing the
+last cover sends LOST for the handle that registration previously received.
+Modern ConnectivityService queues are left in the original network identities,
+with rewriting at the final Bundle dispatcher. Older single-dispatch services
+use their own builder for properties and the legacy LOST message format.
+Registration state has weak keys and is released with the platform registration.
+
+The transition model has host-side tests. Device validation must still cover
+Wi-Fi/mobile handover with a persistent VPN, offline/recovery, multiple callbacks
+of one UID, frozen receivers, unregistration and legacy Android dispatchers.
+The host tests do not establish those runtime boundaries.
 
 ## Kernel Module (kmod)
 

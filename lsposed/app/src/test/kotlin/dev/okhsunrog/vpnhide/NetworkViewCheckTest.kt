@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.CallbackProbeEvidence
 import dev.okhsunrog.vpnhide.diagnostics.networkViewClean
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -41,5 +42,27 @@ class NetworkViewCheckTest {
                 networkViewClean(hasViolation = false, hasError = false),
             ),
         )
+    }
+
+    @Test
+    fun `leak without link properties is retained after clean capabilities`() {
+        val probe = CallbackProbeEvidence()
+        probe.capabilities(100, "VPN")
+        probe.capabilities(101, null)
+        probe.linkProperties(101, "wlan0")
+        assertEquals("VPN", probe.snapshot()?.leak)
+    }
+
+    @Test
+    fun `observations from different handles never form a complete pair`() {
+        val probe = CallbackProbeEvidence()
+        probe.capabilities(100, null)
+        probe.linkProperties(101, "rmnet0")
+        assertNull(probe.snapshot())
+        probe.capabilities(101, null)
+        assertEquals(101, probe.snapshot()?.network)
+        assertEquals("rmnet0", probe.snapshot()?.interfaceName)
+        probe.capabilities(102, null)
+        assertEquals(101, probe.snapshot()?.network)
     }
 }

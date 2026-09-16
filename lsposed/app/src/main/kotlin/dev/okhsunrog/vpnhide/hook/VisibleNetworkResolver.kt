@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide.hook
 
+import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import de.robv.android.xposed.XposedHelpers
@@ -79,7 +80,7 @@ internal class VisibleNetworkResolver(
             }
 
             Reflected.Absent -> {
-                Unit
+                // The method is not present on this ROM: fall through to the next source.
             }
         }
 
@@ -109,7 +110,7 @@ internal class VisibleNetworkResolver(
                     }
 
                     Reflected.Absent -> {
-                        Unit
+                        // No global default accessor either: nothing more to try here.
                     }
                 }
             }
@@ -137,7 +138,7 @@ internal class VisibleNetworkResolver(
                 isVpn = caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ?: true,
                 hasInternet = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ?: false,
                 notRestricted = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED) ?: false,
-                blocked = caps != null && isBlockedForUid(cs, caps, uid),
+                blocked = caps?.let { isBlockedForUid(cs, network, it, uid) },
             )
         return if (isUsableCover(candidate)) network else null
     }
@@ -180,28 +181,53 @@ internal class VisibleNetworkResolver(
             Reflected.Errored
         }
 
-    // isNetworkWithCapabilitiesBlocked(nc, uid, false) (12+): the platform's own
-    // per-uid blocked verdict. When the method is absent OR its call fails the
-    // verdict is undeterminable; it resolves to false (usable) because the source
-    // network is one AOSP already chose as the underlying/default — see
-    // [CoverCandidate.blocked]. This never *manufactures* a blocked network.
+    // The selected underlying/default is not necessarily accessible to this UID.
+    // Android <= 11 checks LinkProperties instead of capabilities. Only a missing
+    // modern method permits that version fallback; runtime failures stay unknown.
     private fun isBlockedForUid(
         cs: Any,
+        network: Network,
         caps: NetworkCapabilities,
         uid: Int,
-    ): Boolean =
-        (
-            classify {
-                XposedHelpers.callMethod(
-                    cs,
-                    "isNetworkWithCapabilitiesBlocked",
-                    arrayOf(NetworkCapabilities::class.java, Integer.TYPE, java.lang.Boolean.TYPE),
-                    caps,
-                    uid,
-                    false,
-                ) as? Boolean
-            } as? Reflected.Present
-        )?.value ?: false
+    ): Boolean? =
+        when (
+            val modern =
+                classify {
+                    XposedHelpers.callMethod(
+                        cs,
+                        "isNetworkWithCapabilitiesBlocked",
+                        arrayOf(NetworkCapabilities::class.java, Integer.TYPE, java.lang.Boolean.TYPE),
+                        caps,
+                        uid,
+                        false,
+                    ) as? Boolean
+                }
+        ) {
+            is Reflected.Present -> {
+                modern.value
+            }
+
+            Reflected.Errored -> {
+                null
+            }
+
+            Reflected.Absent -> {
+                (
+                    classify {
+                        val nai = XposedHelpers.callMethod(cs, "getNetworkAgentInfoForNetwork", network) ?: return@classify null
+                        val lp = XposedHelpers.getObjectField(nai, "linkProperties") as? LinkProperties ?: return@classify null
+                        XposedHelpers.callMethod(
+                            cs,
+                            "isNetworkWithLinkPropertiesBlocked",
+                            arrayOf(LinkProperties::class.java, Integer.TYPE, java.lang.Boolean.TYPE),
+                            lp,
+                            uid,
+                            false,
+                        ) as? Boolean
+                    } as? Reflected.Present
+                )?.value
+            }
+        }
 
     private fun logCover(
         uid: Int,

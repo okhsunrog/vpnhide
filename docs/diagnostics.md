@@ -230,6 +230,21 @@ that a pushed handle's link properties name the interface `getLinkProperties`
 returns for it — is folded into the `network_callback` check, which now fails a
 callback that is clean in capabilities but carries a mismatched interface.
 
+Network enumeration failure is distinct from an empty successful enumeration:
+checks depending on that list are not applicable until it can be read. Failed
+netId scan reads are recorded as errors rather than proof of no phantom networks.
+The capture rechecks the active handle and enumeration at the end; an observed
+change makes cross-call consistency comparisons inconclusive. This is a stability
+check, not an atomic framework snapshot. Direct observations of VPN transport or
+active VPN legacy state still fail even when unrelated reads failed. Only
+violations whose prerequisites were observed take precedence over capture errors.
+
+The callback probe publishes a complete pair for one handle atomically and
+retains any observed VPN capabilities, even if no LinkProperties event arrives.
+Registration/read failures without a VPN observation are not measured. These
+results use the existing CheckOutcome and measurement completeness rollup; the
+additional forensic snapshot remains a separate point-in-time capture.
+
 The `network_info_vpn` check compares the app-side `getNetworkInfo(TYPE_VPN)`
 reply with VPN entries in `getAllNetworkInfo()`, after Binder unmarshalling.
 Both paths must retain type 17 with state `DISCONNECTED` and detailed state
