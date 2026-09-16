@@ -1,15 +1,20 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.ActionNeededKind
 import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
 import dev.okhsunrog.vpnhide.diagnostics.CheckResult
 import dev.okhsunrog.vpnhide.diagnostics.CheckResults
+import dev.okhsunrog.vpnhide.diagnostics.CheckingWhat
+import dev.okhsunrog.vpnhide.diagnostics.CouldNotCheckCause
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticAttempt
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticAttemptNotice
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticBanner
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticMeasurement
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticPresentation
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticScreenDecision
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticStage
+import dev.okhsunrog.vpnhide.diagnostics.EvidenceConclusion
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementApplicability
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementContext
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementCoverage
@@ -19,133 +24,145 @@ import dev.okhsunrog.vpnhide.diagnostics.ProbePlanEntry
 import dev.okhsunrog.vpnhide.diagnostics.RoutingKnowledge
 import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
 import dev.okhsunrog.vpnhide.diagnostics.SelfRouting
+import dev.okhsunrog.vpnhide.diagnostics.Situation
+import dev.okhsunrog.vpnhide.diagnostics.Staleness
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticScreenDecision
 import dev.okhsunrog.vpnhide.diagnostics.summarizeMeasurement
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Test
 
+/**
+ * The banner is a map over [Situation] — the same classification the Dashboard hero
+ * renders — and the presentation only supplies this screen's side channels. Every row
+ * asserts the whole decision, so a results list, a completeness flag or a coverage
+ * that quietly changes is a failure.
+ */
 class DiagnosticScreenDataTest {
     @Test
-    fun `current conditions outrank history and never spin forever`() {
-        val measured = base(measurement = measurement())
-        assertEquals(DiagnosticBanner.RestartApp, decide(measured.copy(eligibility = DiagnosticEligibility.RestartApp)).banner)
-        assertEquals(DiagnosticBanner.VpnOff, decide(measured.copy(eligibility = DiagnosticEligibility.VpnOff)).banner)
-        assertEquals(DiagnosticBanner.SelfExcluded, decide(measured.copy(eligibility = DiagnosticEligibility.SelfExcluded)).banner)
-        assertEquals(DiagnosticBanner.Applying, decide(measured.copy(eligibility = DiagnosticEligibility.Applying)).banner)
+    fun `initialization and a suite in flight show progress and any partial evidence`() {
+        assertEquals(progress(), decide(Situation.Initializing, history))
+        // A run with nothing to show yet, and a draining one that has nothing left to add.
+        assertEquals(progress(), decide(checkingSuite(), blank))
+        val draining = blank.copy(activeRunId = 2, activeStage = DiagnosticStage.Draining, activeResults = partial)
+        assertEquals(progress(), decide(checkingSuite(), draining))
+        // Partial evidence is listed as incomplete and attributed with the live layers, not the measurement's.
+        val running = history.copy(activeRunId = 2, activeStage = DiagnosticStage.Slow, activeResults = partial)
         assertEquals(
-            DiagnosticBanner.ApplicationUnknown,
-            decide(measured.copy(eligibility = DiagnosticEligibility.ApplicationUnknown)).banner,
+            DiagnosticScreenDecision(DiagnosticBanner.Progress, results = partial, complete = false),
+            decide(checkingSuite(), running),
+        )
+    }
+
+    @Test
+    fun `a routing re-read keeps the last known condition with a busy button`() {
+        assertEquals(
+            DiagnosticScreenDecision(DiagnosticBanner.VpnOff, checking = true),
+            decide(checkingVpn(SelfRouting.VpnOff), history),
         )
         assertEquals(
-            DiagnosticBanner.ApplicationFailed,
-            decide(measured.copy(eligibility = DiagnosticEligibility.ApplicationFailed)).banner,
+            DiagnosticScreenDecision(DiagnosticBanner.SelfExcluded, checking = true),
+            decide(checkingVpn(SelfRouting.Excluded), history),
         )
-        assertEquals(DiagnosticBanner.RoutingUnknown, decide(measured.copy(eligibility = DiagnosticEligibility.Unknown)).banner)
-        // The existing prompts replace the list; the explicit condition banners keep history visible (T17).
-        assertNull(decide(measured.copy(eligibility = DiagnosticEligibility.VpnOff)).results)
-        assertNull(decide(measured.copy(eligibility = DiagnosticEligibility.SelfExcluded)).results)
-        assertNull(decide(measured.copy(eligibility = DiagnosticEligibility.RestartApp)).results)
-        for (
-        eligibility in
-        listOf(
-            DiagnosticEligibility.Applying,
-            DiagnosticEligibility.ApplicationUnknown,
-            DiagnosticEligibility.ApplicationFailed,
-            DiagnosticEligibility.Unknown,
-        )
-        ) {
-            assertEquals("$eligibility", measured.measurementResults, decide(measured.copy(eligibility = eligibility)).results)
-            assertNull("$eligibility", decide(base().copy(eligibility = eligibility)).results)
+        // Routed, or nothing known at all: the history stays listed as unverified, or there is nothing to list.
+        assertEquals(listing(DiagnosticBanner.ResultsUnverified), decide(checkingVpn(SelfRouting.Routed), history))
+        assertEquals(progress(), decide(checkingVpn(null), blank))
+    }
+
+    @Test
+    fun `a configuration change being applied keeps the history listed`() {
+        val applying = Situation.Checking(CheckingWhat.ConfigApplying, SelfRouting.Routed, ReadReason.Explicit, since = 0)
+        assertEquals(listing(DiagnosticBanner.Applying), decide(applying, history))
+        assertEquals(DiagnosticScreenDecision(DiagnosticBanner.Applying), decide(applying, blank))
+    }
+
+    @Test
+    fun `a known condition replaces the list, a failed application keeps it`() {
+        assertEquals(DiagnosticScreenDecision(DiagnosticBanner.VpnOff), decide(Situation.VpnOff, history))
+        assertEquals(DiagnosticScreenDecision(DiagnosticBanner.SelfExcluded), decide(Situation.NotMeasurable, history))
+        for (kind in listOf(ActionNeededKind.RestartApp, ActionNeededKind.RestartDevice)) {
+            assertEquals("$kind", DiagnosticScreenDecision(DiagnosticBanner.RestartApp), decide(Situation.ActionNeeded(kind), history))
         }
-        // Re-checking routing keeps an existing measurement on screen as unverified.
-        val checking = decide(measured.copy(eligibility = DiagnosticEligibility.Checking))
-        assertEquals(DiagnosticBanner.ResultsUnverified, checking.banner)
-        assertEquals(measured.measurementResults, checking.results)
-        assertEquals(DiagnosticBanner.Progress, decide(base().copy(eligibility = DiagnosticEligibility.Checking)).banner)
-    }
-
-    @Test
-    fun `a quarantined probe outranks history but not a current condition`() {
-        val measured = base(measurement = measurement()).copy(probeUnavailable = true)
-        val quarantined = decide(measured)
-        assertEquals(DiagnosticBanner.ProbeUnavailable, quarantined.banner)
-        // History stays listed: the measurement is as good as it was, only a new one cannot start.
-        assertEquals(measured.measurementResults, quarantined.results)
-        assertNull(quarantined.attemptNotice)
-        // A condition that explains the same impossibility in more detail still wins.
-        assertEquals(DiagnosticBanner.VpnOff, decide(measured.copy(eligibility = DiagnosticEligibility.VpnOff)).banner)
-        assertEquals(DiagnosticBanner.ProbeUnavailable, decide(base().copy(probeUnavailable = true)).banner)
-    }
-
-    @Test
-    fun `a retained measurement carries the layers it was measured against, partial evidence does not`() {
-        val measured = base(measurement = measurement())
-        assertEquals(measured.measurement?.context?.coverageLayers, decide(measured).coverage)
         assertEquals(
-            measured.measurement?.context?.coverageLayers,
-            decide(measured.copy(eligibility = DiagnosticEligibility.Unknown)).coverage,
+            listing(DiagnosticBanner.ApplicationUnknown),
+            decide(Situation.ActionNeeded(ActionNeededKind.ApplicationUnknown), history),
         )
-        val partial = results(CheckOutcome.HiddenByBackend)
-        val running = decide(measured.copy(activeRunId = 2, activeStage = DiagnosticStage.Slow, activeResults = partial))
-        assertNull(running.coverage)
+        assertEquals(
+            listing(DiagnosticBanner.ApplicationFailed),
+            decide(Situation.ActionNeeded(ActionNeededKind.ApplicationFailed), history),
+        )
     }
 
     @Test
-    fun `an active run shows progress and its partial evidence as incomplete`() {
-        val core = decide(base().copy(activeRunId = 2, activeStage = DiagnosticStage.Core))
-        assertEquals(DiagnosticBanner.Progress, core.banner)
-        assertNull(core.results)
-        val partial = results(CheckOutcome.HiddenByBackend)
-        val slow =
-            decide(base(measurement = measurement()).copy(activeRunId = 2, activeStage = DiagnosticStage.Slow, activeResults = partial))
-        assertEquals(DiagnosticBanner.Progress, slow.banner)
-        assertEquals(partial, slow.results)
-        assertFalse(slow.complete)
+    fun `a check that could not run keeps the history and never repeats itself in a notice`() {
+        val routing = Situation.CouldNotCheck(CouldNotCheckCause.RoutingUnknown(TransitionFailure.ReadFailed))
+        assertEquals(listing(DiagnosticBanner.RoutingUnknown), decide(routing, history))
+        val quarantined = Situation.CouldNotCheck(CouldNotCheckCause.ProbeUnavailable)
+        assertEquals(listing(DiagnosticBanner.ProbeUnavailable), decide(quarantined, history))
+        // The retry prompt sits above the history it could not refresh; the banner already says it failed.
+        val failed = Situation.CouldNotCheck(CouldNotCheckCause.RunFailed(TransitionFailure.ExecutionFailed))
+        val failedAttempt = DiagnosticAttempt(3, RunOutcome.Failed, TransitionFailure.ExecutionFailed)
+        assertEquals(listing(DiagnosticBanner.Failed), decide(failed, history.copy(lastAttempt = failedAttempt)))
+        assertEquals(DiagnosticScreenDecision(DiagnosticBanner.Failed), decide(failed, blank.copy(lastAttempt = failedAttempt)))
+        // An interruption with an earlier measurement is never this situation, so it never lists one.
+        val interrupted = Situation.CouldNotCheck(CouldNotCheckCause.Interrupted(TransitionFailure.ContextChanged))
+        assertEquals(DiagnosticScreenDecision(DiagnosticBanner.Interrupted), decide(interrupted, blank))
     }
 
     @Test
-    fun `a failed or interrupted latest attempt is a banner without history and a notice beside it`() {
-        val failed = DiagnosticAttempt(3, RunOutcome.Failed, TransitionFailure.ExecutionFailed)
-        val interrupted = DiagnosticAttempt(3, RunOutcome.Interrupted, TransitionFailure.ContextChanged)
-        assertEquals(DiagnosticBanner.Failed, decide(base().copy(lastAttempt = failed)).banner)
-        assertEquals(DiagnosticBanner.Interrupted, decide(base().copy(lastAttempt = interrupted)).banner)
-        val notStarted = DiagnosticAttempt(3, RunOutcome.NotStarted, TransitionFailure.ReadFailed)
-        assertEquals(DiagnosticBanner.Failed, decide(base().copy(lastAttempt = notStarted)).banner)
-
-        val withHistory = decide(base(measurement = measurement()).copy(lastAttempt = interrupted))
-        assertEquals(DiagnosticBanner.Ready, withHistory.banner)
-        assertEquals(DiagnosticAttemptNotice.Interrupted, withHistory.attemptNotice)
-        assertEquals(results(CheckOutcome.HiddenByBackend), withHistory.results)
-
-        // A run that never started because the VPN was off is not a failed check: once
-        // the condition has cleared, the history is listed without a notice.
-        val blocked = DiagnosticAttempt(3, RunOutcome.NotStarted, eligibility = DiagnosticEligibility.VpnOff)
-        val blockedHistory = decide(base(measurement = measurement()).copy(lastAttempt = blocked))
-        assertEquals(DiagnosticBanner.Ready, blockedHistory.banner)
-        assertNull(blockedHistory.attemptNotice)
-    }
-
-    @Test
-    fun `sufficiency outranks applicability and applicability words the ready banner`() {
+    fun `a measurement is worded by its evidence, then by its staleness`() {
+        assertEquals(listing(DiagnosticBanner.Ready), decide(measured(staleness = Staleness.Current), history))
+        // A re-read inside its grace is silent: Confirming renders exactly like Current.
+        val confirming = Staleness.Confirming(ReadReason.Background, since = null)
+        assertEquals(listing(DiagnosticBanner.Ready), decide(measured(staleness = confirming), history))
+        assertEquals(listing(DiagnosticBanner.ResultsChanged), decide(measured(staleness = Staleness.Changed), history))
         val insufficient = base(measurement = measurement(CheckOutcome.NotMeasured(NotMeasuredReason.NoGroundTruth)))
-        assertEquals(DiagnosticBanner.InsufficientEvidence, decide(insufficient).banner)
         assertEquals(
-            DiagnosticBanner.InsufficientEvidence,
-            decide(insufficient.copy(applicability = MeasurementApplicability.Changed)).banner,
+            DiagnosticScreenDecision(
+                DiagnosticBanner.InsufficientEvidence,
+                results = insufficient.measurementResults,
+                coverage = insufficient.measurement?.context?.coverageLayers,
+            ),
+            decide(measured(EvidenceConclusion.Insufficient, Staleness.Changed), insufficient),
         )
-        val measured = base(measurement = measurement())
-        assertEquals(DiagnosticBanner.Ready, decide(measured).banner)
-        assertEquals(DiagnosticBanner.ResultsChanged, decide(measured.copy(applicability = MeasurementApplicability.Changed)).banner)
-        assertEquals(
-            DiagnosticBanner.ResultsUnverified,
-            decide(measured.copy(applicability = MeasurementApplicability.Unverified)).banner,
-        )
-        assertEquals(DiagnosticBanner.Progress, decide(base()).banner)
     }
 
-    private fun decide(presentation: DiagnosticPresentation) = diagnosticScreenDecision(presentation)
+    @Test
+    fun `an attempt that did not complete is a notice beside the history`() {
+        val interrupted = DiagnosticAttempt(3, RunOutcome.Interrupted, TransitionFailure.ContextChanged)
+        assertEquals(
+            listing(DiagnosticBanner.Ready, DiagnosticAttemptNotice.Interrupted),
+            decide(measured(), history.copy(lastAttempt = interrupted)),
+        )
+        // A run that never started because of a condition is not a failed check (I13).
+        val blocked = DiagnosticAttempt(3, RunOutcome.NotStarted, eligibility = DiagnosticEligibility.VpnOff)
+        assertEquals(listing(DiagnosticBanner.Ready), decide(measured(), history.copy(lastAttempt = blocked)))
+    }
+
+    private val history = base(measurement = measurement())
+    private val blank = base()
+    private val partial = results(CheckOutcome.HiddenBySelinux)
+
+    private fun decide(
+        situation: Situation,
+        presentation: DiagnosticPresentation,
+    ) = diagnosticScreenDecision(situation, presentation)
+
+    private fun progress() = DiagnosticScreenDecision(DiagnosticBanner.Progress)
+
+    /** The expected decision for a banner that keeps [history]'s measurement listed with its own coverage. */
+    private fun listing(
+        banner: DiagnosticBanner,
+        notice: DiagnosticAttemptNotice? = null,
+    ) = DiagnosticScreenDecision(banner, notice, history.measurementResults, coverage = history.measurement?.context?.coverageLayers)
+
+    private fun checkingSuite() = Situation.Checking(CheckingWhat.Suite, SelfRouting.Routed, ReadReason.Explicit, since = 0)
+
+    private fun checkingVpn(lastKnown: SelfRouting?) = Situation.Checking(CheckingWhat.VpnState, lastKnown, ReadReason.Explicit, since = 0)
+
+    private fun measured(
+        evidence: EvidenceConclusion = EvidenceConclusion.NoObservedLeak,
+        staleness: Staleness = Staleness.Current,
+    ) = Situation.Measured(evidence, staleness)
 
     private fun results(outcome: CheckOutcome) = CheckResults(native = NATIVE_CHECKS.map { CheckResult(it.id, "", outcome, id = it.id) })
 
