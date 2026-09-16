@@ -348,7 +348,7 @@
     <string name="reset_button_sub">删除 VPN Hide 留在设备上的所有配置、状态和目标文件</string>
     <string name="reset_title">移除残留文件</string>
     <string name="reset_warning">这会永久删除 VPN Hide 及其模块写在模块文件夹之外的所有配置、状态、统计和目标文件。此操作无法撤销。</string>
-    <string name="reset_instructions">请仅在完成以下步骤后再执行：在 Root 管理器中移除所有 VPN Hide 模块、在 LSPosed 中禁用 VPN Hide 模块，并重启。这里不会动模块文件夹、应用本身和运行时状态——它们会随上面的步骤一起消失。</string>
+    <string name="reset_instructions">请仅在完成以下步骤后再执行：在 Root 管理器中移除所有 VPN Hide 模块、在 LSPosed 中禁用 VPN Hide 模块，并重启。这里不会动模块文件夹、应用本身和运行时状态——它们会随上面的步骤一起消失。 对于内置后端，还需启动不含 VPN Hide 的内核；移除配套模块不会移除内核钩子。</string>
     <string name="reset_checking">正在检查模块状态…</string>
     <string name="reset_running">正在删除文件…</string>
     <string name="reset_blocked_intro">还不能执行——VPN Hide 仍在运行。请先移除以下项并重启：</string>
@@ -356,7 +356,7 @@
     <string name="reset_blocker_kpm">KPM 仍已安装</string>
     <string name="reset_blocker_zygisk">Zygisk 模块仍已安装</string>
     <string name="reset_blocker_ports">端口模块仍已安装</string>
-    <string name="reset_blocker_kernel">内核钩子仍已加载——需要重启</string>
+    <string name="reset_blocker_kernel">内核钩子仍然存在。移除可加载模块后需要重启；内置后端需要使用不含 VPN Hide 的内核。</string>
     <string name="reset_blocker_lsposed">LSPosed 钩子仍在生效</string>
     <string name="reset_confirm">全部删除</string>
     <string name="reset_done_body">完成，所有残留文件已移除。现在可以卸载 VPN Hide 了。</string>
@@ -370,7 +370,7 @@
     <string name="dashboard_action_details">详情</string>
     <string name="dashboard_action_learn_more">了解更多</string>
     <string name="dashboard_issue_kmod_capable_but_zygisk">当前内核支持内核模块——它在内核空间挂钩，对防篡改检测不可见。Zygisk 也能用，但为其开启原生时，银行和支付类应用可能会检测到它的钩子。请安装 %1$s 并卸载 Zygisk 模块，以获得更干净的覆盖。</string>
-    <string name="dashboard_issue_native_conflict_kernel">内核模块（.ko）和 KPM 同时装着。它们挂钩相同的内核函数，两个都生效可能导致设备硬冻结。请只保留其一——卸载内核模块或 KPM。</string>
+    <string name="dashboard_issue_native_conflict_kernel">内核后端（.ko 或内置）与 KPM 同时处于活动状态。它们挂钩相同的内核函数，可能导致设备冻结。请只保留一个内核后端；使用内置后端时请移除 KPM。</string>
     <string name="dashboard_issue_native_conflict_deferred">内核模块（.ko）和 KPM 同时装着。KPM 已在开机时主动让位以避免冻结，因此没有起任何作用。请只保留其一——卸载 KPM（或内核模块）。</string>
     <string name="dashboard_issue_kpm_awaiting_superkey">KPM 已安装但未生效：APatch/FolkPatch 无法用受信任的 su 令牌加载它。请在“设置 → 安全”中保存 SuperKey，然后重启以启用原生隐藏。</string>
     <string name="dashboard_issue_module_reboot_to_activate">%1$s 模块已安装，但尚未启用 — 重启设备后生效。</string>
@@ -603,4 +603,7 @@
     <string name="config_capture_logging">采集进行期间，调试日志保持开启。</string>
     <string name="config_changes_unavailable">暂时无法更改配置</string>
     <string name="config_close">关闭</string>
+    <string name="reset_blocker_builtin">内置后端配套模块仍已安装</string>
+    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide 已内置于当前内核。请移除多余的 kmod 模块，并保留内置后端配套模块。</string>
+    <string name="dashboard_issue_builtin_companion_missing">VPN Hide 已内置于此内核，但缺少配套模块。请安装 VPN Hide 内置后端配套模块以配置保护。</string>
 </resources>

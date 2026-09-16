@@ -343,3 +343,19 @@ private fun CanonicalConfig.withNativeRoles(roles: Map<String, NativeRole>): Can
 
 private fun CanonicalConfig.withPortPolicies(policies: Map<String, PortPolicy?>): CanonicalConfig =
     withAppValues(policies) { app, v -> app.copy(portPolicy = v) }
+
+/** Row selection enables every installed protection layer; individual chips remain independent. */
+internal fun toggleAllProtection(
+    app: AppEntry,
+    targets: TargetsSnapshot,
+): AppEntry {
+    val selected = !app.anySelected
+    return app.copy(
+        java = selected,
+        javaHooks = null,
+        native = targets.anyNativeInstalled && selected,
+        nativeOverrides = NativeHookOverrides(),
+        appHiding = selected,
+        ports = targets.portsModuleInstalled && selected,
+    )
+}

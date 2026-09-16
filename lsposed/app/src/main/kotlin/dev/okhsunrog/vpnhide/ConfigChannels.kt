@@ -10,18 +10,8 @@ import dev.okhsunrog.vpnhide.picker.applyAutoHiddenPackages
  * activator, which derives that backend's wire from the JSON.
  */
 internal object ConfigChannels {
-    /** Shell part running exactly one native activator by backend priority. */
-    fun nativeActivatorCommand(): String =
-        "{ ${activatorShellHelper()}; " +
-            "if [ -f $KMOD_MODULE_DIR/module.prop ] && [ ! -f $KMOD_MODULE_DIR/disable ]; then " +
-            "run_activator $KMOD_ACTIVATOR kmod; " +
-            "elif [ -f $BUILTIN_MODULE_DIR/module.prop ] && [ ! -f $BUILTIN_MODULE_DIR/disable ]; then " +
-            "run_activator $BUILTIN_ACTIVATOR builtin; " +
-            "elif [ -f $KPM_MODULE_DIR/module.prop ] && [ ! -f $KPM_MODULE_DIR/disable ]; then " +
-            "run_activator $KPM_ACTIVATOR KPM; " +
-            "elif [ -f $ZYGISK_MODULE_DIR/module.prop ] && [ ! -f $ZYGISK_MODULE_DIR/disable ]; then " +
-            "run_activator $ZYGISK_ACTIVATOR Zygisk; " +
-            "else true; fi; }"
+    /** The current mutation helper delegates selection to the shared native activation layer. */
+    fun nativeActivatorCommand(): String = "\"${'$'}{VPNHIDE_MUTATION_HELPER:?mutation helper not supplied}\" activate-native"
 
     /** Shell part running the optional ports activator when its module is enabled. */
     fun portsActivatorCommand(): String =

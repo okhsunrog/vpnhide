@@ -102,10 +102,13 @@ enum PmReadyWait {
     Forever,
 }
 
+mod kernel_control;
 mod kpm;
 mod lifecycle;
 mod model;
 mod ports;
+mod selection;
+pub use selection::activate_native_companion;
 
 use kpm::*;
 pub use lifecycle::*;
@@ -157,7 +160,7 @@ fn activate_kmod_with_pm_wait(wait: PmReadyWait) -> Result<()> {
     let wire = project_native_with_pm_wait(&read_canonical()?, NativeHookFamily::Kmod, wait)?;
     // /proc/vpnhide_ctl replaces the entire config per write(), so keep this
     // bounded to MAX_NATIVE_TARGETS and deliver one complete snapshot.
-    fs::write(KMOD_CTL, wire)?;
+    kernel_control::write_config(Path::new(KMOD_CTL), kernel_control::KMOD_BACKEND_ID, &wire)?;
     Ok(())
 }
 
@@ -169,7 +172,11 @@ fn activate_kmod_with_pm_wait(wait: PmReadyWait) -> Result<()> {
 /// The wire's `backend` field is set by the kernel driver, not here.
 fn activate_builtin_with_pm_wait(wait: PmReadyWait) -> Result<()> {
     let wire = project_native_with_pm_wait(&read_canonical()?, NativeHookFamily::Builtin, wait)?;
-    fs::write(KMOD_CTL, wire)?;
+    kernel_control::write_config(
+        Path::new(KMOD_CTL),
+        kernel_control::BUILTIN_BACKEND_ID,
+        &wire,
+    )?;
     Ok(())
 }
 

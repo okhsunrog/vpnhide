@@ -122,6 +122,7 @@ internal fun expectedInstalledHooks(
 ): Set<HookIds.Hook> =
     when (backend) {
         HookIds.Backend.KMOD -> KERNEL_HOOKS + installed.intersect(KMOD_HOOKS)
+        HookIds.Backend.BUILTIN -> KERNEL_HOOKS + installed.intersect(BUILTIN_HOOKS)
         HookIds.Backend.KPM -> KERNEL_HOOKS + installed.intersect(KPM_HOOKS)
         else -> ownedHooks(backend)
     }

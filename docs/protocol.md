@@ -612,6 +612,13 @@ catching what the previous misses.
 - **Layer 4 — version fuse.** `version` in the header turns any drift that slips
   all tests into a loud refusal rather than a silent misparse (§3).
 
+The `status_fields` vectors exercise the Rust/Kotlin status consumers; C emits
+status and checks its existing emission vectors. Both consumers preserve missing
+fields separately from zero. Display callers may supply defaults, but kernel
+ownership checks require a complete status: an absent backend must never become
+backend zero (kmod). Backend identities come from the generated registry enum;
+shell commands must not parse this wire format independently.
+
 CI currently gates C host vectors, Rust/Kotlin vectors, the Rust↔C proptest
 differential oracle, and the registry drift-check (TOML regenerated and
 committed). Layer 3 remains the next hardening step; no fuzz-smoke gate is

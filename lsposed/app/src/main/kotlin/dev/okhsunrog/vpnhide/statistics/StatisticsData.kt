@@ -54,6 +54,7 @@ private const val KPM_TRUNCATION_MARKER = "# vpnhide truncated"
 internal fun buildStatisticsState(snapshot: RootSnapshot): StatisticsState {
     val uidPackages = uidPackages(snapshot.sections["pm_packages"].orEmpty())
     val kmodRaw = snapshot.sections["kmod_state"].orEmpty()
+    val kernelStatus = parseProtocolStatusBlock(kmodRaw)
     val kpmRaw = snapshot.sections["kpm_state"].orEmpty()
     val lsposedRaw = snapshot.sections["lsposed_state"].orEmpty()
     val kpmStatsTruncated = kpmRaw.lineSequence().any { it.trim() == KPM_TRUNCATION_MARKER }
@@ -61,8 +62,8 @@ internal fun buildStatisticsState(snapshot: RootSnapshot): StatisticsState {
     val nativeBackends =
         listOf(
             buildBackendStatistics(
-                backend = HookIds.Backend.KMOD,
-                status = parseProtocolStatusBlock(kmodRaw),
+                backend = if (kernelStatus?.backendId == HookIds.Backend.BUILTIN) HookIds.Backend.BUILTIN else HookIds.Backend.KMOD,
+                status = kernelStatus,
                 stats = parseProtocolStatsBlock(kmodRaw),
                 uidPackages = uidPackages,
             ),

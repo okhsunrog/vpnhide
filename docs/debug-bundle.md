@@ -212,6 +212,7 @@ to an `emit_*` line in
 - `root_manager` — Magisk/KSU/APatch presence + versions + `/data/adb` perms.
 
 **Native kernel backend (.ko)**
+- `builtin_prop`, `builtin_module_state` (companion flags, activator sha256 and staged update), `builtin_load_status`. Built-in live telemetry shares `kmod_state`; its wire backend id is `0x4`, and counters/status are attributed only to Built-in.
 - `kmod_prop`, `kmod_module_state` (file flags, `.ko` + activator sha256, staged-for-reboot state), `kmod_load_status`, `kmod_load_dmesg` (the boot load log — kretprobe registration lines), `kmod_state` (**live `/proc/vpnhide_ctl`** telemetry: installed-hook mask, per-uid counters — see [protocol.md](protocol.md)).
 - `proc_modules` (is `vpnhide*` in `/proc/modules`), `kprobes` (`/sys/kernel/debug/kprobes/list` for our symbols), `kernel_symbols` (kallsyms presence of each hooked function — key for "symbol missing on trimmed OEM KMI").
 

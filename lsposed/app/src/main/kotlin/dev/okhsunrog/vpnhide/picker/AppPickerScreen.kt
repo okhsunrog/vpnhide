@@ -244,19 +244,7 @@ internal fun AppPickerScreen(
                     ),
                 )
             },
-            onToggleAll = {
-                val newState = !app.anySelected
-                onChange(
-                    app.copy(
-                        java = newState,
-                        javaHooks = null,
-                        native = if (targets.anyNativeInstalled) newState else false,
-                        nativeOverrides = NativeHookOverrides(),
-                        appHiding = newState,
-                        ports = if (targets.portsModuleInstalled) newState else false,
-                    ),
-                )
-            },
+            onToggleAll = { onChange(toggleAllProtection(app, targets)) },
         )
     }
 }

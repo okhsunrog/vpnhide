@@ -32,6 +32,7 @@ internal val FULL_RESET_DIRS =
     listOf(
         "/data/adb/vpnhide",
         "/data/adb/vpnhide_kmod",
+        "/data/adb/vpnhide_builtin",
         "/data/adb/vpnhide_kpm",
         "/data/adb/vpnhide_ports",
     ) + LEGACY_ORPHAN_DIRS
@@ -57,6 +58,7 @@ internal fun buildFullResetCommand(): String =
 // reboot first.
 internal enum class ResetBlocker {
     KmodInstalled,
+    BuiltinInstalled,
     KpmInstalled,
     ZygiskInstalled,
     PortsInstalled,
@@ -78,9 +80,11 @@ internal fun resetBlockers(
     ports: ModuleState,
     lsposed: LsposedState,
     kernelCtlPresent: Boolean,
+    builtin: ModuleState = ModuleState.NotInstalled,
 ): List<ResetBlocker> =
     buildList {
         if (kmod is ModuleState.Installed) add(ResetBlocker.KmodInstalled)
+        if (builtin is ModuleState.Installed) add(ResetBlocker.BuiltinInstalled)
         if (kpm is ModuleState.Installed) add(ResetBlocker.KpmInstalled)
         if (zygisk is ModuleState.Installed) add(ResetBlocker.ZygiskInstalled)
         if (ports is ModuleState.Installed) add(ResetBlocker.PortsInstalled)

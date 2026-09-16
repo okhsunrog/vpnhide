@@ -562,3 +562,26 @@ config reaches controls before slower observation-cache refresh completes.
 See [config coordinator](config-coordinator.md) for conflicts, logging ownership,
 unknown-outcome recovery and first-adoption behavior. This does not change the
 canonical schema, backend protocol or LSPosed direct-read contract.
+
+### Live kernel ownership before activation
+
+App activation invokes the packaged `vhmutate activate-native` entry point under
+the mutation supervisor. Selection lives in the shared activator crate and uses
+the protocol crate's status parser and generated backend enum; the app shell
+does not parse status. When `/proc/vpnhide_ctl` is present, its complete status
+determines the companion. Backend `0x4` requires the enabled built-in companion;
+`0x0` requires the enabled kmod companion. An unreadable, malformed or unknown
+status aborts activation. A missing/disabled matching companion is an error,
+not permission to invoke another installed backend. The installed-module
+priority applies only when there is no live kernel control node.
+
+The kmod boot loader checks the same live identity before invoking `insmod`.
+Only an absent node permits an attempt; a present node or failed read records
+`insmod_exit=-1` and the refusal reason in `insmod_stderr`. Neither the app nor
+the loader removes companion modules automatically.
+
+Both kernel activators verify identity on the open proc file before writing the
+family-specific configuration. This prevents a kmod activator from configuring
+built-in (and vice versa). These are userspace protections: a manual root
+`insmod` bypasses the loader, and concurrent manual kernel changes are not
+serialized by the app coordinator.

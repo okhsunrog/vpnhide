@@ -67,6 +67,10 @@ internal sealed interface DashboardIssue {
     /** Two kernel backends live at once — the .ko + KPM pair that freezes the device. */
     data object NativeConflictKernel : Native
 
+    data object BuiltinCompanionMissing : Native
+
+    data object RedundantKmodWithBuiltin : Native
+
     data object MultipleNativeActive : Native
 
     /** KPM stood down at boot because a .ko was already there. */
@@ -219,6 +223,7 @@ internal data class ModuleFacts(
     val kmodLoadStatus: KmodLoadStatus?,
     val currentBootId: String,
     val mismatches: List<ModuleMismatch>,
+    val builtinKernelPresent: Boolean = false,
 )
 
 internal data class LsposedFacts(
@@ -402,8 +407,17 @@ private fun targetIssues(facts: DashboardFacts): List<DashboardIssue> =
 /** Working, but not the backend this kernel could be running. */
 private fun nativeChoiceIssues(facts: DashboardFacts): List<DashboardIssue> =
     buildList {
-        addAll(betterBackendIssues(facts))
+        if (facts.modules.builtinKernelPresent && facts.modules.builtin.state is ModuleState.NotInstalled) {
+            add(DashboardIssue.BuiltinCompanionMissing)
+        } else {
+            addAll(betterBackendIssues(facts))
+        }
         addAll(multiNativeIssues(facts))
+        if ((facts.modules.builtinKernelPresent || moduleActive(facts.modules.builtin.state)) &&
+            facts.modules.kmod.state is ModuleState.Installed
+        ) {
+            add(DashboardIssue.RedundantKmodWithBuiltin)
+        }
         if (facts.modules.kpm.state is ModuleState.Installed &&
             kpmAwaitingSuperkey(facts.modules.kpmLoadStatus, facts.modules.currentBootId)
         ) {
@@ -457,6 +471,7 @@ private fun multiNativeIssues(facts: DashboardFacts): List<DashboardIssue> {
     val severity =
         classifyMultiNative(
             kmodActive = moduleActive(modules.kmod.state),
+            builtinActive = moduleActive(modules.builtin.state),
             kpmActive = moduleActive(modules.kpm.state),
             zygiskActive = moduleActive(modules.zygisk.state),
         )

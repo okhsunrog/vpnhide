@@ -22,6 +22,7 @@ pub fn execute(
         return Err(io::Error::last_os_error());
     }
     let input = script_input(script)?;
+    let helper = std::env::current_exe()?;
     let (reader, writer) = UnixStream::pair()?;
     let mut output = Output::new(reader)?;
     let stdout = Stdio::from(OwnedFd::from(writer.try_clone()?));
@@ -39,6 +40,7 @@ pub fn execute(
     #[cfg(not(target_os = "android"))]
     let shell = "/bin/sh";
     let child = Command::new(shell)
+        .env("VPNHIDE_MUTATION_HELPER", helper)
         .stdin(input)
         .stdout(stdout)
         .stderr(stderr)

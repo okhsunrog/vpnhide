@@ -314,6 +314,9 @@ int main(int argc, char **argv)
 			run_kind(fields[1], fields[2]);
 		else if (strcmp(fields[0], "stats") == 0 && nf >= 3)
 			run_stats(fields[1], fields[2]);
+		/* Kernel C emits status; Rust/Kotlin consume these read vectors. */
+		else if (strcmp(fields[0], "status_fields") == 0)
+			continue;
 		else if (strcmp(fields[0], "status") == 0 && nf >= 3)
 			run_status(fields[1], fields[2]);
 		else if (strcmp(fields[0], "clamp") == 0 && nf >= 4)

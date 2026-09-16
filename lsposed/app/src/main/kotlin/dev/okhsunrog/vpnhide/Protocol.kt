@@ -201,26 +201,42 @@ internal object Protocol {
 
     // ── status (§4.3) ─────────────────────────────────────────────────────
 
-    fun parseStatus(text: String): Status? {
+    data class StatusFields(
+        val backend: Long? = null,
+        val kver: Long? = null,
+        val hooks: Long? = null,
+        val error: Long? = null,
+    ) {
+        fun complete(): Status? {
+            return Status(backend ?: return null, kver ?: return null, hooks ?: return null, error ?: return null)
+        }
+    }
+
+    fun parseStatusFields(text: String): StatusFields? {
         val h = parseHeader(text) ?: return null
         if (h.kind != Kind.STATUS) return null
-        var backend = 0L
-        var kver = 0L
-        var hooks = 0L
-        var error = 0L
+        var fields = StatusFields()
         forEachRecord(h.records) { toks ->
-            val v = toks.getOrNull(1)?.let { parseHex(it, 32) }
+            if (toks.firstOrNull() == "vpnhide") return fields
+            val v = toks.takeIf { it.size == 2 }?.get(1)?.let { parseHex(it, 32) }
             if (v != null) {
-                when (toks.getOrNull(0)) {
-                    "backend" -> backend = v
-                    "kver" -> kver = v
-                    "hooks" -> hooks = v
-                    "error" -> error = v
-                }
+                fields =
+                    when (toks.firstOrNull()) {
+                        "backend" -> fields.copy(backend = v)
+                        "kver" -> fields.copy(kver = v)
+                        "hooks" -> fields.copy(hooks = v)
+                        "error" -> fields.copy(error = v)
+                        else -> fields
+                    }
             }
         }
-        return Status(backend, kver, hooks, error)
+        return fields
     }
+
+    fun parseStatus(text: String): Status? =
+        parseStatusFields(text)?.let {
+            Status(it.backend ?: 0L, it.kver ?: 0L, it.hooks ?: 0L, it.error ?: 0L)
+        }
 
     fun formatStatus(s: Status): String =
         "vpnhide $TELEMETRY_VERSION status\n" +

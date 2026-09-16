@@ -247,6 +247,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
+name = "vpnhide_activator"
+version = "1.2.5"
+dependencies = [
+ "serde",
+ "serde_json",
+ "vpnhide_apatch_abi",
+ "vpnhide_protocol",
+]
+
+[[package]]
 name = "vpnhide_apatch_abi"
 version = "1.1.1"
 
@@ -258,8 +268,13 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "vpnhide_activator",
  "vpnhide_apatch_abi",
 ]
+
+[[package]]
+name = "vpnhide_protocol"
+version = "1.2.5"
 
 [[package]]
 name = "walkdir"

@@ -206,31 +206,42 @@ pub fn boot_load_kmod() -> Result<()> {
         };
 
     let ko = module_dir.join("vpnhide_kmod.ko");
-    let (insmod_exit, insmod_stderr) = if ko.is_file() {
-        let mut command = Command::new("insmod");
-        command
-            .arg(&ko)
-            .arg(format!("filesystem_hiding={}", u8::from(filesystem_hiding)));
-        match output_with_timeout(&mut command, CHILD_COMMAND_TIMEOUT) {
-            Ok(output) => (
-                exit_code(&output.status),
-                String::from_utf8_lossy(&output.stderr).into_owned(),
-            ),
-            Err(err) if err.kind() == ErrorKind::TimedOut => (
-                124,
-                format!(
-                    "insmod timed out after {}s",
-                    CHILD_COMMAND_TIMEOUT.as_secs()
-                ),
-            ),
-            Err(err) => (126, err.to_string()),
-        }
-    } else {
+    let (insmod_exit, insmod_stderr) = crate::kernel_control::load_kmod_if_absent(
+        crate::kernel_control::observed_backend(Path::new(KMOD_CTL)),
+        || {
+            Ok(if ko.is_file() {
+                let mut command = Command::new("insmod");
+                command
+                    .arg(&ko)
+                    .arg(format!("filesystem_hiding={}", u8::from(filesystem_hiding)));
+                match output_with_timeout(&mut command, CHILD_COMMAND_TIMEOUT) {
+                    Ok(output) => (
+                        exit_code(&output.status),
+                        String::from_utf8_lossy(&output.stderr).into_owned(),
+                    ),
+                    Err(err) if err.kind() == ErrorKind::TimedOut => (
+                        124,
+                        format!(
+                            "insmod timed out after {}s",
+                            CHILD_COMMAND_TIMEOUT.as_secs()
+                        ),
+                    ),
+                    Err(err) => (126, err.to_string()),
+                }
+            } else {
+                (
+                    127,
+                    format!("vpnhide_kmod.ko not found at {}", ko.display()),
+                )
+            })
+        },
+    )
+    .unwrap_or_else(|err| {
         (
-            127,
-            format!("vpnhide_kmod.ko not found at {}", ko.display()),
+            -1,
+            format!("kernel backend preflight refused loading: {err}"),
         )
-    };
+    });
 
     let loaded = module_is_loaded(KMOD_NAME)?;
     write_kmod_dmesg()?;
@@ -308,17 +319,13 @@ pub fn boot_service_kmod() -> Result<()> {
 /// Backend id the in-tree driver reports in its /proc/vpnhide_ctl `status` line
 /// (data/hooks.toml -> VPNHIDE_BACKEND_BUILTIN). The .ko reports 0; the two share
 /// the node and are mutually exclusive, so this is how we tell which is live.
-const BUILTIN_BACKEND_ID: u32 = 4;
+const BUILTIN_BACKEND_ID: u32 = vpnhide_protocol::hook_ids::Backend::Builtin as u32;
 
 /// Parse the `backend 0x<n>` field from a /proc/vpnhide_ctl status read.
 fn observed_ctl_backend() -> Option<u32> {
-    let text = fs::read_to_string(KMOD_CTL).ok()?;
-    let field = text
-        .lines()
-        .find_map(|line| line.strip_prefix("backend "))?
-        .trim();
-    let hex = field.strip_prefix("0x").unwrap_or(field);
-    u32::from_str_radix(hex, 16).ok()
+    crate::kernel_control::observed_backend(Path::new(KMOD_CTL))
+        .ok()
+        .flatten()
 }
 
 struct BuiltinLoadStatus {

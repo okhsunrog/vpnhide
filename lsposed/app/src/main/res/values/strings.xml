@@ -359,7 +359,7 @@
     <string name="reset_button_sub">Delete all config, state and target files VPN Hide left on the device</string>
     <string name="reset_title">Remove leftover files</string>
     <string name="reset_warning">This permanently deletes every config, state, statistics and target file VPN Hide and its modules wrote outside their module folders. This cannot be undone.</string>
-    <string name="reset_instructions">Do this only after you have: removed all VPN Hide modules in your root manager, disabled the VPN Hide LSPosed module, and rebooted. Module folders, the app itself and runtime state are not touched here — they go away with the steps above.</string>
+    <string name="reset_instructions">Do this only after you have: removed all VPN Hide modules in your root manager, disabled the VPN Hide LSPosed module, and rebooted. Module folders, the app itself and runtime state are not touched here — they go away with the steps above. For a built-in backend, also boot a kernel without VPN Hide; removing its companion module does not remove the kernel hooks.</string>
     <string name="reset_checking">Checking module state…</string>
     <string name="reset_running">Deleting files…</string>
     <string name="reset_blocked_intro">Not ready yet — VPN Hide is still active. Remove these and reboot first:</string>
@@ -367,7 +367,7 @@
     <string name="reset_blocker_kpm">KPM is still installed</string>
     <string name="reset_blocker_zygisk">Zygisk module is still installed</string>
     <string name="reset_blocker_ports">Ports module is still installed</string>
-    <string name="reset_blocker_kernel">Kernel hook is still loaded — reboot needed</string>
+    <string name="reset_blocker_kernel">Kernel hooks are still present. A loaded module needs a reboot after removal; a built-in backend requires a kernel without VPN Hide.</string>
     <string name="reset_blocker_lsposed">LSPosed hook is still active</string>
     <string name="reset_confirm">Delete everything</string>
     <string name="reset_done_body">Done. All leftover files were removed. You can now uninstall VPN Hide.</string>
@@ -381,7 +381,7 @@
     <string name="dashboard_action_details">Details</string>
     <string name="dashboard_action_learn_more">Learn more</string>
     <string name="dashboard_issue_kmod_capable_but_zygisk">Your kernel supports the kernel module — it hooks in kernel space and is invisible to anti-tamper checks. Zygisk works too, but banking and payment apps may detect its hooks when Native is enabled for them. Install %1$s and uninstall the Zygisk module for cleaner coverage.</string>
-    <string name="dashboard_issue_native_conflict_kernel">The kernel module (.ko) and the KPM are both installed. They hook the same kernel functions, and having both active can hard-freeze the device. Keep only one — uninstall either the kernel module or the KPM.</string>
+    <string name="dashboard_issue_native_conflict_kernel">A kernel backend (.ko or built-in) and KPM are both active. They hook the same kernel functions and can freeze the device. Keep only one kernel backend; with a built-in kernel, remove KPM.</string>
     <string name="dashboard_issue_native_conflict_deferred">The kernel module (.ko) and the KPM are both installed. The KPM stood down at boot to avoid a freeze, so it isn\'t doing anything. Keep only one — uninstall the KPM (or the kernel module).</string>
     <string name="dashboard_issue_kpm_awaiting_superkey">The KPM is installed but inactive: APatch/FolkPatch could not load it with the trusted su token. Save your SuperKey in Settings → Security, then reboot to activate native hiding.</string>
     <string name="dashboard_issue_module_reboot_to_activate">The %1$s module is installed but not active yet — reboot the device to activate it.</string>
@@ -646,4 +646,7 @@
     <string name="config_capture_logging">Debug logging remains active while a capture is running.</string>
     <string name="config_changes_unavailable">Configuration changes are unavailable</string>
     <string name="config_close">Close</string>
+    <string name="reset_blocker_builtin">Built-in companion module is still installed</string>
+    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide is built into the running kernel. Remove the unnecessary kmod module and keep the built-in companion module.</string>
+    <string name="dashboard_issue_builtin_companion_missing">VPN Hide is built into this kernel, but its companion module is missing. Install the VPN Hide built-in companion module to configure protection.</string>
 </resources>

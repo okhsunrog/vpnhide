@@ -162,7 +162,7 @@ emit_eval module_inventory '
   for BASE in /data/adb/modules /data/adb/modules_update; do
     [ -d "$BASE" ] || continue
     for ID in \
-      vpnhide_kmod vpnhide_kpm vpnhide_zygisk vpnhide_ports \
+      vpnhide_kmod vpnhide_builtin vpnhide_kpm vpnhide_zygisk vpnhide_ports \
       KPatch-Next kpatch-next zygisk_vector zygisk_lsposed lsposed \
       zygisk_next zygisknext zygisksu NeoZygisk
     do
@@ -179,6 +179,9 @@ emit_eval module_inventory '
   done
 '
 
+emit_file builtin_prop "$VPNHIDE_BUILTIN_DIR"/module.prop
+emit_eval builtin_module_state 'file_flags $VPNHIDE_BUILTIN_DIR; hash_file $VPNHIDE_BUILTIN_ACTIVATOR; staged_state $VPNHIDE_BUILTIN_DIR'
+emit_file builtin_load_status "$VPNHIDE_BUILTIN_LOAD_STATUS"
 emit_file kmod_prop "$VPNHIDE_KMOD_DIR"/module.prop
 emit_eval kmod_module_state 'file_flags $VPNHIDE_KMOD_DIR; hash_file $VPNHIDE_KMOD_DIR/vpnhide_kmod.ko; hash_file $VPNHIDE_KMOD_ACTIVATOR; staged_state $VPNHIDE_KMOD_DIR'
 emit_file kmod_load_status "$VPNHIDE_KMOD_LOAD_STATUS"
