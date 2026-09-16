@@ -467,13 +467,19 @@ internal fun checkNetworkCallbackVpn(
     cm: ConnectivityManager,
     name: String,
 ): CheckResult {
+    // Both the capabilities and the link properties are needed, and Android
+    // delivers them in separate events (onAvailable → onCapabilitiesChanged →
+    // onLinkPropertiesChanged), so the latch must trip only once BOTH have
+    // arrived for the same handle — not on the capabilities alone, which would
+    // race the link properties and let a mismatched interface pass unread.
     val latch = CountDownLatch(1)
     val seenNetwork = AtomicReference<Network?>(null)
     val seenCaps = AtomicReference<NetworkCapabilities?>(null)
     val seenLp = AtomicReference<LinkProperties?>(null)
-    // The callback delivers the capabilities and the link properties in separate
-    // events; the latch trips on the capabilities, and the link properties that
-    // arrived up to then are compared. Under the gate both arrive promptly.
+
+    fun completeIfReady() {
+        if (seenNetwork.get() != null && seenCaps.get() != null && seenLp.get() != null) latch.countDown()
+    }
     val callback =
         object : ConnectivityManager.NetworkCallback() {
             override fun onLinkPropertiesChanged(
@@ -481,6 +487,7 @@ internal fun checkNetworkCallbackVpn(
                 lp: LinkProperties,
             ) {
                 seenLp.set(lp)
+                completeIfReady()
             }
 
             override fun onCapabilitiesChanged(
@@ -489,21 +496,22 @@ internal fun checkNetworkCallbackVpn(
             ) {
                 seenNetwork.set(network)
                 seenCaps.set(caps)
-                latch.countDown()
+                completeIfReady()
             }
         }
     return try {
         cm.registerDefaultNetworkCallback(callback)
         val fired = latch.await(3, TimeUnit.SECONDS)
         val caps = seenCaps.get()
-        if (!fired || caps == null) {
-            // No callback within the deadline is a non-observation, not evidence
-            // of hiding: reporting it clean (green) would mask a broken/slow
-            // push path. Under the gate a default-network callback fires
-            // promptly, so this is a rare edge — surface it as not-measured.
-            javaCheck(name, null, "no callback delivered")
+        val lp = seenLp.get()
+        if (!fired || caps == null || lp == null) {
+            // The full event pair did not arrive within the deadline: a
+            // non-observation, not evidence of hiding. Reporting it clean would
+            // mask a broken/slow push path — surface it as not-measured, and say
+            // which half was missing so a genuinely slow device is diagnosable.
+            javaCheck(name, null, "no complete callback (caps=${caps != null}, linkProperties=${lp != null})")
         } else {
-            val (detail, clean) = callbackCleanAndCoherent(cm, seenNetwork.get(), caps, seenLp.get())
+            val (detail, clean) = callbackCleanAndCoherent(cm, seenNetwork.get(), caps, lp)
             javaCheck(name, clean, detail)
         }
     } catch (e: Exception) {
@@ -610,6 +618,15 @@ private fun checkNetworkViewConsistency(
     name: String,
 ): CheckResult {
     val snapshot = captureSyncNetworkView(cm, Process.myUid(), expectHidden = true)
+    // A capture that hit an error read a partial model: active/allNetworks or a
+    // per-network fact could not be read, so an empty or truncated snapshot could
+    // show "no violations" without having observed anything. That is not-measured,
+    // not a pass — the absence of a violation must never be manufactured from a
+    // failed read. (The invariant evaluation only proves a *populated* model
+    // holds together.)
+    if (snapshot.errors.isNotEmpty()) {
+        return javaCheck(name, null, "capture incomplete: ${snapshot.errors.joinToString("; ")}")
+    }
     val violations = snapshot.invariants.filter { it.status == NET_VIEW_VIOLATED }
     val checked = snapshot.invariants.count { it.status != NET_VIEW_NA }
     val detail =

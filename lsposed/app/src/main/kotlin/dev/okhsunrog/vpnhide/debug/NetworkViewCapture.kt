@@ -71,7 +71,7 @@ internal fun captureNetworkView(
     val phantoms = scanPhantoms(cm, all, options.scanBeyond)
     phantoms.forEach { sources.getOrPut(it) { linkedSetOf() } += "scan" }
 
-    val networks = sources.map { (netId, from) -> factsFor(cm, netId, from.toList()) }
+    val networks = sources.map { (netId, from) -> factsFor(cm, netId, from.toList(), errors) }
     val legacy = captureLegacy(cm, errors)
     return NetworkViewSnapshot(
         uid = uid,
@@ -120,7 +120,7 @@ internal fun captureSyncNetworkView(
     active?.let { sources.getOrPut(it) { linkedSetOf() } += "active" }
     val phantoms = scanPhantoms(cm, all, DEFAULT_SCAN_BEYOND)
     phantoms.forEach { sources.getOrPut(it) { linkedSetOf() } += "scan" }
-    val networks = sources.map { (netId, from) -> factsFor(cm, netId, from.toList()) }
+    val networks = sources.map { (netId, from) -> factsFor(cm, netId, from.toList(), errors) }
     val legacy = captureLegacy(cm, errors)
     val observed = NetworkViewObservations(active, all, networks, legacy, phantoms, emptyList(), null)
     return NetworkViewSnapshot(
@@ -161,18 +161,22 @@ internal fun Network.netId(): Int? = toString().toIntOrNull()
 /** Build a handle for a netId the way the framework encodes it, through the public factory. */
 internal fun networkForNetId(netId: Int): Network = Network.fromNetworkHandle((netId.toLong() shl 32) or NETWORK_HANDLE_MAGIC)
 
+// A read that THROWS is recorded in [errors] (an incomplete observation), while a
+// read that legitimately returns null leaves the fact null with no error — so a
+// caller can tell "the platform said no facts" from "we failed to read them".
 private fun factsFor(
     cm: ConnectivityManager,
     netId: Int,
     sources: List<String>,
+    errors: MutableList<String>,
 ): NetworkFacts {
     val network = networkForNetId(netId)
     return NetworkFacts(
         netId = netId,
         sources = sources,
-        capabilities = runCatching { cm.getNetworkCapabilities(network)?.let(::capabilityFacts) }.getOrNull(),
-        linkProperties = runCatching { cm.getLinkProperties(network)?.let(::linkFacts) }.getOrNull(),
-        networkInfo = runCatching { cm.getNetworkInfo(network)?.let(::infoFacts) }.getOrNull(),
+        capabilities = guard(errors, "getNetworkCapabilities($netId)") { cm.getNetworkCapabilities(network)?.let(::capabilityFacts) },
+        linkProperties = guard(errors, "getLinkProperties($netId)") { cm.getLinkProperties(network)?.let(::linkFacts) },
+        networkInfo = guard(errors, "getNetworkInfo($netId)") { cm.getNetworkInfo(network)?.let(::infoFacts) },
     )
 }
 
