@@ -42,17 +42,41 @@ Tracking: [issue 130](https://github.com/okhsunrog/vpnhide/issues/130).
 
 ### Network handle edge cases
 
-The physical replacement path used by LSPosed Java hooks intentionally prefers
-connectivity over perfect concealment in rare fallback cases: if no non-VPN
-replacement exists for `getActiveNetwork()`, the original active network is left
-unchanged instead of reporting that there is no active network.
+The LSPosed Java hooks present a target with one coherent network model: the VPN
+handle is replaced by the *cover* network — the physical network AOSP itself
+resolves behind the VPN for that uid (its declared underlying network, else the
+uid's default) — and the handle, capabilities, link properties, `NetworkInfo`,
+callbacks and PendingIntents all describe that same cover. When no cover resolves
+(for example a background uid whose every network is blocked by the per-uid
+firewall) the active network is reported as `null`, matching what the same uid
+sees with no VPN, rather than leaving the VPN handle exposed.
 
 Follow-up work:
 
 - Watch real app compatibility reports for APIs that are intentionally
   suppressed to `null`, especially `getNetworkForType(TYPE_VPN)`.
-- Consider short-lived caching for the selected replacement network if real
-  devices show measurable overhead from repeated `ConnectivityService` lookups.
+- The cover is resolved fresh per call (memoised only within a single callback
+  dispatch). Consider short-lived caching if real devices show measurable
+  overhead from repeated `ConnectivityService` lookups.
+- `getActiveLinkProperties` / `getLinkPropertiesForType` still sanitize by
+  interface name on the result path; a non-VPN carrier interface that became the
+  active/type network could be over-stripped there (the by-network and callback
+  paths no longer are). Not observed on test devices; revisit if reported.
+
+### Callback lifecycle validation across Android versions
+
+Callback delivery now tracks the visible best network per NetworkRequestInfo.
+A change of cover announces AVAILABLE before its property updates; losing the
+last cover sends LOST for the handle that registration previously received.
+Modern ConnectivityService queues are left in the original network identities,
+with rewriting at the final Bundle dispatcher. Older single-dispatch services
+use their own builder for properties and the legacy LOST message format.
+Registration state has weak keys and is released with the platform registration.
+
+The transition model has host-side tests. Device validation must still cover
+Wi-Fi/mobile handover with a persistent VPN, offline/recovery, multiple callbacks
+of one UID, frozen receivers, unregistration and legacy Android dispatchers.
+The host tests do not establish those runtime boundaries.
 
 ## Kernel Module (kmod)
 

@@ -143,6 +143,11 @@ internal data class VpnHideState(
     // Hook install/counter diagnostics (installed-hook mask, counter deltas across
     // the forced check run). Null for captures that don't take a counter baseline.
     val hookReport: String?,
+    // The framework network model as this (target) uid sees it after Binder —
+    // handles, per-handle facts, legacy answers, callback deliveries — and the
+    // consistency invariants over them (see NetworkViewData.kt). Forensics only;
+    // null when the capture could not take it (the reason is in [errors]).
+    val networkView: NetworkViewSnapshot? = null,
     val debugCapture: DebugCaptureInfo?,
     // Self-documenting: the options this capture was built with (what was included).
     val captureOptions: StateContentOptions = StateContentOptions(),
@@ -268,6 +273,7 @@ internal fun buildVpnHideState(
     hookReport: String?,
     debugCapture: DebugCaptureInfo?,
     errors: List<String>,
+    networkView: NetworkViewSnapshot? = null,
     dashboard: DashboardState? = null,
     config: JsonElement? = null,
     statistics: AgentStatisticsState? = null,
@@ -346,6 +352,7 @@ internal fun buildVpnHideState(
         bootLsposedLogcat = bootLsposedLogcat,
         lsposedConfigDb = lsposedConfigDb,
         hookReport = hookReport,
+        networkView = networkView,
         debugCapture = debugCapture,
         captureOptions = options,
         errors = errors,

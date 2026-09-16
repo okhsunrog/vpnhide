@@ -215,6 +215,36 @@ Java-level checks (LSPosed) cover the framework side — `hasTransport(VPN)`,
 `getNetworkForType(TYPE_VPN)`, the push `NetworkCallback` (issue #70), and the legacy
 `getActiveNetworkInfo` / `getNetworkInfo(TYPE_VPN)` APIs.
 
+The `network_view` check is cross-vector rather than single-surface: it captures
+the app's synchronous network model — every handle and the capabilities, link
+properties and `NetworkInfo` each answers, the legacy type answers and a blind
+netId scan — and asserts it holds together. The active handle must be listed by
+`getAllNetworks()`, a listed network must carry a transport, a connected one an
+interface, its `NetworkInfo` type must name a transport it has, no VPN handle may
+answer outside the enumeration, and (under the gate) no VPN transport, handle or
+active-VPN legacy state may appear anywhere. It catches an *incoherence* the
+per-surface checks miss — a handle whose facts describe a different network. The
+same invariants are what the debug bundle's `networkView` and the external
+`scripts/network-view-probe.py` evaluate. The push-callback coherence half —
+that a pushed handle's link properties name the interface `getLinkProperties`
+returns for it — is folded into the `network_callback` check, which now fails a
+callback that is clean in capabilities but carries a mismatched interface.
+
+Network enumeration failure is distinct from an empty successful enumeration:
+checks depending on that list are not applicable until it can be read. Failed
+netId scan reads are recorded as errors rather than proof of no phantom networks.
+The capture rechecks the active handle and enumeration at the end; an observed
+change makes cross-call consistency comparisons inconclusive. This is a stability
+check, not an atomic framework snapshot. Direct observations of VPN transport or
+active VPN legacy state still fail even when unrelated reads failed. Only
+violations whose prerequisites were observed take precedence over capture errors.
+
+The callback probe publishes a complete pair for one handle atomically and
+retains any observed VPN capabilities, even if no LinkProperties event arrives.
+Registration/read failures without a VPN observation are not measured. These
+results use the existing CheckOutcome and measurement completeness rollup; the
+additional forensic snapshot remains a separate point-in-time capture.
+
 The `network_info_vpn` check compares the app-side `getNetworkInfo(TYPE_VPN)`
 reply with VPN entries in `getAllNetworkInfo()`, after Binder unmarshalling.
 Both paths must retain type 17 with state `DISCONNECTED` and detailed state

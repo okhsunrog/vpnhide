@@ -18,18 +18,21 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkInfo
 import android.os.Build
+import android.os.Process
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.checks.CheckOutput
 import dev.okhsunrog.vpnhide.checks.CheckStatus
 import dev.okhsunrog.vpnhide.checks.NativeProbe
+import dev.okhsunrog.vpnhide.debug.NET_VIEW_NA
+import dev.okhsunrog.vpnhide.debug.NET_VIEW_VIOLATED
+import dev.okhsunrog.vpnhide.debug.captureSyncNetworkView
 import dev.okhsunrog.vpnhide.generated.IfaceLists
 import dev.okhsunrog.vpnhide.next
 import java.net.NetworkInterface
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 private const val TAG = LogTags.TEST
 
@@ -96,6 +99,7 @@ internal val EXTRA_JAVA_CHECKS: List<JavaCheckSpec> =
         JavaCheckSpec("network_callback", R.string.check_network_callback, ::checkNetworkCallbackVpn),
         JavaCheckSpec("link_properties_routes", R.string.check_link_properties_routes, ::checkLinkPropertiesRoutes),
         JavaCheckSpec("network_info_vpn", R.string.check_network_info_vpn, ::checkNetworkInfoVpn),
+        JavaCheckSpec("network_view", R.string.check_network_view, ::checkNetworkViewConsistency),
     )
 
 /**
@@ -462,44 +466,79 @@ internal fun checkNetworkCallbackVpn(
     cm: ConnectivityManager,
     name: String,
 ): CheckResult {
-    val latch = CountDownLatch(1)
-    val seen = AtomicReference<NetworkCapabilities?>(null)
+    val ready = CountDownLatch(1)
+    val evidence = CallbackProbeEvidence()
     val callback =
         object : ConnectivityManager.NetworkCallback() {
             override fun onCapabilitiesChanged(
                 network: Network,
-                caps: NetworkCapabilities,
+                networkCapabilities: NetworkCapabilities,
             ) {
-                seen.set(caps)
-                latch.countDown()
+                evidence.capabilities(network.toString().toInt(), capabilityLeakDetail(networkCapabilities))
+                if (evidence.snapshot() != null) ready.countDown()
+            }
+
+            override fun onLinkPropertiesChanged(
+                network: Network,
+                linkProperties: LinkProperties,
+            ) {
+                evidence.linkProperties(network.toString().toInt(), linkProperties.interfaceName)
+                if (evidence.snapshot() != null) ready.countDown()
             }
         }
     return try {
         cm.registerDefaultNetworkCallback(callback)
-        val fired = latch.await(3, TimeUnit.SECONDS)
-        val caps = seen.get()
-        if (!fired || caps == null) {
-            // No callback within the deadline is a non-observation, not evidence
-            // of hiding: reporting it clean (green) would mask a broken/slow
-            // push path. Under the gate a default-network callback fires
-            // promptly, so this is a rare edge — surface it as not-measured.
-            javaCheck(name, null, "no callback delivered")
-        } else {
-            val hasVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-            val notVpn = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-            val leaked = hasVpn || !notVpn
-            val detail =
-                if (!leaked) {
-                    "callback caps clean (no VPN transport, NOT_VPN present)"
-                } else {
-                    "callback leaks VPN: hasTransport(VPN)=$hasVpn, NOT_VPN=$notVpn"
-                }
-            javaCheck(name, !leaked, detail)
-        }
+        ready.await(CALLBACK_DEADLINE_MS, TimeUnit.MILLISECONDS)
+        val observation = evidence.snapshot() ?: return javaCheck(name, null, "no complete callback for one handle")
+        observation.leak?.let { return javaCheck(name, false, it) }
+        val network =
+            dev.okhsunrog.vpnhide.debug
+                .networkForNetId(observation.network)
+        val (detail, clean) = callbackCoherence(cm, network, observation.interfaceName)
+        // A leak arriving during the synchronous read still outranks the clean pair.
+        evidence.snapshot()?.leak?.let { return javaCheck(name, false, it) }
+        javaCheck(name, clean, detail)
     } catch (e: Exception) {
-        javaCheck(name, false, e.message ?: e.javaClass.simpleName)
+        val leak = evidence.snapshot()?.leak
+        javaCheck(name, if (leak != null) false else null, leak ?: "callback measurement failed: ${e.message}")
     } finally {
         runCatching { cm.unregisterNetworkCallback(callback) }
+    }
+}
+
+private const val CALLBACK_DEADLINE_MS = 3_000L
+
+/** A VPN transport (or missing NOT_VPN) in a pushed capability set is a leak; else null (clean). */
+internal fun capabilityLeakDetail(caps: NetworkCapabilities): String? {
+    val hasVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+    val notVpn = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+    return if (hasVpn || !notVpn) "callback leaks VPN: hasTransport(VPN)=$hasVpn, NOT_VPN=$notVpn" else null
+}
+
+/**
+ * With the capabilities already found clean, a pushed default-network callback must
+ * be coherent with the synchronous view: the link properties it carried must name
+ * the same interface `getLinkProperties(handle)` returns for the same handle. A
+ * cover handle pushed with the VPN's emptied link properties — the exact
+ * incoherence the network-view work fixes — trips it.
+ *
+ * `clean` is a tri-state: false = incoherent, true = coherent, null = could not be
+ * measured (the synchronous side was unreadable, so neither hidden nor leaked).
+ */
+private fun callbackCoherence(
+    cm: ConnectivityManager,
+    network: Network,
+    callbackIface: String?,
+): Pair<String, Boolean?> {
+    val syncLp = runCatching { cm.getLinkProperties(network) }
+    if (syncLp.isFailure) return "sync getLinkProperties threw: ${syncLp.exceptionOrNull()?.message}" to null
+    val syncIface = syncLp.getOrNull()?.interfaceName ?: return "no synchronous link properties for $network" to null
+    // Includes a null/blank callback interface against a real sync one — the exact
+    // incoherence of a cover handle pushed with an emptied link-properties object.
+    return if (callbackIface != syncIface) {
+        "callback handle $network carries iface=$callbackIface but sync says $syncIface" to false
+    } else {
+        "callback capabilities clean and link properties coherent (iface=$callbackIface)" to true
     }
 }
 
@@ -559,3 +598,27 @@ private fun checkNetworkInfoVpn(
 }
 
 private fun NetworkInfo.legacySnapshot(): LegacyVpnInfoSnapshot = LegacyVpnInfoSnapshot(type, state.name, detailedState.name, isAvailable)
+
+// Cross-vector consistency, not a single leak: the synchronous network model this
+// app sees must hold together — the active handle is listed, a listed network has
+// a transport, a connected one has an interface, its NetworkInfo type names a
+// transport it has, and no VPN handle answers outside the enumeration. Reuses the
+// same invariants the debug bundle and the external probe evaluate. The push-path
+// invariants are guarded by [checkNetworkCallbackVpn]; this one needs no callback
+// window. Under the gate the VPN is up and this app is routed, so a VPN still
+// visible anywhere here is a leak.
+private fun checkNetworkViewConsistency(
+    cm: ConnectivityManager,
+    name: String,
+): CheckResult {
+    val snapshot = captureSyncNetworkView(cm, Process.myUid(), expectHidden = true)
+    val violations = snapshot.invariants.filter { it.status == NET_VIEW_VIOLATED }
+    val checked = snapshot.invariants.count { it.status != NET_VIEW_NA }
+    val detail =
+        when {
+            violations.isNotEmpty() -> violations.joinToString("; ") { "${it.id}: ${it.detail}" }
+            snapshot.errors.isNotEmpty() -> "capture incomplete: ${snapshot.errors.joinToString("; ")}"
+            else -> "$checked invariants hold across ${snapshot.allNetworks.size} network(s)"
+        }
+    return javaCheck(name, networkViewClean(violations.isNotEmpty(), snapshot.errors.isNotEmpty()), detail)
+}

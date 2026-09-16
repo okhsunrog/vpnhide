@@ -304,12 +304,13 @@ summary:
 | Vector | API | Sanitization (lsposed) |
 |---|---|---|
 | VPN transport flag | `NetworkCapabilities.hasTransport(TRANSPORT_VPN)` | strip `TRANSPORT_VPN`, add `NET_CAPABILITY_NOT_VPN`, clear `TransportInfo` |
-| Active network is VPN | `getActiveNetwork()` / `Network.writeToParcel` | swap VPN `Network` handle for best physical one |
+| Active network is VPN | `getActiveNetwork()` / `Network.writeToParcel` | swap the VPN `Network` handle for the cover network AOSP resolves behind the VPN for that uid (its declared underlying, else the uid's default) |
 | Network enumeration | `getAllNetworks()` | drop VPN handles from the array |
 | Legacy VPN type state | `getNetworkInfo(TYPE_VPN)` / `getAllNetworkInfo()` | retain inactive VPN entries; replace active entries with the platform's absent-network state (`DISCONNECTED` or policy `BLOCKED`); preserve original `null` |
 | Legacy VPN handle | `getNetworkForType(TYPE_VPN)` | return `null` (no connected VPN handle) |
+| VPN handle facts | `getNetworkCapabilities(Network)` / `getLinkProperties(Network)` / `getNetworkInfo(Network)` on a VPN handle | return `null` — the AOSP answer for an unknown netId, so a retained or scanned VPN handle describes no network (never a transport-less capability set, an interfaceless link, or a connected Wi-Fi) |
 | Interface name / routes / DNS | `LinkProperties.{getInterfaceName,getRoutes,getDnsServers}` | null `mIfaceName`, filter `mRoutes`, recurse into stacked links |
-| Async push | `registerDefaultNetworkCallback()` / `registerNetworkCallback()` | suppress VPN-requested callbacks; stash recipient UID across dispatch (issue #70) |
+| Async push | `registerDefaultNetworkCallback()` / `registerNetworkCallback()` / PendingIntent variants | suppress a VPN-specific request and a passive listen's VPN match; rewrite a default/request callback to the cover network — its handle, capabilities and link properties together — so the pushed event is self-consistent; swap the PendingIntent's network before its async parcel (issue #70) |
 
 `TYPE_VPN` support is not evidence of an active VPN. AOSP 9–16 returns a
 disconnected `NetworkInfo` for that supported type even when no VPN exists.
@@ -320,9 +321,20 @@ nulls and exceptions remain unchanged; the parcel hook preserves inactive VPN
 entries instead of renaming them to Wi-Fi. An unknown OEM policy implementation
 is logged and the result is left unchanged rather than guessing its state.
 
-This does not redesign network-handle queries: active VPN `NetworkInfo` objects
-returned through other paths still use the existing VPN-to-Wi-Fi fallback.
-Full consistency with the selected physical network remains separate work.
+A query about a specific VPN `Network` handle now answers `null` for a target,
+the platform's own answer for a netId that no longer exists, so a handle the app
+held from before hiding — or built by scanning netIds — is consistently gone
+rather than answering a transport-less capability set or a connected Wi-Fi. The
+legacy VPN *type* answer stays the platform's disconnected VPN (#337); a connected
+VPN `NetworkInfo` reaching the parcel backstop is forced to that same disconnected
+VPN, never a connected Wi-Fi. Pushed callbacks are made coherent the same way the
+synchronous answers are: a default or request callback that would deliver the VPN
+is rewritten to the cover network as one unit (handle, capabilities and link
+properties all the cover's), a passive listen's VPN match is dropped so the app
+only sees the physical networks it already gets, and a PendingIntent's network is
+swapped before it is parcelled on the broadcast queue. Whether the cover may be
+bound and so bypass the tunnel is the split-tunnel assumption, unchanged here
+(issue #130 territory).
 
 ### 3E. Package visibility — "is the VPN-manager app installed?"
 

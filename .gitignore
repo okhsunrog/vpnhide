@@ -47,6 +47,9 @@ target/
 /tmp/
 /*.zip
 __pycache__/
+# uv writes this when running the stdlib-only scripts; there are no dependencies
+# to lock (pyproject.toml carries only tool config), so it is left untracked.
+uv.lock
 kmod/shared/test_protocol
 kmod/module-staging/
 kmod/kpm/module-staging/

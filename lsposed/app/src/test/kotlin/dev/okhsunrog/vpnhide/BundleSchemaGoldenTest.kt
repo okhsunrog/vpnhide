@@ -1,7 +1,19 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.debug.AppInfo
+import dev.okhsunrog.vpnhide.debug.CallbackEvent
+import dev.okhsunrog.vpnhide.debug.CapabilityFacts
 import dev.okhsunrog.vpnhide.debug.DeviceInfo
+import dev.okhsunrog.vpnhide.debug.InvariantResult
+import dev.okhsunrog.vpnhide.debug.LegacyTypeView
+import dev.okhsunrog.vpnhide.debug.LinkFacts
+import dev.okhsunrog.vpnhide.debug.NET_VIEW_NA
+import dev.okhsunrog.vpnhide.debug.NET_VIEW_OK
+import dev.okhsunrog.vpnhide.debug.NET_VIEW_VIOLATED
+import dev.okhsunrog.vpnhide.debug.NetworkFacts
+import dev.okhsunrog.vpnhide.debug.NetworkInfoFacts
+import dev.okhsunrog.vpnhide.debug.NetworkViewSnapshot
+import dev.okhsunrog.vpnhide.debug.PendingIntentResult
 import dev.okhsunrog.vpnhide.debug.RootShellDiag
 import dev.okhsunrog.vpnhide.debug.VPNHIDE_STATE_SCHEMA
 import dev.okhsunrog.vpnhide.debug.VpnHideState
@@ -134,7 +146,44 @@ internal fun sampleBundleState(): VpnHideState {
         bootLsposedLogcat = "",
         lsposedConfigDb = "",
         hookReport = null,
+        networkView = sampleNetworkView(),
         debugCapture = null,
+        errors = emptyList(),
+    )
+}
+
+/** One network, one callback, one invariant of each status: pins every nested shape. */
+private fun sampleNetworkView(): NetworkViewSnapshot {
+    val caps = CapabilityFacts(listOf("WIFI"), listOf("INTERNET", "NOT_VPN", "VALIDATED"), "WifiInfo", -1)
+    val lp = LinkFacts("wlan0", listOf("10.0.0.2/24"), listOf("10.0.0.1"), listOf("0.0.0.0/0 via 10.0.0.1 dev wlan0"), emptyList(), 1500)
+    val info = NetworkInfoFacts(1, "WIFI", 0, "CONNECTED", "CONNECTED", true, null)
+    return NetworkViewSnapshot(
+        uid = 10332,
+        packageName = "dev.okhsunrog.vpnhide",
+        sdk = 36,
+        capturedAt = "2026-08-22T12:00:05+0300",
+        captureMs = 2000,
+        expectHidden = true,
+        activeNetwork = 100,
+        boundNetwork = null,
+        allNetworks = listOf(100),
+        networks = listOf(NetworkFacts(100, listOf("all", "active", "callback"), caps, lp, info)),
+        legacy =
+            LegacyTypeView(
+                activeNetworkInfo = info,
+                byType = mapOf("VPN" to NetworkInfoFacts(17, "VPN", 0, "DISCONNECTED", "DISCONNECTED", true, null), "WIFI" to info),
+                allNetworkInfo = listOf(info),
+                networkForType = mapOf("VPN" to null, "WIFI" to 100),
+            ),
+        phantomNetworks = emptyList(),
+        callbacks = listOf(CallbackEvent("default", "capabilities", 100, 12, capabilities = caps)),
+        pendingIntent = PendingIntentResult(registered = true, netIds = listOf(100), requestNetIds = listOf(100)),
+        invariants =
+            listOf(
+                InvariantResult("active_in_all_networks", NET_VIEW_OK, "active=100 listed"),
+                InvariantResult("no_phantom_networks", NET_VIEW_VIOLATED, "answering netIds [103]"),
+                InvariantResult("pending_intent_only_listed_networks", NET_VIEW_NA, "not captured"),
+            ),
         errors = emptyList(),
     )
 }

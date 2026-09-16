@@ -49,6 +49,16 @@ transports passes but ActiveNetwork handle fails on the same active network**:
 the returned handle is still the VPN's netId, yet its capabilities come back
 clean. Family 1 sanitized the capabilities; family 2 never swapped the handle.
 
+Callback payload construction and delivery are separated in `NetworkCallbackRouter`.
+On services with the Bundle dispatcher, the outer builder and frozen-receiver
+queue keep the original VPN identity; rewriting happens only at final delivery.
+The router asks the service to build recipient-redacted cover payloads, tracks
+one visible best handle per registration, and maps loss to that delivered handle.
+`LISTEN_FOR_BEST` uses that lifecycle; only an ordinary `LISTEN` suppresses VPN
+matches without replacement. On older single-dispatch services, LOST is sent
+using the platform's NetworkRequest/Network message shape. PendingIntents retain
+a separate NAI adapter because their extras are parcelled asynchronously.
+
 ## 2. Where the truth lives: `/data/system/vpnhide_lsposed_state`
 
 The module publishes a small text "control channel" from `system_server`; the
@@ -232,3 +242,54 @@ needed.
 > new build the module shows disabled or unscoped, that is a manager/device
 > quirk — just re-enable it with **System Framework** scope; it is not expected
 > behavior and nothing in VpnHide changes it.
+
+## 9. The network-view probe (consistency, post-Binder)
+
+The hooks rewrite several objects independently (handle, capabilities, link
+properties, `NetworkInfo`, callback payloads), so the only measurement that
+counts is what an app *receives* after Binder, all of it together. That is the
+**network view**: every handle the uid can see, the facts each handle answers,
+the legacy type answers, every callback delivered during a capture window, and
+a set of invariants evaluated over the whole (`NetworkViewData.kt`):
+
+| Invariant | Holds when |
+|---|---|
+| `active_in_all_networks` | the active handle is listed by `getAllNetworks()` |
+| `listed_networks_have_transport` | no listed network answers a transport-less capability set |
+| `connected_network_has_interface` | a `CONNECTED` network's link properties name an interface |
+| `info_type_matches_transport` | `NetworkInfo.type` names a transport the handle actually has |
+| `active_info_matches_active_network` | `getActiveNetworkInfo()` describes the active handle |
+| `no_phantom_networks` | no netId outside `getAllNetworks()` answers a blind `Network(netId)` query |
+| `callback_matches_sync_view` | callback payloads for a handle equal the synchronous answers for it |
+| `callbacks_only_for_listed_networks` / `pending_intent_only_listed_networks` | pushes never name an unlisted handle (the PendingIntent pair is a listen and an INTERNET request, both without NOT_VPN; inside the VPN the request is satisfied by the VPN itself) |
+| `no_vpn_transport`, `legacy_vpn_inactive`, `vpn_listen_silent` | (targets only) no VPN transport, handle or legacy state anywhere |
+
+Two captures share the code:
+
+- **The debug bundle** carries the app's own view under `networkView`
+  (forensics on), PendingIntent path included.
+- **Any uid** — `scripts/network-view-probe.py` runs the same capture through
+  root `app_process` under the uid of a given package (the installed APK is the
+  classpath), so a target and a non-target app can be diffed on one device:
+
+  ```sh
+  uv run scripts/network-view-probe.py snapshot --package org.example.plain -o baseline.json
+  uv run scripts/network-view-probe.py snapshot --package com.example.bank --expect-hidden -o target.json
+  uv run scripts/network-view-probe.py compare baseline.json target.json
+  ```
+
+  `compare` expects the target's `allNetworks` to be the baseline minus the VPN
+  handles, every shared handle's facts to be identical, the active handle to be
+  replaced only when the baseline's was the VPN, and no violated invariant. Take
+  both snapshots on a stable connection; across a Wi-Fi/mobile switch the two
+  captures legitimately straddle a change — compare timestamps before calling a
+  difference a defect.
+
+  Two platform effects to keep out of the verdict: the probe runs as a
+  *background* uid, so on Android 15+ the per-uid background firewall makes
+  every `NetworkInfo` read `BLOCKED`/`DISCONNECTED` and `getActiveNetwork()`
+  null for a blocked uid — pick baseline and target in the same state, and read
+  `blocked` callback flags as the platform's word, not ours. And whether a uid
+  is *inside* the VPN decides what Android itself hands it (its default network
+  is the VPN, listens match the VPN) — a target inside and one outside the tunnel
+  are different scenarios, not one bug and one fix.

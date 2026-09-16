@@ -8,12 +8,14 @@ import dev.okhsunrog.vpnhide.debug.VpnHideState
 import dev.okhsunrog.vpnhide.debug.buildLsposedConfigText
 import dev.okhsunrog.vpnhide.debug.buildVpnHideState
 import dev.okhsunrog.vpnhide.debug.captureBootLsposedLogcat
+import dev.okhsunrog.vpnhide.debug.captureSelfNetworkView
 import dev.okhsunrog.vpnhide.debug.exportDebug
 import dev.okhsunrog.vpnhide.debug.isoNow
 import dev.okhsunrog.vpnhide.debug.setDebugLoggingEnabled
 import dev.okhsunrog.vpnhide.diagnostics.AppProbeStats
 import dev.okhsunrog.vpnhide.diagnostics.CaptureDiff
 import dev.okhsunrog.vpnhide.diagnostics.DetectionMethod
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.MethodSurface
 import dev.okhsunrog.vpnhide.diagnostics.buildAppProbeStats
@@ -79,6 +81,15 @@ internal object AgentControl {
             // hook counters, raw sections) only on request — they run extra root
             // shells and bloat the live payload. Same options as the file export.
             val shellSnapshot = if (options.forensics) collectDebugShellSnapshot() else null
+            val errors = mutableListOf<String>()
+            val networkView =
+                if (options.forensics) {
+                    runCatching { captureSelfNetworkView(context, diagnostics.reportGate() == DiagnosticGate.ROUTED) }
+                        .onFailure { errors += "network view: ${it.message}" }
+                        .getOrNull()
+                } else {
+                    null
+                }
             buildVpnHideState(
                 context = context,
                 captureKind = "agent_bridge",
@@ -96,7 +107,8 @@ internal object AgentControl {
                 lsposedConfigDb = if (options.forensics) buildLsposedConfigText(context) else "",
                 hookReport = shellSnapshot?.let { buildHookDiagnosticsText(context, it) },
                 debugCapture = null,
-                errors = emptyList(),
+                errors = errors,
+                networkView = networkView,
                 dashboard = dashboard,
                 config = config,
                 statistics = statistics,
