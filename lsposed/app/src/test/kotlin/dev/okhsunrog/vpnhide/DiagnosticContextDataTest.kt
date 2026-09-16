@@ -10,9 +10,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticAttempt
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticRunState
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticRunView
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticStage
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.EXTRA_JAVA_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_EXTRA_CHECKS
@@ -24,8 +22,6 @@ import dev.okhsunrog.vpnhide.diagnostics.diagnosticRequest
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticRetryAllowed
 import dev.okhsunrog.vpnhide.diagnostics.mergeDiagnosticEvidence
 import dev.okhsunrog.vpnhide.diagnostics.plannedOutcomes
-import dev.okhsunrog.vpnhide.diagnostics.projectDiagnosticAttempt
-import dev.okhsunrog.vpnhide.diagnostics.projectDiagnosticState
 import dev.okhsunrog.vpnhide.diagnostics.routingReadPlan
 import dev.okhsunrog.vpnhide.diagnostics.selfConfigurationIdentity
 import dev.okhsunrog.vpnhide.diagnostics.selfRoutingObservation
@@ -172,40 +168,6 @@ class DiagnosticContextDataTest {
         assertEquals(core, mergeDiagnosticEvidence(null, DiagnosticStage.Core, core))
         assertEquals(core.copy(extraJava = slow.extraJava), mergeDiagnosticEvidence(core, DiagnosticStage.Slow, slow))
         assertEquals(slow, mergeDiagnosticEvidence(null, DiagnosticStage.Slow, slow))
-    }
-
-    @Test
-    fun `projection keeps blocked failed and measured attempts distinct`() {
-        val results = CheckResults(native = emptyList())
-        assertEquals(
-            DiagnosticsCache.State.Ready(results, complete = true),
-            projectDiagnosticAttempt(DiagnosticAttempt(1, RunOutcome.Completed), results),
-        )
-        assertEquals(
-            DiagnosticsCache.State.Blocked(DiagnosticGate.VPN_OFF),
-            projectDiagnosticAttempt(DiagnosticAttempt(1, RunOutcome.NotStarted, eligibility = DiagnosticEligibility.VpnOff), null),
-        )
-        assertEquals(
-            DiagnosticsCache.State.Blocked(DiagnosticGate.NEEDS_RESTART),
-            projectDiagnosticAttempt(DiagnosticAttempt(1, RunOutcome.NotStarted, eligibility = DiagnosticEligibility.RestartApp), null),
-        )
-        assertEquals(
-            DiagnosticsCache.State.Failed,
-            projectDiagnosticAttempt(DiagnosticAttempt(1, RunOutcome.NotStarted, TransitionFailure.ReadFailed), null),
-        )
-        assertEquals(
-            DiagnosticsCache.State.Failed,
-            projectDiagnosticAttempt(DiagnosticAttempt(1, RunOutcome.Interrupted, TransitionFailure.ContextChanged), results),
-        )
-
-        assertEquals(DiagnosticsCache.State.NotRun, projectDiagnosticState(DiagnosticRunView()))
-        val active = ActiveDiagnosticRun(2, diagnosticRequest(), stage = DiagnosticStage.Checking)
-        val running = DiagnosticRunView(DiagnosticRunState(active = active, lastAttempt = DiagnosticAttempt(1, RunOutcome.Completed)))
-        assertEquals(DiagnosticsCache.State.Running, projectDiagnosticState(running))
-        assertEquals(
-            DiagnosticsCache.State.Ready(results, complete = false),
-            projectDiagnosticState(running.copy(activeResults = results)),
-        )
     }
 
     @Test

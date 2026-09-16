@@ -33,15 +33,16 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardState
         @Suppress("UNUSED_PARAMETER") request: ObservationRequest,
     ): RootProjection<DashboardState> {
         val (context, selfNeedsRestart) = requireNotNull(inputs)
-        // Join or read the terminal attempt; a Blocked/Failed one is observed, never retried here.
-        val diagnosticObservation = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart)
+        // Join or read the terminal attempt, then render the shared presentation as
+        // the screens do; a blocked or failed attempt is observed, never retried here.
+        val diagnostics = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart)
         val rootSnapshot =
             RootSnapshotCache.getOrLoad()
         return withContext(Dispatchers.IO) {
             RootProjection(
                 rootSnapshot.observationId,
                 rootSnapshot.generation,
-                loadDashboardState(context, selfNeedsRestart, rootSnapshot, diagnosticObservation),
+                loadDashboardState(context, selfNeedsRestart, rootSnapshot, diagnostics),
             )
         }
     }

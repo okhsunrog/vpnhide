@@ -72,8 +72,9 @@ old device-validation paragraphs predate the successful installs described below
   a blocked eligibility is the `NotEligible` reducer event; measurement context
   (process/boot, self role and hooks, VPN interfaces and self routing, coverage)
   is captured at start and end; every check result has a stable id and the probe
-  plan is derived from the four spec registries. Consumers still render the legacy
-  `DiagnosticsCache.State` projection; `DiagnosticsCache.runs` exposes the view.
+  plan is derived from the four spec registries. `DiagnosticsCache.runs` exposes
+  the view; the legacy `DiagnosticsCache.State` projection consumers rendered at
+  this stage was retired after item 4 (see item 5).
 - Last verification: 671 JVM tests, warnings-as-errors compilation, ktlint, detekt,
   CPD and Android lintDebug passed for the diagnostic execution stage. The signed
   release build and signature verification were last run at `a43cc3f0`.
@@ -103,8 +104,8 @@ old device-validation paragraphs predate the successful installs described below
    emission one instant of all sources. The Diagnostics screen
    (`diagnosticScreenDecision`), the Dashboard hero (`heroDecision`), the bridge
    and the bundle (additive `diagnostics` object, no schema bump, golden refreshed)
-   all render it; the legacy `State` remains only as the cached per-check report
-   the tiles and the check list draw from. Device acceptance of the screen
+   all render it; the legacy `State` remained at this point only as the cached
+   per-check report the tiles drew from, and was retired in item 5. Device acceptance of the screen
    behaviour (VPN off/on, save during a run, interrupted run, manual recheck) is
    still owed under item 4. The plan that was executed, decided 2026-09-15
    (classify-then-render, per `lsposed/AGENTS.md`):
@@ -233,16 +234,36 @@ old device-validation paragraphs predate the successful installs described below
    is exactly the state for "not proven quiescent" (the test "observation worker
    stays occupied until inherited pipes close" pins it). Single-flight, so bounded
    to one thread; the eligibility shows as Unknown with a retry that cannot lift
-   it, which is honest. (2) The bridge's legacy `gate`/`report` come from
+   it, which is honest. (2) The bridge's legacy `gate`/`report` came from
    `awaitTerminal` and `diagnostics` from the presentation, two instants;
-   documented in docs/debug-bundle.md and pinned by the golden. (3)
+   closed in item 5, both now read one presentation value. (3)
    `DiagnosticsCache.presentation` is an eager `combine` that re-derives the
    context (backend detection, coverage identity) on every emission of any
-   source, on every tab; cheap string work today, memoising per snapshot
-   observation id is a follow-up. (4) `DiagnosticImpactState.failed` is one flag
+   source, on every tab; memoised per snapshot observation id in the follow-up.
+   (4) `DiagnosticImpactState.failed` is one flag
    cleared by the next relevant success, unlike `unresolved`; defensible (the
    later write is the current truth) and tested. (5) docs/diagnostics.md still
    said §19/§21 were not implemented; fixed.
+5. **Transitional code retired** (transition contract §21, last paragraph). The
+   legacy `DiagnosticsCache.State` projection and its `projectDiagnosticAttempt`
+   / `projectDiagnosticState` are gone. `awaitTerminal` keeps its join semantics
+   (the active run, the latest finished attempt, or the automatic suite) but
+   returns the shared presentation once it reflects the terminal attempt; the
+   Dashboard derivation renders the tiles from it through the pure
+   `protectionVerdict` (a complete measurement against its own coverage layers,
+   else the latest attempt's blocking gate, else Failed), and the bridge fills
+   its legacy `gate`/`checkResults` and its `diagnostics` summary from the same
+   value (`reportGate`). Behavioural consequence, per T11: a later attempt that
+   failed or was interrupted keeps the measured tiles and is named by the hero
+   note, where the legacy projection blanked them; the Dashboard's
+   routed-transition refresh now keys on the latest attempt not being
+   `Completed`. Deliberately kept: `LogcatRecorder` and the capture packaging
+   (§9 capture machine not implemented, user decision), `blockedGate` (the
+   bundle's `gate` vocabulary), `DashboardState.protection` cached at derivation
+   time (the derivation still awaits the suite, which keeps the startup runtime
+   reconcile off the cold-start critical path, see docs/observation-coordinator.md).
+   Host-verified only; a device pass of the Dashboard after a failed re-check is
+   owed with the item 4 leftovers.
 
 The batched root reader now waits for its launcher and pipe readers to finish.
 The diagnostic run coordinator joins its own effect jobs when draining and

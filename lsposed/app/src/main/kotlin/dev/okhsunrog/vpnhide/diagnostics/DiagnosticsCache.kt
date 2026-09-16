@@ -9,7 +9,6 @@ import dev.okhsunrog.vpnhide.ConfigOperationSpec
 import dev.okhsunrog.vpnhide.ConfigPhase
 import dev.okhsunrog.vpnhide.ContextObservationInputs
 import dev.okhsunrog.vpnhide.ObservationRuntime
-import dev.okhsunrog.vpnhide.ProjectedStateFlow
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.TransitionFailure
 import dev.okhsunrog.vpnhide.currentObservationValue
@@ -18,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 
 /**
@@ -45,21 +45,10 @@ internal sealed interface DiagnosticCaptureOutcome {
  * measured run?* Each run is an identified, immutable attempt executed by
  * [DiagnosticRunCoordinator] on the process scope, so leaving a screen or
  * recreating the Activity never cancels or restarts a suite (a caller's scope is
- * accepted for source compatibility only). [state] is a synchronous projection
- * of the coordinator's view onto the legacy vocabulary every consumer renders:
- *
- * - [State.NotRun] — no attempt has finished yet and none is active.
- * - [State.Running] — a run is waiting for a relevant config operation, checking
- *   eligibility or probing its core phase.
- * - [State.Blocked] — the latest attempt found the suite not eligible (VPN off,
- *   this app split-tunnelled out, or a pending self-restart); carries the
- *   [DiagnosticGate] so the banner explains which.
- * - [State.Failed] — the latest attempt could not measure: execution failure,
- *   deadline, cancellation, a config operation that failed or stayed unresolved,
- *   or a context change during the run. Distinct from a VPN-off gate so an
- *   active-VPN user is not told their VPN is off.
- * - [State.Ready] — evidence exists; [State.Ready.complete] is false while the
- *   slow Java phase of the active run is still filling in.
+ * accepted for source compatibility only). Every consumer renders one projection,
+ * [presentation]: the screens collect it, the Dashboard derivation and the bridge
+ * read it once it reflects a terminal attempt ([awaitTerminal]), the bundle
+ * summarises it. The identified run view behind it is [runs].
  *
  * [run] is the automatic intent: it starts a suite only until one has actually
  * probed, and a blocked attempt does not consume it. [retry] keeps the existing
@@ -78,30 +67,6 @@ internal sealed interface DiagnosticCaptureOutcome {
  * reconcile neither delay nor interrupt a suite.
  */
 internal object DiagnosticsCache {
-    sealed interface State {
-        data object NotRun : State
-
-        data object Running : State
-
-        // Never [DiagnosticGate.ROUTED] — that outcome is a measured [Ready].
-        data class Blocked(
-            val gate: DiagnosticGate,
-        ) : State {
-            init {
-                require(gate != DiagnosticGate.ROUTED) { "Blocked gate must not be ROUTED" }
-            }
-        }
-
-        data object Failed : State
-
-        data class Ready(
-            val results: CheckResults,
-            val complete: Boolean,
-            /** The layers the measurement was taken against; null for an active run's partial evidence. */
-            val coverage: MeasurementCoverage? = null,
-        ) : State
-    }
-
     @Volatile private var inputs: ContextObservationInputs? = null
 
     // Whether this app's own hooks need a restart to apply (it was just added as a
@@ -119,8 +84,6 @@ internal object DiagnosticsCache {
 
     /** The identified run state: active run, latest attempt, latest complete measurement and their evidence. */
     val runs: StateFlow<DiagnosticRunView> get() = coordinator.view
-
-    val state: StateFlow<State> by lazy { ProjectedStateFlow(coordinator.view, ::projectDiagnosticState) }
 
     /**
      * The shared projection every consumer should render: one value per change of
@@ -187,19 +150,24 @@ internal object DiagnosticsCache {
     }
 
     /**
-     * Suspend until a terminal attempt is available: the active run's own result,
-     * the latest finished attempt, or the automatic suite when nothing ran yet. A
-     * terminal Blocked/Failed attempt is returned as is; retry belongs to an
-     * explicit trigger, so a dependent derivation cannot form a refresh cycle.
+     * Suspend until a terminal attempt is available — the active run's own result,
+     * the latest finished attempt, or the automatic suite when nothing ran yet —
+     * and return the shared [presentation] once it reflects that attempt, so the
+     * Dashboard derivation and the bridge render the same projection as the
+     * screens. A terminal blocked or failed attempt is returned as is; retry
+     * belongs to an explicit trigger, so a dependent derivation cannot form a
+     * refresh cycle. Attempt ids are monotonic and runs finish in admission order,
+     * so a presentation whose latest attempt id is at least the awaited run's id
+     * has that run finished.
      */
     suspend fun awaitTerminal(
         context: Context,
         selfNeedsRestart: Boolean,
-    ): State {
+    ): DiagnosticPresentation {
         updateInputs(context, selfNeedsRestart)
-        val handle = coordinator.ensure(request(automatic = true)) ?: return state.value
-        val result = handle.await()
-        return projectDiagnosticAttempt(result.attempt, result.results)
+        val handle = coordinator.ensure(request(automatic = true)) ?: return presentation.value
+        handle.await()
+        return presentation.first { (it.lastAttempt?.id ?: 0) >= handle.id }
     }
 
     /**

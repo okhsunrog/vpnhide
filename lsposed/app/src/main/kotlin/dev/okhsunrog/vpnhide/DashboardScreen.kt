@@ -44,6 +44,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
+import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.VpnTransportWatcher
 import dev.okhsunrog.vpnhide.diagnostics.routedTransitions
@@ -147,10 +148,14 @@ fun DashboardScreen(
         return
     }
 
+    // Routing came back: a latest attempt that never measured (blocked while the VPN
+    // was off, failed, or none yet) is requested again through the refresh; a complete
+    // measurement is kept, since nothing reruns a suite at rest (I16) and the tiles
+    // still show it under the eligibility overlay.
     LaunchedEffect(selfNeedsRestart) {
         RoutingGateCache.gate.routedTransitions().collect {
-            val cached = DashboardCache.state.value
-            if (cached != null && cached.protection !is ProtectionCheck.Checked) {
+            val latest = DiagnosticsCache.presentation.value.lastAttempt
+            if (DashboardCache.state.value != null && latest?.outcome != RunOutcome.Completed) {
                 DashboardCache.refresh(scope, context, selfNeedsRestart)
             }
         }

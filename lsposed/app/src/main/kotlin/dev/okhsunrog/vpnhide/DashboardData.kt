@@ -5,12 +5,11 @@ import android.database.sqlite.SQLiteDatabase
 import android.os.Build
 import android.os.SystemClock
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticPresentation
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementCoverage
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
-import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import dev.okhsunrog.vpnhide.diagnostics.classifyKpmProblem
 import dev.okhsunrog.vpnhide.diagnostics.renderKpmProblem
 import dev.okhsunrog.vpnhide.diagnostics.standaloneKpmLoaded
@@ -1445,20 +1444,20 @@ private suspend fun deriveEnvironmentFacts(
 }
 
 /**
- * Await the check run and fold it into the protection verdict.
+ * Fold the diagnostic presentation into the protection facts.
  *
- * The cache does all the gating (VPN off / needs-restart / self-not-routed) in
- * one fold, and `awaitTerminal` returns the terminal state itself — so the
- * reason for "no results" (blocked gate vs failed run) is carried through
- * instead of re-derived from a second VPN sensor or a raced `state.value` read.
+ * The tiles come from the one canonical report (the same object the debug bundle
+ * renders), so the on-screen verdict and the exported one can never diverge;
+ * [protectionVerdict] builds it from the latest complete measurement against the
+ * layers it was measured with, and carries the reason for "no results" (blocked
+ * gate vs failed run) through instead of re-deriving it from a second VPN sensor.
  */
-private suspend fun resolveProtectionFacts(
-    context: android.content.Context,
+private fun resolveProtectionFacts(
     selfNeedsRestart: Boolean,
     modules: ModuleFacts,
     lsposedActive: Boolean,
     sections: Map<String, String>,
-    diagnosticObservation: DiagnosticsCache.State?,
+    diagnostics: DiagnosticPresentation,
 ): ProtectionFacts {
     VpnHideLog.i(
         TAG,
@@ -1468,44 +1467,10 @@ private suspend fun resolveProtectionFacts(
     val nativeBackend = modules.nativeBackend
     val installedOptionalHooks =
         installedNativeOptionalHooks(nativeBackend.id, sections, modules.currentBootId)
-    var report: DiagnosticReport? = null
-    val check: ProtectionCheck =
-        when (val terminal = diagnosticObservation ?: DiagnosticsCache.awaitTerminal(context, selfNeedsRestart)) {
-            is DiagnosticsCache.State.Blocked -> {
-                ProtectionCheck.Blocked(terminal.gate)
-            }
-
-            is DiagnosticsCache.State.Ready -> {
-                // Derive tiles from the one canonical report (the same object the
-                // debug bundle renders), so the on-screen verdict and the exported
-                // one can never diverge. Tiles judge each backend on the vectors it
-                // owns; unowned leaks are left to the issue list.
-                // The layers the measurement was taken against, not the ones the
-                // Dashboard sees now: a backend switch makes the measurement Changed
-                // rather than re-attributing its evidence to a backend that never ran it.
-                val layers = terminal.coverage ?: MeasurementCoverage(nativeBackend, installedOptionalHooks, lsposedActive)
-                val built =
-                    buildDiagnosticReport(
-                        gate = DiagnosticGate.ROUTED,
-                        results = terminal.results,
-                        backend = layers.backend,
-                        lsposedActive = layers.lsposedActive,
-                        complete = true,
-                        installedOptionalHooks = layers.installedOptionalHooks,
-                    )
-                report = built
-                ProtectionCheck.Checked(built.native.status, built.java.status)
-            }
-
-            // State.Failed, and defensively the never-terminal NotRun/Running: the
-            // run couldn't measure — distinct from a VPN-off gate.
-            else -> {
-                ProtectionCheck.Failed
-            }
-        }
+    val verdict = protectionVerdict(diagnostics, MeasurementCoverage(nativeBackend, installedOptionalHooks, lsposedActive))
     return ProtectionFacts(
-        check = check,
-        report = report,
+        check = verdict.check,
+        report = verdict.report,
         partialHookGap = partialHookGap(nativeBackend, installedOptionalHooks),
         installedOptionalHooks = installedOptionalHooks,
     )
@@ -1555,7 +1520,7 @@ internal suspend fun loadDashboardState(
     context: android.content.Context,
     selfNeedsRestart: Boolean,
     rootSnapshot: RootSnapshot,
-    diagnosticObservation: DiagnosticsCache.State? = null,
+    diagnostics: DiagnosticPresentation,
 ): DashboardState {
     VpnHideLog.i(TAG, "=== Loading dashboard state ===")
     StartupTrace.mark("dashboard_derive_start")
@@ -1593,12 +1558,11 @@ internal suspend fun loadDashboardState(
     StartupTrace.mark("dashboard_protection_start")
     val protection =
         resolveProtectionFacts(
-            context = context,
             selfNeedsRestart = selfNeedsRestart,
             modules = modules,
             lsposedActive = lsposed.state is LsposedState.Active,
             sections = sections,
-            diagnosticObservation = diagnosticObservation,
+            diagnostics = diagnostics,
         )
     VpnHideLog.i(TAG, "protection=${protection.check}")
     StartupTrace.mark("dashboard_protection_done")

@@ -38,6 +38,20 @@ internal data class DiagnosticPresentation(
 }
 
 /**
+ * The legacy gate the Dashboard tiles and the bridge's `gate`/`report` are built
+ * under: `ROUTED` only for a complete measurement whose evidence is retained,
+ * otherwise the blocking eligibility of a latest attempt that never started, or
+ * null when nothing measurable is known (no attempt, a failed or interrupted one,
+ * a condition with no gate vocabulary). Read [applicability] next to it: a `ROUTED`
+ * gate describes the measurement, not necessarily the current conditions.
+ */
+internal fun DiagnosticPresentation.reportGate(): DiagnosticGate? =
+    when {
+        measurement != null && measurementResults != null -> DiagnosticGate.ROUTED
+        else -> lastAttempt?.eligibility?.blockedGate()
+    }
+
+/**
  * [current] is the context observation built from the current routing
  * observation, root snapshot, config and impact state, or null when no routing
  * observation exists yet. [uncertain] is true while the routing observation is

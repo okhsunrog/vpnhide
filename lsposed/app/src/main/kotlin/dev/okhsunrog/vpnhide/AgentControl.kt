@@ -14,13 +14,13 @@ import dev.okhsunrog.vpnhide.debug.setDebugLoggingEnabled
 import dev.okhsunrog.vpnhide.diagnostics.AppProbeStats
 import dev.okhsunrog.vpnhide.diagnostics.CaptureDiff
 import dev.okhsunrog.vpnhide.diagnostics.DetectionMethod
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.MethodSurface
 import dev.okhsunrog.vpnhide.diagnostics.buildAppProbeStats
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
 import dev.okhsunrog.vpnhide.diagnostics.diffCapture
+import dev.okhsunrog.vpnhide.diagnostics.reportGate
 import dev.okhsunrog.vpnhide.diagnostics.snapshotCounters
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.picker.AppListCache
@@ -65,21 +65,15 @@ internal object AgentControl {
     ): VpnHideState =
         withAppContext(context) { context ->
             val rootSnapshot = rootSnapshot(refresh == true)
-            val dashboard = loadDashboardState(context, selfNeedsRestart = false, rootSnapshot = rootSnapshot)
+            // One presentation, read once it reflects a terminal attempt, feeds the
+            // dashboard tiles, the legacy gate/report and the diagnostics summary, so
+            // the three cannot describe different instants. selfNeedsRestart=false is
+            // safe: the cache's sticky flag keeps a UI-set NEEDS_RESTART from being
+            // cleared here.
+            val diagnostics = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart = false)
+            val dashboard = loadDashboardState(context, selfNeedsRestart = false, rootSnapshot = rootSnapshot, diagnostics = diagnostics)
             val statistics = buildStatisticsState(rootSnapshot).toAgentStatisticsState(selfPackage = context.packageName)
             val config = AgentBridgeJson.parseToJsonElement(canonicalConfigJson(currentCanonicalConfig(refresh = false)))
-
-            // awaitTerminal carries the blocked-gate/failed reason instead of racing
-            // on state.value. selfNeedsRestart=false is safe: the cache's sticky flag
-            // keeps a UI-set NEEDS_RESTART from being cleared here.
-            val terminal = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart = false)
-            val gate =
-                when (terminal) {
-                    is DiagnosticsCache.State.Blocked -> terminal.gate
-                    is DiagnosticsCache.State.Ready -> DiagnosticGate.ROUTED
-                    else -> null
-                }
-            val checkResults = (terminal as? DiagnosticsCache.State.Ready)?.results
 
             // Forensic blobs (shell snapshot, dmesg, boot logcat, lsposed config,
             // hook counters, raw sections) only on request — they run extra root
@@ -92,10 +86,10 @@ internal object AgentControl {
                 selfNeedsRestart = false,
                 rootSnapshot = rootSnapshot,
                 shellSnapshot = shellSnapshot,
-                gate = gate,
-                checkResults = checkResults,
+                gate = diagnostics.reportGate(),
+                checkResults = diagnostics.measurementResults,
                 // The same projection the screens render, so getState and the UI agree.
-                diagnostics = diagnosticSummary(DiagnosticsCache.presentation.value),
+                diagnostics = diagnosticSummary(diagnostics),
                 dmesg = if (options.forensics) suExec("dmesg 2>/dev/null").second else "",
                 logcat = "",
                 bootLsposedLogcat = if (options.forensics) captureBootLsposedLogcat() else "",
