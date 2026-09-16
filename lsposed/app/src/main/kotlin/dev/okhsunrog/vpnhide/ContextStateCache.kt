@@ -26,13 +26,15 @@ internal abstract class ContextStateCache<T>(
         ensure()
     }
 
+    /** [reason] is Explicit for a user action; a screen reacting to a network event passes Transition. */
     fun refresh(
         context: Context,
         selfNeedsRestart: Boolean,
+        reason: ReadReason = ReadReason.Explicit,
     ) {
         updateInputs(context, selfNeedsRestart)
         beforeRefresh(requireNotNull(inputs))
-        forceRefresh()
+        forceRefresh(reason)
     }
 
     /** Explicit refresh only; dependency invalidation must not trigger other effect owners. */

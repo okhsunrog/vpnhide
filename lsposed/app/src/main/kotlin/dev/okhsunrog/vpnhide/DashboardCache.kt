@@ -25,6 +25,13 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardState
 ) {
     val state: StateFlow<DashboardState?> = ProjectedStateFlow(value) { it?.value }
 
+    /**
+     * A derivation the user asked for is in flight. A background re-derivation (the
+     * startup reconcile, a root dependency after a config phase) is not; the top-bar
+     * indicator follows this, [loading] follows every derivation.
+     */
+    val refreshing: StateFlow<Boolean> by lazy { ProjectedStateFlow(observation) { it.active?.reason == ReadReason.Explicit } }
+
     override fun beforeRefresh(inputs: ContextObservationInputs) {
         DiagnosticsCache.retry(inputs.context, inputs.selfNeedsRestart)
     }

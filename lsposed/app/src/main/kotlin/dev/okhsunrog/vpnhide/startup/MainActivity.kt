@@ -378,7 +378,9 @@ private fun MainScreen() {
     var targetSortMode by rememberSaveable { mutableStateOf(TargetListSortMode.ConfiguredFirst) }
     val appListLoading by AppListCache.loading.collectAsState()
     val targetsLoading by TargetsCache.loading.collectAsState()
-    val dashboardLoading by DashboardCache.loading.collectAsState()
+    // The top-bar indicator follows only reads the user asked for: a background
+    // re-derivation (the startup reconcile, a root dependency) is not news to spin for.
+    val dashboardLoading by DashboardCache.refreshing.collectAsState()
     val statisticsLoading by StatisticsCache.loading.collectAsState()
     val dashboardState by DashboardCache.state.collectAsState()
     val dashboardError by DashboardCache.error.collectAsState()
