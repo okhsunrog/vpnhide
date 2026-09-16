@@ -6,6 +6,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import dev.okhsunrog.vpnhide.LogTags
+import dev.okhsunrog.vpnhide.ReadReason
 import dev.okhsunrog.vpnhide.StateCache
 import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.debug.captureGateFrom
@@ -88,7 +89,7 @@ internal object VpnTransportWatcher {
 
         events
             .debounce(VPN_TRANSPORT_DEBOUNCE_MS)
-            .onEach { runCatching { RoutingGateCache.refreshInPlace(force = true) } }
+            .onEach { runCatching { RoutingGateCache.refreshInPlace(force = true, reason = ReadReason.Transition) } }
             .launchIn(watcherScope)
 
         val cm = context.applicationContext.getSystemService(ConnectivityManager::class.java) ?: return
@@ -148,8 +149,9 @@ internal object VpnTransportWatcher {
     }
 
     private fun trigger() {
-        // Invalidate readiness now; debounce only the expensive read.
-        RoutingGateCache.markStale()
+        // Invalidate readiness now; debounce only the expensive read. The network
+        // changed under us, so the re-read is a Transition, not a background top-up.
+        RoutingGateCache.markStale(ReadReason.Transition)
         watcherScope.launch { events.emit(Unit) }
     }
 

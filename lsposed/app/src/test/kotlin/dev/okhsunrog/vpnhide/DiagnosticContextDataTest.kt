@@ -45,7 +45,7 @@ class DiagnosticContextDataTest {
     fun `failed routing read is unknown without a comparable context even with historical routed value`() {
         val failed =
             ObservationState(
-                lastGood = ObservedValue(DiagnosticGate.ROUTED, ObservationRequest(1, 0, 0), 5),
+                lastGood = ObservedValue(DiagnosticGate.ROUTED, ObservationRequest(1, 0, 0, ReadReason.Explicit), 5),
                 generation = 1,
                 error = TransitionFailure.ReadFailed,
                 attempted = true,
@@ -65,7 +65,7 @@ class DiagnosticContextDataTest {
         assertEquals(RoutingRead.Refresh, routingReadPlan(fresh.copy(generation = 1)))
         assertEquals(RoutingRead.Refresh, routingReadPlan(fresh.copy(error = TransitionFailure.ReadFailed)))
         assertEquals(RoutingRead.Refresh, routingReadPlan(fresh.copy(quarantined = true, quarantineRequestId = 1)))
-        val loading = fresh.copy(active = ObservationRequest(2, 0, 1))
+        val loading = fresh.copy(active = ObservationRequest(2, 0, 1, ReadReason.Transition))
         assertEquals(RoutingRead.Join, routingReadPlan(loading))
         assertEquals(RoutingRead.Join, routingReadPlan(loading.copy(generation = 1)))
     }
@@ -182,7 +182,7 @@ class DiagnosticContextDataTest {
 
     private fun current(gate: DiagnosticGate): ObservationState<DiagnosticGate> =
         ObservationState(
-            lastGood = ObservedValue(gate, ObservationRequest(1, 0, 0), 5),
+            lastGood = ObservedValue(gate, ObservationRequest(1, 0, 0, ReadReason.Explicit), 5),
             attempted = true,
             attemptedGeneration = 0,
         )

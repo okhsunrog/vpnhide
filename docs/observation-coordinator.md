@@ -77,6 +77,21 @@ active request; an explicit `notBefore` timestamp can demand a newer collection.
 Awaiters follow a superseded request to its successor within their own deadline.
 An ordinary Ensure does not retry a failed attempt in the same generation.
 
+Every re-read states why it happens. `ReadReason` is `Background` (our own process
+invalidated the observation — a root dependency after a config phase or the startup
+reconcile, or the foreground-return safety net), `Transition` (an external signal that
+the observed fact may have changed: the VPN transport / default-network callback) or
+`Explicit` (the user asked: Retry, refresh, pull-to-refresh, a manual re-check). An
+observation that is owed a re-read carries a `StaleMark(reason, since)`: set by an
+invalidation and by a refresh that requests a newer generation, kept while that re-read
+is owed or running, carried over to the successor of a superseded read, and cleared when
+the current generation publishes or fails. Overlapping causes keep the earliest `since`
+and the strongest reason — `Explicit` never degrades to `Background` because a routine
+invalidation arrived afterwards. The request that is started carries that reason, so a
+read in flight can be attributed after the mark is gone. Nothing renders this yet; the
+presentation consumes it in the next stage to word a background top-up differently from
+a user-requested re-check.
+
 ## Root dependencies
 
 The root reader uses the same coordinator. Each accepted snapshot has an observation

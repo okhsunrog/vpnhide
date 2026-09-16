@@ -5,6 +5,7 @@ import dev.okhsunrog.vpnhide.ContextStateCache
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.ObservationRequest
+import dev.okhsunrog.vpnhide.ReadReason
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.StateCache
 import dev.okhsunrog.vpnhide.debug.captureGateFrom
@@ -58,7 +59,8 @@ internal object RoutingGateCache : ContextStateCache<DiagnosticGate>(
     fun refreshIfStale(throttleMs: Long = RESUME_REFRESH_THROTTLE_MS) {
         if (!ready) return
         if (SystemClock.elapsedRealtime() - lastLoadAtMs < throttleMs) return
-        forceRefresh()
+        // A safety net, not evidence that anything changed: never worded as a user-requested re-check.
+        forceRefresh(ReadReason.Background)
     }
 
     // Always on IO: captureGateFrom runs the blocking `su` self-routing probe, so a
