@@ -214,3 +214,17 @@ Java-level checks (LSPosed) cover the framework side — `hasTransport(VPN)`,
 `NET_CAPABILITY_NOT_VPN`, `VpnTransportInfo`, `getAllNetworks`, `LinkProperties`,
 `getNetworkForType(TYPE_VPN)`, the push `NetworkCallback` (issue #70), and the legacy
 `getActiveNetworkInfo` / `getNetworkInfo(TYPE_VPN)` APIs.
+
+The `network_info_vpn` check compares the app-side `getNetworkInfo(TYPE_VPN)`
+reply with VPN entries in `getAllNetworkInfo()`, after Binder unmarshalling.
+Both paths must retain type 17 with state `DISCONNECTED` and detailed state
+`DISCONNECTED` or policy `BLOCKED`. A disconnected Wi-Fi/mobile substitution,
+an active/transitional VPN state, or a missing/duplicate enumeration entry is
+a failure. Separate calls may straddle a UID-policy change, so a difference
+between `DISCONNECTED` and `BLOCKED` alone is not a failure. Availability is
+included in the detail for inspection, not treated as connection status.
+A direct `null` is inconclusive (`NotMeasured`), unless enumeration already
+proves a failure: null is allowed by Android but cannot verify correct legacy
+type semantics. In particular, the old nulling hook no longer earns a green
+pass. This check measures the current VPN-on run; it does not replace comparing
+VPN-off baselines with hiding enabled and disabled on a test device.

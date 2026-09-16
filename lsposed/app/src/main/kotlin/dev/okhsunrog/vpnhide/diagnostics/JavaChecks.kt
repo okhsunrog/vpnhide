@@ -16,6 +16,7 @@ import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkInfo
 import android.os.Build
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.R
@@ -541,24 +542,20 @@ private fun checkLinkPropertiesRoutes(
     }
 
 // getNetworkInfo(TYPE_VPN) probes the legacy VPN type directly (issue #85). The
-// LSPOSED_NETWORK_INFO parcel hook nulls it for a target; a non-null result that
-// reports connected/connecting still answers "a VPN-type network exists" — the
-// leak. (Its companion getActiveNetworkInfo() was dropped: .type reports the
+// ConnectivityService result hook returns the platform's disconnected VPN-type
+// info; the parcel hook must preserve it. Validate type and enumeration as well
+// as state: a disconnected WIFI reply or null must not silently pass this check.
+// (Its companion getActiveNetworkInfo() was dropped: .type reports the
 // underlying transport (WIFI/mobile) for an active VPN, not TYPE_VPN, so it never
 // surfaced the leak.)
 private fun checkNetworkInfoVpn(
     cm: ConnectivityManager,
     name: String,
 ): CheckResult {
-    val info =
-        cm.getNetworkInfo(ConnectivityManager.TYPE_VPN)
-            ?: return javaCheck(name, true, "getNetworkInfo(TYPE_VPN) returned null")
-    val leaks = info.isConnectedOrConnecting
-    val detail =
-        if (!leaks) {
-            "TYPE_VPN state=${info.state}"
-        } else {
-            "getNetworkInfo(TYPE_VPN) connected: ${info.typeName} ${info.state}"
-        }
-    return javaCheck(name, !leaks, detail)
+    val direct = cm.getNetworkInfo(ConnectivityManager.TYPE_VPN)?.legacySnapshot()
+    val all = cm.allNetworkInfo.map { it.legacySnapshot() }
+    val assessment = assessLegacyVpnInfo(direct, all)
+    return javaCheck(name, assessment.clean, assessment.detail)
 }
+
+private fun NetworkInfo.legacySnapshot(): LegacyVpnInfoSnapshot = LegacyVpnInfoSnapshot(type, state.name, detailedState.name, isAvailable)
