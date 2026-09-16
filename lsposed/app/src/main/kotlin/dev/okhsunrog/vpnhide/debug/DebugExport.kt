@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide.debug
 
 import android.content.Context
+import android.net.ConnectivityManager
 import android.os.Build
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.LsposedConfig
@@ -136,6 +137,17 @@ private suspend fun buildDebugState(
             } else {
                 null
             }
+        // The post-Binder network model as this uid sees it. Taken after the suite
+        // so its callback window does not overlap the suite's own callback probe;
+        // the VPN is expected hidden only when the run itself was ROUTED.
+        val networkView =
+            if (options.forensics) {
+                runCatching { captureSelfNetworkView(context, selfTest.gate == DiagnosticGate.ROUTED) }
+                    .onFailure { errors += "network view: ${it.message}" }
+                    .getOrNull()
+            } else {
+                null
+            }
         val dmesg = if (options.forensics) suExec("dmesg 2>/dev/null").second else ""
         val logcat = if (options.forensics) captureDebugLogcat().ifEmpty { "(no logcat entries)" } else ""
         val session = loggingSession?.let { it.withRestore(restoreDebugCaptureLogging(it)) }
@@ -170,6 +182,7 @@ private suspend fun buildDebugState(
                 }.getOrNull(),
             debugCapture = session?.toDebugCaptureInfo(),
             errors = errors,
+            networkView = networkView,
             options = options,
         )
     } finally {
@@ -178,6 +191,19 @@ private suspend fun buildDebugState(
         }
     }
 }
+
+/** The app's own post-Binder network view, PendingIntent path included (this is a real app process). */
+internal fun captureSelfNetworkView(
+    context: Context,
+    expectHidden: Boolean,
+): NetworkViewSnapshot =
+    captureNetworkView(
+        context = context,
+        cm = context.getSystemService(ConnectivityManager::class.java),
+        uid = android.os.Process.myUid(),
+        packageName = context.packageName,
+        options = NetworkViewOptions(expectHidden = expectHidden, includePendingIntent = true),
+    )
 
 /** ISO-8601 timestamp for [VpnHideState.generatedAt] (the serializer has no clock). */
 internal fun isoNow(): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US).format(Date())

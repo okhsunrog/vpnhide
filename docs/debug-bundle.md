@@ -116,6 +116,7 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 | `bootLsposedLogcat` | Best-effort boot-time LSPosed/Vector lines from the current ring buffer (may have rotated away). |
 | `lsposedConfigDb` | LSPosed module enable state + scope for this app. |
 | `hookReport` | Native hook install mask + counter deltas across the forced check run (§7). |
+| `networkView` | The framework network model as this uid sees it after Binder — handles, per-handle capabilities/link properties/`NetworkInfo`, legacy type answers, every callback delivered during a 2 s window (default, listen-without-NOT_VPN, VPN listen, PendingIntent) and the consistency `invariants` over all of it ([lsposed-hook-debugging.md §9](lsposed-hook-debugging.md)). Forensics only; `null` when it could not be taken (reason in `errors`). |
 | `debugCapture` | Whether debug logging was force-enabled for this capture (`forced`) and the toggle exit codes. |
 | `captureOptions` | `{forensics, appList}` — self-documents what was included. |
 | `errors` | Non-fatal capture failures (a probe that threw, a truncated section). Partial data is flagged here, never silently dropped. |
@@ -352,6 +353,9 @@ is the emit order — if truncation hit `app_scan_diagnostics`, the `network_*` 
   `app_scan_diagnostics` (counts only, names redacted) always stays.
 - `proc_cmdline` has `androidboot.serialno` / `wifi_macaddr` / `btmacaddr`
   scrubbed.
+- `networkView` records transport-info objects by class name only (never the
+  `WifiInfo` SSID/BSSID); link addresses, DNS and routes are kept, like the
+  network sections.
 - A lean (non-forensics) export carries **no `sections` and no logs** — just the
   typed state. Check `captureOptions.forensics` before concluding "the section
   isn't there."
@@ -394,6 +398,7 @@ the bundle. All paths are under
 | Optional native hooks (filesystem-hiding coverage) | `FilesystemHidingData.kt` | which optional hooks the active backend installed |
 | `statistics` (per-uid / per-method counters) | `StatisticsData.kt` (`buildStatisticsState`) | how the hook-counter totals are built |
 | `hookReport` | `HookDiagnostics.kt` | installed-hook mask + counter deltas across the run |
+| `networkView` (post-Binder network model + invariants) | `NetworkViewCapture.kt` (capture) + `NetworkViewData.kt` (shape, invariants) | what a target uid actually receives and which consistency rule a leak breaks; `NetworkViewProbeMain.kt` runs the same capture as any uid via `scripts/network-view-probe.py` |
 | `rootShell` (not-verified vs inactive) | `VpnHideState.kt` (`RootShellDiag`) ← `snapshot_shell_uid` probe | why a negative liveness read may be untrustworthy |
 | The raw `sections` batch — every probe + its exact shell command + emit order | `DebugShellSnapshot.kt` | what each section literally runs (and the truncation model) |
 | The path constants in those commands (`$PROC_CTL`, `$KMOD_MODULE_DIR`, …) | `ConfigChannels.kt` | which files/procs each section reads (also [state.md](state.md)) |

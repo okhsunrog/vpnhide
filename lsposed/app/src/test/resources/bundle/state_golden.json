@@ -192,6 +192,161 @@
     "bootLsposedLogcat": "",
     "lsposedConfigDb": "",
     "hookReport": null,
+    "networkView": {
+        "uid": 10332,
+        "packageName": "dev.okhsunrog.vpnhide",
+        "sdk": 36,
+        "capturedAt": "2026-08-22T12:00:05+0300",
+        "captureMs": 2000,
+        "expectHidden": true,
+        "activeNetwork": 100,
+        "boundNetwork": null,
+        "allNetworks": [
+            100
+        ],
+        "networks": [
+            {
+                "netId": 100,
+                "sources": [
+                    "all",
+                    "active",
+                    "callback"
+                ],
+                "capabilities": {
+                    "transports": [
+                        "WIFI"
+                    ],
+                    "capabilities": [
+                        "INTERNET",
+                        "NOT_VPN",
+                        "VALIDATED"
+                    ],
+                    "transportInfo": "WifiInfo",
+                    "ownerUid": -1
+                },
+                "linkProperties": {
+                    "interfaceName": "wlan0",
+                    "addresses": [
+                        "10.0.0.2/24"
+                    ],
+                    "dnsServers": [
+                        "10.0.0.1"
+                    ],
+                    "routes": [
+                        "0.0.0.0/0 via 10.0.0.1 dev wlan0"
+                    ],
+                    "stackedInterfaces": [],
+                    "mtu": 1500
+                },
+                "networkInfo": {
+                    "type": 1,
+                    "typeName": "WIFI",
+                    "subtype": 0,
+                    "state": "CONNECTED",
+                    "detailedState": "CONNECTED",
+                    "available": true,
+                    "extraInfo": null
+                }
+            }
+        ],
+        "legacy": {
+            "activeNetworkInfo": {
+                "type": 1,
+                "typeName": "WIFI",
+                "subtype": 0,
+                "state": "CONNECTED",
+                "detailedState": "CONNECTED",
+                "available": true,
+                "extraInfo": null
+            },
+            "byType": {
+                "VPN": {
+                    "type": 17,
+                    "typeName": "VPN",
+                    "subtype": 0,
+                    "state": "DISCONNECTED",
+                    "detailedState": "DISCONNECTED",
+                    "available": true,
+                    "extraInfo": null
+                },
+                "WIFI": {
+                    "type": 1,
+                    "typeName": "WIFI",
+                    "subtype": 0,
+                    "state": "CONNECTED",
+                    "detailedState": "CONNECTED",
+                    "available": true,
+                    "extraInfo": null
+                }
+            },
+            "allNetworkInfo": [
+                {
+                    "type": 1,
+                    "typeName": "WIFI",
+                    "subtype": 0,
+                    "state": "CONNECTED",
+                    "detailedState": "CONNECTED",
+                    "available": true,
+                    "extraInfo": null
+                }
+            ],
+            "networkForType": {
+                "VPN": null,
+                "WIFI": 100
+            }
+        },
+        "phantomNetworks": [],
+        "callbacks": [
+            {
+                "registration": "default",
+                "event": "capabilities",
+                "netId": 100,
+                "tMs": 12,
+                "capabilities": {
+                    "transports": [
+                        "WIFI"
+                    ],
+                    "capabilities": [
+                        "INTERNET",
+                        "NOT_VPN",
+                        "VALIDATED"
+                    ],
+                    "transportInfo": "WifiInfo",
+                    "ownerUid": -1
+                },
+                "linkProperties": null,
+                "blocked": null
+            }
+        ],
+        "pendingIntent": {
+            "registered": true,
+            "netIds": [
+                100
+            ],
+            "requestNetIds": [
+                100
+            ],
+            "error": null
+        },
+        "invariants": [
+            {
+                "id": "active_in_all_networks",
+                "status": "ok",
+                "detail": "active=100 listed"
+            },
+            {
+                "id": "no_phantom_networks",
+                "status": "violated",
+                "detail": "answering netIds [103]"
+            },
+            {
+                "id": "pending_intent_only_listed_networks",
+                "status": "not_applicable",
+                "detail": "not captured"
+            }
+        ],
+        "errors": []
+    },
     "debugCapture": null,
     "captureOptions": {
         "forensics": false,
