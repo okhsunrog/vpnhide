@@ -85,6 +85,19 @@ impl CoreClient {
         }
     }
 
+    /// One-shot read of the core's current published state (epoch 0 asks for whatever the
+    /// current run holds). Mostly for tools; screens use the mirrored [`state`](Self::state).
+    pub async fn current(&self) -> Result<vpnhide_core_rpc::Published, String> {
+        let client = self.client().await.map_err(|e| e.to_string())?;
+        match client.state_since(deadline(CALL_DEADLINE), 0, 0).await {
+            Ok(published) => Ok(published),
+            Err(e) => {
+                self.drop_client().await;
+                Err(e.to_string())
+            }
+        }
+    }
+
     /// Query an operation's record. `Err` on transport failure.
     pub async fn get_operation(&self, op: OperationId) -> Result<Option<OperationRecord>, String> {
         let client = self.client().await.map_err(|e| e.to_string())?;

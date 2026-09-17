@@ -75,7 +75,7 @@ mod tests {
     use super::*;
 
     fn snap(available: bool) -> StateSnapshot {
-        StateSnapshot { config_available: available, operations_in_flight: vec![] }
+        StateSnapshot { config_available: available, ..StateSnapshot::default() }
     }
 
     #[tokio::test]
