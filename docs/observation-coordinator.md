@@ -23,8 +23,10 @@ once when rendering an app-list response.
 `value` retains the last successful observation while loading and after failure.
 It is useful display history, not evidence of current readiness. `current` is null
 while loading, stale, failed or quarantined. `RoutingGateCache.gate` uses `current`:
-every foreground sample marks the prior value stale before the direct helper read.
-This changes readiness freshness, not diagnostic result classification or retention.
+a shared refresh marks the prior value stale before its direct helper read. The
+one-second foreground comparison is silent and does not enter this state when its
+result is unchanged. A real refresh changes readiness freshness, not diagnostic
+result classification or retention.
 For eligibility, an invalidated observation that still awaits its re-read is
 `Checking`; `Unknown` is reserved for a read that failed, a quarantined source, or
 an attempt that never produced a value. Mapping the stale window to `Unknown`
@@ -35,16 +37,18 @@ known fact and the read's reason): a user-requested or network-triggered re-read
 shows a neutral "Checking…" at once, a background one keeps the last known state
 for a 2 s grace (transition contract §22).
 `AppVpnStatePoller` runs while the main UI is RESUMED, with a one-second delay
-between completed samples. Each sample is one root-helper request for the app-scoped
+between completed samples. Each sample is a silent root-helper request for the app-scoped
 VPN state: current framework VPN session and interfaces plus this app UID's policy
 rule membership. It does not read or compare global route/rule text and does not
-refresh `RootSnapshotCache`. A routed result publishes immediately. `VPN_OFF` and
-`EXCLUDED` require two equal samples 750 ms apart; a state/session change continues
+refresh `RootSnapshotCache`. An equal sample leaves the shared observation untouched,
+so the timer cannot make a stable screen enter Checking. Only a changed fact (or a
+successful recovery sample after a failed/stale read) requests a process-owned
+`StateCache` refresh. That refresh publishes a routed result immediately. `VPN_OFF`
+and `EXCLUDED` require two equal samples 750 ms apart; a state/session change continues
 settling instead of publishing the tunnel's setup edge as a current negative fact.
-Failures become unknown observations, never VPN-off. Samples remain process-owned
-`StateCache` reads, so lifecycle cancellation only detaches the collector and a
-quarantined worker is not replaced by the timer. ON_RESUME always requests fresh
-present-tense evidence, and explicit Retry remains available.
+Probe failures are ignored by the silent timer, never translated to VPN-off. A
+quarantined or active shared read is not replaced by the timer. ON_RESUME always
+requests fresh present-tense evidence, and explicit Retry remains available.
 
 The confirmation suite on a VPN transition has one owner too.
 `AppVpnStatePoller.confirmRoutedTransitions` compares complete app-VPN snapshots.

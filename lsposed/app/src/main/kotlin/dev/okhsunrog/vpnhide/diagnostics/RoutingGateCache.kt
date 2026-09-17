@@ -47,6 +47,30 @@ internal object RoutingGateCache : ContextStateCache<AppVpnStateSnapshot>(
         forceRefresh(ReadReason.Background)
     }
 
+    /**
+     * Probe without invalidating the published observation. The foreground timer
+     * must not turn a stable routed value into Checking on every iteration.
+     */
+    suspend fun observedStateChanged(): Boolean {
+        val retainedInputs = inputs ?: return false
+        val before = observation.value
+        val published = before.lastGood?.value
+        if (!before.attempted || before.active != null || before.quarantined || published?.gate == DiagnosticGate.NEEDS_RESTART) {
+            return false
+        }
+        val observed =
+            withContext(Dispatchers.IO) { GroundTruthProbe.observeAppVpnState(retainedInputs.context) }
+                ?.toSnapshotOrNull()
+        val after = observation.value
+        if (inputs != retainedInputs || !after.attempted || after.active != null || after.quarantined) return false
+        return appVpnStateNeedsRefresh(
+            published = after.lastGood?.value,
+            observed = observed,
+            stale = after.stale != null,
+            failed = after.error != null,
+        )
+    }
+
     override suspend fun load(
         @Suppress("UNUSED_PARAMETER") request: ObservationRequest,
     ): AppVpnStateSnapshot =
@@ -78,6 +102,8 @@ internal object RoutingGateCache : ContextStateCache<AppVpnStateSnapshot>(
         if (state == AppVpnState.UNKNOWN) error("app VPN state unavailable: $detail")
     }
 
+    private fun AppVpnStateObservation.toSnapshotOrNull(): AppVpnStateSnapshot? = takeUnless { state == AppVpnState.UNKNOWN }?.toSnapshot()
+
     private fun AppVpnStateObservation.toSnapshot(): AppVpnStateSnapshot =
         AppVpnStateSnapshot(
             gate =
@@ -88,7 +114,7 @@ internal object RoutingGateCache : ContextStateCache<AppVpnStateSnapshot>(
                     AppVpnState.UNKNOWN -> error("app VPN state unavailable: $detail")
                 },
             session = session,
-            interfaces = interfaces,
+            interfaces = interfaces.distinct().sorted(),
         )
 }
 

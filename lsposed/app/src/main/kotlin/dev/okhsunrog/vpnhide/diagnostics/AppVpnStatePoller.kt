@@ -14,9 +14,8 @@ private const val APP_VPN_STATE_POLL_INTERVAL_MS = 1_000L
 internal object AppVpnStatePoller {
     suspend fun pollWhileVisible() {
         while (true) {
-            val state = RoutingGateCache.observation.value
-            if (state.attempted && !state.quarantined) {
-                RoutingGateCache.refreshInPlace(force = true, reason = ReadReason.Background)
+            if (RoutingGateCache.observedStateChanged()) {
+                RoutingGateCache.refreshRetained(ReadReason.Transition)
             }
             delay(APP_VPN_STATE_POLL_INTERVAL_MS)
         }
