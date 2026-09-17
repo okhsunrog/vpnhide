@@ -32,11 +32,16 @@ pub trait PhaseRunner {
     fn run(&self, phase: ConfigPhase, candidate: &CanonicalConfig) -> PhaseOutcome;
 }
 
-/// The phase plan for an edit. Today every edit is a single `Persist`; the backend-activation
-/// phases (`Native`/`Ports`, and the coupled `Secret`/`Cleanup`) join here with step D, in
-/// [`ConfigPhase`] order. Kept a function so that extension is one place.
-pub fn plan_for(_edit_touches_backend: bool) -> Vec<ConfigPhase> {
-    vec![ConfigPhase::Persist]
+/// The phase plan for an edit, in [`ConfigPhase`] order. `Persist` always; `Native` when the
+/// candidate has a native target *and* a control node is configured to deliver to (step D —
+/// the built-in/kmod family). `Ports` and the coupled `Secret`/`Cleanup` join later. The plan
+/// reflects what is actually runnable, so a planned phase never settles `NotAttempted`.
+pub fn plan_for(native: bool) -> Vec<ConfigPhase> {
+    if native {
+        vec![ConfigPhase::Persist, ConfigPhase::Native]
+    } else {
+        vec![ConfigPhase::Persist]
+    }
 }
 
 /// What running a plan produced: the per-phase record, the settled outcome, and whether the
@@ -89,12 +94,16 @@ pub fn run_plan(
     PlanOutcome { phases, settled, persisted }
 }
 
-/// The production runner. `Persist` writes the durable config atomically; with no path (host
-/// tests) it is a confirmed no-op. The backend-activation phases have no executor yet (they
-/// are never planned before step D); a planned-but-unimplemented phase is reported
-/// `NotAttempted` rather than silently confirmed.
+/// The production runner. `Persist` writes the durable config atomically (no path → confirmed
+/// no-op, for host tests). `Native` projects the config to the built-in control-v2 wire and
+/// delivers it to the configured control node (step D); it is only ever planned when a node
+/// path is set, so a `Native` with no path is a bug, reported `NotAttempted`. `Ports`/`Secret`/
+/// `Cleanup` land later.
 pub struct RealPhaseRunner {
     pub config_path: Option<PathBuf>,
+    /// The kernel control node to deliver `Native` to. `None` disables native delivery
+    /// entirely (the dev sandbox default — it never touches the real `/proc/vpnhide_ctl`).
+    pub kmod_ctl_path: Option<PathBuf>,
 }
 
 impl PhaseRunner for RealPhaseRunner {
@@ -107,7 +116,16 @@ impl PhaseRunner for RealPhaseRunner {
                 },
                 None => PhaseOutcome::Confirmed,
             },
-            // Native / Ports / Secret / Cleanup: implemented in step D.
+            ConfigPhase::Native => match &self.kmod_ctl_path {
+                Some(path) => match crate::activation::project_builtin_wire(candidate)
+                    .and_then(|wire| crate::activation::deliver_builtin(path, &wire))
+                {
+                    Ok(()) => PhaseOutcome::Confirmed,
+                    Err(_) => PhaseOutcome::FailedKnown,
+                },
+                None => PhaseOutcome::NotAttempted,
+            },
+            // Ports / Secret / Cleanup: implemented later in step D.
             _ => PhaseOutcome::NotAttempted,
         }
     }
@@ -212,7 +230,7 @@ mod tests {
     #[test]
     fn real_runner_persists_to_disk_and_reports_none_path_confirmed() {
         // No path: a confirmed no-op (host-test semantics).
-        let none = RealPhaseRunner { config_path: None };
+        let none = RealPhaseRunner { config_path: None, kmod_ctl_path: None };
         assert_eq!(
             none.run(ConfigPhase::Persist, &CanonicalConfig::default()),
             PhaseOutcome::Confirmed,
@@ -220,7 +238,7 @@ mod tests {
         // With a path: the file is written and the phase confirms.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("vpnhide_config.json");
-        let real = RealPhaseRunner { config_path: Some(path.clone()) };
+        let real = RealPhaseRunner { config_path: Some(path.clone()), kmod_ctl_path: None };
         assert_eq!(
             real.run(ConfigPhase::Persist, &CanonicalConfig::default()),
             PhaseOutcome::Confirmed,

@@ -3,6 +3,7 @@
 //! the domain (config/operation/observation) is still placeholder (see `core-rpc`).
 
 pub mod client;
+pub mod activation;
 pub mod config_edit;
 pub mod config_file;
 pub mod listener;
