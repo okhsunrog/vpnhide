@@ -291,6 +291,7 @@ jobs:
             portshide/module/uninstall.sh \
             scripts/clean-device.sh scripts/update-json.sh \
             kmod/test/run.sh kmod/test/build-kernel.sh kmod/test/init.sh \
+            kmod/test/verify-trim-abi.sh \
             kmod/test/run-kpm.sh kmod/test/init-kpm.sh kmod/test/build-source-kernel.sh \
             builtin/test/run.sh builtin/test/build-kernel.sh builtin/test/build-source-kernel.sh
           # The app's root probes. They are assembled from these files plus a
@@ -708,6 +709,12 @@ jobs:
         # VPNHIDE configs onto the .config the image already built with, rebuild
         # the Image, then boot THAT kernel — VPNHIDE_QEMU_IMAGE is overridden
         # inline because the image otherwise points it at the plain baked kernel.
+        #
+        # qemu-trim.config is merged here as well, and this is the only job that
+        # exercises it per pull request: kmod-qemu and kpm-qemu boot the Image
+        # baked into the image, so a trim change reaches them only after
+        # qemu-image.yml re-bakes on main. Merging it here is a no-op once the
+        # image carries it, and covers the PR until then.
         run: |
           set -euo pipefail
           CLANG_BIN="$(ls -d /opt/ddk/clang/*/bin | head -1)"
@@ -717,7 +724,8 @@ jobs:
           printf 'CONFIG_VPNHIDE=y\nCONFIG_VPNHIDE_FS_HIDING=y\n' > /tmp/vpnhide.config
           (
             cd "$KSRC"
-            ./scripts/kconfig/merge_config.sh -m .config /tmp/vpnhide.config
+            ./scripts/kconfig/merge_config.sh -m .config /tmp/vpnhide.config \
+              "$GITHUB_WORKSPACE/kmod/test/qemu-trim.config"
             make ARCH=arm64 LLVM=1 CC="ccache clang" olddefconfig
             grep -E 'CONFIG_VPNHIDE(_FS_HIDING)?=' .config
             make ARCH=arm64 LLVM=1 CC="ccache clang" -j"$(nproc)" Image

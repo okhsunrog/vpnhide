@@ -17,6 +17,9 @@ on:
       - kmod/test/ifconf-probe.c
       - kmod/test/bind-probe.c
       - kmod/test/qemu.config
+      - kmod/test/qemu-trim.config
+      - kmod/test/verify-trim-abi.sh
+      - kmod/test/abi/**
       - kmod/test/build-source-kernel.sh
   schedule:
     - cron: '0 4 1 * *'

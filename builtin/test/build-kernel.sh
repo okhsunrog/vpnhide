@@ -13,7 +13,8 @@ KMI="${1:?usage: build-kernel.sh <kmi>  (e.g. android14-6.1)}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 CACHE="$HERE/.cache/$KMI"
-FRAG="$REPO/kmod/test/qemu.config"   # reuse the proven QEMU boot fragment
+FRAG="$REPO/kmod/test/qemu.config"        # reuse the proven QEMU boot fragment
+TRIM="$REPO/kmod/test/qemu-trim.config"   # …and the same subsystem trim
 
 DDK_IMAGE_TAG="20260313"
 DDK="${VPNHIDE_DDK_IMAGE:-ghcr.io/ylarod/ddk-min:${KMI}-${DDK_IMAGE_TAG}}"
@@ -36,6 +37,7 @@ echo "[build-kernel/builtin] $KMI: cloning kernel/common + baking CONFIG_VPNHIDE
 # shellcheck disable=SC2016
 "$CONTAINER_CMD" run --rm \
 	-v "$(command -v uv):/usr/local/bin/uv:ro" -v "$REPO:/repo:ro" -v "$CACHE:/out" -v "$FRAG:/qemu.config:ro" \
+	-v "$TRIM:/qemu-trim.config:ro" \
 	-e KMI="$KMI" "$DDK" bash -euo pipefail -c '
 	CLANG_BIN="$(ls -d /opt/ddk/clang/*/bin | head -1)"
 	export PATH="$CLANG_BIN:$PATH"
@@ -58,7 +60,7 @@ echo "[build-kernel/builtin] $KMI: cloning kernel/common + baking CONFIG_VPNHIDE
 	make ARCH=arm64 LLVM=1 gki_defconfig
 	cp /qemu.config /tmp/frag.config
 	printf "CONFIG_VPNHIDE=y\nCONFIG_VPNHIDE_FS_HIDING=y\n" >> /tmp/frag.config
-	./scripts/kconfig/merge_config.sh -m .config /tmp/frag.config
+	./scripts/kconfig/merge_config.sh -m .config /tmp/frag.config /qemu-trim.config
 	make ARCH=arm64 LLVM=1 olddefconfig
 	grep -E "CONFIG_VPNHIDE(_FS_HIDING)?=" .config
 	make ARCH=arm64 LLVM=1 -j"$(nproc)" Image

@@ -18,6 +18,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 CACHE="$HERE/.cache/$KMI"
 FRAG="$HERE/qemu.config"
+# What QEMU needs (qemu.config) and what the tests don't (qemu-trim.config) are
+# separate fragments on purpose; the trim is merged second so it is the one that
+# loses if the two ever disagree. See kmod/test/qemu-trim.config.
+TRIM="$HERE/qemu-trim.config"
 
 # Mirror DDK_IMAGE_TAG in kmod/build.py so the kernel + module use the same
 # toolchain as the module CI build.
@@ -29,6 +33,7 @@ echo "[build-kernel] $KMI: cloning kernel/common + building Image (this is slow)
 
 docker run --rm \
 	-v "$REPO:/repo:ro" -v "$CACHE:/out" -v "$FRAG:/qemu.config:ro" \
+	-v "$TRIM:/qemu-trim.config:ro" \
 	-e KMI="$KMI" "$DDK" bash -euo pipefail -c '
 	CLANG_BIN="$(ls -d /opt/ddk/clang/*/bin | head -1)"
 	export PATH="$CLANG_BIN:$PATH"
@@ -44,7 +49,7 @@ docker run --rm \
 	sed -i -z "s/#ifdef USE_PKCS11_ENGINE\nstatic const char \*key_pass;\n#endif/static const char *key_pass;/" \
 		certs/extract-cert.c || true
 	make ARCH=arm64 LLVM=1 gki_defconfig
-	./scripts/kconfig/merge_config.sh -m .config /qemu.config
+	./scripts/kconfig/merge_config.sh -m .config /qemu.config /qemu-trim.config
 	make ARCH=arm64 LLVM=1 olddefconfig
 	make ARCH=arm64 LLVM=1 -j"$(nproc)" Image
 	make ARCH=arm64 LLVM=1 modules_prepare
