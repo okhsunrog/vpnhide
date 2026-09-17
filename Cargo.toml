@@ -6,6 +6,7 @@ members = [
     "crates/activator",
     "crates/checks",
     "crates/checks-jni",
+    "crates/core-rpc",
     "crates/netlink-spike",
     "crates/uds-spike",
     "crates/protocol",
