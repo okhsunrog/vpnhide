@@ -110,6 +110,11 @@ pub struct Published {
 pub struct StateSnapshot {
     /// The confirmed canonical config, or `None` when the core has none.
     pub config: Option<CanonicalConfig>,
+    /// A monotonic counter that bumps only when the config changes — the base a
+    /// [`submit_edit`](VpnhideCore::submit_edit) conflict-checks against. Distinct from
+    /// [`Published::revision`], which bumps on any snapshot change (including observations),
+    /// so an observation update never spuriously conflicts a config edit.
+    pub config_revision: u64,
     /// Ids of operations still in flight, so the app can show pending intent.
     pub operations_in_flight: Vec<OperationId>,
     /// What the root observation loop currently sees of real routing (§8).
@@ -295,6 +300,7 @@ mod tests {
                     revision: 7,
                     snapshot: StateSnapshot {
                         config,
+                        config_revision: 5,
                         operations_in_flight: vec![OperationId(1), OperationId(u64::MAX)],
                         routing: RoutingObservation {
                             observed: true,

@@ -219,15 +219,14 @@ fn consume(batch: &[u8], state: &mut RouteState) -> bool {
 }
 
 /// Publish the current VPN set into the core's snapshot, only when it actually changed.
+/// Touches only `routing`, so a concurrent config edit is never clobbered.
 fn publish(state: &Arc<CoreState>, route: &RouteState) {
     let next = RoutingObservation {
         observed: true,
         vpn_interfaces: route.up.iter().cloned().collect(),
     };
-    let mut snapshot = state.publisher.current().snapshot;
-    if snapshot.routing != next {
-        snapshot.routing = next;
-        state.publisher.publish(snapshot);
+    if state.publisher.current().snapshot.routing != next {
+        state.publisher.update(move |snapshot| snapshot.routing = next);
     }
 }
 

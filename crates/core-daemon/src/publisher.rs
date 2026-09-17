@@ -38,6 +38,16 @@ impl Publisher {
         });
     }
 
+    /// Mutate the published snapshot in place, bumping the revision. Only touch the fields you
+    /// own: this preserves everything else, so a config edit and an observation update never
+    /// clobber each other's fields even if they interleave.
+    pub fn update(&self, edit: impl FnOnce(&mut StateSnapshot)) {
+        self.tx.send_modify(|p| {
+            p.revision += 1;
+            edit(&mut p.snapshot);
+        });
+    }
+
     /// The first published state newer than `(epoch, revision)` — the [`VpnhideCore`]
     /// long-poll body. Returns immediately when the caller's epoch is not this run, or
     /// when a strictly newer revision already exists; otherwise holds until one arrives
