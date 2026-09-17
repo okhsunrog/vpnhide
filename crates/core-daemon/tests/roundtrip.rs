@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use vpnhide_core_daemon::{serve, CoreClient, CoreState, Publisher, ServerHandle};
-use vpnhide_core_rpc::{BaseRef, ConfigEdit, OperationId, PhaseOutcome, StateSnapshot};
+use vpnhide_core_rpc::{
+    BaseRef, CanonicalConfig, ConfigEdit, ConfigToggle, OperationId, PhaseOutcome, StateSnapshot,
+};
 
 fn spawn_core(path: &std::path::Path, epoch: u64) -> (Arc<CoreState>, ServerHandle) {
     let state = CoreState::new(Publisher::new(epoch, StateSnapshot::default()));
@@ -30,7 +32,7 @@ async fn handshake_submit_get_and_mirror() {
         .submit_edit(
             OperationId(1),
             BaseRef { revision: 1 },
-            ConfigEdit::Toggle { field: "settings.debug".into(), enabled: true },
+            ConfigEdit::Toggle { field: ConfigToggle::Debug, enabled: true },
         )
         .await
         .expect("delivered")
@@ -48,7 +50,7 @@ async fn handshake_submit_get_and_mirror() {
     let mut replica = client.state();
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
-            if replica.borrow_and_update().config_available {
+            if replica.borrow_and_update().config.is_some() {
                 break;
             }
             replica.changed().await.expect("publisher alive");
@@ -67,7 +69,7 @@ async fn a_restarted_core_is_adopted_by_the_mirror() {
     {
         let (state, handle) = spawn_core(&path, 100);
         state.publisher.publish(StateSnapshot {
-            config_available: true,
+            config: Some(CanonicalConfig::default()),
             operations_in_flight: vec![],
             ..StateSnapshot::default()
         });
