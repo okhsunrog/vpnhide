@@ -21,8 +21,8 @@
 #define _LINUX_VPNHIDE_H
 
 #include <linux/types.h>
-#include <linux/if.h>		/* IFNAMSIZ */
-#include <linux/version.h>	/* LINUX_VERSION_CODE / KERNEL_VERSION */
+#include <linux/if.h> /* IFNAMSIZ */
+#include <linux/version.h> /* LINUX_VERSION_CODE / KERNEL_VERSION */
 
 /*
  * sockptr_t landed in 5.9; __sys_setsockopt took a sockptr optval from then on.
@@ -32,7 +32,7 @@
  * compile — <linux/sockptr.h> does not exist there).
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
-#include <linux/sockptr.h>	/* sockptr_t */
+#include <linux/sockptr.h> /* sockptr_t */
 #define VPNHIDE_HAVE_SOCKPTR 1
 #endif
 
@@ -79,16 +79,16 @@ struct fib_rule;
  * generated VPNHIDE_HOOK_* enum, so a renumber cannot silently desync a patch.
  * (A distinct prefix avoids colliding with the generated enum in the driver.)
  */
-#define VPNHIDE_HID_FIB_ROUTE_SEQ_SHOW	0
-#define VPNHIDE_HID_IPV6_ROUTE_SEQ_SHOW	1
-#define VPNHIDE_HID_RTNL_FILL_IFINFO	2
-#define VPNHIDE_HID_INET_FILL_IFADDR	3
-#define VPNHIDE_HID_INET6_FILL_IFADDR	4
-#define VPNHIDE_HID_DEV_IOCTL		5
-#define VPNHIDE_HID_SOCK_IOCTL		6
-#define VPNHIDE_HID_FIB_DUMP_INFO	7
-#define VPNHIDE_HID_RT6_FILL_NODE	8
-#define VPNHIDE_HID_FIB_NL_FILL_RULE	9
+#define VPNHIDE_HID_FIB_ROUTE_SEQ_SHOW 0
+#define VPNHIDE_HID_IPV6_ROUTE_SEQ_SHOW 1
+#define VPNHIDE_HID_RTNL_FILL_IFINFO 2
+#define VPNHIDE_HID_INET_FILL_IFADDR 3
+#define VPNHIDE_HID_INET6_FILL_IFADDR 4
+#define VPNHIDE_HID_DEV_IOCTL 5
+#define VPNHIDE_HID_SOCK_IOCTL 6
+#define VPNHIDE_HID_FIB_DUMP_INFO 7
+#define VPNHIDE_HID_RT6_FILL_NODE 8
+#define VPNHIDE_HID_FIB_NL_FILL_RULE 9
 
 /*
  * SO_BINDTODEVICE / SO_BINDTOIFINDEX decision. The .ko must redirect the syscall
@@ -98,10 +98,10 @@ struct fib_rule;
  * FROZEN verdict, swapping in the kernel-side snapshot the driver captured.
  */
 enum vpnhide_bind_action {
-	VPNHIDE_BIND_PASSTHROUGH,	/* not a bind opt / not hidden: proceed as-is */
-	VPNHIDE_BIND_FROZEN,		/* proceed, but with *snap (TOCTOU-safe copy) */
-	VPNHIDE_BIND_DENY,		/* hidden VPN interface: return -ENODEV */
-	VPNHIDE_BIND_FAULT,		/* optval copy faulted: return -EFAULT */
+	VPNHIDE_BIND_PASSTHROUGH, /* not a bind opt / not hidden: proceed as-is */
+	VPNHIDE_BIND_FROZEN, /* proceed, but with *snap (TOCTOU-safe copy) */
+	VPNHIDE_BIND_DENY, /* hidden VPN interface: return -ENODEV */
+	VPNHIDE_BIND_FAULT, /* optval copy faulted: return -EFAULT */
 };
 
 union vpnhide_bind_snapshot {
@@ -136,15 +136,14 @@ bool vpnhide_should_hide_dev(const struct net_device *dev, int hook_id);
  * older), where the patch swaps optval under set_fs(KERNEL_DS) on FROZEN.
  */
 #ifdef VPNHIDE_HAVE_SOCKPTR
-enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
-						 sockptr_t optval,
-						 unsigned int optlen,
-						 union vpnhide_bind_snapshot *snap);
+enum vpnhide_bind_action
+vpnhide_setsockopt_bind(struct sock *sk, int optname, sockptr_t optval,
+			unsigned int optlen, union vpnhide_bind_snapshot *snap);
 #endif
-enum vpnhide_bind_action vpnhide_setsockopt_bind_user(struct sock *sk, int optname,
-						      const char __user *optval,
-						      unsigned int optlen,
-						      union vpnhide_bind_snapshot *snap);
+enum vpnhide_bind_action
+vpnhide_setsockopt_bind_user(struct sock *sk, int optname,
+			     const char __user *optval, unsigned int optlen,
+			     union vpnhide_bind_snapshot *snap);
 
 /*
  * Route / rule concealment (RTM_GETROUTE, /proc/net/route, RTM_GETRULE). Unlike
@@ -156,23 +155,28 @@ enum vpnhide_bind_action vpnhide_setsockopt_bind_user(struct sock *sk, int optna
  * the entry (return 0 / continue) on true. Dev extraction uses the kernel's own
  * fib_info_nhc()/nexthop_fib6_nh() accessors.
  */
-bool vpnhide_hide_fib_route(const struct fib_info *fi);		/* fib_route_seq_show */
+bool vpnhide_hide_fib_route(const struct fib_info *fi); /* fib_route_seq_show */
 #ifdef VPNHIDE_HAVE_FIB6_INFO
-bool vpnhide_hide_fib6_route(struct fib6_info *rt);		/* ipv6_route_seq_show */
+bool vpnhide_hide_fib6_route(struct fib6_info *rt); /* ipv6_route_seq_show */
 #else
-bool vpnhide_hide_fib6_route(struct rt6_info *rt);		/* ipv6_route_seq_show (pre-4.19) */
+bool vpnhide_hide_fib6_route(
+	struct rt6_info *rt); /* ipv6_route_seq_show (pre-4.19) */
 #endif
 #ifdef VPNHIDE_HAVE_FIB_RT_INFO
-bool vpnhide_hide_fib_dump(const struct fib_rt_info *fri);	/* fib_dump_info (5.5+) */
+bool vpnhide_hide_fib_dump(
+	const struct fib_rt_info *fri); /* fib_dump_info (5.5+) */
 #else
-bool vpnhide_hide_fib_dump_raw(const struct fib_info *fi, __be32 dst, int dst_len);
+bool vpnhide_hide_fib_dump_raw(const struct fib_info *fi, __be32 dst,
+			       int dst_len);
 #endif
 #ifdef VPNHIDE_HAVE_FIB6_INFO
-bool vpnhide_hide_rt6(struct fib6_info *rt, struct dst_entry *dst); /* rt6_fill_node */
+bool vpnhide_hide_rt6(struct fib6_info *rt,
+		      struct dst_entry *dst); /* rt6_fill_node */
 #else
-bool vpnhide_hide_rt6(struct rt6_info *rt, struct dst_entry *dst); /* rt6_fill_node (pre-4.19) */
+bool vpnhide_hide_rt6(struct rt6_info *rt,
+		      struct dst_entry *dst); /* rt6_fill_node (pre-4.19) */
 #endif
-bool vpnhide_hide_fib_rule(const struct fib_rule *rule);	/* fib_nl_fill_rule */
+bool vpnhide_hide_fib_rule(const struct fib_rule *rule); /* fib_nl_fill_rule */
 
 #else /* !CONFIG_VPNHIDE */
 

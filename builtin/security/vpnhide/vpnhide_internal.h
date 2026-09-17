@@ -37,10 +37,10 @@
  * snapshot. READ_ONCE keeps the compiler from tearing/hoisting the flag across
  * hot paths — same contract as the .ko. */
 extern bool vpnhide_debug_enabled;
-#define vpnhide_dbg(fmt, ...)                                          \
-	do {                                                          \
-		if (READ_ONCE(vpnhide_debug_enabled))                 \
-			pr_info(MODNAME ": " fmt, ##__VA_ARGS__);     \
+#define vpnhide_dbg(fmt, ...)                                     \
+	do {                                                      \
+		if (READ_ONCE(vpnhide_debug_enabled))             \
+			pr_info(MODNAME ": " fmt, ##__VA_ARGS__); \
 	} while (0)
 
 /*

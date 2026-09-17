@@ -59,7 +59,8 @@ static struct net_device *fib4_route_dev(const struct fib_info *fi)
 		return NULL;
 #ifdef VPNHIDE_HAVE_NEXTHOP_OBJ
 	{
-		struct fib_nh_common *nhc = fib_info_nhc((struct fib_info *)fi, 0);
+		struct fib_nh_common *nhc =
+			fib_info_nhc((struct fib_info *)fi, 0);
 
 		return nhc ? nhc->nhc_dev : NULL;
 	}
@@ -76,11 +77,11 @@ static struct net_device *fib4_route_dev(const struct fib_info *fi)
  * embedded dst_entry). One set of predicates serves both via these aliases.
  */
 #ifdef VPNHIDE_HAVE_FIB6_INFO
-#define VH_FIB6_T	struct fib6_info
-#define VH_FIB6_DST(rt)	((rt)->fib6_dst)
+#define VH_FIB6_T struct fib6_info
+#define VH_FIB6_DST(rt) ((rt)->fib6_dst)
 #else
-#define VH_FIB6_T	struct rt6_info
-#define VH_FIB6_DST(rt)	((rt)->rt6i_dst)
+#define VH_FIB6_T struct rt6_info
+#define VH_FIB6_DST(rt) ((rt)->rt6i_dst)
 #endif
 
 static struct net_device *fib6_route_dev(VH_FIB6_T *rt)
@@ -90,7 +91,8 @@ static struct net_device *fib6_route_dev(VH_FIB6_T *rt)
 #ifdef VPNHIDE_HAVE_FIB6_INFO
 #ifdef VPNHIDE_HAVE_NEXTHOP_OBJ
 	{
-		struct fib6_nh *nh = rt->nh ? nexthop_fib6_nh(rt->nh) : rt->fib6_nh;
+		struct fib6_nh *nh = rt->nh ? nexthop_fib6_nh(rt->nh) :
+					      rt->fib6_nh;
 
 		return nh ? nh->fib_nh_dev : NULL;
 	}
@@ -171,7 +173,8 @@ bool vpnhide_hide_fib6_route(VH_FIB6_T *rt)
 /* IPv4 RTM_GETROUTE reply core: hide a VPN-iface route or a public host-route.
  * Takes the raw route fields so both the 5.5+ fib_rt_info call site and the
  * pre-5.5 fib_dump_info(fi, dst, dst_len, …) site feed the same decision. */
-static bool hide_fib_dump_core(const struct fib_info *fi, __be32 dst, int dst_len)
+static bool hide_fib_dump_core(const struct fib_info *fi, __be32 dst,
+			       int dst_len)
 {
 	struct net_device *dev;
 	bool hide = false;
@@ -197,7 +200,8 @@ bool vpnhide_hide_fib_dump(const struct fib_rt_info *fri)
 	return hide_fib_dump_core(fri->fi, fri->dst, fri->dst_len);
 }
 #else
-bool vpnhide_hide_fib_dump_raw(const struct fib_info *fi, __be32 dst, int dst_len)
+bool vpnhide_hide_fib_dump_raw(const struct fib_info *fi, __be32 dst,
+			       int dst_len)
 {
 	return hide_fib_dump_core(fi, dst, dst_len);
 }
@@ -215,8 +219,8 @@ bool vpnhide_hide_rt6(VH_FIB6_T *rt, struct dst_entry *dst)
 	dev = fib6_route_dev(rt);
 	if (!dev && dst)
 		dev = dst->dev;
-	if (dev && (is_vpn_ifname(dev->name) ||
-		    is_public_host6_via_physical(rt, dev)))
+	if (dev &&
+	    (is_vpn_ifname(dev->name) || is_public_host6_via_physical(rt, dev)))
 		hide = true;
 	rcu_read_unlock();
 	if (hide)
@@ -243,12 +247,9 @@ bool vpnhide_hide_fib_rule(const struct fib_rule *rule)
 	uid = from_kuid(&init_user_ns, current_uid());
 	start = from_kuid(&init_user_ns, rule->uid_range.start);
 	end = from_kuid(&init_user_ns, rule->uid_range.end);
-	if (uid >= start && uid <= end &&
-	    (start != 0 || end != (uid_t)~0) &&
-	    rule->table != RT_TABLE_MAIN &&
-	    rule->table != RT_TABLE_LOCAL &&
-	    rule->table != RT_TABLE_DEFAULT &&
-	    rule->table > 100) {
+	if (uid >= start && uid <= end && (start != 0 || end != (uid_t)~0) &&
+	    rule->table != RT_TABLE_MAIN && rule->table != RT_TABLE_LOCAL &&
+	    rule->table != RT_TABLE_DEFAULT && rule->table > 100) {
 		vpnhide_record_hook_hit(VPNHIDE_HOOK_FIB_NL_FILL_RULE);
 		return true;
 	}

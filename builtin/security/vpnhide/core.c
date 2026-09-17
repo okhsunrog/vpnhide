@@ -43,16 +43,23 @@
 
 /* The public VPNHIDE_HID_* the call-site patches pass must equal the generated
  * VPNHIDE_HOOK_* ids; guard against a data/hooks.toml renumber desyncing them. */
-static_assert(VPNHIDE_HID_FIB_ROUTE_SEQ_SHOW == VPNHIDE_HOOK_FIB_ROUTE_SEQ_SHOW, "");
-static_assert(VPNHIDE_HID_IPV6_ROUTE_SEQ_SHOW == VPNHIDE_HOOK_IPV6_ROUTE_SEQ_SHOW, "");
-static_assert(VPNHIDE_HID_RTNL_FILL_IFINFO == VPNHIDE_HOOK_RTNL_FILL_IFINFO, "");
-static_assert(VPNHIDE_HID_INET_FILL_IFADDR == VPNHIDE_HOOK_INET_FILL_IFADDR, "");
-static_assert(VPNHIDE_HID_INET6_FILL_IFADDR == VPNHIDE_HOOK_INET6_FILL_IFADDR, "");
+static_assert(VPNHIDE_HID_FIB_ROUTE_SEQ_SHOW == VPNHIDE_HOOK_FIB_ROUTE_SEQ_SHOW,
+	      "");
+static_assert(VPNHIDE_HID_IPV6_ROUTE_SEQ_SHOW ==
+		      VPNHIDE_HOOK_IPV6_ROUTE_SEQ_SHOW,
+	      "");
+static_assert(VPNHIDE_HID_RTNL_FILL_IFINFO == VPNHIDE_HOOK_RTNL_FILL_IFINFO,
+	      "");
+static_assert(VPNHIDE_HID_INET_FILL_IFADDR == VPNHIDE_HOOK_INET_FILL_IFADDR,
+	      "");
+static_assert(VPNHIDE_HID_INET6_FILL_IFADDR == VPNHIDE_HOOK_INET6_FILL_IFADDR,
+	      "");
 static_assert(VPNHIDE_HID_DEV_IOCTL == VPNHIDE_HOOK_DEV_IOCTL, "");
 static_assert(VPNHIDE_HID_SOCK_IOCTL == VPNHIDE_HOOK_SOCK_IOCTL, "");
 static_assert(VPNHIDE_HID_FIB_DUMP_INFO == VPNHIDE_HOOK_FIB_DUMP_INFO, "");
 static_assert(VPNHIDE_HID_RT6_FILL_NODE == VPNHIDE_HOOK_RT6_FILL_NODE, "");
-static_assert(VPNHIDE_HID_FIB_NL_FILL_RULE == VPNHIDE_HOOK_FIB_NL_FILL_RULE, "");
+static_assert(VPNHIDE_HID_FIB_NL_FILL_RULE == VPNHIDE_HOOK_FIB_NL_FILL_RULE,
+	      "");
 
 /* ------------------------------------------------------------------ */
 /*  Debug flag (set from the config snapshot's `debug` line)          */
@@ -422,13 +429,20 @@ static const struct file_operations ctl_proc_ops = {
 static const char *netdev_operstate_str(unsigned char operstate)
 {
 	switch (operstate) {
-	case IF_OPER_UNKNOWN:		return "unknown";
-	case IF_OPER_NOTPRESENT:	return "notpresent";
-	case IF_OPER_DOWN:		return "down";
-	case IF_OPER_LOWERLAYERDOWN:	return "lowerlayerdown";
-	case IF_OPER_TESTING:		return "testing";
-	case IF_OPER_DORMANT:		return "dormant";
-	case IF_OPER_UP:		return "up";
+	case IF_OPER_UNKNOWN:
+		return "unknown";
+	case IF_OPER_NOTPRESENT:
+		return "notpresent";
+	case IF_OPER_DOWN:
+		return "down";
+	case IF_OPER_LOWERLAYERDOWN:
+		return "lowerlayerdown";
+	case IF_OPER_TESTING:
+		return "testing";
+	case IF_OPER_DORMANT:
+		return "dormant";
+	case IF_OPER_UP:
+		return "up";
 	}
 	return "?";
 }
@@ -440,9 +454,11 @@ static int vpnhide_diag_show(struct seq_file *m, void *v)
 	struct net_device *dev;
 
 	seq_puts(m, "vpnhide diag\n");
-	seq_printf(m, "backend 0x%x active_hook_mask 0x%x installed_hook_mask 0x%x\n",
-		   VPNHIDE_BACKEND_BUILTIN, READ_ONCE(active_hook_mask),
-		   installed_hook_mask());
+	seq_printf(
+		m,
+		"backend 0x%x active_hook_mask 0x%x installed_hook_mask 0x%x\n",
+		VPNHIDE_BACKEND_BUILTIN, READ_ONCE(active_hook_mask),
+		installed_hook_mask());
 
 	/* Live is_vpn_ifname() verdict over every netdev in the reader's (root
 	 * shell's) network namespace. Runs in process context off seq_read(),
@@ -460,11 +476,12 @@ static int vpnhide_diag_show(struct seq_file *m, void *v)
 
 		memcpy(name, dev->name, IFNAMSIZ);
 		name[IFNAMSIZ - 1] = '\0';
-		seq_printf(m,
-			   "iface %s ifindex=%d is_vpn=%d up=%d operstate=%s flags=0x%x\n",
-			   name, dev->ifindex, is_vpn_ifname(name) ? 1 : 0,
-			   !!(dev->flags & IFF_UP),
-			   netdev_operstate_str(dev->operstate), dev->flags);
+		seq_printf(
+			m,
+			"iface %s ifindex=%d is_vpn=%d up=%d operstate=%s flags=0x%x\n",
+			name, dev->ifindex, is_vpn_ifname(name) ? 1 : 0,
+			!!(dev->flags & IFF_UP),
+			netdev_operstate_str(dev->operstate), dev->flags);
 	}
 	rcu_read_unlock();
 
