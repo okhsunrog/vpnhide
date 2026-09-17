@@ -5,6 +5,7 @@
 //! while this side owns the tarpc/tokio-serde wiring.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use futures::prelude::*;
@@ -20,6 +21,7 @@ use vpnhide_core_rpc::{
 };
 
 use crate::config_edit::apply_canonical_edit;
+use crate::config_file;
 use crate::publisher::Publisher;
 
 /// This core build, reported in the handshake for diagnostics only.
@@ -40,9 +42,13 @@ struct ConfigStore {
 pub struct CoreState {
     pub publisher: Publisher,
     config: Mutex<ConfigStore>,
+    /// Where the durable canonical config lives. `None` = no persistence (host tests); a
+    /// path means every accepted change is written there before it is acknowledged (§4).
+    config_path: Option<PathBuf>,
 }
 
 impl CoreState {
+    /// A core with no durable file — the config lives only in memory. Used by host tests.
     pub fn new(publisher: Publisher) -> Arc<Self> {
         Arc::new(CoreState {
             publisher,
@@ -51,7 +57,40 @@ impl CoreState {
                 config_revision: 0,
                 operations: HashMap::new(),
             }),
+            config_path: None,
         })
+    }
+
+    /// Load the durable config from `path` and own it going forward (§4 tier-1, restart
+    /// recovery). A present config starts at revision 1 and is published into the replica at
+    /// once; an absent/blank file leaves the core with no config (revision 0, absent ≠ empty).
+    /// A corrupt file is an error the caller decides on — core does not silently start blank.
+    pub fn load(publisher: Publisher, path: PathBuf) -> std::io::Result<Arc<Self>> {
+        let (config, config_revision) = match config_file::read(&path)? {
+            Some(config) => (Some(config), 1),
+            None => (None, 0),
+        };
+        let state = Arc::new(CoreState {
+            publisher,
+            config: Mutex::new(ConfigStore {
+                config: config.clone(),
+                config_revision,
+                operations: HashMap::new(),
+            }),
+            config_path: Some(path),
+        });
+        if let Some(config) = config {
+            state.publisher.update(|snapshot| {
+                snapshot.config = Some(config);
+                snapshot.config_revision = config_revision;
+            });
+        }
+        Ok(state)
+    }
+
+    /// True once a durable config is loaded/created (for a startup log).
+    pub fn has_config(&self) -> bool {
+        self.config.lock().expect("config mutex").config.is_some()
     }
 
     /// Apply one typed edit against fresh config (§5). Coarse optimistic concurrency: the
@@ -84,6 +123,22 @@ impl CoreState {
             },
         };
         let next = apply_canonical_edit(&current, edit);
+        let changed = store.config.as_ref() != Some(&next);
+
+        // Durable-first (§4): a changed config is written to disk *before* the edit is
+        // acknowledged, so an accepted operation is one that survives a restart. A failed
+        // write means the edit did not happen — no record, no revision bump. (Blocking IO
+        // under the lock is deliberate: it serializes writers and the file is tiny.)
+        if changed {
+            if let Some(path) = &self.config_path {
+                config_file::write_atomic(path, &next)
+                    .map_err(|e| SubmitError::Rejected { reason: format!("persist failed: {e}") })?;
+            }
+            store.config = Some(next.clone());
+            store.config_revision += 1;
+        }
+
+        // Record the settled op (a no-op edit is still an accepted, queryable operation).
         store.operations.insert(
             op,
             OperationRecord {
@@ -92,10 +147,8 @@ impl CoreState {
                 settled: Some(PhaseOutcome::Confirmed),
             },
         );
-        // A no-op edit is still accepted, but must not bump the revision or wake watchers.
-        if store.config.as_ref() != Some(&next) {
-            store.config = Some(next.clone());
-            store.config_revision += 1;
+
+        if changed {
             let revision = store.config_revision;
             drop(store);
             self.publisher.update(|snapshot| {
@@ -230,5 +283,32 @@ mod tests {
             .submit_edit(ctx(), OperationId(4), BaseRef { revision: 0 }, toggle(ConfigToggle::AutoHideName))
             .await;
         assert!(matches!(stale, Err(SubmitError::Conflict { .. })));
+    }
+
+    #[tokio::test]
+    async fn accepted_edit_persists_and_is_recovered_on_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vpnhide_config.json");
+        let ctx = tarpc::context::current;
+
+        // First run: no file yet -> no config, revision 0. A Replace persists it.
+        let state = CoreState::load(Publisher::new(1, StateSnapshot::default()), path.clone()).unwrap();
+        assert!(!state.has_config());
+        let server = CoreServer::new(state);
+        let cfg = CanonicalConfig { debug: true, ..Default::default() };
+        let replace = ConfigEdit::Replace { config: cfg.clone() };
+        server.clone().submit_edit(ctx(), OperationId(1), BaseRef { revision: 0 }, replace).await.expect("accepted");
+        assert!(path.exists(), "an accepted edit must be on disk before it is acknowledged");
+
+        // Second run (a restart): a fresh core loads the same file and recovers the config
+        // at revision 1, so a follow-up edit conflict-checks against the recovered revision.
+        let restarted = CoreState::load(Publisher::new(2, StateSnapshot::default()), path.clone()).unwrap();
+        assert!(restarted.has_config());
+        let server2 = CoreServer::new(restarted);
+        let published = server2.clone().state_since(ctx(), 0, 0).await;
+        assert_eq!(published.snapshot.config, Some(cfg));
+        assert_eq!(published.snapshot.config_revision, 1);
+        // An edit against the recovered revision applies; against a stale one it conflicts.
+        assert!(server2.clone().submit_edit(ctx(), OperationId(2), BaseRef { revision: 1 }, ConfigEdit::Toggle { field: ConfigToggle::AutoHideName, enabled: true }).await.is_ok());
     }
 }

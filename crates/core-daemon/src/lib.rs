@@ -4,6 +4,7 @@
 
 pub mod client;
 pub mod config_edit;
+pub mod config_file;
 pub mod listener;
 pub mod observer;
 pub mod publisher;

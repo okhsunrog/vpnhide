@@ -628,6 +628,17 @@ for recovery without reintroducing independent ordinary writers.
    orchestration.
 8. Validate upgrade/restart/rollback and independent version combinations before 2.0.
 
+Progress on `dev-2.x`: steps 2 (daemon skeleton + FFI client, §9.3) and the config-edit
+reducer are done; the **durable config file** (part of step 5) is implemented —
+`core-daemon/config_file.rs` is the disk codec between the polymorphic legacy on-disk JSON
+and core's clean `CanonicalConfig` (a faithful port of `StorageConfig.kt`'s
+`parseCanonicalConfig`/`canonicalConfigJson`, so LSPosed and the activator read a
+core-written file identically). `CoreState::load` reads it on startup (restart recovery) and
+`submit_edit` is durable-first (writes before acknowledging; a failed write rejects the
+edit). The path is overridable via `VPNHIDE_CONFIG_PATH` so the dev sandbox core never
+touches the real `/data/system/vpnhide_config.json`. Still to do for step 5: the sole-writer
+cutover and in-process activation (step D).
+
 Each boundary needs an explicit cutover. Do not run legacy and core writers in
 parallel against the same canonical/runtime state. Port behavioral tests before
 deleting them. Include killed service/worker, delayed dispatch, multiple clients,

@@ -10,6 +10,7 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use vpnhide_core_daemon::config_file::config_path_from_env;
 use vpnhide_core_daemon::{observe, serve, CoreClient, CoreState, Publisher};
 use vpnhide_core_rpc::StateSnapshot;
 
@@ -34,7 +35,16 @@ async fn run(path: &str) {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(1);
 
-    let state = CoreState::new(Publisher::new(epoch, StateSnapshot::default()));
+    // The durable canonical config (§4 tier-1). Path is overridable via VPNHIDE_CONFIG_PATH
+    // so the dev sandbox core never touches the real /data/system file.
+    let config_path = config_path_from_env();
+    let state = match CoreState::load(Publisher::new(epoch, StateSnapshot::default()), config_path.clone()) {
+        Ok(state) => state,
+        Err(e) => {
+            eprintln!("core: config load failed on {}: {e}", config_path.display());
+            std::process::exit(1);
+        }
+    };
     let handle = match serve(Path::new(path), state.clone()) {
         Ok(handle) => handle,
         Err(e) => {
@@ -42,7 +52,11 @@ async fn run(path: &str) {
             std::process::exit(1);
         }
     };
-    eprintln!("core: epoch={epoch} serving on {path} (ctrl-c to stop)");
+    eprintln!(
+        "core: epoch={epoch} serving on {path} config={} ({}) (ctrl-c to stop)",
+        config_path.display(),
+        if state.has_config() { "loaded" } else { "none" },
+    );
 
     // The root observation loop feeds real VPN-presence into the published state. Failing to
     // open netlink (no permission, restricted SELinux) is logged, not fatal: the socket still
