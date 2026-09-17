@@ -93,13 +93,14 @@ internal object DiagnosticsCache {
             RootSnapshotCache.snapshot,
             CanonicalConfigRepository.state,
             impactFlow,
-        ) { view, routing, snapshot, config, impact ->
+        ) { view, appVpnState, snapshot, config, impact ->
             val current = inputs
+            val routing = appVpnState.gateProjection()
             val observation =
                 if (routing.attempted) {
                     buildDiagnosticContextObservation(
                         selfNeedsRestart = current?.selfNeedsRestart ?: false,
-                        routing = routing,
+                        appVpn = AppVpnContext(routing, appVpnState.lastGood?.value?.identity),
                         snapshot = snapshot,
                         config = config.confirmed,
                         selfPackage = current?.context?.packageName.orEmpty(),
@@ -121,7 +122,7 @@ internal object DiagnosticsCache {
                 coordinator.view.value,
                 null,
                 0,
-                routingKnowledge(selfRoutingObservation(RoutingGateCache.observation.value), ObservationClock.now()),
+                routingKnowledge(selfRoutingObservation(RoutingGateCache.gateObservation.value), ObservationClock.now()),
             ),
         )
     }

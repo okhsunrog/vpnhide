@@ -1401,11 +1401,7 @@ private fun resolveProtectionFacts(
     sections: Map<String, String>,
     diagnostics: DiagnosticPresentation,
 ): ProtectionFacts {
-    VpnHideLog.i(
-        TAG,
-        "vpnActive=${runCatching { vpnPresenceFromSnapshot(sections).interfaces.isNotEmpty() }.getOrNull()} " +
-            "selfNeedsRestart=$selfNeedsRestart",
-    )
+    VpnHideLog.i(TAG, "selfNeedsRestart=$selfNeedsRestart")
     val nativeBackend = modules.nativeBackend
     val installedOptionalHooks =
         installedNativeOptionalHooks(nativeBackend.id, sections, modules.currentBootId)

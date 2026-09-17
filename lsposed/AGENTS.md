@@ -103,7 +103,10 @@ directions, since `internal` is module-wide and the compiler will not.
   there, never by adding a wait or a retry to a screen.
 - **`RootSnapshotCache`** — the single batched root read. Need new system state
   on the Dashboard/Hiding path? Add a section to its shell snapshot; don't
-  add an ad-hoc `suExec` that races the snapshot.
+  add an ad-hoc `suExec` that races the snapshot. The deliberate exception is
+  `RoutingGateCache`: its foreground `AppVpnStatePoller` uses the narrow Rust
+  `observe app-vpn-state` helper because app-scoped VPN membership changes must
+  not refresh or depend on the heavy root snapshot.
 - **`ShellUtils`** — `suExec`, and the parsers `parseConfigLines`,
   `parseKeyValueLines`, `parsePackageUidMap`. **Never write another `pm list`
   or `key=value` parser** — there used to be four; there is now one of each.

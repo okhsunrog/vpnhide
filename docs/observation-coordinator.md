@@ -23,7 +23,7 @@ once when rendering an app-list response.
 `value` retains the last successful observation while loading and after failure.
 It is useful display history, not evidence of current readiness. `current` is null
 while loading, stale, failed or quarantined. `RoutingGateCache.gate` uses `current`:
-a VPN transition marks it stale immediately, before the 750 ms debounced recheck.
+every foreground sample marks the prior value stale before the direct helper read.
 This changes readiness freshness, not diagnostic result classification or retention.
 For eligibility, an invalidated observation that still awaits its re-read is
 `Checking`; `Unknown` is reserved for a read that failed, a quarantined source, or
@@ -34,31 +34,25 @@ knowledge the presentation keeps (`RoutingKnowledge.Verifying` with the last
 known fact and the read's reason): a user-requested or network-triggered re-read
 shows a neutral "Checking…" at once, a background one keeps the last known state
 for a 2 s grace (transition contract §22).
-`VpnStatePoller` runs while the main UI is RESUMED, with a one-second delay
-between completed samples. It uses the shared root snapshot script's network-only
-mode (interfaces, current framework networks, routes and policy rules), without
-package inventory or backend probes. Samples are process-owned `StateCache` reads,
-so detached lifecycle waiters do not release a still-running worker. Quarantined
-workers are not replaced by the timer. Unchanged samples do not invalidate the
-gate; a changed sample triggers the normal fresh root/gate refresh. An observation
-failure triggers a refresh once and is never interpreted as VPN-off. Initial
-sampling and recovery also refresh to close startup/resume races. ON_RESUME retains
-its throttled refresh, and explicit Retry remains available.
+`AppVpnStatePoller` runs while the main UI is RESUMED, with a one-second delay
+between completed samples. Each sample is one root-helper request for the app-scoped
+VPN state: current framework VPN session and interfaces plus this app UID's policy
+rule membership. It does not read or compare global route/rule text and does not
+refresh `RootSnapshotCache`. A routed result publishes immediately. `VPN_OFF` and
+`EXCLUDED` require two equal samples 750 ms apart; a state/session change continues
+settling instead of publishing the tunnel's setup edge as a current negative fact.
+Failures become unknown observations, never VPN-off. Samples remain process-owned
+`StateCache` reads, so lifecycle cancellation only detaches the collector and a
+quarantined worker is not replaced by the timer. ON_RESUME always requests fresh
+present-tense evidence, and explicit Retry remains available.
 
-The confirmation suite on a VPN-up has one owner too. The poller keeps the gate
-fresh (above); `VpnStatePoller.confirmRoutedTransitions` watches that gate value and,
-latched by `vpnConfirmLatch`, requests exactly one confirmation the moment the gate
-actually reads routed (`DashboardCache.refreshRetained`, whose `beforeRefresh` runs
-one fresh `DiagnosticsCache.retry` and re-derives the tiles). The latch fires on
-`ROUTED` while armed, then disarms; a real `VPN_OFF` re-arms it; the settling states
-the gate passes on the way up (`SELF_NOT_ROUTED`, `NEEDS_RESTART`) and a loading null
-keep the arm state. So the flap through those states — and a Wi-Fi/cellular handover
-that stays routed — does not re-fire, and a cold start already routed does not fire
-at all. This replaces the two screens' `gate.routedTransitions()` effects, which each
-re-armed on the settling flap and re-ran the suite, bouncing the hero green → checking
-→ green. Watching the gate value (not the poller's fingerprint edge) is deliberate:
-self-routing can resolve a read later than the interfaces appear, so the fingerprint
-may have already gone stable when the gate first reads routed.
+The confirmation suite on a VPN transition has one owner too.
+`AppVpnStatePoller.confirmRoutedTransitions` compares complete app-VPN snapshots.
+It requests one confirmation when a stable non-routed state becomes routed, or when
+the framework VPN session changes while both samples are routed. Repeated polls of
+one routed session and a cold start already routed do not fire. This handles the
+excluded → included transition that has no global interface change, while the
+negative confirmation suppresses the brief false exclusion seen during tunnel setup.
 
 There is no ConnectivityManager listener for VPN-state auto-refresh. The app's own
 Java backend intentionally hides VPN lifecycle changes when its visible network
@@ -71,10 +65,12 @@ Dashboard derivation initializes/joins diagnostics when needed, then observes it
 terminal result, including a blocked or failed attempt, without retrying it; what
 it renders is the shared diagnostic presentation once it reflects that attempt
 (`DiagnosticsCache.awaitTerminal`), the same projection the screens collect.
-Explicit Dashboard refresh still requests the existing diagnostic retry policy. This removes
-a dependency cycle: diagnostics refreshes the routing/root source, which invalidates
-Dashboard; that successor must not start diagnostics again just because VPN is off.
-The existing startup, live-routed screen triggers and explicit retry remain. A
+Dashboard and Diagnostics Retry use one coordinator entry point: it requests a
+fresh app-VPN observation, queues one explicit diagnostic run, then re-derives
+Dashboard without its normal `beforeRefresh` hook requesting that run again. An
+explicit retry never joins an already-running automatic suite; it waits as the
+single pending successor, so the user's click cannot disappear. The existing
+startup, live-routed process trigger and explicit retry remain. A
 config-only background invalidation does not itself retry a terminal diagnostic.
 Completed-result retention and measurement classification are unchanged.
 Screen retry triggers observe known routing transitions: a temporary unknown value
@@ -83,14 +79,13 @@ Dashboard loading placeholder and remains available for manual retry.
 
 Diagnostic runs are now owned by the process-lived `DiagnosticRunCoordinator`
 behind `DiagnosticsCache` (transition contract §18). Its eligibility read at
-Checking and its end-context read at Verifying reuse a current routing-gate
-observation, join an in-flight read, and force a refresh (root snapshot plus
-routing probe) only when the observation is stale, failed or absent. An
-undisturbed suite therefore shares the startup root read and adds no second
-shell. When a VPN callback or config write invalidated the gate during the run,
-the Verifying refresh invalidates root dependents; Dashboard derivation, which
-joins the run through its own handle, is then superseded and its successor reads
-the finished attempt without starting another suite.
+Checking and its end-context read at Verifying reuse a current app-VPN
+observation, join an in-flight read, and force the dedicated helper observation
+only when it is stale, failed or absent. The app-VPN observation's session,
+interfaces and UID verdict form the measurement routing identity; backend
+coverage and boot identity still come from `RootSnapshotCache`. Dashboard
+derivation joins the diagnostic run through its own handle and reads its finished
+attempt without starting another suite.
 
 Invalidation advances the generation synchronously. A result from an older
 generation cannot publish either a value or an error. Its completion starts one
@@ -119,7 +114,8 @@ a user-requested re-check.
 The root reader uses the same coordinator. Each accepted snapshot has an observation
 ID and generation. Dashboard, targets and statistics wrap their domain values in
 `RootProjection`, retaining this provenance without changing serialized bundle or
-bridge models. Routing readiness also registers the shared root dependency.
+bridge models. App-VPN readiness is intentionally independent of this dependency
+graph and owns its direct helper observation.
 
 Root invalidation and a new root refresh synchronously invalidate registered
 dependents before asynchronous work starts. Registration is lazy and process-lived;

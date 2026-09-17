@@ -9,7 +9,6 @@ import dev.okhsunrog.vpnhide.detectNativeBackendStates
 import dev.okhsunrog.vpnhide.displayNativeBackend
 import dev.okhsunrog.vpnhide.lsposedHooksActiveThisBoot
 import dev.okhsunrog.vpnhide.settings.installedNativeOptionalHooks
-import dev.okhsunrog.vpnhide.vpnPresenceFromSnapshot
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -21,6 +20,11 @@ import java.util.concurrent.atomic.AtomicReference
 internal data class DiagnosticContextObservation(
     val eligibility: DiagnosticEligibility,
     val context: MeasurementContext?,
+)
+
+internal data class AppVpnContext(
+    val routing: ObservationState<DiagnosticGate>,
+    val identity: String?,
 )
 
 /**
@@ -124,7 +128,7 @@ internal fun DiagnosticEligibility.blockedGate(): DiagnosticGate? =
  */
 internal fun buildDiagnosticContextObservation(
     selfNeedsRestart: Boolean,
-    routing: ObservationState<DiagnosticGate>,
+    appVpn: AppVpnContext,
     snapshot: RootSnapshot?,
     config: CanonicalConfig?,
     selfPackage: String,
@@ -134,16 +138,17 @@ internal fun buildDiagnosticContextObservation(
     changeEpoch: Long = 0,
     initialized: Boolean = true,
 ): DiagnosticContextObservation {
+    val routing = appVpn.routing
     val restart = if (selfNeedsRestart) RestartRequirement.App else RestartRequirement.None
     val eligibility = diagnosticEligibility(initialized, restart, readiness, selfRoutingObservation(routing))
     val gate = currentObservationValue(routing)
     val context =
-        if (gate != null && snapshot != null) {
+        if (gate != null && snapshot != null && appVpn.identity != null) {
             val coverage = measurementCoverageFor(snapshot)
             MeasurementContext(
                 subject = "$processIdentity;boot:${snapshot.sections["current_boot_id"].orEmpty().trim()}",
                 configuration = selfConfigurationIdentity(config, selfPackage),
-                routing = routingIdentity(snapshot.sections, gate),
+                routing = appVpn.identity,
                 coverage = coverage.identity,
                 changeEpoch = changeEpoch,
                 observationId = snapshot.observationId,
@@ -172,15 +177,6 @@ internal fun selfConfigurationIdentity(
             listOf(it.java, it.javaHooks, it.native.enabled, it.native.overrides, it.appHiding, it.ports, it.portPolicy, it.hidden)
         }
     return "self=$role;features=${config.settings.optionalFeatures.sorted()}"
-}
-
-/** Network identity of the measurement: the observed VPN interfaces and this UID's routing verdict. */
-internal fun routingIdentity(
-    sections: Map<String, String>,
-    gate: DiagnosticGate,
-): String {
-    val interfaces = runCatching { vpnPresenceFromSnapshot(sections).interfaces.sorted().joinToString(",") }.getOrDefault("?")
-    return "vpn=$interfaces;self=${gate.name}"
 }
 
 /** The hiding layers a root snapshot shows: the active native backend, its installed optional hooks and LSPosed liveness this boot. */

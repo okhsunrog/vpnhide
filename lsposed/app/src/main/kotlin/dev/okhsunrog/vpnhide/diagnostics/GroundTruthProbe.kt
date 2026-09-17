@@ -3,15 +3,14 @@ package dev.okhsunrog.vpnhide.diagnostics
 import android.content.Context
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.VpnHideLog
-import dev.okhsunrog.vpnhide.VpnPresence
 import dev.okhsunrog.vpnhide.appHelperStagedPath
 import dev.okhsunrog.vpnhide.buildAppHelperStageCommand
+import dev.okhsunrog.vpnhide.checks.AppVpnStateObservation
+import dev.okhsunrog.vpnhide.checks.AppVpnStateResponse
 import dev.okhsunrog.vpnhide.checks.CheckOutput
 import dev.okhsunrog.vpnhide.checks.NativeProbe
 import dev.okhsunrog.vpnhide.extractAppHelper
 import dev.okhsunrog.vpnhide.suExec
-import dev.okhsunrog.vpnhide.tunnelRouteProbeCommand
-import dev.okhsunrog.vpnhide.tunnelRouteProbeResult
 import java.io.File
 
 /**
@@ -53,50 +52,31 @@ object GroundTruthProbe {
         }
     }
 
-    /**
-     * The self-in-tunnel gate: is this app's own uid routed through the VPN?
-     * Runs the probe as root with `--uid` (a hook-inert, unfiltered read of the
-     * policy rules). Returns null when root/exec or routing evidence is unavailable;
-     * the caller reports an inconclusive check instead of blaming split tunneling.
-     */
-    internal fun selfRoutedThroughVpn(
-        context: Context,
-        presence: VpnPresence,
-        sections: Map<String, String>,
-    ): Boolean? {
+    /** One hook-inert root observation of VPN presence and this app's UID routing. */
+    internal fun observeAppVpnState(context: Context): AppVpnStateObservation? {
         val asset = extractAppHelper(context) ?: return null
         val staged = appHelperStagedPath(asset.digest)
         val uid = android.os.Process.myUid()
-        require(presence.interfaces.all { it.matches(Regex("[A-Za-z0-9_.:-]+")) })
-        val interfaces = presence.interfaces.joinToString(",")
         val (exit, out) =
             suExec(
                 buildAppHelperStageCommand(asset) +
-                    " && $staged probe routing --uid $uid --vpn-ifaces '$interfaces'; result=\$?; exit \$result",
+                    " && $staged observe app-vpn-state --uid $uid; result=\$?; exit \$result",
             )
         val json = out.trim()
         if (exit != 0) {
-            VpnHideLog.w(TAG, "self-routed probe unavailable (exit=$exit, no root?)")
+            VpnHideLog.w(TAG, "app VPN state unavailable (exit=$exit, no root?)")
             return null
         }
-        val routed =
-            when (val response = NativeProbe.parseRouting(json)) {
-                is dev.okhsunrog.vpnhide.checks.RoutingResponse.Success -> {
-                    response.observation.routed
-                }
-
-                is dev.okhsunrog.vpnhide.checks.RoutingResponse.Failure -> {
-                    VpnHideLog.w(TAG, "self-routed probe rejected: ${response.error}")
-                    return null
-                }
+        return when (val response = NativeProbe.parseAppVpnState(json)) {
+            is AppVpnStateResponse.Success -> {
+                response.observation
             }
-        if (routed != false) return routed
-        val unmanaged = presence.interfaces - presence.frameworkInterfaces
-        if (unmanaged.isEmpty()) return false
-        val command = tunnelRouteProbeCommand(sections, unmanaged, uid)
-        if (command.isBlank()) return null
-        val (routeExit, routes) = suExec(command)
-        return if (routeExit == 0) tunnelRouteProbeResult(routes, unmanaged) else null
+
+            is AppVpnStateResponse.Failure -> {
+                VpnHideLog.w(TAG, "app VPN state observation rejected: ${response.error}")
+                null
+            }
+        }
     }
 
     /** Prepare the shared app-private helper source for the batched root snapshot. */

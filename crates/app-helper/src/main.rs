@@ -12,6 +12,9 @@ fn main() {
         [command, mode, rest @ ..] if command == "probe" && mode == "routing" => {
             probe::routing(rest)
         }
+        [command, mode, rest @ ..] if command == "observe" && mode == "app-vpn-state" => {
+            probe::app_vpn_state(rest)
+        }
         [command, mode] if command == "observe" && mode == "kpm-list" => {
             observations::kpm_list(&[])
         }
@@ -26,7 +29,7 @@ fn main() {
 
 fn usage_error() -> i32 {
     eprintln!(
-        "usage: vhhelper probe checks | probe routing --uid <uid> [--vpn-ifaces <list>] | observe kpm-list | mutation <directory> <config> <inspect|adopt|open|run|recover> ... | activate native"
+        "usage: vhhelper probe checks | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-list | mutation <directory> <config> <inspect|adopt|open|run|recover> ... | activate native"
     );
     2
 }

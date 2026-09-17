@@ -10,6 +10,7 @@ pub const OBSERVATION_VERSION: u32 = 1;
 
 const KIND_CHECKS: &str = "checks";
 const KIND_ROUTING: &str = "routing";
+const KIND_APP_VPN_STATE: &str = "app_vpn_state";
 const KIND_KPM_LIST: &str = "kpm_list";
 
 #[derive(Serialize)]
@@ -60,6 +61,10 @@ pub fn checks<T: Serialize>(data: &T) -> String {
 
 pub fn routing<T: Serialize>(data: &T) -> String {
     success(KIND_ROUTING, data)
+}
+
+pub fn app_vpn_state<T: Serialize>(data: &T) -> String {
+    success(KIND_APP_VPN_STATE, data)
 }
 
 pub fn kpm_list<T: Serialize>(data: &T) -> String {

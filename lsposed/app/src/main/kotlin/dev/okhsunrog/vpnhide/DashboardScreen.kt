@@ -41,8 +41,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
-import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
+import dev.okhsunrog.vpnhide.diagnostics.retryDiagnosticsAndDashboard
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
@@ -141,7 +141,7 @@ fun DashboardScreen(
         return
     }
 
-    // A VPN off → on while the app is foregrounded is noticed by VpnStatePoller, the
+    // A VPN off → on while the app is foregrounded is noticed by AppVpnStatePoller, the
     // single deduplicated trigger; it requests one confirmation suite and re-derives
     // the tiles. The screen no longer watches the gate for this, which flapped through
     // the tunnel's settling states and re-ran the suite (green → checking → green).
@@ -214,13 +214,11 @@ fun DashboardScreen(
         // the same classification that coloured the hero, so the two cannot
         // contradict each other in one frame. Retry re-reads dashboard state (re-runs
         // its own VPN + protection probes) and re-runs the diag cache so both screens
-        // recover together. One re-check drives every surface: RoutingGateCache.refresh
-        // so the export sheet / logcat card banners update immediately too, plus the
-        // two caches that actually re-derive their own state off the (now shared) gate.
+        // recover together. The coordinator performs one VPN-state read, one fresh
+        // diagnostic run and one Dashboard derivation; the retry cannot be absorbed
+        // by an automatic run already in flight.
         val onRetry = {
-            RoutingGateCache.refresh(context, selfNeedsRestart)
-            DashboardCache.refresh(context, selfNeedsRestart)
-            DiagnosticsCache.retry(context, selfNeedsRestart)
+            retryDiagnosticsAndDashboard(context, selfNeedsRestart)
         }
         HeroPromptBlock(
             visual = visual,

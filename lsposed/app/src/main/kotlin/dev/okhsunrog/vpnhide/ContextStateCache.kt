@@ -11,7 +11,7 @@ internal data class ContextObservationInputs(
 internal abstract class ContextStateCache<T>(
     traceName: String,
     logTag: String,
-    source: ObservationDependency,
+    source: ObservationDependency? = null,
     timeoutMillis: Long = 60_000,
 ) : StateCache<T>(traceName, logTag, source, timeoutMillis) {
     @Volatile protected var inputs: ContextObservationInputs? = null
@@ -31,9 +31,10 @@ internal abstract class ContextStateCache<T>(
         context: Context,
         selfNeedsRestart: Boolean,
         reason: ReadReason = ReadReason.Explicit,
+        runBeforeRefresh: Boolean = true,
     ) {
         updateInputs(context, selfNeedsRestart)
-        beforeRefresh(requireNotNull(inputs))
+        if (runBeforeRefresh) beforeRefresh(requireNotNull(inputs))
         forceRefresh(reason)
     }
 

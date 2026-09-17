@@ -48,6 +48,26 @@ class DiagnosticRunDataTest {
     }
 
     @Test
+    fun `explicit retry queues behind an automatic run instead of disappearing into it`() {
+        val fixture = RunFixture()
+        fixture.request(automatic = true)
+        fixture.context()
+        fixture.request(automatic = false)
+        assertEquals(2L, fixture.state.pending?.id)
+        assertFalse(
+            fixture.effects
+                .filterIsInstance<DiagnosticRunEffect.Accepted>()
+                .last()
+                .joined,
+        )
+        fixture.core()
+        fixture.slow()
+        fixture.context()
+        assertEquals(2L, fixture.active.id)
+        assertFalse(fixture.active.request.automatic)
+    }
+
+    @Test
     fun `slow probe failure retains partial evidence and previous complete measurement`() {
         val fixture = RunFixture()
         fixture.request()

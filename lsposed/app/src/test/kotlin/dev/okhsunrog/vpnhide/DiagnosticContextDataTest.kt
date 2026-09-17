@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.AppVpnContext
 import dev.okhsunrog.vpnhide.diagnostics.CORE_JAVA_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
 import dev.okhsunrog.vpnhide.diagnostics.CheckResult
@@ -88,7 +89,7 @@ class DiagnosticContextDataTest {
         val applying =
             buildDiagnosticContextObservation(
                 selfNeedsRestart = false,
-                routing = current(DiagnosticGate.ROUTED),
+                appVpn = AppVpnContext(current(DiagnosticGate.ROUTED), "vpn=tun0;self=ROUTED"),
                 snapshot = RootSnapshot(snapshotSections(), observationId = 7, generation = 3),
                 config = CanonicalConfig(),
                 selfPackage = selfPackage,
@@ -196,7 +197,7 @@ class DiagnosticContextDataTest {
         readiness: ConfigReadiness = ConfigReadiness.Settled,
     ) = buildDiagnosticContextObservation(
         selfNeedsRestart = selfNeedsRestart,
-        routing = routing,
+        appVpn = AppVpnContext(routing, "vpn=tun0;self=${currentObservationValue(routing)?.name}"),
         snapshot = RootSnapshot(snapshotSections(), observationId = 7, generation = 3),
         config = CanonicalConfig(),
         selfPackage = selfPackage,
@@ -208,10 +209,5 @@ class DiagnosticContextDataTest {
     private fun snapshotSections(): Map<String, String> =
         mapOf(
             "current_boot_id" to "boot-1\n",
-            "vpn_networks" to
-                "Current Networks:\n  NetworkAgentInfo{ni{VPN CONNECTED} lp{InterfaceName: tun0} " +
-                "nc{[ Transports: VPN Capabilities: INTERNET ]}}\n",
-            "vpn_routes4" to "probe_ok",
-            "vpn_routes6" to "probe_ok",
         )
 }

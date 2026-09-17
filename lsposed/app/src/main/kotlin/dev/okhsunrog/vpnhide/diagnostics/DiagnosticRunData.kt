@@ -231,6 +231,7 @@ private fun matchingRun(
     request: DiagnosticRequest,
 ): Boolean =
     run != null && run.stage != DiagnosticStage.Draining &&
+        (request.automatic || !run.request.automatic) &&
         run.request.copy(automatic = false, dependencies = emptySet()) == request.copy(automatic = false, dependencies = emptySet())
 
 private fun requestDiagnosticRun(

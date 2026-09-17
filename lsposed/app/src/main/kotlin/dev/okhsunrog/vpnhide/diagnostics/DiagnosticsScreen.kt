@@ -111,7 +111,7 @@ fun DiagnosticsScreen(
         // guarantees the shared gate is ready even if Diagnostics is opened first.
         RoutingGateCache.ensureLoaded(context, selfNeedsRestart)
     }
-    // A VPN up / routed transition while foregrounded is noticed by VpnStatePoller,
+    // A VPN up / routed transition while foregrounded is noticed by AppVpnStatePoller,
     // the single deduplicated trigger, which runs one confirmation suite; the check
     // list re-renders reactively from the presentation. The screen no longer watches
     // the gate itself, which re-ran the suite on every settling flap.
@@ -131,13 +131,10 @@ fun DiagnosticsScreen(
     ) {
         Spacer(Modifier.height(8.dp))
 
-        // One re-check drives every surface: RoutingGateCache.refresh so the export
-        // sheet / logcat card banners update immediately too, plus the two caches
-        // that actually re-derive their own state off the (now shared) gate.
+        // One coordinated retry refreshes VPN state, queues one fresh suite and
+        // then re-derives Dashboard from that result.
         val onRetry = {
-            RoutingGateCache.refresh(context, selfNeedsRestart)
-            DiagnosticsCache.retry(context, selfNeedsRestart)
-            DashboardCache.refresh(context, selfNeedsRestart)
+            retryDiagnosticsAndDashboard(context, selfNeedsRestart)
         }
         DiagnosticBannerContent(decision.banner, decision.checking, onRetry, onOpenAccelerators)
         decision.attemptNotice?.let { notice ->
@@ -735,8 +732,8 @@ private data class CaptureGate(
 )
 
 /**
- * Reads the shared [RoutingGateCache] — the same cheap probe (VPN-iface read +
- * self-routing) the export used to run privately via the now-removed
+ * Reads the shared [RoutingGateCache] — the same cheap app VPN-state observation
+ * the export used to run privately via the now-removed
  * `measureCaptureGate` — so a re-check from any surface (this sheet, the logcat
  * card, Dashboard, Diagnostics' own retry) updates every other one through the one
  * underlying [StateFlow].

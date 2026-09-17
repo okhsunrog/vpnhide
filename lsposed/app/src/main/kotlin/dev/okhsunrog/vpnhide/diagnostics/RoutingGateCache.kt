@@ -1,65 +1,107 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
-import android.os.SystemClock
 import dev.okhsunrog.vpnhide.ContextStateCache
-import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.ObservationRequest
+import dev.okhsunrog.vpnhide.ObservationState
+import dev.okhsunrog.vpnhide.ObservedValue
+import dev.okhsunrog.vpnhide.ProjectedStateFlow
 import dev.okhsunrog.vpnhide.ReadReason
-import dev.okhsunrog.vpnhide.RootSnapshotCache
-import dev.okhsunrog.vpnhide.StateCache
-import dev.okhsunrog.vpnhide.debug.captureGateFrom
+import dev.okhsunrog.vpnhide.checks.AppVpnState
+import dev.okhsunrog.vpnhide.checks.AppVpnStateObservation
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 
-/** Foreground-return re-probes are coalesced to at most one per this window. */
-private const val RESUME_REFRESH_THROTTLE_MS = 4_000L
+private const val NEGATIVE_CONFIRM_DELAY_MS = 750L
+private const val MAX_SETTLING_SAMPLES = 4
+
+internal data class AppVpnStateSnapshot(
+    val gate: DiagnosticGate,
+    val session: String?,
+    val interfaces: List<String>,
+) {
+    val identity: String =
+        "session=${session ?: "none"};vpn=${interfaces.sorted().joinToString(",")};self=${gate.name}"
+}
 
 /**
- * Shared, app-scoped source for the routing gate — is a VPN up, and is THIS
- * app routed through it. This used to be computed independently in three
- * places (the debug-export sheet, the logcat-record card, and
- * [DiagnosticsCache]'s own gate fold), so a re-check in one place never
- * updated the others and each surface could disagree about the current
- * state. One [StateCache] of [DiagnosticGate] now backs all of them:
- * [ensureLoaded] / [refresh] mirror [DashboardCache]'s stash-then-delegate
- * shape, and [gate] is the one [StateFlow] every screen collects.
- *
- * [load] always folds through [captureGateFrom] (VPN-iface read off the root
- * snapshot + [GroundTruthProbe.selfRoutedThroughVpn]) — the same pure probe
- * the export/logcat gate used to call directly — so the value here is never
- * a looser, framework-only approximation.
+ * Shared app-scoped VPN-state source. One privileged Rust helper observes
+ * VPN presence and this UID's membership directly; the heavy root snapshot is
+ * not a prerequisite and no global route/rule fingerprint drives correctness.
+ * Negative facts are confirmed twice inside one identified load so a tunnel's
+ * brief setup window is published as Checking, not as a false exclusion.
  */
-internal object RoutingGateCache : ContextStateCache<DiagnosticGate>(
+internal object RoutingGateCache : ContextStateCache<AppVpnStateSnapshot>(
     traceName = "routing_gate",
     logTag = LogTags.DIAG,
-    source = RootSnapshotCache.dependency,
 ) {
-    val gate: StateFlow<DiagnosticGate?> get() = current
+    val gate: StateFlow<DiagnosticGate?> by lazy { ProjectedStateFlow(current) { it?.gate } }
+    val gateObservation: StateFlow<ObservationState<DiagnosticGate>> by lazy {
+        ProjectedStateFlow(observation) { it.gateProjection() }
+    }
 
-    // Includes every gate load so foreground return coalesces with startup/manual reads.
-    @Volatile private var lastLoadAtMs: Long = 0L
-
-    /** Reuses retained application inputs; no-op before startup initializes the gate. */
-    fun refreshIfStale(throttleMs: Long = RESUME_REFRESH_THROTTLE_MS) {
-        if (!ready) return
-        if (SystemClock.elapsedRealtime() - lastLoadAtMs < throttleMs) return
-        // A safety net, not evidence that anything changed: never worded as a user-requested re-check.
+    /** An Activity return always asks for present-tense app VPN state. */
+    fun refreshOnResume() {
         forceRefresh(ReadReason.Background)
     }
 
-    // Always on IO: captureGateFrom runs the blocking `su` self-routing probe, so a
-    // caller that awaits a refresh from the main dispatcher (e.g. a card's
-    // rememberCaptureGate scrolling into view) must not run it on the UI thread. The
-    // old measureCaptureGate wrapped this; keep it wrapped here so no caller has to.
     override suspend fun load(
         @Suppress("UNUSED_PARAMETER") request: ObservationRequest,
-    ): DiagnosticGate =
+    ): AppVpnStateSnapshot =
         withContext(Dispatchers.IO) {
-            lastLoadAtMs = SystemClock.elapsedRealtime()
             val (context, selfNeedsRestart) = requireNotNull(inputs)
-            val snapshot = RootSnapshotCache.getOrLoad()
-            captureGateFrom(snapshot, context, selfNeedsRestart)
+            if (selfNeedsRestart) {
+                return@withContext AppVpnStateSnapshot(DiagnosticGate.NEEDS_RESTART, null, emptyList())
+            }
+            var candidate = requireObservation(GroundTruthProbe.observeAppVpnState(context))
+            repeat(MAX_SETTLING_SAMPLES - 1) {
+                candidate.validate()
+                if (candidate.state == AppVpnState.ROUTED) return@withContext candidate.toSnapshot()
+                delay(NEGATIVE_CONFIRM_DELAY_MS)
+                val next = requireObservation(GroundTruthProbe.observeAppVpnState(context))
+                next.validate()
+                if (next.state == AppVpnState.ROUTED) return@withContext next.toSnapshot()
+                if (candidate.state == next.state && candidate.session == next.session) {
+                    return@withContext next.toSnapshot()
+                }
+                candidate = next
+            }
+            error("app VPN state did not settle")
         }
+
+    private fun requireObservation(observation: AppVpnStateObservation?): AppVpnStateObservation =
+        requireNotNull(observation) { "app VPN state observation unavailable" }
+
+    private fun AppVpnStateObservation.validate() {
+        if (state == AppVpnState.UNKNOWN) error("app VPN state unavailable: $detail")
+    }
+
+    private fun AppVpnStateObservation.toSnapshot(): AppVpnStateSnapshot =
+        AppVpnStateSnapshot(
+            gate =
+                when (state) {
+                    AppVpnState.VPN_OFF -> DiagnosticGate.VPN_OFF
+                    AppVpnState.EXCLUDED -> DiagnosticGate.SELF_NOT_ROUTED
+                    AppVpnState.ROUTED -> DiagnosticGate.ROUTED
+                    AppVpnState.UNKNOWN -> error("app VPN state unavailable: $detail")
+                },
+            session = session,
+            interfaces = interfaces,
+        )
 }
+
+internal fun ObservationState<AppVpnStateSnapshot>.gateProjection(): ObservationState<DiagnosticGate> =
+    ObservationState(
+        lastGood = lastGood?.let { ObservedValue(it.value.gate, it.request, it.finishedAt) },
+        active = active,
+        generation = generation,
+        stale = stale,
+        nextId = nextId,
+        error = error,
+        attempted = attempted,
+        attemptedGeneration = attemptedGeneration,
+        quarantined = quarantined,
+        quarantineRequestId = quarantineRequestId,
+    )
