@@ -1084,11 +1084,13 @@ name = "vpnhide_core_daemon"
 version = "0.0.0"
 dependencies = [
  "futures",
+ "libc",
  "tarpc",
  "tempfile",
  "tokio",
  "tokio-serde",
  "tokio-util",
+ "vpnhide_checks",
  "vpnhide_core_rpc",
 ]
 

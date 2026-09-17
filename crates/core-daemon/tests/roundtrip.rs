@@ -66,7 +66,11 @@ async fn a_restarted_core_is_adopted_by_the_mirror() {
     // First run at one epoch; publish a distinctive state, then drop it.
     {
         let (state, handle) = spawn_core(&path, 100);
-        state.publisher.publish(StateSnapshot { config_available: true, operations_in_flight: vec![] });
+        state.publisher.publish(StateSnapshot {
+            config_available: true,
+            operations_in_flight: vec![],
+            ..StateSnapshot::default()
+        });
         let client = CoreClient::connect_and_mirror(path.clone());
         assert_eq!(client.hello().await.expect("handshake"), 100);
         handle.shutdown_and_unlink();

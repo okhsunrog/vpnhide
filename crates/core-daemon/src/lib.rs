@@ -4,11 +4,13 @@
 
 pub mod client;
 pub mod listener;
+pub mod observer;
 pub mod publisher;
 pub mod server;
 
 pub use client::CoreClient;
 pub use listener::{listen, ServerHandle};
+pub use observer::observe;
 pub use publisher::Publisher;
 pub use server::{serve_connection, CoreServer, CoreState, CORE_BUILD};
 
