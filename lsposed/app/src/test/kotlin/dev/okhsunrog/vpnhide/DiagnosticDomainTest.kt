@@ -15,6 +15,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticPresentation
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticRunIo
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticStage
 import dev.okhsunrog.vpnhide.diagnostics.EXTRA_JAVA_CHECKS
+import dev.okhsunrog.vpnhide.diagnostics.EvidenceConclusion
 import dev.okhsunrog.vpnhide.diagnostics.JavaCheckSpec
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_EXTRA_CHECKS
@@ -25,6 +26,8 @@ import dev.okhsunrog.vpnhide.diagnostics.Situation
 import dev.okhsunrog.vpnhide.diagnostics.Staleness
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticContextObservation
 import dev.okhsunrog.vpnhide.diagnostics.gateProjection
+import dev.okhsunrog.vpnhide.diagnostics.situation
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,7 +35,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -66,7 +68,14 @@ class DiagnosticDomainTest {
             // The re-read publishes the re-established tunnel: a new routing identity,
             // which the retained measurement does not cover. One confirmation is owed,
             // worded as the run it becomes, and runs without anyone comparing samples.
+            // The probes are held so the run in flight can be observed, not raced.
+            f.holdProbes()
             f.routing.value = known(SESSION_B, generation = 2)
+            val running = f.domain.presentation.first { it.activeRunId != null && it.currentKey?.routing == SESSION_B.identity }
+            assertEquals(true, running.activeRunAutomatic)
+            val whileRunning = situation(running, ObservationClock.now())
+            assertTrue("$whileRunning", whileRunning is Situation.Checking && whileRunning.what == CheckingWhat.Suite)
+            f.releaseProbes()
             val confirmed =
                 f.domain.presentation.first {
                     it.activeRunId == null && it.measurement?.context?.routing == SESSION_B.identity
@@ -74,8 +83,10 @@ class DiagnosticDomainTest {
             assertFalse(confirmed.confirmationPending)
             assertEquals(RunOutcome.Completed, confirmed.lastAttempt?.outcome)
             assertEquals(2, f.suites.get())
-            // The stale measurement was never worded as a result to re-check by hand.
-            assertTrue(f.situationsSeen().none { it is Situation.Measured && it.staleness == Staleness.Changed })
+            assertEquals(
+                Situation.Measured(EvidenceConclusion.NoObservedLeak, Staleness.Current),
+                situation(confirmed, ObservationClock.now()),
+            )
         }
 
     @Test
@@ -103,17 +114,18 @@ class DiagnosticDomainTest {
             f.routing.value = known(SESSION_A, generation = 1)
             f.domain.presentation.first { it.activeRunId == null && it.measurement != null }
 
+            f.holdProbes()
             f.domain.retry()
             val running = f.domain.presentation.first { it.activeRunId != null }
             assertEquals(false, running.activeRunAutomatic)
+            val whileRunning = situation(running, ObservationClock.now())
+            assertTrue(
+                "$whileRunning",
+                whileRunning is Situation.Checking && whileRunning.what == CheckingWhat.Suite && whileRunning.reason == ReadReason.Explicit,
+            )
+            f.releaseProbes()
             f.domain.presentation.first { it.activeRunId == null && it.lastAttempt?.id == 2L }
             assertEquals(2, f.suites.get())
-            assertTrue(
-                f.situationsSeen().any {
-                    it is Situation.Checking && it.what == CheckingWhat.Suite &&
-                        it.reason == ReadReason.Explicit
-                },
-            )
         }
 
     private fun fixture(block: suspend (Fixture) -> Unit) =
@@ -135,7 +147,11 @@ class DiagnosticDomainTest {
         val config = MutableStateFlow(ConfigCoordinatorView())
         val inputs = MutableStateFlow<DiagnosticInputs?>(DiagnosticInputs(SELF_PACKAGE, selfNeedsRestart = false))
         val suites = AtomicInteger()
-        val situations = mutableListOf<Situation>()
+
+        // A gate the core probes wait at while held, so a run in flight can be
+        // observed instead of raced: with an instant helper a run starts and ends
+        // between two emissions a StateFlow collector gets to see.
+        @Volatile private var gate: CompletableDeferred<Unit>? = null
         val domain =
             DiagnosticDomain(
                 scope = scope,
@@ -148,12 +164,14 @@ class DiagnosticDomainTest {
                 wait = { },
             )
 
-        init {
-            scope.launch { domain.situation.collect { synchronized(situations) { situations += it } } }
+        fun holdProbes() {
+            gate = CompletableDeferred()
         }
 
-        /** A consistent copy: the collector keeps appending on its own dispatcher. */
-        fun situationsSeen(): List<Situation> = synchronized(situations) { situations.toList() }
+        fun releaseProbes() {
+            gate?.complete(Unit)
+            gate = null
+        }
 
         /** Observes exactly what production observes, from the same flows; probes hide everything. */
         private inner class FakeIo : DiagnosticRunIo {
@@ -180,6 +198,7 @@ class DiagnosticDomainTest {
             ): CheckResults =
                 when (stage) {
                     DiagnosticStage.Core -> {
+                        gate?.await()
                         suites.incrementAndGet()
                         CheckResults(
                             native = NATIVE_CHECKS.map { CheckResult(it.id, "", CheckOutcome.HiddenByBackend, "root: tun0", id = it.id) },
