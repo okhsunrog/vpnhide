@@ -1,52 +1,66 @@
 # App state: transition contract
 
-Status: configuration, observation and diagnostic-run coordinators are connected
-to the app, and config operations feed diagnostic admission and context. The
-screens, the bridge and the bundle render one shared presentation projection;
-capture runs through the run coordinator but keeps its older orchestration.
-Sections 13–21 record the implementation stages and their exact boundaries.
-This formalizes the direction
-agreed on 2026-09-15. It extends [app state design](app-state-design.md) and follows
-the [diagnostics investigation](diagnostics-state-analysis.md). Existing runtime
-behavior remains documented in [storage](../storage.md) and [diagnostics](../diagnostics.md).
+Status: current specification of the process-owned state machines as implemented.
+Configuration, observation and diagnostic-run coordinators are connected to the
+app; config operations feed diagnostic admission and context; the screens, the
+bridge and the bundle render one shared presentation; the Dashboard state is a
+projection of that presentation; capture runs through the run coordinator but
+keeps its older orchestration. Where the implementation deliberately deviates
+from the design agreed on 2026-09-15, the deviation is recorded in place. The
+stage-by-stage implementation log with its validation records is in
+[app-state-transitions-history.md](app-state-transitions-history.md) (its
+sections keep their original numbers, §13–§22). This contract extends
+[app state design](app-state-design.md) and follows the
+[diagnostics investigation](diagnostics-state-analysis.md). Runtime paths and
+deadlines are documented in [storage](../storage.md),
+[config coordinator](../config-coordinator.md),
+[observation coordinator](../observation-coordinator.md) and
+[diagnostics](../diagnostics.md).
 
 Scope: process-owned config operations, drafts, observations, diagnostic runs,
-measurement applicability and capture integration. Names below are domain names,
-not a commitment to public Kotlin or JSON names. Wire control-v2/telemetry-v1
-remains unchanged. The root transport requirements in section 12 are implementation
-gates; these tables do not claim the current transport already satisfies them.
+measurement applicability, presentation and capture integration. Names below are
+domain names, not a commitment to public Kotlin or JSON names, except where a
+code identifier is quoted. Wire control-v2/telemetry-v1 remains unchanged.
 
 ## 1. Ownership and event ordering
 
 Use related machines, each with one owner, rather than a screen-owned copy of each
-state. A short process-owned event dispatcher orders cross-machine decisions:
+state. Each machine is a pure reducer executed by its coordinator:
 
 ```text
 reduce(previous, event) -> next + effects
 ```
 
 Reducers do not suspend, read Android services, execute commands or format UI text.
-Effects run outside the dispatcher and return identified completion events. One
-logical event publishes one immutable presentation revision after all affected
-reducers have run. Consumers must not independently combine flows of incompatible
-revisions. This is an in-process ordering guarantee, not an atomic Android snapshot.
+Effects run outside the reducer and return identified completion events.
 
 | Owner | State | Exclusive work |
 |---|---|---|
-| Config coordinator behind `CanonicalConfigRepository` | Initialization, operation queue, confirmed config, phase outcomes | One mutating root operation, through activation/recovery |
+| `ConfigCoordinator` behind `CanonicalConfigRepository` | Initialization, operation queue, confirmed config, phase outcomes | One mutating root operation, through activation/recovery |
 | Draft registry and lifecycle state holders | Base identity, field patch, draft revision, submitted revision | Short edit/registration transitions; no lock held through I/O |
-| Existing observation cache facades | Last observation, request generation, loading/error | One physical load per resource; coalesce requests |
-| Diagnostic coordinator behind `DiagnosticsCache` | Request admission, active run, immutable run records | One suite at a time, including export requests |
-| Capture coordinator | Capture phase, logging token, evidence/errors | One forensic capture session initially; overlapping read-only historical exports allowed |
-| Pure presentation functions | Setup status, run progress, applicability, evidence summary | No I/O and no independently mutable verdict |
+| `ObservationCoordinator` behind every `StateCache` facade | Last observation, request generation, active request, stale mark, error, quarantine | One physical load per resource; coalesce requests |
+| `DiagnosticRunCoordinator` inside `DiagnosticDomain`, behind `DiagnosticsCache` | Request admission, active run, immutable run records, operation impact, the claimed confirmation key | One suite at a time, including export requests |
+| Capture (`DebugExport`, `LogcatRecorder`) | Capture phase, logging token, evidence/errors | One forensic capture session; the §9 capture machine is designed, not implemented |
+| Pure presentation functions | Eligibility, applicability, evidence summary, Situation, Dashboard assembly | No I/O and no independently mutable verdict |
+
+Deviation from the original design, recorded deliberately: there is no global
+event dispatcher and no single presentation revision published per logical
+event. The coordinators publish immutable states independently;
+`DiagnosticsCache.presentation` is a `combine` of the run view, the routing
+observation, the root snapshot, the confirmed config, the operation impact, the
+claimed confirmation key and the process inputs, mapped by the pure
+`diagnosticPresentation`. Each emission is computed from one instant of all its
+sources, which is the property the consumers need; ordering across coordinators
+is "the app received it in this order".
 
 `OperationId`, `RunId`, `CaptureId`, `RequestId`, `DraftId` are process-unique.
-An effect also carries a step/attempt identity. Accept its result only if it is the
-expected outstanding effect. Duplicate events have no effect. Obsolete observation
-results cannot publish. Late mutating-command evidence is routed to recovery, never
-silently treated as a new operation or allowed to overwrite a newer config.
+An effect also carries a step/attempt identity (`EffectTicket`). Accept its result
+only if it is the expected outstanding effect. Duplicate events have no effect.
+Obsolete observation results cannot publish. Late mutating-command evidence is
+routed to recovery, never silently treated as a new operation or allowed to
+overwrite a newer config.
 
-An event means the app *received* evidence; dispatcher order is not proof of the
+An event means the app *received* evidence; coordinator order is not proof of the
 order of independent external system changes. Unknown external ordering stays
 unknown in the resulting observation.
 
@@ -90,20 +104,23 @@ whether previous app-owned root effects are quiescent. While that bounded check
 runs, coordinator mode is Initializing. Proven quiescence permits explicit startup
 initialization/reconciliation and then Open; uncertainty follows the same initial
 readback plus one repeat, then Paused rule as an in-process timeout. A new app PID
-does not prove an old privileged descendant stopped. The transport must supply
-discoverable execution-lifetime evidence across app restarts, or safely remain
-paused; no full persistent operation journal or automatic command replay is assumed.
+does not prove an old privileged descendant stopped. The transport supplies
+discoverable execution-lifetime evidence across app restarts through `vhmutate`
+([root mutation transport](../root-mutation-transport.md)), or safely remains
+paused; no full persistent operation journal or automatic command replay exists.
 Commands issued by builds that predate the transport are untracked writers, like
 module boot scripts: a lane never opened in this boot is adopted directly, and
 their bounded, idempotent overlap with the first new-session command is an
 accepted risk, not a reboot requirement (decided 2026-09-15).
 
-Startup's automatic self-test intent is armed until initialization is complete and
-the first eligible conditions are observed. It is consumed when a suite actually
-starts, whether it later completes or fails. Blocked conditions do not consume it.
-No automatic second suite is scheduled after failure, cancellation or context
-change; explicit retry remains available. All these flags survive Activity
-recreation and reset on process death.
+The startup self-test intent (`DiagnosticsCache.run`) starts the first suite of
+the process and afterwards only joins the active run or reads the latest attempt.
+A suite blocked by a condition (VPN off, self excluded, restart pending) is a
+terminal `NotStarted` attempt with that eligibility; nothing re-arms an intent
+for it. Once the conditions become eligible, the measurement key of that world
+is covered by nothing, and the owed confirmation of §7 requests exactly one
+automatic suite. All these facts survive Activity recreation and reset on
+process death.
 
 ## 3. Config operation machine
 
@@ -157,6 +174,10 @@ Reconciliation attempt 0 is the initial readback, attempt 1 is its single automa
 repeat. A matching JSON is insufficient if an activator/descendant can still run.
 Late acknowledgements may trigger a recovery decision only with sufficient evidence
 that all effects have stopped. A late success line alone does not reopen the lane.
+Recovery may consume a still-undispatched sequence in transport metadata: this
+fences a root launch delayed beyond the app timeout and never repeats a config,
+secret or activation effect; the "read-only" recovery policy excludes application
+mutations while permitting this lifetime-metadata update.
 
 After a known apply failure, a later ordinary command may proceed once effects are
 quiescent. Retry activation is a new operation against **current** config, not a
@@ -164,6 +185,13 @@ replay of the failed command's old snapshot. After uncertainty resolves, queued
 commands rejected during pause require resubmission, so recovery cannot unexpectedly
 write old intent. Reads, navigation, drafts and unrelated DataStore settings remain
 usable while mutations are paused.
+
+Each accepted operation's lifecycle is published to a `ConfigOperationObserver`
+synchronously from the coordinator's actor, in dispatch order: acceptance (before
+any effect, with the operation's spec), preparation (the spec with the prepared
+write set merged in: the diff of the transformed candidate against the fresh
+base), every mutating root dispatch (phase), the single result delivery, and a
+later manual recovery. Section 7 says what the diagnostic domain does with it.
 
 ## 4. Drafts and UI priority
 
@@ -176,7 +204,7 @@ selection. UI edit publication and draft registration occur in the same event.
 |---|---|
 | Edit a field | Advance field/draft revision; register patch; immediate UI update |
 | Observe a new config | Rebase untouched fields; keep edited fields and their revisions |
-| Save | Snapshot submitted patch/revisions into a config operation; disable editing that draft during this save in the first implementation |
+| Save | Snapshot submitted patch/revisions into a config operation; disable editing that draft during this save |
 | Save persistence confirmed | Clear only fields whose current revision equals the submitted revision; rebase to confirmed config; retain operation's activation progress separately |
 | Save fails before persistence | Keep patch; restore editing; report error |
 | Save remains unresolved | Keep patch and unresolved operation link; allow local editing after handle resolves unresolved, but no new save until recovery |
@@ -204,7 +232,7 @@ Bridge/UI ordering has two distinct cases:
 A bridge operation completed before an edit cannot retroactively fail. UI priority
 means its unsaved values remain displayed/protected and its next save wins on those
 fields; it does not mean unsubmitted edits are already installed in the backends.
-The bridge error envelope must carry structured phase results for this distinction.
+The bridge error envelope carries structured phase results for this distinction.
 
 Auto-hide reconciliation computes only allowed untouched-field changes and reports
 skipped protected fields internally. Bridge mutations are all-or-reject before
@@ -214,18 +242,21 @@ silent draft deletion or wildcard replacement over unsaved edits.
 
 ## 5. Observation machine
 
-One immutable observation state contains `lastGood`, `requestedGeneration`,
-`activeRequest`, and `lastAttempt` (`None`, `Loading`, `Succeeded`, `Failed`).
-`lastGood` carries its own interval, source/config identity and generation. A new
+One immutable `ObservationState` contains `lastGood` (with its request and
+finish time), `generation`, `active` request, `stale` mark, `error`, `attempted`
+and the quarantine fields. `lastGood` carries the generation it was read at. A new
 attempt never makes the old value new. Errors are structured and retryable.
+`current` is the last good value only while it is not owed a re-read (no active
+request, no error, no quarantine, same generation); `value` retains it as display
+history regardless.
 
 | Event / guard | Transition and effect |
 |---|---|
 | Ensure, no observation and no attempt | Start one load |
 | Ensure, value/error/load already present | Reuse it; no retry loop from recomposition |
 | Explicit equivalent refresh while loading | Join that request's handle |
-| Invalidate due to a relevant event | Advance requested generation; retain lastGood; start load if idle, otherwise request one successor |
-| Success for active request at requested generation | Publish observation and finish its waiters |
+| Invalidate due to a relevant event | Advance requested generation; retain lastGood; set the stale mark; start load if idle, otherwise request one successor |
+| Success for active request at requested generation | Publish observation, clear the stale mark and finish its waiters |
 | Success/error for older generation | Do not publish; finish old waiters with `superseded`; start one successor for latest generation |
 | Error for current request | Publish Failed, keep lastGood historical; resolve waiters with error |
 | Explicit retry after failure | New request identity; loading with previous value/error evidence retained |
@@ -242,100 +273,135 @@ The old physical read drains before its successor starts; cancellation is not pr
 that blocking work stopped. Deadline failure is explicit, not endless loading. A
 missing dependency produces `initialization_pending`, not a poisoned cache entry.
 
-Routing is an observation with outcomes `VpnOff`, `SelfExcluded`, `Routed`, or
-`Unknown(reason)`. Restart requirements belong to process readiness, not network
-facts. Derive diagnostic eligibility in this precedence:
+Every re-read states its cause. `ReadReason` is `Background` (our own process
+invalidated it: a root dependency after a config phase or the startup reconcile,
+the foreground-return safety net, the run coordinator's own gate reads),
+`Transition` (an external signal that the observed fact may have changed: the
+foreground app-VPN poller found a changed fact) or `Explicit` (the user asked).
+The `StaleMark(reason, since)` is kept from the moment a re-read is owed until
+the current generation publishes or fails; overlapping causes keep the earliest
+`since` and the strongest reason, and the request that starts carries it.
+
+Routing is the app-scoped VPN observation (`RoutingGateCache`): one privileged
+helper reports this UID's state as `VpnOff`, `SelfExcluded` (excluded), `Routed`
+or `Unknown(reason)`, with the framework VPN session identity and interfaces.
+The foreground poller samples it silently once a second and requests a shared
+refresh only for a changed or recoverable fact; negative states need two equal
+samples 750 ms apart so tunnel setup cannot publish a false exclusion. Restart
+requirements belong to process readiness, not network facts. The presentation
+carries routing as knowledge, not as an admission decision:
+`RoutingKnowledge.Known(fact, observedAt)`, `Verifying(lastKnown, reason, since)`
+while a re-read is owed or running, or `Unknown(cause, lastKnown)` after a failed
+or quarantined read. Derive diagnostic eligibility in this precedence:
 
 1. Initialization incomplete -> `Initializing`.
-2. Known restart/reboot requirement -> `RestartRequired(action, reason)`.
+2. Known restart/reboot requirement -> `RestartApp` / `RestartDevice`.
 3. Relevant config effects unsettled/unknown/known failed -> `Applying` /
-   `ApplicationUnknown` / `ApplicationFailed` until explicit repair or fresh
-   sufficient runtime evidence resolves the relevant application state.
+   `ApplicationUnknown` / `ApplicationFailed` until a later relevant operation
+   succeeds or manual recovery resolves it.
 4. Routing refresh outstanding or observation uncertain -> `Checking` / `Unknown`.
 5. Known no VPN or excluded UID -> `VpnOff` / `SelfExcluded`.
-6. Otherwise -> `Eligible(context)`.
+6. Otherwise -> `Eligible`.
 
 One consumer never converts `Unknown` into a positive/negative network fact. All
 consumers use this same derivation, including capture guidance and bridge reads.
 
 ## 6. Measurement context and applicability
 
-At admission, define the probe plan and a dependency projection for the self UID:
-process/boot identity, app/probe version, self role/hook selection, relevant global
-features, module/runtime/coverage evidence, network identity and self-routing
-evidence. Record collection start/end, observation request IDs and uncertainties.
-Whole-config revision alone is not this projection.
+At admission, the Checking observation folds the current observations into the
+`MeasurementContext` of the run: the subject (process and boot identity), this
+UID's applied configuration (its roles and hook selection plus the global
+optional features), the routing identity (the framework VPN session, the VPN
+interfaces and this UID's routing verdict), the coverage (the active native
+backend, its installed optional hooks and LSPosed liveness this boot, with the
+typed layers retained beside the identity string), the `changeEpoch`, and the
+root observation ID and time it was read at. Whole-config revision alone is not
+this projection. The `MeasurementKey` is the context without its instant:
+subject, configuration, routing, coverage and change epoch. Two contexts with the
+same key describe the same measurable world.
 
-Maintain two monotonic epochs: `changeEpoch` for a known relevant transition and
-`uncertaintyEpoch` for a possible transition not yet classified. An uncertain event
-may be cleared by a fresh consistent observation if no known change was recorded.
-A known off/on or mutation transition never disappears just because values later
-match. A run intersecting unresolved uncertainty cannot yield a current positive
-summary. Undetected external changes remain a limitation, not an asserted guarantee.
+`changeEpoch` is monotonic and advances at the first mutating dispatch of a
+relevant config operation (§7). A known transition never disappears just because
+values later match. There is no separate uncertainty epoch: a possible transition
+not yet classified is exactly a routing observation that is not `Known`, and it
+makes the measurement Unverified until a consistent reobservation restores it.
+Undetected external changes remain a limitation, not an asserted guarantee.
 
 | Event | Dependency / run effect |
 |---|---|
 | UI draft changes only | No applied-context change |
-| Relevant mutating effect dispatched | Advance changeEpoch before side effects; mark active run interrupted; context is Applying |
+| Relevant mutating effect dispatched | Advance changeEpoch before side effects; interrupt the active run; readiness is Applying |
 | Such a write later fails | Reobserve; do not resurrect the interrupted run as current |
-| Debug-only or proven unrelated per-app edit | No semantic invalidation; coordinate shared probe/capture resources if activation touches them |
-| Imports, reset, shared UID change, unknown impact | Conservatively relevant until a pure dependency projection establishes otherwise |
-| Known VPN/network identity, self-route, runtime mask or process change | Advance changeEpoch; interrupt affected active run; old measurement Changed |
-| VPN callback without classified difference | Advance uncertaintyEpoch; invalidate observations; current applicability Unverified until classified |
-| Observation fails / root lost | Current applicability Unverified; never replace results with empty success |
+| Debug-only or proven unrelated per-app edit, the startup runtime reconcile | No semantic invalidation; a forced activation without a write neither delays nor interrupts a suite |
+| Imports, reset, shared UID change, unknown impact | Relevant |
+| New routing identity (a re-established tunnel has a new framework network id), new coverage, new process | A new measurement key: the old measurement is Changed |
+| Routing re-read in flight, failed or quarantined | Current applicability Unverified; never replace results with empty success |
 | Statistics/UI preference change | No self-test invalidation |
 
-“Unrelated app” requires different effective UID and no shared global capability
-change. A debug-only activation must not be assumed harmless if it reloads or
-changes effective self runtime state; the adapter reports its actual impact. The
-initial fallback for unclassified operations is relevant, not silently safe.
+"Unrelated app" requires different effective UID and no shared global capability
+change. Relevance (`operationAffectsSelfMeasurement`) is decided from the declared
+and then the prepared write set: this app's own roles and hook selection
+(`apps/<self>/…` or the whole `apps` domain), global optional features
+(`settings/optionalFeatures` or the whole `settings` domain), and whole
+replacements (import, reset, removal). Relevance only ever increases within an
+operation.
 
-An immutable measurement has `RunId`, subject, probe plan/coverage at that time,
-per-probe observations and provenance, start/end context, execution outcome and
-context-integrity result. Raw observations gathered after a known interruption may
-be retained as evidence but must not be attributed as if collected in stable
-conditions. Coverage of an old measurement is never recalculated using a new backend.
+An immutable measurement has `RunId`, its start context, the frozen probe plan,
+per-probe outcomes, whether it completed or was interrupted, its start and end
+times and the end context. Raw observations gathered after a known interruption
+are retained as evidence but never attributed as if collected in stable
+conditions. Coverage of an old measurement is never recalculated using a new
+backend: its report is built against its own retained layers.
 
-Applicability is a pure projection, not a mutable flag inside the measurement:
+Applicability is a pure projection (`measurementApplicability`), not a mutable
+flag inside the measurement:
 
 | Inputs, in precedence order | Applicability |
 |---|---|
 | No measurement | Absent |
-| Context changed during run, different process, or known relevant transition since | Changed(reasons) |
-| Measurement lacked required context evidence, current conditions unknown, or refresh pending | Unverified(reasons) |
-| Comparable required evidence and no known relevant transition | MatchesLastObservation(observationId, observedAt) |
+| Measurement interrupted, or a known relevant change (epoch) since | Changed |
+| No current context, or routing not Known | Unverified |
+| Current key differs from the measurement's key | Changed |
+| Same key | MatchesLastObservation |
 
 `MatchesLastObservation` is deliberately bounded to observations; neither a TTL nor
-an app revision proves continuous backend consumption. Failed observation alone
-need not permanently discard a prior measurement: successful reobservation can
-restore applicability if no known relevant change occurred. Interrupted measurements
+an app revision proves continuous backend consumption. A failed observation alone
+does not discard a prior measurement: successful reobservation restores
+applicability if no known relevant change occurred. Interrupted measurements
 cannot be restored this way. Execution/evidence sufficiency is checked separately.
 
 ## 7. Diagnostic execution machine
 
-Keep `activeRun`, optional `pendingRequest`, and retained immutable records separately.
-An unsuccessful new attempt never deletes the last completed measurement. At minimum
-retain the latest attempt and latest complete measurement; pin any record referenced
-by an open view/export until that owner releases it. Do not keep unbounded history.
+`DiagnosticRunCoordinator` executes `reduceDiagnosticRun` under one short lock
+and runs its identified effects (`DiagnosticRunIo`: the context observation and
+the phased probes) on the process scope. Keep `active`, optional `pending`, and
+the retained immutable records (`lastAttempt`, `lastComplete`) separately. An
+unsuccessful new attempt never deletes the last completed measurement; a result
+referenced by neither is evicted. Every run is an immutable, identified attempt;
+leaving a screen or recreating the Activity detaches a waiter and never cancels
+or restarts a run.
 
-States for an admitted request: `Waiting(reason)`, `Checking`, `Running(stage)`,
-`Draining(reason)`, `Verifying`, `Finished(outcome)`. Terminal outcomes:
+States for an admitted request: `Waiting`, `Checking`, `Core`, `Slow`,
+`Verifying`, `Draining`. Terminal outcomes (`RunOutcome`):
 
-- `NotStarted(reason)` with no probes (blocked prerequisites or explicit rejection).
-- `Completed(measurement)` including leaking or unmeasurable probes.
-- `Interrupted(reason, evidence)` for cancellation/context change.
-- `Failed(stage, error, evidence)` for execution failure.
+- `NotStarted` with no probes (blocked eligibility, a failed or unresolved
+  operation dependency, a deadline, or explicit rejection).
+- `Completed` including leaking or unmeasurable probes.
+- `Interrupted` for cancellation or context change, with its evidence retained.
+- `Failed` for execution failure, with partial evidence retained.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Waiting: accepted request
-    Waiting --> Checking: prerequisites settled
-    Waiting --> Finished: cancel, failure or deadline
-    Checking --> Running: eligible, resources acquired
-    Checking --> Finished: blocked, unknown, cancel or deadline
-    Running --> Running: publish partial evidence
-    Running --> Verifying: planned probes finished
-    Running --> Draining: error, cancel or context change
+    [*] --> Waiting: accepted request with operation dependencies
+    [*] --> Checking: accepted request
+    Waiting --> Checking: dependencies settled
+    Waiting --> Finished: dependency failed or unresolved, cancel or deadline
+    Checking --> Core: eligible, resources acquired
+    Checking --> Finished: blocked, read failed, cancel or deadline
+    Core --> Slow: core probes finished, partial evidence published
+    Slow --> Verifying: planned probes finished
+    Core --> Draining: error, cancel or context change
+    Slow --> Draining: error, cancel or context change
     Verifying --> Finished: classify with end context
     Verifying --> Draining: cancel or context change
     Draining --> Finished: cleanup confirmed or resource quarantined
@@ -344,79 +410,109 @@ stateDiagram-v2
 
 | From / event / guard | To and effects |
 |---|---|
-| No active run / explicit check request | Allocate ID and publish Waiting or Checking synchronously before returning handle |
-| Relevant config operation already accepted | Waiting(operation IDs) until those operations settle; reject on uncertainty/failure requiring recovery |
-| Checking | Request fresh context observation; do not reuse a stale eligibility value |
-| Checking / observation superseded | Continue with successor only within the original admission deadline |
-| Waiting / required operations settle successfully | Checking; issue fresh context observation |
-| Waiting / required operation fails or becomes unresolved | Finished(NotStarted(application_failed or application_unknown)) |
-| Waiting / newly accepted relevant operation | Extend dependency set without extending original deadline |
-| Waiting or Checking / deadline expires | Finished(NotStarted(deadline_exceeded)); retire own observation waiter |
-| Checking / known block or observation error | Finished(NotStarted(reason)); resolve this handle immediately |
-| Checking / Eligible and resources free | Capture start context/plan; Running(core); consume startup auto intent if applicable |
-| Running / core completed | Publish immutable partial evidence for this run; Running(slow) |
-| Running / all planned probes finished | Verifying; capture end context and compare relevant epochs |
-| Verifying / stable required context | Finished(Completed); classify evidence; resolve this run's handle |
-| Verifying / context changed or unverifiable | Finished(Interrupted(context_changed or context_unverified)); retain evidence |
-| Running / a probe is unobservable | Record NotMeasured with specific reason; continue plan if safe |
-| Running / suite execution fails | Draining(error); stop new probes and await bounded cleanup, then Finished(Failed) |
-| Running or Verifying / relevant change | Draining(context_changed); stop new probes; retain evidence; do not restart automatically |
-| Waiting or Checking / explicit cancel | Finished(Interrupted(cancelled)); retire pending read/waiter |
-| Running or Verifying / explicit cancel | Draining(cancelled); do not launch a successor until physical probe resources are released |
-| Draining / cleanup confirms quiescence | Finished with recorded reason; admit compatible pending request |
-| Draining / deadline, quiescence not established | Resolve Finished with resource uncertainty; quarantine probe resource until recovery; reject successors requiring it |
+| No active run / request | Allocate ID and publish Waiting or Checking synchronously before returning the handle |
+| Relevant config operation already accepted | Waiting(operation IDs) until those operations settle |
+| Checking | Request the context observation: a not-invalidated routing observation is reused, an in-flight read is joined, only a stale, failed or absent one forces a new read |
+| Waiting / required operations settle successfully | Checking; fresh context observation |
+| Waiting / required operation fails or becomes unresolved | Finished(NotStarted) with that failure |
+| Waiting / newly accepted relevant operation | Extend dependency set without extending the original deadline |
+| Waiting or Checking / deadline expires | Finished(NotStarted, deadline exceeded) |
+| Checking / blocked eligibility | `NotEligible`: Finished(NotStarted) recording the eligibility; no probe; a terminal attempt like any other |
+| Checking / observation failed | Finished(Failed, read failed) |
+| Checking / eligible | Capture start context and plan; Core |
+| Core / core probes finished | Publish the partial evidence of this run; Slow |
+| Slow / all planned probes finished | Verifying; observe the end context under the same freshness rule |
+| Verifying / same measurement key | Finished(Completed); the measurement becomes `lastComplete` |
+| Verifying / key changed | Finished(Interrupted, context changed); evidence retained, `lastComplete` unchanged |
+| Core or Slow / a probe is unobservable | Record NotMeasured with its reason; continue the plan |
+| Core or Slow / suite execution fails | Draining; stop new probes, await bounded cleanup, then Finished(Failed) |
+| Core, Slow or Verifying / relevant change (first mutating dispatch of a relevant operation) | Draining(context changed); retain evidence; do not restart automatically |
+| Waiting or Checking / explicit cancel | Finished(Interrupted, cancelled) |
+| Core, Slow or Verifying / explicit cancel | Draining(cancelled); no successor until physical probe resources are released |
+| Draining / cleanup confirms quiescence | Finished with the recorded reason; admit the pending request |
+| Draining / deadline, quiescence not established | Finished with resource uncertainty; quarantine the probe resource; reject requests until the helper returns |
 | Any / screen or one waiter closes | No execution transition |
-| Finished / late stage response | Ignore for current publication; never turn old/incomplete evidence into a new run |
+| Finished / late stage response | Ignored; never turns old or incomplete evidence into a new run |
 
-When Checking is invalidated by a known change before probes start, finish
-`NotStarted(context_changed)` rather than following endless changes. Its explicit
-caller can retry; the unconsumed startup intent waits for the next stable eligibility
-observation. A context refresh that reveals no new measurement key produces no
-rerun; one that does is owed exactly one automatic confirmation (see the
-2026-09-17 amendment at the end of this note).
+A suite starts in exactly three ways, and nothing else requests one:
+
+1. **Startup intent.** `DiagnosticsCache.run` (`ensure`): the first suite of the
+   process; afterwards it joins the active run or reads the latest attempt.
+2. **Explicit re-check.** `retryDiagnosticsAndDashboard`, the one entry point of
+   "the user asked to check again" (Retry on both screens, pull-to-refresh, the
+   post-reset re-check): it refreshes the app-VPN observation, requests one
+   explicit run and re-reads the Dashboard's root facts. An explicit request
+   always allocates a new run after a completed one; it joins an active explicit
+   run, and waits as the single pending successor of an active automatic run, so
+   the click cannot be absorbed. No cache refresh requests a run as a side
+   effect.
+3. **Owed confirmation.** `owedConfirmation` reads the presentation: when this app
+   is eligible and the current measurement key is covered by no presented
+   measurement, no non-blocked attempt taken under that key and no key the owner
+   already claimed, exactly one automatic run is owed for it. The presentation
+   carries this as `confirmationPending`; the owner (`confirmMeasurements`) waits
+   a 300 ms settle window restarted by every newer presentation, keeps at least
+   5 s from its previous request, re-checks the latest presentation, requests
+   the run and claims the key on admission. A failed run is answered by Retry,
+   never by a loop. Because the rule reads state rather than transitions, a cold
+   start already routed, a foreground return after a re-established tunnel and a
+   session change seen by the poller take one path, and no edge can be lost to a
+   missing baseline. A re-read that reveals no new key reruns nothing (I16).
 
 Request admission while busy:
 
-- Join an active non-draining run only if subject, plan, context and capture
-  requirements match and its context remains valid. Return the actual shared RunId.
-- Otherwise allow one pending explicit request, joining equivalent pending requests;
-  reject a different additional request as `diagnostics_busy` rather than hiding
-  an unbounded queue. UI shows the waiting reason and can cancel its owned request.
-- A forensic request cannot join a run whose probes began before its logging and
-  counter baseline. It waits for the active run to settle, then prepares capture.
-- Cancelling an awaiter never cancels a shared run. Only the run owner (or explicit
-  global Stop action with cancellation authority) can request execution cancellation;
-  a joined bridge consumer can only detach.
+- An automatic request joins any active non-draining run with the same plan; an
+  explicit request joins an active explicit run only. Return the actual shared
+  RunId.
+- Otherwise allow one pending request; a further one is rejected as busy rather
+  than queued without bound. Request identity ignores dependencies: an active
+  run already carries every accepted operation.
+- A forensic request (`captureId` in its identity) cannot join any run: it waits
+  as the pending run for the active one to settle.
+- Cancelling an awaiter never cancels a shared run. Only `cancel` on the
+  coordinator requests execution cancellation; a joined consumer can only detach.
 
-Waiting/checking/running/cleanup all have finite adapter deadlines. Waiting for an
-operation that becomes paused finishes NotStarted(application_unknown), not an
-endless spinner. A pending request retains its original deadline and is checked
-again on admission. After a completed run, a new explicit request always allocates
-a new run; it cannot be satisfied by the old terminal StateFlow value.
+Operation impacts reach the run through `DiagnosticImpactObserver` and the pure
+`reduceDiagnosticImpact`: an accepted relevant operation is added to every new
+request's dependencies and sent as `OperationAccepted`; its first mutating
+dispatch advances `changeEpoch` and sends `ContextChanged`; its settlement sends
+`OperationSettled(id, failure)`. Readiness for eligibility comes from the same
+state (an unresolved relevant operation is `ApplicationUnknown`, an in-flight one
+`Applying`, a known-failed one `ApplicationFailed`).
+
+Waiting, checking, probing and cleanup all have finite deadlines. Waiting for an
+operation that becomes paused finishes NotStarted, not an endless spinner. A
+pending request retains its original deadline and is checked again on admission.
 
 Probe resources have a separate lifecycle so a terminal handle never implies that
 an uninterruptible helper vanished:
 
 | Resource / event | Next state |
 |---|---|
-| Free / admitted effect | Busy(effect ID); only that owner can release it |
+| Free / admitted effect | Busy(effect ticket); only that owner can release it |
 | Busy / confirmed completion or cleanup | Free; admit next allowed effect |
-| Busy / deadline without cleanup proof | Quarantined(evidence); resolve waiting requests with resource_unavailable |
-| Quarantined / explicit recovery | One bounded read-only termination check; new probes remain rejected |
-| Recovery / confirmed quiescence or verified process/boot replacement covering that helper | Free |
-| Recovery / insufficient evidence | Quarantined with updated reason |
+| Busy / drain deadline without cleanup proof | Quarantined; resolve waiting requests with resource_unavailable |
+| Quarantined / the late helper returns | Free; its late result is discarded; one queued request starts |
+| Quarantined / any request | Rejected; the presentation names it (`probeUnavailable`) |
 
 Quarantine affects that resource, not all app reads. External helpers can outlive
-the app: startup must establish a safe helper session (unique staging/resource
-identity or verified cleanup) before launching probes, even though its in-memory
-quarantine was lost. Restarting an Activity cannot clear quarantine.
+the app: startup establishes a safe helper session (versioned staging identity)
+before launching probes, even though its in-memory quarantine was lost.
+Restarting an Activity cannot clear quarantine.
 
-## 8. Evidence and presentation rules
+Every check result carries a stable id: `NATIVE_CHECKS` for the Rust probes,
+`NATIVE_EXTRA_CHECKS`, `CORE_JAVA_CHECKS` and `EXTRA_JAVA_CHECKS` for the
+Java-implemented ones. The probe plan is derived from these registries at request
+time and frozen; per-run outcomes are keyed by id. Ownership in the plan is
+structural (Java-implemented native-level probes are unowned); backend-scoped
+ownership of the Rust probes is applied by the report from the retained layers.
 
-Keep per-vector outcomes, owned/unowned scope and provenance. Stable probe IDs are
-required for Java/native-extra checks too. Native attribution uses its differential;
-Java attribution remains explicitly gate-based inference. Preserve `NothingToLeak`
-and permission-blocked outcomes as distinct from backend suppression.
+## 8. Evidence, presentation and Situation
+
+Keep per-vector outcomes, owned/unowned scope and provenance. Native attribution
+uses its root differential; Java attribution remains explicitly gate-based
+inference. Preserve `NothingToLeak` and permission-blocked outcomes as distinct
+from backend suppression.
 
 Freeze the planned vector set at start; never drop unavailable probes from the
 denominator to manufacture full coverage. A typed unsupported/not-applicable
@@ -424,14 +520,14 @@ reason may exclude a vector only through the probe plan, not a failed read.
 
 For each layer expose counts for backend-hidden, system-blocked, nothing-to-leak,
 leaking, not-measured and not-yet-run, plus uncovered observations separately.
-Derive the owned-scope headline in this precedence:
+Derive the owned-scope conclusion (`EvidenceConclusion`) in this precedence:
 
-| Evidence | Headline meaning |
+| Evidence | Conclusion |
 |---|---|
-| At least one owned leak observed | Owned leak observed; attach historical/partial qualifiers where needed |
-| No attributable observation of hiding/leak (only nothing-to-leak or unavailable) | Insufficient evidence to assess hiding |
-| No owned leak, some hiding/blocking evidence, required probes incomplete/unmeasured | Partial verification; show missing coverage |
-| Complete and interpretable plan, hiding/blocking evidence, no owned leak | No leak observed in the tested scope; show attribution counts |
+| At least one owned leak observed | `OwnedLeak` |
+| No attributable observation of hiding/leak (only nothing-to-leak or unavailable) | `Insufficient` |
+| No owned leak, some hiding/blocking evidence, run incomplete or probes unmeasured | `Partial` |
+| Complete plan, hiding/blocking evidence, no owned leak | `NoObservedLeak` |
 
 This is not a replacement for module presence/readiness. A system-blocked vector
 supports limited visibility, not that a module worked. Unowned leaks stay in a
@@ -439,18 +535,75 @@ neutral coverage section and do not inflate actionable issue counts. Findings
 from an interrupted run remain observations with context warnings, not a fresh
 backend verdict. Nothing here claims every selected app is protected.
 
-Dashboard, detail and bridge use the same `Presentation(revision, setup, eligibility,
-activeRun, lastAttempt, selectedMeasurement, applicability, findings)` projection:
+**The presentation.** Every consumer renders one projection,
+`DiagnosticPresentation`: the shared eligibility; routing as knowledge; the
+active run (id, whether it is automatic, stage, partial evidence); the latest
+attempt with its outcome, failure, measurement and blocking eligibility; the
+latest complete measurement with its results, applicability and evidence
+summary; `currentSuccess` (completed execution, sufficient evidence, an
+applicable measurement and eligible conditions); `probeUnavailable`; the current
+measurement key; and `confirmationPending`. Progress appears immediately and
+never uses null as a synonym for loading. A failed latest attempt is visible even
+if a previous complete measurement exists. A positive current claim requires
+MatchesLastObservation; historical findings remain accessible without it.
 
-- Setup describes persistence/application/restart and observed module health.
-- Progress appears immediately and never uses null as a synonym for loading.
-- A failed latest attempt is visible even if a previous complete measurement exists.
-- A positive current summary requires completed execution, sufficient evidence and
-  MatchesLastObservation; historical findings remain accessible without that claim.
-- VPN-off/excluded and observation errors have explicit explanations/actions. They
-  do not suppress unrelated module errors or make support capture inaccessible.
-- Detailed views identify the run they show; updates to progress cannot silently
-  replace a user-selected historical measurement.
+**The Situation.** `situation(presentation, now)` classifies once, in one
+precedence, into an exhaustive `Situation`: `Initializing`; `Checking(what,
+lastKnown, reason, since)` with `what` = the VPN state, the suite or a
+configuration change being applied; `VpnOff`; `NotMeasurable` (self excluded);
+`ActionNeeded(RestartApp | RestartDevice | ApplicationFailed |
+ApplicationUnknown)`; `CouldNotCheck(RoutingUnknown | RunFailed | Interrupted |
+ProbeUnavailable)`; `Measured(evidence, staleness)` with staleness `Current`,
+`Changed` or `Confirming(reason, since)`. Precedence: process health
+(initialization, a quarantined probe) → the action the user owes → a
+configuration change applying → routing knowledge → a run in flight → a pending
+confirmation → the latest attempt → the measurement. A `Verifying` read is
+`Checking` at once for `Explicit` and `Transition` causes and after a 2 s grace
+for `Background` ones; inside that grace the last known fact stands and the
+measurement is `Confirming`, which every surface renders exactly like `Current`.
+An automatic confirmation of a still-applicable measurement is silent for the
+length of the run; an explicit re-run, an automatic run after a change, and a
+confirmation about to be requested are `Checking(Suite)`, so a stale measurement
+is never worded as a result to re-check by hand while the owner is about to
+replace it. A run that never started because of a condition is never a failed
+check (I13). `DiagnosticsCache.situation` publishes one value per presentation
+plus a single re-emission when a Background grace expires while the read is
+still in flight; it words, it never schedules a run (I16).
+
+**The surfaces.** The Dashboard hero and the Diagnostics banner are two wording
+maps over the Situation (`heroVisual`, `diagnosticScreenDecision`); the tiles,
+the issue counts, the results list and the attempt notice stay per-surface side
+channels. The hero's colour is a function of the case: `Checking` is neutral with
+a progress indicator and a subtitle naming what is checked, keeping the last
+known condition's prompt with a busy button; `VpnOff` and `NotMeasurable` are
+neutral; `ActionNeeded` and `CouldNotCheck` are Attention with the action or the
+cause in the subtitle and the matching prompt; `Measured` takes the worst signal
+of the tiles and the dashboard issues, and a changed or insufficient measurement
+is at least Attention without ever softening a red one. The top-bar indicator
+follows only `Explicit` derivations.
+
+**The Dashboard state** is a projection, not a cache. `DashboardCache` caches
+`DashboardRootFacts`, the half derived from the root snapshot alone (modules,
+LSPosed, targets, environment, installed optional hooks, the legacy-import
+prompt); `DashboardCache.state` combines those facts with the live presentation
+and assembles the protection tiles (`protectionVerdict`: the latest complete
+measurement rendered against its own retained layers is `Checked`; without one,
+a latest attempt blocked by a gated eligibility is `Blocked`; everything else is
+`Failed`), the banners and the screen state on every change of either
+(`assembleDashboardState`, pure apart from wording). The tiles and the hero
+therefore always describe the same instant. The state stays null until the root
+facts exist and the suite has a first terminal attempt, so the Dashboard appears
+with its first verdict.
+
+**The bridge and the bundle** carry the same projection: `AgentControl.getState`
+assembles the Dashboard state from the presentation once it reflects a terminal
+attempt (`awaitTerminal`), overlays the current Situation on its tiles
+(`overlayCondition`) so its legacy gate says "VPN off" whenever the hero does,
+and reports the `diagnostics` summary (eligibility, active run, latest attempt,
+measurement identity, applicability, evidence counts and conclusion,
+`currentSuccess`, `probeUnavailable`, `lastKnownRouting`, `routingRead`) from the
+same value; the legacy `gate`/`report` come from `reportGate` on that value. The
+bundle does not carry the Situation itself.
 
 ## 9. Capture and API integration
 
@@ -459,65 +612,41 @@ export a selected run, perform a fresh check with capture, record third-party lo
 Every export records which operation was requested and which RunId, if any, it
 contains. `generatedAt` is payload assembly time; measurement times stay separate.
 
-Historical export pins its selected immutable record, needs no fresh probes and
-does not change logging. Current context, if included, is a separately dated
-section. A fresh forensic session follows:
+Implemented: the debug export does not measure on its own. `DiagnosticsCache.captureRun`
+submits an explicit request carrying a unique `captureId`, which is part of the
+request identity, so a capture can never join a suite whose probes began before
+its logging and counter baseline; with a run active it is admitted as the pending
+run and waits. Forensic order is: acquire the logging token, clear dmesg, then
+run. The bundle reports the run's own outcome: only `Completed` may be `ROUTED`;
+a blocked eligibility becomes its gate; an interrupted, failed, not-started or
+never-admitted run contributes its partial evidence and an explicit reason
+instead of a verdict. `exportDebug` returns `Written(file, errors)` or
+`Failed(reason)`, so an export cannot be silently lost. Capture tokens belong to
+captures, never composables; `effectiveDebug = debugSwitch OR tokens`; release is
+idempotent and never restores an old whole-config snapshot. If mutations are
+paused, cleanup cannot bypass the write barrier: `logging_restore_pending` is
+recorded and recomputed at startup from persisted debug/debugSwitch after process
+death, not from a lost token list. `getState(refresh=true)` remains an observation
+refresh, not a hidden forced suite run.
+
+Designed, not implemented (recorded so the remaining gap is explicit): the
+capture machine
 
 ```text
 Queued -> PreparingLogging -> Baseline -> Checking/Recording
        -> CollectingEvidence -> ReleasingLogging -> Packaging -> Finished
 ```
 
-| State / event | Transition / outcome |
-|---|---|
-| Queued / suite lane available | Reserve it for this forensic session; PreparingLogging |
-| Queued / cancel or admission deadline | Finished(cancelled or busy); no token acquired |
-| PreparingLogging / setup confirmed | Baseline; then request the fresh run or begin recording |
-| PreparingLogging / setup failed or unresolved | Record missing logging; collect available evidence without clearing buffers |
-| Baseline / capture read fails | Record missing baseline; continue with explicit limitation |
-| Checking / run completed, blocked, failed or interrupted | CollectingEvidence with identified run/attempt outcome |
-| Recording / stop, process error or size/duration limit | Stop/drain recorder; CollectingEvidence; retain partial recording/error |
-| CollectingEvidence / complete or deadline | ReleasingLogging, retaining successful sections and failure reasons |
-| Any state after token acquisition / explicit cancel | Stop new acquisition, drain active helpers, then ReleasingLogging; retain existing evidence |
-| ReleasingLogging / confirmed cleanup or deferred recovery obligation | Packaging with cleanup outcome; never wait indefinitely for a paused mutation lane |
-| Packaging / file written | Finished(artifact, completeness, errors, cleanup status) |
-| Packaging / file error or deadline | Finished(artifact_failed, errors, cleanup status) |
-
-The forensic reservation prevents an ordinary run from starting between logging
-setup and baseline. It does not reserve the config lane or prevent user writes;
-relevant writes interrupt the run normally. Release the suite reservation once
-its probes are quiescent, or quarantine their resource. If setup cannot support a
-run, release the reservation and collect partial support evidence. Pure third-party
-recording holds capture ownership but needs no suite reservation after setup.
-
-All failure/cancel paths after token acquisition pass through ReleasingLogging.
-Capture tokens belong to captures, never composables. Acquire/release their desired
-state in the ordered config coordinator; `effectiveDebug = debugSwitch OR tokens`.
-Release is idempotent and never restores an old whole-config snapshot. A stopped
-capture loses its token even if backend cleanup cannot yet be persisted; the
-coordinator separately tracks desired/confirmed logging discrepancy and recovery.
-
-If mutations are paused, cleanup cannot bypass the write barrier. Record
-`logging_restore_pending` and retain a recovery obligation; do not announce logging
-disabled. On safe recovery, recompute from current user intent and remaining tokens
-before permitting new ordinary mutations. This obligation is recomputed at startup
-from persisted debug/debugSwitch after process death, not from a lost token list.
-
-Failure to enable logging or to establish self-test eligibility produces a partial
-support session with explicit missing evidence. Do not clear existing log buffers
-when logging setup failed. A logcat recording concerns its selected reproduction,
-not the recorder app's self-routing verdict; it can proceed with a warning. Failure
-to obtain root evidence must not suppress already-collected app-side evidence.
-Failure to create/write the archive is an explicit artifact failure, never a
-reported successful file. A packaging deadline cannot falsely mark cleanup complete.
-Package only finalized files or bounded immutable copies; a recorder whose
-termination is unproven must not be represented as a completed recording.
-
-Keep compatibility explicit: existing `getState(refresh=true)` remains an observation
-refresh, not a hidden forced suite run. A new run request has its own handle/API.
-New measurement/attempt/eligibility meanings require a bundle schema change and a
-bridge protocol compatibility decision when implemented. Keep old wire backend
-protocols untouched; do not silently reuse old `Ok`/null fields for new meanings.
+with its suite reservation between logging setup and baseline, its own deadlines
+and its cancellation path through ReleasingLogging. Capture-logging acquire and
+release keep their `finally` semantics and `LogcatRecorder` is unchanged. The
+rules that machine must keep when it is built: all failure/cancel paths after
+token acquisition pass through ReleasingLogging; a packaging deadline cannot
+falsely mark cleanup complete; package only finalized files or bounded immutable
+copies; a recorder whose termination is unproven is never represented as a
+completed recording; failure to obtain root evidence never suppresses
+already-collected app-side evidence; new measurement/attempt/eligibility meanings
+require a bundle schema change and a bridge compatibility decision.
 
 ## 10. Invariants
 
@@ -539,12 +668,17 @@ protocols untouched; do not silently reuse old `Ok`/null fields for new meanings
 | I14 | Capture release happens once logically; logging restoration is never falsely acknowledged |
 | I15 | No secret enters state, diagnostic payloads, conflict fields or error text |
 | I16 | Recomposition, timer ticks and observation refresh do not independently schedule completed-test reruns; a rerun is owed only by a measurement key nothing covers, once per key |
+| I17 | Anything that must agree with the presentation (tiles, banners, the bridge's gate) is projected from it, never cached beside it |
 
 ## 11. Scenario traces for implementation tests
 
-These are acceptance traces, not executed tests. Fake effects must expose explicit
-suspension points at dispatch, file replacement, activation, core/slow probes and
-publication. Assert intermediate publications and effect counts, not just final values.
+These are acceptance traces. The pure reducers are tested with explicit fake
+effects (`ConfigOperationDataTest`, `ObservationDataTest`, `DraftDataTest`,
+`DiagnosticRunDataTest`, `DiagnosticRunCoordinatorTest`, `MeasurementDataTest`,
+`DiagnosticEligibilityDataTest`, `SituationDataTest`, `DashboardUiStateTest`,
+`DiagnosticConfirmationDataTest`), and `DiagnosticDomainTest` drives the wired
+diagnostic domain through its observation flows with a fake helper. Assert
+intermediate publications and effect counts, not just final values.
 
 | ID | Events | Required result / invariants |
 |---|---|---|
@@ -559,13 +693,13 @@ publication. Assert intermediate publications and effect counts, not just final 
 | T9 | Active run -> Activity recreated / bridge awaiter disconnects | Same RunId continues; no second suite; I6, I9 |
 | T10 | Old NotStarted/Failed -> explicit retry | Synchronously allocate new request; waiter never receives old terminal result; I5 |
 | T11 | Core complete -> slow phase error | Partial evidence retained; failed attempt visible alongside last complete measurement; I10, I13 |
-| T12 | Complete run A -> known VPN off -> VPN on with same apparent identity | A stays Changed; no automatic rerun; I11, I16 |
+| T12 | Complete run A -> VPN off -> VPN on with the same routing identity | A matches again; no rerun. With a new identity (a re-established tunnel): A is Changed, exactly one automatic confirmation, never "re-check needed" meanwhile; I11, I16 |
 | T13 | Complete run -> root read error -> consistent successful reobservation, no known change | Unverified then MatchesLastObservation; dates preserved; I10–I11 |
 | T14 | Core probes -> relevant save dispatched -> late probe response | Interrupted evidence; late response cannot certify new config; I10–I11 |
-| T15 | Eligible -> network event between app and root samples | Context interrupted/unverified; no fresh differential claim; I11 |
+| T15 | Eligible -> network event between the two context reads | Interrupted; no fresh differential claim; I11 |
 | T16 | Complete suite: all NotMeasured; then nothing-to-leak-only fixture | Insufficient evidence in UI, bridge and export; I12–I13 |
 | T17 | Current gate unknown with old successful test | Explicit unknown everywhere; history visible; no endless spinner/current green; I11, I13 |
-| T18 | Active normal run -> forensic request | Wait for own baseline/logging before a new suite; cannot join old probes; I9 |
+| T18 | Active normal run -> forensic request | Waits as the pending run; cannot join old probes; I9 |
 | T19 | Capture -> user turns debug off -> capture ends twice | Effective logging kept during token; one release; restore current intent; I14 |
 | T20 | Capture ends while mutation unresolved | Stop recording; release token; pending cleanup evidence; no barrier bypass; I1, I14 |
 | T21 | Blocked self-test / failed root during support collection | Partial artifact when writable, explicit unavailable evidence, no fabricated verdict; I13 |
@@ -574,489 +708,31 @@ publication. Assert intermediate publications and effect counts, not just final 
 | T24 | Explicit check waits on save -> save becomes Paused | NotStarted(application_unknown); no indefinite waiter; I5 |
 | T25 | Boot changes / app process dies during operation or capture | No claimed continuation; fresh initialization/reconciliation, no inherited draft; I1–I3, I14 |
 | T26 | Whole import/reset with open draft; then discard and resubmit | First rejection has no effect; second uses fresh config; I7–I8 |
-| T27 | Debug or distinct-UID target edit with verified unchanged self projection | No new suite and no false semantic change; refresh resource observations as needed; I16 |
-| T28 | UI render and agent snapshot from same presentation revision | Identical eligibility, selected RunId, applicability and findings; I13 |
+| T27 | Debug or distinct-UID target edit, or the startup reconcile, with unchanged self projection | No new suite and no false semantic change; I16 |
+| T28 | UI render and agent snapshot from same presentation value | Identical eligibility, selected RunId, applicability and findings; I13, I17 |
 | T29 | Canonical remember setting persists -> secret command fails or times out | Explicit independent phases/repair; no secret in logs, state or bundle; I1–I3, I15 |
 | T30 | Capture reserves suite -> logging command waits on config lane | Config completion does not wait for suite/dashboard; bounded capture outcome, no cycle; I1, I5, I9 |
+| T31 | Foreground return while the resume re-read is in flight, then a re-established tunnel | Nothing owed while routing is Verifying; one confirmation for the new key once Known; the same key read again reruns nothing; I16 |
+| T32 | A run finishes while the Dashboard state was derived earlier | The tiles follow the presentation on the same emission; no attempt-id bookkeeping; I17 |
 
-## 12. Implementation boundary and validation
+## 12. Validation boundary
 
-The state-machine policy above is specified; these concrete adapters must be
-implemented and verified before making runtime guarantees:
+Pure reducer tests prove decisions for supplied events; they cannot prove the
+adapters report reality. Run the Kotlin tests, ktlint, detekt, CPD and Android
+lint for code changes, then validate on devices what only devices show: root
+timeouts and late effects, real VPN transitions (off/on, split-tunnel membership
+changes, a re-established tunnel while the app is backgrounded), Activity
+recreation during a run, process restarts and capture cleanup. Device records
+are kept in [vpn-poll-device-validation.md](vpn-poll-device-validation.md) and
+the pull requests that shipped each stage.
 
-- Root phase evidence, atomic-replacement outcome and descendant quiescence on
-  supported root managers, including discoverable previous-process command
-  lifetimes. If quiescence cannot be established, Paused is the designed outcome,
-  not a gap to bypass with another timeout or a new app process.
-- Typed coupled-secret steps preserving current canonical-before-coupled ordering,
-  with redacted evidence and explicit repair actions for partial persistence.
-- Backend-specific impact projection and restart/readiness evidence. Kernel boot
-  features, Zygisk process specialization and LSPosed system_server lifetime are
-  different; never infer consumption from a command exit alone.
-- Finite deadlines for each adapter and resource ownership for shared staging
-  paths/native probes. Choose measured constants in implementation; expiration has
-  the fixed transitions above, never invented success.
-- One presentation revision across feature facades, stable probe IDs, and bundle /
-  bridge versioning with explicit field semantics and compatibility fixtures.
+Known gaps, deliberately open:
 
-Implementation order: pure models/reducers and T1–T30 with fake effects; root/config
-transport and all writers; observation generations; process-owned run execution;
-shared presentation and capture/API serialization. Integrate in validated steps,
-retaining current runtime paths until each replacement's contracts are satisfied.
-Use existing facades/parsers/coverage rules rather than parallel global stores.
-
-Run applicable Kotlin tests, ktlint, detekt, CPD and Android lint for code changes.
-Then separately validate root timeouts/late effects, real VPN transitions, Activity
-recreation, process restarts and capture cleanup on devices. Pure reducer tests
-prove decisions for supplied events; they cannot prove the adapters report reality.
-
-## 13. First implementation: pure transition cores
-
-The first implementation adds ordinary Kotlin data models and top-level pure
-functions, without a new dependency, store singleton, coroutine scope, JSON schema
-or backend protocol. Effects are values; nothing in these reducers executes root
-commands or calls Android services. Existing facades are not connected yet.
-
-Paths below are relative to `lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/`:
-
-| Core | Implemented behavior | Tests in `src/test/kotlin/dev/okhsunrog/vpnhide/` |
-|---|---|---|
-| `ConfigOperationData.kt`, `ConfigRecoveryData.kt` | Ordered admission/preparation, identified phase effects, early confirmed config, independent failures, bounded readback, held mutations, manual recovery, before/after-dispatch UI conflicts | `ConfigOperationDataTest.kt` |
-| `CanonicalSnapshotData.kt`, `StateTransitionData.kt` | Safe effect identities/error categories; detach concrete config and field-path collections at retention boundaries | Config operation snapshot/conflict cases |
-| `ObservationData.kt` | Generation-aware load publication, equivalent-request join, successor-generation wait, last-good retention, failure and identified resource recovery | `ObservationDataTest.kt` |
-| `DraftData.kt` | Untouched-field rebase, revision-aware save acknowledgement, capture token/user intent versus confirmed logging | `DraftDataTest.kt` |
-| `diagnostics/DiagnosticRunData.kt`, `diagnostics/DiagnosticRunControlData.kt` | Identified runs, bounded pending admission, operation dependencies, progressive evidence, context interruption, independent drain deadlines, quarantine, immutable latest attempt/complete measurement | `DiagnosticRunDataTest.kt` |
-| `diagnostics/MeasurementData.kt` | Original/start/end context, applicability and scoped evidence summaries; current success also requires eligible conditions | `MeasurementDataTest.kt` |
-| `diagnostics/DiagnosticEligibilityData.kt` | Shared readiness precedence; unknown routing cannot reuse historical routed state as eligibility | `DiagnosticEligibilityDataTest.kt` |
-
-The tests supply effect responses explicitly, including obsolete responses and
-duplicate deadline events. They do not sleep or depend on actual coroutine
-scheduling. A request deadline and the subsequent drain deadline have different
-identities; replaying the former cannot expire the latter. Recovery evidence also
-belongs to the specific quarantined effect, preventing an old successful cleanup
-response from releasing a newer quarantine.
-
-### What these tests establish
-
-- T1–T8: operation sequencing, independent phase results/recovery, field overlap and
-  revision behavior. T1 currently proves when preparation happens; typed canonical
-  patch construction and real fresh reads remain to be integrated.
-- T10–T17: new run identity after old failure, partial evidence retention, context
-  change/uncertainty and evidence sufficiency. T17 also exercises the pure shared
-  eligibility decision against a failed observation with historical routed data.
-- T18/T23/T24: incompatible capture identities cannot join a run, draining resources
-  cannot be reused, and failed operation dependencies finish waiting requests.
-  Actual logging/baseline preparation for T18 is still capture-adapter work.
-- T19: token ownership and desired versus confirmed logging, including duplicate
-  release and late confirmation. T29: canonical/secret phase independence; the
-  core types never take a secret or arbitrary root-output string.
-
-These are core portions of the traces, not completion of all thirty integration
-scenarios. These pure tests do not exercise Android Activity recreation or
-coroutine ownership. Likewise, explicit fake responses establish
-reducer ordering, not truthful root acknowledgements or hardware behavior.
-
-Validation on 2026-09-15: `./gradlew :app:testDebugUnitTest :app:detekt cpdCheck
-:app:ktlintCheck :app:lintDebug` from `lsposed/` passed. The unit suite contains
-570 tests, including 44 new transition-core tests; none failed or were skipped.
-No APK/device or Android lifecycle validation was performed for this stage.
-
-### Remaining work before runtime connection
-
-1. Startup/config availability and predecessor-quiescence transport. The operation
-   core currently starts with an already-readable confirmed config and proven
-   predecessor quiescence; its constructor documents this precondition.
-2. Typed config intents, their authoritative write/impact sets, validation and
-   no-op planning. `Prepare` identifies the operation; the future coordinator
-   must associate that ID with its typed intent and read current canonical data
-   before constructing the candidate. It must not reuse a screen's full snapshot.
-   Whole import/reset and auto-hide draft rules still need their typed producers.
-3. The process-owned dispatcher/effect runner: publish before executing effects,
-   associate each handle with its own completion, and forward relevant operation
-   acceptance/dispatch/completion events to diagnostic dependencies/context.
-   Decide absolute adapter deadlines and cancellation authority there. Generic
-   observation/draft payloads must be immutable values supplied by their adapters.
-4. Connect the existing `StateCache`, config and diagnostic facades; compute real
-   self-context projections and probe plans with stable IDs. The pure request
-   deadline is armed once on admission, including for pending requests; drain
-   effects arm a separate cleanup deadline.
-5. Capture reservation/collection/packaging and deferred cleanup through the config
-   barrier (T20/T21/T30); UI lifecycle holders and a common presentation revision
-   (T9/T28); import/reset integration (T26) and concrete impact classification (T27).
-6. Bundle/bridge compatibility, startup/process-death reconstruction (T25), and
-   device validation. No serialized types or runtime wire semantics changed in
-   this first core implementation.
-
-## 14. Mutation transport implementation
-
-The next stage implements `vhmutate` plus a bounded Kotlin process runner,
-versioned binary staging and typed receipt/readback adapters. Its protocol,
-quiescence proof, limits, device evidence and exact migration boundary are in
-[root mutation transport](../root-mutation-transport.md). The transport is packaged
-but existing app writers are not connected yet.
-
-Recovery can consume a still-undispatched sequence in transport metadata. This
-fences a root launch delayed beyond the app timeout; it never repeats a config,
-secret or activation effect. The “read-only” recovery policy in section 3 excludes
-application mutations, while permitting this lifetime-metadata update.
-
-## 15. Coordinator engine and typed config edits
-
-`ConfigCoordinator` now executes the config reducer through identified coroutine
-effects; `ConfigRootIo` connects it to the retained root session and receipts.
-Typed edits apply to fresh preparation reads, preserve declared intent for conflict
-checks, support no-op plans and keep persistence separate from activation failure.
-The engine and adapter are exercised by coroutine/adapter tests; existing app
-writers and UI are not connected yet. The exact implementation, validation and
-all-writer migration boundary are in [config coordinator](../config-coordinator.md).
-
-
-## 16. Configuration runtime connection
-
-All app configuration producers now use the coordinator and root transport.
-Settings switches render optimistic intent with progress; Activity ViewModels
-retain editor drafts and acknowledge only saved revisions. Capture logging tokens,
-bridge conflicts, cleanup/reset and startup share this ownership. Implementation,
-validation boundaries and remaining observation/diagnostic work are tracked in
-[config coordinator](../config-coordinator.md). Earlier implementation sections above
-record the intermediate stages; their disconnected-runtime statements are historical.
-
-## 17. Observation runtime connection
-
-`StateCache` now executes the observation reducer in a process-owned coordinator.
-Root invalidation synchronously advances dependent generations; obsolete success
-and failure cannot publish. Awaiters join shared reads and can detach without
-cancelling the worker. Read deadlines quarantine a still-running worker until it
-returns, with no overlapping replacement. App inventory metadata is published
-with its app list, and root-derived projections carry source observation IDs.
-
-This does not implement an atomic presentation revision across all screens and
-diagnostic measurements. The existing diagnostic run lifecycle, capture stages
-and their legacy subprocesses remain outside this connection. Concrete deadlines,
-retry behavior, dependencies and validation are documented in
-[observation coordinator](../observation-coordinator.md).
-
-## 18. Diagnostic execution runtime connection
-
-`DiagnosticsCache` is now a facade over a process-owned `DiagnosticRunCoordinator`
-that executes `reduceDiagnosticRun` under one short lock and runs its identified
-effects on the observation runtime scope. Every suite is an immutable, identified
-attempt; leaving a screen or recreating the Activity detaches a waiter and never
-cancels or restarts a run (T9). An explicit retry allocates a new run whose handle
-resolves only with that run's own result (T10). A slow-phase failure retains the
-core evidence beside the previous complete measurement (T11). Explicit cancel
-drains the run's outstanding helper jobs; an unproven drain quarantines the probe
-resource until the late helper returns, and requests are rejected meanwhile (T23).
-
-The context effect goes through the shared `RoutingGateCache` and folds it with
-`diagnosticEligibility` into `DiagnosticContextObservation`. "Fresh" means not
-invalidated (`routingReadPlan`): a current observation is reused, an in-flight
-read is joined, and only a stale, failed or absent observation forces a new root
-snapshot plus routing probe. VPN callbacks and config writes invalidate it, so a
-known change always causes a new read, while the end-context read of an
-undisturbed run costs no second root shell. A blocked Checking observation is the new
-`NotEligible` reducer event: a terminal `NotStarted` attempt that records the
-eligibility, launches no probe and does not consume the startup automatic intent.
-An eligible observation yields the `MeasurementContext`: process/boot subject, the
-self UID's role and hook selection plus global optional features, the observed VPN
-interfaces with this UID's routing verdict, and backend/optional-hook/LSPosed
-coverage, with the root observation ID. The same observation runs again at
-Verifying under the same freshness rule; a changed identity finishes the run as
-Interrupted with its evidence retained (T14/T15 for changes visible between the
-two reads).
-
-Every check result now carries a stable id: `NATIVE_CHECKS` for the Rust probes,
-`NATIVE_EXTRA_CHECKS`, `CORE_JAVA_CHECKS` and `EXTRA_JAVA_CHECKS` for the
-Java-implemented ones. The probe plan is derived from these registries at request
-time, per-run outcomes are keyed by id, and the report uses the ids instead of
-list position or an empty string. The bundle schema is unchanged: the report's
-`id` field existed and was empty for Java checks.
-
-Boundaries of this stage:
-
-- Config readiness is treated as settled and `changeEpoch` stays at zero.
-  Operation dependencies (Waiting on accepted config operations), epoch
-  advancement at mutating dispatch, `Applying`/`ApplicationUnknown` eligibility
-  and re-triggering after settlement are the next stage. The startup runtime
-  reconcile can therefore still overlap the automatic suite; a self-projection
-  change during a run is still detected by the end-context identity.
-- Screens, Dashboard, bridge and export keep rendering the legacy
-  `DiagnosticsCache.State` projection (`NotRun`/`Running`/`Blocked`/`Failed`/
-  `Ready`). An interrupted or deadline-expired attempt renders as `Failed`;
-  applicability, evidence sufficiency and the shared presentation revision are
-  not surfaced yet. The identified view is available as `DiagnosticsCache.runs`.
-- `awaitTerminal` (Dashboard derivation, agent `getState`) joins the active run or
-  returns the latest finished attempt; it never retries a terminal Blocked/Failed
-  attempt, so a dependent observation invalidated by the eligibility read cannot
-  form a cycle. `retry` keeps the existing policy: a completed suite is reused.
-- Debug export no longer runs its own independent `runAllChecks`: it requests a
-  capture-identified run from the coordinator (§20). The rest of the capture
-  machine — reservation, its own states and deadlines — is still not implemented.
-- Probe ownership in the frozen plan is structural (Java-implemented native-level
-  probes are unowned); backend-scoped ownership is still applied by the report.
-
-Validation on 2026-09-15: 671 JVM tests passed (16 added for this stage: a
-coordinator test with gated fake effects and deadlines, a context/projection test
-and a reducer test), warnings-as-errors compilation, ktlint, detekt, CPD and
-Android `lintDebug` passed. No APK was installed for this stage; Activity
-recreation during a real run, root timeouts and the VPN transition between the
-two context reads remain device-validation items.
-
-## 19. Operation impacts on diagnostic runs
-
-The config coordinator publishes each accepted operation's lifecycle to a
-`ConfigOperationObserver` synchronously from its actor, in dispatch order:
-acceptance (before any effect, with the operation's spec), every mutating root
-dispatch (phase), the single result delivery, and a later manual recovery.
-`DiagnosticsCache` receives it through `DiagnosticImpactObserver` and the pure
-`reduceDiagnosticImpact`:
-
-- Relevance (`operationAffectsSelfMeasurement`) is decided from the declared
-  write set: this app's own roles and hook selection (`apps/<self>/…` or the
-  whole `apps` domain), global optional features (`settings/optionalFeatures` or
-  the whole `settings` domain), and whole replacements (import, reset, removal).
-  Other apps' roles, debug logging, auto-hide bookkeeping and a forced activation
-  without a write (the startup runtime reconcile) are not relevant: they neither
-  delay nor interrupt a suite (T27, and the decision recorded in §2 and §6).
-- An accepted relevant operation is added to every new request's dependencies
-  and sent as `OperationAccepted` to the run reducer, so a waiting or checking
-  run waits for it. Request identity ignores dependencies: a request made while
-  a run is active joins it (the active run already carries every accepted
-  operation) instead of queueing a second suite.
-- The first mutating dispatch of a relevant operation advances `changeEpoch` and
-  sends `ContextChanged(known)`: a probing run drains and finishes Interrupted,
-  a checking run finishes NotStarted(context_changed). Later phases of the same
-  operation belong to that change.
-- Settlement sends `OperationSettled(id, failure)`: a waiting run proceeds to a
-  fresh Checking observation; a failed or unresolved (Paused) operation finishes
-  the waiting run NotStarted with that failure (T24).
-- Readiness for eligibility comes from the same state: an unresolved relevant
-  operation is `ApplicationUnknown`, an in-flight one `Applying`, a known-failed
-  one `ApplicationFailed` until a later relevant operation succeeds or manual
-  recovery resolves it; `changeEpoch` enters the measurement context.
-
-Boundaries: the epoch is only advanced by config operations; VPN transitions
-still enter through the routing gate invalidation and the end-context identity
-comparison, and `uncertaintyEpoch` is not implemented. Screens keep rendering the
-legacy projection; a run finished NotStarted because of a failed or unresolved
-operation renders as `Failed`.
-
-Validation on 2026-09-15: JVM tests (impact reducer and relevance, coordinator
-dependency/settlement/interrupt scenarios, observer ordering in the config
-coordinator, readiness in the context builder, join ignoring dependencies),
-warnings-as-errors compilation, ktlint, detekt, CPD, Android `lintDebug` and the
-signed release build. Device validation of a save during a running suite is
-pending.
-
-## 20. Capture through the run coordinator
-
-The debug export no longer measures on its own. `DiagnosticsCache.captureRun`
-submits an explicit request carrying a unique `captureId`, which is part of the
-request identity, so a capture can never join a suite whose probes began before
-its logging and counter baseline (§9); with a run active it is admitted as the
-pending run and waits. Forensic order is unchanged: acquire the logging token,
-clear dmesg, then run.
-
-The bundle now reports the run's own outcome. `debugSelfTestFrom` maps the
-terminal attempt onto `gate` / `checkResults` / `selfTestRunId` / `errors`: only
-`Completed` may be `ROUTED`; a blocked eligibility becomes its gate; an
-interrupted, failed, not-started or never-admitted run contributes its partial
-evidence and an explicit reason instead of a verdict. `exportDebug` returns
-`Written(file, errors)` or `Failed(reason)`, so an export can no longer be
-silently lost — the old path derived the gate with `captureGateFrom`, which
-throws when self-routing is unknown and returned `null` for the whole export.
-`captureGateFrom` stays: it backs `RoutingGateCache`, the pre-collect warning
-and the runs' routing observation.
-
-Not implemented, deliberately: the §9 capture machine itself — Queued /
-PreparingLogging / Baseline / CollectingEvidence / ReleasingLogging / Packaging,
-its suite reservation, its own deadlines and cancellation path. Capture-logging
-acquire/release keeps its current `finally` semantics, and `LogcatRecorder` is
-untouched.
-
-## 21. Shared presentation projection
-
-Deviation from §1 and §8, recorded deliberately: there is no global dispatcher
-and no single presentation revision published per logical event. The three
-coordinators publish immutable states independently; `DiagnosticsCache.presentation`
-is a `combine` of the run view, the routing observation, the root snapshot, the
-confirmed config and the operation impact, mapped by the pure
-`diagnosticPresentation`. Each emission is computed from one instant of all five
-sources, which is the property §8 needed; ordering across coordinators remains
-"the app received it in this order", as §1 already said.
-
-`DiagnosticPresentation` carries the shared eligibility, the active run (id,
-stage, partial evidence), the latest attempt with its evidence, the latest
-complete measurement with its evidence, its applicability
-(`measurementApplicability`: Absent / Changed / Unverified /
-MatchesLastObservation), the evidence summary and `currentSuccess`
-(`canPresentCurrentSuccess`). A routing observation that is loading, invalidated,
-failed or quarantined makes the measurement Unverified; a consistent reobservation
-restores it (T13). A known change (epoch or identity) makes it Changed while the
-history stays visible (T12). A failed later attempt is exposed beside the last
-complete measurement (T11). All-unmeasured evidence is Insufficient (T16).
-
-The Diagnostics screen renders the projection through the pure
-`diagnosticScreenDecision` (classify, then word): current conditions first
-(Initializing/Checking → progress, or an existing measurement shown as unverified
-while routing is re-read; RestartApp; VpnOff; SelfExcluded; Applying;
-ApplicationUnknown; ApplicationFailed; routing Unknown with a retry, never an
-endless spinner), then a run in flight (progress, partial evidence listed as
-incomplete), then a failed or interrupted latest attempt (its own prompt when no
-complete measurement exists, a notice beside the history otherwise), then the
-latest complete measurement: Insufficient evidence outranks applicability, and
-applicability words the banner (ready, results changed with a retry that starts
-a new run, results unverified). The screen no longer overlays the live gate on
-the legacy state; the presentation the live gate feeds is what owes the
-automatic suite (`owedConfirmation`).
-
-The Dashboard hero renders the projection through the pure `heroDecision`: the
-cached tiles are overlaid with the current eligibility (`effectiveProtection`,
-which replaces the former live-gate overlay), and a `HeroNote` qualifies the
-subtitle. Notes that make a positive claim unsafe (a configuration change
-applying, unresolved or failed; unknown routing; a checking state with no
-measurement; an interrupted or failed latest attempt; a changed measurement;
-insufficient evidence) downgrade a Protected hero to Attention. ResultsUnverified
-only names a refresh in flight and keeps the previous status, so a routine
-Dashboard refresh does not flicker; this is a deliberate softening of §8's
-"positive summary requires MatchesLastObservation" for the duration of one
-routing re-read. The skeleton gate uses the projection's active run instead of
-the legacy terminal state.
-
-The bridge (`AgentControl.getState`) and the debug bundle carry the same
-projection as an additive `diagnostics` object on `VpnHideState`
-(`DiagnosticSummaryInfo`: eligibility, active run id and stage, latest attempt
-outcome/failure/blocking eligibility, measurement run id, start/end and
-observation id, applicability, evidence counts and conclusion, `currentSuccess`),
-filled from `DiagnosticsCache.presentation.value` at assembly time. The legacy
-`gate`/`report` fields stay with their meaning, so the bundle schema is not
-bumped; a `ROUTED` report next to `applicability: Changed` describes an earlier
-state, and docs/debug-bundle.md says so. The logcat recorder leaves the object
-null. With this, every consumer named in §21 renders the one projection.
-
-Boundary: capture reservation, cancellation and packaging still use the older
-orchestration (§20); the §9 capture machine is deliberately not implemented.
-`MeasurementContext.coverageLayers` carries the typed layers behind the coverage
-identity (backend, installed optional hooks, LSPosed liveness), and the per-check
-list and the Dashboard tiles build a retained measurement's report from them
-(§6); only an active run's partial evidence is attributed with the live layers.
-The derivation is memoised per snapshot observation id, since the presentation
-re-derives the context on every emission of any source.
-Probe quarantine is now a presentation condition: `DiagnosticPresentation.probeUnavailable`
-carries `DiagnosticRunState.quarantined`, the Diagnostics screen words it as its
-own banner (outranked by a current condition, outranking the retained history it
-keeps listed, because the Re-check button under that history would only be
-rejected), the Dashboard hero names it before any eligibility note, and the
-bundle/bridge summary carries the same flag. Relevance (§19) is no longer
-classified from the submitted write set alone: `ConfigOperationObserver.prepared`
-publishes the spec with the prepared write set merged in — the diff of the
-transformed candidate against the fresh base — right after the `Prepared` event
-is reduced and before its first `Execute`, so a `transform`-only write to
-`apps/<self>` delays new runs from that moment and its first mutating dispatch
-interrupts an active one. Relevance only ever increases.
-
-The legacy `DiagnosticsCache.State` projection (`NotRun`/`Running`/`Blocked`/
-`Failed`/`Ready`) is retired, together with the `DiagnosticsCache.runs` accessor,
-the presentation's unrendered `lastAttemptResults` / `staleFailureVisible` and
-`StateCache.pristine`, none of which had a consumer. The Dashboard derivation and the bridge still join
-the active run or the automatic suite through `awaitTerminal`, which now returns
-the shared presentation once it reflects the terminal attempt (attempt ids are
-monotonic and runs finish in admission order, so the first presentation whose
-latest attempt id reaches the awaited run's id is that instant). The tiles come
-from the pure `protectionVerdict`: the latest complete measurement rendered
-against its own `coverageLayers` is `Checked`; without one, a latest attempt
-that never started because of a gated eligibility is `Blocked`; everything else
-is `Failed`. A later attempt that failed or was interrupted therefore leaves the
-measured tiles in place and is named by the hero note (T11), where the legacy
-projection blanked the tiles. An attempt that never started because of a
-condition (`DiagnosticAttempt.blocked`: NotStarted, no failure, an eligibility)
-is not a failed check (I13): the hero and the Diagnostics history carry no
-notice for it, since the condition is named by the eligibility while it holds
-and is stale once it clears; and while a re-check is in flight the hero only
-names the confirmation (ResultsUnverified) instead of the attempt it is about to
-replace. Found on the device: a Retry with the VPN off, then the VPN coming back,
-flipped a protected hero to Attention twice with "the latest check couldn't run". The bridge's legacy `gate`/`report` come from the
-same presentation value (`reportGate`: `ROUTED` for a retained complete
-measurement, else the blocking eligibility, else null) as its `diagnostics`
-summary, so the two no longer describe different instants. The Dashboard's
-routed-transition refresh keys on the presentation's latest attempt not being
-`Completed`, which is what the legacy `!is Checked` test meant.
-
-## 22. Situation and read reasons
-
-Implemented 2026-09-16 after the design review in
-[ui-state-presentation-review.md](ui-state-presentation-review.md), which found
-that §21's decomposition (cached tiles overlaid with the current eligibility,
-qualified by a note) let the hero claim "VPN hidden" while the VPN state was the
-very thing being re-read, and let the hero and the Diagnostics banner keep two
-precedence orders that had already drifted apart. This section supersedes §21's
-"softening" paragraph and the routed-transition rule above.
-
-Every re-read of an observation states its cause. `ReadReason` is `Background`
-(our own process invalidated it: a root dependency after a config phase or the
-startup reconcile, the foreground-return safety net, the run coordinator's own
-gate reads), `Transition` (the VPN transport or default-network callback said the
-fact may have changed) or `Explicit` (the user asked). The observation reducer
-keeps a `StaleMark(reason, since)` from the moment a re-read is owed until the
-current generation publishes or fails; overlapping causes keep the earliest
-`since` and the strongest reason, and the request that starts carries it.
-
-The presentation carries routing as knowledge, not as an admission decision:
-`RoutingKnowledge.Known(fact, observedAt)`, `Verifying(lastKnown, reason, since)`
-while a re-read is owed or running, or `Unknown(cause, lastKnown)` after a failed
-or quarantined read. Its branches mirror `diagnosticEligibility`'s routing branches
-exactly, so eligibility keeps its values for the run coordinator and the bundle.
-The presentation also names whether the active run is automatic.
-
-`situation(presentation, now)` classifies once, in one precedence, into an
-exhaustive `Situation`: `Initializing`; `Checking(what, lastKnown, reason, since)`
-with `what` = the VPN state, the suite or a configuration change being applied;
-`VpnOff`; `NotMeasurable` (self excluded); `ActionNeeded(RestartApp |
-RestartDevice | ApplicationFailed | ApplicationUnknown)`; `CouldNotCheck(
-RoutingUnknown | RunFailed | Interrupted | ProbeUnavailable)`; `Measured(evidence,
-staleness)` with staleness `Current`, `Changed` or `Confirming(reason, since)`.
-Precedence: process health (initialization, a quarantined probe) → the action the
-user owes → a configuration change applying → routing knowledge → a run in flight
-→ the latest attempt → the measurement. A `Verifying` read is `Checking` at once
-for `Explicit` and `Transition` causes and after a 2 s grace for `Background`
-ones; inside that grace the last known fact stands and the measurement is
-`Confirming`, which every surface renders exactly like `Current`. That grace is
-the bounded, reasoned form of §21's softening: a routine top-up by our own process
-draws nothing, a user-visible cause or a slow read is named. An automatic
-confirmation of a still-applicable measurement is silent for the length of the run
-(the run coordinator's deadline bounds it); an explicit re-run is `Checking(Suite)`.
-A run that never started because of a condition (`DiagnosticAttempt.blocked`) is
-never a failed check (I13). `DiagnosticsCache.situation` publishes one value per
-presentation plus a single re-emission when a Background grace expires while the
-read is still in flight; it words, it never schedules a run (I16).
-
-The Dashboard hero and the Diagnostics banner are two wording maps over the
-Situation (`heroVisual`, `diagnosticScreenDecision`); the tiles, the issue counts,
-the results list and the attempt notice stay per-surface side channels. The hero's
-colour is a function of the case: `Checking` is neutral grey with a progress
-indicator in the icon bubble and a subtitle naming what is checked, keeping the
-last known condition's prompt with a busy button; `VpnOff` and `NotMeasurable`
-are neutral; `ActionNeeded` and `CouldNotCheck` are Attention with the action or
-the cause in the subtitle and the matching prompt; `Measured` takes the worst
-signal of the tiles and the dashboard issues, and a changed or insufficient
-measurement is at least Attention without ever softening a red one. The bridge
-overlays the same condition on its tiles (`overlayCondition`) so its legacy gate
-says "VPN off" whenever the hero does. The top-bar indicator follows only
-`Explicit` derivations. An explicit re-check always requests a new suite. The
-automatic confirmation is no longer an event: `owedConfirmation` reads the
-presentation and asks for one automatic run per measurement key that no
-measurement, no attempt and no earlier request covers (2026-09-17, replacing the
-`Transition`-driven edge detector, which lost the excluded → included edge on a
-foreground return because its baseline was invalidated by the resume re-probe).
-A gate already routed when the screen composes, a re-established tunnel seen on
-return, and a session change seen by the poller therefore take one path. An
-own-roles save advances the change epoch and so is a new key, which the owner
-confirms once after the operation settles; the foreground-return re-probe stays
-`Background`.
-
-Boundary: the activator does not report whether a forced activation changed
-anything, so the startup reconcile still invalidates root observations and the
-Background grace is what keeps that re-read silent; a targeted invalidation of
-runtime-only sections is the cheaper follow-up if the background work matters.
-The bundle carries `lastKnownRouting` and `routingRead(reason, pendingMs)` but not
-the Situation itself.
+- The §9 capture machine (reservation, its own states, deadlines and
+  cancellation path).
+- No single presentation revision across all coordinators (§1 deviation); the
+  diagnostic presentation is one instant of its own sources.
+- The startup runtime reconcile invalidates every root observation because the
+  activator does not report whether a forced activation changed anything; the
+  Background grace keeps that re-read silent. A targeted invalidation of
+  runtime-only sections is the cheaper follow-up if the background work matters.

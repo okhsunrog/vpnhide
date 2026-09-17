@@ -8,7 +8,9 @@ on explicit; 2 one confirmation suite on a routed transition while the Dashboard
 is up; 3 Transition grace 0; 4 neutral grey, no fifth colour; 5 self excluded
 neutral; 6 own-roles save keeps Changed plus a manual re-check (earlier
 maintainer decision); 7 foreground return is Background; 8 additive bundle
-fields, no bump. Stage 8 (activator "runtime unchanged" marker) was declined in
+fields, no bump. Decisions 2 and 6 were superseded on 2026-09-17: the owed
+confirmation (transition contract §7) replaced the routed-transition trigger and
+confirms an own-roles save automatically. Stage 8 (activator "runtime unchanged" marker) was declined in
 favour of a targeted invalidation if the background work ever matters. Paths
 below are relative to `lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/` and
 describe the code as it was before the change.
@@ -381,7 +383,8 @@ surfaces, 7–8 clean up.
    by `Situation`, tiles by `LayerStatus`; `lsposed/AGENTS.md`: add `Situation`
    / `situation()` to the load-bearing list next to `DashboardIssue` with the
    same "never a `res.getString` in the classifier" rule;
-   `docs/notes/state-refactor-handoff.md` item 5: closed by this work.
+   the state-refactor handoff note, item 5 (the note was retired once every
+   item closed): closed by this work.
    Changelog fragment (user-visible): fixed — the Dashboard no longer says
    "VPN hidden" while the VPN state is being re-read, shows a neutral
    "Checking…" state instead, and no longer flips its subtitle at startup.

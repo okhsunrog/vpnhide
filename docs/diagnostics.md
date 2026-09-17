@@ -9,10 +9,12 @@ For the hiding side (which backend covers which detection vector) see
 For the baseline execution states, screen/export dependencies, historical decisions
 and the semantic questions that motivated the redesign, see the
 [diagnostics state analysis](notes/diagnostics-state-analysis.md). The replacement is
-specified in the [app state transition contract](notes/app-state-transitions.md);
-its diagnostic execution (§18), operation impacts (§19), capture through the run
-coordinator (§20) and the shared presentation projection (§21) are implemented;
-only the §9 capture machine (reservation, cancellation, packaging) is not.
+specified in the [app state transition contract](notes/app-state-transitions.md):
+diagnostic execution and operation impacts (§7), the presentation, the Situation
+and the Dashboard projection (§8) and capture through the run coordinator (§9)
+are implemented; only the §9 capture machine (reservation, cancellation,
+packaging) is not. How each stage got there is in the
+[contract's implementation history](notes/app-state-transitions-history.md).
 
 The [observation coordinator](observation-coordinator.md) owns cache refreshes,
 and a process-owned `DiagnosticRunCoordinator` behind `DiagnosticsCache` owns
@@ -131,7 +133,7 @@ gate (§5) guarantees a VPN artifact was present to hide.
 The tiles are one input to the hero, not the hero: its colour, title, subtitle and
 the prompt under it are decided from the one `Situation` every surface renders
 (`situation()` in `diagnostics/SituationData.kt`, worded by `heroVisual`; see the
-transition contract §22). A `LayerStatus` only ranks a `Measured` situation.
+transition contract §8). A `LayerStatus` only ranks a `Measured` situation.
 
 Each dashboard tile is a `LayerStatus`: `Absent` (no module installed) · `Inactive`
 (installed, not loaded this boot) · `Active(hidden, leaks)`. Presence is decided

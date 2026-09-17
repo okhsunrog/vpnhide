@@ -37,7 +37,7 @@ you add to any of them:
 | name | what it actually is |
 |---|---|
 | `DiagnosticsScreen`, *Detailed diagnostics* | the user-facing check suite |
-| `DiagnosticsCache`, `DiagnosticRunCoordinator` | the **run state** of that suite: identified, process-owned runs (`DiagnosticRunView`) projected onto NotRun / Running / Blocked / Failed / Ready |
+| `DiagnosticsCache`, `DiagnosticDomain`, `DiagnosticRunCoordinator` | the **run state** of that suite: identified, process-owned runs (`DiagnosticRunView`) folded with the observations into one `DiagnosticPresentation`, classified once into a `Situation` |
 | `DiagnosticReport`, `buildDiagnosticReport`, `DiagnosticCheck` | the **canonical model** the screen and the bundle both render — see `docs/diagnostics.md` |
 | `DiagnosticGate`, `RoutingGateCache`, `resolveDiagnosticGate` | the **precondition** for a meaningful run (VPN up, this app routed) — not a check |
 | `HookDiagnostics`, `ConnectivityAttachDiagnostics`, `KpmDiagnostics` | attach/telemetry for the hooks themselves; **not part of the suite** |
