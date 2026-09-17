@@ -7,6 +7,7 @@ pub mod config_edit;
 pub mod config_file;
 pub mod listener;
 pub mod observer;
+pub mod operation;
 pub mod publisher;
 pub mod server;
 

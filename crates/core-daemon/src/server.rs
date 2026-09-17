@@ -15,13 +15,13 @@ use tokio::net::UnixStream;
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use tokio_util::sync::CancellationToken;
 use vpnhide_core_rpc::{
-    Accepted, BaseRef, CanonicalConfig, ClientHello, ConfigEdit, ConfigPhase, Handshake,
-    OperationId, OperationRecord, PhaseOutcome, PhaseRecord, Published, SubmitError, VpnhideCore,
-    PROTOCOL_VERSION,
+    Accepted, BaseRef, CanonicalConfig, ClientHello, ConfigEdit, Handshake, OperationId,
+    OperationRecord, Published, SubmitError, VpnhideCore, PROTOCOL_VERSION,
 };
 
 use crate::config_edit::apply_canonical_edit;
 use crate::config_file;
+use crate::operation::{self, RealPhaseRunner};
 use crate::publisher::Publisher;
 
 /// This core build, reported in the handshake for diagnostics only.
@@ -93,10 +93,14 @@ impl CoreState {
         self.config.lock().expect("config mutex").config.is_some()
     }
 
-    /// Apply one typed edit against fresh config (§5). Coarse optimistic concurrency: the
+    /// Admit one typed edit (§5) and run its phase plan. Coarse optimistic concurrency: the
     /// caller's `base` must match the current config revision, or the edit is a conflict.
-    /// Operation phases and durable persistence are the next steps; this records a settled
-    /// single-phase op and publishes the new config into the replica.
+    ///
+    /// Admission failures (conflict, no config to edit, a reused id) are `Err(SubmitError)`.
+    /// An **admitted** edit returns `Ok(Accepted)` and its execution outcome — including a
+    /// phase failure — lives in the queryable [`OperationRecord`] (settled), the way the app
+    /// accepts an operation and then reports how it settled. `Persist` is the durable commit,
+    /// so only a confirmed `Persist` publishes the new config into the replica.
     fn submit_edit(
         &self,
         op: OperationId,
@@ -110,7 +114,7 @@ impl CoreState {
             return Ok(Accepted { op });
         }
         // Coarse conflict: whole-config optimistic lock. Field-level merge of unrelated
-        // concurrent edits is a later refinement (the operation reducer, §5).
+        // concurrent edits is a later refinement (§5).
         if base.revision != store.config_revision {
             return Err(SubmitError::Conflict { field: "config".to_owned() });
         }
@@ -125,30 +129,23 @@ impl CoreState {
         let next = apply_canonical_edit(&current, edit);
         let changed = store.config.as_ref() != Some(&next);
 
-        // Durable-first (§4): a changed config is written to disk *before* the edit is
-        // acknowledged, so an accepted operation is one that survives a restart. A failed
-        // write means the edit did not happen — no record, no revision bump. (Blocking IO
-        // under the lock is deliberate: it serializes writers and the file is tiny.)
-        if changed {
-            if let Some(path) = &self.config_path {
-                config_file::write_atomic(path, &next)
-                    .map_err(|e| SubmitError::Rejected { reason: format!("persist failed: {e}") })?;
-            }
+        // Run the operation's phase plan. The runner performs the durable write (Persist),
+        // so an accepted edit is on disk before the config is committed in memory. Blocking
+        // IO under the lock is deliberate: it serializes writers and the file is tiny.
+        let plan = operation::plan_for(false);
+        let runner = RealPhaseRunner { config_path: self.config_path.clone() };
+        let outcome = operation::run_plan(&plan, &next, changed, &runner);
+
+        if outcome.persisted {
             store.config = Some(next.clone());
             store.config_revision += 1;
         }
-
-        // Record the settled op (a no-op edit is still an accepted, queryable operation).
         store.operations.insert(
             op,
-            OperationRecord {
-                op,
-                phases: vec![PhaseRecord { phase: ConfigPhase::Persist, outcome: PhaseOutcome::Confirmed }],
-                settled: Some(PhaseOutcome::Confirmed),
-            },
+            OperationRecord { op, phases: outcome.phases, settled: Some(outcome.settled) },
         );
 
-        if changed {
+        if outcome.persisted {
             let revision = store.config_revision;
             drop(store);
             self.publisher.update(|snapshot| {
@@ -233,7 +230,7 @@ pub fn serve_connection(stream: UnixStream, state: Arc<CoreState>, cancel: Cance
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vpnhide_core_rpc::{ConfigToggle, StateSnapshot};
+    use vpnhide_core_rpc::{ConfigToggle, PhaseOutcome, StateSnapshot};
 
     fn server() -> CoreServer {
         CoreServer::new(CoreState::new(Publisher::new(1, StateSnapshot::default())))
