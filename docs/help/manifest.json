@@ -93,7 +93,7 @@
         },
         {
           "id": "ports",
-          "title": { "en": "Hide localhost ports", "ru": "Скрыть localhost-порты", "zh": "隐藏 localhost 端口" },
+          "title": { "en": "Hide localhost ports (Ports)", "ru": "Скрыть localhost-порты (Ports)", "zh": "隐藏 localhost 端口（Ports）" },
           "keywords": {
             "en": ["ports", "localhost", "loopback", "127.0.0.1", "clash", "sing-box", "v2ray", "proxy", "port ranges", "connection refused"],
             "ru": ["порты", "localhost", "loopback", "127.0.0.1", "clash", "sing-box", "v2ray", "прокси", "диапазоны портов", "connection refused"],
@@ -261,7 +261,7 @@
         },
         {
           "id": "config-backup",
-          "title": { "en": "Back up, restore and transfer your config", "ru": "Резервная копия и перенос конфигурации", "zh": "备份、恢复与迁移配置" },
+          "title": { "en": "Back up, restore and transfer your config", "ru": "Резервная копия, восстановление и перенос конфигурации", "zh": "备份、恢复与迁移配置" },
           "keywords": {
             "en": ["backup", "restore", "export json", "import json", "transfer", "another device", "migrate", "pre-1.0", "old configuration"],
             "ru": ["резервная копия", "восстановление", "export json", "import json", "перенос", "другое устройство", "миграция", "до 1.0", "старая конфигурация"],
@@ -270,7 +270,7 @@
         },
         {
           "id": "remove-vpnhide",
-          "title": { "en": "Turning it off, resetting and uninstalling", "ru": "Отключение, сброс и удаление", "zh": "关闭、重置与卸载" },
+          "title": { "en": "Pause, reset and uninstall", "ru": "Отключение, сброс и удаление", "zh": "暂停、重置与卸载" },
           "keywords": {
             "en": ["uninstall", "remove", "reset", "leftover files", "disable", "turn off", "clean up", "delete config"],
             "ru": ["удаление", "удалить", "сброс", "оставшиеся файлы", "отключить", "выключить", "очистка", "удалить конфиг"],
@@ -281,11 +281,11 @@
     },
     {
       "id": "capabilities-limits",
-      "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能力与限制" },
+      "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能做到与做不到什么" },
       "articles": [
         {
           "id": "capabilities-limits",
-          "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能力与限制" },
+          "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能做到与做不到什么" },
           "keywords": {
             "en": ["limits", "limitations", "external ip", "server-side", "anti-fraud", "root", "split tunneling", "anti-cheat"],
             "ru": ["ограничения", "пределы", "внешний ip", "сервер", "антифрод", "root", "split tunneling"],

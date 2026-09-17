@@ -16,7 +16,7 @@ The offline help guide, shipped inside the app (**Settings → Help & guide**) a
 - [Set up hiding](en/configure-hiding.md)
 - [Game accelerators](en/game-accelerators.md)  ·  _EN/ZH only_
 - [Direct access or through the tunnel](en/split-tunneling.md)
-- [Hide localhost ports](en/ports.md)
+- [Hide localhost ports (Ports)](en/ports.md)
 - [Work profiles, clones and second space](en/work-profiles.md)
 - [When changes take effect](en/saving-applying.md)
 - [Experimental protection (filesystem paths)](en/experimental-protection.md)
@@ -45,7 +45,7 @@ The offline help guide, shipped inside the app (**Settings → Help & guide**) a
 
 - [Updating the app and modules](en/updating.md)
 - [Back up, restore and transfer your config](en/config-backup.md)
-- [Turning it off, resetting and uninstalling](en/remove-vpnhide.md)
+- [Pause, reset and uninstall](en/remove-vpnhide.md)
 
 ## What it can and can't do
 
