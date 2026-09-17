@@ -103,6 +103,20 @@ pub struct StateSnapshot {
     pub config_available: bool,
     /// Ids of operations still in flight, so the app can show pending intent.
     pub operations_in_flight: Vec<OperationId>,
+    /// What the root observation loop currently sees of real routing (§8).
+    pub routing: RoutingObservation,
+}
+
+/// The core's own view of real routing, from its netlink observer (§8). Independent of the
+/// app's own (filterable) callbacks — that independence is the reason the daemon exists.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct RoutingObservation {
+    /// `false` until the observer has read routing at least once (never-yet ≠ nothing).
+    pub observed: bool,
+    /// VPN-candidate interfaces currently up, by kernel name-match. TODO(§8): cross-check
+    /// the framework's `TRANSPORT_VPN` set — name-matching alone counts an IMS `ipsec`
+    /// tunnel as a VPN (proven on device).
+    pub vpn_interfaces: Vec<String>,
 }
 
 /// The base a submitted edit is checked against, for conflict detection (§5).
@@ -236,6 +250,10 @@ mod tests {
                 snapshot: StateSnapshot {
                     config_available: true,
                     operations_in_flight: vec![OperationId(1), OperationId(u64::MAX)],
+                    routing: RoutingObservation {
+                        observed: true,
+                        vpn_interfaces: vec!["tun0".into(), "wg0".into()],
+                    },
                 },
             };
             assert_eq!(survives("Published", &published), published);
