@@ -16,4 +16,7 @@ is [Set up hiding](configure-hiding.md).
 
 Remember: the roles go on the **bank**, not on the VPN client. The VPN client is
 the thing being hidden. If the bank still refuses, work through
-[Set up hiding](configure-hiding.md).
+[Set up hiding](configure-hiding.md). Often the remaining cause is your VPN
+server's exit IP, which no hiding on the phone can change: exclude the bank from
+the tunnel in your VPN client's split-tunnel settings — see
+[Direct access or through the tunnel](split-tunneling.md).

@@ -28,7 +28,7 @@ vpnhide 用分层架构同时解决这两个问题：
 
 **第 1 层 —— Java API（lsposed 模块）：** 挂钩的是 `system_server`，而非目标应用。`NetworkCapabilities`、`NetworkInfo` 和 `LinkProperties` 在 Binder 层、在数据到达应用进程*之前*就被过滤。应用通过 IPC 收到干净的数据 —— 没有注入其进程，防篡改无从检测。同一模块还在 `PackageManager` 层对观察者应用隐藏选定应用（**Apps** 角色）。
 
-**第 2 层 —— 原生（kmod、KPM 或 Zygisk）：** 覆盖原生检测路径。同一时间应恰好有一个原生后端处于活动状态：
+**第 2 层 —— 原生（kmod、内核内置、KPM 或 Zygisk）：** 覆盖原生检测路径。同一时间应恰好有一个原生后端处于活动状态：
 - **kmod**（推荐用于受支持的 GKI 内核）—— 内核级 `kprobe`/`kretprobe` 钩子。过滤 `ioctl`、`getifaddrs`/netlink 的接口、地址、路由和策略规则转储，并在套接字状态改变前对隐藏接口拒绝 `SO_BINDTODEVICE` / `SO_BINDTOIFINDEX`。在目标进程中零足迹：无库注入，无可检测之物。
 - **KPM** —— 一个 KernelPatch 模块，实现与之相同的 11 个逻辑内核钩子，无需针对特定 GKI 变体的 `.ko`。适用于旧的/非 GKI 的 4.14 / 4.19 / 5.4 内核，以及 `.ko` 无法加载的情况。需要 KernelPatch 运行时：APatch 或 KPatch-Next-Module。
 - **Zygisk** —— 当无法使用内核级后端时的回退方案。它的 `libc.so` 内联钩子包含尽力而为的 `setsockopt` 过滤，运行在目标进程内部，可被直接系统调用绕过，因此银行和反欺诈应用可能会检测到它。对于这类应用，请关闭原生并依赖 Java 层。
@@ -54,7 +54,7 @@ vpnhide 对选定应用隐藏三样东西，全部通过四个 **J / N / A / P**
 - **`Zygisk`** —— 当 kmod/KPM 不可用，或你不想安装 KernelPatch 运行时时的回退方案。
 - **`portshide`**（可选）—— 若你想阻止选定应用探测本地回环端口，请安装它。
 
-不要同时安装多个原生后端。若安装了多个，应用会按优先级选择活动的那个：kmod，其次 KPM，再次 Zygisk；请卸载不使用的模块。
+不要同时安装多个原生后端。若安装了多个，应用会按优先级选择活动的那个：kmod，其次内核内置后端，再次 KPM，最后 Zygisk；请卸载不使用的模块。
 
 分步说明见[安装](#安装)。
 
@@ -65,7 +65,7 @@ vpnhide 对选定应用隐藏三样东西，全部通过四个 **J / N / A / P**
 简而言之——应用的**概览**标签页会带你逐步完成，并告诉你该装哪个模块。完整说明在内置指南里（下面的链接在 GitHub 和应用内都能打开）。
 
 1. **应用 + LSPosed。**安装 `vpnhide.apk`，在 LSPosed 中启用 **VPN Hide** 模块，把 **“系统框架”** 加入其作用域，然后重启。→ [首次安装](docs/help/zh/first-install.md)
-2. **一个 Native 后端。**概览会检测你的内核并给出文件名——kmod、KPM 或 Zygisk。通过 root 管理器安装并重启。→ [该选哪个 Native 后端](docs/help/zh/choosing-native.md) · [kmod](docs/help/zh/kmod-install.md) · [KPM](docs/help/zh/kpm-install.md) · [Zygisk](docs/help/zh/zygisk-install.md)
+2. **一个 Native 后端。**概览会检测你的内核并给出文件名——kmod、KPM 或 Zygisk。通过 root 管理器安装并重启。如果你自己编译内核，还有第四种选择：[内核内置后端](builtin/README.md)及其配套模块。→ [该选哪个 Native 后端](docs/help/zh/choosing-native.md) · [kmod](docs/help/zh/kmod-install.md) · [KPM](docs/help/zh/kpm-install.md) · [Zygisk](docs/help/zh/zygisk-install.md)
 3. **可选 —— Ports。**要拦截本地回环端口，安装 `vpnhide-ports.zip`。→ [隐藏 localhost 端口](docs/help/zh/ports.md)
 4. **设置隐藏。**在**隐藏**标签页，把 **J / N / A / P** 角色赋给你要对其隐藏 VPN 的应用（银行、政务）——而不是 VPN 客户端本身。→ [设置隐藏](docs/help/zh/configure-hiding.md)
 
@@ -135,6 +135,7 @@ su -c /data/adb/modules/vpnhide_ports/activator
 
 | 目录 | 是什么 | 如何工作 |
 |---|---|---|
+| **[builtin/](builtin/)** | 内核内置后端（C）+ 配套模块 | 与 `.ko` 相同的驱动，但编译进内核（`CONFIG_VPNHIDE=y`），用于 `.ko` 无法加载的内核：集成模块、无 kprobes、LTO。`scripts/integrate.py` 将其并入内核源码树；配套模块只包含激活器。 |
 | **[kmod/](kmod/)** | `.ko` 内核模块 + KPM 后端（C） | 两个内核级原生后端：使用 `kretprobe` 的稳定 GKI `.ko`，以及使用 KernelPatch 内联钩子的 KPM。两者在目标应用进程中均零足迹；只应有一个处于活动状态。（[详情](kmod/README.md)，[KPM](kmod/kpm/README.md)） |
 | **[lsposed/](lsposed/)** | LSPosed 模块 + 应用（Kotlin + Rust） | 在 `system_server` 中挂钩 `writeToParcel`，实现按 UID 的 Binder 过滤。APK 提供概览（模块状态、版本检查、LSPosed 配置校验、安装建议）、用于 Java / Native / Apps / Ports 角色的隐藏标签页，以及诊断。（[详情](lsposed/README.md)） |
 | **[portshide/](portshide/)** | 端口模块（Shell + iptables） | 阻止选定应用访问 `127.0.0.1` / `::1`，使本地绑定的 VPN / 代理守护进程免于本地回环端口探测。（[详情](portshide/README.md)） |
@@ -221,9 +222,9 @@ docker run --rm -it -v "${PWD}:/workspace" -v "vpnhide_cargo_cache:/usr/local/ca
 
 ## 分应用代理（Split tunneling）
 
-可与分应用代理的 VPN 配置正确协同工作。仅目标列表中的应用会受影响。
+可与分应用代理的 VPN 配置正确协同工作：仅目标列表中的应用会受影响。
 
-强烈建议将分应用代理与 VPN Hide 一起使用。
+强烈建议将分应用代理与 VPN Hide 一起使用。VPN Hide 在设备上隐藏 VPN，但无法改变服务器看到的内容：如果应用走隧道，服务看到的是 VPN 服务器的出口 IP，仅凭这一点就可能拒绝你。因此不需要隧道的应用（银行、政务、支付类应用）最好在 VPN 客户端里排除出隧道——这样它们看到的是你的真实 IP，配合 VPN Hide 也看不到任何 VPN 痕迹。详见[直连还是走隧道](docs/help/zh/split-tunneling.md)。
 
 将设备上报的公网 IP 与外部检测器对比的检测类应用应留在隧道之外 —— 它们的流量应走运营商网络，而非 VPN。
 

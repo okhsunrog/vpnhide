@@ -33,8 +33,9 @@ Other possible causes include:
 
 - **Server-side checks.** The service sees your exit IP. If that IP belongs to a
   known VPN/hosting range, it can block you no matter what the device reports —
-  route that app **directly** instead of through the tunnel. See
-  [A third-party tester still finds the VPN](tester-finds-vpn.md).
+  route that app **directly** instead of through the tunnel (your VPN client's
+  split-tunnel setting). See [Direct access or through the tunnel](split-tunneling.md)
+  and [A third-party tester still finds the VPN](tester-finds-vpn.md).
 - **A detection path outside the active backend's reach.** Diagnostics marks
   these *"Not covered."* A kernel backend, or Experimental protection, may close
   more — see [What it can and can't do](capabilities-limits.md).

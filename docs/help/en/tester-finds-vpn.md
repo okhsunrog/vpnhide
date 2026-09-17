@@ -10,6 +10,8 @@ a VPN. That's not necessarily a contradiction — the two measure different thin
 - A third-party tester may also key off things the device can't hide:
   - **Your exit IP.** Databases flag known VPN/datacenter IP ranges. That's
     server-side and outside the phone — hiding on the device can't change it.
+    Exclude the app from the tunnel in your VPN client instead — see
+    [Direct access or through the tunnel](split-tunneling.md).
   - **A vector you didn't enable.** If the tester reads installed packages or
     localhost ports and you only turned on **Java + Native**, add **Apps** or
     **Ports**.

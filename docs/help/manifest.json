@@ -86,9 +86,9 @@
           "id": "split-tunneling",
           "title": { "en": "Direct access or through the tunnel", "ru": "Напрямую или через туннель", "zh": "直连还是走隧道" },
           "keywords": {
-            "en": ["split tunnel", "split tunneling", "per-app routing", "direct", "kill switch", "block without vpn", "real ip", "not routed"],
-            "ru": ["раздельное туннелирование", "split tunnel", "маршрутизация по приложениям", "напрямую", "kill switch", "блокировка без vpn", "реальный ip", "не через vpn"],
-            "zh": ["分流", "分应用路由", "直连", "断网保护", "kill switch", "无 vpn 阻断", "真实 ip", "没走 vpn"]
+            "en": ["split tunnel", "split tunneling", "per-app routing", "direct", "kill switch", "block without vpn", "real ip", "not routed", "exit ip", "still detects vpn", "server-side check"],
+            "ru": ["раздельное туннелирование", "split tunnel", "маршрутизация по приложениям", "напрямую", "kill switch", "блокировка без vpn", "реальный ip", "не через vpn", "выходной ip", "всё равно видит vpn", "серверная проверка"],
+            "zh": ["分流", "分应用路由", "直连", "断网保护", "kill switch", "无 vpn 阻断", "真实 ip", "没走 vpn", "出口 ip", "仍然检测到 vpn", "服务器端检查"]
           }
         },
         {

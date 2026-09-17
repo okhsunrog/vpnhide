@@ -26,7 +26,7 @@ vpnhide solves both problems with a layered architecture:
 
 **Layer 1 — Java API (lsposed module):** hooks `system_server`, not the target app. `NetworkCapabilities`, `NetworkInfo`, and `LinkProperties` are filtered at the Binder level *before* data reaches the app's process. The app receives clean data over IPC — no injection into its process, nothing for anti-tamper to detect. The same module also hides selected apps from observer apps at the `PackageManager` level (the **Apps** role).
 
-**Layer 2 — Native (kmod, KPM, or Zygisk):** covers native detection paths. Exactly one native backend should be active:
+**Layer 2 — Native (kmod, built-in, KPM, or Zygisk):** covers native detection paths. Exactly one native backend should be active:
 - **kmod** (recommended for supported GKI kernels) — kernel-level `kprobe`/`kretprobe` hooks. Filters `ioctl`, `getifaddrs`/netlink interface, address, route, and policy-rule dumps, and rejects `SO_BINDTODEVICE` / `SO_BINDTOIFINDEX` for hidden interfaces before socket state changes. Zero footprint in the target process: no library injection, nothing to detect.
 - **KPM** — a KernelPatch Module implementing the same 11 logical kernel hooks without a GKI-variant-specific `.ko`. Useful for old/non-GKI 4.14 / 4.19 / 5.4 kernels and cases where the `.ko` cannot load. Requires a KernelPatch runtime: APatch or KPatch-Next-Module.
 - **Zygisk** — fallback when a kernel-level backend is not possible. Its `libc.so` inline hooks include best-effort `setsockopt` filtering, run inside the target process, and can be bypassed by direct syscalls, so banking and anti-fraud apps may detect it. For those apps, leave Native off and rely on the Java layer.
@@ -52,7 +52,7 @@ You always need the **VPN Hide app** (`vpnhide.apk`) + LSPosed/Vector for the Ja
 - **`Zygisk`** — fallback if kmod/KPM are unavailable or you do not want to install a KernelPatch runtime.
 - **`portshide`** (optional) — install this if you want to block selected apps from probing localhost ports.
 
-Do not install multiple Native backends at the same time. If more than one is installed, the app chooses the active one by priority: kmod, then KPM, then Zygisk; uninstall unused modules.
+Do not install multiple Native backends at the same time. If more than one is installed, the app chooses the active one by priority: kmod, then built-in, then KPM, then Zygisk; uninstall unused modules.
 
 See [Install](#install) for step-by-step instructions.
 
@@ -63,7 +63,7 @@ Download the latest release from [Releases](https://github.com/okhsunrog/vpnhide
 In short — the app's **Dashboard** tab walks you through it and tells you which module to install. Full instructions live in the built-in guide (the links below open both on GitHub and inside the app).
 
 1. **App + LSPosed.** Install `vpnhide.apk`, enable the **VPN Hide** module in LSPosed, add **"System Framework"** to its scope, and reboot. → [First install](docs/help/en/first-install.md)
-2. **One Native backend.** The Dashboard detects your kernel and names the file — kmod, KPM, or Zygisk. Install it through your root manager and reboot. → [Which native backend to use](docs/help/en/choosing-native.md) · [kmod](docs/help/en/kmod-install.md) · [KPM](docs/help/en/kpm-install.md) · [Zygisk](docs/help/en/zygisk-install.md)
+2. **One Native backend.** The Dashboard detects your kernel and names the file — kmod, KPM, or Zygisk. Install it through your root manager and reboot. If you build your own kernel, there is a fourth option: the [built-in kernel backend](builtin/README.md) with its companion module. → [Which native backend to use](docs/help/en/choosing-native.md) · [kmod](docs/help/en/kmod-install.md) · [KPM](docs/help/en/kpm-install.md) · [Zygisk](docs/help/en/zygisk-install.md)
 3. **Optional — Ports.** For localhost port blocking, install `vpnhide-ports.zip`. → [Hide localhost ports](docs/help/en/ports.md)
 4. **Set up hiding.** In the **Hiding** tab, give the **J / N / A / P** roles to the apps you're hiding the VPN from (a bank, a government service) — not the VPN client itself. → [Set up hiding](docs/help/en/configure-hiding.md)
 
@@ -133,6 +133,7 @@ Any issues found are shown as actionable cards with specific instructions.
 
 | Directory | What | How |
 |---|---|---|
+| **[builtin/](builtin/)** | Built-in kernel backend (C) + companion module | The same driver as the `.ko`, compiled into the kernel (`CONFIG_VPNHIDE=y`) for kernels the `.ko` cannot load on: integrated modules, no kprobes, LTO. `scripts/integrate.py` vendors it into a kernel tree; the companion module carries only the activator. |
 | **[kmod/](kmod/)** | `.ko` kernel module + KPM backend (C) | Two kernel-level Native backends: the GKI `.ko` using `kretprobe`, and the KPM using KernelPatch inline hooks. Both have zero footprint in the target app's process; only one should be active. ([details](kmod/README.md), [KPM](kmod/kpm/README.md)) |
 | **[lsposed/](lsposed/)** | LSPosed module + app (Kotlin + Rust) | Hooks `writeToParcel` in `system_server` for per-UID Binder filtering. The APK provides a dashboard (module status, version checks, LSPosed config validation, install recommendations), the Hiding tab for Java / Native / Apps / Ports roles, and diagnostics. ([details](lsposed/README.md)) |
 | **[portshide/](portshide/)** | Ports module (Shell + iptables) | Blocks selected apps from reaching `127.0.0.1` / `::1`, hiding locally bound VPN / proxy daemons from localhost port probes. ([details](portshide/README.md)) |
@@ -220,9 +221,9 @@ Both implement the official Russian Ministry of Digital Development VPN/proxy de
 
 ## Split tunneling
 
-Works correctly with split-tunnel VPN configurations. Only the apps in the target list are affected.
+Works correctly with split-tunnel VPN configurations: only the apps in the target list are affected.
 
-Using split tunneling together with VPN Hide is strongly recommended.
+Using split tunneling together with VPN Hide is strongly recommended. VPN Hide hides the VPN on the device but cannot change what the server sees: if an app goes through the tunnel, the service sees the VPN server's exit IP and can refuse on that alone. So apps that do not need the tunnel (banks, government services, payment apps) are best excluded from it in your VPN client — then they see your real IP and, with VPN Hide, no trace of the VPN. Details: [Direct access or through the tunnel](docs/help/en/split-tunneling.md).
 
 Detection apps that compare the device-reported public IP against external checkers should stay outside the tunnel — their traffic should go through the carrier, not the VPN.
 
