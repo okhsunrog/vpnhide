@@ -71,8 +71,11 @@ private const val SELF_TARGETS_TIMEOUT_SEC: Long = SU_DEFAULT_TIMEOUT_SEC
 internal fun suExec(
     cmd: String,
     timeoutSec: Long = SU_DEFAULT_TIMEOUT_SEC,
-): Pair<Int, String> =
-    try {
+): Pair<Int, String> {
+    // Dev sandbox build: never invoke su. -1 is the app's "no root" signal everywhere, so
+    // every legacy root/backend path goes Unavailable rather than touching the real install.
+    if (BuildConfig.DEV_ISOLATED) return -1 to ""
+    return try {
         val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
         try {
             val stdoutHolder = AtomicReference("")
@@ -103,6 +106,7 @@ internal fun suExec(
         VpnHideLog.e(TAG, "su exec failed: ${e.message}")
         -1 to ""
     }
+}
 
 private fun commandPreview(cmd: String): String {
     val preview =

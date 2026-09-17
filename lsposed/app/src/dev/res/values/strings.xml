@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dev build type override: coexists with the real "VPN Hide" install under a distinct label. -->
+<resources>
+    <string name="app_name">VPN Hide Dev</string>
+</resources>
