@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use vpnhide_core_daemon::{serve, CoreClient, CoreState, Publisher, ServerHandle};
 use vpnhide_core_rpc::{
-    BaseRef, CanonicalConfig, ConfigEdit, ConfigToggle, OperationId, PhaseOutcome, StateSnapshot,
+    BaseRef, CanonicalConfig, ConfigEdit, OperationId, PhaseOutcome, StateSnapshot,
 };
 
 fn spawn_core(path: &std::path::Path, epoch: u64) -> (Arc<CoreState>, ServerHandle) {
@@ -27,12 +27,13 @@ async fn handshake_submit_get_and_mirror() {
     // Version handshake returns this run's epoch.
     assert_eq!(client.hello().await.expect("handshake"), 4242);
 
-    // A submitted edit is accepted and becomes a queryable settled operation.
+    // A submitted edit is accepted and becomes a queryable settled operation. The config is
+    // empty, so a Replace against revision 0 bootstraps it.
     let accepted = client
         .submit_edit(
             OperationId(1),
-            BaseRef { revision: 1 },
-            ConfigEdit::Toggle { field: ConfigToggle::Debug, enabled: true },
+            BaseRef { revision: 0 },
+            ConfigEdit::Replace { config: CanonicalConfig { debug: true, ..Default::default() } },
         )
         .await
         .expect("delivered")
