@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dev-only manifest overrides (merged only into the `dev` build type).
+
+  - useLegacyPackaging (extractNativeLibs) is turned on for the dev variant in the build
+    script (androidComponents.onVariants), so the UniFFI/JNA loader (Native.register) can
+    dlopen the core-ffi cdylib by file path. AGP 9 defaults it off (libs stay inside the
+    APK, no on-disk file), which JNA cannot load. Dev-only; release is untouched.
+  - CoreSpikeActivity: a throwaway harness that drives the app<->core round-trip. Exported
+    so it can be launched straight from adb (`am start -n .../…CoreSpikeActivity`).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <activity
+            android:name="dev.okhsunrog.vpnhide.spike.CoreSpikeActivity"
+            android:exported="true"
+            android:label="Core Spike"
+            android:theme="@style/Theme.VpnHide" />
+    </application>
+</manifest>

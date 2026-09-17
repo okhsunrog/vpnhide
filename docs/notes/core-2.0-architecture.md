@@ -376,15 +376,12 @@ that actually matters: **the socket/label/domain plumbing under enforcing SELinu
 a per-device, per-manager plumbing question, not a security-theory question, and it is
 the first spike. The eventual support matrix is Magisk / KSU / APatch, whose sepolicy
 and seapp mechanisms differ — but the concept only needs to be proven on **one**
-manager first. The available device runs a **custom KernelSU-Next** whose `ksud profile`
-CLI is, in effect, the whole §9 substrate: a root profile grants a package/uid its
-`capabilities` (e.g. `NET_ADMIN`), a custom **`selinux_domain`**, uid/gid/groups, and —
-via `ksud profile set-sepolicy <pkg> <policy>` — per-package sepolicy statements. So the
-daemon (a KSU-managed root service) gets its capabilities and its own SELinux domain from
-a profile rather than hand-crafted `sepolicy.rule` files, and Spike B reduces to: give the
-app/daemon a dedicated `selinux_domain`, allow that domain → the socket label, and test
-connect under enforcing. Magisk and APatch are later breadth-of-support work, not a
-prerequisite for go/no-go.
+manager first. The available device runs a **custom KernelSU-Next**; its `ksud profile`
+CLI (a root profile grants a package/uid its `capabilities`, a custom `selinux_domain`,
+uid/gid/groups, and per-package sepolicy via `ksud profile set-sepolicy`) is a convenient
+handle for the **spike**, but it is **not** the production substrate and core must not
+depend on it — see the delivery/rights model in §9.3. Magisk and APatch are later
+breadth-of-support work, not a prerequisite for go/no-go.
 
 Detection surface is not a separate concern. Current self-hiding rests on SELinux +
 platform (`untrusted_app` denied `/proc/net/*`, hidepid hides other processes from a
@@ -481,8 +478,53 @@ Constraints and stealth:
   module's existing fd discipline.
 - Companion and core have **independent lifecycles** (the Zygisk daemon owns the companion, the
   root manager owns core), so a fallback is mandatory: config → the file; stats → dropped.
-- The companion's SELinux domain needs an allow to reach core's socket (a managed grant via the
-  ksud profile), unlike untrusted_app, which must not get one.
+- The companion's SELinux domain needs an allow to reach core's socket (shipped in the module's
+  `sepolicy.rule`, §9.3), unlike untrusted_app, which must not get one.
+
+### 9.3 App-side client and cross-manager delivery/rights model
+
+The Kotlin↔core client is **Rust (the tarpc UDS `CoreClient`) exposed to Kotlin through plain
+UniFFI** — no hand-written wire in Kotlin (fragile), no Kotlin-Multiplatform gobley (broke on
+AGP 9; we are Android-only). UniFFI's `async_runtime = "tokio"` turns each async Rust method
+into a Kotlin `suspend fun`; the state subscription is a **suspend-long-poll** (`awaitNextState`
+parks on the mirror's `watch` and resumes on change — no callbacks, no Stream→Flow). The domain
+payloads cross the FFI as **JSON strings**, not per-type UniFFI records: the FFI surface stays
+tiny (connect / hello / submit / state) and stable while the domain churns, and both ends already
+`serde`/`kotlinx.serialization` the same shapes.
+
+**Spike result — the FFI client end to end on device (KSU-Next Pixel 8 Pro, `crates/core-ffi` +
+the app `dev` sandbox): GO.** The full chain — UniFFI + JNA + tokio + tarpc-over-UDS — comes up
+inside the real `untrusted_app` process; the async methods complete across JNI as suspend funs;
+a Replace bootstrap then a Toggle round-trip (`{"Ok":{"op":N}}`), optimistic concurrency holds
+(`config_revision` 0→1→2), and the suspend-long-poll mirror delivers each change reactively while
+the netlink observer feeds real routing into the same snapshot. Two Android-build notes: JNA needs
+the cdylib **extracted on disk** (`useLegacyPackaging`/`extractNativeLibs`, else `Native.register`
+can't dlopen it), and **R8 must not minify** the JNA runtime (`com.sun.jna.Native.fromNative` is
+called from native code) — both scoped to the dev build here, and keep-rules or no-minify in prod.
+
+**Delivery and rights are manager-agnostic — core does not depend on any one manager.** The
+production core is a **Magisk-format module launched at boot** from `service.sh`/`post-fs-data.sh`,
+the same format Magisk / KSU / KSU-Next / APatch all run (exactly how v1 already ships its
+backends). This splits cleanly by owner:
+
+- **App→core SELinux** (`untrusted_app_XX` → the socket's `sock_file` write + `unix_stream_socket
+  connectto` to core's domain) ships as the module's **`sepolicy.rule`**, consumed by every
+  Magisk-compatible manager (`magiskpolicy` / `ksud sepolicy` / APatch). The runtime
+  `ksud sepolicy patch` used in the spike is the throwaway equivalent.
+- **Core's capabilities** come from the **boot-launch root context** (full caps, incl.
+  `CAP_NET_ADMIN`) on every manager. The empty-caps gap seen in Spike A/B is an artifact of
+  launching core via an *app/shell `su`* (which on KSU applies a RootProfile that drops caps),
+  **not** of boot launch. `CAP_NET_ADMIN` is in any case **optional** — the observer only used it
+  for `SO_RCVBUFFORCE` and already falls back to `SO_RCVBUF`.
+- **Core's SELinux domain** for the `connectto` rule: simplest cross-manager option is to let core
+  run in the manager's root domain and ship a short per-manager allow set (`magisk` / `ksu` / …);
+  a custom `vpnhide_core` domain via `type_transition` is one rule but leans on custom-type support
+  that varies by manager. The primary gate stays the **socket file label** (a path we own +
+  `restorecon`), with `SO_PEERCRED` uid+package as fail-closed.
+
+`ksud profile` (capabilities / `selinux_domain` / per-package `set-sepolicy`) is a genuine
+convenience **for the spike** on the KSU-Next device, but is not required by, and must not be
+depended on by, the production design.
 
 ## 10. Traffic and resource expectations
 
@@ -563,8 +605,15 @@ for recovery without reintroducing independent ordinary writers.
    granting the shared `untrusted_app` type opens the socket for **every** app, so real
    scoping to only vpnhide needs a dedicated `selinux_domain` (via `ksud profile`) and/or
    the daemon's `SO_PEERCRED` uid+package check — both confirmed available. (Sepolicy
-   grants applied live are non-persistent; production ships them via a KSU profile/module.)
-   introduce the cross-process epoch (§6).
+   grants applied live are non-persistent; production ships them via the module's
+   `sepolicy.rule`, §9.3.)
+
+2. Stand up the tarpc-over-UDS daemon skeleton (publish / lifecycle / listener) and the
+   app-side client; introduce the cross-process epoch (§6). **Done** on `dev-2.x`:
+   `crates/core-{rpc,daemon}`, and the Kotlin↔core client validated end to end on device
+   via `crates/core-ffi` (UniFFI, suspend-long-poll) against the isolated app `dev`
+   sandbox — see the §9.3 FFI spike result. The app-side connection recipe (socket DAC +
+   the two SELinux rules) is recorded there.
 3. Implement root observations and consistent state subscription; integrate UI against
    the read-replica.
 4. Transfer durable config operations and recovery, porting the config-operation

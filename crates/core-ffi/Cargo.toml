@@ -1,0 +1,28 @@
+# THROWAWAY SPIKE (core-2.0): the app-side FFI surface, to de-risk the Kotlin<->core path.
+# Wraps the Rust `CoreClient` (tarpc-over-UDS) behind UniFFI, exposing async methods with a
+# JSON-string boundary for the domain payloads (no per-type UniFFI mirroring — deliberate).
+# If this turns into a monster, it's cheap to delete; the real crate replaces it later.
+[package]
+name = "vpnhide_core_ffi"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "core-2.0 spike: UniFFI wrapper over the tarpc UDS CoreClient (async, JSON boundary)."
+
+[lib]
+name = "vpnhide_core_ffi"
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["sync"] }
+uniffi = { version = "0.32", features = ["cli", "tokio"] }
+vpnhide_core_daemon = { path = "../core-daemon" }
+vpnhide_core_rpc = { path = "../core-rpc" }

@@ -304,6 +304,11 @@ android {
             isDebuggable = true
             applicationIdSuffix = ".dev"
             buildConfigField("boolean", "DEV_ISOLATED", "true")
+            // No R8 for the sandbox: the core-2.0 spike bundles JNA (UniFFI runtime), whose
+            // native-called methods (com.sun.jna.Native.fromNative) minification strips,
+            // and org.json. debug is minified, so override it here like rawDebug does.
+            isMinifyEnabled = false
+            isShrinkResources = false
             matchingFallbacks += listOf("debug")
         }
     }
@@ -356,6 +361,9 @@ androidComponents {
         variant.outputs.forEach { output ->
             output.versionName.set("2.0.0-alpha0")
         }
+        // Extract native libs on disk (core-2.0 spike): the UniFFI/JNA loader dlopens the
+        // core-ffi cdylib by path. Dev variant only — release keeps AGP 9's compressed-in-APK default.
+        variant.packaging.jniLibs.useLegacyPackaging.set(true)
     }
 }
 
@@ -406,6 +414,11 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
     add("rawDebugImplementation", libs.compose.ui.tooling)
+
+    // core-2.0 dev spike only: JNA is the UniFFI Kotlin runtime's loader for the
+    // core-ffi cdylib (Native.register). @aar pulls the per-ABI libjnidispatch.so.
+    // Scoped to the `dev` build type so release/debug never carry it.
+    add("devImplementation", "net.java.dev.jna:jna:5.17.0@aar")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

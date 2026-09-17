@@ -8,6 +8,7 @@ members = [
     "crates/checks-jni",
     "crates/core-rpc",
     "crates/core-daemon",
+    "crates/core-ffi",
     "crates/netlink-spike",
     "crates/uds-spike",
     "crates/protocol",
