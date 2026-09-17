@@ -414,6 +414,76 @@ References checked during discussion:
 - [tarpc UDS](https://docs.rs/tarpc/latest/tarpc/serde_transport/unix/index.html)
 - `SO_PEERCRED` / `struct ucred`, `SCM_RIGHTS` fd-passing, `seapp_contexts` (per-manager)
 
+### 9.1 Two IPC boundaries: tarpc for the app, the control/telemetry wire for backends
+
+tarpc/UDS is the **app ↔ core** boundary only. The **core ↔ backends** boundary is the
+existing frozen `control` v2 / `telemetry` v1 wire (docs/protocol.md), which core — as the
+activator (§4) — already speaks: it writes `control` v2 config to each backend and reads
+`telemetry` v1 stats/status back. Two different problems, two different tools:
+
+- **app ↔ core:** tarpc/core-rpc — typed edits, operation lifecycle, state subscription.
+- **core ↔ backends** (kmod / KPM / built-in / **Zygisk**): protocol.md text — snapshot
+  config out, telemetry in; compiles in freestanding kernel C and a minimal in-process hook,
+  `cat`/`echo`-debuggable, drift-guarded by golden vectors.
+
+Do **not** reach for tarpc on the backend side. An earlier sketch had the Zygisk companion be
+a tarpc client of core; that was wrong — Zygisk is a backend, so its channel is protocol.md
+like every other backend.
+
+**Two version fuses on two boundaries, decoupled.** With core as the hub, `telemetry` v1 /
+`control` v2 now guards *core ↔ backend* skew (its reader moved from the app to core), and
+core-rpc's `PROTOCOL_VERSION` guards *app ↔ core*. The app is insulated from the backend wire
+version — it reads stats through tarpc, not by parsing telemetry itself — so the kernel wire
+can bump with the core module while the app's contract moves on its own schedule (exactly the
+apart-versioning protocol.md already has, now landing on two physical boundaries).
+protocol.md §9's "we have no hub" flips: v2 has a hub (core); telemetry flows
+backend → core → app; the wire is unchanged, only the reader is new.
+
+### 9.2 The Zygisk companion
+
+Zygisk is the one backend whose code runs **inside the target app** (untrusted_app, no
+privilege, hot fork path). The in-process hook cannot reach core's socket (§9) and cannot
+reopen `/data/adb` after load. So:
+
+- **Config down** stays `targets.txt` (control v2), read via the privileged module-dir fd at
+  `on_load`; core becomes its sole writer (absorbing the Zygisk activator, §4). The file also
+  stays as the fallback when core/companion is unreachable.
+- **The companion** — a Zygisk-specific mechanism: a per-module **root** process the Zygisk
+  daemon spawns from the module `.so`, reached by the in-process hook over a daemon-brokered
+  socketpair — is the only privileged bridge the sandboxed hook has. It is a **thin text relay
+  + per-uid aggregator**: control v2 down to the hook, telemetry v1 up to core. No
+  tarpc/tokio/serde — the hook reuses its existing protocol parser/emitter and the companion
+  just relays text, so nothing heavy enters the injected `.so` (the empty `register_companion!`
+  stub is already reserved for this).
+- **The companion is to Zygisk what the kernel is to kmod/KPM: the per-uid counter
+  aggregator.** Zygisk hooks are ephemeral and unpollable, so they *push* their counts
+  (telemetry v1) to the persistent companion, which accumulates; core then *pulls* the
+  aggregate (telemetry v1, over a small file or socket) — the pull model preserved.
+
+This unlocks two things Zygisk lacks today, both through the one companion:
+
+- **Live config apply without reboot.** Config is cached at zygote load, so a change needs a
+  reboot; the companion can hand fresh config to the hook per specialize (the hook cannot
+  reopen the file itself).
+- **Statistics.** Zygisk is currently the only backend with no telemetry; giving its hook a
+  telemetry v1 *producer* role closes that. This is a protocol *profile* addition (Zygisk
+  gains a `stats` producer), not a new protocol — no version bump.
+
+Constraints and stealth:
+
+- Stats reporting is the only path with an **in-app footprint** kernel backends do not have
+  (the hook must report *out*). Gate it behind its **own opt-in parameter** (not the
+  debug-logging toggle), **off by default**, so the default stealth posture is untouched. Do
+  not build elaborate hiding: stealth is carried by *backend choice* — anything that inspects
+  its own process detects the injection itself and belongs on a kernel backend, and Zygisk's
+  threat model is targets that do not inspect. Keep only the near-free hygiene: transient
+  open → send → close per flush, not a socket held for the app's lifetime, matching the
+  module's existing fd discipline.
+- Companion and core have **independent lifecycles** (the Zygisk daemon owns the companion, the
+  root manager owns core), so a fallback is mandatory: config → the file; stats → dropped.
+- The companion's SELinux domain needs an allow to reach core's socket (a managed grant via the
+  ksud profile), unlike untrusted_app, which must not get one.
+
 ## 10. Traffic and resource expectations
 
 One initial snapshot, commands on committed user actions, and updates when relevant
