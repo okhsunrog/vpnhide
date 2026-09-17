@@ -6,7 +6,9 @@ pieces out of step for one reboot.
 ## Check these
 
 - **Version mismatch.** The Dashboard shows the app version and the *running
-  module version*. If they differ, the new module hasn't loaded yet — **reboot**.
+  module version*. After installing matching components, **reboot** so the new
+  code loads. If the warning remains, check which component still needs updating;
+  a version mismatch does not always mean only a reboot is missing.
 - **Kernel changed.** A system update can change the kernel. A kernel module
   built for the old kernel may fail to load ("Unknown symbol", "not active").
   Reinstall the native backend that matches the new kernel, or switch to one the

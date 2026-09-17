@@ -1,29 +1,22 @@
 # Work profiles, clones and second space
 
-**Install VPN Hide in your main profile only.** From there it already covers
-everything — you don't need a copy in a work profile, Second Space, or a cloned
-space.
+**Install and configure VPN Hide in the main profile only.** Its Java hooks run
+in the system-wide `system_server`; a copy in each profile is not needed. The app
+blocks its UI in secondary profiles. Remove redundant copies if prompted.
 
-## Why one copy is enough
+## One package, one selection
 
-The Java layer hooks `system_server`, which runs in the **main profile only**.
-The picker in your main profile already lists apps from every profile on the
-device and applies hiding to all of them. A second copy in a work profile or
-Second Space can't hook anything extra — and worse, extra copies race each
-other's **Save** against the shared config, so they can undo one another.
+The main-profile picker gathers installed packages and their UIDs across profiles.
+A package present in several profiles has one selection, with profile information
+shown in the list. Its roles and hook settings apply to all discovered copies.
+**You cannot give different roles to the personal and work copies of the same
+package.** A clone with a different package name can be configured separately.
 
-If the app detects itself installed in more than one profile, the Dashboard
-warns you and points to the redundant copies. Uninstall VPN Hide from the work
-profile / Second Space / other secondary profiles and keep only the main-profile
-one.
+Native capacity counts distinct UIDs, not rows: one package in two profiles usually
+uses two slots. VPN Hide reserves its own slot for the main-profile UID only.
+See [Limits](capabilities-limits.md).
 
-## Hiding the VPN from an app inside a work profile or clone
-
-You still control that from the main-profile picker — cloned and work-profile
-apps show up there (labeled as a **Work profile** or **Cloned app** entry) and
-can be given roles like any other app. There's nothing to install on the
-secondary side.
-
-One caveat: an app you give **Native** to in more than one profile counts as a
-separate UID per profile toward the native limit, so clones use up that budget
-twice as fast — see [What it can and can't do](capabilities-limits.md).
+If a profile's apps are missing or the scan is incomplete, check that the profile
+is available, then retry the app-list load. Do not assume that a missing row means
+its saved configuration was deleted. Profiles and VPN routing are separate:
+check the target's actual VPN/profile arrangement when troubleshooting.

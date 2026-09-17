@@ -35,3 +35,22 @@ already set some apps up, it won't import it silently — it shows a banner and,
   already redone your setup and just want them off the device.
 
 All three **delete the old files**, and that can't be undone.
+
+## What this backup does not contain
+
+The JSON is a backup of hiding configuration: package roles, hook overrides, port
+policies, hidden-package choices and canonical options (including debug flags).
+It is not a complete app/device backup. It does not include installed modules,
+your VPN client's connections or credentials, runtime counters/logs, root grants,
+LSPosed scope, or local UI preferences such as theme/language. The actual APatch
+SuperKey is stored separately and is **not** exported, even if the remember-key
+option is present. Set it again on the new device if needed.
+
+Choose modules compatible with the **new device** rather than copying an old
+kernel ZIP blindly. After import, check the application outcome, module states
+and UID capacity, then restart targets. A saved configuration can exist even if
+applying it failed; see [Saving and applying](saving-applying.md).
+
+The file includes configured package names. Review it before sharing publicly.
+Exporting a plain package list in Settings is useful for other tools, but is not
+a substitute for the JSON backup: it does not preserve roles and hook/port options.

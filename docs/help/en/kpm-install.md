@@ -3,7 +3,8 @@
 KPM is a kernel-level native backend for the kernels the loadable `.ko` **can't**
 serve — old or non-GKI kernels (e.g. 4.9, 4.14), vendor kernels with no source,
 or kernels that reject unsigned modules. It hides at the kernel level just like
-the `.ko`, so it's invisible to anti-tamper checks. It's a **single universal
+the `.ko`, without injecting libc hooks into the target process. This does not
+guarantee invisibility to all anti-tamper or root checks. It's a **single universal
 module** — there's no GKI variant to match. See
 [Which native backend to use](choosing-native.md) first.
 
@@ -14,10 +15,9 @@ in your kernel. Pick the path that matches your root:
 
 - **APatch / FolkPatch** — KernelPatch is already built in. Just install the
   module ZIP and save your **SuperKey** (below).
-- **KernelSU-Next** — flash **KPatch-Next** first.
-- **Magisk or stock KernelSU** — install the standalone **KPatch-Next-Module**
-  and patch your kernel from its interface. It works on both Magisk and
-  KernelSU, so you don't have to switch to APatch.
+- **Magisk / KernelSU / KernelSU-Next** — use **KPatch-Next-Module** and its
+  instructions to patch the kernel, or integrate KPatch-Next into a self-built
+  kernel. Installing VPN Hide alone does not provide this runtime.
 
 If the runtime isn't present, the Dashboard says *"the kernel is not patched with
 a KernelPatch runtime."*
@@ -59,3 +59,10 @@ The Dashboard names the cause:
 
 For a load failure, use **Settings → Debugging → Collect debug log** to attach
 the boot-time output to a report — see [Collect a debug report](collect-report.md).
+
+## Runtime installation instructions
+
+Use the [official KPatch-Next-Module instructions](https://github.com/KernelSU-Next/KPatch-Next-Module)
+for its supported root managers, including KernelSU-Next, or the
+[KPatch-Next project](https://github.com/KernelSU-Next/KPatch-Next) for kernel integration.
+VPN Hide's ZIP does not install or patch the KernelPatch runtime for you.

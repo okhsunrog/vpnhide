@@ -22,9 +22,14 @@ concluding it's broken.
 
 ## When hiding is working but the app still refuses
 
-Run [Diagnostics](vpnhide://diagnostics). If the self-test passes, VPN Hide's
-layers are doing their job and the app is refusing for a reason VPN Hide can't
-change:
+Run [Diagnostics](vpnhide://diagnostics). Passing results are evidence for the
+checks run under VPN Hide's own UID, not proof that every target app sees the same
+thing. Compare the target's roles, custom hook settings, profile and routing.
+A different API sequence or an untested detection method can also expose a hiding
+bug. Keep that possibility in the report instead of assuming every refusal is
+outside VPN Hide's control.
+
+Other possible causes include:
 
 - **Server-side checks.** The service sees your exit IP. If that IP belongs to a
   known VPN/hosting range, it can block you no matter what the device reports —

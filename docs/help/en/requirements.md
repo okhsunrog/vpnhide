@@ -1,26 +1,27 @@
 # Requirements and compatibility
 
-VPN Hide is a set of root modules plus this app. You need root and at least the
-Java layer; the native layer needs a compatible kernel or a KernelPatch runtime.
+VPN Hide requires **root**. Enable the layers needed for the ways your target app
+detects VPNs; Java + Native is the usual starting point, not an all-or-nothing requirement.
 
-## What you need
-
-| Piece | Requires |
+| Component | Requires |
 |---|---|
-| App (picker) | Android 9+, arm64 or armv7 |
-| Java layer | LSPosed, LSPosed-Next or Vector |
-| Native — kmod | GKI kernel with `CONFIG_KPROBES` (standard on Android 12+) |
-| Native — KPM | APatch or KPatch-Next-Module (a KernelPatch runtime) |
-| Native — Zygisk | Zygisk (Magisk / KernelSU) or ZygiskNext |
-| Ports (optional) | any root manager |
+| App | Android 9+, arm64 or armv7, root access granted to VPN Hide |
+| Java and Apps roles | LSPosed / LSPosed-Next / Vector, with VPN Hide enabled for System Framework |
+| Native — kmod | Compatible arm64 GKI kernel with the required probe support; use the Dashboard's recommendation |
+| Native — KPM | Supported arm64 kernel family and KernelPatch runtime, such as APatch or KPatch-Next |
+| Native — Zygisk | A working Zygisk implementation, such as Magisk Zygisk or ZygiskNext/NeoZygisk |
+| Ports | Ports module installed through a supported root manager |
 
-You install **one** native backend, the Java layer, and optionally Ports. The
-app itself runs on 32-bit (armv7) devices too, but the kernel backends are arm64
-only.
+Kernel backends are arm64-only. On a device without a compatible kernel backend,
+[Zygisk](zygisk-install.md) is a fallback with reduced coverage. KernelSU does not
+by itself supply the Zygisk implementation needed by that backend.
 
-## Choosing a native backend
+## What to install
 
-Prefer a kernel backend — the `kmod` or the built-in kernel patch — where your
-device supports one: they hook in kernel space, so banking and payment apps can't
-see them. `Zygisk` works wherever Zygisk does, but some of those apps detect its
-in-process hooks. The Dashboard recommends a backend for your device.
+Start with [First install](first-install.md), then [choose one native backend](choosing-native.md).
+Kernel hooks avoid injecting libc hooks into the target process, but do not promise
+invisibility to every anti-tamper or root check. VPN Hide does not hide root or
+provide Play Integrity attestation.
+
+Built-in is an advanced **self-built kernel integration**, not a supported ready-made
+kernel download. It is described separately in [Choosing Native](choosing-native.md).

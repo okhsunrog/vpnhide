@@ -1,40 +1,34 @@
 # Reading the statistics
 
-The **Interception counters** view shows how often the apps you selected actually
-hit an installed hook — the runtime events the active backends report, counted
-**cumulatively since boot**. It's a window into what your target apps probe, not
-a scoreboard.
+**Interception counters** show calls handled by the installed hooks, grouped by
+UID/app and hook. Tap an app for its breakdown. A normal network API call can hit
+a hook too: a count is not proof that the app deliberately tried to detect a VPN.
 
-## What you see
+## Observe activity during a test
 
-- **Counters stay empty** until a selected app calls a hook. "No runtime
-  statistics yet" just means nothing you targeted has probed since boot.
-- **Apps probing VPN** lists the apps that hit hooks; tap one for its full
-  per-hook breakdown (which detection paths it used).
+1. Tap **Start capture** to take a counter baseline.
+2. Switch to the target app and reproduce the behavior.
+3. Return and tap **Stop** to keep the displayed differences for review.
 
-## Capture session — watch one app live
+During capture, VPN Hide periodically reads cumulative counters and shows the
+increase since the baseline. This is **not a trace of individual calls**: it does
+not provide every call's exact time, order or arguments. Other apps may appear too.
 
-To see exactly which VPN checks a specific app runs:
+Stopped results remain in the current app process until cleared or replaced by a
+new capture; they are not a durable recording after a force-stop or reboot. For
+logs to send with a bug report, use [debug recording](collect-report.md).
 
-1. Tap **Start capture**.
-2. Switch to the app you want to test and use it for a bit.
-3. Every VPN check it makes shows up in the list as it happens.
+## Backend differences and missing data
 
-Tap **Stop** when done; the results stay until you start a new capture or clear
-them. This is the quickest way to understand *how* a particular app looks for a
-VPN.
+- Kernel and Java counters accumulate while their runtime remains alive. A reboot
+  resets them; a backend reset can also restart the capture baseline.
+- **Zygisk:** native counters are unavailable; LSPosed still supplies Java and Apps counters.
+- **KPM:** current components read native counters in pages. If an older/truncated
+  reply is encountered, incomplete native totals are withheld rather than shown as
+  complete. Follow the screen's message and check component versions.
+- An empty or unavailable result does not prove the app made no checks. Check for
+  read errors, unsupported counters and detection paths outside the installed hooks.
 
-## Backend differences
-
-- **Zygisk** — native counters aren't available. Java and Apps counters are still
-  reported by LSPosed.
-- **KPM** — it has more counters than its control channel can return at once, so
-  partial native totals are hidden; Java and Apps counters still show.
-
-## What not to read into it
-
-A high count doesn't mean an app is "more suspicious," and a **zero** count
-doesn't prove an app never checks — it may use a detection path this backend
-doesn't cover, or it cached an earlier result. Counters show activity on the
-hooks that are installed; they're not proof that hiding is complete. For that,
-use the self-test — see [What the self-test checks](what-the-check-proves.md).
+Counters measure activity, not complete protection. Use the
+[self-test](what-the-check-proves.md) for its measured vectors and reproduce the
+actual behavior in the target app.

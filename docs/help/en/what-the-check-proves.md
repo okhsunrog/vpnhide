@@ -25,6 +25,18 @@ real signal that hiding works, which is exactly why the Dashboard can say
 ## What it does not prove
 
 A pass doesn't guarantee a *specific* third-party app will accept you. An app can
-still refuse for reasons outside the device — a server-side check on your exit
+still refuse for other reasons — a server-side check on your exit
 IP, an installed-app scan you haven't covered, or a result it cached before you
 saved. See [A third-party tester still finds the VPN](tester-finds-vpn.md).
+
+## Scope of the evidence
+
+The probes run as VPN Hide, not inside your bank or detector. Per-app hook settings,
+UID/profile routing, API choice and callback timing can differ. Passing does not
+rule out a bug affecting another app. Test that app after Save and force-stop,
+and include its reproduction steps in a report if it still detects the VPN.
+
+A steady-state callback probe also cannot certify every Wi-Fi/mobile/offline
+transition or every combination of callback registrations. Those require separate
+transition tests. For current, retained and interrupted results, see
+[Result meanings](check-result-meanings.md).

@@ -10,7 +10,7 @@ can react to that.
 If a bank or another app refuses to run "because a VPN is on" while your
 accelerator is active:
 
-- Give **that** app the **Java + Native** roles, so it can't see the VPN.
+- Give **that** app **Java + Native** for network hiding and **Apps** for package hiding.
 - Add the accelerator to the hidden VPN-apps list (**Settings → VPN app hiding**,
   or [open it now](vpnhide://hidden-apps)) so package scans don't spot it.
 

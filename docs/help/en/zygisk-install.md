@@ -21,8 +21,8 @@ tell you.
 
 - A **Zygisk implementation**: stock Magisk Zygisk, or ZygiskNext / NeoZygisk on
   Magisk or KernelSU.
-- **LSPosed / Vector** enabled for the Java layer (the same companion every
-  backend needs).
+- **LSPosed / Vector** is recommended alongside it for Java/Apps coverage.
+  Zygisk alone does not provide those roles.
 
 ## Steps
 

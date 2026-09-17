@@ -2,7 +2,7 @@
 
 KPM 是面向可加载 `.ko` **无法**支持的内核的内核级 Native 后端——老旧或非 GKI
 内核（如 4.9、4.14）、无源码的厂商内核、拒绝未签名模块的内核。它像 `.ko` 一样在
-内核级别隐藏，因此对反篡改不可见。它是**单一通用模块**——无需匹配 GKI 版本。请先
+内核级别隐藏，不向目标进程注入 libc 钩子，但不保证躲过所有反篡改或 root 检测。它是**单一通用模块**——无需匹配 GKI 版本。请先
 阅读[该选哪个 Native 后端](choosing-native.md)。
 
 ## 它需要 KernelPatch 运行时
@@ -12,9 +12,8 @@ KPM 使用内核 inline 挂钩，这要求内核中已存在 KernelPatch 运行�
 
 - **APatch / FolkPatch**——已内置 KernelPatch。直接安装模块 ZIP 并保存
   **SuperKey**（见下）。
-- **KernelSU-Next**——先刷入 **KPatch-Next**。
-- **Magisk 或原版 KernelSU**——安装独立的 **KPatch-Next-Module** 并从它的界面为
-  内核打补丁。它在 Magisk 和 KernelSU 上都能用，因此无需改用 APatch。
+- **Magisk / KernelSU / KernelSU-Next**——使用 **KPatch-Next-Module** 并按其说明
+  修补内核，或在自行编译内核时集成 KPatch-Next。只安装 VPN Hide 不会提供此运行时。
 
 若运行时不存在，仪表盘会提示*“内核未打入 KernelPatch 运行时”*。
 
@@ -50,3 +49,10 @@ KPM 在加载时校验你的内核家族。受支持的家族为 4.9、4.14、4.
 
 若加载失败，用 **Settings → Debugging → Collect debug log** 把开机时的输出附到
 报告中——见[收集调试报告](collect-report.md)。
+
+## 运行时安装说明
+
+对受支持的 root 管理器（含 KernelSU-Next），请使用
+[KPatch-Next-Module 官方说明](https://github.com/KernelSU-Next/KPatch-Next-Module)；
+内核集成见[KPatch-Next 项目](https://github.com/KernelSU-Next/KPatch-Next)。
+VPN Hide ZIP 不会代你安装或修补 KernelPatch 运行时。

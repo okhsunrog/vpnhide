@@ -1,24 +1,25 @@
 # 要求与兼容性
 
-VPN Hide 是一组 root 模块加上这个应用。你需要 root，并至少启用 Java 层；原生层需要
-兼容的内核或 KernelPatch 运行时。
-
-## 你需要什么
+VPN Hide 需要 **root**。按目标应用的检测方式启用所需层；Java + Native 是常用起点，
+但不是必须同时启用所有层。
 
 | 组件 | 要求 |
 |---|---|
-| 应用（选择器） | Android 9+，arm64 或 armv7 |
-| Java 层 | LSPosed、LSPosed-Next 或 Vector |
-| 原生 — kmod | 带 `CONFIG_KPROBES` 的 GKI 内核（Android 12+ 标配） |
-| 原生 — KPM | APatch 或 KPatch-Next-Module（KernelPatch 运行时） |
-| 原生 — Zygisk | Zygisk（Magisk / KernelSU）或 ZygiskNext |
-| Ports（可选） | 任意 root 管理器 |
+| 应用 | Android 9+，arm64 或 armv7，并授予 VPN Hide root 权限 |
+| Java 和 Apps 角色 | LSPosed / LSPosed-Next / Vector，并为 VPN Hide 启用 System Framework 作用域 |
+| Native — kmod | 兼容的 arm64 GKI 内核及所需探针支持；按仪表盘推荐选择 |
+| Native — KPM | 支持的 arm64 内核家族与 KernelPatch 运行时，如 APatch 或 KPatch-Next |
+| Native — Zygisk | 可用的 Zygisk 实现，如 Magisk Zygisk 或 ZygiskNext/NeoZygisk |
+| Ports | 通过受支持的 root 管理器安装 Ports 模块 |
 
-只安装**一个**原生后端、Java 层，以及可选的 Ports。应用本身也能在 32 位（armv7）
-设备上运行，但内核后端仅支持 arm64。
+内核后端仅支持 arm64。没有兼容内核后端时，[Zygisk](zygisk-install.md)是覆盖较少的
+后备选择。KernelSU 本身不提供此后端所需的 Zygisk 实现。
 
-## 如何选择原生后端
+## 安装什么
 
-只要设备支持，优先用内核后端——`kmod` 或内置的内核补丁：它们在内核空间挂钩，银行和
-支付类应用看不到。`Zygisk` 在任何支持 Zygisk 的地方都能用，但部分此类应用能察觉到它
-在进程内的钩子。仪表盘会针对你的设备推荐一个后端。
+从[首次安装](first-install.md)和[选择一个 Native 后端](choosing-native.md)开始。
+内核钩子不向目标进程注入 libc 钩子，但不能承诺躲过所有反篡改或 root 检测。
+VPN Hide 不隐藏 root，也不提供 Play Integrity 认证。
+
+Built-in 是**自行编译内核**的高级集成方案，不是受支持的预编译内核下载选项。
+见[选择 Native](choosing-native.md)中的说明。

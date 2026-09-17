@@ -1,9 +1,10 @@
 # Install the kernel module
 
 The kernel module (the `.ko`, shown as **Kmod** on the Dashboard) is the default
-native backend on GKI kernels. It hooks in kernel space, so the target app's
-process memory is never touched and anti-tamper checks can't see it. First make
-sure it's the right backend for your device — see
+native backend on GKI kernels. It hooks in kernel space, so no libc hooks are
+injected into the target app's process. This avoids that particular in-process
+detection surface; it does not hide root or guarantee every app will accept it.
+First make sure it is the right backend for your device — see
 [Which native backend to use](choosing-native.md).
 
 ## Match the GKI variant
