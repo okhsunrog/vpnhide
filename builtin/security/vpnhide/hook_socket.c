@@ -24,7 +24,7 @@
 #include <linux/if.h>
 #include <linux/socket.h>
 #include <linux/netdevice.h>
-#include <linux/uaccess.h>	/* copy_from_user (pre-5.9 bind variant) */
+#include <linux/uaccess.h> /* copy_from_user (pre-5.9 bind variant) */
 #include <net/sock.h>
 
 #include <linux/vpnhide.h>
@@ -93,7 +93,8 @@ static bool bind_opt_relevant(int optname)
  * already concealed — so a caller cannot target it by index in the first place;
  * we simply deny that bind (ENODEV, as the .ko does).
  */
-static enum vpnhide_bind_action classify_bind_name(union vpnhide_bind_snapshot *snap)
+static enum vpnhide_bind_action
+classify_bind_name(union vpnhide_bind_snapshot *snap)
 {
 	if (snap->name[0] && is_vpn_ifname(snap->name)) {
 		vpnhide_record_hook_hit(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE);
@@ -103,10 +104,11 @@ static enum vpnhide_bind_action classify_bind_name(union vpnhide_bind_snapshot *
 	return VPNHIDE_BIND_FROZEN;
 }
 
-static enum vpnhide_bind_action classify_bind_idx(struct sock *sk,
-						  union vpnhide_bind_snapshot *snap)
+static enum vpnhide_bind_action
+classify_bind_idx(struct sock *sk, union vpnhide_bind_snapshot *snap)
 {
-	if (snap->ifindex > 0 && classify_bind_ifindex(sk, snap->ifindex) != 0) {
+	if (snap->ifindex > 0 &&
+	    classify_bind_ifindex(sk, snap->ifindex) != 0) {
 		vpnhide_record_hook_hit(VPNHIDE_HOOK_SOCKET_BIND_INTERFACE);
 		return VPNHIDE_BIND_DENY;
 	}
@@ -114,10 +116,9 @@ static enum vpnhide_bind_action classify_bind_idx(struct sock *sk,
 }
 
 #ifdef VPNHIDE_HAVE_SOCKPTR
-enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
-						 sockptr_t optval,
-						 unsigned int optlen,
-						 union vpnhide_bind_snapshot *snap)
+enum vpnhide_bind_action
+vpnhide_setsockopt_bind(struct sock *sk, int optname, sockptr_t optval,
+			unsigned int optlen, union vpnhide_bind_snapshot *snap)
 {
 	if (!bind_opt_relevant(optname))
 		return VPNHIDE_BIND_PASSTHROUGH;
@@ -155,10 +156,10 @@ enum vpnhide_bind_action vpnhide_setsockopt_bind(struct sock *sk, int optname,
  * kernel's own path produces the native absent errno for the caller's privilege
  * (this is what makes it correct on both cap-first and name-first legacy).
  */
-enum vpnhide_bind_action vpnhide_setsockopt_bind_user(struct sock *sk, int optname,
-						      const char __user *optval,
-						      unsigned int optlen,
-						      union vpnhide_bind_snapshot *snap)
+enum vpnhide_bind_action
+vpnhide_setsockopt_bind_user(struct sock *sk, int optname,
+			     const char __user *optval, unsigned int optlen,
+			     union vpnhide_bind_snapshot *snap)
 {
 	if (!bind_opt_relevant(optname))
 		return VPNHIDE_BIND_PASSTHROUGH;

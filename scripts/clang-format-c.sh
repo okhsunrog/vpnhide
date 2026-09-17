@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the pinned C formatter for kmod sources.
+# Run the pinned C formatter for the kernel-side C sources (kmod + builtin).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -9,8 +9,9 @@ usage() {
 Usage: scripts/clang-format-c.sh [--check|--fix] [file...]
 
 Uses clang-format 18.x. Set CLANG_FORMAT=/path/to/clang-format to override.
-When no files are passed, formats all tracked kmod C/H files except generated
-and vendored sources.
+When no files are passed, formats all tracked kmod and builtin C/H files except
+generated and vendored sources. builtin/.clang-format is a symlink to
+kmod/.clang-format so both trees share one style.
 EOF
 }
 
@@ -89,6 +90,7 @@ if [[ "$#" -gt 0 ]]; then
     printf '%s\n' "$@" > "$tmp"
 else
     git ls-files 'kmod/*.c' 'kmod/*.h' 'kmod/**/*.c' 'kmod/**/*.h' \
+        'builtin/*.c' 'builtin/*.h' 'builtin/**/*.c' 'builtin/**/*.h' \
         | grep -Ev '(^kmod/third_party/|^kmod/generated/|\.mod\.c$)' > "$tmp"
 fi
 

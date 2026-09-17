@@ -499,7 +499,7 @@ private fun DeveloperSettingsSection() {
         )
         CanonicalPreferenceSwitch(
             field = CanonicalToggle.DebugSwitch,
-            title = stringResource(R.string.diag_debug_logging_title),
+            title = stringResource(R.string.settings_debug_logging),
             subtitle = stringResource(R.string.settings_debug_logging_sub),
             icon = Icons.Default.BugReport,
             index = 2,

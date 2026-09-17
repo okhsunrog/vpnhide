@@ -105,7 +105,7 @@
     <string name="btn_export_debug_running">Collecting debug info&#8230;</string>
     <string name="btn_save_debug">Save</string>
     <string name="btn_share_debug">Share</string>
-    <string name="diag_debug_logging_title">Debug logging</string>
+    <string name="settings_debug_logging">Debug logging</string>
     <string name="settings_debug_logging_sub">Off by default to keep logcat quiet and avoid the overhead. The capture tools in Debugging enable it automatically — turn this on only for continuous logs across every component.</string>
     <string name="logcat_card_title">Full system logcat</string>
     <string name="logcat_card_description">Records unfiltered logs from all buffers (main/system/crash/events/radio) and saves a ZIP with device, backend, kernel, and config context. It can include sensitive app data and the agent-control token. Start recording, reproduce the bug, then stop.</string>
