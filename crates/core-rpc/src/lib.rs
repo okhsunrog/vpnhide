@@ -1,0 +1,281 @@
+//! The wire between the app and the persistent root core (core-2.0 §5/§9).
+//!
+//! This is a **different boundary** from the frozen kernel control/telemetry protocol
+//! (the `protocol` crate / docs/protocol.md); changing core IPC does not touch that.
+//!
+//! Shape and conventions are lifted from the on-device-proven tarpc-over-UDS setup in
+//! floppa-vpn (`floppa-vpn-core/src/rpc.rs`), with one deliberate addition — a version
+//! handshake (see [`hello`](VpnhideCore::hello)).
+//!
+//! # Codec: JSON, deliberately (not bincode)
+//!
+//! The transport is `tokio_serde::formats::Json`. bincode is not self-describing, so any
+//! serde shape that needs the format to describe itself — internally/adjacently tagged
+//! enums (`#[serde(tag = …)]`), `#[serde(flatten)]`, `#[serde(untagged)]`,
+//! `deserialize_with`, `deserialize_any` — *encodes* fine and *fails to decode* inside
+//! the framed transport, surfacing as "connection shut down" rather than a catchable
+//! decode error. This wire carries the domain's own internally-tagged vocabulary
+//! (config edits, operation outcomes, observation state), so JSON is required. JSON's one
+//! hazard: `serde_json` writes a non-finite `f64` as `null` and refuses to read it back —
+//! keep every float on the wire finite.
+//!
+//! # Rule: every wire type round-trips through the wire's codec
+//!
+//! Every argument and return of every [`VpnhideCore`] method round-trips through
+//! `serde_json` in `tests::wire_coverage`. Adding a method or field means adding it there.
+//!
+//! # Versioning (the divergence from floppa-vpn)
+//!
+//! floppa-vpn needs no versioning: its helper and UI ship in one APK, always the same
+//! build, and installing force-stops every process — two builds cannot be live at once.
+//! vpnhide is different: the core is a root-manager module and the app is an APK, updated
+//! on **separate channels**, so the two ends can be different builds. [`PROTOCOL_VERSION`]
+//! is a single monotonic number, and [`VpnhideCore::hello`] must be the first call: on a
+//! mismatch the client refuses and tells the user to update the lagging component, rather
+//! than talking a format the peer does not share.
+
+use std::time::Duration;
+
+/// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
+/// The client checks it in [`VpnhideCore::hello`] before any other call.
+pub const PROTOCOL_VERSION: u32 = 1;
+
+/// Filesystem path of the core's UDS socket. A path socket (never abstract, §9): its
+/// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
+pub const SOCKET_NAME: &str = "vpnhide-core.sock";
+
+/// How long the core holds a [`state_since`](VpnhideCore::state_since) call open waiting
+/// for something newer. A long poll mapped onto request/response, not a subscription.
+pub const STATE_HOLD: Duration = Duration::from_secs(20);
+
+/// The client's per-call deadline for the state long poll. **Must exceed [`STATE_HOLD`]**:
+/// tarpc's default deadline is 10 s, and a call held longer than the caller waits fails on
+/// a healthy connection. Every client call sets an explicit deadline in its `Context`.
+pub const STATE_POLL_DEADLINE: Duration = Duration::from_secs(30);
+
+/// The client's per-call deadline for ordinary request/response calls.
+pub const CALL_DEADLINE: Duration = Duration::from_secs(15);
+
+/// A stable identifier for a config-mutation operation. Reusing an id with the same
+/// payload queries/deduplicates it; reuse with a different payload is rejected (§5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct OperationId(pub u64);
+
+/// The client's identity in the handshake.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ClientHello {
+    pub protocol: u32,
+    /// The app build, for diagnostics only — never a compatibility input.
+    pub build: String,
+}
+
+/// The core's answer to [`VpnhideCore::hello`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Handshake {
+    /// Compatible: the current core instance/epoch the caller should follow (§6).
+    Compatible { core_protocol: u32, core_build: String, epoch: u64 },
+    /// Incompatible skew: which side is behind. The app surfaces "update the lagging
+    /// component"; it does not attempt to speak the other version.
+    Incompatible { core_protocol: u32 },
+}
+
+/// A published state and which run of the core published it (§6 cross-process epoch).
+///
+/// `epoch` identifies the core instance; `revision` only ever grows *within one epoch*.
+/// A restart is a new `epoch`, whose `revision` starts over — so the client adopts on an
+/// epoch change rather than comparing revisions across runs (this is floppa-vpn's
+/// `Published { boot, state }`, renamed to our vocabulary).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Published {
+    pub epoch: u64,
+    pub revision: u64,
+    pub snapshot: StateSnapshot,
+}
+
+/// The read-only replica the app mirrors from the core.
+///
+/// TODO(core-2.0 §3/§6): fill from the real read-replica — confirmed canonical config
+/// projection + root observations with provenance. Placeholder while the daemon and the
+/// shared domain types (ported from `ConfigCoordinatorView` / `ObservationState`) land.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct StateSnapshot {
+    /// Whether the core currently holds a usable canonical config.
+    pub config_available: bool,
+    /// Ids of operations still in flight, so the app can show pending intent.
+    pub operations_in_flight: Vec<OperationId>,
+}
+
+/// The base a submitted edit is checked against, for conflict detection (§5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BaseRef {
+    pub revision: u64,
+}
+
+/// A typed field intent — never an authoritative replacement of a screen snapshot (§5).
+///
+/// TODO(core-2.0 §5): port the real edit vocabulary from `ConfigCoordinator`'s
+/// `CanonicalEdit` (toggles, target add/remove, import/reset). Placeholder shape.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ConfigEdit {
+    /// A single boolean setting keyed by a stable field path.
+    Toggle { field: String, enabled: bool },
+    /// A whole import/reset — a broader write set (§5).
+    Replace { raw: String },
+}
+
+/// The core accepted a durable mutation. It now owns the operation independently of the
+/// caller's connection (§5): client death does not cancel it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Accepted {
+    pub op: OperationId,
+}
+
+/// Why the core refused an edit at submission.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SubmitError {
+    /// A stale change to a field another accepted change already moved (§5).
+    Conflict { field: String },
+    /// The same id was reused with a different payload.
+    IdReused,
+    /// The core has no usable canonical config and the edit is not a bootstrap/reset.
+    Unavailable,
+    /// The edit failed validation before any phase could be dispatched.
+    Rejected { reason: String },
+}
+
+/// One phase of an operation as the core executed it.
+///
+/// TODO(core-2.0 §5): align with `ConfigPhase` (Persist / Native / Ports / Cleanup / …)
+/// and `PhaseOutcome`. Placeholder.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PhaseRecord {
+    pub name: String,
+    pub outcome: PhaseOutcome,
+}
+
+/// Known success, known failure, or unknown — preserved as distinct (§3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PhaseOutcome {
+    Confirmed,
+    FailedKnown,
+    Unknown,
+}
+
+/// An operation's durable record: its phases and, once settled, its outcome (§5).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OperationRecord {
+    pub op: OperationId,
+    pub phases: Vec<PhaseRecord>,
+    /// `None` while still running; `Some` once the operation settled.
+    pub settled: Option<PhaseOutcome>,
+}
+
+/// The app <-> core boundary, spelled for a socket. Intent flows one way, published state
+/// the other; nothing here carries in-process handles.
+#[tarpc::service]
+pub trait VpnhideCore {
+    /// Version handshake. **Must be the first call** on a connection. On
+    /// [`Handshake::Incompatible`] the client refuses and asks the user to update the
+    /// lagging component (§9); it never falls back to a foreign wire format.
+    async fn hello(client: ClientHello) -> Handshake;
+
+    /// The first published state newer than what the caller holds (a `watch` over
+    /// request/response). `epoch`/`revision` are what the caller last saw. An `epoch`
+    /// that is not the core's current run is answered immediately — everything the caller
+    /// knew came from a run that is over. Otherwise returns as soon as something strictly
+    /// newer exists, and holds the call open up to [`STATE_HOLD`] before returning the
+    /// current state unchanged. Nothing is missed and nothing is replayed.
+    async fn state_since(epoch: u64, revision: u64) -> Published;
+
+    /// Submit a typed field edit, checked against `base`. Accepted (the core now owns the
+    /// operation) or rejected with an explicit reason (§5).
+    async fn submit_edit(op: OperationId, base: BaseRef, edit: ConfigEdit) -> Result<Accepted, SubmitError>;
+
+    /// Query an operation's phases and outcome. Survives the submitting client's death,
+    /// so a reconnecting app can find out what happened. `None` if the id is unknown.
+    async fn get_operation(op: OperationId) -> Option<OperationRecord>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Round-trip through the codec that is actually on the wire (`serde_json`), not
+    /// "serde works in general" — the exact gap that let a JSON-only shape ship on a
+    /// bincode transport in floppa-vpn and break connects on device.
+    fn survives<T>(what: &str, value: &T) -> T
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        let bytes = serde_json::to_vec(value).unwrap_or_else(|e| panic!("{what} encode: {e}"));
+        serde_json::from_slice(&bytes).unwrap_or_else(|e| panic!("{what} decode: {e}"))
+    }
+
+    /// Every argument and return type of every `VpnhideCore` method, every variant.
+    mod wire_coverage {
+        use super::*;
+
+        #[test]
+        fn hello_arguments_and_result() {
+            let hello = ClientHello { protocol: PROTOCOL_VERSION, build: "1.2.3".into() };
+            assert_eq!(survives("ClientHello", &hello), hello);
+            for h in [
+                Handshake::Compatible { core_protocol: 1, core_build: "9".into(), epoch: u64::MAX },
+                Handshake::Incompatible { core_protocol: 2 },
+            ] {
+                assert_eq!(survives("Handshake", &h), h);
+            }
+        }
+
+        #[test]
+        fn state_since_arguments_and_result() {
+            assert_eq!(survives("epoch", &u64::MAX), u64::MAX);
+            let published = Published {
+                epoch: u64::MAX,
+                revision: 7,
+                snapshot: StateSnapshot {
+                    config_available: true,
+                    operations_in_flight: vec![OperationId(1), OperationId(u64::MAX)],
+                },
+            };
+            assert_eq!(survives("Published", &published), published);
+        }
+
+        #[test]
+        fn submit_edit_arguments_and_result() {
+            for edit in [
+                ConfigEdit::Toggle { field: "settings.debug".into(), enabled: true },
+                ConfigEdit::Replace { raw: "{}".into() },
+            ] {
+                assert_eq!(survives("ConfigEdit", &edit), edit);
+            }
+            assert_eq!(survives("BaseRef", &BaseRef { revision: 3 }), BaseRef { revision: 3 });
+            let ok: Result<Accepted, SubmitError> = Ok(Accepted { op: OperationId(5) });
+            assert_eq!(survives("Accepted", &ok), ok);
+            for err in [
+                SubmitError::Conflict { field: "apps.x.native".into() },
+                SubmitError::IdReused,
+                SubmitError::Unavailable,
+                SubmitError::Rejected { reason: "oversized".into() },
+            ] {
+                let refused: Result<Accepted, SubmitError> = Err(err.clone());
+                assert_eq!(survives("SubmitError", &refused), refused);
+            }
+        }
+
+        #[test]
+        fn get_operation_result() {
+            let none: Option<OperationRecord> = None;
+            assert_eq!(survives("no record", &none), none);
+            let record = Some(OperationRecord {
+                op: OperationId(9),
+                phases: vec![
+                    PhaseRecord { name: "Persist".into(), outcome: PhaseOutcome::Confirmed },
+                    PhaseRecord { name: "Native".into(), outcome: PhaseOutcome::Unknown },
+                ],
+                settled: Some(PhaseOutcome::FailedKnown),
+            });
+            assert_eq!(survives("OperationRecord", &record), record);
+        }
+    }
+}

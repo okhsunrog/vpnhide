@@ -1,0 +1,18 @@
+# The app <-> core-daemon IPC contract (core-2.0 §5/§9). A DIFFERENT boundary from
+# the frozen kernel `protocol` crate — do not conflate. tarpc pinned to 0.38 to match
+# the version already proven cross-compiling + running over UDS on Android in floppa-vpn.
+[package]
+name = "vpnhide_core_rpc"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Shared app<->core IPC contract (tarpc service + wire types) for vpnhide 2.0."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+tarpc = { version = "0.38", features = ["serde-transport", "tokio1", "unix"] }
+
+[dev-dependencies]
+serde_json = "1"
