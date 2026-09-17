@@ -34,16 +34,17 @@ internal class AppDiagnosticRunIo(
         if (current.selfNeedsRestart) return DiagnosticContextObservation(DiagnosticEligibility.RestartApp, null)
         RoutingGateCache.ensureLoaded(current.context, selfNeedsRestart = false)
         // A not-invalidated observation is fresh; only a stale or absent one costs a root shell.
-        when (routingReadPlan(RoutingGateCache.observation.value)) {
+        when (routingReadPlan(RoutingGateCache.gateObservation.value)) {
             RoutingRead.Reuse -> Unit
             RoutingRead.Join -> readRoutingGate(force = false)
             RoutingRead.Refresh -> readRoutingGate(force = true)
         }
         val impact = impact()
+        val appVpnState = RoutingGateCache.observation.value
         val observation =
             buildDiagnosticContextObservation(
                 selfNeedsRestart = false,
-                routing = RoutingGateCache.observation.value,
+                appVpn = AppVpnContext(appVpnState.gateProjection(), appVpnState.lastGood?.value?.identity),
                 snapshot = RootSnapshotCache.snapshot.value,
                 config = CanonicalConfigRepository.state.value.confirmed,
                 selfPackage = current.context.packageName,

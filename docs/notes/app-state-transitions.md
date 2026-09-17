@@ -371,7 +371,9 @@ stateDiagram-v2
 When Checking is invalidated by a known change before probes start, finish
 `NotStarted(context_changed)` rather than following endless changes. Its explicit
 caller can retry; the unconsumed startup intent waits for the next stable eligibility
-observation. Automatic context refreshes do not produce automatic completed-test reruns.
+observation. A context refresh that reveals no new measurement key produces no
+rerun; one that does is owed exactly one automatic confirmation (see the
+2026-09-17 amendment at the end of this note).
 
 Request admission while busy:
 
@@ -536,7 +538,7 @@ protocols untouched; do not silently reuse old `Ok`/null fields for new meanings
 | I13 | Gate failure, blocked eligibility, execution failure and detected leak remain distinct in UI/API/bundles |
 | I14 | Capture release happens once logically; logging restoration is never falsely acknowledged |
 | I15 | No secret enters state, diagnostic payloads, conflict fields or error text |
-| I16 | Recomposition, timer ticks and observation refresh do not independently schedule completed-test reruns |
+| I16 | Recomposition, timer ticks and observation refresh do not independently schedule completed-test reruns; a rerun is owed only by a measurement key nothing covers, once per key |
 
 ## 11. Scenario traces for implementation tests
 
@@ -905,7 +907,8 @@ complete measurement exists, a notice beside the history otherwise), then the
 latest complete measurement: Insufficient evidence outranks applicability, and
 applicability words the banner (ready, results changed with a retry that starts
 a new run, results unverified). The screen no longer overlays the live gate on
-the legacy state; the live gate remains the trigger for the automatic suite.
+the legacy state; the presentation the live gate feeds is what owes the
+automatic suite (`owedConfirmation`).
 
 The Dashboard hero renders the projection through the pure `heroDecision`: the
 cached tiles are overlaid with the current eligibility (`effectiveProtection`,
@@ -1039,12 +1042,17 @@ signal of the tiles and the dashboard issues, and a changed or insufficient
 measurement is at least Attention without ever softening a red one. The bridge
 overlays the same condition on its tiles (`overlayCondition`) so its legacy gate
 says "VPN off" whenever the hero does. The top-bar indicator follows only
-`Explicit` derivations. An explicit re-check always requests a new suite, and a
-known VPN off → on while the Dashboard is up requests one confirmation suite as
-a `Transition` (an event, not a rerun at rest; a gate already routed when the
-screen composes is not a transition). Own-roles saves keep `Changed` plus a manual
-re-check, and the foreground-return re-probe stays `Background`, both by the
-maintainer's decision.
+`Explicit` derivations. An explicit re-check always requests a new suite. The
+automatic confirmation is no longer an event: `owedConfirmation` reads the
+presentation and asks for one automatic run per measurement key that no
+measurement, no attempt and no earlier request covers (2026-09-17, replacing the
+`Transition`-driven edge detector, which lost the excluded → included edge on a
+foreground return because its baseline was invalidated by the resume re-probe).
+A gate already routed when the screen composes, a re-established tunnel seen on
+return, and a session change seen by the poller therefore take one path. An
+own-roles save advances the change epoch and so is a new key, which the owner
+confirms once after the operation settles; the foreground-return re-probe stays
+`Background`.
 
 Boundary: the activator does not report whether a forced activation changed
 anything, so the startup reconcile still invalidates root observations and the

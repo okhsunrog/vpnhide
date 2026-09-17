@@ -3,6 +3,10 @@ package dev.okhsunrog.vpnhide
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -16,6 +20,12 @@ import kotlinx.coroutines.withContext
  * The Dashboard screen reads [state] and shows the previous value
  * while a refresh is in flight so tab switches feel instant even when
  * data changes underneath.
+ *
+ * The protection tiles are folded from the diagnostic presentation at derivation
+ * time, while the hero renders the live Situation. So that the two never come
+ * from different instants, the cache follows the suite: a terminal attempt newer
+ * than the one the tiles were derived from re-derives them in the background,
+ * without requesting another run.
  */
 internal object DashboardCache : ContextStateCache<RootProjection<DashboardState>>(
     traceName = "dashboard_state",
@@ -39,6 +49,7 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardState
     override suspend fun load(
         @Suppress("UNUSED_PARAMETER") request: ObservationRequest,
     ): RootProjection<DashboardState> {
+        follower
         val (context, selfNeedsRestart) = requireNotNull(inputs)
         // Join or read the terminal attempt, then render the shared presentation as
         // the screens do; a blocked or failed attempt is observed, never retried here.
@@ -52,5 +63,25 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardState
                 loadDashboardState(context, selfNeedsRestart, rootSnapshot, diagnostics),
             )
         }
+    }
+
+    private val follower by lazy { ObservationRuntime.scope.launch { followDiagnostics() } }
+
+    /**
+     * Re-derive after a terminal attempt the tiles have not seen, from the root
+     * snapshot already in hand (no root re-read, no run request). A derivation in
+     * flight is left to render it first; a failed derivation is not retried from
+     * here (that stays with the user's Retry), and a derivation that already
+     * rendered the attempt is left alone.
+     */
+    private suspend fun followDiagnostics() {
+        DiagnosticsCache.presentation
+            .mapNotNull { it.lastAttempt?.id }
+            .distinctUntilChanged()
+            .collect { attempt ->
+                observation.first { it.active == null }
+                val rendered = state.value?.diagnosticsAttemptId ?: return@collect
+                if (rendered < attempt) refreshInPlace(force = false, reason = ReadReason.Background)
+            }
     }
 }

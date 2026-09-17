@@ -20,11 +20,10 @@ suite execution: each run is an identified, immutable attempt that survives
 screen changes and Activity recreation, a retry is a new run, and a run records
 its measurement context (process, self configuration, VPN routing, coverage) at
 start and end. Dashboard cache derivation observes terminal diagnostics without
-implicitly retrying Blocked/Failed; explicit refresh and existing diagnostic
-triggers still use the current retry policy. This prevents diagnostic root
-refreshes from recursively retriggering themselves through Dashboard
-invalidation. Measurement classification and the completed-run retention policy
-below are unchanged.
+implicitly retrying Blocked/Failed. A user retry refreshes the app-VPN
+observation, queues one explicit diagnostic run, then re-derives Dashboard
+without requesting that run a second time. Measurement classification and the
+completed-run retention policy below are unchanged.
 
 Devices this was validated on: Pixel 4a (sunfish, Magisk, 4.14, kmod/KPM/Zygisk),
 Pixel 8 Pro (husky, KernelSU-Next, GKI 6.1, KPM), and an Android 13 Zygisk device.
@@ -81,12 +80,14 @@ trusted `su` token; the probe never prints either credential.
 ### Helper observation envelope
 
 `vhhelper` and the JNI library share a small app/helper response contract. Every
-observation is one JSON object with `version: 1`, a `kind` (`checks`, `routing`
-or `kpm_list`) and a `status` (`ok` or `error`). Successful responses carry a
+observation is one JSON object with `version: 1`, a `kind` (`checks`,
+`app_vpn_state`, legacy `routing`, or `kpm_list`) and a `status` (`ok` or
+`error`). Successful responses carry a
 typed `data` value:
 
 ```json
 {"version":1,"kind":"checks","status":"ok","data":[{"id":"...","status":"pass","detail":"..."}]}
+{"version":1,"kind":"app_vpn_state","status":"ok","data":{"uid":10042,"state":"routed","session":"framework:143:tun0","interfaces":["tun0"],"method":"uid_rule","detail":"uid_in_vpn_table"}}
 {"version":1,"kind":"routing","status":"ok","data":{"uid":10042,"routed":null,"detail":"netlink unavailable"}}
 {"version":1,"kind":"kpm_list","status":"ok","data":{"available":true,"modules":[]}}
 ```
@@ -159,36 +160,41 @@ check, so all its leaks count.
 
 ## 5. Self-in-tunnel gate
 
-Diagnostics are meaningless if VPN Hide itself is not routed through the VPN: split-
-tunnelled out, there is no VPN artifact for its own probes to be hidden *from*, so
-every check would read misleadingly clean. Before running any checks the app asks
-the root snapshot which current Android networks are VPN networks. Interface-name
-matching alone is not VPN presence: an `ipsec*` interface may belong to a carrier
-IMS/IWLAN network explicitly marked `NOT_VPN`. Such interfaces remain hidden from
-selected apps but do not activate the self-test gate. Only current NetworkAgentInfo
-records count, not VPN requests, historical events or idle VPN-manager objects.
-Unmanaged tunnels (for example root WireGuard) additionally require an up/unknown
-interface with a non-local route. A failed network/route probe is a diagnostic
-failure, not a claim that VPN is off or the app is excluded.
+Diagnostics are meaningless if VPN Hide itself is not routed through the VPN:
+split-tunnelled out, there is no VPN artifact for its own probes to be hidden
+*from*, so every check would read misleadingly clean. `RoutingGateCache` therefore
+owns one direct root-helper observation, `vhhelper observe app-vpn-state --uid
+<selfUid>`. It returns the complete app-scoped state: `vpn_off`, `excluded`,
+`routed`, or `unknown`, plus a VPN-session identity and candidate interfaces.
 
-For the resulting candidate interfaces, `vhhelper probe routing --uid <selfUid> --vpn-ifaces
-<comma-separated-ifaces>` (root, hook-inert) checks whether this uid is routed through
-the VPN. Two passes over the policy rules (both address families): learn the VPN egress
-table id(s) from rules that egress via a VPN interface (`oif tun*`), then check whether
-a `uidrange` rule steers this uid into exactly that table. This is stricter than the
-broad `netlink_getrule` diagnostic predicate — every uid sits in *some* per-network
-table (wlan/rmnet, also non-standard), so it must pin the VPN table specifically. If
-not routed, the UI shows an "add VPN Hide to your tunnel" prompt instead of clean
-results. Table identifiers are scoped by address family; output-interface-only
-rules are not UID membership. Native probe failures return `routed: null`, and the
-gate reports a failed check instead of using a stale gate or assuming exclusion.
+The helper reads only current `NetworkAgentInfo` records from root `dumpsys
+connectivity`; requests, history and idle VPN-manager objects do not count.
+Transport `VPN` establishes a framework VPN and `NOT_VPN` excludes carrier
+IMS/IWLAN interfaces such as `ipsec*`. An up/unknown tunnel-named sysfs interface
+is the fallback for an unmanaged root tunnel. The helper does not dump global
+route tables or use their text as a change fingerprint.
 
-Unmanaged root tunnels may not have Android UID-range rules. If membership is not
-found, read-only `ip route get ... uid <selfUid>` lookups sample their routed
-prefixes in each family (public probe addresses for default routes). They send no
-packets. A lookup using a candidate tunnel establishes routing; lookup errors are
-inconclusive. This does not prove that every destination or socket mark uses the
-tunnel, nor replace a full policy-routing evaluator.
+For candidate interfaces it performs the narrow netlink policy-rule check for
+both address families: first learn the VPN egress table id(s) from rules with
+`oif tun*`, then check whether a `uidrange` rule steers this UID into exactly that
+table. This is stricter than the broad `netlink_getrule` diagnostic predicate —
+every online UID sits in some per-network table, so membership must be pinned to
+the VPN table. Table identifiers are scoped by address family and an
+output-interface-only rule is not UID membership. Any unavailable or malformed
+framework/rule observation becomes `unknown`, never `vpn_off` or `excluded`.
+
+The foreground `AppVpnStatePoller` requests this observation after each one-second
+delay and on every Activity resume. `routed` publishes immediately; negative
+states require two equal samples 750 ms apart, so tunnel setup cannot briefly
+publish a false exclusion. The poller only keeps the observation current; the
+confirmation suite is owed by the presentation it produces (`owedConfirmation`):
+one automatic run per measurement key (routing identity, coverage, self
+configuration, change epoch) that no measurement and no attempt covers, so a
+re-established tunnel, an excluded → routed return or a coverage change each get
+exactly one run, whether the app was in the foreground for the edge or not.
+Repeated samples of one routed session reveal no new key and rerun nothing. User
+Retry uses the same cache and queues an explicit suite behind any automatic run
+already in progress, so the click cannot be absorbed by that run.
 
 ## 6. Empirical facts that shape the checks
 

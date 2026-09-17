@@ -231,9 +231,6 @@ to an `emit_*` line in
 **App enumeration** — `app_scan_diagnostics` (privacy-safe: per-user exit code + package counts + first stderr line, **no names/paths** — diagnoses "couldn't read all profiles" / the ARG_MAX overflow). `pm_users` / `pm_packages` carry the real names/paths and are **redacted out unless `appList` was opted in** (§10).
 
 **Network (forensic)** — `network_addr` (`ip -d addr`), `network_operstate`, `network_routes` (`ip route show table all`), `network_rules` (`ip rule`), `network_sockets` (listening localhost sockets), `connectivity_dump` (`dumpsys connectivity`, VPN/tun/agent lines), `proc_net_route` / `proc_net_ipv6_route` / `proc_net_if_inet6` / `proc_net_tcp[6]` / `proc_net_udp[6]` / `proc_net_dev` / `proc_net_fib_trie`.
-- `vpn_ifaces` — `/sys/class/net/*/operstate` for every interface. Tunnel-like names alone do not establish user VPN activity.
-- `vpn_networks` — current NetworkAgentInfo records from root `dumpsys connectivity` (requests and history omitted). VPN and explicitly non-VPN records distinguish user VPNs from carrier IMS. Like other network sections, it can contain network addresses and identifiers.
-- `vpn_routes4`, `vpn_routes6` — root routing tables with a terminal `probe_ok` marker. Used for unmanaged root tunnels; a missing success marker is inconclusive, not VPN-off.
 
 **Module presence flags** (one-liners, from the root snapshot) — `kmod_module_dir`, `*_activator_state`, `*_disabled`, `*_pending_update`, `superkey_saved`, `proc_exists` (does `/proc/vpnhide_ctl` exist), `ports_chain` (does the iptables chain exist), `snapshot_shell_uid` (backs `rootShell`, §6), `module_inventory` (dump of every relevant `/data/adb/modules[_update]/*`).
 
@@ -327,7 +324,7 @@ is the emit order — if truncation hit `app_scan_diagnostics`, the `network_*` 
 5. Cross-check the raw section for that vector (e.g. `proc_net_route`, `network_addr`).
 
 **"No network at all / DNS broken with the module"**
-1. `vpn_ifaces` + `network_addr` + `proc_net_dev` — which interfaces exist; any physical/default iface being hidden?
+1. `network_operstate` + `network_addr` + `proc_net_dev` — which interfaces exist; any physical/default iface being hidden?
 2. `dmesg` (debug on) — hook actions; `sk_setsockopt_entry action=deny`, and `active_hook_mask`.
 3. `ports_state` — is the iptables `vpnhide_out` chain over-broad?
 4. `report`/`gate`, `statistics` (per-hook hit counts).
@@ -426,7 +423,7 @@ Rule of thumb: a **typed** top-level field → find where it's *derived*
 | Is a kallsyms symbol missing? | `sections.kernel_symbols` |
 | Is an app a target, with which roles? | `config.apps` |
 | Live iptables chain? | `sections.ports_state` |
-| Interfaces on the device? | `sections.vpn_ifaces`, `sections.network_addr` |
+| Interfaces on the device? | `sections.network_operstate`, `sections.network_addr` |
 | Can I trust an "inactive" reading? | `rootShell` (§6) |
 | Was the capture even measurable? | `gate` (§4) |
 | Is anything missing/cut off? | `errors`, `sections.debug_snapshot_truncated` |

@@ -12,10 +12,8 @@ import dev.okhsunrog.vpnhide.collectDebugShellSnapshot
 import dev.okhsunrog.vpnhide.collectHookCounterSnapshot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
-import dev.okhsunrog.vpnhide.diagnostics.GroundTruthProbe
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
-import dev.okhsunrog.vpnhide.diagnostics.resolveDiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.readLsposedConfig
@@ -23,7 +21,6 @@ import dev.okhsunrog.vpnhide.statistics.buildStatisticsState
 import dev.okhsunrog.vpnhide.suExec
 import dev.okhsunrog.vpnhide.toAgentStatisticsState
 import dev.okhsunrog.vpnhide.ui.components.container
-import dev.okhsunrog.vpnhide.vpnPresenceFromSnapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -207,37 +204,6 @@ internal fun captureSelfNetworkView(
 
 /** ISO-8601 timestamp for [VpnHideState.generatedAt] (the serializer has no clock). */
 internal fun isoNow(): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US).format(Date())
-
-/**
- * The gate that decides whether a debug/logcat capture taken *right now* would be
- * meaningful, computed from a root snapshot. Cheap and stateless — a VPN-iface read
- * plus one self-routing probe — it backs `RoutingGateCache`, which is both the
- * pre-collect warning on the Collect sheet and the routing observation every
- * diagnostic run folds into its eligibility.
- *
- * It is NOT what the bundle reports: an export's gate comes from its own run's
- * outcome ([debugSelfTestFrom]), so an interrupted or failed run can never be
- * written up as ROUTED. Note that this function throws when self-routing cannot be
- * determined — a caller must be able to treat that as an observation error.
- */
-internal fun captureGateFrom(
-    snapshot: RootSnapshot,
-    context: Context,
-    selfNeedsRestart: Boolean,
-): DiagnosticGate {
-    if (selfNeedsRestart) return DiagnosticGate.NEEDS_RESTART
-    val presence = vpnPresenceFromSnapshot(snapshot.sections)
-    if (presence.interfaces.isEmpty()) return DiagnosticGate.VPN_OFF
-    val routed =
-        checkNotNull(GroundTruthProbe.selfRoutedThroughVpn(context, presence, snapshot.sections)) {
-            "VPN routing could not be determined"
-        }
-    return resolveDiagnosticGate(
-        vpnActive = true,
-        selfRouted = routed,
-        selfNeedsRestart = selfNeedsRestart,
-    )
-}
 
 /**
  * Pack a ZIP: named text entries + raw file entries. The one packaging primitive for

@@ -74,6 +74,13 @@ fn is_vpn_iface(name: &str) -> bool {
     matches_vpn(name.as_bytes())
 }
 
+/// Shared VPN-interface vocabulary for privileged observers. Keeping this
+/// projection here prevents the root helper and the in-process checks from
+/// drifting onto different prefix lists.
+pub fn is_vpn_interface_name(name: &str) -> bool {
+    is_vpn_iface(name)
+}
+
 /// 8-byte-aligned byte buffer. The `SIOCGIFCONF` probe reinterprets the raw
 /// bytes the kernel writes back as `ifreq` values. A plain `[u8; N]` is only
 /// 1-aligned, so the backing storage must provide the alignment of `ifreq`.
@@ -908,8 +915,8 @@ fn check_netlink_getrule() -> CheckOutput {
     check_netlink_getrule_uid(unsafe { libc::getuid() })
 }
 
-/// RTM_GETRULE for a specific uid. The `vhhelper probe routing` self-routing gate reuses
-/// this to answer "is <uid> routed through the VPN?" — a matching policy rule
+/// RTM_GETRULE for a specific uid. The app-VPN-state observer reuses this to
+/// answer "is <uid> routed through the VPN?" — a matching policy rule
 /// (or a VPN-named iif/oif) means yes.
 fn check_netlink_getrule_uid(myuid: u32) -> CheckOutput {
     // rtattr types and standard table ids (linux/fib_rules.h, linux/rtnetlink.h).
@@ -1161,13 +1168,23 @@ pub fn self_routed_json(uid: u32) -> String {
 }
 
 pub fn self_routed_for_interfaces_json(uid: u32, interfaces: Option<&[String]>) -> String {
-    let (routed, detail) = uid_routed_through_vpn(uid, interfaces);
+    let (routed, detail) = self_routed_for_interfaces(uid, interfaces);
     let sr = SelfRouted {
         uid,
         routed,
         detail,
     };
     observation::routing(&sr)
+}
+
+/// Classify one UID against an explicit set of VPN interfaces without adding a
+/// transport envelope. The root helper uses this to combine VPN presence and
+/// membership into one atomic observation.
+pub fn self_routed_for_interfaces(
+    uid: u32,
+    interfaces: Option<&[String]>,
+) -> (Option<bool>, String) {
+    uid_routed_through_vpn(uid, interfaces)
 }
 
 #[cfg(test)]

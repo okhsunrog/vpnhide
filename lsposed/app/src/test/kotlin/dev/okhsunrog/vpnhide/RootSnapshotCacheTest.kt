@@ -89,7 +89,7 @@ class RootSnapshotCacheTest {
 
     @Test
     fun `snapshot validation rejects missing sections`() {
-        val sections = REQUIRED_ROOT_SNAPSHOT_SECTIONS.associateWith { "" } - "vpn_ifaces"
+        val sections = REQUIRED_ROOT_SNAPSHOT_SECTIONS.associateWith { "" } - "kmod_prop"
         var thrown: RootSnapshotException? = null
 
         try {
@@ -98,7 +98,7 @@ class RootSnapshotCacheTest {
             thrown = e
         }
 
-        assertTrue(thrown?.message?.contains("vpn_ifaces") == true)
+        assertTrue(thrown?.message?.contains("kmod_prop") == true)
     }
 
     @Test
@@ -112,7 +112,7 @@ class RootSnapshotCacheTest {
         assertTrue(command.contains("cat \"${'$'}PATH_TO_READ\""))
         assertTrue(command.contains("pm list users"))
         assertTrue(command.contains("pm list packages -U -f --user \"${'$'}PM_USER_ID\""))
-        assertTrue(command.contains("grep -H . /sys/class/net/*/operstate"))
+        assertFalse(command.contains("/sys/class/net/*/operstate"))
         // Paths reach the script through the assignment prelude now, so both
         // halves are checked: the value Kotlin passes, and the script using it.
         assertTrue(command.contains("VPNHIDE_SUPERKEY_FILE='$SUPERKEY_FILE'"))
@@ -173,7 +173,7 @@ class RootSnapshotCacheTest {
         assertTrue(command.contains("if [ \"${'$'}VPNHIDE_WITH_PM\" = 1 ]; then"))
         assertTrue(buildRootShellSnapshotCommand(includePmPackages = true).contains("VPNHIDE_WITH_PM='1'"))
         assertTrue(command.contains("phase_target_files"))
-        assertTrue(command.contains("phase_vpn_ifaces"))
+        assertFalse(command.contains("route show table all"))
     }
 
     @Test

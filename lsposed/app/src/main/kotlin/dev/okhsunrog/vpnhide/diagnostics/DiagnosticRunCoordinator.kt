@@ -52,9 +52,6 @@ internal sealed interface DiagnosticAdmission {
     data class Rejected(
         val reason: TransitionFailure,
     ) : DiagnosticAdmission
-
-    /** An automatic request whose intent was already consumed by an earlier suite. */
-    data object Ignored : DiagnosticAdmission
 }
 
 /** Identified I/O effects of a run. Failures are exceptions; a blocked eligibility is a value. */
@@ -105,13 +102,15 @@ internal class DiagnosticRunCoordinator(
                 // eligibility), so its handle always exists.
                 accepted != null -> DiagnosticAdmission.Accepted(checkNotNull(handle(accepted.id)), accepted.joined)
 
-                rejected != null -> DiagnosticAdmission.Rejected(rejected.reason)
-
-                else -> DiagnosticAdmission.Ignored
+                else -> DiagnosticAdmission.Rejected(checkNotNull(rejected).reason)
             }
         }
 
-    /** Join the active run or read the latest attempt; only a suite that never ran starts the automatic intent. */
+    /**
+     * Join the active run or read the latest attempt; only a suite that never ran
+     * starts one, as the startup intent. Every later automatic run is owed by a
+     * presentation whose measurable world nothing covers (`owedConfirmation`).
+     */
     fun ensure(request: DiagnosticRequest): DiagnosticRunHandle? =
         synchronized(lock) {
             val state = view.value.core

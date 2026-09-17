@@ -19,7 +19,7 @@ private data class HeroRow(
     val name: String,
     val situation: Situation,
     val expected: HeroVisual,
-    val tiles: ProtectionCheck,
+    val tiles: ProtectionCheck?,
     val errorCount: Int = 0,
     val warningCount: Int = 0,
 )
@@ -66,7 +66,8 @@ class DashboardUiStateTest {
 
     @Test
     fun `every situation is worded as one whole hero visual`() {
-        val rows = checkingRows() + conditionRows() + couldNotCheckRows() + measuredRows() + staleMeasurementRows()
+        val rows =
+            checkingRows() + conditionRows() + couldNotCheckRows() + measuredRows() + tilelessRows() + staleMeasurementRows()
         rows.forEach { row ->
             assertEquals(row.name, row.expected, heroVisual(row.situation, row.tiles, row.errorCount, row.warningCount))
         }
@@ -192,6 +193,23 @@ class DashboardUiStateTest {
                 Situation.CouldNotCheck(CouldNotCheckCause.ProbeUnavailable),
                 HeroVisual(HeroTone.Attention, HeroTitle.CouldNotCheck, HeroSubtitle.ProbeUnavailable, HeroPrompt.None, checking = false),
                 okTiles,
+            ),
+        )
+
+    /** Tiles derived from an older attempt are withheld (null); the measurement's own evidence ranks. */
+    private fun tilelessRows(): List<HeroRow> =
+        listOf(
+            HeroRow(
+                "tiles from an older attempt are not consulted: the fresh evidence ranks green",
+                Situation.Measured(EvidenceConclusion.NoObservedLeak, Staleness.Current),
+                HeroVisual(HeroTone.Protected, HeroTitle.VpnHidden, HeroSubtitle.AllLayersActive, HeroPrompt.None, checking = false),
+                tiles = null,
+            ),
+            HeroRow(
+                "without tiles a leak in the evidence still ranks red",
+                Situation.Measured(EvidenceConclusion.OwnedLeak, Staleness.Current),
+                HeroVisual(HeroTone.Unprotected, HeroTitle.VpnVisible, HeroSubtitle.HidingNotActive, HeroPrompt.None, checking = false),
+                tiles = null,
             ),
         )
 

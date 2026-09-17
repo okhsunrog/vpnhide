@@ -91,9 +91,14 @@ directions, since `internal` is module-wide and the compiler will not.
   self-test suite. It executes the pure `reduceDiagnosticRun` with identified
   effects (`DiagnosticRunIo`: context observation and phased probes) on the
   process scope; a waiter detaching never cancels a run, and a retry is a new run.
-  Request a suite through `DiagnosticsCache.run` (automatic intent) / `retry`
-  (explicit) / `awaitTerminal` (join or read the latest attempt); never launch
+  Request a suite through `DiagnosticsCache.run` (startup intent: the first
+  suite of the process, a join or a read afterwards) / `retry` (explicit) /
+  `awaitTerminal` (join or read the latest attempt); never launch
   `runCoreChecks` from a screen or bypass the coordinator's probe ownership.
+  Every other automatic run is owed by the presentation (`owedConfirmation` in
+  `DiagnosticConfirmationData.kt`: one per measurement key nothing covers), so
+  do not add an edge-triggered "the gate changed, run a suite" path anywhere —
+  feed the observation and let the rule decide.
   The probe plan and per-run outcomes are keyed by the stable check ids in
   `NATIVE_CHECKS` / `NATIVE_EXTRA_CHECKS` / `CORE_JAVA_CHECKS` / `EXTRA_JAVA_CHECKS`
   — a new probe is a new spec entry with an id, not a bare list item.
@@ -103,7 +108,10 @@ directions, since `internal` is module-wide and the compiler will not.
   there, never by adding a wait or a retry to a screen.
 - **`RootSnapshotCache`** — the single batched root read. Need new system state
   on the Dashboard/Hiding path? Add a section to its shell snapshot; don't
-  add an ad-hoc `suExec` that races the snapshot.
+  add an ad-hoc `suExec` that races the snapshot. The deliberate exception is
+  `RoutingGateCache`: its foreground `AppVpnStatePoller` uses the narrow Rust
+  `observe app-vpn-state` helper because app-scoped VPN membership changes must
+  not refresh or depend on the heavy root snapshot.
 - **`ShellUtils`** — `suExec`, and the parsers `parseConfigLines`,
   `parseKeyValueLines`, `parsePackageUidMap`. **Never write another `pm list`
   or `key=value` parser** — there used to be four; there is now one of each.

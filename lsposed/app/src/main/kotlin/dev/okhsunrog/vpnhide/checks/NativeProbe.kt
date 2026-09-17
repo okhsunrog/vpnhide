@@ -58,6 +58,27 @@ data class RoutingObservation(
     val detail: String,
 )
 
+enum class AppVpnState { VPN_OFF, EXCLUDED, ROUTED, UNKNOWN }
+
+data class AppVpnStateObservation(
+    val uid: Long,
+    val state: AppVpnState,
+    val session: String?,
+    val interfaces: List<String>,
+    val method: String,
+    val detail: String,
+)
+
+sealed interface AppVpnStateResponse {
+    data class Success(
+        val observation: AppVpnStateObservation,
+    ) : AppVpnStateResponse
+
+    data class Failure(
+        val error: ObservationError,
+    ) : AppVpnStateResponse
+}
+
 sealed interface RoutingResponse {
     data class Success(
         val observation: RoutingObservation,
@@ -87,6 +108,7 @@ sealed interface KpmListResponse {
 object NativeProbe {
     private const val CHECKS_KIND = "checks"
     private const val ROUTING_KIND = "routing"
+    private const val APP_VPN_STATE_KIND = "app_vpn_state"
     private const val KPM_LIST_KIND = "kpm_list"
     private val probeJson = Json { ignoreUnknownKeys = true }
 
@@ -125,11 +147,18 @@ object NativeProbe {
             is Envelope.Failure -> ChecksResponse.Failure(envelope.error)
         }
 
-    /** Parse the self-routing response from the root helper transport. */
+    /** Parse the legacy UID-routing response from the root helper transport. */
     fun parseRouting(json: String): RoutingResponse =
         when (val envelope = parseEnvelope(json, ROUTING_KIND)) {
             is Envelope.Success -> parseRoutingData(envelope.data)
             is Envelope.Failure -> RoutingResponse.Failure(envelope.error)
+        }
+
+    /** Parse the combined VPN-presence and self-UID routing observation. */
+    fun parseAppVpnState(json: String): AppVpnStateResponse =
+        when (val envelope = parseEnvelope(json, APP_VPN_STATE_KIND)) {
+            is Envelope.Success -> parseAppVpnStateData(envelope.data)
+            is Envelope.Failure -> AppVpnStateResponse.Failure(envelope.error)
         }
 
     /** Parse the structured runtime KPM listing used by the root snapshot. */
@@ -175,6 +204,40 @@ object NativeProbe {
         }
         val detail = item.stringField("detail") ?: return RoutingResponse.Failure(ObservationError.Malformed)
         return RoutingResponse.Success(RoutingObservation(uid, routed, detail))
+    }
+
+    private fun parseAppVpnStateData(data: JsonElement): AppVpnStateResponse {
+        val item = data as? JsonObject ?: return AppVpnStateResponse.Failure(ObservationError.Malformed)
+        val uid = item.longField("uid") ?: return AppVpnStateResponse.Failure(ObservationError.Malformed)
+        if (uid < 0) return AppVpnStateResponse.Failure(ObservationError.Malformed)
+        val state =
+            when (item.stringField("state")) {
+                "vpn_off" -> AppVpnState.VPN_OFF
+                "excluded" -> AppVpnState.EXCLUDED
+                "routed" -> AppVpnState.ROUTED
+                "unknown" -> AppVpnState.UNKNOWN
+                else -> return AppVpnStateResponse.Failure(ObservationError.Malformed)
+            }
+        val sessionElement = item["session"]
+        val session =
+            when (sessionElement) {
+                JsonNull -> null
+                is JsonPrimitive -> sessionElement.takeIf(JsonPrimitive::isString)?.content
+                else -> null
+            }
+        if (sessionElement !is JsonNull && session == null) {
+            return AppVpnStateResponse.Failure(ObservationError.Malformed)
+        }
+        val interfaces =
+            (item["interfaces"] as? JsonArray)
+                ?.map { element ->
+                    (element as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.content
+                        ?: return AppVpnStateResponse.Failure(ObservationError.Malformed)
+                } ?: return AppVpnStateResponse.Failure(ObservationError.Malformed)
+        if (interfaces.any(String::isEmpty)) return AppVpnStateResponse.Failure(ObservationError.Malformed)
+        val method = item.stringField("method") ?: return AppVpnStateResponse.Failure(ObservationError.Malformed)
+        val detail = item.stringField("detail") ?: return AppVpnStateResponse.Failure(ObservationError.Malformed)
+        return AppVpnStateResponse.Success(AppVpnStateObservation(uid, state, session, interfaces, method, detail))
     }
 
     private fun parseKpmListData(data: JsonElement): KpmListResponse {

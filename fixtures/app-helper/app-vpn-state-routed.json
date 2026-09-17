@@ -1,0 +1,1 @@
+{"version":1,"kind":"app_vpn_state","status":"ok","data":{"uid":10042,"state":"routed","session":"framework:143:tun0","interfaces":["tun0"],"method":"uid_rule","detail":"uid_in_vpn_table"}}

@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.checks.AppVpnState
+import dev.okhsunrog.vpnhide.checks.AppVpnStateResponse
 import dev.okhsunrog.vpnhide.checks.CheckStatus
 import dev.okhsunrog.vpnhide.checks.ChecksResponse
 import dev.okhsunrog.vpnhide.checks.KpmListResponse
@@ -11,6 +13,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NativeProbeContractTest {
+    @Test
+    fun `combined app VPN state preserves session and UID membership`() {
+        val response =
+            NativeProbe.parseAppVpnState(fixture("app-vpn-state-routed.json")) as AppVpnStateResponse.Success
+        assertEquals(AppVpnState.ROUTED, response.observation.state)
+        assertEquals("framework:143:tun0", response.observation.session)
+        assertEquals(listOf("tun0"), response.observation.interfaces)
+    }
+
     @Test
     fun `known checks fixture preserves the Rust payload fields`() {
         val response = NativeProbe.parseChecks(fixture("checks-pass.json")) as ChecksResponse.Success

@@ -8,16 +8,20 @@ import dev.okhsunrog.vpnhide.ConfigOperationResult
 import dev.okhsunrog.vpnhide.ConfigOperationSpec
 import dev.okhsunrog.vpnhide.ConfigPhase
 import dev.okhsunrog.vpnhide.ContextObservationInputs
+import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.ObservationClock
 import dev.okhsunrog.vpnhide.ObservationRuntime
+import dev.okhsunrog.vpnhide.ProjectedStateFlow
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.TransitionFailure
+import dev.okhsunrog.vpnhide.VpnHideLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * What a capture got out of the suite. A capture never renders the legacy
@@ -48,10 +52,13 @@ internal sealed interface DiagnosticCaptureOutcome {
  * read it once it reflects a terminal attempt ([awaitTerminal]), the bundle
  * summarises it.
  *
- * [run] is the automatic intent: it starts a suite only until one has actually
- * probed, and a blocked attempt does not consume it. [retry] keeps the existing
- * policy — a completed suite is reused, anything else is requested again as a
- * new run. Neither observation refreshes nor recomposition rerun a completed suite.
+ * [run] is the startup intent: it starts a suite only while none was ever
+ * attempted, and otherwise joins or reads what exists. Every automatic run after
+ * that is owed by the presentation itself ([confirmMeasurements]): when this app
+ * is eligible and the key of its measurable world is covered by no measurement,
+ * no attempt and no earlier request, one confirmation is requested for that key.
+ * Recomposition, timer ticks and re-reads that reveal no new key rerun nothing.
+ * [retry] is the explicit run: always a new one.
  * [captureRun] is the debug export's entry: an explicit, capture-identified run
  * that never joins an existing suite and whose terminal attempt is reported as is.
  *
@@ -76,6 +83,9 @@ internal object DiagnosticsCache {
     private val impactFlow = MutableStateFlow(DiagnosticImpactState())
     private val impact: DiagnosticImpactState get() = impactFlow.value
 
+    /** The key the confirmation owner last requested a run for; part of the presentation, so "pending" is one fact. */
+    private val claimedKey = MutableStateFlow<MeasurementKey?>(null)
+
     private val coordinator by lazy {
         DiagnosticRunCoordinator(ObservationRuntime.scope, AppDiagnosticRunIo(inputs = { inputs }, impact = { impact }))
     }
@@ -92,14 +102,15 @@ internal object DiagnosticsCache {
             RoutingGateCache.observation,
             RootSnapshotCache.snapshot,
             CanonicalConfigRepository.state,
-            impactFlow,
-        ) { view, routing, snapshot, config, impact ->
+            combine(impactFlow, claimedKey, ::Pair),
+        ) { view, appVpnState, snapshot, config, (impact, claimed) ->
             val current = inputs
+            val routing = appVpnState.gateProjection()
             val observation =
                 if (routing.attempted) {
                     buildDiagnosticContextObservation(
                         selfNeedsRestart = current?.selfNeedsRestart ?: false,
-                        routing = routing,
+                        appVpn = AppVpnContext(routing, appVpnState.lastGood?.value?.identity),
                         snapshot = snapshot,
                         config = config.confirmed,
                         selfPackage = current?.context?.packageName.orEmpty(),
@@ -113,7 +124,7 @@ internal object DiagnosticsCache {
                     null
                 }
             val knowledge = routingKnowledge(selfRoutingObservation(routing), ObservationClock.now())
-            diagnosticPresentation(view, observation, impact.changeEpoch, knowledge)
+            diagnosticPresentation(view, observation, impact.changeEpoch, knowledge, claimed)
         }.stateIn(
             ObservationRuntime.scope,
             SharingStarted.Eagerly,
@@ -121,7 +132,7 @@ internal object DiagnosticsCache {
                 coordinator.view.value,
                 null,
                 0,
-                routingKnowledge(selfRoutingObservation(RoutingGateCache.observation.value), ObservationClock.now()),
+                routingKnowledge(selfRoutingObservation(RoutingGateCache.gateObservation.value), ObservationClock.now()),
             ),
         )
     }
@@ -141,14 +152,30 @@ internal object DiagnosticsCache {
 
     private fun processIdentity(): String = "pid:${Process.myPid()};uid:${Process.myUid()}"
 
-    /** Automatic suite request: idempotent, consumed by the first suite that actually probes. */
+    /** Startup intent: starts the first suite of the process; later calls join or read what exists. */
     fun run(
         context: Context,
         selfNeedsRestart: Boolean,
     ) {
         updateInputs(context, selfNeedsRestart)
-        coordinator.request(request(automatic = true))
+        coordinator.ensure(request(automatic = true))
     }
+
+    /**
+     * One automatic confirmation for [key]: admitted, or joined when a suite with
+     * the same plan is already in flight. Not admitted only while a capture's own
+     * run holds the probes, and the owner asks again on the next presentation.
+     */
+    private fun requestConfirmation(key: MeasurementKey): Boolean {
+        val admission = coordinator.request(request(automatic = true))
+        VpnHideLog.i(LogTags.DIAG, "confirmation for ${key.routing}: $admission")
+        val accepted = admission is DiagnosticAdmission.Accepted
+        if (accepted) claimedKey.value = key
+        return accepted
+    }
+
+    /** The latest terminal attempt's id: what a derivation that folded the presentation was built from. */
+    val latestAttemptId: StateFlow<Long?> by lazy { ProjectedStateFlow(presentation) { it.lastAttempt?.id } }
 
     /**
      * Explicit re-check from the prompts, the Diagnostics screen and the Dashboard
@@ -202,11 +229,7 @@ internal object DiagnosticsCache {
         updateInputs(context, selfNeedsRestart)
         return when (val admission = coordinator.request(request(automatic = false).copy(captureId = captureId))) {
             is DiagnosticAdmission.Accepted -> DiagnosticCaptureOutcome.Ran(admission.handle.await())
-
             is DiagnosticAdmission.Rejected -> DiagnosticCaptureOutcome.NotAdmitted(admission.reason)
-
-            // Only an automatic request can be ignored; a capture request never is.
-            DiagnosticAdmission.Ignored -> DiagnosticCaptureOutcome.NotAdmitted(TransitionFailure.Busy)
         }
     }
 
@@ -230,6 +253,16 @@ internal object DiagnosticsCache {
     ) {
         restartPending = restartPending || selfNeedsRestart
         inputs = ContextObservationInputs(context.applicationContext, restartPending)
+        confirmations
+    }
+
+    /**
+     * The one owner of automatic confirmations, process-lived like the runs it
+     * requests and started with the first inputs; nothing is owed before them,
+     * because the presentation stays Initializing.
+     */
+    private val confirmations by lazy {
+        ObservationRuntime.scope.launch { confirmMeasurements(presentation, ::requestConfirmation, ObservationClock::now) }
     }
 }
 

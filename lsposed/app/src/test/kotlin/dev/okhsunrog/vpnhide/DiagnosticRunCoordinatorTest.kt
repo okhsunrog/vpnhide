@@ -110,7 +110,7 @@ class DiagnosticRunCoordinatorTest {
         }
 
     @Test
-    fun `blocked eligibility finishes without probes and keeps the automatic intent`() =
+    fun `blocked eligibility finishes without probes and a later automatic request is admitted`() =
         fixture { f ->
             val first = f.accept(diagnosticRequest(automatic = true))
             f.observations
@@ -126,7 +126,8 @@ class DiagnosticRunCoordinatorTest {
             val second = f.accept(diagnosticRequest(automatic = true))
             assertEquals(2L, second.id)
             f.complete(second)
-            assertTrue(f.owner.request(diagnosticRequest(automatic = true)) is DiagnosticAdmission.Ignored)
+            val third = f.owner.request(diagnosticRequest(automatic = true))
+            assertTrue(third is DiagnosticAdmission.Accepted && third.handle.id == 3L)
         }
 
     @Test

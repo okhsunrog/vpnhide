@@ -59,9 +59,9 @@ import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.SelfTargetFailureKind
 import dev.okhsunrog.vpnhide.VpnHideLog
+import dev.okhsunrog.vpnhide.diagnostics.AppVpnStatePoller
 import dev.okhsunrog.vpnhide.diagnostics.GroundTruthProbe
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
-import dev.okhsunrog.vpnhide.diagnostics.VpnStatePoller
 import dev.okhsunrog.vpnhide.help.HelpScreen
 import dev.okhsunrog.vpnhide.picker.AppListCache
 import dev.okhsunrog.vpnhide.picker.ProtectionScreen
@@ -431,8 +431,7 @@ private fun MainScreen() {
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            launch { VpnStatePoller.pollWhileVisible() }
-            launch { VpnStatePoller.confirmRoutedTransitions() }
+            launch { AppVpnStatePoller.pollWhileVisible() }
         }
     }
     DisposableEffect(lifecycleOwner) {
@@ -442,7 +441,7 @@ private fun MainScreen() {
                     startupCoordinator.ensureUpdateFresh(scope)
                     // Fresh routing evidence on foreground return, independently of
                     // callbacks hidden by our own Java backend.
-                    RoutingGateCache.refreshIfStale()
+                    RoutingGateCache.refreshOnResume()
                 }
             }
         lifecycleOwner.lifecycle.addObserver(observer)

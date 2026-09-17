@@ -40,12 +40,27 @@ internal data class MeasurementCoverage(
         )};hooks=${installedOptionalHooks.map { it.name }.sorted()};lsposed=$lsposedActive"
 }
 
+/**
+ * The conditions a measurement is taken under, without the instant it was taken
+ * at. Two contexts with the same key describe the same measurable world: a
+ * measurement keyed like the current context still applies, and one automatic
+ * confirmation is owed per key that no attempt has covered yet.
+ */
+internal data class MeasurementKey(
+    val subject: String,
+    val configuration: String,
+    val routing: String,
+    val coverage: String,
+    val changeEpoch: Long,
+)
+
+internal val MeasurementContext.key: MeasurementKey
+    get() = MeasurementKey(subject, configuration, routing, coverage, changeEpoch)
+
 internal fun sameMeasurementConditions(
     first: MeasurementContext,
     second: MeasurementContext,
-): Boolean =
-    first.subject == second.subject && first.configuration == second.configuration &&
-        first.routing == second.routing && first.coverage == second.coverage && first.changeEpoch == second.changeEpoch
+): Boolean = first.key == second.key
 
 internal data class DiagnosticMeasurement(
     val runId: Long,

@@ -12,11 +12,21 @@ internal data class AppHelperAsset(
     val digest: String,
 )
 
+@Volatile
+private var cachedAppHelperAsset: AppHelperAsset? = null
+
 /**
  * Extract the one app helper as an immutable, content-addressed file. A new APK
  * never overwrites an executable that an older app process may still be using.
  */
-internal fun extractAppHelper(context: Context): AppHelperAsset? =
+internal fun extractAppHelper(context: Context): AppHelperAsset? {
+    cachedAppHelperAsset?.let { return it }
+    return synchronized(AppHelperAsset::class.java) {
+        cachedAppHelperAsset ?: extractAppHelperOnce(context)?.also { cachedAppHelperAsset = it }
+    }
+}
+
+private fun extractAppHelperOnce(context: Context): AppHelperAsset? =
     runCatching {
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
         val bytes = context.assets.open("bin/$abi/vhhelper").use { it.readBytes() }
