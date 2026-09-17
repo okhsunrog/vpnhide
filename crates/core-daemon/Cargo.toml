@@ -1,0 +1,31 @@
+# The persistent root core: a UDS tarpc server (and a typed client) speaking the
+# `core-rpc` contract. Skeleton for core-2.0 step 2 — the publish/lifecycle machinery
+# is real; the domain (config/operation/observation) is still placeholder (see core-rpc).
+[package]
+name = "vpnhide_core_daemon"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "vpnhide 2.0 persistent root core: UDS tarpc server + typed client skeleton."
+
+[lib]
+name = "vpnhide_core_daemon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vpnhide-core"
+path = "src/main.rs"
+
+[dependencies]
+vpnhide_core_rpc = { path = "../core-rpc" }
+tarpc = { version = "0.38", features = ["serde-transport", "tokio1", "unix"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros", "time", "signal"] }
+tokio-serde = { version = "0.9", features = ["json"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["test-util"] }
