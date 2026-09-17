@@ -91,9 +91,14 @@ directions, since `internal` is module-wide and the compiler will not.
   self-test suite. It executes the pure `reduceDiagnosticRun` with identified
   effects (`DiagnosticRunIo`: context observation and phased probes) on the
   process scope; a waiter detaching never cancels a run, and a retry is a new run.
-  Request a suite through `DiagnosticsCache.run` (automatic intent) / `retry`
-  (explicit) / `awaitTerminal` (join or read the latest attempt); never launch
+  Request a suite through `DiagnosticsCache.run` (startup intent: the first
+  suite of the process, a join or a read afterwards) / `retry` (explicit) /
+  `awaitTerminal` (join or read the latest attempt); never launch
   `runCoreChecks` from a screen or bypass the coordinator's probe ownership.
+  Every other automatic run is owed by the presentation (`owedConfirmation` in
+  `DiagnosticConfirmationData.kt`: one per measurement key nothing covers), so
+  do not add an edge-triggered "the gate changed, run a suite" path anywhere —
+  feed the observation and let the rule decide.
   The probe plan and per-run outcomes are keyed by the stable check ids in
   `NATIVE_CHECKS` / `NATIVE_EXTRA_CHECKS` / `CORE_JAVA_CHECKS` / `EXTRA_JAVA_CHECKS`
   — a new probe is a new spec entry with an id, not a bare list item.

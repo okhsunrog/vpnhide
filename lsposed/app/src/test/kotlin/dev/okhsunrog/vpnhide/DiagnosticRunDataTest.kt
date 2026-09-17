@@ -214,19 +214,17 @@ class DiagnosticRunDataTest {
     }
 
     @Test
-    fun `automatic intent is consumed on probe start but not on blocked attempt`() {
+    fun `automatic request after a finished suite starts a new run`() {
         val fixture = RunFixture()
         fixture.request(automatic = true)
         fixture.send(DiagnosticRunEvent.Failed(fixture.active.ticket, TransitionFailure.ReadFailed))
-        assertTrue(fixture.state.automaticAvailable)
         fixture.request(automatic = true)
+        assertEquals(2L, fixture.active.id)
         fixture.complete()
-        assertFalse(fixture.state.automaticAvailable)
-        val before = fixture.state
+        // Whether a confirmation is owed is decided from the presentation; admission never refuses it at rest.
         fixture.request(automatic = true)
-        assertEquals(before, fixture.state)
-        fixture.request()
         assertEquals(3L, fixture.active.id)
+        assertTrue(fixture.active.request.automatic)
     }
 
     @Test
@@ -262,7 +260,7 @@ class DiagnosticRunDataTest {
     }
 
     @Test
-    fun `blocked checking observation finishes with its reason and keeps the automatic intent`() {
+    fun `blocked checking observation finishes with its reason and probes nothing`() {
         val fixture = RunFixture()
         fixture.request(automatic = true)
         fixture.send(DiagnosticRunEvent.NotEligible(fixture.active.ticket, DiagnosticEligibility.VpnOff))
@@ -271,7 +269,6 @@ class DiagnosticRunDataTest {
         assertEquals(DiagnosticEligibility.VpnOff, attempt.eligibility)
         assertEquals(null, attempt.failure)
         assertEquals(null, attempt.measurement)
-        assertTrue(fixture.state.automaticAvailable)
         assertTrue(fixture.effects.none { it is DiagnosticRunEffect.Probe })
         // Only a Checking observation can block; a late one after probes started is not a new outcome.
         fixture.request(automatic = true)

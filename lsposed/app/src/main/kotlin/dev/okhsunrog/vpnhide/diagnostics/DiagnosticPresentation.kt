@@ -39,6 +39,20 @@ internal data class DiagnosticPresentation(
     val evidence: MeasurementEvidence?,
     val currentSuccess: Boolean,
     val probeUnavailable: Boolean,
+    /**
+     * The key of the measurable world right now, or null while no current context
+     * exists (routing not current, no root snapshot yet). It is what a measurement
+     * is compared against for [applicability] and what one automatic confirmation
+     * is owed for when nothing covers it (see `owedConfirmation`).
+     */
+    val currentKey: MeasurementKey? = null,
+    /**
+     * An automatic confirmation of [currentKey] is owed and not yet requested
+     * (`owedConfirmation` against the key the owner last claimed). The surfaces
+     * word it as the run it is about to become, never as a stale result asking
+     * for a manual re-check.
+     */
+    val confirmationPending: Boolean = false,
 )
 
 /**
@@ -61,9 +75,22 @@ internal fun DiagnosticPresentation.reportGate(): DiagnosticGate? =
  * observation exists yet. [routing] is that same routing observation as
  * knowledge; anything but [RoutingKnowledge.Known] means the observation is not
  * current (loading, invalidated, failed or quarantined), so the measurement is
- * Unverified until a consistent reobservation restores it.
+ * Unverified until a consistent reobservation restores it. [claimed] is the key
+ * the confirmation owner last requested a run for; the presentation says whether
+ * one is still pending, so every surface and the owner read the same answer.
  */
 internal fun diagnosticPresentation(
+    view: DiagnosticRunView,
+    current: DiagnosticContextObservation?,
+    changeEpoch: Long,
+    routing: RoutingKnowledge,
+    claimed: MeasurementKey? = null,
+): DiagnosticPresentation {
+    val presentation = presentationWithoutConfirmation(view, current, changeEpoch, routing)
+    return presentation.copy(confirmationPending = owedConfirmation(presentation, claimed) != null)
+}
+
+private fun presentationWithoutConfirmation(
     view: DiagnosticRunView,
     current: DiagnosticContextObservation?,
     changeEpoch: Long,
@@ -87,5 +114,6 @@ internal fun diagnosticPresentation(
         evidence = measurement?.let(::summarizeMeasurement),
         currentSuccess = canPresentCurrentSuccess(measurement, applicability, eligibility),
         probeUnavailable = core.quarantined,
+        currentKey = current?.context?.key,
     )
 }

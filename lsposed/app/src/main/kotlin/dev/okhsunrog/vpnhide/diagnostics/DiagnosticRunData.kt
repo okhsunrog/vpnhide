@@ -61,7 +61,6 @@ internal data class DiagnosticRunState(
     val nextEffect: Long = 1,
     val quarantined: Boolean = false,
     val quarantineTicket: EffectTicket? = null,
-    val automaticAvailable: Boolean = true,
 )
 
 internal sealed interface DiagnosticRunEvent {
@@ -238,7 +237,6 @@ private fun requestDiagnosticRun(
     state: DiagnosticRunState,
     request: DiagnosticRequest,
 ): Transition<DiagnosticRunState, DiagnosticRunEffect> {
-    if (request.automatic && !state.automaticAvailable) return Transition(state)
     if (state.quarantined) return Transition(state, listOf(DiagnosticRunEffect.Rejected(TransitionFailure.ResourceUnavailable)))
     val shared = listOf(state.active, state.pending).firstOrNull { matchingRun(it, request) }
     if (shared != null) return Transition(state, listOf(DiagnosticRunEffect.Accepted(shared.id, joined = true)))
@@ -293,7 +291,7 @@ private fun receiveRunContext(
     return when (active.stage) {
         DiagnosticStage.Checking -> {
             dispatchDiagnosticStage(
-                state.copy(active = active.copy(context = event.context, startedAt = now), automaticAvailable = false),
+                state.copy(active = active.copy(context = event.context, startedAt = now)),
                 DiagnosticStage.Core,
             )
         }

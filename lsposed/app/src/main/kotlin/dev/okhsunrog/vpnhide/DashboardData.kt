@@ -26,6 +26,7 @@ import dev.okhsunrog.vpnhide.startup.StartupTrace
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import java.io.File
 
 // ── Domain types — invalid states are unrepresentable ────────────────────
@@ -347,6 +348,10 @@ internal data class DashboardState(
     // A pre-1.0 config still on disk next to a config that already has roles —
     // the startup importer leaves that case to the user (LegacyConfigImport).
     val legacyImport: LegacyImportPrompt? = null,
+    // The latest diagnostic attempt the protection tiles were derived from; the
+    // cache re-derives when the suite has a newer terminal attempt (DashboardCache).
+    // Process bookkeeping, not a fact of the device: kept out of the bundle.
+    @Transient val diagnosticsAttemptId: Long? = null,
 )
 
 internal fun protectionFullyPassed(protection: ProtectionCheck): Boolean =
@@ -1424,6 +1429,7 @@ private fun resolveProtectionFacts(
 private fun DashboardFacts.toDashboardState(
     messages: List<DashboardMessage>,
     legacyImport: LegacyImportPrompt?,
+    diagnosticsAttemptId: Long?,
 ): DashboardState =
     DashboardState(
         kmod = modules.kmod.state,
@@ -1444,6 +1450,7 @@ private fun DashboardFacts.toDashboardState(
         messages = messages,
         installedOptionalHooks = protection.installedOptionalHooks,
         legacyImport = legacyImport,
+        diagnosticsAttemptId = diagnosticsAttemptId,
     )
 
 /**
@@ -1524,5 +1531,6 @@ internal suspend fun loadDashboardState(
     return facts.toDashboardState(
         messages = messages,
         legacyImport = parseLegacyConfigCandidate(sections, targetsSnapshot.uidToPkg)?.toPrompt(),
+        diagnosticsAttemptId = diagnostics.lastAttempt?.id,
     )
 }

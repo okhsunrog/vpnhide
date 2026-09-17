@@ -68,7 +68,7 @@ internal data class HeroVisual(
 
 internal fun heroVisual(
     situation: Situation,
-    tiles: ProtectionCheck,
+    tiles: ProtectionCheck?,
     errorCount: Int,
     warningCount: Int,
 ): HeroVisual =
@@ -169,15 +169,18 @@ private fun couldNotCheckVisual(cause: CouldNotCheckCause): HeroVisual {
  * the conditions have outrun, or one that attributed nothing, replaces the wording
  * and is at least Attention — but never softens a worse signal, so a broken layer or
  * an error stays red while the re-check is asked for. [Staleness.Confirming] renders
- * exactly like [Staleness.Current]: it is silent by design.
+ * exactly like [Staleness.Current]: it is silent by design. Tiles derived from an
+ * older attempt than the measurement are passed as null: the evidence conclusion
+ * ranks instead, so a fresh measurement is never yellowed by the previous tiles.
  */
 private fun measuredVisual(
     measured: Situation.Measured,
-    tiles: ProtectionCheck,
+    tiles: ProtectionCheck?,
     errorCount: Int,
     warningCount: Int,
 ): HeroVisual {
-    val rank = maxOf(tilesRank(tiles), issuesRank(errorCount, warningCount))
+    val layers = tiles?.let(::tilesRank) ?: evidenceRank(measured.evidence)
+    val rank = maxOf(layers, issuesRank(errorCount, warningCount))
     if (measured.staleness == Staleness.Changed) {
         return HeroVisual(
             toneOf(maxOf(rank, RANK_ATTENTION)),
@@ -234,6 +237,14 @@ private fun tilesRank(tiles: ProtectionCheck): Int =
     when (tiles) {
         is ProtectionCheck.Checked -> maxOf(tiles.native.heroRank(), tiles.java.heroRank())
         is ProtectionCheck.Blocked, ProtectionCheck.Failed -> RANK_ATTENTION
+    }
+
+/** The measurement's own worst signal, for the moment its tiles have not been derived yet. */
+private fun evidenceRank(evidence: EvidenceConclusion): Int =
+    when (evidence) {
+        EvidenceConclusion.NoObservedLeak -> RANK_PROTECTED
+        EvidenceConclusion.Partial, EvidenceConclusion.Insufficient -> RANK_ATTENTION
+        EvidenceConclusion.OwnedLeak -> RANK_UNPROTECTED
     }
 
 private fun issuesRank(

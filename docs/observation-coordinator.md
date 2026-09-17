@@ -50,13 +50,35 @@ Probe failures are ignored by the silent timer, never translated to VPN-off. A
 quarantined or active shared read is not replaced by the timer. ON_RESUME always
 requests fresh present-tense evidence, and explicit Retry remains available.
 
-The confirmation suite on a VPN transition has one owner too.
-`AppVpnStatePoller.confirmRoutedTransitions` compares complete app-VPN snapshots.
-It requests one confirmation when a stable non-routed state becomes routed, or when
-the framework VPN session changes while both samples are routed. Repeated polls of
-one routed session and a cold start already routed do not fire. This handles the
-excluded → included transition that has no global interface change, while the
-negative confirmation suppresses the brief false exclusion seen during tunnel setup.
+The confirmation suite has one owner too, and it is not an edge detector.
+`DiagnosticsCache` runs `confirmMeasurements` over its own presentation: whenever
+`owedConfirmation` finds this app eligible with a current measurement key
+(subject, self configuration, routing identity, coverage, change epoch) that
+nothing covers, it requests one automatic run for that key. "Covers" means the
+presented measurement was taken under that key, or the latest non-blocked attempt
+was (whatever its outcome: a failure is answered by Retry, never by a loop), or
+the owner already asked for it. A run in flight or a quarantined probe owes
+nothing. Whether a confirmation is pending is itself a field of the presentation
+(`confirmationPending`, computed from the key the owner last claimed), so the
+Situation words that window as the run it becomes (`Checking`) instead of as a
+stale result asking for a manual re-check, and the owner and the surfaces read
+one fact. The request waits a 300 ms settle window, restarted by every newer
+presentation so the separate emissions of one change produce one run, and keeps
+at least five seconds from the previous automatic request so a flapping VPN
+cannot keep the suite busy. Because the rule reads state rather than transitions, a cold
+start already routed, a foreground return after the tunnel was re-established
+(the excluded → included split-tunnel case: a new framework network id is a new
+routing identity) and a session change seen by the poller all take the same path,
+and none of them can be lost to a missing baseline. A poll that reveals no new key
+reruns nothing; the negative confirmation in `RoutingGateCache` still suppresses
+the brief false exclusion seen during tunnel setup.
+
+The Dashboard tiles are folded from the presentation when Dashboard derives, while
+the hero renders the live Situation; `DashboardCache` therefore follows the suite
+and re-derives in place (no root re-read, no run request) when a terminal attempt
+is newer than the one its tiles came from. Until that derivation lands, the hero
+withholds tiles derived from an older attempt and ranks the fresh measurement by
+its own evidence, so a new green result is never yellowed by the previous tiles.
 
 There is no ConnectivityManager listener for VPN-state auto-refresh. The app's own
 Java backend intentionally hides VPN lifecycle changes when its visible network
@@ -73,9 +95,11 @@ Dashboard and Diagnostics Retry use one coordinator entry point: it requests a
 fresh app-VPN observation, queues one explicit diagnostic run, then re-derives
 Dashboard without its normal `beforeRefresh` hook requesting that run again. An
 explicit retry never joins an already-running automatic suite; it waits as the
-single pending successor, so the user's click cannot disappear. The existing
-startup, live-routed process trigger and explicit retry remain. A
-config-only background invalidation does not itself retry a terminal diagnostic.
+single pending successor, so the user's click cannot disappear. The startup
+intent (`DiagnosticsCache.run`: the first suite of the process, a join or a read
+afterwards), the owed confirmation above and the explicit retry are the only
+ways a suite starts. Admission never refuses an automatic request at rest;
+whether one is owed is decided from the presentation.
 Completed-result retention and measurement classification are unchanged.
 Screen retry triggers observe known routing transitions: a temporary unknown value
 during refresh does not count as VPN returning. A terminal failure leaves the

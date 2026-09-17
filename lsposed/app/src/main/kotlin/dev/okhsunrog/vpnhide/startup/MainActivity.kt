@@ -432,7 +432,6 @@ private fun MainScreen() {
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             launch { AppVpnStatePoller.pollWhileVisible() }
-            launch { AppVpnStatePoller.confirmRoutedTransitions() }
         }
     }
     DisposableEffect(lifecycleOwner) {

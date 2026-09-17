@@ -170,6 +170,16 @@ class SituationDataTest {
                 Situation.Checking(CheckingWhat.Suite, SelfRouting.Routed, ReadReason.Background, NOW),
             ),
             Row(
+                "a confirmation about to be requested is the run it becomes, not a stale result to re-check",
+                presentation(
+                    routing = routed,
+                    measurement = measurement(),
+                    applicability = MeasurementApplicability.Changed,
+                    confirmationPending = true,
+                ),
+                Situation.Checking(CheckingWhat.Suite, SelfRouting.Routed, ReadReason.Background, NOW),
+            ),
+            Row(
                 "a completed attempt whose evidence was evicted has nothing to show",
                 presentation(routing = routed, lastAttempt = DiagnosticAttempt(1, RunOutcome.Completed)),
                 Situation.CouldNotCheck(CouldNotCheckCause.RunFailed(null)),
@@ -308,6 +318,7 @@ class SituationDataTest {
         activeRunId: Long? = null,
         activeRunAutomatic: Boolean? = null,
         probeUnavailable: Boolean = false,
+        confirmationPending: Boolean = false,
     ): DiagnosticPresentation =
         DiagnosticPresentation(
             eligibility = eligibility,
@@ -323,6 +334,7 @@ class SituationDataTest {
             evidence = measurement?.let(::summarizeMeasurement),
             currentSuccess = false,
             probeUnavailable = probeUnavailable,
+            confirmationPending = confirmationPending,
         )
 
     companion object {

@@ -186,11 +186,15 @@ framework/rule observation becomes `unknown`, never `vpn_off` or `excluded`.
 The foreground `AppVpnStatePoller` requests this observation after each one-second
 delay and on every Activity resume. `routed` publishes immediately; negative
 states require two equal samples 750 ms apart, so tunnel setup cannot briefly
-publish a false exclusion. A stable excluded → routed edge and a changed routed
-VPN session each request one fresh confirmation suite. Repeated samples of one
-routed session do not. User Retry uses the same cache and queues an explicit suite
-behind any automatic run already in progress, so the click cannot be absorbed by
-that run.
+publish a false exclusion. The poller only keeps the observation current; the
+confirmation suite is owed by the presentation it produces (`owedConfirmation`):
+one automatic run per measurement key (routing identity, coverage, self
+configuration, change epoch) that no measurement and no attempt covers, so a
+re-established tunnel, an excluded → routed return or a coverage change each get
+exactly one run, whether the app was in the foreground for the edge or not.
+Repeated samples of one routed session reveal no new key and rerun nothing. User
+Retry uses the same cache and queues an explicit suite behind any automatic run
+already in progress, so the click cannot be absorbed by that run.
 
 ## 6. Empirical facts that shape the checks
 

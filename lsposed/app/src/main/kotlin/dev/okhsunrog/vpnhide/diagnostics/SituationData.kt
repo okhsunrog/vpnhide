@@ -250,6 +250,9 @@ private fun measuredSituation(
     confirming: Staleness.Confirming?,
 ): Situation {
     activeRunSituation(presentation, now, fact)?.let { return it }
+    // A confirmation the owner is about to request is the run it becomes: the stale
+    // measurement it will replace is not asked for a manual re-check meanwhile.
+    if (presentation.confirmationPending) return Situation.Checking(CheckingWhat.Suite, fact, ReadReason.Background, now)
     failedAttemptSituation(presentation)?.let { return it }
     noMeasurementSituation(presentation, now, fact)?.let { return it }
     val evidence = requireNotNull(presentation.evidence) { "a measurement always carries its evidence summary" }
