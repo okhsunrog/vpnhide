@@ -142,7 +142,7 @@ fn default_enabled() -> bool {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum NativeHookFamily {
+pub enum NativeHookFamily {
     Kmod,
     Kpm,
     Builtin,
@@ -410,7 +410,7 @@ pub(crate) fn project_native_with_pm_wait(
     ))
 }
 
-pub(crate) fn project_native_with_resolver_for_family(
+pub fn project_native_with_resolver_for_family(
     cfg: &CanonicalConfig,
     resolver: &PackageUidMap,
     family: NativeHookFamily,

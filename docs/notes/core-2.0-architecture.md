@@ -647,8 +647,24 @@ app-only concerns migration leaves in Kotlin (drafts, UI-edit conflicts, bridge-
 **not** ported (§3/§7). Recovery (an `Unknown` outcome → readback → resolve/Held) is
 deliberately deferred to step D: today the only real phase is `Persist` (a local atomic write,
 never `Unknown`); the `PhaseRunner` seam is where the D activation runners plug in, and a fake
-runner already drives every outcome in tests. Still to do for step 5: the sole-writer cutover
-and in-process activation (step D).
+runner already drives every outcome in tests.
+
+**Step D (backend activation) has started, kmod/built-in family, device-validated.**
+`core-daemon/activation.rs` links the activator (additive pub surface on `vpnhide_activator`)
+rather than shelling out to the per-backend binaries: it projects the config to the built-in
+control-v2 wire (`project_native_for_family`, real `pm` uid resolution) and delivers it to the
+control node (`deliver_kernel_config`, which refuses a node not reporting the expected
+backend). The `Native` phase runner does project → deliver; `plan_for` adds `Native` after
+`Persist` on any config change when a control node is configured. **Isolation:** the control
+node is an overridable path (env `VPNHIDE_KMOD_CTL`) with **no default** — unset means no
+native write at all, so the dev sandbox core cannot touch the real `/proc/vpnhide_ctl` (a
+write there replaces the live backend's entire state). Validated on the KSU-Next device
+**read-only**: core parsed the live telemetry-v1 status (`backend=0x4 kver=0x6019d
+hooks=0x20003ff error=0x0`) and projected the real config into the exact control-v2 wire the
+live backend runs (same `20003ff` mask, and every uid the live stats report appears in the
+projected target set) — without writing. Still to do for D: KPM and Zygisk (companion)
+families; the Ports phase; the sole-writer cutover; and recovery (now that a `Native` write
+can be `Unknown`).
 
 Each boundary needs an explicit cutover. Do not run legacy and core writers in
 parallel against the same canonical/runtime state. Port behavioral tests before

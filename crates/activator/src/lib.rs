@@ -117,6 +117,37 @@ pub use lifecycle::*;
 pub use model::*;
 use ports::*;
 
+// --- core-2.0 (§4): the persistent root core absorbs the activator, linking these instead
+// of shelling out to the per-backend binaries. Additive pub surface over the pieces the
+// binaries already compose (project a config to the native wire; deliver it to the control
+// node, refusing a foreign owner). See core-daemon's activation phase.
+
+/// The backend id the built-in / kmod control node reports when it is the in-tree backend.
+pub const BUILTIN_BACKEND_ID: u32 = kernel_control::BUILTIN_BACKEND_ID;
+/// The backend id the loadable `.ko` reports.
+pub const KMOD_BACKEND_ID: u32 = kernel_control::KMOD_BACKEND_ID;
+
+/// Project a canonical-config JSON string into the native control-v2 wire for one backend
+/// family, resolving package uids from the live PackageManager (bounded wait). This is the
+/// same projection the per-backend activator binaries run.
+pub fn project_native_for_family(json: &str, family: NativeHookFamily) -> Result<String> {
+    project_native_with_pm_wait(json, family, PmReadyWait::Bounded(PM_READY_ATTEMPTS))
+}
+
+/// Deliver a native control-v2 `wire` to the control node at `path`, first reading the node
+/// and refusing unless it belongs to `expected_backend` (never configure a foreign owner).
+/// `path` is explicit so the dev sandbox can target an isolated node, never the real
+/// `/proc/vpnhide_ctl`.
+pub fn deliver_kernel_config(path: &Path, expected_backend: u32, wire: &str) -> Result<()> {
+    kernel_control::write_config(path, expected_backend, wire)
+}
+
+/// The backend id the control node at `path` currently reports, or `None` if the node is
+/// absent. Read-only — safe against the live node.
+pub fn observed_kernel_backend(path: &Path) -> Result<Option<u32>> {
+    kernel_control::observed_backend(path)
+}
+
 pub fn read_canonical() -> Result<String> {
     match fs::read_to_string(CANONICAL_CONFIG) {
         Ok(raw) => Ok(raw),
