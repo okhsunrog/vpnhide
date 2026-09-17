@@ -49,8 +49,8 @@ class DiagnosticDomainTest {
     @Test
     fun `a tunnel re-established while the app was away is confirmed once on return, without an edge to detect`() =
         fixture { f ->
+            // Nothing covers the first key either, so the owner starts the first suite itself.
             f.routing.value = known(SESSION_A, generation = 1)
-            requireNotNull(f.domain.run()).await()
             val measured = f.domain.presentation.first { it.activeRunId == null && it.measurement != null }
             assertEquals(SESSION_A.identity, measured.measurement?.context?.routing)
             assertFalse(measured.confirmationPending)
@@ -75,14 +75,14 @@ class DiagnosticDomainTest {
             assertEquals(RunOutcome.Completed, confirmed.lastAttempt?.outcome)
             assertEquals(2, f.suites.get())
             // The stale measurement was never worded as a result to re-check by hand.
-            assertTrue(f.situations.none { it is Situation.Measured && it.staleness == Staleness.Changed })
+            assertTrue(f.situationsSeen().none { it is Situation.Measured && it.staleness == Staleness.Changed })
         }
 
     @Test
     fun `the same session read again reveals no new key and reruns nothing`() =
         fixture { f ->
+            // Nothing covers the first key either, so the owner starts the first suite itself.
             f.routing.value = known(SESSION_A, generation = 1)
-            requireNotNull(f.domain.run()).await()
             f.domain.presentation.first { it.activeRunId == null && it.measurement != null }
 
             f.routing.value = verifying(previous = SESSION_A, generation = 2)
@@ -99,8 +99,8 @@ class DiagnosticDomainTest {
     @Test
     fun `an explicit retry is always a new run and the presentation shows it as explicit`() =
         fixture { f ->
+            // Nothing covers the first key either, so the owner starts the first suite itself.
             f.routing.value = known(SESSION_A, generation = 1)
-            requireNotNull(f.domain.run()).await()
             f.domain.presentation.first { it.activeRunId == null && it.measurement != null }
 
             f.domain.retry()
@@ -108,7 +108,12 @@ class DiagnosticDomainTest {
             assertEquals(false, running.activeRunAutomatic)
             f.domain.presentation.first { it.activeRunId == null && it.lastAttempt?.id == 2L }
             assertEquals(2, f.suites.get())
-            assertTrue(f.situations.any { it is Situation.Checking && it.what == CheckingWhat.Suite && it.reason == ReadReason.Explicit })
+            assertTrue(
+                f.situationsSeen().any {
+                    it is Situation.Checking && it.what == CheckingWhat.Suite &&
+                        it.reason == ReadReason.Explicit
+                },
+            )
         }
 
     private fun fixture(block: suspend (Fixture) -> Unit) =
@@ -146,6 +151,9 @@ class DiagnosticDomainTest {
         init {
             scope.launch { domain.situation.collect { synchronized(situations) { situations += it } } }
         }
+
+        /** A consistent copy: the collector keeps appending on its own dispatcher. */
+        fun situationsSeen(): List<Situation> = synchronized(situations) { situations.toList() }
 
         /** Observes exactly what production observes, from the same flows; probes hide everything. */
         private inner class FakeIo : DiagnosticRunIo {
