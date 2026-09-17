@@ -39,12 +39,10 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
-import dev.okhsunrog.vpnhide.diagnostics.routedTransitions
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
@@ -59,7 +57,6 @@ import dev.okhsunrog.vpnhide.ui.components.SectionHeader
 import dev.okhsunrog.vpnhide.ui.components.container
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import dev.okhsunrog.vpnhide.ui.components.SectionHeader as SharedSectionHeader
@@ -144,21 +141,10 @@ fun DashboardScreen(
         return
     }
 
-    // Routing came back (a known VPN off → on while this screen is up): one
-    // confirmation suite through the refresh, as a Transition rather than a user
-    // action. That is an event, not a rerun at rest (I16): the measurement taken under
-    // the previous VPN session is not presented as current without a fresh suite. A
-    // gate that is already routed when the effect starts is the current value, not a
-    // transition, so it is skipped; a re-read that yields the same routed value is
-    // deduplicated upstream.
-    LaunchedEffect(selfNeedsRestart) {
-        val alreadyRouted = RoutingGateCache.gate.value == DiagnosticGate.ROUTED
-        RoutingGateCache.gate.routedTransitions().drop(if (alreadyRouted) 1 else 0).collect {
-            if (DashboardCache.state.value != null) {
-                DashboardCache.refresh(context, selfNeedsRestart, ReadReason.Transition)
-            }
-        }
-    }
+    // A VPN off → on while the app is foregrounded is noticed by VpnStatePoller, the
+    // single deduplicated trigger; it requests one confirmation suite and re-derives
+    // the tiles. The screen no longer watches the gate for this, which flapped through
+    // the tunnel's settling states and re-ran the suite (green → checking → green).
 
     Column(
         modifier =

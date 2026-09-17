@@ -431,7 +431,8 @@ private fun MainScreen() {
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            VpnStatePoller.pollWhileVisible()
+            launch { VpnStatePoller.pollWhileVisible() }
+            launch { VpnStatePoller.confirmRoutedTransitions() }
         }
     }
     DisposableEffect(lifecycleOwner) {

@@ -45,6 +45,21 @@ failure triggers a refresh once and is never interpreted as VPN-off. Initial
 sampling and recovery also refresh to close startup/resume races. ON_RESUME retains
 its throttled refresh, and explicit Retry remains available.
 
+The confirmation suite on a VPN-up has one owner too. The poller keeps the gate
+fresh (above); `VpnStatePoller.confirmRoutedTransitions` watches that gate value and,
+latched by `vpnConfirmLatch`, requests exactly one confirmation the moment the gate
+actually reads routed (`DashboardCache.refreshRetained`, whose `beforeRefresh` runs
+one fresh `DiagnosticsCache.retry` and re-derives the tiles). The latch fires on
+`ROUTED` while armed, then disarms; a real `VPN_OFF` re-arms it; the settling states
+the gate passes on the way up (`SELF_NOT_ROUTED`, `NEEDS_RESTART`) and a loading null
+keep the arm state. So the flap through those states — and a Wi-Fi/cellular handover
+that stays routed — does not re-fire, and a cold start already routed does not fire
+at all. This replaces the two screens' `gate.routedTransitions()` effects, which each
+re-armed on the settling flap and re-ran the suite, bouncing the hero green → checking
+→ green. Watching the gate value (not the poller's fingerprint edge) is deliberate:
+self-routing can resolve a read later than the interfaces appear, so the fingerprint
+may have already gone stable when the gate first reads routed.
+
 There is no ConnectivityManager listener for VPN-state auto-refresh. The app's own
 Java backend intentionally hides VPN lifecycle changes when its visible network
 is unchanged, so those callbacks cannot be a reliable trigger. Diagnostic callback

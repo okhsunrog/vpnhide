@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
+import dev.okhsunrog.vpnhide.diagnostics.vpnConfirmLatch
 import dev.okhsunrog.vpnhide.diagnostics.vpnPollFingerprint
 import dev.okhsunrog.vpnhide.diagnostics.vpnPollNeedsRefresh
 import org.junit.Assert.assertEquals
@@ -54,6 +56,39 @@ class VpnStatePollerTest {
     @Test(expected = IllegalArgumentException::class)
     fun `missing routing evidence is not a VPN off sample`() {
         vpnPollFingerprint(snapshot() - "vpn_rules6")
+    }
+
+    @Test
+    fun `confirm latch fires once per VPN-up through settling and never on handover`() {
+        // A VPN-up settles VPN_OFF -> SELF_NOT_ROUTED -> ROUTED; fire once, on routed.
+        var armed = true
+        val fires = mutableListOf<Boolean>()
+        for (gate in listOf(DiagnosticGate.SELF_NOT_ROUTED, null, DiagnosticGate.ROUTED)) {
+            val (next, fire) = vpnConfirmLatch(armed, gate)
+            armed = next
+            fires += fire
+        }
+        assertEquals(listOf(false, false, true), fires)
+
+        // A routed→settling→routed flap (handover) after the first fire must not re-fire.
+        for (gate in listOf(DiagnosticGate.SELF_NOT_ROUTED, DiagnosticGate.ROUTED)) {
+            val (next, fire) = vpnConfirmLatch(armed, gate)
+            armed = next
+            assertFalse(fire)
+        }
+        // A real disconnect re-arms; the next routed read fires again.
+        val (armedAfterOff, offFire) = vpnConfirmLatch(armed, DiagnosticGate.VPN_OFF)
+        assertFalse(offFire)
+        assertTrue(armedAfterOff)
+        assertTrue(vpnConfirmLatch(armedAfterOff, DiagnosticGate.ROUTED).second)
+    }
+
+    @Test
+    fun `confirm latch does not fire for a cold start already routed`() {
+        // Armed starts false when the gate is already routed at collection start.
+        val (next, fire) = vpnConfirmLatch(armed = false, gate = DiagnosticGate.ROUTED)
+        assertFalse(fire)
+        assertFalse(next)
     }
 
     @Test

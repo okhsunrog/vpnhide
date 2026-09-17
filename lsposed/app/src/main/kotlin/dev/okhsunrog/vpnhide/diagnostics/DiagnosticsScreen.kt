@@ -111,17 +111,10 @@ fun DiagnosticsScreen(
         // guarantees the shared gate is ready even if Diagnostics is opened first.
         RoutingGateCache.ensureLoaded(context, selfNeedsRestart)
     }
-    // The live gate is the trigger to (re)compute the frozen check results: once the
-    // VPN comes up (or this app becomes routed), the results must be measured even if
-    // DiagnosticsCache is still sitting on a stale Blocked/Failed from before. run() is
-    // idempotent — a no-op on an already-complete Ready — so this is cheap on every
-    // known routed transition. Temporary unknown readiness while the gate refreshes
-    // must not retrigger a failed run when the same routed value returns.
-    LaunchedEffect(selfNeedsRestart) {
-        RoutingGateCache.gate.routedTransitions().collect {
-            DiagnosticsCache.run(context, selfNeedsRestart)
-        }
-    }
+    // A VPN up / routed transition while foregrounded is noticed by VpnStatePoller,
+    // the single deduplicated trigger, which runs one confirmation suite; the check
+    // list re-renders reactively from the presentation. The screen no longer watches
+    // the gate itself, which re-ran the suite on every settling flap.
 
     val results = decision.results
     // Native probes that couldn't run (ECONNREFUSED from socket()) classify as

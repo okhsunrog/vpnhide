@@ -37,6 +37,17 @@ internal abstract class ContextStateCache<T>(
         forceRefresh(reason)
     }
 
+    /**
+     * Refresh using the inputs a screen already supplied, for a process-side trigger
+     * that has no Context of its own (the foreground VPN-state poller). A no-op until
+     * startup or a screen has seeded the inputs at least once.
+     */
+    fun refreshRetained(reason: ReadReason) {
+        val current = inputs ?: return
+        beforeRefresh(current)
+        forceRefresh(reason)
+    }
+
     /** Explicit refresh only; dependency invalidation must not trigger other effect owners. */
     protected open fun beforeRefresh(inputs: ContextObservationInputs) = Unit
 

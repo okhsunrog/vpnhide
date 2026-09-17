@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
+import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.ObservationRequest
 import dev.okhsunrog.vpnhide.ReadReason
@@ -24,6 +25,14 @@ internal object VpnStatePoller : StateCache<List<String>>(
 
     override val ready: Boolean get() = RoutingGateCache.observation.value.attempted
 
+    /**
+     * Keep the routing gate fresh while the app is foregrounded: the app's own Java
+     * backend hides VPN callbacks from its process, so a light network-only root
+     * sample is how a VPN change is noticed. A changed sample re-reads the gate; a
+     * stable one costs only the sample. This does not decide the confirmation suite —
+     * [confirmRoutedTransitions] watches the gate value for that, because self-routing
+     * can resolve a beat after the interfaces appear.
+     */
     suspend fun pollWhileVisible() {
         var previous: List<String>? = null
         var failed = false
@@ -39,6 +48,23 @@ internal object VpnStatePoller : StateCache<List<String>>(
             }
             failed = next == null
             previous = next
+        }
+    }
+
+    /**
+     * The single confirmation trigger on a VPN-up, unifying what two screens used to
+     * do off the gate. It watches the routing gate the poller keeps fresh and, latched
+     * by [vpnConfirmLatch], requests exactly one confirmation once the gate actually
+     * reads routed — which may be a later read than the first interface change, since
+     * self-routing settles after the tunnel appears. `DashboardCache.refreshRetained`
+     * runs one fresh suite (via `beforeRefresh`) and re-derives the tiles.
+     */
+    suspend fun confirmRoutedTransitions() {
+        var armed = RoutingGateCache.gate.value != DiagnosticGate.ROUTED
+        RoutingGateCache.gate.collect { gate ->
+            val (next, fire) = vpnConfirmLatch(armed, gate)
+            armed = next
+            if (fire) DashboardCache.refreshRetained(ReadReason.Transition)
         }
     }
 
