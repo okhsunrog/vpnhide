@@ -52,6 +52,7 @@ The grammar is shared, but the transports and supported directions differ:
 | Runtime | Control v2 in | Telemetry v1 out | Consumer/producer |
 |---|---|---|---|
 | `.ko` | write `/proc/vpnhide_ctl` | read `/proc/vpnhide_ctl` (`seq_file`) | kernel |
+| built-in (`CONFIG_VPNHIDE=y`) | write `/proc/vpnhide_ctl`, byte-for-byte the `.ko` channel | read `/proc/vpnhide_ctl` (`seq_file`) | kernel |
 | KPM | `ctl0` `args` | `ctl0` `out_msg` | kernel |
 | Zygisk | module-dir `targets.txt` | none | forked app process |
 | LSPosed | none; reads canonical JSON directly | `/data/system/vpnhide_lsposed_state` | `system_server` |
@@ -257,8 +258,8 @@ hooks <installed_mask>
 error <code>
 ```
 
-- `backend <id>` — which backend answered (registry ids: `0x0` .ko, `0x1` KPM,
-  `0x2` Zygisk, `0x3` LSPosed).
+- `backend <id>` — which backend answered (registry ids from `data/hooks.toml`:
+  `0x0` .ko, `0x1` KPM, `0x2` Zygisk, `0x3` LSPosed, `0x4` built-in).
 - `kver <kver>` — running kernel version as the backend sees it (KernelPatch
   `kver`, e.g. `0x6019d`); `0x0` for non-kernel backends.
 - `hooks <installed_mask>` — bitset of hooks that *actually* installed, in the
@@ -413,7 +414,7 @@ backend reads its own profile.
 
 | Channel | config records it acts on | emits stats? | emits status? |
 |---|---|---|---|
-| `.ko` / KPM | `debug`, `default`, `targets`, `end` (kernel-owned mask bits) | yes | yes (§4.3) |
+| `.ko` / built-in / KPM | `debug`, `default`, `targets`, `end` (kernel-owned mask bits) | yes | yes (§4.3) |
 | Zygisk | `debug`, `targets`, `end`; its activator rejects a non-zero `default` because it cannot inject into every unlisted process | no | no; its app heartbeat is not telemetry v1 |
 | LSPosed | — does **not** consume control v2; it reads canonical JSON directly | yes | yes |
 
@@ -696,4 +697,4 @@ Recorded so they are not re-litigated.
   STATE …`) before the current state. It is a comment line (ignored by parsers,
   §4.1), so it costs nothing structurally and exposes the grammar +
   replace-whole semantics in a single `cat` (§2). All seven OPEN items are
-  now resolved; `version 1` is frozen.
+  now resolved; both protocols (control v2, telemetry v1) are frozen.

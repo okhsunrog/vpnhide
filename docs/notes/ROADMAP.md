@@ -5,7 +5,7 @@ single changelog entry. It is not a release commitment; concrete work should
 still be tracked in GitHub issues and pull requests.
 
 For the current state — which detection vectors exist and which component
-covers each — see [detection-vectors.md](detection-vectors.md). This file is
+covers each — see [detection-vectors.md](../detection-vectors.md). This file is
 the *forward-looking* counterpart: vectors that are partially covered or
 intentionally deferred are described there and cross-linked from here.
 
@@ -114,7 +114,7 @@ The kmod `.ko` filters `SIOCGIFCONF` interface enumeration via a kretprobe on
 enumeration is not filtered (it sees VPN interfaces). KPM also compacts the
 filled ifreq array but does not yet reduce the `ifc_req == NULL` size query —
 a separate, 64-bit gap, not the 32-bit/compat case this heading names.
-Both remaining cases are tracked in [detection-vectors.md](detection-vectors.md)
+Both remaining cases are tracked in [detection-vectors.md](../detection-vectors.md)
 (the SIOCGIFCONF notes).
 
 This is **low priority**: most current Android apps are 64-bit, and modern

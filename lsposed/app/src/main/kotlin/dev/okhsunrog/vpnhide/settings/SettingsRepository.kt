@@ -17,9 +17,9 @@ import kotlinx.coroutines.flow.map
 /**
  * Single DataStore for all UI/appearance preferences.
  *
- * Lives separately from [dev.okhsunrog.vpnhide.DebugLoggingPrefs] (which gates a
- * stealth-sensitive runtime flag and is read off the cold-start critical path):
- * these are purely cosmetic and safe to observe reactively.
+ * Lives separately from the canonical config's `debugSwitch` (a stealth-sensitive
+ * runtime flag owned by the config coordinator and read off the cold-start
+ * critical path): these are purely cosmetic and safe to observe reactively.
  */
 private val Context.uiSettingsStore: DataStore<Preferences> by preferencesDataStore(name = "ui_settings")
 

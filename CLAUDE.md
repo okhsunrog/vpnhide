@@ -11,9 +11,11 @@ tooling that follows the AGENTS-convention picks it up automatically.
 Monorepo for hiding VPN interfaces from selected Android apps. Runtime components plus tooling:
 
 - `kmod/` — kernel-level native backends: `.ko` kretprobe module per GKI generation, plus KPM for KernelPatch
+- `builtin/` — the in-tree (CONFIG_VPNHIDE=y) kernel backend: the driver plus `scripts/integrate.py` that vendors it into a kernel tree, and the KMI-agnostic companion module (activator only, no `.ko`) built by `build.py`
 - `zygisk/` — Rust Zygisk module, inline `libc` hooks via shadowhook
 - `lsposed/` — LSPosed module + Compose target-picker app
 - `portshide/` — localhost port blocker (shell + iptables)
+- `crates/` — the Rust workspace: the wire `protocol`, the `activator` (one thin bin per backend), the app-side `checks`/`checks-jni` probes and the `app-helper` (`vhhelper`) root helper
 
 ## Read before touching code
 
@@ -22,13 +24,13 @@ These short files cover everything specific to this repo. Skipping them leads to
 - [CONTRIBUTING.md](CONTRIBUTING.md) — PR process, commit conventions, changelog requirement
 - [docs/development.md](docs/development.md) — prereqs, per-module build quickstart, keystore setup, device install, CI lints
 - [docs/state.md](docs/state.md) — every persistent path / proc entry / iptables chain the project touches; who writes, who reads, lifetime
-- [docs/storage.md](docs/storage.md) — current storage & activation design: the single JSON canonical, the activator (Rust workspace, four thin bins: kmod/kpm/zygisk/ports) that derives runtime state, LSPosed self-read, the APatch superkey, SELinux layout. Read before touching how config is stored/loaded.
+- [docs/storage.md](docs/storage.md) — current storage & activation design: the single JSON canonical, the activator (Rust workspace, five thin bins: kmod/builtin/kpm/zygisk/ports) that derives runtime state, LSPosed self-read, the APatch superkey, SELinux layout. Read before touching how config is stored/loaded.
 - [docs/protocol.md](docs/protocol.md) — the frozen control v2 / telemetry v1 **wire** between the activator, app, and native backends (config/stats/status); the format every backend parser must agree on
 - [docs/limits.md](docs/limits.md) — every target/config/stats capacity ceiling, what binds first, and the cost of raising it. Read before changing target caps, wire density, or backend buffers.
 - [docs/config-coordinator.md](docs/config-coordinator.md) — who owns app configuration writes: the process-owned coordinator, typed edits, drafts, phase outcomes and recovery. Read before adding any code path that writes config or runs an activator.
 - [docs/observation-coordinator.md](docs/observation-coordinator.md) — how root/app observations are read, invalidated, joined and quarantined, and the Dashboard/diagnostics refresh rules. Read before adding a cache or a refresh trigger.
-- [docs/root-mutation-transport.md](docs/root-mutation-transport.md) — the `vhmutate` helper: receipts, sessions, late-launch fencing, the device fixture. Read before touching privileged writes.
-- [docs/detection-vectors.md](docs/detection-vectors.md) — what an app can probe to detect the VPN (or a hidden package), which component (kmod / KPM / zygisk / lsposed / SELinux) covers each vector, how it manifests. Read before adding or changing a hook.
+- [docs/root-mutation-transport.md](docs/root-mutation-transport.md) — the `vhhelper mutation` transport: receipts, sessions, late-launch fencing, the device fixture. Read before touching privileged writes.
+- [docs/detection-vectors.md](docs/detection-vectors.md) — what an app can probe to detect the VPN (or a hidden package), which component (kmod / built-in / KPM / zygisk / lsposed / SELinux) covers each vector, how it manifests. Read before adding or changing a hook.
 - [docs/diagnostics.md](docs/diagnostics.md) — how the app self-tests hiding and attributes *who* hid the VPN (root-differential, `CheckOutcome`, `LayerStatus`/verdict, the self-in-tunnel gate). Read before touching the diagnostics/dashboard.
 - [docs/debug-bundle.md](docs/debug-bundle.md) — how to read the diagnostic bundle a bug report ships (`vpnhide_debug_*.zip` → `state.json` + raw `sections`): what every field/section means, where each is produced in code, and triage playbooks. Read when diagnosing from a user's bundle.
 - [docs/lsposed-hook-debugging.md](docs/lsposed-hook-debugging.md) — debugging the Java-layer LSPosed hooks: the `cs_*` attach telemetry, reading `hook_report.txt`, and diagnosing why a `ConnectivityService` hook didn't attach on a given ROM. Read before touching `HookEntry.kt`.
@@ -60,13 +62,13 @@ Single-command builds for both CI and local — the same scripts run in both pla
 - **zygisk**: `cd zygisk && ./build.py` — host-side cargo-ndk build, same script in CI image.
 - **lsposed APK**: `cd lsposed && ./gradlew :app:assembleRelease`.
 
-Both Rust cdylibs (`zygisk/build.rs`, `lsposed/native/build.rs`) pass `-Wl,-z,max-page-size=16384` so the resulting `.so` files load cleanly on 16 KiB-page Android devices (Pixel 8 Pro on Android 16, future hardware). Don't strip that flag.
+Both Rust cdylibs (`zygisk/build.rs`, `crates/checks-jni/build.rs`) pass `-Wl,-z,max-page-size=16384` so the resulting `.so` files load cleanly on 16 KiB-page Android devices (Pixel 8 Pro on Android 16, future hardware). Don't strip that flag.
 
 ## Reading device diagnostics from logcat
 
-The picker app runs its full check suite (native probes + the Java VPN-presence checks, each PASS/FAIL with detail) at every cold start and logs every result to logcat under tag `VPNHideTest` — you do **not** need to open the Diagnostics screen to read them. But the app logger (`VpnHideLog`) is gated by the **Debug logging** toggle, which is off by default (stealth-first) and stored in the app's SharedPreferences — it can't be flipped reliably from `adb`/`su`.
+The picker app runs its full check suite (native probes + the Java VPN-presence checks, each PASS/FAIL with detail) at every cold start and logs every result to logcat under tag `VPNHideTest` — you do **not** need to open the Diagnostics screen to read them. But the app logger (`VpnHideLog`) is gated by the **Debug logging** toggle, which is off by default (stealth-first) and stored as `debugSwitch` in the canonical JSON (`/data/system/vpnhide_config.json`, see `docs/state.md`) — writing it from `adb`/`su` bypasses the app's config coordinator, so don't.
 
-So when you need diagnostics in the logs and Debug logging is off: **stop and ask the user to turn it on** (Diagnostics → Debug logging). Do not drive the GUI to read check results, and do not try to enable the flag by editing prefs via su. Once it's on (it persists across launches), capture is: `adb logcat -c` → cold-start the app (`am force-stop` + relaunch — checks run once per process and need an active VPN) → read the `VPNHideTest` / `VpnHide-Startup` lines.
+So when you need diagnostics in the logs and Debug logging is off: **stop and ask the user to turn it on** (Settings → Developer → Debug logging). Do not drive the GUI to read check results, and do not try to enable the flag by editing the JSON via su. Once it's on (it persists across launches), capture is: `adb logcat -c` → cold-start the app (`am force-stop` + relaunch — checks run once per process and need an active VPN) → read the `VPNHideTest` / `VpnHide-Startup` lines.
 
 ## Design notes
 

@@ -49,8 +49,8 @@ fn current_version(kind: Kind) -> u32 {
 /// keep a fixed `targets[MAX_TARGET_UIDS]` array, so a config carrying more than
 /// this many native targets is truncated on projection. This is the single
 /// source of truth for the cap on the wire boundary; the C backends mirror it as
-/// `#define MAX_TARGET_UIDS` in kmod/vpnhide_kmod.c and kmod/kpm/vpnhide_kpm.c —
-/// keep all three in sync.
+/// `#define MAX_TARGET_UIDS` in kmod/vpnhide_kmod.c, kmod/kpm/vpnhide_kpm.c and
+/// builtin/security/vpnhide/vpnhide_internal.h — keep all four in sync.
 pub const MAX_TARGET_UIDS: usize = 160;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

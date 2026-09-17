@@ -18,7 +18,7 @@ What it does, atomically:
   * Regenerate `CHANGELOG.md` and `update-json/changelog.md`.
   * Write `X.Y.Z` into the `VERSION` file.
   * Patch the pinned version in:
-      - `{kmod,zygisk,portshide}/module/module.prop` (version, versionCode)
+      - `{kmod,kmod/kpm,builtin,zygisk,portshide}/module/module.prop` (version, versionCode)
       - `zygisk/Cargo.toml`                            (first `version = "..."`)
       - app-native Cargo manifests under `crates/`     (first `version = "..."`)
       - `lsposed/app/build.gradle.kts`                 (versionCode; versionName
@@ -130,6 +130,7 @@ def patch_all_sources(version: str, version_code: int, *, dry_run: bool) -> None
     """Patch (or, with dry_run, just validate) every version-bearing source file."""
     vc = version_code  # local alias to keep the patch calls within the line limit
     update_module_prop(REPO_ROOT / "kmod/module/module.prop", version, vc, dry_run=dry_run)
+    update_module_prop(REPO_ROOT / "builtin/module/module.prop", version, vc, dry_run=dry_run)
     update_module_prop(REPO_ROOT / "kmod/kpm/module/module.prop", version, vc, dry_run=dry_run)
     update_module_prop(REPO_ROOT / "zygisk/module/module.prop", version, vc, dry_run=dry_run)
     update_module_prop(REPO_ROOT / "portshide/module/module.prop", version, vc, dry_run=dry_run)

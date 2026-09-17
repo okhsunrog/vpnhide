@@ -58,13 +58,20 @@ Key consequences:
   (`ConnectivityManager`, `LinkProperties`, capabilities, callbacks) and
   **package visibility**. Native layers cannot synthesize a coherent
   `NetworkCapabilities` parcel; framework layers cannot touch `getifaddrs`.
-- **kmod, KPM, and Zygisk are implementations of the same Native role — you
-  install one active backend, not a stack.** The app prioritizes kmod > KPM >
-  Zygisk when more than one is installed. `.ko` + KPM together is the dangerous
-  case because they hook the same kernel functions and can freeze the device;
-  other overlaps are redundant and make setup harder to reason about.
+- **kmod, built-in, KPM, and Zygisk are implementations of the same Native role
+  — you install one active backend, not a stack.** The app prioritizes kmod >
+  built-in > KPM > Zygisk when more than one is installed (the two kernel
+  backends are one tier: a live `/proc/vpnhide_ctl` names which of them owns
+  the kernel). `.ko` + KPM together is the dangerous case because they hook the
+  same kernel functions and can freeze the device; other overlaps are redundant
+  and make setup harder to reason about.
     - **kmod** is preferred on supported GKI kernels — bypass-proof and
       out-of-process, with the most test coverage; needs `CONFIG_KPROBES`.
+    - **built-in** (`CONFIG_VPNHIDE=y`) is the same driver compiled into the
+      kernel, for kernels the `.ko` cannot load on (integrated modules, no
+      kprobes, whole-program LTO). Same hooks and coverage as kmod, so the kmod
+      column below applies to it; it ships as kernel patches plus a companion
+      module that carries only the activator.
     - **KPM** is also bypass-proof and out-of-process, but beta and dependent on
       KernelPatch runtime (APatch or KPatch-Next-Module).
     - **Zygisk** is the fallback where no kernel backend is practical — works on
@@ -76,7 +83,7 @@ Key consequences:
   (`RTM_GETRULE` used to be a kernel-only vector; Zygisk now parses it in the
   same recv netlink filter as `RTM_GETLINK`/`RTM_GETROUTE`.)
 - So a complete install is **two components**: exactly one native backend (kmod,
-  KPM, or Zygisk) **plus** lsposed — which covers both the Java network vectors
+  built-in, KPM, or Zygisk) **plus** lsposed — which covers both the Java network vectors
   and package visibility — with SELinux as an unreliable platform backstop
   underneath. Where only one layer covers a vector, that is called out below.
 
@@ -109,6 +116,10 @@ Legend: ✅ covered · ⚠️ partial / conditional · — not applicable to tha
 🔒 often closed by SELinux (varies by device).
 
 ### 3A. Interface enumeration — "is there a tun/wg/ppp interface?"
+
+The **kmod** column in §3A–§3C also describes the **built-in** backend: it is
+the same driver compiled into the kernel, with the same hooks and the same
+optional groups, so it is not listed as a separate column.
 
 | Vector | How it manifests | kmod | KPM | Zygisk | lsposed | SELinux |
 |---|---|:--:|:--:|:--:|:--:|:--:|

@@ -113,10 +113,22 @@ Shape (illustrative):
   },
   "settings": {
     "rememberSuperkey": false,
-    "optionalFeatures": []
+    "optionalFeatures": [],
+    "autoHideVpnServices": true,
+    "autoHideVpnName": true,
+    "autoHideExcludedPackages": [],
+    "autoHiddenPackages": ["com.example.vpnclient"]
   }
 }
 ```
+
+The `autoHide*` settings drive the automatic hiding of VPN apps from observers:
+`autoHideVpnServices` and `autoHideVpnName` are the detection signals the user
+can switch off, `autoHideExcludedPackages` are packages the user removed from
+that automatic set, and `autoHiddenPackages` is the set the app last
+materialised from those rules (re-derived on Refresh and at startup, written
+only when it changed). A package's app-owned `hidden` role is the union of its
+manual and automatic hiding.
 
 `debugSwitch` is the user intent stored by the app toggle; `debug` is the
 effective in-runtime value. On a capture path, `debug` may temporarily become
@@ -257,7 +269,7 @@ does not: the hook self-reads the canonical JSON and resolves UIDs in-process.
 ## 4. The activator and its backends (native + ports)
 
 The native backends are designed to be **mutually exclusive**: the supported
-installation has exactly one of kmod, KPM, or Zygisk. The app warns or errors and
+installation has exactly one of kmod, built-in, KPM, or Zygisk. The app warns or errors and
 asks the user to remove extras. A Save invokes only the highest-priority enabled
 native activator; boot scripts remain module-local, which is why extra installed
 modules must still be removed rather than treated as idle replicas.
@@ -283,9 +295,16 @@ crates/
                             #   (`pm`), project_native(json) -> String
     src/lifecycle.rs        # typed boot load/status/service/uninstall ownership
     src/bin/kmod.rs         #   project_native(json) → write("/proc/vpnhide_ctl")
+    src/bin/builtin.rs      #   same channel as kmod, for the in-tree CONFIG_VPNHIDE=y driver;
+                            #   refuses when /proc/vpnhide_ctl is not the built-in backend
     src/bin/kpm.rs          #   project_native(json) → APatch/FolkPatch supercall / KPatch-Next `kpatch`
     src/bin/zygisk.rs       #   project_native(json) → write_atomic(module_dir file)
     src/bin/ports.rs        #   activate_ports() → iptables-restore/ip6tables-restore
+  protocol-diff/            # test-only host bridge: differential C ↔ Rust parser checks
+  checks/                   # the native probe library the app runs in-process and as root
+  checks-jni/               # cdylib — the JNI wrapper of `checks` loaded by the APK
+  app-helper/               # `vhhelper`: the root helper the app stages and execs
+                            #   (ground-truth probes, app-VPN state, KPM list, mutations)
 zygisk/                     # cdylib — the injected .so. deps: protocol (+ shadowhook).
                             #   Lean: no serde, no JSON in every app process.
 ```
@@ -325,7 +344,9 @@ zygisk/                     # cdylib — the injected .so. deps: protocol (+ sha
   module's `activator` directly and distinguishes an absent file from a
   non-executable one. Enabled modules with either failure are marked broken on
   the Dashboard. Save selects the first installed, enabled native backend in
-  the normal `kmod > KPM > Zygisk` order and fails if that backend's activator
+  the normal `kmod > built-in > KPM > Zygisk` order (a live `/proc/vpnhide_ctl`
+  that reports `backend 0x4` selects the built-in companion regardless of
+  which module directories exist) and fails if that backend's activator
   is unusable; it never silently falls through to another backend.
   KPM remediation means installing the complete `vpnhide-kpm.zip` through the
   root manager's Modules screen, not extracting or loading the inner
@@ -355,9 +376,11 @@ that a flat package list could not express.)
 ### 4.3 Native backend selection and safety
 
 The Java and native layers are orthogonal: LSPosed may run alongside one native
-backend, while the native backend is exactly one of `.ko`, KPM, or Zygisk. On
-Save, the app runs at most one installed and enabled native activator in fixed
-priority order `kmod > KPM > Zygisk`. It does not fan one snapshot out to every
+backend, while the native backend is exactly one of `.ko`, built-in, KPM, or
+Zygisk. On Save, the app runs at most one installed and enabled native activator
+in fixed priority order `kmod > built-in > KPM > Zygisk` (the two kernel
+backends are one tier: a live `/proc/vpnhide_ctl` decides between them by the
+`backend` id it reports). It does not fan one snapshot out to every
 installed backend and does not use empty snapshots as a selection mechanism.
 Multiple installed native modules are a configuration issue that the dashboard
 asks the user to resolve; `.ko` plus KPM is elevated to an error because that

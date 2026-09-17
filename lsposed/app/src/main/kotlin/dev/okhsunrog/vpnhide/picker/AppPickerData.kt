@@ -58,7 +58,7 @@ internal data class AppRoleSelection(
     val portPolicy: PortPolicy? = null,
 )
 
-/** Mirror of `vpnhide_protocol::MAX_TARGET_UIDS` and both native backends. */
+/** Mirror of `vpnhide_protocol::MAX_TARGET_UIDS` and the three kernel backends' `MAX_TARGET_UIDS`. */
 internal const val NATIVE_TARGET_UID_CAPACITY = 160
 internal const val NATIVE_SELF_RESERVED_UID_SLOTS = 1
 internal const val NATIVE_USER_UID_CAPACITY = NATIVE_TARGET_UID_CAPACITY - NATIVE_SELF_RESERVED_UID_SLOTS

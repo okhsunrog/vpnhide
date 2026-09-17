@@ -7,11 +7,11 @@ one thing: **`state.json` is the whole report**, everything else in the zip is a
 heavy attachment beside it.
 
 Source of truth for this format (read these if the doc drifts):
-- [`VpnHideState.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/VpnHideState.kt) — the top-level `@Serializable` model + `buildVpnHideState` (what every field means / where it comes from).
-- [`DiagnosticReport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/DiagnosticReport.kt) — the `report` object (gate, layers, checks).
-- [`CheckOutcome.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/CheckOutcome.kt) / [`LayerStatus.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/LayerStatus.kt) — outcome/status/verdict enums (the `kind` values).
+- [`VpnHideState.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/VpnHideState.kt) — the top-level `@Serializable` model + `buildVpnHideState` (what every field means / where it comes from).
+- [`DiagnosticReport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/DiagnosticReport.kt) — the `report` object (gate, layers, checks).
+- [`CheckOutcome.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/CheckOutcome.kt) / [`LayerStatus.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/LayerStatus.kt) — outcome/status/verdict enums (the `kind` values).
 - [`DebugShellSnapshot.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/DebugShellSnapshot.kt) — every raw `sections` entry + the exact shell command behind it.
-- [`DebugExport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/DebugExport.kt) / [`KernelImageExport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/KernelImageExport.kt) — zip packaging.
+- [`DebugExport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/DebugExport.kt) / [`KernelImageExport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/KernelImageExport.kt) — zip packaging.
 
 Related: [diagnostics.md](diagnostics.md) (how the checks/verdicts are computed and
 rendered), [state.md](state.md) (every path/proc entry the sections read),
@@ -66,7 +66,7 @@ version.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
-| 2 | unreleased | Sealed `kind` discriminators are compact snake_case everywhere. Previously `dashboard.lsposed` and `dashboard.protection` carried fully-qualified class names (`dev.okhsunrog.vpnhide.LsposedState.Active`) instead of `active`/`blocked`. The separate `report.schema` field is gone — the top-level one is the only version. |
+| 2 | 1.3.0 | Sealed `kind` discriminators are compact snake_case everywhere. Previously `dashboard.lsposed` and `dashboard.protection` carried fully-qualified class names (`dev.okhsunrog.vpnhide.LsposedState.Active`) instead of `active`/`blocked`. The separate `report.schema` field is gone — the top-level one is the only version. |
 | 1 | 1.0.0 – 1.2.5 | Initial format. |
 
 Rules for changing it (enforced by `BundleSchemaGoldenTest`, which pins the
@@ -103,8 +103,8 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 | `diagnostics` | The shared diagnostic presentation at assembly time, exactly what the Dashboard hero and the Diagnostics screen rendered: `eligibility` (Initializing / Checking / RestartApp / RestartDevice / Applying / ApplicationUnknown / ApplicationFailed / Unknown / VpnOff / SelfExcluded / Eligible), `activeRunId` + `activeStage` for a run in flight, `lastAttempt` (`runId`, `outcome` NotStarted / Completed / Interrupted / Failed, `failure`, blocking `eligibility`), `measurement` (the latest complete run: `runId`, `startedAt`/`endedAt` epoch ms, `completed`, `interrupted`, root `observationId`), `applicability` (Absent / Changed / Unverified / MatchesLastObservation: whether that measurement still applies to the current VPN, routing and configuration), `evidence` (owned-scope counts and a conclusion: OwnedLeak / Insufficient / Partial / NoObservedLeak) and `currentSuccess`, the only positive claim. `probeUnavailable` is a property of the app process rather than of any measurement: the probe helper of an earlier run never returned, the probe resource stays quarantined, and no new run can start until it does — so a stale `measurement` next to it is not a stale screen, it is the newest one the app was able to take. `null` for the logcat recorder. Read this before `report`: a `ROUTED` report whose `diagnostics.applicability` is `Changed` describes an earlier state. `lastKnownRouting` (VpnOff / Excluded / Routed, `null` when the app never got a routing fact) is the last routing fact the app had, kept even while that fact is being re-read — so `eligibility: Checking` next to `lastKnownRouting: VpnOff` means "the VPN was off and we are re-reading", not "we know nothing". `routingRead` is present only while such a re-read is owed or in flight: `reason` (Background = our own process invalidated it, Transition = a VPN/network callback said it may have changed, Explicit = the user asked) and `pendingMs`, how long it had been owed **at the moment the bundle was assembled** (a monotonic age, not a timestamp; a large value means the re-read was stuck, not that the bundle is old). |
 | `nativeVerdict` / `javaVerdict` | `Ok`/`Partial`/`Broken`, or `null` if not a measured (`ROUTED`) run. |
 | `report` | The full `DiagnosticReport` (§4). `null` when no checks ran. |
-| `backends` | Per-module state for `kmod` / `kpm` / `zygisk` (installed? active? version? `brokenReason`? `pendingReboot`?). |
-| `activeBackend` | The **one** native backend in charge (`id` + `state`). Priority kmod > KPM > zygisk. |
+| `backends` | Per-module state for `kmod` / `builtin` / `kpm` / `zygisk` (installed? active? version? `brokenReason`? `pendingReboot`?). |
+| `activeBackend` | The **one** native backend in charge (`id` + `state`). Priority kmod > builtin > KPM > zygisk; a live `/proc/vpnhide_ctl` decides between the two kernel backends by the `backend` id it reports. |
 | `ports` | The portshide module `ModuleState` (localhost port blocker). |
 | `kmodLoadStatus` | Boot-time `.ko` load result (uname, kprobes/kretprobes ok, insmod exit, dmesg tail, `filesystemHiding`). The richest single "did the kernel module come up" field. |
 | `dashboard` | Full live dashboard model. **`null` in file exports** (only the agent-bridge `getState` fills it). |
@@ -127,12 +127,12 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 
 `report` is the single canonical verdict object; the dashboard, Diagnostics
 screen and this bundle are all pure renders of it. *Computed in
-[`DiagnosticReport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/DiagnosticReport.kt)
+[`DiagnosticReport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/DiagnosticReport.kt)
 (`buildDiagnosticReport`); outcome classification in
-[`CheckOutcome.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/CheckOutcome.kt)
-+ [`GroundTruthProbe.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/GroundTruthProbe.kt);
+[`CheckOutcome.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/CheckOutcome.kt)
++ [`GroundTruthProbe.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/GroundTruthProbe.kt);
 the per-vector spec + hook coverage in
-[`NativeChecks.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/NativeChecks.kt).*
+[`NativeChecks.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/NativeChecks.kt).*
 
 ### `gate` gates everything
 

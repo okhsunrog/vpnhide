@@ -22,6 +22,7 @@ The single managed desired-state file.
   roles }`, `settings.rememberSuperkey: Boolean`,
   `settings.optionalFeatures: [feature name]`,
   `settings.autoHideVpnServices: Boolean`, `settings.autoHideVpnName: Boolean`,
+  `settings.autoHideExcludedPackages: [package]`,
   `settings.autoHiddenPackages: [package]`.
 - Roles per package: `java`, `native` (`Boolean` or hook-name array),
   `appHiding`, `ports`, and the app-owned extension `hidden`.
@@ -331,6 +332,20 @@ and the app reruns the ports activator on Save.
 
 ## 8. App-Process State
 
+### DataStore `ui_settings`
+
+`settings/SettingsRepository.kt` keeps every UI preference in one Preferences
+DataStore named `ui_settings` (`filesDir/datastore/ui_settings.preferences_pb`):
+theme (`dynamic_color`, `amoled`, `contrast`, `seed_color`, `corner_style`,
+`theme_mode`), `animations_enabled`, `haptics_enabled`,
+`full_protection_role_labels`, `background_update_checks`,
+`agent_control_enabled`, `suppress_version_warnings`, `settings_hint_seen`,
+`donate_prompt_dismissed`, `legacy_import_dismissed`, and the update worker's
+`last_notified_update_version`. Nothing here affects hiding: the runtime flags
+(`debug`, `debugSwitch`) and every role live in the canonical JSON. It survives
+reboots and app updates and is wiped on app reinstall; Vector's prefs redirect
+does not apply to it.
+
 ### SharedPreferences `vpnhide_prefs`
 
 Accessed through `context.getSharedPreferences("vpnhide_prefs", MODE_PRIVATE)`.
@@ -415,8 +430,11 @@ post-fs-data:
        either credential it writes awaiting_superkey
 
 service:
-  kmod / KPM / Zygisk service.sh
+  kmod / built-in / KPM / Zygisk service.sh
     -> start that module's activator boot-service in the background and return
+    -> built-in activator refuses unless /proc/vpnhide_ctl reports backend 0x4,
+       then delivers the config over the same channel as kmod and writes
+       /data/adb/vpnhide_builtin/load_status
     -> KPM activator rejects unsupported kernels before waiting for PackageManager
     -> activator waits for PackageManager to expose dev.okhsunrog.vpnhide
     -> kmod activator also waits for /proc/vpnhide_ctl
@@ -452,11 +470,11 @@ zygote app fork:
 | Lifetime | Examples |
 |---|---|
 | In-kernel per boot | `/proc/vpnhide_ctl` state, KPM in-kernel state, iptables chains |
-| Per boot / last apply files | `/data/adb/vpnhide_kmod/load_status`, `/data/adb/vpnhide_kmod/load_dmesg`, `/data/adb/vpnhide_kpm/load_status`, `/data/adb/vpnhide_ports/load_status`, `/data/adb/vpnhide_ports/load_log`, `/data/system/vpnhide_lsposed_state` |
+| Per boot / last apply files | `/data/adb/vpnhide_kmod/load_status`, `/data/adb/vpnhide_kmod/load_dmesg`, `/data/adb/vpnhide_builtin/load_status`, `/data/adb/vpnhide_kpm/load_status`, `/data/adb/vpnhide_ports/load_status`, `/data/adb/vpnhide_ports/load_log`, `/data/system/vpnhide_lsposed_state` |
 | Per app launch | `filesDir/vpnhide_zygisk_active`, content-addressed `filesDir/vhhelper-<sha256>` |
 | Persistent root-managed | `/data/system/vpnhide_config.json`, `/data/adb/vpnhide/superkey` |
 | Module-dir derived state | `/data/adb/modules/vpnhide_zygisk/targets.txt` |
-| Removed on module uninstall | `/data/adb/vpnhide_kmod/`, `/data/adb/vpnhide_kpm/`, `/data/adb/vpnhide_ports/` when empty after deleting module-specific files |
+| Removed on module uninstall | `/data/adb/vpnhide_kmod/`, `/data/adb/vpnhide_builtin/`, `/data/adb/vpnhide_kpm/`, `/data/adb/vpnhide_ports/` when empty after deleting module-specific files |
 | Removed on pre-1.0 config import (or Full Reset) | the import inputs in section 1, plus `/data/adb/vpnhide_zygisk/`, `/data/adb/vpnhide_lsposed/` |
 | Wiped on module reinstall | files under `/data/adb/modules/vpnhide_*/` |
-| Wiped on app reinstall | app SharedPreferences, except Vector redirects the physical path under `/data/misc/<uuid>/prefs/` |
+| Wiped on app reinstall | app SharedPreferences (except Vector redirects the physical path under `/data/misc/<uuid>/prefs/`) and the `ui_settings` DataStore |

@@ -34,6 +34,8 @@ The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNa
 | `zygisk/` | Zygisk native module (Rust, inline `libc` hooks) |
 | `lsposed/` | LSPosed module + target-picker Android app (Kotlin, Compose) |
 | `kmod/` | Kernel-level native backends: GKI `.ko` (C, kretprobes) and KPM (KernelPatch inline hooks) |
+| `builtin/` | The in-tree kernel backend (`CONFIG_VPNHIDE=y`): kernel patches, `apply.sh`, the KMI-agnostic companion module (activator only), `build.py` |
+| `crates/` | The Rust workspace: `protocol` (the wire), `activator` (one bin per backend), `checks` / `checks-jni` (the app's native probes), `app-helper` (`vhhelper`) |
 | `portshide/` | Localhost port blocker (shell + iptables) |
 | `scripts/` | Release & changelog tooling |
 | `update-json/` | Magisk/KSU update metadata |
@@ -141,7 +143,11 @@ with `adb shell dumpsys package dev.okhsunrog.vpnhide` after installing.
 
 After flashing a native backend, reboot the device. Do not keep multiple native
 backends installed unless you are explicitly testing conflict handling; the app
-uses priority `kmod > KPM > Zygisk`, and `.ko` + KPM together is unsafe.
+uses priority `kmod > built-in > KPM > Zygisk`, and `.ko` + KPM together is
+unsafe. The built-in backend has no module to flash: integrate the driver into
+a kernel tree with `builtin/scripts/integrate.py`, build and boot that kernel,
+then install the companion zip from `python3 builtin/build.py` (see
+[builtin/README.md](../builtin/README.md)).
 
 ## CI lints (run before pushing)
 
@@ -154,13 +160,14 @@ which areas a pull request exercises, and every area job is gated on it:
 
 | Paths | Area jobs |
 |---|---|
-| `kmod/**` (except `kmod/kpm/`) | `kmod-activator`, `kmod`, `kmod-qemu` |
+| `kmod/*`, `kmod/module/**` | `kmod-activator`, `kmod`, `kmod-qemu` |
 | `kmod/kpm/**` | `kpm`, `kpm-qemu`, `kpm-qemu-legacy` |
 | `builtin/**` | `builtin`, `builtin-integrator`, `builtin-qemu` |
 | `zygisk/**` | `zygisk` |
 | `lsposed/**` | `android` |
 | `portshide/**` | `portshide` |
-| shared: `crates/**`, `Cargo.*`, `kmod/shared/**`, `kmod/test/**`, `kmod/generated/**`, the code generators | every area |
+| `shared`: `kmod/shared/**`, `kmod/test/**`, `kmod/generated/**`, `scripts/codegen*.py` | every area, QEMU matrix included |
+| `shared_rust`: `crates/**`, `Cargo.*`, `fixtures/app-helper/**`, `scripts/build_lib.py`, `scripts/build-version.py` | every area's packaging job plus `rust`; the QEMU probes and matrix only if a kernel area changed on its own |
 | `.github/**` | every area |
 
 `lint-python` (ruff, generated files), `lint-shell-c` (shellcheck, clang-format,
@@ -188,8 +195,11 @@ the whole matrix. The decision is taken when the run starts, so re-run the
 workflow after adding a label.
 
 ```sh
-# Codegen drift — run after editing data/interfaces.toml; CI fails on diff
+# Generated files — run after editing data/interfaces.toml, data/hooks.toml or
+# docs/help/manifest.json; CI fails on any diff (job lint-python)
 python3 scripts/codegen-interfaces.py
+python3 scripts/codegen-hooks.py
+python3 scripts/gen-help-index.py
 git diff --quiet  # must be clean
 
 # Python (ruff, config in pyproject.toml). uvx runs without installing anything global.

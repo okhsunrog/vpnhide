@@ -226,8 +226,9 @@ already in progress, so the click cannot be absorbed by that run.
 
 ## 7. Native check → owning hook, verified on Pixel 4a
 
-The native backend hooks map to the diagnostic checks below. Kernel backends
-provide the strongest coverage; the optional Zygisk filesystem group covers
+The native backend hooks map to the diagnostic checks below. The kernel backends
+(`.ko`, built-in and KPM: the first two are one driver, loaded versus compiled
+in) provide the strongest coverage; the optional Zygisk filesystem group covers
 ordinary libc-routed probes but not raw syscalls or aliases. Full hiding matrix in
 [detection-vectors.md](detection-vectors.md).
 

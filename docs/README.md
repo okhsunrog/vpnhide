@@ -39,6 +39,7 @@ Stable references for anyone changing the code. Read the relevant one before a P
 
 Module-specific developer docs live next to their code:
 [kmod/BUILDING.md](../kmod/BUILDING.md), [kmod/kpm/README.md](../kmod/kpm/README.md),
+[builtin/README.md](../builtin/README.md) (the in-tree kernel backend),
 [lsposed/AGENTS.md](../lsposed/AGENTS.md), and each module's `README.md`.
 Repo conventions and the PR/changelog process are in
 [CONTRIBUTING.md](../CONTRIBUTING.md) and [AGENTS.md](../AGENTS.md).
@@ -55,3 +56,7 @@ a release commitment — lives in **[`notes/`](notes/)**:
 - [notes/diagnostics-state-analysis.md](notes/diagnostics-state-analysis.md) — historical analysis of what "diagnostics" meant before the refactor and why
 - [notes/app-state-design.md](notes/app-state-design.md) — the original state redesign proposal (superseded by the contract)
 - [notes/ci-kernel-config-trim.md](notes/ci-kernel-config-trim.md) — research brief: what the QEMU test kernels build, what the tests need, and which config options can be trimmed without moving a struct offset
+- [notes/core-2.0-architecture.md](notes/core-2.0-architecture.md) — forward-looking design for a persistent root daemon replacing the per-call root helper: ownership, projection, auth and observer decisions
+- [notes/builtin-app-integration-audit.md](notes/builtin-app-integration-audit.md) — audit of how the app integrates the built-in kernel backend (picker, statistics, diagnostics, capture, reset)
+- [notes/ui-state-presentation-review.md](notes/ui-state-presentation-review.md) — design review that led to the Situation classifier; decisions recorded, two since superseded
+- [notes/vpn-poll-device-validation.md](notes/vpn-poll-device-validation.md) — device acceptance evidence for the foreground app-VPN poller and the network callback lifecycle

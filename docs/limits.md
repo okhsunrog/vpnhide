@@ -27,7 +27,7 @@ can't raise the app count because stats won't fit" conflates the two.
 
 | constraint | where | value | binds at |
 |---|---|---|---|
-| `MAX_TARGET_UIDS` | `crates/protocol/src/lib.rs`, mirrored in both backends | 160 | **160 targets — currently binding** |
+| `MAX_TARGET_UIDS` | `crates/protocol/src/lib.rs`, mirrored by hand in the three kernel backends (`kmod/vpnhide_kmod.c`, `kmod/kpm/vpnhide_kpm.c`, `builtin/security/vpnhide/vpnhide_internal.h`) | 160 | **160 targets — currently binding** |
 | `KPM_ARGS_LEN` | `kmod/third_party/KernelPatch/kernel/include/kpmodule.h` | 1024 B | ~190 targets sharing one mask; fewer with many distinct masks |
 | `ctl_write` payload cap | `kmod/vpnhide_kmod.c` (`count > PAGE_SIZE`) | 4096 B | ~800 targets |
 | config parse snapshot | `.ko` heap; KPM serialized static scratch | 8 B/target | does not grow either kernel stack |
