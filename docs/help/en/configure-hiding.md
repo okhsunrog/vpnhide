@@ -94,3 +94,34 @@ choose individual hooks or port ranges for that app. A **\*** means the app has
 custom per-hook settings.
 
 Ready? [Open the Hiding tab](vpnhide://hiding) and pick the app to configure.
+
+## Row, role chips and custom hooks
+
+Tapping an unselected app row enables Java and Apps, plus Native and Ports when
+their components are installed. Tapping a row with any role selected clears its
+roles. Use the individual role chips to change only one layer. The row shortcut
+also resets Java/Native hook selections to defaults; use chips if you want to
+preserve custom choices. Changes still need **Save**.
+
+Leave hook selection at its defaults unless troubleshooting a specific problem.
+Disabling a hook reduces coverage; it is not a stronger stealth mode. Native
+customizations for kernel backends and Zygisk are stored separately, so review them
+when changing backend. Ports ranges are a separate policy.
+
+## Automatic and manual package hiding
+
+Open [VPN app hiding](vpnhide://hidden-apps). This chooses **what packages to hide**;
+the observer still needs the **Apps** role and working LSPosed hooks.
+
+- **Auto:** detected from an Android VpnService declaration. This is package
+  discovery, not evidence that a VPN is connected.
+- **Name matching:** an optional, less reliable heuristic for names containing VPN;
+  it is off by default and can produce false matches.
+- **Manual:** a package you explicitly chose to hide.
+- **Excluded:** a package exempted from automatic hiding after a false match.
+  Unchecking a package removes manual hiding and, for an automatic match, adds an
+  exclusion. Checking it again removes the exclusion.
+
+Changing the hidden-package list affects all Apps observers. Test the target after
+applying and restarting it. Use exclusions instead of disabling automatic discovery
+for everyone just to correct one false match.

@@ -1,32 +1,29 @@
-# Turning it off, resetting and uninstalling
+# Pause, reset and uninstall
 
-## Pause hiding without removing anything
+## Pause hiding for an app
 
-To stop hiding for one app, remove its roles in the picker and Save. To stop
-everything temporarily, disable the modules in your root manager (and the
-LSPosed module) — you can re-enable them later.
+Clear its roles in **Hiding**, Save successfully, then force-stop and reopen it.
+This also clears in-process Zygisk hooks on the next launch. Merely disabling a
+module in the root manager does not remove already loaded hooks; reboot when
+changing the installation/enabled state. Save a [backup](config-backup.md) first
+if you want to restore your selection later.
 
-## Remove VPN Hide completely
+## Remove the installation and leftover files
 
-Order matters, because the app needs to confirm nothing is still active before it
-can clean up:
+1. Export your config if you may need it later.
+2. Remove VPN Hide's native module and Ports module in the root manager.
+3. Disable VPN Hide in LSPosed, then **reboot**.
+4. Open **Settings → Remove leftover files**. Resolve any listed blockers first.
+5. Run cleanup, then use the offered uninstall action to remove the APK.
 
-1. In your root manager, **remove all VPN Hide modules** — the native backend
-   (kernel module / KPM / Zygisk) and Ports.
-2. **Disable the VPN Hide module in LSPosed.**
-3. **Reboot.**
+Cleanup deletes configuration and other persistent VPN Hide files outside module
+folders; it cannot be undone. Uninstalling just the APK does not perform this cleanup.
 
-## Remove leftover files
+## Self-built Built-in kernels
 
-VPN Hide and its modules also write config, state, statistics and target files
-**outside** their module folders. To delete those, use **Settings → Remove
-leftover files**. It permanently deletes them and **can't be undone**.
-
-The screen won't run until the steps above are done — if a module is still
-installed or a hook is still loaded, it lists exactly what's blocking (kernel
-module, KPM, Zygisk, Ports, a kernel hook awaiting reboot, or the LSPosed hook)
-so you can clear it and reboot first. Once it finishes, it offers to **Uninstall
-VPN Hide** (the app itself).
-
-If you only reflash or move devices, you probably want to keep the config —
-[export it first](config-backup.md).
+This advanced integration is not a normal downloadable kernel option. Removing
+its companion does not remove code compiled into the running kernel. Full cleanup
+requires removing the companion **and booting a kernel without VPN Hide**, as well
+as removing other modules and disabling LSPosed. Another reboot into the same
+Built-in kernel will not resolve that blocker. Plan how to restore your kernel
+before dismantling a self-built integration.

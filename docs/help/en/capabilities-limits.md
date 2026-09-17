@@ -19,20 +19,23 @@ different things, and VPN Hide has a role for each: **Java**, **Native**,
   Integrity.** VPN Hide hides the VPN and nothing else. An app that refuses
   because it detects root or fails attestation needs a different approach — that
   isn't what this tool does.
-- **Work without root.** It needs a native backend plus LSPosed; without them
-  there are no hooks to install.
+- **Work without root.** Root is required. Java/Apps need LSPosed; Native needs
+  a native backend; Ports needs its module. You can use fewer layers, with less coverage.
 - **Give Native to an unlimited number of apps.** The native backend protects up
   to **159 app UIDs** (it counts UIDs, not apps, and reserves one slot for VPN
-  Hide itself). Past that, Save keeps your config but the extra apps get no
-  Native protection. An app cloned into a work profile or Second Space counts
+  Hide itself). The picker prevents selections/saves over its UID budget. Reduce
+  the Native selection if it reports the limit. An imported configuration or new
+  profile can also exceed runtime capacity; do not ignore an apply/capacity warning
+  or assume every saved target is protected. An app cloned into a work profile or Second Space counts
   twice — see [Work profiles](work-profiles.md). The Java and Apps roles aren't
   capped this way.
 - **Defeat a game's own anti-cheat.** Hiding a VPN from the very game you're
   playing to get past its checks is a different matter, and not something VPN
   Hide promises — see [Game accelerators](game-accelerators.md).
 
-## Designed for split tunneling
+## Routing is a separate choice
 
-VPN Hide is meant to be used *with* split tunneling: the apps you hide from run
-*off* the VPN, so changing what they see about the network doesn't change how
-they actually reach the internet. That's why turning hiding on per app is safe.
+Targets can be inside or outside the tunnel. VPN Hide changes the local view,
+not your VPN client's routing rules or the public IP. Start with the roles you
+need, check the target's actual behavior, and undo a change if it breaks a feature.
+See [Direct or through the tunnel](split-tunneling.md).

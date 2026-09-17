@@ -22,8 +22,8 @@ Zygisk — это Native-бэкенд в пользовательском про
 
 - **Реализация Zygisk**: штатный Zygisk в Magisk либо ZygiskNext / NeoZygisk на
   Magisk или KernelSU.
-- Включённый **LSPosed / Vector** для Java-слоя (тот же спутник нужен любому
-  бэкенду).
+- Для покрытия Java/Apps рекомендуется включённый **LSPosed / Vector**.
+  Сам Zygisk эти роли не обеспечивает.
 
 ## Шаги
 

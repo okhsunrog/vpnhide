@@ -18,7 +18,7 @@ Zygisk 是用户空间的 Native 后端：它在**每个目标应用进程内部
 
 - 一个 **Zygisk 实现**：Magisk 自带的 Zygisk，或 Magisk / KernelSU 上的
   ZygiskNext / NeoZygisk。
-- 为 Java 层启用 **LSPosed / Vector**（每个后端都需要的同一个搭档）。
+- 推荐搭配 **LSPosed / Vector** 以覆盖 Java/Apps；Zygisk 本身不提供这些角色。
 
 ## 步骤
 

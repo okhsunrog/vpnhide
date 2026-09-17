@@ -32,3 +32,12 @@ If Diagnostics reports a surface as *"Not covered,"* filesystem paths are one of
 the things this setting closes. Others may need a kernel-level backend where your
 device supports one — see
 [Detection vectors and coverage](detection-vectors.md).
+
+## Global hooks, selected targets
+
+“Global” describes where the kernel hooks are installed, not a command to hide
+paths from every app. Filtering still follows target configuration. This option
+only addresses filesystem-path detection; it cannot turn every “Not covered” row
+into a pass. For a self-built Built-in integration, check the capabilities of your
+kernel build and the setting's status instead of assuming a companion update adds
+missing kernel hooks.

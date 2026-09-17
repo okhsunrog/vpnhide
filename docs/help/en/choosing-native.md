@@ -19,21 +19,28 @@ recommends the right one for your device and gives you its download name.
   Works without a compatible kernel, but it's weaker: raw `svc` syscalls bypass
   it, and banking/payment apps may detect its in-process hooks. Use it when no
   kernel backend fits your device. See [Install the Zygisk module](zygisk-install.md).
-- **Built-in** — the same kernel-level hiding compiled directly into a custom
-  kernel (no loadable module). Only relevant if you build your own kernel from
-  the project's patches; the Dashboard shows it as **Built-in** when present.
+- **Built-in (advanced, self-built kernels)** — an integration path for people
+  compiling their own kernel with the project's patches. Ready-made kernels are
+  not currently a supported distribution option. This is not a ZIP that adds
+  support to a stock kernel. See the [developer integration guide](https://github.com/okhsunrog/vpnhide/tree/main/builtin).
+  A self-built integration also needs its matching companion/activator to deliver
+  configuration. A detected driver alone does not prove configuration is applied.
 
-## Only one at a time
+## Keep one native backend
 
-If more than one native backend is installed, only one runs — priority is
-**kernel module (or Built-in) → KPM → Zygisk** — and the others sit idle. Keep just the one
-you use. In particular, **never run the kernel module and KPM together**: they
-hook the same kernel functions, and having both active can hard-freeze the
-device. The app warns you on the Dashboard when it sees a conflict.
+Install one native backend. The app's choice of an activator does **not** guarantee
+that every other installed backend has stopped hooking. In particular, leftover
+Zygisk hooks can still run inside app processes.
 
-The native backend always works alongside the **Java** layer (LSPosed), which
-covers the framework APIs. Native and Java are two halves of the coverage, not
-alternatives — see [Detection vectors and coverage](detection-vectors.md).
+Kernel loaders check for conflicting backends and may refuse to load. These guards
+are not a reason to keep conflicting installations: remove the redundant component
+and reboot. Never force `.ko` and KPM to run together; they hook the same kernel
+functions and can freeze the device. With a self-built Built-in kernel, do not add
+`.ko` or KPM on top; keep the companion matching that integration.
+
+**Java** and **Native** cover different detection paths. Both are recommended for
+broader coverage, but a single layer can be used with reduced coverage. The Apps
+role needs Java/LSPosed. See [Detection vectors](detection-vectors.md).
 
 ## Let the Dashboard pick
 

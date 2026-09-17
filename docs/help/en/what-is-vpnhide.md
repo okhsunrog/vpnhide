@@ -21,7 +21,8 @@ VPN Hide changes what apps *see on the device*, not your network identity:
 - **Your external IP doesn't change.** A server still sees the VPN exit IP. If a
   service blocks by IP or does its checks server-side, hiding on the device can't
   help — that's outside the phone.
-- **It needs root** (a kernel module, KernelPatch/KPM, or Zygisk) plus LSPosed
-  for the Java layer. Without them there's nothing to hook.
-- It's meant to be used **with split tunneling**: the apps you hide from usually
-  run *off* the VPN, so hiding the VPN from them doesn't change their networking.
+- **Root is required.** Java/Apps use LSPosed, Native uses one native backend,
+  and Ports uses its own module. See [Requirements](requirements.md).
+- Your VPN client decides whether a target goes through the tunnel or directly.
+  VPN Hide supports both arrangements, with coverage depending on the enabled
+  layers. See [Routing](split-tunneling.md).

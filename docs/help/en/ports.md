@@ -1,42 +1,34 @@
 # Hide localhost ports (Ports)
 
-Some VPN and proxy clients run a local daemon — Clash, Sing-box, V2Ray, Amnezia
-and the like — listening on a `localhost` port such as `127.0.0.1:7890`. An app
-can probe those ports with `connect(127.0.0.1, PORT)` to guess a VPN or proxy is
-running, even when the interface itself is hidden. The **Ports** role closes that
-gap for the apps you pick.
+Some VPN/proxy clients listen on local ports, for example `127.0.0.1:7890`.
+An app can probe them even when the VPN interface is hidden. **Ports** blocks
+these connections for the target app; it does not stop the proxy itself.
 
-## What it does
+## Set it up
 
-For an app you mark as a Ports target, VPN Hide blocks its access to the
-loopback address. Probes come back as *connection refused* — indistinguishable
-from a genuinely closed port. The block is **per-app**: your VPN client and the
-rest of the system still use localhost normally.
+1. Install `vpnhide-ports.zip` from the [official releases](https://github.com/okhsunrog/vpnhide/releases)
+   through your root manager, then reboot to finish installation.
+2. In **Hiding**, enable **Ports** for the app doing the probing.
+3. Use the settings icon beside Ports if you want to choose port ranges, then **Save**.
+4. Wait for a successful apply and reopen the target app.
 
-By default it blocks the whole loopback range for that app, which is safe for
-typical observers — banks, government and marketplace apps, and similar — none of
-them legitimately use localhost. **Browsers are the exception** (dev tools, PWAs
-and installed web apps do use localhost), so simply don't add a browser as a
-Ports target.
+Once the module is available, changing roles or ranges applies firewall rules on
+Save without another reboot. If applying fails, follow [Saving and applying](saving-applying.md).
 
-## Turn it on
+## Coverage and side effects
 
-1. Install the **Ports** module (`vpnhide-ports.zip`) through your root manager's
-   **Modules** screen. A reboot isn't strictly required — the app re-applies the
-   rules when you Save.
-2. In the app's **Hiding** tab, give the app the **Ports** / **P** role (the
-   settings icon next to the role label).
-3. Save. The rules apply immediately.
+The default blocks all TCP/UDP ports on IPv4 loopback `127.0.0.0/8` and IPv6 `::1`
+for the selected UID. TCP is rejected with a reset; UDP uses a port-unreachable
+response. Other UIDs are unaffected; packages sharing a UID also share the block.
 
-## Narrowing it to specific ports
+Any app can legitimately use a local service. Blocking all ports may break such
+features, including browser/dev tools and local integrations. If that happens,
+disable Ports for the app or narrow the rules to the proxy ports you need to hide.
+This does not cover every way to discover a local service, such as Unix sockets
+or a service reachable on another network address.
 
-If blocking the whole loopback range is too broad for an app, the settings icon
-next to the Ports role also lets you set **specific port ranges** to block
-instead. These are saved as exact rules, so an exported or imported config keeps
-the same behavior.
+## Stop blocking
 
-## Removing it
-
-Uninstall the Ports module from your root manager's Modules screen. Note that the
-firewall rules are re-applied at each boot and on every Save; removing the role
-(or the module) and saving clears them.
+For one app, turn off its Ports role and Save successfully. To remove the component,
+uninstall it in the root manager and reboot. Do not assume that marking a module
+for removal has already cleared live firewall rules.

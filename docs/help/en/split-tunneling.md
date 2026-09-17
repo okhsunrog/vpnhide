@@ -10,8 +10,9 @@ pick. Both routing choices work with it:
   interface from it too. This is the usual choice for banks and services that
   check your IP or region — they see a normal, VPN-free connection.
 - **Target app routed through the tunnel.** The app's traffic is tunneled, but
-  VPN Hide hides the interface, routes and DNS, so the app can't tell it's on a
-  VPN. Use this when you want the app tunneled but not to *know* it.
+  VPN Hide filters local network information according to the enabled layers.
+  It does not change the tunnel's exit IP or guarantee that every detection method
+  is covered. Test that the app can still connect with the selected hooks.
 
 ## Where to set it
 
