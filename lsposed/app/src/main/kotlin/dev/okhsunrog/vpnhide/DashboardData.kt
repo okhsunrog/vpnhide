@@ -240,6 +240,9 @@ internal fun detectPortsApplyProblem(
 ): PortsApplyProblem? {
     val installed = ports as? ModuleState.Installed ?: return null
     if (installed.active || installed.brokenReason != null || targetCount == 0) return null
+    // An inactive reading the snapshot could not verify (probe failed, shell not
+    // root) is no evidence that the rules are missing: nothing to warn about.
+    if (!installed.runtimeCheckable) return null
     // A module the user turned off via their manager (a `disable` marker) is
     // inactive by design — the activator skips it for the same reason. Don't
     // nag "iptables rules are not active" for a deliberately disabled module.
@@ -1019,13 +1022,16 @@ internal fun detectKpmModule(
 internal fun detectPortsModule(sections: Map<String, String>): ModuleState {
     val prop = parseModuleProp(sections["ports_prop"].orEmpty())
     if (!prop.installed) return ModuleState.NotInstalled
-    val active = sections["ports_chain"].orEmpty().trim() == "1"
+    // "1" = chains present and jumped to, "0" = a chain or jump is absent,
+    // "error=<rc>" (or nothing) = the probe itself could not run: the xtables lock
+    // was held, the shell lacked CAP_NET_ADMIN, the phase never ran. Only a "0"
+    // from a root shell is evidence of an inactive module; the rest is unverified.
+    val probe = sections["ports_chain"].orEmpty().trim()
+    val active = probe == "1"
     return ModuleState.Installed(
         version = prop.version,
         active = active,
-        // `ports_chain` runs iptables, which needs CAP_NET_ADMIN; a non-root
-        // snapshot shell reads a false "0". Mark unverified rather than inactive.
-        runtimeCheckable = active || snapshotRuntimeCheckable(sections),
+        runtimeCheckable = active || (probe == "0" && snapshotRuntimeCheckable(sections)),
     )
 }
 

@@ -653,7 +653,7 @@ pub fn boot_service_ports() -> Result<()> {
     // complete ruleset, apply once, then repeat after the observed rebuild
     // window. This runs in the non-blocking late_start service stage.
     for _ in 0..60 {
-        if command_succeeds("iptables", &["-L", "bw_OUTPUT", "-n"]) {
+        if xtables_succeeds("iptables", &["-L", "bw_OUTPUT", "-n"]) {
             break;
         }
         thread::sleep(Duration::from_secs(1));
@@ -684,13 +684,13 @@ pub fn boot_service_ports() -> Result<()> {
 }
 
 pub fn uninstall_ports() -> Result<()> {
-    while command_succeeds("iptables", &["-D", "OUTPUT", "-j", PORTS_CHAIN4]) {}
-    let _ = command_succeeds("iptables", &["-F", PORTS_CHAIN4]);
-    let _ = command_succeeds("iptables", &["-X", PORTS_CHAIN4]);
+    while xtables_succeeds("iptables", &["-D", "OUTPUT", "-j", PORTS_CHAIN4]) {}
+    let _ = xtables_succeeds("iptables", &["-F", PORTS_CHAIN4]);
+    let _ = xtables_succeeds("iptables", &["-X", PORTS_CHAIN4]);
 
-    while command_succeeds("ip6tables", &["-D", "OUTPUT", "-j", PORTS_CHAIN6]) {}
-    let _ = command_succeeds("ip6tables", &["-F", PORTS_CHAIN6]);
-    let _ = command_succeeds("ip6tables", &["-X", PORTS_CHAIN6]);
+    while xtables_succeeds("ip6tables", &["-D", "OUTPUT", "-j", PORTS_CHAIN6]) {}
+    let _ = xtables_succeeds("ip6tables", &["-F", PORTS_CHAIN6]);
+    let _ = xtables_succeeds("ip6tables", &["-X", PORTS_CHAIN6]);
 
     remove_if_present(Path::new(PORTS_STATUS_DIR).join("load_status"))?;
     remove_if_present(Path::new(PORTS_STATUS_DIR).join("load_log"))?;
@@ -708,6 +708,13 @@ pub(crate) fn current_module_dir() -> Result<PathBuf> {
 
 pub(crate) fn log_android(tag: &str, message: &str) {
     let _ = Command::new("log").args(["-t", tag, message]).status();
+}
+
+/// `iptables`/`ip6tables` with the xtables lock wait (see `ports::XTABLES_WAIT`).
+fn xtables_succeeds(program: &str, args: &[&str]) -> bool {
+    let mut full: Vec<&str> = crate::ports::XTABLES_WAIT.to_vec();
+    full.extend_from_slice(args);
+    command_succeeds(program, &full)
 }
 
 pub(crate) fn command_succeeds(program: &str, args: &[&str]) -> bool {

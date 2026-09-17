@@ -226,12 +226,26 @@ phase_proc_exists() {
 }
 phase_ports_chain() {
   phase_start shell_probe_ports_chain
+  # "1" when both chains exist and OUTPUT jumps to them, "0" when a chain or a
+  # jump is absent (iptables exits 1 for a missing chain, 2 for a missing
+  # target), "error=<rc>" for anything else: 4 when another process holds the
+  # xtables lock (netd on a network change, the VPN client, the ports
+  # activator), 3 without CAP_NET_ADMIN. -w waits briefly for the lock instead
+  # of failing at once; a probe that still could not run is reported as an
+  # error and rendered as "not verified", never as an inactive module.
   emit_eval ports_chain '
-    iptables -L vpnhide_out -n >/dev/null 2>&1 &&
-    iptables -C OUTPUT -j vpnhide_out >/dev/null 2>&1 &&
-    ip6tables -L vpnhide_out6 -n >/dev/null 2>&1 &&
-    ip6tables -C OUTPUT -j vpnhide_out6 >/dev/null 2>&1 &&
-    echo 1 || echo 0
+    RESULT=1
+    for CMD in "iptables -w 2 -L vpnhide_out -n" "iptables -w 2 -C OUTPUT -j vpnhide_out" \
+               "ip6tables -w 2 -L vpnhide_out6 -n" "ip6tables -w 2 -C OUTPUT -j vpnhide_out6"; do
+      $CMD >/dev/null 2>&1
+      RC=$?
+      case "$RC" in
+        0) ;;
+        1|2) RESULT=0; break ;;
+        *) RESULT="error=$RC"; break ;;
+      esac
+    done
+    echo "$RESULT"
   '
   phase_end
 }

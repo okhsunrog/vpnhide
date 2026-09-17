@@ -196,9 +196,24 @@ class DetectModulesTest {
             mapOf(
                 "ports_prop" to "version=0.6.3",
                 "ports_chain" to "0",
+                "snapshot_shell_uid" to "uid=0\nid=uid=0(root)\ncontext=u:r:ksu:s0",
             )
         val state = detectPortsModule(sections) as ModuleState.Installed
         assertEquals(false, state.active)
+        assertEquals(true, state.runtimeCheckable)
+    }
+
+    @Test
+    fun `ports unverified, not inactive, when the iptables probe itself failed`() {
+        // Exit 4: another process held the xtables lock for longer than the probe waited.
+        val locked = detectPortsModule(mapOf("ports_prop" to "version=0.6.3", "ports_chain" to "error=4")) as ModuleState.Installed
+        assertEquals(false, locked.active)
+        assertEquals(false, locked.runtimeCheckable)
+        // The phase never emitted anything.
+        val missing = detectPortsModule(mapOf("ports_prop" to "version=0.6.3")) as ModuleState.Installed
+        assertEquals(false, missing.runtimeCheckable)
+        // An unverified reading is no evidence that the rules are missing: no warning.
+        assertEquals(null, detectPortsApplyProblem(locked, 1, "boot_id=boot-1\nloaded=1", "boot-1", portsDisabled = false))
     }
 
     @Test
