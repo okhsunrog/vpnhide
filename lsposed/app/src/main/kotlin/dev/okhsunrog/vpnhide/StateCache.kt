@@ -40,7 +40,10 @@ internal abstract class StateCache<T>(
                 }
             },
             changed = ::observationChanged,
-        ).also { owner -> source?.subscribe { owner.invalidate() } }
+        ).also { owner ->
+            // A dependency invalidation is our own process re-reading: ReadReason.Background.
+            source?.subscribe { owner.invalidate() }
+        }
     }
 
     val observation: StateFlow<ObservationState<T>> get() = coordinator.state
@@ -60,17 +63,20 @@ internal abstract class StateCache<T>(
     // Loads run on the process-owned ObservationRuntime scope; leaving a screen only detaches its collectors.
     protected fun ensure() = coordinator.ensure()
 
-    protected fun forceRefresh() {
+    protected fun forceRefresh(reason: ReadReason = ReadReason.Explicit) {
         if (!ready) return
         source?.refresh()
-        coordinator.refresh()
+        coordinator.refresh(reason)
     }
 
-    suspend fun refreshInPlace(force: Boolean = true) {
+    suspend fun refreshInPlace(
+        force: Boolean = true,
+        reason: ReadReason = ReadReason.Explicit,
+    ) {
         if (!ready) return
         if (force) source?.refresh()
         try {
-            coordinator.read(refresh = true)
+            coordinator.read(refresh = true, reason = reason)
         } catch (error: CancellationException) {
             throw error
         } catch (_: ObservationReadException) {
@@ -83,9 +89,10 @@ internal abstract class StateCache<T>(
         notBefore: Long = Long.MIN_VALUE,
     ): T = coordinator.read(refresh, notBefore)
 
-    protected fun requestRefresh() = coordinator.refresh()
+    protected fun requestRefresh() = coordinator.refresh(ReadReason.Explicit)
 
-    fun markStale() = coordinator.invalidate(start = false)
+    /** Owe a re-read without starting one; the caller states why, since the presentation words it. */
+    fun markStale(reason: ReadReason) = coordinator.invalidate(start = false, reason = reason)
 
     open fun invalidate() = coordinator.invalidate()
 }

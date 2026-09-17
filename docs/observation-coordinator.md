@@ -26,24 +26,46 @@ while loading, stale, failed or quarantined. `RoutingGateCache.gate` uses `curre
 a VPN transition marks it stale immediately, before the 750 ms debounced recheck.
 This changes readiness freshness, not diagnostic result classification or retention.
 For eligibility, an invalidated observation that still awaits its re-read is
-`Checking` (the hero says "confirming the last check still applies"); `Unknown` is
-reserved for a read that failed, a quarantined source, or an attempt that never
-produced a value. Mapping the stale window to `Unknown` flashed "couldn't determine
-whether VPN Hide is routed" on every VPN toggle.
-`VpnTransportWatcher` is only a trigger; the gate value always comes from the
-root probe. It listens two ways, because one is blind by design: a
-`TRANSPORT_VPN` listen (without the builder's default `NOT_VPN` capability, which
-had made it match nothing), which the app's own Java hook drops for target uids,
-VPN Hide included; and the default-network callback, which the hook sanitizes
-but delivers. ConnectivityService dispatches `onAvailable` on the default
-callback only when the satisfying network changes, so every delivery after the
-registration replay counts as a switch (`reduceDefaultNetwork`); handles are not
-compared, since for this uid the hook rewrites the VPN network into its
-underlying one and a VPN toggle arrives as the same handle. Replays at
-registration are knowledge of the current state, not transitions
-(`reduceVpnTransport`, `DefaultNetworkKnowledge.replayed`), and must not
-invalidate a gate that already reflects them. Verified on the Pixel 8 Pro on
-2026-09-16: VPN off and on each produced one root re-read within a second.
+`Checking`; `Unknown` is reserved for a read that failed, a quarantined source, or
+an attempt that never produced a value. Mapping the stale window to `Unknown`
+flashed "couldn't determine whether VPN Hide is routed" on every VPN toggle. What
+the screens render during that window is not the eligibility but the routing
+knowledge the presentation keeps (`RoutingKnowledge.Verifying` with the last
+known fact and the read's reason): a user-requested or network-triggered re-read
+shows a neutral "Checking…" at once, a background one keeps the last known state
+for a 2 s grace (transition contract §22).
+`VpnStatePoller` runs while the main UI is RESUMED, with a one-second delay
+between completed samples. It uses the shared root snapshot script's network-only
+mode (interfaces, current framework networks, routes and policy rules), without
+package inventory or backend probes. Samples are process-owned `StateCache` reads,
+so detached lifecycle waiters do not release a still-running worker. Quarantined
+workers are not replaced by the timer. Unchanged samples do not invalidate the
+gate; a changed sample triggers the normal fresh root/gate refresh. An observation
+failure triggers a refresh once and is never interpreted as VPN-off. Initial
+sampling and recovery also refresh to close startup/resume races. ON_RESUME retains
+its throttled refresh, and explicit Retry remains available.
+
+The confirmation suite on a VPN-up has one owner too. The poller keeps the gate
+fresh (above); `VpnStatePoller.confirmRoutedTransitions` watches that gate value and,
+latched by `vpnConfirmLatch`, requests exactly one confirmation the moment the gate
+actually reads routed (`DashboardCache.refreshRetained`, whose `beforeRefresh` runs
+one fresh `DiagnosticsCache.retry` and re-derives the tiles). The latch fires on
+`ROUTED` while armed, then disarms; a real `VPN_OFF` re-arms it; the settling states
+the gate passes on the way up (`SELF_NOT_ROUTED`, `NEEDS_RESTART`) and a loading null
+keep the arm state. So the flap through those states — and a Wi-Fi/cellular handover
+that stays routed — does not re-fire, and a cold start already routed does not fire
+at all. This replaces the two screens' `gate.routedTransitions()` effects, which each
+re-armed on the settling flap and re-ran the suite, bouncing the hero green → checking
+→ green. Watching the gate value (not the poller's fingerprint edge) is deliberate:
+self-routing can resolve a read later than the interfaces appear, so the fingerprint
+may have already gone stable when the gate first reads routed.
+
+There is no ConnectivityManager listener for VPN-state auto-refresh. The app's own
+Java backend intentionally hides VPN lifecycle changes when its visible network
+is unchanged, so those callbacks cannot be a reliable trigger. Diagnostic callback
+registrations remain: they measure hiding rather than drive readiness refresh.
+Device validation on 2026-09-17 is recorded in
+[the polling/callback report](notes/vpn-poll-device-validation.md).
 
 Dashboard derivation initializes/joins diagnostics when needed, then observes its
 terminal result, including a blocked or failed attempt, without retrying it; what
@@ -76,6 +98,21 @@ successor for the newest requested generation. Equivalent refreshes join the
 active request; an explicit `notBefore` timestamp can demand a newer collection.
 Awaiters follow a superseded request to its successor within their own deadline.
 An ordinary Ensure does not retry a failed attempt in the same generation.
+
+Every re-read states why it happens. `ReadReason` is `Background` (our own process
+invalidated the observation — a root dependency after a config phase or the startup
+reconcile, or the foreground-return safety net), `Transition` (an external signal that
+the observed fact may have changed: the VPN transport / default-network callback) or
+`Explicit` (the user asked: Retry, refresh, pull-to-refresh, a manual re-check). An
+observation that is owed a re-read carries a `StaleMark(reason, since)`: set by an
+invalidation and by a refresh that requests a newer generation, kept while that re-read
+is owed or running, carried over to the successor of a superseded read, and cleared when
+the current generation publishes or fails. Overlapping causes keep the earliest `since`
+and the strongest reason — `Explicit` never degrades to `Background` because a routine
+invalidation arrived afterwards. The request that is started carries that reason, so a
+read in flight can be attributed after the mark is gone. Nothing renders this yet; the
+presentation consumes it in the next stage to word a background top-up differently from
+a user-requested re-check.
 
 ## Root dependencies
 

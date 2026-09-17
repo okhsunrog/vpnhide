@@ -349,73 +349,10 @@ internal data class DashboardState(
     val legacyImport: LegacyImportPrompt? = null,
 )
 
-internal enum class HeroStatus { Protected, Attention, Unprotected, VpnOff }
-
 internal fun protectionFullyPassed(protection: ProtectionCheck): Boolean =
     protection is ProtectionCheck.Checked &&
         (protection.native as? LayerStatus.Active)?.verdict == Verdict.Ok &&
         (protection.java as? LayerStatus.Active)?.verdict == Verdict.Ok
-
-/** Worst-signal rank a layer contributes to the hero: leaking-and-dead = 2,
- * partial / inactive / absent = 1, ok = 0. */
-private fun LayerStatus.heroRank(): Int =
-    when (this) {
-        LayerStatus.Absent -> {
-            1
-        }
-
-        LayerStatus.Inactive -> {
-            1
-        }
-
-        LayerStatus.Unverified -> {
-            1
-        }
-
-        is LayerStatus.Active -> {
-            when (verdict) {
-                Verdict.Ok -> 0
-                Verdict.Partial -> 1
-                Verdict.Broken -> 2
-            }
-        }
-    }
-
-/** Overall health, ranked worst-signal-wins from protection state + errors/warnings. */
-internal fun computeHeroStatus(
-    state: DashboardState,
-    errorCount: Int,
-    warningCount: Int,
-): HeroStatus {
-    val p = state.protection
-    if (p is ProtectionCheck.Blocked && p.gate == DiagnosticGate.VPN_OFF) return HeroStatus.VpnOff
-    // 0 = protected, 1 = attention, 2 = unprotected — keep the worst signal.
-    var rank = 0
-    when (p) {
-        // A non-VPN-off block (self-not-routed / needs-restart) is attention, not off.
-        is ProtectionCheck.Blocked -> {
-            rank = maxOf(rank, 1)
-        }
-
-        // Couldn't measure — attention, not "off" (we don't know protection is broken).
-        ProtectionCheck.Failed -> {
-            rank = maxOf(rank, 1)
-        }
-
-        is ProtectionCheck.Checked -> {
-            rank = maxOf(rank, p.native.heroRank(), p.java.heroRank())
-        }
-    }
-    when {
-        errorCount > 0 -> rank = maxOf(rank, 2)
-        warningCount > 0 -> rank = maxOf(rank, 1)
-    }
-    return when (rank) {
-        0 -> HeroStatus.Protected
-        1 -> HeroStatus.Attention
-        else -> HeroStatus.Unprotected
-    }
-}
 
 internal fun moduleSummaryText(state: DashboardState): String = "${activeModuleCount(state)}/3"
 

@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -62,6 +63,62 @@ class ObservationDataTest {
         val recovered = reduceObservation(failed, ObservationEvent.ResourceRecovered(2, 13))
         assertFalse(recovered.state.quarantined)
         assertTrue(recovered.effects.single() is ObservationEffect.Load)
+    }
+
+    @Test
+    fun `a stale mark keeps its first since and takes the strongest reason without downgrading`() {
+        var state = loadedObservation()
+        state = reduceObservation(state, ObservationEvent.Invalidate(10, start = false, reason = ReadReason.Background)).state
+        assertEquals(StaleMark(ReadReason.Background, 10), state.stale)
+        state = reduceObservation(state, ObservationEvent.Invalidate(14, start = false, reason = ReadReason.Transition)).state
+        assertEquals(StaleMark(ReadReason.Transition, 10), state.stale)
+        state = reduceObservation(state, ObservationEvent.Invalidate(16, start = false, reason = ReadReason.Background)).state
+        assertEquals(StaleMark(ReadReason.Transition, 10), state.stale)
+        state = reduceObservation(state, ObservationEvent.Invalidate(18, start = false, reason = ReadReason.Explicit)).state
+        state = reduceObservation(state, ObservationEvent.Invalidate(19, start = false, reason = ReadReason.Background)).state
+        assertEquals(StaleMark(ReadReason.Explicit, 10), state.stale)
+    }
+
+    @Test
+    fun `the started read carries the stale reason and publication clears the mark`() {
+        val stale =
+            reduceObservation(
+                loadedObservation(),
+                ObservationEvent.Invalidate(10, start = false, reason = ReadReason.Transition),
+            ).state
+        val started = reduceObservation(stale, ObservationEvent.Ensure(11))
+        val request = requireNotNull(started.state.active)
+        assertEquals(ReadReason.Transition, request.reason)
+        assertEquals(StaleMark(ReadReason.Transition, 10), started.state.stale)
+        val published = reduceObservation(started.state, ObservationEvent.Loaded(request.id, "fresh", 12))
+        assertNull(published.state.stale)
+        assertEquals("fresh", published.state.lastGood?.value)
+    }
+
+    @Test
+    fun `a joined refresh upgrades the reason of the read already in flight`() {
+        val loading = reduceObservation(ObservationState<String>(), ObservationEvent.Refresh(10, reason = ReadReason.Transition)).state
+        assertEquals(ReadReason.Transition, loading.active?.reason)
+        assertNull(loading.stale)
+        val joined = reduceObservation(loading, ObservationEvent.Refresh(12, reason = ReadReason.Explicit))
+        assertEquals(listOf(ObservationEffect.Join(1)), joined.effects)
+        assertEquals(StaleMark(ReadReason.Explicit, 10), joined.state.stale)
+        val weaker = reduceObservation(joined.state, ObservationEvent.Refresh(13, reason = ReadReason.Background))
+        assertEquals(StaleMark(ReadReason.Explicit, 10), weaker.state.stale)
+    }
+
+    @Test
+    fun `a superseded read hands its reason on and only the current generation clears the mark`() {
+        val loading = reduceObservation(loadedObservation(), ObservationEvent.Refresh(10, reason = ReadReason.Background)).state
+        val obsolete = requireNotNull(loading.active).id
+        val invalidated = reduceObservation(loading, ObservationEvent.Invalidate(11, reason = ReadReason.Explicit)).state
+        assertEquals(StaleMark(ReadReason.Explicit, 11), invalidated.stale)
+        val superseded = reduceObservation(invalidated, ObservationEvent.Loaded(obsolete, "obsolete", 12))
+        val successor = requireNotNull(superseded.state.active)
+        assertEquals(ReadReason.Explicit, successor.reason)
+        assertEquals(StaleMark(ReadReason.Explicit, 11), superseded.state.stale)
+        val failed = reduceObservation(superseded.state, ObservationEvent.Failed(successor.id, TransitionFailure.ReadFailed, 13))
+        assertNull(failed.state.stale)
     }
 
     private fun loadedObservation(): ObservationState<String> {

@@ -274,7 +274,11 @@ old device-validation paragraphs predate the successful installs described below
    and again while the suite re-ran once the VPN came back, because a blocked
    attempt was worded as a failed one. Fixed: `DiagnosticAttempt.blocked` carries
    no notice on the hero or beside the Diagnostics history, and a re-check in
-   flight only names the confirmation.
+   flight only names the confirmation. Superseded the same day by the Situation
+   layer (transition contract §22, design review in
+   [ui-state-presentation-review.md](ui-state-presentation-review.md)): the hero
+   and the Diagnostics banner now render one classification, so this item is
+   closed.
 
 The batched root reader now waits for its launcher and pipe readers to finish.
 The diagnostic run coordinator joins its own effect jobs when draining and
@@ -300,9 +304,12 @@ usual; re-check the set once more at release time.
 Run from `/home/okhsunrog/code/vpnhide_state/lsposed`:
 
 ```sh
-./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3072m -PvpnhideWarningsAsErrors :app:testDebugUnitTest :app:detekt cpdCheck :app:ktlintCheck :app:lintDebug
-./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx4096m -PvpnhideWarningsAsErrors :app:assembleRelease
+./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx3072m -PvpnhideWarningsAsErrors=true :app:testDebugUnitTest :app:detekt cpdCheck :app:ktlintCheck :app:lintDebug
+./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx4096m -PvpnhideWarningsAsErrors=true :app:assembleRelease
 ```
+
+`=true` is required: `build.gradle.kts` parses the property as a boolean string,
+so a bare `-PvpnhideWarningsAsErrors` is a no-op (CI passes `=true`).
 
 Do not edit Kotlin/resources while Gradle runs: changing inputs during lint has
 caused failures. Other Java processes may belong to unrelated work; do not kill them.

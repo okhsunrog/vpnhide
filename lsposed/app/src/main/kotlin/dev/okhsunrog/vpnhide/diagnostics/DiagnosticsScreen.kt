@@ -83,12 +83,14 @@ fun DiagnosticsScreen(
 ) {
     val context = LocalContext.current
 
-    // One projection for everything above the check list: eligibility, the run in
-    // flight, the latest attempt and the latest complete measurement with its
-    // applicability, all from the same instant. The screen only words the pure
-    // decision made in diagnosticScreenDecision; it never combines flows itself.
+    // The banner is the one Situation the Dashboard hero renders too, so the two
+    // surfaces cannot disagree about what the user is looking at. The presentation
+    // supplies only this screen's side channels (which results to list, whether they
+    // are complete, their coverage, the notice about the latest attempt), from the
+    // same instant. The screen words the pure decision; it never combines flows.
     val presentation by DiagnosticsCache.presentation.collectAsState()
-    val decision = diagnosticScreenDecision(presentation)
+    val situation by DiagnosticsCache.situation.collectAsState()
+    val decision = diagnosticScreenDecision(situation, presentation)
     // The dashboard state carries which native backend is active + the optional hooks
     // it installed — the inputs needed to rebuild the canonical DiagnosticReport here,
     // so each check can be shown against the vectors the backend actually OWNS. Null
@@ -109,17 +111,10 @@ fun DiagnosticsScreen(
         // guarantees the shared gate is ready even if Diagnostics is opened first.
         RoutingGateCache.ensureLoaded(context, selfNeedsRestart)
     }
-    // The live gate is the trigger to (re)compute the frozen check results: once the
-    // VPN comes up (or this app becomes routed), the results must be measured even if
-    // DiagnosticsCache is still sitting on a stale Blocked/Failed from before. run() is
-    // idempotent — a no-op on an already-complete Ready — so this is cheap on every
-    // known routed transition. Temporary unknown readiness while the gate refreshes
-    // must not retrigger a failed run when the same routed value returns.
-    LaunchedEffect(selfNeedsRestart) {
-        RoutingGateCache.gate.routedTransitions().collect {
-            DiagnosticsCache.run(context, selfNeedsRestart)
-        }
-    }
+    // A VPN up / routed transition while foregrounded is noticed by VpnStatePoller,
+    // the single deduplicated trigger, which runs one confirmation suite; the check
+    // list re-renders reactively from the presentation. The screen no longer watches
+    // the gate itself, which re-ran the suite on every settling flap.
 
     val results = decision.results
     // Native probes that couldn't run (ECONNREFUSED from socket()) classify as
@@ -144,7 +139,7 @@ fun DiagnosticsScreen(
             DiagnosticsCache.retry(context, selfNeedsRestart)
             DashboardCache.refresh(context, selfNeedsRestart)
         }
-        DiagnosticBannerContent(decision.banner, onRetry, onOpenAccelerators)
+        DiagnosticBannerContent(decision.banner, decision.checking, onRetry, onOpenAccelerators)
         decision.attemptNotice?.let { notice ->
             Spacer(Modifier.height(6.dp))
             StatusBanner(
@@ -199,10 +194,15 @@ fun DiagnosticsScreen(
     }
 }
 
-/** Words one [DiagnosticBanner]; the decision itself is pure and tested, this only renders it. */
+/**
+ * Words one [DiagnosticBanner]; the decision itself is pure and tested, this only
+ * renders it. [checking] holds a condition's prompt in place with a busy button
+ * while the fact behind it is being re-read.
+ */
 @Composable
 private fun DiagnosticBannerContent(
     banner: DiagnosticBanner,
+    checking: Boolean,
     onRetry: () -> Unit,
     onOpenAccelerators: (() -> Unit)?,
 ) {
@@ -225,11 +225,11 @@ private fun DiagnosticBannerContent(
         }
 
         DiagnosticBanner.VpnOff -> {
-            VpnOffPrompt(onRetry = onRetry)
+            VpnOffPrompt(onRetry = onRetry, enabled = !checking)
         }
 
         DiagnosticBanner.SelfExcluded -> {
-            SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators)
+            SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators, enabled = !checking)
         }
 
         DiagnosticBanner.Applying -> {

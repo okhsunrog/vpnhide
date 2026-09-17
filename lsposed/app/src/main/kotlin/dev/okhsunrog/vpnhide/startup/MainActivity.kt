@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.lerp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import dev.okhsunrog.vpnhide.AgentControlBridge
 import dev.okhsunrog.vpnhide.BackgroundUpdateChecks
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
@@ -60,7 +61,7 @@ import dev.okhsunrog.vpnhide.SelfTargetFailureKind
 import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.diagnostics.GroundTruthProbe
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
-import dev.okhsunrog.vpnhide.diagnostics.VpnTransportWatcher
+import dev.okhsunrog.vpnhide.diagnostics.VpnStatePoller
 import dev.okhsunrog.vpnhide.help.HelpScreen
 import dev.okhsunrog.vpnhide.picker.AppListCache
 import dev.okhsunrog.vpnhide.picker.ProtectionScreen
@@ -103,11 +104,6 @@ class MainActivity : ComponentActivity() {
             RootSnapshotCache.setRuntimeProbeSource(GroundTruthProbe.prepare(this)?.absolutePath)
             // Load canonical debug state before runtime work so first suExec and dashboard bootstrap agree.
             if (CanonicalConfigRepository.state.value.confirmed == null) VpnHideLog.init()
-            // Process-scoped, registered once: auto-refreshes RoutingGateCache on VPN
-            // up/down so Diagnostics/Dashboard/export/logcat react without a manual
-            // re-check. Safe before RoutingGateCache has ever loaded — its trigger is
-            // a no-op refreshInPlace guarded by runCatching until a screen seeds it.
-            VpnTransportWatcher.start(this)
         }
         setContent {
             VpnHideApp(mainProfile)
@@ -378,7 +374,9 @@ private fun MainScreen() {
     var targetSortMode by rememberSaveable { mutableStateOf(TargetListSortMode.ConfiguredFirst) }
     val appListLoading by AppListCache.loading.collectAsState()
     val targetsLoading by TargetsCache.loading.collectAsState()
-    val dashboardLoading by DashboardCache.loading.collectAsState()
+    // The top-bar indicator follows only reads the user asked for: a background
+    // re-derivation (the startup reconcile, a root dependency) is not news to spin for.
+    val dashboardLoading by DashboardCache.refreshing.collectAsState()
     val statisticsLoading by StatisticsCache.loading.collectAsState()
     val dashboardState by DashboardCache.state.collectAsState()
     val dashboardError by DashboardCache.error.collectAsState()
@@ -431,15 +429,19 @@ private fun MainScreen() {
     // on ON_RESUME if it's been a while. Listener lives as long as
     // MainScreen is composed.
     val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            launch { VpnStatePoller.pollWhileVisible() }
+            launch { VpnStatePoller.confirmRoutedTransitions() }
+        }
+    }
     DisposableEffect(lifecycleOwner) {
         val observer =
             LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
                     startupCoordinator.ensureUpdateFresh(scope)
-                    // Belt-and-suspenders re-probe of the routing gate on foreground
-                    // return (throttled), covering the case where the background VPN
-                    // transport callback was frozen/missed while we were away — e.g. the
-                    // user left to toggle their VPN in another app and came back.
+                    // Fresh routing evidence on foreground return, independently of
+                    // callbacks hidden by our own Java backend.
                     RoutingGateCache.refreshIfStale()
                 }
             }

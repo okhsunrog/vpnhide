@@ -1,6 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.diagnostics.ActiveDiagnosticRun
 import dev.okhsunrog.vpnhide.diagnostics.CORE_JAVA_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
 import dev.okhsunrog.vpnhide.diagnostics.CheckResult
@@ -9,24 +8,22 @@ import dev.okhsunrog.vpnhide.diagnostics.ConfigReadiness
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticAttempt
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticRunState
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticStage
 import dev.okhsunrog.vpnhide.diagnostics.EXTRA_JAVA_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.NATIVE_EXTRA_CHECKS
 import dev.okhsunrog.vpnhide.diagnostics.RoutingRead
 import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
+import dev.okhsunrog.vpnhide.diagnostics.SelfRouting
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticContextObservation
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticProbePlan
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticRequest
-import dev.okhsunrog.vpnhide.diagnostics.diagnosticRetryAllowed
 import dev.okhsunrog.vpnhide.diagnostics.mergeDiagnosticEvidence
 import dev.okhsunrog.vpnhide.diagnostics.plannedOutcomes
 import dev.okhsunrog.vpnhide.diagnostics.routingReadPlan
 import dev.okhsunrog.vpnhide.diagnostics.selfConfigurationIdentity
 import dev.okhsunrog.vpnhide.diagnostics.selfRoutingObservation
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -45,7 +42,7 @@ class DiagnosticContextDataTest {
     fun `failed routing read is unknown without a comparable context even with historical routed value`() {
         val failed =
             ObservationState(
-                lastGood = ObservedValue(DiagnosticGate.ROUTED, ObservationRequest(1, 0, 0), 5),
+                lastGood = ObservedValue(DiagnosticGate.ROUTED, ObservationRequest(1, 0, 0, ReadReason.Explicit), 5),
                 generation = 1,
                 error = TransitionFailure.ReadFailed,
                 attempted = true,
@@ -57,6 +54,22 @@ class DiagnosticContextDataTest {
         assertNull(selfRoutingObservation(current(DiagnosticGate.NEEDS_RESTART)).lastGood)
     }
 
+    /**
+     * The projection rebuilds the state field by field, so every field a consumer
+     * reads has to be carried: the stale mark is what tells the presentation why a
+     * re-read is owed and since when, and dropping it silently degrades every
+     * re-read to Background/now.
+     */
+    @Test
+    fun `the self routing projection carries the stale mark of the gate observation`() {
+        val mark = StaleMark(ReadReason.Transition, since = 11)
+        val invalidated = current(DiagnosticGate.ROUTED).copy(generation = 1, stale = mark)
+        val projected = selfRoutingObservation(invalidated)
+        assertEquals(mark, projected.stale)
+        assertEquals(SelfRouting.Routed, projected.lastGood?.value)
+        assertNull(selfRoutingObservation(current(DiagnosticGate.ROUTED)).stale)
+    }
+
     @Test
     fun `routing read reuses a current observation joins an in-flight read and refreshes only stale state`() {
         val fresh = current(DiagnosticGate.ROUTED)
@@ -65,7 +78,7 @@ class DiagnosticContextDataTest {
         assertEquals(RoutingRead.Refresh, routingReadPlan(fresh.copy(generation = 1)))
         assertEquals(RoutingRead.Refresh, routingReadPlan(fresh.copy(error = TransitionFailure.ReadFailed)))
         assertEquals(RoutingRead.Refresh, routingReadPlan(fresh.copy(quarantined = true, quarantineRequestId = 1)))
-        val loading = fresh.copy(active = ObservationRequest(2, 0, 1))
+        val loading = fresh.copy(active = ObservationRequest(2, 0, 1, ReadReason.Transition))
         assertEquals(RoutingRead.Join, routingReadPlan(loading))
         assertEquals(RoutingRead.Join, routingReadPlan(loading.copy(generation = 1)))
     }
@@ -170,19 +183,9 @@ class DiagnosticContextDataTest {
         assertEquals(slow, mergeDiagnosticEvidence(null, DiagnosticStage.Slow, slow))
     }
 
-    @Test
-    fun `retry policy reuses a completed suite only`() {
-        assertTrue(diagnosticRetryAllowed(DiagnosticRunState()))
-        assertTrue(diagnosticRetryAllowed(DiagnosticRunState(lastAttempt = DiagnosticAttempt(1, RunOutcome.NotStarted))))
-        assertTrue(diagnosticRetryAllowed(DiagnosticRunState(lastAttempt = DiagnosticAttempt(1, RunOutcome.Failed))))
-        assertFalse(diagnosticRetryAllowed(DiagnosticRunState(lastAttempt = DiagnosticAttempt(1, RunOutcome.Completed))))
-        val active = ActiveDiagnosticRun(2, diagnosticRequest(), stage = DiagnosticStage.Core)
-        assertTrue(diagnosticRetryAllowed(DiagnosticRunState(active = active, lastAttempt = DiagnosticAttempt(1, RunOutcome.Completed))))
-    }
-
     private fun current(gate: DiagnosticGate): ObservationState<DiagnosticGate> =
         ObservationState(
-            lastGood = ObservedValue(gate, ObservationRequest(1, 0, 0), 5),
+            lastGood = ObservedValue(gate, ObservationRequest(1, 0, 0, ReadReason.Explicit), 5),
             attempted = true,
             attemptedGeneration = 0,
         )

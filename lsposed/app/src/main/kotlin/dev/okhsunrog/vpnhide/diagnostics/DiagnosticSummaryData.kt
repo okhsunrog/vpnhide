@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
+import dev.okhsunrog.vpnhide.ObservationClock
+import dev.okhsunrog.vpnhide.ReadReason
 import dev.okhsunrog.vpnhide.TransitionFailure
 import kotlinx.serialization.Serializable
 
@@ -22,6 +24,17 @@ internal data class DiagnosticSummaryInfo(
     val currentSuccess: Boolean,
     /** The probe helper did not return from an earlier run, so no new run can start. */
     val probeUnavailable: Boolean,
+    /** The last routing fact this process had, kept across a re-read; null when it never had one. */
+    val lastKnownRouting: SelfRouting?,
+    /** Present only while a routing re-read is owed or in flight. */
+    val routingRead: RoutingReadInfo?,
+)
+
+/** A routing re-read in flight at assembly time: why it runs, and how long it has been owed. */
+@Serializable
+internal data class RoutingReadInfo(
+    val reason: ReadReason,
+    val pendingMs: Long,
 )
 
 @Serializable
@@ -42,7 +55,11 @@ internal data class DiagnosticMeasurementInfo(
     val observationId: Long,
 )
 
-internal fun diagnosticSummary(presentation: DiagnosticPresentation): DiagnosticSummaryInfo =
+/** [now] is the coordinator's monotonic base ([ObservationClock]), the base a pending read's `since` is in. */
+internal fun diagnosticSummary(
+    presentation: DiagnosticPresentation,
+    now: Long = ObservationClock.now(),
+): DiagnosticSummaryInfo =
     DiagnosticSummaryInfo(
         eligibility = presentation.eligibility,
         activeRunId = presentation.activeRunId,
@@ -59,4 +76,14 @@ internal fun diagnosticSummary(presentation: DiagnosticPresentation): Diagnostic
         evidence = presentation.evidence,
         currentSuccess = presentation.currentSuccess,
         probeUnavailable = presentation.probeUnavailable,
+        lastKnownRouting =
+            when (val routing = presentation.routing) {
+                is RoutingKnowledge.Known -> routing.routing
+                is RoutingKnowledge.Verifying -> routing.lastKnown
+                is RoutingKnowledge.Unknown -> routing.lastKnown
+            },
+        routingRead =
+            (presentation.routing as? RoutingKnowledge.Verifying)?.let {
+                RoutingReadInfo(it.reason, (now - it.since).coerceAtLeast(0))
+            },
     )

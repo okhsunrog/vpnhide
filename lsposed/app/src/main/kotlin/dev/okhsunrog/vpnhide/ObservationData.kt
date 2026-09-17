@@ -1,9 +1,32 @@
 package dev.okhsunrog.vpnhide
 
+import kotlinx.serialization.Serializable
+
+/**
+ * Why an observation is being re-read. Declared in ascending strength, so
+ * `maxOf` picks the stronger of two overlapping causes and a weaker one never
+ * downgrades it.
+ *
+ * - [Background] — our own process invalidated it: a root dependency after a
+ *   config phase or the startup reconcile, or the foreground-return safety net.
+ * - [Transition] — an external signal that the observed fact may have changed
+ *   (a changed root network observation).
+ * - [Explicit] — the user asked: Retry, refresh, pull-to-refresh, a manual re-check.
+ */
+@Serializable
+internal enum class ReadReason { Background, Transition, Explicit }
+
+/** An observation owed a re-read: why it is owed, and since when. */
+internal data class StaleMark(
+    val reason: ReadReason,
+    val since: Long,
+)
+
 internal data class ObservationRequest(
     val id: Long,
     val generation: Long,
     val startedAt: Long,
+    val reason: ReadReason,
 )
 
 internal data class ObservedValue<T>(
@@ -21,11 +44,19 @@ internal fun <T> currentObservationValue(state: ObservationState<T>): T? =
             state.active == null && !state.quarantined && state.error == null && it.request.generation == state.generation
         }?.value
 
-/** Load state for the existing StateCache facade; no jobs or global store live here. */
+/**
+ * Load state for the existing StateCache facade; no jobs or global store live here.
+ *
+ * [stale] is set the moment the observation is owed a re-read (an invalidation, or a
+ * refresh that requests a newer generation), kept for as long as that re-read is owed
+ * or running, and cleared when the current generation publishes or fails. Overlapping
+ * causes keep the earliest `since` and the strongest [ReadReason].
+ */
 internal data class ObservationState<T>(
     val lastGood: ObservedValue<T>? = null,
     val active: ObservationRequest? = null,
     val generation: Long = 0,
+    val stale: StaleMark? = null,
     val nextId: Long = 1,
     val error: TransitionFailure? = null,
     val attempted: Boolean = false,
@@ -42,11 +73,13 @@ internal sealed interface ObservationEvent<out T> {
     data class Refresh(
         val now: Long,
         val notBefore: Long = Long.MIN_VALUE,
+        val reason: ReadReason = ReadReason.Explicit,
     ) : ObservationEvent<Nothing>
 
     data class Invalidate(
         val now: Long,
         val start: Boolean = true,
+        val reason: ReadReason = ReadReason.Background,
     ) : ObservationEvent<Nothing>
 
     data class Loaded<T>(
@@ -110,7 +143,7 @@ internal fun <T> reduceObservation(
         }
 
         is ObservationEvent.Invalidate -> {
-            invalidateObservation(state, event.now, event.start)
+            invalidateObservation(state, event.now, event.start, event.reason)
         }
 
         is ObservationEvent.Loaded -> {
@@ -131,12 +164,20 @@ internal fun <T> reduceObservation(
         }
     }
 
+/** An owed re-read keeps its original [StaleMark.since]; overlapping causes take the stronger reason. */
+private fun upgradeStaleMark(
+    current: StaleMark?,
+    reason: ReadReason,
+    since: Long,
+): StaleMark = current?.copy(reason = maxOf(current.reason, reason)) ?: StaleMark(reason, since)
+
 private fun <T> startObservation(
     state: ObservationState<T>,
     now: Long,
+    reason: ReadReason = state.stale?.reason ?: ReadReason.Background,
 ): Transition<ObservationState<T>, ObservationEffect> {
     if (state.quarantined) return Transition(state, listOf(ObservationEffect.Unavailable(TransitionFailure.ResourceUnavailable)))
-    val request = ObservationRequest(state.nextId, state.generation, now)
+    val request = ObservationRequest(state.nextId, state.generation, now, reason)
     return Transition(
         state.copy(active = request, nextId = state.nextId + 1, attempted = true, attemptedGeneration = state.generation),
         listOf(ObservationEffect.Load(request)),
@@ -147,12 +188,17 @@ private fun <T> refreshObservation(
     state: ObservationState<T>,
     event: ObservationEvent.Refresh,
 ): Transition<ObservationState<T>, ObservationEffect> {
-    val active = state.active ?: return startObservation(state, event.now)
+    val reason = maxOf(event.reason, state.stale?.reason ?: event.reason)
+    // Starting the read now: it carries the reason, so an absent mark stays absent.
+    val active = state.active ?: return startObservation(state.copy(stale = state.stale?.copy(reason = reason)), event.now, reason)
     if (active.generation == state.generation && active.startedAt >= event.notBefore) {
-        return Transition(state, listOf(ObservationEffect.Join(active.id)))
+        // The read is already in flight, so the mark it joins dates from that start.
+        val joined = state.copy(stale = upgradeStaleMark(state.stale, event.reason, active.startedAt))
+        return Transition(joined, listOf(ObservationEffect.Join(active.id)))
     }
+    val marked = state.copy(stale = upgradeStaleMark(state.stale, event.reason, event.now))
     // A successor is already requested: do not produce unbounded generations for equivalent requests.
-    val next = if (active.generation != state.generation) state else state.copy(generation = state.generation + 1)
+    val next = if (active.generation != state.generation) marked else marked.copy(generation = marked.generation + 1)
     return Transition(next, listOf(ObservationEffect.AwaitGeneration(next.generation)))
 }
 
@@ -160,8 +206,9 @@ private fun <T> invalidateObservation(
     state: ObservationState<T>,
     now: Long,
     start: Boolean,
+    reason: ReadReason,
 ): Transition<ObservationState<T>, ObservationEffect> {
-    val next = state.copy(generation = state.generation + 1)
+    val next = state.copy(generation = state.generation + 1, stale = upgradeStaleMark(state.stale, reason, now))
     return if (state.active == null && start) startObservation(next, now) else Transition(next)
 }
 
@@ -187,7 +234,7 @@ private fun <T> finishObservation(
     }
     val observed: ObservedValue<T>? = if (error == null) ObservedValue(requireNotNull(value), active, now) else state.lastGood
     return Transition(
-        state.copy(active = null, lastGood = observed, error = error),
+        state.copy(active = null, lastGood = observed, error = error, stale = null),
         listOf(ObservationEffect.Finished(id, if (error == null) ObservationCompletion.Published else ObservationCompletion.Failed)),
     )
 }

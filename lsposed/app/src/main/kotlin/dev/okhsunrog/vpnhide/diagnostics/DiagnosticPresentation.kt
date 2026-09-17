@@ -17,10 +17,19 @@ package dev.okhsunrog.vpnhide.diagnostics
  * resource stays quarantined (§7) and every new request is rejected until that
  * helper returns. The retained results are as good as they were; what is gone is
  * the ability to take a new one, and the user has to be told that (§1).
+ *
+ * [routing] is the same routing observation [eligibility] is decided from, kept
+ * as knowledge instead of as an admission verdict: it carries the last known fact
+ * through a re-read and says why that re-read runs. `eligibility` stays the
+ * decision (the run coordinator and the bundle read it); a surface that wants to
+ * keep saying "VPN is off" while the fact is being re-read reads [routing].
  */
 internal data class DiagnosticPresentation(
     val eligibility: DiagnosticEligibility,
+    val routing: RoutingKnowledge,
     val activeRunId: Long?,
+    /** The intent of the run in flight: automatic (our own confirmation) or explicit (somebody asked); null when none runs. */
+    val activeRunAutomatic: Boolean?,
     val activeStage: DiagnosticStage?,
     val activeResults: CheckResults?,
     val lastAttempt: DiagnosticAttempt?,
@@ -49,23 +58,26 @@ internal fun DiagnosticPresentation.reportGate(): DiagnosticGate? =
 /**
  * [current] is the context observation built from the current routing
  * observation, root snapshot, config and impact state, or null when no routing
- * observation exists yet. [uncertain] is true while the routing observation is
- * not current (loading, invalidated, failed or quarantined): the measurement is
- * then Unverified until a consistent reobservation restores it.
+ * observation exists yet. [routing] is that same routing observation as
+ * knowledge; anything but [RoutingKnowledge.Known] means the observation is not
+ * current (loading, invalidated, failed or quarantined), so the measurement is
+ * Unverified until a consistent reobservation restores it.
  */
 internal fun diagnosticPresentation(
     view: DiagnosticRunView,
     current: DiagnosticContextObservation?,
     changeEpoch: Long,
-    uncertain: Boolean,
+    routing: RoutingKnowledge,
 ): DiagnosticPresentation {
     val core = view.core
     val measurement = core.lastComplete
-    val applicability = measurementApplicability(measurement, current?.context, changeEpoch, uncertain)
+    val applicability = measurementApplicability(measurement, current?.context, changeEpoch, routing !is RoutingKnowledge.Known)
     val eligibility = current?.eligibility ?: DiagnosticEligibility.Checking
     return DiagnosticPresentation(
         eligibility = eligibility,
+        routing = routing,
         activeRunId = core.active?.id,
+        activeRunAutomatic = core.active?.request?.automatic,
         activeStage = core.active?.stage,
         activeResults = view.activeResults,
         lastAttempt = core.lastAttempt,

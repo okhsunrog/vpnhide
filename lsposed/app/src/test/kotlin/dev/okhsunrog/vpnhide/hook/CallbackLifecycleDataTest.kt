@@ -7,6 +7,26 @@ import org.junit.Test
 
 class CallbackLifecycleDataTest {
     @Test
+    fun `VPN up and down over the same cover do not duplicate availability`() {
+        val physical = transitionPhysicalCallback(null, 100, CallbackEventKind.Available)
+        assertEquals(CallbackDelivery.Forward, physical.delivery)
+        val up = transitionCallback(physical.held, 100, CallbackEventKind.Available)
+        assertEquals(CallbackDelivery.Suppress, up.delivery)
+        assertEquals(CallbackDelivery.Suppress, transitionPhysicalCallback(up.held, 100, CallbackEventKind.Available).delivery)
+    }
+
+    @Test
+    fun `physical replacement ignores old loss but delivers offline and recovery`() {
+        val mobile = transitionPhysicalCallback(100, 101, CallbackEventKind.Available)
+        assertEquals(CallbackDelivery.Forward, mobile.delivery)
+        assertEquals(CallbackDelivery.Suppress, transitionPhysicalCallback(mobile.held, 100, CallbackEventKind.Lost).delivery)
+        val offline = transitionPhysicalCallback(mobile.held, 101, CallbackEventKind.Lost)
+        assertEquals(CallbackTransition(null, CallbackDelivery.Forward, 101), offline)
+        assertEquals(CallbackDelivery.Suppress, transitionPhysicalCallback(offline.held, 101, CallbackEventKind.Lost).delivery)
+        assertEquals(CallbackDelivery.Forward, transitionPhysicalCallback(offline.held, 102, CallbackEventKind.Available).delivery)
+    }
+
+    @Test
     fun `cover changes announce available before properties`() {
         assertEquals(CallbackTransition(101, CallbackDelivery.Available), transitionCallback(100, 101, CallbackEventKind.Changed))
         assertEquals(CallbackTransition(101, CallbackDelivery.Forward), transitionCallback(101, 101, CallbackEventKind.Changed))

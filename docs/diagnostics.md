@@ -126,6 +126,11 @@ gate (§5) guarantees a VPN artifact was present to hide.
 
 ## 4. Layer status & verdict (dashboard tiles)
 
+The tiles are one input to the hero, not the hero: its colour, title, subtitle and
+the prompt under it are decided from the one `Situation` every surface renders
+(`situation()` in `diagnostics/SituationData.kt`, worded by `heroVisual`; see the
+transition contract §22). A `LayerStatus` only ranks a `Measured` situation.
+
 Each dashboard tile is a `LayerStatus`: `Absent` (no module installed) · `Inactive`
 (installed, not loaded this boot) · `Active(hidden, leaks)`. Presence is decided
 **before** the checks, so an unloaded backend can never render a verdict — it just

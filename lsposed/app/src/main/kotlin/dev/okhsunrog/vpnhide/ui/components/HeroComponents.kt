@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,7 +26,9 @@ import dev.okhsunrog.vpnhide.ui.theme.AppColors
 /**
  * 58dp circular icon bubble used in the Dashboard and Statistics hero cards,
  * which each used to carry their own copy (one with the icon as a parameter,
- * the other hard-coding it).
+ * the other hard-coding it). With [progress] the bubble spins instead of naming
+ * a state — the hero uses it while a read or a run is in flight, so the "we are
+ * still looking" signal sits where the state icon would be, not beside it.
  */
 @Composable
 fun IconBubble(
@@ -33,6 +36,7 @@ fun IconBubble(
     tint: Color,
     container: Color,
     modifier: Modifier = Modifier,
+    progress: Boolean = false,
 ) {
     Box(
         modifier =
@@ -42,12 +46,20 @@ fun IconBubble(
                 .background(container),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(31.dp),
-        )
+        if (progress) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(28.dp),
+                color = tint,
+                strokeWidth = 3.dp,
+            )
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(31.dp),
+            )
+        }
     }
 }
 

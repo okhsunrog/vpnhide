@@ -5,6 +5,7 @@ import android.os.Process
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.ContextObservationInputs
 import dev.okhsunrog.vpnhide.EffectTicket
+import dev.okhsunrog.vpnhide.ReadReason
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.startup.StartupTrace
 import kotlinx.coroutines.Dispatchers
@@ -35,8 +36,8 @@ internal class AppDiagnosticRunIo(
         // A not-invalidated observation is fresh; only a stale or absent one costs a root shell.
         when (routingReadPlan(RoutingGateCache.observation.value)) {
             RoutingRead.Reuse -> Unit
-            RoutingRead.Join -> withContext(Dispatchers.IO) { RoutingGateCache.refreshInPlace(force = false) }
-            RoutingRead.Refresh -> withContext(Dispatchers.IO) { RoutingGateCache.refreshInPlace(force = true) }
+            RoutingRead.Join -> readRoutingGate(force = false)
+            RoutingRead.Refresh -> readRoutingGate(force = true)
         }
         val impact = impact()
         val observation =
@@ -78,6 +79,14 @@ internal class AppDiagnosticRunIo(
                 }
             }
         }
+
+    /**
+     * The suite reads the gate for itself, so the read is never worded as a user-requested
+     * re-check: any stale mark it finds already carries the true cause and the upgrade rule
+     * keeps it, so a run never invents a stronger reason than the one that made it stale.
+     */
+    private suspend fun readRoutingGate(force: Boolean) =
+        withContext(Dispatchers.IO) { RoutingGateCache.refreshInPlace(force = force, reason = ReadReason.Background) }
 
     private fun traceEligibility(eligibility: DiagnosticEligibility) {
         when (eligibility) {

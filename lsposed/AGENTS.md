@@ -141,6 +141,14 @@ directions, since `internal` is module-wide and the compiler will not.
   `res.getString` inside `loadDashboardState`, which is what made the guard list
   untestable for a year. Emission order in `dashboardIssues` is what the user
   sees; `DashboardIssuesTest` pins it.
+- **`Situation` / `situation()`** (`diagnostics/SituationData.kt`) — what the
+  user is looking at, classified once from the `DiagnosticPresentation` in one
+  precedence; the Dashboard hero (`heroVisual`) and the Diagnostics banner
+  (`diagnosticScreenDecision`) are wording maps over it and decide nothing.
+  A new state is a new `Situation` case plus its branch in both maps — never a
+  second precedence in a screen, and never a `res.getString` in the classifier.
+  `SituationDataTest` pins the scenario table of
+  `docs/notes/ui-state-presentation-review.md`.
 - **`watchSystemDataDir`** — the shared `/data/system` FileObserver factory for
   the three system_server watchers (HookEntry / PackageVisibilityHooks /
   HookLog).

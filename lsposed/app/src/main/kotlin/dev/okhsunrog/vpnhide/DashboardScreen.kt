@@ -39,15 +39,10 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
-import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
-import dev.okhsunrog.vpnhide.diagnostics.VpnTransportWatcher
-import dev.okhsunrog.vpnhide.diagnostics.routedTransitions
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
@@ -79,14 +74,12 @@ fun DashboardScreen(
 
     val state by DashboardCache.state.collectAsState()
     val loadError by DashboardCache.error.collectAsState()
-    val loading by DashboardCache.loading.collectAsState()
     val updateInfo by UpdateCheckCache.info.collectAsState()
-    // The shared diagnostic projection: current eligibility (kept fresh by the routing
-    // gate the VPN transport watcher refreshes), the run in flight, the latest attempt
-    // and the latest measurement's applicability. The hero and the prompt under it are
-    // decided from it purely (heroDecision / effectiveProtection), never by overlaying
-    // flows of different vintages here.
-    val presentation by DiagnosticsCache.presentation.collectAsState()
+    // What the user is looking at, classified once from the shared diagnostic
+    // projection (routing knowledge, the run in flight, the latest attempt, the
+    // measurement and its staleness). The hero and the prompt under it are two
+    // wordings of it (heroVisual), never an overlay of flows of different vintages.
+    val situation by DiagnosticsCache.situation.collectAsState()
     var showChangelog by remember { mutableStateOf(false) }
     var changelogData by remember { mutableStateOf<ChangelogData?>(null) }
     var showContact by remember { mutableStateOf(false) }
@@ -148,33 +141,10 @@ fun DashboardScreen(
         return
     }
 
-    // Routing came back: a latest attempt that never measured (blocked while the VPN
-    // was off, failed, or none yet) is requested again through the refresh; a complete
-    // measurement is kept, since nothing reruns a suite at rest (I16) and the tiles
-    // still show it under the eligibility overlay.
-    LaunchedEffect(selfNeedsRestart) {
-        RoutingGateCache.gate.routedTransitions().collect {
-            val latest = DiagnosticsCache.presentation.value.lastAttempt
-            if (DashboardCache.state.value != null && latest?.outcome != RunOutcome.Completed) {
-                DashboardCache.refresh(context, selfNeedsRestart)
-            }
-        }
-    }
-
-    // Routed but no tiles yet: the app was opened with the VPN off (checks never ran),
-    // then the VPN came up. We have no routed protection to show, so refresh and render
-    // the same full-screen skeleton as the initial load — ABOVE the scrolling Column,
-    // because the skeleton scrolls itself and must not nest inside another vertical
-    // scroll. Never flash the now-wrong "VPN off" hero. (The common toggle case keeps
-    // its Checked tiles via the sticky DiagnosticsCache, so it never lands here.)
-    val gateState = state
-    if (gateState != null && loadError == null &&
-        presentation.eligibility == DiagnosticEligibility.Eligible && gateState.protection !is ProtectionCheck.Checked &&
-        (loading || presentation.activeRunId != null)
-    ) {
-        DashboardLoadingState(modifier = modifier)
-        return
-    }
+    // A VPN off → on while the app is foregrounded is noticed by VpnStatePoller, the
+    // single deduplicated trigger; it requests one confirmation suite and re-derives
+    // the tiles. The screen no longer watches the gate for this, which flapped through
+    // the tunnel's settling states and re-ran the suite (green → checking → green).
 
     Column(
         modifier =
@@ -223,14 +193,6 @@ fun DashboardScreen(
         }
         val loadedState = s ?: return@Column
 
-        // Overlay the live gate onto the cached protection: a live block (VPN off /
-        // self-not-routed / needs-restart) always wins over whatever DashboardCache last
-        // measured, so the hero/prompt react to a VPN toggle immediately. The ROUTED-but-
-        // no-tiles-yet case shows a skeleton above while work is pending. A terminal
-        // failure must remain visible here instead of retriggering work indefinitely.
-        val effectiveProtection = effectiveProtection(loadedState.protection, presentation.eligibility)
-        val effectiveState = loadedState.copy(protection = effectiveProtection)
-
         // Messages split by severity. Only errors/warnings affect the hero:
         // info messages are neutral notes rendered below without changing the
         // overall "Protected" state or issue count.
@@ -238,59 +200,35 @@ fun DashboardScreen(
         val warnings = loadedState.messages.filter { it.severity == DashboardMessageSeverity.WARNING }
         val infos = loadedState.messages.filter { it.severity == DashboardMessageSeverity.INFO }
 
-        // Hero: the whole setup's health at a glance.
-        val decision = heroDecision(loadedState, presentation, errorCount = errors.size, warningCount = warnings.size)
+        // Hero: the whole setup's health at a glance, worded from the one Situation.
+        val visual = heroVisual(situation, loadedState.protection, errorCount = errors.size, warningCount = warnings.size)
         DashboardHeroCard(
-            state = effectiveState,
-            decision = decision,
+            state = loadedState,
+            visual = visual,
             errorCount = errors.size,
             warningCount = warnings.size,
         )
 
-        // Critical protection states sit right under the hero (not in a separate
-        // mid-screen section): the VPN needs turning on, or a self-restart is
-        // pending. The all-good "Checked" state renders nothing here — the hero's
-        // per-level tiles already carry that status, so the old duplicate per-level
-        // cards (Native / Java «OK», which just restated those tiles) are gone.
-        // Per-layer verdict (Checked) renders in the cards below; only a blocked gate
-        // shows a hero banner. Retry re-reads dashboard state (re-runs its own VPN +
-        // protection probes) and re-runs the diag cache so both screens recover together.
-        // One re-check drives every surface: RoutingGateCache.refresh so the export
-        // sheet / logcat card banners update immediately too, plus the two caches
-        // that actually re-derive their own state off the (now shared) gate.
+        // The condition the user can act on sits right under the hero (not in a
+        // separate mid-screen section), and which one it is comes from [visual] —
+        // the same classification that coloured the hero, so the two cannot
+        // contradict each other in one frame. Retry re-reads dashboard state (re-runs
+        // its own VPN + protection probes) and re-runs the diag cache so both screens
+        // recover together. One re-check drives every surface: RoutingGateCache.refresh
+        // so the export sheet / logcat card banners update immediately too, plus the
+        // two caches that actually re-derive their own state off the (now shared) gate.
         val onRetry = {
             RoutingGateCache.refresh(context, selfNeedsRestart)
             DashboardCache.refresh(context, selfNeedsRestart)
             DiagnosticsCache.retry(context, selfNeedsRestart)
         }
-        val protection = effectiveProtection
-        when {
-            (protection as? ProtectionCheck.Blocked)?.gate == DiagnosticGate.VPN_OFF -> {
-                Spacer(Modifier.height(12.dp))
-                VpnOffPrompt(onRetry = onRetry)
-            }
-
-            (protection as? ProtectionCheck.Blocked)?.gate == DiagnosticGate.NEEDS_RESTART -> {
-                Spacer(Modifier.height(12.dp))
-                StatusBanner(
-                    text = stringResource(R.string.dashboard_needs_restart),
-                    containerColor = warningBg,
-                    contentColor = onBannerColor,
-                )
-            }
-
-            (protection as? ProtectionCheck.Blocked)?.gate == DiagnosticGate.SELF_NOT_ROUTED -> {
-                Spacer(Modifier.height(12.dp))
-                SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators)
-            }
-
-            decision.showsFailedPrompt -> {
-                Spacer(Modifier.height(12.dp))
-                DiagnosticsFailedPrompt(onRetry = onRetry)
-            }
-
-            else -> {} // Checked: the per-layer tiles carry the status; no hero banner
-        }
+        HeroPromptBlock(
+            visual = visual,
+            onRetry = onRetry,
+            onOpenAccelerators = onOpenAccelerators,
+            warningBg = warningBg,
+            onBannerColor = onBannerColor,
+        )
         Spacer(Modifier.height(20.dp))
 
         // Module status cards — one grouped block (byIndex corners).
@@ -658,87 +596,133 @@ private fun SectionHeader(
     SharedSectionHeader(text = text, color = color, emphasized = true)
 }
 
-private data class HeroVisual(
+/** The container/accent/icon triple a [HeroTone] is drawn with. */
+private data class HeroPalette(
     val container: Color,
     val accent: Color,
     val icon: ImageVector,
-    val titleRes: Int,
-    val subtitleRes: Int,
 )
 
-/** The subtitle a hero note replaces the status subtitle with; null keeps the status wording. */
-private fun heroNoteRes(note: HeroNote): Int? =
-    when (note) {
-        HeroNote.None -> null
-        HeroNote.ProbeUnavailable -> R.string.dashboard_hero_note_probe_unavailable
-        HeroNote.Applying -> R.string.dashboard_hero_note_applying
-        HeroNote.ApplicationUnknown -> R.string.dashboard_hero_note_application_unknown
-        HeroNote.ApplicationFailed -> R.string.dashboard_hero_note_application_failed
-        HeroNote.RoutingUnknown -> R.string.dashboard_hero_note_routing_unknown
-        HeroNote.Checking -> R.string.dashboard_hero_note_checking
-        HeroNote.Interrupted -> R.string.dashboard_hero_note_interrupted
-        HeroNote.Failed -> R.string.dashboard_hero_note_failed
-        HeroNote.ResultsChanged -> R.string.dashboard_hero_note_results_changed
-        HeroNote.ResultsUnverified -> R.string.dashboard_hero_note_results_unverified
-        HeroNote.InsufficientEvidence -> R.string.dashboard_hero_note_insufficient
+/** Neutral keeps the palette the VPN-off hero has always used. */
+@Composable
+private fun heroPalette(tone: HeroTone): HeroPalette =
+    when (tone) {
+        HeroTone.Protected -> {
+            HeroPalette(StatusColors.successContainer(), StatusColors.successDot, Icons.Default.Shield)
+        }
+
+        HeroTone.Attention -> {
+            HeroPalette(StatusColors.warningContainer(), StatusColors.warningAccent, Icons.Default.Warning)
+        }
+
+        HeroTone.Unprotected -> {
+            HeroPalette(StatusColors.errorContainer(), StatusColors.errorAccent, Icons.Default.Warning)
+        }
+
+        HeroTone.Neutral -> {
+            HeroPalette(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, Icons.Default.Info)
+        }
+    }
+
+private fun heroTitleRes(title: HeroTitle): Int =
+    when (title) {
+        HeroTitle.VpnHidden -> R.string.dashboard_hero_protected_title
+        HeroTitle.NeedsAttention -> R.string.dashboard_hero_attention_title
+        HeroTitle.VpnVisible -> R.string.dashboard_hero_unprotected_title
+        HeroTitle.VpnOff -> R.string.dashboard_hero_vpnoff_title
+        HeroTitle.Checking -> R.string.dashboard_hero_checking_title
+        HeroTitle.CannotCheck -> R.string.dashboard_hero_cannot_check_title
+        HeroTitle.RestartToCheck -> R.string.dashboard_hero_restart_title
+        HeroTitle.CouldNotCheck -> R.string.dashboard_hero_could_not_check_title
+        HeroTitle.RecheckNeeded -> R.string.dashboard_hero_recheck_title
+    }
+
+private fun heroSubtitleRes(subtitle: HeroSubtitle): Int =
+    when (subtitle) {
+        HeroSubtitle.AllLayersActive -> R.string.dashboard_hero_protected_subtitle
+        HeroSubtitle.SomeChecksNeedLook -> R.string.dashboard_hero_attention_subtitle
+        HeroSubtitle.HidingNotActive -> R.string.dashboard_hero_unprotected_subtitle
+        HeroSubtitle.InactiveWithoutVpn -> R.string.dashboard_hero_vpnoff_subtitle
+        HeroSubtitle.CheckingVpn -> R.string.dashboard_hero_checking_vpn
+        HeroSubtitle.RunningChecks -> R.string.dashboard_hero_checking_suite
+        HeroSubtitle.ApplyingConfig -> R.string.dashboard_hero_checking_config
+        HeroSubtitle.SelfExcluded -> R.string.dashboard_hero_self_excluded_subtitle
+        HeroSubtitle.RestartApp -> R.string.dashboard_hero_restart_app_subtitle
+        HeroSubtitle.RestartDevice -> R.string.dashboard_hero_restart_device_subtitle
+        HeroSubtitle.ApplicationUnknown -> R.string.dashboard_hero_note_application_unknown
+        HeroSubtitle.ApplicationFailed -> R.string.dashboard_hero_note_application_failed
+        HeroSubtitle.RoutingUnknown -> R.string.dashboard_hero_note_routing_unknown
+        HeroSubtitle.LastCheckFailed -> R.string.dashboard_hero_note_failed
+        HeroSubtitle.LastCheckInterrupted -> R.string.dashboard_hero_note_interrupted
+        HeroSubtitle.ProbeUnavailable -> R.string.dashboard_hero_note_probe_unavailable
+        HeroSubtitle.ResultsChanged -> R.string.dashboard_hero_note_results_changed
+        HeroSubtitle.InsufficientEvidence -> R.string.dashboard_hero_note_insufficient
     }
 
 /**
- * The big at-a-glance status card at the top of the Dashboard. Summarizes the
- * whole setup's health into one of four states with a tinted container, accent
- * icon and headline. [decision] also carries the note that qualifies the
- * subtitle when the measurement is not the whole story.
+ * The condition block under the hero. Which prompt appears is [HeroVisual.prompt];
+ * only the wording is decided here. A [HeroPrompt.Recheck] asks for the same action
+ * whatever led to it, so it reuses the message the Diagnostics screen already words
+ * for that cause rather than inventing a second vocabulary.
+ */
+@Composable
+private fun HeroPromptBlock(
+    visual: HeroVisual,
+    onRetry: () -> Unit,
+    onOpenAccelerators: (() -> Unit)?,
+    warningBg: Color,
+    onBannerColor: Color,
+) {
+    if (visual.prompt == HeroPrompt.None) return
+    Spacer(Modifier.height(12.dp))
+    when (visual.prompt) {
+        HeroPrompt.VpnOff -> {
+            VpnOffPrompt(onRetry = onRetry, enabled = !visual.checking)
+        }
+
+        HeroPrompt.SelfExcluded -> {
+            SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators, enabled = !visual.checking)
+        }
+
+        HeroPrompt.Restart -> {
+            StatusBanner(
+                text = stringResource(R.string.dashboard_needs_restart),
+                containerColor = warningBg,
+                contentColor = onBannerColor,
+            )
+        }
+
+        HeroPrompt.Recheck -> {
+            DiagnosticsRetryPrompt(heroRecheckPromptRes(visual.subtitle), onRetry)
+        }
+
+        // Returned above; the branch only keeps the `when` exhaustive.
+        HeroPrompt.None -> {}
+    }
+}
+
+private fun heroRecheckPromptRes(subtitle: HeroSubtitle): Int =
+    when (subtitle) {
+        HeroSubtitle.ResultsChanged -> R.string.diag_banner_results_changed
+        HeroSubtitle.RoutingUnknown -> R.string.diag_banner_routing_unknown
+        HeroSubtitle.LastCheckInterrupted -> R.string.diag_banner_interrupted
+        else -> R.string.diag_failed_prompt
+    }
+
+/**
+ * The big at-a-glance status card at the top of the Dashboard. [visual] carries the
+ * whole decision — tone, title, subtitle and whether a read or a run is in flight —
+ * so this only picks colours and strings. The tiles keep rendering the measurement
+ * in [state]; they are the evidence, the hero is the claim about it.
  */
 @Composable
 private fun DashboardHeroCard(
     state: DashboardState,
-    decision: HeroDecision,
+    visual: HeroVisual,
     errorCount: Int,
     warningCount: Int,
 ) {
-    val status = decision.status
-    val visual =
-        when (status) {
-            HeroStatus.Protected -> {
-                HeroVisual(
-                    container = StatusColors.successContainer(),
-                    accent = StatusColors.successDot,
-                    icon = Icons.Default.Shield,
-                    titleRes = R.string.dashboard_hero_protected_title,
-                    subtitleRes = R.string.dashboard_hero_protected_subtitle,
-                )
-            }
-
-            HeroStatus.Attention -> {
-                HeroVisual(
-                    container = StatusColors.warningContainer(),
-                    accent = StatusColors.warningAccent,
-                    icon = Icons.Default.Warning,
-                    titleRes = R.string.dashboard_hero_attention_title,
-                    subtitleRes = R.string.dashboard_hero_attention_subtitle,
-                )
-            }
-
-            HeroStatus.Unprotected -> {
-                HeroVisual(
-                    container = StatusColors.errorContainer(),
-                    accent = StatusColors.errorAccent,
-                    icon = Icons.Default.Warning,
-                    titleRes = R.string.dashboard_hero_unprotected_title,
-                    subtitleRes = R.string.dashboard_hero_unprotected_subtitle,
-                )
-            }
-
-            HeroStatus.VpnOff -> {
-                HeroVisual(
-                    container = MaterialTheme.colorScheme.surfaceVariant,
-                    accent = MaterialTheme.colorScheme.onSurfaceVariant,
-                    icon = Icons.Default.Info,
-                    titleRes = R.string.dashboard_hero_vpnoff_title,
-                    subtitleRes = R.string.dashboard_hero_vpnoff_subtitle,
-                )
-            }
-        }
+    val palette = heroPalette(visual.tone)
     EnhancedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.extraLarge,
@@ -753,20 +737,21 @@ private fun DashboardHeroCard(
                 // Dashboard rendering at the display's refresh rate (~95% of a core)
                 // for a movement nobody noticed.
                 IconBubble(
-                    icon = visual.icon,
-                    tint = visual.accent,
-                    container = visual.container,
+                    icon = palette.icon,
+                    tint = palette.accent,
+                    container = palette.container,
+                    progress = visual.checking,
                 )
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = stringResource(visual.titleRes),
+                        text = stringResource(heroTitleRes(visual.title)),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = stringResource(heroNoteRes(decision.note) ?: visual.subtitleRes),
+                        text = stringResource(heroSubtitleRes(visual.subtitle)),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

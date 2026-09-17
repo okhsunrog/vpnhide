@@ -8,10 +8,10 @@ import dev.okhsunrog.vpnhide.ConfigOperationResult
 import dev.okhsunrog.vpnhide.ConfigOperationSpec
 import dev.okhsunrog.vpnhide.ConfigPhase
 import dev.okhsunrog.vpnhide.ContextObservationInputs
+import dev.okhsunrog.vpnhide.ObservationClock
 import dev.okhsunrog.vpnhide.ObservationRuntime
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.TransitionFailure
-import dev.okhsunrog.vpnhide.currentObservationValue
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -112,11 +112,30 @@ internal object DiagnosticsCache {
                 } else {
                     null
                 }
-            diagnosticPresentation(view, observation, impact.changeEpoch, uncertain = currentObservationValue(routing) == null)
+            val knowledge = routingKnowledge(selfRoutingObservation(routing), ObservationClock.now())
+            diagnosticPresentation(view, observation, impact.changeEpoch, knowledge)
         }.stateIn(
             ObservationRuntime.scope,
             SharingStarted.Eagerly,
-            diagnosticPresentation(coordinator.view.value, null, 0, uncertain = true),
+            diagnosticPresentation(
+                coordinator.view.value,
+                null,
+                0,
+                routingKnowledge(selfRoutingObservation(RoutingGateCache.observation.value), ObservationClock.now()),
+            ),
+        )
+    }
+
+    /**
+     * The one classification the surfaces render: [presentation] folded into a
+     * [Situation], plus the single re-emission that ends a Background grace. It
+     * words the presentation and never triggers a read or a run (I16).
+     */
+    val situation: StateFlow<Situation> by lazy {
+        situationFlow(presentation, ObservationClock::now).stateIn(
+            ObservationRuntime.scope,
+            SharingStarted.Eagerly,
+            situation(presentation.value, ObservationClock.now()),
         )
     }
 
@@ -131,15 +150,19 @@ internal object DiagnosticsCache {
         coordinator.request(request(automatic = true))
     }
 
-    /** Explicit retry from the VPN-off / failed banners and Dashboard refresh: a new run unless the last one completed. */
+    /**
+     * Explicit re-check from the prompts, the Diagnostics screen and the Dashboard
+     * refresh: always a new run. The user asked for a fresh verdict and the hero says
+     * "Running the hiding checks…" while it runs, so reusing a completed suite would
+     * promise a measurement and deliver the old one. A run already in flight is
+     * joined by the coordinator; nothing here reruns a suite at rest on its own (I16).
+     */
     fun retry(
         context: Context,
         selfNeedsRestart: Boolean,
     ) {
         updateInputs(context, selfNeedsRestart)
-        // A completed suite is reused unless a known change made its measurement inapplicable.
-        val changed = presentation.value.applicability == MeasurementApplicability.Changed
-        if (changed || diagnosticRetryAllowed(coordinator.view.value.core)) coordinator.request(request(automatic = false))
+        coordinator.request(request(automatic = false))
     }
 
     /**

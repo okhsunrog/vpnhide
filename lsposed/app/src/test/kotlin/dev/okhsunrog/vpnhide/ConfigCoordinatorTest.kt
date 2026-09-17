@@ -221,7 +221,9 @@ class ConfigCoordinatorTest {
             io.recoveries.receive().complete(
                 ConfigPhaseEvidence(PhaseOutcome.Confirmed, RootCanonicalRead.Available(requireNotNull(io.config)), warning),
             )
-            coordinator.view.first { it.mode == ConfigCoordinatorMode.Open }
+            // Admission reopens before the recovered result is published. Await the
+            // result as well; observing Open alone races the capacity evidence.
+            coordinator.view.first { it.mode == ConfigCoordinatorMode.Open && it.lastResult?.failure == null }
             assertEquals(warning, coordinator.view.value.lastNativeCapacity)
             assertEquals(
                 null,

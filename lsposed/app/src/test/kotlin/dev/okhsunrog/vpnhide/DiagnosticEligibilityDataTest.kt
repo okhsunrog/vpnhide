@@ -3,8 +3,10 @@ package dev.okhsunrog.vpnhide
 import dev.okhsunrog.vpnhide.diagnostics.ConfigReadiness
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.RestartRequirement
+import dev.okhsunrog.vpnhide.diagnostics.RoutingKnowledge
 import dev.okhsunrog.vpnhide.diagnostics.SelfRouting
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticEligibility
+import dev.okhsunrog.vpnhide.diagnostics.routingKnowledge
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -61,6 +63,70 @@ class DiagnosticEligibilityDataTest {
         assertEquals(
             DiagnosticEligibility.ApplicationFailed,
             diagnosticEligibility(true, RestartRequirement.None, ConfigReadiness.Failed, unknown),
+        )
+    }
+
+    /**
+     * The knowledge model must not move any state to a different verdict: it only
+     * keeps what eligibility throws away. Verifying ⇔ Checking, Unknown ⇔ Unknown,
+     * Known ⇔ the fact's own verdict, for every reachable routing state.
+     */
+    @Test
+    fun `routing knowledge and eligibility agree on every routing state`() {
+        routingStates().forEach { (name, state) ->
+            val knowledge = routingKnowledge(state, now = 100)
+            assertEquals(name, eligibility(state), knowledge.asEligibility())
+        }
+    }
+
+    private fun RoutingKnowledge.asEligibility(): DiagnosticEligibility =
+        when (this) {
+            is RoutingKnowledge.Verifying -> {
+                DiagnosticEligibility.Checking
+            }
+
+            is RoutingKnowledge.Unknown -> {
+                DiagnosticEligibility.Unknown
+            }
+
+            is RoutingKnowledge.Known -> {
+                when (routing) {
+                    SelfRouting.VpnOff -> DiagnosticEligibility.VpnOff
+                    SelfRouting.Excluded -> DiagnosticEligibility.SelfExcluded
+                    SelfRouting.Routed -> DiagnosticEligibility.Eligible
+                }
+            }
+        }
+
+    /** Every reachable routing state, named, built through the reducer so the table cannot drift from it. */
+    private fun routingStates(): List<Pair<String, ObservationState<SelfRouting>>> {
+        val initial = ObservationState<SelfRouting>()
+        val loading = reduceObservation(initial, ObservationEvent.Ensure(1)).state
+        val routed = reduceObservation(loading, ObservationEvent.Loaded(1, SelfRouting.Routed, 2)).state
+        val off = routed.copy(lastGood = routed.lastGood?.copy(value = SelfRouting.VpnOff))
+        val excluded = routed.copy(lastGood = routed.lastGood?.copy(value = SelfRouting.Excluded))
+        val stale = reduceObservation(routed, ObservationEvent.Invalidate(3, start = false)).state
+        val rereading = reduceObservation(stale, ObservationEvent.Ensure(4)).state
+        val refreshing = reduceObservation(routed, ObservationEvent.Refresh(5, reason = ReadReason.Explicit)).state
+        val failed = reduceObservation(refreshing, ObservationEvent.Failed(2, TransitionFailure.ReadFailed, 6)).state
+        val firstReadFailed = reduceObservation(loading, ObservationEvent.Failed(1, TransitionFailure.ReadFailed, 2)).state
+        val quarantined =
+            reduceObservation(
+                refreshing,
+                ObservationEvent.Failed(2, TransitionFailure.DeadlineExceeded, 6, quiescent = false),
+            ).state
+        return listOf(
+            "never read" to initial,
+            "first read in flight" to loading,
+            "routed" to routed,
+            "vpn off" to off,
+            "self excluded" to excluded,
+            "invalidated, re-read owed" to stale,
+            "invalidated, re-read in flight" to rereading,
+            "explicit refresh in flight" to refreshing,
+            "refresh failed with history" to failed,
+            "first read failed, no history" to firstReadFailed,
+            "probe resource quarantined" to quarantined,
         )
     }
 

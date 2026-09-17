@@ -5,6 +5,7 @@ import dev.okhsunrog.vpnhide.ContextStateCache
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.ObservationRequest
+import dev.okhsunrog.vpnhide.ReadReason
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.StateCache
 import dev.okhsunrog.vpnhide.debug.captureGateFrom
@@ -37,28 +38,15 @@ internal object RoutingGateCache : ContextStateCache<DiagnosticGate>(
 ) {
     val gate: StateFlow<DiagnosticGate?> get() = current
 
-    // Monotonic timestamp of the last actual (re)load — stamped in load() so it counts
-    // every refresh source (VpnTransportWatcher, manual re-check, config write). Used to
-    // throttle the belt-and-suspenders foreground-return re-probe below.
+    // Includes every gate load so foreground return coalesces with startup/manual reads.
     @Volatile private var lastLoadAtMs: Long = 0L
 
-    /**
-     * Re-probe the gate on a foreground return, but at most once per
-     * [RESUME_REFRESH_THROTTLE_MS] — a cheap safety net for aggressive-OEM freezers
-     * that may delay or drop the background [VpnTransportWatcher] callback. Because
-     * the throttle keys off [load]'s stamp (every refresh source), a resume right
-     * after the watcher already refreshed is a no-op. Safe to call on every ON_RESUME.
-     *
-     * Deliberately reuses the application-only [inputs] (set by
-     * the UI/startup [ensureLoaded]) rather than taking them from the caller: a
-     * lifecycle observer captures its composable's vars once and would otherwise pass a
-     * stale (e.g. still-null → false) `selfNeedsRestart`, clobbering the real one. No-op
-     * until the cache has been initialized at least once.
-     */
+    /** Reuses retained application inputs; no-op before startup initializes the gate. */
     fun refreshIfStale(throttleMs: Long = RESUME_REFRESH_THROTTLE_MS) {
         if (!ready) return
         if (SystemClock.elapsedRealtime() - lastLoadAtMs < throttleMs) return
-        forceRefresh()
+        // A safety net, not evidence that anything changed: never worded as a user-requested re-check.
+        forceRefresh(ReadReason.Background)
     }
 
     // Always on IO: captureGateFrom runs the blocking `su` self-routing probe, so a

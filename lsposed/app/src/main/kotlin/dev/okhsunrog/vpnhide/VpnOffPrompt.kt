@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,7 +29,8 @@ import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 internal fun VpnOffPrompt(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
-) = RetryPromptCard(R.string.vpn_off_prompt, onRetry, modifier)
+    enabled: Boolean = true,
+) = RetryPromptCard(R.string.vpn_off_prompt, onRetry, modifier, enabled = enabled)
 
 /**
  * Banner + retry button for the "a VPN is up, but VPN Hide itself is not routed
@@ -40,6 +43,7 @@ internal fun SelfNotRoutedPrompt(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenAccelerators: (() -> Unit)? = null,
+    enabled: Boolean = true,
 ) {
     // Show the accelerator link exactly where the guide actually offers that
     // article — every locale that resolves to the en/zh guide (i.e. not ru), which
@@ -51,6 +55,7 @@ internal fun SelfNotRoutedPrompt(
         messageRes = R.string.self_not_routed_prompt,
         onRetry = onRetry,
         modifier = modifier,
+        enabled = enabled,
         secondaryLabelRes = R.string.self_not_routed_accelerators.takeIf { accelerators != null },
         onSecondary = accelerators,
     )
@@ -75,11 +80,17 @@ internal fun DiagnosticsRetryPrompt(
     modifier: Modifier = Modifier,
 ) = RetryPromptCard(messageRes, onRetry, modifier)
 
+/**
+ * [enabled] is false while the state behind the prompt is being re-read: the
+ * condition still stands, so the text stays, but the button says the work the
+ * user would ask for is already running.
+ */
 @Composable
 private fun RetryPromptCard(
     messageRes: Int,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     secondaryLabelRes: Int? = null,
     onSecondary: (() -> Unit)? = null,
 ) {
@@ -100,11 +111,20 @@ private fun RetryPromptCard(
             EnhancedButton(
                 onClick = onRetry,
                 modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
             ) {
-                Text(stringResource(R.string.vpn_off_retry))
+                if (enabled) {
+                    Text(stringResource(R.string.vpn_off_retry))
+                } else {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (secondaryLabelRes != null && onSecondary != null) {
-                TextButton(onClick = onSecondary, modifier = Modifier.fillMaxWidth()) {
+                TextButton(onClick = onSecondary, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(secondaryLabelRes))
                 }
             }

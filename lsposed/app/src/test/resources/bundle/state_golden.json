@@ -48,7 +48,12 @@
             "conclusion": "NoObservedLeak"
         },
         "currentSuccess": false,
-        "probeUnavailable": true
+        "probeUnavailable": true,
+        "lastKnownRouting": "VpnOff",
+        "routingRead": {
+            "reason": "Transition",
+            "pendingMs": 820
+        }
     },
     "nativeVerdict": "Ok",
     "javaVerdict": "Ok",

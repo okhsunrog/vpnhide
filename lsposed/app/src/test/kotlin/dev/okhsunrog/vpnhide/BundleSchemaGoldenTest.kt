@@ -28,7 +28,9 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSummaryInfo
 import dev.okhsunrog.vpnhide.diagnostics.EvidenceConclusion
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementApplicability
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementEvidence
+import dev.okhsunrog.vpnhide.diagnostics.RoutingReadInfo
 import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
+import dev.okhsunrog.vpnhide.diagnostics.SelfRouting
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -246,4 +248,6 @@ private fun sampleDiagnosticSummary(): DiagnosticSummaryInfo =
             ),
         currentSuccess = false,
         probeUnavailable = true,
+        lastKnownRouting = SelfRouting.VpnOff,
+        routingRead = RoutingReadInfo(ReadReason.Transition, pendingMs = 820),
     )

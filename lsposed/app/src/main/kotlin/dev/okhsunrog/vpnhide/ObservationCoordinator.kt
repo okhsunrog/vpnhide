@@ -13,13 +13,24 @@ internal class ObservationReadException(
     val reason: TransitionFailure,
 ) : RuntimeException(reason.name)
 
+/**
+ * The monotonic millisecond base every observation timestamp is expressed in:
+ * [ObservationRequest.startedAt], [StaleMark.since] and anything derived from
+ * them (how long a re-read has been owed). It is not a wall clock and must never
+ * be formatted as a date — `System.currentTimeMillis()` stays the base for a
+ * measurement's `observedAt` and the bundle's dates.
+ */
+internal object ObservationClock {
+    fun now(): Long = System.nanoTime() / 1_000_000
+}
+
 /** Process-owned reads. A waiter owns neither the worker nor its cancellation. */
 internal class ObservationCoordinator<T>(
     private val scope: CoroutineScope,
     private val load: suspend (ObservationRequest) -> T,
     private val ready: () -> Boolean = { true },
     private val timeoutMillis: Long = 60_000,
-    private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+    private val clock: () -> Long = ObservationClock::now,
     private val deadline: suspend () -> Unit = { delay(timeoutMillis) },
     private val changed: (ObservationState<T>, ObservationState<T>) -> Unit = { _, _ -> },
 ) {
@@ -35,24 +46,27 @@ internal class ObservationCoordinator<T>(
             if (ready()) dispatch(ObservationEvent.Ensure(clock()))
         }
 
-    fun invalidate(start: Boolean = true) =
-        synchronized(lock) {
-            dispatch(ObservationEvent.Invalidate(clock(), start = start && ready() && state.value.attempted))
-        }
+    fun invalidate(
+        start: Boolean = true,
+        reason: ReadReason = ReadReason.Background,
+    ) = synchronized(lock) {
+        dispatch(ObservationEvent.Invalidate(clock(), start = start && ready() && state.value.attempted, reason = reason))
+    }
 
-    fun refresh() =
+    fun refresh(reason: ReadReason = ReadReason.Explicit) =
         synchronized(lock) {
             if (state.value.quarantined) retryAfterDrain = true
-            if (ready()) dispatch(ObservationEvent.Refresh(clock()))
+            if (ready()) dispatch(ObservationEvent.Refresh(clock(), reason = reason))
         }
 
     /** Follows superseded requests to the requested generation; never returns lastGood as fresh. */
     suspend fun read(
         refresh: Boolean = false,
         notBefore: Long = Long.MIN_VALUE,
+        reason: ReadReason = ReadReason.Explicit,
     ): T {
         val waiter = CompletableDeferred<T>()
-        synchronized(lock) { admit(waiter, refresh, notBefore) }
+        synchronized(lock) { admit(waiter, refresh, notBefore, reason) }
         return try {
             withTimeoutOrNull(timeoutMillis * 2) { waiter.await() }
                 ?: throw ObservationReadException(TransitionFailure.DeadlineExceeded)
@@ -65,6 +79,7 @@ internal class ObservationCoordinator<T>(
         waiter: CompletableDeferred<T>,
         refresh: Boolean,
         notBefore: Long,
+        reason: ReadReason,
     ) {
         if (!ready()) {
             waiter.completeExceptionally(ObservationReadException(TransitionFailure.InitializationPending))
@@ -75,7 +90,7 @@ internal class ObservationCoordinator<T>(
             waiter.completeExceptionally(ObservationReadException(TransitionFailure.ResourceUnavailable))
             return
         }
-        if (refresh) dispatch(ObservationEvent.Refresh(clock(), notBefore)) else dispatch(ObservationEvent.Ensure(clock()))
+        if (refresh) dispatch(ObservationEvent.Refresh(clock(), notBefore, reason)) else dispatch(ObservationEvent.Ensure(clock()))
         if (state.value.active == null) {
             complete(waiter)
         } else {

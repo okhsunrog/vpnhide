@@ -185,6 +185,33 @@ class ObservationCoordinatorTest {
             assertEquals(TransitionFailure.DeadlineExceeded, owner.state.value.error)
         }
 
+    @Test
+    fun `read reasons reach the request and a background cause never outranks the user`() =
+        observationTest {
+            val first = async(start = CoroutineStart.UNDISPATCHED) { owner.read() }
+            reads.receive().result.complete("old")
+            first.await()
+            owner.invalidate(start = false, reason = ReadReason.Transition)
+            owner.invalidate(start = false)
+            assertEquals(
+                ReadReason.Transition,
+                owner.state.value.stale
+                    ?.reason,
+            )
+            assertNull(reads.tryReceive().getOrNull())
+            val explicit = async(start = CoroutineStart.UNDISPATCHED) { owner.read(refresh = true) }
+            val read = reads.receive()
+            assertEquals(ReadReason.Explicit, read.request.reason)
+            assertEquals(
+                ReadReason.Explicit,
+                owner.state.value.stale
+                    ?.reason,
+            )
+            read.result.complete("new")
+            assertEquals("new", explicit.await())
+            assertNull(owner.state.value.stale)
+        }
+
     private fun observationTest(
         initiallyReady: Boolean = true,
         block: suspend Fixture.() -> Unit,
