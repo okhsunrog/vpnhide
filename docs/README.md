@@ -60,3 +60,4 @@ a release commitment — lives in **[`notes/`](notes/)**:
 - [notes/builtin-app-integration-audit.md](notes/builtin-app-integration-audit.md) — audit of how the app integrates the built-in kernel backend (picker, statistics, diagnostics, capture, reset)
 - [notes/ui-state-presentation-review.md](notes/ui-state-presentation-review.md) — design review that led to the Situation classifier; decisions recorded, two since superseded
 - [notes/vpn-poll-device-validation.md](notes/vpn-poll-device-validation.md) — device acceptance evidence for the foreground app-VPN poller and the network callback lifecycle
+- [notes/release-candidates.md](notes/release-candidates.md) — TODO: `vX.Y.Z-rc.N` pre-release tags; what already works, what blocks it (versionCode scheme, `release.py` rotation, CI notes extraction)
