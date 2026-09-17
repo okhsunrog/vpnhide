@@ -1,0 +1,19 @@
+# THROWAWAY SPIKE (core-2.0 §12 step 1b). Not shipped. Proves, under enforcing
+# SELinux on the device, that an app-domain client can be granted connect to a
+# root daemon's UDS *path* socket and is denied by default — and reads the peer's
+# SO_PEERCRED (the §9 defense-in-depth). Delete once Spike B is answered.
+[package]
+name = "vpnhide_uds_spike"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Throwaway core-2.0 spike: UDS socket connect under enforcing SELinux."
+
+[[bin]]
+name = "uds-probe"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
