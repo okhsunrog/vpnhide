@@ -131,7 +131,8 @@ An ordinary Ensure does not retry a failed attempt in the same generation.
 Every re-read states why it happens. `ReadReason` is `Background` (our own process
 invalidated the observation — a root dependency after a config phase or the startup
 reconcile, or the foreground-return safety net), `Transition` (an external signal that
-the observed fact may have changed: the VPN transport / default-network callback) or
+the observed fact may have changed: the foreground app-VPN poller found a changed
+or recoverable fact) or
 `Explicit` (the user asked: Retry, refresh, pull-to-refresh, a manual re-check). An
 observation that is owed a re-read carries a `StaleMark(reason, since)`: set by an
 invalidation and by a refresh that requests a newer generation, kept while that re-read
