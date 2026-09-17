@@ -15,6 +15,7 @@ import dev.okhsunrog.vpnhide.UpdateCheckCache
 import dev.okhsunrog.vpnhide.cleanupStaleZygiskStatus
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
+import dev.okhsunrog.vpnhide.diagnostics.retryDiagnosticsAndDashboard
 import dev.okhsunrog.vpnhide.ensureSelfInTargets
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.picker.AppAutoHideSignal
@@ -217,11 +218,12 @@ internal class StartupCoordinator(
         UpdateCheckCache.ensureFresh(scope, appVersionName)
     }
 
+    /** Pull-to-refresh on the Dashboard: the one explicit re-check, plus the update check. */
     fun refreshDashboard(
         scope: CoroutineScope,
         selfNeedsRestart: Boolean,
     ) {
-        DashboardCache.refresh(appContext, selfNeedsRestart)
+        retryDiagnosticsAndDashboard(appContext, selfNeedsRestart)
         UpdateCheckCache.refresh(scope, appVersionName)
     }
 

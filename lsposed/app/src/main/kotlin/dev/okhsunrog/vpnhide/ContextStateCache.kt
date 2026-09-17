@@ -7,7 +7,11 @@ internal data class ContextObservationInputs(
     val selfNeedsRestart: Boolean,
 )
 
-/** Snapshot application-only inputs before a load; changed readiness invalidates older work. */
+/**
+ * Snapshot application-only inputs before a load; changed readiness invalidates
+ * older work. A refresh re-reads this cache's own source and nothing else: no
+ * cache starts work in another domain as a side effect of being refreshed.
+ */
 internal abstract class ContextStateCache<T>(
     traceName: String,
     logTag: String,
@@ -31,10 +35,8 @@ internal abstract class ContextStateCache<T>(
         context: Context,
         selfNeedsRestart: Boolean,
         reason: ReadReason = ReadReason.Explicit,
-        runBeforeRefresh: Boolean = true,
     ) {
         updateInputs(context, selfNeedsRestart)
-        if (runBeforeRefresh) beforeRefresh(requireNotNull(inputs))
         forceRefresh(reason)
     }
 
@@ -44,13 +46,9 @@ internal abstract class ContextStateCache<T>(
      * startup or a screen has seeded the inputs at least once.
      */
     fun refreshRetained(reason: ReadReason) {
-        val current = inputs ?: return
-        beforeRefresh(current)
+        if (inputs == null) return
         forceRefresh(reason)
     }
-
-    /** Explicit refresh only; dependency invalidation must not trigger other effect owners. */
-    protected open fun beforeRefresh(inputs: ContextObservationInputs) = Unit
 
     private fun updateInputs(
         context: Context,

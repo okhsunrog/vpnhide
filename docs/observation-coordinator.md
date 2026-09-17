@@ -73,12 +73,16 @@ and none of them can be lost to a missing baseline. A poll that reveals no new k
 reruns nothing; the negative confirmation in `RoutingGateCache` still suppresses
 the brief false exclusion seen during tunnel setup.
 
-The Dashboard tiles are folded from the presentation when Dashboard derives, while
-the hero renders the live Situation; `DashboardCache` therefore follows the suite
-and re-derives in place (no root re-read, no run request) when a terminal attempt
-is newer than the one its tiles came from. Until that derivation lands, the hero
-withholds tiles derived from an older attempt and ranks the fresh measurement by
-its own evidence, so a new green result is never yellowed by the previous tiles.
+The Dashboard's screen state is a projection, not a cache. `DashboardCache` caches
+only `DashboardRootFacts`, the half that costs root shells and changes with the
+root snapshot (modules, LSPosed, targets, environment, installed optional hooks);
+`DashboardCache.state` combines those facts with the live presentation and
+assembles the protection tiles, the banners and the screen state on every change
+of either (`assembleDashboardState`, pure apart from wording). The tiles and the
+hero therefore always describe the same instant: nothing follows the suite, nothing
+compares attempt ids, and a fresh measurement can never sit beside the previous
+tiles. The state stays null until the root facts exist and the suite has a first
+terminal attempt, so the Dashboard appears with its first verdict, as before.
 
 There is no ConnectivityManager listener for VPN-state auto-refresh. The app's own
 Java backend intentionally hides VPN lifecycle changes when its visible network
@@ -87,16 +91,18 @@ registrations remain: they measure hiding rather than drive readiness refresh.
 Device validation on 2026-09-17 is recorded in
 [the polling/callback report](notes/vpn-poll-device-validation.md).
 
-Dashboard derivation initializes/joins diagnostics when needed, then observes its
-terminal result, including a blocked or failed attempt, without retrying it; what
-it renders is the shared diagnostic presentation once it reflects that attempt
-(`DiagnosticsCache.awaitTerminal`), the same projection the screens collect.
-Dashboard and Diagnostics Retry use one coordinator entry point: it requests a
-fresh app-VPN observation, queues one explicit diagnostic run, then re-derives
-Dashboard without its normal `beforeRefresh` hook requesting that run again. An
-explicit retry never joins an already-running automatic suite; it waits as the
-single pending successor, so the user's click cannot disappear. The startup
-intent (`DiagnosticsCache.run`: the first suite of the process, a join or a read
+The bridge's one-shot state read still joins or reads the terminal attempt
+(`DiagnosticsCache.awaitTerminal`) and assembles the same Dashboard state from it
+(`loadDashboardState`), so its tiles and the screen's cannot diverge. Refreshing a
+cache re-reads that cache's own source and nothing else: `ContextStateCache` has
+no hook that starts work in another domain, and `DashboardCache.refresh` never
+requests a diagnostic run. The explicit run has one entry point,
+`retryDiagnosticsAndDashboard` (Retry on both screens, pull-to-refresh, the
+post-reset re-check): it refreshes the app-VPN observation, queues one explicit
+diagnostic run and re-reads the Dashboard's root facts. An explicit retry never
+joins an already-running automatic suite; it waits as the single pending
+successor, so the user's click cannot disappear. The startup intent
+(`DiagnosticsCache.run`: the first suite of the process, a join or a read
 afterwards), the owed confirmation above and the explicit retry are the only
 ways a suite starts. Admission never refuses an automatic request at rest;
 whether one is owed is decided from the presentation.
