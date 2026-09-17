@@ -133,41 +133,58 @@ implementation from su-shell orchestration to socket RPC; the app keeps `view` a
 its replica, keeps drafts and app-context checks local. "Simplify Kotlin" means
 delete the su orchestration and section-grepping, not rewrite the coordination.
 
-## 4. Configuration storage: canonical versus published projections
+## 4. Configuration storage and activation ownership
 
-Canonical config lives in **core's own durable store**, in core's own format (free
-to carry operation metadata, provenance and epoch, and free to evolve). What the
-system exposes on the filesystem is not the canonical — it is a **published,
-atomically-rewritten (write-temp + rename) read replica**, in the exact frozen
-format its readers already parse.
+Three distinct kinds of state, often conflated into "the config file", pull apart:
 
-There is not one such file but a **family of projections**, each in its reader's
-format: the LSPosed package/appId set, the kernel wire config (docs/protocol.md v2),
-the Ports UID policy. This folds the activator's "derive runtime channels from the
-canonical" role into core as a publish step.
+**1. The config file is the durable canonical config.** `/data/system/vpnhide_config.json`
+is where the canonical config lives on disk: core is its **sole writer** and **reads it
+back on restart** (recovering the config after a reboot). It is at the same time the
+source **LSPosed reads directly** — an RPC-less reader, because its hooks run in
+system_server and must never block on a call to core (§3). So the file is both core's
+config store and LSPosed's read source: **input and output for core**, not a write-only
+projection. It is written atomically (write-temp + rename, so readers get whole-old or
+whole-new) and its schema is the frozen shape LSPosed already parses. DAC makes it
+**output-only for everyone but core** (`root:root`, `0640`, others read) — which is what
+makes the single-writer/dual-writer guarantee in §11 enforceable rather than conventional.
+
+There is no *separate* private store for the config: the config the app edits is exactly
+what the readers consume, so a second copy would be pointless. "Adopt the legacy file on
+first start" is therefore just the ordinary restart read, not a special one-shot.
+
+**2. Backend activation is core's job, done in-process — core replaces every activator.**
+Core does not publish a file "for the activator to read"; there is no separate activator.
+Holding the canonical, core derives the per-backend kernel wire (docs/protocol.md v2, a
+frozen boundary) and the Ports UID policy and **applies them directly** to the one active
+backend — writing the kernel control channel, setting iptables — on a config change and at
+boot. These are **apply-actions, not published files**: nothing here is ever read back
+(the "never read a projection as truth" rule applies here, trivially, and *not* to the
+config file, which is the canonical). The activator's projection logic (`crates/activator`
+— `project_native`, `project_ports`, `PackageUidMap`) moves **into** core; the separate
+activator binaries and su activation paths retire. This is "backend selection and
+activation, owned by core" (§1), and it lines up with core driving the single active
+backend (the natives are mutually exclusive).
+
+**3. Operation / recovery / epoch metadata is core's private durable store.** Operation
+phases, recovery evidence and the publication epoch are **not** config and do not belong in
+the LSPosed-facing file (§3: operation metadata is separate). This is the state that lives
+in core's own format, is free to evolve, and is also read back on restart. The "free to
+evolve internal format" benefit is here — not in the config file, whose schema is pinned by
+its readers.
 
 Consequences, several of which the current code makes mandatory:
 
-- Persist the canonical durably **before** publishing any projection as confirmed.
-- A projection is **output-only**, enforced by DAC (`root:root`, `0640`, LSPosed /
-  system read, nobody else writes) rather than by convention. This is also what
-  makes the dual-writer guarantee in §11 enforceable rather than aspirational.
-- On restart, core rebuilds projections **from its own canonical**, and never reads
-  a projection back as truth — the sole exception is the one-shot adopt step during
-  migration that seeds the canonical from the legacy file.
-- `rename()` gives readers whole-old-or-whole-new, so torn reads are solved; reader
-  **staleness** (when LSPosed re-reads) is a separate question and must be answered
-  (inotify, or a cheap re-read on the relevant callback — never a synchronous RPC to
-  core from a hook, §6).
-- Current cleanup this forces: canonical stops being a section grepped out of the
-  root su-snapshot (`canonical_config` in `RootSnapshotCache`) and becomes a typed
-  field of core's published state.
+- Persist the config durably **before** publishing it as confirmed.
+- `rename()` solves torn reads; reader **staleness** (when LSPosed re-reads a changed file)
+  is a separate question and must be answered (inotify, or a cheap re-read on the relevant
+  callback — never a synchronous RPC to core from a hook, §6).
+- Current cleanup this forces: the app stops grepping the config out of the root su-snapshot
+  (`canonical_config` in `RootSnapshotCache`) and reads it as a typed field of core's
+  published state instead (`StateSnapshot.config`).
 
-LSPosed retaining direct read access to a compatible published projection is fine
-and required (a hook must never block on core). Inventory every remaining boot
-script, CLI, agent-control action and manual activation path before claiming
-exclusive ownership. Malformed or unavailable canonical data must never silently
-become default config.
+Inventory every remaining boot script, CLI, agent-control action and manual activation path
+before claiming exclusive ownership. Malformed or unavailable config must never silently
+become a default config.
 
 ## 5. Configuration commands and operation lifetime
 
@@ -428,8 +445,8 @@ half-migrated device where two things believe they own activation — for a stea
 tool that is a silent leak. So the moment core is present, every other writer must
 **fail closed immediately** (core holds an epoch/lock marker; legacy paths check it
 and no-op with a log), not merely be deleted at the last step of §12. This is now
-enforceable rather than conventional, because the published config is an output-only
-projection under DAC (§4). Per boundary the cutover order is: install core → core
+enforceable rather than conventional, because the config file is DAC output-only for
+everyone but core (§4). Per boundary the cutover order is: install core → core
 adopts existing state → legacy writer disabled — all before core's first write. Old
 Ports uninstall must not erase rules core now owns; the built-in bridge similarly
 disappears only after core owns its boot tasks. Existing KPM/kernel/Zygisk consumers
@@ -483,8 +500,9 @@ for recovery without reintroducing independent ordinary writers.
 4. Transfer durable config operations and recovery, porting the config-operation
    reducer to Rust (§7) with the existing `ConfigCoordinator` behavioral tests as the
    language-neutral vector.
-5. Move Ports and activation adapters under core; migrate installed module state;
-   switch the config file to a published projection (§4).
+5. Absorb every activator into core — derive the kernel wire and Ports policy in-process
+   and apply them directly (§4); make core the sole writer of the config file and its
+   reader on restart; migrate installed module state.
 6. Integrate app-context diagnostics and capture with core session provenance; the
    app-side generic reducer may remain Kotlin.
 7. Remove obsolete activators, bridge/Ports packages, writers, caches and su
