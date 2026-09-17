@@ -65,7 +65,7 @@ old device-validation paragraphs predate the successful installs described below
   readiness so a refresh cannot repeatedly retrigger failed diagnostics.
 - Navigation restoration: `a43cc3f0`, using `rememberSaveable` for tabs, overlays,
   nested settings, search and filters. Editor drafts have separate ViewModel owners.
-- Diagnostic execution runtime (transition contract §18): `DiagnosticsCache` is a
+- Diagnostic execution runtime (transition contract history §18): `DiagnosticsCache` is a
   facade over the process-owned `DiagnosticRunCoordinator` executing
   `reduceDiagnosticRun` with identified effects (`AppDiagnosticRunIo`). Runs are
   identified immutable attempts that survive screen changes; retry is a new run;
@@ -81,7 +81,7 @@ old device-validation paragraphs predate the successful installs described below
 
 ## Remaining implementation and next bounded step
 
-1. **Operation impacts on diagnostics: done** (transition contract §19). The
+1. **Operation impacts on diagnostics: done** (transition contract history §19). The
    config coordinator publishes operation acceptance, mutating dispatches and
    results to `DiagnosticImpactObserver`; `reduceDiagnosticImpact` classifies
    relevance from the declared write set (own roles/hooks, global optional
@@ -94,7 +94,7 @@ old device-validation paragraphs predate the successful installs described below
    (`measurementApplicability`) and evidence sufficiency in a shared presentation
    projection instead of the legacy `State` (interrupted and operation-blocked
    attempts currently render as `Failed`). Preserve the feedback-cycle fixes above.
-2. **Shared presentation: done** (transition contract §21):
+2. **Shared presentation: done** (transition contract history §21):
    `DiagnosticsCache.presentation` combines the run view, routing observation,
    root snapshot, confirmed config and operation impact into one
    `DiagnosticPresentation` (eligibility, active run, latest attempt, latest
@@ -140,7 +140,7 @@ old device-validation paragraphs predate the successful installs described below
    but screens still publish independently and retain last-good values. An atomic
    presentation revision including diagnostic measurement applicability is not
    implemented. Do not describe the cache stage as full cross-screen consistency.
-3. **Capture through the run coordinator: done** (transition contract §20). The
+3. **Capture through the run coordinator: done** (transition contract history §20). The
    debug export no longer runs its own `runAllChecks`. `DiagnosticsCache.captureRun`
    requests an explicit run carrying a unique `captureId`, which is part of the
    request identity, so a capture never joins a suite whose probes began before its
@@ -244,7 +244,7 @@ old device-validation paragraphs predate the successful installs described below
    cleared by the next relevant success, unlike `unresolved`; defensible (the
    later write is the current truth) and tested. (5) docs/diagnostics.md still
    said §19/§21 were not implemented; fixed.
-5. **Transitional code retired** (transition contract §21, last paragraph). The
+5. **Transitional code retired** (transition contract history §21, last paragraph). The
    legacy `DiagnosticsCache.State` projection and its `projectDiagnosticAttempt`
    / `projectDiagnosticState` are gone. `awaitTerminal` keeps its join semantics
    (the active run, the latest finished attempt, or the automatic suite) but
@@ -275,7 +275,7 @@ old device-validation paragraphs predate the successful installs described below
    attempt was worded as a failed one. Fixed: `DiagnosticAttempt.blocked` carries
    no notice on the hero or beside the Diagnostics history, and a re-check in
    flight only names the confirmation. Superseded the same day by the Situation
-   layer (transition contract §22, design review in
+   layer (transition contract history §22, design review in
    [ui-state-presentation-review.md](ui-state-presentation-review.md)): the hero
    and the Diagnostics banner now render one classification, so this item is
    closed.

@@ -50,7 +50,8 @@ a release commitment — lives in **[`notes/`](notes/)**:
 
 - [notes/ROADMAP.md](notes/ROADMAP.md) — larger product directions
 - [notes/setup-wizard-design.md](notes/setup-wizard-design.md) — design proposal for the first-run setup wizard (not yet implemented)
-- [notes/app-state-transitions.md](notes/app-state-transitions.md) — the app state transition contract: machines, scenario traces and the implemented stages; partly still a plan
+- [notes/app-state-transitions.md](notes/app-state-transitions.md) — the app state transition contract as implemented: machines, invariants, scenario traces, the recorded deviations and the known gaps
+- [notes/app-state-transitions-history.md](notes/app-state-transitions-history.md) — the stage-by-stage implementation log of that contract (§13–§22) with each stage's boundaries and validation
 - [notes/state-refactor-handoff.md](notes/state-refactor-handoff.md) — working notes for the state refactor: status, decisions, cold-start measurements, next steps
 - [notes/diagnostics-state-analysis.md](notes/diagnostics-state-analysis.md) — historical analysis of what "diagnostics" meant before the refactor and why
 - [notes/app-state-design.md](notes/app-state-design.md) — the original state redesign proposal (superseded by the contract)

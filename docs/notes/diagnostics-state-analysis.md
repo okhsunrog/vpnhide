@@ -8,7 +8,8 @@ design direction. This analysis remains a record of the baseline behavior and
 questions that motivated it; its open questions are historical inputs to that
 contract, not competing runtime rules. The code it describes (the
 `DiagnosticsCache.State` projection, caller-scoped runs, `retry` aliasing `run`)
-has since been replaced; read the contract §18–§21 for what runs today.
+has since been replaced; read the contract §7–§8 for what runs today, and its
+[implementation history](app-state-transitions-history.md) for the stages.
 
 Baseline: `3818954e1615697427664a6bbcff6d9d6483f0c4`, inspected on 2026-09-15 in
 `../vpnhide_state`. Complements [diagnostics](../diagnostics.md),

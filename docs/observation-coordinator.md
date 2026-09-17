@@ -35,7 +35,7 @@ the screens render during that window is not the eligibility but the routing
 knowledge the presentation keeps (`RoutingKnowledge.Verifying` with the last
 known fact and the read's reason): a user-requested or network-triggered re-read
 shows a neutral "Checking…" at once, a background one keeps the last known state
-for a 2 s grace (transition contract §22).
+for a 2 s grace (transition contract §8).
 `AppVpnStatePoller` runs while the main UI is RESUMED, with a one-second delay
 between completed samples. Each sample is a silent root-helper request for the app-scoped
 VPN state: current framework VPN session and interfaces plus this app UID's policy
@@ -112,7 +112,7 @@ during refresh does not count as VPN returning. A terminal failure leaves the
 Dashboard loading placeholder and remains available for manual retry.
 
 Diagnostic runs are now owned by the process-lived `DiagnosticRunCoordinator`
-behind `DiagnosticsCache` (transition contract §18). Its eligibility read at
+behind `DiagnosticsCache` (transition contract §7). Its eligibility read at
 Checking and its end-context read at Verifying reuse a current app-VPN
 observation, join an in-flight read, and force the dedicated helper observation
 only when it is stale, failed or absent. The app-VPN observation's session,

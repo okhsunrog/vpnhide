@@ -53,7 +53,7 @@ internal interface ConfigOperationObserver {
     /**
      * The operation's spec with the prepared write set merged in. A mutation that
      * carries only a `transform` declares nothing at submission, so this is the
-     * first moment its real write set is known (§19).
+     * first moment its real write set is known (transition contract §7).
      */
     fun prepared(
         id: Long,
