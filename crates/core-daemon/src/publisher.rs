@@ -75,7 +75,10 @@ mod tests {
     use super::*;
 
     fn snap(available: bool) -> StateSnapshot {
-        StateSnapshot { config_available: available, ..StateSnapshot::default() }
+        StateSnapshot {
+            config: available.then(vpnhide_core_rpc::CanonicalConfig::default),
+            ..StateSnapshot::default()
+        }
     }
 
     #[tokio::test]
@@ -84,7 +87,7 @@ mod tests {
         pub_.publish(snap(true)); // revision 2
         let got = pub_.state_since(7, 1).await;
         assert_eq!(got.revision, 2);
-        assert!(got.snapshot.config_available);
+        assert!(got.snapshot.config.is_some());
     }
 
     #[tokio::test]

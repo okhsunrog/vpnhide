@@ -36,6 +36,14 @@
 
 use std::time::Duration;
 
+mod config;
+mod edit;
+
+pub use config::{
+    AppConfig, CanonicalConfig, NativeRole, PortPolicy, PortProtocol, PortRule, Settings,
+};
+pub use edit::{ConfigAppField, ConfigEdit, ConfigSetField, ConfigToggle};
+
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -94,13 +102,14 @@ pub struct Published {
 
 /// The read-only replica the app mirrors from the core.
 ///
-/// TODO(core-2.0 §3/§6): fill from the real read-replica — confirmed canonical config
-/// projection + root observations with provenance. Placeholder while the daemon and the
-/// shared domain types (ported from `ConfigCoordinatorView` / `ObservationState`) land.
+/// The read-only replica the app mirrors (§3): the confirmed canonical config, the
+/// operations in flight, and the root observation. `config` is `None` when the core holds
+/// no usable config (absent ≠ empty — a distinct state, §3). TODO(§3): join in the
+/// provenance-tagged app-context measurements when diagnostics move onto the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct StateSnapshot {
-    /// Whether the core currently holds a usable canonical config.
-    pub config_available: bool,
+    /// The confirmed canonical config, or `None` when the core has none.
+    pub config: Option<CanonicalConfig>,
     /// Ids of operations still in flight, so the app can show pending intent.
     pub operations_in_flight: Vec<OperationId>,
     /// What the root observation loop currently sees of real routing (§8).
@@ -125,18 +134,6 @@ pub struct BaseRef {
     pub revision: u64,
 }
 
-/// A typed field intent — never an authoritative replacement of a screen snapshot (§5).
-///
-/// TODO(core-2.0 §5): port the real edit vocabulary from `ConfigCoordinator`'s
-/// `CanonicalEdit` (toggles, target add/remove, import/reset). Placeholder shape.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum ConfigEdit {
-    /// A single boolean setting keyed by a stable field path.
-    Toggle { field: String, enabled: bool },
-    /// A whole import/reset — a broader write set (§5).
-    Replace { raw: String },
-}
-
 /// The core accepted a durable mutation. It now owns the operation independently of the
 /// caller's connection (§5): client death does not cancel it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -157,19 +154,31 @@ pub enum SubmitError {
     Rejected { reason: String },
 }
 
+/// The phases an operation runs, in the order the config coordinator dispatches them
+/// (mirrors `ConfigPhase`): persist the config, run coupled secret/cleanup commands, then
+/// activate the native backend and ports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ConfigPhase {
+    Persist,
+    Secret,
+    Cleanup,
+    Native,
+    Ports,
+}
+
 /// One phase of an operation as the core executed it.
-///
-/// TODO(core-2.0 §5): align with `ConfigPhase` (Persist / Native / Ports / Cleanup / …)
-/// and `PhaseOutcome`. Placeholder.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PhaseRecord {
-    pub name: String,
+    pub phase: ConfigPhase,
     pub outcome: PhaseOutcome,
 }
 
-/// Known success, known failure, or unknown — preserved as distinct (§3).
+/// A phase's outcome (mirrors `PhaseOutcome`): known success, known failure and unknown are
+/// preserved as distinct (§3), as are not-yet-attempted and still-running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PhaseOutcome {
+    NotAttempted,
+    Running,
     Confirmed,
     FailedKnown,
     Unknown,
@@ -228,6 +237,7 @@ mod tests {
     /// Every argument and return type of every `VpnhideCore` method, every variant.
     mod wire_coverage {
         use super::*;
+        use std::collections::{BTreeMap, BTreeSet};
 
         #[test]
         fn hello_arguments_and_result() {
@@ -241,30 +251,78 @@ mod tests {
             }
         }
 
+        /// A config that exercises every wire config type in one value.
+        fn sample_config() -> CanonicalConfig {
+            let app = AppConfig {
+                java: true,
+                java_hooks: Some(vec!["hookA".into()]),
+                native: NativeRole {
+                    enabled: true,
+                    kernel: Some(vec!["k1".into(), "k2".into()]),
+                    zygisk: None,
+                },
+                app_hiding: true,
+                ports: true,
+                port_policy: Some(PortPolicy {
+                    mode: "custom".into(),
+                    preset: Some("dev".into()),
+                    rules: vec![PortRule { protocol: PortProtocol::Tcp, start: 8080, end: 8090 }],
+                }),
+                hidden: false,
+            };
+            CanonicalConfig {
+                version: 1,
+                debug: true,
+                debug_switch: false,
+                apps: BTreeMap::from([("com.example".to_owned(), app), ("com.other".to_owned(), AppConfig::default())]),
+                settings: Settings {
+                    remember_superkey: true,
+                    optional_features: BTreeSet::from(["fs".to_owned()]),
+                    auto_hide_vpn_services: true,
+                    auto_hide_vpn_name: false,
+                    auto_hide_excluded_packages: BTreeSet::from(["com.bank".to_owned()]),
+                    auto_hidden_packages: BTreeSet::from(["com.x".to_owned()]),
+                },
+            }
+        }
+
         #[test]
         fn state_since_arguments_and_result() {
             assert_eq!(survives("epoch", &u64::MAX), u64::MAX);
-            let published = Published {
-                epoch: u64::MAX,
-                revision: 7,
-                snapshot: StateSnapshot {
-                    config_available: true,
-                    operations_in_flight: vec![OperationId(1), OperationId(u64::MAX)],
-                    routing: RoutingObservation {
-                        observed: true,
-                        vpn_interfaces: vec!["tun0".into(), "wg0".into()],
+            for config in [None, Some(sample_config())] {
+                let published = Published {
+                    epoch: u64::MAX,
+                    revision: 7,
+                    snapshot: StateSnapshot {
+                        config,
+                        operations_in_flight: vec![OperationId(1), OperationId(u64::MAX)],
+                        routing: RoutingObservation {
+                            observed: true,
+                            vpn_interfaces: vec!["tun0".into(), "wg0".into()],
+                        },
                     },
-                },
-            };
-            assert_eq!(survives("Published", &published), published);
+                };
+                assert_eq!(survives("Published", &published), published);
+            }
         }
 
         #[test]
         fn submit_edit_arguments_and_result() {
-            for edit in [
-                ConfigEdit::Toggle { field: "settings.debug".into(), enabled: true },
-                ConfigEdit::Replace { raw: "{}".into() },
-            ] {
+            let edits = [
+                ConfigEdit::Toggle { field: ConfigToggle::Debug, enabled: true },
+                ConfigEdit::SettingSet {
+                    field: ConfigSetField::AutoHideExcludedPackages,
+                    values: BTreeSet::from(["com.bank".to_owned()]),
+                },
+                ConfigEdit::App {
+                    pkg: "com.example".into(),
+                    field: ConfigAppField::Native,
+                    value: sample_config().apps["com.example"].clone(),
+                },
+                ConfigEdit::RemoveApp { pkg: "com.example".into() },
+                ConfigEdit::Replace { config: sample_config() },
+            ];
+            for edit in edits {
                 assert_eq!(survives("ConfigEdit", &edit), edit);
             }
             assert_eq!(survives("BaseRef", &BaseRef { revision: 3 }), BaseRef { revision: 3 });
@@ -285,12 +343,27 @@ mod tests {
         fn get_operation_result() {
             let none: Option<OperationRecord> = None;
             assert_eq!(survives("no record", &none), none);
+            let phases = [
+                ConfigPhase::Persist,
+                ConfigPhase::Secret,
+                ConfigPhase::Cleanup,
+                ConfigPhase::Native,
+                ConfigPhase::Ports,
+            ];
+            let outcomes = [
+                PhaseOutcome::NotAttempted,
+                PhaseOutcome::Running,
+                PhaseOutcome::Confirmed,
+                PhaseOutcome::FailedKnown,
+                PhaseOutcome::Unknown,
+            ];
             let record = Some(OperationRecord {
                 op: OperationId(9),
-                phases: vec![
-                    PhaseRecord { name: "Persist".into(), outcome: PhaseOutcome::Confirmed },
-                    PhaseRecord { name: "Native".into(), outcome: PhaseOutcome::Unknown },
-                ],
+                phases: phases
+                    .into_iter()
+                    .zip(outcomes)
+                    .map(|(phase, outcome)| PhaseRecord { phase, outcome })
+                    .collect(),
                 settled: Some(PhaseOutcome::FailedKnown),
             });
             assert_eq!(survives("OperationRecord", &record), record);

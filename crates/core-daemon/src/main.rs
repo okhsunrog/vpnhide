@@ -70,10 +70,11 @@ async fn dump(path: &str) {
     }
     match client.current().await {
         Ok(p) => println!(
-            "epoch={} revision={} config_available={} observed={} vpn=[{}]",
+            "epoch={} revision={} config_present={} apps={} observed={} vpn=[{}]",
             p.epoch,
             p.revision,
-            p.snapshot.config_available,
+            p.snapshot.config.is_some(),
+            p.snapshot.config.as_ref().map_or(0, |c| c.apps.len()),
             p.snapshot.routing.observed,
             p.snapshot.routing.vpn_interfaces.join(","),
         ),

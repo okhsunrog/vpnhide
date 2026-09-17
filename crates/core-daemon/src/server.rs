@@ -14,8 +14,9 @@ use tokio::net::UnixStream;
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use tokio_util::sync::CancellationToken;
 use vpnhide_core_rpc::{
-    Accepted, ClientHello, ConfigEdit, Handshake, OperationId, OperationRecord, PhaseOutcome,
-    PhaseRecord, Published, SubmitError, VpnhideCore, PROTOCOL_VERSION,
+    Accepted, CanonicalConfig, ClientHello, ConfigEdit, ConfigPhase, Handshake, OperationId,
+    OperationRecord, PhaseOutcome, PhaseRecord, Published, SubmitError, VpnhideCore,
+    PROTOCOL_VERSION,
 };
 
 use crate::publisher::Publisher;
@@ -46,31 +47,33 @@ impl CoreState {
     /// fresh state, run typed phases, and can conflict — TODO when the domain lands.
     fn submit_edit(&self, op: OperationId, edit: &ConfigEdit) -> Result<Accepted, SubmitError> {
         let mut ops = self.operations.lock().expect("operations mutex");
-        if let Some(existing) = ops.get(&op) {
+        if ops.contains_key(&op) {
             // Re-submitting the same id is a query/dedup; a different payload would be
             // IdReused. The placeholder cannot compare payloads yet, so it dedups.
-            let _ = existing;
             return Ok(Accepted { op });
         }
-        let name = match edit {
-            ConfigEdit::Toggle { .. } => "Persist",
-            ConfigEdit::Replace { .. } => "Replace",
-        };
         ops.insert(
             op,
             OperationRecord {
                 op,
                 phases: vec![PhaseRecord {
-                    name: name.to_owned(),
+                    phase: ConfigPhase::Persist,
                     outcome: PhaseOutcome::Confirmed,
                 }],
                 settled: Some(PhaseOutcome::Confirmed),
             },
         );
         drop(ops);
-        // Reflect that something changed so long polls wake.
+        // Placeholder application: a Replace sets the config; any other edit just marks it
+        // present so a long poll wakes. Real edit application (applyCanonicalEdit) lands when
+        // the config coordinator moves into core (§5).
         let mut snapshot = self.publisher.current().snapshot;
-        snapshot.config_available = true;
+        match edit {
+            ConfigEdit::Replace { config } => snapshot.config = Some(config.clone()),
+            _ => {
+                snapshot.config.get_or_insert_with(CanonicalConfig::default);
+            }
+        }
         self.publisher.publish(snapshot);
         Ok(Accepted { op })
     }
@@ -150,7 +153,7 @@ pub fn serve_connection(stream: UnixStream, state: Arc<CoreState>, cancel: Cance
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vpnhide_core_rpc::StateSnapshot;
+    use vpnhide_core_rpc::{ConfigToggle, StateSnapshot};
 
     fn server() -> CoreServer {
         CoreServer::new(CoreState::new(Publisher::new(1, StateSnapshot::default())))
@@ -173,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn a_submitted_edit_becomes_a_queryable_settled_operation() {
         let server = server();
-        let edit = ConfigEdit::Toggle { field: "settings.debug".to_owned(), enabled: true };
+        let edit = ConfigEdit::Toggle { field: ConfigToggle::Debug, enabled: true };
         let accepted = server
             .clone()
             .submit_edit(tarpc::context::current(), OperationId(3), vpnhide_core_rpc::BaseRef { revision: 1 }, edit)
