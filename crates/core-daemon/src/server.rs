@@ -14,72 +14,100 @@ use tokio::net::UnixStream;
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use tokio_util::sync::CancellationToken;
 use vpnhide_core_rpc::{
-    Accepted, CanonicalConfig, ClientHello, ConfigEdit, ConfigPhase, Handshake, OperationId,
-    OperationRecord, PhaseOutcome, PhaseRecord, Published, SubmitError, VpnhideCore,
+    Accepted, BaseRef, CanonicalConfig, ClientHello, ConfigEdit, ConfigPhase, Handshake,
+    OperationId, OperationRecord, PhaseOutcome, PhaseRecord, Published, SubmitError, VpnhideCore,
     PROTOCOL_VERSION,
 };
 
+use crate::config_edit::apply_canonical_edit;
 use crate::publisher::Publisher;
 
 /// This core build, reported in the handshake for diagnostics only.
 pub const CORE_BUILD: &str = env!("CARGO_PKG_VERSION");
 
-/// The core's owned state: the published-state store plus the durable operation records.
+/// The authoritative config core owns, its revision, and the durable operation records.
 ///
-/// The operation side is a placeholder (a real submit would prepare against fresh config,
-/// dispatch phases, and recover) — enough to exercise the wire and the ownership rule that
-/// an accepted operation outlives the submitting connection.
+/// This is core's in-memory canonical (§4 tier 1 — the durable file read/write lands in the
+/// next step). `config_revision` bumps only on a real config change and is what an edit
+/// conflict-checks against.
+struct ConfigStore {
+    config: Option<CanonicalConfig>,
+    config_revision: u64,
+    operations: HashMap<OperationId, OperationRecord>,
+}
+
+/// The core's owned state: the published-state store plus the authoritative config.
 pub struct CoreState {
     pub publisher: Publisher,
-    operations: Mutex<HashMap<OperationId, OperationRecord>>,
+    config: Mutex<ConfigStore>,
 }
 
 impl CoreState {
     pub fn new(publisher: Publisher) -> Arc<Self> {
         Arc::new(CoreState {
             publisher,
-            operations: Mutex::new(HashMap::new()),
+            config: Mutex::new(ConfigStore {
+                config: None,
+                config_revision: 0,
+                operations: HashMap::new(),
+            }),
         })
     }
 
-    /// Placeholder mutation: record the operation as a settled single-phase write and add a
-    /// revision so a watching client observes the change. Real edits (§5) prepare against
-    /// fresh state, run typed phases, and can conflict — TODO when the domain lands.
-    fn submit_edit(&self, op: OperationId, edit: &ConfigEdit) -> Result<Accepted, SubmitError> {
-        let mut ops = self.operations.lock().expect("operations mutex");
-        if ops.contains_key(&op) {
-            // Re-submitting the same id is a query/dedup; a different payload would be
-            // IdReused. The placeholder cannot compare payloads yet, so it dedups.
+    /// Apply one typed edit against fresh config (§5). Coarse optimistic concurrency: the
+    /// caller's `base` must match the current config revision, or the edit is a conflict.
+    /// Operation phases and durable persistence are the next steps; this records a settled
+    /// single-phase op and publishes the new config into the replica.
+    fn submit_edit(
+        &self,
+        op: OperationId,
+        base: BaseRef,
+        edit: &ConfigEdit,
+    ) -> Result<Accepted, SubmitError> {
+        let mut store = self.config.lock().expect("config mutex");
+        // Re-submitting the same id queries/dedups (a different payload would be IdReused —
+        // deferred until operations carry their payload).
+        if store.operations.contains_key(&op) {
             return Ok(Accepted { op });
         }
-        ops.insert(
+        // Coarse conflict: whole-config optimistic lock. Field-level merge of unrelated
+        // concurrent edits is a later refinement (the operation reducer, §5).
+        if base.revision != store.config_revision {
+            return Err(SubmitError::Conflict { field: "config".to_owned() });
+        }
+        // Apply against fresh config. With none yet, only a Replace can bootstrap one.
+        let current = match &store.config {
+            Some(config) => config.clone(),
+            None => match edit {
+                ConfigEdit::Replace { .. } => CanonicalConfig::default(),
+                _ => return Err(SubmitError::Unavailable),
+            },
+        };
+        let next = apply_canonical_edit(&current, edit);
+        store.operations.insert(
             op,
             OperationRecord {
                 op,
-                phases: vec![PhaseRecord {
-                    phase: ConfigPhase::Persist,
-                    outcome: PhaseOutcome::Confirmed,
-                }],
+                phases: vec![PhaseRecord { phase: ConfigPhase::Persist, outcome: PhaseOutcome::Confirmed }],
                 settled: Some(PhaseOutcome::Confirmed),
             },
         );
-        drop(ops);
-        // Placeholder application: a Replace sets the config; any other edit just marks it
-        // present so a long poll wakes. Real edit application (applyCanonicalEdit) lands when
-        // the config coordinator moves into core (§5).
-        let mut snapshot = self.publisher.current().snapshot;
-        match edit {
-            ConfigEdit::Replace { config } => snapshot.config = Some(config.clone()),
-            _ => {
-                snapshot.config.get_or_insert_with(CanonicalConfig::default);
-            }
+        // A no-op edit is still accepted, but must not bump the revision or wake watchers.
+        if store.config.as_ref() != Some(&next) {
+            store.config = Some(next.clone());
+            store.config_revision += 1;
+            let revision = store.config_revision;
+            drop(store);
+            self.publisher.update(|snapshot| {
+                snapshot.config = Some(next);
+                snapshot.config_revision = revision;
+            });
         }
-        self.publisher.publish(snapshot);
         Ok(Accepted { op })
     }
 
     fn get_operation(&self, op: OperationId) -> Option<OperationRecord> {
-        self.operations.lock().expect("operations mutex").get(&op).cloned()
+        self.config.lock().expect("config mutex").operations.get(&op).cloned()
     }
 }
 
@@ -116,11 +144,10 @@ impl VpnhideCore for CoreServer {
         self,
         _ctx: Context,
         op: OperationId,
-        _base: vpnhide_core_rpc::BaseRef,
+        base: BaseRef,
         edit: ConfigEdit,
     ) -> Result<Accepted, SubmitError> {
-        // TODO(§5): check `_base` against the fresh revision for a conflict.
-        self.state.submit_edit(op, &edit)
+        self.state.submit_edit(op, base, &edit)
     }
 
     async fn get_operation(self, _ctx: Context, op: OperationId) -> Option<OperationRecord> {
@@ -174,20 +201,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_submitted_edit_becomes_a_queryable_settled_operation() {
+    async fn submit_bootstraps_applies_conflicts_and_reports_unavailable() {
         let server = server();
-        let edit = ConfigEdit::Toggle { field: ConfigToggle::Debug, enabled: true };
-        let accepted = server
-            .clone()
-            .submit_edit(tarpc::context::current(), OperationId(3), vpnhide_core_rpc::BaseRef { revision: 1 }, edit)
-            .await
-            .expect("accepted");
-        assert_eq!(accepted.op, OperationId(3));
+        let ctx = tarpc::context::current;
+        let toggle = |f| ConfigEdit::Toggle { field: f, enabled: true };
 
-        let record = server
-            .get_operation(tarpc::context::current(), OperationId(3))
-            .await
-            .expect("record exists");
+        // No config yet: a non-Replace edit is Unavailable.
+        let unavailable = server
+            .clone()
+            .submit_edit(ctx(), OperationId(1), BaseRef { revision: 0 }, toggle(ConfigToggle::Debug))
+            .await;
+        assert!(matches!(unavailable, Err(SubmitError::Unavailable)));
+
+        // Replace bootstraps the config against revision 0, and is a queryable settled op.
+        let bootstrap = ConfigEdit::Replace { config: CanonicalConfig::default() };
+        assert_eq!(
+            server.clone().submit_edit(ctx(), OperationId(2), BaseRef { revision: 0 }, bootstrap).await.expect("accepted").op,
+            OperationId(2),
+        );
+        let record = server.clone().get_operation(ctx(), OperationId(2)).await.expect("record");
         assert_eq!(record.settled, Some(PhaseOutcome::Confirmed));
+
+        // A toggle now applies against fresh config; the revision advanced to 1.
+        assert!(server.clone().submit_edit(ctx(), OperationId(3), BaseRef { revision: 1 }, toggle(ConfigToggle::Debug)).await.is_ok());
+
+        // A stale base conflicts.
+        let stale = server
+            .submit_edit(ctx(), OperationId(4), BaseRef { revision: 0 }, toggle(ConfigToggle::AutoHideName))
+            .await;
+        assert!(matches!(stale, Err(SubmitError::Conflict { .. })));
     }
 }
