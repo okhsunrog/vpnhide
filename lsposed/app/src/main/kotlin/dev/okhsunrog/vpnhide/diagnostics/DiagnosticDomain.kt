@@ -141,7 +141,7 @@ internal class DiagnosticDomain(
      * words the presentation and never triggers a read or a run (I16).
      */
     val situation: StateFlow<Situation> =
-        situationFlow(presentation, clock).stateIn(scope, SharingStarted.Eagerly, situation(presentation.value, clock()))
+        situationFlow(presentation, clock, wait).stateIn(scope, SharingStarted.Eagerly, situation(presentation.value, clock()))
 
     init {
         // The one owner of automatic confirmations, process-lived like the runs it requests.
