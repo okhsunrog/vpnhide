@@ -26,6 +26,7 @@ internal class RootProcessRunner {
         arguments: List<String>,
         timeoutMillis: Long = 10_000,
     ): RootProcessResult {
+        if (BuildConfig.DEV_ISOLATED) return RootProcessResult.Uncertain
         require(timeoutMillis in 1..120_000)
         return execute(arguments, byteArrayOf(), System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis), 16 * 1024 * 1024)
     }
@@ -36,6 +37,7 @@ internal class RootProcessRunner {
         timeoutMillis: Long = 10_000,
         outputLimit: Int = 4 * 1024 * 1024,
     ): RootProcessResult {
+        if (BuildConfig.DEV_ISOLATED) return RootProcessResult.Uncertain
         require(timeoutMillis in 1..120_000 && outputLimit in 1..4 * 1024 * 1024)
         if (!slots.tryAcquire()) return RootProcessResult.Uncertain
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
