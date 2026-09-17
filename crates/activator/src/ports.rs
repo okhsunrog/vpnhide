@@ -17,7 +17,10 @@ use crate::{
 // holding the xtables lock" (exit 4) and the whole ports apply is marked
 // failed. Every iptables-family invocation passes these first; the timeout
 // keeps a stuck lock from hanging boot.
-const XTABLES_WAIT: [&str; 2] = ["-w", "5"];
+/// Wait for the xtables lock instead of failing at once: netd on a network
+/// change and the VPN client hold it too, and a check or teardown that gives up
+/// immediately reads "absent" where the rules are merely locked.
+pub(crate) const XTABLES_WAIT: [&str; 2] = ["-w", "5"];
 
 pub(crate) fn build_ports_ruleset(
     chain: &str,

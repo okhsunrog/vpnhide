@@ -19,11 +19,12 @@ and a process-owned `DiagnosticRunCoordinator` behind `DiagnosticsCache` owns
 suite execution: each run is an identified, immutable attempt that survives
 screen changes and Activity recreation, a retry is a new run, and a run records
 its measurement context (process, self configuration, VPN routing, coverage) at
-start and end. Dashboard cache derivation observes terminal diagnostics without
-implicitly retrying Blocked/Failed. A user retry refreshes the app-VPN
-observation, queues one explicit diagnostic run, then re-derives Dashboard
-without requesting that run a second time. Measurement classification and the
-completed-run retention policy below are unchanged.
+start and end. The Dashboard's tiles are projected from the same presentation the
+hero classifies, on every change of it, so they cannot lag behind a run. A user
+retry (`retryDiagnosticsAndDashboard`, the one explicit entry point) refreshes
+the app-VPN observation, queues one explicit diagnostic run and re-reads the
+Dashboard's root facts; no cache refresh requests a run on its own. Measurement
+classification and the completed-run retention policy below are unchanged.
 
 Devices this was validated on: Pixel 4a (sunfish, Magisk, 4.14, kmod/KPM/Zygisk),
 Pixel 8 Pro (husky, KernelSU-Next, GKI 6.1, KPM), and an Android 13 Zygisk device.

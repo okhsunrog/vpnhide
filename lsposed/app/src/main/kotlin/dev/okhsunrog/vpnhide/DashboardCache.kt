@@ -2,38 +2,48 @@ package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.mapNotNull
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 
 /**
- * App-scoped cache for the Dashboard's computed state. Previously
- * `DashboardScreen` ran `loadDashboardState()` in its own
- * `LaunchedEffect(Unit)` on every composition — which means every
- * tab switch re-ran all the module-prop / target / kprobes / SELinux
- * checks via `suExec`. Cache them once at startup; refresh them
- * explicitly on user action or after a Save.
+ * App-scoped cache for the Dashboard's root-derived facts, and the screen state
+ * projected from them.
  *
- * The Dashboard screen reads [state] and shows the previous value
- * while a refresh is in flight so tab switches feel instant even when
- * data changes underneath.
+ * The cached value is [DashboardRootFacts]: everything that costs a root shell
+ * or parsing and changes only with the root snapshot. It is refreshed explicitly
+ * (pull-to-refresh, Retry, a Save) and by the root dependency. [state] is not
+ * cached at all: it is a projection of those facts and the live diagnostic
+ * presentation, assembled by [assembleDashboardState] on every change of either,
+ * so the protection tiles, the banners and the hero always describe the same
+ * instant and nothing has to follow the suite to keep them in step.
  *
- * The protection tiles are folded from the diagnostic presentation at derivation
- * time, while the hero renders the live Situation. So that the two never come
- * from different instants, the cache follows the suite: a terminal attempt newer
- * than the one the tiles were derived from re-derives them in the background,
- * without requesting another run.
+ * Refreshing this cache re-reads root and nothing else: it never requests a
+ * diagnostic run. The explicit run has one entry point,
+ * `retryDiagnosticsAndDashboard`, and the automatic one is owed by the
+ * presentation (`owedConfirmation`).
  */
-internal object DashboardCache : ContextStateCache<RootProjection<DashboardState>>(
+internal object DashboardCache : ContextStateCache<RootProjection<DashboardRootFacts>>(
     traceName = "dashboard_state",
     logTag = LogTags.DASHBOARD,
     source = RootSnapshotCache.dependency,
     timeoutMillis = 120_000,
 ) {
-    val state: StateFlow<DashboardState?> = ProjectedStateFlow(value) { it?.value }
+    /**
+     * The screen state, null until the root facts exist and the suite has a first
+     * terminal attempt: the Dashboard appears with its first verdict (blocked, failed
+     * or measured), as it always has, rather than with tiles that say nothing yet.
+     * The previous value stays visible while a root refresh is in flight.
+     */
+    val state: StateFlow<DashboardState?> by lazy {
+        combine(value, DiagnosticsCache.presentation) { facts, presentation ->
+            val context = inputs?.context
+            if (facts == null || context == null || presentation.lastAttempt == null) return@combine null
+            assembleDashboardState(context, facts.value, presentation)
+        }.stateIn(ObservationRuntime.scope, SharingStarted.Eagerly, null)
+    }
 
     /**
      * A derivation the user asked for is in flight. A background re-derivation (the
@@ -42,46 +52,17 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardState
      */
     val refreshing: StateFlow<Boolean> by lazy { ProjectedStateFlow(observation) { it.active?.reason == ReadReason.Explicit } }
 
-    override fun beforeRefresh(inputs: ContextObservationInputs) {
-        DiagnosticsCache.retry(inputs.context, inputs.selfNeedsRestart)
-    }
-
     override suspend fun load(
         @Suppress("UNUSED_PARAMETER") request: ObservationRequest,
-    ): RootProjection<DashboardState> {
-        follower
+    ): RootProjection<DashboardRootFacts> {
         val (context, selfNeedsRestart) = requireNotNull(inputs)
-        // Join or read the terminal attempt, then render the shared presentation as
-        // the screens do; a blocked or failed attempt is observed, never retried here.
-        val diagnostics = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart)
-        val rootSnapshot =
-            RootSnapshotCache.getOrLoad()
+        val rootSnapshot = RootSnapshotCache.getOrLoad()
         return withContext(Dispatchers.IO) {
             RootProjection(
                 rootSnapshot.observationId,
                 rootSnapshot.generation,
-                loadDashboardState(context, selfNeedsRestart, rootSnapshot, diagnostics),
+                deriveDashboardRootFacts(context, selfNeedsRestart, rootSnapshot),
             )
         }
-    }
-
-    private val follower by lazy { ObservationRuntime.scope.launch { followDiagnostics() } }
-
-    /**
-     * Re-derive after a terminal attempt the tiles have not seen, from the root
-     * snapshot already in hand (no root re-read, no run request). A derivation in
-     * flight is left to render it first; a failed derivation is not retried from
-     * here (that stays with the user's Retry), and a derivation that already
-     * rendered the attempt is left alone.
-     */
-    private suspend fun followDiagnostics() {
-        DiagnosticsCache.presentation
-            .mapNotNull { it.lastAttempt?.id }
-            .distinctUntilChanged()
-            .collect { attempt ->
-                observation.first { it.active == null }
-                val rendered = state.value?.diagnosticsAttemptId ?: return@collect
-                if (rendered < attempt) refreshInPlace(force = false, reason = ReadReason.Background)
-            }
     }
 }

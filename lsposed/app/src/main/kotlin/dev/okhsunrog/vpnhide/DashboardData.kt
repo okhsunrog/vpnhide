@@ -26,7 +26,6 @@ import dev.okhsunrog.vpnhide.startup.StartupTrace
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.Transient
 import java.io.File
 
 // ── Domain types — invalid states are unrepresentable ────────────────────
@@ -241,6 +240,9 @@ internal fun detectPortsApplyProblem(
 ): PortsApplyProblem? {
     val installed = ports as? ModuleState.Installed ?: return null
     if (installed.active || installed.brokenReason != null || targetCount == 0) return null
+    // An inactive reading the snapshot could not verify (probe failed, shell not
+    // root) is no evidence that the rules are missing: nothing to warn about.
+    if (!installed.runtimeCheckable) return null
     // A module the user turned off via their manager (a `disable` marker) is
     // inactive by design — the activator skips it for the same reason. Don't
     // nag "iptables rules are not active" for a deliberately disabled module.
@@ -348,10 +350,6 @@ internal data class DashboardState(
     // A pre-1.0 config still on disk next to a config that already has roles —
     // the startup importer leaves that case to the user (LegacyConfigImport).
     val legacyImport: LegacyImportPrompt? = null,
-    // The latest diagnostic attempt the protection tiles were derived from; the
-    // cache re-derives when the suite has a newer terminal attempt (DashboardCache).
-    // Process bookkeeping, not a fact of the device: kept out of the bundle.
-    @Transient val diagnosticsAttemptId: Long? = null,
 )
 
 internal fun protectionFullyPassed(protection: ProtectionCheck): Boolean =
@@ -1024,13 +1022,16 @@ internal fun detectKpmModule(
 internal fun detectPortsModule(sections: Map<String, String>): ModuleState {
     val prop = parseModuleProp(sections["ports_prop"].orEmpty())
     if (!prop.installed) return ModuleState.NotInstalled
-    val active = sections["ports_chain"].orEmpty().trim() == "1"
+    // "1" = chains present and jumped to, "0" = a chain or jump is absent,
+    // "error=<rc>" (or nothing) = the probe itself could not run: the xtables lock
+    // was held, the shell lacked CAP_NET_ADMIN, the phase never ran. Only a "0"
+    // from a root shell is evidence of an inactive module; the rest is unverified.
+    val probe = sections["ports_chain"].orEmpty().trim()
+    val active = probe == "1"
     return ModuleState.Installed(
         version = prop.version,
         active = active,
-        // `ports_chain` runs iptables, which needs CAP_NET_ADMIN; a non-root
-        // snapshot shell reads a false "0". Mark unverified rather than inactive.
-        runtimeCheckable = active || snapshotRuntimeCheckable(sections),
+        runtimeCheckable = active || (probe == "0" && snapshotRuntimeCheckable(sections)),
     )
 }
 
@@ -1391,6 +1392,27 @@ private suspend fun deriveEnvironmentFacts(
 }
 
 /**
+ * Everything the Dashboard derives from one root snapshot alone: the module,
+ * LSPosed, target and environment facts, the kernel recommendation, the optional
+ * hooks this boot installed, and the legacy-import prompt. It costs root shells
+ * and parsing, so it is cached ([DashboardCache]); the protection tiles and the
+ * banners that depend on the diagnostic presentation are assembled on top of it
+ * by [assembleDashboardState], a pure step that follows every presentation.
+ */
+internal data class DashboardRootFacts(
+    val selfNeedsRestart: Boolean,
+    val modules: ModuleFacts,
+    val lsposed: LsposedFacts,
+    val targets: TargetCounts,
+    val environment: EnvironmentFacts,
+    val kernelRecommendation: NativeInstallRecommendation?,
+    val appVersion: String,
+    val installedOptionalHooks: Set<HookIds.Hook>,
+    val partialHookGap: PartialHookGap?,
+    val legacyImport: LegacyImportPrompt?,
+)
+
+/**
  * Fold the diagnostic presentation into the protection facts.
  *
  * The tiles come from the one canonical report (the same object the debug bundle
@@ -1400,22 +1422,17 @@ private suspend fun deriveEnvironmentFacts(
  * gate vs failed run) through instead of re-deriving it from a second VPN sensor.
  */
 private fun resolveProtectionFacts(
-    selfNeedsRestart: Boolean,
-    modules: ModuleFacts,
-    lsposedActive: Boolean,
-    sections: Map<String, String>,
+    facts: DashboardRootFacts,
     diagnostics: DiagnosticPresentation,
 ): ProtectionFacts {
-    VpnHideLog.i(TAG, "selfNeedsRestart=$selfNeedsRestart")
-    val nativeBackend = modules.nativeBackend
-    val installedOptionalHooks =
-        installedNativeOptionalHooks(nativeBackend.id, sections, modules.currentBootId)
-    val verdict = protectionVerdict(diagnostics, MeasurementCoverage(nativeBackend, installedOptionalHooks, lsposedActive))
+    val liveLayers =
+        MeasurementCoverage(facts.modules.nativeBackend, facts.installedOptionalHooks, facts.lsposed.state is LsposedState.Active)
+    val verdict = protectionVerdict(diagnostics, liveLayers)
     return ProtectionFacts(
         check = verdict.check,
         report = verdict.report,
-        partialHookGap = partialHookGap(nativeBackend, installedOptionalHooks),
-        installedOptionalHooks = installedOptionalHooks,
+        partialHookGap = facts.partialHookGap,
+        installedOptionalHooks = facts.installedOptionalHooks,
     )
 }
 
@@ -1429,7 +1446,6 @@ private fun resolveProtectionFacts(
 private fun DashboardFacts.toDashboardState(
     messages: List<DashboardMessage>,
     legacyImport: LegacyImportPrompt?,
-    diagnosticsAttemptId: Long?,
 ): DashboardState =
     DashboardState(
         kmod = modules.kmod.state,
@@ -1450,23 +1466,31 @@ private fun DashboardFacts.toDashboardState(
         messages = messages,
         installedOptionalHooks = protection.installedOptionalHooks,
         legacyImport = legacyImport,
-        diagnosticsAttemptId = diagnosticsAttemptId,
     )
 
 /**
- * Everything the Dashboard shows, derived from one root snapshot.
- *
- * Reads as four steps: derive the facts, await the check run, turn the facts
- * into banners, assemble. The banner logic itself is deliberately not here —
- * [dashboardIssues] decides and [toMessage] words it, so the ~25 guards are
- * reachable from a unit test that needs no `Context`.
+ * Everything the Dashboard shows, from one root snapshot and one diagnostic
+ * presentation: the root facts, then the assembly on top of them. The bridge
+ * uses this one-shot form; the screen's cache keeps the root facts and assembles
+ * on every presentation instead.
  */
 internal suspend fun loadDashboardState(
     context: android.content.Context,
     selfNeedsRestart: Boolean,
     rootSnapshot: RootSnapshot,
     diagnostics: DiagnosticPresentation,
-): DashboardState {
+): DashboardState = assembleDashboardState(context, deriveDashboardRootFacts(context, selfNeedsRestart, rootSnapshot), diagnostics)
+
+/**
+ * The root-derived half of the Dashboard. The banner logic itself is
+ * deliberately not here — [dashboardIssues] decides and [toMessage] words it, so
+ * the ~25 guards are reachable from a unit test that needs no `Context`.
+ */
+internal suspend fun deriveDashboardRootFacts(
+    context: android.content.Context,
+    selfNeedsRestart: Boolean,
+    rootSnapshot: RootSnapshot,
+): DashboardRootFacts {
     VpnHideLog.i(TAG, "=== Loading dashboard state ===")
     StartupTrace.mark("dashboard_derive_start")
     val res = context.resources
@@ -1500,18 +1524,6 @@ internal suspend fun loadDashboardState(
     val lsposed = deriveLsposedFacts(context, sections, modules.currentBootId, targets.lsposed)
     StartupTrace.mark("dashboard_lsposed_done")
 
-    StartupTrace.mark("dashboard_protection_start")
-    val protection =
-        resolveProtectionFacts(
-            selfNeedsRestart = selfNeedsRestart,
-            modules = modules,
-            lsposedActive = lsposed.state is LsposedState.Active,
-            sections = sections,
-            diagnostics = diagnostics,
-        )
-    VpnHideLog.i(TAG, "protection=${protection.check}")
-    StartupTrace.mark("dashboard_protection_done")
-
     val environment =
         deriveEnvironmentFacts(
             context = context,
@@ -1521,16 +1533,46 @@ internal suspend fun loadDashboardState(
             portsTargetCount = targets.ports,
             currentBootId = modules.currentBootId,
         )
-    val facts =
-        DashboardFacts(modules, lsposed, targets, environment, protection, kernelRecommendation, appVersion)
-    val messages = dashboardIssues(facts).map { it.toMessage(context, res) }
-    StartupTrace.mark("dashboard_issues_done")
-    VpnHideLog.i(TAG, "messages=$messages")
-    VpnHideLog.i(TAG, "=== Dashboard state loaded ===")
-
-    return facts.toDashboardState(
-        messages = messages,
+    val installedOptionalHooks = installedNativeOptionalHooks(modules.nativeBackend.id, sections, modules.currentBootId)
+    VpnHideLog.i(TAG, "selfNeedsRestart=$selfNeedsRestart")
+    VpnHideLog.i(TAG, "=== Dashboard root facts loaded ===")
+    return DashboardRootFacts(
+        selfNeedsRestart = selfNeedsRestart,
+        modules = modules,
+        lsposed = lsposed,
+        targets = targets,
+        environment = environment,
+        kernelRecommendation = kernelRecommendation,
+        appVersion = appVersion,
+        installedOptionalHooks = installedOptionalHooks,
+        partialHookGap = partialHookGap(modules.nativeBackend, installedOptionalHooks),
         legacyImport = parseLegacyConfigCandidate(sections, targetsSnapshot.uidToPkg)?.toPrompt(),
-        diagnosticsAttemptId = diagnostics.lastAttempt?.id,
     )
+}
+
+/**
+ * The presentation-dependent half: the protection tiles, the banners and the
+ * screen state, assembled from cached root facts and the presentation of the
+ * moment. Pure apart from wording the messages, so it can follow every
+ * presentation change and the tiles can never lag behind the hero.
+ */
+internal fun assembleDashboardState(
+    context: android.content.Context,
+    facts: DashboardRootFacts,
+    diagnostics: DiagnosticPresentation,
+): DashboardState {
+    val protection = resolveProtectionFacts(facts, diagnostics)
+    val dashboardFacts =
+        DashboardFacts(
+            facts.modules,
+            facts.lsposed,
+            facts.targets,
+            facts.environment,
+            protection,
+            facts.kernelRecommendation,
+            facts.appVersion,
+        )
+    val messages = dashboardIssues(dashboardFacts).map { it.toMessage(context, context.resources) }
+    VpnHideLog.i(TAG, "protection=${protection.check} messages=$messages")
+    return dashboardFacts.toDashboardState(messages = messages, legacyImport = facts.legacyImport)
 }

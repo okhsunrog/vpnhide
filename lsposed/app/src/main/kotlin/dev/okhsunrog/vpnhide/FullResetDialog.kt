@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.okhsunrog.vpnhide.diagnostics.retryDiagnosticsAndDashboard
 import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
 import kotlinx.coroutines.launch
 
@@ -160,7 +161,7 @@ internal fun FullResetDialog(
                                 running = false
                                 done = exit == 0
                                 if (exit == 0) {
-                                    DashboardCache.refresh(context, selfNeedsRestart)
+                                    retryDiagnosticsAndDashboard(context, selfNeedsRestart)
                                 }
                             }
                         },

@@ -240,12 +240,12 @@ emit_eval ports_module_state 'file_flags $VPNHIDE_PORTS_DIR; hash_file $VPNHIDE_
 emit_file ports_load_status "$VPNHIDE_PORTS_LOAD_STATUS"
 emit_file ports_load_log "$VPNHIDE_PORTS_LOAD_LOG"
 emit_eval ports_state '
-  iptables -S OUTPUT 2>&1 | grep vpnhide || true
-  iptables -S vpnhide_out 2>&1 || true
-  iptables -L vpnhide_out -n -v --line-numbers 2>&1 || true
-  ip6tables -S OUTPUT 2>&1 | grep vpnhide || true
-  ip6tables -S vpnhide_out6 2>&1 || true
-  ip6tables -L vpnhide_out6 -n -v --line-numbers 2>&1 || true
+  iptables -w 2 -S OUTPUT 2>&1 | grep vpnhide || true
+  iptables -w 2 -S vpnhide_out 2>&1 || true
+  iptables -w 2 -L vpnhide_out -n -v --line-numbers 2>&1 || true
+  ip6tables -w 2 -S OUTPUT 2>&1 | grep vpnhide || true
+  ip6tables -w 2 -S vpnhide_out6 2>&1 || true
+  ip6tables -w 2 -L vpnhide_out6 -n -v --line-numbers 2>&1 || true
 '
 
 emit_file lsposed_state "$VPNHIDE_LSPOSED_STATE"

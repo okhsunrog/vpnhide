@@ -2,7 +2,7 @@ package dev.okhsunrog.vpnhide.diagnostics
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -55,7 +55,7 @@ internal fun owedConfirmation(
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 internal suspend fun confirmMeasurements(
-    presentations: Flow<DiagnosticPresentation>,
+    presentations: StateFlow<DiagnosticPresentation>,
     request: (MeasurementKey) -> Boolean,
     clock: () -> Long,
     wait: suspend (Long) -> Unit = { delay(it) },
@@ -65,6 +65,10 @@ internal suspend fun confirmMeasurements(
         if (!presentation.confirmationPending) return@collectLatest
         val key = presentation.currentKey ?: return@collectLatest
         wait(confirmationHoldOff(clock(), lastRequestedAt))
+        // The wait may have returned without suspending; ask only if the latest
+        // presentation still owes this key, not the one that started the wait.
+        val latest = presentations.value
+        if (!latest.confirmationPending || latest.currentKey != key) return@collectLatest
         if (request(key)) lastRequestedAt = clock()
     }
 }

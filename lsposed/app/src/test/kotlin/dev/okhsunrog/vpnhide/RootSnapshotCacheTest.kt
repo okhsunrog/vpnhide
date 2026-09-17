@@ -133,8 +133,10 @@ class RootSnapshotCacheTest {
         assertTrue(command.contains(ZYGISK_STATUS_FILE))
         assertTrue(command.contains(PORTS_LOAD_STATUS_FILE))
         assertTrue(command.contains("probe_ok=1"))
-        assertTrue(command.contains("iptables -C OUTPUT -j vpnhide_out"))
-        assertTrue(command.contains("ip6tables -C OUTPUT -j vpnhide_out6"))
+        assertTrue(command.contains("iptables -w 2 -C OUTPUT -j vpnhide_out"))
+        assertTrue(command.contains("ip6tables -w 2 -C OUTPUT -j vpnhide_out6"))
+        // A probe that could not run is reported as an error, never as an absent chain.
+        assertTrue(command.contains("RESULT=\"error=\$RC\""))
         assertFalse(command.contains("--user all"))
         assertFalse(command.contains("while IFS= read"))
         assertFalse(command.contains("base64"))

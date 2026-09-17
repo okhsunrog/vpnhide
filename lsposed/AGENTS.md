@@ -87,18 +87,24 @@ directions, since `internal` is module-wide and the compiler will not.
   loading needs application context plus restart state. Readiness must use `current`,
   not retained `value`. See `docs/observation-coordinator.md` for lifecycle and
   publication rules. Diagnostic runs are a separate domain, not an observation cache.
-- **`DiagnosticRunCoordinator` / `DiagnosticsCache`** — the one owner of the
-  self-test suite. It executes the pure `reduceDiagnosticRun` with identified
-  effects (`DiagnosticRunIo`: context observation and phased probes) on the
+- **`DiagnosticDomain` / `DiagnosticsCache`** — the one owner of the
+  self-test suite. `DiagnosticDomain` is the domain wired from its inputs
+  (observation flows, a `DiagnosticRunIo`, a scope, clocks), so
+  `DiagnosticDomainTest` drives it exactly as production does with plain state
+  flows and a fake helper; `DiagnosticsCache` is only the production wiring.
+  It executes the pure `reduceDiagnosticRun` with identified effects on the
   process scope; a waiter detaching never cancels a run, and a retry is a new run.
-  Request a suite through `DiagnosticsCache.run` (startup intent: the first
-  suite of the process, a join or a read afterwards) / `retry` (explicit) /
-  `awaitTerminal` (join or read the latest attempt); never launch
-  `runCoreChecks` from a screen or bypass the coordinator's probe ownership.
-  Every other automatic run is owed by the presentation (`owedConfirmation` in
-  `DiagnosticConfirmationData.kt`: one per measurement key nothing covers), so
-  do not add an edge-triggered "the gate changed, run a suite" path anywhere —
-  feed the observation and let the rule decide.
+  A suite starts in exactly three ways: `DiagnosticsCache.run` (startup intent:
+  the first suite of the process, a join or a read afterwards),
+  `retryDiagnosticsAndDashboard` (the one explicit entry point: Retry on both
+  screens, pull-to-refresh, the post-reset re-check) and the owed confirmation
+  (`owedConfirmation` in `DiagnosticConfirmationData.kt`: one automatic run per
+  measurement key nothing covers). Never launch `runCoreChecks` from a screen,
+  never request a run from a cache refresh hook, and never add an edge-triggered
+  "the gate changed, run a suite" path — feed the observation and let the rule
+  decide. Anything that must agree with the presentation (the Dashboard tiles
+  and banners: `assembleDashboardState`) is projected from it, never cached
+  beside it.
   The probe plan and per-run outcomes are keyed by the stable check ids in
   `NATIVE_CHECKS` / `NATIVE_EXTRA_CHECKS` / `CORE_JAVA_CHECKS` / `EXTRA_JAVA_CHECKS`
   — a new probe is a new spec entry with an id, not a bare list item.

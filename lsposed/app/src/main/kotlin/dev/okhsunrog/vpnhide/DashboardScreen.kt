@@ -80,7 +80,6 @@ fun DashboardScreen(
     // measurement and its staleness). The hero and the prompt under it are two
     // wordings of it (heroVisual), never an overlay of flows of different vintages.
     val situation by DiagnosticsCache.situation.collectAsState()
-    val latestAttemptId by DiagnosticsCache.latestAttemptId.collectAsState()
     var showChangelog by remember { mutableStateOf(false) }
     var changelogData by remember { mutableStateOf<ChangelogData?>(null) }
     var showContact by remember { mutableStateOf(false) }
@@ -202,10 +201,8 @@ fun DashboardScreen(
         val infos = loadedState.messages.filter { it.severity == DashboardMessageSeverity.INFO }
 
         // Hero: the whole setup's health at a glance, worded from the one Situation.
-        // Tiles derived from an older attempt than the presented one stay out of the
-        // hero's rank until DashboardCache has followed the suite.
-        val tiles = loadedState.protection.takeIf { loadedState.diagnosticsAttemptId == latestAttemptId }
-        val visual = heroVisual(situation, tiles, errorCount = errors.size, warningCount = warnings.size)
+        // The tiles are projected from the same presentation, so they cannot lag behind it.
+        val visual = heroVisual(situation, loadedState.protection, errorCount = errors.size, warningCount = warnings.size)
         DashboardHeroCard(
             state = loadedState,
             visual = visual,
