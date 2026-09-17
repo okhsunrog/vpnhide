@@ -35,5 +35,14 @@ tell you.
 ## Applying changes
 
 Zygisk hooks are installed when the app process starts, so a config change takes
-effect the next time the app is launched fresh. **Force-stop** a target app (or
-reboot) and reopen it to apply — see [Set up hiding](configure-hiding.md).
+effect the next time the app is launched fresh. **Force-stop** a target app and
+reopen it to apply — see [Set up hiding](configure-hiding.md). A reboot is needed
+only to install, update, disable or remove the module itself; changing targets
+or hooks never needs one.
+
+The module takes its targets from `targets.txt` in its module folder. Save
+rewrites that file from the saved configuration (so do every boot and a fresh
+start of VPN Hide), and the module reads it anew in every app process it is
+injected into. Apps are listed there by UID, so after reinstalling a target app
+tap Save again before force-stopping it; see
+[When changes take effect](saving-applying.md).
