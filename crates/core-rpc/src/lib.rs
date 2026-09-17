@@ -162,7 +162,7 @@ pub enum SubmitError {
 /// The phases an operation runs, in the order the config coordinator dispatches them
 /// (mirrors `ConfigPhase`): persist the config, run coupled secret/cleanup commands, then
 /// activate the native backend and ports.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ConfigPhase {
     Persist,
     Secret,

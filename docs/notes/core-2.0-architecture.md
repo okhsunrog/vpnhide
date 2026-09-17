@@ -634,10 +634,21 @@ reducer are done; the **durable config file** (part of step 5) is implemented �
 and core's clean `CanonicalConfig` (a faithful port of `StorageConfig.kt`'s
 `parseCanonicalConfig`/`canonicalConfigJson`, so LSPosed and the activator read a
 core-written file identically). `CoreState::load` reads it on startup (restart recovery) and
-`submit_edit` is durable-first (writes before acknowledging; a failed write rejects the
-edit). The path is overridable via `VPNHIDE_CONFIG_PATH` so the dev sandbox core never
-touches the real `/data/system/vpnhide_config.json`. Still to do for step 5: the sole-writer
-cutover and in-process activation (step D).
+`submit_edit` is durable-first (writes before acknowledging). The path is overridable via
+`VPNHIDE_CONFIG_PATH` so the dev sandbox core never touches the real
+`/data/system/vpnhide_config.json`.
+
+The **operation lifecycle** (`operation.rs`) is the core-side port of the execution core of
+the app's `reduceConfigOperation` — an accepted edit runs an ordered phase plan through a
+`PhaseRunner` seam, each phase recording a real outcome into the `OperationRecord`, the first
+non-confirmed phase stopping the plan (later phases stay `NotAttempted`), and only a confirmed
+`Persist` committing the candidate (a later phase failing keeps what `Persist` wrote). The
+app-only concerns migration leaves in Kotlin (drafts, UI-edit conflicts, bridge-source) are
+**not** ported (§3/§7). Recovery (an `Unknown` outcome → readback → resolve/Held) is
+deliberately deferred to step D: today the only real phase is `Persist` (a local atomic write,
+never `Unknown`); the `PhaseRunner` seam is where the D activation runners plug in, and a fake
+runner already drives every outcome in tests. Still to do for step 5: the sole-writer cutover
+and in-process activation (step D).
 
 Each boundary needs an explicit cutover. Do not run legacy and core writers in
 parallel against the same canonical/runtime state. Port behavioral tests before
