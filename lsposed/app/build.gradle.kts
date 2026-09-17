@@ -227,6 +227,11 @@ android {
         versionCode = 10301
         versionName = buildVersion
 
+        // Off by default; the `dev` build type flips it on. When true, the app cuts every
+        // root/backend connection (see suExec / RootProcessRunner), so a Dev build coexists
+        // with a real vpnhide install without touching its files, backends, or config.
+        buildConfigField("boolean", "DEV_ISOLATED", "false")
+
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
@@ -288,6 +293,19 @@ android {
             isShrinkResources = false
             matchingFallbacks += listOf("debug")
         }
+        // Isolated sandbox build for core-2.0 work: a distinct package that coexists with a
+        // real vpnhide install and cuts all connection to its components/files (DEV_ISOLATED).
+        // Version is set to 2.0.0-alpha0 via androidComponents below.
+        create("dev") {
+            initWith(getByName("debug"))
+            // The auto-generated debug keystore, not the release keystore: a Dev sandbox must
+            // build in a fresh worktree that has no keystore.properties.
+            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = true
+            applicationIdSuffix = ".dev"
+            buildConfigField("boolean", "DEV_ISOLATED", "true")
+            matchingFallbacks += listOf("debug")
+        }
     }
 
     compileOptions {
@@ -328,6 +346,16 @@ android {
         // app has no dynamic resource lookups (getIdentifier / by-name), so the
         // analysis is exhaustive and false-positive-free here.
         error += "UnusedResources"
+    }
+}
+
+// The Dev sandbox build carries an explicit pre-release version, independent of the
+// git-derived versionName the shipping builds use.
+androidComponents {
+    onVariants(selector().withBuildType("dev")) { variant ->
+        variant.outputs.forEach { output ->
+            output.versionName.set("2.0.0-alpha0")
+        }
     }
 }
 
