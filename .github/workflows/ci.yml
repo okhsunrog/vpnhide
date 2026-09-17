@@ -33,8 +33,10 @@ jobs:
 
 
   # Decide which areas this run exercises. A pull request runs the jobs whose
-  # paths changed, plus everything an area shares (the protocol/activator
-  # crates, kmod/shared, the QEMU probes, the code generators). An `area:*`
+  # paths changed, plus everything an area shares: the code generators, the
+  # kernel side and the QEMU probes (`shared`, which also starts the QEMU
+  # matrix) and the Rust workspace (`shared_rust`: the activator every zip
+  # bundles, so every area packages, but no QEMU kernel runs it). An `area:*`
   # label forces that area and `ci:full` forces everything, whatever the diff;
   # a change under .github runs everything; pushes to main, tags and manual
   # dispatches always run everything. A skipped job counts as passing for
@@ -63,16 +65,24 @@ jobs:
         id: filter
         with:
           filters: |
+            # What every area consumes: the hook registry generators, the kernel
+            # side shared by kmod/KPM/builtin and the QEMU probes. Turns every
+            # area on, QEMU runtime tests included.
             shared:
+              - 'kmod/shared/**'
+              - 'kmod/test/**'
+              - 'kmod/generated/**'
+              - 'scripts/codegen*.py'
+            # The Rust workspace: the activator every module zip bundles, the
+            # app-native crates and zygisk. A change here packages every area
+            # (cross-compiles and zips), but the QEMU kernels run nothing from
+            # it, so it does not start the QEMU matrix on its own.
+            shared_rust:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'crates/**'
               # Shared producer/consumer vectors: run both Rust and Android tests.
               - 'fixtures/app-helper/**'
-              - 'kmod/shared/**'
-              - 'kmod/test/**'
-              - 'kmod/generated/**'
-              - 'scripts/codegen*.py'
               - 'scripts/build_lib.py'
               - 'scripts/build-version.py'
             ci:
@@ -99,6 +109,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
           F_SHARED: ${{ steps.filter.outputs.shared }}
+          F_SHARED_RUST: ${{ steps.filter.outputs.shared_rust }}
           F_CI: ${{ steps.filter.outputs.ci }}
           F_KMOD: ${{ steps.filter.outputs.kmod }}
           F_KPM: ${{ steps.filter.outputs.kpm }}
@@ -113,17 +124,22 @@ jobs:
           case " $LABELS " in *" ci:full "*) full=true ;; esac
           native=false
           rust=false
+          # An area is "own" when its sources, the kernel-side shared paths, a
+          # label or a full run ask for it; own kernel areas also start the QEMU
+          # matrix. The Rust workspace turns every area on for packaging only.
           area() {
-            local name=$1 changed=$2 on=false
-            if [ "$full" = true ] || [ "$changed" = true ] || [ "$F_SHARED" = true ]; then on=true; fi
-            case " $LABELS " in *" area:$name "*) on=true ;; esac
+            local name=$1 changed=$2 own=false on=false
+            if [ "$full" = true ] || [ "$changed" = true ] || [ "$F_SHARED" = true ]; then own=true; fi
+            case " $LABELS " in *" area:$name "*) own=true ;; esac
+            on=$own
+            [ "$F_SHARED_RUST" = true ] && on=true
             echo "$name=$on" >> "$GITHUB_OUTPUT"
             echo "$name: $on"
-            [ "$on" = true ] && case "$name" in kmod|kpm|builtin) native=true ;; esac
+            [ "$own" = true ] && case "$name" in kmod|kpm|builtin) native=true ;; esac
             [ "$on" = true ] && case "$name" in zygisk|lsposed) rust=true ;; esac
             return 0
           }
-          echo "event=$EVENT full=$full shared=${F_SHARED:-n/a} labels='$LABELS'"
+          echo "event=$EVENT full=$full shared=${F_SHARED:-n/a} shared_rust=${F_SHARED_RUST:-n/a} labels='$LABELS'"
           area kmod "$F_KMOD"
           area kpm "$F_KPM"
           area builtin "$F_BUILTIN"
@@ -132,7 +148,7 @@ jobs:
           area portshide "$F_PORTSHIDE"
           echo "native=$native" >> "$GITHUB_OUTPUT"
           echo "native: $native"
-          if [ "$full" = true ] || [ "$F_SHARED" = true ]; then rust=true; fi
+          if [ "$full" = true ] || [ "$F_SHARED" = true ] || [ "$F_SHARED_RUST" = true ]; then rust=true; fi
           echo "rust=$rust" >> "$GITHUB_OUTPUT"
           echo "rust: $rust"
 
