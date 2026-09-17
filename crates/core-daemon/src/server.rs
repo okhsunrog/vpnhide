@@ -45,6 +45,10 @@ pub struct CoreState {
     /// Where the durable canonical config lives. `None` = no persistence (host tests); a
     /// path means every accepted change is written there before it is acknowledged (§4).
     config_path: Option<PathBuf>,
+    /// The kernel control node the `Native` phase delivers to (§4/§9.1). `None` disables
+    /// native activation — the safe default so the dev sandbox never writes the real
+    /// `/proc/vpnhide_ctl`.
+    kmod_ctl_path: Option<PathBuf>,
 }
 
 impl CoreState {
@@ -58,6 +62,7 @@ impl CoreState {
                 operations: HashMap::new(),
             }),
             config_path: None,
+            kmod_ctl_path: None,
         })
     }
 
@@ -65,7 +70,14 @@ impl CoreState {
     /// recovery). A present config starts at revision 1 and is published into the replica at
     /// once; an absent/blank file leaves the core with no config (revision 0, absent ≠ empty).
     /// A corrupt file is an error the caller decides on — core does not silently start blank.
-    pub fn load(publisher: Publisher, path: PathBuf) -> std::io::Result<Arc<Self>> {
+    ///
+    /// `kmod_ctl_path` is the kernel control node the `Native` phase delivers to; `None`
+    /// disables native activation (the dev sandbox default).
+    pub fn load(
+        publisher: Publisher,
+        path: PathBuf,
+        kmod_ctl_path: Option<PathBuf>,
+    ) -> std::io::Result<Arc<Self>> {
         let (config, config_revision) = match config_file::read(&path)? {
             Some(config) => (Some(config), 1),
             None => (None, 0),
@@ -78,6 +90,7 @@ impl CoreState {
                 operations: HashMap::new(),
             }),
             config_path: Some(path),
+            kmod_ctl_path,
         });
         if let Some(config) = config {
             state.publisher.update(|snapshot| {
@@ -129,11 +142,19 @@ impl CoreState {
         let next = apply_canonical_edit(&current, edit);
         let changed = store.config.as_ref() != Some(&next);
 
-        // Run the operation's phase plan. The runner performs the durable write (Persist),
-        // so an accepted edit is on disk before the config is committed in memory. Blocking
-        // IO under the lock is deliberate: it serializes writers and the file is tiny.
-        let plan = operation::plan_for(false);
-        let runner = RealPhaseRunner { config_path: self.config_path.clone() };
+        // Run the operation's phase plan. The runner performs the durable write (Persist) and,
+        // when a control node is configured and the config has a native target, delivers the
+        // native wire (Native). An accepted edit is on disk before the config is committed in
+        // memory. Blocking IO under the lock is deliberate: it serializes writers.
+        // On any config change, re-project and re-deliver to keep the backend in sync (a
+        // write replaces its entire state, so this also clears removed targets). Only when a
+        // control node is configured — the dev sandbox leaves it unset and stays Persist-only.
+        let native = changed && self.kmod_ctl_path.is_some();
+        let plan = operation::plan_for(native);
+        let runner = RealPhaseRunner {
+            config_path: self.config_path.clone(),
+            kmod_ctl_path: self.kmod_ctl_path.clone(),
+        };
         let outcome = operation::run_plan(&plan, &next, changed, &runner);
 
         if outcome.persisted {
@@ -289,7 +310,7 @@ mod tests {
         let ctx = tarpc::context::current;
 
         // First run: no file yet -> no config, revision 0. A Replace persists it.
-        let state = CoreState::load(Publisher::new(1, StateSnapshot::default()), path.clone()).unwrap();
+        let state = CoreState::load(Publisher::new(1, StateSnapshot::default()), path.clone(), None).unwrap();
         assert!(!state.has_config());
         let server = CoreServer::new(state);
         let cfg = CanonicalConfig { debug: true, ..Default::default() };
@@ -299,7 +320,7 @@ mod tests {
 
         // Second run (a restart): a fresh core loads the same file and recovers the config
         // at revision 1, so a follow-up edit conflict-checks against the recovered revision.
-        let restarted = CoreState::load(Publisher::new(2, StateSnapshot::default()), path.clone()).unwrap();
+        let restarted = CoreState::load(Publisher::new(2, StateSnapshot::default()), path.clone(), None).unwrap();
         assert!(restarted.has_config());
         let server2 = CoreServer::new(restarted);
         let published = server2.clone().state_since(ctx(), 0, 0).await;

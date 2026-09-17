@@ -1560,8 +1560,10 @@ dependencies = [
  "tokio",
  "tokio-serde",
  "tokio-util",
+ "vpnhide_activator",
  "vpnhide_checks",
  "vpnhide_core_rpc",
+ "vpnhide_protocol",
 ]
 
 [[package]]

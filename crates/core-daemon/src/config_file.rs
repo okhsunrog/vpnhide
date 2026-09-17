@@ -66,6 +66,14 @@ pub fn read(path: &Path) -> io::Result<Option<CanonicalConfig>> {
     Ok(from_disk(&root))
 }
 
+/// Serialize the config to the on-disk JSON string (the polymorphic legacy format), the same
+/// text [`write_atomic`] persists. Core hands this to the activator projection, which parses
+/// exactly this shape (§4: core absorbs the activator, so it feeds it the durable canon).
+pub fn to_json_string(config: &CanonicalConfig) -> String {
+    // to_disk builds a finite, well-formed Value, so serialization cannot fail.
+    serde_json::to_string(&to_disk(config)).expect("config serializes")
+}
+
 /// Serialize and write the config atomically (temp in the same dir → `rename`), mode `0640`.
 /// The rename is the commit point, so a reader (LSPosed, the activator, a restarting core)
 /// never sees a half-written file. Core runs as root, so the file lands `root:root`.
