@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -427,12 +428,43 @@ internal fun DiagnosticsSettingsScreen(
     onBack: () -> Unit,
     onOpenAccelerators: (() -> Unit)? = null,
 ) {
+    SettingsSubScreenScaffold(stringResource(R.string.settings_diagnostics_title), onBack) { padding ->
+        if (selfNeedsRestart == null) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+        } else {
+            DiagnosticsScreen(
+                selfNeedsRestart = selfNeedsRestart,
+                modifier = Modifier.padding(padding),
+                onOpenAccelerators = onOpenAccelerators,
+            )
+        }
+    }
+}
+
+/**
+ * The shared chrome for a Settings sub-screen: a back-arrow top bar over the
+ * screen background, with the body laid out under the scaffold padding. One
+ * place so a Settings detail page (Diagnostics, For developers, …) is a title
+ * plus content, not a re-typed TopAppBar each time.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SettingsSubScreenScaffold(
+    title: String,
+    onBack: () -> Unit,
+    content: @Composable (PaddingValues) -> Unit,
+) {
     BackHandler(onBack = onBack)
     Scaffold(
         containerColor = AppColors.screenBackground,
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.settings_diagnostics_title)) },
+                title = { Text(title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -449,22 +481,8 @@ internal fun DiagnosticsSettingsScreen(
                     ),
             )
         },
-    ) { padding ->
-        if (selfNeedsRestart == null) {
-            Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
-        } else {
-            DiagnosticsScreen(
-                selfNeedsRestart = selfNeedsRestart,
-                modifier = Modifier.padding(padding),
-                onOpenAccelerators = onOpenAccelerators,
-            )
-        }
-    }
+        content = content,
+    )
 }
 
 @Composable
