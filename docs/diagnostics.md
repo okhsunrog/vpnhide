@@ -224,6 +224,43 @@ already in progress, so the click cannot be absorbed by that run.
   used by diagnostics — the root differential already gives the full 4-way + `hidden`
   without them — and stay only in the Statistics tab.
 
+## 6a. Hook count vs check count — why they differ
+
+Two numbers describe the same backend and they are deliberately not equal, which
+reads as a contradiction if you assume they should match:
+
+- **Statistics → "hooks: N"** counts the *interception points the backend
+  actually installed* — the set bits of its `hooks` mask (protocol §4.3). For a
+  kernel backend on a modern kernel that is 11 (10 below 5.3, where the bind hook
+  is left to CAP_NET_RAW — see §5.1 and the protocol note on the per-kernel
+  requested set); for LSPosed it is the Java hooks that attached.
+- **Detailed diagnostics → the per-check list** counts the *detection vectors the
+  self-test probes* — 15 under the native layer, 13 under the Java layer. Each is
+  a distinct way an app could notice the VPN, run and classified independently
+  (§2, §3).
+
+They are different denominators, not the same one miscounted, because the
+hook↔check relation is many-to-many:
+
+- **One hook covers several checks.** `dev_ioctl` backs both `ioctl_flags`
+  (`SIOCGIFFLAGS`) and `ioctl_mtu` (`SIOCGIFMTU`); one installed hook, two probed
+  vectors.
+- **One check is covered by several hooks, often across backends.** `proc_route`
+  lists `fib_route_seq_show` *and* `zygisk_openat`: whichever active backend
+  closes the vector counts, so a check's `expectedHooks` spans the kernel and
+  Zygisk id spaces even though a given device runs only one of them.
+- **Some checks map to no installed hook and still pass.** `proc_dev` /
+  `proc_if_inet6` have no kernel `seq_show` hook — SELinux or the optional Zygisk
+  `openat` group closes them; and on a pre-5.3 kernel `so_bindtodevice` maps to
+  `socket_bind_interface`, which is intentionally not installed, yet the check
+  passes via the native CAP_NET_RAW gate.
+
+So "KPM OK · hooks: 10" next to "15 KPM checks" is correct: ten interception
+points closing fifteen probed vectors (with SELinux and the kernel's own gates
+carrying the rest). The self-test measures *outcomes per vector*, not one probe
+per hook, which is the whole point of the root-differential (§2) — it asks "is
+this surface hidden", not "did hook N fire".
+
 ## 7. Native check → owning hook, verified on Pixel 4a
 
 The native backend hooks map to the diagnostic checks below. The kernel backends
