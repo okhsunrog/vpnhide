@@ -57,7 +57,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # on some KMIs (CFI / struct kretprobe on android16-6.12). Prune .cmd files
 # (incremental-rebuild artifacts, ~half the tree, not needed for external
 # modules) to keep the image smaller.
-COPY kmod/test/qemu.config /tmp/qemu.config
+#
+# Two Kconfig fragments are merged, in this order: qemu.config (what QEMU needs
+# to boot) then qemu-trim.config (what no test reaches — the storage stacks, the
+# on-disk filesystems, the USB gadget stack, vendor SoC platforms, staging and
+# debug info). The trim is what keeps this bake and every cold `builtin-qemu`
+# rebuild from compiling drivers `-machine virt` has no hardware for: about
+# −16 % of the compile on 6.1.
+#
+# Before the real build, while the tree is still clean enough for `O=` builds,
+# verify-trim-abi.sh configures it both ways and diffs the pahole layout of
+# every structure the backends read. The KPM backend carries hardcoded offsets
+# (kmod/kpm/kver_offsets.h), so a trim that shifted one would make kpm-qemu pass
+# against a layout no device has. A mismatch fails the image build, loudly.
+COPY kmod/test/qemu.config /tmp/vpnhide/kmod/test/qemu.config
+COPY kmod/test/qemu-trim.config /tmp/vpnhide/kmod/test/qemu-trim.config
+COPY kmod/test/verify-trim-abi.sh /tmp/vpnhide/kmod/test/verify-trim-abi.sh
+COPY kmod/test/abi /tmp/vpnhide/kmod/test/abi
 COPY .github/docker/ddk-qemu/extract-cert-key-pass.patch /tmp/extract-cert-key-pass.patch
 RUN CLANG_BIN="$(ls -d /opt/ddk/clang/*/bin | head -1)" && export PATH="$CLANG_BIN:$PATH" && \
     mkdir -p /opt/qemu && \
@@ -71,15 +87,19 @@ RUN CLANG_BIN="$(ls -d /opt/ddk/clang/*/bin | head -1)" && export PATH="$CLANG_B
         android14-6.1|android15-6.6) \
             patch -d /opt/qemu/linux -p1 < /tmp/extract-cert-key-pass.patch ;; \
     esac && \
+    /tmp/vpnhide/kmod/test/verify-trim-abi.sh "${KMI}" --inside-container \
+        --ksrc /opt/qemu/linux --work /tmp/abi-verify && \
+    rm -rf /tmp/abi-verify && \
     cd /opt/qemu/linux && \
     make ARCH=arm64 LLVM=1 gki_defconfig && \
-    ./scripts/kconfig/merge_config.sh -m .config /tmp/qemu.config && \
+    ./scripts/kconfig/merge_config.sh -m .config \
+        /tmp/vpnhide/kmod/test/qemu.config /tmp/vpnhide/kmod/test/qemu-trim.config && \
     make ARCH=arm64 LLVM=1 olddefconfig && \
     make ARCH=arm64 LLVM=1 -j"$(nproc)" Image && \
     make ARCH=arm64 LLVM=1 modules_prepare && \
     cp arch/arm64/boot/Image /opt/qemu/Image && \
     cp vmlinux.symvers Module.symvers && \
-    rm -f /tmp/qemu.config /tmp/extract-cert-key-pass.patch && \
+    rm -rf /tmp/vpnhide /tmp/extract-cert-key-pass.patch && \
     find /opt/qemu/linux -name '*.cmd' -delete
 
 RUN curl -fsSL \

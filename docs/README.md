@@ -55,7 +55,7 @@ a release commitment — lives in **[`notes/`](notes/)**:
 - [notes/app-state-transitions-history.md](notes/app-state-transitions-history.md) — the stage-by-stage implementation log of that contract (§13–§22) with each stage's boundaries and validation
 - [notes/diagnostics-state-analysis.md](notes/diagnostics-state-analysis.md) — historical analysis of what "diagnostics" meant before the refactor and why
 - [notes/app-state-design.md](notes/app-state-design.md) — the original state redesign proposal (superseded by the contract)
-- [notes/ci-kernel-config-trim.md](notes/ci-kernel-config-trim.md) — research brief: what the QEMU test kernels build, what the tests need, and which config options can be trimmed without moving a struct offset
+- [notes/ci-kernel-config-trim.md](notes/ci-kernel-config-trim.md) — the QEMU test-kernel trim: what it switches off and what it measures, the ABI guard that keeps it from moving a struct offset, and the options that look trimmable but are not
 - [notes/core-2.0-architecture.md](notes/core-2.0-architecture.md) — forward-looking design for a persistent root daemon replacing the per-call root helper: ownership, projection, auth and observer decisions
 - [notes/builtin-app-integration-audit.md](notes/builtin-app-integration-audit.md) — audit of how the app integrates the built-in kernel backend (picker, statistics, diagnostics, capture, reset)
 - [notes/ui-state-presentation-review.md](notes/ui-state-presentation-review.md) — design review that led to the Situation classifier; decisions recorded, two since superseded

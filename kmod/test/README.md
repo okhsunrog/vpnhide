@@ -57,8 +57,12 @@ Vectors exercised (`init.sh`):
 
 **Limits:** GitHub/QEMU runners have no KVM, so the VM runs under TCG (software
 emulation) — correct, just slow. The test kernel is *our* `kernel/common` build
-with `qemu.config` merged, not a byte-identical vendor GKI release, so it does
-not cover vendor patches. A device smoke-test is still the final word — but the
+with `qemu.config` and `qemu-trim.config` merged, not a byte-identical vendor
+GKI release, so it does not cover vendor patches. (The trim switches off
+subsystems no vector reaches — storage stacks, on-disk filesystems, debug info
+— and never anything that moves a structure the backends read;
+`verify-trim-abi.sh` proves that by diffing `pahole` layouts both ways. See
+[docs/notes/ci-kernel-config-trim.md](../../docs/notes/ci-kernel-config-trim.md).) A device smoke-test is still the final word — but the
 gate is far tighter than "it compiled".
 
 ## Usage
@@ -97,8 +101,11 @@ Building a virtio GKI kernel takes ~15-40 min, so it must not run per-PR:
   `ghcr.io/<owner>/vpnhide/ddk-qemu:<kmi>` = `FROM ddk-min:<kmi>` + qemu + the
   built kernel `Image` + **its build tree** (`/opt/qemu/linux`, for module
   builds) + the Alpine rootfs. Matrix over the 7 KMIs; runs only on
-  `qemu.config`/Dockerfile changes, monthly, or manual dispatch. Full-LTO
-  generations are heavy — the workflow frees disk + adds swap.
+  `qemu.config`/`qemu-trim.config`/Dockerfile changes, monthly, or manual
+  dispatch. Full-LTO generations are heavy — the workflow frees disk + adds
+  swap. Each bake runs `verify-trim-abi.sh` first: if the trim moved a structure
+  layout on that KMI, the image build fails instead of publishing a kernel the
+  KPM offsets no longer match.
 - **`ci.yml` `kmod-qemu` job** (per KMI) boots the baked kernel and runs the
   vectors. It builds the module **against the baked kernel tree**
   (`VPNHIDE_QEMU_KSRC`), not the GKI kdir — see Design decisions. The image is
