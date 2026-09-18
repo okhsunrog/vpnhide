@@ -117,12 +117,23 @@ impl PhaseRunner for RealPhaseRunner {
                 None => PhaseOutcome::Confirmed,
             },
             ConfigPhase::Native => match &self.kmod_ctl_path {
-                Some(path) => match crate::activation::project_builtin_wire(candidate)
-                    .and_then(|wire| crate::activation::deliver_builtin(path, &wire))
-                {
-                    Ok(()) => PhaseOutcome::Confirmed,
-                    Err(_) => PhaseOutcome::FailedKnown,
-                },
+                // Detect the family that owns the control node, then project *for that family*
+                // and deliver (delivery re-verifies the node's identity). A node reporting no
+                // known kernel backend cannot be activated — FailedKnown, never guessed.
+                Some(path) => {
+                    let backend = crate::activation::read_status(path)
+                        .ok()
+                        .and_then(|s| crate::backend::kernel_backend_from_id(s.backend));
+                    match backend {
+                        Some(backend) => match crate::activation::project_native_wire(candidate, backend)
+                            .and_then(|wire| crate::activation::deliver_native(path, backend, &wire))
+                        {
+                            Ok(()) => PhaseOutcome::Confirmed,
+                            Err(_) => PhaseOutcome::FailedKnown,
+                        },
+                        None => PhaseOutcome::FailedKnown,
+                    }
+                }
                 None => PhaseOutcome::NotAttempted,
             },
             // Ports / Secret / Cleanup: implemented later in step D.

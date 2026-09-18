@@ -119,6 +119,10 @@ pub struct StateSnapshot {
     pub operations_in_flight: Vec<OperationId>,
     /// What the root observation loop currently sees of real routing (§8).
     pub routing: RoutingObservation,
+    /// Which native backend core observes as active/installed (§4). Centralizing this — one
+    /// detected identity instead of each activator probing for itself — is the point of core
+    /// owning all state: the family to project for, and what the app shows, come from here.
+    pub backend: NativeBackendStatus,
 }
 
 /// The core's own view of real routing, from its netlink observer (§8). Independent of the
@@ -131,6 +135,30 @@ pub struct RoutingObservation {
     /// the framework's `TRANSPORT_VPN` set — name-matching alone counts an IMS `ipsec`
     /// tunnel as a VPN (proven on device).
     pub vpn_interfaces: Vec<String>,
+}
+
+/// A native backend family. The natives are mutually exclusive — at most one is `active` at a
+/// time — so this doubles as "which family to project the control wire for".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NativeBackend {
+    Kmod,
+    Builtin,
+    Kpm,
+    Zygisk,
+}
+
+/// What core observes of the native backend (§4), detected from runtime identity rather than
+/// from a module directory merely existing (§2). `installed` ≠ `active`: a module can be
+/// present but not the running backend. This is observed state (like [`RoutingObservation`]),
+/// published so the app reads the active backend from one place instead of joining per-backend
+/// status files.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct NativeBackendStatus {
+    /// The live native backend, from runtime identity (kernel control-node id, module
+    /// liveness). `None` until observed, or when none is active.
+    pub active: Option<NativeBackend>,
+    /// Backends whose module is present on disk (installed, not necessarily running).
+    pub installed: Vec<NativeBackend>,
 }
 
 /// The base a submitted edit is checked against, for conflict detection (§5).
@@ -305,6 +333,10 @@ mod tests {
                         routing: RoutingObservation {
                             observed: true,
                             vpn_interfaces: vec!["tun0".into(), "wg0".into()],
+                        },
+                        backend: NativeBackendStatus {
+                            active: Some(NativeBackend::Builtin),
+                            installed: vec![NativeBackend::Builtin, NativeBackend::Zygisk],
                         },
                     },
                 };
