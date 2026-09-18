@@ -175,6 +175,7 @@
             "kind": "blocked",
             "gate": "VPN_OFF"
         },
+        "nativePartialHooks": false,
         "messages": [],
         "installedOptionalHooks": [],
         "legacyImport": null

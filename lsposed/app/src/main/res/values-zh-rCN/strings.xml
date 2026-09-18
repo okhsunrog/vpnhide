@@ -153,6 +153,7 @@
     <string name="dashboard_backend_kpm">KPM</string>
     <string name="dashboard_backend_zygisk">Zygisk</string>
     <string name="dashboard_backend_line">%1$s · %2$s</string>
+    <string name="dashboard_backend_partial_hooks">部分钩子</string>
     <string name="dashboard_not_installed">未安装</string>
     <string name="dashboard_installed_inactive">已安装，未启用</string>
     <string name="dashboard_installed_not_verified">已安装，状态未验证</string>

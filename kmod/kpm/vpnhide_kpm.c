@@ -754,6 +754,26 @@ static int socket_bind_uses_index_hook(void)
 	return (unsigned int)kver < VPNHIDE_KVER(5, 9, 0);
 }
 
+/*
+ * Whether a bind hook is REQUIRED on this kernel — i.e. whether the KPM must
+ * cover SO_BINDTODEVICE/SO_BINDTOIFINDEX itself, or the native gate already does.
+ *
+ * Below 5.3 the first such bind already requires CAP_NET_RAW, so the kernel's
+ * own gate closes the vector and the KPM intentionally installs no bind hook
+ * (hooking the setsockopt wrapper there would be a TOCTOU on the raw user
+ * pointer, and there is no post-copy *_locked helper to hook instead). On those
+ * kernels the hook is NOT expected: not installing it is complete, not partial.
+ *
+ * From 5.3 up the post-copy helper exists (or is backported) and the CAP_NET_RAW
+ * gate is NOT a reliable substitute — a LineageOS 5.4 build let an app bind tun0
+ * with the gate compiled in — so the hook is required and its absence is a real
+ * gap worth reporting.
+ */
+static int socket_bind_hook_required(void)
+{
+	return (unsigned int)kver >= VPNHIDE_KVER(5, 3, 0);
+}
+
 static const char *const socket_bind_index_hook_names[] = {
 	"sock_bindtoindex_locked", /* 5.8+, and 5.4/5.7 backports */
 	"sock_setbindtodevice_locked", /* 5.3-5.7 upstream */
@@ -2048,7 +2068,8 @@ static long vpnhide_kpm_init(const char *args, const char *event,
 		install_hook("fib_nl_fill_rule", 7, (void *)fib_rule_before,
 			     (void *)fib_rule_after,
 			     VPNHIDE_HOOK_FIB_NL_FILL_RULE);
-	if (_netdev_get_name && off->sock_net && off->socket_sk) {
+	if (_netdev_get_name && off->sock_net && off->socket_sk &&
+	    socket_bind_hook_required()) {
 		int bind_ok;
 
 		if (socket_bind_uses_index_hook()) {
@@ -2097,15 +2118,28 @@ static long vpnhide_kpm_init(const char *args, const char *event,
 		logki(MODNAME
 		      ": optional filesystem hook group failed atomically\n");
 
-	/* Healthy iff every requested hook installed; otherwise honestly
-	 * report partial — the `hooks` mask carries which ones (§5.1). A kver
-	 * with an incomplete offset table lands here by design. */
-	last_error =
-		(installed_hooks ==
-		 (VPNHIDE_KERNEL_HOOK_MASK |
-		  (filesystem_hiding_requested ? VPNHIDE_KPM_HOOK_MASK : 0))) ?
-			VPNHIDE_ERR_OK :
-			VPNHIDE_ERR_PARTIAL_HOOKS;
+	/* Healthy iff every hook EXPECTED ON THIS KERNEL installed; otherwise
+	 * honestly report partial — the `hooks` mask carries which ones (§5.1). A
+	 * kver with an incomplete offset table lands here by design.
+	 *
+	 * The expected set is per-kernel, not the universal kernel mask: the bind
+	 * hook is left to the native CAP_NET_RAW gate below 5.3 (see
+	 * socket_bind_hook_required), so on those kernels a full install is 10 of
+	 * 10, not 10 of 11. Counting it as missing there reported a permanent false
+	 * "partial" on every 4.x device. */
+	{
+		uint32_t expected = VPNHIDE_KERNEL_HOOK_MASK;
+
+		if (!socket_bind_hook_required())
+			expected &= ~vpnhide_hook_bit(
+				VPNHIDE_HOOK_SOCKET_BIND_INTERFACE);
+		if (filesystem_hiding_requested)
+			expected |= VPNHIDE_KPM_HOOK_MASK;
+
+		last_error = (installed_hooks == expected) ?
+				     VPNHIDE_ERR_OK :
+				     VPNHIDE_ERR_PARTIAL_HOOKS;
+	}
 
 	logki(MODNAME
 	      ": KPM hooks installed (mask=0x%x filesystem_hiding=%d err=%u)\n",

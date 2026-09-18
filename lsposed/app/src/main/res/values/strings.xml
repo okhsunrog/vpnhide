@@ -161,6 +161,7 @@
     <string name="dashboard_backend_kpm">KPM</string>
     <string name="dashboard_backend_zygisk">Zygisk</string>
     <string name="dashboard_backend_line">%1$s · %2$s</string>
+    <string name="dashboard_backend_partial_hooks">partial hooks</string>
     <string name="dashboard_not_installed">Not installed</string>
     <string name="dashboard_installed_inactive">Installed, inactive</string>
     <string name="dashboard_installed_not_verified">Installed, status not verified</string>

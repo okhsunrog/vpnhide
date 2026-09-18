@@ -195,6 +195,30 @@ internal fun installedNativeOptionalHooks(
     }
 
 /**
+ * The kernel backend's own health verdict (`error` field of its `status`), so
+ * the app can trust the module's per-kernel judgement of "complete" rather than
+ * diffing against the universal hook set. Null for Zygisk (no such status) and
+ * when the status was unread.
+ */
+internal fun nativeBackendStatusError(
+    backend: NativeBackendId?,
+    sections: Map<String, String>,
+): HookIds.StatusError? =
+    when (backend) {
+        NativeBackendId.Kmod, NativeBackendId.Builtin -> {
+            parseProtocolStatusBlock(sections["kmod_state"].orEmpty())?.statusError
+        }
+
+        NativeBackendId.Kpm -> {
+            parseProtocolStatusBlock(sections["kpm_state"].orEmpty())?.statusError
+        }
+
+        NativeBackendId.Zygisk, null -> {
+            null
+        }
+    }
+
+/**
  * Compare the canonical choice with the hook set actually reported by the
  * active native backend. Kernel backends apply it at boot; Zygisk applies it
  * per target-process launch and reports the installed subset in its heartbeat.

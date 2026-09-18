@@ -33,13 +33,28 @@ class PartialHookGapTest {
 
     @Test
     fun `a complete kernel install reports no gap`() {
-        assertNull(partialHookGap(backend(NativeBackendId.Kpm), KERNEL_HOOKS))
+        assertNull(partialHookGap(backend(NativeBackendId.Kpm), KERNEL_HOOKS, HookIds.StatusError.OK))
+    }
+
+    @Test
+    fun `a hook the module does not expect on this kernel is not a gap`() {
+        // The 4.14 case: the KPM leaves the bind hook to the native CAP_NET_RAW
+        // gate, reports OK, and installs 10 of the 11 universal kernel hooks. The
+        // one absent from the universal diff must NOT read as a partial install —
+        // the module's OK is authoritative for what this kernel expects.
+        assertNull(
+            partialHookGap(
+                backend(NativeBackendId.Kpm),
+                KERNEL_HOOKS - HookIds.Hook.SOCKET_BIND_INTERFACE,
+                HookIds.StatusError.OK,
+            ),
+        )
     }
 
     @Test
     fun `missing kernel hooks are named`() {
         val reported = KERNEL_HOOKS - HookIds.Hook.SOCK_IOCTL - HookIds.Hook.FIB_ROUTE_SEQ_SHOW
-        val gap = partialHookGap(backend(NativeBackendId.Kpm), reported)!!
+        val gap = partialHookGap(backend(NativeBackendId.Kpm), reported, HookIds.StatusError.PARTIAL_HOOKS)!!
 
         assertEquals(KERNEL_HOOKS.size, gap.expected)
         assertEquals(KERNEL_HOOKS.size - 2, gap.installed)
@@ -53,7 +68,7 @@ class PartialHookGapTest {
     fun `an unread status is not reported as a total failure`() {
         // No status line read (no root, backend not answering) must not render as
         // "0 of 12 hooks installed" — that would be a fabricated diagnosis.
-        assertNull(partialHookGap(backend(NativeBackendId.Kpm), emptySet()))
+        assertNull(partialHookGap(backend(NativeBackendId.Kpm), emptySet(), null))
     }
 
     @Test
@@ -62,18 +77,19 @@ class PartialHookGapTest {
             partialHookGap(
                 backend(NativeBackendId.Kpm, ModuleState.Installed(version = "1.2.5", active = false)),
                 KERNEL_HOOKS - HookIds.Hook.SOCK_IOCTL,
+                HookIds.StatusError.PARTIAL_HOOKS,
             ),
         )
     }
 
     @Test
     fun `zygisk is out of scope — its mask is per-process`() {
-        assertNull(partialHookGap(backend(NativeBackendId.Zygisk), setOf(HookIds.Hook.ZYGISK_IOCTL)))
+        assertNull(partialHookGap(backend(NativeBackendId.Zygisk), setOf(HookIds.Hook.ZYGISK_IOCTL), HookIds.StatusError.PARTIAL_HOOKS))
     }
 
     @Test
     fun `a gap only warrants a warning when it costs a measured vector`() {
-        val gap = partialHookGap(backend(NativeBackendId.Kpm), KERNEL_HOOKS - HookIds.Hook.SOCK_IOCTL)!!
+        val gap = partialHookGap(backend(NativeBackendId.Kpm), KERNEL_HOOKS - HookIds.Hook.SOCK_IOCTL, HookIds.StatusError.PARTIAL_HOOKS)!!
 
         // The vector the missing hook covers is leaking → worth telling the user.
         assertTrue(gap.costsAnyVector(reportWith(CheckOutcome.Leak, listOf(HookIds.Hook.SOCK_IOCTL))))

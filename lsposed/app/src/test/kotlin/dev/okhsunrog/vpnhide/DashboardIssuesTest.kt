@@ -523,14 +523,17 @@ class DashboardIssuesTest {
     }
 
     @Test
-    fun `a partial hook gap with no measured report is reported anyway`() {
-        // No report means the run could not measure; err towards telling the user.
+    fun `a partial hook gap with no measured report stays quiet`() {
+        // No report means nothing was measured, so nothing is known to leak. The
+        // alarming banner needs evidence — it fails closed rather than warning on
+        // a gap the native/SELinux layers may well cover. The "partial" fact still
+        // shows structurally on the backend card; this banner does not.
         val issues =
             dashboardIssues(
                 facts(protection = protection(gap = PartialHookGap(installed = 7, expected = 9, missing = emptyList()))),
             )
 
-        assertTrue(issues.has<DashboardIssue.PartialHooks>())
+        assertFalse(issues.has<DashboardIssue.PartialHooks>())
     }
 
     @Test

@@ -135,8 +135,17 @@ internal data class PartialHookGap(
 internal fun partialHookGap(
     backend: DisplayNativeBackend,
     reportedHooks: Set<HookIds.Hook>,
+    statusError: HookIds.StatusError?,
 ): PartialHookGap? {
     if (!moduleActive(backend.state)) return null
+    // Trust the module's own verdict, not a diff against the universal kernel
+    // hook set: whether a hook is EXPECTED is per-kernel (the KPM leaves the
+    // bind hook to the native CAP_NET_RAW gate below 5.3), and the module is the
+    // only place that knows — it probes symbols at load. It reports PARTIAL_HOOKS
+    // exactly when a hook it needed on THIS kernel is missing. On OK there is no
+    // gap even if the universal diff would find one; on the refusal codes the
+    // module is not running with hooks at all, handled elsewhere.
+    if (statusError != HookIds.StatusError.PARTIAL_HOOKS) return null
     val missing = missingBackendHooks(backend.id, reportedHooks)
     if (missing.isEmpty()) return null
     return PartialHookGap(
