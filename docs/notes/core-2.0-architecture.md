@@ -662,9 +662,16 @@ write there replaces the live backend's entire state). Validated on the KSU-Next
 **read-only**: core parsed the live telemetry-v1 status (`backend=0x4 kver=0x6019d
 hooks=0x20003ff error=0x0`) and projected the real config into the exact control-v2 wire the
 live backend runs (same `20003ff` mask, and every uid the live stats report appears in the
-projected target set) — without writing. Still to do for D: KPM and Zygisk (companion)
-families; the Ports phase; the sole-writer cutover; and recovery (now that a `Native` write
-can be `Unknown`).
+projected target set) — without writing. **Central backend detection** (`core-daemon/backend.rs`) is the point of core owning all
+state: instead of each activator probing runtime identity and self-selecting, core makes one
+observation — `NativeBackendStatus { active, installed }`, published in `StateSnapshot`.
+`active` is the live kernel family from the control node's `backend` id (read-only, §2: runtime
+identity, not a module dir merely existing); `installed` is module-dir presence. The Native
+phase now projects for the **detected** family (the built-in hardcode is gone), and `selection.rs`
+is subsumed. Device-validated read-only: `active=Some(Builtin) installed=[Builtin]`, and
+`project` drives the same live wire through detection. Still to do for D: KPM and Zygisk
+(companion) `active` liveness signals + conflict matrix + boot-load policy; the Ports phase; the
+sole-writer cutover; and recovery (now that a `Native` write can be `Unknown`).
 
 Each boundary needs an explicit cutover. Do not run legacy and core writers in
 parallel against the same canonical/runtime state. Port behavioral tests before
