@@ -39,7 +39,14 @@ class SettingsRepository(
         val BACKGROUND_UPDATE_CHECKS = booleanPreferencesKey("background_update_checks")
         val AGENT_CONTROL = booleanPreferencesKey("agent_control_enabled")
         val SETTINGS_HINT_SEEN = booleanPreferencesKey("settings_hint_seen")
-        val SUPPRESS_VERSION_WARNINGS = booleanPreferencesKey("suppress_version_warnings")
+
+        // The two developer switches below were one toggle ("hide version and
+        // changelog notices") until they were split. LEGACY_DEVELOPER_NOTICES is
+        // that old key: it seeds both until each is set on its own, so a
+        // developer who had it on does not get the noise back after an update.
+        val LEGACY_DEVELOPER_NOTICES = booleanPreferencesKey("suppress_version_warnings")
+        val SUPPRESS_CHANGELOG = booleanPreferencesKey("suppress_changelog")
+        val IGNORE_VERSION_MISMATCH = booleanPreferencesKey("ignore_version_mismatch")
         val DONATE_PROMPT_DISMISSED = booleanPreferencesKey("donate_prompt_dismissed")
         val LEGACY_IMPORT_DISMISSED = booleanPreferencesKey("legacy_import_dismissed")
 
@@ -68,8 +75,12 @@ class SettingsRepository(
                     p[Keys.BACKGROUND_UPDATE_CHECKS] ?: defaults.backgroundUpdateChecksEnabled,
                 agentControlEnabled = p[Keys.AGENT_CONTROL] ?: defaults.agentControlEnabled,
                 settingsHintSeen = p[Keys.SETTINGS_HINT_SEEN] ?: defaults.settingsHintSeen,
-                suppressVersionWarnings =
-                    p[Keys.SUPPRESS_VERSION_WARNINGS] ?: defaults.suppressVersionWarnings,
+                suppressChangelog =
+                    p[Keys.SUPPRESS_CHANGELOG] ?: p[Keys.LEGACY_DEVELOPER_NOTICES] ?: defaults.suppressChangelog,
+                ignoreVersionMismatch =
+                    p[Keys.IGNORE_VERSION_MISMATCH]
+                        ?: p[Keys.LEGACY_DEVELOPER_NOTICES]
+                        ?: defaults.ignoreVersionMismatch,
                 donatePromptDismissed =
                     p[Keys.DONATE_PROMPT_DISMISSED] ?: defaults.donatePromptDismissed,
                 legacyImportDismissed =
@@ -101,7 +112,9 @@ class SettingsRepository(
 
     suspend fun setSettingsHintSeen(value: Boolean) = edit { it[Keys.SETTINGS_HINT_SEEN] = value }
 
-    suspend fun setSuppressVersionWarnings(value: Boolean) = edit { it[Keys.SUPPRESS_VERSION_WARNINGS] = value }
+    suspend fun setSuppressChangelog(value: Boolean) = edit { it[Keys.SUPPRESS_CHANGELOG] = value }
+
+    suspend fun setIgnoreVersionMismatch(value: Boolean) = edit { it[Keys.IGNORE_VERSION_MISMATCH] = value }
 
     suspend fun setDonatePromptDismissed(value: Boolean) = edit { it[Keys.DONATE_PROMPT_DISMISSED] = value }
 

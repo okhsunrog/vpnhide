@@ -246,11 +246,28 @@ internal data class EnvironmentFacts(
     val selinuxPermissive: Boolean,
     val selfProfileCount: Int,
     val debugLoggingOn: Boolean,
-    val agentBridgeOn: Boolean,
-    /** Compare running-vs-installed by base version only; see SettingsRepository. */
-    val suppressVersionWarnings: Boolean,
     val filesystemHiding: FilesystemHidingState,
     val portsApply: PortsApplyProblem?,
+)
+
+/**
+ * The app-local switches on Settings → For developers that change what the
+ * Dashboard says.
+ *
+ * They live here rather than in [EnvironmentFacts] because they are not derived
+ * from root: the facts are cached until something invalidates them, so a flag
+ * read in there only took effect after the next refresh. As part of the
+ * projection they follow the toggle immediately — see [DeveloperFlagsCache].
+ *
+ * `debugLoggingOn` stays in [EnvironmentFacts] on purpose: it is the canonical
+ * config's `debugSwitch`, owned by the config coordinator and genuinely read
+ * off the device.
+ */
+internal data class DeveloperFlags(
+    /** The debug localhost bridge is running; surfaced so it isn't left on unnoticed. */
+    val agentBridgeOn: Boolean = false,
+    /** Drop every module/hook-vs-app version notice; see AppSettings. */
+    val ignoreVersionMismatch: Boolean = false,
 )
 
 internal data class ProtectionFacts(
@@ -269,6 +286,7 @@ internal data class DashboardFacts(
     val protection: ProtectionFacts,
     val kernelRecommendation: NativeInstallRecommendation?,
     val appVersion: String,
+    val developer: DeveloperFlags = DeveloperFlags(),
 )
 
 // ── The guard list ────────────────────────────────────────────────────────
@@ -358,6 +376,13 @@ private fun lsposedConfigIssues(lsposed: LsposedFacts): List<DashboardIssue> =
     }
 
 private fun moduleVersionIssues(facts: DashboardFacts): List<DashboardIssue> =
+    if (facts.developer.ignoreVersionMismatch) {
+        emptyList()
+    } else {
+        moduleVersionIssuesFor(facts)
+    }
+
+private fun moduleVersionIssuesFor(facts: DashboardFacts): List<DashboardIssue> =
     facts.modules.mismatches.map { mismatch ->
         val recommendedArtifact =
             facts.kernelRecommendation
@@ -506,7 +531,7 @@ private fun environmentIssues(facts: DashboardFacts): List<DashboardIssue> =
         if (env.debugLoggingOn) add(DashboardIssue.DebugLoggingOn)
         // A loopback HTTP server is an on-device fingerprint; note it so it isn't
         // left running unnoticed.
-        if (env.agentBridgeOn) add(DashboardIssue.AgentBridgeOn)
+        if (facts.developer.agentBridgeOn) add(DashboardIssue.AgentBridgeOn)
         // Permissive exposes the vectors we rely on SELinux to block (RTM_GETROUTE,
         // /proc/net/*, /sys/class/net) — see the coverage table in the README.
         if (env.selinuxPermissive) add(DashboardIssue.SelinuxPermissive)
@@ -590,20 +615,16 @@ private fun protectionIssues(facts: DashboardFacts): List<DashboardIssue> =
 
 /**
  * The hook code lives in system_server and only swaps on reboot, so reinstalling
- * the APK on the same base leaves the old hooks running until then. Developers
- * who reinstall constantly can flip `suppressVersionWarnings` to compare base
- * versions only; release users see no difference, release versions carrying no
- * dev suffix.
+ * the APK — even on the same base version — leaves the old hooks running until
+ * then. The comparison is therefore on the FULL version, dev suffix included:
+ * that skew is the whole point of the notice. A developer who reinstalls all day
+ * turns the notice off entirely (`ignoreVersionMismatch`) rather than getting a
+ * blunter comparison.
  */
 private fun versionMismatchIssues(facts: DashboardFacts): List<DashboardIssue> {
+    if (facts.developer.ignoreVersionMismatch) return emptyList()
     val running = (facts.lsposed.state as? LsposedState.Active)?.version ?: return emptyList()
-    val mismatch =
-        if (facts.environment.suppressVersionWarnings) {
-            versionsMismatch(running, facts.appVersion)
-        } else {
-            versionsMismatchFull(running, facts.appVersion)
-        }
-    if (!mismatch) return emptyList()
+    if (!versionsMismatchFull(running, facts.appVersion)) return emptyList()
     return listOf(
         DashboardIssue.LsposedVersionMismatch(
             runningVersion = running,

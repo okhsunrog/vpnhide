@@ -78,7 +78,16 @@ only `DashboardRootFacts`, the half that costs root shells and changes with the
 root snapshot (modules, LSPosed, targets, environment, installed optional hooks);
 `DashboardCache.state` combines those facts with the live presentation and
 assembles the protection tiles, the banners and the screen state on every change
-of either (`assembleDashboardState`, pure apart from wording). The tiles and the
+of either (`assembleDashboardState`, pure apart from wording).
+
+A third source joins that combine: `DeveloperFlagsCache`, the app-local switches
+on Settings → For developers that change what the Dashboard says (the agent-bridge
+note, the version-mismatch notices). They are preferences, not observations — a
+DataStore write invalidates nothing — so holding them inside the cached facts meant
+a toggle did nothing until the next refresh. As a source of the projection they
+reach the banners immediately and cost no root read. The canonical config's
+`debugSwitch` is not one of them: that one genuinely is read off the device and
+stays in the environment facts. The tiles and the
 hero therefore always describe the same instant: nothing follows the suite, nothing
 compares attempt ids, and a fresh measurement can never sit beside the previous
 tiles. The state stays null until the root facts exist and the suite has a first

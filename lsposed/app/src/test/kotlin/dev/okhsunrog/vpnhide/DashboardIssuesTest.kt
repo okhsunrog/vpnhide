@@ -90,6 +90,7 @@ class DashboardIssuesTest {
         protection: ProtectionFacts = protection(),
         kernelRecommendation: NativeInstallRecommendation? = null,
         appVersion: String = "1.2.5",
+        developer: DeveloperFlags = DeveloperFlags(),
     ) = DashboardFacts(
         modules = modules,
         lsposed =
@@ -106,22 +107,19 @@ class DashboardIssuesTest {
         protection = protection,
         kernelRecommendation = kernelRecommendation,
         appVersion = appVersion,
+        developer = developer,
     )
 
     private fun environment(
         selinuxPermissive: Boolean = false,
         selfProfileCount: Int = 1,
         debugLoggingOn: Boolean = false,
-        agentBridgeOn: Boolean = false,
-        suppressVersionWarnings: Boolean = false,
         filesystemHiding: FilesystemHidingState = FilesystemHidingState(FilesystemHidingStatus.Disabled),
         portsApply: PortsApplyProblem? = null,
     ) = EnvironmentFacts(
         selinuxPermissive = selinuxPermissive,
         selfProfileCount = selfProfileCount,
         debugLoggingOn = debugLoggingOn,
-        agentBridgeOn = agentBridgeOn,
-        suppressVersionWarnings = suppressVersionWarnings,
         filesystemHiding = filesystemHiding,
         portsApply = portsApply,
     )
@@ -436,8 +434,8 @@ class DashboardIssuesTest {
                             selinuxPermissive = true,
                             selfProfileCount = 2,
                             debugLoggingOn = true,
-                            agentBridgeOn = true,
                         ),
+                    developer = DeveloperFlags(agentBridgeOn = true),
                 ),
             )
 
@@ -560,19 +558,66 @@ class DashboardIssuesTest {
     }
 
     @Test
-    fun `suppressVersionWarnings compares base versions only`() {
-        fun mismatchesWith(suppress: Boolean) =
+    fun `a dev rebuild on the same base still counts as a running-hook mismatch`() {
+        // The hook only swaps on reboot, so a reinstall off the same release is
+        // exactly the skew worth reporting — the compare is on the full version.
+        assertTrue(
             dashboardIssues(
                 facts(
                     lsposed = LsposedState.Active(version = "1.2.5-3-gabc1234", targetCount = 3),
                     appVersion = "1.2.5",
-                    environment = environment(suppressVersionWarnings = suppress),
                 ),
-            ).has<DashboardIssue.LsposedVersionMismatch>()
+            ).has<DashboardIssue.LsposedVersionMismatch>(),
+        )
+    }
 
-        // A dev rebuild off the same base: the full compare notices, the base one does not.
-        assertTrue(mismatchesWith(suppress = false))
-        assertFalse(mismatchesWith(suppress = true))
+    @Test
+    fun `ignoreVersionMismatch drops every version notice, module and hook alike`() {
+        fun issuesWith(ignore: Boolean) =
+            dashboardIssues(
+                facts(
+                    modules =
+                        moduleFacts(
+                            mismatches =
+                                listOf(
+                                    ModuleMismatch(FlashableModuleKind.Zygisk, "1.2.5", "1.3.0"),
+                                    ModuleMismatch(FlashableModuleKind.Ports, "1.2.5", "1.3.0"),
+                                ),
+                        ),
+                    lsposed = LsposedState.Active(version = "1.2.5-268-g96631d53", targetCount = 3),
+                    appVersion = "1.3.0",
+                    developer = DeveloperFlags(ignoreVersionMismatch = ignore),
+                ),
+            )
+
+        // The base versions genuinely differ here (1.2.5 vs 1.3.0), which is why
+        // comparing base versions only was never enough to quiet this down.
+        assertTrue(issuesWith(ignore = false).has<DashboardIssue.ModuleVersionMismatch>())
+        assertTrue(issuesWith(ignore = false).has<DashboardIssue.LsposedVersionMismatch>())
+        assertFalse(issuesWith(ignore = true).has<DashboardIssue.ModuleVersionMismatch>())
+        assertFalse(issuesWith(ignore = true).has<DashboardIssue.LsposedVersionMismatch>())
+    }
+
+    @Test
+    fun `ignoreVersionMismatch keeps everything that is not a version notice`() {
+        val issues =
+            dashboardIssues(
+                facts(
+                    modules =
+                        moduleFacts(
+                            mismatches = listOf(ModuleMismatch(FlashableModuleKind.Zygisk, "1.2.5", "1.3.0")),
+                            pendingReboot = setOf(FlashableModuleKind.Ports),
+                        ),
+                    environment = environment(selinuxPermissive = true),
+                    appVersion = "1.3.0",
+                    developer = DeveloperFlags(ignoreVersionMismatch = true),
+                ),
+            )
+
+        // A flashed-but-not-active module is a reboot instruction, not version
+        // noise, so it survives; so does everything unrelated.
+        assertTrue(issues.has<DashboardIssue.ModuleNeedsReboot>())
+        assertTrue(issues.has<DashboardIssue.SelinuxPermissive>())
     }
 
     // ── Ordering ──

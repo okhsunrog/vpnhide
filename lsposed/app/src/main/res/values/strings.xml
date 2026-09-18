@@ -404,8 +404,8 @@
     <string name="dashboard_issue_native_partial_hooks">The native backend loaded, but only %1$d of %2$d kernel hooks installed on this kernel — it could not resolve: %3$s. The detection surfaces behind them are not covered by this backend; another layer may still close them. Reinstalling does not help: the functions are named differently (or absent) in this kernel build.</string>
     <string name="dashboard_issue_kpm_load_failed">KPM installed but failed to load: %1$s. Use Settings → Debugging → Collect debug log to attach the full boot-time output to a bug report, or reinstall vpnhide-kpm.zip from the latest release.</string>
     <string name="dashboard_issue_multiple_native">More than one native backend is installed. Only one can be active at a time (priority: kernel module, then KPM, then Zygisk); the others sit idle. Uninstall the ones you don\'t use to keep things clean.</string>
-    <string name="dashboard_issue_debug_logging_on">Debug logging is enabled. VPN Hide is writing verbose lines to logcat that anyone with root can read. Turn it off in Settings → Developer after you\'ve finished collecting a bug report.</string>
-    <string name="dashboard_issue_agent_bridge_on">Agent control is enabled. VPN Hide is running a local debug bridge whose open port lets other apps on this device detect VPN Hide. Turn it off in Settings → Developer when you\'re done.</string>
+    <string name="dashboard_issue_debug_logging_on">Debug logging is enabled. VPN Hide is writing verbose lines to logcat that anyone with root can read. Turn it off in Settings → For developers after you\'ve finished collecting a bug report.</string>
+    <string name="dashboard_issue_agent_bridge_on">Agent control is enabled. VPN Hide is running a local debug bridge whose open port lets other apps on this device detect VPN Hide. Turn it off in Settings → For developers when you\'re done.</string>
     <string name="dashboard_issue_selinux_permissive">SELinux is Permissive. Six detection vectors VPN Hide relies on the kernel to block (RTM_GETROUTE, /proc/net/{tcp,udp,dev,fib_trie}, /sys/class/net) are reachable to selected apps. Run `setenforce 1` and investigate what disabled it.</string>
     <string name="dashboard_issue_self_multi_profile">VPN Hide is installed in %1$d profiles. The main-profile copy is the one that matters — LSPosed hooks system_server, which runs in the main profile only, and the picker there already sees apps from every profile and applies filters to all of them. Extra copies in secondary profiles are redundant and race each other\'s Saves to the shared config. Uninstall from work profile / Second Space / other secondary profiles.</string>
     <string name="dashboard_issue_no_native">No Native backend installed. Install the recommended Native backend for full hiding.</string>
@@ -561,9 +561,12 @@
     <string name="settings_debug_section">Debugging</string>
     <string name="settings_agent_control">Agent control</string>
     <string name="settings_agent_control_sub">Start the debug localhost bridge for host MCP tools over adb</string>
-    <string name="settings_developer_section">Developer</string>
-    <string name="settings_suppress_version_warnings">Hide version and changelog notices</string>
-    <string name="settings_suppress_version_warnings_sub">Ignore the dev-build suffix when comparing the running LSPosed hook against the installed app, and don\'t pop the changelog after each rebuild. Only relevant when running your own builds; no effect on release versions.</string>
+    <string name="settings_developer_section">For developers</string>
+    <string name="settings_developer_sub">Changelog, version checks, the agent bridge and debug logging</string>
+    <string name="settings_suppress_changelog">Skip the changelog</string>
+    <string name="settings_suppress_changelog_sub">Don\'t open the list of changes on the first launch after the version changes. Useful when rebuilding the app several times a day.</string>
+    <string name="settings_ignore_version_mismatch">Ignore version mismatches</string>
+    <string name="settings_ignore_version_mismatch_sub">Drop every Dashboard notice about module, LSPosed hook and app versions drifting apart. The versions themselves stay on the cards.</string>
     <string name="settings_config_section">Configuration</string>
     <string name="settings_config_backup_title">Config backup</string>
     <string name="settings_config_backup_sub">Save or restore the canonical JSON config</string>

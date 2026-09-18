@@ -531,8 +531,11 @@
     <string name="settings_agent_control">Agent control</string>
     <string name="settings_agent_control_sub">Запустить локальный отладочный мост для MCP-инструментов на хосте через adb</string>
     <string name="settings_developer_section">Для разработчиков</string>
-    <string name="settings_suppress_version_warnings">Скрыть предупреждения о версиях и истории изменений</string>
-    <string name="settings_suppress_version_warnings_sub">Игнорировать суффикс dev-сборки при сравнении запущенного хука LSPosed с установленным приложением и не показывать историю изменений после каждой пересборки. Актуально только при сборке из исходников; на релизных версиях не влияет.</string>
+    <string name="settings_developer_sub">История изменений, проверки версий, мост для агента и отладочные логи</string>
+    <string name="settings_suppress_changelog">Не показывать историю изменений</string>
+    <string name="settings_suppress_changelog_sub">Не открывать список изменений при первом запуске после смены версии. Пригодится, когда пересобираешь приложение по несколько раз в день.</string>
+    <string name="settings_ignore_version_mismatch">Игнорировать несовпадение версий</string>
+    <string name="settings_ignore_version_mismatch_sub">Убрать с главного экрана все предупреждения о том, что версии модулей, хука LSPosed и приложения разошлись. Сами версии останутся на карточках.</string>
     <string name="settings_config_section">Конфигурация</string>
     <string name="settings_config_backup_title">Резервная копия конфига</string>
     <string name="settings_config_backup_sub">Сохранить или восстановить канонический JSON-конфиг</string>

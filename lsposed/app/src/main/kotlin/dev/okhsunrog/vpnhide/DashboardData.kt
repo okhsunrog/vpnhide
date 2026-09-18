@@ -1347,7 +1347,14 @@ private fun deriveLsposedFacts(
     )
 }
 
-/** The device and the app's own settings — everything not owned by one module. */
+/**
+ * The device state not owned by any one module.
+ *
+ * App-local settings are deliberately absent: they are not read from root and
+ * these facts are cached until an observation invalidates them, so a preference
+ * in here would only take effect after the next refresh. They reach the
+ * Dashboard through [DeveloperFlagsCache] instead.
+ */
 private suspend fun deriveEnvironmentFacts(
     context: android.content.Context,
     sections: Map<String, String>,
@@ -1355,9 +1362,8 @@ private suspend fun deriveEnvironmentFacts(
     ports: ModuleState,
     portsTargetCount: Int,
     currentBootId: String,
-): EnvironmentFacts {
-    val appSettings = SettingsRepository(context.applicationContext).settings.first()
-    return EnvironmentFacts(
+): EnvironmentFacts =
+    EnvironmentFacts(
         selinuxPermissive = sections["getenforce"].orEmpty().trim().equals("Permissive", ignoreCase = true),
         // Each profile's picker only lists its own apps (getInstalledApplications is
         // per-user), so a Save from a profile that cannot see every target would
@@ -1368,8 +1374,6 @@ private suspend fun deriveEnvironmentFacts(
                 ?.size
                 ?: 0,
         debugLoggingOn = targetsSnapshot.canonicalConfig?.debug == true,
-        agentBridgeOn = appSettings.agentControlEnabled,
-        suppressVersionWarnings = appSettings.suppressVersionWarnings,
         filesystemHiding =
             resolveFilesystemHidingState(
                 desiredEnabled =
@@ -1389,7 +1393,6 @@ private suspend fun deriveEnvironmentFacts(
                 portsDisabled = sections["ports_disabled"].orEmpty().trim() == "1",
             ),
     )
-}
 
 /**
  * Everything the Dashboard derives from one root snapshot alone: the module,
@@ -1479,7 +1482,11 @@ internal suspend fun loadDashboardState(
     selfNeedsRestart: Boolean,
     rootSnapshot: RootSnapshot,
     diagnostics: DiagnosticPresentation,
-): DashboardState = assembleDashboardState(context, deriveDashboardRootFacts(context, selfNeedsRestart, rootSnapshot), diagnostics)
+): DashboardState {
+    val facts = deriveDashboardRootFacts(context, selfNeedsRestart, rootSnapshot)
+    val developer = SettingsRepository(context.applicationContext).settings.first().toDeveloperFlags()
+    return assembleDashboardState(context, facts, diagnostics, developer)
+}
 
 /**
  * The root-derived half of the Dashboard. The banner logic itself is
@@ -1560,6 +1567,7 @@ internal fun assembleDashboardState(
     context: android.content.Context,
     facts: DashboardRootFacts,
     diagnostics: DiagnosticPresentation,
+    developer: DeveloperFlags,
 ): DashboardState {
     val protection = resolveProtectionFacts(facts, diagnostics)
     val dashboardFacts =
@@ -1571,6 +1579,7 @@ internal fun assembleDashboardState(
             protection,
             facts.kernelRecommendation,
             facts.appVersion,
+            developer,
         )
     val messages = dashboardIssues(dashboardFacts).map { it.toMessage(context, context.resources) }
     VpnHideLog.i(TAG, "protection=${protection.check} messages=$messages")

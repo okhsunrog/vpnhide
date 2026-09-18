@@ -26,7 +26,7 @@ It cannot recover detailed logs that were disabled when your target app failed.
 It also clears the kernel log buffer before collecting a fresh self-test window;
 a later snapshot is not a replacement for a recording of the failure.
 
-**Debug logging** in **Settings → Developer** is useful when continuous logging
+**Debug logging** in **Settings → For developers** is useful when continuous logging
 outside a capture is requested. Enable it before reproducing, and turn it off
 when finished. A capture restores the logging state it found beforehand.
 

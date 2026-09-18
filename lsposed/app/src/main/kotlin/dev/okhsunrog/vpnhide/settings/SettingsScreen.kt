@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,8 +29,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.BrightnessMedium
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
@@ -161,6 +162,7 @@ fun SettingsScreen(
     var diagnosticsOpen by rememberSaveable { mutableStateOf(false) }
     var hiddenAppsOpen by rememberSaveable { mutableStateOf(false) }
     var helpOpen by rememberSaveable { mutableStateOf(false) }
+    var developerOpen by rememberSaveable { mutableStateOf(false) }
 
     // A guide link (e.g. from the Hiding tab's help) can ask Settings to open a
     // specific sub-screen; apply it once, then let the host clear the request.
@@ -182,6 +184,10 @@ fun SettingsScreen(
     }
     if (hiddenAppsOpen) {
         HiddenAppsSettingsScreen(onBack = { hiddenAppsOpen = false })
+        return
+    }
+    if (developerOpen) {
+        DeveloperSettingsScreen(onBack = { developerOpen = false })
         return
     }
     if (helpOpen) {
@@ -335,7 +341,7 @@ fun SettingsScreen(
             SuperkeySettingsSection()
             CommunitySettingsSection()
             ResetSettingsSection(selfNeedsRestart = selfNeedsRestart)
-            DeveloperSettingsSection()
+            DeveloperSettingsSection(onOpen = { developerOpen = true })
         }
     }
 }
@@ -422,29 +428,7 @@ internal fun DiagnosticsSettingsScreen(
     onBack: () -> Unit,
     onOpenAccelerators: (() -> Unit)? = null,
 ) {
-    BackHandler(onBack = onBack)
-    Scaffold(
-        containerColor = AppColors.screenBackground,
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.settings_diagnostics_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.action_back),
-                        )
-                    }
-                },
-                colors =
-                    TopAppBarDefaults.topAppBarColors(
-                        containerColor = AppColors.topBarContainer,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                        navigationIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-            )
-        },
-    ) { padding ->
+    SettingsSubScreenScaffold(stringResource(R.string.settings_diagnostics_title), onBack) { padding ->
         if (selfNeedsRestart == null) {
             Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
@@ -462,6 +446,45 @@ internal fun DiagnosticsSettingsScreen(
     }
 }
 
+/**
+ * The shared chrome for a Settings sub-screen: a back-arrow top bar over the
+ * screen background, with the body laid out under the scaffold padding. One
+ * place so a Settings detail page (Diagnostics, For developers, …) is a title
+ * plus content, not a re-typed TopAppBar each time.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SettingsSubScreenScaffold(
+    title: String,
+    onBack: () -> Unit,
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    BackHandler(onBack = onBack)
+    Scaffold(
+        containerColor = AppColors.screenBackground,
+        topBar = {
+            TopAppBar(
+                title = { Text(title) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.action_back),
+                        )
+                    }
+                },
+                colors =
+                    TopAppBarDefaults.topAppBarColors(
+                        containerColor = AppColors.topBarContainer,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+            )
+        },
+        content = content,
+    )
+}
+
 @Composable
 private fun DebugToolsSettingsSection(selfNeedsRestart: Boolean?) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -470,42 +493,17 @@ private fun DebugToolsSettingsSection(selfNeedsRestart: Boolean?) {
     }
 }
 
+// One row into Settings → For developers. The switches behind it are not part of
+// a normal install's vocabulary, and the list keeps growing, so it gets a page
+// (DeveloperSettingsScreen) instead of a tail section here.
 @Composable
-private fun DeveloperSettingsSection() {
-    val settings = LocalSettingsState.current
-    val interactor = LocalSettingsInteractor.current
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        SettingsSectionHeader(stringResource(R.string.settings_developer_section))
-        PreferenceRowSwitch(
-            title = stringResource(R.string.settings_suppress_version_warnings),
-            subtitle = stringResource(R.string.settings_suppress_version_warnings_sub),
-            icon = Icons.Default.Update,
-            index = 0,
-            count = 3,
-            checked = settings.suppressVersionWarnings,
-            onCheckedChange = interactor::setSuppressVersionWarnings,
-        )
-        // Off by default. The bridge ships in release too (the user develops on
-        // release builds) — when on it opens a loopback control port, which the
-        // dashboard surfaces as an info note so it isn't left running unnoticed.
-        PreferenceRowSwitch(
-            title = stringResource(R.string.settings_agent_control),
-            subtitle = stringResource(R.string.settings_agent_control_sub),
-            icon = Icons.Default.Settings,
-            index = 1,
-            count = 3,
-            checked = settings.agentControlEnabled,
-            onCheckedChange = interactor::setAgentControlEnabled,
-        )
-        CanonicalPreferenceSwitch(
-            field = CanonicalToggle.DebugSwitch,
-            title = stringResource(R.string.settings_debug_logging),
-            subtitle = stringResource(R.string.settings_debug_logging_sub),
-            icon = Icons.Default.BugReport,
-            index = 2,
-            count = 3,
-        )
-    }
+private fun DeveloperSettingsSection(onOpen: () -> Unit) {
+    PreferenceRow(
+        title = stringResource(R.string.settings_developer_section),
+        subtitle = stringResource(R.string.settings_developer_sub),
+        icon = Icons.Default.Code,
+        onClick = onOpen,
+    )
 }
 
 @Composable

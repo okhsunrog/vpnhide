@@ -38,10 +38,14 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardRootF
      * The previous value stays visible while a root refresh is in flight.
      */
     val state: StateFlow<DashboardState?> by lazy {
-        combine(value, DiagnosticsCache.presentation) { facts, presentation ->
+        // The developer flags join here rather than inside the cached facts: they
+        // are app-local settings, and a DataStore write invalidates no
+        // observation, so a toggle would otherwise not show until the next
+        // refresh. See [DeveloperFlagsCache].
+        combine(value, DiagnosticsCache.presentation, DeveloperFlagsCache.flags) { facts, presentation, developer ->
             val context = inputs?.context
             if (facts == null || context == null || presentation.lastAttempt == null) return@combine null
-            assembleDashboardState(context, facts.value, presentation)
+            assembleDashboardState(context, facts.value, presentation, developer)
         }.stateIn(ObservationRuntime.scope, SharingStarted.Eagerly, null)
     }
 
@@ -56,6 +60,7 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardRootF
         @Suppress("UNUSED_PARAMETER") request: ObservationRequest,
     ): RootProjection<DashboardRootFacts> {
         val (context, selfNeedsRestart) = requireNotNull(inputs)
+        DeveloperFlagsCache.start(context)
         val rootSnapshot = RootSnapshotCache.getOrLoad()
         return withContext(Dispatchers.IO) {
             RootProjection(
