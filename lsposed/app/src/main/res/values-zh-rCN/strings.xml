@@ -519,8 +519,11 @@
     <string name="settings_agent_control">Agent 控制</string>
     <string name="settings_agent_control_sub">启动本地回环调试桥，供主机上的 MCP 工具通过 adb 使用</string>
     <string name="settings_developer_section">开发者</string>
-    <string name="settings_suppress_version_warnings">隐藏版本与更新日志提示</string>
-    <string name="settings_suppress_version_warnings_sub">比较运行中的 LSPosed 钩子与已安装应用时，忽略 dev 构建后缀，并且不再在每次重新构建后弹出更新日志。仅在运行自己编译的版本时有意义，对正式发行版无影响。</string>
+    <string name="settings_developer_sub">更新日志、版本检查、代理桥接与调试日志</string>
+    <string name="settings_suppress_changelog">不显示更新日志</string>
+    <string name="settings_suppress_changelog_sub">版本变化后首次启动时不再弹出更新内容列表。频繁重新构建应用时很有用。</string>
+    <string name="settings_ignore_version_mismatch">忽略版本不一致</string>
+    <string name="settings_ignore_version_mismatch_sub">隐藏主页上所有关于模块、LSPosed 钩子与应用版本不一致的提示。版本号仍会显示在卡片上。</string>
     <string name="settings_config_section">配置</string>
     <string name="settings_config_backup_title">配置备份</string>
     <string name="settings_config_backup_sub">保存或恢复规范 JSON 配置</string>

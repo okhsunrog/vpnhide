@@ -46,7 +46,9 @@ interface SettingsInteractor {
 
     fun setSettingsHintSeen(value: Boolean)
 
-    fun setSuppressVersionWarnings(value: Boolean)
+    fun setSuppressChangelog(value: Boolean)
+
+    fun setIgnoreVersionMismatch(value: Boolean)
 
     fun setDonatePromptDismissed(value: Boolean)
 
@@ -85,7 +87,9 @@ class RepositorySettingsInteractor(
 
     override fun setSettingsHintSeen(value: Boolean) = launch { repository.setSettingsHintSeen(value) }
 
-    override fun setSuppressVersionWarnings(value: Boolean) = launch { repository.setSuppressVersionWarnings(value) }
+    override fun setSuppressChangelog(value: Boolean) = launch { repository.setSuppressChangelog(value) }
+
+    override fun setIgnoreVersionMismatch(value: Boolean) = launch { repository.setIgnoreVersionMismatch(value) }
 
     override fun setDonatePromptDismissed(value: Boolean) = launch { repository.setDonatePromptDismissed(value) }
 

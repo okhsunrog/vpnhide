@@ -561,9 +561,12 @@
     <string name="settings_debug_section">Debugging</string>
     <string name="settings_agent_control">Agent control</string>
     <string name="settings_agent_control_sub">Start the debug localhost bridge for host MCP tools over adb</string>
-    <string name="settings_developer_section">Developer</string>
-    <string name="settings_suppress_version_warnings">Hide version and changelog notices</string>
-    <string name="settings_suppress_version_warnings_sub">Ignore the dev-build suffix when comparing the running LSPosed hook against the installed app, and don\'t pop the changelog after each rebuild. Only relevant when running your own builds; no effect on release versions.</string>
+    <string name="settings_developer_section">For developers</string>
+    <string name="settings_developer_sub">Changelog, version checks, the agent bridge and debug logging</string>
+    <string name="settings_suppress_changelog">Skip the changelog</string>
+    <string name="settings_suppress_changelog_sub">Don\'t open the list of changes on the first launch after the version changes. Useful when rebuilding the app several times a day.</string>
+    <string name="settings_ignore_version_mismatch">Ignore version mismatches</string>
+    <string name="settings_ignore_version_mismatch_sub">Drop every Dashboard notice about module, LSPosed hook and app versions drifting apart. The versions themselves stay on the cards.</string>
     <string name="settings_config_section">Configuration</string>
     <string name="settings_config_backup_title">Config backup</string>
     <string name="settings_config_backup_sub">Save or restore the canonical JSON config</string>

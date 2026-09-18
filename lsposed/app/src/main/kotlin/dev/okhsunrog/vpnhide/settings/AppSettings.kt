@@ -52,13 +52,21 @@ data class AppSettings(
     /** Whether the user has opened Settings at least once (gates the gear hint). */
     val settingsHintSeen: Boolean = false,
     /**
-     * Suppress the LSPosed running-vs-installed version warning by comparing only
-     * the release base version (ignoring the git-describe dev suffix). Off by
-     * default, so a stale dev build surfaces; a developer who reinstalls the APK
-     * repeatedly without rebooting can flip this to silence the reminder. No
-     * effect on release builds (their versions carry no dev suffix).
+     * Don't open the changelog on the first launch after the version changes.
+     * For someone who reinstalls their own build several times a day the dialog
+     * is pure interruption.
      */
-    val suppressVersionWarnings: Boolean = false,
+    val suppressChangelog: Boolean = false,
+    /**
+     * Drop every version-skew notice from the Dashboard: a module older or newer
+     * than the app, and the LSPosed hook running a different build than the
+     * installed APK. Off by default, because for a normal install each of those
+     * is a real "reflash this / reboot" instruction. A developer whose modules
+     * and APK are deliberately out of step knows that already and only sees
+     * noise, so this hides the lot rather than only the git-describe suffix.
+     * The versions themselves stay on the module cards either way.
+     */
+    val ignoreVersionMismatch: Boolean = false,
     /**
      * The donation prompt on the Dashboard has been acted on — either "Support"
      * or "Hide". Set by both, so the banner is shown until the first deliberate

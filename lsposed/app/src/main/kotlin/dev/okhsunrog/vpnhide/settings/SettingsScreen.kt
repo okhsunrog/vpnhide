@@ -28,8 +28,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.BrightnessMedium
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
@@ -161,6 +161,7 @@ fun SettingsScreen(
     var diagnosticsOpen by rememberSaveable { mutableStateOf(false) }
     var hiddenAppsOpen by rememberSaveable { mutableStateOf(false) }
     var helpOpen by rememberSaveable { mutableStateOf(false) }
+    var developerOpen by rememberSaveable { mutableStateOf(false) }
 
     // A guide link (e.g. from the Hiding tab's help) can ask Settings to open a
     // specific sub-screen; apply it once, then let the host clear the request.
@@ -182,6 +183,10 @@ fun SettingsScreen(
     }
     if (hiddenAppsOpen) {
         HiddenAppsSettingsScreen(onBack = { hiddenAppsOpen = false })
+        return
+    }
+    if (developerOpen) {
+        DeveloperSettingsScreen(onBack = { developerOpen = false })
         return
     }
     if (helpOpen) {
@@ -335,7 +340,7 @@ fun SettingsScreen(
             SuperkeySettingsSection()
             CommunitySettingsSection()
             ResetSettingsSection(selfNeedsRestart = selfNeedsRestart)
-            DeveloperSettingsSection()
+            DeveloperSettingsSection(onOpen = { developerOpen = true })
         }
     }
 }
@@ -470,42 +475,17 @@ private fun DebugToolsSettingsSection(selfNeedsRestart: Boolean?) {
     }
 }
 
+// One row into Settings → For developers. The switches behind it are not part of
+// a normal install's vocabulary, and the list keeps growing, so it gets a page
+// (DeveloperSettingsScreen) instead of a tail section here.
 @Composable
-private fun DeveloperSettingsSection() {
-    val settings = LocalSettingsState.current
-    val interactor = LocalSettingsInteractor.current
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        SettingsSectionHeader(stringResource(R.string.settings_developer_section))
-        PreferenceRowSwitch(
-            title = stringResource(R.string.settings_suppress_version_warnings),
-            subtitle = stringResource(R.string.settings_suppress_version_warnings_sub),
-            icon = Icons.Default.Update,
-            index = 0,
-            count = 3,
-            checked = settings.suppressVersionWarnings,
-            onCheckedChange = interactor::setSuppressVersionWarnings,
-        )
-        // Off by default. The bridge ships in release too (the user develops on
-        // release builds) — when on it opens a loopback control port, which the
-        // dashboard surfaces as an info note so it isn't left running unnoticed.
-        PreferenceRowSwitch(
-            title = stringResource(R.string.settings_agent_control),
-            subtitle = stringResource(R.string.settings_agent_control_sub),
-            icon = Icons.Default.Settings,
-            index = 1,
-            count = 3,
-            checked = settings.agentControlEnabled,
-            onCheckedChange = interactor::setAgentControlEnabled,
-        )
-        CanonicalPreferenceSwitch(
-            field = CanonicalToggle.DebugSwitch,
-            title = stringResource(R.string.settings_debug_logging),
-            subtitle = stringResource(R.string.settings_debug_logging_sub),
-            icon = Icons.Default.BugReport,
-            index = 2,
-            count = 3,
-        )
-    }
+private fun DeveloperSettingsSection(onOpen: () -> Unit) {
+    PreferenceRow(
+        title = stringResource(R.string.settings_developer_section),
+        subtitle = stringResource(R.string.settings_developer_sub),
+        icon = Icons.Default.Code,
+        onClick = onOpen,
+    )
 }
 
 @Composable

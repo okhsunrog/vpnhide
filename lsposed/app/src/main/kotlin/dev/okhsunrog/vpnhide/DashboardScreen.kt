@@ -115,7 +115,7 @@ fun DashboardScreen(
         // suppressed we also skip markChangelogSeen, so turning the toggle back
         // off still shows the changelog for the current version.
         val suppress =
-            SettingsRepository(context.applicationContext).settings.first().suppressVersionWarnings
+            SettingsRepository(context.applicationContext).settings.first().suppressChangelog
         if (!suppress && shouldShowChangelog(context)) {
             val data = withContext(Dispatchers.IO) { loadChangelog(context) }
             // Only raise the dialog when there's something to show — the
