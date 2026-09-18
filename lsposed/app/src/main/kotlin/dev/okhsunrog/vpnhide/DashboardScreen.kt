@@ -236,7 +236,14 @@ fun DashboardScreen(
         // Java, one native backend (docs/storage.md §4.3), and the separate ports feature.
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             JavaBackendCard(loadedState.lsposed, index = 0, count = 3)
-            NativeBackendCard(loadedState.nativeBackend, loadedState.nativeTargetCount, selfNeedsRestart, index = 1, count = 3)
+            NativeBackendCard(
+                loadedState.nativeBackend,
+                loadedState.nativeTargetCount,
+                selfNeedsRestart,
+                partialHooks = loadedState.nativePartialHooks,
+                index = 1,
+                count = 3,
+            )
             ModuleCard(stringResource(R.string.dashboard_ports), "P", loadedState.ports, loadedState.portsTargetCount, index = 2, count = 3)
         }
         loadedState.nativeInstallRecommendation?.let { recommendation ->
@@ -875,9 +882,15 @@ private fun installedVisual(
     state: ModuleState.Installed,
     targetCount: Int,
     selfNeedsRestart: Boolean,
+    // Active, but the backend reports PARTIAL_HOOKS. Colours the dot the same
+    // warning yellow the Statistics card uses, so the two screens agree instead
+    // of one showing green and the other yellow for the same state. Only the
+    // native backend passes true; the other module cards keep the default.
+    partialHooks: Boolean = false,
 ): InstalledVisual {
     val active = state.active
     val broken = state.brokenReason
+    val activePartial = active && partialHooks
     val brokenSubtitleRes =
         when (broken) {
             ModuleBrokenReason.WrongVariant -> R.string.dashboard_kmod_broken_wrong_variant
@@ -895,6 +908,8 @@ private fun installedVisual(
     // sending the user hunting through KernelSU/Magisk's module list (which
     // shows only the generic module name, not the GKI variant — issue #225).
     val variantSuffix = state.gkiVariant?.let { " · $it" }.orEmpty()
+    val partialSuffix =
+        if (activePartial) " · " + stringResource(R.string.dashboard_backend_partial_hooks) else ""
     // `!runtimeCheckable` guards against a false "inactive": a liveness read from a
     // non-root snapshot shell (0600 ctl / iptables) is untrustworthy, so show "status
     // not verified" instead of claiming the module is off.
@@ -903,7 +918,7 @@ private fun installedVisual(
             when {
                 state.pendingReboot -> stringResource(R.string.dashboard_module_installed_reboot_needed)
                 brokenSubtitleRes != null -> stringResource(brokenSubtitleRes)
-                active -> stringResource(R.string.dashboard_active_targets, targetCount) + variantSuffix
+                active -> stringResource(R.string.dashboard_active_targets, targetCount) + variantSuffix + partialSuffix
                 !state.runtimeCheckable -> stringResource(R.string.dashboard_installed_not_verified) + variantSuffix
                 selfNeedsRestart -> stringResource(R.string.dashboard_installed_restart_app)
                 else -> stringResource(R.string.dashboard_installed_inactive) + variantSuffix
@@ -912,6 +927,7 @@ private fun installedVisual(
             when {
                 state.pendingReboot -> StatusColors.warningAccent
                 broken != null -> StatusColors.errorDot
+                activePartial -> StatusColors.warningAccent
                 active -> StatusColors.successDot
                 else -> StatusColors.warningAccent
             },
@@ -919,6 +935,7 @@ private fun installedVisual(
             when {
                 state.pendingReboot -> StatusColors.warningContainer()
                 broken != null -> StatusColors.errorContainer()
+                activePartial -> StatusColors.warningContainer()
                 active -> StatusColors.successContainer()
                 else -> StatusColors.warningContainer()
             },
@@ -1038,6 +1055,7 @@ private fun NativeBackendCard(
     backend: DisplayNativeBackend,
     targetCount: Int,
     selfNeedsRestart: Boolean,
+    partialHooks: Boolean = false,
     index: Int = -1,
     count: Int = 1,
 ) {
@@ -1065,7 +1083,13 @@ private fun NativeBackendCard(
                 NativeBackendId.Zygisk -> R.string.dashboard_backend_zygisk
             },
         )
-    val v = installedVisual(state, targetCount, selfNeedsRestart && backend.id == NativeBackendId.Zygisk)
+    val v =
+        installedVisual(
+            state,
+            targetCount,
+            selfNeedsRestart && backend.id == NativeBackendId.Zygisk,
+            partialHooks = partialHooks,
+        )
     ModuleCardShell(
         name = name,
         badgeText = "N",
