@@ -339,7 +339,10 @@ DataStore named `ui_settings` (`filesDir/datastore/ui_settings.preferences_pb`):
 theme (`dynamic_color`, `amoled`, `contrast`, `seed_color`, `corner_style`,
 `theme_mode`), `animations_enabled`, `haptics_enabled`,
 `full_protection_role_labels`, `background_update_checks`,
-`agent_control_enabled`, `suppress_version_warnings`, `settings_hint_seen`,
+`agent_control_enabled`, the developer switches `suppress_changelog` and
+`ignore_version_mismatch` (both still fall back to `suppress_version_warnings`,
+the single key they were split out of, until each is set on its own),
+`settings_hint_seen`,
 `donate_prompt_dismissed`, `legacy_import_dismissed`, and the update worker's
 `last_notified_update_version`. Nothing here affects hiding: the runtime flags
 (`debug`, `debugSwitch`) and every role live in the canonical JSON. It survives

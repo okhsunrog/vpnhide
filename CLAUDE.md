@@ -68,7 +68,7 @@ Both Rust cdylibs (`zygisk/build.rs`, `crates/checks-jni/build.rs`) pass `-Wl,-z
 
 The picker app runs its full check suite (native probes + the Java VPN-presence checks, each PASS/FAIL with detail) at every cold start and logs every result to logcat under tag `VPNHideTest` — you do **not** need to open the Diagnostics screen to read them. But the app logger (`VpnHideLog`) is gated by the **Debug logging** toggle, which is off by default (stealth-first) and stored as `debugSwitch` in the canonical JSON (`/data/system/vpnhide_config.json`, see `docs/state.md`) — writing it from `adb`/`su` bypasses the app's config coordinator, so don't.
 
-So when you need diagnostics in the logs and Debug logging is off: **stop and ask the user to turn it on** (Settings → Developer → Debug logging). Do not drive the GUI to read check results, and do not try to enable the flag by editing the JSON via su. Once it's on (it persists across launches), capture is: `adb logcat -c` → cold-start the app (`am force-stop` + relaunch — checks run once per process and need an active VPN) → read the `VPNHideTest` / `VpnHide-Startup` lines.
+So when you need diagnostics in the logs and Debug logging is off: **stop and ask the user to turn it on** (Settings → For developers → Debug logging). Do not drive the GUI to read check results, and do not try to enable the flag by editing the JSON via su. Once it's on (it persists across launches), capture is: `adb logcat -c` → cold-start the app (`am force-stop` + relaunch — checks run once per process and need an active VPN) → read the `VPNHideTest` / `VpnHide-Startup` lines.
 
 ## Design notes
 
