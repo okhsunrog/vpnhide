@@ -204,12 +204,18 @@ boot_phase() {
 	( cd "$rfs" && find . | cpio -o -H newc 2>/dev/null | gzip > "$WORK/initramfs.$tag.gz" )
 
 	echo "[run-kpm] $KMI: booting phase '$tag' (args='${args}')…" >&2
+	# virtio-rng-pci: 4.4 has no fast boot-time entropy under TCG (no CPU RNG,
+	# and it predates the kernel's jitter-entropy seeding), so getrandom() blocks
+	# and the boot-time `apk add iproute2` TLS fetch hangs until the 300s timeout.
+	# The RNG device seeds the pool immediately; it is harmless on the newer
+	# kernels that already boot with enough entropy.
 	timeout 300 qemu-system-aarch64 \
 		-machine virt -cpu "$QEMU_CPU" -accel tcg,thread=multi,tb-size=1024 \
 		-smp 4 -m 2G \
 		-kernel "$patched" -initrd "$WORK/initramfs.$tag.gz" \
 		-append "console=ttyAMA0 rodata=off panic=-1 rdinit=/init" \
 		-netdev user,id=n0 -device virtio-net-pci,netdev=n0,romfile= \
+		-device virtio-rng-pci \
 		-display none -no-reboot -serial "file:$log" >/dev/null 2>&1 || true
 	echo "$log"
 }

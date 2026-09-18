@@ -37,7 +37,7 @@ a KernelPatch runtime."*
 
 ## Supported kernels
 
-KPM validates your kernel family at load time. Supported families are 4.9, 4.14,
+KPM validates your kernel family at load time. Supported families are 4.4, 4.9, 4.14,
 4.19, 5.4, 5.10, 5.15, 6.1, 6.6, and 6.12. Other families are refused rather than
 guessed. If the Dashboard shows *"kernel not supported … no validated offset
 table,"* use the [Zygisk backend](zygisk-install.md) instead.

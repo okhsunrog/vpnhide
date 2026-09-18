@@ -1,9 +1,9 @@
-# Image for the KPM harness's LEGACY targets: 4.9 / 4.14 / 4.19 / 5.4 —
+# Image for the KPM harness's LEGACY targets: 4.4 / 4.9 / 4.14 / 4.19 / 5.4 —
 # the kernels the .ko backend can't serve (no GKI, no DDK). Unlike ddk-qemu
 # (per-KMI, DDK clang, kept kernel tree), this publishes ONE runtime image:
 #
 #   debian + qemu/clang for the harness and per-PR KPM build
-#   + 4 virtio Images compiled in a disposable Bootlin-gcc builder stage
+#   + 5 virtio Images compiled in a disposable Bootlin-gcc builder stage
 #   + Alpine minirootfs + KernelPatch tool/runtime
 #
 # No DDK and no kernel tree: the .kpm is relocatable (built per-PR against the
@@ -51,6 +51,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # source in the same layer, retaining only the shared Bootlin toolchain and
 # completed Images for the next step. The final image copies only the Images.
 COPY kmod/test /src/kmod/test
+RUN cd /src && kmod/test/build-source-kernel.sh 4.4 /opt/qemu/legacy/4.4 && \
+    rm -rf /src/kmod/test/.cache/legacy/src/aosp-4.4
 RUN cd /src && kmod/test/build-source-kernel.sh 4.9 /opt/qemu/legacy/4.9 && \
     rm -rf /src/kmod/test/.cache/legacy/src/aosp-4.9
 RUN cd /src && kmod/test/build-source-kernel.sh 4.14 /opt/qemu/legacy/4.14 && \

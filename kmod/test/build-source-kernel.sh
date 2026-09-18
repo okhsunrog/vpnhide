@@ -2,13 +2,15 @@
 # Build a QEMU-bootable, from-source kernel for the KPM harness's pre-GKI /
 # legacy targets — the kernels the `.ko` backend can NOT serve (no GKI, no DDK):
 #
-#   4.9   (AOSP common)     — oldest requested Android family, rt6_info model
+#   4.4   (AOSP common)     — oldest requested Android family (offset-identical
+#                             to 4.9; separate boot proves the loader + build)
+#   4.9   (AOSP common)     — rt6_info IPv6 model
 #   4.14  (AOSP common)     — issue #33; rt6_info IPv6 model
 #   4.19  (AOSP common)     — pre-nexthop, struct fib6_info
 #   5.4   (AOSP common)     — issue #35 (HyperOS) target
 #
 # Unlike build-kernel.sh (GKI built with the per-KMI DDK clang container), all
-# four legacy kernels build with ONE pinned Bootlin aarch64 gcc — the compiler
+# five legacy kernels build with ONE pinned Bootlin aarch64 gcc — the compiler
 # version doesn't affect struct layout (that's source+config), it's just old
 # enough to compile these kernels (a modern gcc/clang trips on -Werror). The
 # config is the branch's Android reference config (`cuttlefish_defconfig` on
@@ -20,14 +22,14 @@
 # (the `.kpm` is relocatable against KernelPatch headers), so unlike the `.ko`
 # harness there is no tree/symvers to keep.
 #
-# Usage:  build-source-kernel.sh <4.9|4.14|4.19|5.4> [outdir]
+# Usage:  build-source-kernel.sh <4.4|4.9|4.14|4.19|5.4> [outdir]
 # Output: <outdir>/Image            (default: .cache/legacy/<ver>/Image)
 #
 # Boot these with `-cpu cortex-a57` (they fault on `-cpu max`'s newer features
 # before the console) and `rodata=off` — run-kpm.sh already does both.
 set -euo pipefail
 
-VER="${1:?usage: build-source-kernel.sh <4.9|4.14|4.19|5.4> [outdir]}"
+VER="${1:?usage: build-source-kernel.sh <4.4|4.9|4.14|4.19|5.4> [outdir]}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CACHE="$HERE/.cache/legacy"
 OUT="${2:-$CACHE/$VER}"
@@ -50,10 +52,11 @@ if [ ! -x "${CROSS}gcc" ]; then
 fi
 
 # --- pinned AOSP source -------------------------------------------------------
-# The old `deprecated/android-*-q` refs are retained by the GitHub AOSP mirror;
-# android11-5.4 comes from the canonical Android Git server. Fetch the named
-# branch shallowly, then require its tip to equal the pinned commit — branch
-# movement cannot silently change the reference source.
+# Most `deprecated/android-*-q` refs are retained by the GitHub AOSP mirror;
+# android11-5.4 and android-4.4-p come from the canonical Android Git server (the
+# mirror can't shallow-fetch 4.4-p). Fetch the named branch shallowly, then
+# require its tip to equal the pinned commit — branch movement cannot silently
+# change the reference source.
 AOSP_MIRROR="https://github.com/aosp-mirror/kernel_common.git"
 AOSP_CANONICAL="https://android.googlesource.com/kernel/common"
 checkout_aosp() {
@@ -61,10 +64,27 @@ checkout_aosp() {
 
 	if ! git -C "$dest" rev-parse --git-dir >/dev/null 2>&1; then
 		echo "[legacy] fetching AOSP common $branch @ $sha…"
+		# A leftover half-initialised dir (git init ran, fetch didn't finish)
+		# would make the rev-parse above pass and the fetch below be skipped,
+		# so start clean. googlesource intermittently short-packs a shallow
+		# fetch of a deprecated branch ("remote did not send all necessary
+		# objects"); it is not deterministic, so retry a few times before
+		# giving up rather than failing the whole legacy-image bake on a flake.
+		rm -rf "$dest"
 		mkdir -p "$dest"
 		git -C "$dest" init -q
 		git -C "$dest" remote add origin "$remote"
-		git -C "$dest" fetch --depth=1 origin "refs/heads/$branch"
+		local attempt
+		for attempt in 1 2 3 4 5; do
+			if git -C "$dest" fetch --depth=1 origin "refs/heads/$branch"; then
+				break
+			fi
+			echo "[legacy] fetch attempt $attempt failed; retrying…" >&2
+			# Drop whatever partial pack landed so the retry starts fresh.
+			rm -rf "$dest/.git/shallow" "$dest"/.git/objects/pack/tmp_* 2>/dev/null || true
+			sleep 3
+			[ "$attempt" = 5 ] && { echo "ERROR: could not fetch $branch after 5 tries" >&2; exit 2; }
+		done
 		git -C "$dest" checkout -q --detach FETCH_HEAD
 	fi
 	if [ "$(git -C "$dest" rev-parse HEAD)" != "$sha" ]; then
@@ -74,6 +94,15 @@ checkout_aosp() {
 }
 
 case "$VER" in
+4.4)
+	SRC="$SRCROOT/aosp-4.4"
+	# The GitHub AOSP mirror fails a shallow fetch of this deprecated branch
+	# ("remote did not send all necessary objects"), so 4.4 uses the canonical
+	# Android Git server, which serves it cleanly.
+	checkout_aosp "$AOSP_CANONICAL" deprecated/android-4.4-p \
+		875c0cc8115381f702b12d41de293807f47cdac9 "$SRC"
+	DEFCONFIG=cuttlefish_defconfig
+	;;
 4.9)
 	SRC="$SRCROOT/aosp-4.9"
 	checkout_aosp "$AOSP_MIRROR" deprecated/android-4.9-q \
@@ -99,7 +128,7 @@ case "$VER" in
 	DEFCONFIG=gki_defconfig
 	;;
 *)
-	echo "ERROR: unknown version '$VER' (expected 4.9 | 4.14 | 4.19 | 5.4)"; exit 2 ;;
+	echo "ERROR: unknown version '$VER' (expected 4.4 | 4.9 | 4.14 | 4.19 | 5.4)"; exit 2 ;;
 esac
 
 cd "$SRC"

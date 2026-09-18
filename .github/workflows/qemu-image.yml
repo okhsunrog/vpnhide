@@ -157,7 +157,7 @@ jobs:
       - id: img
         env:
           REPO: ${{ github.repository }}
-        run: echo "image=ghcr.io/${REPO,,}/kpm-qemu-legacy:aosp-20260810" >> "$GITHUB_OUTPUT"
+        run: echo "image=ghcr.io/${REPO,,}/kpm-qemu-legacy:aosp-20260918" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v7

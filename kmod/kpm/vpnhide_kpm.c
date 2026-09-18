@@ -1755,7 +1755,7 @@ static int raw_usercopy_is_safe(void)
 {
 	uint64_t mmfr1;
 
-	/* 4.9/4.14/4.19 __arch_copy_*_user assembly brackets the copy with
+	/* 4.4/4.9/4.14/4.19 __arch_copy_*_user assembly brackets the copy with
 	 * uaccess_enable_not_uao itself. From 5.x onward that moved into the
 	 * inline raw_copy_*_user wrapper, which may not have a callable symbol. */
 	if ((unsigned int)kver < VPNHIDE_KVER(5, 0, 0))

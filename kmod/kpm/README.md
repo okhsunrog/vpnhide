@@ -50,8 +50,8 @@ kmod/
 The implementation relies on four design rules:
 
 1. **One source + a runtime `kver` offset table** (`kver_offsets.h`) produces
-   one binary for the supported Android kernel families: 4.9, 4.14, 4.19,
-   5.4, 5.10, 5.15, 6.1, 6.6, and 6.12. Other minor families are rejected
+   one binary for the supported Android kernel families: 4.4, 4.9, 4.14,
+   4.19, 5.4, 5.10, 5.15, 6.1, 6.6, and 6.12. Other minor families are rejected
    rather than guessed from a nearby layout.
 2. **Per-call state via `fargs->local.dataN`** keeps before/after callback
    state attached to the invocation even if the task migrates between CPUs.
@@ -60,7 +60,7 @@ The implementation relies on four design rules:
    its argument/register mapping is not stable across tested kernels.
 4. **Prefer the kernel's user-copy wrappers.** If a build inlines those
    wrappers and exposes only the raw architecture routines, the KPM uses the
-   raw routines only on 4.9/4.14/4.19 (where they bracket user access themselves)
+   raw routines only on 4.4/4.9/4.14/4.19 (where they bracket user access themselves)
    or when the kernel reports hardware PAN support.
 
 ## KernelPatch API used
@@ -132,7 +132,7 @@ loads through the vpnhide activator's `boot-load` phase and its runtime
 `kpatch` CLI, while APatch/FolkPatch defers to the service activator and uses
 the saved SuperKey or trusted `su` token when present. Before either load path
 invokes KernelPatch, the activator validates the leading `major.minor` family
-from `uname -r` against 4.9, 4.14, 4.19, 5.4, 5.10, 5.15, 6.1, 6.6, and 6.12.
+from `uname -r` against 4.4, 4.9, 4.14, 4.19, 5.4, 5.10, 5.15, 6.1, 6.6, and 6.12.
 The KPM repeats that check from KernelPatch's numeric `kver` at init, which is
 the authoritative safety boundary; userspace preflight provides an actionable
 `unsupported_kernel` status to the app.
@@ -207,6 +207,7 @@ reference images:
 
 | Reference image | Source/build path |
 |---|---|
+| android9-4.4 | pinned AOSP common `deprecated/android-4.4-p`, Cuttlefish config |
 | android10-4.9 | pinned AOSP common `deprecated/android-4.9-q`, Cuttlefish config |
 | android10-4.14 | pinned AOSP common `deprecated/android-4.14-q`, Cuttlefish config |
 | android10-4.19 | pinned AOSP common `deprecated/android-4.19-q`, Cuttlefish config |
