@@ -21,6 +21,7 @@ import dev.okhsunrog.vpnhide.picker.TargetsSnapshot
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import dev.okhsunrog.vpnhide.settings.SettingsRepository
 import dev.okhsunrog.vpnhide.settings.installedNativeOptionalHooks
+import dev.okhsunrog.vpnhide.settings.nativeBackendStatusError
 import dev.okhsunrog.vpnhide.settings.resolveFilesystemHidingState
 import dev.okhsunrog.vpnhide.startup.StartupTrace
 import kotlinx.coroutines.flow.first
@@ -342,6 +343,13 @@ internal data class DashboardState(
     val nativeInstallRecommendation: NativeInstallRecommendation?,
     val kmodLoadStatus: KmodLoadStatus?,
     val protection: ProtectionCheck,
+    // The native backend loaded but reports PARTIAL_HOOKS (a hook it needed on
+    // this kernel is missing). Structural, straight from the module's status —
+    // the same signal the Statistics card colours by — so the backend card's dot
+    // and Statistics agree instead of one being green and the other yellow. Not
+    // the alarming leak banner (that needs a measurement); this is the plain
+    // "not fully hooked" fact.
+    val nativePartialHooks: Boolean = false,
     val messages: List<DashboardMessage>,
     // Optional native hooks this boot actually installed. Retained so the Detailed
     // diagnostics screen can rebuild the canonical DiagnosticReport (which vectors
@@ -1463,6 +1471,7 @@ private fun DashboardFacts.toDashboardState(
             kernelRecommendation?.takeIf { modules.backends.noneInstalled && !modules.standaloneKpm && !modules.builtinKernelPresent },
         kmodLoadStatus = modules.kmodLoadStatus,
         protection = protection.check,
+        nativePartialHooks = protection.partialHookGap != null,
         messages = messages,
         installedOptionalHooks = protection.installedOptionalHooks,
         legacyImport = legacyImport,
@@ -1534,6 +1543,7 @@ internal suspend fun deriveDashboardRootFacts(
             currentBootId = modules.currentBootId,
         )
     val installedOptionalHooks = installedNativeOptionalHooks(modules.nativeBackend.id, sections, modules.currentBootId)
+    val nativeStatusError = nativeBackendStatusError(modules.nativeBackend.id, sections)
     VpnHideLog.i(TAG, "selfNeedsRestart=$selfNeedsRestart")
     VpnHideLog.i(TAG, "=== Dashboard root facts loaded ===")
     return DashboardRootFacts(
@@ -1545,7 +1555,7 @@ internal suspend fun deriveDashboardRootFacts(
         kernelRecommendation = kernelRecommendation,
         appVersion = appVersion,
         installedOptionalHooks = installedOptionalHooks,
-        partialHookGap = partialHookGap(modules.nativeBackend, installedOptionalHooks),
+        partialHookGap = partialHookGap(modules.nativeBackend, installedOptionalHooks, nativeStatusError),
         legacyImport = parseLegacyConfigCandidate(sections, targetsSnapshot.uidToPkg)?.toPrompt(),
     )
 }

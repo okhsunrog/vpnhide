@@ -572,8 +572,13 @@ private fun protectionIssues(facts: DashboardFacts): List<DashboardIssue> =
         // Only worth saying when a missing hook costs a measurable vector: on
         // kernels that never had the symbol the surface is usually closed by
         // SELinux or a capability check anyway, and alarming there is noise.
+        // Only alarm when a measurement actually shows a leak behind a missing
+        // hook. No report yet (blocked/failed/first boot) means nothing is known
+        // to leak, so stay quiet rather than speculate — fail closed. The
+        // structural "partial" fact still shows on the backend card; this banner
+        // is the "you are detectable, act" layer, which needs evidence.
         protection.partialHookGap
-            ?.takeIf { gap -> protection.report?.let { gap.costsAnyVector(it) } != false }
+            ?.takeIf { gap -> protection.report?.let { gap.costsAnyVector(it) } == true }
             ?.let { add(DashboardIssue.PartialHooks(it.installed, it.expected, it.missing)) }
         addAll(versionMismatchIssues(facts))
         // A vector an active layer OWNS is leaking: the backend should have hidden
