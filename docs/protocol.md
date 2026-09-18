@@ -264,6 +264,13 @@ error <code>
   `kver`, e.g. `0x6019d`); `0x0` for non-kernel backends.
 - `hooks <installed_mask>` — bitset of hooks that *actually* installed, in the
   same id space as a config `hookmask`. Lets the app show "requested vs active".
+  The set a backend *requests* is **per running kernel**, not the whole
+  kernel-hook universe: a hook that is not applicable on this kernel is neither
+  installed nor expected, so fewer bits than the universal mask can still be a
+  healthy `ok` (§5.1). Example: the KPM leaves `socket_bind_interface` to the
+  native `CAP_NET_RAW` gate below 5.3, so a full install there is 10 bits and
+  `error 0x0`, not `partial_hooks`. Readers must judge completeness from the
+  backend's own `error`, not by diffing `hooks` against the universal set.
 - `error <code>` — `0x0` = healthy; non-zero is the single dominant fault code
   (§5.1). At most one `error` line.
 
@@ -390,7 +397,7 @@ of:
 
 | code | name | meaning |
 |---|---|---|
-| `0x0` | `ok` | healthy; every requested, owned hook installed |
+| `0x0` | `ok` | healthy; every hook the backend requested on this kernel installed (the requested set is per-kernel — see the `hooks` field in §4.3) |
 | `0x1` | `unsupported_kver` | no offset table for the running kernel — refused, no hooks |
 | `0x2` | `conflicting_backend` | KPM activation found the `.ko` installed or live and refused before loading/configuring KPM |
 | `0x3` | `symbol_resolution_failed` | a required kallsyms symbol was missing — refused |
