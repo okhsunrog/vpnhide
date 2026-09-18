@@ -177,7 +177,7 @@ jobs:
         run: |
           echo "image=ghcr.io/${REPO,,}/ci:latest" >> "$GITHUB_OUTPUT"
           echo "ddkqemu=ghcr.io/${REPO,,}/ddk-qemu" >> "$GITHUB_OUTPUT"
-          echo "kpmlegacy=ghcr.io/${REPO,,}/kpm-qemu-legacy:aosp-20260810" >> "$GITHUB_OUTPUT"
+          echo "kpmlegacy=ghcr.io/${REPO,,}/kpm-qemu-legacy:aosp-20260918" >> "$GITHUB_OUTPUT"
 
   # Build native probes from the PR checkout once, then feed those exact
   # binaries to every QEMU job. The long-lived QEMU images also carry fallback
@@ -557,8 +557,8 @@ jobs:
           make -C kmod kpm CLANG_DIR="$CLANG_BIN"
           kmod/test/run-kpm.sh "$KMI"
 
-  # Legacy kernels (4.9/4.14/4.19/5.4) — the KPM's whole reason to exist
-  # (the .ko can't serve them). One image holds all four from-source Images;
+  # Legacy kernels (4.4/4.9/4.14/4.19/5.4) — the KPM's whole reason to exist
+  # (the .ko can't serve them). One image holds all five from-source Images;
   # `-cpu cortex-a57` (those kernels fault on `-cpu max`) with software PAN
   # compiled in, so the user/kernel pointer-domain bug class is caught here on
   # the exact cores where it lives.
@@ -570,7 +570,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ver: ["4.9", "4.14", "4.19", "5.4"]
+        ver: ["4.4", "4.9", "4.14", "4.19", "5.4"]
     container:
       image: ${{ needs.setup.outputs.kpmlegacy }}
       credentials:

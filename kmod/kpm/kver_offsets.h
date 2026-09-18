@@ -430,7 +430,14 @@ static const struct vpnhide_offsets vpnhide_off_4_14 = {
 /* 4.9 (AOSP common android-4.9-q cuttlefish_defconfig + QEMU-validated).
  * The route/ioctl ABIs match the 4.14 table, but the older delayed_work layout
  * moves inet6_ifaddr.idev to 184. Keep this separate: using the 4.14 offset
- * makes RTM_GETADDR dereference unrelated state on 4.9. */
+ * makes RTM_GETADDR dereference unrelated state on 4.9.
+ *
+ * Also covers 4.4 (AOSP common android-4.4-p, 4.4.302): every structure and hook
+ * signature the KPM reads is byte-identical to 4.9 (verified against the 4.4-p
+ * tree), and a separate harness run boots a from-source 4.4 Image. The
+ * inet6_ifaddr/delayed_work prefix that pins idev@184 is unchanged from 4.9, and
+ * vfs_getattr still takes two args (the kver<4.11 gate in vpnhide_kpm.c already
+ * covers both). */
 static const struct vpnhide_offsets vpnhide_off_4_9 = {
 	.skb_len = 120,
 	.netdev_name = 0,
@@ -484,8 +491,8 @@ vpnhide_select_offsets(unsigned int kver)
 		return &vpnhide_off_4_19;
 	if (VPNHIDE_KVER_FAMILY(kver, 4, 14))
 		return &vpnhide_off_4_14;
-	if (VPNHIDE_KVER_FAMILY(kver, 4, 9))
-		return &vpnhide_off_4_9;
+	if (VPNHIDE_KVER_FAMILY(kver, 4, 9) || VPNHIDE_KVER_FAMILY(kver, 4, 4))
+		return &vpnhide_off_4_9; /* 4.4 is byte-identical to 4.9, see the table */
 	return 0; /* never guess a layout for an unvalidated minor family */
 }
 

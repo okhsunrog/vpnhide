@@ -116,7 +116,7 @@ is no insmod and no `/proc` dependency — the same control-v2 snapshot used by
 runtime ctl0 is passed via embedded extra-args (`kptools -A`). The A/B is done across **two boots**
 (no target → app UID 10000 sees `vpn0`; target=10000 → it doesn't), driven by
 `init-kpm.sh`. The 10 enumeration hooks, socket-bind state checks, and optional
-sysfs/proc-sys stat/open/readdir checks run with no panic across the CI reference set — 4.9, 4.14, 4.19, 5.4, 5.10,
+sysfs/proc-sys stat/open/readdir checks run with no panic across the CI reference set — 4.4, 4.9, 4.14, 4.19, 5.4, 5.10,
 5.15, 6.1, 6.6, 6.12 (the modern GKI ones via
 the DDK `Image`, the legacy AOSP ones via a from-source `Image` passed with
 `VPNHIDE_QEMU_IMAGE=`). Legacy kernels that natively require `CAP_NET_RAW` for
@@ -133,7 +133,7 @@ kmod/test/run-kpm.sh android12-5.10
 Two knobs the KPM harness needs that the `.ko` one doesn't:
 
 - **`VPNHIDE_QEMU_CPU`** — defaults to `max`, but kernels older than 5.10
-  (4.9/4.14/4.19/5.4) fault on `max`'s newer CPU features before the console comes
+  (4.4/4.9/4.14/4.19/5.4) fault on `max`'s newer CPU features before the console comes
   up, so they need `VPNHIDE_QEMU_CPU=cortex-a57`. KernelPatch also writes its
   restore region into kernel text, so the boot args carry `rodata=off` (some
   from-source layouts otherwise put that page read-only → early abort).

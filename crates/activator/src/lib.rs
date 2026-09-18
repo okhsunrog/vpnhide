@@ -36,8 +36,10 @@ const PORTS_LOAD_STATUS: &str = "/data/adb/vpnhide_ports/load_status";
 const PORTS_LOAD_LOG: &str = "/data/adb/vpnhide_ports/load_log";
 const KPM_CTL_LOCK: &str = "/data/adb/vpnhide_kpm/ctl.lock";
 const KPM_TRUNCATION_MARKER: &str = "# vpnhide truncated";
-pub const KPM_SUPPORTED_KERNEL_FAMILIES: &str = "4.9, 4.14, 4.19, 5.4, 5.10, 5.15, 6.1, 6.6, 6.12";
+pub const KPM_SUPPORTED_KERNEL_FAMILIES: &str =
+    "4.4, 4.9, 4.14, 4.19, 5.4, 5.10, 5.15, 6.1, 6.6, 6.12";
 const KPM_SUPPORTED_KERNEL_PAIRS: &[(u32, u32)] = &[
+    (4, 4),
     (4, 9),
     (4, 14),
     (4, 19),
