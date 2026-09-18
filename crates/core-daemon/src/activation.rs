@@ -18,13 +18,33 @@
 use std::path::{Path, PathBuf};
 
 use vpnhide_activator::{
-    BUILTIN_BACKEND_ID, NativeHookFamily, PackageUidMap, deliver_kernel_config, parse_canonical,
-    project_native_for_family, project_native_with_resolver_for_family,
+    BUILTIN_BACKEND_ID, KMOD_BACKEND_ID, NativeHookFamily, PackageUidMap, deliver_kernel_config,
+    parse_canonical, project_native_for_family, project_native_with_resolver_for_family,
 };
-use vpnhide_core_rpc::CanonicalConfig;
+use vpnhide_core_rpc::{CanonicalConfig, NativeBackend};
 use vpnhide_protocol::{Status, parse_status_fields};
 
 use crate::config_file;
+
+/// The activator's hook-mask family for a backend (projection depends on it).
+fn family_of(backend: NativeBackend) -> NativeHookFamily {
+    match backend {
+        NativeBackend::Kmod => NativeHookFamily::Kmod,
+        NativeBackend::Builtin => NativeHookFamily::Builtin,
+        NativeBackend::Kpm => NativeHookFamily::Kpm,
+        NativeBackend::Zygisk => NativeHookFamily::Zygisk,
+    }
+}
+
+/// The kernel control-node backend id for a backend, or `None` for families that do not
+/// deliver through `/proc/vpnhide_ctl` (KPM has its own CLI, Zygisk uses `targets.txt`).
+fn kernel_backend_id(backend: NativeBackend) -> Option<u32> {
+    match backend {
+        NativeBackend::Builtin => Some(BUILTIN_BACKEND_ID),
+        NativeBackend::Kmod => Some(KMOD_BACKEND_ID),
+        NativeBackend::Kpm | NativeBackend::Zygisk => None,
+    }
+}
 
 /// Env override for the kernel control node. **No default** — unset means "do not write".
 pub const KMOD_CTL_ENV: &str = "VPNHIDE_KMOD_CTL";
@@ -38,31 +58,31 @@ pub fn kmod_ctl_path_from_env() -> Option<PathBuf> {
     }
 }
 
-/// Project a config into the built-in family's control-v2 wire, resolving package uids from
-/// the live PackageManager. Device-only (needs `pm`); host tests use the resolver variant.
-pub fn project_builtin_wire(config: &CanonicalConfig) -> Result<String, String> {
+/// Project a config into a backend family's control-v2 wire, resolving package uids from the
+/// live PackageManager. Device-only (needs `pm`); host tests use the resolver variant.
+pub fn project_native_wire(config: &CanonicalConfig, backend: NativeBackend) -> Result<String, String> {
     let json = config_file::to_json_string(config);
-    project_native_for_family(&json, NativeHookFamily::Builtin).map_err(|e| e.to_string())
+    project_native_for_family(&json, family_of(backend)).map_err(|e| e.to_string())
 }
 
 /// Project with an explicit uid resolver — deterministic and PackageManager-free, for tests.
-pub fn project_builtin_wire_with_resolver(
+pub fn project_native_wire_with_resolver(
     config: &CanonicalConfig,
+    backend: NativeBackend,
     resolver: &PackageUidMap,
 ) -> Result<String, String> {
     let json = config_file::to_json_string(config);
     let cfg = parse_canonical(&json).map_err(|e| e.to_string())?;
-    Ok(project_native_with_resolver_for_family(
-        &cfg,
-        resolver,
-        NativeHookFamily::Builtin,
-    ))
+    Ok(project_native_with_resolver_for_family(&cfg, resolver, family_of(backend)))
 }
 
-/// Deliver a control-v2 `wire` to the built-in control node at `path`, refusing unless the
-/// node reports the built-in backend (never configure a foreign owner).
-pub fn deliver_builtin(path: &Path, wire: &str) -> Result<(), String> {
-    deliver_kernel_config(path, BUILTIN_BACKEND_ID, wire).map_err(|e| e.to_string())
+/// Deliver a control-v2 `wire` to the kernel control node at `path` for `backend`, refusing
+/// unless the node reports that backend (never configure a foreign owner). Errors for a
+/// backend that does not deliver through the kernel node (KPM/Zygisk).
+pub fn deliver_native(path: &Path, backend: NativeBackend, wire: &str) -> Result<(), String> {
+    let expected = kernel_backend_id(backend)
+        .ok_or_else(|| format!("{backend:?} does not deliver via the kernel control node"))?;
+    deliver_kernel_config(path, expected, wire).map_err(|e| e.to_string())
 }
 
 /// Read the backend's telemetry-v1 **status** (backend id, kernel version, installed-hook
@@ -106,7 +126,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let wire = project_builtin_wire_with_resolver(&config, &resolver).expect("projects");
+        let wire = project_native_wire_with_resolver(&config, NativeBackend::Builtin, &resolver).expect("projects");
         // The wire is a control-v2 config snapshot; the resolved uid appears as bare hex
         // (10234 == 0x27fa), per the protocol's control-side numeric rule.
         assert!(wire.contains("27fa"), "projected wire must target the resolved uid: {wire}");
@@ -115,7 +135,7 @@ mod tests {
     #[test]
     fn empty_config_projects_without_targets() {
         let resolver = PackageUidMap::default();
-        let wire = project_builtin_wire_with_resolver(&CanonicalConfig::default(), &resolver)
+        let wire = project_native_wire_with_resolver(&CanonicalConfig::default(), NativeBackend::Builtin, &resolver)
             .expect("projects");
         assert!(wire.contains("config"), "still a valid config snapshot: {wire}");
     }

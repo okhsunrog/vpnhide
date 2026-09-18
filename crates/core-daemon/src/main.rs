@@ -12,8 +12,8 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use vpnhide_core_daemon::activation;
 use vpnhide_core_daemon::config_file::{self, config_path_from_env};
+use vpnhide_core_daemon::{activation, backend};
 use vpnhide_core_daemon::{observe, serve, CoreClient, CoreState, Publisher};
 use vpnhide_core_rpc::StateSnapshot;
 
@@ -43,7 +43,8 @@ async fn main() {
     run(&path).await;
 }
 
-/// Read-only: project a config file to the built-in control-v2 wire and print it.
+/// Read-only: detect the active native backend, project a config file to *its* control-v2
+/// wire, and print it — the centralized flow (detect → project for the detected family).
 fn project(config_arg: Option<String>) {
     let path = config_arg.map(std::path::PathBuf::from).unwrap_or_else(config_path_from_env);
     let config = match config_file::read(&path) {
@@ -57,7 +58,12 @@ fn project(config_arg: Option<String>) {
             std::process::exit(1);
         }
     };
-    match activation::project_builtin_wire(&config) {
+    let observed = backend::detect(Path::new(DEFAULT_CTL), Path::new(backend::MODULES_ROOT));
+    let Some(active) = observed.active else {
+        eprintln!("project: no active native backend at {DEFAULT_CTL}");
+        std::process::exit(1);
+    };
+    match activation::project_native_wire(&config, active) {
         Ok(wire) => print!("{wire}"),
         Err(e) => {
             eprintln!("project: {e}");
@@ -66,7 +72,8 @@ fn project(config_arg: Option<String>) {
     }
 }
 
-/// Read-only: read a kernel control node's telemetry-v1 status and print it.
+/// Read-only: read a kernel control node's telemetry-v1 status and print it, plus the
+/// detected native-backend identity (active + installed).
 fn status(ctl: &str) {
     match activation::read_status(Path::new(ctl)) {
         Ok(s) => println!(
@@ -78,6 +85,8 @@ fn status(ctl: &str) {
             std::process::exit(1);
         }
     }
+    let observed = backend::detect(Path::new(ctl), Path::new(backend::MODULES_ROOT));
+    println!("active={:?} installed={:?}", observed.active, observed.installed);
 }
 
 async fn run(path: &str) {
@@ -111,11 +120,19 @@ async fn run(path: &str) {
             std::process::exit(1);
         }
     };
+    // Detect the native backend once at startup and publish it (§4): the app reads the active
+    // backend from the replica instead of joining per-backend status files. Read-only — safe
+    // against the real control node even when native delivery is disabled. A later refresh
+    // trigger (module change / boot) can re-detect; identity changes rarely, not per-tick.
+    let observed_backend = backend::detect(Path::new(DEFAULT_CTL), Path::new(backend::MODULES_ROOT));
+    state.publisher.update(|snapshot| snapshot.backend = observed_backend.clone());
+
     eprintln!(
-        "core: epoch={epoch} serving on {path} config={} ({}) native_ctl={} (ctrl-c to stop)",
+        "core: epoch={epoch} serving on {path} config={} ({}) native_ctl={} backend={:?} (ctrl-c to stop)",
         config_path.display(),
         if state.has_config() { "loaded" } else { "none" },
         kmod_ctl_path.as_ref().map_or_else(|| "disabled".to_string(), |p| p.display().to_string()),
+        observed_backend.active,
     );
 
     // The root observation loop feeds real VPN-presence into the published state. Failing to
@@ -144,13 +161,15 @@ async fn dump(path: &str) {
     }
     match client.current().await {
         Ok(p) => println!(
-            "epoch={} revision={} config_present={} apps={} observed={} vpn=[{}]",
+            "epoch={} revision={} config_present={} apps={} observed={} vpn=[{}] backend={:?} installed={:?}",
             p.epoch,
             p.revision,
             p.snapshot.config.is_some(),
             p.snapshot.config.as_ref().map_or(0, |c| c.apps.len()),
             p.snapshot.routing.observed,
             p.snapshot.routing.vpn_interfaces.join(","),
+            p.snapshot.backend.active,
+            p.snapshot.backend.installed,
         ),
         Err(e) => {
             eprintln!("dump: read failed: {e}");

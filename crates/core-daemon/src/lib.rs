@@ -4,6 +4,7 @@
 
 pub mod client;
 pub mod activation;
+pub mod backend;
 pub mod config_edit;
 pub mod config_file;
 pub mod listener;
