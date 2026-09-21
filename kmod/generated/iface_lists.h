@@ -69,6 +69,15 @@ static inline int vpnhide_iface_is_vpn(const char *name)
 {
 	if (!name || !name[0])
 		return 0;
+	/* not a VPN: ipip fallback device tunl0 — matches the `tun` rule but is not a VPN */
+	if (vpnhide_iface_starts_with_ci(name, "tunl"))
+		return 0;
+	/* not a VPN: ip_gre fallback device gre0 — matches the `gre` rule but is not a VPN */
+	if (vpnhide_iface_equals_ci(name, "gre0"))
+		return 0;
+	/* not a VPN: ip_gre L2 fallback device gretap0 — matches the `gre` rule but is not a VPN */
+	if (vpnhide_iface_equals_ci(name, "gretap0"))
+		return 0;
 	/* OpenVPN, WireGuard userspace, Tailscale, generic tunneling */
 	if (vpnhide_iface_starts_with_ci(name, "tun"))
 		return 1;

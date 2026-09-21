@@ -56,6 +56,18 @@ pub fn matches_vpn(name: &[u8]) -> bool {
     if name.is_empty() {
         return false;
     }
+    // not a VPN: ipip fallback device tunl0 — matches the `tun` rule but is not a VPN
+    if starts_with_ci(name, b"tunl") {
+        return false;
+    }
+    // not a VPN: ip_gre fallback device gre0 — matches the `gre` rule but is not a VPN
+    if equals_ci(name, b"gre0") {
+        return false;
+    }
+    // not a VPN: ip_gre L2 fallback device gretap0 — matches the `gre` rule but is not a VPN
+    if equals_ci(name, b"gretap0") {
+        return false;
+    }
     // OpenVPN, WireGuard userspace, Tailscale, generic tunneling
     if starts_with_ci(name, b"tun") {
         return true;
@@ -133,7 +145,7 @@ mod tests {
         assert!(matches_vpn(b"xfrm0"), "matches_vpn('xfrm0')");
         assert!(matches_vpn(b"utun3"), "matches_vpn('utun3')");
         assert!(matches_vpn(b"l2tp0"), "matches_vpn('l2tp0')");
-        assert!(matches_vpn(b"gre0"), "matches_vpn('gre0')");
+        assert!(matches_vpn(b"gre1"), "matches_vpn('gre1')");
         assert!(matches_vpn(b"tailscale0"), "matches_vpn('tailscale0')");
         assert!(matches_vpn(b"ztyqb6mebi"), "matches_vpn('ztyqb6mebi')");
         assert!(matches_vpn(b"zt0"), "matches_vpn('zt0')");
@@ -159,6 +171,14 @@ mod tests {
         assert!(!matches_vpn(b"dummy0"), "matches_vpn('dummy0')");
         assert!(!matches_vpn(b"bnep0"), "matches_vpn('bnep0')");
         assert!(!matches_vpn(b"rndis0"), "matches_vpn('rndis0')");
+        assert!(!matches_vpn(b"tunl0"), "matches_vpn('tunl0')");
+        assert!(!matches_vpn(b"gre0"), "matches_vpn('gre0')");
+        assert!(!matches_vpn(b"gretap0"), "matches_vpn('gretap0')");
+        assert!(matches_vpn(b"gretap1"), "matches_vpn('gretap1')");
+        assert!(!matches_vpn(b"sit0"), "matches_vpn('sit0')");
+        assert!(!matches_vpn(b"ip6tnl0"), "matches_vpn('ip6tnl0')");
+        assert!(!matches_vpn(b"ip6gre0"), "matches_vpn('ip6gre0')");
+        assert!(!matches_vpn(b"erspan0"), "matches_vpn('erspan0')");
         assert!(matches_vpn(b"if33"), "matches_vpn('if33')");
         assert!(matches_vpn(b"if0"), "matches_vpn('if0')");
         assert!(matches_vpn(b"if99"), "matches_vpn('if99')");
@@ -167,7 +187,7 @@ mod tests {
         assert!(!matches_vpn(b"if"), "matches_vpn('if')");
         assert!(!matches_vpn(b"if_inet6"), "matches_vpn('if_inet6')");
         assert!(!matches_vpn(b""), "matches_vpn('')");
-        assert!(matches_vpn(b"tunl"), "matches_vpn('tunl')");
+        assert!(matches_vpn(b"tunp"), "matches_vpn('tunp')");
         assert!(!matches_vpn(b"atun0"), "matches_vpn('atun0')");
         assert!(matches_vpn(b"VPN"), "matches_vpn('VPN')");
     }
