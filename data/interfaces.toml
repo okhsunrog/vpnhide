@@ -1,6 +1,8 @@
 # Single source of truth for VPN-like network interface name patterns.
-# A name matching any rule below is treated as a tunnel and hidden from
-# target apps (kmod) / from the calling process (zygisk + lsposed).
+# A name matching any [[vpn]] rule below is treated as a tunnel and hidden
+# from target apps (kmod) / from the calling process (zygisk + lsposed),
+# UNLESS it also matches an [[exclude]] rule (checked first) — those are
+# standard non-VPN kernel netdevs such as the ipip/gre fallback devices.
 #
 # Read at codegen time by scripts/codegen-interfaces.py, which renders
 # four matchers (kmod C, zygisk Rust, lsposed-native Rust, lsposed
@@ -81,6 +83,27 @@ Does NOT match `ifb<N>` — those are kernel intermediate-functional-block \
 traffic-shaping ifaces (different shape: `if` + letter, not + digit)."""
 
 
+# ── Exclusions ────────────────────────────────────────────────────────
+# Checked BEFORE the [[vpn]] rules above: a name matching any exclusion
+# is treated as NOT a VPN, even if a [[vpn]] rule would otherwise match
+# it. This is for standard kernel netdevs that the kernel auto-creates
+# (index 0, usually DOWN, no traffic) once a tunnel module loads — they
+# are not user VPNs, and hiding them (or denying binds to them) is both
+# wrong and a fingerprint. Same match grammar as [[vpn]].
+
+[[exclude]]
+match = { prefix = "tunl" }
+note = "ipip fallback device tunl0 — matches the `tun` rule but is not a VPN"
+
+[[exclude]]
+match = { exact = "gre0" }
+note = "ip_gre fallback device gre0 — matches the `gre` rule but is not a VPN"
+
+[[exclude]]
+match = { exact = "gretap0" }
+note = "ip_gre L2 fallback device gretap0 — matches the `gre` rule but is not a VPN"
+
+
 # ── Test vectors ──────────────────────────────────────────────────────
 # Array of {name, is_vpn} fixtures. Codegen renders these into per-
 # language unit tests so all four matchers stay in lockstep.
@@ -130,7 +153,7 @@ name = "l2tp0"
 is_vpn = true
 
 [[test]]
-name = "gre0"
+name = "gre1"         # user GRE tunnel — still hidden (only gre0 is excluded)
 is_vpn = true
 
 [[test]]
@@ -239,6 +262,43 @@ is_vpn = false
 name = "rndis0"
 is_vpn = false
 
+# Standard kernel tunnel fallback devices (auto-created by the ipip / gre /
+# sit modules at index 0, usually DOWN, no traffic) — NOT user VPNs. Must be
+# excluded even when they share a prefix with a [[vpn]] rule (tunl0 vs `tun`,
+# gre0/gretap0 vs `gre`). See the [[exclude]] section above.
+
+[[test]]
+name = "tunl0"        # ipip fallback — excluded despite the `tun` prefix
+is_vpn = false
+
+[[test]]
+name = "gre0"         # ip_gre fallback — excluded despite the `gre` prefix
+is_vpn = false
+
+[[test]]
+name = "gretap0"      # ip_gre L2 fallback — excluded despite the `gre` prefix
+is_vpn = false
+
+[[test]]
+name = "gretap1"      # user GRE tap tunnel — still hidden (only gretap0 excluded)
+is_vpn = true
+
+[[test]]
+name = "sit0"         # sit fallback — no [[vpn]] rule matches it anyway
+is_vpn = false
+
+[[test]]
+name = "ip6tnl0"      # ip6_tunnel fallback — no [[vpn]] rule matches it anyway
+is_vpn = false
+
+[[test]]
+name = "ip6gre0"      # ip6_gre fallback — starts with `ip6`, not `gre`
+is_vpn = false
+
+[[test]]
+name = "erspan0"      # erspan fallback — no [[vpn]] rule matches it anyway
+is_vpn = false
+
 # The renamed-tun trick from issue #86 — caught by the
 # `if` + digits rule above.
 
@@ -282,7 +342,7 @@ name = ""             # empty
 is_vpn = false
 
 [[test]]
-name = "tunl"         # 'tun' prefix matches even with non-digit suffix
+name = "tunp"         # 'tun' prefix matches even with non-digit suffix
 is_vpn = true
 
 [[test]]

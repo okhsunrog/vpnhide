@@ -7,6 +7,12 @@ internal object IfaceLists {
     fun isVpnIface(name: String): Boolean {
         if (name.isEmpty()) return false
         val n = name.lowercase()
+        // not a VPN: ipip fallback device tunl0 — matches the `tun` rule but is not a VPN
+        if (n.startsWith("tunl")) return false
+        // not a VPN: ip_gre fallback device gre0 — matches the `gre` rule but is not a VPN
+        if (n == "gre0") return false
+        // not a VPN: ip_gre L2 fallback device gretap0 — matches the `gre` rule but is not a VPN
+        if (n == "gretap0") return false
         // OpenVPN, WireGuard userspace, Tailscale, generic tunneling
         if (n.startsWith("tun")) return true
         // OpenVPN bridged

@@ -121,15 +121,19 @@ def parse_test(entry: dict[str, Any]) -> TestVector:
     return TestVector(name=name, is_vpn=bool(entry["is_vpn"]))
 
 
-def load() -> tuple[list[Rule], list[TestVector]]:
+def load() -> tuple[list[Rule], list[Rule], list[TestVector]]:
     with TOML_PATH.open("rb") as f:
         data = tomllib.load(f)
     raw_rules = data.get("vpn") or []
     if not isinstance(raw_rules, list) or not raw_rules:
         raise SystemExit(f"{TOML_PATH}: missing or empty [[vpn]] table")
     rules = [parse_rule(e) for e in raw_rules]
+    raw_excludes = data.get("exclude") or []
+    if not isinstance(raw_excludes, list):
+        raise SystemExit(f"{TOML_PATH}: [[exclude]] must be an array of tables")
+    excludes = [parse_rule(e) for e in raw_excludes]
     tests = [parse_test(e) for e in (data.get("test") or [])]
-    return rules, tests
+    return rules, excludes, tests
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +263,7 @@ static inline int vpnhide_iface_contains_ci(const char *name, const char *needle
 """
 
 
-def emit_kmod(rules: list[Rule]) -> str:
+def emit_kmod(rules: list[Rule], excludes: list[Rule]) -> str:
     """Render an inline header for the kernel module.
 
     Header is dual-target: builds in kernel (default) AND in userspace
@@ -287,6 +291,14 @@ def emit_kmod(rules: list[Rule]) -> str:
         "prefix_digits": "vpnhide_iface_starts_with_then_digits_ci",
         "contains": "vpnhide_iface_contains_ci",
     }
+    # Exclusions run first: standard non-VPN kernel devices (e.g. the ipip/gre
+    # fallback netdevs tunl0/gre0/gretap0) that would otherwise match a [[vpn]]
+    # rule below. A hit here means "definitely not a VPN" — return early.
+    for r in excludes:
+        if r.note:
+            lines.append(f"\t/* not a VPN: {r.note} */")
+        lines.append(f"\tif ({fn_for_kind[r.kind]}(name, {c_str_lit(r.needle)}))")
+        lines.append("\t\treturn 0;")
     for r in rules:
         if r.note:
             lines.append(f"\t/* {r.note} */")
@@ -356,7 +368,16 @@ def emit_kmod_test(tests: list[TestVector]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def emit_rust(rules: list[Rule], tests: list[TestVector]) -> str:
+def _rust_fn(kind: str) -> str:
+    return {
+        "exact": "equals_ci",
+        "prefix": "starts_with_ci",
+        "prefix_digits": "starts_with_then_digits_ci",
+        "contains": "contains_ci",
+    }[kind]
+
+
+def emit_rust(rules: list[Rule], excludes: list[Rule], tests: list[TestVector]) -> str:
     lines: list[str] = []
     lines.append(f"// {GENERATED_HEADER_LINE}")
     lines.append("")
@@ -416,18 +437,18 @@ def emit_rust(rules: list[Rule], tests: list[TestVector]) -> str:
     lines.append("    if name.is_empty() {")
     lines.append("        return false;")
     lines.append("    }")
+    # Exclusions run first: standard non-VPN kernel devices (tunl0/gre0/gretap0)
+    # that would otherwise match a rule below. A hit means "not a VPN".
+    for r in excludes:
+        if r.note:
+            lines.append(f"    // not a VPN: {r.note}")
+        lines.append(f"    if {_rust_fn(r.kind)}(name, {rust_byte_lit(r.needle)}) {{")
+        lines.append("        return false;")
+        lines.append("    }")
     for r in rules:
         if r.note:
             lines.append(f"    // {r.note}")
-        if r.kind == "exact":
-            fn = "equals_ci"
-        elif r.kind == "prefix":
-            fn = "starts_with_ci"
-        elif r.kind == "prefix_digits":
-            fn = "starts_with_then_digits_ci"
-        elif r.kind == "contains":
-            fn = "contains_ci"
-        lines.append(f"    if {fn}(name, {rust_byte_lit(r.needle)}) {{")
+        lines.append(f"    if {_rust_fn(r.kind)}(name, {rust_byte_lit(r.needle)}) {{")
         lines.append("        return true;")
         lines.append("    }")
     lines.append("    false")
@@ -463,7 +484,24 @@ def emit_rust(rules: list[Rule], tests: list[TestVector]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def emit_kotlin(rules: list[Rule]) -> str:
+def _kt_cond(r: Rule) -> str:
+    if r.kind == "exact":
+        return f"n == {kt_str_lit(r.needle)}"
+    if r.kind == "prefix":
+        return f"n.startsWith({kt_str_lit(r.needle)})"
+    if r.kind == "prefix_digits":
+        lit = kt_str_lit(r.needle)
+        return (
+            f"n.startsWith({lit}) && "
+            f"n.length > {len(r.needle)} && "
+            f"n.substring({len(r.needle)}).all {{ it.isDigit() }}"
+        )
+    if r.kind == "contains":
+        return f"n.contains({kt_str_lit(r.needle)})"
+    raise SystemExit(f"unhandled rule kind {r.kind!r}")
+
+
+def emit_kotlin(rules: list[Rule], excludes: list[Rule]) -> str:
     lines: list[str] = []
     lines.append(f"// {GENERATED_HEADER_LINE}")
     lines.append("")
@@ -474,23 +512,16 @@ def emit_kotlin(rules: list[Rule]) -> str:
     lines.append("    fun isVpnIface(name: String): Boolean {")
     lines.append("        if (name.isEmpty()) return false")
     lines.append("        val n = name.lowercase()")
+    # Exclusions run first: standard non-VPN kernel devices (tunl0/gre0/gretap0)
+    # that would otherwise match a rule below. A hit means "not a VPN".
+    for r in excludes:
+        if r.note:
+            lines.append(f"        // not a VPN: {r.note}")
+        lines.append(f"        if ({_kt_cond(r)}) return false")
     for r in rules:
         if r.note:
             lines.append(f"        // {r.note}")
-        if r.kind == "exact":
-            cond = f"n == {kt_str_lit(r.needle)}"
-        elif r.kind == "prefix":
-            cond = f"n.startsWith({kt_str_lit(r.needle)})"
-        elif r.kind == "prefix_digits":
-            lit = kt_str_lit(r.needle)
-            cond = (
-                f"n.startsWith({lit}) && "
-                f"n.length > {len(r.needle)} && "
-                f"n.substring({len(r.needle)}).all {{ it.isDigit() }}"
-            )
-        elif r.kind == "contains":
-            cond = f"n.contains({kt_str_lit(r.needle)})"
-        lines.append(f"        if ({cond}) return true")
+        lines.append(f"        if ({_kt_cond(r)}) return true")
     lines.append("        return false")
     lines.append("    }")
     lines.append("}")
@@ -528,15 +559,15 @@ def emit_kotlin_test(tests: list[TestVector]) -> str:
 
 
 def main() -> int:
-    rules, tests = load()
-    rust_body = emit_rust(rules, tests)
+    rules, excludes, tests = load()
+    rust_body = emit_rust(rules, excludes, tests)
     return emit_outputs(
         {
-            OUT_KMOD: emit_kmod(rules),
+            OUT_KMOD: emit_kmod(rules, excludes),
             OUT_KMOD_TEST: emit_kmod_test(tests),
             OUT_ZYGISK: rust_body,
             OUT_LSP_NATIVE: rust_body,
-            OUT_LSP_KT: emit_kotlin(rules),
+            OUT_LSP_KT: emit_kotlin(rules, excludes),
             OUT_LSP_KT_TEST: emit_kotlin_test(tests),
         }
     )

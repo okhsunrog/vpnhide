@@ -37,7 +37,7 @@ int main(void)
 	check("xfrm0", true);
 	check("utun3", true);
 	check("l2tp0", true);
-	check("gre0", true);
+	check("gre1", true);
 	check("tailscale0", true);
 	check("ztyqb6mebi", true);
 	check("zt0", true);
@@ -63,6 +63,14 @@ int main(void)
 	check("dummy0", false);
 	check("bnep0", false);
 	check("rndis0", false);
+	check("tunl0", false);
+	check("gre0", false);
+	check("gretap0", false);
+	check("gretap1", true);
+	check("sit0", false);
+	check("ip6tnl0", false);
+	check("ip6gre0", false);
+	check("erspan0", false);
 	check("if33", true);
 	check("if0", true);
 	check("if99", true);
@@ -71,7 +79,7 @@ int main(void)
 	check("if", false);
 	check("if_inet6", false);
 	check("", false);
-	check("tunl", true);
+	check("tunp", true);
 	check("atun0", false);
 	check("VPN", true);
 
@@ -79,6 +87,6 @@ int main(void)
 		fprintf(stderr, "%d test(s) failed\n", failures);
 		return 1;
 	}
-	printf("OK: 48 vectors passed\n");
+	printf("OK: 56 vectors passed\n");
 	return 0;
 }
