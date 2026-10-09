@@ -21,7 +21,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.StatusBanner
 import dev.okhsunrog.vpnhide.StatusColors
@@ -94,9 +94,9 @@ private object CaptureSession {
 @Composable
 fun StatisticsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val state by StatisticsCache.state.collectAsState()
-    val loadError by StatisticsCache.error.collectAsState()
-    val installedApps by AppListCache.apps.collectAsState()
+    val state by StatisticsCache.state.collectAsStateWithLifecycle()
+    val loadError by StatisticsCache.error.collectAsStateWithLifecycle()
+    val installedApps by AppListCache.apps.collectAsStateWithLifecycle()
     var detailApp by remember { mutableStateOf<AppProbeStats?>(null) }
     // Backed by the process-scoped CaptureSession so the session survives an
     // Activity recreation (rotation / day-night / resize). frozenCapture being

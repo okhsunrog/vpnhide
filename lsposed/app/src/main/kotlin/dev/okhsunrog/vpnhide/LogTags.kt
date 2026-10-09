@@ -1,12 +1,11 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.debug.LogcatRecorder
 import dev.okhsunrog.vpnhide.hook.HookLog
 
 /**
  * Single registry of the logcat tags this project emits, so call sites, the
  * [HookLog] system_server sink and the debug-capture logcat filter
- * ([LogcatRecorder]) all agree on one spelling instead of re-typing string
+ * (debug.LogcatRecorder) all agree on one spelling instead of re-typing string
  * literals. Native-backend tags (kmod / ports / zygisk / shadowhook) are listed
  * too — the app never logs under them, but the bundle filter needs them.
  */

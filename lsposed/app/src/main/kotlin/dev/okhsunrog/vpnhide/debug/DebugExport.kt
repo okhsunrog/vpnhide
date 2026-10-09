@@ -3,6 +3,8 @@ package dev.okhsunrog.vpnhide.debug
 import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
+import dev.okhsunrog.vpnhide.CanonicalConfigRepository
+import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.LsposedConfig
 import dev.okhsunrog.vpnhide.RootSnapshot
@@ -15,6 +17,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
 import dev.okhsunrog.vpnhide.diagnostics.verdict
+import dev.okhsunrog.vpnhide.loadDashboardState
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.readLsposedConfig
 import dev.okhsunrog.vpnhide.statistics.buildStatisticsState
@@ -98,6 +101,27 @@ private suspend fun buildDebugState(
 ): VpnHideState {
     // Forensics forces debug logging + a fresh dmesg window while the capture runs;
     // a lean (no-forensics) export skips all of that and just serializes the state.
+    val beforeCapture =
+        runCatching {
+            val dashboard = DashboardCache.state.value
+            val operation = CanonicalConfigRepository.state.value
+            BeforeCaptureInfo(
+                observedAt = isoNow(),
+                diagnostics = diagnosticSummary(DiagnosticsCache.presentation.value),
+                protection = dashboard?.protection,
+                messages = dashboard?.messages.orEmpty(),
+                pendingOperationIds = operation.operations.sorted(),
+                operationRechecking = operation.rechecking,
+                lastOperationId = operation.lastResult?.id,
+                lastOperationPhases =
+                    operation.lastResult
+                        ?.phases
+                        .orEmpty()
+                        .mapKeys { it.key.name }
+                        .mapValues { it.value.name },
+                lastOperationFailure = operation.lastResult?.failure?.name,
+            )
+        }.getOrNull()
     val loggingSession = if (options.forensics) beginDebugCaptureLogging() else null
     var restoreAttempted = false
     val errors = mutableListOf<String>()
@@ -114,6 +138,7 @@ private suspend fun buildDebugState(
                 DiagnosticsCache.captureRun(context, selfNeedsRestart, nextDebugCaptureId.getAndIncrement()),
             )
         errors += selfTest.errors
+        val presentation = DiagnosticsCache.presentation.value
 
         // Authoritative module/liveness state — the SAME snapshot the dashboard
         // derives from. This is what fixes the old export path silently reading
@@ -124,6 +149,16 @@ private suspend fun buildDebugState(
                     errors += "root snapshot failed: ${it.message}"
                     RootSnapshot(emptyMap())
                 }
+
+        val dashboard =
+            try {
+                loadDashboardState(context, selfNeedsRestart, rootSnapshot, presentation)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                errors += "dashboard assembly failed: ${e.message}"
+                null
+            }
 
         val shellSnapshot =
             if (options.forensics) {
@@ -163,7 +198,9 @@ private suspend fun buildDebugState(
             checkResults = selfTest.checkResults,
             selfTestRunId = selfTest.runId,
             // The projection after the capture's own run settled: what the screens show now.
-            diagnostics = diagnosticSummary(DiagnosticsCache.presentation.value),
+            diagnostics = diagnosticSummary(presentation),
+            dashboard = dashboard,
+            beforeCapture = beforeCapture,
             dmesg = dmesg,
             logcat = logcat,
             bootLsposedLogcat = if (options.forensics) captureBootLsposedLogcat() else "",

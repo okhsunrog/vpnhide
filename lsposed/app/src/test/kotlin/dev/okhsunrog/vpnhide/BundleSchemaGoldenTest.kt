@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.debug.AppInfo
+import dev.okhsunrog.vpnhide.debug.BeforeCaptureInfo
 import dev.okhsunrog.vpnhide.debug.CallbackEvent
 import dev.okhsunrog.vpnhide.debug.CapabilityFacts
 import dev.okhsunrog.vpnhide.debug.DeviceInfo
@@ -138,6 +139,7 @@ internal fun sampleBundleState(): VpnHideState {
         ports = ModuleState.NotInstalled,
         kmodLoadStatus = null,
         dashboard = sampleDashboard(kmod, backends),
+        beforeCapture = sampleBeforeCapture(),
         rootShell =
             RootShellDiag.from(
                 mapOf("snapshot_shell_uid" to "uid=0\nid=uid=0(root)\ncontext=u:r:ksu:s0\nerrno_ctl=ok"),
@@ -250,4 +252,28 @@ private fun sampleDiagnosticSummary(): DiagnosticSummaryInfo =
         probeUnavailable = true,
         lastKnownRouting = SelfRouting.VpnOff,
         routingRead = RoutingReadInfo(ReadReason.Transition, pendingMs = 820),
+    )
+
+private fun sampleBeforeCapture(): BeforeCaptureInfo =
+    BeforeCaptureInfo(
+        observedAt = "2026-08-22T11:59:59+0300",
+        diagnostics = sampleDiagnosticSummary(),
+        protection = null,
+        messages =
+            listOf(
+                DashboardMessage(
+                    DashboardMessageSeverity.WARNING,
+                    "Update module",
+                    reason =
+                        DashboardIssue
+                            .ModuleVersionMismatch(
+                                ModuleMismatch(FlashableModuleKind.Kmod, "1.2.0", "1.3.0"),
+                                null,
+                                null,
+                            ).toReason(),
+                    presentationLanguage = "en",
+                ),
+            ),
+        pendingOperationIds = listOf(7),
+        operationRechecking = true,
     )

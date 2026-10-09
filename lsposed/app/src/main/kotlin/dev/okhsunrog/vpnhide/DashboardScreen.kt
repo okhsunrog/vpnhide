@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
@@ -72,14 +73,14 @@ fun DashboardScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val state by DashboardCache.state.collectAsState()
-    val loadError by DashboardCache.error.collectAsState()
-    val updateInfo by UpdateCheckCache.info.collectAsState()
+    val state by DashboardCache.state.collectAsStateWithLifecycle()
+    val loadError by DashboardCache.error.collectAsStateWithLifecycle()
+    val updateInfo by UpdateCheckCache.info.collectAsStateWithLifecycle()
     // What the user is looking at, classified once from the shared diagnostic
     // projection (routing knowledge, the run in flight, the latest attempt, the
     // measurement and its staleness). The hero and the prompt under it are two
     // wordings of it (heroVisual), never an overlay of flows of different vintages.
-    val situation by DiagnosticsCache.situation.collectAsState()
+    val situation by DiagnosticsCache.situation.collectAsStateWithLifecycle()
     var showChangelog by remember { mutableStateOf(false) }
     var changelogData by remember { mutableStateOf<ChangelogData?>(null) }
     var showContact by remember { mutableStateOf(false) }

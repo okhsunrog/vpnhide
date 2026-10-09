@@ -107,7 +107,8 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 | `activeBackend` | The **one** native backend in charge (`id` + `state`). Priority kmod > builtin > KPM > zygisk; a live `/proc/vpnhide_ctl` decides between the two kernel backends by the `backend` id it reports. |
 | `ports` | The portshide module `ModuleState` (localhost port blocker). |
 | `kmodLoadStatus` | Boot-time `.ko` load result (uname, kprobes/kretprobes ok, insmod exit, dmesg tail, `filesystemHiding`). The richest single "did the kernel module come up" field. |
-| `dashboard` | Full live dashboard model. **`null` in file exports** (only the agent-bridge `getState` fills it). |
+| `dashboard` | Dashboard derived from the capture root snapshot and one saved diagnostic presentation, shared with `diagnostics`. File exports and agent bridge use the same builder. A failed dashboard assembly leaves this null, appends a reason to `errors`, and preserves the rest of the archive. |
+| `beforeCapture` | Optional available process state before enabling capture logging or starting checks: observation time, diagnostic summary, retained Dashboard protection/messages, pending operation IDs, recovery flag and last operation phases/failure. No fresh root read or diagnostic run is requested. It may be absent or use retained screen values; it is the state available at collection start, not proof of what the user previously saw. |
 | `config` | The canonical desired-state config as structured JSON (`/data/system/vpnhide_config.json`) — answers "is app X even a target, with which roles". |
 | `statistics` | Point-in-time hook-counter totals (per-uid/per-method hit counts). Always present in a debug export, even without forensics. |
 | `rootShell` | Snapshot-shell self-diagnosis (§6). The "not verified vs inactive" discriminator. |
@@ -428,3 +429,23 @@ Rule of thumb: a **typed** top-level field → find where it's *derived*
 | Was the capture even measurable? | `gate` (§4) |
 | Is anything missing/cut off? | `errors`, `sections.debug_snapshot_truncated` |
 | What was included in this capture? | `captureOptions`, `captureKind` |
+
+### Export feedback and stable issue reasons
+
+The Collect sheet shows complete, partial and failed outcomes. Partial archives
+remain available for Save/Share; the section failures are shown alongside the
+result. A failed export retains its reason and can be retried.
+
+Each `dashboard.messages` entry keeps its existing severity, localized text,
+action, download artifact and help article, and adds `reason` and
+`presentationLanguage`. `reason.kind` is an explicit stable snake_case identifier;
+`reason.parameters` is a map of named string values (versions, components, counts,
+details; list-valued parameters use comma-separated stable package/hook names).
+The same `DashboardIssue` that produces the UI message produces its reason. No
+export-specific detection rules exist. For example `module_version_mismatch`
+carries `component`, `moduleVersion` and `appVersion` regardless of RU/EN wording.
+
+New reason identifiers and optional parameters are additive. Do not rename a
+published identifier, repurpose a parameter or infer it from localized text;
+changes of meaning follow the existing schema-bump rule. These fields and
+`beforeCapture` are additive within schema 2 and are covered by the bundle golden.

@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.lerp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import dev.okhsunrog.vpnhide.AgentControlBridge
 import dev.okhsunrog.vpnhide.BackgroundUpdateChecks
@@ -151,7 +152,7 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
 
     val context = LocalContext.current
     val settingsRepository = remember(context) { SettingsRepository(context.applicationContext) }
-    val loadedSettings by settingsRepository.settings.collectAsState(initial = null)
+    val loadedSettings by settingsRepository.settings.collectAsStateWithLifecycle(initialValue = null)
     val settingsLoaded = loadedSettings != null
     val settings = loadedSettings ?: AppSettings()
     val settingsScope = rememberCoroutineScope()
@@ -372,16 +373,16 @@ private fun MainScreen() {
     var showSystem by rememberSaveable { mutableStateOf(false) }
     var showRussianOnly by rememberSaveable { mutableStateOf(false) }
     var targetSortMode by rememberSaveable { mutableStateOf(TargetListSortMode.ConfiguredFirst) }
-    val appListLoading by AppListCache.loading.collectAsState()
-    val targetsLoading by TargetsCache.loading.collectAsState()
+    val appListLoading by AppListCache.loading.collectAsStateWithLifecycle()
+    val targetsLoading by TargetsCache.loading.collectAsStateWithLifecycle()
     // The top-bar indicator follows only reads the user asked for: a background
     // re-derivation (the startup reconcile, a root dependency) is not news to spin for.
-    val dashboardLoading by DashboardCache.refreshing.collectAsState()
-    val statisticsLoading by StatisticsCache.loading.collectAsState()
-    val dashboardState by DashboardCache.state.collectAsState()
-    val dashboardError by DashboardCache.error.collectAsState()
-    val rootSnapshot by RootSnapshotCache.snapshot.collectAsState()
-    val selfTargetState by startupCoordinator.selfTargetState.collectAsState()
+    val dashboardLoading by DashboardCache.refreshing.collectAsStateWithLifecycle()
+    val statisticsLoading by StatisticsCache.loading.collectAsStateWithLifecycle()
+    val dashboardState by DashboardCache.state.collectAsStateWithLifecycle()
+    val dashboardError by DashboardCache.error.collectAsStateWithLifecycle()
+    val rootSnapshot by RootSnapshotCache.snapshot.collectAsStateWithLifecycle()
+    val selfTargetState by startupCoordinator.selfTargetState.collectAsStateWithLifecycle()
     val selfNeedsRestart =
         (selfTargetState as? StartupSelfTargetState.Ready)?.selfNeedsRestart
     val selfTargetFailure = selfTargetState as? StartupSelfTargetState.Failed
