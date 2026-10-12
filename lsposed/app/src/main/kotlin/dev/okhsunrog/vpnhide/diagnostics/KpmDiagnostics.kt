@@ -4,9 +4,7 @@ import dev.okhsunrog.vpnhide.KpmFailureReason
 import dev.okhsunrog.vpnhide.KpmLoadStatus
 import dev.okhsunrog.vpnhide.KpmRuntime
 import dev.okhsunrog.vpnhide.ModuleBrokenReason
-import dev.okhsunrog.vpnhide.ModuleProblem
 import dev.okhsunrog.vpnhide.ModuleState
-import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.checks.KpmListResponse
 import dev.okhsunrog.vpnhide.checks.NativeProbe
 
@@ -78,32 +76,6 @@ internal fun classifyKpmProblem(
     }
     return KpmProblemKind.LoadFailed(detail)
 }
-
-internal fun renderKpmProblem(
-    kind: KpmProblemKind,
-    res: android.content.res.Resources,
-): ModuleProblem =
-    ModuleProblem(
-        reason = kind.reason,
-        text =
-            when (kind) {
-                is KpmProblemKind.UnsupportedKernel -> {
-                    res.getString(R.string.dashboard_issue_kpm_unsupported_kernel, kind.unameR)
-                }
-
-                is KpmProblemKind.NoKernelPatchRuntime -> {
-                    res.getString(R.string.dashboard_issue_kpm_needs_runtime)
-                }
-
-                is KpmProblemKind.NeedsSuperkey -> {
-                    res.getString(R.string.dashboard_issue_kpm_needs_superkey)
-                }
-
-                is KpmProblemKind.LoadFailed -> {
-                    res.getString(R.string.dashboard_issue_kpm_load_failed, kind.detail)
-                }
-            },
-    )
 
 /**
  * A runtime-loaded `vpnhide` KPM without our flashable module directory is a

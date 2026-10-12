@@ -486,7 +486,7 @@ class DashboardIssuesTest {
 
     @Test
     fun `a module problem and a pending reboot are mutually exclusive per module`() {
-        val problem = ModuleProblem(ModuleBrokenReason.WrongVariant, "broken", downloadArtifact = "x.zip")
+        val problem = ModuleProblem.Kmod(KmodProblemKind.WrongVariant("old", "new", "x.zip"))
         val issues =
             dashboardIssues(
                 facts(

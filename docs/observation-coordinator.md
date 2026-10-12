@@ -82,6 +82,8 @@ of either (`assembleDashboardState`, pure apart from wording).
 
 App-language configuration is also a presentation input: changing it rewords
 Dashboard messages without invalidating facts or rerunning diagnostic probes.
+Module load and integrity problems remain structured in the root facts; their
+messages are rendered with the current language only when building the dashboard.
 The language context is copied from application resources with the Activity
 configuration; the process never retains the Activity itself.
 

@@ -11,7 +11,6 @@ import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementCoverage
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.classifyKpmProblem
-import dev.okhsunrog.vpnhide.diagnostics.renderKpmProblem
 import dev.okhsunrog.vpnhide.diagnostics.standaloneKpmLoaded
 import dev.okhsunrog.vpnhide.diagnostics.token
 import dev.okhsunrog.vpnhide.diagnostics.verdict
@@ -79,24 +78,6 @@ enum class ModuleBrokenReason {
     ActivatorMissing,
     ActivatorNotExecutable,
 }
-
-/**
- * The single module problem to surface. [reason] drives the red module-card
- * color; [text] drives the dashboard error banner. Computed once (see
- * `loadDashboardState`) so the card and the banner can never disagree —
- * previously the priority order was hand-mirrored in two separate `when`
- * blocks. [reason] is null for a generic load failure where we only have raw
- * stderr/exit-status text to show, not a named diagnosis. Shared by the kmod
- * (`classifyKmodProblem`) and KPM (`classifyKpmProblem`) diagnosis paths.
- */
-internal data class ModuleProblem(
-    val reason: ModuleBrokenReason?,
-    val text: String,
-    // The zip to offer for one-tap download when the fix is re-flashing a specific
-    // artifact (wrong/unknown/unsupported variant, ambiguous load). Null for
-    // problems no download fixes (kprobes missing, signature enforcement).
-    val downloadArtifact: String? = null,
-)
 
 @Serializable
 sealed interface LsposedState {
@@ -833,61 +814,6 @@ internal fun KmodLoadStatus.isModuleSignatureRejected(): Boolean {
     return "key was rejected" in stderr || "required key not available" in stderr
 }
 
-private fun renderKmodProblem(
-    kind: KmodProblemKind,
-    res: android.content.res.Resources,
-): ModuleProblem =
-    ModuleProblem(
-        reason = kind.reason,
-        downloadArtifact =
-            when (kind) {
-                is KmodProblemKind.UnsupportedKernel -> kind.recommendedArtifact
-                is KmodProblemKind.WrongVariant -> kind.recommendedArtifact
-                is KmodProblemKind.UnknownVariant -> kind.recommendedArtifact
-                is KmodProblemKind.AmbiguousLoadFailed -> kind.tryArtifact.takeIf { it.endsWith(".zip") }
-                else -> null
-            },
-        text =
-            when (kind) {
-                KmodProblemKind.KprobesMissing -> {
-                    res.getString(R.string.dashboard_issue_kprobes_missing)
-                }
-
-                KmodProblemKind.SignatureEnforced -> {
-                    res.getString(R.string.dashboard_issue_kmod_signature_enforced)
-                }
-
-                is KmodProblemKind.UnsupportedKernel -> {
-                    res.getString(R.string.dashboard_issue_kmod_not_supported_kernel, kind.unameR, kind.recommendedArtifact)
-                }
-
-                is KmodProblemKind.WrongVariant -> {
-                    res.getString(
-                        R.string.dashboard_issue_kmod_wrong_variant,
-                        kind.installedVariant,
-                        kind.recommendedKmi,
-                        kind.recommendedArtifact,
-                    )
-                }
-
-                is KmodProblemKind.UnknownVariant -> {
-                    res.getString(R.string.dashboard_issue_kmod_unknown_variant, kind.recommendedArtifact)
-                }
-
-                is KmodProblemKind.AmbiguousLoadFailed -> {
-                    res.getString(
-                        R.string.dashboard_issue_kmod_ambiguous_try_alternative,
-                        kind.installedVariant,
-                        kind.tryArtifact,
-                    )
-                }
-
-                is KmodProblemKind.LoadFailed -> {
-                    res.getString(R.string.dashboard_issue_kmod_load_failed, kind.insmodStderr)
-                }
-            },
-    )
-
 // ── LSPosed state resolution (pure, unit-tested) ─────────────────────────
 
 /**
@@ -1187,7 +1113,6 @@ private fun deriveModuleFact(
     raw: ModuleState,
     sections: Map<String, String>,
     activatorPath: String,
-    res: android.content.res.Resources,
     classifyBackendProblem: () -> ModuleProblem? = { null },
 ): ModuleFact {
     val pendingReboot = modulePendingReboot(kind, raw, sections)
@@ -1200,7 +1125,7 @@ private fun deriveModuleFact(
                 module = raw,
                 sections = sections,
                 activatorPath = activatorPath,
-            )?.let { renderModuleIntegrityProblem(it, res) }
+            )?.let { ModuleProblem.Integrity(it) }
                 ?: classifyBackendProblem()
         }
     return ModuleFact(
@@ -1216,19 +1141,17 @@ private fun deriveKmodFact(
     sections: Map<String, String>,
     recommendation: NativeInstallRecommendation?,
     loadStatus: KmodLoadStatus?,
-    res: android.content.res.Resources,
 ): ModuleFact =
-    deriveModuleFact(FlashableModuleKind.Kmod, raw.kmod, sections, KMOD_ACTIVATOR, res) {
+    deriveModuleFact(FlashableModuleKind.Kmod, raw.kmod, sections, KMOD_ACTIVATOR) {
         if (parseCtlBackendId(sections) == BUILTIN_BACKEND_ID) {
             null // The redundant-companion banner explains why this .ko must stay unloaded.
         } else {
-            classifyKmodProblem(raw.kmod, recommendation, loadStatus)?.let { renderKmodProblem(it, res) }
+            classifyKmodProblem(raw.kmod, recommendation, loadStatus)?.let { ModuleProblem.Kmod(it) }
         }
     }
 
 private fun deriveModuleFacts(
     sections: Map<String, String>,
-    res: android.content.res.Resources,
     kernelRecommendation: NativeInstallRecommendation?,
     hasKpatchRuntime: Boolean,
     appVersion: String,
@@ -1245,22 +1168,22 @@ private fun deriveModuleFacts(
         )
     VpnHideLog.i(TAG, "kmodLoadStatus=$kmodLoadStatus")
 
-    val kmod = deriveKmodFact(raw, sections, kernelRecommendation, kmodLoadStatus, res)
+    val kmod = deriveKmodFact(raw, sections, kernelRecommendation, kmodLoadStatus)
     // The in-tree backend has no .ko to diagnose, so it needs no classifier —
     // only the shared integrity/pending-reboot checks on its companion activator.
-    val builtin = deriveModuleFact(FlashableModuleKind.Builtin, raw.builtin, sections, BUILTIN_ACTIVATOR, res)
+    val builtin = deriveModuleFact(FlashableModuleKind.Builtin, raw.builtin, sections, BUILTIN_ACTIVATOR)
     val kpm =
-        deriveModuleFact(FlashableModuleKind.Kpm, raw.kpm, sections, KPM_ACTIVATOR, res) {
+        deriveModuleFact(FlashableModuleKind.Kpm, raw.kpm, sections, KPM_ACTIVATOR) {
             classifyKpmProblem(
                 kpm = raw.kpm,
                 status = kpmLoadStatus,
                 currentBootId = currentBootId,
                 hasKpatchRuntime = hasKpatchRuntime,
                 apatchSuperkeySaved = sections["superkey_saved"]?.trim() == "1",
-            )?.let { renderKpmProblem(it, res) }
+            )?.let { ModuleProblem.Kpm(it) }
         }
-    val zygisk = deriveModuleFact(FlashableModuleKind.Zygisk, raw.zygisk, sections, ZYGISK_ACTIVATOR, res)
-    val ports = deriveModuleFact(FlashableModuleKind.Ports, portsRaw, sections, PORTS_ACTIVATOR, res)
+    val zygisk = deriveModuleFact(FlashableModuleKind.Zygisk, raw.zygisk, sections, ZYGISK_ACTIVATOR)
+    val ports = deriveModuleFact(FlashableModuleKind.Ports, portsRaw, sections, PORTS_ACTIVATOR)
 
     // The one place the three native backends are grouped: every "is anything
     // installed / active" gate reads from this instead of re-deriving its own
@@ -1512,7 +1435,6 @@ internal suspend fun deriveDashboardRootFacts(
 ): DashboardRootFacts {
     VpnHideLog.i(TAG, "=== Loading dashboard state ===")
     StartupTrace.mark("dashboard_derive_start")
-    val res = context.resources
     val selfPkg = context.packageName
     val sections = rootSnapshot.sections
     val targetsSnapshot = parseTargetsSnapshot(rootSnapshot)
@@ -1536,7 +1458,7 @@ internal suspend fun deriveDashboardRootFacts(
             hasKpatchRuntime,
         )
     val appVersion = BuildConfig.VERSION_NAME
-    val modules = deriveModuleFacts(sections, res, kernelRecommendation, hasKpatchRuntime, appVersion)
+    val modules = deriveModuleFacts(sections, kernelRecommendation, hasKpatchRuntime, appVersion)
     StartupTrace.mark("dashboard_modules_done")
     StartupTrace.mark("dashboard_kernel_done")
 

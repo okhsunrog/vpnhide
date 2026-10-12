@@ -120,10 +120,9 @@ internal sealed interface DashboardIssue {
     ) : Module
 
     /**
-     * Integrity or load diagnosis. Already rendered upstream: the same
-     * [ModuleProblem] drives the module card's colour via
-     * `ModuleState.withBrokenReason`, so the text exists before the issue list
-     * is built and re-deriving it here would let card and banner drift apart.
+     * Integrity or load diagnosis shared with the module card via
+     * `ModuleState.withBrokenReason`. Keep facts here; render the banner with
+     * the current locale without reclassifying or refreshing root state.
      */
     data class ModuleBroken(
         val problem: ModuleProblem,
