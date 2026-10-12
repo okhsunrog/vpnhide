@@ -129,34 +129,80 @@ internal data class HelpSearchHit(
 )
 
 /**
- * Case-insensitive search over article titles and bodies. [matchTextOf] is what a
- * query is matched against (title + body + keyword aliases); [snippetTextOf] is
- * the article body the shown snippet is cut from — kept separate so a keyword-only
- * match never renders the alias list as the snippet. Both are parameters so this
- * stays pure and testable, with asset IO in the caller. Queries shorter than two
- * characters return nothing.
+ * Case-insensitive ranked search over article titles, bodies and keyword aliases.
+ * The query is split into whitespace tokens (each >= 2 chars) and an article
+ * matches only when *every* token appears in its title, body or keywords — so a
+ * multi-word query no longer needs the exact phrase to sit contiguously in the
+ * text. Hits are ranked (title matches above keyword matches above body-only
+ * ones), and ties keep table-of-contents order. [bodyOf] supplies the body, which
+ * is both matched and used to cut the snippet; [keywordsOf] supplies the alias
+ * text, matched only and never shown in the snippet. Both are parameters so this
+ * stays pure and testable, with asset IO in the caller. A query shorter than two
+ * characters, or with no usable token, returns nothing.
  */
 internal fun searchGuide(
     guide: HelpGuide,
     query: String,
-    matchTextOf: (String) -> String,
-    snippetTextOf: (String) -> String,
+    bodyOf: (String) -> String,
+    keywordsOf: (String) -> String,
 ): List<HelpSearchHit> {
     val needle = query.trim().lowercase()
     if (needle.length < 2) return emptyList()
-    val hits = mutableListOf<HelpSearchHit>()
+    val tokens = needle.split(WHITESPACE).filter { it.length >= 2 }
+    if (tokens.isEmpty()) return emptyList()
+
+    val ranked = mutableListOf<RankedHit>()
+    var tocIndex = 0
     for (section in guide.sections) {
         for (article in section.articles) {
-            val matches =
-                article.title.lowercase().contains(needle) ||
-                    matchTextOf(article.id).lowercase().contains(needle)
+            val title = article.title.lowercase()
+            val body = bodyOf(article.id)
+            val bodyLower = body.lowercase()
+            val keywords = keywordsOf(article.id).lowercase()
+            val matches = tokens.all { it in title || it in bodyLower || it in keywords }
             if (matches) {
-                val body = snippetTextOf(article.id)
-                hits += HelpSearchHit(article, snippetAround(body, body.lowercase().indexOf(needle)))
+                val score = scoreHit(needle, tokens, title, keywords, bodyLower)
+                val anchor = tokens.mapNotNull { bodyLower.indexOf(it).takeIf { i -> i >= 0 } }.minOrNull() ?: -1
+                ranked += RankedHit(score, tocIndex, HelpSearchHit(article, snippetAround(body, anchor)))
             }
+            tocIndex++
         }
     }
-    return hits
+    return ranked
+        .sortedWith(compareByDescending<RankedHit> { it.score }.thenBy { it.tocIndex })
+        .map { it.hit }
+}
+
+private val WHITESPACE = Regex("\\s+")
+
+private data class RankedHit(
+    val score: Int,
+    val tocIndex: Int,
+    val hit: HelpSearchHit,
+)
+
+/**
+ * Higher is more relevant: a whole-phrase title hit ranks above an all-token title
+ * hit, above any-token; a keyword hit adds a middle tier; an incidental body match
+ * scores lowest. Ordering within a score tier is left to the caller (TOC order).
+ */
+private fun scoreHit(
+    needle: String,
+    tokens: List<String>,
+    title: String,
+    keywords: String,
+    body: String,
+): Int {
+    var score =
+        when {
+            needle in title -> 100
+            tokens.all { it in title } -> 60
+            tokens.any { it in title } -> 25
+            else -> 0
+        }
+    if (needle in keywords || tokens.all { it in keywords }) score += 30
+    if (needle in body) score += 5
+    return score
 }
 
 private const val SNIPPET_RADIUS = 48

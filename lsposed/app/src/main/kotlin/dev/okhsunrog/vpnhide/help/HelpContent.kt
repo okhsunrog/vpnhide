@@ -20,7 +20,7 @@ internal class HelpContent(
     val faq: List<HelpFaqEntry>,
     private val docById: Map<String, Node>,
     private val bodyById: Map<String, String>,
-    private val searchTextById: Map<String, String>,
+    private val keywordsById: Map<String, String>,
 ) {
     fun doc(articleId: String): Node = docById[articleId] ?: parseMarkdown("")
 
@@ -28,8 +28,8 @@ internal class HelpContent(
         searchGuide(
             guide = guide,
             query = query,
-            matchTextOf = { searchTextById[it].orEmpty() },
-            snippetTextOf = { bodyById[it].orEmpty() },
+            bodyOf = { bodyById[it].orEmpty() },
+            keywordsOf = { keywordsById[it].orEmpty() },
         )
 }
 
@@ -55,7 +55,7 @@ internal fun loadHelpContent(
     val dtoById = manifest.sections.flatMap { it.articles }.associateBy { it.id }
     val docById = mutableMapOf<String, Node>()
     val bodyById = mutableMapOf<String, String>()
-    val searchTextById = mutableMapOf<String, String>()
+    val keywordsById = mutableMapOf<String, String>()
     for (section in guide.sections) {
         for (article in section.articles) {
             val body =
@@ -64,17 +64,16 @@ internal fun loadHelpContent(
                     ?: ""
             val doc = parseMarkdown(body)
             docById[article.id] = doc
-            val plain = plainText(doc)
-            bodyById[article.id] = plain
-            // The searchable text also carries the article's keyword aliases so a
-            // query matches how people phrase things — but the shown snippet is cut
-            // from bodyById, never from these aliases.
+            bodyById[article.id] = plainText(doc)
+            // Keyword aliases are searched alongside the body so a query matches how
+            // people phrase things, and ranked as their own tier — but they are kept
+            // apart from bodyById so the shown snippet is never cut from the aliases.
             val keywords = dtoById[article.id]?.let { articleKeywords(it, locale) }.orEmpty()
-            searchTextById[article.id] = (plain + "\n" + keywords.joinToString(" ")).trim()
+            keywordsById[article.id] = keywords.joinToString(" ")
         }
     }
     val faq = buildFaq(manifest, locale, docById.keys)
-    return HelpContent(guide, faq, docById, bodyById, searchTextById)
+    return HelpContent(guide, faq, docById, bodyById, keywordsById)
 }
 
 private fun readAsset(
