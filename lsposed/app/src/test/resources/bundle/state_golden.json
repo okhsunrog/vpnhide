@@ -53,6 +53,15 @@
         "routingRead": {
             "reason": "Transition",
             "pendingMs": 820
+        },
+        "snapshot": {
+            "revision": 12,
+            "rootObservationId": 9,
+            "rootGeneration": 3,
+            "rootCurrent": true,
+            "routingObservationId": 8,
+            "routingGeneration": 4,
+            "changeEpoch": 2
         }
     },
     "nativeVerdict": "Ok",
@@ -179,6 +188,81 @@
         "messages": [],
         "installedOptionalHooks": [],
         "legacyImport": null
+    },
+    "beforeCapture": {
+        "observedAt": "2026-08-22T11:59:59+0300",
+        "diagnostics": {
+            "eligibility": "Eligible",
+            "activeRunId": 5,
+            "activeStage": "Core",
+            "lastAttempt": {
+                "runId": 4,
+                "outcome": "Failed",
+                "failure": "ExecutionFailed",
+                "eligibility": null
+            },
+            "measurement": {
+                "runId": 3,
+                "startedAt": 1755856800000,
+                "endedAt": 1755856802000,
+                "completed": true,
+                "interrupted": false,
+                "observationId": 7
+            },
+            "applicability": "Changed",
+            "evidence": {
+                "hidden": 9,
+                "systemBlocked": 1,
+                "nothingToLeak": 2,
+                "leaks": 0,
+                "notMeasured": 0,
+                "notRun": 0,
+                "uncoveredLeaks": 0,
+                "conclusion": "NoObservedLeak"
+            },
+            "currentSuccess": false,
+            "probeUnavailable": true,
+            "lastKnownRouting": "VpnOff",
+            "routingRead": {
+                "reason": "Transition",
+                "pendingMs": 820
+            },
+            "snapshot": {
+                "revision": 12,
+                "rootObservationId": 9,
+                "rootGeneration": 3,
+                "rootCurrent": true,
+                "routingObservationId": 8,
+                "routingGeneration": 4,
+                "changeEpoch": 2
+            }
+        },
+        "protection": null,
+        "messages": [
+            {
+                "severity": "WARNING",
+                "text": "Update module",
+                "action": null,
+                "downloadArtifact": null,
+                "helpArticle": null,
+                "reason": {
+                    "kind": "module_version_mismatch",
+                    "parameters": {
+                        "component": "kmod",
+                        "moduleVersion": "1.2.0",
+                        "appVersion": "1.3.0"
+                    }
+                },
+                "presentationLanguage": "en"
+            }
+        ],
+        "pendingOperationIds": [
+            7
+        ],
+        "operationRechecking": true,
+        "lastOperationId": null,
+        "lastOperationPhases": {},
+        "lastOperationFailure": null
     },
     "config": null,
     "statistics": null,

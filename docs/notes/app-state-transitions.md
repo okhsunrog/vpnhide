@@ -736,3 +736,15 @@ Known gaps, deliberately open:
   activator does not report whether a forced activation changed anything; the
   Background grace keeps that re-read silent. A targeted invalidation of
   runtime-only sections is the cheaper follow-up if the background work matters.
+
+### Shared diagnostic snapshot publication
+
+The executable publication boundary is `DiagnosticSnapshotOwner` inside
+`DiagnosticDomain`. Accepted source events and run transitions share the run
+owner's lock. The packet contains both presentation and Situation and is
+published before terminal handles complete. Config-impact changes and associated
+run interruption form one publication. Bridge and export wait for acceptance of
+their root checkpoint and pending source events, then consume that same packet.
+`DiagnosticSnapshotTest` drives immediate completion waiters, queued source
+acceptance, superseded checkpoints, routing/config changes, root invalidation,
+waiter cancellation and grace expiry with a virtual clock.

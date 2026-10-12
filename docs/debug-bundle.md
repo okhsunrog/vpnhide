@@ -100,14 +100,15 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 | `selfNeedsRestart` | The picker app added itself as a target but its own hooks aren't applied to this process yet → checks can't measure; user must reboot. |
 | `gate` | `DiagnosticGate` — see §4. `null` for logcat/kernel captures (no check run), and for a debug capture whose run did not complete (the reason is in `errors`). Only a completed run reports `ROUTED`. In an agent-bridge read (`captureKind: agent_bridge`) the gate follows the tiles as the Dashboard shows them: a current blocking condition (VPN off, self not routed, restart pending) is its gate and `report` is null, otherwise the latest complete measurement the app retains is `ROUTED` with its `report`, else `null`; `dashboard.protection` carries the same overlay, and `diagnostics` (same presentation value) says whether that measurement still applies. |
 | `selfTestRunId` | The identified diagnostic run this capture took its evidence from, for matching the bundle against that run's own attempt. `null` when the capture ran no suite, or when no run was admitted at all (`errors` says which). |
-| `diagnostics` | The shared diagnostic presentation at assembly time, exactly what the Dashboard hero and the Diagnostics screen rendered: `eligibility` (Initializing / Checking / RestartApp / RestartDevice / Applying / ApplicationUnknown / ApplicationFailed / Unknown / VpnOff / SelfExcluded / Eligible), `activeRunId` + `activeStage` for a run in flight, `lastAttempt` (`runId`, `outcome` NotStarted / Completed / Interrupted / Failed, `failure`, blocking `eligibility`), `measurement` (the latest complete run: `runId`, `startedAt`/`endedAt` epoch ms, `completed`, `interrupted`, root `observationId`), `applicability` (Absent / Changed / Unverified / MatchesLastObservation: whether that measurement still applies to the current VPN, routing and configuration), `evidence` (owned-scope counts and a conclusion: OwnedLeak / Insufficient / Partial / NoObservedLeak) and `currentSuccess`, the only positive claim. `probeUnavailable` is a property of the app process rather than of any measurement: the probe helper of an earlier run never returned, the probe resource stays quarantined, and no new run can start until it does — so a stale `measurement` next to it is not a stale screen, it is the newest one the app was able to take. `null` for the logcat recorder. Read this before `report`: a `ROUTED` report whose `diagnostics.applicability` is `Changed` describes an earlier state. `lastKnownRouting` (VpnOff / Excluded / Routed, `null` when the app never got a routing fact) is the last routing fact the app had, kept even while that fact is being re-read — so `eligibility: Checking` next to `lastKnownRouting: VpnOff` means "the VPN was off and we are re-reading", not "we know nothing". `routingRead` is present only while such a re-read is owed or in flight: `reason` (Background = our own process invalidated it, Transition = a VPN/network callback said it may have changed, Explicit = the user asked) and `pendingMs`, how long it had been owed **at the moment the bundle was assembled** (a monotonic age, not a timestamp; a large value means the re-read was stuck, not that the bundle is old). |
+| `diagnostics` | The shared diagnostic presentation at assembly time, computed from the same immutable domain packet the Dashboard hero and Diagnostics screen consume: `eligibility` (Initializing / Checking / RestartApp / RestartDevice / Applying / ApplicationUnknown / ApplicationFailed / Unknown / VpnOff / SelfExcluded / Eligible), `activeRunId` + `activeStage` for a run in flight, `lastAttempt` (`runId`, `outcome` NotStarted / Completed / Interrupted / Failed, `failure`, blocking `eligibility`), `measurement` (the latest complete run: `runId`, `startedAt`/`endedAt` epoch ms, `completed`, `interrupted`, root `observationId`), `applicability` (Absent / Changed / Unverified / MatchesLastObservation: whether that measurement still applies to the current VPN, routing and configuration), `evidence` (owned-scope counts and a conclusion: OwnedLeak / Insufficient / Partial / NoObservedLeak) and `currentSuccess`, the only positive claim. `probeUnavailable` is a property of the app process rather than of any measurement: the probe helper of an earlier run never returned, the probe resource stays quarantined, and no new run can start until it does — so a stale `measurement` next to it is not a stale screen, it is the newest one the app was able to take. `null` for the logcat recorder. Read this before `report`: a `ROUTED` report whose `diagnostics.applicability` is `Changed` describes an earlier state. `lastKnownRouting` (VpnOff / Excluded / Routed, `null` when the app never got a routing fact) is the last routing fact the app had, kept even while that fact is being re-read — so `eligibility: Checking` next to `lastKnownRouting: VpnOff` means "the VPN was off and we are re-reading", not "we know nothing". `routingRead` is present only while such a re-read is owed or in flight: `reason` (Background = our own process invalidated it, Transition = a VPN/network callback said it may have changed, Explicit = the user asked) and `pendingMs`, how long it had been owed **at the diagnostic snapshot publication** (a monotonic age, not a timestamp; a large value means the re-read was stuck, not that the bundle is old). |
 | `nativeVerdict` / `javaVerdict` | `Ok`/`Partial`/`Broken`, or `null` if not a measured (`ROUTED`) run. |
 | `report` | The full `DiagnosticReport` (§4). `null` when no checks ran. |
 | `backends` | Per-module state for `kmod` / `builtin` / `kpm` / `zygisk` (installed? active? version? `brokenReason`? `pendingReboot`?). |
 | `activeBackend` | The **one** native backend in charge (`id` + `state`). Priority kmod > builtin > KPM > zygisk; a live `/proc/vpnhide_ctl` decides between the two kernel backends by the `backend` id it reports. |
 | `ports` | The portshide module `ModuleState` (localhost port blocker). |
 | `kmodLoadStatus` | Boot-time `.ko` load result (uname, kprobes/kretprobes ok, insmod exit, dmesg tail, `filesystemHiding`). The richest single "did the kernel module come up" field. |
-| `dashboard` | Full live dashboard model. **`null` in file exports** (only the agent-bridge `getState` fills it). |
+| `dashboard` | Dashboard derived from the capture root snapshot and one saved diagnostic presentation, shared with `diagnostics`. File exports and agent bridge use the same builder. A failed dashboard assembly leaves this null, appends a reason to `errors`, and preserves the rest of the archive. |
+| `beforeCapture` | Optional available process state before enabling capture logging or starting checks: observation time, diagnostic summary, retained Dashboard protection/messages, pending operation IDs, recovery flag and last operation phases/failure. No fresh root read or diagnostic run is requested. It may be absent or use retained screen values; it is the state available at collection start, not proof of what the user previously saw. |
 | `config` | The canonical desired-state config as structured JSON (`/data/system/vpnhide_config.json`) — answers "is app X even a target, with which roles". |
 | `statistics` | Point-in-time hook-counter totals (per-uid/per-method hit counts). Always present in a debug export, even without forensics. |
 | `rootShell` | Snapshot-shell self-diagnosis (§6). The "not verified vs inactive" discriminator. |
@@ -428,3 +429,39 @@ Rule of thumb: a **typed** top-level field → find where it's *derived*
 | Was the capture even measurable? | `gate` (§4) |
 | Is anything missing/cut off? | `errors`, `sections.debug_snapshot_truncated` |
 | What was included in this capture? | `captureOptions`, `captureKind` |
+
+### Export feedback and stable issue reasons
+
+The Collect sheet shows complete, partial and failed outcomes. Partial archives
+remain available for Save/Share; the section failures are shown alongside the
+result. A failed export retains its reason and can be retried.
+
+Each `dashboard.messages` entry keeps its existing severity, localized text,
+action, download artifact and help article, and adds `reason` and
+`presentationLanguage`. `reason.kind` is an explicit stable snake_case identifier;
+`reason.parameters` is a map of named string values (versions, components, counts,
+details; list-valued parameters use comma-separated stable package/hook names).
+The same `DashboardIssue` that produces the UI message produces its reason. No
+export-specific detection rules exist. For example `module_version_mismatch`
+carries `component`, `moduleVersion` and `appVersion` regardless of RU/EN wording.
+
+New reason identifiers and optional parameters are additive. Do not rename a
+published identifier, repurpose a parameter or infer it from localized text;
+changes of meaning follow the existing schema-bump rule. These fields and
+`beforeCapture` are additive within schema 2 and are covered by the bundle golden.
+
+### Diagnostic snapshot provenance
+
+`diagnostics.snapshot` is additive within schema 2. It records the process-local
+`revision`, retained `rootObservationId`, `rootGeneration`, `rootCurrent`,
+`routingObservationId`, `routingGeneration` and config-impact `changeEpoch`.
+`rootCurrent: false` means retained root data cannot certify current success.
+The measurement's own observation ID remains separate: it identifies the world
+in which the probes actually ran.
+
+A debug capture preserves its own identified run and raw probe results. After
+its root refresh it obtains one accepted domain packet for both the dashboard
+and diagnostic summary. That summary can describe newer knowledge (or a later
+run), so inspect run IDs and applicability before interpreting historical probe
+results. A VPN/config change during capture must not promote old evidence to a
+current success. `beforeCapture` similarly uses one Dashboard publication.

@@ -7,6 +7,10 @@ internal data class RootProjection<T>(
     val value: T,
 )
 
+/** A projection can only be assembled with diagnostics using the same root observation. */
+internal fun <T> RootProjection<T>.belongsTo(root: RootSnapshot?): Boolean =
+    root != null && observationId == root.observationId && generation == root.generation
+
 internal fun rootObservationInvalidatesDependents(
     previous: ObservationState<RootSnapshot>,
     next: ObservationState<RootSnapshot>,

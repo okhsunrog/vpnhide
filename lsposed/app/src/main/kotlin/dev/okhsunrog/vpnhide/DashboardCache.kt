@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSnapshot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
@@ -7,6 +8,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
+
+/** The hero and the tiles travel together, including while matching root facts are pending. */
+internal data class DashboardPresentation(
+    val diagnostics: DiagnosticSnapshot,
+    val state: DashboardState?,
+)
 
 /**
  * App-scoped cache for the Dashboard's root-derived facts, and the screen state
@@ -18,7 +25,7 @@ import kotlinx.coroutines.withContext
  * cached at all: it is a projection of those facts and the live diagnostic
  * presentation, assembled by [assembleDashboardState] on every change of either,
  * so the protection tiles, the banners and the hero always describe the same
- * instant and nothing has to follow the suite to keep them in step.
+ * accepted revision and nothing has to follow the suite to keep them in step.
  *
  * Refreshing this cache re-reads root and nothing else: it never requests a
  * diagnostic run. The explicit run has one entry point,
@@ -35,19 +42,27 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardRootF
      * The screen state, null until the root facts exist and the suite has a first
      * terminal attempt: the Dashboard appears with its first verdict (blocked, failed
      * or measured), as it always has, rather than with tiles that say nothing yet.
-     * The previous value stays visible while a root refresh is in flight.
+     * Retained facts stay visible while their root observation still matches.
+     * A newer diagnostic root waits for matching facts instead of mixing revisions.
      */
-    val state: StateFlow<DashboardState?> by lazy {
+    val presentation: StateFlow<DashboardPresentation> by lazy {
         // The developer flags join here rather than inside the cached facts: they
         // are app-local settings, and a DataStore write invalidates no
         // observation, so a toggle would otherwise not show until the next
         // refresh. See [DeveloperFlagsCache].
-        combine(value, DiagnosticsCache.presentation, DeveloperFlagsCache.flags) { facts, presentation, developer ->
+        combine(value, DiagnosticsCache.snapshot, DeveloperFlagsCache.flags) { facts, snapshot, developer ->
             val context = inputs?.context
-            if (facts == null || context == null || presentation.lastAttempt == null) return@combine null
-            assembleDashboardState(context, facts.value, presentation, developer)
-        }.stateIn(ObservationRuntime.scope, SharingStarted.Eagerly, null)
+            val state =
+                if (facts?.belongsTo(snapshot.rootSnapshot) == true && context != null && snapshot.presentation.lastAttempt != null) {
+                    assembleDashboardState(context, facts.value, snapshot.presentation, developer)
+                } else {
+                    null
+                }
+            DashboardPresentation(snapshot, state)
+        }.stateIn(ObservationRuntime.scope, SharingStarted.Eagerly, DashboardPresentation(DiagnosticsCache.snapshot.value, null))
     }
+
+    val state: StateFlow<DashboardState?> by lazy { ProjectedStateFlow(presentation) { it.state } }
 
     /**
      * A derivation the user asked for is in flight. A background re-derivation (the

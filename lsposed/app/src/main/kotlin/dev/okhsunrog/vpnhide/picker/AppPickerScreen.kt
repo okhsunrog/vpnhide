@@ -91,6 +91,7 @@ internal data class AppEntry(
     override val isSystem: Boolean,
     override val userIds: List<Int> = emptyList(),
     val uids: List<Int> = emptyList(),
+    val sharesJavaAppId: Boolean = false,
     val java: Boolean = false,
     val javaHooks: List<String>? = null,
     val native: Boolean = false,
@@ -136,6 +137,7 @@ internal fun AppPickerScreen(
         merge = { apps, t, selfPkg ->
             val nativeTargets = t.nativeTargets
             val observers = t.observerNames
+            val sharedAppIdPackages = packagesSharingAppIds(t.packageUids)
             val autoHideSignals = apps.map(AppSummary::toAutoHideSignal)
             val baseCanonical = t.canonicalConfig ?: buildCanonicalConfigFromTargetsSnapshot(t)
             val autoApplied =
@@ -157,6 +159,7 @@ internal fun AppPickerScreen(
                             isSystem = app.isSystem,
                             userIds = app.userIds,
                             uids = t.packageUids[app.packageName].orEmpty(),
+                            sharesJavaAppId = app.packageName in sharedAppIdPackages,
                             java = canonicalApp?.java ?: (app.packageName in t.lsposedTargets),
                             javaHooks = canonicalApp?.takeIf { it.java }?.javaHooks?.takeIf { it.isNotEmpty() },
                             native = app.packageName in nativeTargets,
@@ -426,6 +429,7 @@ private fun AppRow(
             hookEntries = LsposedJavaHookEntries,
             selectedHooks = app.javaHooks,
             roleEnabled = app.java,
+            notice = if (app.sharesJavaAppId) stringResource(R.string.java_hooks_shared_app_id) else null,
             onDismiss = { javaHookDialogOpen = false },
             onSave = { hooks ->
                 onJavaHooksChange(hooks)

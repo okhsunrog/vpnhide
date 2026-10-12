@@ -5,11 +5,10 @@ import android.util.Log
 import de.robv.android.xposed.XposedBridge
 import dev.okhsunrog.vpnhide.GatedLogger
 import dev.okhsunrog.vpnhide.LogTags
-import dev.okhsunrog.vpnhide.VpnHideLog
 
 /**
  * system_server logcat facade for LSPosed hooks, which can't reach the app's
- * canonical-snapshot cache. Same gate-and-level policy as [VpnHideLog] (see
+ * canonical-snapshot cache. Same gate-and-level policy as the app logger (see
  * [GatedLogger]) — info is per-request/hot-path and gated, error always prints
  * so "hooks didn't attach" reports stay diagnosable — but the flag is owned by
  * [SystemServerConfigCache], which re-reads the canonical JSON on the same 1s

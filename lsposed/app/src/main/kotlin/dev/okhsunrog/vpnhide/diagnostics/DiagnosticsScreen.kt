@@ -34,11 +34,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DiagnosticsFailedPrompt
 import dev.okhsunrog.vpnhide.DiagnosticsRetryPrompt
 import dev.okhsunrog.vpnhide.FileSaveShareRow
-import dev.okhsunrog.vpnhide.LsposedState
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.SelfNotRoutedPrompt
 import dev.okhsunrog.vpnhide.StatusBanner
@@ -88,14 +88,10 @@ fun DiagnosticsScreen(
     // supplies only this screen's side channels (which results to list, whether they
     // are complete, their coverage, the notice about the latest attempt), from the
     // same instant. The screen words the pure decision; it never combines flows.
-    val presentation by DiagnosticsCache.presentation.collectAsState()
-    val situation by DiagnosticsCache.situation.collectAsState()
+    val snapshot by DiagnosticsCache.snapshot.collectAsStateWithLifecycle()
+    val presentation = snapshot.presentation
+    val situation = snapshot.situation
     val decision = diagnosticScreenDecision(situation, presentation)
-    // The dashboard state carries which native backend is active + the optional hooks
-    // it installed — the inputs needed to rebuild the canonical DiagnosticReport here,
-    // so each check can be shown against the vectors the backend actually OWNS. Null
-    // until the dashboard has loaded (then we fall back to the raw, ownership-less list).
-    val dashState by DashboardCache.state.collectAsState()
     val tallyFmt = stringResource(R.string.diag_summary_tally)
 
     // Kick off the diagnostics run once per process. The cache parks at
@@ -167,12 +163,10 @@ fun DiagnosticsScreen(
             // render the raw list (every leak reads as a leak — the pre-report
             // behaviour, used only in the brief window before the dashboard loads).
             // A retained measurement keeps the layers it was measured against; only an
-            // active run's partial evidence is attributed with the live Dashboard state.
+            // active run's partial evidence uses the root in the same domain snapshot.
             val layers =
                 decision.coverage
-                    ?: dashState?.let { ds ->
-                        MeasurementCoverage(ds.nativeBackend, ds.installedOptionalHooks, ds.lsposed is LsposedState.Active)
-                    }
+                    ?: snapshot.rootSnapshot?.let(::measurementCoverageFor)
             val report =
                 layers?.let { c ->
                     buildDiagnosticReport(
@@ -386,7 +380,8 @@ private fun DebugExportSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var exporting by remember { mutableStateOf(false) }
-    var resultFile by remember { mutableStateOf<File?>(null) }
+    var outcome by remember { mutableStateOf<DebugExportOutcome?>(null) }
+    val resultFile = (outcome as? DebugExportOutcome.Written)?.file
 
     // One export recipe, shared with the agent bridge's getState.
     var optForensics by remember { mutableStateOf(true) }
@@ -397,7 +392,7 @@ private fun DebugExportSheet(
     val saveLauncher = rememberZipSaveLauncher("debug-export") { resultFile }
 
     // Changing any toggle invalidates a result produced with the old recipe.
-    val clearResult = { resultFile = null }
+    val clearResult = { outcome = null }
     // Recreated with this composable, so a reopened sheet never flashes the previous
     // verdict while a fresh probe runs (e.g. user closed the blocked sheet, turned the
     // VPN on, reopened). rememberCaptureGate re-measures on first composition = on open.
@@ -458,18 +453,19 @@ private fun DebugExportSheet(
                     val kernel = optKernelImage
                     exporting = true
                     scope.launch {
-                        // A Failed export produced no file: the sheet returns to its
-                        // configure phase exactly as it did for the old null result.
-                        // Everything else — including a self-test that could not
-                        // measure — is a written bundle carrying its own reasons.
-                        resultFile = (exportDebug(context, restartState, options, kernel) as? DebugExportOutcome.Written)?.file
-                        exporting = false
+                        outcome = null
+                        try {
+                            outcome = exportDebug(context, restartState, options, kernel)
+                        } finally {
+                            exporting = false
+                        }
                     }
                 }
                 Unit
             }
 
             val file = resultFile
+            if (!exporting) outcome?.let { ExportOutcomeBanner(it) }
 
             // Configure phase only: warn that a VPN-off / not-in-tunnel capture
             // will be incomplete. The encouraged action (Re-check) rides on the
@@ -582,7 +578,7 @@ private fun ExportToggle(
 private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state by LogcatRecorder.state.collectAsState()
+    val state by LogcatRecorder.state.collectAsStateWithLifecycle()
 
     // Own gate: the card is always visible, so it holds its VPN-off/not-in-tunnel
     // verdict until re-checked (re-measured on entry and on the banner's re-check).
@@ -754,8 +750,8 @@ private data class CaptureGate(
 private fun rememberCaptureGate(selfNeedsRestart: Boolean?): CaptureGate {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val sharedGate by RoutingGateCache.gate.collectAsState()
-    val sharedLoading by RoutingGateCache.loading.collectAsState()
+    val sharedGate by RoutingGateCache.gate.collectAsStateWithLifecycle()
+    val sharedLoading by RoutingGateCache.loading.collectAsStateWithLifecycle()
     var awaitingFreshSinceOpen by remember { mutableStateOf(true) }
 
     val recheck: () -> Unit = {
@@ -1058,4 +1054,39 @@ private fun CheckCard(
             }
         }
     }
+}
+
+@Composable
+private fun ExportOutcomeBanner(outcome: DebugExportOutcome) {
+    val text =
+        when (outcome) {
+            is DebugExportOutcome.Failed -> {
+                stringResource(R.string.debug_export_failed, outcome.reason)
+            }
+
+            is DebugExportOutcome.Written -> {
+                if (outcome.errors.isEmpty()) {
+                    stringResource(R.string.debug_export_complete)
+                } else {
+                    stringResource(R.string.debug_export_partial, outcome.errors.joinToString("\n"))
+                }
+            }
+        }
+    val color =
+        when (outcome) {
+            is DebugExportOutcome.Failed -> {
+                StatusColors.errorContainer()
+            }
+
+            is DebugExportOutcome.Written -> {
+                if (outcome.errors.isEmpty()) {
+                    StatusColors.successContainer()
+                } else {
+                    StatusColors
+                        .warningContainer()
+                }
+            }
+        }
+    StatusBanner(text = text, containerColor = color, contentColor = MaterialTheme.colorScheme.onSurface)
+    Spacer(Modifier.height(12.dp))
 }

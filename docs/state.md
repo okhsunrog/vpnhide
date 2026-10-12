@@ -307,8 +307,31 @@ sanitizer for that app; `java: ["hook_name", ...]` enables only the named
 LSPosed Java hooks for the app. App-hiding package visibility is controlled by
 `appHiding`, not by the Java VPN hook list.
 
-Inotify watches `/data/system/vpnhide_config.json`; package reinstall UID/appId
-changes are picked up by a periodic fingerprint of `/data/system/packages.list`.
+Packages sharing an appId use the **union** of their enabled Java hook lists.
+A disabled Java role (or empty list) contributes no hooks; it does not veto
+another package's selection. Binder cannot distinguish those packages at the
+UID boundary, so the union applies to the whole group in every profile. Canonical
+JSON still stores each package's intent. The Java hook dialog explains this when
+the package inventory identifies a shared appId; the offline guide describes it
+regardless of inventory availability.
+
+Inotify invalidates the cache on canonical-config changes. Independently, a
+one-second poll fingerprints **both** canonical JSON and `packages.list`, including
+device/inode, size and nanosecond modification/change times. A load compares both
+fingerprints before and after reading, and publishes only under the same
+invalidation generation. A late invalidation cannot be overwritten by a reader.
+Each call attempts at most two reads. If the sources keep changing (or cannot be
+statted), it returns the previous coherent snapshot, or an empty fail-open policy
+at startup. A separate one-second retry deadline bounds I/O and error reporting,
+even if more invalidations arrive; it does not mark the old snapshot as current.
+The first call at or after that deadline retries without needing a watcher event.
+A stable missing canonical file or explicit empty config replaces the previous policy. Read/parse errors retain the last successful policy (or fail open at startup)
+and trigger another read after one second even if metadata did not change. A
+blank, malformed or unsupported JSON file is an error; intentional reset is a
+valid empty canonical object or removal of the canonical file. LSPosed telemetry
+exports `policy_read_status=error` and `policy_read_error` until reading succeeds.
+Telemetry uses same-directory atomic rename only; replacement failure preserves
+the previous complete file and schedules another write without clearing counters.
 
 ---
 
