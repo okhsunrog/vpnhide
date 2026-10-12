@@ -8,8 +8,9 @@ import kotlinx.serialization.Serializable
 /**
  * The presentation projection as the bridge and the bundle carry it: the same
  * eligibility, run identities, applicability and evidence sufficiency the
- * screens render, so an agent read or a bug report can never disagree with what
- * the user saw (T28). Additive next to the legacy `gate`/`report` fields, which
+ * screens render for that accepted revision (T28). Later observations can move
+ * the UI forward while the payload retains its snapshot. Additive next to the
+ * legacy `gate`/`report` fields, which
  * keep their meaning; the dates are the measurement's own, not the payload's.
  */
 @Serializable
@@ -28,6 +29,7 @@ internal data class DiagnosticSummaryInfo(
     val lastKnownRouting: SelfRouting?,
     /** Present only while a routing re-read is owed or in flight. */
     val routingRead: RoutingReadInfo?,
+    val snapshot: DiagnosticSnapshotInfo? = null,
 )
 
 /** A routing re-read in flight at assembly time: why it runs, and how long it has been owed. */
@@ -86,4 +88,33 @@ internal fun diagnosticSummary(
             (presentation.routing as? RoutingKnowledge.Verifying)?.let {
                 RoutingReadInfo(it.reason, (now - it.since).coerceAtLeast(0))
             },
+    )
+
+/** Provenance of the common domain packet, additive to the measurement's own observation ID. */
+@Serializable
+internal data class DiagnosticSnapshotInfo(
+    val revision: Long,
+    val rootObservationId: Long?,
+    val rootGeneration: Long?,
+    val rootCurrent: Boolean,
+    val routingObservationId: Long?,
+    val routingGeneration: Long,
+    val changeEpoch: Long,
+)
+
+internal fun diagnosticSummary(snapshot: DiagnosticSnapshot): DiagnosticSummaryInfo =
+    diagnosticSummary(snapshot.presentation, snapshot.observedAt).copy(
+        snapshot =
+            DiagnosticSnapshotInfo(
+                revision = snapshot.revision,
+                rootObservationId = snapshot.rootSnapshot?.observationId,
+                rootGeneration = snapshot.sources.root.generation,
+                rootCurrent = dev.okhsunrog.vpnhide.currentObservationValue(snapshot.sources.root) != null,
+                routingObservationId =
+                    snapshot.sources.routing.lastGood
+                        ?.request
+                        ?.id,
+                routingGeneration = snapshot.sources.routing.generation,
+                changeEpoch = snapshot.sources.impact.changeEpoch,
+            ),
     )

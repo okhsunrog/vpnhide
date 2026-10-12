@@ -8,10 +8,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
-import java.io.InputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -28,14 +26,6 @@ private const val LOCALHOST = "127.0.0.1"
 // A stalled localhost peer must not wedge the single serve thread forever:
 // every accepted socket gets this read deadline before any byte is read.
 private const val SOCKET_TIMEOUT_MS = 5_000
-
-// Upper bound on a request body. The /call payload is a small JSON document;
-// anything larger is rejected (after auth) rather than allocated.
-private const val MAX_BODY_BYTES = 256 * 1024
-
-// Pre-auth guard: cap a single request/header line so an unauthenticated peer
-// cannot grow the line buffer without bound before we ever check the token.
-private const val MAX_LINE_BYTES = 8 * 1024
 
 internal object AgentControlBridge {
     private val lock = Any()
@@ -148,8 +138,8 @@ private class BridgeServer(
 
     private fun handleClient(client: Socket) {
         try {
-            val input = client.getInputStream()
-            val head = readRequestHead(input)
+            val request = AgentRequestReader(client.getInputStream(), { client.soTimeout = it })
+            val head = request.readHead()
             if (head == null) {
                 writeError(client, 400, "Bad Request", "Invalid HTTP request")
                 return
@@ -162,7 +152,7 @@ private class BridgeServer(
                 writeError(client, 401, "Unauthorized", "Missing or invalid bearer token")
                 return
             }
-            val body = readBody(input, head.headers)
+            val body = request.readBody(head.headers)
             when {
                 head.method == "GET" && head.path == "/functions" -> {
                     writeJson(client, 200, "OK", AgentControlDispatcher.functionsJson())
@@ -196,59 +186,6 @@ private class BridgeServer(
             writeError(client, 500, "Internal Server Error", e.message ?: e::class.java.simpleName)
         }
     }
-}
-
-private data class RequestHead(
-    val method: String,
-    val path: String,
-    val headers: Map<String, String>,
-)
-
-private fun readRequestHead(input: InputStream): RequestHead? {
-    val requestLine = readAsciiLine(input)?.takeIf { it.isNotBlank() } ?: return null
-    val requestParts = requestLine.split(' ', limit = 3)
-    if (requestParts.size < 2) return null
-
-    val headers = linkedMapOf<String, String>()
-    while (true) {
-        val line = readAsciiLine(input) ?: return null
-        if (line.isEmpty()) break
-        val separator = line.indexOf(':')
-        if (separator <= 0) continue
-        headers[line.substring(0, separator).trim().lowercase()] = line.substring(separator + 1).trim()
-    }
-    return RequestHead(method = requestParts[0], path = requestParts[1], headers = headers)
-}
-
-private fun readBody(
-    input: InputStream,
-    headers: Map<String, String>,
-): String {
-    val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
-    if (contentLength <= 0) return ""
-    require(contentLength <= MAX_BODY_BYTES) { "Request body too large" }
-    val body = ByteArray(contentLength)
-    var offset = 0
-    while (offset < contentLength) {
-        val read = input.read(body, offset, contentLength - offset)
-        if (read == -1) throw IOException("Unexpected end of request body")
-        offset += read
-    }
-    return body.decodeToString()
-}
-
-private fun readAsciiLine(input: InputStream): String? {
-    val out = ByteArrayOutputStream()
-    while (true) {
-        val next = input.read()
-        if (next == -1) return if (out.size() == 0) null else out.toString(Charsets.US_ASCII.name())
-        if (next == '\n'.code) break
-        if (next != '\r'.code) {
-            require(out.size() < MAX_LINE_BYTES) { "Request header line too long" }
-            out.write(next)
-        }
-    }
-    return out.toString(Charsets.US_ASCII.name())
 }
 
 private fun writeError(

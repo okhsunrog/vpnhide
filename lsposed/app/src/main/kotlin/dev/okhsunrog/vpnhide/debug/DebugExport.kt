@@ -3,6 +3,8 @@ package dev.okhsunrog.vpnhide.debug
 import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
+import dev.okhsunrog.vpnhide.DashboardCache
+import dev.okhsunrog.vpnhide.DashboardState
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.LsposedConfig
 import dev.okhsunrog.vpnhide.RootSnapshot
@@ -11,10 +13,12 @@ import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.collectDebugShellSnapshot
 import dev.okhsunrog.vpnhide.collectHookCounterSnapshot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSnapshot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
 import dev.okhsunrog.vpnhide.diagnostics.verdict
+import dev.okhsunrog.vpnhide.loadDashboardState
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.readLsposedConfig
 import dev.okhsunrog.vpnhide.statistics.buildStatisticsState
@@ -98,6 +102,7 @@ private suspend fun buildDebugState(
 ): VpnHideState {
     // Forensics forces debug logging + a fresh dmesg window while the capture runs;
     // a lean (no-forensics) export skips all of that and just serializes the state.
+    val beforeCapture = beforeDebugCapture()
     val loggingSession = if (options.forensics) beginDebugCaptureLogging() else null
     var restoreAttempted = false
     val errors = mutableListOf<String>()
@@ -118,12 +123,16 @@ private suspend fun buildDebugState(
         // Authoritative module/liveness state — the SAME snapshot the dashboard
         // derives from. This is what fixes the old export path silently reading
         // "inactive" from a shell that never emitted proc_exists/ports_chain.
-        val rootSnapshot =
+        val refreshedRoot =
             runCatching { RootSnapshotCache.refresh() }
                 .getOrElse {
                     errors += "root snapshot failed: ${it.message}"
-                    RootSnapshot(emptyMap())
+                    null
                 }
+
+        val diagnosticSnapshot = DiagnosticsCache.awaitSnapshot(refreshedRoot)
+        val rootSnapshot = diagnosticSnapshot.rootSnapshot ?: RootSnapshot(emptyMap())
+        val dashboard = captureDashboard(context, selfNeedsRestart, rootSnapshot, diagnosticSnapshot, errors)
 
         val shellSnapshot =
             if (options.forensics) {
@@ -163,7 +172,9 @@ private suspend fun buildDebugState(
             checkResults = selfTest.checkResults,
             selfTestRunId = selfTest.runId,
             // The projection after the capture's own run settled: what the screens show now.
-            diagnostics = diagnosticSummary(DiagnosticsCache.presentation.value),
+            diagnostics = diagnosticSummary(diagnosticSnapshot),
+            dashboard = dashboard,
+            beforeCapture = beforeCapture,
             dmesg = dmesg,
             logcat = logcat,
             bootLsposedLogcat = if (options.forensics) captureBootLsposedLogcat() else "",
@@ -188,6 +199,46 @@ private suspend fun buildDebugState(
         }
     }
 }
+
+/** Dashboard failure must not discard the run evidence or the rest of the archive. */
+private suspend fun captureDashboard(
+    context: Context,
+    selfNeedsRestart: Boolean,
+    root: RootSnapshot,
+    snapshot: DiagnosticSnapshot,
+    errors: MutableList<String>,
+): DashboardState? =
+    try {
+        loadDashboardState(context, selfNeedsRestart, root, snapshot.presentation)
+    } catch (c: CancellationException) {
+        throw c
+    } catch (e: Exception) {
+        errors += "dashboard assembly failed: ${e.message}"
+        null
+    }
+
+private fun beforeDebugCapture(): BeforeCaptureInfo? =
+    runCatching {
+        val display = DashboardCache.presentation.value
+        val dashboard = display.state
+        val operation = display.diagnostics.sources.config
+        BeforeCaptureInfo(
+            observedAt = isoNow(),
+            diagnostics = diagnosticSummary(display.diagnostics),
+            protection = dashboard?.protection,
+            messages = dashboard?.messages.orEmpty(),
+            pendingOperationIds = operation.operations.sorted(),
+            operationRechecking = operation.rechecking,
+            lastOperationId = operation.lastResult?.id,
+            lastOperationPhases =
+                operation.lastResult
+                    ?.phases
+                    .orEmpty()
+                    .mapKeys { it.key.name }
+                    .mapValues { it.value.name },
+            lastOperationFailure = operation.lastResult?.failure?.name,
+        )
+    }.getOrNull()
 
 /** The app's own post-Binder network view, PendingIntent path included (this is a real app process). */
 internal fun captureSelfNetworkView(

@@ -65,24 +65,18 @@ internal object AgentControl {
         options: StateContentOptions = StateContentOptions(),
     ): VpnHideState =
         withAppContext(context) { context ->
-            val rootSnapshot = rootSnapshot(refresh == true)
-            // One presentation, read once it reflects a terminal attempt, feeds the
-            // dashboard tiles, the legacy gate/report and the diagnostics summary, so
-            // the three cannot describe different instants. selfNeedsRestart=false is
-            // safe: the cache's sticky flag keeps a UI-set NEEDS_RESTART from being
-            // cleared here.
-            val diagnostics = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart = false)
+            val requestedRoot = rootSnapshot(refresh == true)
+            // Root, results, presentation and Situation belong to one accepted domain revision.
+            val snapshot = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart = false, root = requestedRoot)
+            val rootSnapshot = requireNotNull(snapshot.rootSnapshot)
+            val diagnostics = snapshot.presentation
             val derived = loadDashboardState(context, selfNeedsRestart = false, rootSnapshot = rootSnapshot, diagnostics = diagnostics)
-            // The screens classify one Situation and render it; the bridge overlays the
-            // same condition on the derived tiles, so its dashboard and legacy gate/report
-            // say "VPN off" whenever the hero does, instead of presenting a retained
-            // measurement as measurable right now. The Situation is read at assembly time:
-            // it is published from the same presentation flow but on its own schedule, so
-            // it is not guaranteed to be the very instant [diagnostics] came from.
-            val protection = overlayCondition(derived.protection, DiagnosticsCache.situation.value)
+            val protection = overlayCondition(derived.protection, snapshot.situation)
             val dashboard = derived.copy(protection = protection)
             val statistics = buildStatisticsState(rootSnapshot).toAgentStatisticsState(selfPackage = context.packageName)
-            val config = AgentBridgeJson.parseToJsonElement(canonicalConfigJson(currentCanonicalConfig(refresh = false)))
+            val config =
+                snapshot.sources.config.confirmed
+                    ?.let { AgentBridgeJson.parseToJsonElement(canonicalConfigJson(it)) }
 
             // Forensic blobs (shell snapshot, dmesg, boot logcat, lsposed config,
             // hook counters, raw sections) only on request — they run extra root
@@ -107,7 +101,7 @@ internal object AgentControl {
                 gate = bridgeGate(protection),
                 checkResults = diagnostics.measurementResults.takeIf { protection is ProtectionCheck.Checked },
                 // The same projection the screens render, so getState and the UI agree.
-                diagnostics = diagnosticSummary(diagnostics),
+                diagnostics = diagnosticSummary(snapshot),
                 dmesg = if (options.forensics) suExec("dmesg 2>/dev/null").second else "",
                 logcat = "",
                 bootLsposedLogcat = if (options.forensics) captureBootLsposedLogcat() else "",
@@ -550,10 +544,6 @@ private suspend fun targetsSnapshot(refresh: Boolean): TargetsSnapshot {
     val snapshot = parseTargetsSnapshot(rootSnapshot(refresh))
     return snapshot.copy(canonicalConfig = CanonicalConfigRepository.state.value.confirmed ?: snapshot.canonicalConfig)
 }
-
-private suspend fun currentCanonicalConfig(refresh: Boolean): CanonicalConfig =
-    CanonicalConfigRepository.state.value.confirmed
-        ?: requireNotNull(targetsSnapshot(refresh).canonicalConfig) { "Canonical configuration unavailable" }
 
 private suspend fun mutateAgentApp(
     context: Context,

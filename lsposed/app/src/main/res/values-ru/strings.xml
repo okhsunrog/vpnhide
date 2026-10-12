@@ -12,6 +12,8 @@
     <string name="btn_save">Сохранить</string>
     <string name="btn_cancel">Отмена</string>
     <string name="action_refresh">Обновить</string>
+    <string name="close_search">Закрыть поиск</string>
+    <string name="clear_search_query">Очистить запрос</string>
     <string name="search_placeholder">Поиск приложений&#8230;</string>
     <string name="filter_show_system">Системные</string>
     <string name="filter_russian_only">Российские</string>
@@ -32,6 +34,7 @@
     <string name="profile_scan_partial_message">Не удалось прочитать: %1$s. Показаны все приложения, которые удалось найти; настройки для %1$s сохранены.</string>
 
     <string name="apps_help_title">Как это работает</string>
+    <string name="java_hooks_shared_app_id">У этого пакета общий Android app ID с другими пакетами. Включённые Java-хуки всех пакетов с этим ID объединяются и действуют на всю группу во всех профилях. Чтобы отключить хук для группы, снимите его у каждого пакета.</string>
     <string name="java_hooks_title">Java-хуки</string>
     <string name="native_hooks_title">Нативные хуки</string>
     <string name="native_hooks_title_with_backend">Нативные хуки · %1$s</string>
@@ -630,4 +633,7 @@
     <string name="reset_blocker_builtin">Companion-модуль встроенного бэкенда ещё установлен</string>
     <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide встроен в работающее ядро. Удалите лишний модуль kmod и оставьте companion-модуль встроенного бэкенда.</string>
     <string name="dashboard_issue_builtin_companion_missing">VPN Hide встроен в это ядро, но companion-модуль отсутствует. Установите companion-модуль встроенного бэкенда VPN Hide для настройки защиты.</string>
+    <string name="debug_export_complete">Отчёт собран полностью.</string>
+    <string name="debug_export_partial">Собран частичный отчёт. Его можно сохранить или отправить.\n%1$s</string>
+    <string name="debug_export_failed">Не удалось собрать отчёт: %1$s</string>
 </resources>

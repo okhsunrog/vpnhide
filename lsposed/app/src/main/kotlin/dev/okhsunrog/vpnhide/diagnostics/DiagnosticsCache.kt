@@ -10,6 +10,7 @@ import dev.okhsunrog.vpnhide.ConfigPhase
 import dev.okhsunrog.vpnhide.ContextObservationInputs
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.ObservationRuntime
+import dev.okhsunrog.vpnhide.RootSnapshot
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.VpnHideLog
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,13 +37,17 @@ internal object DiagnosticsCache {
             scope = ObservationRuntime.scope,
             io = AppDiagnosticRunIo(inputs = { inputs }, impact = { domain.impact }),
             routing = RoutingGateCache.observation,
-            snapshots = RootSnapshotCache.snapshot,
+            snapshots = RootSnapshotCache.observation,
             config = CanonicalConfigRepository.state,
             inputs = domainInputs,
             processIdentity = "pid:${Process.myPid()};uid:${Process.myUid()}",
             log = { VpnHideLog.i(LogTags.DIAG, it) },
         )
     }
+
+    val snapshot: StateFlow<DiagnosticSnapshot> get() = domain.snapshot
+
+    suspend fun awaitSnapshot(root: RootSnapshot? = null): DiagnosticSnapshot = domain.awaitSnapshot(root)
 
     /** See [DiagnosticDomain.presentation]. */
     val presentation: StateFlow<DiagnosticPresentation> get() = domain.presentation
@@ -72,9 +77,10 @@ internal object DiagnosticsCache {
     suspend fun awaitTerminal(
         context: Context,
         selfNeedsRestart: Boolean,
-    ): DiagnosticPresentation {
+        root: RootSnapshot? = null,
+    ): DiagnosticSnapshot {
         updateInputs(context, selfNeedsRestart)
-        return domain.awaitTerminal()
+        return domain.awaitTerminal(root)
     }
 
     /** See [DiagnosticDomain.captureRun]. */

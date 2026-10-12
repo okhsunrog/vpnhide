@@ -327,6 +327,8 @@ internal data class DashboardMessage(
     // "Learn more" button that opens this help article — the contextual entry
     // from an issue to the guide section that explains and fixes it.
     val helpArticle: String? = null,
+    val reason: DashboardIssueReason? = null,
+    val presentationLanguage: String? = null,
 )
 
 @Serializable
@@ -1591,7 +1593,15 @@ internal fun assembleDashboardState(
             facts.appVersion,
             developer,
         )
-    val messages = dashboardIssues(dashboardFacts).map { it.toMessage(context, context.resources) }
+    val messages =
+        dashboardIssues(dashboardFacts).map { issue ->
+            issue.toMessage(context, context.resources).copy(
+                reason = issue.toReason(),
+                presentationLanguage =
+                    context.resources.configuration.locales[0]
+                        .toLanguageTag(),
+            )
+        }
     VpnHideLog.i(TAG, "protection=${protection.check} messages=$messages")
     return dashboardFacts.toDashboardState(messages = messages, legacyImport = facts.legacyImport)
 }

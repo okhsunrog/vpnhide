@@ -66,6 +66,21 @@ internal const val NATIVE_USER_UID_CAPACITY = NATIVE_TARGET_UID_CAPACITY - NATIV
 private const val ANDROID_UIDS_PER_USER = 100_000
 private const val FIRST_APPLICATION_UID = 10_000
 
+/** Distinct packages sharing an appId; copies of one package in profiles do not count. */
+internal fun packagesSharingAppIds(packageUids: Map<String, List<Int>>): Set<String> =
+    packageUids.entries
+        .flatMap { (pkg, uids) ->
+            uids
+                .filter { it >= FIRST_APPLICATION_UID }
+                .map { it % ANDROID_UIDS_PER_USER }
+                .distinct()
+                .map { it to pkg }
+        }.groupBy({ it.first }, { it.second })
+        .values
+        .filter { it.size > 1 }
+        .flatten()
+        .toSet()
+
 internal data class NativeTargetCapacityUsage(
     val used: Int,
     val capacity: Int = NATIVE_TARGET_UID_CAPACITY,
