@@ -30,7 +30,7 @@ vpnhide 用分层架构同时解决这两个问题：
 
 **第 2 层 —— 原生（kmod、内核内置、KPM 或 Zygisk）：** 覆盖原生检测路径。同一时间应恰好有一个原生后端处于活动状态：
 - **kmod**（推荐用于受支持的 GKI 内核）—— 内核级 `kprobe`/`kretprobe` 钩子。过滤 `ioctl`、`getifaddrs`/netlink 的接口、地址、路由和策略规则转储，并在套接字状态改变前对隐藏接口拒绝 `SO_BINDTODEVICE` / `SO_BINDTOIFINDEX`。在目标进程中零足迹：无库注入，无可检测之物。
-- **KPM** —— 一个 KernelPatch 模块，实现与之相同的 11 个逻辑内核钩子，无需针对特定 GKI 变体的 `.ko`。适用于旧的/非 GKI 的 4.14 / 4.19 / 5.4 内核，以及 `.ko` 无法加载的情况。需要 KernelPatch 运行时：APatch 或 KPatch-Next-Module。
+- **KPM** —— 一个 KernelPatch 模块，实现与之相同的 11 个逻辑内核钩子，无需针对特定 GKI 变体的 `.ko`。适用于旧的/非 GKI 的 4.14 / 4.19 / 5.4 内核，以及 `.ko` 无法加载的情况。需要 KernelPatch 运行时：APatch 或 [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)。
 - **Zygisk** —— 当无法使用内核级后端时的回退方案。它的 `libc.so` 内联钩子包含尽力而为的 `setsockopt` 过滤，运行在目标进程内部，可被直接系统调用绕过，因此银行和反欺诈应用可能会检测到它。对于这类应用，请关闭原生并依赖 Java 层。
 
 **第 3 层 —— 端口模块（portshide）：** 一个独立的 Magisk 模块。它阻止选定应用访问 `127.0.0.1` / `::1`（通过 iptables），使其无法通过本地绑定的 VPN / 代理守护进程的开放端口来检测它们（**Ports** 角色）。
@@ -50,7 +50,7 @@ vpnhide 对选定应用隐藏三样东西，全部通过四个 **J / N / A / P**
 你始终需要 **VPN Hide 应用**（`vpnhide.apk`）+ 用于 Java 层的 LSPosed/Vector + 恰好一个用于原生隐藏的原生后端。若你想要本地回环端口拦截，应用还可选用可选的端口模块：
 
 - **`kmod`**（稳定默认）—— 完全在进程外，对防篡改不可见。需要受支持的 GKI 内核：5.10、5.15、6.1、6.6 或 6.12。
-- **`KPM`** —— 用于 4.14 / 4.19 / 5.4 以及 `.ko` 不适配的其他情况的内核级后端。需要 APatch 或 KPatch-Next-Module。
+- **`KPM`** —— 用于 4.14 / 4.19 / 5.4 以及 `.ko` 不适配的其他情况的内核级后端。需要 APatch 或 [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)。
 - **`Zygisk`** —— 当 kmod/KPM 不可用，或你不想安装 KernelPatch 运行时时的回退方案。
 - **`portshide`**（可选）—— 若你想阻止选定应用探测本地回环端口，请安装它。
 
@@ -216,7 +216,7 @@ docker run --rm -it -v "${PWD}:/workspace" -v "vpnhide_cargo_cache:/usr/local/ca
 ## 已验证对抗
 
 - [RKNHardering](https://github.com/xtclovver/RKNHardering/) —— 所有检测向量均干净
-- [YourVPNDead](https://github.com/loop-uh/yourvpndead) —— 所有检测向量均干净
+- YourVPNDead（原仓库已无法访问） —— 所有检测向量均干净
 
 两者均实现了俄罗斯数字发展部官方的 VPN/代理检测方法论（[来源](https://t.me/ruitunion/893)）。
 
@@ -238,7 +238,7 @@ vpnhide 对特定应用隐藏活动的 VPN。它并非为以下用途设计：
 ## 已知限制
 
 - `kmod` 需要带 `CONFIG_KPROBES=y` 的受支持 GKI 内核（Android 12+ 设备上为标准配置）
-- KPM 需要 KernelPatch 运行时（APatch 或 KPatch-Next-Module）；不要将 KPM 与 `.ko` 一起安装
+- KPM 需要 KernelPatch 运行时（APatch 或 [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)）；不要将 KPM 与 `.ko` 一起安装
 - `lsposed` 需要 LSPosed、LSPosed-Next 或 Vector
 - `zygisk` 提供 arm64-v8a 和 armeabi-v7a（注入 32 位进程）；内核级后端仅支持 arm64
 - 直接的 `svc #0` 系统调用会绕过 Zygisk 的 libc 钩子 —— 为此请使用内核级后端（kmod 或 KPM）

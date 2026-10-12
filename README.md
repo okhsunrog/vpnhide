@@ -28,7 +28,7 @@ vpnhide решает обе проблемы многослойной архит
 
 **Уровень 2 — нативный (kmod, встроенный в ядро, KPM или Zygisk):** покрывает нативные пути обнаружения. Активным должен быть ровно один Native-бэкенд:
 - **kmod** (рекомендуется для поддерживаемых GKI-ядер) — хуки `kprobe`/`kretprobe` на уровне ядра. Фильтрует `ioctl`, `getifaddrs`/netlink-дампы интерфейсов, адресов, маршрутов и policy rules, а также отклоняет `SO_BINDTODEVICE` / `SO_BINDTOIFINDEX` для скрытых интерфейсов до изменения состояния сокета. Нулевой след в процессе приложения: никаких инъекций библиотек, нечего обнаруживать.
-- **KPM** — KernelPatch Module с теми же 11 логическими kernel-хуками, но без привязки к GKI-варианту `.ko`. Полезен для старых/non-GKI ядер 4.9 / 4.14 / 4.19 / 5.4 и ситуаций, где `.ko` не может загрузиться. Требует KernelPatch runtime: APatch или KPatch-Next-Module.
+- **KPM** — KernelPatch Module с теми же 11 логическими kernel-хуками, но без привязки к GKI-варианту `.ko`. Полезен для старых/non-GKI ядер 4.9 / 4.14 / 4.19 / 5.4 и ситуаций, где `.ko` не может загрузиться. Требует KernelPatch runtime: APatch или [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest).
 - **Zygisk** — запасной вариант, если kernel-level backend поставить нельзя. Inline-хуки `libc.so`, включая best-effort фильтрацию `setsockopt`, работают внутри процесса приложения и обходятся прямыми системными вызовами, поэтому банковские и anti-fraud приложения могут их обнаруживать. Для таких приложений лучше оставлять Native выключенным и полагаться на Java-уровень.
 
 **Уровень 3 — модуль скрытия портов (portshide):** отдельный Magisk-модуль. Через iptables блокирует выбранным приложениям доступ к `127.0.0.1` / `::1`, чтобы они не могли обнаружить локально запущенный VPN / proxy-демон по открытому порту (роль Ports).
@@ -48,7 +48,7 @@ vpnhide скрывает от выбранных приложений три в�
 Всегда нужно **приложение VPN Hide** (`vpnhide.apk`) + LSPosed/Vector для Java-уровня + ровно один Native-бэкенд для нативного скрытия. Дополнительно приложение может использовать необязательный Ports-модуль для блокировки localhost-портов:
 
 - **`kmod`** (стабильный вариант по умолчанию) — полностью out-of-process, невидим для anti-tamper. Требуется поддерживаемое GKI-ядро: 5.10, 5.15, 6.1, 6.6 или 6.12.
-- **`KPM`** — kernel-level backend для 4.9 / 4.14 / 4.19 / 5.4 и других случаев, где `.ko` не подходит. Нужен APatch или KPatch-Next-Module.
+- **`KPM`** — kernel-level backend для 4.9 / 4.14 / 4.19 / 5.4 и других случаев, где `.ko` не подходит. Нужен APatch или [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest).
 - **`Zygisk`** — fallback, если kmod/KPM недоступны или вы не хотите ставить KernelPatch runtime.
 - **`portshide`** (необязательно) — установите, если хотите блокировать выбранным приложениям доступ к localhost-портам.
 
@@ -217,7 +217,7 @@ docker run --rm -it -v "${PWD}:/workspace" -v "vpnhide_cargo_cache:/usr/local/ca
 ## Проверено на
 
 - [RKNHardering](https://github.com/xtclovver/RKNHardering/) — все векторы обнаружения чисты
-- [YourVPNDead](https://github.com/loop-uh/yourvpndead) — все векторы обнаружения чисты
+- YourVPNDead (исходный репозиторий недоступен) — все векторы обнаружения чисты
 
 Оба реализуют официальную методику обнаружения VPN/прокси Минцифры РФ ([источник](https://t.me/ruitunion/893)).
 
@@ -241,7 +241,7 @@ vpnhide скрывает активный VPN от конкретных прил
 ## Известные ограничения
 
 - `kmod` требует поддерживаемое GKI-ядро с `CONFIG_KPROBES=y` (стандарт на устройствах Android 12+)
-- KPM требует KernelPatch runtime (APatch или KPatch-Next-Module); не ставьте KPM одновременно с `.ko`
+- KPM требует KernelPatch runtime (APatch или [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)); не ставьте KPM одновременно с `.ko`
 - `lsposed` требует LSPosed, LSPosed-Next или Vector
 - `zygisk` собирается под arm64-v8a и armeabi-v7a (внедрение в 32-битные процессы); kernel-бэкенды — только arm64
 - Прямые системные вызовы `svc #0` обходят хуки libc в Zygisk — для этого нужен kernel-level backend (kmod или KPM)

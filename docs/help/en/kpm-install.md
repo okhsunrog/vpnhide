@@ -15,8 +15,8 @@ in your kernel. Pick the path that matches your root:
 
 - **APatch / FolkPatch** — KernelPatch is already built in. Just install the
   module ZIP and save your **SuperKey** (below).
-- **Magisk / KernelSU / KernelSU-Next** — use **KPatch-Next-Module** and its
-  instructions to patch the kernel, or integrate KPatch-Next into a self-built
+- **Magisk / KernelSU / KernelSU-Next** — use [**KPatch-Next-Module**](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest) and the
+  setup steps below, or integrate KPatch-Next into a self-built
   kernel. Installing VPN Hide alone does not provide this runtime.
 
 If the runtime isn't present, the Dashboard says *"the kernel is not patched with
@@ -74,9 +74,30 @@ The Dashboard names the cause:
 For a load failure, use **Settings → Debugging → Collect debug log** to attach
 the boot-time output to a report — see [Collect a debug report](collect-report.md).
 
-## Runtime installation instructions
+## Where to download and how to install KPatch-Next-Module
 
-Use the [official KPatch-Next-Module instructions](https://github.com/KernelSU-Next/KPatch-Next-Module)
-for its supported root managers, including KernelSU-Next, or the
-[KPatch-Next project](https://github.com/KernelSU-Next/KPatch-Next) for kernel integration.
-VPN Hide's ZIP does not install or patch the KernelPatch runtime for you.
+For Magisk / KernelSU / KernelSU-Next:
+
+1. Download [KPatch-Next-Module.zip](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest/download/KPatch-Next-Module.zip)
+   from the [official releases](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest).
+   This provides the KPM runtime, not `vpnhide-kpm.zip`; you need both modules.
+2. Install the ZIP through your root manager's **Modules** screen, then open
+   the KPatch-Next module's WebUI. If the manager cannot open it, the module's
+   action offers [KsuWebUIStandalone](https://github.com/KOWX712/KsuWebUIStandalone/releases).
+3. Open **Patch** in the WebUI and patch the boot image. The modified image
+   must be flashed and the device rebooted before the runtime is available
+   in the running kernel. Installing the ZIP alone is not enough.
+   Before flashing, keep a working boot image and a way to restore it.
+4. After rebooting, check for **Working** in the WebUI. Then install
+   `vpnhide-kpm.zip` using the steps above; if already installed, open VPN Hide
+   and refresh its status.
+
+APatch / FolkPatch normally need no separate KPatch-Next-Module: their patched
+kernel includes the runtime. If VPN Hide still reports a missing runtime,
+check its status in your root manager and collect a
+[debug report](collect-report.md). A screenshot alone cannot distinguish a
+missing runtime from a failure to detect it.
+
+If patching is unavailable or unsuitable for your device, use
+[Zygisk](zygisk-install.md) instead of KPM. For a self-built kernel, see the
+[KPatch-Next project](https://github.com/KernelSU-Next/KPatch-Next).

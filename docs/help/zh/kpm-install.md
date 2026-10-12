@@ -12,7 +12,7 @@ KPM 使用内核 inline 挂钩，这要求内核中已存在 KernelPatch 运行�
 
 - **APatch / FolkPatch**——已内置 KernelPatch。直接安装模块 ZIP 并保存
   **SuperKey**（见下）。
-- **Magisk / KernelSU / KernelSU-Next**——使用 **KPatch-Next-Module** 并按其说明
+- **Magisk / KernelSU / KernelSU-Next**——使用 [**KPatch-Next-Module**](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest) 并按下方步骤
   修补内核，或在自行编译内核时集成 KPatch-Next。只安装 VPN Hide 不会提供此运行时。
 
 若运行时不存在，仪表盘会提示*“内核未打入 KernelPatch 运行时”*。
@@ -61,9 +61,25 @@ KPM 在加载时校验你的内核家族。受支持的家族为 4.4、4.9、4.1
 若加载失败，用 **Settings → Debugging → Collect debug log** 把开机时的输出附到
 报告中——见[收集调试报告](collect-report.md)。
 
-## 运行时安装说明
+## 下载并安装 KPatch-Next-Module
 
-对受支持的 root 管理器（含 KernelSU-Next），请使用
-[KPatch-Next-Module 官方说明](https://github.com/KernelSU-Next/KPatch-Next-Module)；
-内核集成见[KPatch-Next 项目](https://github.com/KernelSU-Next/KPatch-Next)。
-VPN Hide ZIP 不会代你安装或修补 KernelPatch 运行时。
+适用于 Magisk / KernelSU / KernelSU-Next：
+
+1. 从[官方发布页](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)
+   下载 [KPatch-Next-Module.zip](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest/download/KPatch-Next-Module.zip)。
+   它提供 KPM 运行时，不是 `vpnhide-kpm.zip`；两个模块都需要安装。
+2. 在 root 管理器的**模块**页面安装 ZIP，然后打开 KPatch-Next 模块的 WebUI。
+   如果管理器无法打开 WebUI，模块的操作按钮会提供
+   [KsuWebUIStandalone](https://github.com/KOWX712/KsuWebUIStandalone/releases) 下载入口。
+3. 在 WebUI 中打开 **Patch** 并修补启动镜像。必须刷入修改后的镜像并重启，
+   运行中的内核才会具备运行时。只安装 ZIP 不够。
+   刷入前请保留可用的启动镜像及恢复方法。
+4. 重启后确认 WebUI 显示 **Working**，再按上面的步骤安装 `vpnhide-kpm.zip`。
+   如果已经安装，请打开 VPN Hide 并刷新状态。
+
+APatch / FolkPatch 通常无需另装 KPatch-Next-Module：其修补后的内核已包含运行时。
+如果 VPN Hide 仍提示缺少运行时，请在 root 管理器中检查状态并
+[收集调试报告](collect-report.md)。仅凭截图无法区分运行时缺失和检测失败。
+
+如果设备无法或不适合修补，请改用 [Zygisk](zygisk-install.md)。自行编译内核时，
+请参阅 [KPatch-Next 项目](https://github.com/KernelSU-Next/KPatch-Next)。

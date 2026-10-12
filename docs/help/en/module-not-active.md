@@ -5,6 +5,7 @@ has one of a few concrete causes — the on-screen message names the exact one.
 
 ## Common causes
 
+- **Missing KernelPatch runtime.** “The kernel is not patched” means VPN Hide could not detect a working KPM runtime. Installing `vpnhide-kpm.zip` does not provide it. See [where to download KPatch-Next-Module and how to install the runtime](kpm-install.md).
 - **Reboot to activate.** A freshly installed native module only loads after a
   reboot. Restart the device.
 - **Missing LSPosed scope.** The Java layer needs **System Framework** in

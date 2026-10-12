@@ -15,9 +15,12 @@ Ports 为可选。见[要求](requirements.md)。
 3. **安装一个原生后端。** 仪表盘会针对你的设备推荐最合适的一个。通过 root 管理器的
    **模块**页面安装它的模块（ZIP）——Magisk、KernelSU、APatch 或 FolkPatch。只装一个
    原生后端；两个同时生效可能冲突。
+   安装说明：[kmod](kmod-install.md) · [KPM 与 KernelPatch 配置](kpm-install.md) ·
+   [Zygisk](zygisk-install.md)。不确定时，请查看[选择后端](choosing-native.md)，
+   其中也介绍了内置 VPN Hide 的内核。
 4. **启用 Java 层。** 在 LSPosed / LSPosed-Next / Vector 中启用 **VPN Hide**，并把
    **系统框架（System Framework）**加入它的作用域。没有这个作用域，Java 钩子不会挂载。
-5. **（可选）安装 Ports**，如果你需要隐藏本地回环端口。
+5. **（可选）[安装 Ports](ports.md)**，如果你需要隐藏本地回环端口。
 6. **重启**，让原生和 Java 模块加载。
 
 ## 确认是否生效

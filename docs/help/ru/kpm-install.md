@@ -15,8 +15,8 @@ KernelPatch. Выберите путь под свой root:
 
 - **APatch / FolkPatch** — KernelPatch уже встроен. Просто поставьте ZIP модуля и
   сохраните **SuperKey** (см. ниже).
-- **Magisk / KernelSU / KernelSU-Next** — используйте **KPatch-Next-Module** и
-  его инструкцию по патчингу ядра либо интегрируйте KPatch-Next при самостоятельной
+- **Magisk / KernelSU / KernelSU-Next** — используйте [**KPatch-Next-Module**](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest) и
+  шаги установки ниже либо интегрируйте KPatch-Next при самостоятельной
   сборке. Одна установка VPN Hide эту среду не предоставляет.
 
 Если среды нет, Дашборд напишет, что *«ядро не пропатчено средой KernelPatch»*.
@@ -74,9 +74,30 @@ KPM проверяет семейство вашего ядра при загр�
 чтобы приложить вывод со старта к отчёту — см.
 [Собрать отчёт для диагностики](collect-report.md).
 
-## Инструкции по установке среды
+## Где скачать и как установить KPatch-Next-Module
 
-Для поддерживаемых root-менеджеров, включая KernelSU-Next, используйте
-[официальную инструкцию KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module),
-для интеграции в ядро — [проект KPatch-Next](https://github.com/KernelSU-Next/KPatch-Next).
-ZIP VPN Hide сам не устанавливает и не встраивает среду KernelPatch.
+Для Magisk / KernelSU / KernelSU-Next:
+
+1. Скачайте [KPatch-Next-Module.zip](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest/download/KPatch-Next-Module.zip)
+   из [официальных релизов](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest).
+   Это среда для KPM, а не сам `vpnhide-kpm.zip`; нужны оба модуля.
+2. Установите ZIP через **Модули** root-менеджера, затем откройте WebUI
+   модуля KPatch-Next. Если менеджер не открывает WebUI, действие модуля
+   предложит [KsuWebUIStandalone](https://github.com/KOWX712/KsuWebUIStandalone/releases).
+3. В WebUI откройте **Patch** и пропатчите загрузочный образ. Чтобы среда
+   появилась в работающем ядре, изменённый образ нужно прошить, затем
+   перезагрузиться. Одна установка ZIP этого не заменяет.
+   Перед прошивкой сохраните рабочий загрузочный образ и способ его восстановления.
+4. После перезагрузки проверьте статус **Working** в WebUI. Затем установите
+   `vpnhide-kpm.zip` по шагам выше; если он уже установлен, откройте VPN Hide
+   и обновите состояние.
+
+На APatch / FolkPatch отдельно ставить KPatch-Next-Module обычно не требуется:
+среда входит в пропатченное ими ядро. Если VPN Hide всё же сообщает, что среды
+нет, проверьте её состояние в root-менеджере и соберите
+[отчёт для диагностики](collect-report.md). Одного скриншота недостаточно,
+чтобы отличить отсутствие среды от ошибки её обнаружения.
+
+Если патчинг недоступен или не подходит вашему устройству, используйте
+[Zygisk](zygisk-install.md) вместо KPM. Для собственной сборки ядра есть
+[проект KPatch-Next](https://github.com/KernelSU-Next/KPatch-Next).

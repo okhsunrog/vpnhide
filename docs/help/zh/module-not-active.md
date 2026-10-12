@@ -5,6 +5,7 @@
 
 ## 常见原因
 
+- **缺少 KernelPatch 运行时。** “内核未修补”表示 VPN Hide 未检测到可用的 KPM 运行时。安装 `vpnhide-kpm.zip` 不会提供它。请参阅 [KPatch-Next-Module 下载及运行时安装步骤](kpm-install.md)。
 - **重启以激活。** 刚安装的原生模块要重启后才加载。请重启设备。
 - **缺少 LSPosed 作用域。** Java 层需要在 VPN Hide 的作用域里加入**系统框架**。在
   LSPosed / Vector 中加上并重启。

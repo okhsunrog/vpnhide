@@ -19,10 +19,13 @@ but its detection paths remain uncovered; Ports is optional. See [Requirements](
    device. Install its module (the ZIP) through your root manager's **Modules**
    screen — Magisk, KernelSU, APatch or FolkPatch. Install only one native
    backend; two active at once can conflict.
+   Instructions: [kmod](kmod-install.md) · [KPM and KernelPatch setup](kpm-install.md) ·
+   [Zygisk](zygisk-install.md). Unsure? See [choosing a backend](choosing-native.md),
+   including kernels with VPN Hide built in.
 4. **Turn on the Java layer.** In LSPosed / LSPosed-Next / Vector, enable
    **VPN Hide** and add **System Framework** to its scope. Without that scope the
    Java hooks don't attach.
-5. **(Optional) Install Ports** if you need localhost port hiding.
+5. **(Optional) [Install Ports](ports.md)** if you need localhost port hiding.
 6. **Reboot** so the native and Java modules load.
 
 ## Check it worked
