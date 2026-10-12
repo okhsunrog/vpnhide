@@ -30,14 +30,18 @@ a later snapshot is not a replacement for a recording of the failure.
 outside a capture is requested. Enable it before reproducing, and turn it off
 when finished. A capture restores the logging state it found beforehand.
 
-## Check the contents before sharing
+## Choose what to share
 
-The ZIP contains `state.json`, including configuration, module states and diagnostic
-results. Verbose capture adds logs and network/system details. The installed-app
-option adds the full inventory and profile information; leaving it off does **not**
-remove configured package names from the configuration or all app/network details
-from logs. Treat the report as potentially identifying information.
+You do not need to read the entire `state.json`. Choose the archive contents in
+the export dialog: leave the full installed-app list and kernel image off unless
+the developer requests them. Keep verbose logs for a diagnostic report; for a
+recording, start just before reproducing the problem and stop when finished.
 
-A kernel image is a separate, larger attachment for kernel investigation. Include
-it only when requested. Review files before posting publicly, and use the contact
-links in the app to share through the agreed support channel.
+The report includes configuration, module states and diagnostic results. Verbose
+capture adds logs and network/system details. Omitting the full app list does
+not remove configured package names or every app/network detail from logs.
+
+Use the contact links in the app to agree on a support channel and send the
+archive to the developer instead of posting it publicly. This limits who receives
+the data; it does not make the report anonymous. If you cannot share logs, say so
+in your report; the developer can discuss what evidence is needed.

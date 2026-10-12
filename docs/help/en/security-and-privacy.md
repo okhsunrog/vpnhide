@@ -22,13 +22,20 @@ and verify the target app's connections. Do not infer routing from an IP check
 in another app. See [Direct access or through the tunnel](split-tunneling.md#scenario-2-the-app-must-use-the-vpn-but-must-not-see-it)
 and [What the self-test checks](what-the-check-proves.md).
 
-## Failures and partial protection
+## Hook status and diagnostic results
 
-An installed module is not proof that all its hooks are active. Missing hooks,
-failed activation and stale configuration can leave gaps. VPN Hide does not
-block all traffic when hiding fails. A permission or SELinux denial is also not
-proof that a hiding hook worked. Check the reported status and
-[check result meanings](check-result-meanings.md).
+The hook count reports which hooks attached. Detailed Diagnostics goes further:
+it performs real detection probes and checks the results. Where root comparison
+is available, it checks that root can see a signal while the app cannot. A
+successful hiding result is evidence that protection worked for the tested
+vector on your device, not just that a module loaded.
+
+Use the detailed results to distinguish working hiding from a detected leak,
+a probe blocked by SELinux, or an unavailable measurement. The probes run as
+VPN Hide; another app can have different role settings or use a different API.
+See [What the self-test checks](what-the-check-proves.md) and
+[Result meanings](check-result-meanings.md). VPN Hide does not block all traffic
+when hiding fails.
 
 ## Saved credentials
 
@@ -47,7 +54,9 @@ bridge can control it; localhost does not identify a particular app. Forwarding
 can make the bridge reachable beyond the phone, but still requires the token.
 Enable it only for intended tooling sessions and turn it off when finished.
 
-Debug reports can contain app lists, network details, logs and optional kernel
-images. They are not anonymous. Redaction covers specific fields, not every
-possible secret inside arbitrary logs. Review selected contents before sharing:
-[Collect a debug report](collect-report.md).
+Debug reports can contain configuration, network details and logs. You do not
+need to read the entire JSON: choose what to include in the export dialog.
+Leave the full app list and kernel image off unless requested. Share the archive
+with the developer through the agreed support channel rather than posting it
+publicly. Configured package names and details from logs may remain even without
+the full app list. See [Collect a debug report](collect-report.md).

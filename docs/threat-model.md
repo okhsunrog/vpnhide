@@ -164,7 +164,9 @@ Debug archives are intentionally useful evidence, not anonymous reports. Dependi
 on options they contain configuration, network addresses/routes, device and
 module details, logs, app inventory or kernel images. Redaction removes specific
 fields; it does not establish that every secret or identifying value is absent
-from arbitrary logs or images. Review the selected content before sharing it.
+from arbitrary logs or images. The user guide asks users to choose export categories and share reports through
+an agreed support channel rather than inspect a large JSON document manually.
+Limiting recipients does not make an archive anonymous.
 See [debug-bundle.md](debug-bundle.md) for the exact fields and redaction rules.
 
 ## What diagnostics establish
@@ -173,8 +175,11 @@ The self-test compares the picker process's app-side probes with root-observed
 state. A meaningful run requires an active VPN and the picker itself routed
 through it. A VPN-off or self-excluded state is not a successful hiding test.
 
-A completed run establishes evidence for the measured vectors, process and
-conditions. It does not execute inside every target app, certify every callback
+The checks execute real detection probes, not just hook-installation checks.
+A successful hiding measurement establishes that the tested signal was hidden
+under the measured conditions; root-differential probes compare app-visible
+results with root-observed state. A completed run establishes evidence for the
+measured vectors, process and conditions. It does not execute inside every target app, certify every callback
 sequence, prove that all traffic stayed in the tunnel, or establish acceptance by
 a remote service. Different target settings, identities and APIs can give a
 different result. Root-denied, unmeasured and uncovered cases must retain their
