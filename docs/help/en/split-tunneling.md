@@ -1,78 +1,76 @@
 # Direct access or through the tunnel
 
-Where your target apps get their network — straight out through your normal
-connection, or through the VPN tunnel — is decided in **your VPN client**, not in
-VPN Hide. VPN Hide's job is only to make the VPN *invisible* to the apps you
-pick. Both routing choices work with it, but they solve different problems, so
-decide per app which one you need.
+Configure per-app routing in **your VPN client**. VPN Hide filters supported
+VPN signals available to selected apps. These are separate tasks: a successful
+hiding check does not establish the route of an app's connections.
 
 ## Scenario 1: the app must not use the VPN, and must not see it
 
-The usual case for banks, government services, payment and delivery apps, and
-anything that checks your IP or region. You want the app to behave exactly as it
-would on a phone without a VPN.
+Choose this when the app should connect directly over your carrier or Wi-Fi.
+The service will see that connection's public IP.
 
-1. In your VPN client, **exclude the app from the tunnel** (the split-tunnel,
-   per-app routing or "bypass" list). Its traffic now goes out through your
-   ordinary carrier or Wi-Fi connection, and the service sees your real IP.
-2. In VPN Hide, give the app **Java** and **Native** (plus **Apps** if it scans
-   for installed VPN apps, **Ports** if it probes localhost). Without this the
-   app can still tell that a VPN is *running* on the phone — from the interface
-   list, the routes, the Android VPN network callbacks — even though its own
-   traffic bypasses it.
+1. In your VPN client, **exclude the app from the tunnel** using split tunneling,
+   per-app routing or the bypass list.
+2. In VPN Hide, enable **Java** and **Native** for the app. Add **Apps** if it
+   scans for installed VPN apps and **Ports** if it probes localhost.
 3. Save, force-stop the app, reopen it.
 
-What the app sees: a normal connection with your real IP, no VPN interface, no
-VPN network. What remains detectable: nothing VPN-related on the device side;
-checks unrelated to the VPN (root, device integrity) are outside VPN Hide's job.
+VPN Hide filters supported local signals. It cannot guarantee complete
+invisibility: results depend on the backend, installed hooks, settings and the
+app's own checks. See [Capabilities and limits](capabilities-limits.md).
 
-Watch the **kill-switch**: if your VPN client blocks traffic that does not go
-through the tunnel, the excluded app loses network. Exempt it from the
-kill-switch.
+If the excluded app loses network access, check the
+[block-without-VPN settings](#a-block-connections-without-vpn-kill-switch).
 
 ## Scenario 2: the app must use the VPN, but must not see it
 
-The case for an app whose traffic you want inside the tunnel — to reach a
-blocked service, or to hide your real IP from it — and which nevertheless
-refuses to work "while a VPN is active".
+Choose this when the app needs the VPN to reach a service or the service must
+not see your ordinary connection's public IP.
 
 1. In your VPN client, keep the app **inside the tunnel**.
-2. In VPN Hide, give it **Java** and **Native** (and **Apps** / **Ports** as
-   needed). VPN Hide filters what the app can learn locally: the VPN interface
-   disappears from the interface list, routes, socket binds and `/proc/net`, and
-   the Android network APIs describe the underlying Wi-Fi or mobile network
-   instead of the VPN.
-3. Save, force-stop the app, reopen it. Check that the app still connects with
-   the selected hooks; if one of them breaks its networking, turn that hook off
-   for this app in its hook selection.
+2. In VPN Hide, enable **Java** and **Native**, plus **Apps** / **Ports** if needed.
+3. Save, force-stop the app, reopen it.
+4. Check both app compatibility and the actual route of its connections.
+   VPN Hide's self-test does not verify another app's traffic route.
 
-What the app sees: an ordinary Wi-Fi or mobile connection, while its traffic
-actually travels through the tunnel. What remains detectable: the **exit IP** of
-your VPN server. If the service checks that IP against known VPN or hosting
-ranges, or its geolocation does not match, it can refuse you no matter what the
-device reports — VPN Hide hides the VPN *on the device* and cannot change what
-the server sees. If the app still refuses after all of this, it does not need
-the tunnel after all: move it to scenario 1.
+**VPN Hide does not guarantee that traffic stays in the tunnel.** Java hooks can
+return a physical Wi-Fi or mobile network in place of the VPN network. If the
+app explicitly binds a connection to that network, it may connect directly when
+Android and the VPN policy permit it. When bypass is prohibited, substituting
+the network does not remove that restriction; a connection may also fail.
+The hiding status alone cannot distinguish these outcomes.
+
+If direct access is unacceptable, do not disable VPN blocking to make the app
+work. Verify routing with your VPN, Android version and target app, including
+VPN reconnections. Checking an IP in a separate browser does not verify the
+target app's connections. See [Security and privacy](security-and-privacy.md).
+
+Even when traffic stays in the tunnel, the server sees the **VPN exit IP** and
+may reject it. VPN Hide cannot change that IP. An app refusing to work does not
+establish the cause or mean it no longer needs the tunnel. Continue with
+[App still asks to disable VPN](app-still-requires-vpn-off.md).
 
 ## Where to set it
 
-In a general VPN client, this is the **split tunnel** / **per-app routing**
-setting: choose which apps go through the tunnel and which go direct. Put your
-target apps wherever you need them per the two scenarios above. Some VPNs route
-only a fixed set of apps and offer no per-app choice; then every target app is
-in scenario 2.
+Look for **split tunneling** or **per-app routing** in your VPN client. Some
+clients route only a fixed set of apps and offer no choice. Check the client's
+actual behavior; VPN Hide does not add routing controls to it.
 
 ## Keep VPN Hide itself in the tunnel
 
-For the built-in self-test to have anything to measure, **VPN Hide itself should
-be routed through the tunnel** (don't split-tunnel it out). If your VPN routes
-only selected apps and won't let you add VPN Hide, the self-test simply can't run
-— that's expected, not a failure; judge hiding by whether your target app works.
-See [What the self-test checks](what-the-check-proves.md).
+**VPN Hide itself must be routed through the tunnel** for its self-test. If you
+cannot include it, a full self-test is unavailable. A working target app is
+useful compatibility evidence, but does not prove complete hiding or tunnel
+retention. See [What the self-test checks](what-the-check-proves.md).
 
 ## A "block connections without VPN" kill-switch
 
-If your VPN client has a kill-switch (block traffic when the tunnel is down, or
-block anything not routed through it), remember it can cut off the target apps
-you deliberately routed **direct** (scenario 1). Exclude those apps from the
-kill-switch, or they'll lose network whenever it engages.
+Your VPN client may have its own block for traffic outside the tunnel. Android
+also has a separate system setting to block connections without VPN. Their
+behavior and support for exceptions differ.
+
+A block may leave an intentionally excluded app without network access. Allow
+direct access only if that is your goal in scenario 1 and your VPN settings
+support it. If the app must stay in the tunnel, keep blocking enabled and
+investigate compatibility: disabling protection changes your routing policy,
+not the effectiveness of hiding.

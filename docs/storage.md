@@ -471,10 +471,13 @@ that authenticates "may control the kernel patch". So it defends against the sam
 app could `ctl0` our config or grant itself root. (KPatch-Next `d05` under
 Magisk/KSU is **keyless**; this whole section is **APatch/FolkPatch-only**.)
 
-- **Default:** session-only, re-prompt each session (APatch's own model).
-- **Optional flag `rememberSuperkey`** (in the canonical `settings`): persist it so
-  it loads automatically — convenient for users who prefer it, and for development
-  (no manual entry each time).
+- **Default:** no saved SuperKey (`rememberSuperkey=false`). The app does not
+  offer a session-only key mode. The APatch activator tries a saved key, if any,
+  and the trusted `su` token; a working trusted token needs no saved key.
+- **Save / Clear in Settings:** Save writes the key and sets `rememberSuperkey`;
+  Clear removes the file and resets the flag. Saving persists across app and
+  device restarts. Clearing the file does not unload an already active KPM;
+  future activation without a working trusted token can require the key again.
 - **When the flag is on**, the key is stored at:
   - **Path:** `/data/adb/vpnhide/superkey`, `0600 root`.
   - **Why there, not elsewhere:**

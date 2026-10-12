@@ -101,18 +101,26 @@ target connection inside a tunnel, prevent DNS/IP leaks, or alter the remote
 server's view of the source IP, account history, timing or protocol behavior.
 
 Java concealment can substitute a physical cover network for the VPN network.
-An app explicitly binding to that returned network can use the physical path.
+An app explicitly binding to that returned network may use the physical path
+if Android permits the UID to use it and the VPN policy allows bypass. Returning
+a physical `Network` does not itself establish whether a connection bypasses the
+VPN or is blocked. Android documents this distinction in
+[`VpnService.Builder.allowBypass()`](https://developer.android.com/reference/android/net/VpnService.Builder#allowBypass()).
 Therefore, hiding success must not be interpreted as proof of tunnel retention.
 Split tunneling is the usual setup when the target should use the physical
 connection; it intentionally exposes that connection's public IP to the service.
 A VPN-preserving concealment mode remains a separate design direction in the
 [roadmap](notes/ROADMAP.md). VPN routing and lockdown policies require their own
-verification; local concealment does not override or certify them.
+verification; local concealment does not override or certify them. The network
+substitution is implemented in
+[HookEntry.kt](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/hook/HookEntry.kt),
+with cover selection in
+[VisibleNetworkResolver.kt](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/hook/VisibleNetworkResolver.kt).
 
 ### Failures, stale state and availability
 
-This is not a fail-closed network access control system. For example, a policy
-read error retains the last successful policy (or an empty initial policy) and
+This is not a fail-closed network access control system. For example, an LSPosed
+system-server policy cache read error retains the last successful policy (or an empty initial policy) and
 reports the error; it does not stop all target traffic until recovery. Config
 persistence, activation and observed runtime state are separate phases. A failed
 or uncertain phase is not proof that the requested protection is in force.
@@ -125,28 +133,40 @@ probe workloads or immunity to hook implementation bugs.
 
 ## Credentials, developer access and exported evidence
 
-The APatch/FolkPatch SuperKey authorizes KernelPatch control. It is session-only
-by default; optional persistence uses a root-owned `0600` file under `/data/adb`,
-separate from canonical config exports. The boot-readable copy is not an
-app-only Keystore secret. Root compromise defeats that boundary. Backend-specific
+The APatch/FolkPatch SuperKey authorizes KernelPatch control. The app does not
+offer a session-only key mode. Saving the key in Settings persists it in the
+root-owned `0600` file
+`/data/adb/vpnhide/superkey` until cleared; no key is saved by default. The key is
+separate from canonical config exports. The APatch activator tries the saved key
+and the trusted `su` token; a working trusted token makes saving a key
+unnecessary. The boot-readable copy is not an app-only Keystore secret. Root
+compromise defeats that boundary. Backend-specific
 keyless operation and boot activation requirements are described in
-[storage.md](storage.md).
+[storage.md](storage.md). The Save/Clear path lives in
+[SettingsScreen.kt](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/settings/SettingsScreen.kt);
+authentication candidates are selected in
+[kpm.rs](../crates/activator/src/kpm.rs).
 
 The optional developer HTTP bridge is off by default, binds to `127.0.0.1`, and
 requires a generated bearer token. **Loopback is not app identity**: the token is
 the authorization boundary for local clients. The implementation stores it in
 app-private files and deliberately logs it for the host tooling's logcat
-fallback. Anyone granted access to that token, relevant logs or a forwarded
-bridge must be treated as an authorized controller, including for configuration
-mutations. Request size/deadline limits bound individual requests; they are not
-a general denial-of-service guarantee. See
+fallback. Anyone who obtains that token and can reach the bridge must be treated
+as an
+authorized controller, including for configuration mutations. Forwarding the
+bridge can extend its reach beyond local clients; it still requires the token.
+Request size limits and a receive deadline bound incoming request
+parsing; that deadline does not bound execution of an accepted operation. These
+limits are not a general denial-of-service guarantee. See
 [AgentControlBridge.kt](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/AgentControlBridge.kt).
 
 Debug archives are intentionally useful evidence, not anonymous reports. Depending
 on options they contain configuration, network addresses/routes, device and
 module details, logs, app inventory or kernel images. Redaction removes specific
 fields; it does not establish that every secret or identifying value is absent
-from arbitrary logs or images. Review the selected content before sharing it.
+from arbitrary logs or images. The user guide asks users to choose export categories and share reports through
+an agreed support channel rather than inspect a large JSON document manually.
+Limiting recipients does not make an archive anonymous.
 See [debug-bundle.md](debug-bundle.md) for the exact fields and redaction rules.
 
 ## What diagnostics establish
@@ -155,8 +175,11 @@ The self-test compares the picker process's app-side probes with root-observed
 state. A meaningful run requires an active VPN and the picker itself routed
 through it. A VPN-off or self-excluded state is not a successful hiding test.
 
-A completed run establishes evidence for the measured vectors, process and
-conditions. It does not execute inside every target app, certify every callback
+The checks execute real detection probes, not just hook-installation checks.
+A successful hiding measurement establishes that the tested signal was hidden
+under the measured conditions; root-differential probes compare app-visible
+results with root-observed state. A completed run establishes evidence for the
+measured vectors, process and conditions. It does not execute inside every target app, certify every callback
 sequence, prove that all traffic stayed in the tunnel, or establish acceptance by
 a remote service. Different target settings, identities and APIs can give a
 different result. Root-denied, unmeasured and uncovered cases must retain their
@@ -169,6 +192,10 @@ changes or invalidation; its run ID and observation provenance remain useful
 history. See [diagnostics.md](diagnostics.md),
 [observation-coordinator.md](observation-coordinator.md) and
 [what the self-test proves](help/en/what-the-check-proves.md).
+
+The localized [security and privacy guide](help/en/security-and-privacy.md)
+presents these limits in the app. Keep its claims consistent with the verified
+implementation when updating this model.
 
 ## Maintaining this model
 
