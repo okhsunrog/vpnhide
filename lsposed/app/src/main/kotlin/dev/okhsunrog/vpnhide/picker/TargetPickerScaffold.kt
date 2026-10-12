@@ -368,47 +368,31 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                 // A save error's snackbar rises above this bar, not over Save / Discard.
                 modifier = Modifier.reportConfigSnackbarInset { snackbarInsets.actionBar = it },
             ) {
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = countText(allApps, resources),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    androidx.compose.material3.TextButton(onClick = editor::discard, enabled = editor.state.dirty && !saving) {
-                        Text(stringResource(R.string.config_discard_draft))
-                    }
-                    EnhancedButton(
-                        onClick = save@{
-                            if (!checkWrite()) return@save
-                            val error =
-                                targets.let { currentTargets ->
-                                    selectionSaveError(allApps, currentTargets, context.packageName, resources)
-                                }
-                            if (error != null) {
-                                snackDuration = SnackbarDuration.Long
-                                snackMessage = error
-                            } else {
-                                val selfPkg = context.packageName
-                                val signals = cachedApps.orEmpty().map(AppSummary::toAutoHideSignal)
-                                val partial = scanWarning != null
-                                editor.save(CanonicalActivation(ports = true)) { fresh ->
-                                    applyAutoHiddenPackages(fresh, selfPkg, signals, partial)
-                                }
+                TargetActionBar(
+                    count = countText(allApps, resources),
+                    canDiscard = editor.state.dirty && !saving,
+                    canSave = dirty && !saving,
+                    saving = saving,
+                    onDiscard = editor::discard,
+                    onSave = save@{
+                        if (!checkWrite()) return@save
+                        val error =
+                            targets.let { currentTargets ->
+                                selectionSaveError(allApps, currentTargets, context.packageName, resources)
                             }
-                        },
-                        enabled = dirty && !saving,
-                    ) {
-                        if (saving) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Text(stringResource(R.string.btn_save))
-                    }
-                }
+                        if (error != null) {
+                            snackDuration = SnackbarDuration.Long
+                            snackMessage = error
+                        } else {
+                            val selfPkg = context.packageName
+                            val signals = cachedApps.orEmpty().map(AppSummary::toAutoHideSignal)
+                            val partial = scanWarning != null
+                            editor.save(CanonicalActivation(ports = true)) { fresh ->
+                                applyAutoHiddenPackages(fresh, selfPkg, signals, partial)
+                            }
+                        }
+                    },
+                )
             }
         }
     }

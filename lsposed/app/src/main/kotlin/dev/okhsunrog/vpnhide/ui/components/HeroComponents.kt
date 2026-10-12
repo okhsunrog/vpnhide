@@ -1,9 +1,13 @@
 package dev.okhsunrog.vpnhide.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,7 +23,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 
@@ -86,8 +89,6 @@ fun MetricTile(
             text = label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(4.dp))
         Text(
@@ -95,8 +96,62 @@ fun MetricTile(
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = accent,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+internal data class MetricContent(
+    val label: String,
+    val value: String,
+    val accent: Color,
+)
+
+/** Keep a consistent grid: all pairs use two columns, or every metric gets a full row. */
+@Composable
+internal fun MetricGrid(vararg metrics: MetricContent) {
+    val width =
+        metrics.maxOfOrNull {
+            maxOf(
+                unwrappedTextWidth(it.label, MaterialTheme.typography.labelMedium),
+                unwrappedTextWidth(it.value, MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)),
+            ) + 24.dp
+        } ?: 0.dp
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columns = if (width * 2 + 8.dp <= maxWidth) 2 else 1
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            metrics.toList().chunked(columns).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { metric ->
+                        MetricTile(metric.label, metric.value, metric.accent, Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ModuleHeading(
+    name: String,
+    version: String?,
+) {
+    val titleStyle = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+    if (version == null) {
+        Text(name, style = titleStyle)
+        return
+    }
+    AdaptivePair(
+        firstWidth = unwrappedTextWidth(name, titleStyle),
+        secondWidth = unwrappedTextWidth(version, MaterialTheme.typography.bodySmall),
+        modifier = Modifier.fillMaxWidth(),
+        first = { Text(name, modifier = it, style = titleStyle) },
+        second = {
+            Text(
+                version,
+                modifier = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+    )
 }
