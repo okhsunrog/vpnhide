@@ -140,7 +140,8 @@ private fun showUpdateNotification(
     context: Context,
     info: UpdateInfo,
 ): Boolean {
-    ensureUpdateNotificationChannel(context)
+    val localized = ContextCompat.getContextForLanguage(context)
+    ensureUpdateNotificationChannel(localized)
     val intent =
         Intent(Intent.ACTION_VIEW, Uri.parse(info.downloadUrl))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -155,11 +156,11 @@ private fun showUpdateNotification(
         NotificationCompat
             .Builder(context, UPDATE_NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher_monochrome)
-            .setContentTitle(context.getString(R.string.update_notification_title))
-            .setContentText(context.getString(R.string.update_notification_body, info.latestVersion))
+            .setContentTitle(localized.getString(R.string.update_notification_title))
+            .setContentText(localized.getString(R.string.update_notification_body, info.latestVersion))
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
-                    context.getString(R.string.update_notification_body, info.latestVersion),
+                    localized.getString(R.string.update_notification_body, info.latestVersion),
                 ),
             ).setContentIntent(pendingIntent)
             .setAutoCancel(true)

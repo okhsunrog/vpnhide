@@ -86,56 +86,6 @@ internal fun moduleIntegrityProblem(
     )
 }
 
-internal fun renderModuleIntegrityProblem(
-    problem: ModuleIntegrityProblem,
-    res: android.content.res.Resources,
-): ModuleProblem {
-    val moduleName =
-        when (problem.kind) {
-            FlashableModuleKind.Kmod -> "kmod"
-            FlashableModuleKind.Builtin -> "Built-in"
-            FlashableModuleKind.Kpm -> "KPM"
-            FlashableModuleKind.Zygisk -> "Zygisk"
-            FlashableModuleKind.Ports -> "Ports"
-        }
-    val message =
-        when (problem.kind to problem.activatorState) {
-            FlashableModuleKind.Kpm to ActivatorState.Missing -> {
-                R.string.dashboard_issue_kpm_bundle_activator_missing
-            }
-
-            FlashableModuleKind.Kpm to ActivatorState.NotExecutable -> {
-                R.string.dashboard_issue_kpm_bundle_activator_not_executable
-            }
-
-            else -> {
-                when (problem.activatorState) {
-                    ActivatorState.Missing -> {
-                        R.string.dashboard_issue_module_activator_missing
-                    }
-
-                    ActivatorState.NotExecutable -> {
-                        R.string.dashboard_issue_module_activator_not_executable
-                    }
-
-                    ActivatorState.Executable, ActivatorState.Unknown -> {
-                        error("healthy or unknown activator is not an integrity problem")
-                    }
-                }
-            }
-        }
-    val text =
-        if (problem.kind == FlashableModuleKind.Kpm) {
-            res.getString(message, problem.activatorPath)
-        } else {
-            res.getString(message, moduleName, problem.activatorPath)
-        }
-    return ModuleProblem(
-        reason = problem.reason,
-        text = text,
-    )
-}
-
 internal fun ModuleState.withBrokenReason(reason: ModuleBrokenReason?): ModuleState =
     if (this is ModuleState.Installed && reason != null) copy(brokenReason = reason) else this
 

@@ -170,10 +170,18 @@ private fun DashboardIssue.Module.moduleMessage(res: Resources): DashboardMessag
             )
         }
 
-        // Text and artifact were resolved with the module's card diagnosis; see
-        // DashboardIssue.ModuleBroken.
+        // Share the card diagnosis, but render its text with the current locale.
         is DashboardIssue.ModuleBroken -> {
-            err(problem.text, problem.downloadArtifact, helpArticle = HelpArticle.MODULE_NOT_ACTIVE)
+            err(
+                problem.renderText {
+                    id,
+                    args,
+                    ->
+                    res.getString(id, *args)
+                },
+                problem.downloadArtifact,
+                helpArticle = HelpArticle.MODULE_NOT_ACTIVE,
+            )
         }
 
         is DashboardIssue.ModuleNeedsReboot -> {

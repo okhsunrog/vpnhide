@@ -354,6 +354,7 @@ dependencies {
     // Compose UI
     implementation(libs.core.ktx)
     implementation(libs.activity.compose)
+    implementation(libs.appcompat)
     implementation(platform(libs.compose.bom.get()))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)

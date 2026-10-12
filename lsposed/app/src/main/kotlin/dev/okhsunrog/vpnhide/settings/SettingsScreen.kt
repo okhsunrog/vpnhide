@@ -243,7 +243,7 @@ fun SettingsScreen(
                 onClick = { helpOpen = true },
             )
 
-            // ── Appearance ── one grouped block of four rows.
+            // ── Appearance ── theme, language, and visual preferences.
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 SettingsSectionHeader(stringResource(R.string.settings_appearance))
 
@@ -258,7 +258,7 @@ fun SettingsScreen(
                     subtitle = themeModeLabel,
                     icon = Icons.Default.BrightnessMedium,
                     index = 0,
-                    count = 4,
+                    count = 5,
                     onClick = {
                         val next =
                             when (settings.themeMode) {
@@ -269,12 +269,13 @@ fun SettingsScreen(
                         interactor.setThemeMode(next)
                     },
                 )
+                LanguagePreference(index = 1, count = 5)
                 PreferenceRowSwitch(
                     title = stringResource(R.string.settings_dynamic_color),
                     subtitle = stringResource(R.string.settings_dynamic_color_sub),
                     icon = Icons.Default.Palette,
-                    index = 1,
-                    count = 4,
+                    index = 2,
+                    count = 5,
                     checked = settings.dynamicColor,
                     onCheckedChange = interactor::setDynamicColor,
                 )
@@ -282,8 +283,8 @@ fun SettingsScreen(
                     title = stringResource(R.string.settings_amoled),
                     subtitle = stringResource(R.string.settings_amoled_sub),
                     icon = Icons.Default.DarkMode,
-                    index = 2,
-                    count = 4,
+                    index = 3,
+                    count = 5,
                     checked = settings.amoled,
                     onCheckedChange = interactor::setAmoled,
                 )
@@ -291,8 +292,8 @@ fun SettingsScreen(
                     title = stringResource(R.string.settings_squircle),
                     subtitle = stringResource(R.string.settings_squircle_sub),
                     icon = Icons.Default.RoundedCorner,
-                    index = 3,
-                    count = 4,
+                    index = 4,
+                    count = 5,
                     checked = settings.cornerStyle == CornerStyle.Smooth,
                     onCheckedChange = { value ->
                         interactor.setCornerStyle(if (value) CornerStyle.Smooth else CornerStyle.Rounded)

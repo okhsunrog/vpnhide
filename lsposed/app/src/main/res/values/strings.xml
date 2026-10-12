@@ -667,4 +667,6 @@
     <string name="debug_export_complete">Report collected successfully.</string>
     <string name="debug_export_partial">A partial report was collected. You can save or share it.\n%1$s</string>
     <string name="debug_export_failed">Report collection failed: %1$s</string>
+    <string name="settings_language">Language</string>
+    <string name="language_system">System default</string>
 </resources>

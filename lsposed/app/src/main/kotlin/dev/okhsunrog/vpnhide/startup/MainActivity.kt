@@ -3,12 +3,12 @@ package dev.okhsunrog.vpnhide.startup
 import android.Manifest
 import android.os.Bundle
 import android.os.Process
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -72,6 +72,7 @@ import dev.okhsunrog.vpnhide.picker.TargetsCache
 import dev.okhsunrog.vpnhide.picker.isMainAppProfile
 import dev.okhsunrog.vpnhide.rememberCanonicalEditor
 import dev.okhsunrog.vpnhide.reportConfigSnackbarInset
+import dev.okhsunrog.vpnhide.settings.AppLanguageContext
 import dev.okhsunrog.vpnhide.settings.AppSettings
 import dev.okhsunrog.vpnhide.settings.DiagnosticsSettingsScreen
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
@@ -95,11 +96,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         StartupTrace.mark("activity_on_create")
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        AppLanguageContext.update(this)
         val mainProfile = isMainAppProfile(Process.myUid())
         if (mainProfile) {
             RootSnapshotCache.setRuntimeProbeSource(GroundTruthProbe.prepare(this)?.absolutePath)

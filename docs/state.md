@@ -355,9 +355,21 @@ and the app reruns the ports activator on Save.
 
 ## 8. App-Process State
 
+### App UI language
+
+Settings → Appearance → Language uses AndroidX AppCompat's per-app locales.
+An empty locale list follows the system; explicit choices are `en`, `ru`, and
+`zh-CN`. On Android 13+ the platform owns persistence and exposes the same
+choice in system app-language settings through `res/xml/locales_config.xml`.
+On Android 9–12 AppCompat's `autoStoreLocales` stores the choice in app-private
+storage. This preference never enters the root canonical config or activators.
+Activity recreation preserves saveable navigation state. Locale changes update
+Dashboard wording and diagnostic labels without invalidating root observations
+or requesting another diagnostic run.
+
 ### DataStore `ui_settings`
 
-`settings/SettingsRepository.kt` keeps every UI preference in one Preferences
+`settings/SettingsRepository.kt` keeps UI preferences other than language in one Preferences
 DataStore named `ui_settings` (`filesDir/datastore/ui_settings.preferences_pb`):
 theme (`dynamic_color`, `amoled`, `contrast`, `seed_color`, `corner_style`,
 `theme_mode`), `animations_enabled`, `haptics_enabled`,
