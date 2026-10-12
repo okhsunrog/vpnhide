@@ -24,6 +24,7 @@ Stable references for anyone changing the code. Read the relevant one before a P
 | [protocol.md](protocol.md) | The frozen control/telemetry wire between activator, app and backends |
 | [storage.md](storage.md) | Storage & activation design: the JSON canonical, the activator, SELinux |
 | [state.md](state.md) | Every persistent path / proc entry / iptables chain the project touches |
+| [threat-model.md](threat-model.md) | Attacker capabilities, trusted components, security boundaries and limits of hiding/diagnostic claims |
 | [detection-vectors.md](detection-vectors.md) | What an app can probe and which component covers each vector |
 | [diagnostics.md](diagnostics.md) | How the app self-tests hiding and attributes the result |
 | [debug-bundle.md](debug-bundle.md) | How to read a user's `vpnhide_debug_*.zip` bundle |

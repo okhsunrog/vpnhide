@@ -12,11 +12,16 @@ see [ROADMAP.md](notes/ROADMAP.md).
 
 ## 1. Threat model
 
+The full [threat model](threat-model.md) defines attacker capabilities, trusted
+components, routing limits and the scope of diagnostic evidence. This section
+is the coverage-specific summary.
+
 A *target* app (banking, store, anti-fraud SDK, censorship-detector like
 RKNHardering) runs on the user's device and tries to decide "is this device
 behind a VPN?" or "is app X installed?". It is **unprivileged** (`untrusted_app`
 SELinux domain, its own UID) and cannot load kernel modules or read other
-apps' memory. Its toolbox is exactly the OS interfaces below.
+apps' memory. The interfaces below are the known coverage surface, not an exhaustive list
+of everything an app could probe.
 
 vpnhide does **not** tear down the VPN. It makes those interfaces *lie* to
 selected apps: the tunnel keeps working, but the listed targets see a device
@@ -49,7 +54,7 @@ Coverage comes from vpnhide components plus the platform. They differ in
 
 Key consequences:
 
-- **The kernel backends (kmod `.ko` and KPM) are the bypass-proof native layers.**
+- **The kernel backends (kmod `.ko` and KPM) cover hooked native paths below libc.**
   A detector reading `/proc/net/route` with a raw `openat` syscall, or driving
   netlink without libc, defeats Zygisk but not a kernel backend. kmod is the
   stable default for supported GKI kernels; KPM is the KernelPatch path for
