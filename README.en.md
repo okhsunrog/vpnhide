@@ -215,7 +215,7 @@ The reason `zygisk` can't be built directly on Windows is that the `zygisk-api` 
 ## Verified against
 
 - [RKNHardering](https://github.com/xtclovver/RKNHardering/) — all detection vectors clean
-- YourVPNDead (original repository unavailable) — all detection vectors clean
+- [YourVPNDead](https://git.zapret.moe/zapretkvn/yourvpndead) ([GitHub mirror](https://github.com/zapret-discordyoutube/yourvpndead)) — all detection vectors clean
 
 Both implement the official Russian Ministry of Digital Development VPN/proxy detection methodology ([source](https://t.me/ruitunion/893)).
 

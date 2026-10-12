@@ -216,7 +216,7 @@ docker run --rm -it -v "${PWD}:/workspace" -v "vpnhide_cargo_cache:/usr/local/ca
 ## 已验证对抗
 
 - [RKNHardering](https://github.com/xtclovver/RKNHardering/) —— 所有检测向量均干净
-- YourVPNDead（原仓库已无法访问） —— 所有检测向量均干净
+- [YourVPNDead](https://git.zapret.moe/zapretkvn/yourvpndead) ([GitHub 镜像](https://github.com/zapret-discordyoutube/yourvpndead)) —— 所有检测向量均干净
 
 两者均实现了俄罗斯数字发展部官方的 VPN/代理检测方法论（[来源](https://t.me/ruitunion/893)）。
 

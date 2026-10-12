@@ -217,7 +217,7 @@ docker run --rm -it -v "${PWD}:/workspace" -v "vpnhide_cargo_cache:/usr/local/ca
 ## Проверено на
 
 - [RKNHardering](https://github.com/xtclovver/RKNHardering/) — все векторы обнаружения чисты
-- YourVPNDead (исходный репозиторий недоступен) — все векторы обнаружения чисты
+- [YourVPNDead](https://git.zapret.moe/zapretkvn/yourvpndead) ([зеркало на GitHub](https://github.com/zapret-discordyoutube/yourvpndead)) — все векторы обнаружения чисты
 
 Оба реализуют официальную методику обнаружения VPN/прокси Минцифры РФ ([источник](https://t.me/ruitunion/893)).
 
