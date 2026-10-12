@@ -42,6 +42,20 @@ KPM validates your kernel family at load time. Supported families are 4.4, 4.9, 
 guessed. If the Dashboard shows *"kernel not supported … no validated offset
 table,"* use the [Zygisk backend](zygisk-install.md) instead.
 
+## Why it shows 10 hooks on some kernels
+
+With optional filesystem hiding off, a complete KPM installation reports
+**OK · hooks: 10** on kernels older than 5.3 and **OK · hooks: 11** from 5.3 up.
+The older kernels already require a privilege ordinary apps do not have to bind
+a socket to an interface, so KPM does not install its socket-bind hook there.
+
+The counter counts installed logical hook IDs/groups, not physical interception
+points. If **Hide VPN filesystem paths** is enabled and its group installs after
+a reboot, it adds one: the counts become **11** and **12**, respectively. One
+group can use several interception points. The count also differs from the
+number of Diagnostics checks — see
+[What the self-test checks](what-the-check-proves.md).
+
 ## If it's installed but inactive
 
 The Dashboard names the cause:
