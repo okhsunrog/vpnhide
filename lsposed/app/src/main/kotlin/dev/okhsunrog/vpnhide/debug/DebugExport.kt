@@ -3,8 +3,8 @@ package dev.okhsunrog.vpnhide.debug
 import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
-import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.DashboardCache
+import dev.okhsunrog.vpnhide.DashboardState
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.LsposedConfig
 import dev.okhsunrog.vpnhide.RootSnapshot
@@ -13,6 +13,7 @@ import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.collectDebugShellSnapshot
 import dev.okhsunrog.vpnhide.collectHookCounterSnapshot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSnapshot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
@@ -101,27 +102,7 @@ private suspend fun buildDebugState(
 ): VpnHideState {
     // Forensics forces debug logging + a fresh dmesg window while the capture runs;
     // a lean (no-forensics) export skips all of that and just serializes the state.
-    val beforeCapture =
-        runCatching {
-            val dashboard = DashboardCache.state.value
-            val operation = CanonicalConfigRepository.state.value
-            BeforeCaptureInfo(
-                observedAt = isoNow(),
-                diagnostics = diagnosticSummary(DiagnosticsCache.presentation.value),
-                protection = dashboard?.protection,
-                messages = dashboard?.messages.orEmpty(),
-                pendingOperationIds = operation.operations.sorted(),
-                operationRechecking = operation.rechecking,
-                lastOperationId = operation.lastResult?.id,
-                lastOperationPhases =
-                    operation.lastResult
-                        ?.phases
-                        .orEmpty()
-                        .mapKeys { it.key.name }
-                        .mapValues { it.value.name },
-                lastOperationFailure = operation.lastResult?.failure?.name,
-            )
-        }.getOrNull()
+    val beforeCapture = beforeDebugCapture()
     val loggingSession = if (options.forensics) beginDebugCaptureLogging() else null
     var restoreAttempted = false
     val errors = mutableListOf<String>()
@@ -138,27 +119,20 @@ private suspend fun buildDebugState(
                 DiagnosticsCache.captureRun(context, selfNeedsRestart, nextDebugCaptureId.getAndIncrement()),
             )
         errors += selfTest.errors
-        val presentation = DiagnosticsCache.presentation.value
 
         // Authoritative module/liveness state — the SAME snapshot the dashboard
         // derives from. This is what fixes the old export path silently reading
         // "inactive" from a shell that never emitted proc_exists/ports_chain.
-        val rootSnapshot =
+        val refreshedRoot =
             runCatching { RootSnapshotCache.refresh() }
                 .getOrElse {
                     errors += "root snapshot failed: ${it.message}"
-                    RootSnapshot(emptyMap())
+                    null
                 }
 
-        val dashboard =
-            try {
-                loadDashboardState(context, selfNeedsRestart, rootSnapshot, presentation)
-            } catch (c: CancellationException) {
-                throw c
-            } catch (e: Exception) {
-                errors += "dashboard assembly failed: ${e.message}"
-                null
-            }
+        val diagnosticSnapshot = DiagnosticsCache.awaitSnapshot(refreshedRoot)
+        val rootSnapshot = diagnosticSnapshot.rootSnapshot ?: RootSnapshot(emptyMap())
+        val dashboard = captureDashboard(context, selfNeedsRestart, rootSnapshot, diagnosticSnapshot, errors)
 
         val shellSnapshot =
             if (options.forensics) {
@@ -198,7 +172,7 @@ private suspend fun buildDebugState(
             checkResults = selfTest.checkResults,
             selfTestRunId = selfTest.runId,
             // The projection after the capture's own run settled: what the screens show now.
-            diagnostics = diagnosticSummary(presentation),
+            diagnostics = diagnosticSummary(diagnosticSnapshot),
             dashboard = dashboard,
             beforeCapture = beforeCapture,
             dmesg = dmesg,
@@ -225,6 +199,46 @@ private suspend fun buildDebugState(
         }
     }
 }
+
+/** Dashboard failure must not discard the run evidence or the rest of the archive. */
+private suspend fun captureDashboard(
+    context: Context,
+    selfNeedsRestart: Boolean,
+    root: RootSnapshot,
+    snapshot: DiagnosticSnapshot,
+    errors: MutableList<String>,
+): DashboardState? =
+    try {
+        loadDashboardState(context, selfNeedsRestart, root, snapshot.presentation)
+    } catch (c: CancellationException) {
+        throw c
+    } catch (e: Exception) {
+        errors += "dashboard assembly failed: ${e.message}"
+        null
+    }
+
+private fun beforeDebugCapture(): BeforeCaptureInfo? =
+    runCatching {
+        val display = DashboardCache.presentation.value
+        val dashboard = display.state
+        val operation = display.diagnostics.sources.config
+        BeforeCaptureInfo(
+            observedAt = isoNow(),
+            diagnostics = diagnosticSummary(display.diagnostics),
+            protection = dashboard?.protection,
+            messages = dashboard?.messages.orEmpty(),
+            pendingOperationIds = operation.operations.sorted(),
+            operationRechecking = operation.rechecking,
+            lastOperationId = operation.lastResult?.id,
+            lastOperationPhases =
+                operation.lastResult
+                    ?.phases
+                    .orEmpty()
+                    .mapKeys { it.key.name }
+                    .mapValues { it.value.name },
+            lastOperationFailure = operation.lastResult?.failure?.name,
+        )
+    }.getOrNull()
 
 /** The app's own post-Binder network view, PendingIntent path included (this is a real app process). */
 internal fun captureSelfNetworkView(

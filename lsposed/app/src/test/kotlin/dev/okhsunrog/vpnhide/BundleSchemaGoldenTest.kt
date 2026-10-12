@@ -24,6 +24,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticAttemptInfo
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticMeasurementInfo
+import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSnapshotInfo
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticStage
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSummaryInfo
 import dev.okhsunrog.vpnhide.diagnostics.EvidenceConclusion
@@ -252,6 +253,7 @@ private fun sampleDiagnosticSummary(): DiagnosticSummaryInfo =
         probeUnavailable = true,
         lastKnownRouting = SelfRouting.VpnOff,
         routingRead = RoutingReadInfo(ReadReason.Transition, pendingMs = 820),
+        snapshot = DiagnosticSnapshotInfo(12, 9, 3, true, 8, 4, 2),
     )
 
 private fun sampleBeforeCapture(): BeforeCaptureInfo =

@@ -53,6 +53,15 @@
         "routingRead": {
             "reason": "Transition",
             "pendingMs": 820
+        },
+        "snapshot": {
+            "revision": 12,
+            "rootObservationId": 9,
+            "rootGeneration": 3,
+            "rootCurrent": true,
+            "routingObservationId": 8,
+            "routingGeneration": 4,
+            "changeEpoch": 2
         }
     },
     "nativeVerdict": "Ok",
@@ -217,6 +226,15 @@
             "routingRead": {
                 "reason": "Transition",
                 "pendingMs": 820
+            },
+            "snapshot": {
+                "revision": 12,
+                "rootObservationId": 9,
+                "rootGeneration": 3,
+                "rootCurrent": true,
+                "routingObservationId": 8,
+                "routingGeneration": 4,
+                "changeEpoch": 2
             }
         },
         "protection": null,

@@ -39,7 +39,6 @@ import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DiagnosticsFailedPrompt
 import dev.okhsunrog.vpnhide.DiagnosticsRetryPrompt
 import dev.okhsunrog.vpnhide.FileSaveShareRow
-import dev.okhsunrog.vpnhide.LsposedState
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.SelfNotRoutedPrompt
 import dev.okhsunrog.vpnhide.StatusBanner
@@ -89,14 +88,10 @@ fun DiagnosticsScreen(
     // supplies only this screen's side channels (which results to list, whether they
     // are complete, their coverage, the notice about the latest attempt), from the
     // same instant. The screen words the pure decision; it never combines flows.
-    val presentation by DiagnosticsCache.presentation.collectAsStateWithLifecycle()
-    val situation by DiagnosticsCache.situation.collectAsStateWithLifecycle()
+    val snapshot by DiagnosticsCache.snapshot.collectAsStateWithLifecycle()
+    val presentation = snapshot.presentation
+    val situation = snapshot.situation
     val decision = diagnosticScreenDecision(situation, presentation)
-    // The dashboard state carries which native backend is active + the optional hooks
-    // it installed — the inputs needed to rebuild the canonical DiagnosticReport here,
-    // so each check can be shown against the vectors the backend actually OWNS. Null
-    // until the dashboard has loaded (then we fall back to the raw, ownership-less list).
-    val dashState by DashboardCache.state.collectAsStateWithLifecycle()
     val tallyFmt = stringResource(R.string.diag_summary_tally)
 
     // Kick off the diagnostics run once per process. The cache parks at
@@ -168,12 +163,10 @@ fun DiagnosticsScreen(
             // render the raw list (every leak reads as a leak — the pre-report
             // behaviour, used only in the brief window before the dashboard loads).
             // A retained measurement keeps the layers it was measured against; only an
-            // active run's partial evidence is attributed with the live Dashboard state.
+            // active run's partial evidence uses the root in the same domain snapshot.
             val layers =
                 decision.coverage
-                    ?: dashState?.let { ds ->
-                        MeasurementCoverage(ds.nativeBackend, ds.installedOptionalHooks, ds.lsposed is LsposedState.Active)
-                    }
+                    ?: snapshot.rootSnapshot?.let(::measurementCoverageFor)
             val report =
                 layers?.let { c ->
                     buildDiagnosticReport(

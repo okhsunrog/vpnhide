@@ -92,6 +92,9 @@ directions, since `internal` is module-wide and the compiler will not.
   (observation flows, a `DiagnosticRunIo`, a scope, clocks), so
   `DiagnosticDomainTest` drives it exactly as production does with plain state
   flows and a fake helper; `DiagnosticsCache` is only the production wiring.
+  Consume `DiagnosticSnapshot` when values must agree: it owns accepted inputs,
+  presentation and Situation, and publishes before terminal handles complete.
+  Bridge/export use its acceptance barrier; do not assemble independent flow values.
   It executes the pure `reduceDiagnosticRun` with identified effects on the
   process scope; a waiter detaching never cancels a run, and a retry is a new run.
   A suite starts in exactly three ways: `DiagnosticsCache.run` (startup intent:
