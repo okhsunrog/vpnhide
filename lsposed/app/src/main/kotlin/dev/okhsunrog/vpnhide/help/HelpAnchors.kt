@@ -1,8 +1,14 @@
 package dev.okhsunrog.vpnhide.help
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.positionInWindow
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 /**
@@ -14,6 +20,21 @@ import kotlin.math.roundToInt
  * article host in HelpScreen.
  */
 internal class HelpAnchorRegistry {
+    var highlightedSlug by mutableStateOf<String?>(null)
+        private set
+    val highlightAlpha = Animatable(0f)
+
+    suspend fun highlight(slug: String) {
+        highlightedSlug = slug
+        try {
+            highlightAlpha.snapTo(1f)
+            delay(1_000)
+            highlightAlpha.animateTo(0f, tween(450))
+        } finally {
+            highlightedSlug = null
+        }
+    }
+
     var contentRoot: LayoutCoordinates? = null
     private val headings = mutableMapOf<String, LayoutCoordinates>()
 

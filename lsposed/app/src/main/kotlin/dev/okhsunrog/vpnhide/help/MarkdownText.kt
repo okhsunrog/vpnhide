@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide.help
 
 import android.content.Context
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -164,7 +165,16 @@ private fun HeadingBlock(
         text = inlineAnnotated(node, onLink),
         style = style,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(top = 4.dp).then(anchorModifier),
+        modifier =
+            Modifier
+                .padding(top = 4.dp)
+                .then(anchorModifier)
+                .background(
+                    MaterialTheme.colorScheme.primaryContainer.copy(
+                        alpha = if (anchors?.highlightedSlug == slug) anchors.highlightAlpha.value else 0f,
+                    ),
+                    RoundedCornerShape(4.dp),
+                ),
     )
 }
 

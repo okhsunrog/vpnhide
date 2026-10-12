@@ -207,7 +207,10 @@ internal fun HelpScreen(
                         offset = anchors.offsetOf(slug)
                         frames++
                     }
-                    offset?.let { scrollState.animateScrollTo((it - ANCHOR_SCROLL_GAP_PX).coerceAtLeast(0)) }
+                    offset?.let {
+                        scrollState.animateScrollTo((it - ANCHOR_SCROLL_GAP_PX).coerceAtLeast(0))
+                        anchors.highlight(slug)
+                    }
                     pendingAnchor = null
                 }
                 // Leaving the article view (back to the TOC or search) before the
