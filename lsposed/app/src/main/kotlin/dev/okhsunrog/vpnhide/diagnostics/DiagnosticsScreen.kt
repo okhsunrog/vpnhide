@@ -835,6 +835,7 @@ private fun formatSize(bytes: Long): String {
  * backend's own vectors.
  */
 private data class DiagCard(
+    val id: String,
     val name: String,
     val detail: String,
     val groundTruthDetail: String?,
@@ -849,6 +850,7 @@ private data class DiagCard(
  * so it is the only one that can flag an uncovered native leak. */
 private fun DiagnosticCheck.toDiagCard(): DiagCard =
     DiagCard(
+        id = id,
         name = label,
         detail = appDetail,
         groundTruthDetail = groundTruthDetail,
@@ -859,7 +861,7 @@ private fun DiagnosticCheck.toDiagCard(): DiagCard =
 
 /** Raw-list fallback (dashboard not yet loaded): no ownership known, so nothing is
  * marked uncovered — a leak reads as a leak, the pre-report behaviour. */
-private fun CheckResult.toDiagCard(): DiagCard = DiagCard(name, detail, groundTruthDetail, outcome, uncovered = false)
+private fun CheckResult.toDiagCard(): DiagCard = DiagCard(id, name, detail, groundTruthDetail, outcome, uncovered = false)
 
 /**
  * The results body: the honest headline (hidden vs still-leaking) plus the check
@@ -1001,7 +1003,7 @@ private fun CheckCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = r.name,
+                    text = diagnosticLabelResource(r.id)?.let { stringResource(it) } ?: r.name,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f).padding(end = 8.dp),

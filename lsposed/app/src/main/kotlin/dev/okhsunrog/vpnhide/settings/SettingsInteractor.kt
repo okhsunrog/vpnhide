@@ -1,6 +1,8 @@
 package dev.okhsunrog.vpnhide.settings
 
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.core.os.LocaleListCompat
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.startup.VpnHideApp
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +35,9 @@ interface SettingsInteractor {
     fun setCornerStyle(value: CornerStyle)
 
     fun setThemeMode(value: ThemeMode)
+
+    /** Owned by Android/AppCompat, not the UI DataStore or root config. */
+    fun setAppLanguage(languageTag: String)
 
     fun setAnimationsEnabled(value: Boolean)
 
@@ -74,6 +79,10 @@ class RepositorySettingsInteractor(
     override fun setCornerStyle(value: CornerStyle) = launch { repository.setCornerStyle(value) }
 
     override fun setThemeMode(value: ThemeMode) = launch { repository.setThemeMode(value) }
+
+    override fun setAppLanguage(languageTag: String) {
+        AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(languageTag))
+    }
 
     override fun setAnimationsEnabled(value: Boolean) = launch { repository.setAnimationsEnabled(value) }
 

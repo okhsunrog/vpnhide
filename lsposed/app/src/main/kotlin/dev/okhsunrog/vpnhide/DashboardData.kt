@@ -19,6 +19,7 @@ import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.hook.HookEntry
 import dev.okhsunrog.vpnhide.picker.TargetsSnapshot
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
+import dev.okhsunrog.vpnhide.settings.AppLanguageContext
 import dev.okhsunrog.vpnhide.settings.SettingsRepository
 import dev.okhsunrog.vpnhide.settings.installedNativeOptionalHooks
 import dev.okhsunrog.vpnhide.settings.nativeBackendStatusError
@@ -1581,6 +1582,7 @@ internal fun assembleDashboardState(
     diagnostics: DiagnosticPresentation,
     developer: DeveloperFlags,
 ): DashboardState {
+    val localized = AppLanguageContext.localized(context)
     val protection = resolveProtectionFacts(facts, diagnostics)
     val dashboardFacts =
         DashboardFacts(
@@ -1595,10 +1597,10 @@ internal fun assembleDashboardState(
         )
     val messages =
         dashboardIssues(dashboardFacts).map { issue ->
-            issue.toMessage(context, context.resources).copy(
+            issue.toMessage(localized, localized.resources).copy(
                 reason = issue.toReason(),
                 presentationLanguage =
-                    context.resources.configuration.locales[0]
+                    localized.resources.configuration.locales[0]
                         .toLanguageTag(),
             )
         }

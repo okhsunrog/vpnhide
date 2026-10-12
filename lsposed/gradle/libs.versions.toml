@@ -7,6 +7,7 @@ compose-bom = "2026.08.00"
 # Requires AGP 9.1+ (we're on 9.3.1 from google()), mirrors ImageToolbox.
 material3 = "1.5.0-alpha26"
 activity-compose = "1.13.0"
+appcompat = "1.8.0"
 core-ktx = "1.19.0"
 datastore = "1.2.1"
 material-kolor = "5.0.0"
@@ -23,6 +24,7 @@ ben-manes-versions = "0.61.0"
 version-catalog-update = "1.1.1"
 
 [libraries]
+appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
 activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity-compose" }
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }

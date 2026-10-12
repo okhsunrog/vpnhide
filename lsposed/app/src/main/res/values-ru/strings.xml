@@ -636,4 +636,6 @@
     <string name="debug_export_complete">Отчёт собран полностью.</string>
     <string name="debug_export_partial">Собран частичный отчёт. Его можно сохранить или отправить.\n%1$s</string>
     <string name="debug_export_failed">Не удалось собрать отчёт: %1$s</string>
+    <string name="settings_language">Язык</string>
+    <string name="language_system">Как в системе</string>
 </resources>

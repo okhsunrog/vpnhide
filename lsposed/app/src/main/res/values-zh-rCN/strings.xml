@@ -624,4 +624,6 @@
     <string name="debug_export_complete">报告已完整收集。</string>
     <string name="debug_export_partial">已收集部分报告，仍可保存或分享。\n%1$s</string>
     <string name="debug_export_failed">报告收集失败：%1$s</string>
+    <string name="settings_language">语言</string>
+    <string name="language_system">跟随系统</string>
 </resources>

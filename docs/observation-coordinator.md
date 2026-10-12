@@ -80,7 +80,12 @@ root snapshot (modules, LSPosed, targets, environment, installed optional hooks)
 assembles the protection tiles, the banners and the screen state on every change
 of either (`assembleDashboardState`, pure apart from wording).
 
-A third source joins that combine: `DeveloperFlagsCache`, the app-local switches
+App-language configuration is also a presentation input: changing it rewords
+Dashboard messages without invalidating facts or rerunning diagnostic probes.
+The language context is copied from application resources with the Activity
+configuration; the process never retains the Activity itself.
+
+Another source joins that combine: `DeveloperFlagsCache`, the app-local switches
 on Settings → For developers that change what the Dashboard says (the agent-bridge
 note, the version-mismatch notices). They are preferences, not observations — a
 DataStore write invalidates nothing — so holding them inside the cached facts meant

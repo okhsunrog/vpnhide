@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSnapshot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
+import dev.okhsunrog.vpnhide.settings.AppLanguageContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -50,7 +51,7 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardRootF
         // are app-local settings, and a DataStore write invalidates no
         // observation, so a toggle would otherwise not show until the next
         // refresh. See [DeveloperFlagsCache].
-        combine(value, DiagnosticsCache.snapshot, DeveloperFlagsCache.flags) { facts, snapshot, developer ->
+        combine(value, DiagnosticsCache.snapshot, DeveloperFlagsCache.flags, AppLanguageContext.context) { facts, snapshot, developer, _ ->
             val context = inputs?.context
             val state =
                 if (facts?.belongsTo(snapshot.rootSnapshot) == true && context != null && snapshot.presentation.lastAttempt != null) {
