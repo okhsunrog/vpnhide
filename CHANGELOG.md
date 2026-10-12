@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v1.3.1
+
+### Added
+- KPM now supports Linux 4.4 kernels.
+- Choose the app language in Settings → Appearance: system default, English, Russian or Simplified Chinese. Module error messages follow the selected language too.
+
+### Changed
+- Developer settings have their own page, with separate controls for changelog and version-mismatch notices. Changes take effect immediately.
+- Help search handles multi-word queries and prioritizes title and keyword matches.
+
+### Fixed
+- Fixed Java hiding for apps sharing an ID and policy-cache races. Temporary read failures retain the last working policy without excessive retries or logging; telemetry snapshots survive write failures.
+- Fixed cramped save controls, dashboard tiles and module headings on narrow screens or with large text. Layouts that fit stay unchanged.
+- The kernel interfaces tunl0, gre0 and gretap0 are no longer mistaken for VPN interfaces.
+- Fixed Java-layer VPN hiding on Android 11.
+- Fixed KPM socket-binding leaks on some vendor kernels and false incomplete-hook warnings on kernels before 5.3.
+- Dashboard, Statistics, diagnostics and debug reports now show consistent results and backend status. Reports include clearer failure details, and exports explain incomplete captures.
+- UI preferences no longer flicker back to defaults after a language change or screen recreation. Prepared exports survive opening the file picker.
+
 ## v1.3.0
 
 ### Added

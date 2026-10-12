@@ -1,6 +1,70 @@
 {
   "history": [
     {
+      "version": "1.3.1",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            {
+              "en": "KPM now supports Linux 4.4 kernels.",
+              "ru": "KPM теперь поддерживает ядра Linux 4.4."
+            },
+            {
+              "en": "Choose the app language in Settings → Appearance: system default, English, Russian or Simplified Chinese. Module error messages follow the selected language too.",
+              "ru": "Выбор языка в Настройках → Внешний вид: как в системе, английский, русский или упрощённый китайский. Сообщения об ошибках модулей также следуют выбранному языку."
+            }
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            {
+              "en": "Developer settings have their own page, with separate controls for changelog and version-mismatch notices. Changes take effect immediately.",
+              "ru": "Настройки разработчика вынесены на отдельную страницу. Уведомления об истории изменений и несовпадении версий отключаются отдельно; изменения действуют сразу."
+            },
+            {
+              "en": "Help search handles multi-word queries and prioritizes title and keyword matches.",
+              "ru": "Поиск по руководству поддерживает запросы из нескольких слов и отдаёт приоритет заголовкам и ключевым словам."
+            }
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            {
+              "en": "Fixed Java hiding for apps sharing an ID and policy-cache races. Temporary read failures retain the last working policy without excessive retries or logging; telemetry snapshots survive write failures.",
+              "ru": "Исправлены Java-скрытие для приложений с общим ID и гонки кеша настроек. При временных ошибках чтения сохраняются последние рабочие настройки без частых повторов и потока логов; ошибки записи не повреждают снимки телеметрии."
+            },
+            {
+              "en": "Fixed cramped save controls, dashboard tiles and module headings on narrow screens or with large text. Layouts that fit stay unchanged.",
+              "ru": "Исправлено сжатие панели сохранения, показателей обзора и заголовков модулей на узких экранах и при крупном шрифте. Если места достаточно, раскладка не меняется."
+            },
+            {
+              "en": "The kernel interfaces tunl0, gre0 and gretap0 are no longer mistaken for VPN interfaces.",
+              "ru": "Интерфейсы ядра tunl0, gre0 и gretap0 больше не принимаются за VPN-интерфейсы."
+            },
+            {
+              "en": "Fixed Java-layer VPN hiding on Android 11.",
+              "ru": "Исправлено скрытие VPN на Java-уровне Android 11."
+            },
+            {
+              "en": "Fixed KPM socket-binding leaks on some vendor kernels and false incomplete-hook warnings on kernels before 5.3.",
+              "ru": "Исправлены утечки через привязку сокета в KPM на некоторых ядрах производителей и ложные предупреждения о неполном наборе хуков на ядрах до 5.3."
+            },
+            {
+              "en": "Dashboard, Statistics, diagnostics and debug reports now show consistent results and backend status. Reports include clearer failure details, and exports explain incomplete captures.",
+              "ru": "Обзор, статистика, диагностика и отладочные отчёты теперь показывают согласованные результаты и статус бэкендов. В отчётах уточнены причины ошибок, при экспорте объясняются неполные результаты сбора."
+            },
+            {
+              "en": "UI preferences no longer flicker back to defaults after a language change or screen recreation. Prepared exports survive opening the file picker.",
+              "ru": "Настройки интерфейса больше не переключаются временно на значения по умолчанию при смене языка или пересоздании экрана. Подготовленные экспорты сохраняются при открытии выбора файла."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "version": "1.3.0",
       "sections": [
         {
