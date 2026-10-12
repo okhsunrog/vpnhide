@@ -43,5 +43,5 @@ not remove configured package names or every app/network detail from logs.
 
 Use the contact links in the app to agree on a support channel and send the
 archive to the developer instead of posting it publicly. This limits who receives
-the data; it does not make the report anonymous. If you cannot share logs, say so
-in your report; the developer can discuss what evidence is needed.
+the data; it does not make the report anonymous. Attach the diagnostic report
+when reporting a problem: its logs and state are needed to investigate the cause.
