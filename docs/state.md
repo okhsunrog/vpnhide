@@ -322,8 +322,10 @@ fingerprints before and after reading, and publishes only under the same
 invalidation generation. A late invalidation cannot be overwritten by a reader.
 Each call attempts at most two reads. If the sources keep changing (or cannot be
 statted), it returns the previous coherent snapshot, or an empty fail-open policy
-at startup; it leaves the cache expired so the next call retries. A stable missing
-canonical file or explicit empty config replaces the previous policy. Read/parse errors retain the last successful policy (or fail open at startup)
+at startup. A separate one-second retry deadline bounds I/O and error reporting,
+even if more invalidations arrive; it does not mark the old snapshot as current.
+The first call at or after that deadline retries without needing a watcher event.
+A stable missing canonical file or explicit empty config replaces the previous policy. Read/parse errors retain the last successful policy (or fail open at startup)
 and trigger another read after one second even if metadata did not change. A
 blank, malformed or unsupported JSON file is an error; intentional reset is a
 valid empty canonical object or removal of the canonical file. LSPosed telemetry

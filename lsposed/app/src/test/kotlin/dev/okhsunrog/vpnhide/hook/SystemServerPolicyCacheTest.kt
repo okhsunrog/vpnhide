@@ -13,6 +13,7 @@ class SystemServerPolicyCacheTest {
         var fingerprint = SystemServerFingerprint(file(1), file(1))
         var config = SystemServerConfig()
         var reads = 0
+        var stats = 0
         val publications = mutableListOf<SystemServerConfig>()
         val errors = mutableListOf<String?>()
         var afterRead: () -> Unit = {}
@@ -23,6 +24,7 @@ class SystemServerPolicyCacheTest {
         val cache =
             SystemServerPolicyCache(
                 fingerprint = {
+                    stats++
                     val result = fingerprint.takeIf { statReadable }
                     afterStat()
                     result
@@ -187,18 +189,20 @@ class SystemServerPolicyCacheTest {
         assertEquals(3, source.reads)
         assertEquals(listOf(first), source.publications)
         source.afterRead = {}
+        source.now = 1_000
         assertEquals(second, source.cache.load())
         assertEquals(4, source.reads)
     }
 
     @Test
-    fun `continuous invalidations without initial snapshot fail open without caching`() {
+    fun `continuous invalidations without initial snapshot retry after cooldown`() {
         val source = Source().apply { config = first }
         source.afterRead = { source.cache.invalidate() }
         assertEquals(SystemServerConfig(), source.cache.load())
         assertEquals(2, source.reads)
         assertEquals(emptyList<SystemServerConfig>(), source.publications)
         source.afterRead = {}
+        source.now = 1_000
         assertEquals(first, source.cache.load())
         assertEquals(3, source.reads)
     }
@@ -213,6 +217,7 @@ class SystemServerPolicyCacheTest {
         source.config = second
         source.fingerprint = source.fingerprint.copy(config = file(2))
         source.statReadable = true
+        source.now = 2_000
         assertEquals(second, source.cache.load())
     }
 
@@ -224,6 +229,7 @@ class SystemServerPolicyCacheTest {
         source.statReadable = false
         assertEquals(first, source.cache.load())
         source.statReadable = true
+        source.now = 2_000
         assertEquals(first, source.cache.load())
         assertEquals(2, source.reads)
         assertEquals(null, source.errors.last())
@@ -266,6 +272,99 @@ class SystemServerPolicyCacheTest {
         source.failure = null
         source.now = 1_000
         assertEquals(first, source.cache.load())
+    }
+
+    @Test
+    fun `persistent stat failure bounds I O and error reporting with and without previous policy`() {
+        for (warm in listOf(false, true)) {
+            val source = Source().apply { config = first }
+            if (warm) source.cache.load()
+            val expected = if (warm) first else SystemServerConfig()
+            val initialStats = source.stats
+            val initialErrors = source.errors.size
+            source.now = 1_000
+            source.statReadable = false
+            repeat(1_000) {
+                source.cache.invalidate()
+                assertEquals(expected, source.cache.load())
+            }
+            assertEquals(initialStats + 2, source.stats)
+            assertEquals(initialErrors + 1, source.errors.size)
+            source.now = 1_999
+            assertEquals(expected, source.cache.load())
+            assertEquals(initialStats + 2, source.stats)
+            source.now = 2_000
+            assertEquals(expected, source.cache.load())
+            assertEquals(initialStats + 4, source.stats)
+            assertEquals(initialErrors + 2, source.errors.size)
+            source.statReadable = true
+            source.config = second
+            source.now = 3_000
+            assertEquals(second, source.cache.load())
+            assertEquals(null, source.errors.last())
+        }
+    }
+
+    @Test
+    fun `unstable reads keep last good without publishing until cooldown ends`() {
+        val source = Source().apply { config = first }
+        source.cache.load()
+        source.config = second
+        source.cache.invalidate()
+        source.afterRead = { source.cache.invalidate() }
+        repeat(1_000) { assertEquals(first, source.cache.load()) }
+        assertEquals(3, source.reads)
+        assertEquals(listOf(first), source.publications)
+        assertEquals(2, source.errors.size)
+        source.afterRead = {}
+        source.now = 1_000
+        assertEquals(second, source.cache.load())
+        assertEquals(4, source.reads)
+        assertEquals(listOf(first, second), source.publications)
+    }
+
+    @Test
+    fun `cold stat recovery waits for deadline without treating empty fallback as loaded`() {
+        val source =
+            Source().apply {
+                config = first
+                statReadable = false
+            }
+        assertEquals(SystemServerConfig(), source.cache.load())
+        source.statReadable = true
+        source.cache.invalidate()
+        source.now = 999
+        assertEquals(SystemServerConfig(), source.cache.load())
+        assertEquals(0, source.reads)
+        assertEquals(emptyList<SystemServerConfig>(), source.publications)
+        source.now = 1_000
+        assertEquals(first, source.cache.load())
+        assertEquals(listOf(first), source.publications)
+        assertEquals(null, source.errors.last())
+        // Once recovered, a new invalidation again causes an immediate reload.
+        source.config = second
+        source.cache.invalidate()
+        assertEquals(second, source.cache.load())
+    }
+
+    @Test
+    fun `parse failure cooldown also survives repeated invalidation`() {
+        val source = Source().apply { config = first }
+        source.cache.load()
+        source.failure = "malformed JSON"
+        source.cache.invalidate()
+        repeat(1_000) {
+            source.cache.invalidate()
+            assertEquals(first, source.cache.load())
+        }
+        assertEquals(2, source.reads)
+        assertEquals(4, source.stats)
+        assertEquals(listOf(null, "malformed JSON"), source.errors)
+        source.failure = null
+        source.config = second
+        source.now = 1_000
+        assertEquals(second, source.cache.load())
+        assertEquals(null, source.errors.last())
     }
 
     private companion object {

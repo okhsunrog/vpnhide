@@ -43,10 +43,17 @@ internal class SystemServerPolicyCache(
         val retryRead: Boolean = false,
     )
 
+    private data class RetryFallback(
+        val config: SystemServerConfig,
+        val retryAtUptimeMs: Long,
+    )
+
     private val generation = AtomicLong()
     private val lock = Any()
 
     @Volatile private var cache: Cache? = null
+
+    @Volatile private var retryFallback: RetryFallback? = null
 
     fun invalidate() {
         // Never wait for a reader's I/O. Even a publication after this increment
@@ -55,12 +62,12 @@ internal class SystemServerPolicyCache(
     }
 
     fun load(): SystemServerConfig {
-        cache?.takeIf { it.isFresh(uptimeMillis()) }?.let { return it.config }
+        cachedConfig()?.let { return it }
         return synchronized(lock) { loadLocked() }
     }
 
     private fun loadLocked(): SystemServerConfig {
-        cache?.takeIf { it.isFresh(uptimeMillis()) }?.let { return it.config }
+        cachedConfig()?.let { return it }
         repeat(MAX_READ_ATTEMPTS) {
             val readingGeneration = generation.get()
             val before = fingerprint() ?: return@repeat
@@ -81,16 +88,26 @@ internal class SystemServerPolicyCache(
                         is PolicyReadResult.Failed -> previous?.config ?: SystemServerConfig()
                     }
                 cache = Cache(readingGeneration, before, config, nextStatCheck(), retryRead = result is PolicyReadResult.Failed)
+                retryFallback = if (result is PolicyReadResult.Failed) RetryFallback(config, nextStatCheck()) else null
                 onReadError((result as? PolicyReadResult.Failed)?.reason)
                 onLoaded(config)
                 return config
             }
         }
-        // Do not stamp an unstable read as current. The expired/invalidated
-        // entry stays expired, so the next call retries without an inotify event.
+        // Retain the old identity: a cooldown is not a successful observation.
+        // Invalidation still advances the generation, but cannot turn an error
+        // or watcher storm into synchronous I/O on every intercepted Binder call.
         cache = cache?.copy(retryRead = true)
+        val fallback = cache?.config ?: SystemServerConfig()
+        retryFallback = RetryFallback(fallback, nextStatCheck())
         onReadError("config sources unstable or unreadable; retry pending")
-        return cache?.config ?: SystemServerConfig()
+        return fallback
+    }
+
+    private fun cachedConfig(): SystemServerConfig? {
+        val now = uptimeMillis()
+        retryFallback?.takeIf { now < it.retryAtUptimeMs }?.let { return it.config }
+        return cache?.takeIf { it.isFresh(now) }?.config
     }
 
     private fun Cache.isFresh(now: Long): Boolean =
