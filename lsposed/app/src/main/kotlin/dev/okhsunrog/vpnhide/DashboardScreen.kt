@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -1166,8 +1167,8 @@ private fun Context.openUrl(url: String) {
  * outdated version, …) — grabs the exact named artifact from the latest release. */
 @Composable
 private fun ModuleDownloadButton(artifact: String) {
-    val context = LocalContext.current
-    EnhancedOutlinedButton(onClick = { context.openUrl(releaseAssetUrl(artifact)) }) {
+    val uriHandler = LocalUriHandler.current
+    EnhancedOutlinedButton(onClick = { runCatching { uriHandler.openUri(releaseAssetUrl(artifact)) } }) {
         Text(stringResource(R.string.dashboard_install_recommendation_download, artifact))
     }
 }

@@ -1,1 +1,1 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application><activity android:name="dev.okhsunrog.vpnhide.settings.LayoutHarness" android:exported="true" /><activity android:name="dev.okhsunrog.vpnhide.settings.KpmHelpHarness" android:exported="true" /></application></manifest>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application><activity android:name="dev.okhsunrog.vpnhide.settings.LayoutHarness" android:exported="true" /></application></manifest>

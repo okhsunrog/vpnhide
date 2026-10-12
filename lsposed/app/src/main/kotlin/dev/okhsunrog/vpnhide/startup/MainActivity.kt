@@ -49,6 +49,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import dev.okhsunrog.vpnhide.AgentControlBridge
+import dev.okhsunrog.vpnhide.AgentUiScenarioHost
 import dev.okhsunrog.vpnhide.BackgroundUpdateChecks
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.ConfigFeedbackProvider
@@ -249,6 +250,7 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
                 }
                 ConfigFeedbackProvider { MainScreen() }
             }
+            if (settings.agentControlEnabled) AgentUiScenarioHost()
         }
     }
 }

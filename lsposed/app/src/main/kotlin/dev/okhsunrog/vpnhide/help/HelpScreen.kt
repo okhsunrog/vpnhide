@@ -30,6 +30,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -74,6 +75,7 @@ internal fun HelpScreen(
     onClose: () -> Unit,
     onNavigate: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onLocationChanged: (String?) -> Unit = {},
 ) {
     val context = LocalContext.current
     val language = LocalConfiguration.current.locales[0].language
@@ -87,6 +89,9 @@ internal fun HelpScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var contactOpen by rememberSaveable { mutableStateOf(false) }
     var pendingAnchor by rememberSaveable { mutableStateOf(initialDestination.anchor) }
+    SideEffect {
+        onLocationChanged(articleId?.let { id -> pendingAnchor?.let { "$id#$it" } ?: id })
+    }
     val uriHandler = LocalUriHandler.current
 
     if (contactOpen) ContactModal(onDismiss = { contactOpen = false })

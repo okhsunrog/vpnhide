@@ -42,7 +42,9 @@ internal object AgentControlBridge {
                     if (server == null) {
                         server = startServer(context.applicationContext)
                     }
+                    agentUiSession.setEnabled(server != null)
                 } else {
+                    agentUiSession.setEnabled(false)
                     server?.stop()
                     server = null
                     File(context.filesDir, AGENT_BRIDGE_TOKEN_FILE).delete()

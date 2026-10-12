@@ -672,4 +672,7 @@
     <string name="settings_load_failed_title">Could not load settings</string>
     <string name="settings_load_failed_body">Your saved settings have not been replaced. Retry to load them.</string>
     <string name="settings_loading">Loading settings…</string>
+    <string name="agent_ui_preview_label">UI preview · %1$s · synthetic data</string>
+    <string name="agent_ui_preview_exit">Exit preview</string>
+    <string name="agent_ui_preview_action">Intercepted action: %1$s</string>
 </resources>

@@ -629,4 +629,7 @@
     <string name="settings_load_failed_title">无法加载设置</string>
     <string name="settings_load_failed_body">已保存的设置未被替换。请重试加载。</string>
     <string name="settings_loading">正在加载设置…</string>
+    <string name="agent_ui_preview_label">界面预览 · %1$s · 测试数据</string>
+    <string name="agent_ui_preview_exit">退出预览</string>
+    <string name="agent_ui_preview_action">已拦截操作：%1$s</string>
 </resources>

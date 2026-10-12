@@ -10,6 +10,16 @@ class AgentControlDispatcherTest {
     fun exposesBridgeFunctions() {
         val names = AgentControlDispatcher.functionSpecs.map { it.name }
 
+        for (name in listOf(
+            "listUiScenarios",
+            "startUiScenario",
+            "getUiScenario",
+            "navigateUiScenario",
+            "backUiScenario",
+            "stopUiScenario",
+        )) {
+            assertTrue("$name missing", name in names)
+        }
         assertTrue("getStatisticsState missing", "getStatisticsState" in names)
         assertTrue("getStatisticsCaptureBaseline missing", "getStatisticsCaptureBaseline" in names)
         assertTrue("getStatisticsCaptureDiff missing", "getStatisticsCaptureDiff" in names)

@@ -1,7 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
@@ -13,7 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
@@ -33,13 +31,11 @@ internal const val CONTACT_4PDA_URL = "https://4pda.to/forum/index.php?showtopic
  */
 @Composable
 internal fun ContactModal(onDismiss: () -> Unit) {
-    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
 
     fun open(url: String) {
         runCatching {
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
+            uriHandler.openUri(url)
         }
         onDismiss()
     }

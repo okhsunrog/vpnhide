@@ -21,6 +21,42 @@ import kotlinx.serialization.json.putJsonObject
 internal object AgentControlDispatcher {
     private val functions: List<BridgeFunction> =
         listOf(
+            function<EmptyArgs, List<AgentUiScenarioSpec>>(
+                name = "listUiScenarios",
+                description = "List isolated UI scenarios using production components. Requires the foreground app; no root writes.",
+                inputSchema = schema(),
+            ) { _, _ -> agentUiScenarioCatalog },
+            function<AgentUiStartArgs, AgentUiState>(
+                name = "startUiScenario",
+                description =
+                    "Start a listed UI scenario; returns sessionId. getUiScenario reports composition. " +
+                        "Real config and getState remain unchanged.",
+                inputSchema = schema(required("scenario", stringSchema()), optional("destination", stringSchema())),
+            ) { _, args -> agentUiSession.start(args) },
+            function<EmptyArgs, AgentUiState>(
+                name = "getUiScenario",
+                description =
+                    "Read preview session, help location, composed revision and intercepted actions. " +
+                        "Separate from real device getState.",
+                inputSchema = schema(),
+            ) { _, _ -> agentUiSession.state.value },
+            function<AgentUiNavigationArgs, AgentUiState>(
+                name = "navigateUiScenario",
+                description =
+                    "Open preview help: article-id#localized-anchor or omit for contents. " +
+                        "Repeated destinations restart scrolling and highlight.",
+                inputSchema = schema(required("sessionId", integerSchema()), optional("destination", stringSchema())),
+            ) { _, args -> agentUiSession.navigate(args) },
+            function<AgentUiSessionArgs, AgentUiState>(
+                name = "backUiScenario",
+                description = "Return from preview help to its scenario; on the scenario itself, exit. Stale session IDs are rejected.",
+                inputSchema = schema(required("sessionId", integerSchema())),
+            ) { _, args -> agentUiSession.back(args.sessionId) },
+            function<AgentUiSessionArgs, AgentUiState>(
+                name = "stopUiScenario",
+                description = "Exit the preview and reveal the real app with its existing navigation and drafts.",
+                inputSchema = schema(required("sessionId", integerSchema())),
+            ) { _, args -> agentUiSession.stop(args.sessionId) },
             function<GetStateArgs, VpnHideState>(
                 name = "getState",
                 description =

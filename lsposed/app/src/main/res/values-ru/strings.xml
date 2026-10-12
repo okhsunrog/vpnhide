@@ -641,4 +641,7 @@
     <string name="settings_load_failed_title">Не удалось загрузить настройки</string>
     <string name="settings_load_failed_body">Сохранённые настройки не заменены. Повторите загрузку.</string>
     <string name="settings_loading">Загрузка настроек…</string>
+    <string name="agent_ui_preview_label">Предпросмотр · %1$s · тестовые данные</string>
+    <string name="agent_ui_preview_exit">Завершить</string>
+    <string name="agent_ui_preview_action">Перехваченное действие: %1$s</string>
 </resources>
