@@ -284,6 +284,15 @@
       "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能做到与做不到什么" },
       "articles": [
         {
+          "id": "security-and-privacy",
+          "title": { "en": "Security and privacy", "ru": "Безопасность и приватность", "zh": "安全与隐私" },
+          "keywords": {
+            "en": ["security", "privacy", "threat model", "superkey", "credentials", "agent control", "token", "routing", "leaks"],
+            "ru": ["безопасность", "приватность", "модель угроз", "superkey", "ключ", "agent control", "токен", "маршрутизация", "утечки"],
+            "zh": ["安全", "隐私", "威胁模型", "superkey", "密钥", "agent control", "令牌", "路由", "泄漏"]
+          }
+        },
+        {
           "id": "capabilities-limits",
           "title": { "en": "What it can and can't do", "ru": "Возможности и ограничения", "zh": "能做到与做不到什么" },
           "keywords": {

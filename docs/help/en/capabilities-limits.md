@@ -35,7 +35,9 @@ different things, and VPN Hide has a role for each: **Java**, **Native**,
 
 ## Routing is a separate choice
 
-Targets can be inside or outside the tunnel. VPN Hide changes the local view,
-not your VPN client's routing rules or the public IP. Start with the roles you
-need, check the target's actual behavior, and undo a change if it breaks a feature.
-See [Direct or through the tunnel](split-tunneling.md).
+Targets can be inside or outside the tunnel. VPN Hide does not configure the
+VPN client's routing policy, but Java hooks can change the network returned to
+an app. An app binding to that network may connect directly if Android and VPN
+policy permit bypass. Hiding checks do not verify tunnel retention.
+See [Direct access or through the tunnel](split-tunneling.md) and
+[Security and privacy](security-and-privacy.md).

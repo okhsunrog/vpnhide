@@ -35,7 +35,7 @@ hero shows **VPN hidden** once a VPN is up and its checks pass. If a module says
 "reboot to activate" or "not active", follow the on-screen hint. Missing scope,
 a not-yet-rebooted module, or two native backends at once are the usual causes.
 
-Then move on to [Set up hiding](configure-hiding.md).
+Then move on to [Your first app, step by step](first-setup.md).
 
 ## Official downloads
 

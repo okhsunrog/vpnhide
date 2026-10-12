@@ -49,6 +49,7 @@ The offline help guide, shipped inside the app (**Settings → Help & guide**) a
 
 ## What it can and can't do
 
+- [Security and privacy](en/security-and-privacy.md)
 - [What it can and can't do](en/capabilities-limits.md)
 
 ## Under the hood
