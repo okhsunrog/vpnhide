@@ -357,23 +357,16 @@ class HookEntry : IXposedHookLoadPackage {
     private fun callNetworkCapabilities(
         cs: Any,
         network: Network,
-    ): NetworkCapabilities? {
-        val typedArgs = arrayOf<Any?>(network, "android", null)
+    ): NetworkCapabilities? =
         try {
-            return XposedHelpers.callMethod(
-                cs,
-                "getNetworkCapabilities",
-                arrayOf(Network::class.java, String::class.java, String::class.java),
-                *typedArgs,
-            ) as? NetworkCapabilities
+            readNetworkCapabilitiesCompat(network) { args ->
+                val types = Array<Class<*>>(args.size) { if (it == 0) Network::class.java else String::class.java }
+                XposedHelpers.callMethod(cs, "getNetworkCapabilities", types, *args) as? NetworkCapabilities
+            }
         } catch (_: Throwable) {
-        }
-        return try {
-            XposedHelpers.callMethod(cs, "getNetworkCapabilities", network) as? NetworkCapabilities
-        } catch (_: Throwable) {
+            // A present accessor can fail on an OEM ROM; never throw into system_server.
             null
         }
-    }
 
     private fun rawAllNetworks(cs: Any): List<Network> =
         withClearedCallingIdentity {
