@@ -52,7 +52,9 @@ import dev.okhsunrog.vpnhide.ui.components.EnhancedCard
 import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
 import dev.okhsunrog.vpnhide.ui.components.GroupedCard
 import dev.okhsunrog.vpnhide.ui.components.IconBubble
-import dev.okhsunrog.vpnhide.ui.components.MetricTile
+import dev.okhsunrog.vpnhide.ui.components.MetricContent
+import dev.okhsunrog.vpnhide.ui.components.MetricGrid
+import dev.okhsunrog.vpnhide.ui.components.ModuleHeading
 import dev.okhsunrog.vpnhide.ui.components.SectionHeader
 import dev.okhsunrog.vpnhide.ui.components.container
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
@@ -765,43 +767,22 @@ private fun DashboardHeroCard(
                 }
             }
             Spacer(Modifier.height(16.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MetricTile(
-                        label = stringResource(R.string.dashboard_summary_modules),
-                        value = moduleSummaryText(state),
-                        accent = moduleSummaryAccent(state),
-                        modifier = Modifier.weight(1f),
-                    )
-                    val nativeMetric = protectionMetric(state.protection) { it.native }
-                    MetricTile(
-                        label = stringResource(R.string.dashboard_native_protection),
-                        value = nativeMetric.text,
-                        accent = nativeMetric.accent,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val javaMetric = protectionMetric(state.protection) { it.java }
-                    MetricTile(
-                        label = stringResource(R.string.dashboard_java_protection),
-                        value = javaMetric.text,
-                        accent = javaMetric.accent,
-                        modifier = Modifier.weight(1f),
-                    )
-                    MetricTile(
-                        label = stringResource(R.string.dashboard_summary_issues),
-                        value = (errorCount + warningCount).toString(),
-                        accent =
-                            when {
-                                errorCount > 0 -> StatusColors.errorAccent
-                                warningCount > 0 -> StatusColors.warningAccent
-                                else -> StatusColors.successDot
-                            },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
+            val nativeMetric = protectionMetric(state.protection) { it.native }
+            val javaMetric = protectionMetric(state.protection) { it.java }
+            MetricGrid(
+                MetricContent(stringResource(R.string.dashboard_summary_modules), moduleSummaryText(state), moduleSummaryAccent(state)),
+                MetricContent(stringResource(R.string.dashboard_native_protection), nativeMetric.text, nativeMetric.accent),
+                MetricContent(stringResource(R.string.dashboard_java_protection), javaMetric.text, javaMetric.accent),
+                MetricContent(
+                    stringResource(R.string.dashboard_summary_issues),
+                    (errorCount + warningCount).toString(),
+                    when {
+                        errorCount > 0 -> StatusColors.errorAccent
+                        warningCount > 0 -> StatusColors.warningAccent
+                        else -> StatusColors.successDot
+                    },
+                ),
+            )
         }
     }
 }
@@ -1127,27 +1108,7 @@ private fun ModuleCardShell(
             ModuleBadge(text = badgeText, accentColor = accentColor, containerColor = accentContainerColor)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (version != null) {
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = version,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 118.dp),
-                        )
-                    }
-                }
+                ModuleHeading(name, version)
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,

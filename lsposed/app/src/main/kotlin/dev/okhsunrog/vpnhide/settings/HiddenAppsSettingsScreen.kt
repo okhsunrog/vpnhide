@@ -62,6 +62,7 @@ import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.StatusColors
 import dev.okhsunrog.vpnhide.picker.AppListCache
 import dev.okhsunrog.vpnhide.picker.AppSummary
+import dev.okhsunrog.vpnhide.picker.TargetActionBar
 import dev.okhsunrog.vpnhide.picker.TargetRowShell
 import dev.okhsunrog.vpnhide.picker.TargetsCache
 import dev.okhsunrog.vpnhide.picker.applyAutoHiddenPackages
@@ -69,8 +70,6 @@ import dev.okhsunrog.vpnhide.picker.manualHiddenPackages
 import dev.okhsunrog.vpnhide.picker.toAutoHideSignal
 import dev.okhsunrog.vpnhide.rememberCanonicalEditor
 import dev.okhsunrog.vpnhide.ui.components.AppSearchTopBar
-import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
-import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.theme.AppColors
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -429,38 +428,22 @@ private fun HiddenAppsSaveBar(
     onDiscard: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp) {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.settings_hidden_apps_sub, summary.hidden, summary.automatic, summary.manual),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (summary.excluded > 0) {
-                    Text(
-                        text = stringResource(R.string.settings_hidden_apps_excluded_sub, summary.excluded),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            androidx.compose.material3.TextButton(onClick = onDiscard, enabled = dirty && !saving) {
-                Text(stringResource(R.string.config_discard_draft))
-            }
-            EnhancedButton(onClick = onSave, enabled = dirty && !saving) {
-                if (saving) {
-                    ButtonSpinner()
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(stringResource(R.string.btn_save))
-            }
-        }
+        TargetActionBar(
+            count = stringResource(R.string.settings_hidden_apps_sub, summary.hidden, summary.automatic, summary.manual),
+            supportingText =
+                if (summary.excluded >
+                    0
+                ) {
+                    stringResource(R.string.settings_hidden_apps_excluded_sub, summary.excluded)
+                } else {
+                    null
+                },
+            canDiscard = dirty && !saving,
+            canSave = dirty && !saving,
+            saving = saving,
+            onDiscard = onDiscard,
+            onSave = onSave,
+            modifier = Modifier.navigationBarsPadding(),
+        )
     }
 }

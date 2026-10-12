@@ -1,0 +1,12 @@
+// Opt-in source set only: this Activity is absent from ordinary builds.
+def fixtureDir = new File(gradle.startParameter.projectDir, "layout-fixture")
+allprojects { p ->
+    p.plugins.withId("com.android.application") {
+        p.android.sourceSets.all { source ->
+            if (source.name == "rawDebug") {
+                source.kotlin.srcDir(fixtureDir)
+                source.manifest.srcFile(new File(fixtureDir, "AndroidManifest.xml"))
+            }
+        }
+    }
+}
