@@ -73,7 +73,6 @@ import dev.okhsunrog.vpnhide.picker.isMainAppProfile
 import dev.okhsunrog.vpnhide.rememberCanonicalEditor
 import dev.okhsunrog.vpnhide.reportConfigSnackbarInset
 import dev.okhsunrog.vpnhide.settings.AppLanguageContext
-import dev.okhsunrog.vpnhide.settings.AppSettings
 import dev.okhsunrog.vpnhide.settings.DiagnosticsSettingsScreen
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
@@ -153,11 +152,14 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
     }
 
     val context = LocalContext.current
-    val settingsRepository = remember(context) { SettingsRepository(context.applicationContext) }
-    val loadedSettings by settingsRepository.settings.collectAsStateWithLifecycle(initialValue = null)
-    val settingsLoaded = loadedSettings != null
-    val settings = loadedSettings ?: AppSettings()
-    val settingsScope = rememberCoroutineScope()
+    val settingsRepository = remember(context) { SettingsRepository.forProcess(context.applicationContext) }
+    val settingsState by settingsRepository.uiState.state.collectAsStateWithLifecycle()
+    val settings = settingsState.settings
+    if (settings == null) {
+        SettingsLoadingScreen(settingsState.error, settingsRepository.uiState::retry)
+        return
+    }
+    val settingsScope = settingsRepository.uiScope
     val settingsInteractor =
         remember(settingsRepository, settingsScope) {
             RepositorySettingsInteractor(settingsRepository, settingsScope)
@@ -181,14 +183,11 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
         }
     }
     LaunchedEffect(
-        settingsLoaded,
         settings.backgroundUpdateChecksConfigured,
         settings.backgroundUpdateChecksEnabled,
     ) {
-        if (settingsLoaded) {
-            withContext(Dispatchers.IO) {
-                BackgroundUpdateChecks.sync(context.applicationContext, settings)
-            }
+        withContext(Dispatchers.IO) {
+            BackgroundUpdateChecks.sync(context.applicationContext, settings)
         }
     }
 
@@ -231,9 +230,9 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
                 // Only prompt about background update checks once the app is
                 // actually usable (root granted) — never over the no-root gate.
                 var showBackgroundUpdatePrompt by remember { mutableStateOf(false) }
-                LaunchedEffect(granted, settingsLoaded, settings.backgroundUpdateChecksConfigured) {
+                LaunchedEffect(granted, settings.backgroundUpdateChecksConfigured) {
                     showBackgroundUpdatePrompt =
-                        granted && settingsLoaded && !settings.backgroundUpdateChecksConfigured
+                        granted && !settings.backgroundUpdateChecksConfigured
                 }
                 if (showBackgroundUpdatePrompt) {
                     BackgroundUpdatePromptDialog(

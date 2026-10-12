@@ -24,10 +24,10 @@ import kotlinx.coroutines.launch
  * care, so nothing depends on an Activity having run first.
  */
 internal object DeveloperFlagsCache {
-    private val state = MutableStateFlow(DeveloperFlags())
+    private val state = MutableStateFlow<DeveloperFlags?>(null)
 
-    /** Defaults until DataStore's first emission — a few milliseconds, long before root facts exist. */
-    val flags: StateFlow<DeveloperFlags> = state.asStateFlow()
+    /** Unread stays unknown: root facts can arrive before the first preference emission. */
+    val flags: StateFlow<DeveloperFlags?> = state.asStateFlow()
 
     private var started = false
 
@@ -35,10 +35,10 @@ internal object DeveloperFlagsCache {
     fun start(context: Context) {
         if (started) return
         started = true
-        val repository = SettingsRepository(context.applicationContext)
+        val repository = SettingsRepository.forProcess(context.applicationContext)
         ObservationRuntime.scope.launch {
-            repository.settings.collect { settings ->
-                state.value = settings.toDeveloperFlags()
+            repository.uiState.state.collect { loaded ->
+                state.value = loaded.settings?.toDeveloperFlags()
             }
         }
     }

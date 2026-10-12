@@ -6,7 +6,6 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.util.Log
-import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
@@ -23,6 +22,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -281,33 +281,30 @@ private fun NeutralBanner(
     )
 }
 
-/**
- * A "Save As…" launcher for a generated `application/zip` file: on a picked uri it
- * copies [source]`()` off the main thread and swallows IO errors (a large zip would
- * block the UI, and a write failure would crash) — logging under [errorLabel].
- * [source] is read at launch time, so it always sees the latest generated file.
- */
+/** Capture the source before opening Android's picker; its callback can arrive after recreation. */
 @Composable
-private fun rememberZipSaveLauncher(
-    errorLabel: String,
-    mimeType: String = "application/zip",
-    source: () -> File?,
-): ManagedActivityResultLauncher<String, Uri?> {
+private fun rememberZipSaveLauncher(errorLabel: String): (File) -> Unit {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    return rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument(mimeType),
-    ) { uri: Uri? ->
-        val src = source() ?: return@rememberLauncherForActivityResult
-        if (uri != null) {
-            scope.launch(Dispatchers.IO) {
-                runCatching {
-                    context.contentResolver.openOutputStream(uri)?.use { out ->
-                        src.inputStream().use { it.copyTo(out) }
-                    }
-                }.onFailure { HookLog.e("VpnHide: $errorLabel save failed: ${it.message}") }
+    var pendingPath by rememberSaveable { mutableStateOf<String?>(null) }
+    val launcher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("application/zip"),
+        ) { uri: Uri? ->
+            val path = pendingPath
+            pendingPath = null
+            if (uri != null && path != null) {
+                scope.launch(Dispatchers.IO) {
+                    runCatching {
+                        val out = checkNotNull(context.contentResolver.openOutputStream(uri))
+                        out.use { File(path).inputStream().use { input -> input.copyTo(it) } }
+                    }.onFailure { HookLog.e("VpnHide: $errorLabel save failed: ${it.message}") }
+                }
             }
         }
+    return { file ->
+        pendingPath = file.absolutePath
+        launcher.launch(file.name)
     }
 }
 
@@ -316,7 +313,7 @@ fun DebugToolsSection(
     selfNeedsRestart: Boolean?,
     modifier: Modifier = Modifier,
 ) {
-    var showModal by remember { mutableStateOf(false) }
+    var showModal by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxWidth()) {
         EnhancedCard(
@@ -389,7 +386,7 @@ private fun DebugExportSheet(
     var optKernelImage by remember { mutableStateOf(false) }
 
     // Every export kind is now a .zip (carrying state.json), so one MIME type fits all.
-    val saveLauncher = rememberZipSaveLauncher("debug-export") { resultFile }
+    val saveLauncher = rememberZipSaveLauncher("debug-export")
 
     // Changing any toggle invalidates a result produced with the old recipe.
     val clearResult = { outcome = null }
@@ -531,7 +528,7 @@ private fun DebugExportSheet(
                         saveLabel = stringResource(R.string.btn_save_debug),
                         shareLabel = stringResource(R.string.btn_share_debug),
                         sharePrimary = true,
-                        onSave = { saveLauncher.launch(file.name) },
+                        onSave = { saveLauncher(file) },
                         onShare = { shareFileViaProvider(context, file, "application/zip") },
                     )
                     TextButton(
@@ -600,7 +597,7 @@ private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
     }
 
     val saveLauncher =
-        rememberZipSaveLauncher("logcat") { (state as? LogcatRecorder.State.Stopped)?.lastFile }
+        rememberZipSaveLauncher("logcat")
 
     EnhancedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -670,7 +667,7 @@ private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
                             saveLabel = stringResource(R.string.btn_save),
                             shareLabel = stringResource(R.string.btn_share_debug),
                             sharePrimary = false,
-                            onSave = { saveLauncher.launch(last.name) },
+                            onSave = { saveLauncher(last) },
                             onShare = { shareFileViaProvider(context, last, "application/zip") },
                         )
                         Spacer(Modifier.height(8.dp))

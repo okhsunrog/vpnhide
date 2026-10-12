@@ -87,12 +87,22 @@ messages are rendered with the current language only when building the dashboard
 The language context is copied from application resources with the Activity
 configuration; the process never retains the Activity itself.
 
+UI preferences have their own process-owned `SettingsStateOwner` in
+`SettingsRepository.forProcess`. Its eager DataStore subscription retains the last
+loaded snapshot across Activity recreation; a new screen must collect that state
+without supplying an `AppSettings()` fallback. Before the first read, or after a
+read failure, the app shows a loading/retry gate. Preference-dependent effects
+(agent bridge and update scheduling) run only with a real snapshot. UI preference
+writes use the same process lifetime, so a locale change cannot cancel an accepted
+edit. This owner stores application context only; it does not own root observations.
+
 Another source joins that combine: `DeveloperFlagsCache`, the app-local switches
 on Settings → For developers that change what the Dashboard says (the agent-bridge
 note, the version-mismatch notices). They are preferences, not observations — a
 DataStore write invalidates nothing — so holding them inside the cached facts meant
 a toggle did nothing until the next refresh. As a source of the projection they
-reach the banners immediately and cost no root read. The canonical config's
+reach the banners immediately and cost no root read. The developer projection
+uses the same retained preference owner and stays unknown until it has a snapshot. The canonical config's
 `debugSwitch` is not one of them: that one genuinely is read off the device and
 stays in the environment facts. The tiles and the
 hero therefore always describe the same instant: nothing follows the suite, nothing

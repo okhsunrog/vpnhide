@@ -120,7 +120,7 @@ fun PreferenceRow(
 @Composable
 fun PreferenceRowSwitch(
     title: String,
-    checked: Boolean,
+    checked: Boolean?,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
@@ -139,14 +139,18 @@ fun PreferenceRowSwitch(
         enabled = enabled || onDisabledClick != null,
         index = index,
         count = count,
-        onClick = { if (enabled) onCheckedChange(!checked) else onDisabledClick?.invoke() },
+        onClick = { if (enabled && checked != null) onCheckedChange(!checked) else onDisabledClick?.invoke() },
         trailing = {
-            EnhancedSwitch(
-                checked = checked,
-                onCheckedChange = null,
-                enabled = enabled,
-                progress = progress,
-            )
+            if (checked == null) {
+                ButtonSpinner(size = 24.dp)
+            } else {
+                EnhancedSwitch(
+                    checked = checked,
+                    onCheckedChange = null,
+                    enabled = enabled,
+                    progress = progress,
+                )
+            }
         },
     )
 }
