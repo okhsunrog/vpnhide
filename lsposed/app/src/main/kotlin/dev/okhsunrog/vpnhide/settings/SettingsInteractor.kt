@@ -62,7 +62,8 @@ interface SettingsInteractor {
 
 /**
  * Default [SettingsInteractor] backed by [SettingsRepository], launching each
- * write on [scope] (typically the composition's `rememberCoroutineScope`).
+ * write on [scope]. Production uses the repository's process scope so Activity
+ * recreation cannot cancel an accepted preference edit.
  */
 class RepositorySettingsInteractor(
     private val repository: SettingsRepository,

@@ -42,7 +42,7 @@ internal fun CanonicalPreferenceSwitch(
         icon = icon,
         index = index,
         count = count,
-        checked = requested ?: pending ?: state.confirmed?.let { canonicalToggle(it, field) } ?: false,
+        checked = requested ?: pending ?: state.confirmed?.let { canonicalToggle(it, field) },
         enabled = enabled && state.mode == ConfigCoordinatorMode.Open && requested == null && pending == null,
         progress = requested != null || pending != null,
         onDisabledClick =

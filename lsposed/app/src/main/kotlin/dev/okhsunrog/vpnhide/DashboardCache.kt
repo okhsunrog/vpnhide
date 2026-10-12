@@ -54,7 +54,9 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardRootF
         combine(value, DiagnosticsCache.snapshot, DeveloperFlagsCache.flags, AppLanguageContext.context) { facts, snapshot, developer, _ ->
             val context = inputs?.context
             val state =
-                if (facts?.belongsTo(snapshot.rootSnapshot) == true && context != null && snapshot.presentation.lastAttempt != null) {
+                if (facts?.belongsTo(snapshot.rootSnapshot) == true && context != null && snapshot.presentation.lastAttempt != null &&
+                    developer != null
+                ) {
                     assembleDashboardState(context, facts.value, snapshot.presentation, developer)
                 } else {
                     null

@@ -669,4 +669,7 @@
     <string name="debug_export_failed">Report collection failed: %1$s</string>
     <string name="settings_language">Language</string>
     <string name="language_system">System default</string>
+    <string name="settings_load_failed_title">Could not load settings</string>
+    <string name="settings_load_failed_body">Your saved settings have not been replaced. Retry to load them.</string>
+    <string name="settings_loading">Loading settings…</string>
 </resources>

@@ -626,4 +626,7 @@
     <string name="debug_export_failed">报告收集失败：%1$s</string>
     <string name="settings_language">语言</string>
     <string name="language_system">跟随系统</string>
+    <string name="settings_load_failed_title">无法加载设置</string>
+    <string name="settings_load_failed_body">已保存的设置未被替换。请重试加载。</string>
+    <string name="settings_loading">正在加载设置…</string>
 </resources>

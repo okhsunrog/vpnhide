@@ -77,6 +77,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.CanonicalActivation
 import dev.okhsunrog.vpnhide.CanonicalConfig
@@ -527,8 +530,8 @@ private fun ConfigBackupSection() {
     val checkWrite = LocalConfigWriteAccess.current
     val targets by TargetsCache.snapshot.collectAsStateWithLifecycle()
     var operation by remember { mutableStateOf(ConfigOperation.Idle) }
-    var pendingExport by remember { mutableStateOf<String?>(null) }
-    var pendingPackageListExport by remember { mutableStateOf<String?>(null) }
+    val owner = LocalLifecycleOwner.current as ViewModelStoreOwner
+    val pendingExports = remember(owner) { ViewModelProvider(owner)[PendingExportsViewModel::class.java] }
     var packageListDialogOpen by remember { mutableStateOf(false) }
     var legacyImportDialog by remember { mutableStateOf<LegacyImportPrompt?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -553,9 +556,13 @@ private fun ConfigBackupSection() {
         rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("application/json"),
         ) { uri ->
-            val raw = pendingExport
-            pendingExport = null
-            if (uri == null || raw == null) return@rememberLauncherForActivityResult
+            val raw = pendingExports.config
+            pendingExports.config = null
+            if (uri == null) return@rememberLauncherForActivityResult
+            if (raw == null) {
+                status = exportFailed
+                return@rememberLauncherForActivityResult
+            }
             operation = ConfigOperation.Export
             scope.launch {
                 val ok = withContext(Dispatchers.IO) { writeTextToUri(context, uri, raw) }
@@ -598,9 +605,13 @@ private fun ConfigBackupSection() {
         rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("text/plain"),
         ) { uri ->
-            val raw = pendingPackageListExport
-            pendingPackageListExport = null
-            if (uri == null || raw == null) return@rememberLauncherForActivityResult
+            val raw = pendingExports.packages
+            pendingExports.packages = null
+            if (uri == null) return@rememberLauncherForActivityResult
+            if (raw == null) {
+                status = packageListSaveFailed
+                return@rememberLauncherForActivityResult
+            }
             operation = ConfigOperation.PackageListSave
             scope.launch {
                 val ok = withContext(Dispatchers.IO) { writeTextToUri(context, uri, raw) }
@@ -626,7 +637,7 @@ private fun ConfigBackupSection() {
         ) {
             EnhancedOutlinedButton(
                 onClick = {
-                    pendingExport = buildConfigExportJson(targets)
+                    pendingExports.config = buildConfigExportJson(targets)
                     status = null
                     exportLauncher.launch("vpnhide_config.json")
                 },
@@ -715,7 +726,7 @@ private fun ConfigBackupSection() {
                 packageListDialogOpen = false
             },
             onSave = { text, source ->
-                pendingPackageListExport = text
+                pendingExports.packages = text
                 status = null
                 packageListDialogOpen = false
                 packageListSaveLauncher.launch(packageListExportFileName(source))
@@ -880,10 +891,10 @@ private fun SuperkeySettingsSection() {
             title = stringResource(R.string.settings_superkey_title),
             subtitle =
                 stringResource(
-                    if (remembered) {
-                        R.string.settings_superkey_saved
-                    } else {
-                        R.string.settings_superkey_not_saved
+                    when {
+                        targets == null -> R.string.settings_loading
+                        remembered -> R.string.settings_superkey_saved
+                        else -> R.string.settings_superkey_not_saved
                     },
                 ),
             icon = Icons.Default.Lock,

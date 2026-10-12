@@ -10,6 +10,9 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -26,6 +29,19 @@ private val Context.uiSettingsStore: DataStore<Preferences> by preferencesDataSt
 class SettingsRepository(
     private val context: Context,
 ) {
+    companion object {
+        @Volatile private var processInstance: SettingsRepository? = null
+
+        fun forProcess(context: Context): SettingsRepository =
+            processInstance ?: synchronized(this) {
+                processInstance ?: SettingsRepository(context.applicationContext).also { processInstance = it }
+            }
+    }
+
+    // Cosmetic writes and reads outlive Activity recreation; DataStore still serializes edits.
+    internal val uiScope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
+    internal val uiState by lazy { SettingsStateOwner(settings, uiScope) }
+
     private object Keys {
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val AMOLED = booleanPreferencesKey("amoled")

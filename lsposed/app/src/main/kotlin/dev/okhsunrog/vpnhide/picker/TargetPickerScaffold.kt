@@ -165,11 +165,28 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     val editor = rememberCanonicalEditor(helpPrefKey)
     val targets = cachedTargets?.copy(canonicalConfig = editor.state.current ?: repository.confirmed ?: cachedTargets?.canonicalConfig)
     val saving = editor.saving
-    var resaveNeeded by remember { mutableStateOf(false) }
+    val merged =
+        remember(cachedApps, targets) {
+            val apps = cachedApps
+            if (apps != null && targets != null) merge(apps, targets, context.packageName) else null
+        }
+    val resaveNeeded = merged?.resaveNeeded == true
     val dirty = editor.state.dirty || resaveNeeded
     val targetsError by TargetsCache.error.collectAsStateWithLifecycle()
 
-    var allApps by remember { mutableStateOf<List<T>>(emptyList()) }
+    var allApps by remember { mutableStateOf(merged?.entries.orEmpty()) }
+    var appliedMerge by remember { mutableStateOf(merged) }
+    // Reconcile before rendering: cached rows must never flash as an empty list.
+    if (appliedMerge != merged) {
+        appliedMerge = merged
+        if (merged != null) {
+            val old = allApps.associateBy { it.packageName }
+            allApps =
+                merged.entries.map { next ->
+                    if (editor.state.dirty) old[next.packageName]?.let { preserveGroup(next, it) } ?: next else next
+                }
+        }
+    }
     var snackMessage by remember { mutableStateOf<String?>(null) }
     var snackDuration by remember { mutableStateOf(SnackbarDuration.Long) }
     val snackbarHostState = LocalConfigSnackbar.current
@@ -224,17 +241,6 @@ internal fun <T : TargetEntry> TargetPickerScreen(
             modifier = modifier,
         )
         return
-    }
-
-    // Merge confirmed changes with the field draft; keep list grouping stable while editing.
-    LaunchedEffect(cachedApps, targets) {
-        val apps = cachedApps ?: return@LaunchedEffect
-        val t = targets ?: return@LaunchedEffect
-        val merged = merge(apps, t, context.packageName)
-        val old = allApps.associateBy { it.packageName }
-        allApps =
-            merged.entries.map { next -> if (editor.state.dirty) old[next.packageName]?.let { preserveGroup(next, it) } ?: next else next }
-        resaveNeeded = merged.resaveNeeded
     }
 
     val loading = cachedApps == null || targets == null

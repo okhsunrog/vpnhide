@@ -136,9 +136,16 @@ internal fun FilesystemHidingSettingsSection() {
         )
         PreferenceRowSwitch(
             title = stringResource(R.string.settings_filesystem_hiding),
-            subtitle = filesystemHidingStatusText(runtimeState),
+            subtitle =
+                if (repository.confirmed == null ||
+                    rootSnapshot == null
+                ) {
+                    stringResource(R.string.settings_loading)
+                } else {
+                    filesystemHidingStatusText(runtimeState)
+                },
             icon = Icons.Default.VisibilityOff,
-            checked = enabled,
+            checked = enabled.takeIf { repository.confirmed != null },
             progress = saving || pending != null,
             onDisabledClick =
                 if (repository.mode != ConfigCoordinatorMode.Open) {

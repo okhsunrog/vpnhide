@@ -638,4 +638,7 @@
     <string name="debug_export_failed">Не удалось собрать отчёт: %1$s</string>
     <string name="settings_language">Язык</string>
     <string name="language_system">Как в системе</string>
+    <string name="settings_load_failed_title">Не удалось загрузить настройки</string>
+    <string name="settings_load_failed_body">Сохранённые настройки не заменены. Повторите загрузку.</string>
+    <string name="settings_loading">Загрузка настроек…</string>
 </resources>
