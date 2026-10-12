@@ -64,7 +64,14 @@ int main(void)
 	check("bnep0", false);
 	check("rndis0", false);
 	check("tunl0", false);
+	check("tunl", true);
+	check("tunl1", true);
+	check("tunl42", true);
+	check("tunlocal", true);
+	check("tunl-vpn", true);
+	check("TUNL1", true);
 	check("gre0", false);
+	check("TUNL0", false);
 	check("gretap0", false);
 	check("gretap1", true);
 	check("sit0", false);
@@ -87,6 +94,6 @@ int main(void)
 		fprintf(stderr, "%d test(s) failed\n", failures);
 		return 1;
 	}
-	printf("OK: 56 vectors passed\n");
+	printf("OK: 63 vectors passed\n");
 	return 0;
 }

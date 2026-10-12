@@ -87,12 +87,12 @@ traffic-shaping ifaces (different shape: `if` + letter, not + digit)."""
 # Checked BEFORE the [[vpn]] rules above: a name matching any exclusion
 # is treated as NOT a VPN, even if a [[vpn]] rule would otherwise match
 # it. This is for standard kernel netdevs that the kernel auto-creates
-# (index 0, usually DOWN, no traffic) once a tunnel module loads — they
+# (names ending in 0, usually DOWN) once a tunnel module loads — they
 # are not user VPNs, and hiding them (or denying binds to them) is both
 # wrong and a fingerprint. Same match grammar as [[vpn]].
 
 [[exclude]]
-match = { prefix = "tunl" }
+match = { exact = "tunl0" }
 note = "ipip fallback device tunl0 — matches the `tun` rule but is not a VPN"
 
 [[exclude]]
@@ -263,7 +263,7 @@ name = "rndis0"
 is_vpn = false
 
 # Standard kernel tunnel fallback devices (auto-created by the ipip / gre /
-# sit modules at index 0, usually DOWN, no traffic) — NOT user VPNs. Must be
+# sit modules with names ending in 0, usually DOWN) — NOT user VPNs. Must be
 # excluded even when they share a prefix with a [[vpn]] rule (tunl0 vs `tun`,
 # gre0/gretap0 vs `gre`). See the [[exclude]] section above.
 
@@ -272,7 +272,35 @@ name = "tunl0"        # ipip fallback — excluded despite the `tun` prefix
 is_vpn = false
 
 [[test]]
+name = "tunl"
+is_vpn = true
+
+[[test]]
+name = "tunl1"
+is_vpn = true
+
+[[test]]
+name = "tunl42"
+is_vpn = true
+
+[[test]]
+name = "tunlocal"
+is_vpn = true
+
+[[test]]
+name = "tunl-vpn"
+is_vpn = true
+
+[[test]]
+name = "TUNL1"
+is_vpn = true
+
+[[test]]
 name = "gre0"         # ip_gre fallback — excluded despite the `gre` prefix
+is_vpn = false
+
+[[test]]
+name = "TUNL0"        # exact exclusions remain case-insensitive
 is_vpn = false
 
 [[test]]

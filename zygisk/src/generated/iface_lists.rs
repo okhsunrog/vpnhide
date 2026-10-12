@@ -57,7 +57,7 @@ pub fn matches_vpn(name: &[u8]) -> bool {
         return false;
     }
     // not a VPN: ipip fallback device tunl0 — matches the `tun` rule but is not a VPN
-    if starts_with_ci(name, b"tunl") {
+    if equals_ci(name, b"tunl0") {
         return false;
     }
     // not a VPN: ip_gre fallback device gre0 — matches the `gre` rule but is not a VPN
@@ -172,7 +172,14 @@ mod tests {
         assert!(!matches_vpn(b"bnep0"), "matches_vpn('bnep0')");
         assert!(!matches_vpn(b"rndis0"), "matches_vpn('rndis0')");
         assert!(!matches_vpn(b"tunl0"), "matches_vpn('tunl0')");
+        assert!(matches_vpn(b"tunl"), "matches_vpn('tunl')");
+        assert!(matches_vpn(b"tunl1"), "matches_vpn('tunl1')");
+        assert!(matches_vpn(b"tunl42"), "matches_vpn('tunl42')");
+        assert!(matches_vpn(b"tunlocal"), "matches_vpn('tunlocal')");
+        assert!(matches_vpn(b"tunl-vpn"), "matches_vpn('tunl-vpn')");
+        assert!(matches_vpn(b"TUNL1"), "matches_vpn('TUNL1')");
         assert!(!matches_vpn(b"gre0"), "matches_vpn('gre0')");
+        assert!(!matches_vpn(b"TUNL0"), "matches_vpn('TUNL0')");
         assert!(!matches_vpn(b"gretap0"), "matches_vpn('gretap0')");
         assert!(matches_vpn(b"gretap1"), "matches_vpn('gretap1')");
         assert!(!matches_vpn(b"sit0"), "matches_vpn('sit0')");
