@@ -64,7 +64,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,6 +77,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.CanonicalActivation
 import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
@@ -524,14 +524,14 @@ private fun ConfigBackupSection() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val checkWrite = LocalConfigWriteAccess.current
-    val targets by TargetsCache.snapshot.collectAsState()
+    val targets by TargetsCache.snapshot.collectAsStateWithLifecycle()
     var operation by remember { mutableStateOf(ConfigOperation.Idle) }
     var pendingExport by remember { mutableStateOf<String?>(null) }
     var pendingPackageListExport by remember { mutableStateOf<String?>(null) }
     var packageListDialogOpen by remember { mutableStateOf(false) }
     var legacyImportDialog by remember { mutableStateOf<LegacyImportPrompt?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
-    val rootSnapshot by RootSnapshotCache.snapshot.collectAsState()
+    val rootSnapshot by RootSnapshotCache.snapshot.collectAsStateWithLifecycle()
     // Pre-1.0 config still on disk (see LegacyConfigImport). Derived from the
     // shared root snapshot TargetsCache already loads — no extra su round-trip.
     val legacyPrompt =
@@ -857,8 +857,8 @@ private fun packageListFormatLabel(format: PackageListFormat): String =
 @Composable
 private fun SuperkeySettingsSection() {
     val scope = rememberCoroutineScope()
-    val targets by TargetsCache.snapshot.collectAsState()
-    val repository by CanonicalConfigRepository.state.collectAsState()
+    val targets by TargetsCache.snapshot.collectAsStateWithLifecycle()
+    val repository by CanonicalConfigRepository.state.collectAsStateWithLifecycle()
     val pending = CanonicalToggle.RememberSuperkey in repository.pending
     val checkWrite = LocalConfigWriteAccess.current
     var superkey by remember { mutableStateOf("") }
@@ -1022,14 +1022,14 @@ private suspend fun importConfigFromUri(
 private fun AutoHideSettingsSection(onOpenHiddenApps: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val targets by TargetsCache.snapshot.collectAsState()
-    val apps by AppListCache.apps.collectAsState()
+    val targets by TargetsCache.snapshot.collectAsStateWithLifecycle()
+    val apps by AppListCache.apps.collectAsStateWithLifecycle()
     var saving by remember { mutableStateOf<AutoHideSetting?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     var unavailableDialogOpen by remember { mutableStateOf(false) }
     val unavailableRemovedMessage = stringResource(R.string.settings_unavailable_configured_removed)
     val unavailableFailedMessage = stringResource(R.string.settings_unavailable_configured_failed)
-    val repository by CanonicalConfigRepository.state.collectAsState()
+    val repository by CanonicalConfigRepository.state.collectAsStateWithLifecycle()
     val canonical = repository.confirmed
     val hiddenSummary =
         remember(canonical, apps, context.packageName) {

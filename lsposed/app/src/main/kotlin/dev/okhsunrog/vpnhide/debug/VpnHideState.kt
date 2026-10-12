@@ -3,6 +3,7 @@ package dev.okhsunrog.vpnhide.debug
 import android.content.Context
 import android.os.Build
 import dev.okhsunrog.vpnhide.AgentStatisticsState
+import dev.okhsunrog.vpnhide.DashboardMessage
 import dev.okhsunrog.vpnhide.DashboardState
 import dev.okhsunrog.vpnhide.DebugShellSnapshot
 import dev.okhsunrog.vpnhide.DisplayNativeBackend
@@ -116,11 +117,10 @@ internal data class VpnHideState(
     val activeBackend: DisplayNativeBackend,
     val ports: ModuleState,
     val kmodLoadStatus: KmodLoadStatus?,
-    // The full live dashboard model (hero/messages/recommendations on top of the
-    // module states above). Populated by the agent-bridge getState (which has a
-    // live DashboardState); null in the file export, which carries only the cheap
-    // detector-derived fields above.
+    // Dashboard derived from the same root snapshot and diagnostic presentation.
+    // Null if assembly failed (errors explains why), or for captures that omit it.
     val dashboard: DashboardState? = null,
+    val beforeCapture: BeforeCaptureInfo? = null,
     // Desired-state config embedded as structured JSON (the canonical
     // /data/system/vpnhide_config.json). Lets one read answer "is app X even a
     // target" alongside the runtime state. Null when not requested.
@@ -154,6 +154,20 @@ internal data class VpnHideState(
     // Non-fatal capture failures (a probe that threw, a truncated section). The
     // document always serializes; partial data is flagged here rather than lost.
     val errors: List<String> = emptyList(),
+)
+
+/** Available process state before logging or probes; never initiates a read. */
+@Serializable
+internal data class BeforeCaptureInfo(
+    val observedAt: String,
+    val diagnostics: DiagnosticSummaryInfo?,
+    val protection: ProtectionCheck?,
+    val messages: List<DashboardMessage>,
+    val pendingOperationIds: List<Long>,
+    val operationRechecking: Boolean,
+    val lastOperationId: Long? = null,
+    val lastOperationPhases: Map<String, String> = emptyMap(),
+    val lastOperationFailure: String? = null,
 )
 
 @Serializable
@@ -275,6 +289,7 @@ internal fun buildVpnHideState(
     errors: List<String>,
     networkView: NetworkViewSnapshot? = null,
     dashboard: DashboardState? = null,
+    beforeCapture: BeforeCaptureInfo? = null,
     config: JsonElement? = null,
     statistics: AgentStatisticsState? = null,
     options: StateContentOptions = StateContentOptions(),
@@ -331,6 +346,7 @@ internal fun buildVpnHideState(
         ports = ports,
         kmodLoadStatus = kmodLoadStatus,
         dashboard = dashboard,
+        beforeCapture = beforeCapture,
         // Explicit config (the bridge lean call) wins; otherwise derive it from the
         // raw canonical-config section so the file export carries it structured too.
         config = config ?: parseCanonicalConfigSection(rootSections["canonical_config"]),

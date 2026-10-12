@@ -95,6 +95,15 @@ internal object LsposedStats {
 
     @Volatile private var installFailures: List<String> = emptyList()
 
+    @Volatile private var policyReadError: String? = null
+
+    fun setPolicyReadError(reason: String?) {
+        val sanitized = reason?.let(::sanitizeMetadataValue)
+        if (policyReadError == sanitized) return
+        policyReadError = sanitized
+        scheduleWrite()
+    }
+
     // ConnectivityService hooks attach asynchronously (the reliable path only
     // fires when "connectivity" registers, after handleLoadPackage returns), so
     // their bits and diagnostics can't be known at setStatus() time. The attach
@@ -156,13 +165,10 @@ internal object LsposedStats {
         try {
             val text = buildStateText()
             val tmp = File("$LSPOSED_STATE_FILE.tmp.${Process.myPid()}")
-            tmp.writeText(text)
-            if (!tmp.renameTo(File(LSPOSED_STATE_FILE))) {
-                tmp.delete()
-                File(LSPOSED_STATE_FILE).writeText(text)
-            }
+            writeAtomicTelemetry(File(LSPOSED_STATE_FILE), tmp, text)
         } catch (t: Throwable) {
             HookLog.e("VpnHide: failed to write LSPosed state: ${t.message}")
+            scheduleWrite() // Counters stay in memory; retry even without another hook call.
         }
     }
 
@@ -201,6 +207,9 @@ internal object LsposedStats {
                 LsposedStateMetadata.TIMESTAMP to (System.currentTimeMillis() / 1000).toString(),
                 LsposedStateMetadata.AOSP_SDK to Build.VERSION.SDK_INT.toString(),
             )
+        val readError = policyReadError
+        meta["policy_read_status"] = if (readError == null) "ok" else "error"
+        readError?.let { meta["policy_read_error"] = it }
         val broken = brokenFields
         if (broken.isNotEmpty()) {
             meta[LsposedStateMetadata.BROKEN_FIELDS] = broken.joinToString(",")

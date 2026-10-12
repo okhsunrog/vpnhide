@@ -82,8 +82,9 @@ internal class DiagnosticRunCoordinator(
     private val clock: () -> Long = System::currentTimeMillis,
     private val runDeadline: suspend () -> Unit = { delay(DIAGNOSTIC_RUN_DEADLINE_MS) },
     private val drainDeadline: suspend () -> Unit = { delay(DIAGNOSTIC_DRAIN_DEADLINE_MS) },
+    private val lock: Any = Any(),
+    private val onPublished: (DiagnosticRunView) -> Unit = {},
 ) {
-    private val lock = Any()
     private val mutableView = MutableStateFlow(DiagnosticRunView())
     val view: StateFlow<DiagnosticRunView> = mutableView.asStateFlow()
     private val waiters = mutableMapOf<Long, MutableList<CompletableDeferred<DiagnosticRunResult>>>()
@@ -174,6 +175,7 @@ internal class DiagnosticRunCoordinator(
                 activeResults = previous.activeResults?.takeIf { next.active != null && next.active.id == activeId },
                 attemptResults = retained.filterKeys { it in keep },
             )
+        onPublished(mutableView.value)
         transition.effects.forEach(::effect)
         return transition.effects
     }

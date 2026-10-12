@@ -54,13 +54,13 @@ internal fun AppSearchTopBar(
         placeholder = { Text(placeholder) },
         leadingIcon = {
             IconButton(onClick = onClose) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.close_search))
             }
         },
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Default.Clear, contentDescription = null)
+                    Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.clear_search_query))
                 }
             }
         },

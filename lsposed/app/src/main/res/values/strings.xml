@@ -12,6 +12,8 @@
     <string name="btn_save">Save</string>
     <string name="btn_cancel">Cancel</string>
     <string name="action_refresh">Refresh</string>
+    <string name="close_search">Close search</string>
+    <string name="clear_search_query">Clear query</string>
     <string name="search_placeholder">Search apps&#8230;</string>
     <string name="filter_show_system">System</string>
     <string name="filter_russian_only">Russian</string>
@@ -39,6 +41,7 @@
     <string name="chip_native_full" translatable="false">Native</string>
     <string name="chip_app_hiding_full" translatable="false">Apps</string>
     <string name="chip_ports_full" translatable="false">Ports</string>
+    <string name="java_hooks_shared_app_id">This package shares an Android app ID. Enabled Java hooks from all packages with that ID are combined and apply to the whole group in every profile. To disable a hook for the group, deselect it in every package.</string>
     <string name="java_hooks_title">Java hooks</string>
     <string name="native_hooks_title">Native hooks</string>
     <string name="native_hooks_title_with_backend">Native hooks · %1$s</string>
@@ -661,4 +664,7 @@
     <string name="reset_blocker_builtin">Built-in companion module is still installed</string>
     <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide is built into the running kernel. Remove the unnecessary kmod module and keep the built-in companion module.</string>
     <string name="dashboard_issue_builtin_companion_missing">VPN Hide is built into this kernel, but its companion module is missing. Install the VPN Hide built-in companion module to configure protection.</string>
+    <string name="debug_export_complete">Report collected successfully.</string>
+    <string name="debug_export_partial">A partial report was collected. You can save or share it.\n%1$s</string>
+    <string name="debug_export_failed">Report collection failed: %1$s</string>
 </resources>

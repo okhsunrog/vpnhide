@@ -40,7 +40,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,6 +59,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.CanonicalActivation
 import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
@@ -156,18 +156,18 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     val context = LocalContext.current
     val resources = LocalResources.current
 
-    val cachedApps by AppListCache.apps.collectAsState()
-    val appListError by AppListCache.error.collectAsState()
-    val userNames by AppListCache.userNames.collectAsState()
-    val scanWarning by AppListCache.scanWarning.collectAsState()
-    val cachedTargets by TargetsCache.snapshot.collectAsState()
-    val repository by CanonicalConfigRepository.state.collectAsState()
+    val cachedApps by AppListCache.apps.collectAsStateWithLifecycle()
+    val appListError by AppListCache.error.collectAsStateWithLifecycle()
+    val userNames by AppListCache.userNames.collectAsStateWithLifecycle()
+    val scanWarning by AppListCache.scanWarning.collectAsStateWithLifecycle()
+    val cachedTargets by TargetsCache.snapshot.collectAsStateWithLifecycle()
+    val repository by CanonicalConfigRepository.state.collectAsStateWithLifecycle()
     val editor = rememberCanonicalEditor(helpPrefKey)
     val targets = cachedTargets?.copy(canonicalConfig = editor.state.current ?: repository.confirmed ?: cachedTargets?.canonicalConfig)
     val saving = editor.saving
     var resaveNeeded by remember { mutableStateOf(false) }
     val dirty = editor.state.dirty || resaveNeeded
-    val targetsError by TargetsCache.error.collectAsState()
+    val targetsError by TargetsCache.error.collectAsStateWithLifecycle()
 
     var allApps by remember { mutableStateOf<List<T>>(emptyList()) }
     var snackMessage by remember { mutableStateOf<String?>(null) }

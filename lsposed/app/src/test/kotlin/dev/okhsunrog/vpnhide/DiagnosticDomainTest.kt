@@ -157,7 +157,20 @@ class DiagnosticDomainTest {
                 scope = scope,
                 io = FakeIo(),
                 routing = routing,
-                snapshots = snapshots,
+                snapshots =
+                    ProjectedStateFlow(snapshots) { root ->
+                        ObservationState(
+                            lastGood =
+                                root?.let {
+                                    ObservedValue(
+                                        it,
+                                        ObservationRequest(it.observationId, it.generation, 0, ReadReason.Background),
+                                        0,
+                                    )
+                                },
+                            generation = root?.generation ?: 0,
+                        )
+                    },
                 config = config,
                 inputs = inputs,
                 processIdentity = "pid:1;uid:10",

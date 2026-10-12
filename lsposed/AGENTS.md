@@ -23,7 +23,7 @@ model together:
 | `ui/`, `checks/`, `generated/` | design system, the JNI probe binding, codegen |
 
 What stays in the root package is the shared vocabulary both sides use —
-`StorageConfig`, `ShellUtils`, `RootSnapshotCache`, `HookRegistry`,
+`CanonicalConfigData`, `StorageConfig`, `ShellUtils`, `RootSnapshotCache`, `HookMaskData`, `HookRegistry`,
 `DashboardData`, the agent bridge. Moving those buys import churn and nothing
 else; they belong to no single feature.
 
@@ -54,7 +54,7 @@ The single most important thing about this module: `hook/` is loaded by LSPosed
 **into `system_server`**; everything else runs in the app process. So `hook/`
 carries no Compose, no Activity, no app resources — and nothing outside it may
 touch `de.robv.android.xposed` (absent in the app process). The shared vocabulary
-they both use (canonical-config parsing, `HookRegistry`, `LsposedStats`,
+they both use (canonical-config parsing in `CanonicalConfigData`, mask vocabulary in `HookMaskData`, `LsposedStats`,
 `LogTags`) stays in the root package. `HookPackageBoundaryTest` enforces both
 directions, since `internal` is module-wide and the compiler will not.
 
@@ -92,6 +92,9 @@ directions, since `internal` is module-wide and the compiler will not.
   (observation flows, a `DiagnosticRunIo`, a scope, clocks), so
   `DiagnosticDomainTest` drives it exactly as production does with plain state
   flows and a fake helper; `DiagnosticsCache` is only the production wiring.
+  Consume `DiagnosticSnapshot` when values must agree: it owns accepted inputs,
+  presentation and Situation, and publishes before terminal handles complete.
+  Bridge/export use its acceptance barrier; do not assemble independent flow values.
   It executes the pure `reduceDiagnosticRun` with identified effects on the
   process scope; a waiter detaching never cancels a run, and a retry is a new run.
   A suite starts in exactly three ways: `DiagnosticsCache.run` (startup intent:
@@ -132,7 +135,7 @@ directions, since `internal` is module-wide and the compiler will not.
   or a pure transform of the fresh config; never save a cached full snapshot or
   call a config/activation shell through `suExec`. Root outcome can be unknown:
   preserve phase evidence and let the coordinator reconcile it.
-- **`StorageConfig` / `ShellCommandBuilders`** — canonical JSON schema,
+- **`CanonicalConfigData` / `StorageConfig` / `ShellCommandBuilders`** — shared canonical JSON models/parsing, app-side storage builders,
   migration helpers, and root-safe file writes (`buildCanonicalConfigWriteCommand`
   in `StorageConfig` wraps the generic `buildAtomicSystemDataRawWriteCommand` in
   `ShellCommandBuilders`). The canonical JSON is the persistent

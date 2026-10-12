@@ -95,6 +95,12 @@ custom per-hook settings.
 
 Ready? [Open the Hiding tab](vpnhide://hiding) and pick the app to configure.
 
+Packages sharing an Android app ID also share the effective Java settings in
+all profiles: enabled Java hooks from each package are combined. Turning Java
+off for one package does not disable hooks selected by another package in the
+group. To disable a hook for the group, deselect it in every package. The Java
+hook dialog shows a notice when the app inventory identifies a shared app ID.
+
 ## Row, role chips and custom hooks
 
 Tapping an unselected app row enables Java and Apps, plus Native and Ports when

@@ -352,7 +352,7 @@ internal fun situationFlow(
         }.distinctUntilChanged()
 
 /** How long this presentation's classification still depends on an unexpired grace; 0 when it does not. */
-private fun backgroundGraceRemaining(
+internal fun backgroundGraceRemaining(
     presentation: DiagnosticPresentation,
     now: Long,
     grace: (ReadReason) -> Long = SituationGrace::of,

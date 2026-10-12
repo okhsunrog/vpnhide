@@ -239,3 +239,24 @@ Validation on 2026-09-15: all 655 JVM tests passed, including 23 new tests, with
 no failures or skips. Kotlin warnings-as-errors compilation, ktlint, detekt, CPD
 and Android `lintDebug` passed. The source and tests were held unchanged throughout
 the final combined Gradle run.
+
+## Diagnostic publication boundary
+
+`DiagnosticDomain` publishes one immutable `DiagnosticSnapshot`: the accepted
+root/routing observations, config view, operation impact and run view, together
+with their `DiagnosticPresentation` and `Situation`. Source acceptance and run
+transitions share a short lock; no I/O runs under that lock. A terminal transition
+publishes the snapshot before completing the run handle. Config impact and its
+run interruption publish together.
+
+The screens consume that packet. Dashboard publishes its hero and tiles together
+and only joins root facts with the same observation ID and generation; while new
+facts are pending it does not attach old tiles to a new diagnostic root. Root
+invalidation retains historical facts but removes current measurement validation.
+The background-routing grace timer can update Situation only for its captured
+revision, and never starts a run or a read.
+
+Bridge/export `awaitSnapshot` waits for a requested root checkpoint (or a newer
+one) and acceptance of already-published source events. It returns an existing
+owner publication, rather than rebuilding a context from independent flow reads.
+This is coherent accepted knowledge, not simultaneous physical device sampling.

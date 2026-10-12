@@ -1,11 +1,13 @@
 package dev.okhsunrog.vpnhide.hook
 
 import android.os.SystemClock
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import dev.okhsunrog.vpnhide.CANONICAL_CONFIG_FILE
-import dev.okhsunrog.vpnhide.LsposedJavaHookEntries
+import dev.okhsunrog.vpnhide.LsposedStats
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.hasHook
-import dev.okhsunrog.vpnhide.hookSelectionMask
 import dev.okhsunrog.vpnhide.parseCanonicalConfig
 import java.io.File
 
@@ -37,74 +39,30 @@ internal data class SystemServerConfig(
  * for the same appId is covered.
  */
 internal object SystemServerConfigCache {
-    private const val STAT_CHECK_INTERVAL_MS = 1_000L
     private const val USER_ID_MODULO = 100_000
     private val configFile = File(CANONICAL_CONFIG_FILE)
     private val packagesListFile = File("/data/system/packages.list")
 
-    private data class FileFingerprint(
-        val exists: Boolean,
-        val lastModified: Long,
-        val length: Long,
-    )
+    private val policyCache =
+        SystemServerPolicyCache(
+            fingerprint = ::fingerprint,
+            readConfig = ::readConfig,
+            uptimeMillis = SystemClock::uptimeMillis,
+            onReadError = LsposedStats::setPolicyReadError,
+            onLoaded = { result ->
+                // Poll both sources even if the FileObserver misses atomic renames.
+                HookLog.enabled = result.debug
+                HookLog.i(
+                    "VpnHide: system_server config loaded " +
+                        "java=${result.javaTargetAppIds.size} observer=${result.observerAppIds.size} " +
+                        "hidden=${result.hiddenPackages.size} debug=${result.debug}",
+                )
+            },
+        )
 
-    private data class Fingerprint(
-        val config: FileFingerprint,
-        val packagesList: FileFingerprint,
-    )
+    fun load(): SystemServerConfig = policyCache.load()
 
-    private data class Cache(
-        val fingerprint: Fingerprint,
-        val config: SystemServerConfig,
-        val nextStatCheckUptimeMs: Long,
-    )
-
-    @Volatile private var cache: Cache? = null
-    private val lock = Any()
-
-    fun load(): SystemServerConfig {
-        val now = SystemClock.uptimeMillis()
-        cache?.let { cached ->
-            if (now < cached.nextStatCheckUptimeMs) return cached.config
-        }
-
-        synchronized(lock) {
-            val lockedNow = SystemClock.uptimeMillis()
-            cache?.let { cached ->
-                if (lockedNow < cached.nextStatCheckUptimeMs) return cached.config
-                val fingerprint = fingerprint()
-                if (cached.fingerprint == fingerprint) {
-                    val refreshed = cached.withNextCheck(lockedNow)
-                    cache = refreshed
-                    return refreshed.config
-                }
-            }
-
-            val result = readConfig()
-            val loadedFingerprint = fingerprint()
-            // The debug-logging flag rides this same 1s stat poll as everything
-            // else the hooks read. It used to be refreshed only by HookLog's
-            // FileObserver, and on a Pixel 8 Pro that observer silently stopped
-            // delivering: an atomic rename over the config produced no callback
-            // at all, so the flag stayed frozen at its boot value for five days
-            // while this cache — reading the very same file — was current the
-            // whole time. Turning Debug logging off in the app simply never
-            // reached system_server, and the hooks kept naming target UIDs in
-            // logcat. Correctness must not depend on inotify.
-            HookLog.enabled = result.debug
-            HookLog.i(
-                "VpnHide: system_server config loaded " +
-                    "java=${result.javaTargetAppIds.size} observer=${result.observerAppIds.size} " +
-                    "hidden=${result.hiddenPackages.size} debug=${result.debug}",
-            )
-            cache = Cache(loadedFingerprint, result, nextStatCheck(lockedNow))
-            return result
-        }
-    }
-
-    fun invalidate() {
-        cache = null
-    }
+    fun invalidate() = policyCache.invalidate()
 
     fun isTargetUid(uid: Int): Boolean {
         if (uid < android.os.Process.FIRST_APPLICATION_UID) return false
@@ -121,64 +79,58 @@ internal object SystemServerConfigCache {
 
     fun appId(uid: Int): Int = uid % USER_ID_MODULO
 
-    private fun Cache.withNextCheck(now: Long): Cache = copy(nextStatCheckUptimeMs = nextStatCheck(now))
-
-    private fun nextStatCheck(now: Long): Long = now + STAT_CHECK_INTERVAL_MS
-
-    private fun readConfig(): SystemServerConfig =
+    private fun readConfig(): PolicyReadResult =
         try {
+            if (!configFile.exists()) return PolicyReadResult.Loaded(SystemServerConfig())
             val canonical =
-                parseCanonicalConfig(configFile.takeIf(File::isFile)?.readText().orEmpty())
-                    ?: return SystemServerConfig()
+                parseCanonicalConfig(configFile.readText())
+                    ?: return PolicyReadResult.Failed("empty or unsupported canonical config")
             val packageAppIds = parsePackagesListAppIds(packagesListFile.takeIf(File::isFile)?.readText().orEmpty())
-            val javaTargetHookMasks =
-                canonical.apps
-                    .mapNotNull { (pkg, app) ->
-                        val appId = packageAppIds[pkg] ?: return@mapNotNull null
-                        val mask =
-                            hookSelectionMask(
-                                enabled = app.java,
-                                hooks = app.javaHooks,
-                                entries = LsposedJavaHookEntries,
-                            )
-                        if (mask == 0L) null else appId to mask
-                    }.toMap()
             val observers =
                 canonical.apps
                     .filterValues { it.appHiding }
                     .keys
                     .resolveAppIds(packageAppIds)
             val hidden = canonical.apps.filterValues { it.hidden }.keys
-            SystemServerConfig(
-                javaTargetHookMasksByAppId = javaTargetHookMasks,
-                observerAppIds = observers,
-                hiddenPackages = hidden,
-                packageAppIds = packageAppIds,
-                debug = canonical.debug,
+            PolicyReadResult.Loaded(
+                SystemServerConfig(
+                    javaTargetHookMasksByAppId = javaHookMasksByAppId(canonical, packageAppIds),
+                    observerAppIds = observers,
+                    hiddenPackages = hidden,
+                    packageAppIds = packageAppIds,
+                    debug = canonical.debug,
+                ),
             )
         } catch (t: Throwable) {
             HookLog.e("VpnHide: failed to read canonical config: ${t.message}")
-            SystemServerConfig()
+            PolicyReadResult.Failed(t.message ?: t.javaClass.simpleName)
         }
 
     private fun Set<String>.resolveAppIds(packageAppIds: Map<String, Int>): Set<Int> = mapNotNull(packageAppIds::get).toSet()
 
-    private fun fingerprint(): Fingerprint =
-        Fingerprint(
-            config = configFile.fingerprint(),
-            packagesList = packagesListFile.fingerprint(),
-        )
-
-    private fun File.fingerprint(): FileFingerprint =
+    private fun fingerprint(): SystemServerFingerprint? =
         try {
-            if (!exists()) {
-                FileFingerprint(exists = false, lastModified = 0L, length = 0L)
-            } else {
-                FileFingerprint(exists = true, lastModified = lastModified(), length = length())
-            }
-        } catch (t: Throwable) {
-            HookLog.e("VpnHide: failed to stat ${this.path}: ${t.message}")
-            FileFingerprint(exists = false, lastModified = 0L, length = 0L)
+            SystemServerFingerprint(configFile.fingerprint(), packagesListFile.fingerprint())
+        } catch (e: ErrnoException) {
+            HookLog.e("VpnHide: failed to stat config sources: ${e.message}")
+            null // An unreadable source must never look like a stable missing file.
+        }
+
+    private fun File.fingerprint(): PolicyFileFingerprint? =
+        try {
+            val stat = Os.stat(path)
+            PolicyFileFingerprint(
+                device = stat.st_dev,
+                inode = stat.st_ino,
+                length = stat.st_size,
+                modifiedSeconds = stat.st_mtim.tv_sec,
+                modifiedNanos = stat.st_mtim.tv_nsec,
+                changedSeconds = stat.st_ctim.tv_sec,
+                changedNanos = stat.st_ctim.tv_nsec,
+            )
+        } catch (e: ErrnoException) {
+            if (e.errno != OsConstants.ENOENT) throw e
+            null
         }
 }
 

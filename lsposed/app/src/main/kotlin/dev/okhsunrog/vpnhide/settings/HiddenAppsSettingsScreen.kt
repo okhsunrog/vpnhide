@@ -39,7 +39,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.ConfigCoordinatorMode
 import dev.okhsunrog.vpnhide.HelpAccordion
@@ -77,8 +77,8 @@ import dev.okhsunrog.vpnhide.ui.theme.AppColors
 @Composable
 internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    val apps by AppListCache.apps.collectAsState()
-    val userNames by AppListCache.userNames.collectAsState()
+    val apps by AppListCache.apps.collectAsStateWithLifecycle()
+    val userNames by AppListCache.userNames.collectAsStateWithLifecycle()
     val snackbarHostState = LocalConfigSnackbar.current
     val checkWrite = LocalConfigWriteAccess.current
     var filter by rememberSaveable { mutableStateOf(HiddenAppsFilter.All) }
@@ -86,7 +86,7 @@ internal fun HiddenAppsSettingsScreen(onBack: () -> Unit) {
     var searchActive by rememberSaveable { mutableStateOf(false) }
     val editor = rememberCanonicalEditor("hidden_apps")
     val saving = editor.saving
-    val repository by CanonicalConfigRepository.state.collectAsState()
+    val repository by CanonicalConfigRepository.state.collectAsStateWithLifecycle()
     var snackMessage by remember { mutableStateOf<String?>(null) }
     val savedMessage = stringResource(R.string.settings_auto_hide_saved)
 

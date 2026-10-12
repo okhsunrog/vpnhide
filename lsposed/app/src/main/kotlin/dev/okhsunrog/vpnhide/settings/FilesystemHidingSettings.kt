@@ -11,7 +11,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -20,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.CanonicalActivation
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.CanonicalEdit
@@ -44,11 +44,11 @@ import kotlinx.coroutines.withContext
 internal fun FilesystemHidingSettingsSection() {
     val scope = rememberCoroutineScope()
     val checkWrite = LocalConfigWriteAccess.current
-    val rootSnapshot by RootSnapshotCache.snapshot.collectAsState()
+    val rootSnapshot by RootSnapshotCache.snapshot.collectAsStateWithLifecycle()
     var saving by remember { mutableStateOf(false) }
     var confirmationOpen by remember { mutableStateOf(false) }
     var saveStatus by remember { mutableStateOf<String?>(null) }
-    val repository by CanonicalConfigRepository.state.collectAsState()
+    val repository by CanonicalConfigRepository.state.collectAsStateWithLifecycle()
     var requested by remember { mutableStateOf<Boolean?>(null) }
     val pending = repository.pending[CanonicalToggle.Filesystem]
     val enabled =
