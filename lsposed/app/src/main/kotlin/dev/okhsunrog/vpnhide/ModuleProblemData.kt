@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.diagnostics.KpmProblemKind
+import dev.okhsunrog.vpnhide.help.resolveHelpLocale
 
 /** Cached diagnoses contain facts only; resolve strings with the current presentation locale. */
 internal sealed interface ModuleProblem {
@@ -158,4 +159,16 @@ private fun renderModuleIntegrityProblem(
             res.getString(message, moduleName, problem.activatorPath)
         }
     return text
+}
+
+/** Contextual help uses the same locale fallback as the bundled guide. */
+internal fun ModuleProblem.helpArticle(language: String): String {
+    if (this !is ModuleProblem.Kpm || kind != KpmProblemKind.NoKernelPatchRuntime) return "module-not-active"
+    val anchor =
+        when (resolveHelpLocale(language)) {
+            "ru" -> "где-скачать-и-как-установить-kpatch-next-module"
+            "zh" -> "下载并安装-kpatch-next-module"
+            else -> "where-to-download-and-how-to-install-kpatch-next-module"
+        }
+    return "kpm-install#$anchor"
 }

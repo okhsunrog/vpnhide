@@ -1,6 +1,9 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.diagnostics.KpmProblemKind
+import dev.okhsunrog.vpnhide.help.headingSlug
+import dev.okhsunrog.vpnhide.help.parseHelpDestination
+import dev.okhsunrog.vpnhide.help.resolveHelpLocale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -31,6 +34,21 @@ class ModuleProblemDataTest {
             listOf("old-kmi", "new-kmi", "module.zip").forEach { assertTrue(text, it in text) }
             assertEquals(ModuleBrokenReason.WrongVariant, cached.reason)
             assertEquals("module.zip", cached.downloadArtifact)
+        }
+    }
+
+    @Test
+    fun missingRuntimeHelpTargetsExistingLocalizedInstallationHeading() {
+        val problem = ModuleProblem.Kpm(KpmProblemKind.NoKernelPatchRuntime)
+        listOf("en", "ru", "zh", "zh-CN", "de").forEach { language ->
+            val destination = parseHelpDestination(problem.helpArticle(language))
+            assertEquals("kpm-install", destination.articleId)
+            val guide = File("../../docs/help/${resolveHelpLocale(language)}/kpm-install.md")
+            val headings = guide.readLines().filter { it.startsWith("## ") }.map { headingSlug(it.removePrefix("## ")) }
+            assertTrue("$language: ${destination.anchor}", destination.anchor in headings)
+        }
+        problems().filter { it != problem }.forEach {
+            assertEquals("module-not-active", it.helpArticle("ru"))
         }
     }
 

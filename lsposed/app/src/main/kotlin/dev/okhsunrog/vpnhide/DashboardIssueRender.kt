@@ -180,7 +180,7 @@ private fun DashboardIssue.Module.moduleMessage(res: Resources): DashboardMessag
                     res.getString(id, *args)
                 },
                 problem.downloadArtifact,
-                helpArticle = HelpArticle.MODULE_NOT_ACTIVE,
+                helpArticle = problem.helpArticle(res.configuration.locales[0].language),
             )
         }
 

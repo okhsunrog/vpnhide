@@ -81,11 +81,12 @@ internal fun HelpScreen(
     val content by produceState<HelpContent?>(initialValue = null, language) {
         value = kotlinx.coroutines.withContext(Dispatchers.IO) { loadHelpContent(context, language) }
     }
-    var articleId by rememberSaveable { mutableStateOf(initialArticleId) }
+    val initialDestination = remember(initialArticleId) { parseHelpDestination(initialArticleId) }
+    var articleId by rememberSaveable { mutableStateOf(initialDestination.articleId) }
     var searchActive by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var contactOpen by rememberSaveable { mutableStateOf(false) }
-    var pendingAnchor by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingAnchor by rememberSaveable { mutableStateOf(initialDestination.anchor) }
     val uriHandler = LocalUriHandler.current
 
     if (contactOpen) ContactModal(onDismiss = { contactOpen = false })
@@ -97,9 +98,9 @@ internal fun HelpScreen(
             }
 
             href.startsWith(ARTICLE_SCHEME) -> {
-                val rest = href.removePrefix(ARTICLE_SCHEME)
-                articleId = rest.substringBefore('#')
-                pendingAnchor = rest.substringAfter('#', "").ifEmpty { null }
+                val destination = parseHelpDestination(href.removePrefix(ARTICLE_SCHEME))
+                articleId = destination.articleId
+                pendingAnchor = destination.anchor
             }
 
             href.startsWith(IN_APP_SCHEME) -> {
