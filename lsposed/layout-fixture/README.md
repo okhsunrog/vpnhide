@@ -42,3 +42,19 @@ adb -s emulator-5554 shell settings put system font_scale 1.0
 
 This checks the actual layout components with fixture data, not root/module
 integration. Run the standard Android quality gates separately.
+
+## KPM runtime help scenario
+
+For a physical ARM phone, build with the same init script but omit
+`-PvpnhideEmulatorX86`. Install the rawDebug APK and launch:
+
+```sh
+adb shell am start -W -n dev.okhsunrog.vpnhide/.settings.KpmHelpHarness
+```
+
+The preview uses the production module-problem renderer, Dashboard message
+section and HelpScreen. Tap Learn more to check the localized installation
+anchor, follow guide links, and use Back to return. The preview is visibly
+labelled as test data and does not change module state or canonical settings.
+Links to app settings show a preview notice instead of mutating the real app.
+This Activity is absent from ordinary APK builds.

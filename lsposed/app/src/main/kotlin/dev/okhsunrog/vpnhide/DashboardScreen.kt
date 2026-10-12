@@ -359,7 +359,7 @@ private fun HelpGuideEntry(onClick: () -> Unit) {
 // list of StatusBanners. No-op when [messages] is empty, so the three call sites
 // can't drift in spacing or action wiring. [titleRes] takes the count as its arg.
 @Composable
-private fun MessageSection(
+internal fun MessageSection(
     messages: List<DashboardMessage>,
     titleRes: Int,
     headerColor: Color,
