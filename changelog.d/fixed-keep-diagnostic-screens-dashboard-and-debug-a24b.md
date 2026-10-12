@@ -2,8 +2,8 @@ _2026-10-12_
 
 ## English
 
-Keep diagnostic screens, dashboard and debug exports consistent through a shared state snapshot.
+Dashboard, Statistics, diagnostics and debug reports now show consistent results and backend status. Reports include clearer failure details, and exports explain incomplete captures.
 
 ## Русский
 
-Согласовано состояние диагностики на экранах, панели состояния и в отладочных архивах через общий снимок данных.
+Обзор, статистика, диагностика и отладочные отчёты теперь показывают согласованные результаты и статус бэкендов. В отчётах уточнены причины ошибок, при экспорте объясняются неполные результаты сбора.

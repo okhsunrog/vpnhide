@@ -2,8 +2,8 @@ _2026-10-12_
 
 ## English
 
-Adapt picker actions, dashboard metrics and module headings to narrow screens and large text while preserving layouts that fit.
+Fixed cramped save controls, dashboard tiles and module headings on narrow screens or with large text. Layouts that fit stay unchanged.
 
 ## Русский
 
-Панель действий, показатели обзора и заголовки модулей адаптируются к узким экранам и крупному шрифту; если места достаточно, привычная раскладка сохраняется.
+Исправлено сжатие панели сохранения, показателей обзора и заголовков модулей на узких экранах и при крупном шрифте. Если места достаточно, раскладка не меняется.

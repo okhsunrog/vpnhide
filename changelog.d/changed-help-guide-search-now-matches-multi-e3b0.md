@@ -2,8 +2,8 @@ _2026-09-22_
 
 ## English
 
-Help guide search now matches multi-word queries word by word and ranks title and keyword matches ahead of incidental body mentions.
+Help search handles multi-word queries and prioritizes title and keyword matches.
 
 ## Русский
 
-Поиск по руководству теперь находит запросы из нескольких слов по отдельным словам и ставит совпадения в заголовках и ключевых словах выше случайных упоминаний в тексте.
+Поиск по руководству поддерживает запросы из нескольких слов и отдаёт приоритет заголовкам и ключевым словам.

@@ -2,8 +2,8 @@ _2026-10-12_
 
 ## English
 
-Keep saved UI preferences stable across language changes and Activity recreation, and retain prepared exports while choosing a destination.
+UI preferences no longer flicker back to defaults after a language change or screen recreation. Prepared exports survive opening the file picker.
 
 ## Русский
 
-Сохранённые настройки интерфейса больше не сбрасываются на время смены языка и пересоздания Activity; подготовленные экспорты сохраняются при выборе файла.
+Настройки интерфейса больше не переключаются временно на значения по умолчанию при смене языка или пересоздании экрана. Подготовленные экспорты сохраняются при открытии выбора файла.
