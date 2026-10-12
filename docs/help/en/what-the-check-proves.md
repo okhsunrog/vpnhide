@@ -44,7 +44,8 @@ transition tests. For current, retained and interrupted results, see
 ## Why the check count isn't the hook count
 
 The Diagnostics list has more entries than the backend has hooks (for example
-15 native checks against 10–11 kernel hooks). That's expected: a check is a *way
+15 native checks against 10–11 logical kernel hook IDs with the optional
+filesystem group disabled). That's expected: a check is a *way
 an app could detect the VPN*, and one hook often covers several of them, while
 some checks are covered by the kernel or SELinux with no hook at all. The
 self-test measures each vector's outcome, not one probe per hook. The hook count

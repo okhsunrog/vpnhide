@@ -229,11 +229,14 @@ already in progress, so the click cannot be absorbed by that run.
 Two numbers describe the same backend and they are deliberately not equal, which
 reads as a contradiction if you assume they should match:
 
-- **Statistics → "hooks: N"** counts the *interception points the backend
-  actually installed* — the set bits of its `hooks` mask (protocol §4.3). For a
-  kernel backend on a modern kernel that is 11 (10 below 5.3, where the bind hook
-  is left to CAP_NET_RAW — see §5.1 and the protocol note on the per-kernel
-  requested set); for LSPosed it is the Java hooks that attached.
+- **Statistics → "hooks: N"** counts the *installed logical hook IDs/groups* —
+  the set bits of the backend's `hooks` mask (protocol §4.3), not the number of
+  physical interception points. By default a complete kernel backend reports
+  11; KPM below 5.3 reports 10 because it leaves the bind vector to CAP_NET_RAW
+  (see §5.1 and the protocol note on the per-kernel requested set). Enabling and
+  successfully installing `filesystem_iface_paths` adds one logical group,
+  giving 12 or 11 respectively, although that group uses several interception
+  points. LSPosed likewise counts the attached logical hook IDs.
 - **Detailed diagnostics → the per-check list** counts the *detection vectors the
   self-test probes* — 15 under the native layer, 13 under the Java layer. Each is
   a distinct way an app could notice the VPN, run and classified independently
@@ -255,9 +258,11 @@ hook↔check relation is many-to-many:
   `socket_bind_interface`, which is intentionally not installed, yet the check
   passes via the native CAP_NET_RAW gate.
 
-So "KPM OK · hooks: 10" next to "15 KPM checks" is correct: ten interception
-points closing fifteen probed vectors (with SELinux and the kernel's own gates
-carrying the rest). The self-test measures *outcomes per vector*, not one probe
+So "KPM OK · hooks: 10" next to "15 KPM checks" can be correct: ten
+logical hook IDs, with some vectors additionally blocked by SELinux or the
+kernel's own gates. This example assumes the optional filesystem group is off;
+it does not mean every vector is necessarily hidden on every device. The
+self-test measures *outcomes per vector*, not one probe
 per hook, which is the whole point of the root-differential (§2) — it asks "is
 this surface hidden", not "did hook N fire".
 

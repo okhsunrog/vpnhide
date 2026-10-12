@@ -44,13 +44,17 @@ table,"* use the [Zygisk backend](zygisk-install.md) instead.
 
 ## Why it shows 10 hooks on some kernels
 
-On kernels older than 5.3 the Native backend installs 10 hooks, not 11, and reads
-**OK** — this is a complete install, not a missing hook. The one hook it skips
-guards binding a socket to the VPN interface, and on those kernels the kernel
-already blocks that itself (it needs a privilege an ordinary app doesn't have),
-so VPN Hide leaves it to the kernel. From 5.3 up all 11 are installed. (The hook
-count is separate from the number of Diagnostics checks — see
-[What the self-test checks](what-the-check-proves.md).)
+With optional filesystem hiding off, a complete KPM installation reports
+**OK · hooks: 10** on kernels older than 5.3 and **OK · hooks: 11** from 5.3 up.
+The older kernels already require a privilege ordinary apps do not have to bind
+a socket to an interface, so KPM does not install its socket-bind hook there.
+
+The counter counts installed logical hook IDs/groups, not physical interception
+points. If **Hide VPN filesystem paths** is enabled and its group installs after
+a reboot, it adds one: the counts become **11** and **12**, respectively. One
+group can use several interception points. The count also differs from the
+number of Diagnostics checks — see
+[What the self-test checks](what-the-check-proves.md).
 
 ## If it's installed but inactive
 
