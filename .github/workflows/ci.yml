@@ -308,6 +308,10 @@ jobs:
           cd kmod
           gcc -O2 -Wall -Werror -o /tmp/test_iface_lists test_iface_lists.c
           /tmp/test_iface_lists
+      - name: KPM socket-bind regression test (host build)
+        run: |
+          gcc -O2 -Wall -Wextra -Werror -Wno-unused-parameter -o /tmp/test_socket_bind_index kmod/test_socket_bind_index.c
+          /tmp/test_socket_bind_index
       - name: shared-logic + protocol host tests
         run: |
           cd kmod/shared

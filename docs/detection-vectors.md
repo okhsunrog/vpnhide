@@ -241,7 +241,7 @@ cheap and correct when such a route is present; see issue discussion.
 
 | Vector | How it manifests | kmod | KPM | Zygisk | lsposed | SELinux |
 |---|---|:--:|:--:|:--:|:--:|:--:|
-| `setsockopt(SO_BINDTODEVICE)` / `SO_BINDTOIFINDEX` | bind success and `getsockopt` state reveal or select a hidden iface | ✅ pre-mutation entry redirect | ✅ pre-hook `skip_origin` | ⚠️ bionic `setsockopt` only | — | |
+| `setsockopt(SO_BINDTODEVICE)` / `SO_BINDTOIFINDEX` | bind success and `getsockopt` state reveal or select a hidden iface | ✅ pre-mutation entry redirect | ✅ pre-mutation rejection | ⚠️ bionic `setsockopt` only | — | |
 | `/proc/net/tcp` | local addr hex per socket | — | — | ✅ `filter_tcp4_buf` (by VPN addr) | — | 🔒 often denied |
 | `/proc/net/tcp6` | 32-hex local addr | — | — | ✅ `filter_tcp6_buf` | — | 🔒 |
 | `/proc/net/if_inet6` | IPv6 addrs, iface last field | — | — | ✅ `filter_if_inet6_buf` | — | 🔒 |
@@ -251,8 +251,8 @@ bind, so `curl --interface tun0 ...` or a raw `setsockopt` syscall is a real
 local oracle even without root. The kernel backends deny VPN names and indices
 with `ENODEV` **before** `sk_bound_dev_if` changes. The `.ko` redirects
 `sock_setsockopt` **and** `sk_setsockopt` (6.1+) to a typed wrapper because a
-return-only kretprobe would be too late; KPM uses KernelPatch's pre-hook
-`skip_origin`. Both symbols are hooked because a whole-kernel-LTO build can inline
+return-only kretprobe would be too late; KPM rejects the request before socket
+mutation. Both symbols are hooked because a whole-kernel-LTO build can inline
 `sock_setsockopt` into `__sys_setsockopt`, leaving `sk_setsockopt` the only symbol
 on the syscall path — and the wrapper must not trust the ABI `level` argument
 (LTO drops it as dead, since `sk_setsockopt` never reads it), because reaching
@@ -263,24 +263,26 @@ mutation helper instead — after the copy and the name lookup, before
 `sk_bound_dev_if` changes. Which helper exists is a property of the tree, not of
 the version: upstream renamed `sock_setbindtodevice_locked` to
 `sock_bindtoindex_locked` in 5.8, and Android/vendor 5.4 trees backport the newer
-name, so KPM probes both by symbol and takes whichever answers. A tree exporting
-neither leaves the hook bit clear — the mask then says, honestly, that this
-backend does not cover the vector.
+name. KPM intercepts every available resolved-index entry, including the public
+`sock_bindtoindex` wrapper: LTO can inline the locked body into that wrapper
+while the index-based option still calls the standalone locked symbol. Failure
+to install any available entry rolls back the group and leaves its coverage
+bit clear.
 
-Below 5.9 the KPM hook is a pre-hook on the mutation helper, so it runs before
-that helper's own `CAP_NET_RAW` check. It therefore asks the same question first
-(`capable(CAP_NET_RAW)`, no struct offsets involved) and denies only callers that
-would otherwise have succeeded: where the kernel refuses everyone, every bind
-keeps failing identically instead of singling the VPN name out with a different
-errno. Same rule the Zygisk hook follows, arrived at from the same counterexample.
+Below 5.9, a hidden positive index is replaced with `-1` before the native
+helper runs. The helper rejects negative indices before changing the socket.
+Its capability checks still run under its normal locking: native `EPERM` is
+preserved; only the deliberately induced `EINVAL` becomes `ENODEV`. Nested
+wrapper/locked calls do not count the same denial twice. This covers both old
+trees requiring `CAP_NET_RAW` for every bind and downstream trees permitting
+an unprivileged first bind, without guessing their policy from the release
+number or adding a `sk_bound_dev_if` offset. It also leaves physical binds,
+unbinds, and caller-supplied invalid indices on their native path.
 
-The kernel's own `CAP_NET_RAW` gate is **not** treated as a substitute. It used
-to be: below 5.7 this vector was deliberately left unhooked on the grounds that
-`sock_bindtoindex_locked()` rejects an unprivileged bind anyway. A LineageOS
-5.4 build (sm8350) disproved it — the gate is compiled in there, and an
-untrusted app still bound a socket to `tun0`. Whatever satisfies `ns_capable()`
-on such a ROM, the lesson is that a kernel-side policy we do not control cannot
-back a coverage claim.
+A Xiaomi 5.4.302-Titanic image demonstrated both failure modes: the name-based
+path used an inlined wrapper, and the capability gate applied only to sockets
+already bound. Checking `capable(CAP_NET_RAW)` unconditionally in our callback
+therefore could not substitute for the native gate.
 
 When neither kernel backend is available, Zygisk inline-hooks bionic's
 `setsockopt` entry point and applies the same pre-syscall `ENODEV` policy. It
