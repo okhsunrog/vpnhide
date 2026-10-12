@@ -1,7 +1,6 @@
 package dev.okhsunrog.vpnhide.help
 
 import android.content.Context
-import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -161,6 +160,7 @@ private fun HeadingBlock(
     val slug = remember(node) { headingSlug(plainText(node)) }
     val anchorModifier =
         if (anchors != null) Modifier.onGloballyPositioned { anchors.register(slug, it) } else Modifier
+    val glow = if (anchors?.highlightedSlug == slug) anchors.highlightAlpha.value else 0f
     Text(
         text = inlineAnnotated(node, onLink),
         style = style,
@@ -169,12 +169,7 @@ private fun HeadingBlock(
             Modifier
                 .padding(top = 4.dp)
                 .then(anchorModifier)
-                .background(
-                    MaterialTheme.colorScheme.primaryContainer.copy(
-                        alpha = if (anchors?.highlightedSlug == slug) anchors.highlightAlpha.value else 0f,
-                    ),
-                    RoundedCornerShape(4.dp),
-                ),
+                .anchorGlow(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer, glow),
     )
 }
 

@@ -27,9 +27,10 @@ internal class HelpAnchorRegistry {
     suspend fun highlight(slug: String) {
         highlightedSlug = slug
         try {
-            highlightAlpha.snapTo(1f)
-            delay(1_000)
-            highlightAlpha.animateTo(0f, tween(450))
+            highlightAlpha.snapTo(0f)
+            highlightAlpha.animateTo(1f, tween(180))
+            delay(650)
+            highlightAlpha.animateTo(0f, tween(1_700))
         } finally {
             highlightedSlug = null
         }
