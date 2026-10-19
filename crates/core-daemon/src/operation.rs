@@ -38,15 +38,33 @@ pub trait PhaseHook {
     fn after(&mut self, phase: ConfigPhase, outcome: PhaseOutcome);
 }
 
-/// The phase plan for an edit, in [`ConfigPhase`] order. `Persist` always; `Native` when the
-/// config changed and native management is enabled (including target removal).
+/// What an admitted edit needs to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanKind {
+    /// Durable config only (no native control node, or config unchanged).
+    PersistOnly,
+    /// Persist then activate (config changed and a control node is configured).
+    PersistThenNative,
+    /// Activation repair: re-apply native policy without rewriting canonical config.
+    NativeOnly,
+}
+
+/// The phase plan for an edit, in [`ConfigPhase`] order.
 /// `Ports` and the coupled `Secret`/`Cleanup` join later. The plan
 /// reflects what is actually runnable, so a planned phase never settles `NotAttempted`.
 pub fn plan_for(native: bool) -> Vec<ConfigPhase> {
-    if native {
-        vec![ConfigPhase::Persist, ConfigPhase::Native]
+    plan_kind(if native {
+        PlanKind::PersistThenNative
     } else {
-        vec![ConfigPhase::Persist]
+        PlanKind::PersistOnly
+    })
+}
+
+pub fn plan_kind(kind: PlanKind) -> Vec<ConfigPhase> {
+    match kind {
+        PlanKind::PersistOnly => vec![ConfigPhase::Persist],
+        PlanKind::PersistThenNative => vec![ConfigPhase::Persist, ConfigPhase::Native],
+        PlanKind::NativeOnly => vec![ConfigPhase::Native],
     }
 }
 

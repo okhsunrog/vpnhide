@@ -47,6 +47,7 @@ pub fn apply_canonical_edit(config: &CanonicalConfig, edit: &ConfigEdit) -> Cano
             next.apps.remove(pkg);
         }
         ConfigEdit::Replace { config } => next = config.clone(),
+        ConfigEdit::RepairActivation => {}
     }
     next
 }
@@ -256,5 +257,174 @@ mod tests {
             },
         );
         assert!(b.debug && b.settings.remember_superkey);
+    }
+}
+
+/// A config field path for conflict detection (mirrors Kotlin `ConfigField` segments).
+/// Examples: `debug`, `settings/autoHideVpnName`, `apps/com.x/native`, `apps/com.x`.
+pub type FieldPath = String;
+
+/// Whether two field paths overlap (prefix relationship), matching `configFieldsOverlap`.
+pub fn fields_overlap(a: &str, b: &str) -> bool {
+    let a: Vec<&str> = a.split('/').filter(|s| !s.is_empty()).collect();
+    let b: Vec<&str> = b.split('/').filter(|s| !s.is_empty()).collect();
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    (a.len() >= b.len() && a[..b.len()] == b[..]) || (b.len() >= a.len() && b[..a.len()] == a[..])
+}
+
+/// The write set of an edit — the fields it intends to change (§5).
+pub fn write_set(edit: &ConfigEdit) -> Vec<FieldPath> {
+    match edit {
+        ConfigEdit::Toggle { field, .. } => vec![toggle_path(*field)],
+        ConfigEdit::SettingSet { field, .. } => vec![set_field_path(*field)],
+        ConfigEdit::App { pkg, field, .. } => {
+            vec![format!("apps/{pkg}/{}", app_field_segment(*field))]
+        }
+        ConfigEdit::RemoveApp { pkg } => vec![format!("apps/{pkg}")],
+        // Import / reset: broad domains — any change under these since base conflicts.
+        ConfigEdit::Replace { .. } => vec![
+            "apps".into(),
+            "settings".into(),
+            "debug".into(),
+            "debugSwitch".into(),
+        ],
+        // Activation repair does not rewrite canonical fields.
+        ConfigEdit::RepairActivation => Vec::new(),
+    }
+}
+
+fn toggle_path(field: ConfigToggle) -> FieldPath {
+    match field {
+        ConfigToggle::Filesystem => "settings/optionalFeatures".into(),
+        ConfigToggle::Debug => "debug".into(),
+        ConfigToggle::DebugSwitch => "debugSwitch".into(),
+        ConfigToggle::RememberSuperkey => "settings/rememberSuperkey".into(),
+        ConfigToggle::AutoHideServices => "settings/autoHideVpnServices".into(),
+        ConfigToggle::AutoHideName => "settings/autoHideVpnName".into(),
+    }
+}
+
+fn set_field_path(field: ConfigSetField) -> FieldPath {
+    match field {
+        ConfigSetField::OptionalFeatures => "settings/optionalFeatures".into(),
+        ConfigSetField::AutoHideExcludedPackages => "settings/autoHideExcludedPackages".into(),
+        ConfigSetField::AutoHiddenPackages => "settings/autoHiddenPackages".into(),
+    }
+}
+
+fn app_field_segment(field: ConfigAppField) -> &'static str {
+    match field {
+        ConfigAppField::Java => "java",
+        ConfigAppField::Native => "native",
+        ConfigAppField::AppHiding => "appHiding",
+        ConfigAppField::Ports => "ports",
+        ConfigAppField::Hidden => "hidden",
+    }
+}
+
+/// Field-level optimistic concurrency against a map of last-writer revisions.
+///
+/// Unrelated fields written after `base.revision` do not conflict; a write to the
+/// same field (or an overlapping path) after `base` is `Conflict`. Import/reset
+/// (`Replace`) uses broad domains so any overlapping change since base conflicts.
+///
+/// `base.revision == current_revision` always succeeds (fresh). `base.revision` greater
+/// than current is rejected as unavailable/skew.
+pub fn conflict_field(
+    base_revision: u64,
+    current_revision: u64,
+    edit: &ConfigEdit,
+    field_revisions: &std::collections::BTreeMap<FieldPath, u64>,
+) -> Option<FieldPath> {
+    if base_revision > current_revision {
+        return Some("config".into());
+    }
+    if base_revision == current_revision {
+        return None;
+    }
+    let writes = write_set(edit);
+    // RepairActivation has an empty write set — never a config-field conflict.
+    for write in &writes {
+        for (written, &rev) in field_revisions {
+            if rev > base_revision && fields_overlap(write, written) {
+                return Some(write.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Record that `writes` were committed at `revision`.
+pub fn note_writes(
+    field_revisions: &mut std::collections::BTreeMap<FieldPath, u64>,
+    writes: &[FieldPath],
+    revision: u64,
+) {
+    for w in writes {
+        field_revisions.insert(w.clone(), revision);
+    }
+}
+
+#[cfg(test)]
+mod conflict_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn unrelated_fields_do_not_conflict() {
+        let mut revs = BTreeMap::new();
+        revs.insert("debug".into(), 2);
+        let edit = ConfigEdit::Toggle {
+            field: ConfigToggle::AutoHideName,
+            enabled: true,
+        };
+        assert_eq!(conflict_field(1, 2, &edit, &revs), None);
+    }
+
+    #[test]
+    fn same_field_conflicts() {
+        let mut revs = BTreeMap::new();
+        revs.insert("debug".into(), 2);
+        let edit = ConfigEdit::Toggle {
+            field: ConfigToggle::Debug,
+            enabled: false,
+        };
+        assert_eq!(conflict_field(1, 2, &edit, &revs).as_deref(), Some("debug"));
+    }
+
+    #[test]
+    fn replace_conflicts_with_any_domain_change() {
+        let mut revs = BTreeMap::new();
+        revs.insert("debug".into(), 2);
+        let edit = ConfigEdit::Replace {
+            config: CanonicalConfig::default(),
+        };
+        assert!(conflict_field(1, 2, &edit, &revs).is_some());
+    }
+
+    #[test]
+    fn remove_app_overlaps_app_field() {
+        assert!(fields_overlap("apps/com.x", "apps/com.x/native"));
+        let mut revs = BTreeMap::new();
+        revs.insert("apps/com.x/native".into(), 3);
+        let edit = ConfigEdit::RemoveApp {
+            pkg: "com.x".into(),
+        };
+        assert_eq!(
+            conflict_field(1, 3, &edit, &revs).as_deref(),
+            Some("apps/com.x")
+        );
+    }
+
+    #[test]
+    fn repair_activation_never_field_conflicts() {
+        let mut revs = BTreeMap::new();
+        revs.insert("debug".into(), 9);
+        assert_eq!(
+            conflict_field(1, 9, &ConfigEdit::RepairActivation, &revs),
+            None
+        );
     }
 }

@@ -837,12 +837,22 @@ return the existing record; different content or retired IDs are `IdReused`.
 Subprocess crash-injection (`VPNHIDE_TEST_CRASH_AFTER`) covers persist-intent,
 persist, and native-intent boundaries.
 
-Still open before production cutover (handoff to step 2 / ownership): multi-client
-disconnect ownership, delayed-worker fencing, field-level conflicts, manual
-recheck RPC, Ports evidence, and kernel Native apply receipts. Zygisk live-process
+**Step 2 ownership / conflicts (landed).** Accepted mutations run under
+`spawn_blocking` so RPC cancel/socket loss cannot abandon them. A
+`dispatch_fence` ticket claimed at admit must still match before each external
+effect (`invalidate_dispatch` fences delayed predecessors). Field-level
+optimistic concurrency (`config_edit::write_set` / `conflict_field`) lets
+unrelated edits merge against fresh state while same-field and Replace/import
+domains conflict; `field_revisions` are durable in the journal.
+`ConfigEdit::RepairActivation` re-applies Native without rewriting canonical
+config (persist intent ≠ runtime apply).
+
+Still open before Ports / production cutover: supervised async worker pool with
+descendant accounting, manual recheck RPC / Held UX, Ports evidence, kernel
+Native apply receipts, Magisk packaging, APK cutover. Zygisk live-process
 evidence remains distinct from file publication.
 
-Next: ownership transfer before enabling the common module's production boot path.
+Next: Ports execution into core (step 3) once ownership gaps above are accepted.
 
 Each boundary needs an explicit cutover. Do not run legacy and core writers in
 parallel against the same canonical/runtime state. Port behavioral tests before
