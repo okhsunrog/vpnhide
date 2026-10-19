@@ -10,6 +10,10 @@
 /// Crate name, stable for logs.
 pub const CRATE_NAME: &str = "vpnhide_ai_support";
 
+pub mod http;
+pub mod issue;
 pub mod limits;
 pub mod snapshot;
 pub mod tools;
+
+pub use http::{AppState, router};

@@ -796,6 +796,149 @@ fn optional_line(value: Option<&str>, max_chars: usize) -> bool {
 }
 
 #[cfg(test)]
+pub(crate) fn routed_fixture() -> DiagnosticSnapshot {
+    DiagnosticSnapshot {
+        schema: ASSISTANT_SNAPSHOT_SCHEMA,
+        bundle_schema: Some(2),
+        generated_at: "2026-10-19T18:00:00Z".to_string(),
+        capture_kind: "debug".to_string(),
+        app: AppInfo {
+            package_name: "dev.okhsunrog.vpnhide".to_string(),
+            version: "1.3.1".to_string(),
+        },
+        device: DeviceInfo {
+            manufacturer: "Google".to_string(),
+            model: "Pixel 8 Pro".to_string(),
+            android_release: "16".to_string(),
+            sdk: 36,
+            abis: vec!["arm64-v8a".to_string()],
+        },
+        self_needs_restart: false,
+        gate: Some(DiagnosticGate::Routed),
+        self_test_run_id: Some(41),
+        diagnostics: Some(DiagnosticSummary {
+            eligibility: DiagnosticEligibility::Eligible,
+            active_run_id: None,
+            active_stage: None,
+            last_attempt: Some(AttemptInfo {
+                run_id: 41,
+                outcome: RunOutcome::Completed,
+                failure: None,
+                eligibility: None,
+            }),
+            measurement: Some(MeasurementInfo {
+                run_id: 41,
+                started_at: 1_700_000_000_000,
+                ended_at: 1_700_000_000_500,
+                completed: true,
+                interrupted: false,
+                observation_id: 9,
+            }),
+            applicability: MeasurementApplicability::MatchesLastObservation,
+            evidence: Some(MeasurementEvidence {
+                hidden: 4,
+                system_blocked: 0,
+                nothing_to_leak: 1,
+                leaks: 1,
+                not_measured: 0,
+                not_run: 0,
+                uncovered_leaks: 0,
+                conclusion: EvidenceConclusion::OwnedLeak,
+            }),
+            current_success: false,
+            probe_unavailable: false,
+            last_known_routing: Some(SelfRouting::Routed),
+        }),
+        native_verdict: Some(Verdict::Partial),
+        java_verdict: Some(Verdict::Ok),
+        report: Some(DiagnosticReport {
+            gate: DiagnosticGate::Routed,
+            complete: true,
+            native: LayerReport {
+                backend: Some(NativeBackendId::Kmod),
+                status: LayerStatus::Active {
+                    hidden: 4,
+                    leaks: 1,
+                },
+                unowned_leaks: 0,
+                checks: vec![
+                    DiagnosticCheck {
+                        id: "ioctl_flags".to_string(),
+                        layer: CheckLayer::Native,
+                        outcome: CheckOutcome::Leak,
+                        owned: true,
+                        missing_hooks: vec!["ioctl_flags".to_string()],
+                    },
+                    DiagnosticCheck {
+                        id: "getifaddrs".to_string(),
+                        layer: CheckLayer::Native,
+                        outcome: CheckOutcome::HiddenBackend,
+                        owned: true,
+                        missing_hooks: Vec::new(),
+                    },
+                ],
+            },
+            java: LayerReport {
+                backend: None,
+                status: LayerStatus::Active {
+                    hidden: 2,
+                    leaks: 0,
+                },
+                unowned_leaks: 0,
+                checks: vec![DiagnosticCheck {
+                    id: "network_capabilities".to_string(),
+                    layer: CheckLayer::Java,
+                    outcome: CheckOutcome::NotMeasured {
+                        reason: NotMeasuredReason::NoGroundTruth,
+                    },
+                    owned: true,
+                    missing_hooks: Vec::new(),
+                }],
+            },
+        }),
+        backends: BackendSet {
+            kmod: installed(true),
+            builtin: ModulePresence::NotInstalled,
+            kpm: ModulePresence::NotInstalled,
+            zygisk: ModulePresence::NotInstalled,
+        },
+        active_backend: ActiveBackend {
+            id: Some(NativeBackendId::Kmod),
+            state: installed(true),
+        },
+        ports: ModulePresence::NotInstalled,
+        kmod_load: Some(KmodLoad {
+            uname_r: Some("6.1.99-android14-11".to_string()),
+            gki_variant: Some("android14-6.1".to_string()),
+            kmod_version: Some("1.3.1".to_string()),
+            root_manager: Some("kernelsu".to_string()),
+            loaded: true,
+            insmod_exit: Some(0),
+            fresh_for_current_boot: true,
+            filesystem_hiding: Some(false),
+        }),
+        root_shell: RootShell {
+            uid: Some(0),
+            errno_ctl: "ok".to_string(),
+            runtime_checkable: true,
+        },
+        errors: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+fn installed(active: bool) -> ModulePresence {
+    ModulePresence::Installed {
+        version: Some("1.3.1".to_string()),
+        active,
+        gki_variant: Some("android14-6.1".to_string()),
+        broken_reason: None,
+        pending_reboot: false,
+        runtime_checkable: true,
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -957,146 +1100,5 @@ mod tests {
             .kind(),
             "not_measured"
         );
-    }
-
-    pub(crate) fn routed_fixture() -> DiagnosticSnapshot {
-        DiagnosticSnapshot {
-            schema: ASSISTANT_SNAPSHOT_SCHEMA,
-            bundle_schema: Some(2),
-            generated_at: "2026-10-19T18:00:00Z".to_string(),
-            capture_kind: "debug".to_string(),
-            app: AppInfo {
-                package_name: "dev.okhsunrog.vpnhide".to_string(),
-                version: "1.3.1".to_string(),
-            },
-            device: DeviceInfo {
-                manufacturer: "Google".to_string(),
-                model: "Pixel 8 Pro".to_string(),
-                android_release: "16".to_string(),
-                sdk: 36,
-                abis: vec!["arm64-v8a".to_string()],
-            },
-            self_needs_restart: false,
-            gate: Some(DiagnosticGate::Routed),
-            self_test_run_id: Some(41),
-            diagnostics: Some(DiagnosticSummary {
-                eligibility: DiagnosticEligibility::Eligible,
-                active_run_id: None,
-                active_stage: None,
-                last_attempt: Some(AttemptInfo {
-                    run_id: 41,
-                    outcome: RunOutcome::Completed,
-                    failure: None,
-                    eligibility: None,
-                }),
-                measurement: Some(MeasurementInfo {
-                    run_id: 41,
-                    started_at: 1_700_000_000_000,
-                    ended_at: 1_700_000_000_500,
-                    completed: true,
-                    interrupted: false,
-                    observation_id: 9,
-                }),
-                applicability: MeasurementApplicability::MatchesLastObservation,
-                evidence: Some(MeasurementEvidence {
-                    hidden: 4,
-                    system_blocked: 0,
-                    nothing_to_leak: 1,
-                    leaks: 1,
-                    not_measured: 0,
-                    not_run: 0,
-                    uncovered_leaks: 0,
-                    conclusion: EvidenceConclusion::OwnedLeak,
-                }),
-                current_success: false,
-                probe_unavailable: false,
-                last_known_routing: Some(SelfRouting::Routed),
-            }),
-            native_verdict: Some(Verdict::Partial),
-            java_verdict: Some(Verdict::Ok),
-            report: Some(DiagnosticReport {
-                gate: DiagnosticGate::Routed,
-                complete: true,
-                native: LayerReport {
-                    backend: Some(NativeBackendId::Kmod),
-                    status: LayerStatus::Active {
-                        hidden: 4,
-                        leaks: 1,
-                    },
-                    unowned_leaks: 0,
-                    checks: vec![
-                        DiagnosticCheck {
-                            id: "ioctl_flags".to_string(),
-                            layer: CheckLayer::Native,
-                            outcome: CheckOutcome::Leak,
-                            owned: true,
-                            missing_hooks: vec!["ioctl_flags".to_string()],
-                        },
-                        DiagnosticCheck {
-                            id: "getifaddrs".to_string(),
-                            layer: CheckLayer::Native,
-                            outcome: CheckOutcome::HiddenBackend,
-                            owned: true,
-                            missing_hooks: Vec::new(),
-                        },
-                    ],
-                },
-                java: LayerReport {
-                    backend: None,
-                    status: LayerStatus::Active {
-                        hidden: 2,
-                        leaks: 0,
-                    },
-                    unowned_leaks: 0,
-                    checks: vec![DiagnosticCheck {
-                        id: "network_capabilities".to_string(),
-                        layer: CheckLayer::Java,
-                        outcome: CheckOutcome::NotMeasured {
-                            reason: NotMeasuredReason::NoGroundTruth,
-                        },
-                        owned: true,
-                        missing_hooks: Vec::new(),
-                    }],
-                },
-            }),
-            backends: BackendSet {
-                kmod: installed(true),
-                builtin: ModulePresence::NotInstalled,
-                kpm: ModulePresence::NotInstalled,
-                zygisk: ModulePresence::NotInstalled,
-            },
-            active_backend: ActiveBackend {
-                id: Some(NativeBackendId::Kmod),
-                state: installed(true),
-            },
-            ports: ModulePresence::NotInstalled,
-            kmod_load: Some(KmodLoad {
-                uname_r: Some("6.1.99-android14-11".to_string()),
-                gki_variant: Some("android14-6.1".to_string()),
-                kmod_version: Some("1.3.1".to_string()),
-                root_manager: Some("kernelsu".to_string()),
-                loaded: true,
-                insmod_exit: Some(0),
-                fresh_for_current_boot: true,
-                filesystem_hiding: Some(false),
-            }),
-            root_shell: RootShell {
-                uid: Some(0),
-                errno_ctl: "ok".to_string(),
-                runtime_checkable: true,
-            },
-            errors: Vec::new(),
-        }
-    }
-
-    fn installed(active: bool) -> ModulePresence {
-        ModulePresence::Installed {
-            version: Some("1.3.1".to_string()),
-            active,
-            gki_variant: Some("android14-6.1".to_string()),
-            broken_reason: None,
-            pending_reboot: false,
-            runtime_checkable: true,
-        }
     }
 }

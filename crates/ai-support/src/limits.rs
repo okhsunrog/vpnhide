@@ -1,7 +1,13 @@
-//! Caps for read-only tools.
+//! Caps for read-only tools and the HTTP body that carries a snapshot.
 //!
 //! The numbers belong to the server. A result that does not fit is truncated.
 //! Nothing in this crate shells out to get a bigger one.
+
+/// Chat and issue-draft questions, in Unicode scalars.
+pub const MAX_QUESTION_CHARS: usize = 4_000;
+
+/// Compact snapshot plus question. A full debug archive does not fit, on purpose.
+pub const MAX_HTTP_BODY_BYTES: usize = 256 * 1024;
 
 /// How much of a checkout one tool call may return.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
