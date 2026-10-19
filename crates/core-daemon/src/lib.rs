@@ -5,6 +5,8 @@
 pub mod activation;
 pub mod backend;
 pub mod boot;
+pub mod routing_compose;
+pub mod framework_vpn;
 pub mod client;
 pub mod config_edit;
 pub mod config_file;

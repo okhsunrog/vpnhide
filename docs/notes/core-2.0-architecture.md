@@ -865,8 +865,13 @@ Production writes remain explicitly enabled only; APK config writer not yet fenc
 core; uninstall is restricted (no hook unload / no SuperKey touch). See
 [`core-2.0-module-lifecycle.md`](core-2.0-module-lifecycle.md).
 
-Next: root observations polish / device validation (step 6) and production smoke of
-reboot-without-APK → Applied or explicit `boot_status` recovery.
+**Step 6 observations/freshness (landed).** `RoutingObservation` carries Current vs
+Unknown vs last-good; framework VPN classification (dumpsys/env stub); backend
+`installed`/`selected`/`applied`/`active` separation; lock-free backend refresh.
+See [`core-2.0-observations.md`](core-2.0-observations.md).
+
+Next: APK IPC cutover (step 7) consuming freshness/last-good; device smoke for
+framework classify + reboot-without-APK.
 
 Each boundary needs an explicit cutover. Do not run legacy and core writers in
 parallel against the same canonical/runtime state. Port behavioral tests before

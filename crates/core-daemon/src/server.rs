@@ -480,8 +480,18 @@ impl CoreState {
                 }
                 if let Some(backend) = observed_backend {
                     let last_selected = runner.selected().or(snapshot.backend.selected);
+                    let last_applied = snapshot.backend.applied;
                     snapshot.backend = backend;
                     snapshot.backend.selected = last_selected;
+                    // Confirmed Native → record applied runtime family (≠ Zygisk process load).
+                    let native_ok = outcome.phases.iter().any(|p| {
+                        p.phase == ConfigPhase::Native && p.outcome == PhaseOutcome::Confirmed
+                    });
+                    snapshot.backend.applied = if native_ok {
+                        last_selected.or(last_applied)
+                    } else {
+                        last_applied
+                    };
                 }
             });
         }

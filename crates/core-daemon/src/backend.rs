@@ -265,6 +265,7 @@ pub fn detect(ctl_path: &Path, modules_root: &Path) -> NativeBackendStatus {
         active,
         installed,
         selected: None,
+        applied: None,
     }
 }
 
