@@ -1561,6 +1561,7 @@ dependencies = [
  "tokio-serde",
  "tokio-util",
  "vpnhide_activator",
+ "vpnhide_apatch_abi",
  "vpnhide_checks",
  "vpnhide_core_rpc",
  "vpnhide_protocol",

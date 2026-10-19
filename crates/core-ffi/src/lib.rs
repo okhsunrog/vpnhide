@@ -7,6 +7,7 @@
 uniffi::setup_scaffolding!();
 
 pub mod config_relay;
+pub mod root_relay;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -91,6 +92,19 @@ pub async fn config_repair(socket_path: String, op: u64, base_revision: u64) -> 
         base: base_revision,
     };
     config_relay::relay(&socket_path, request).await
+}
+
+/// Run fixed root probes in core. `request_json` is a `core-rpc` `DiagnosticsRequest`;
+/// the reply is `{"status":"ok","report":…}` or a delivery status. Never throws.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn collect_diagnostics(socket_path: String, request_json: String) -> String {
+    root_relay::diagnostics(&socket_path, &request_json).await
+}
+
+/// Apply a fixed root effect (`core-rpc` `RootEffect` JSON) in core. Never throws.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn root_effect(socket_path: String, op: u64, effect_json: String) -> String {
+    root_relay::root_effect(&socket_path, op, &effect_json).await
 }
 
 /// Connect to the production socket path (convenience for the APK).

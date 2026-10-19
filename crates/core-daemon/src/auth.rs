@@ -127,6 +127,21 @@ pub fn apply_app_socket_permissions(socket: &Path, app_dir: &Path) -> io::Result
     Ok(())
 }
 
+/// Give `path` the uid/gid and SELinux label of `owner_dir` (an app data dir), so only that
+/// app can read what core wrote for it. Ownership needs root; the label copy is best-effort.
+pub fn hand_to_owner_of(path: &Path, owner_dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = fs::metadata(owner_dir)?;
+    if unsafe { libc::geteuid() } == 0 {
+        let c = path_cstr(path)?;
+        if unsafe { libc::lchown(c.as_ptr(), meta.uid(), meta.gid()) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    let _ = copy_selinux_label(owner_dir, path);
+    Ok(())
+}
+
 fn copy_selinux_label(from: &Path, to: &Path) -> io::Result<()> {
     const NAME: &[u8] = b"security.selinux\0";
     let src = path_cstr(from)?;

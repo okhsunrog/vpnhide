@@ -293,11 +293,11 @@ jobs:
             kmod/test/verify-trim-abi.sh \
             kmod/test/run-kpm.sh kmod/test/init-kpm.sh kmod/test/build-source-kernel.sh \
             builtin/test/run.sh builtin/test/build-kernel.sh builtin/test/build-source-kernel.sh
-          # The app's root probes. They are assembled from these files plus a
-          # variable prelude, so they are checked as POSIX sh (the device shell
-          # is mksh) and on their own — a stray apostrophe in one of them once
-          # killed the whole batched command silently for a release.
-          shellcheck -s sh lsposed/app/src/main/resources/shell/*.sh
+          # Core's root probes (collect_diagnostics). They run with a variable
+          # prelude, so they are checked as POSIX sh (the device shell is mksh)
+          # and on their own — a stray apostrophe in one of them once killed
+          # the whole batched command silently for a release.
+          shellcheck -s sh crates/core-daemon/probes/shell/*.sh
 
       # C (kernel module)
       - name: clang-format

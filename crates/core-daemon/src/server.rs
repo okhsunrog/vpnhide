@@ -16,9 +16,9 @@ use tokio::net::UnixStream;
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use tokio_util::sync::CancellationToken;
 use vpnhide_core_rpc::{
-    Accepted, BaseRef, CanonicalConfig, ClientHello, ConfigEdit, ConfigPhase, Handshake,
-    OperationId, OperationRecord, PROTOCOL_VERSION, PhaseOutcome, PhaseRecord, Published,
-    SubmitError, VpnhideCore,
+    Accepted, BaseRef, CanonicalConfig, ClientHello, ConfigEdit, ConfigPhase, DiagnosticsReport,
+    DiagnosticsRequest, EffectError, Handshake, OperationId, OperationRecord, PROTOCOL_VERSION,
+    PhaseOutcome, PhaseRecord, Published, RootEffect, SubmitError, VpnhideCore,
 };
 
 use crate::config_edit::{self, apply_canonical_edit};
@@ -73,6 +73,11 @@ pub struct CoreState {
     /// effect, so a delayed predecessor cannot dispatch after newer work (or an explicit
     /// fence) has started (§5).
     dispatch_fence: AtomicU64,
+    /// Where root effects act (`VPNHIDE_ROOT_EFFECTS=1` → the real filesystem). `None`
+    /// refuses them, so a dev sandbox never deletes or writes real state.
+    effect_paths: std::sync::RwLock<Option<crate::effects::EffectPaths>>,
+    /// Probe environment for `collect_diagnostics`.
+    probe_env: std::sync::RwLock<crate::diagnostics::ProbeEnv>,
 }
 
 impl CoreState {
@@ -92,6 +97,8 @@ impl CoreState {
             kmod_ctl_path: None,
             ports_enabled: false,
             dispatch_fence: AtomicU64::new(0),
+            effect_paths: std::sync::RwLock::new(crate::effects::effect_paths_from_env()),
+            probe_env: std::sync::RwLock::new(crate::diagnostics::ProbeEnv::from_env()),
         })
     }
 
@@ -225,6 +232,8 @@ impl CoreState {
             kmod_ctl_path,
             ports_enabled: crate::ports::ports_enabled_from_env(),
             dispatch_fence: AtomicU64::new(0),
+            effect_paths: std::sync::RwLock::new(crate::effects::effect_paths_from_env()),
+            probe_env: std::sync::RwLock::new(crate::diagnostics::ProbeEnv::from_env()),
         });
         if let Some(config) = config {
             state.publisher.update(|snapshot| {
@@ -263,6 +272,58 @@ impl CoreState {
         edit: &ConfigEdit,
     ) -> Result<Accepted, SubmitError> {
         self.submit_edit(op, base, edit)
+    }
+
+    /// Point root effects at `paths` (tests, or a sandbox root). `None` disables them.
+    pub fn set_effect_paths(&self, paths: Option<crate::effects::EffectPaths>) {
+        *self.effect_paths.write().expect("effect paths") = paths;
+    }
+
+    /// Replace the probe environment (tests).
+    pub fn set_probe_env(&self, env: crate::diagnostics::ProbeEnv) {
+        *self.probe_env.write().expect("probe env") = env;
+    }
+
+    /// Run a batch of fixed probes (blocking).
+    pub fn collect_diagnostics(&self, request: &DiagnosticsRequest) -> DiagnosticsReport {
+        let env = self.probe_env.read().expect("probe env").clone();
+        crate::diagnostics::collect(&env, request)
+    }
+
+    /// Apply a fixed root effect under the mutation lane, so it never interleaves with a
+    /// config operation. A full reset also drops the canonical config and publishes that.
+    pub fn root_effect(&self, op: OperationId, effect: &RootEffect) -> Result<(), EffectError> {
+        let Some(paths) = self.effect_paths.read().expect("effect paths").clone() else {
+            return Err(EffectError::Failed("root effects disabled".into()));
+        };
+        let mut store = self.config.lock().map_err(|_| EffectError::Busy)?;
+        eprintln!("core: root effect op={} {}", op.0, effect_name(effect));
+        crate::effects::apply(&paths, effect)?;
+        if matches!(effect, RootEffect::FullReset) {
+            if let Some(path) = &self.config_path {
+                match std::fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        return Err(EffectError::Failed(format!("remove config: {}", e.kind())));
+                    }
+                }
+            }
+            store.config = None;
+            store.config_revision += 1;
+            store.journal.config_revision = store.config_revision;
+            if let Some(journal_path) = &self.journal_path {
+                if let Err(e) = journal::write_atomic(journal_path, &store.journal) {
+                    eprintln!("core: journal after reset failed: {e}");
+                }
+            }
+            let revision = store.config_revision;
+            self.publisher.update(|snapshot| {
+                snapshot.config = None;
+                snapshot.config_revision = revision;
+            });
+        }
+        Ok(())
     }
 
     /// Query a settled/in-flight operation record.
@@ -687,6 +748,39 @@ impl VpnhideCore for CoreServer {
     async fn get_operation(self, _ctx: Context, op: OperationId) -> Option<OperationRecord> {
         self.state.get_operation(op)
     }
+
+    async fn collect_diagnostics(
+        self,
+        _ctx: Context,
+        request: DiagnosticsRequest,
+    ) -> DiagnosticsReport {
+        let state = self.state.clone();
+        tokio::task::spawn_blocking(move || state.collect_diagnostics(&request))
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn root_effect(
+        self,
+        _ctx: Context,
+        op: OperationId,
+        effect: RootEffect,
+    ) -> Result<(), EffectError> {
+        // Like submit_edit: owned by core, not cancelled with the request.
+        let state = self.state.clone();
+        tokio::task::spawn_blocking(move || state.root_effect(op, &effect))
+            .await
+            .unwrap_or(Err(EffectError::Busy))
+    }
+}
+
+fn effect_name(effect: &RootEffect) -> &'static str {
+    match effect {
+        RootEffect::SetSuperkey { .. } => "set_superkey",
+        RootEffect::ClearSuperkey => "clear_superkey",
+        RootEffect::DeleteLegacyConfig => "delete_legacy_config",
+        RootEffect::FullReset => "full_reset",
+    }
 }
 
 /// Serve one accepted connection until it closes or its generation is cancelled.
@@ -752,7 +846,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn submit_bootstraps_applies_conflicts_and_reports_unavailable() {
+        // Submits read the Ports env; keep env-mutating tests out.
+        let _env = crate::ports::test_env_lock();
         let server = server();
         let ctx = tarpc::context::current;
         let toggle = |f| ConfigEdit::Toggle {
@@ -820,7 +917,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn field_level_allows_unrelated_edits_and_rejects_same_field() {
+        // Submits read the Ports env; keep env-mutating tests out.
+        let _env = crate::ports::test_env_lock();
         let server = server();
         let ctx = tarpc::context::current;
         server
@@ -900,7 +1000,121 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn root_effects_are_refused_unless_enabled() {
+        let result = server()
+            .root_effect(
+                tarpc::context::current(),
+                OperationId(1),
+                RootEffect::ClearSuperkey,
+            )
+            .await;
+        assert!(matches!(result, Err(EffectError::Failed(_))));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn full_reset_drops_the_config_and_publishes_it() {
+        // Submits read the Ports env; keep env-mutating tests out.
+        let _env = crate::ports::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("vpnhide_config.json");
+        let state = CoreState::load(
+            Publisher::new(1, StateSnapshot::default()),
+            config_path.clone(),
+            None,
+        )
+        .unwrap();
+        let fs_root = dir.path().join("root");
+        state.set_effect_paths(Some(crate::effects::EffectPaths {
+            root: fs_root.clone(),
+        }));
+        let server = CoreServer::new(state.clone());
+        let ctx = tarpc::context::current;
+        server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(1),
+                BaseRef { revision: 0 },
+                ConfigEdit::Replace {
+                    config: CanonicalConfig::default(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(config_path.exists());
+        let before = state.config_revision();
+
+        server
+            .clone()
+            .root_effect(
+                ctx(),
+                OperationId(2),
+                RootEffect::SetSuperkey {
+                    superkey: "k".into(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(fs_root.join("data/adb/vpnhide/superkey").exists());
+
+        server
+            .clone()
+            .root_effect(ctx(), OperationId(3), RootEffect::FullReset)
+            .await
+            .unwrap();
+        assert!(!config_path.exists());
+        assert!(!fs_root.join("data/adb/vpnhide/superkey").exists());
+        let published = server.clone().state_since(ctx(), 0, 0).await;
+        assert!(published.snapshot.config.is_none());
+        assert_eq!(published.snapshot.config_revision, before + 1);
+        // A Replace against the new revision bootstraps again.
+        server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(4),
+                BaseRef {
+                    revision: before + 1,
+                },
+                ConfigEdit::Replace {
+                    config: CanonicalConfig::default(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(config_path.exists());
+    }
+
+    #[tokio::test]
+    async fn diagnostics_run_fixed_probes_over_rpc() {
+        let state = CoreState::new(Publisher::new(1, StateSnapshot::default()));
+        state.set_probe_env(crate::diagnostics::ProbeEnv {
+            shell: PathBuf::from("/bin/sh"),
+            core_exe: PathBuf::from("/nonexistent"),
+            app_dir: None,
+        });
+        let report = CoreServer::new(state)
+            .collect_diagnostics(
+                tarpc::context::current(),
+                DiagnosticsRequest {
+                    probes: vec![
+                        vpnhide_core_rpc::DiagnosticProbe::HookCounters,
+                        vpnhide_core_rpc::DiagnosticProbe::KpmList,
+                    ],
+                    clear_dmesg: false,
+                },
+            )
+            .await;
+        assert_eq!(report.outputs.len(), 2);
+        assert_eq!(report.outputs[1].exit, -1, "missing probe binary");
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn activation_repair_runs_native_without_config_rewrite() {
+        // Submits read the Ports env; keep env-mutating tests out.
+        let _env = crate::ports::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("cfg.json");
         let ctl = dir.path().join("ctl");
@@ -1075,7 +1289,10 @@ esac
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn delayed_worker_is_fenced_before_native_dispatch() {
+        // Submits read the Ports env; keep env-mutating tests out.
+        let _env = crate::ports::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("cfg.json");
         let ctl = dir.path().join("ctl");
@@ -1134,7 +1351,10 @@ esac
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn accepted_edit_persists_and_is_recovered_on_reload() {
+        // Submits read the Ports env; keep env-mutating tests out.
+        let _env = crate::ports::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("vpnhide_config.json");
         let ctx = tarpc::context::current;
@@ -1197,7 +1417,10 @@ esac
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn journal_survives_restart_and_dedupes_same_request() {
+        // Submits read the Ports env; keep env-mutating tests out.
+        let _env = crate::ports::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("vpnhide_config.json");
         let journal_path = dir.path().join("operations.json");
@@ -1273,7 +1496,10 @@ esac
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn restart_at_native_boundary_preserves_uncertainty_without_replay() {
+        // Submits read the Ports env; keep env-mutating tests out.
+        let _env = crate::ports::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("vpnhide_config.json");
         let journal_path = dir.path().join("operations.json");
@@ -1363,7 +1589,10 @@ esac
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn journal_revision_continues_across_restarts() {
+        // Submits read the Ports env; keep env-mutating tests out.
+        let _env = crate::ports::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("vpnhide_config.json");
         let journal_path = dir.path().join("operations.json");

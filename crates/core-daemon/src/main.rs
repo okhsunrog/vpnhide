@@ -5,6 +5,7 @@
 //!   - `vpnhide-core dump [socket]` — connect as a client and print the current snapshot.
 //!   - `vpnhide-core project [config.json]` — print control-v2 wire (**read-only**).
 //!   - `vpnhide-core status [ctl]` — print telemetry-v1 status (**read-only**).
+//!   - `vpnhide-core probe …|observe …` — one-shot root probes core runs as its own child.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,8 +19,16 @@ use vpnhide_core_rpc::StateSnapshot;
 const DEFAULT_SOCKET: &str = "/data/local/tmp/vpnhide-core.sock";
 const DEFAULT_CTL: &str = "/proc/vpnhide_ctl";
 
+fn main() {
+    let all: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = vpnhide_core_daemon::probe_cli::run(&all) {
+        std::process::exit(code);
+    }
+    daemon_main();
+}
+
 #[tokio::main]
-async fn main() {
+async fn daemon_main() {
     let mut args = std::env::args().skip(1);
     let first = args.next().unwrap_or_default();
     match first.as_str() {

@@ -37,16 +37,20 @@
 use std::time::Duration;
 
 mod config;
+mod diag;
 mod edit;
 
 pub use config::{
     AppConfig, CanonicalConfig, NativeRole, PortPolicy, PortProtocol, PortRule, Settings,
 };
+pub use diag::{
+    DiagnosticProbe, DiagnosticsReport, DiagnosticsRequest, EffectError, ProbeOutput, RootEffect,
+};
 pub use edit::{ConfigAppField, ConfigEdit, ConfigSetField, ConfigToggle};
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract, §9): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -74,6 +78,13 @@ pub const STATE_POLL_DEADLINE: Duration = Duration::from_secs(30);
 
 /// The client's per-call deadline for ordinary request/response calls.
 pub const CALL_DEADLINE: Duration = Duration::from_secs(15);
+
+/// Client deadline for [`VpnhideCore::collect_diagnostics`]: the slowest probe (kernel
+/// images) is bounded by core at [`PROBE_MAX_RUNTIME`]; this leaves room on top.
+pub const DIAGNOSTICS_DEADLINE: Duration = Duration::from_secs(210);
+
+/// Core's own cap on any single probe's runtime.
+pub const PROBE_MAX_RUNTIME: Duration = Duration::from_secs(180);
 
 /// A stable identifier for a config-mutation operation. Reusing an id with the same
 /// payload queries/deduplicates it; reuse with a different payload is rejected (§5).
@@ -369,6 +380,13 @@ pub trait VpnhideCore {
     /// Query an operation's phases and outcome. Survives the submitting client's death,
     /// so a reconnecting app can find out what happened. `None` if the id is unknown.
     async fn get_operation(op: OperationId) -> Option<OperationRecord>;
+
+    /// Run a batch of fixed root probes (v5). No caller-chosen command or path exists.
+    async fn collect_diagnostics(request: DiagnosticsRequest) -> DiagnosticsReport;
+
+    /// Apply a fixed root effect outside the config (v5): superkey, legacy cleanup, full
+    /// reset. Serialized with config operations; `op` makes a retry idempotent.
+    async fn root_effect(op: OperationId, effect: RootEffect) -> Result<(), EffectError>;
 }
 
 #[cfg(test)]
@@ -537,6 +555,69 @@ mod tests {
             ] {
                 let refused: Result<Accepted, SubmitError> = Err(err.clone());
                 assert_eq!(survives("SubmitError", &refused), refused);
+            }
+        }
+
+        #[test]
+        fn diagnostics_arguments_and_result() {
+            let probes = vec![
+                DiagnosticProbe::RootSnapshot { packages: true },
+                DiagnosticProbe::DebugSnapshot,
+                DiagnosticProbe::HookCounters,
+                DiagnosticProbe::Dmesg,
+                DiagnosticProbe::LogcatAppTags,
+                DiagnosticProbe::LogcatLsposedBoot,
+                DiagnosticProbe::LogcatSince {
+                    since: "10-19 21:00:00.000".into(),
+                },
+                DiagnosticProbe::KernelPartitions,
+                DiagnosticProbe::KernelImages,
+                DiagnosticProbe::LsposedModulesDb,
+                DiagnosticProbe::GroundTruthChecks,
+                DiagnosticProbe::AppVpnState { uid: 10123 },
+                DiagnosticProbe::KpmList,
+            ];
+            let request = DiagnosticsRequest {
+                probes: probes.clone(),
+                clear_dmesg: true,
+            };
+            assert_eq!(survives("DiagnosticsRequest", &request), request);
+            let report = DiagnosticsReport {
+                outputs: probes
+                    .into_iter()
+                    .map(|probe| ProbeOutput {
+                        probe,
+                        exit: 0,
+                        output: "x".into(),
+                        file: Some("/d/f".into()),
+                        artifacts: vec!["/d/a".into()],
+                        truncated: true,
+                    })
+                    .collect(),
+                dmesg_cleared: true,
+            };
+            assert_eq!(survives("DiagnosticsReport", &report), report);
+        }
+
+        #[test]
+        fn root_effect_arguments_and_result() {
+            for effect in [
+                RootEffect::SetSuperkey {
+                    superkey: "k".into(),
+                },
+                RootEffect::ClearSuperkey,
+                RootEffect::DeleteLegacyConfig,
+                RootEffect::FullReset,
+            ] {
+                assert_eq!(survives("RootEffect", &effect), effect);
+            }
+            for result in [
+                Ok(()),
+                Err(EffectError::Invalid("x".into())),
+                Err(EffectError::Busy),
+                Err(EffectError::Failed("y".into())),
+            ] {
+                assert_eq!(survives("effect result", &result), result);
             }
         }
 
