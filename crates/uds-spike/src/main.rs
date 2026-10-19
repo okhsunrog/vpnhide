@@ -45,13 +45,24 @@ fn server(path: &str) {
     let listener = match UnixListener::bind(path) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("BIND FAILED as {} err={} ({:?})", my_context(), e, e.raw_os_error());
+            eprintln!(
+                "BIND FAILED as {} err={} ({:?})",
+                my_context(),
+                e,
+                e.raw_os_error()
+            );
             std::process::exit(1);
         }
     };
     // Open the DAC gate wide so the SELinux layer is the only thing under test.
-    let _ = std::process::Command::new("chmod").arg("666").arg(path).status();
-    println!("server listening at {path} as {} — waiting for clients", my_context());
+    let _ = std::process::Command::new("chmod")
+        .arg("666")
+        .arg(path)
+        .status();
+    println!(
+        "server listening at {path} as {} — waiting for clients",
+        my_context()
+    );
     for stream in listener.incoming() {
         match stream {
             Ok(mut s) => {
@@ -92,7 +103,10 @@ fn client(path: &str) {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let path = args.get(2).map(String::as_str).unwrap_or("/data/local/tmp/vh.sock");
+    let path = args
+        .get(2)
+        .map(String::as_str)
+        .unwrap_or("/data/local/tmp/vh.sock");
     match args.get(1).map(String::as_str) {
         Some("server") => server(path),
         Some("client") => client(path),

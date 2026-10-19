@@ -110,7 +110,13 @@ impl CoreClientHandle {
             serde_json::from_str(&edit_json).map_err(|e| CoreFfiError::Json(e.to_string()))?;
         let outcome = self
             .client
-            .submit_edit(OperationId(op), BaseRef { revision: base_revision }, edit)
+            .submit_edit(
+                OperationId(op),
+                BaseRef {
+                    revision: base_revision,
+                },
+                edit,
+            )
             .await
             .map_err(CoreFfiError::Transport)?;
         serde_json::to_string(&outcome).map_err(|e| CoreFfiError::Json(e.to_string()))
