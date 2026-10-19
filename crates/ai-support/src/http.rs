@@ -18,9 +18,8 @@ use crate::issue::draft_issue;
 use crate::limits::{MAX_HTTP_BODY_BYTES, MAX_QUESTION_CHARS};
 use crate::snapshot::{AssistantRequest, DiagnosticSnapshot, validate_snapshot};
 
-/// Reserved until the prompt text lands. Chat responses name this id so a
-/// client can tell which draft it talked to. The client cannot replace it.
-const SYSTEM_PROMPT_ID: &str = "ai-support-draft-1";
+/// Chat responses name this id. The text lives in `prompts/system.md`.
+pub(crate) use crate::prompt::SYSTEM_PROMPT_ID;
 
 #[derive(Clone)]
 pub struct AppState {

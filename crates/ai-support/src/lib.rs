@@ -13,6 +13,7 @@ pub const CRATE_NAME: &str = "vpnhide_ai_support";
 pub mod http;
 pub mod issue;
 pub mod limits;
+pub mod prompt;
 pub mod snapshot;
 pub mod tools;
 
