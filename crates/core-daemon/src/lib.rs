@@ -2,9 +2,9 @@
 //! a typed client. Skeleton for core-2.0 step 2 — the publish/lifecycle machinery is real;
 //! the domain (config/operation/observation) is still placeholder (see `core-rpc`).
 
-pub mod client;
 pub mod activation;
 pub mod backend;
+pub mod client;
 pub mod config_edit;
 pub mod config_file;
 pub mod listener;
@@ -12,12 +12,13 @@ pub mod observer;
 pub mod operation;
 pub mod publisher;
 pub mod server;
+pub mod zygisk;
 
 pub use client::CoreClient;
-pub use listener::{listen, ServerHandle};
+pub use listener::{ServerHandle, listen};
 pub use observer::observe;
 pub use publisher::Publisher;
-pub use server::{serve_connection, CoreServer, CoreState, CORE_BUILD};
+pub use server::{CORE_BUILD, CoreServer, CoreState, serve_connection};
 
 use std::path::Path;
 use std::sync::Arc;

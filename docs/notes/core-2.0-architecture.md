@@ -436,50 +436,29 @@ apart-versioning protocol.md already has, now landing on two physical boundaries
 protocol.md §9's "we have no hub" flips: v2 has a hub (core); telemetry flows
 backend → core → app; the wire is unchanged, only the reader is new.
 
-### 9.2 The Zygisk companion
+### 9.2 Zygisk file delivery and process boundaries
 
-Zygisk is the one backend whose code runs **inside the target app** (untrusted_app, no
-privilege, hot fork path). The in-process hook cannot reach core's socket (§9) and cannot
-reopen `/data/adb` after load. So:
+Zygisk hooks run inside the target app. Configuration remains a control-v2
+snapshot in the module's `targets.txt`, read through the privileged module-dir
+fd in `on_load`. The library is loaded afresh in each forked child and its cache
+is per process. A newly launched target reads the updated file; an existing
+process keeps its snapshot until restart. No zygote reboot is needed for that
+existing behavior.
 
-- **Config down** stays `targets.txt` (control v2), read via the privileged module-dir fd at
-  `on_load`; core becomes its sole writer (absorbing the Zygisk activator, §4). The file also
-  stays as the fallback when core/companion is unreachable.
-- **The companion** — a Zygisk-specific mechanism: a per-module **root** process the Zygisk
-  daemon spawns from the module `.so`, reached by the in-process hook over a daemon-brokered
-  socketpair — is the only privileged bridge the sandboxed hook has. It is a **thin text relay
-  + per-uid aggregator**: control v2 down to the hook, telemetry v1 up to core. No
-  tarpc/tokio/serde — the hook reuses its existing protocol parser/emitter and the companion
-  just relays text, so nothing heavy enters the injected `.so` (the empty `register_companion!`
-  stub is already reserved for this).
-- **The companion is to Zygisk what the kernel is to kmod/KPM: the per-uid counter
-  aggregator.** Zygisk hooks are ephemeral and unpollable, so they *push* their counts
-  (telemetry v1) to the persistent companion, which accumulates; core then *pulls* the
-  aggregate (telemetry v1, over a small file or socket) — the pull model preserved.
+Core owns selection and publishes the file directly. Root-manager integration
+continues to load the Zygisk library in the correct process/ABI. Core does not
+inject the library, install app hooks from its own root context, or require the
+VPN Hide APK to remain alive for publication. Actual hook measurements remain
+in the app process. Publishing a file is evidence of delivery, while runtime
+and per-process consumption require independent evidence.
 
-This unlocks two things Zygisk lacks today, both through the one companion:
-
-- **Live config apply without reboot.** Config is cached at zygote load, so a change needs a
-  reboot; the companion can hand fresh config to the hook per specialize (the hook cannot
-  reopen the file itself).
-- **Statistics.** Zygisk is currently the only backend with no telemetry; giving its hook a
-  telemetry v1 *producer* role closes that. This is a protocol *profile* addition (Zygisk
-  gains a `stats` producer), not a new protocol — no version bump.
-
-Constraints and stealth:
-
-- Stats reporting is the only path with an **in-app footprint** kernel backends do not have
-  (the hook must report *out*). Gate it behind its **own opt-in parameter** (not the
-  debug-logging toggle), **off by default**, so the default stealth posture is untouched. Do
-  not build elaborate hiding: stealth is carried by *backend choice* — anything that inspects
-  its own process detects the injection itself and belongs on a kernel backend, and Zygisk's
-  threat model is targets that do not inspect. Keep only the near-free hygiene: transient
-  open → send → close per flush, not a socket held for the app's lifetime, matching the
-  module's existing fd discipline.
-- Companion and core have **independent lifecycles** (the Zygisk daemon owns the companion, the
-  root manager owns core), so a fallback is mandatory: config → the file; stats → dropped.
-- The companion's SELinux domain needs an allow to reach core's socket (shipped in the module's
-  `sepolicy.rule`, §9.3), unlike untrusted_app, which must not get one.
+The reserved empty companion is not required for this migration. Per-UID
+statistics and an optional relay remain future work. If a companion is added,
+its role is delivery/collection; core retains backend selection and canonical
+configuration ownership. A future statistics channel needs its own opt-in,
+off by default, and must preserve short-lived descriptors and the existing
+process/SELinux boundaries. No companion, new hook RPC or statistics mechanism
+is introduced as a condition of the main V2 result.
 
 ### 9.3 App-side client and cross-manager delivery/rights model
 
@@ -543,7 +522,7 @@ bundles must not block small control messages or imply unbounded buffers.
 
 Ports implementation already resides in `crates/activator/src/ports.rs` and
 `lifecycle.rs`: UID policy projection, IPv4/IPv6 restore, OUTPUT jumps, boot apply and
-uninstall cleanup. Move it behind a core backend adapter; remove the separate ZIP only
+uninstall cleanup. Move it into core's Ports implementation; remove the separate ZIP only
 after migration ownership is explicit.
 
 Current boot code waits for `bw_OUTPUT`, applies once, then repeats after 30s. A
@@ -670,8 +649,176 @@ identity, not a module dir merely existing); `installed` is module-dir presence.
 phase now projects for the **detected** family (the built-in hardcode is gone), and `selection.rs`
 is subsumed. Device-validated read-only: `active=Some(Builtin) installed=[Builtin]`, and
 `project` drives the same live wire through detection. Still to do for D: KPM and Zygisk
-(companion) `active` liveness signals + conflict matrix + boot-load policy; the Ports phase; the
+(companion) `active` liveness signals + central selection/loading policy; the Ports phase; the
 sole-writer cutover; and recovery (now that a `Native` write can be `Unknown`).
+
+**Step D continuation: direct kernel selection and loading (host-validated).**
+`backend::ensure_kernel_backend` now owns the kernel-family decision used by the
+Native phase. Its order is:
+
+1. Adopt a compatible live built-in/kmod identity. This precedes artifact priority;
+   a live built-in needs no `vpnhide_builtin` directory or bridge.
+2. Only a definitely missing node permits selecting an enabled kmod artifact.
+   Both `module.prop` and `vpnhide_kmod.ko` must exist; `disable` and `remove`
+   markers exclude it. A malformed, unreadable, incompatible or foreign node
+   stops selection, rather than being treated as absence.
+3. Load that artifact directly through the shared Rust load executor, preserving
+   its timeout and `filesystem_hiding` argument from the candidate config.
+   The loader rechecks control-node absence and refuses a live KPM or an
+   unobservable detected KernelPatch runtime. Failed `kpatch kpm list` is an
+   observation error, not an empty module list.
+4. Verify the selected kmod identity after loading, then project and deliver.
+   Delivery still checks identity on the same open file that receives the write.
+   A load failure or unexpected post-load owner stops the operation. No retry,
+   unload, or fallback to another family is dispatched by this slice.
+
+The existing native preference is `kmod > built-in > KPM > Zygisk`, subject to
+adopting a live kernel owner first. This kernel-only checkpoint did not manage
+KPM/Zygisk; the KPM continuation below extends the selector. Cross-family
+fallback after a failed attempt remains disabled.
+Core remains the selection owner; backend-specific Rust modules do not become
+autonomous activators or perform neighbor selection over RPC.
+
+Loading is explicitly enabled by `VPNHIDE_KERNEL_MODULES=<module-root>`, in
+addition to `VPNHIDE_KMOD_CTL=<control-node>`. Without the former there is no
+`insmod`; without the latter there is no Native phase. This preserves development
+isolation while the common module and legacy-writer cutover are unfinished.
+Do not enable the production load path alongside legacy boot writers. No module
+scripts are changed or removed in this stage, and core still does not activate
+on boot without a submitted edit. Native-only execution uses no APK measurement
+or LSPosed service.
+
+After an activation attempt core refreshes backend observation, independently of
+whether the Native phase succeeded. Confirmed persistence survives a subsequent
+load/apply failure. Durable operation recovery and write-outcome uncertainty are
+still unfinished; these changes do not establish exactly-once effects or safe
+production cutover.
+
+Host tests cover the selection policy, unusable artifacts, wrong protocol/owner,
+failed loading, and KPM presence/uncertainty. Subprocess tests exercise the real
+RPC and phase runner with a fake `insmod`, including the loader arguments,
+built-in operation without a bridge, post-load identity refusal, saved intent,
+and refreshed observation after failure. A regular test file is not a proc node;
+these tests do not validate Android loading, SELinux, QEMU, or device boot.
+The existing Rust CI job now includes core-rpc/core-daemon checks and tests.
+
+Validation: 106 host tests passed across activator, core-daemon and core-rpc;
+the wider non-Zygisk host suite passed 155 tests. Host Clippy (`--all-targets`,
+warnings denied) and library Clippy for Android ARM64/ARMv7 passed. Two Zygisk
+`setsockopt_tests` fail identically in an unmodified `e4127ea8` worktree in this
+environment. Workspace rustfmt also fails on that baseline (18 files); touched
+Rust files are formatted. These are baseline limitations, not a claim of green
+full CI.
+
+**Step D continuation: KPM management from core (host-validated).**
+With `VPNHIDE_KPM_LOCK` explicitly set, `backend::select_native` probes a single
+authenticated KPM transport in addition to the kernel control node. It adopts
+a compatible live kernel owner or KPM; simultaneous kernel/KPM identities are
+an error. A loaded raw KPM needs no companion directory. With no active backend,
+eligible kmod artifacts precede KPM artifacts; disabled/removed artifacts are
+ineligible. Failed discovery, authentication, enumeration, load or identity
+validation never triggers another backend's load.
+
+The shared activator now exposes `CoreKpm`, a transport handle with an explicit
+lock path. It reuses KPatch-Next CLI and APatch/FolkPatch direct-supercall code,
+but does not select backends, read canonical config or invoke old activator bins.
+Core supplies the selected artifact, filesystem load feature and KPM-family
+projection. Loading retains the supported-kernel-family check and verifies live
+telemetry after the runtime reports success. Optional filesystem loading emits
+`filesystem_hiding=1` only when enabled, retaining the existing KPM ABI.
+
+Status requires a complete telemetry-v1 response with the KPM identity. Before
+dispatch, core checks capacity, config framing, readiness and the absence of a
+kernel control owner again. Identity validation and config dispatch hold the same
+KPM lock. A busy lock fails preflight immediately, while legacy lock behavior is
+unchanged. The management lock must be `/data/adb/vpnhide_kpm/ctl.lock` in a future
+production launch so legacy readers cooperate; tests use a private lock.
+
+The core sends exactly one KPM config command per attempt, without the legacy
+activator's generic retry loop. A post-dispatch error becomes `Unknown`, rather
+than known failure. Confirmed persistence remains visible and duplicate operation
+IDs with the same original base and payload query the existing record; reusing
+an ID with a different request returns `IdReused`. New edits are blocked after Unknown in this core
+instance; durable records, restart fencing and reconciliation are still pending.
+Restart is **not** an authorized recovery procedure or proof of completion.
+KPM remains opt-in, requiring `VPNHIDE_KPM_LOCK` and `VPNHIDE_KMOD_CTL`; artifact
+loading also requires `VPNHIDE_KERNEL_MODULES`. Common-module boot and legacy
+writer cutover are not enabled by this stage.
+
+Initial observation completes before the socket admits commands, preventing a
+first mutation from competing with startup for the KPM lock. Backend publication
+refreshes after attempts, and the read-only `project` tool now honors the same
+paths and KPM observation as the service.
+
+Subprocess/RPC tests cover 22 KPM scenarios: raw active adoption, loading and
+filesystem feature defaults, inactive/disabled artifacts, kernel priority and
+conflicts, unsupported kernels, failed or identity-less loads, changed/foreign/
+incompatible/truncated status, partial readiness, busy locks, failed enumeration,
+single dispatch with an unknown result, deduplication and rejection of new edits
+after uncertainty. These are host checks with fake runtime commands. Direct
+APatch/FolkPatch supercalls, Android permissions and actual kernel loading have
+not been executed by these tests.
+
+Validation for the KPM continuation: 107 core/activator/RPC host tests passed;
+the wider non-Zygisk suite passed 156 tests. Clippy with warnings denied passed
+on the host and Android ARM64/ARMv7, including all targets. Modified Rust files
+pass rustfmt. The previously reproduced workspace formatting and Zygisk baseline
+failures remain outside this stage; full CI is not claimed green.
+
+**Step D continuation: Zygisk policy publication (host-validated).**
+`VPNHIDE_ZYGISK_MODULE` enables the verified file recipient. With no compatible
+live kernel/KPM owner, eligible kmod artifacts precede manageable KPM artifacts,
+then Zygisk. A KPM artifact without a runtime is ineligible; an authentication or
+enumeration error is unavailable evidence and stops selection. A live KPM without
+an enabled management channel also stops selection. Failed load attempts never
+fall through to Zygisk. Opt-in remains required while legacy writers exist.
+
+The Zygisk module advertises `id=vpnhide_zygisk` and `vpnhideControl=2` in its
+root-managed manifest. Core requires that identity/profile, enabled installation
+and at least one matching ARM64/ARMv7 ELF shared-library artifact. Legacy bundles
+without the profile need an updated module before this development path can own
+their policy. Artifact suitability is not proof of runtime loading or hook health.
+
+Core pins the recipient directory, revalidates its inode/manifest/artifacts after
+projection, and publishes through the pinned directory. Redirected destinations,
+staging links, disabled/removed modules and replaced directories are refused.
+The shared atomic writer publishes the existing `targets.txt` format/mode;
+core also syncs the directory before confirming publication. Kernel/KPM runtime
+facts are rechecked after the PackageManager wait, immediately before dispatch.
+Publication errors
+after the write boundary are Unknown. Removing all targets writes an empty
+snapshot, rather than leaving the previous policy installed.
+
+App/core RPC is now version 2 because `NativeBackendStatus.selected` records the
+last backend prepared for a policy-apply attempt in this core epoch. The matching
+operation record gives its outcome. `active` remains independently observed
+runtime identity; neither an installed library nor a successful Zygisk file
+publication sets it. No synthetic root measurement replaces the existing
+app-context heartbeat/hook probes. The client adopts the updated JSON state,
+and version-1 clients are rejected by the handshake. Backend control-v2 and
+telemetry-v1 formats are unchanged. The `dump` tool includes selected state.
+
+Host unit tests cover atomic replacement, recipient changes, redirects, invalid
+profiles, protocol/framing checks and both ARM artifact classes. Nineteen real
+core-process/RPC scenarios cover selection/opt-out, priority, unmanaged/unknown
+KPM, incompatible modules, publication and last-target removal. These tests do
+not run Zygisk injection or validate Android root-manager/SELinux behavior.
+
+This stage publishes Zygisk policy and records the selection; it does not unload
+old hooks or retire another installation's existing boot policy. Coordinated
+handoff of legacy files/scripts and stale processes belongs to ownership transfer.
+
+Validation: 164 non-Zygisk host tests passed, including 19 Zygisk publication
+scenarios within the core RPC suite. Host Clippy (all targets, warnings denied)
+passed with the FFI client included, as did Android ARM64/ARMv7 Clippy for the
+core/activator targets. The existing Rust CI Clippy step now includes core-ffi.
+Modified Rust files pass rustfmt. The previously recorded workspace-formatting
+and native Zygisk host-test baseline failures remain; full CI/device validation
+is not claimed complete.
+
+Next: durable operation recovery and ownership transfer before enabling the
+common module's production boot path. Zygisk live-process evidence and complete
+observation freshness/error reporting remain distinct from file delivery.
 
 Each boundary needs an explicit cutover. Do not run legacy and core writers in
 parallel against the same canonical/runtime state. Port behavioral tests before

@@ -113,6 +113,7 @@ mod selection;
 pub use selection::activate_native_companion;
 
 use kpm::*;
+pub use kpm::{CoreKpm, KpmConfigError};
 pub use lifecycle::*;
 pub use model::*;
 use ports::*;
@@ -146,6 +147,24 @@ pub fn deliver_kernel_config(path: &Path, expected_backend: u32, wire: &str) -> 
 /// absent. Read-only — safe against the live node.
 pub fn observed_kernel_backend(path: &Path) -> Result<Option<u32>> {
     kernel_control::observed_backend(path)
+}
+
+/// Load an explicitly selected artifact for core. This performs only the load,
+/// never reads canonical configuration or runs an activator. The caller owns
+/// selection and must re-observe runtime identity before delivering policy.
+pub fn load_kernel_module(ctl: &Path, artifact: &Path, filesystem_hiding: bool) -> Result<()> {
+    kernel_control::load_kmod_if_absent(kernel_control::observed_backend(ctl), || {
+        if !artifact.is_file() {
+            return Err(format!("kernel artifact missing: {}", artifact.display()).into());
+        }
+        let output = kernel_control::load_without_kpm(kpm::KpmClient::observe_loaded(), || {
+            Ok(lifecycle::load_kmod_artifact(artifact, filesystem_hiding)?)
+        })?;
+        if !output.status.success() {
+            return Err(format!("insmod failed: {}", output.status).into());
+        }
+        Ok(())
+    })
 }
 
 pub fn read_canonical() -> Result<String> {
@@ -241,7 +260,7 @@ fn activate_zygisk_with_pm_wait(wait: PmReadyWait) -> Result<()> {
 /// would require injecting the module into every app process. Refuse that wire
 /// at the delivery boundary so a future whitelist producer cannot silently turn
 /// the exception list back into a blacklist.
-fn validate_zygisk_config_wire(wire: &str) -> Result<()> {
+pub fn validate_zygisk_config_wire(wire: &str) -> Result<()> {
     let config = parse_config(wire.as_bytes()).ok_or("invalid Zygisk control payload")?;
     if config.default_mask != 0 {
         return Err(
@@ -250,6 +269,12 @@ fn validate_zygisk_config_wire(wire: &str) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Read-only safety probe for core's central selector. Runtime/authentication
+/// failures remain errors, rather than permission to select Zygisk.
+pub fn observed_kpm_loaded() -> Result<bool> {
+    kpm::KpmClient::observe_loaded()
 }
 
 /// Outcome of a KPM boot activation. A kmod conflict is a legitimate,

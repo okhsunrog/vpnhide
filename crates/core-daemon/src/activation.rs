@@ -3,8 +3,10 @@
 //! per-backend activator binaries. It **links** the activator's projection and delivery
 //! (additive pub surface on `vpnhide_activator`) rather than reimplementing hook masks.
 //!
-//! Scope: the kmod/built-in family (the shared `/proc/vpnhide_ctl` node), which the device
-//! runs. KPM (its own CLI + lock) and Zygisk (`targets.txt` via the companion) join later.
+//! Scope: kmod/built-in (the shared `/proc/vpnhide_ctl` node), plus direct KPM
+//! control through the selected authenticated transport and explicit lock path.
+//! Zygisk receives its existing policy file through a verified module directory;
+//! injection and process-local measurements retain their existing owners.
 //!
 //! # Isolation
 //!
@@ -24,7 +26,50 @@ use vpnhide_activator::{
 use vpnhide_core_rpc::{CanonicalConfig, NativeBackend};
 use vpnhide_protocol::{Status, parse_status_fields};
 
+use crate::backend::SelectedNative;
 use crate::config_file;
+
+pub fn deliver_selected(
+    path: &Path,
+    selected: &SelectedNative,
+    wire: &str,
+) -> vpnhide_core_rpc::PhaseOutcome {
+    use vpnhide_core_rpc::PhaseOutcome;
+    match selected {
+        SelectedNative::Kernel(backend) => match deliver_native(path, *backend, wire) {
+            Ok(()) => PhaseOutcome::Confirmed,
+            Err(_) => PhaseOutcome::FailedKnown,
+        },
+        SelectedNative::Kpm(client) => match client.configure_once(path, wire) {
+            Ok(()) => PhaseOutcome::Confirmed,
+            Err(vpnhide_activator::KpmConfigError::BeforeDispatch(error)) => {
+                eprintln!("core: KPM config preflight failed: {error}");
+                PhaseOutcome::FailedKnown
+            }
+            Err(vpnhide_activator::KpmConfigError::Unknown(error)) => {
+                eprintln!("core: KPM config outcome unknown: {error}");
+                PhaseOutcome::Unknown
+            }
+        },
+        SelectedNative::Zygisk(target) => {
+            if let Err(error) = crate::backend::check_zygisk_dispatch(path) {
+                eprintln!("core: Zygisk dispatch preflight failed: {error}");
+                return PhaseOutcome::FailedKnown;
+            }
+            match target.publish(wire) {
+                Ok(()) => PhaseOutcome::Confirmed,
+                Err(crate::zygisk::PublishError::BeforeWrite(error)) => {
+                    eprintln!("core: Zygisk publication preflight failed: {error}");
+                    PhaseOutcome::FailedKnown
+                }
+                Err(crate::zygisk::PublishError::Unknown(error)) => {
+                    eprintln!("core: Zygisk publication outcome unknown: {error}");
+                    PhaseOutcome::Unknown
+                }
+            }
+        }
+    }
+}
 
 /// The activator's hook-mask family for a backend (projection depends on it).
 fn family_of(backend: NativeBackend) -> NativeHookFamily {
@@ -60,7 +105,10 @@ pub fn kmod_ctl_path_from_env() -> Option<PathBuf> {
 
 /// Project a config into a backend family's control-v2 wire, resolving package uids from the
 /// live PackageManager. Device-only (needs `pm`); host tests use the resolver variant.
-pub fn project_native_wire(config: &CanonicalConfig, backend: NativeBackend) -> Result<String, String> {
+pub fn project_native_wire(
+    config: &CanonicalConfig,
+    backend: NativeBackend,
+) -> Result<String, String> {
     let json = config_file::to_json_string(config);
     project_native_for_family(&json, family_of(backend)).map_err(|e| e.to_string())
 }
@@ -73,7 +121,11 @@ pub fn project_native_wire_with_resolver(
 ) -> Result<String, String> {
     let json = config_file::to_json_string(config);
     let cfg = parse_canonical(&json).map_err(|e| e.to_string())?;
-    Ok(project_native_with_resolver_for_family(&cfg, resolver, family_of(backend)))
+    Ok(project_native_with_resolver_for_family(
+        &cfg,
+        resolver,
+        family_of(backend),
+    ))
 }
 
 /// Deliver a control-v2 `wire` to the kernel control node at `path` for `backend`, refusing
@@ -104,7 +156,10 @@ mod tests {
     fn env_override_is_none_by_default_and_some_when_set() {
         // SAFETY: env access is process-global; this test owns the var name.
         unsafe { std::env::remove_var(KMOD_CTL_ENV) };
-        assert!(kmod_ctl_path_from_env().is_none(), "unset -> no native write");
+        assert!(
+            kmod_ctl_path_from_env().is_none(),
+            "unset -> no native write"
+        );
         unsafe { std::env::set_var(KMOD_CTL_ENV, "/data/local/tmp/vpnhide-dev/fake_ctl") };
         assert_eq!(
             kmod_ctl_path_from_env(),
@@ -122,22 +177,37 @@ mod tests {
         config.apps.insert(
             "com.example".into(),
             AppConfig {
-                native: NativeRole { enabled: true, kernel: None, zygisk: None },
+                native: NativeRole {
+                    enabled: true,
+                    kernel: None,
+                    zygisk: None,
+                },
                 ..Default::default()
             },
         );
-        let wire = project_native_wire_with_resolver(&config, NativeBackend::Builtin, &resolver).expect("projects");
+        let wire = project_native_wire_with_resolver(&config, NativeBackend::Builtin, &resolver)
+            .expect("projects");
         // The wire is a control-v2 config snapshot; the resolved uid appears as bare hex
         // (10234 == 0x27fa), per the protocol's control-side numeric rule.
-        assert!(wire.contains("27fa"), "projected wire must target the resolved uid: {wire}");
+        assert!(
+            wire.contains("27fa"),
+            "projected wire must target the resolved uid: {wire}"
+        );
     }
 
     #[test]
     fn empty_config_projects_without_targets() {
         let resolver = PackageUidMap::default();
-        let wire = project_native_wire_with_resolver(&CanonicalConfig::default(), NativeBackend::Builtin, &resolver)
-            .expect("projects");
-        assert!(wire.contains("config"), "still a valid config snapshot: {wire}");
+        let wire = project_native_wire_with_resolver(
+            &CanonicalConfig::default(),
+            NativeBackend::Builtin,
+            &resolver,
+        )
+        .expect("projects");
+        assert!(
+            wire.contains("config"),
+            "still a valid config snapshot: {wire}"
+        );
     }
 
     #[test]

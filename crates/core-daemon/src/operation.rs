@@ -1,5 +1,5 @@
 //! The operation lifecycle: an accepted edit runs an ordered **phase plan**, each phase
-//! producing a [`PhaseOutcome`], and the whole settles into a durable [`OperationRecord`]
+//! producing a [`PhaseOutcome`], and the whole settles into a queryable operation record
 //! (core-2.0 §5). This is the core-side port of the execution core of the app's
 //! `reduceConfigOperation` — deliberately *without* the app-only concerns that migration
 //! leaves in Kotlin (drafts, UI-edit conflicts, bridge-source, defensive collection copies;
@@ -13,11 +13,9 @@
 //! confirmed `Persist` commits the candidate — a later phase failing keeps what `Persist`
 //! already wrote (the app's "failed activation retains the persisted switch" rule).
 //!
-//! Recovery (an `Unknown` outcome → readback → resolve/Held) is **not** built yet: today the
-//! only real phase is `Persist`, a local atomic write that is `Confirmed` or errors, never
-//! `Unknown`. It lands with step D, when a backend-activation phase (`Native`/`Ports`, over
-//! protocol.md) can actually return `Unknown`. The [`PhaseRunner`] seam is where those
-//! executors plug in; tests already drive every outcome through a fake runner.
+//! Persist and Native are real phases. A KPM dispatch without completion evidence
+//! returns Unknown and is not retried. Core blocks new edits in this instance;
+//! durable operation records, restart fencing and reconciliation are still pending.
 
 use std::path::PathBuf;
 
@@ -33,8 +31,8 @@ pub trait PhaseRunner {
 }
 
 /// The phase plan for an edit, in [`ConfigPhase`] order. `Persist` always; `Native` when the
-/// candidate has a native target *and* a control node is configured to deliver to (step D —
-/// the built-in/kmod family). `Ports` and the coupled `Secret`/`Cleanup` join later. The plan
+/// config changed and native management is enabled (including target removal).
+/// `Ports` and the coupled `Secret`/`Cleanup` join later. The plan
 /// reflects what is actually runnable, so a planned phase never settles `NotAttempted`.
 pub fn plan_for(native: bool) -> Vec<ConfigPhase> {
     if native {
@@ -85,13 +83,20 @@ pub fn run_plan(
             // record still shows what was never reached.
             settled = outcome;
             for &rest in &plan[i + 1..] {
-                phases.push(PhaseRecord { phase: rest, outcome: PhaseOutcome::NotAttempted });
+                phases.push(PhaseRecord {
+                    phase: rest,
+                    outcome: PhaseOutcome::NotAttempted,
+                });
             }
             break;
         }
     }
 
-    PlanOutcome { phases, settled, persisted }
+    PlanOutcome {
+        phases,
+        settled,
+        persisted,
+    }
 }
 
 /// The production runner. `Persist` writes the durable config atomically (no path → confirmed
@@ -104,6 +109,21 @@ pub struct RealPhaseRunner {
     /// The kernel control node to deliver `Native` to. `None` disables native delivery
     /// entirely (the dev sandbox default — it never touches the real `/proc/vpnhide_ctl`).
     pub kmod_ctl_path: Option<PathBuf>,
+    selected: std::cell::Cell<Option<vpnhide_core_rpc::NativeBackend>>,
+}
+
+impl RealPhaseRunner {
+    pub fn new(config_path: Option<PathBuf>, kmod_ctl_path: Option<PathBuf>) -> Self {
+        Self {
+            config_path,
+            kmod_ctl_path,
+            selected: std::cell::Cell::new(None),
+        }
+    }
+
+    pub fn selected(&self) -> Option<vpnhide_core_rpc::NativeBackend> {
+        self.selected.get()
+    }
 }
 
 impl PhaseRunner for RealPhaseRunner {
@@ -117,21 +137,43 @@ impl PhaseRunner for RealPhaseRunner {
                 None => PhaseOutcome::Confirmed,
             },
             ConfigPhase::Native => match &self.kmod_ctl_path {
-                // Detect the family that owns the control node, then project *for that family*
-                // and deliver (delivery re-verifies the node's identity). A node reporting no
-                // known kernel backend cannot be activated — FailedKnown, never guessed.
+                // Select the live kernel owner, or load the explicitly enabled kmod
+                // artifact when the node is definitely absent. Project for that
+                // family and deliver (which re-verifies identity on the open node).
                 Some(path) => {
-                    let backend = crate::activation::read_status(path)
-                        .ok()
-                        .and_then(|s| crate::backend::kernel_backend_from_id(s.backend));
+                    let modules = crate::backend::kernel_modules_from_env();
+                    let kpm_lock = crate::backend::kpm_lock_from_env();
+                    let zygisk_module = crate::zygisk::module_from_env();
+                    let backend = crate::backend::select_native(
+                        path,
+                        modules.as_deref(),
+                        kpm_lock.as_deref(),
+                        zygisk_module.as_deref(),
+                        candidate
+                            .settings
+                            .optional_features
+                            .contains(vpnhide_activator::OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS),
+                    );
                     match backend {
-                        Some(backend) => match crate::activation::project_native_wire(candidate, backend)
-                            .and_then(|wire| crate::activation::deliver_native(path, backend, &wire))
-                        {
-                            Ok(()) => PhaseOutcome::Confirmed,
-                            Err(_) => PhaseOutcome::FailedKnown,
-                        },
-                        None => PhaseOutcome::FailedKnown,
+                        Ok(backend) => {
+                            self.selected.set(Some(backend.family()));
+                            match crate::activation::project_native_wire(
+                                candidate,
+                                backend.family(),
+                            ) {
+                                Ok(wire) => {
+                                    crate::activation::deliver_selected(path, &backend, &wire)
+                                }
+                                Err(error) => {
+                                    eprintln!("core: native projection failed: {error}");
+                                    PhaseOutcome::FailedKnown
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("core: native selection failed: {error}");
+                            PhaseOutcome::FailedKnown
+                        }
                     }
                 }
                 None => PhaseOutcome::NotAttempted,
@@ -167,18 +209,30 @@ mod tests {
     impl PhaseRunner for FakeRunner {
         fn run(&self, phase: ConfigPhase, _candidate: &CanonicalConfig) -> PhaseOutcome {
             self.ran.borrow_mut().push(phase);
-            self.outcomes.get(&phase).copied().unwrap_or(PhaseOutcome::NotAttempted)
+            self.outcomes
+                .get(&phase)
+                .copied()
+                .unwrap_or(PhaseOutcome::NotAttempted)
         }
     }
 
     fn record(out: &PlanOutcome, phase: ConfigPhase) -> PhaseOutcome {
-        out.phases.iter().find(|p| p.phase == phase).unwrap().outcome
+        out.phases
+            .iter()
+            .find(|p| p.phase == phase)
+            .unwrap()
+            .outcome
     }
 
     #[test]
     fn single_persist_change_commits() {
         let runner = FakeRunner::new(&[(ConfigPhase::Persist, PhaseOutcome::Confirmed)]);
-        let out = run_plan(&[ConfigPhase::Persist], &CanonicalConfig::default(), true, &runner);
+        let out = run_plan(
+            &[ConfigPhase::Persist],
+            &CanonicalConfig::default(),
+            true,
+            &runner,
+        );
         assert_eq!(out.settled, PhaseOutcome::Confirmed);
         assert!(out.persisted);
         assert_eq!(*runner.ran.borrow(), vec![ConfigPhase::Persist]);
@@ -188,10 +242,18 @@ mod tests {
     fn no_op_persist_does_not_write_or_commit() {
         // changed=false: Persist is trivially confirmed and the runner is never called.
         let runner = FakeRunner::new(&[(ConfigPhase::Persist, PhaseOutcome::FailedKnown)]);
-        let out = run_plan(&[ConfigPhase::Persist], &CanonicalConfig::default(), false, &runner);
+        let out = run_plan(
+            &[ConfigPhase::Persist],
+            &CanonicalConfig::default(),
+            false,
+            &runner,
+        );
         assert_eq!(out.settled, PhaseOutcome::Confirmed);
         assert!(!out.persisted);
-        assert!(runner.ran.borrow().is_empty(), "no-op must not invoke the persist side effect");
+        assert!(
+            runner.ran.borrow().is_empty(),
+            "no-op must not invoke the persist side effect"
+        );
     }
 
     #[test]
@@ -201,7 +263,11 @@ mod tests {
             (ConfigPhase::Native, PhaseOutcome::Confirmed),
             (ConfigPhase::Ports, PhaseOutcome::Confirmed),
         ]);
-        let plan = [ConfigPhase::Persist, ConfigPhase::Native, ConfigPhase::Ports];
+        let plan = [
+            ConfigPhase::Persist,
+            ConfigPhase::Native,
+            ConfigPhase::Ports,
+        ];
         let out = run_plan(&plan, &CanonicalConfig::default(), true, &runner);
         assert_eq!(out.settled, PhaseOutcome::Confirmed);
         assert!(out.persisted);
@@ -214,14 +280,24 @@ mod tests {
             (ConfigPhase::Persist, PhaseOutcome::Confirmed),
             (ConfigPhase::Native, PhaseOutcome::FailedKnown),
         ]);
-        let plan = [ConfigPhase::Persist, ConfigPhase::Native, ConfigPhase::Ports];
+        let plan = [
+            ConfigPhase::Persist,
+            ConfigPhase::Native,
+            ConfigPhase::Ports,
+        ];
         let out = run_plan(&plan, &CanonicalConfig::default(), true, &runner);
         assert_eq!(out.settled, PhaseOutcome::FailedKnown);
-        assert!(out.persisted, "a persisted config survives a later phase failure");
+        assert!(
+            out.persisted,
+            "a persisted config survives a later phase failure"
+        );
         assert_eq!(record(&out, ConfigPhase::Persist), PhaseOutcome::Confirmed);
         assert_eq!(record(&out, ConfigPhase::Native), PhaseOutcome::FailedKnown);
         assert_eq!(record(&out, ConfigPhase::Ports), PhaseOutcome::NotAttempted);
-        assert_eq!(*runner.ran.borrow(), vec![ConfigPhase::Persist, ConfigPhase::Native]);
+        assert_eq!(
+            *runner.ran.borrow(),
+            vec![ConfigPhase::Persist, ConfigPhase::Native]
+        );
     }
 
     #[test]
@@ -234,14 +310,21 @@ mod tests {
         let out = run_plan(&plan, &CanonicalConfig::default(), true, &runner);
         assert_eq!(out.settled, PhaseOutcome::FailedKnown);
         assert!(!out.persisted);
-        assert_eq!(record(&out, ConfigPhase::Native), PhaseOutcome::NotAttempted);
-        assert_eq!(*runner.ran.borrow(), vec![ConfigPhase::Persist], "no dispatch after a failed persist");
+        assert_eq!(
+            record(&out, ConfigPhase::Native),
+            PhaseOutcome::NotAttempted
+        );
+        assert_eq!(
+            *runner.ran.borrow(),
+            vec![ConfigPhase::Persist],
+            "no dispatch after a failed persist"
+        );
     }
 
     #[test]
     fn real_runner_persists_to_disk_and_reports_none_path_confirmed() {
         // No path: a confirmed no-op (host-test semantics).
-        let none = RealPhaseRunner { config_path: None, kmod_ctl_path: None };
+        let none = RealPhaseRunner::new(None, None);
         assert_eq!(
             none.run(ConfigPhase::Persist, &CanonicalConfig::default()),
             PhaseOutcome::Confirmed,
@@ -249,7 +332,7 @@ mod tests {
         // With a path: the file is written and the phase confirms.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("vpnhide_config.json");
-        let real = RealPhaseRunner { config_path: Some(path.clone()), kmod_ctl_path: None };
+        let real = RealPhaseRunner::new(Some(path.clone()), None);
         assert_eq!(
             real.run(ConfigPhase::Persist, &CanonicalConfig::default()),
             PhaseOutcome::Confirmed,

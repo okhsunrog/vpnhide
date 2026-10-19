@@ -46,7 +46,7 @@ pub use edit::{ConfigAppField, ConfigEdit, ConfigSetField, ConfigToggle};
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract, §9): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -81,7 +81,11 @@ pub struct ClientHello {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Handshake {
     /// Compatible: the current core instance/epoch the caller should follow (§6).
-    Compatible { core_protocol: u32, core_build: String, epoch: u64 },
+    Compatible {
+        core_protocol: u32,
+        core_build: String,
+        epoch: u64,
+    },
     /// Incompatible skew: which side is behind. The app surfaces "update the lagging
     /// component"; it does not attempt to speak the other version.
     Incompatible { core_protocol: u32 },
@@ -154,8 +158,13 @@ pub enum NativeBackend {
 /// status files.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct NativeBackendStatus {
+    /// Last backend selected by this core instance for an apply attempt. Its
+    /// operation record describes publication/application success independently.
+    /// In particular, publishing a Zygisk file is not proof of per-process hooks.
+    pub selected: Option<NativeBackend>,
     /// The live native backend, from runtime identity (kernel control-node id, module
-    /// liveness). `None` until observed, or when none is active.
+    /// liveness). `None` also covers unavailable evidence; Zygisk file publication
+    /// alone never sets this field. Per-process hook measurements stay separate.
     pub active: Option<NativeBackend>,
     /// Backends whose module is present on disk (installed, not necessarily running).
     pub installed: Vec<NativeBackend>,
@@ -245,7 +254,11 @@ pub trait VpnhideCore {
 
     /// Submit a typed field edit, checked against `base`. Accepted (the core now owns the
     /// operation) or rejected with an explicit reason (§5).
-    async fn submit_edit(op: OperationId, base: BaseRef, edit: ConfigEdit) -> Result<Accepted, SubmitError>;
+    async fn submit_edit(
+        op: OperationId,
+        base: BaseRef,
+        edit: ConfigEdit,
+    ) -> Result<Accepted, SubmitError>;
 
     /// Query an operation's phases and outcome. Survives the submitting client's death,
     /// so a reconnecting app can find out what happened. `None` if the id is unknown.
@@ -274,10 +287,17 @@ mod tests {
 
         #[test]
         fn hello_arguments_and_result() {
-            let hello = ClientHello { protocol: PROTOCOL_VERSION, build: "1.2.3".into() };
+            let hello = ClientHello {
+                protocol: PROTOCOL_VERSION,
+                build: "1.2.3".into(),
+            };
             assert_eq!(survives("ClientHello", &hello), hello);
             for h in [
-                Handshake::Compatible { core_protocol: 1, core_build: "9".into(), epoch: u64::MAX },
+                Handshake::Compatible {
+                    core_protocol: PROTOCOL_VERSION,
+                    core_build: "9".into(),
+                    epoch: u64::MAX,
+                },
                 Handshake::Incompatible { core_protocol: 2 },
             ] {
                 assert_eq!(survives("Handshake", &h), h);
@@ -299,7 +319,11 @@ mod tests {
                 port_policy: Some(PortPolicy {
                     mode: "custom".into(),
                     preset: Some("dev".into()),
-                    rules: vec![PortRule { protocol: PortProtocol::Tcp, start: 8080, end: 8090 }],
+                    rules: vec![PortRule {
+                        protocol: PortProtocol::Tcp,
+                        start: 8080,
+                        end: 8090,
+                    }],
                 }),
                 hidden: false,
             };
@@ -307,7 +331,10 @@ mod tests {
                 version: 1,
                 debug: true,
                 debug_switch: false,
-                apps: BTreeMap::from([("com.example".to_owned(), app), ("com.other".to_owned(), AppConfig::default())]),
+                apps: BTreeMap::from([
+                    ("com.example".to_owned(), app),
+                    ("com.other".to_owned(), AppConfig::default()),
+                ]),
                 settings: Settings {
                     remember_superkey: true,
                     optional_features: BTreeSet::from(["fs".to_owned()]),
@@ -335,6 +362,7 @@ mod tests {
                             vpn_interfaces: vec!["tun0".into(), "wg0".into()],
                         },
                         backend: NativeBackendStatus {
+                            selected: Some(NativeBackend::Zygisk),
                             active: Some(NativeBackend::Builtin),
                             installed: vec![NativeBackend::Builtin, NativeBackend::Zygisk],
                         },
@@ -347,7 +375,10 @@ mod tests {
         #[test]
         fn submit_edit_arguments_and_result() {
             let edits = [
-                ConfigEdit::Toggle { field: ConfigToggle::Debug, enabled: true },
+                ConfigEdit::Toggle {
+                    field: ConfigToggle::Debug,
+                    enabled: true,
+                },
                 ConfigEdit::SettingSet {
                     field: ConfigSetField::AutoHideExcludedPackages,
                     values: BTreeSet::from(["com.bank".to_owned()]),
@@ -357,20 +388,31 @@ mod tests {
                     field: ConfigAppField::Native,
                     value: sample_config().apps["com.example"].clone(),
                 },
-                ConfigEdit::RemoveApp { pkg: "com.example".into() },
-                ConfigEdit::Replace { config: sample_config() },
+                ConfigEdit::RemoveApp {
+                    pkg: "com.example".into(),
+                },
+                ConfigEdit::Replace {
+                    config: sample_config(),
+                },
             ];
             for edit in edits {
                 assert_eq!(survives("ConfigEdit", &edit), edit);
             }
-            assert_eq!(survives("BaseRef", &BaseRef { revision: 3 }), BaseRef { revision: 3 });
+            assert_eq!(
+                survives("BaseRef", &BaseRef { revision: 3 }),
+                BaseRef { revision: 3 }
+            );
             let ok: Result<Accepted, SubmitError> = Ok(Accepted { op: OperationId(5) });
             assert_eq!(survives("Accepted", &ok), ok);
             for err in [
-                SubmitError::Conflict { field: "apps.x.native".into() },
+                SubmitError::Conflict {
+                    field: "apps.x.native".into(),
+                },
                 SubmitError::IdReused,
                 SubmitError::Unavailable,
-                SubmitError::Rejected { reason: "oversized".into() },
+                SubmitError::Rejected {
+                    reason: "oversized".into(),
+                },
             ] {
                 let refused: Result<Accepted, SubmitError> = Err(err.clone());
                 assert_eq!(survives("SubmitError", &refused), refused);
