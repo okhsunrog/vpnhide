@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use vpnhide_core_daemon::{serve, CoreClient, CoreState, Publisher, ServerHandle};
+use vpnhide_core_daemon::{CoreClient, CoreState, Publisher, ServerHandle, serve};
 use vpnhide_core_rpc::{
     BaseRef, CanonicalConfig, ConfigEdit, OperationId, PhaseOutcome, StateSnapshot,
 };
@@ -33,7 +33,12 @@ async fn handshake_submit_get_and_mirror() {
         .submit_edit(
             OperationId(1),
             BaseRef { revision: 0 },
-            ConfigEdit::Replace { config: CanonicalConfig { debug: true, ..Default::default() } },
+            ConfigEdit::Replace {
+                config: CanonicalConfig {
+                    debug: true,
+                    ..Default::default()
+                },
+            },
         )
         .await
         .expect("delivered")

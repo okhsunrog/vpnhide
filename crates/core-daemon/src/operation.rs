@@ -14,8 +14,8 @@
 //! already wrote (the app's "failed activation retains the persisted switch" rule).
 //!
 //! Persist and Native are real phases. A KPM dispatch without completion evidence
-//! returns Unknown and is not retried. Core blocks new edits in this instance;
-//! durable operation records, restart fencing and reconciliation are still pending.
+//! returns Unknown and is not retried. Core blocks new edits while Unknown remains.
+//! Durable operation records and restart fencing live in [`crate::journal`].
 
 use std::path::PathBuf;
 
@@ -28,6 +28,14 @@ use crate::config_file;
 /// backend-activation runners. Tests inject a fake that returns scripted outcomes.
 pub trait PhaseRunner {
     fn run(&self, phase: ConfigPhase, candidate: &CanonicalConfig) -> PhaseOutcome;
+}
+
+/// Observes phase boundaries so a durable journal can sync evidence before/after effects.
+/// `before` runs immediately prior to dispatching a phase that may mutate external state;
+/// returning `Err` aborts that phase as the given outcome (typically `FailedKnown`).
+pub trait PhaseHook {
+    fn before(&mut self, phase: ConfigPhase) -> Result<(), PhaseOutcome>;
+    fn after(&mut self, phase: ConfigPhase, outcome: PhaseOutcome);
 }
 
 /// The phase plan for an edit, in [`ConfigPhase`] order. `Persist` always; `Native` when the
@@ -61,6 +69,18 @@ pub fn run_plan(
     changed: bool,
     runner: &dyn PhaseRunner,
 ) -> PlanOutcome {
+    run_plan_hooked(plan, candidate, changed, runner, None)
+}
+
+/// Like [`run_plan`], but notifies `hook` before each dispatched effect and after each
+/// outcome so a journal can make evidence durable at crash boundaries.
+pub fn run_plan_hooked(
+    plan: &[ConfigPhase],
+    candidate: &CanonicalConfig,
+    changed: bool,
+    runner: &dyn PhaseRunner,
+    mut hook: Option<&mut dyn PhaseHook>,
+) -> PlanOutcome {
     let mut phases = Vec::with_capacity(plan.len());
     let mut settled = PhaseOutcome::Confirmed;
     let mut persisted = false;
@@ -70,7 +90,17 @@ pub fn run_plan(
         let outcome = if phase == ConfigPhase::Persist && !changed {
             PhaseOutcome::Confirmed
         } else {
-            runner.run(phase, candidate)
+            let blocked = hook.as_mut().and_then(|h| h.before(phase).err());
+            match blocked {
+                Some(fail) => fail,
+                None => {
+                    let outcome = runner.run(phase, candidate);
+                    if let Some(h) = hook.as_mut() {
+                        h.after(phase, outcome);
+                    }
+                    outcome
+                }
+            }
         };
         phases.push(PhaseRecord { phase, outcome });
 

@@ -15,28 +15,32 @@ use tokio::net::UnixStream;
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use tokio_util::sync::CancellationToken;
 use vpnhide_core_rpc::{
-    Accepted, BaseRef, CanonicalConfig, ClientHello, ConfigEdit, Handshake, OperationId,
-    OperationRecord, PROTOCOL_VERSION, Published, SubmitError, VpnhideCore,
+    Accepted, BaseRef, CanonicalConfig, ClientHello, ConfigEdit, ConfigPhase, Handshake,
+    OperationId, OperationRecord, PROTOCOL_VERSION, PhaseOutcome, PhaseRecord, Published,
+    SubmitError, VpnhideCore,
 };
 
 use crate::config_edit::apply_canonical_edit;
 use crate::config_file;
-use crate::operation::{self, RealPhaseRunner};
+use crate::journal::{self, Journal, JournalEntry};
+use crate::operation::{self, PhaseHook, RealPhaseRunner};
 use crate::publisher::Publisher;
 
 /// This core build, reported in the handshake for diagnostics only.
 pub const CORE_BUILD: &str = env!("CARGO_PKG_VERSION");
 
 /// The authoritative config, its revision, and this instance's operation records.
-/// Durable operation records and restart fencing remain pending.
 ///
-/// This is core's in-memory canonical (§4 tier 1 — the durable file read/write lands in the
-/// next step). `config_revision` bumps only on a real config change and is what an edit
-/// conflict-checks against.
+/// This is core's in-memory canonical (§4 tier 1). `config_revision` bumps only on a real
+/// config change and is what an edit conflict-checks against. When a journal path is set,
+/// the revision and operation records are also durable (§4 tier 3 / §5).
 struct ConfigStore {
     config: Option<CanonicalConfig>,
     config_revision: u64,
     operations: HashMap<OperationId, StoredOperation>,
+    /// Mirror of the on-disk journal when durability is enabled; kept in lockstep with
+    /// `operations` so each phase boundary can sync without rebuilding from the map.
+    journal: Journal,
 }
 
 struct StoredOperation {
@@ -52,6 +56,9 @@ pub struct CoreState {
     /// Where the durable canonical config lives. `None` = no persistence (host tests); a
     /// path means every accepted change is written there before it is acknowledged (§4).
     config_path: Option<PathBuf>,
+    /// Private operation journal (§4 tier 3). `None` = memory-only (host tests that do not
+    /// exercise restart fencing). Separate from the LSPosed-facing config file.
+    journal_path: Option<PathBuf>,
     /// The kernel control node the `Native` phase delivers to (§4/§9.1). `None` disables
     /// native activation — the safe default so the dev sandbox never writes the real
     /// `/proc/vpnhide_ctl`.
@@ -67,16 +74,18 @@ impl CoreState {
                 config: None,
                 config_revision: 0,
                 operations: HashMap::new(),
+                journal: Journal::default(),
             }),
             config_path: None,
+            journal_path: None,
             kmod_ctl_path: None,
         })
     }
 
     /// Load the durable config from `path` and own it going forward (§4 tier-1, restart
-    /// recovery). A present config starts at revision 1 and is published into the replica at
-    /// once; an absent/blank file leaves the core with no config (revision 0, absent ≠ empty).
-    /// A corrupt file is an error the caller decides on — core does not silently start blank.
+    /// recovery). Without a journal the revision is reconstructed as 1 when a config is
+    /// present (legacy behaviour). With a journal, the durable revision counter and
+    /// operation records are restored and unresolved work is fenced (§5).
     ///
     /// `kmod_ctl_path` is the kernel control node the `Native` phase delivers to; `None`
     /// disables native activation (the dev sandbox default).
@@ -85,18 +94,70 @@ impl CoreState {
         path: PathBuf,
         kmod_ctl_path: Option<PathBuf>,
     ) -> std::io::Result<Arc<Self>> {
-        let (config, config_revision) = match config_file::read(&path)? {
-            Some(config) => (Some(config), 1),
-            None => (None, 0),
+        Self::load_with_journal(publisher, path, None, kmod_ctl_path)
+    }
+
+    /// Like [`load`], but also restores the private operation journal from `journal_path`.
+    pub fn load_with_journal(
+        publisher: Publisher,
+        path: PathBuf,
+        journal_path: Option<PathBuf>,
+        kmod_ctl_path: Option<PathBuf>,
+    ) -> std::io::Result<Arc<Self>> {
+        let file_config = config_file::read(&path)?;
+
+        let mut journal = match &journal_path {
+            Some(jp) => journal::read(jp)?,
+            None => Journal::default(),
         };
+        // Fence before exposing operations: Running → Unknown, no effect replay.
+        journal.fence_unresolved();
+        if let Some(jp) = &journal_path {
+            // Persist the fenced form so a second crash does not see stale Running.
+            journal::write_atomic(jp, &journal)?;
+        }
+
+        let (config, config_revision) = match file_config {
+            Some(config) => {
+                let rev = if journal_path.is_some() && journal.config_revision > 0 {
+                    journal.config_revision
+                } else {
+                    1
+                };
+                (Some(config), rev)
+            }
+            None => (
+                None,
+                if journal_path.is_some() {
+                    journal.config_revision
+                } else {
+                    0
+                },
+            ),
+        };
+
+        let mut operations = HashMap::new();
+        for entry in &journal.operations {
+            operations.insert(
+                entry.record.op,
+                StoredOperation {
+                    base: entry.base,
+                    edit: entry.edit.clone(),
+                    record: entry.record.clone(),
+                },
+            );
+        }
+
         let state = Arc::new(CoreState {
             publisher,
             config: Mutex::new(ConfigStore {
                 config: config.clone(),
                 config_revision,
-                operations: HashMap::new(),
+                operations,
+                journal,
             }),
             config_path: Some(path),
+            journal_path,
             kmod_ctl_path,
         });
         if let Some(config) = config {
@@ -121,6 +182,10 @@ impl CoreState {
     /// phase failure — lives in the queryable [`OperationRecord`] (settled), the way the app
     /// accepts an operation and then reports how it settled. `Persist` is the durable commit,
     /// so only a confirmed `Persist` publishes the new config into the replica.
+    ///
+    /// When a journal is configured, intent is synced before each dispatched effect and the
+    /// settled record (plus revision) is synced afterward. Restart recovery fences unresolved
+    /// work; it does not replay effects.
     fn submit_edit(
         &self,
         op: OperationId,
@@ -137,12 +202,16 @@ impl CoreState {
                 Err(SubmitError::IdReused)
             };
         }
-        // An uncertain dispatch is never repaired by blindly submitting a new
-        // edit. Durable restart recovery remains a separate migration stage.
+        // Retention must not turn a pruned retry into a new mutation.
+        if store.journal.is_retired(op) {
+            return Err(SubmitError::IdReused);
+        }
+        // An uncertain dispatch is never repaired by blindly submitting a new edit.
         if store
             .operations
             .values()
-            .any(|stored| stored.record.settled == Some(vpnhide_core_rpc::PhaseOutcome::Unknown))
+            .any(|stored| stored.record.settled == Some(PhaseOutcome::Unknown))
+            || store.journal.has_unknown()
         {
             return Err(SubmitError::Unavailable);
         }
@@ -168,28 +237,70 @@ impl CoreState {
         // when a control node is configured and the config has a native target, delivers the
         // native wire (Native). An accepted edit is on disk before the config is committed in
         // memory. Blocking IO under the lock is deliberate: it serializes writers.
-        // On any config change, re-project and re-deliver to keep the backend in sync (a
-        // write replaces its entire state, so this also clears removed targets). Only when a
-        // control node is configured — the dev sandbox leaves it unset and stays Persist-only.
         let native = changed && self.kmod_ctl_path.is_some();
         let plan = operation::plan_for(native);
         let runner = RealPhaseRunner::new(self.config_path.clone(), self.kmod_ctl_path.clone());
-        let outcome = operation::run_plan(&plan, &next, changed, &runner);
+
+        let outcome = if let Some(journal_path) = self.journal_path.clone() {
+            let mut hook = JournalPhaseHook {
+                path: journal_path,
+                journal: &mut store.journal,
+                op,
+                base,
+                edit,
+                plan: plan.clone(),
+                completed: Vec::new(),
+            };
+            operation::run_plan_hooked(&plan, &next, changed, &runner, Some(&mut hook))
+        } else {
+            operation::run_plan(&plan, &next, changed, &runner)
+        };
 
         if outcome.persisted {
             store.config = Some(next.clone());
             store.config_revision += 1;
+        }
+        let record = OperationRecord {
+            op,
+            phases: outcome.phases.clone(),
+            settled: Some(outcome.settled),
+        };
+        if let Some(journal_path) = &self.journal_path {
+            let revision_for_journal = store.config_revision;
+            if let Err(e) = journal::record_settled(
+                journal_path,
+                &mut store.journal,
+                op,
+                base,
+                edit,
+                record.clone(),
+                revision_for_journal,
+            ) {
+                eprintln!("core: journal settle failed: {e}");
+                // Evidence of the effect may already exist; surface uncertainty rather than
+                // pretending the operation vanished.
+                let uncertain = OperationRecord {
+                    op,
+                    phases: outcome.phases.clone(),
+                    settled: Some(PhaseOutcome::Unknown),
+                };
+                store.operations.insert(
+                    op,
+                    StoredOperation {
+                        base,
+                        edit: edit.clone(),
+                        record: uncertain,
+                    },
+                );
+                return Err(SubmitError::Unavailable);
+            }
         }
         store.operations.insert(
             op,
             StoredOperation {
                 base,
                 edit: edit.clone(),
-                record: OperationRecord {
-                    op,
-                    phases: outcome.phases,
-                    settled: Some(outcome.settled),
-                },
+                record,
             },
         );
 
@@ -233,6 +344,70 @@ impl CoreState {
             .operations
             .get(&op)
             .map(|stored| stored.record.clone())
+    }
+}
+
+/// Syncs journal evidence at each phase boundary (durability-before-effect).
+struct JournalPhaseHook<'a> {
+    path: PathBuf,
+    journal: &'a mut Journal,
+    op: OperationId,
+    base: BaseRef,
+    edit: &'a ConfigEdit,
+    plan: Vec<ConfigPhase>,
+    completed: Vec<(ConfigPhase, PhaseOutcome)>,
+}
+
+impl PhaseHook for JournalPhaseHook<'_> {
+    fn before(&mut self, phase: ConfigPhase) -> Result<(), PhaseOutcome> {
+        journal::record_phase_running(
+            &self.path,
+            self.journal,
+            self.op,
+            self.base,
+            self.edit,
+            &self.plan,
+            &self.completed,
+            phase,
+        )
+        .map_err(|e| {
+            eprintln!("core: journal intent failed before {phase:?}: {e}");
+            PhaseOutcome::FailedKnown
+        })
+    }
+
+    fn after(&mut self, phase: ConfigPhase, outcome: PhaseOutcome) {
+        self.completed.push((phase, outcome));
+        // Mid-plan progress is already covered by the next before() / final settle.
+        // Sync after Persist so a crash before Native still sees Persist confirmed.
+        if phase == ConfigPhase::Persist {
+            let phases: Vec<PhaseRecord> = self
+                .plan
+                .iter()
+                .map(|&p| {
+                    let outcome = if let Some((_, o)) = self.completed.iter().find(|(c, _)| *c == p)
+                    {
+                        *o
+                    } else {
+                        PhaseOutcome::NotAttempted
+                    };
+                    PhaseRecord { phase: p, outcome }
+                })
+                .collect();
+            let entry = JournalEntry {
+                base: self.base,
+                edit: self.edit.clone(),
+                record: OperationRecord {
+                    op: self.op,
+                    phases,
+                    settled: None,
+                },
+            };
+            self.journal.upsert(entry);
+            if let Err(e) = journal::write_atomic(&self.path, self.journal) {
+                eprintln!("core: journal after Persist failed: {e}");
+            }
+        }
     }
 }
 
@@ -307,7 +482,8 @@ pub fn serve_connection(stream: UnixStream, state: Arc<CoreState>, cancel: Cance
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vpnhide_core_rpc::{ConfigToggle, PhaseOutcome, StateSnapshot};
+    use crate::journal::{Journal, JournalEntry};
+    use vpnhide_core_rpc::{ConfigToggle, PhaseOutcome, PhaseRecord, StateSnapshot};
 
     fn server() -> CoreServer {
         CoreServer::new(CoreState::new(Publisher::new(1, StateSnapshot::default())))
@@ -465,5 +641,221 @@ mod tests {
                 .await
                 .is_ok()
         );
+    }
+
+    #[tokio::test]
+    async fn journal_survives_restart_and_dedupes_same_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("vpnhide_config.json");
+        let journal_path = dir.path().join("operations.json");
+        let ctx = tarpc::context::current;
+
+        let state = CoreState::load_with_journal(
+            Publisher::new(1, StateSnapshot::default()),
+            config_path.clone(),
+            Some(journal_path.clone()),
+            None,
+        )
+        .unwrap();
+        let server = CoreServer::new(state);
+        let replace = ConfigEdit::Replace {
+            config: CanonicalConfig {
+                debug: true,
+                ..Default::default()
+            },
+        };
+        server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(10),
+                BaseRef { revision: 0 },
+                replace.clone(),
+            )
+            .await
+            .expect("accepted");
+        assert!(journal_path.exists());
+
+        // Restart: durable revision continues, operation identity is restored.
+        let restarted = CoreState::load_with_journal(
+            Publisher::new(2, StateSnapshot::default()),
+            config_path,
+            Some(journal_path),
+            None,
+        )
+        .unwrap();
+        let server2 = CoreServer::new(restarted);
+        let published = server2.clone().state_since(ctx(), 0, 0).await;
+        assert_eq!(published.snapshot.config_revision, 1);
+        let record = server2
+            .clone()
+            .get_operation(ctx(), OperationId(10))
+            .await
+            .expect("restored op");
+        assert_eq!(record.settled, Some(PhaseOutcome::Confirmed));
+
+        // Same id + same request → existing operation (idempotent retry).
+        assert_eq!(
+            server2
+                .clone()
+                .submit_edit(ctx(), OperationId(10), BaseRef { revision: 0 }, replace)
+                .await
+                .expect("deduped")
+                .op,
+            OperationId(10),
+        );
+        // Same id + different content → rejected.
+        let reused = server2
+            .submit_edit(
+                ctx(),
+                OperationId(10),
+                BaseRef { revision: 1 },
+                ConfigEdit::Toggle {
+                    field: ConfigToggle::Debug,
+                    enabled: false,
+                },
+            )
+            .await;
+        assert!(matches!(reused, Err(SubmitError::IdReused)));
+    }
+
+    #[tokio::test]
+    async fn restart_at_native_boundary_preserves_uncertainty_without_replay() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("vpnhide_config.json");
+        let journal_path = dir.path().join("operations.json");
+
+        // Simulate a crash after Persist confirmed, Native still Running.
+        let mut journal = Journal {
+            config_revision: 1,
+            ..Journal::default()
+        };
+        journal.upsert(JournalEntry {
+            base: BaseRef { revision: 0 },
+            edit: ConfigEdit::Replace {
+                config: CanonicalConfig {
+                    debug: true,
+                    ..Default::default()
+                },
+            },
+            record: OperationRecord {
+                op: OperationId(42),
+                phases: vec![
+                    PhaseRecord {
+                        phase: ConfigPhase::Persist,
+                        outcome: PhaseOutcome::Confirmed,
+                    },
+                    PhaseRecord {
+                        phase: ConfigPhase::Native,
+                        outcome: PhaseOutcome::Running,
+                    },
+                ],
+                settled: None,
+            },
+        });
+        journal::write_atomic(&journal_path, &journal).unwrap();
+        // Config file already reflects the Persist (crash after write, before Native done).
+        config_file::write_atomic(
+            &config_path,
+            &CanonicalConfig {
+                debug: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let restarted = CoreState::load_with_journal(
+            Publisher::new(9, StateSnapshot::default()),
+            config_path,
+            Some(journal_path.clone()),
+            // Even with a ctl path, recovery must not re-dispatch Native.
+            Some(dir.path().join("missing_ctl")),
+        )
+        .unwrap();
+        let server = CoreServer::new(restarted);
+        let ctx = tarpc::context::current;
+        let record = server
+            .clone()
+            .get_operation(ctx(), OperationId(42))
+            .await
+            .expect("fenced op");
+        assert_eq!(record.settled, Some(PhaseOutcome::Unknown));
+        assert_eq!(
+            record.phases[1].outcome,
+            PhaseOutcome::Unknown,
+            "Running Native must become Unknown, not Confirmed"
+        );
+        // New edits are blocked while uncertainty remains.
+        let blocked = server
+            .submit_edit(
+                ctx(),
+                OperationId(43),
+                BaseRef { revision: 1 },
+                ConfigEdit::Toggle {
+                    field: ConfigToggle::AutoHideName,
+                    enabled: true,
+                },
+            )
+            .await;
+        assert!(matches!(blocked, Err(SubmitError::Unavailable)));
+        // Journal on disk should no longer say Running after fencing write-back.
+        let on_disk = journal::read(&journal_path).unwrap();
+        assert_eq!(
+            on_disk.get(OperationId(42)).unwrap().record.settled,
+            Some(PhaseOutcome::Unknown)
+        );
+    }
+
+    #[tokio::test]
+    async fn journal_revision_continues_across_restarts() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("vpnhide_config.json");
+        let journal_path = dir.path().join("operations.json");
+        let ctx = tarpc::context::current;
+
+        let state = CoreState::load_with_journal(
+            Publisher::new(1, StateSnapshot::default()),
+            config_path.clone(),
+            Some(journal_path.clone()),
+            None,
+        )
+        .unwrap();
+        let server = CoreServer::new(state);
+        server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(1),
+                BaseRef { revision: 0 },
+                ConfigEdit::Replace {
+                    config: CanonicalConfig::default(),
+                },
+            )
+            .await
+            .unwrap();
+        server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(2),
+                BaseRef { revision: 1 },
+                ConfigEdit::Toggle {
+                    field: ConfigToggle::Debug,
+                    enabled: true,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Without a journal, load would reconstruct revision=1; with a journal it continues at 2.
+        let restarted = CoreState::load_with_journal(
+            Publisher::new(2, StateSnapshot::default()),
+            config_path,
+            Some(journal_path),
+            None,
+        )
+        .unwrap();
+        let published = CoreServer::new(restarted).state_since(ctx(), 0, 0).await;
+        assert_eq!(published.snapshot.config_revision, 2);
     }
 }

@@ -13,6 +13,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vpnhide_core_daemon::config_file::{self, config_path_from_env};
+use vpnhide_core_daemon::journal::journal_path_from_env;
 use vpnhide_core_daemon::{CoreClient, CoreState, Publisher, observe, serve};
 use vpnhide_core_daemon::{activation, backend};
 use vpnhide_core_rpc::StateSnapshot;
@@ -120,12 +121,15 @@ async fn run(path: &str) {
     // The durable canonical config (§4 tier-1). Path is overridable via VPNHIDE_CONFIG_PATH
     // so the dev sandbox core never touches the real /data/system file.
     let config_path = config_path_from_env();
+    // Private operation journal (§4 tier 3 / §5). Overridable via VPNHIDE_JOURNAL_PATH.
+    let journal_path = journal_path_from_env();
     // The Native phase's control node (§4/§9.1). Unset via VPNHIDE_KMOD_CTL = no native write,
     // so the dev sandbox core never touches the real /proc/vpnhide_ctl.
     let kmod_ctl_path = vpnhide_core_daemon::activation::kmod_ctl_path_from_env();
-    let state = match CoreState::load(
+    let state = match CoreState::load_with_journal(
         Publisher::new(epoch, StateSnapshot::default()),
         config_path.clone(),
+        Some(journal_path.clone()),
         kmod_ctl_path.clone(),
     ) {
         Ok(state) => state,
@@ -164,9 +168,10 @@ async fn run(path: &str) {
     };
 
     eprintln!(
-        "core: epoch={epoch} serving on {path} config={} ({}) native_ctl={} backend={:?} (ctrl-c to stop)",
+        "core: epoch={epoch} serving on {path} config={} ({}) journal={} native_ctl={} backend={:?} (ctrl-c to stop)",
         config_path.display(),
         if state.has_config() { "loaded" } else { "none" },
+        journal_path.display(),
         kmod_ctl_path
             .as_ref()
             .map_or_else(|| "disabled".to_string(), |p| p.display().to_string()),

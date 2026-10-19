@@ -10,12 +10,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{Mutex, watch};
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use vpnhide_core_rpc::{
-    Accepted, BaseRef, ClientHello, ConfigEdit, Handshake, OperationId, OperationRecord,
-    StateSnapshot, SubmitError, VpnhideCoreClient, CALL_DEADLINE, PROTOCOL_VERSION,
-    STATE_POLL_DEADLINE,
+    Accepted, BaseRef, CALL_DEADLINE, ClientHello, ConfigEdit, Handshake, OperationId,
+    OperationRecord, PROTOCOL_VERSION, STATE_POLL_DEADLINE, StateSnapshot, SubmitError,
+    VpnhideCoreClient,
 };
 
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
@@ -76,7 +76,10 @@ impl CoreClient {
         edit: ConfigEdit,
     ) -> Result<Result<Accepted, SubmitError>, String> {
         let client = self.client().await.map_err(|e| e.to_string())?;
-        match client.submit_edit(deadline(CALL_DEADLINE), op, base, edit).await {
+        match client
+            .submit_edit(deadline(CALL_DEADLINE), op, base, edit)
+            .await
+        {
             Ok(result) => Ok(result),
             Err(e) => {
                 self.drop_client().await;
@@ -149,7 +152,10 @@ async fn mirror(me: Arc<CoreClient>) {
                 continue;
             }
         };
-        match client.state_since(deadline(STATE_POLL_DEADLINE), following, revision).await {
+        match client
+            .state_since(deadline(STATE_POLL_DEADLINE), following, revision)
+            .await
+        {
             Ok(published) => {
                 if published.epoch != following {
                     // A new run of the core: its revisions start again, so adopt rather

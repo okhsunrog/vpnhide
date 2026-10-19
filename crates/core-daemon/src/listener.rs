@@ -95,8 +95,8 @@ fn remove_socket(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     async fn wait_until_refused(path: &Path) {

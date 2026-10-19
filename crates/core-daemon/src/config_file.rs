@@ -127,12 +127,19 @@ fn from_disk(root: &Value) -> Option<CanonicalConfig> {
         optional_features: string_set_at(s, "optionalFeatures"),
         auto_hide_vpn_services: opt_bool_at(s, "autoHideVpnServices")
             .unwrap_or(defaults.auto_hide_vpn_services),
-        auto_hide_vpn_name: opt_bool_at(s, "autoHideVpnName").unwrap_or(defaults.auto_hide_vpn_name),
+        auto_hide_vpn_name: opt_bool_at(s, "autoHideVpnName")
+            .unwrap_or(defaults.auto_hide_vpn_name),
         auto_hide_excluded_packages: string_set_at(s, "autoHideExcludedPackages"),
         auto_hidden_packages: string_set_at(s, "autoHiddenPackages"),
     };
 
-    Some(CanonicalConfig { version, debug, debug_switch, apps, settings })
+    Some(CanonicalConfig {
+        version,
+        debug,
+        debug_switch,
+        apps,
+        settings,
+    })
 }
 
 fn app_from_disk(value: &Value) -> AppConfig {
@@ -153,10 +160,16 @@ fn app_from_disk(value: &Value) -> AppConfig {
         java,
         java_hooks,
         native: native_role_from_disk(value.get("native")),
-        app_hiding: value.get("appHiding").and_then(Value::as_bool).unwrap_or(false),
+        app_hiding: value
+            .get("appHiding")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         ports,
         port_policy,
-        hidden: value.get("hidden").and_then(Value::as_bool).unwrap_or(false),
+        hidden: value
+            .get("hidden")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
@@ -193,7 +206,11 @@ fn native_role_from_disk(value: Option<&Value>) -> NativeRole {
         _ => {
             let (enabled, hooks) = hook_role(value);
             if enabled {
-                NativeRole { enabled: true, kernel: hooks, zygisk: None }
+                NativeRole {
+                    enabled: true,
+                    kernel: hooks,
+                    zygisk: None,
+                }
             } else {
                 NativeRole::default()
             }
@@ -210,14 +227,22 @@ fn port_policy_from_disk(value: Option<&Value>) -> Option<PortPolicy> {
     for r in rules_json {
         rules.push(port_rule_from_disk(r.as_object()?)?);
     }
-    let mode = obj.get("mode").and_then(Value::as_str).unwrap_or("custom").to_owned();
+    let mode = obj
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("custom")
+        .to_owned();
     let preset = obj
         .get("preset")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_owned);
-    Some(PortPolicy { mode, preset, rules })
+    Some(PortPolicy {
+        mode,
+        preset,
+        rules,
+    })
 }
 
 fn port_rule_from_disk(obj: &Map<String, Value>) -> Option<PortRule> {
@@ -229,12 +254,20 @@ fn port_rule_from_disk(obj: &Map<String, Value>) -> Option<PortRule> {
     if start == 0 || start > u16::MAX as u64 || end < start || end > u16::MAX as u64 {
         return None;
     }
-    let protocol = match obj.get("protocol").and_then(Value::as_str).unwrap_or("both") {
+    let protocol = match obj
+        .get("protocol")
+        .and_then(Value::as_str)
+        .unwrap_or("both")
+    {
         "tcp" => PortProtocol::Tcp,
         "udp" => PortProtocol::Udp,
         _ => PortProtocol::Both,
     };
-    Some(PortRule { protocol, start: start as u16, end: end as u16 })
+    Some(PortRule {
+        protocol,
+        start: start as u16,
+        end: end as u16,
+    })
 }
 
 // ---- model -> disk JSON (port of canonicalConfigJson) -----------------------------------
@@ -264,7 +297,10 @@ fn to_disk(config: &CanonicalConfig) -> Value {
 
 fn app_to_disk(app: &AppConfig) -> Value {
     let mut o = Map::new();
-    o.insert("java".into(), hook_role_value(app.java, app.java_hooks.as_deref()));
+    o.insert(
+        "java".into(),
+        hook_role_value(app.java, app.java_hooks.as_deref()),
+    );
     o.insert("native".into(), native_role_value(&app.native));
     o.insert("appHiding".into(), Value::Bool(app.app_hiding));
     o.insert("ports".into(), Value::Bool(app.ports));
@@ -397,14 +433,24 @@ mod tests {
 
     /// native=all (enabled, no per-hook overrides).
     fn native_all() -> NativeRole {
-        NativeRole { enabled: true, kernel: None, zygisk: None }
+        NativeRole {
+            enabled: true,
+            kernel: None,
+            zygisk: None,
+        }
     }
 
     /// A config exercising every polymorphic shape and conditional field.
     fn rich() -> CanonicalConfig {
         let mut apps = BTreeMap::new();
         // java=all, native=all
-        apps.insert("com.a".into(), app(|a| { a.java = true; a.native = native_all(); }));
+        apps.insert(
+            "com.a".into(),
+            app(|a| {
+                a.java = true;
+                a.native = native_all();
+            }),
+        );
         // java per-hook list, native per-hook object with both families
         apps.insert(
             "com.b".into(),
@@ -419,7 +465,13 @@ mod tests {
             }),
         );
         // hidden only, app_hiding
-        apps.insert("com.c".into(), app(|a| { a.hidden = true; a.app_hiding = true; }));
+        apps.insert(
+            "com.c".into(),
+            app(|a| {
+                a.hidden = true;
+                a.app_hiding = true;
+            }),
+        );
         // ports with a policy (single-port rule + range rule)
         apps.insert(
             "com.d".into(),
@@ -429,8 +481,16 @@ mod tests {
                     mode: "custom".into(),
                     preset: Some("torrents".into()),
                     rules: vec![
-                        PortRule { protocol: PortProtocol::Tcp, start: 443, end: 443 },
-                        PortRule { protocol: PortProtocol::Both, start: 6881, end: 6889 },
+                        PortRule {
+                            protocol: PortProtocol::Tcp,
+                            start: 443,
+                            end: 443,
+                        },
+                        PortRule {
+                            protocol: PortProtocol::Both,
+                            start: 6881,
+                            end: 6889,
+                        },
                     ],
                 });
             }),
@@ -480,7 +540,10 @@ mod tests {
         assert_eq!(apps["com.b"]["java"], json!(["hookX", "hookY"]));
         // native: bool true (com.a) vs object (com.b)
         assert_eq!(apps["com.a"]["native"], json!(true));
-        assert_eq!(apps["com.b"]["native"], json!({"enabled": true, "kernel": ["k1"], "zygisk": ["z1", "z2"]}));
+        assert_eq!(
+            apps["com.b"]["native"],
+            json!({"enabled": true, "kernel": ["k1"], "zygisk": ["z1", "z2"]})
+        );
         // hidden written only when true; com.a has no hidden key, com.c does
         assert!(apps["com.a"].get("hidden").is_none());
         assert_eq!(apps["com.c"]["hidden"], json!(true));
@@ -519,8 +582,14 @@ mod tests {
         // bool native -> enabled, no overrides
         assert_eq!(cfg.apps["com.bool"].native, native_all());
         // array java -> java=true + hooks; array native -> kernel overrides
-        assert_eq!(cfg.apps["com.arr"].java_hooks.as_deref(), Some(&["h1".to_string()][..]));
-        assert_eq!(cfg.apps["com.arr"].native.kernel.as_deref(), Some(&["k1".to_string(), "k2".to_string()][..]));
+        assert_eq!(
+            cfg.apps["com.arr"].java_hooks.as_deref(),
+            Some(&["h1".to_string()][..])
+        );
+        assert_eq!(
+            cfg.apps["com.arr"].native.kernel.as_deref(),
+            Some(&["k1".to_string(), "k2".to_string()][..])
+        );
     }
 
     #[test]

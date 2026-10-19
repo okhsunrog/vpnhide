@@ -6,7 +6,7 @@
 //! rather than stalled on sequence numbers that are no longer comparable.
 
 use tokio::sync::watch;
-use vpnhide_core_rpc::{Published, StateSnapshot, STATE_HOLD};
+use vpnhide_core_rpc::{Published, STATE_HOLD, StateSnapshot};
 
 /// Owns the current [`Published`] and wakes long polls when it changes.
 pub struct Publisher {
@@ -17,7 +17,11 @@ pub struct Publisher {
 impl Publisher {
     /// Start an epoch at revision 1 with an initial snapshot.
     pub fn new(epoch: u64, initial: StateSnapshot) -> Self {
-        let (tx, _rx) = watch::channel(Published { epoch, revision: 1, snapshot: initial });
+        let (tx, _rx) = watch::channel(Published {
+            epoch,
+            revision: 1,
+            snapshot: initial,
+        });
         Publisher { epoch, tx }
     }
 
