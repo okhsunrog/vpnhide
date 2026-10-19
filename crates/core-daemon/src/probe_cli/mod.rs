@@ -20,9 +20,10 @@ pub fn run(args: &[String]) -> Option<i32> {
         [command, mode] if command == "observe" && mode == "kpm-list" => {
             observations::kpm_list(&[])
         }
+        [command, mode] if command == "observe" && mode == "kpm-state" => observations::kpm_state(),
         [command, ..] if command == "probe" || command == "observe" => {
             eprintln!(
-                "usage: vpnhide-core probe checks | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-list"
+                "usage: vpnhide-core probe checks | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-list | observe kpm-state"
             );
             2
         }

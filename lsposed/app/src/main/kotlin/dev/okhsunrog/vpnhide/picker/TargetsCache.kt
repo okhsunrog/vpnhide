@@ -11,6 +11,7 @@ import dev.okhsunrog.vpnhide.RootSnapshot
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.StateCache
 import dev.okhsunrog.vpnhide.activeNativeBackendId
+import dev.okhsunrog.vpnhide.builtinKernelPresent
 import dev.okhsunrog.vpnhide.detectNativeBackendStates
 import dev.okhsunrog.vpnhide.nativeHookFamilyFor
 import dev.okhsunrog.vpnhide.next
@@ -39,11 +40,11 @@ internal data class TargetsSnapshot(
     val kmodModuleInstalled: Boolean,
     val kpmModuleInstalled: Boolean,
     val zygiskModuleInstalled: Boolean,
-    val portsModuleInstalled: Boolean,
     val uidToPkg: Map<Int, String>,
     val canonicalConfig: CanonicalConfig?,
     val apatchSuperkeySaved: Boolean = false,
     val activeNativeBackendId: NativeBackendId? = null,
+    /** The in-tree driver owns /proc/vpnhide_ctl (it has no module to install). */
     val builtinModuleInstalled: Boolean = false,
     /** Exact package → UID projection from the shared per-user package
      * inventory. The picker uses it to enforce native capacity before Save,
@@ -122,7 +123,6 @@ internal object TargetsCache : StateCache<RootProjection<TargetsSnapshot>>(
 
 internal fun parseTargetsSnapshot(rootSnapshot: RootSnapshot): TargetsSnapshot {
     val sections = rootSnapshot.sections
-    val portsInstalled = sections["ports_prop"]?.isNotBlank() == true
     val canonical = runCatching { parseCanonicalConfig(sections["canonical_config"].orEmpty()) }.getOrNull()
 
     // The inventory contains one block per Android user. Each resolved UID
@@ -139,10 +139,9 @@ internal fun parseTargetsSnapshot(rootSnapshot: RootSnapshot): TargetsSnapshot {
     // fields — there is nothing to fill in here beyond the config itself.
     return TargetsSnapshot(
         kmodModuleInstalled = sections["kmod_module_dir"]?.trim() == "1",
-        builtinModuleInstalled = sections["builtin_module_dir"]?.trim() == "1",
+        builtinModuleInstalled = builtinKernelPresent(sections),
         kpmModuleInstalled = sections["kpm_module_dir"]?.trim() == "1",
         zygiskModuleInstalled = sections["zygisk_module_dir"]?.trim() == "1",
-        portsModuleInstalled = portsInstalled,
         uidToPkg = uidToPkg,
         canonicalConfig = canonical,
         apatchSuperkeySaved = sections["superkey_saved"]?.trim() == "1",

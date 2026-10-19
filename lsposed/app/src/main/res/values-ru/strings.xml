@@ -90,7 +90,7 @@
     <string name="self_targets_error_body_unknown">VPN Hide не смог завершить подготовку запуска с root-доступом (показано ниже). Нажмите «Повторить».</string>
     <string name="targets_load_failed_title">Данные скрытия недоступны</string>
     <string name="targets_load_failed_message">VPN Hide не смог получить данные для этой вкладки через root. Проверьте менеджер root, если запрос доступа был прерван, затем нажмите «Повторить».</string>
-    <string name="dashboard_ports">Модуль скрытия портов</string>
+    <string name="dashboard_ports">Скрытие портов</string>
     <string name="dashboard_java_backend">Java-бэкенд</string>
     <string name="dashboard_native_backend">Нативный бэкенд</string>
     <string name="dashboard_backend_lsposed">LSPosed</string>
@@ -111,8 +111,7 @@
     <string name="dashboard_kmod_broken_unknown_variant">Установлен, не загрузился</string>
     <string name="dashboard_kmod_broken_ambiguous">Установлен, не загрузился — попробуйте второй GKI-вариант</string>
     <string name="dashboard_kmod_broken_signature_enforced">Установлен, ядро отклоняет неподписанные модули</string>
-    <string name="dashboard_module_broken_activator_missing">Установлен, отсутствует активатор</string>
-    <string name="dashboard_module_broken_activator_not_executable">Установлен, активатор не исполняемый</string>
+    <string name="dashboard_module_broken_artifact_missing">Установлен, нет полезной нагрузки</string>
     <string name="dashboard_active_targets">Активен · целей: %d</string>
     <string name="dashboard_reboot_needed">Требуется перезагрузка устройства</string>
     <string name="dashboard_hero_protected_title">VPN скрыт</string>
@@ -322,7 +321,6 @@
     <string name="reset_blocker_kmod">Модуль ядра (.ko) ещё установлен</string>
     <string name="reset_blocker_kpm">KPM ещё установлен</string>
     <string name="reset_blocker_zygisk">Модуль Zygisk ещё установлен</string>
-    <string name="reset_blocker_ports">Модуль портов ещё установлен</string>
     <string name="reset_blocker_kernel">Хуки ядра ещё присутствуют. После удаления загружаемого модуля нужна перезагрузка; для встроенного бэкенда нужно ядро без VPN Hide.</string>
     <string name="reset_blocker_lsposed">LSPosed-хук ещё активен</string>
     <string name="reset_confirm">Удалить всё</string>
@@ -341,12 +339,9 @@
     <string name="dashboard_issue_native_conflict_deferred">Модуль ядра (.ko) и KPM установлены одновременно. KPM отключился при загрузке, чтобы не подвесить устройство, и сейчас бездействует. Оставьте только один — удалите KPM (или модуль ядра).</string>
     <string name="dashboard_issue_kpm_awaiting_superkey">KPM установлен, но не активен: APatch/FolkPatch не смог загрузить его через доверенный su-токен. Сохраните SuperKey в Настройки → Безопасность и перезагрузитесь для активации нативного скрытия.</string>
     <string name="dashboard_issue_module_reboot_to_activate">Модуль %1$s установлен, но ещё не активен — перезагрузите устройство, чтобы он заработал.</string>
-    <string name="dashboard_issue_module_activator_missing">Установка модуля %1$s повреждена: отсутствует активатор (%2$s). Переустановите ZIP модуля из последнего релиза.</string>
-    <string name="dashboard_issue_module_activator_not_executable">Установка модуля %1$s повреждена: активатор не является исполняемым файлом (%2$s). Переустановите ZIP модуля из последнего релиза.</string>
-    <string name="dashboard_issue_kpm_bundle_activator_missing">Установка модуля KPM повреждена: отсутствует активатор (%1$s). Установите полный vpnhide-kpm.zip как APM/Magisk-совместимый модуль через экран «Модули» вашего root-менеджера; не извлекайте и не загружайте внутренний файл vpnhide.kpm отдельно.</string>
-    <string name="dashboard_issue_kpm_bundle_activator_not_executable">Установка модуля KPM повреждена: активатор не является исполняемым файлом (%1$s). Установите полный vpnhide-kpm.zip как APM/Magisk-совместимый модуль через экран «Модули» вашего root-менеджера; не извлекайте и не загружайте внутренний файл vpnhide.kpm отдельно.</string>
+    <string name="dashboard_issue_module_artifact_missing">Установка модуля %1$s повреждена: отсутствует %2$s, и ядру VPN Hide нечего загружать. Переустановите ZIP модуля из последнего релиза.</string>
     <string name="dashboard_issue_kpm_unsupported_kernel">KPM установлен, но не может загрузиться на ядре %1$s: для этого семейства ядра нет проверенной таблицы смещений. Используйте Zygisk.</string>
-    <string name="dashboard_issue_kpm_standalone_install">Обнаружена неправильная установка KPM: KernelPatch загрузил отдельный файл vpnhide.kpm, но модуль vpnhide-kpm.zip не установлен. В одном файле .kpm нет активатора VPN Hide, загрузочных скриптов и доставки настроек, поэтому защита не будет работать правильно. Удалите или выгрузите отдельную запись «vpnhide» в APatch/KPatch-Next (если KPM был встроен в ядро, заново пропатчите boot-образ без него), установите целиком vpnhide-kpm.zip через экран «Модули» и перезагрузите устройство.</string>
+    <string name="dashboard_issue_kpm_standalone_install">Обнаружена неправильная установка KPM: KernelPatch загрузил отдельный файл vpnhide.kpm, но модуль vpnhide-kpm.zip не установлен. Core VPN Hide управляет только тем KPM, который сам загружает из этого модуля, поэтому защита не будет работать правильно. Удалите или выгрузите отдельную запись «vpnhide» в APatch/KPatch-Next (если KPM был встроен в ядро, заново пропатчите boot-образ без него), установите целиком vpnhide-kpm.zip через экран «Модули» и перезагрузите устройство.</string>
     <string name="dashboard_issue_kpm_needs_superkey">KPM установлен, runtime KernelPatch отвечает, но управляющий вызов отклонён — SuperKey в VPN Hide не сохранён, и авторизоваться удалось только доверенным su-токеном. Сохраните SuperKey в Настройки → Безопасность (тот же, что задан в APatch/FolkPatch) и нажмите «Обновить». Переустановка zip не поможет.</string>
     <string name="dashboard_issue_kpm_needs_runtime">KPM установлен, но ядро не пропатчено runtime\'ом KernelPatch, чтобы его загрузить. Установите KPatch-Next-Module и пропатчьте ядро из его интерфейса (работает и на Magisk, и на KernelSU). Если не получится — используйте APatch или FolkPatch.</string>
     <string name="dashboard_issue_native_partial_hooks">Нативный бэкенд загрузился, но на этом ядре встало только %1$d хуков из %2$d — не удалось найти: %3$s. Проверки, которые они закрывают, этим бэкендом не защищены; их может закрывать другой слой. Переустановка не поможет: в этой сборке ядра нужные функции названы иначе или отсутствуют.</string>
@@ -366,7 +361,6 @@
     <string name="dashboard_issue_lsposed_field_rename">Обнаружено переименование AOSP-поля на Android SDK %2$s: %1$s. Java-уровень скрытия отключён для затронутых хуков: они пропущены при установке, чтобы не засорять logcat ошибками NoSuchFieldError при каждом вызове. Пожалуйста, откройте issue на github.com/okhsunrog/vpnhide/issues с этим списком — это нужно, чтобы обновить хуки под вашу версию Android.</string>
     <string name="dashboard_issue_lsposed_install_failures">LSPosed/Vector сообщил об ошибках установки хуков: %1$s. Соберите отладочный лог и приложите его к отчёту об ошибке, чтобы можно было исправить упавший хук.</string>
     <string name="dashboard_issue_no_targets">Целевые приложения не настроены. Откройте вкладку «Скрытие» и выберите нужные.</string>
-    <string name="dashboard_issue_ports_no_observers">Модуль скрытия портов установлен, но Ports не включён ни для одного приложения. Откройте вкладку «Скрытие» и включите Ports для нужных приложений.</string>
     <string name="dashboard_issue_ports_rules_inactive">Ports включён для приложений, но правила iptables не активны. Перезагрузитесь или нажмите «Сохранить» на вкладке «Скрытие»; если проблема останется, соберите отладочный лог — в него попадут Ports load_status/load_log.</string>
     <string name="dashboard_issue_ports_apply_failed">Ports включён для приложений, но правила iptables не активны. Последнее применение завершилось ошибкой: %1$s. Соберите отладочный лог — в него попадут Ports load_status/load_log.</string>
     <string name="dashboard_issue_version_mismatch">Несоответствие версий LSPosed модуля: запущена %1$s, установлена %2$s. Перезагрузите устройство для обновления.</string>
@@ -380,9 +374,9 @@
     <string name="dashboard_issue_update_app_for_zygisk">Версия модуля Zygisk %1$s новее версии приложения %2$s. Обновите приложение VPN Hide.</string>
     <string name="dashboard_issue_kmod_version_mismatch">Несоответствие версий модуля ядра: модуль %1$s, приложение %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
     <string name="dashboard_issue_zygisk_version_mismatch">Несоответствие версий модуля Zygisk: модуль %1$s, приложение %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
-    <string name="dashboard_issue_update_ports">Версия модуля скрытия портов %1$s старее версии приложения %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
-    <string name="dashboard_issue_update_app_for_ports">Версия модуля скрытия портов %1$s новее версии приложения %2$s. Обновите приложение VPN Hide.</string>
-    <string name="dashboard_issue_ports_version_mismatch">Несоответствие версий модуля скрытия портов: модуль %1$s, приложение %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
+    <string name="dashboard_issue_update_core">Версия модуля core %1$s старее версии приложения %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
+    <string name="dashboard_issue_update_app_for_core">Версия модуля core %1$s новее версии приложения %2$s. Обновите приложение VPN Hide.</string>
+    <string name="dashboard_issue_core_version_mismatch">Несоответствие версий модуля core: модуль %1$s, приложение %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
     <string name="dashboard_issue_update_kpm">Версия KPM %1$s старее версии приложения %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
     <string name="dashboard_issue_update_app_for_kpm">Версия KPM %1$s новее версии приложения %2$s. Обновите приложение VPN Hide.</string>
     <string name="dashboard_issue_kpm_version_mismatch">Несоответствие версий KPM: модуль %1$s, приложение %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
@@ -630,9 +624,7 @@
     <string name="config_capture_logging">Отладочные логи остаются включены, пока идёт сбор данных.</string>
     <string name="config_changes_unavailable">Изменение конфигурации недоступно</string>
     <string name="config_close">Закрыть</string>
-    <string name="reset_blocker_builtin">Companion-модуль встроенного бэкенда ещё установлен</string>
     <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide встроен в работающее ядро. Удалите лишний модуль kmod и оставьте companion-модуль встроенного бэкенда.</string>
-    <string name="dashboard_issue_builtin_companion_missing">VPN Hide встроен в это ядро, но companion-модуль отсутствует. Установите companion-модуль встроенного бэкенда VPN Hide для настройки защиты.</string>
     <string name="debug_export_complete">Отчёт собран полностью.</string>
     <string name="debug_export_partial">Собран частичный отчёт. Его можно сохранить или отправить.\n%1$s</string>
     <string name="debug_export_failed">Не удалось собрать отчёт: %1$s</string>

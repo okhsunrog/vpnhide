@@ -940,3 +940,15 @@ does not supersede them):
 - [Capacity/resource limits](../limits.md)
 - [Diagnostics](../diagnostics.md)
 - [Debug bundle](../debug-bundle.md)
+
+**Hard cutover: production backend lanes on.** With the activators, the
+built-in companion and the Ports module deleted, nothing else loads or
+configures a backend, so the common module's `service.sh` now exports
+`VPNHIDE_KERNEL_MODULES=/data/adb/modules`, `VPNHIDE_KPM_LOCK=/data/adb/vpnhide_kpm/ctl.lock`
+(the lock every KPM reader shares) and `VPNHIDE_ZYGISK_MODULE=/data/adb/modules/vpnhide_zygisk`;
+the scaffold check requires them. Selection policy is unchanged: a KPM
+authentication or enumeration error still stops selection rather than risk
+loading a kmod beside a live KPM. Diagnostics read KPM state through core's
+own `vpnhide-core observe kpm-state` (status reply plus stats pages), and the
+dashboard checks each backend module for the payload core loads
+(`<kind>_artifact_state`) instead of an activator.

@@ -105,7 +105,6 @@ class NativeBackendTest {
                 sections =
                     mapOf(
                         "kmod_prop" to "id=vpnhide_kmod\nversion=v1.2.5\n",
-                        "builtin_prop" to "id=vpnhide_builtin\nversion=v1.2.5\n",
                         "proc_exists" to "1",
                         "kmod_state" to "vpnhide 1 status\nbackend 0x4\nkver 0x0\nhooks 0x3ff\nerror 0x0\n",
                         "current_boot_id" to "boot-1",

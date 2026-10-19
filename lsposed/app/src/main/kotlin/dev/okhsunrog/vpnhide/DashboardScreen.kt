@@ -882,8 +882,7 @@ private fun installedVisual(
             ModuleBrokenReason.UnknownVariantInactive -> R.string.dashboard_kmod_broken_unknown_variant
             ModuleBrokenReason.AmbiguousLoadFailed -> R.string.dashboard_kmod_broken_ambiguous
             ModuleBrokenReason.SignatureEnforced -> R.string.dashboard_kmod_broken_signature_enforced
-            ModuleBrokenReason.ActivatorMissing -> R.string.dashboard_module_broken_activator_missing
-            ModuleBrokenReason.ActivatorNotExecutable -> R.string.dashboard_module_broken_activator_not_executable
+            ModuleBrokenReason.ArtifactMissing -> R.string.dashboard_module_broken_artifact_missing
             null -> null
         }
     // Stamped GKI variant (kmod builds from v0.6.3+ only — see ModuleState.gkiVariant),

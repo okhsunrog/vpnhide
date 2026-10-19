@@ -44,17 +44,17 @@ class DetectModulesTest {
     }
 
     @Test
-    fun `builtin active when the control node reports the built-in backend`() {
+    fun `builtin installed and active exactly when the control node reports the built-in backend`() {
         val sections =
             mapOf(
-                "builtin_prop" to "id=vpnhide_builtin\nversion=1.2.5",
                 "kmod_prop" to "id=vpnhide_kmod\nversion=1.2.5",
                 "proc_exists" to "1",
                 "kmod_state" to ctlStatus("4"),
             )
         val builtin = detectBuiltinModule(sections) as ModuleState.Installed
         assertEquals(true, builtin.active)
-        assertEquals("1.2.5", builtin.version)
+        // The driver is part of the kernel image: there is no module version.
+        assertEquals(null, builtin.version)
         // The .ko must NOT also be reported active — this proc is the in-tree
         // driver's, not the module's, even though the kmod_prop is present.
         assertEquals(false, (detectKmodModule(sections) as ModuleState.Installed).active)
@@ -69,7 +69,6 @@ class DetectModulesTest {
                 "kmod_state" to ctlStatus("0"),
             )
         assertEquals(true, (detectKmodModule(sections) as ModuleState.Installed).active)
-        // No builtin companion → not installed.
         assertEquals(ModuleState.NotInstalled, detectBuiltinModule(sections))
     }
 
@@ -87,37 +86,24 @@ class DetectModulesTest {
     }
 
     @Test
-    fun `builtin inactive but verified when the control node reports the kmod backend`() {
-        val sections =
-            mapOf(
-                "builtin_prop" to "id=vpnhide_builtin\nversion=1.2.5",
-                "proc_exists" to "1",
-                "kmod_state" to ctlStatus("0"),
-            )
-        val builtin = detectBuiltinModule(sections) as ModuleState.Installed
-        assertEquals(false, builtin.active)
-        // proc/status were readable (root-equivalent snapshot, no uid probe → trusted).
-        assertEquals(true, builtin.runtimeCheckable)
+    fun `builtin absent without a live built-in control node`() {
+        assertEquals(ModuleState.NotInstalled, detectBuiltinModule(mapOf("proc_exists" to "0", "kmod_state" to ctlStatus("4"))))
+        assertEquals(ModuleState.NotInstalled, detectBuiltinModule(mapOf("proc_exists" to "1")))
+        assertEquals(false, builtinKernelPresent(mapOf("proc_exists" to "1", "kmod_state" to ctlStatus("0"))))
+        assertEquals(true, builtinKernelPresent(mapOf("proc_exists" to "1", "kmod_state" to ctlStatus("4"))))
     }
 
     @Test
-    fun `builtin runtime unverified when snapshot shell lacked root`() {
-        // The 0600 /proc/vpnhide_ctl is EACCES to a non-root shell, so the id
-        // can't be read and proc_exists reads 0 — not proof the backend is off.
+    fun `kpm active when core reads a live status reply`() {
         val sections =
             mapOf(
-                "builtin_prop" to "id=vpnhide_builtin\nversion=1.2.5",
-                "proc_exists" to "0",
-                "snapshot_shell_uid" to "uid=2000\nid=uid=2000(shell)\ncontext=u:r:shell:s0",
+                "kpm_prop" to "version=2.0.0",
+                "kpm_state" to "vpnhide 1 status\nbackend 0x1\nkver 0x0\nhooks 0x3ff\nerror 0x0\n",
             )
-        val builtin = detectBuiltinModule(sections) as ModuleState.Installed
-        assertEquals(false, builtin.active)
-        assertEquals(false, builtin.runtimeCheckable)
-    }
-
-    @Test
-    fun `builtin not installed when its companion prop is absent`() {
-        assertEquals(ModuleState.NotInstalled, detectBuiltinModule(mapOf("proc_exists" to "1", "kmod_state" to ctlStatus("4"))))
+        val kpm = detectKpmModule(sections, parseKpmLoadStatus(""), "boot-1") as ModuleState.Installed
+        assertEquals(true, kpm.active)
+        val idle = detectKpmModule(sections - "kpm_state", parseKpmLoadStatus(""), "boot-1") as ModuleState.Installed
+        assertEquals(false, idle.active)
     }
 
     @Test
@@ -152,7 +138,7 @@ class DetectModulesTest {
     fun `ports runtime unverified when snapshot shell lacked root`() {
         val sections =
             mapOf(
-                "ports_prop" to "version=1.2.3",
+                "core_prop" to "version=1.2.3",
                 "ports_chain" to "0",
                 "snapshot_shell_uid" to "uid=2000\nid=uid=2000(shell)\ncontext=u:r:shell:s0",
             )
@@ -183,7 +169,7 @@ class DetectModulesTest {
     fun `ports active when iptables probe reports connected chains`() {
         val sections =
             mapOf(
-                "ports_prop" to "version=0.6.3",
+                "core_prop" to "version=0.6.3",
                 "ports_chain" to "1",
             )
         val state = detectPortsModule(sections) as ModuleState.Installed
@@ -194,7 +180,7 @@ class DetectModulesTest {
     fun `ports inactive when iptables probe reports missing chains or jumps`() {
         val sections =
             mapOf(
-                "ports_prop" to "version=0.6.3",
+                "core_prop" to "version=0.6.3",
                 "ports_chain" to "0",
                 "snapshot_shell_uid" to "uid=0\nid=uid=0(root)\ncontext=u:r:ksu:s0",
             )
@@ -206,73 +192,69 @@ class DetectModulesTest {
     @Test
     fun `ports unverified, not inactive, when the iptables probe itself failed`() {
         // Exit 4: another process held the xtables lock for longer than the probe waited.
-        val locked = detectPortsModule(mapOf("ports_prop" to "version=0.6.3", "ports_chain" to "error=4")) as ModuleState.Installed
+        val locked = detectPortsModule(mapOf("core_prop" to "version=0.6.3", "ports_chain" to "error=4")) as ModuleState.Installed
         assertEquals(false, locked.active)
         assertEquals(false, locked.runtimeCheckable)
         // The phase never emitted anything.
-        val missing = detectPortsModule(mapOf("ports_prop" to "version=0.6.3")) as ModuleState.Installed
+        val missing = detectPortsModule(mapOf("core_prop" to "version=0.6.3")) as ModuleState.Installed
         assertEquals(false, missing.runtimeCheckable)
         // An unverified reading is no evidence that the rules are missing: no warning.
-        assertEquals(null, detectPortsApplyProblem(locked, 1, "boot_id=boot-1\nloaded=1", "boot-1", portsDisabled = false))
+        assertEquals(null, detectPortsApplyProblem(locked, 1, "status=Applied\n", portsDisabled = false))
     }
 
     @Test
-    fun `ports apply problem uses current boot failure detail`() {
-        val ports = ModuleState.Installed(version = "0.6.3", active = false)
+    fun `ports apply problem carries core's boot failure detail`() {
+        val ports = ModuleState.Installed(version = "2.0.0", active = false)
         val problem =
             detectPortsApplyProblem(
                 ports,
                 1,
-                "boot_id=boot-1\nloaded=0\ndetail=iptables-restore failed\n",
-                currentBootId = "boot-1",
+                "status=AppliedWithFailure { settled: FailedKnown }\nop=Some(7)\ndetail=iptables-restore failed\n",
                 portsDisabled = false,
             )
 
         assertEquals("iptables-restore failed", problem?.failureDetail)
+        val refused = detectPortsApplyProblem(ports, 1, "status=HeldUnknown\nop=None\ndetail=\n", portsDisabled = false)
+        assertEquals("HeldUnknown", refused?.failureDetail)
     }
 
     @Test
-    fun `ports apply problem is generic when chains are missing without current boot failure`() {
-        val ports = ModuleState.Installed(version = "0.6.3", active = false)
+    fun `ports apply problem is generic when chains are missing after a clean boot apply`() {
+        val ports = ModuleState.Installed(version = "2.0.0", active = false)
 
-        assertEquals(null, detectPortsApplyProblem(ports.copy(active = true), 1, "", "boot-1", portsDisabled = false))
-        assertEquals(null, detectPortsApplyProblem(ports, 0, "", "boot-1", portsDisabled = false))
+        assertEquals(null, detectPortsApplyProblem(ports.copy(active = true), 1, "", portsDisabled = false))
+        assertEquals(null, detectPortsApplyProblem(ports, 0, "", portsDisabled = false))
         assertEquals(
             PortsApplyProblem(failureDetail = null),
-            detectPortsApplyProblem(ports, 1, "boot_id=old\nloaded=0\ndetail=old failure\n", "boot-1", portsDisabled = false),
+            detectPortsApplyProblem(ports, 1, "status=Applied\nop=Some(1)\ndetail=\n", portsDisabled = false),
         )
+        assertEquals(PortsApplyProblem(failureDetail = null), detectPortsApplyProblem(ports, 1, "", portsDisabled = false))
     }
 
     @Test
-    fun `ports apply problem is suppressed for a deliberately disabled module`() {
-        val ports = ModuleState.Installed(version = "0.6.3", active = false)
+    fun `ports apply problem is suppressed for a deliberately disabled core module`() {
+        val ports = ModuleState.Installed(version = "2.0.0", active = false)
 
         assertEquals(
             null,
-            detectPortsApplyProblem(
-                ports,
-                1,
-                "boot_id=boot-1\nloaded=0\ndetail=iptables-restore failed\n",
-                currentBootId = "boot-1",
-                portsDisabled = true,
-            ),
+            detectPortsApplyProblem(ports, 1, "status=AppliedWithFailure\ndetail=iptables-restore failed\n", portsDisabled = true),
         )
     }
 
     @Test
-    fun `ports apply problem does not duplicate a bundle integrity failure`() {
+    fun `ports apply problem does not duplicate a module integrity failure`() {
         val ports =
             ModuleState.Installed(
-                version = "0.6.3",
+                version = "2.0.0",
                 active = false,
-                brokenReason = ModuleBrokenReason.ActivatorMissing,
+                brokenReason = ModuleBrokenReason.ArtifactMissing,
             )
 
-        assertEquals(null, detectPortsApplyProblem(ports, 1, "", "boot-1", portsDisabled = false))
+        assertEquals(null, detectPortsApplyProblem(ports, 1, "", portsDisabled = false))
     }
 
     @Test
-    fun `ports not installed when prop is absent`() {
+    fun `ports not available when the core prop is absent`() {
         assertEquals(ModuleState.NotInstalled, detectPortsModule(mapOf("ports_chain" to "1")))
     }
 }

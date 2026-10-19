@@ -8,7 +8,7 @@ package dev.okhsunrog.vpnhide
  * vectors (`kmod/shared/protocol_vectors.tsv`), run by ProtocolTest.
  *
  * **Stats and status only.** The app does not speak the `config` payload: it
- * writes canonical JSON and the module's own activator derives the wire from
+ * submits canonical JSON and core derives the wire from
  * it, so the C and Rust ends are the only config parsers (their parity is what
  * the `cfg|` vectors hold). What lives here is the app reading a backend's
  * stats/status back, plus `LsposedState` emitting the LSPosed layer's own.
@@ -19,7 +19,7 @@ package dev.okhsunrog.vpnhide
  */
 internal object Protocol {
     /**
-     * Version of the **control** protocol (`config`), activator → backend. The
+     * Version of the **control** protocol (`config`), core → backend. The
      * app never parses or writes that payload — it is here because the header
      * and its version fuse are the one lexical core all three ports share, and
      * [peekKind] has to classify a control header the same way the C and Rust

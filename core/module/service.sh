@@ -27,6 +27,13 @@ export VPNHIDE_CORE_OWNER_DIR="$PERSIST"
 export VPNHIDE_CORE_ADOPT=1
 export VPNHIDE_BOOT_APPLY=1
 export VPNHIDE_KMOD_CTL="/proc/vpnhide_ctl"
+# Native backends: core is their only loader and writer (backend modules ship
+# artifacts only). Kernel modules are looked up under the manager's module
+# root; the KPM lock is the one every KPM reader shares; the Zygisk recipient
+# is the module's own directory.
+export VPNHIDE_KERNEL_MODULES="/data/adb/modules"
+export VPNHIDE_KPM_LOCK="/data/adb/vpnhide_kpm/ctl.lock"
+export VPNHIDE_ZYGISK_MODULE="/data/adb/modules/vpnhide_zygisk"
 export VPNHIDE_PORTS=1
 # Ports marker colocated with other ownership markers.
 export VPNHIDE_PORTS_OWNER_MARKER="$PERSIST/ports_owned"

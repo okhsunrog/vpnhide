@@ -20,11 +20,11 @@ class DashboardIssuesTest {
     // ── Fixtures — a healthy device, so each test states only its own deviation ──
 
     @Test
-    fun `live builtin warns about redundant kmod and missing companion`() {
+    fun `live builtin warns about a redundant kmod`() {
         val redundant = moduleFacts(kmod = installed(active = false), builtin = installed())
         assertTrue(dashboardIssues(facts(modules = redundant)).contains(DashboardIssue.RedundantKmodWithBuiltin))
-        val missing = moduleFacts(kmod = installed(active = false)).copy(builtinKernelPresent = true)
-        assertTrue(dashboardIssues(facts(modules = missing)).contains(DashboardIssue.BuiltinCompanionMissing))
+        val kernelOnly = moduleFacts(kmod = installed(active = false)).copy(builtinKernelPresent = true)
+        assertTrue(dashboardIssues(facts(modules = kernelOnly)).contains(DashboardIssue.RedundantKmodWithBuiltin))
     }
 
     private val bootId = "boot-1"
@@ -52,7 +52,7 @@ class DashboardIssuesTest {
             builtin = ModuleFact(builtin, null, FlashableModuleKind.Builtin in pendingReboot),
             kpm = ModuleFact(kpm, null, FlashableModuleKind.Kpm in pendingReboot),
             zygisk = ModuleFact(zygisk, null, FlashableModuleKind.Zygisk in pendingReboot),
-            ports = ModuleFact(ports, null, FlashableModuleKind.Ports in pendingReboot),
+            ports = ModuleFact(ports, null, FlashableModuleKind.Core in pendingReboot),
             backends = backends,
             nativeBackend = displayNativeBackend(backends),
             standaloneKpm = standaloneKpm,
@@ -399,7 +399,7 @@ class DashboardIssuesTest {
     }
 
     @Test
-    fun `ports installed with no observers is called out`() {
+    fun `ports with no observers is not an issue, core always provides it`() {
         val issues =
             dashboardIssues(
                 facts(
@@ -408,7 +408,7 @@ class DashboardIssuesTest {
                 ),
             )
 
-        assertTrue(issues.has<DashboardIssue.PortsNoObservers>())
+        assertTrue(issues.none { it is DashboardIssue.PortsRulesInactive })
     }
 
     @Test
@@ -493,7 +493,7 @@ class DashboardIssuesTest {
                     modules =
                         moduleFacts(
                             kmodProblem = problem,
-                            pendingReboot = setOf(FlashableModuleKind.Ports),
+                            pendingReboot = setOf(FlashableModuleKind.Core),
                             ports = installed(),
                         ),
                 ),
@@ -501,7 +501,7 @@ class DashboardIssuesTest {
 
         assertEquals(problem, issues.filterIsInstance<DashboardIssue.ModuleBroken>().single().problem)
         assertEquals(
-            FlashableModuleKind.Ports,
+            FlashableModuleKind.Core,
             issues.filterIsInstance<DashboardIssue.ModuleNeedsReboot>().single().kind,
         )
     }
@@ -584,7 +584,7 @@ class DashboardIssuesTest {
                             mismatches =
                                 listOf(
                                     ModuleMismatch(FlashableModuleKind.Zygisk, "1.2.5", "1.3.0"),
-                                    ModuleMismatch(FlashableModuleKind.Ports, "1.2.5", "1.3.0"),
+                                    ModuleMismatch(FlashableModuleKind.Core, "1.2.5", "1.3.0"),
                                 ),
                         ),
                     lsposed = LsposedState.Active(version = "1.2.5-268-g96631d53", targetCount = 3),
@@ -609,7 +609,7 @@ class DashboardIssuesTest {
                     modules =
                         moduleFacts(
                             mismatches = listOf(ModuleMismatch(FlashableModuleKind.Zygisk, "1.2.5", "1.3.0")),
-                            pendingReboot = setOf(FlashableModuleKind.Ports),
+                            pendingReboot = setOf(FlashableModuleKind.Core),
                         ),
                     environment = environment(selinuxPermissive = true),
                     appVersion = "1.3.0",
@@ -639,7 +639,7 @@ class DashboardIssuesTest {
                             zygisk = installed(),
                             ports = installed(),
                             mismatches = listOf(ModuleMismatch(FlashableModuleKind.Zygisk, "1.2.0", "1.2.5")),
-                            pendingReboot = setOf(FlashableModuleKind.Ports),
+                            pendingReboot = setOf(FlashableModuleKind.Core),
                         ),
                     lsposed = LsposedState.InstalledInactive("1.2.5"),
                     framework = LsposedFramework.NotInstalled,
@@ -657,7 +657,6 @@ class DashboardIssuesTest {
                 "LsposedNotInstalled",
                 "ModuleVersionMismatch",
                 "NoTargets",
-                "PortsNoObservers",
                 "BetterBackendAvailable",
                 "DebugLoggingOn",
                 "SelinuxPermissive",

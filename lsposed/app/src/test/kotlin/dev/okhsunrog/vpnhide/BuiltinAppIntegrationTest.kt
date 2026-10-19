@@ -13,8 +13,6 @@ import org.junit.Test
 class BuiltinAppIntegrationTest {
     private val builtinSections =
         mapOf(
-            "builtin_module_dir" to "1",
-            "builtin_prop" to "id=vpnhide_builtin\nversion=1.2.5",
             "proc_exists" to "1",
             "kmod_state" to "vpnhide 1 status\nbackend 0x4\nkver 0x60100\nhooks 0x20003ff\nerror 0x0\n",
         )
@@ -28,7 +26,7 @@ class BuiltinAppIntegrationTest {
 
     @Test
     fun `whole row toggle includes builtin native and can clear it again`() {
-        val targets = parseTargetsSnapshot(RootSnapshot(builtinSections + ("ports_prop" to "version=1.2.5")))
+        val targets = parseTargetsSnapshot(RootSnapshot(builtinSections))
         val app = AppEntry(packageName = "com.byxiaorun.detector", label = "Ruru", icon = null, isSystem = false)
         val selected = toggleAllProtection(app, targets)
         assertTrue(selected.java && selected.native && selected.appHiding && selected.ports)
@@ -46,12 +44,11 @@ class BuiltinAppIntegrationTest {
     }
 
     @Test
-    fun `inactive builtin companion still permits configuring native protection`() {
+    fun `no live built-in node means no built-in backend`() {
+        // The driver has no module: without its control node there is nothing to configure.
         val targets = parseTargetsSnapshot(RootSnapshot(builtinSections - "kmod_state" - "proc_exists"))
-        assertTrue(targets.anyNativeInstalled)
-        assertEquals(null, targets.activeNativeBackendId)
-        assertEquals(NativeBackendId.Builtin, targets.displayNativeBackendId)
-        assertFalse(parseTargetsSnapshot(RootSnapshot(emptyMap())).anyNativeInstalled)
+        assertFalse(targets.anyNativeInstalled)
+        assertEquals(null, targets.displayNativeBackendId)
     }
 
     @Test
@@ -75,17 +72,15 @@ class BuiltinAppIntegrationTest {
     }
 
     @Test
-    fun `builtin companion prevents reset even without a live kernel control node`() {
+    fun `a live built-in driver blocks reset through its control node`() {
         val blockers =
             resetBlockers(
                 kmod = ModuleState.NotInstalled,
                 kpm = ModuleState.NotInstalled,
                 zygisk = ModuleState.NotInstalled,
-                ports = ModuleState.NotInstalled,
                 lsposed = LsposedState.NotInstalled,
-                kernelCtlPresent = false,
-                builtin = detectBuiltinModule(builtinSections - "kmod_state" - "proc_exists"),
+                kernelCtlPresent = builtinSections["proc_exists"] == "1",
             )
-        assertEquals(listOf(ResetBlocker.BuiltinInstalled), blockers)
+        assertEquals(listOf(ResetBlocker.KernelStillHooked), blockers)
     }
 }

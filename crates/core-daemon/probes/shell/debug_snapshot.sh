@@ -1,9 +1,11 @@
 # Everything a bug report needs from the device, framed into named sections:
 # module state, backend status, kernel/network forensics and the per-user app
-# scan. One su round-trip; the app parses the sections back out.
+# scan. Core runs it for the `debug_snapshot` probe; the app parses the
+# sections back out.
 #
-# Inputs (assigned by the Kotlin caller, see ShellScripts.kt): VPNHIDE_SECTION_*,
-# the module/file paths, and VPNHIDE_LEGACY_SECTIONS ("name=path name=path").
+# Inputs (assigned by core, see diagnostics.rs snapshot_vars): VPNHIDE_SECTION_*,
+# the module/file paths, VPNHIDE_LEGACY_SECTIONS ("name=path name=path") and
+# VPNHIDE_CORE_EXE (core itself, for its read-only `observe` children).
 # vpnhide_package_inventory() comes from package_inventory.sh, concatenated
 # ahead of this file.
 #
@@ -62,20 +64,16 @@ hash_file() {
     echo "(missing: $PATH_TO_HASH)"
   fi
 }
-# Reports the copy staged in modules_update/ awaiting the next reboot. A
-# complete staged install with the active activator absent means "installed,
-# reboot needed" rather than a corrupt install (matches pending_update in the
-# runtime snapshot).
+# Reports the copy staged in modules_update/ awaiting the next reboot
+# (matches pending_update in the runtime snapshot).
 staged_state() {
   STAGED=/data/adb/modules_update/${1##*/}
   if [ ! -d "$STAGED" ]; then
     echo "staged=0"
-  elif [ -x "$STAGED/activator" ]; then
-    echo "staged=1 staged_activator=executable"
-  elif [ -e "$STAGED/activator" ]; then
-    echo "staged=1 staged_activator=not_executable"
+  elif [ -f "$STAGED/module.prop" ]; then
+    echo "staged=1 staged_prop=1"
   else
-    echo "staged=1 staged_activator=missing"
+    echo "staged=1 staged_prop=0"
   fi
 }
 redact_cmdline() {
@@ -162,7 +160,8 @@ emit_eval module_inventory '
   for BASE in /data/adb/modules /data/adb/modules_update; do
     [ -d "$BASE" ] || continue
     for ID in \
-      vpnhide_kmod vpnhide_builtin vpnhide_kpm vpnhide_zygisk vpnhide_ports \
+      vpnhide_core vpnhide_kmod vpnhide_kpm vpnhide_zygisk \
+      vpnhide_builtin vpnhide_ports \
       KPatch-Next kpatch-next zygisk_vector zygisk_lsposed lsposed \
       zygisk_next zygisknext zygisksu NeoZygisk
     do
@@ -179,11 +178,12 @@ emit_eval module_inventory '
   done
 '
 
-emit_file builtin_prop "$VPNHIDE_BUILTIN_DIR"/module.prop
-emit_eval builtin_module_state 'file_flags $VPNHIDE_BUILTIN_DIR; hash_file $VPNHIDE_BUILTIN_ACTIVATOR; staged_state $VPNHIDE_BUILTIN_DIR'
-emit_file builtin_load_status "$VPNHIDE_BUILTIN_LOAD_STATUS"
+emit_file core_prop "$VPNHIDE_CORE_DIR"/module.prop
+emit_eval core_module_state 'file_flags $VPNHIDE_CORE_DIR; hash_file $VPNHIDE_CORE_DIR/vpnhide-core; staged_state $VPNHIDE_CORE_DIR'
+emit_file core_boot_status "$VPNHIDE_CORE_BOOT_STATUS"
+emit_eval core_log 'tail -n 200 $VPNHIDE_CORE_LOG 2>&1 || true'
 emit_file kmod_prop "$VPNHIDE_KMOD_DIR"/module.prop
-emit_eval kmod_module_state 'file_flags $VPNHIDE_KMOD_DIR; hash_file $VPNHIDE_KMOD_DIR/vpnhide_kmod.ko; hash_file $VPNHIDE_KMOD_ACTIVATOR; staged_state $VPNHIDE_KMOD_DIR'
+emit_eval kmod_module_state 'file_flags $VPNHIDE_KMOD_DIR; hash_file $VPNHIDE_KMOD_DIR/vpnhide_kmod.ko; staged_state $VPNHIDE_KMOD_DIR'
 emit_file kmod_load_status "$VPNHIDE_KMOD_LOAD_STATUS"
 emit_file kmod_load_dmesg "$VPNHIDE_KMOD_LOAD_DMESG"
 emit_eval kmod_state '[ -e $VPNHIDE_PROC_CTL ] && cat $VPNHIDE_PROC_CTL 2>&1 || echo "(missing: $VPNHIDE_PROC_CTL)"'
@@ -193,15 +193,11 @@ emit_eval kmod_state '[ -e $VPNHIDE_PROC_CTL ] && cat $VPNHIDE_PROC_CTL 2>&1 || 
 emit_eval kmod_diag '[ -e $VPNHIDE_PROC_DIAG ] && cat $VPNHIDE_PROC_DIAG 2>&1 || echo "(missing: $VPNHIDE_PROC_DIAG)"'
 
 emit_file kpm_prop "$VPNHIDE_KPM_DIR"/module.prop
-emit_eval kpm_module_state 'file_flags $VPNHIDE_KPM_DIR; hash_file $VPNHIDE_KPM_DIR/vpnhide.kpm; hash_file $VPNHIDE_KPM_ACTIVATOR; staged_state $VPNHIDE_KPM_DIR'
+emit_eval kpm_module_state 'file_flags $VPNHIDE_KPM_DIR; hash_file $VPNHIDE_KPM_DIR/vpnhide.kpm; staged_state $VPNHIDE_KPM_DIR'
 emit_file kpm_load_status "$VPNHIDE_KPM_LOAD_STATUS"
 emit_eval kpm_state '
-  if [ -x $VPNHIDE_KPM_ACTIVATOR ] && [ ! -f $VPNHIDE_KPM_DIR/disable ]; then
-    $VPNHIDE_KPM_ACTIVATOR state 2>&1
-    echo "[exit=$?]"
-  else
-    echo "(KPM activator missing or disabled)"
-  fi
+  "$VPNHIDE_CORE_EXE" observe kpm-state 2>&1
+  echo "[exit=$?]"
 '
 emit_eval kpatch_runtime '
   [ -d /data/adb/ap ] && echo "apatch_dir=1" || echo "apatch_dir=0"
@@ -226,7 +222,7 @@ emit_eval kpatch_runtime '
 '
 
 emit_file zygisk_prop "$VPNHIDE_ZYGISK_DIR"/module.prop
-emit_eval zygisk_module_state 'file_flags $VPNHIDE_ZYGISK_DIR; hash_file $VPNHIDE_ZYGISK_DIR/zygisk/arm64-v8a.so; hash_file $VPNHIDE_ZYGISK_ACTIVATOR; staged_state $VPNHIDE_ZYGISK_DIR'
+emit_eval zygisk_module_state 'file_flags $VPNHIDE_ZYGISK_DIR; hash_file $VPNHIDE_ZYGISK_DIR/zygisk/arm64-v8a.so; hash_file $VPNHIDE_ZYGISK_DIR/zygisk/armeabi-v7a.so; staged_state $VPNHIDE_ZYGISK_DIR'
 emit_file zygisk_status "$VPNHIDE_ZYGISK_STATUS"
 emit_eval zygisk_runtime '
   for BASE in /data/adb/modules /data/adb/modules_update; do
@@ -235,10 +231,6 @@ emit_eval zygisk_runtime '
   done
 '
 
-emit_file ports_prop "$VPNHIDE_PORTS_DIR"/module.prop
-emit_eval ports_module_state 'file_flags $VPNHIDE_PORTS_DIR; hash_file $VPNHIDE_PORTS_ACTIVATOR; staged_state $VPNHIDE_PORTS_DIR'
-emit_file ports_load_status "$VPNHIDE_PORTS_LOAD_STATUS"
-emit_file ports_load_log "$VPNHIDE_PORTS_LOAD_LOG"
 emit_eval ports_state '
   iptables -w 2 -S OUTPUT 2>&1 | grep vpnhide || true
   iptables -w 2 -S vpnhide_out 2>&1 || true
@@ -268,7 +260,7 @@ emit_eval lsposed_files '
 '
 
 # Network state first: the per-user package scan further down can eat most of
-# the su timeout on a bloatware-heavy ROM, and bundles came back truncated
+# the probe timeout on a bloatware-heavy ROM, and bundles came back truncated
 # with exactly these sections missing — the ones a routing bug needs.
 emit_cmd network_addr ip -d addr
 emit_eval network_operstate 'for IFACE in /sys/class/net/*; do echo "$(basename "$IFACE"): $(cat "$IFACE/operstate" 2>/dev/null)"; done'

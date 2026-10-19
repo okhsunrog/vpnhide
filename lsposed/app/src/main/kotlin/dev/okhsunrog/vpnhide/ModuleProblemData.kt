@@ -124,41 +124,9 @@ private fun renderModuleIntegrityProblem(
             FlashableModuleKind.Builtin -> "Built-in"
             FlashableModuleKind.Kpm -> "KPM"
             FlashableModuleKind.Zygisk -> "Zygisk"
-            FlashableModuleKind.Ports -> "Ports"
+            FlashableModuleKind.Core -> "Core"
         }
-    val message =
-        when (problem.kind to problem.activatorState) {
-            FlashableModuleKind.Kpm to ActivatorState.Missing -> {
-                R.string.dashboard_issue_kpm_bundle_activator_missing
-            }
-
-            FlashableModuleKind.Kpm to ActivatorState.NotExecutable -> {
-                R.string.dashboard_issue_kpm_bundle_activator_not_executable
-            }
-
-            else -> {
-                when (problem.activatorState) {
-                    ActivatorState.Missing -> {
-                        R.string.dashboard_issue_module_activator_missing
-                    }
-
-                    ActivatorState.NotExecutable -> {
-                        R.string.dashboard_issue_module_activator_not_executable
-                    }
-
-                    ActivatorState.Executable, ActivatorState.Unknown -> {
-                        error("healthy or unknown activator is not an integrity problem")
-                    }
-                }
-            }
-        }
-    val text =
-        if (problem.kind == FlashableModuleKind.Kpm) {
-            res.getString(message, problem.activatorPath)
-        } else {
-            res.getString(message, moduleName, problem.activatorPath)
-        }
-    return text
+    return res.getString(R.string.dashboard_issue_module_artifact_missing, moduleName, problem.artifactPath)
 }
 
 /** Contextual help uses the same locale fallback as the bundled guide. */

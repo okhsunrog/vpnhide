@@ -561,7 +561,6 @@ class StorageConfigTest {
                 kmodModuleInstalled = true,
                 kpmModuleInstalled = false,
                 zygiskModuleInstalled = false,
-                portsModuleInstalled = true,
                 uidToPkg = mapOf(10123 to "com.observer"),
                 canonicalConfig =
                     CanonicalConfig(

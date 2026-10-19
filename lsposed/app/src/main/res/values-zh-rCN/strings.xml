@@ -147,7 +147,7 @@
     <string name="self_targets_error_body_unknown">VPN Hide 未能完成 Root 侧的启动流程（见下方）。请点按“重试”。</string>
     <string name="targets_load_failed_title">隐藏数据不可用</string>
     <string name="targets_load_failed_message">VPN Hide 无法获取此标签页所需的 Root 状态。若是授权被中断，请检查 Root 管理器后点按“重试”。</string>
-    <string name="dashboard_ports">端口隐藏模块</string>
+    <string name="dashboard_ports">端口隐藏</string>
     <string name="dashboard_java_backend">Java 后端</string>
     <string name="dashboard_native_backend">原生后端</string>
     <string name="dashboard_backend_lsposed">LSPosed</string>
@@ -168,8 +168,7 @@
     <string name="dashboard_kmod_broken_unknown_variant">已安装，未加载</string>
     <string name="dashboard_kmod_broken_ambiguous">已安装，未加载——请换另一个 GKI 变体试试</string>
     <string name="dashboard_kmod_broken_signature_enforced">已安装，内核拒绝未签名模块</string>
-    <string name="dashboard_module_broken_activator_missing">已安装，缺少激活器</string>
-    <string name="dashboard_module_broken_activator_not_executable">已安装，激活器不可执行</string>
+    <string name="dashboard_module_broken_artifact_missing">已安装，缺少载荷文件</string>
     <string name="dashboard_active_targets">生效中 · %d 个目标应用</string>
     <string name="dashboard_reboot_needed">需要重启设备</string>
     <string name="dashboard_hero_protected_title">VPN 已隐藏</string>
@@ -367,7 +366,6 @@
     <string name="reset_blocker_kmod">内核模块（.ko）仍已安装</string>
     <string name="reset_blocker_kpm">KPM 仍已安装</string>
     <string name="reset_blocker_zygisk">Zygisk 模块仍已安装</string>
-    <string name="reset_blocker_ports">端口模块仍已安装</string>
     <string name="reset_blocker_kernel">内核钩子仍然存在。移除可加载模块后需要重启；内置后端需要使用不含 VPN Hide 的内核。</string>
     <string name="reset_blocker_lsposed">LSPosed 钩子仍在生效</string>
     <string name="reset_confirm">全部删除</string>
@@ -386,12 +384,9 @@
     <string name="dashboard_issue_native_conflict_deferred">内核模块（.ko）和 KPM 同时装着。KPM 已在开机时主动让位以避免冻结，因此没有起任何作用。请只保留其一——卸载 KPM（或内核模块）。</string>
     <string name="dashboard_issue_kpm_awaiting_superkey">KPM 已安装但未生效：APatch/FolkPatch 无法用受信任的 su 令牌加载它。请在“设置 → 安全”中保存 SuperKey，然后重启以启用原生隐藏。</string>
     <string name="dashboard_issue_module_reboot_to_activate">%1$s 模块已安装，但尚未启用 — 重启设备后生效。</string>
-    <string name="dashboard_issue_module_activator_missing">%1$s 模块安装已损坏：缺少激活器（%2$s）。请从最新发行版重新安装该模块 ZIP。</string>
-    <string name="dashboard_issue_module_activator_not_executable">%1$s 模块安装已损坏：激活器不可执行（%2$s）。请从最新发行版重新安装该模块 ZIP。</string>
-    <string name="dashboard_issue_kpm_bundle_activator_missing">KPM 模块安装已损坏：缺少激活器（%1$s）。请通过 Root 管理器的模块界面，把完整的 vpnhide-kpm.zip 作为兼容 APM/Magisk 的模块安装；不要单独解压或加载里面的 vpnhide.kpm 文件。</string>
-    <string name="dashboard_issue_kpm_bundle_activator_not_executable">KPM 模块安装已损坏：激活器不可执行（%1$s）。请通过 Root 管理器的模块界面，把完整的 vpnhide-kpm.zip 作为兼容 APM/Magisk 的模块安装；不要单独解压或加载里面的 vpnhide.kpm 文件。</string>
+    <string name="dashboard_issue_module_artifact_missing">%1$s 模块安装已损坏：缺少 %2$s，core 无可加载的内容。请从最新发行版重新安装该模块 ZIP。</string>
     <string name="dashboard_issue_kpm_unsupported_kernel">KPM 已安装，但无法在内核 %1$s 上加载，因为这一内核家族没有经过验证的偏移表。请改用 Zygisk 后端。</string>
-    <string name="dashboard_issue_kpm_standalone_install">检测到无效的 KPM 安装：KernelPatch 加载了独立的 vpnhide.kpm 文件，但 vpnhide-kpm.zip 模块并未安装。单独的 .kpm 文件没有 VPN Hide 激活器、开机脚本或配置下发，因此保护无法正常工作。请在 APatch/KPatch-Next 中移除或卸载独立的“vpnhide”条目（若它是内嵌的，请在不含它的情况下重新修补 boot 镜像），再从模块界面安装完整的 vpnhide-kpm.zip，然后重启。</string>
+    <string name="dashboard_issue_kpm_standalone_install">检测到无效的 KPM 安装：KernelPatch 加载了独立的 vpnhide.kpm 文件，但 vpnhide-kpm.zip 模块并未安装。VPN Hide core 只管理它从该模块加载的 KPM，因此保护无法正常工作。请在 APatch/KPatch-Next 中移除或卸载独立的“vpnhide”条目（若它是内嵌的，请在不含它的情况下重新修补 boot 镜像），再从模块界面安装完整的 vpnhide-kpm.zip，然后重启。</string>
     <string name="dashboard_issue_kpm_needs_superkey">KPM 已安装，KernelPatch 运行时也有响应，但模块控制调用被拒绝——VPN Hide 没有保存 SuperKey，只能用受信任的 su 令牌认证。请在“设置 → 安全”中保存 SuperKey（与 APatch/FolkPatch 里设置的相同），然后点按“刷新”。重装 zip 没有用。</string>
     <string name="dashboard_issue_kpm_needs_runtime">KPM 已安装，但内核尚未通过 KernelPatch 运行时打补丁来加载它。请安装 KPatch-Next-Module 并在其界面中为内核打补丁（在 Magisk 和 KernelSU 上均可用）。若不行，请改用 APatch 或 FolkPatch。</string>
     <string name="dashboard_issue_native_partial_hooks">原生后端已加载，但在此内核上只装上了 %2$d 个内核钩子中的 %1$d 个——未能解析：%3$s。它们负责的检测面不由该后端覆盖，可能仍有其他层将其关闭。重新安装没有用：在这个内核版本里，这些函数的名字不同或根本不存在。</string>
@@ -411,7 +406,6 @@
     <string name="dashboard_issue_lsposed_field_rename">在 Android SDK %2$s 上检测到 AOSP 字段重命名：%1$s。受影响钩子的 Java 层隐藏能力已降级（为免每次调用都抛 NoSuchFieldError 刷屏 logcat，它们在安装时被跳过）。请到 github.com/okhsunrog/vpnhide/issues 提交问题并附上此列表，以便为你的 Android 版本更新这些钩子。</string>
     <string name="dashboard_issue_lsposed_install_failures">LSPosed/Vector 报告钩子安装失败：%1$s。请收集调试日志并附到问题里，以便修复失败的钩子。</string>
     <string name="dashboard_issue_no_targets">还没有配置目标应用。请打开“隐藏”并选择需要的应用。</string>
-    <string name="dashboard_issue_ports_no_observers">端口隐藏模块已安装，但没有应用启用端口。请打开“隐藏”，为需要的应用启用端口。</string>
     <string name="dashboard_issue_ports_rules_inactive">已为应用启用端口，但 iptables 规则未生效。请重启，或在“隐藏”中点按保存；若仍如此，请收集调试日志，以便包含端口的 load_status/load_log。</string>
     <string name="dashboard_issue_ports_apply_failed">已为应用启用端口，但 iptables 规则未生效。上次应用失败：%1$s。请收集调试日志，以便包含端口的 load_status/load_log。</string>
     <string name="dashboard_issue_version_mismatch">LSPosed 模块版本不一致：运行中 %1$s，已安装 %2$s。请重启设备以应用更新。</string>
@@ -425,9 +419,9 @@
     <string name="dashboard_issue_update_app_for_zygisk">Zygisk 版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
     <string name="dashboard_issue_kmod_version_mismatch">内核模块版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
     <string name="dashboard_issue_zygisk_version_mismatch">Zygisk 版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
-    <string name="dashboard_issue_update_ports">端口模块版本 %1$s 低于应用版本 %2$s。请打开 KernelSU/Magisk → 模块进行更新。</string>
-    <string name="dashboard_issue_update_app_for_ports">端口模块版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
-    <string name="dashboard_issue_ports_version_mismatch">端口模块版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
+    <string name="dashboard_issue_update_core">Core 模块版本 %1$s 低于应用版本 %2$s。请打开 KernelSU/Magisk → 模块进行更新。</string>
+    <string name="dashboard_issue_update_app_for_core">Core 模块版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
+    <string name="dashboard_issue_core_version_mismatch">Core 模块版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
     <string name="dashboard_issue_update_kpm">KPM 版本 %1$s 低于应用版本 %2$s。请打开 KernelSU/Magisk → 模块进行更新。</string>
     <string name="dashboard_issue_update_app_for_kpm">KPM 版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
     <string name="dashboard_issue_kpm_version_mismatch">KPM 版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
@@ -618,9 +612,7 @@
     <string name="config_capture_logging">采集进行期间，调试日志保持开启。</string>
     <string name="config_changes_unavailable">暂时无法更改配置</string>
     <string name="config_close">关闭</string>
-    <string name="reset_blocker_builtin">内置后端配套模块仍已安装</string>
     <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide 已内置于当前内核。请移除多余的 kmod 模块，并保留内置后端配套模块。</string>
-    <string name="dashboard_issue_builtin_companion_missing">VPN Hide 已内置于此内核，但缺少配套模块。请安装 VPN Hide 内置后端配套模块以配置保护。</string>
     <string name="debug_export_complete">报告已完整收集。</string>
     <string name="debug_export_partial">已收集部分报告，仍可保存或分享。\n%1$s</string>
     <string name="debug_export_failed">报告收集失败：%1$s</string>

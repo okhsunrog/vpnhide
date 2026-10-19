@@ -345,7 +345,7 @@ internal object LegacyConfigImporter {
     }
 
     /**
-     * Delete only. No canonical write and no activator run: the config the
+     * Delete only. No canonical write and no backend apply: the config the
      * backends are already using does not change, just the dead files go away.
      * The caches still need a reload so the banner and the Settings entry
      * disappear without a manual refresh.

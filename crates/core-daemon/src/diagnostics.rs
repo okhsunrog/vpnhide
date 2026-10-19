@@ -130,30 +130,14 @@ fn snapshot_vars(begin: &str, end: &str, stderr_to_stdout: bool) -> Vec<(&'stati
         ("VPNHIDE_PM_USER_BEGIN", prefixes::PM_USER_BEGIN),
         ("VPNHIDE_PM_USER_END", prefixes::PM_USER_END),
         ("VPNHIDE_KMOD_DIR", "/data/adb/modules/vpnhide_kmod"),
-        ("VPNHIDE_BUILTIN_DIR", "/data/adb/modules/vpnhide_builtin"),
         ("VPNHIDE_KPM_DIR", "/data/adb/modules/vpnhide_kpm"),
         ("VPNHIDE_ZYGISK_DIR", "/data/adb/modules/vpnhide_zygisk"),
-        ("VPNHIDE_PORTS_DIR", "/data/adb/modules/vpnhide_ports"),
+        ("VPNHIDE_CORE_DIR", "/data/adb/modules/vpnhide_core"),
         (
-            "VPNHIDE_KMOD_ACTIVATOR",
-            "/data/adb/modules/vpnhide_kmod/activator",
+            "VPNHIDE_CORE_BOOT_STATUS",
+            "/data/adb/vpnhide/core/boot_status",
         ),
-        (
-            "VPNHIDE_BUILTIN_ACTIVATOR",
-            "/data/adb/modules/vpnhide_builtin/activator",
-        ),
-        (
-            "VPNHIDE_KPM_ACTIVATOR",
-            "/data/adb/modules/vpnhide_kpm/activator",
-        ),
-        (
-            "VPNHIDE_ZYGISK_ACTIVATOR",
-            "/data/adb/modules/vpnhide_zygisk/activator",
-        ),
-        (
-            "VPNHIDE_PORTS_ACTIVATOR",
-            "/data/adb/modules/vpnhide_ports/activator",
-        ),
+        ("VPNHIDE_CORE_LOG", "/data/adb/vpnhide/core/core.log"),
         ("VPNHIDE_CONFIG_FILE", "/data/system/vpnhide_config.json"),
         ("VPNHIDE_SUPERKEY_FILE", crate::effects::SUPERKEY_FILE),
         (
@@ -165,10 +149,6 @@ fn snapshot_vars(begin: &str, end: &str, stderr_to_stdout: bool) -> Vec<(&'stati
             "/data/adb/vpnhide_kmod/load_dmesg",
         ),
         (
-            "VPNHIDE_BUILTIN_LOAD_STATUS",
-            "/data/adb/vpnhide_builtin/load_status",
-        ),
-        (
             "VPNHIDE_ZYGISK_STATUS",
             "/data/user/0/dev.okhsunrog.vpnhide/files/vpnhide_zygisk_active",
         ),
@@ -176,11 +156,6 @@ fn snapshot_vars(begin: &str, end: &str, stderr_to_stdout: bool) -> Vec<(&'stati
             "VPNHIDE_KPM_LOAD_STATUS",
             "/data/adb/vpnhide_kpm/load_status",
         ),
-        (
-            "VPNHIDE_PORTS_LOAD_STATUS",
-            "/data/adb/vpnhide_ports/load_status",
-        ),
-        ("VPNHIDE_PORTS_LOAD_LOG", "/data/adb/vpnhide_ports/load_log"),
         ("VPNHIDE_PROC_CTL", "/proc/vpnhide_ctl"),
         ("VPNHIDE_PROC_DIAG", "/proc/vpnhide_diag"),
         (
@@ -257,7 +232,11 @@ fn clear_dmesg() -> bool {
 fn run_probe(env: &ProbeEnv, probe: &DiagnosticProbe) -> Captured {
     let shell = |script: String, vars: Vec<(&'static str, String)>, timeout: Duration| {
         let mut cmd = Command::new(&env.shell);
-        cmd.arg("-c").arg(script).envs(vars);
+        // This binary, for the scripts' `observe kpm-list|kpm-state` children.
+        cmd.arg("-c")
+            .arg(script)
+            .envs(vars)
+            .env("VPNHIDE_CORE_EXE", &env.core_exe);
         run_bounded(cmd, timeout)
     };
     match probe {
@@ -268,7 +247,6 @@ fn run_probe(env: &ProbeEnv, probe: &DiagnosticProbe) -> Captured {
                 "VPNHIDE_WITH_PM",
                 if *packages { "1" } else { "0" }.to_owned(),
             ));
-            vars.push(("VPNHIDE_KPM_PROBE_PATH", env.core_exe.display().to_string()));
             shell(
                 format!("{PACKAGE_INVENTORY}\n{ROOT_SNAPSHOT}"),
                 vars,
@@ -629,6 +607,23 @@ mod tests {
             },
         );
         assert!(report.outputs[0].output.contains(prefixes::DEBUG_BEGIN));
+    }
+
+    #[test]
+    fn kpm_state_comes_from_core_not_a_module_binary() {
+        // 2.0 modules ship artifacts only: every runtime read goes through core itself.
+        for script in [ROOT_SNAPSHOT, DEBUG_SNAPSHOT, HOOK_COUNTERS] {
+            assert!(script.contains("\"$VPNHIDE_CORE_EXE\" observe kpm-state"));
+            assert!(!script.contains("ACTIVATOR"));
+            assert!(!script.contains("PORTS_DIR"));
+        }
+        let vars = snapshot_vars("b", "e", false);
+        let value = |key: &str| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone());
+        assert_eq!(
+            value("VPNHIDE_CORE_DIR").as_deref(),
+            Some("/data/adb/modules/vpnhide_core")
+        );
+        assert!(vars.iter().all(|(k, _)| !k.contains("ACTIVATOR")));
     }
 
     #[test]

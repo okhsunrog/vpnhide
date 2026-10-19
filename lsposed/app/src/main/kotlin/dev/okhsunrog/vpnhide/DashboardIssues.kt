@@ -67,8 +67,6 @@ internal sealed interface DashboardIssue {
     /** Two kernel backends live at once — the .ko + KPM pair that freezes the device. */
     data object NativeConflictKernel : Native
 
-    data object BuiltinCompanionMissing : Native
-
     data object RedundantKmodWithBuiltin : Native
 
     data object MultipleNativeActive : Native
@@ -135,8 +133,6 @@ internal sealed interface DashboardIssue {
     // ── Target ──
 
     data object NoTargets : Target
-
-    data object PortsNoObservers : Target
 
     /** Ports rules are not in effect. [failureDetail] is set when this boot's apply failed. */
     data class PortsRulesInactive(
@@ -407,35 +403,27 @@ private fun downloadArtifactFor(
         FlashableModuleKind.Kmod -> recommendedArtifact
 
         // The in-tree backend has no downloadable zip that fixes a version skew:
-        // the driver lives in the kernel image, and the companion module is
-        // updated with the app itself, not re-flashed on its own.
+        // the driver lives in the kernel image.
         FlashableModuleKind.Builtin -> null
 
         FlashableModuleKind.Kpm -> "vpnhide-kpm.zip"
 
         FlashableModuleKind.Zygisk -> "vpnhide-zygisk.zip"
 
-        FlashableModuleKind.Ports -> "vpnhide-ports.zip"
+        FlashableModuleKind.Core -> "vpnhide-core.zip"
     }
 
 private fun targetIssues(facts: DashboardFacts): List<DashboardIssue> =
     buildList {
         // A fresh install with nothing selected is not broken — guide, don't alarm.
         if (facts.targets.lsposed + facts.targets.native == 0) add(DashboardIssue.NoTargets)
-        if (facts.modules.ports.state is ModuleState.Installed && facts.targets.ports == 0) {
-            add(DashboardIssue.PortsNoObservers)
-        }
         facts.environment.portsApply?.let { add(DashboardIssue.PortsRulesInactive(it.failureDetail)) }
     }
 
 /** Working, but not the backend this kernel could be running. */
 private fun nativeChoiceIssues(facts: DashboardFacts): List<DashboardIssue> =
     buildList {
-        if (facts.modules.builtinKernelPresent && facts.modules.builtin.state is ModuleState.NotInstalled) {
-            add(DashboardIssue.BuiltinCompanionMissing)
-        } else {
-            addAll(betterBackendIssues(facts))
-        }
+        addAll(betterBackendIssues(facts))
         addAll(multiNativeIssues(facts))
         if ((facts.modules.builtinKernelPresent || moduleActive(facts.modules.builtin.state)) &&
             facts.modules.kmod.state is ModuleState.Installed
@@ -581,7 +569,7 @@ private fun moduleProblemIssues(facts: DashboardFacts): List<DashboardIssue> =
                 FlashableModuleKind.Builtin to modules.builtin,
                 FlashableModuleKind.Kpm to modules.kpm,
                 FlashableModuleKind.Zygisk to modules.zygisk,
-                FlashableModuleKind.Ports to modules.ports,
+                FlashableModuleKind.Core to modules.ports,
             )
         ordered.forEach { (_, module) -> module.problem?.let { add(DashboardIssue.ModuleBroken(it)) } }
         ordered.forEach { (kind, module) ->

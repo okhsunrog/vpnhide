@@ -51,9 +51,8 @@ sealed interface ModuleState {
         // is permanently broken (distinct from "active=false" which usually
         // just means a reboot is pending). UI colors the card red.
         val brokenReason: ModuleBrokenReason? = null,
-        // True when a complete install is staged in modules_update/ and the
-        // active dir has no activator yet — the module just needs a reboot to
-        // take effect. UI colors the card orange, not red, and the dashboard
+        // True when an install is staged in modules_update/ awaiting the next
+        // boot — the module just needs a reboot to take effect. UI colors the card orange, not red, and the dashboard
         // surfaces a reboot warning rather than a corruption error.
         val pendingReboot: Boolean = false,
         // False when the liveness probe for this module reads a runtime resource
@@ -77,8 +76,7 @@ enum class ModuleBrokenReason {
     UnknownVariantInactive,
     AmbiguousLoadFailed,
     SignatureEnforced,
-    ActivatorMissing,
-    ActivatorNotExecutable,
+    ArtifactMissing,
 }
 
 @Serializable
@@ -138,7 +136,7 @@ internal sealed interface ProtectionCheck {
     ) : ProtectionCheck
 }
 
-internal enum class FlashableModuleKind { Kmod, Builtin, Kpm, Zygisk, Ports }
+internal enum class FlashableModuleKind { Kmod, Builtin, Kpm, Zygisk, Core }
 
 internal enum class MultiNativeSeverity { None, Warning, Error }
 
@@ -186,7 +184,7 @@ internal fun kpmDeferredForConflict(
  *
  * Distinct from [kpmDeferredForConflict] (that writes `runtime=conflict`): here the
  * module is installed and healthy but dormant, waiting for an APatch SuperKey
- * in Settings so the service activator can load it. Without this, the dashboard
+ * in Settings so core can load it. Without this, the dashboard
  * would just show KPM as inactive with no explanation.
  */
 internal fun kpmAwaitingSuperkey(
@@ -219,8 +217,7 @@ internal data class PortsApplyProblem(
 internal fun detectPortsApplyProblem(
     ports: ModuleState,
     targetCount: Int,
-    loadStatusSection: String,
-    currentBootId: String,
+    coreBootStatus: String,
     portsDisabled: Boolean,
 ): PortsApplyProblem? {
     val installed = ports as? ModuleState.Installed ?: return null
@@ -229,17 +226,18 @@ internal fun detectPortsApplyProblem(
     // root) is no evidence that the rules are missing: nothing to warn about.
     if (!installed.runtimeCheckable) return null
     // A module the user turned off via their manager (a `disable` marker) is
-    // inactive by design — the activator skips it for the same reason. Don't
+    // inactive by design — core does not start for the same reason. Don't
     // nag "iptables rules are not active" for a deliberately disabled module.
     if (portsDisabled) return null
 
-    val load = parseKeyValueLines(loadStatusSection)
-    val bootId = load["boot_id"]?.trim()
-    val sameBoot = !bootId.isNullOrEmpty() && bootId == currentBootId.trim()
-    val failedThisBoot = sameBoot && load["loaded"]?.trim() == "0"
+    // Core rewrites boot_status on every boot: `status=Applied` or `NoIntent` is a
+    // clean apply, anything else carries the reason the rules could be missing.
+    val boot = parseKeyValueLines(coreBootStatus)
+    val status = boot["status"]?.trim().orEmpty()
+    val bootFailed = status.isNotEmpty() && status != "Applied" && status != "NoIntent"
     val detail =
-        if (failedThisBoot) {
-            load["detail"]?.trim()?.takeIf { it.isNotBlank() }
+        if (bootFailed) {
+            boot["detail"]?.trim()?.takeIf { it.isNotBlank() } ?: status
         } else {
             null
         }
@@ -901,27 +899,21 @@ internal fun detectKmodModule(sections: Map<String, String>): ModuleState {
     )
 }
 
-// Built-in kernel backend: the driver is compiled into the kernel, so the
-// companion module ships only the userspace activator. "Installed" = that
-// companion module is present; "active" = the shared control node is live AND
-// it reports the built-in backend id (0x4). Because a non-root snapshot can't
-// read the 0600 node, a proc-present-but-unread id leaves active=false but
-// unverified — never a false "inactive", mirroring detectKmodModule.
-internal fun detectBuiltinModule(sections: Map<String, String>): ModuleState {
-    val prop = parseModuleProp(sections["builtin_prop"].orEmpty())
-    if (!prop.installed) return ModuleState.NotInstalled
-    val procPresent = sections["proc_exists"].orEmpty().trim() == "1"
-    val ctlBackendId = parseCtlBackendId(sections)
-    val active = procPresent && ctlBackendId == BUILTIN_BACKEND_ID
-    return ModuleState.Installed(
-        version = prop.version,
-        active = active,
-        // A positive read (backend==0x4) is self-verifying. Otherwise the id may
-        // simply be unread (non-root snapshot on the 0600 node), so a false
-        // "inactive" is not trustworthy — render "not verified" instead.
-        runtimeCheckable = active || snapshotRuntimeCheckable(sections),
-    )
-}
+/** The in-tree driver owns the shared control node (backend id 0x4). */
+internal fun builtinKernelPresent(sections: Map<String, String>): Boolean =
+    sections["proc_exists"]?.trim() == "1" && parseCtlBackendId(sections) == BUILTIN_BACKEND_ID
+
+// Built-in kernel backend: the driver is compiled into the kernel and has no
+// module of its own; core configures it over /proc/vpnhide_ctl. It is
+// "installed" exactly when the live node reports the built-in backend id (0x4),
+// and then it is also active. Its version is the kernel's, so there is no
+// module/app version pair to compare.
+internal fun detectBuiltinModule(sections: Map<String, String>): ModuleState =
+    if (builtinKernelPresent(sections)) {
+        ModuleState.Installed(version = null, active = true)
+    } else {
+        ModuleState.NotInstalled
+    }
 
 internal fun detectZygiskModule(
     sections: Map<String, String>,
@@ -947,19 +939,22 @@ internal fun detectKpmModule(
 ): ModuleState {
     val prop = parseModuleProp(sections["kpm_prop"].orEmpty())
     if (!prop.installed) return ModuleState.NotInstalled
-    // The KPM has no /proc marker (its runtime channel is the kpatch ctl0
-    // supercall). The boot script writes load_status with loaded=1 and the
-    // boot_id it loaded under, so "active" = loaded for the current boot —
-    // the same freshness check the zygisk heartbeat uses.
-    val active = loadStatus.loaded == true && loadStatus.isFreshFor(currentBootId)
+    // The KPM has no /proc marker: its runtime channel is the KernelPatch ctl0
+    // supercall, which core reads into `kpm_state`. A complete status reply there
+    // is the live runtime. A load_status stamped for this boot also counts.
+    val active =
+        Protocol.parseStatusFields(sections["kpm_state"].orEmpty()) != null ||
+            (loadStatus.loaded == true && loadStatus.isFreshFor(currentBootId))
     return ModuleState.Installed(
         version = prop.version,
         active = active,
     )
 }
 
+// Ports is a core feature: the card carries the core module's version, and is
+// active while core's iptables chains are in place.
 internal fun detectPortsModule(sections: Map<String, String>): ModuleState {
-    val prop = parseModuleProp(sections["ports_prop"].orEmpty())
+    val prop = parseModuleProp(sections["core_prop"].orEmpty())
     if (!prop.installed) return ModuleState.NotInstalled
     // "1" = chains present and jumped to, "0" = a chain or jump is absent,
     // "error=<rc>" (or nothing) = the probe itself could not run: the xtables lock
@@ -1091,18 +1086,17 @@ internal fun readLsposedConfig(
  * folded in.
  *
  * The four backends used to do this inline, in four ~18-line blocks that
- * differed only in kind, activator path and the backend-specific classifier —
- * which is exactly the shape that lets one of them quietly drift.
+ * differed only in kind and the backend-specific classifier — which is exactly
+ * the shape that lets one of them quietly drift.
  *
  * Order matters: a staged install is not a corrupt one, so [modulePendingReboot]
  * suppresses the diagnosis entirely; integrity beats the backend classifier so a
- * missing activator is not reported as a load failure.
+ * missing payload is not reported as a load failure.
  */
 private fun deriveModuleFact(
     kind: FlashableModuleKind,
     raw: ModuleState,
     sections: Map<String, String>,
-    activatorPath: String,
     classifyBackendProblem: () -> ModuleProblem? = { null },
 ): ModuleFact {
     val pendingReboot = modulePendingReboot(kind, raw, sections)
@@ -1114,7 +1108,6 @@ private fun deriveModuleFact(
                 kind = kind,
                 module = raw,
                 sections = sections,
-                activatorPath = activatorPath,
             )?.let { ModuleProblem.Integrity(it) }
                 ?: classifyBackendProblem()
         }
@@ -1132,7 +1125,7 @@ private fun deriveKmodFact(
     recommendation: NativeInstallRecommendation?,
     loadStatus: KmodLoadStatus?,
 ): ModuleFact =
-    deriveModuleFact(FlashableModuleKind.Kmod, raw.kmod, sections, KMOD_ACTIVATOR) {
+    deriveModuleFact(FlashableModuleKind.Kmod, raw.kmod, sections) {
         if (parseCtlBackendId(sections) == BUILTIN_BACKEND_ID) {
             null // The redundant-companion banner explains why this .ko must stay unloaded.
         } else {
@@ -1159,11 +1152,10 @@ private fun deriveModuleFacts(
     VpnHideLog.i(TAG, "kmodLoadStatus=$kmodLoadStatus")
 
     val kmod = deriveKmodFact(raw, sections, kernelRecommendation, kmodLoadStatus)
-    // The in-tree backend has no .ko to diagnose, so it needs no classifier —
-    // only the shared integrity/pending-reboot checks on its companion activator.
-    val builtin = deriveModuleFact(FlashableModuleKind.Builtin, raw.builtin, sections, BUILTIN_ACTIVATOR)
+    // The in-tree backend has no module: nothing to diagnose or stage.
+    val builtin = deriveModuleFact(FlashableModuleKind.Builtin, raw.builtin, sections)
     val kpm =
-        deriveModuleFact(FlashableModuleKind.Kpm, raw.kpm, sections, KPM_ACTIVATOR) {
+        deriveModuleFact(FlashableModuleKind.Kpm, raw.kpm, sections) {
             classifyKpmProblem(
                 kpm = raw.kpm,
                 status = kpmLoadStatus,
@@ -1172,8 +1164,10 @@ private fun deriveModuleFacts(
                 apatchSuperkeySaved = sections["superkey_saved"]?.trim() == "1",
             )?.let { ModuleProblem.Kpm(it) }
         }
-    val zygisk = deriveModuleFact(FlashableModuleKind.Zygisk, raw.zygisk, sections, ZYGISK_ACTIVATOR)
-    val ports = deriveModuleFact(FlashableModuleKind.Ports, portsRaw, sections, PORTS_ACTIVATOR)
+    val zygisk = deriveModuleFact(FlashableModuleKind.Zygisk, raw.zygisk, sections)
+    // Ports is applied by core, so its card is the core module's fact: version
+    // skew and a staged update are the core's.
+    val ports = deriveModuleFact(FlashableModuleKind.Core, portsRaw, sections)
 
     // The one place the three native backends are grouped: every "is anything
     // installed / active" gate reads from this instead of re-deriving its own
@@ -1184,7 +1178,7 @@ private fun deriveModuleFacts(
     return ModuleFacts(
         kmod = kmod,
         builtin = builtin,
-        builtinKernelPresent = sections["proc_exists"]?.trim() == "1" && parseCtlBackendId(sections) == BUILTIN_BACKEND_ID,
+        builtinKernelPresent = builtinKernelPresent(sections),
         kpm = kpm,
         zygisk = zygisk,
         ports = ports,
@@ -1202,7 +1196,7 @@ private fun deriveModuleFacts(
                     builtin.state to FlashableModuleKind.Builtin,
                     kpm.state to FlashableModuleKind.Kpm,
                     zygisk.state to FlashableModuleKind.Zygisk,
-                    ports.state to FlashableModuleKind.Ports,
+                    ports.state to FlashableModuleKind.Core,
                 ),
                 appVersion,
             ),
@@ -1285,7 +1279,6 @@ private suspend fun deriveEnvironmentFacts(
     targetsSnapshot: TargetsSnapshot,
     ports: ModuleState,
     portsTargetCount: Int,
-    currentBootId: String,
 ): EnvironmentFacts =
     EnvironmentFacts(
         selinuxPermissive = sections["getenforce"].orEmpty().trim().equals("Permissive", ignoreCase = true),
@@ -1312,9 +1305,8 @@ private suspend fun deriveEnvironmentFacts(
             detectPortsApplyProblem(
                 ports,
                 portsTargetCount,
-                sections["ports_load_status"].orEmpty(),
-                currentBootId,
-                portsDisabled = sections["ports_disabled"].orEmpty().trim() == "1",
+                sections["core_boot_status"].orEmpty(),
+                portsDisabled = sections["core_disabled"].orEmpty().trim() == "1",
             ),
     )
 
@@ -1462,7 +1454,6 @@ internal suspend fun deriveDashboardRootFacts(
             targetsSnapshot = targetsSnapshot,
             ports = modules.ports.state,
             portsTargetCount = targets.ports,
-            currentBootId = modules.currentBootId,
         )
     val installedOptionalHooks = installedNativeOptionalHooks(modules.nativeBackend.id, sections, modules.currentBootId)
     val nativeStatusError = nativeBackendStatusError(modules.nativeBackend.id, sections)
