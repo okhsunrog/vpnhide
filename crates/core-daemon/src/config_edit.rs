@@ -55,7 +55,10 @@ fn apply_toggle(config: &mut CanonicalConfig, field: ConfigToggle, enabled: bool
     match field {
         ConfigToggle::Filesystem => {
             if enabled {
-                config.settings.optional_features.insert(FILESYSTEM_FEATURE.to_owned());
+                config
+                    .settings
+                    .optional_features
+                    .insert(FILESYSTEM_FEATURE.to_owned());
             } else {
                 config.settings.optional_features.remove(FILESYSTEM_FEATURE);
             }
@@ -98,23 +101,53 @@ mod tests {
     }
 
     fn app_with(native: bool) -> AppConfig {
-        AppConfig { native: NativeRole { enabled: native, ..Default::default() }, ..Default::default() }
+        AppConfig {
+            native: NativeRole {
+                enabled: native,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
     }
 
     #[test]
     fn toggles_set_their_field() {
         let mut c = empty();
-        c = apply_canonical_edit(&c, &ConfigEdit::Toggle { field: ConfigToggle::Debug, enabled: true });
+        c = apply_canonical_edit(
+            &c,
+            &ConfigEdit::Toggle {
+                field: ConfigToggle::Debug,
+                enabled: true,
+            },
+        );
         assert!(c.debug);
-        c = apply_canonical_edit(&c, &ConfigEdit::Toggle { field: ConfigToggle::AutoHideName, enabled: true });
+        c = apply_canonical_edit(
+            &c,
+            &ConfigEdit::Toggle {
+                field: ConfigToggle::AutoHideName,
+                enabled: true,
+            },
+        );
         assert!(c.settings.auto_hide_vpn_name);
     }
 
     #[test]
     fn filesystem_toggle_adds_and_removes_the_feature() {
-        let on = apply_canonical_edit(&empty(), &ConfigEdit::Toggle { field: ConfigToggle::Filesystem, enabled: true });
+        let on = apply_canonical_edit(
+            &empty(),
+            &ConfigEdit::Toggle {
+                field: ConfigToggle::Filesystem,
+                enabled: true,
+            },
+        );
         assert!(on.settings.optional_features.contains(FILESYSTEM_FEATURE));
-        let off = apply_canonical_edit(&on, &ConfigEdit::Toggle { field: ConfigToggle::Filesystem, enabled: false });
+        let off = apply_canonical_edit(
+            &on,
+            &ConfigEdit::Toggle {
+                field: ConfigToggle::Filesystem,
+                enabled: false,
+            },
+        );
         assert!(!off.settings.optional_features.contains(FILESYSTEM_FEATURE));
     }
 
@@ -127,17 +160,30 @@ mod tests {
                 values: BTreeSet::from(["com.bank".to_owned()]),
             },
         );
-        assert_eq!(c.settings.auto_hide_excluded_packages, BTreeSet::from(["com.bank".to_owned()]));
+        assert_eq!(
+            c.settings.auto_hide_excluded_packages,
+            BTreeSet::from(["com.bank".to_owned()])
+        );
     }
 
     #[test]
     fn app_edit_merges_only_the_named_field() {
         // Start with an app that hides; edit only its Native field.
         let mut c = empty();
-        c.apps.insert("com.x".into(), AppConfig { hidden: true, ..Default::default() });
+        c.apps.insert(
+            "com.x".into(),
+            AppConfig {
+                hidden: true,
+                ..Default::default()
+            },
+        );
         let edited = apply_canonical_edit(
             &c,
-            &ConfigEdit::App { pkg: "com.x".into(), field: ConfigAppField::Native, value: app_with(true) },
+            &ConfigEdit::App {
+                pkg: "com.x".into(),
+                field: ConfigAppField::Native,
+                value: app_with(true),
+            },
         );
         let app = &edited.apps["com.x"];
         assert!(app.native.enabled, "native field applied");
@@ -151,7 +197,11 @@ mod tests {
         // Turn native off via an App edit: the app now has no role -> removed.
         let edited = apply_canonical_edit(
             &c,
-            &ConfigEdit::App { pkg: "com.x".into(), field: ConfigAppField::Native, value: app_with(false) },
+            &ConfigEdit::App {
+                pkg: "com.x".into(),
+                field: ConfigAppField::Native,
+                value: app_with(false),
+            },
         );
         assert!(!edited.apps.contains_key("com.x"));
     }
@@ -160,22 +210,51 @@ mod tests {
     fn remove_app_drops_it() {
         let mut c = empty();
         c.apps.insert("com.x".into(), app_with(true));
-        let edited = apply_canonical_edit(&c, &ConfigEdit::RemoveApp { pkg: "com.x".into() });
+        let edited = apply_canonical_edit(
+            &c,
+            &ConfigEdit::RemoveApp {
+                pkg: "com.x".into(),
+            },
+        );
         assert!(edited.apps.is_empty());
     }
 
     #[test]
     fn replace_swaps_the_whole_config() {
-        let replacement = CanonicalConfig { debug: true, settings: Settings { auto_hide_vpn_name: true, ..Default::default() }, ..Default::default() };
-        let edited = apply_canonical_edit(&empty(), &ConfigEdit::Replace { config: replacement.clone() });
+        let replacement = CanonicalConfig {
+            debug: true,
+            settings: Settings {
+                auto_hide_vpn_name: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let edited = apply_canonical_edit(
+            &empty(),
+            &ConfigEdit::Replace {
+                config: replacement.clone(),
+            },
+        );
         assert_eq!(edited, replacement);
     }
 
     #[test]
     fn applying_against_fresh_merges_unrelated_fields() {
         // Two edits to different fields compose without clobbering each other.
-        let a = apply_canonical_edit(&empty(), &ConfigEdit::Toggle { field: ConfigToggle::Debug, enabled: true });
-        let b = apply_canonical_edit(&a, &ConfigEdit::Toggle { field: ConfigToggle::RememberSuperkey, enabled: true });
+        let a = apply_canonical_edit(
+            &empty(),
+            &ConfigEdit::Toggle {
+                field: ConfigToggle::Debug,
+                enabled: true,
+            },
+        );
+        let b = apply_canonical_edit(
+            &a,
+            &ConfigEdit::Toggle {
+                field: ConfigToggle::RememberSuperkey,
+                enabled: true,
+            },
+        );
         assert!(b.debug && b.settings.remember_superkey);
     }
 }

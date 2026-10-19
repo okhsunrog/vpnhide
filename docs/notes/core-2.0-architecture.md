@@ -739,8 +739,9 @@ activator's generic retry loop. A post-dispatch error becomes `Unknown`, rather
 than known failure. Confirmed persistence remains visible and duplicate operation
 IDs with the same original base and payload query the existing record; reusing
 an ID with a different request returns `IdReused`. New edits are blocked after Unknown in this core
-instance; durable records, restart fencing and reconciliation are still pending.
-Restart is **not** an authorized recovery procedure or proof of completion.
+instance. Durable records and restart fencing are implemented (see journal slice below);
+reconciliation of Unknown via evidence readback is still pending.
+Restart alone is **not** proof of completion and must not re-dispatch uncertain effects.
 KPM remains opt-in, requiring `VPNHIDE_KPM_LOCK` and `VPNHIDE_KMOD_CTL`; artifact
 loading also requires `VPNHIDE_KERNEL_MODULES`. Common-module boot and legacy
 writer cutover are not enabled by this stage.
@@ -816,7 +817,20 @@ Modified Rust files pass rustfmt. The previously recorded workspace-formatting
 and native Zygisk host-test baseline failures remain; full CI/device validation
 is not claimed complete.
 
-Next: durable operation recovery and ownership transfer before enabling the
+**Durable operation journal (incremental slice landed).**
+`core-daemon/journal.rs` is the private store (§4 tier 3), separate from the
+LSPosed-facing config file. Path: `/data/adb/vpnhide/core/operations.json`
+(overridable via `VPNHIDE_JOURNAL_PATH`; colocated beside `VPNHIDE_CONFIG_PATH`
+in the sandbox). It persists operation IDs, original requests, phase progress,
+outcomes, retired-id retention, and the durable `config_revision` counter.
+Intent is synced before each dispatched phase effect; restart fencing turns
+in-flight `Running` into durable `Unknown` without replaying effects. Same-ID
+retries return the existing record; different content or retired IDs are
+`IdReused`. Still open for this milestone: Persist/Native evidence reconciliation
+(readback to resolve Unknown), Held/recheck UX, and crash-injection at every
+phase boundary in the subprocess suite.
+
+Next: finish journal recovery/ownership transfer before enabling the
 common module's production boot path. Zygisk live-process evidence and complete
 observation freshness/error reporting remain distinct from file delivery.
 

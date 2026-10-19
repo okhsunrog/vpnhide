@@ -1554,6 +1554,7 @@ version = "0.0.0"
 dependencies = [
  "futures",
  "libc",
+ "serde",
  "serde_json",
  "tarpc",
  "tempfile",

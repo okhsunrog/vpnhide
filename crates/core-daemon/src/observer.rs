@@ -19,8 +19,8 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::unix::AsyncFd;
 use tokio::io::Interest;
+use tokio::io::unix::AsyncFd;
 use tokio::time::Instant;
 use vpnhide_checks::is_vpn_interface_name;
 use vpnhide_core_rpc::RoutingObservation;
@@ -156,7 +156,8 @@ impl NetlinkRoute {
         req[4..6].copy_from_slice(&RTM_GETLINK.to_ne_bytes());
         req[6..8].copy_from_slice(&(NLM_F_REQUEST | NLM_F_DUMP).to_ne_bytes());
         req[8..12].copy_from_slice(&1u32.to_ne_bytes());
-        let sent = unsafe { libc::send(self.fd, req.as_ptr() as *const libc::c_void, req.len(), 0) };
+        let sent =
+            unsafe { libc::send(self.fd, req.as_ptr() as *const libc::c_void, req.len(), 0) };
         if sent < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -226,12 +227,18 @@ fn publish(state: &Arc<CoreState>, route: &RouteState) {
         vpn_interfaces: route.up.iter().cloned().collect(),
     };
     if state.publisher.current().snapshot.routing != next {
-        state.publisher.update(move |snapshot| snapshot.routing = next);
+        state
+            .publisher
+            .update(move |snapshot| snapshot.routing = next);
     }
 }
 
 /// Rebuild the route state from a fresh kernel dump (startup and after an ENOBUFS overflow).
-async fn resync(async_fd: &AsyncFd<NetlinkRoute>, buf: &mut [u8], state: &mut RouteState) -> io::Result<()> {
+async fn resync(
+    async_fd: &AsyncFd<NetlinkRoute>,
+    buf: &mut [u8],
+    state: &mut RouteState,
+) -> io::Result<()> {
     *state = RouteState::default();
     async_fd.get_ref().request_link_dump()?;
     loop {
@@ -349,18 +356,27 @@ mod tests {
     #[test]
     fn a_vpn_link_up_then_down_flips_the_set() {
         let mut state = RouteState::default();
-        assert!(consume(&nlmsg(RTM_NEWLINK, &link_body("tun0", true)), &mut state));
+        assert!(consume(
+            &nlmsg(RTM_NEWLINK, &link_body("tun0", true)),
+            &mut state
+        ));
         assert_eq!(state.up.iter().cloned().collect::<Vec<_>>(), vec!["tun0"]);
         // A route message (RTM_NEWROUTE = 24), i.e. non-link, does not change presence.
         assert!(!consume(&nlmsg(24, &[0u8; 12]), &mut state));
-        assert!(consume(&nlmsg(RTM_DELLINK, &link_body("tun0", true)), &mut state));
+        assert!(consume(
+            &nlmsg(RTM_DELLINK, &link_body("tun0", true)),
+            &mut state
+        ));
         assert!(state.up.is_empty());
     }
 
     #[test]
     fn a_non_vpn_link_never_enters_the_set() {
         let mut state = RouteState::default();
-        assert!(!consume(&nlmsg(RTM_NEWLINK, &link_body("wlan0", true)), &mut state));
+        assert!(!consume(
+            &nlmsg(RTM_NEWLINK, &link_body("wlan0", true)),
+            &mut state
+        ));
         assert!(state.up.is_empty());
     }
 }
