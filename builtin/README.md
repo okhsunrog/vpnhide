@@ -1,3 +1,7 @@
+> **2.0:** The Magisk companion module (`vpnhide-builtin.zip`) was removed.
+> Core detects builtin by `/proc/vpnhide_ctl` backend id and delivers wire.
+> Install `vpnhide_core` only — no companion activator zip.
+
 # builtin — in-tree (compile-time) native backend
 
 A fourth native backend for vpnhide, alongside `kmod` (.ko / kretprobes), `kpm`

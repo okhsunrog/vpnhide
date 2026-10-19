@@ -1,3 +1,5 @@
+> **Superseded for 2.0:** There is no separate `vpnhide-ports.zip`. Ports rules are applied by the **`vpnhide_core`** module. Uninstall any old `vpnhide_ports` Magisk module.
+
 # 隐藏 localhost 端口（Ports）
 
 部分 VPN/代理客户端监听本地端口，例如 `127.0.0.1:7890`。即使 VPN 接口被隐藏，

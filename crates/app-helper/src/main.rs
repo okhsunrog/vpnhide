@@ -1,4 +1,3 @@
-mod activate;
 mod mutation;
 mod observations;
 mod probe;
@@ -21,7 +20,6 @@ fn main() {
         [command, rest @ ..] if command == "mutation" && mutation::valid_command(rest) => {
             mutation::run(rest)
         }
-        [command, mode] if command == "activate" && mode == "native" => activate::run(&[]),
         _ => usage_error(),
     };
     std::process::exit(code);
@@ -29,7 +27,7 @@ fn main() {
 
 fn usage_error() -> i32 {
     eprintln!(
-        "usage: vhhelper probe checks | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-list | mutation <directory> <config> <inspect|adopt|open|run|recover> ... | activate native"
+        "usage: vhhelper probe checks | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-list | mutation <directory> <config> <inspect|adopt|open|run|recover> ..."
     );
     2
 }

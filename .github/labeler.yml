@@ -23,10 +23,11 @@
       - any-glob-to-any-file:
           - 'lsposed/**'
           - 'tools/agent-mcp/**'
-'area:portshide':
+'area:core':
   - changed-files:
       - any-glob-to-any-file:
-          - 'portshide/**'
+          - 'core/**'
+          - 'crates/core-*/**'
 'area:docs':
   - changed-files:
       - any-glob-to-any-file:

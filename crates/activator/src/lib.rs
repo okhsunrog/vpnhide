@@ -1,3 +1,4 @@
+#![allow(dead_code)] // Boot activator entry points removed; keep projection helpers for core.
 use std::error::Error;
 use std::fs;
 use std::io::{ErrorKind, Write};
@@ -16,12 +17,8 @@ pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 pub const CANONICAL_CONFIG: &str = "/data/system/vpnhide_config.json";
 pub const KMOD_CTL: &str = "/proc/vpnhide_ctl";
 pub const KMOD_MODULE_DIR: &str = "/data/adb/modules/vpnhide_kmod";
-/// The built-in backend lives in the kernel image (CONFIG_VPNHIDE=y), not in a
-/// loadable module. Its companion module ships only the userspace glue (this
-/// activator + boot scripts) that delivers config over the shared control node
-/// and records liveness. The control node itself is KMOD_CTL — the built-in backend and kmod
-/// speak the identical /proc/vpnhide_ctl wire and are mutually exclusive (one
-/// kernel is either built with the driver or loads the .ko, never both).
+/// Historical Magisk id for the removed companion module. Builtin is detected
+/// by control-node backend id; core delivers wire.
 pub const BUILTIN_MODULE_DIR: &str = "/data/adb/modules/vpnhide_builtin";
 pub const ZYGISK_RUNTIME_CONFIG: &str = "/data/adb/modules/vpnhide_zygisk/targets.txt";
 pub const KPM_MODULE_FILE: &str = "/data/adb/modules/vpnhide_kpm/vpnhide.kpm";
@@ -32,8 +29,7 @@ const KPM_NAME: &str = "vpnhide";
 pub const PORTS_CHAIN4: &str = "vpnhide_out";
 pub const PORTS_CHAIN6: &str = "vpnhide_out6";
 const PORTS_STATUS_DIR: &str = "/data/adb/vpnhide_ports";
-/// Marker file written by core when it owns Ports rules. Legacy uninstall must
-/// not tear down chains while this is present.
+/// Marker file written by core when it has applied Ports rules (diagnostics).
 pub const PORTS_CORE_OWNER_MARKER: &str = "/data/adb/vpnhide/core/ports_owned";
 /// Marker: core owns the durable canonical config file writes.
 pub const CONFIG_CORE_OWNER_MARKER: &str = "/data/adb/vpnhide/core/config_owned";
@@ -116,16 +112,14 @@ enum PmReadyWait {
 
 mod kernel_control;
 mod kpm;
-mod lifecycle;
+mod load_kmod;
+pub(crate) use load_kmod::{CHILD_COMMAND_TIMEOUT, output_with_timeout};
 mod model;
-mod ports;
 mod ownership;
-mod selection;
-pub use selection::activate_native_companion;
+mod ports;
 
 use kpm::*;
 pub use kpm::{CoreKpm, KpmConfigError};
-pub use lifecycle::*;
 pub use model::*;
 pub use ports::{
     PORTS_OWNER_MARKER_ENV, PortsApplyResult, PortsChainPresence, PortsFamilyResult,
@@ -133,10 +127,8 @@ pub use ports::{
     ports_owner_marker_path, write_ports_core_owner_marker, write_ports_load_status,
 };
 pub use ownership::{
-    activation_fenced_by_core, config_owned_by_core, core_marker_path, log_fenced,
-    native_owned_by_core, zygisk_owned_by_core,
+    config_owned_by_core, core_marker_path, native_owned_by_core, zygisk_owned_by_core,
 };
-use ports::*;
 
 // --- core-2.0 (§4): the persistent root core absorbs the activator, linking these instead
 // of shelling out to the per-backend binaries. Additive pub surface over the pieces the
@@ -178,7 +170,7 @@ pub fn load_kernel_module(ctl: &Path, artifact: &Path, filesystem_hiding: bool) 
             return Err(format!("kernel artifact missing: {}", artifact.display()).into());
         }
         let output = kernel_control::load_without_kpm(kpm::KpmClient::observe_loaded(), || {
-            Ok(lifecycle::load_kmod_artifact(artifact, filesystem_hiding)?)
+            Ok(load_kmod::load_kmod_artifact(artifact, filesystem_hiding)?)
         })?;
         if !output.status.success() {
             return Err(format!("insmod failed: {}", output.status).into());
@@ -219,91 +211,6 @@ pub(crate) fn optional_feature_enabled_or_default(feature: &str) -> bool {
     }
 }
 
-pub fn activate_kmod() -> Result<()> {
-    if crate::ownership::activation_fenced_by_core("native") {
-        crate::ownership::log_fenced("vpnhide_kmod", "activate_kmod");
-        return Ok(());
-    }
-
-    activate_kmod_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
-}
-
-pub(crate) fn activate_kmod_boot() -> Result<()> {
-    if crate::ownership::activation_fenced_by_core("native") {
-        crate::ownership::log_fenced("vpnhide_kmod", "activate_kmod_boot");
-        return Ok(());
-    }
-
-    wait_for_path(KMOD_CTL);
-    activate_kmod_with_pm_wait(PmReadyWait::Forever)
-}
-
-fn activate_kmod_with_pm_wait(wait: PmReadyWait) -> Result<()> {
-    let wire = project_native_with_pm_wait(&read_canonical()?, NativeHookFamily::Kmod, wait)?;
-    // /proc/vpnhide_ctl replaces the entire config per write(), so keep this
-    // bounded to MAX_NATIVE_TARGETS and deliver one complete snapshot.
-    kernel_control::write_config(Path::new(KMOD_CTL), kernel_control::KMOD_BACKEND_ID, &wire)?;
-    Ok(())
-}
-
-/// Deliver config to the in-tree (built-in) backend. Same /proc/vpnhide_ctl wire
-/// and kernel hooks as the .ko, but its OWN hook family: unlike the .ko (whose
-/// filesystem hook is gated at insmod by module_param) the driver is compiled in
-/// (CONFIG_VPNHIDE_FS_HIDING=y) with no load-time gate, so the filesystem toggle
-/// must be projected into the runtime mask — otherwise it could never turn off.
-/// The wire's `backend` field is set by the kernel driver, not here.
-fn activate_builtin_with_pm_wait(wait: PmReadyWait) -> Result<()> {
-    let wire = project_native_with_pm_wait(&read_canonical()?, NativeHookFamily::Builtin, wait)?;
-    kernel_control::write_config(
-        Path::new(KMOD_CTL),
-        kernel_control::BUILTIN_BACKEND_ID,
-        &wire,
-    )?;
-    Ok(())
-}
-
-pub fn activate_builtin() -> Result<()> {
-    if crate::ownership::activation_fenced_by_core("native") {
-        crate::ownership::log_fenced("vpnhide_builtin", "activate_builtin");
-        return Ok(());
-    }
-
-    activate_builtin_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
-}
-
-pub(crate) fn activate_builtin_boot() -> Result<()> {
-    if crate::ownership::activation_fenced_by_core("native") {
-        crate::ownership::log_fenced("vpnhide_builtin", "activate_builtin_boot");
-        return Ok(());
-    }
-
-    wait_for_path(KMOD_CTL);
-    activate_builtin_with_pm_wait(PmReadyWait::Forever)
-}
-
-pub fn activate_zygisk() -> Result<()> {
-    if crate::ownership::activation_fenced_by_core("zygisk") {
-        crate::ownership::log_fenced("vpnhide_zygisk", "activate_zygisk");
-        return Ok(());
-    }
-
-    activate_zygisk_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
-}
-
-pub(crate) fn activate_zygisk_boot() -> Result<()> {
-    if crate::ownership::activation_fenced_by_core("zygisk") {
-        crate::ownership::log_fenced("vpnhide_zygisk", "activate_zygisk_boot");
-        return Ok(());
-    }
-
-    activate_zygisk_with_pm_wait(PmReadyWait::Forever)
-}
-
-fn activate_zygisk_with_pm_wait(wait: PmReadyWait) -> Result<()> {
-    let wire = project_native_with_pm_wait(&read_canonical()?, NativeHookFamily::Zygisk, wait)?;
-    validate_zygisk_config_wire(&wire)?;
-    write_atomic(Path::new(ZYGISK_RUNTIME_CONFIG), wire.as_bytes(), 0o644)
-}
 
 /// Zygisk installs hooks only in processes whose UID is explicitly listed.
 /// A non-zero default means the opposite — act on every UID not listed — which
@@ -376,52 +283,6 @@ impl KpmBootReport {
     }
 }
 
-pub fn activate_kpm() -> Result<()> {
-    if crate::ownership::activation_fenced_by_core("native") {
-        crate::ownership::log_fenced("vpnhide_kpm", "activate_kpm");
-        return Ok(());
-    }
-
-    // App / manual path: a conflict is a hard error (conflict_is_error=true),
-    // so this only ever returns Configured on success.
-    activate_kpm_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS), true).map(|_| ())
-}
-
-pub(crate) fn activate_kpm_boot() -> Result<KpmBootReport> {
-    activate_kpm_with_pm_wait(PmReadyWait::Forever, false)
-}
-
-/// Load the KPM without waiting for PackageManager or delivering config.
-/// The early lifecycle phase calls this during post-fs-data; configuration happens
-/// later through `activate_kpm_boot` once package UIDs can be resolved.
-pub(crate) fn load_kpm_boot() -> Result<KpmBootReport> {
-    if skip_kpm_for_kmod_conflict(false)? {
-        return Ok(KpmBootReport::before_config(
-            KpmBootOutcome::DeferredConflict,
-        ));
-    }
-    if !running_kernel_supports_kpm()? {
-        return Ok(KpmBootReport::before_config(
-            KpmBootOutcome::UnsupportedKernel,
-        ));
-    }
-    let filesystem_hiding =
-        optional_feature_enabled_or_default(OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS);
-    let client = match KpmClient::detect_outcome()? {
-        KpmClientDetection::Ready(client) => client,
-        KpmClientDetection::AwaitingAuthentication(_) => {
-            return Ok(KpmBootReport::with_feature(
-                KpmBootOutcome::AwaitingAuthentication,
-                filesystem_hiding,
-            ));
-        }
-    };
-    client.ensure_loaded(KpmLoadOptions { filesystem_hiding })?;
-    Ok(KpmBootReport::with_feature(
-        KpmBootOutcome::Configured,
-        filesystem_hiding,
-    ))
-}
 
 pub fn read_kpm_status() -> Result<String> {
     read_kpm_payload("vpnhide 1 status")
@@ -444,55 +305,6 @@ fn read_kpm_payload(wire: &str) -> Result<String> {
     client.ctl0_read(wire)
 }
 
-fn activate_kpm_with_pm_wait(wait: PmReadyWait, conflict_is_error: bool) -> Result<KpmBootReport> {
-    if skip_kpm_for_kmod_conflict(conflict_is_error)? {
-        return Ok(KpmBootReport::before_config(
-            KpmBootOutcome::DeferredConflict,
-        ));
-    }
-    if !running_kernel_supports_kpm()? {
-        if conflict_is_error {
-            let release = running_kernel_release()?;
-            return Err(format!(
-                "unsupported kernel {release}; KPM supports {KPM_SUPPORTED_KERNEL_FAMILIES}"
-            )
-            .into());
-        }
-        return Ok(KpmBootReport::before_config(
-            KpmBootOutcome::UnsupportedKernel,
-        ));
-    }
-    let canonical = read_canonical()?;
-    let filesystem_hiding = parse_canonical(&canonical)?
-        .settings
-        .optional_features
-        .contains(OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS);
-    let wire = project_native_with_pm_wait(&canonical, NativeHookFamily::Kpm, wait)?;
-    // Re-check after the (possibly long) PackageManager wait: the .ko may have
-    // been loaded meanwhile, in which case we must not configure the KPM.
-    if skip_kpm_for_kmod_conflict(conflict_is_error)? {
-        return Ok(KpmBootReport::with_feature(
-            KpmBootOutcome::DeferredConflict,
-            filesystem_hiding,
-        ));
-    }
-    let client = match KpmClient::detect_outcome()? {
-        KpmClientDetection::Ready(client) => client,
-        KpmClientDetection::AwaitingAuthentication(_) if !conflict_is_error => {
-            return Ok(KpmBootReport::with_feature(
-                KpmBootOutcome::AwaitingAuthentication,
-                filesystem_hiding,
-            ));
-        }
-        KpmClientDetection::AwaitingAuthentication(detail) => return Err(detail.into()),
-    };
-    client.ensure_loaded(KpmLoadOptions { filesystem_hiding })?;
-    client.ctl0_config(&wire)?;
-    Ok(KpmBootReport::with_feature(
-        KpmBootOutcome::Configured,
-        filesystem_hiding,
-    ))
-}
 
 fn running_kernel_release() -> Result<String> {
     let out = Command::new("uname").arg("-r").output()?;
@@ -548,49 +360,6 @@ fn parse_kernel_family(release: &str) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
-pub fn activate_ports() -> Result<PortsActivationReport> {
-    activate_ports_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
-}
-
-pub(crate) fn activate_ports_boot() -> Result<PortsActivationReport> {
-    activate_ports_with_pm_wait(PmReadyWait::Forever)
-}
-
-fn activate_ports_with_pm_wait(wait: PmReadyWait) -> Result<PortsActivationReport> {
-    let rules = project_ports_with_pm_wait(&read_canonical()?, wait)?;
-    apply_ports_rules(&rules)
-}
-
-pub fn activate_ports_recorded(boot_wait: bool) -> Result<()> {
-    if crate::ownership::activation_fenced_by_core("ports") {
-        crate::ownership::log_fenced("vpnhide_ports", "activate_ports_recorded");
-        return Ok(());
-    }
-
-    let source = if boot_wait { "boot" } else { "app" };
-    let result = if boot_wait {
-        activate_ports_boot()
-    } else {
-        activate_ports()
-    };
-    match result {
-        Ok(report) => {
-            write_ports_load_status(
-                source,
-                true,
-                Some(report.target_count),
-                "configured",
-                &report.log,
-            );
-            Ok(())
-        }
-        Err(err) => {
-            let detail = err.to_string();
-            write_ports_load_status(source, false, None, &detail, &detail);
-            Err(err)
-        }
-    }
-}
 
 fn has_native_targets(cfg: &CanonicalConfig, family: NativeHookFamily) -> bool {
     cfg.apps

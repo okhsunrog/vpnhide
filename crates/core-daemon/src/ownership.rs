@@ -1,13 +1,12 @@
-//! Exclusive ownership fencing (core-2.0 §4 / §11).
+//! Core resource inventory markers (core-2.0 §4 / §11).
 //!
-//! Dual-writer is refused by **markers**, not by deleting legacy code yet: when
-//! core claims a resource, legacy activators / uninstall paths check the marker
-//! and no-op. Dev sandboxes leave markers unset unless they opt in — production
-//! writes stay gated until packaging cutover (step 5) enables them.
+//! After the activator cutover, core is the **only** writer of canonical config,
+//! `/proc/vpnhide_ctl`, Zygisk `targets.txt`, and Ports rules. Markers record that
+//! core has claimed/applied a resource for diagnostics and adopt-on-start — they
+//! are not a dual-writer fencing protocol.
 //!
-//! Backend handoff note: claiming Zygisk/Native ownership does **not** unload
-//! kernel hooks or rewrite already-injected process policy; it only fences
-//! competing writers of the next apply.
+//! Claiming Zygisk/Native does **not** unload kernel hooks or rewrite already-
+//! injected process policy; it only records ownership for the next apply.
 
 use std::fs;
 use std::io::{self, Write};

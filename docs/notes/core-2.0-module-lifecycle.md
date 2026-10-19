@@ -1,3 +1,5 @@
+> See also [core-2.0-activator-cutover.md](core-2.0-activator-cutover.md) — activators deleted.
+
 # Core common module lifecycle (step 5)
 
 Magisk-format module `id=vpnhide_core` under `core/module/`. Same zip format for
@@ -14,8 +16,7 @@ core/module/
   service.sh            # export production env, start vpnhide-core
   uninstall.sh          # restricted: stop socket/log only
   sepolicy.rule         # app→core UDS (manager-applied)
-  legacy-prefer-core.sh # snippet mirrored into legacy service.sh
-  vpnhide-core[.arm64|.armv7]  # shipped by release packaging
+    vpnhide-core[.arm64|.armv7]  # shipped by release packaging
 ```
 
 Persist dir: `/data/adb/vpnhide/core/` — journal, markers, `boot_status`,

@@ -211,7 +211,7 @@ impl PhaseRunner for RealPhaseRunner {
             ConfigPhase::Persist => match &self.config_path {
                 Some(path) => {
                     // Best-effort fence: host sandboxes may lack /data/adb. A
-                    // successful claim makes legacy activators no-op; failure
+                    // claim records inventory ownership; failure
                     // must not block Persist itself.
                     if let Err(e) = crate::ownership::claim(crate::ownership::OwnedResource::Config)
                     {

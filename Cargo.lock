@@ -1525,7 +1525,6 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
- "vpnhide_activator",
  "vpnhide_apatch_abi",
  "vpnhide_checks",
 ]

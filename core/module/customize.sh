@@ -35,7 +35,6 @@ set_perm "$MODPATH/vpnhide-core" 0 0 0755
 set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
 set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
-[ -f "$MODPATH/legacy-prefer-core.sh" ] && set_perm "$MODPATH/legacy-prefer-core.sh" 0 0 0644
 
 ui_print "- Persist: $PERSIST_DIR (journal, markers, boot_status, socket)"
 ui_print "- Config:  /data/system/vpnhide_config.json (LSPosed-compatible schema)"
