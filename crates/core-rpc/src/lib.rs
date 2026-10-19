@@ -52,6 +52,15 @@ pub const PROTOCOL_VERSION: u32 = 4;
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
 pub const SOCKET_NAME: &str = "vpnhide-core.sock";
 
+/// Production UDS path under the common Magisk module persist dir (§9 / step 5).
+pub const PRODUCTION_SOCKET_PATH: &str = "/data/adb/vpnhide/core/vpnhide-core.sock";
+
+/// Max length-delimited frame on the tarpc transport (bytes). Oversized frames are dropped.
+pub const MAX_FRAME_BYTES: usize = 1 << 20; // 1 MiB
+
+/// Soft cap on concurrent accepted client connections (slow consumers / DoS bound).
+pub const MAX_CONCURRENT_CONNECTIONS: usize = 8;
+
 /// How long the core holds a [`state_since`](VpnhideCore::state_since) call open waiting
 /// for something newer. A long poll mapped onto request/response, not a subscription.
 pub const STATE_HOLD: Duration = Duration::from_secs(20);

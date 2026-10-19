@@ -26,6 +26,11 @@ internal data class CanonicalWriteResult(
  *
  * The process-owned actor serializes fresh field edits through root receipt recovery.
  * The filesystem write remains atomic for system_server and native readers.
+ *
+ * Step 7: when [dev.okhsunrog.vpnhide.core.CoreIpcPrefs.useCoreReplica] is true (dev FFI
+ * build), prefer the core UDS replica + typed `submit_edit` / `get_operation` over this
+ * su [ConfigRootIo] lane. Default remains legacy until device validation completes.
+ * Editor drafts and local preferences stay in Kotlin either way.
  */
 internal object CanonicalConfigRepository {
     internal val processScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

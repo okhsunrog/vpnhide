@@ -691,24 +691,28 @@ impl VpnhideCore for CoreServer {
 
 /// Serve one accepted connection until it closes or its generation is cancelled.
 ///
-/// Framing + codec match core-rpc's contract (length-delimited + JSON). Spawned onto the
-/// current runtime; ends when the peer disconnects or `cancel` fires, so a connection never
-/// outlives the generation that accepted it.
-pub fn serve_connection(stream: UnixStream, state: Arc<CoreState>, cancel: CancellationToken) {
-    let framed = LengthDelimitedCodec::builder().new_framed(stream);
+/// Framing + codec match core-rpc's contract (length-delimited + JSON, capped at
+/// [`vpnhide_core_rpc::MAX_FRAME_BYTES`]). Ends when the peer disconnects or `cancel`
+/// fires, so a connection never outlives the generation that accepted it.
+pub async fn serve_connection(
+    stream: UnixStream,
+    state: Arc<CoreState>,
+    cancel: CancellationToken,
+) {
+    let framed = LengthDelimitedCodec::builder()
+        .max_frame_length(vpnhide_core_rpc::MAX_FRAME_BYTES)
+        .new_framed(stream);
     let transport = tarpc::serde_transport::new(framed, tokio_serde::formats::Json::default());
     let server = CoreServer::new(state);
-    tokio::spawn(async move {
-        let serve = BaseChannel::with_defaults(transport)
-            .execute(server.serve())
-            .for_each(|response| async move {
-                tokio::spawn(response);
-            });
-        tokio::select! {
-            _ = cancel.cancelled() => {}
-            _ = serve => {}
-        }
-    });
+    let serve = BaseChannel::with_defaults(transport)
+        .execute(server.serve())
+        .for_each(|response| async move {
+            tokio::spawn(response);
+        });
+    tokio::select! {
+        _ = cancel.cancelled() => {}
+        _ = serve => {}
+    }
 }
 
 #[cfg(test)]

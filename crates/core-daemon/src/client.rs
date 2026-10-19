@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, watch};
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use vpnhide_core_rpc::{
-    Accepted, BaseRef, CALL_DEADLINE, ClientHello, ConfigEdit, Handshake, OperationId,
-    OperationRecord, PROTOCOL_VERSION, STATE_POLL_DEADLINE, StateSnapshot, SubmitError,
-    VpnhideCoreClient,
+    Accepted, BaseRef, CALL_DEADLINE, ClientHello, ConfigEdit, Handshake, MAX_FRAME_BYTES,
+    OperationId, OperationRecord, PROTOCOL_VERSION, STATE_POLL_DEADLINE, StateSnapshot,
+    SubmitError, VpnhideCoreClient,
 };
 
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
@@ -119,7 +119,9 @@ impl CoreClient {
             return Ok(client.clone());
         }
         let stream = tokio::net::UnixStream::connect(&self.socket_path).await?;
-        let framed = LengthDelimitedCodec::builder().new_framed(stream);
+        let framed = LengthDelimitedCodec::builder()
+            .max_frame_length(MAX_FRAME_BYTES)
+            .new_framed(stream);
         let transport = tarpc::serde_transport::new(framed, tokio_serde::formats::Json::default());
         let client = VpnhideCoreClient::new(tarpc::client::Config::default(), transport).spawn();
         *guard = Some(client.clone());
