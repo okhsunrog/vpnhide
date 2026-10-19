@@ -48,7 +48,11 @@ pub fn reconcile_entry(entry: &mut JournalEntry, sources: &EvidenceSources<'_>) 
         let resolved = match phase.phase {
             ConfigPhase::Persist => reconcile_persist(candidate, sources.config_path),
             ConfigPhase::Native => reconcile_native(candidate, sources),
-            // Ports/Secret/Cleanup: no evidence path in this slice.
+            ConfigPhase::Ports => {
+                let presence = crate::ports::inspect_surviving_rules();
+                crate::ports::reconcile_ports_unknown(presence)
+            }
+            // Secret/Cleanup: no evidence path in this slice.
             _ => PhaseOutcome::Unknown,
         };
         if resolved != PhaseOutcome::Unknown {
@@ -212,6 +216,7 @@ mod tests {
                 op: OperationId(1),
                 phases,
                 settled: Some(PhaseOutcome::Unknown),
+                ports: None,
             },
         }
     }

@@ -66,6 +66,8 @@ pub struct CoreState {
     /// native activation — the safe default so the dev sandbox never writes the real
     /// `/proc/vpnhide_ctl`.
     kmod_ctl_path: Option<PathBuf>,
+    /// When true, config changes include a Ports phase (`VPNHIDE_PORTS`).
+    ports_enabled: bool,
     /// Dispatch generation: bumped when admitting work and by [`Self::invalidate_dispatch`].
     /// A worker captures the value at admit and must still match before each external
     /// effect, so a delayed predecessor cannot dispatch after newer work (or an explicit
@@ -88,6 +90,7 @@ impl CoreState {
             config_path: None,
             journal_path: None,
             kmod_ctl_path: None,
+            ports_enabled: false,
             dispatch_fence: AtomicU64::new(0),
         })
     }
@@ -205,6 +208,7 @@ impl CoreState {
             config_path: Some(path),
             journal_path,
             kmod_ctl_path,
+            ports_enabled: crate::ports::ports_enabled_from_env(),
             dispatch_fence: AtomicU64::new(0),
         });
         if let Some(config) = config {
@@ -294,19 +298,31 @@ impl CoreState {
         // when a control node is configured, delivers the native wire (Native). Repair skips
         // Persist and only activates. Blocking IO under the lock serializes writers; the RPC
         // layer detaches via spawn_blocking so connection loss cannot cancel ownership.
+        let native = self.kmod_ctl_path.is_some();
+        let ports = self.ports_enabled;
         let kind = if repair {
-            if self.kmod_ctl_path.is_some() {
-                PlanKind::NativeOnly
-            } else {
-                PlanKind::PersistOnly // no-op Persist; nothing to activate
+            match (native, ports) {
+                (true, true) => PlanKind::NativeThenPorts,
+                (true, false) => PlanKind::NativeOnly,
+                (false, true) => PlanKind::PortsOnly,
+                (false, false) => PlanKind::PersistOnly,
             }
-        } else if changed && self.kmod_ctl_path.is_some() {
-            PlanKind::PersistThenNative
+        } else if changed {
+            match (native, ports) {
+                (true, true) => PlanKind::PersistThenNativeThenPorts,
+                (true, false) => PlanKind::PersistThenNative,
+                (false, true) => PlanKind::PersistThenPorts,
+                (false, false) => PlanKind::PersistOnly,
+            }
         } else {
             PlanKind::PersistOnly
         };
         let plan = operation::plan_kind(kind);
-        let runner = RealPhaseRunner::new(self.config_path.clone(), self.kmod_ctl_path.clone());
+        let runner = RealPhaseRunner::new_with_ports(
+            self.config_path.clone(),
+            self.kmod_ctl_path.clone(),
+            ports,
+        );
 
         let outcome = if let Some(journal_path) = self.journal_path.clone() {
             let mut hook = JournalPhaseHook {
@@ -338,10 +354,12 @@ impl CoreState {
             config_edit::note_writes(&mut store.field_revisions, &writes, rev);
             store.journal.field_revisions = store.field_revisions.clone();
         }
+        let ports_report = runner.take_ports_report();
         let record = OperationRecord {
             op,
             phases: outcome.phases.clone(),
             settled: Some(outcome.settled),
+            ports: ports_report.clone(),
         };
         if let Some(journal_path) = &self.journal_path {
             let revision_for_journal = store.config_revision;
@@ -362,6 +380,7 @@ impl CoreState {
                     op,
                     phases: outcome.phases.clone(),
                     settled: Some(PhaseOutcome::Unknown),
+                    ports: ports_report.clone(),
                 };
                 store.operations.insert(
                     op,
@@ -543,6 +562,7 @@ impl PhaseHook for JournalPhaseHook<'_> {
                     op: self.op,
                     phases,
                     settled: None,
+                    ports: None,
                 },
             };
             self.journal.upsert(entry);
@@ -635,7 +655,9 @@ pub fn serve_connection(stream: UnixStream, state: Arc<CoreState>, cancel: Cance
 mod tests {
     use super::*;
     use crate::journal::{Journal, JournalEntry};
-    use vpnhide_core_rpc::{ConfigToggle, PhaseOutcome, PhaseRecord, StateSnapshot};
+    use vpnhide_core_rpc::{
+        AppConfig, ConfigToggle, FamilyApplyOutcome, PhaseOutcome, PhaseRecord, StateSnapshot,
+    };
 
     fn server() -> CoreServer {
         CoreServer::new(CoreState::new(Publisher::new(1, StateSnapshot::default())))
@@ -883,6 +905,110 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn ports_phase_reports_partial_families_on_record() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::ports::test_env_lock();
+
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let write_stub = |name: &str, body: &str| {
+            let p = bin.join(name);
+            std::fs::write(&p, body).unwrap();
+            let mut perms = std::fs::metadata(&p).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&p, perms).unwrap();
+        };
+        // IPv4 ok; IPv6 restore fails — honest partial.
+        let tables = r#"#!/bin/sh
+case "$*" in
+  *"-C OUTPUT"*) exit 1 ;;
+  *) exit 0 ;;
+esac
+"#;
+        write_stub("iptables", tables);
+        write_stub("ip6tables", tables);
+        write_stub("iptables-restore", "#!/bin/sh\ncat >/dev/null; exit 0\n");
+        write_stub("ip6tables-restore", "#!/bin/sh\ncat >/dev/null; exit 1\n");
+
+        let marker = dir.path().join("ports_owned");
+        let pm_dump = dir.path().join("pm.txt");
+        std::fs::write(&pm_dump, "package:com.example.app uid:10123\n").unwrap();
+        let old_path = std::env::var_os("PATH");
+        let new_path = format!(
+            "{}:{}",
+            bin.display(),
+            old_path
+                .as_ref()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        );
+        // SAFETY: PATH_LOCK held for this test.
+        unsafe {
+            std::env::set_var("PATH", &new_path);
+            std::env::set_var("VPNHIDE_PORTS", "1");
+            std::env::set_var("VPNHIDE_PORTS_OWNER_MARKER", &marker);
+            std::env::set_var("VPNHIDE_PORTS_PM_DUMP", &pm_dump);
+        }
+
+        let config_path = dir.path().join("cfg.json");
+        let state = CoreState::load(
+            Publisher::new(1, StateSnapshot::default()),
+            config_path,
+            None, // no native — Ports-only plan
+        )
+        .unwrap();
+        let server = CoreServer::new(state);
+        let ctx = tarpc::context::current;
+        let mut cfg = CanonicalConfig::default();
+        cfg.apps.insert(
+            "com.example.app".into(),
+            AppConfig {
+                ports: true,
+                ..Default::default()
+            },
+        );
+        server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(1),
+                BaseRef { revision: 0 },
+                ConfigEdit::Replace { config: cfg },
+            )
+            .await
+            .unwrap();
+        let record = server
+            .clone()
+            .get_operation(ctx(), OperationId(1))
+            .await
+            .unwrap();
+        assert!(
+            record
+                .phases
+                .iter()
+                .any(|p| p.phase == ConfigPhase::Ports
+                    && p.outcome == PhaseOutcome::FailedKnown),
+            "Ports phase must run and settle FailedKnown on partial apply: {record:?}"
+        );
+        let ports = record.ports.expect("ports family report on record");
+        assert_eq!(ports.ipv4, FamilyApplyOutcome::Confirmed);
+        assert_eq!(ports.ipv6, FamilyApplyOutcome::FailedKnown);
+        assert!(marker.is_file(), "core must claim ownership on partial apply");
+
+        unsafe {
+            std::env::remove_var("VPNHIDE_PORTS");
+            std::env::remove_var("VPNHIDE_PORTS_OWNER_MARKER");
+            std::env::remove_var("VPNHIDE_PORTS_PM_DUMP");
+            match old_path {
+                Some(v) => std::env::set_var("PATH", v),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn delayed_worker_is_fenced_before_native_dispatch() {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("cfg.json");
@@ -1114,6 +1240,7 @@ mod tests {
                     },
                 ],
                 settled: None,
+                ports: None,
             },
         });
         journal::write_atomic(&journal_path, &journal).unwrap();

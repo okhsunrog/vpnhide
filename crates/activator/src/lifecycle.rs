@@ -680,6 +680,20 @@ pub fn boot_service_ports() -> Result<()> {
 }
 
 pub fn uninstall_ports() -> Result<()> {
+    // Core owns the live rules once it has claimed Ports. Leaving the Magisk
+    // Ports module's uninstall path free to wipe them would race the core and
+    // break exclusive-ownership cutover (architecture §11).
+    if crate::ports::ports_owned_by_core() {
+        remove_if_present(Path::new(PORTS_STATUS_DIR).join("load_status"))?;
+        remove_if_present(Path::new(PORTS_STATUS_DIR).join("load_log"))?;
+        remove_empty_dir(PORTS_STATUS_DIR)?;
+        log_android(
+            "vpnhide_ports",
+            "uninstall skipped chain teardown: core owns ports rules",
+        );
+        return Ok(());
+    }
+
     while xtables_succeeds("iptables", &["-D", "OUTPUT", "-j", PORTS_CHAIN4]) {}
     let _ = xtables_succeeds("iptables", &["-F", PORTS_CHAIN4]);
     let _ = xtables_succeeds("iptables", &["-X", PORTS_CHAIN4]);

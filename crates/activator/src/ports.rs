@@ -106,7 +106,108 @@ fn port_match(rule: PortRule) -> String {
     }
 }
 
-pub(crate) fn apply_ports_rules(rules: &PortsRuleset) -> Result<PortsActivationReport> {
+/// Per-address-family outcome of a Ports apply. IPv4 and IPv6 are independent
+/// restores — never one atomic transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortsFamilyResult {
+    Confirmed,
+    FailedKnown,
+    /// Spawn/IO failure after we may have mutated tables — do not invent absence.
+    Unknown,
+}
+
+/// Presence of the Ports chains / OUTPUT jumps (restart inspection).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PortsChainPresence {
+    pub ipv4_chain: bool,
+    pub ipv6_chain: bool,
+    pub ipv4_jump: bool,
+    pub ipv6_jump: bool,
+}
+
+impl PortsChainPresence {
+    /// True when any remnant of a prior apply is still visible.
+    pub fn any_present(self) -> bool {
+        self.ipv4_chain || self.ipv6_chain || self.ipv4_jump || self.ipv6_jump
+    }
+}
+
+/// Honest dual-family apply report for core (and for legacy activator aggregation).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortsApplyResult {
+    pub ipv4: PortsFamilyResult,
+    pub ipv6: PortsFamilyResult,
+    pub target_count: usize,
+    pub log: String,
+}
+
+impl PortsApplyResult {
+    /// Worst of the two families for a single phase outcome: Unknown > FailedKnown > Confirmed.
+    pub fn overall(&self) -> PortsFamilyResult {
+        use PortsFamilyResult::*;
+        match (self.ipv4, self.ipv6) {
+            (Unknown, _) | (_, Unknown) => Unknown,
+            (FailedKnown, _) | (_, FailedKnown) => FailedKnown,
+            (Confirmed, Confirmed) => Confirmed,
+        }
+    }
+}
+
+/// Env override for the core-ownership marker path (host tests).
+pub const PORTS_OWNER_MARKER_ENV: &str = "VPNHIDE_PORTS_OWNER_MARKER";
+
+pub fn ports_owner_marker_path() -> std::path::PathBuf {
+    std::env::var_os(PORTS_OWNER_MARKER_ENV)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(crate::PORTS_CORE_OWNER_MARKER))
+}
+
+pub fn ports_owned_by_core() -> bool {
+    ports_owner_marker_path().is_file()
+}
+
+pub fn write_ports_core_owner_marker() -> Result<()> {
+    let path = ports_owner_marker_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    write_atomic(&path, b"owned-by-core\n", 0o644)?;
+    Ok(())
+}
+
+/// Inspect surviving Ports chains/jumps. Used on restart instead of assuming
+/// daemon death cleared netfilter state.
+pub fn inspect_ports_chains() -> PortsChainPresence {
+    PortsChainPresence {
+        ipv4_chain: chain_exists("iptables", PORTS_CHAIN4),
+        ipv6_chain: chain_exists("ip6tables", PORTS_CHAIN6),
+        ipv4_jump: jump_exists("iptables", PORTS_CHAIN4),
+        ipv6_jump: jump_exists("ip6tables", PORTS_CHAIN6),
+    }
+}
+
+fn chain_exists(program: &str, chain: &str) -> bool {
+    Command::new(program)
+        .args(XTABLES_WAIT)
+        .args(["-L", chain, "-n"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+fn jump_exists(program: &str, chain: &str) -> bool {
+    Command::new(program)
+        .args(XTABLES_WAIT)
+        .args(["-C", "OUTPUT", "-j", chain])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Apply Ports rules with independent IPv4/IPv6 outcomes.
+pub fn apply_ports_rules_families(rules: &PortsRuleset) -> PortsApplyResult {
     let mut log = String::new();
 
     if let Ok(out) = Command::new("iptables")
@@ -124,27 +225,77 @@ pub(crate) fn apply_ports_rules(rules: &PortsRuleset) -> Result<PortsActivationR
         append_command_output(&mut log, "ip6tables -N vpnhide_out6", &out);
     }
 
-    let rc4 = run_with_stdin("iptables-restore", &["--noflush"], &rules.ipv4)?;
-    append_command_output(&mut log, "iptables-restore --noflush", &rc4);
-    let rc6 = run_with_stdin("ip6tables-restore", &["--noflush"], &rules.ipv6)?;
-    append_command_output(&mut log, "ip6tables-restore --noflush", &rc6);
+    let ipv4 = apply_one_family(
+        "iptables",
+        "iptables-restore",
+        PORTS_CHAIN4,
+        &rules.ipv4,
+        &mut log,
+    );
+    let ipv6 = apply_one_family(
+        "ip6tables",
+        "ip6tables-restore",
+        PORTS_CHAIN6,
+        &rules.ipv6,
+        &mut log,
+    );
 
-    ensure_output_jump("iptables", PORTS_CHAIN4, &mut log)?;
-    ensure_output_jump("ip6tables", PORTS_CHAIN6, &mut log)?;
-
-    if !rc4.status.success() || !rc6.status.success() {
-        return Err(format!(
-            "ports apply failed: rc4={} rc6={}\n{}",
-            rc4.status,
-            rc6.status,
-            log.trim_end()
-        )
-        .into());
-    }
-    Ok(PortsActivationReport {
+    PortsApplyResult {
+        ipv4,
+        ipv6,
         target_count: rules.target_count,
         log,
-    })
+    }
+}
+
+fn apply_one_family(
+    tables: &str,
+    restore: &str,
+    chain: &str,
+    ruleset: &str,
+    log: &mut String,
+) -> PortsFamilyResult {
+    let rc = match run_with_stdin(restore, &["--noflush"], ruleset) {
+        Ok(out) => {
+            append_command_output(log, &format!("{restore} --noflush"), &out);
+            out
+        }
+        Err(err) => {
+            log.push_str(&format!("$ {restore} --noflush\nerror={err}\n"));
+            // Restore may have partially applied; treat spawn failure as Unknown.
+            return PortsFamilyResult::Unknown;
+        }
+    };
+    if !rc.status.success() {
+        return PortsFamilyResult::FailedKnown;
+    }
+    match ensure_output_jump(tables, chain, log) {
+        Ok(()) => PortsFamilyResult::Confirmed,
+        Err(err) => {
+            log.push_str(&format!("jump error: {err}\n"));
+            // Jump insert failed after restore succeeded — tables changed; Unknown
+            // would over-claim uncertainty for a clear insert failure. FailedKnown.
+            PortsFamilyResult::FailedKnown
+        }
+    }
+}
+
+/// Legacy activator entry: both families must succeed.
+pub(crate) fn apply_ports_rules(rules: &PortsRuleset) -> Result<PortsActivationReport> {
+    let result = apply_ports_rules_families(rules);
+    match result.overall() {
+        PortsFamilyResult::Confirmed => Ok(PortsActivationReport {
+            target_count: result.target_count,
+            log: result.log,
+        }),
+        PortsFamilyResult::FailedKnown | PortsFamilyResult::Unknown => Err(format!(
+            "ports apply failed: ipv4={:?} ipv6={:?}\n{}",
+            result.ipv4,
+            result.ipv6,
+            result.log.trim_end()
+        )
+        .into()),
+    }
 }
 
 fn run_with_stdin(program: &str, args: &[&str], stdin: &str) -> Result<Output> {
@@ -211,7 +362,7 @@ fn append_output_stream(log: &mut String, label: &str, bytes: &[u8]) {
     log.push('\n');
 }
 
-pub(crate) fn write_ports_load_status(
+pub fn write_ports_load_status(
     source: &str,
     loaded: bool,
     target_count: Option<usize>,
@@ -285,4 +436,32 @@ fn sanitize_status_value(value: &str) -> String {
         .chars()
         .take(240)
         .collect()
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn owner_marker_roundtrip() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("vpnhide-ports-owner-{nanos}"));
+        fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("owned");
+        // SAFETY: ENV_LOCK held.
+        unsafe { std::env::set_var(PORTS_OWNER_MARKER_ENV, &marker) };
+        assert!(!ports_owned_by_core());
+        write_ports_core_owner_marker().unwrap();
+        assert!(ports_owned_by_core());
+        unsafe { std::env::remove_var(PORTS_OWNER_MARKER_ENV) };
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

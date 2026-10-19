@@ -279,6 +279,7 @@ pub fn record_phase_running(
             op,
             phases,
             settled: None,
+            ports: None,
         },
     });
     write_atomic(path, journal)
@@ -333,6 +334,7 @@ mod tests {
                     outcome: PhaseOutcome::Confirmed,
                 }],
                 settled: Some(PhaseOutcome::Confirmed),
+                ports: None,
             },
         }
     }
@@ -375,6 +377,7 @@ mod tests {
                     },
                 ],
                 settled: None,
+                ports: None,
             },
         });
         j.fence_unresolved();
@@ -411,6 +414,7 @@ mod tests {
                     outcome: PhaseOutcome::Unknown,
                 }],
                 settled: Some(PhaseOutcome::Unknown),
+                ports: None,
             },
         });
         j.upsert(confirmed(4));

@@ -45,13 +45,21 @@ pub enum PlanKind {
     PersistOnly,
     /// Persist then activate (config changed and a control node is configured).
     PersistThenNative,
+    /// Persist then Ports (config changed, Ports opted in, no native node).
+    PersistThenPorts,
+    /// Persist, Native, then Ports.
+    PersistThenNativeThenPorts,
     /// Activation repair: re-apply native policy without rewriting canonical config.
     NativeOnly,
+    /// Ports-only repair / re-apply without rewriting canonical config.
+    PortsOnly,
+    /// Repair with both Native and Ports (no Persist).
+    NativeThenPorts,
 }
 
 /// The phase plan for an edit, in [`ConfigPhase`] order.
-/// `Ports` and the coupled `Secret`/`Cleanup` join later. The plan
-/// reflects what is actually runnable, so a planned phase never settles `NotAttempted`.
+/// Coupled `Secret`/`Cleanup` join later. The plan reflects what is actually
+/// runnable; a planned phase should not settle `NotAttempted` under normal wiring.
 pub fn plan_for(native: bool) -> Vec<ConfigPhase> {
     plan_kind(if native {
         PlanKind::PersistThenNative
@@ -64,7 +72,13 @@ pub fn plan_kind(kind: PlanKind) -> Vec<ConfigPhase> {
     match kind {
         PlanKind::PersistOnly => vec![ConfigPhase::Persist],
         PlanKind::PersistThenNative => vec![ConfigPhase::Persist, ConfigPhase::Native],
+        PlanKind::PersistThenPorts => vec![ConfigPhase::Persist, ConfigPhase::Ports],
+        PlanKind::PersistThenNativeThenPorts => {
+            vec![ConfigPhase::Persist, ConfigPhase::Native, ConfigPhase::Ports]
+        }
         PlanKind::NativeOnly => vec![ConfigPhase::Native],
+        PlanKind::PortsOnly => vec![ConfigPhase::Ports],
+        PlanKind::NativeThenPorts => vec![ConfigPhase::Native, ConfigPhase::Ports],
     }
 }
 
@@ -150,27 +164,44 @@ pub fn run_plan_hooked(
 /// The production runner. `Persist` writes the durable config atomically (no path → confirmed
 /// no-op, for host tests). `Native` projects the config to the built-in control-v2 wire and
 /// delivers it to the configured control node (step D); it is only ever planned when a node
-/// path is set, so a `Native` with no path is a bug, reported `NotAttempted`. `Ports`/`Secret`/
-/// `Cleanup` land later.
+/// path is set, so a `Native` with no path is a bug, reported `NotAttempted`. `Ports` applies
+/// firewall rules when opted in via `VPNHIDE_PORTS`. `Secret`/`Cleanup` land later.
 pub struct RealPhaseRunner {
     pub config_path: Option<PathBuf>,
     /// The kernel control node to deliver `Native` to. `None` disables native delivery
     /// entirely (the dev sandbox default — it never touches the real `/proc/vpnhide_ctl`).
     pub kmod_ctl_path: Option<PathBuf>,
+    /// When true, `Ports` runs the real apply path (env `VPNHIDE_PORTS`).
+    pub ports_enabled: bool,
     selected: std::cell::Cell<Option<vpnhide_core_rpc::NativeBackend>>,
+    ports_report: std::cell::RefCell<Option<vpnhide_core_rpc::PortsFamilyReport>>,
 }
 
 impl RealPhaseRunner {
     pub fn new(config_path: Option<PathBuf>, kmod_ctl_path: Option<PathBuf>) -> Self {
+        Self::new_with_ports(config_path, kmod_ctl_path, crate::ports::ports_enabled_from_env())
+    }
+
+    pub fn new_with_ports(
+        config_path: Option<PathBuf>,
+        kmod_ctl_path: Option<PathBuf>,
+        ports_enabled: bool,
+    ) -> Self {
         Self {
             config_path,
             kmod_ctl_path,
+            ports_enabled,
             selected: std::cell::Cell::new(None),
+            ports_report: std::cell::RefCell::new(None),
         }
     }
 
     pub fn selected(&self) -> Option<vpnhide_core_rpc::NativeBackend> {
         self.selected.get()
+    }
+
+    pub fn take_ports_report(&self) -> Option<vpnhide_core_rpc::PortsFamilyReport> {
+        self.ports_report.borrow_mut().take()
     }
 }
 
@@ -226,7 +257,15 @@ impl PhaseRunner for RealPhaseRunner {
                 }
                 None => PhaseOutcome::NotAttempted,
             },
-            // Ports / Secret / Cleanup: implemented later in step D.
+            ConfigPhase::Ports => {
+                if !self.ports_enabled {
+                    return PhaseOutcome::NotAttempted;
+                }
+                let (outcome, report) = crate::ports::run_ports_phase(candidate);
+                *self.ports_report.borrow_mut() = Some(report);
+                outcome
+            }
+            // Secret / Cleanup: later.
             _ => PhaseOutcome::NotAttempted,
         }
     }
@@ -391,5 +430,31 @@ mod tests {
             real.run(ConfigPhase::Native, &CanonicalConfig::default()),
             PhaseOutcome::NotAttempted,
         );
+    }
+
+    #[test]
+    fn persist_then_ports_plan_includes_ports() {
+        assert_eq!(
+            plan_kind(PlanKind::PersistThenPorts),
+            vec![ConfigPhase::Persist, ConfigPhase::Ports]
+        );
+        assert_eq!(
+            plan_kind(PlanKind::PersistThenNativeThenPorts),
+            vec![ConfigPhase::Persist, ConfigPhase::Native, ConfigPhase::Ports]
+        );
+        assert_eq!(
+            plan_kind(PlanKind::NativeThenPorts),
+            vec![ConfigPhase::Native, ConfigPhase::Ports]
+        );
+    }
+
+    #[test]
+    fn real_runner_ports_disabled_is_not_attempted() {
+        let runner = RealPhaseRunner::new_with_ports(None, None, false);
+        assert_eq!(
+            runner.run(ConfigPhase::Ports, &CanonicalConfig::default()),
+            PhaseOutcome::NotAttempted
+        );
+        assert!(runner.take_ports_report().is_none());
     }
 }

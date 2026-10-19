@@ -29,9 +29,12 @@ pub const SUPERKEY_FILE: &str = "/data/adb/vpnhide/superkey";
 const APATCH_DIR: &str = "/data/adb/ap";
 const APP_PACKAGE: &str = "dev.okhsunrog.vpnhide";
 const KPM_NAME: &str = "vpnhide";
-const PORTS_CHAIN4: &str = "vpnhide_out";
-const PORTS_CHAIN6: &str = "vpnhide_out6";
+pub const PORTS_CHAIN4: &str = "vpnhide_out";
+pub const PORTS_CHAIN6: &str = "vpnhide_out6";
 const PORTS_STATUS_DIR: &str = "/data/adb/vpnhide_ports";
+/// Marker file written by core when it owns Ports rules. Legacy uninstall must
+/// not tear down chains while this is present.
+pub const PORTS_CORE_OWNER_MARKER: &str = "/data/adb/vpnhide/core/ports_owned";
 const PORTS_LOAD_STATUS: &str = "/data/adb/vpnhide_ports/load_status";
 const PORTS_LOAD_LOG: &str = "/data/adb/vpnhide_ports/load_log";
 const KPM_CTL_LOCK: &str = "/data/adb/vpnhide_kpm/ctl.lock";
@@ -116,6 +119,11 @@ use kpm::*;
 pub use kpm::{CoreKpm, KpmConfigError};
 pub use lifecycle::*;
 pub use model::*;
+pub use ports::{
+    PortsApplyResult, PortsChainPresence, PortsFamilyResult, apply_ports_rules_families,
+    inspect_ports_chains, ports_owned_by_core, ports_owner_marker_path,
+    write_ports_core_owner_marker, write_ports_load_status,
+};
 use ports::*;
 
 // --- core-2.0 (§4): the persistent root core absorbs the activator, linking these instead
@@ -538,7 +546,7 @@ fn has_native_targets(cfg: &CanonicalConfig, family: NativeHookFamily) -> bool {
         .any(|app| app.native.hooks(family).is_some())
 }
 
-fn has_ports_targets(cfg: &CanonicalConfig) -> bool {
+pub fn has_ports_targets(cfg: &CanonicalConfig) -> bool {
     cfg.apps.values().any(|app| app.ports)
 }
 
