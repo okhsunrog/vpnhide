@@ -27,6 +27,7 @@ mod tests {
         assert!(text.contains("current_success"));
         assert!(text.contains("Do not say \"protection is working\""));
         assert!(text.contains("You have no shell."));
+        assert!(text.contains("Inventing a command, or running one, is not."));
         assert!(text.contains("Do not invent issue numbers"));
         assert!(text.contains("not git history"));
         assert!(text.contains("hidden_selinux"));
