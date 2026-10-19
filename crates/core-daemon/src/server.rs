@@ -110,10 +110,38 @@ impl CoreState {
             Some(jp) => journal::read(jp)?,
             None => Journal::default(),
         };
-        // Fence before exposing operations: Running → Unknown, no effect replay.
+        // Fence before exposing operations: Running → Unknown; unfinished ops Held.
+        // Effects are never replayed.
         journal.fence_unresolved();
+
+        // Evidence readback may resolve Unknown → Confirmed/FailedKnown without dispatch.
+        let zygisk_module = crate::zygisk::module_from_env();
+        let sources = crate::recovery::EvidenceSources {
+            config_path: Some(path.as_path()),
+            kmod_ctl_path: kmod_ctl_path.as_deref(),
+            zygisk_module: zygisk_module.as_deref(),
+        };
+        let mut journal_dirty = false;
+        for entry in &mut journal.operations {
+            if crate::recovery::reconcile_entry(entry, &sources) {
+                journal_dirty = true;
+            }
+        }
+        // Advance durable revision when Persist evidence proves the write landed.
+        let mut config_revision_from_journal = journal.config_revision;
+        for entry in &journal.operations {
+            let next =
+                crate::recovery::revision_after_reconcile(entry, config_revision_from_journal);
+            if next != config_revision_from_journal {
+                config_revision_from_journal = next;
+                journal_dirty = true;
+            }
+        }
+        journal.config_revision = config_revision_from_journal;
+
         if let Some(jp) = &journal_path {
-            // Persist the fenced form so a second crash does not see stale Running.
+            // Rewrite after fence (and reconcile) so a second boot sees the resolved form.
+            let _ = journal_dirty;
             journal::write_atomic(jp, &journal)?;
         }
 
@@ -248,6 +276,7 @@ impl CoreState {
                 op,
                 base,
                 edit,
+                candidate: &next,
                 plan: plan.clone(),
                 completed: Vec::new(),
             };
@@ -273,6 +302,7 @@ impl CoreState {
                 op,
                 base,
                 edit,
+                &next,
                 record.clone(),
                 revision_for_journal,
             ) {
@@ -354,6 +384,7 @@ struct JournalPhaseHook<'a> {
     op: OperationId,
     base: BaseRef,
     edit: &'a ConfigEdit,
+    candidate: &'a CanonicalConfig,
     plan: Vec<ConfigPhase>,
     completed: Vec<(ConfigPhase, PhaseOutcome)>,
 }
@@ -366,6 +397,7 @@ impl PhaseHook for JournalPhaseHook<'_> {
             self.op,
             self.base,
             self.edit,
+            self.candidate,
             &self.plan,
             &self.completed,
             phase,
@@ -373,7 +405,16 @@ impl PhaseHook for JournalPhaseHook<'_> {
         .map_err(|e| {
             eprintln!("core: journal intent failed before {phase:?}: {e}");
             PhaseOutcome::FailedKnown
-        })
+        })?;
+        let point = match phase {
+            ConfigPhase::Persist => "persist-intent",
+            ConfigPhase::Native => "native-intent",
+            ConfigPhase::Ports => "ports-intent",
+            ConfigPhase::Secret => "secret-intent",
+            ConfigPhase::Cleanup => "cleanup-intent",
+        };
+        crate::recovery::maybe_crash_for_test(point);
+        Ok(())
     }
 
     fn after(&mut self, phase: ConfigPhase, outcome: PhaseOutcome) {
@@ -397,6 +438,7 @@ impl PhaseHook for JournalPhaseHook<'_> {
             let entry = JournalEntry {
                 base: self.base,
                 edit: self.edit.clone(),
+                candidate: Some(self.candidate.clone()),
                 record: OperationRecord {
                     op: self.op,
                     phases,
@@ -407,6 +449,10 @@ impl PhaseHook for JournalPhaseHook<'_> {
             if let Err(e) = journal::write_atomic(&self.path, self.journal) {
                 eprintln!("core: journal after Persist failed: {e}");
             }
+            crate::recovery::maybe_crash_for_test("persist");
+        }
+        if phase == ConfigPhase::Native {
+            crate::recovery::maybe_crash_for_test("native");
         }
     }
 }
@@ -730,14 +776,16 @@ mod tests {
             config_revision: 1,
             ..Journal::default()
         };
+        let candidate = CanonicalConfig {
+            debug: true,
+            ..Default::default()
+        };
         journal.upsert(JournalEntry {
             base: BaseRef { revision: 0 },
             edit: ConfigEdit::Replace {
-                config: CanonicalConfig {
-                    debug: true,
-                    ..Default::default()
-                },
+                config: candidate.clone(),
             },
+            candidate: Some(candidate.clone()),
             record: OperationRecord {
                 op: OperationId(42),
                 phases: vec![

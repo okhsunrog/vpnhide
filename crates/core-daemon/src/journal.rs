@@ -26,7 +26,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use vpnhide_core_rpc::{
-    BaseRef, ConfigEdit, ConfigPhase, OperationId, OperationRecord, PhaseOutcome, PhaseRecord,
+    BaseRef, CanonicalConfig, ConfigEdit, ConfigPhase, OperationId, OperationRecord, PhaseOutcome,
+    PhaseRecord,
 };
 
 /// Production path of the private journal (root-owned, not LSPosed-readable by design).
@@ -63,6 +64,10 @@ pub fn journal_path_from_env() -> PathBuf {
 pub struct JournalEntry {
     pub base: BaseRef,
     pub edit: ConfigEdit,
+    /// Intended config after this edit — required for Persist/Native evidence readback.
+    /// Absent only on journals written before this field existed; those stay Unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate: Option<CanonicalConfig>,
     pub record: OperationRecord,
 }
 
@@ -160,10 +165,14 @@ impl Journal {
     }
 
     /// Restart fencing: any in-flight (`Running`) phase becomes durable `Unknown`.
-    /// Effects are **not** re-dispatched; uncertainty is preserved until evidence resolves it.
+    /// An accepted but unfinished operation (`settled == None`) is also held as
+    /// `Unknown` so remaining `NotAttempted` phases are **not** continued blindly.
+    /// Effects are never re-dispatched here; [`crate::recovery`] may resolve Unknown
+    /// from durable evidence afterward.
     pub fn fence_unresolved(&mut self) {
         for entry in &mut self.operations {
-            let mut uncertain = entry.record.settled == Some(PhaseOutcome::Unknown);
+            let mut uncertain = entry.record.settled == Some(PhaseOutcome::Unknown)
+                || entry.record.settled.is_none();
             for phase in &mut entry.record.phases {
                 if phase.outcome == PhaseOutcome::Running {
                     phase.outcome = PhaseOutcome::Unknown;
@@ -242,6 +251,7 @@ pub fn record_phase_running(
     op: OperationId,
     base: BaseRef,
     edit: &ConfigEdit,
+    candidate: &CanonicalConfig,
     plan: &[ConfigPhase],
     completed: &[(ConfigPhase, PhaseOutcome)],
     running: ConfigPhase,
@@ -260,6 +270,7 @@ pub fn record_phase_running(
     journal.upsert(JournalEntry {
         base,
         edit: edit.clone(),
+        candidate: Some(candidate.clone()),
         record: OperationRecord {
             op,
             phases,
@@ -270,12 +281,14 @@ pub fn record_phase_running(
 }
 
 /// Persist the settled operation record (and optional revision bump) after phases finish.
+#[allow(clippy::too_many_arguments)]
 pub fn record_settled(
     path: &Path,
     journal: &mut Journal,
     _op: OperationId,
     base: BaseRef,
     edit: &ConfigEdit,
+    candidate: &CanonicalConfig,
     record: OperationRecord,
     config_revision: u64,
 ) -> io::Result<()> {
@@ -283,6 +296,7 @@ pub fn record_settled(
     journal.upsert(JournalEntry {
         base,
         edit: edit.clone(),
+        candidate: Some(candidate.clone()),
         record,
     });
     write_atomic(path, journal)
@@ -304,6 +318,10 @@ mod tests {
         JournalEntry {
             base: BaseRef { revision: 0 },
             edit: edit_debug(true),
+            candidate: Some(CanonicalConfig {
+                debug: true,
+                ..Default::default()
+            }),
             record: OperationRecord {
                 op: OperationId(op),
                 phases: vec![PhaseRecord {
@@ -336,6 +354,10 @@ mod tests {
         j.upsert(JournalEntry {
             base: BaseRef { revision: 1 },
             edit: edit_debug(true),
+            candidate: Some(CanonicalConfig {
+                debug: true,
+                ..Default::default()
+            }),
             record: OperationRecord {
                 op: OperationId(7),
                 phases: vec![
@@ -377,6 +399,7 @@ mod tests {
             edit: ConfigEdit::Replace {
                 config: CanonicalConfig::default(),
             },
+            candidate: Some(CanonicalConfig::default()),
             record: OperationRecord {
                 op: OperationId(99),
                 phases: vec![PhaseRecord {
@@ -400,12 +423,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("operations.json");
         let mut j = Journal::default();
+        let candidate = CanonicalConfig {
+            debug: true,
+            ..Default::default()
+        };
         record_phase_running(
             &path,
             &mut j,
             OperationId(1),
             BaseRef { revision: 0 },
             &edit_debug(true),
+            &candidate,
             &[ConfigPhase::Persist, ConfigPhase::Native],
             &[],
             ConfigPhase::Persist,

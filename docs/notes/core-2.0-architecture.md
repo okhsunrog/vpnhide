@@ -740,7 +740,8 @@ than known failure. Confirmed persistence remains visible and duplicate operatio
 IDs with the same original base and payload query the existing record; reusing
 an ID with a different request returns `IdReused`. New edits are blocked after Unknown in this core
 instance. Durable records and restart fencing are implemented (see journal slice below);
-reconciliation of Unknown via evidence readback is still pending.
+evidence readback for Unknown is implemented for Persist and Zygisk publication;
+kernel/KPM Native still stays Unknown until a reliable apply receipt exists.
 Restart alone is **not** proof of completion and must not re-dispatch uncertain effects.
 KPM remains opt-in, requiring `VPNHIDE_KPM_LOCK` and `VPNHIDE_KMOD_CTL`; artifact
 loading also requires `VPNHIDE_KERNEL_MODULES`. Common-module boot and legacy
@@ -817,22 +818,31 @@ Modified Rust files pass rustfmt. The previously recorded workspace-formatting
 and native Zygisk host-test baseline failures remain; full CI/device validation
 is not claimed complete.
 
-**Durable operation journal (incremental slice landed).**
+**Durable operation journal + evidence readback (journal milestone).**
 `core-daemon/journal.rs` is the private store (§4 tier 3), separate from the
 LSPosed-facing config file. Path: `/data/adb/vpnhide/core/operations.json`
 (overridable via `VPNHIDE_JOURNAL_PATH`; colocated beside `VPNHIDE_CONFIG_PATH`
-in the sandbox). It persists operation IDs, original requests, phase progress,
-outcomes, retired-id retention, and the durable `config_revision` counter.
-Intent is synced before each dispatched phase effect; restart fencing turns
-in-flight `Running` into durable `Unknown` without replaying effects. Same-ID
-retries return the existing record; different content or retired IDs are
-`IdReused`. Still open for this milestone: Persist/Native evidence reconciliation
-(readback to resolve Unknown), Held/recheck UX, and crash-injection at every
-phase boundary in the subprocess suite.
+in the sandbox). It persists operation IDs, original requests, the intended
+`candidate` config, phase progress, outcomes, retired-id retention, and the
+durable `config_revision` counter. Intent is synced before each dispatched
+phase effect; restart fencing turns in-flight `Running` (and unfinished
+`settled=None` work) into durable `Unknown` without replaying effects.
 
-Next: finish journal recovery/ownership transfer before enabling the
-common module's production boot path. Zygisk live-process evidence and complete
-observation freshness/error reporting remain distinct from file delivery.
+`core-daemon/recovery.rs` reconciles Unknown from durable evidence only:
+Persist compares the config file to the stored candidate (match → Confirmed,
+readable mismatch/absent → FailedKnown, unreadable → keep Unknown); Zygisk
+Native may confirm when `targets.txt` equals the projected wire; kernel/KPM
+Native has no reliable apply receipt and stays Unknown (Held). Same-ID retries
+return the existing record; different content or retired IDs are `IdReused`.
+Subprocess crash-injection (`VPNHIDE_TEST_CRASH_AFTER`) covers persist-intent,
+persist, and native-intent boundaries.
+
+Still open before production cutover (handoff to step 2 / ownership): multi-client
+disconnect ownership, delayed-worker fencing, field-level conflicts, manual
+recheck RPC, Ports evidence, and kernel Native apply receipts. Zygisk live-process
+evidence remains distinct from file publication.
+
+Next: ownership transfer before enabling the common module's production boot path.
 
 Each boundary needs an explicit cutover. Do not run legacy and core writers in
 parallel against the same canonical/runtime state. Port behavioral tests before
