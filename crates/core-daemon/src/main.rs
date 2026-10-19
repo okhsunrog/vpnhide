@@ -169,13 +169,30 @@ async fn run(path: &str) {
 
     // Finish initial channel observation before admitting mutations; startup
     // must not contend with the first request for the KPM control lock.
-    let handle = match serve(Path::new(path), state.clone()) {
-        Ok(handle) => handle,
-        Err(e) => {
-            eprintln!("core: bind failed on {path}: {e}");
-            std::process::exit(1);
+    //
+    // Production: the socket lives in the app's data dir and is re-bound across
+    // reinstalls (app_socket). Host/dev: a plain path socket.
+    let app_dir = vpnhide_core_daemon::app_socket::app_data_dir_from_env();
+    let handle = match &app_dir {
+        Some(dir) => {
+            tokio::spawn(vpnhide_core_daemon::app_socket::supervise(
+                dir.clone(),
+                state.clone(),
+            ));
+            None
         }
+        None => match serve(Path::new(path), state.clone()) {
+            Ok(handle) => Some(handle),
+            Err(e) => {
+                eprintln!("core: bind failed on {path}: {e}");
+                std::process::exit(1);
+            }
+        },
     };
+    let path = app_dir
+        .as_deref()
+        .map(vpnhide_core_daemon::app_socket::socket_path)
+        .map_or_else(|| path.to_owned(), |p| p.display().to_string());
 
     eprintln!(
         "core: epoch={epoch} serving on {path} config={} ({}) journal={} native_ctl={} backend={:?} (ctrl-c to stop)",
@@ -200,7 +217,9 @@ async fn run(path: &str) {
 
     let _ = tokio::signal::ctrl_c().await;
     eprintln!("core: shutting down");
-    handle.shutdown_and_unlink();
+    if let Some(handle) = handle {
+        handle.shutdown_and_unlink();
+    }
 }
 
 /// One-shot boot path used by the Magisk module before or instead of long-run serve.

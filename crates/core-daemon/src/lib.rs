@@ -3,6 +3,7 @@
 //! the domain (config/operation/observation) is still placeholder (see `core-rpc`).
 
 pub mod activation;
+pub mod app_socket;
 pub mod auth;
 pub mod backend;
 pub mod boot;
@@ -60,7 +61,14 @@ pub fn serve_with_allowlist(
         auth::Allowlist::Uids(set) => {
             eprintln!("core: peer allowlist uids={set:?}");
         }
+        auth::Allowlist::AppOwner(dir) => {
+            eprintln!("core: peer allowlist root + owner of {}", dir.display());
+        }
     }
+    let app_dir = match &allowlist {
+        auth::Allowlist::AppOwner(dir) => Some(dir.clone()),
+        _ => None,
+    };
     let inflight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let handle = listen(socket_path, move |stream, cancel| {
         match auth::authorize(&stream, &allowlist) {
@@ -94,8 +102,13 @@ pub fn serve_with_allowlist(
             inflight.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         });
     })?;
-    // Bind created the socket inode — set DAC now (before clients race in).
-    if let Err(e) = auth::apply_socket_permissions(socket_path) {
+    // Bind created the socket inode — set DAC now (before clients race in). The peer
+    // allowlist still gates every accept, so a client racing this window is refused.
+    let perms = match &app_dir {
+        Some(dir) => auth::apply_app_socket_permissions(socket_path, dir),
+        None => auth::apply_socket_permissions(socket_path),
+    };
+    if let Err(e) = perms {
         eprintln!("core: socket permissions: {e}");
     }
     Ok(handle)

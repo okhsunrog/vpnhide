@@ -25,6 +25,11 @@ fi
 grep -q '^id=vpnhide_core$' "$MOD/module.prop" || { echo "bad id"; fail=1; }
 grep -q 'VPNHIDE_BOOT_APPLY=1' "$MOD/service.sh" || { echo "service missing BOOT_APPLY"; fail=1; }
 grep -q 'VPNHIDE_CORE_ADOPT=1' "$MOD/service.sh" || { echo "service missing ADOPT"; fail=1; }
+grep -q 'VPNHIDE_APP_DATA_DIR=' "$MOD/service.sh" || { echo "service missing app socket dir"; fail=1; }
+if grep -q 'allowed_uids' "$MOD/service.sh"; then
+  echo "service must not read an app-written uid allowlist" >&2
+  fail=1
+fi
 grep -q 'config_owned' "$MOD/post-fs-data.sh" || { echo "post-fs missing claim"; fail=1; }
 grep -q 'markers and applied policy retained' "$MOD/uninstall.sh" || { echo "uninstall not restricted"; fail=1; }
 if grep -E 'superkey|SUPERKEY|/data/adb/ap' "$MOD/uninstall.sh" "$MOD/service.sh" "$MOD/post-fs-data.sh"; then

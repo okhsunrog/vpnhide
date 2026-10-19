@@ -5,7 +5,8 @@
 MODDIR="${0%/*}"
 PERSIST="/data/adb/vpnhide/core"
 CORE="$MODDIR/vpnhide-core"
-SOCKET="$PERSIST/vpnhide-core.sock"
+APP_DATA_DIR="/data/user_de/0/dev.okhsunrog.vpnhide"
+SOCKET="$APP_DATA_DIR/vpnhide-core.sock"
 LOG="$PERSIST/core.log"
 
 mkdir -p "$PERSIST"
@@ -30,27 +31,11 @@ export VPNHIDE_PORTS=1
 # Ports marker colocated with other ownership markers.
 export VPNHIDE_PORTS_OWNER_MARKER="$PERSIST/ports_owned"
 
-# IPC auth (step 7): optional uid allowlist. Empty/missing = open (dev). Production
-# app writes $PERSIST/allowed_uids after a one-shot su grant (reinstall/UID change
-# rewrites the file). Env VPNHIDE_CORE_ALLOW_UIDS overrides the file when set.
-export VPNHIDE_CORE_ALLOW_UIDS_FILE="$PERSIST/allowed_uids"
-# Socket DAC: leave owner root; mode 0666 so untrusted_app can connectto; peer
-# auth is the real gate. Tighten with VPNHIDE_CORE_SOCKET_OWNER_UID + 0660 when
-# the allowlisted app uid is known at boot.
-if [ -f "$PERSIST/allowed_uids" ]; then
-  # Prefer first uid as socket owner when present (safe reinstall: app rewrites file).
-  first_uid=$(awk '/^[0-9]+/{print; exit}' "$PERSIST/allowed_uids" 2>/dev/null)
-  if [ -n "$first_uid" ]; then
-    export VPNHIDE_CORE_SOCKET_OWNER_UID="$first_uid"
-    export VPNHIDE_CORE_SOCKET_MODE=0660
-  fi
-fi
-
-# Stop a previous instance from an interrupted upgrade (best-effort).
-if [ -S "$SOCKET" ]; then
-  # Asking the old process to exit is preferred; kill by socket peer is not portable.
-  rm -f "$SOCKET"
-fi
+# App IPC: core binds its socket inside the app's own device-encrypted data dir,
+# owned by the app uid (0600) with the dir's SELinux label, and admits only root and
+# that uid (SO_PEERCRED). Re-bound on reinstall / clear data. The app runs no root
+# process. See crates/core-daemon/src/app_socket.rs.
+export VPNHIDE_APP_DATA_DIR="$APP_DATA_DIR"
 
 # Background: boot-apply runs inside the daemon when VPNHIDE_BOOT_APPLY=1, then serve.
 (
