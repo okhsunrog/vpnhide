@@ -1,4 +1,5 @@
 id=vpnhide_zygisk
+vpnhideControl=2
 name=VPN Hide (Zygisk)
 version=v1.3.1
 versionCode=10301

@@ -168,6 +168,21 @@ adb shell am force-stop <pkg>
 
 </details>
 
+## Development V2 core delivery
+
+The `dev-2.x` core can publish this module's existing control-v2 `targets.txt`
+directly when its Zygisk recipient is explicitly enabled. The package declares
+`vpnhideControl=2` in `module.prop`; core verifies the recipient and library ABI
+before publication. The file is read afresh when each target process launches.
+A running target keeps its cached policy until it restarts.
+
+Core reports its selection separately from observed runtime activity. A published
+file does not confirm injection into every app. The existing app-context hook
+checks remain separate. This path adds no companion or per-hook RPC. Legacy
+service/app ownership has not been cut over; do not run both policy writers.
+See the [V2 architecture](../docs/notes/core-2.0-architecture.md) for development
+paths, current validation and recovery/ownership work.
+
 ## License
 
 MIT. See [LICENSE](../LICENSE).

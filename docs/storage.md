@@ -268,6 +268,13 @@ does not: the hook self-reads the canonical JSON and resolves UIDs in-process.
 
 ## 4. The activator and its backends (native + ports)
 
+This section describes the shipped v1 ownership. The opt-in `dev-2.x` core now
+selects and directly manages kmod/built-in and KPM through shared Rust functions,
+and publishes Zygisk's existing runtime policy through a verified module directory;
+legacy boot scripts and app writers have not been cut over. See the
+[V2 architecture](notes/core-2.0-architecture.md) for current scope, explicit
+development paths and the remaining recovery/ownership work.
+
 The native backends are designed to be **mutually exclusive**: the supported
 installation has exactly one of kmod, built-in, KPM, or Zygisk. The app warns or errors and
 asks the user to remove extras. A Save invokes only the highest-priority enabled

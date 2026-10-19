@@ -16,7 +16,7 @@ use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use tokio_util::sync::CancellationToken;
 use vpnhide_core_rpc::{
     Accepted, BaseRef, CanonicalConfig, ClientHello, ConfigEdit, Handshake, OperationId,
-    OperationRecord, Published, SubmitError, VpnhideCore, PROTOCOL_VERSION,
+    OperationRecord, PROTOCOL_VERSION, Published, SubmitError, VpnhideCore,
 };
 
 use crate::config_edit::apply_canonical_edit;
@@ -27,7 +27,8 @@ use crate::publisher::Publisher;
 /// This core build, reported in the handshake for diagnostics only.
 pub const CORE_BUILD: &str = env!("CARGO_PKG_VERSION");
 
-/// The authoritative config core owns, its revision, and the durable operation records.
+/// The authoritative config, its revision, and this instance's operation records.
+/// Durable operation records and restart fencing remain pending.
 ///
 /// This is core's in-memory canonical (§4 tier 1 — the durable file read/write lands in the
 /// next step). `config_revision` bumps only on a real config change and is what an edit
@@ -35,7 +36,13 @@ pub const CORE_BUILD: &str = env!("CARGO_PKG_VERSION");
 struct ConfigStore {
     config: Option<CanonicalConfig>,
     config_revision: u64,
-    operations: HashMap<OperationId, OperationRecord>,
+    operations: HashMap<OperationId, StoredOperation>,
+}
+
+struct StoredOperation {
+    base: BaseRef,
+    edit: ConfigEdit,
+    record: OperationRecord,
 }
 
 /// The core's owned state: the published-state store plus the authoritative config.
@@ -121,15 +128,30 @@ impl CoreState {
         edit: &ConfigEdit,
     ) -> Result<Accepted, SubmitError> {
         let mut store = self.config.lock().expect("config mutex");
-        // Re-submitting the same id queries/dedups (a different payload would be IdReused —
-        // deferred until operations carry their payload).
-        if store.operations.contains_key(&op) {
-            return Ok(Accepted { op });
+        // Deduplication precedes current-base and uncertainty gates: a lost
+        // receipt may be queried using its original base, but never a new payload.
+        if let Some(previous) = store.operations.get(&op) {
+            return if previous.base == base && previous.edit == *edit {
+                Ok(Accepted { op })
+            } else {
+                Err(SubmitError::IdReused)
+            };
+        }
+        // An uncertain dispatch is never repaired by blindly submitting a new
+        // edit. Durable restart recovery remains a separate migration stage.
+        if store
+            .operations
+            .values()
+            .any(|stored| stored.record.settled == Some(vpnhide_core_rpc::PhaseOutcome::Unknown))
+        {
+            return Err(SubmitError::Unavailable);
         }
         // Coarse conflict: whole-config optimistic lock. Field-level merge of unrelated
         // concurrent edits is a later refinement (§5).
         if base.revision != store.config_revision {
-            return Err(SubmitError::Conflict { field: "config".to_owned() });
+            return Err(SubmitError::Conflict {
+                field: "config".to_owned(),
+            });
         }
         // Apply against fresh config. With none yet, only a Replace can bootstrap one.
         let current = match &store.config {
@@ -151,10 +173,7 @@ impl CoreState {
         // control node is configured — the dev sandbox leaves it unset and stays Persist-only.
         let native = changed && self.kmod_ctl_path.is_some();
         let plan = operation::plan_for(native);
-        let runner = RealPhaseRunner {
-            config_path: self.config_path.clone(),
-            kmod_ctl_path: self.kmod_ctl_path.clone(),
-        };
+        let runner = RealPhaseRunner::new(self.config_path.clone(), self.kmod_ctl_path.clone());
         let outcome = operation::run_plan(&plan, &next, changed, &runner);
 
         if outcome.persisted {
@@ -163,22 +182,57 @@ impl CoreState {
         }
         store.operations.insert(
             op,
-            OperationRecord { op, phases: outcome.phases, settled: Some(outcome.settled) },
+            StoredOperation {
+                base,
+                edit: edit.clone(),
+                record: OperationRecord {
+                    op,
+                    phases: outcome.phases,
+                    settled: Some(outcome.settled),
+                },
+            },
         );
 
-        if outcome.persisted {
-            let revision = store.config_revision;
-            drop(store);
+        // Loading may have changed runtime identity even if a later projection
+        // or delivery failed. Publish observation separately from apply outcome.
+        let observed_backend = self.kmod_ctl_path.as_ref().filter(|_| native).map(|ctl| {
+            let modules = crate::backend::kernel_modules_from_env();
+            let kpm_lock = crate::backend::kpm_lock_from_env();
+            crate::backend::detect_managed(
+                ctl,
+                modules
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new(crate::backend::MODULES_ROOT)),
+                kpm_lock.as_deref(),
+            )
+        });
+        let revision = store.config_revision;
+        // Publish while still owning the mutation lane so a later accepted edit
+        // cannot publish first and then be overwritten by this older snapshot.
+        if outcome.persisted || observed_backend.is_some() {
             self.publisher.update(|snapshot| {
-                snapshot.config = Some(next);
-                snapshot.config_revision = revision;
+                if outcome.persisted {
+                    snapshot.config = Some(next);
+                    snapshot.config_revision = revision;
+                }
+                if let Some(backend) = observed_backend {
+                    let last_selected = runner.selected().or(snapshot.backend.selected);
+                    snapshot.backend = backend;
+                    snapshot.backend.selected = last_selected;
+                }
             });
         }
+        drop(store);
         Ok(Accepted { op })
     }
 
     fn get_operation(&self, op: OperationId) -> Option<OperationRecord> {
-        self.config.lock().expect("config mutex").operations.get(&op).cloned()
+        self.config
+            .lock()
+            .expect("config mutex")
+            .operations
+            .get(&op)
+            .map(|stored| stored.record.clone())
     }
 }
 
@@ -203,7 +257,9 @@ impl VpnhideCore for CoreServer {
                 epoch: self.state.publisher.epoch(),
             }
         } else {
-            Handshake::Incompatible { core_protocol: PROTOCOL_VERSION }
+            Handshake::Incompatible {
+                core_protocol: PROTOCOL_VERSION,
+            }
         }
     }
 
@@ -259,46 +315,91 @@ mod tests {
 
     #[tokio::test]
     async fn hello_accepts_the_current_protocol_and_refuses_skew() {
-        let hello = |protocol| ClientHello { protocol, build: "test".to_owned() };
+        let hello = |protocol| ClientHello {
+            protocol,
+            build: "test".to_owned(),
+        };
         let ok = server()
             .hello(tarpc::context::current(), hello(PROTOCOL_VERSION))
             .await;
         assert!(matches!(ok, Handshake::Compatible { epoch: 1, .. }));
 
-        let skewed = server()
-            .hello(tarpc::context::current(), hello(PROTOCOL_VERSION + 1))
-            .await;
-        assert!(matches!(skewed, Handshake::Incompatible { .. }));
+        for protocol in [1, PROTOCOL_VERSION + 1] {
+            let skewed = server()
+                .hello(tarpc::context::current(), hello(protocol))
+                .await;
+            assert_eq!(
+                skewed,
+                Handshake::Incompatible {
+                    core_protocol: PROTOCOL_VERSION
+                }
+            );
+        }
     }
 
     #[tokio::test]
     async fn submit_bootstraps_applies_conflicts_and_reports_unavailable() {
         let server = server();
         let ctx = tarpc::context::current;
-        let toggle = |f| ConfigEdit::Toggle { field: f, enabled: true };
+        let toggle = |f| ConfigEdit::Toggle {
+            field: f,
+            enabled: true,
+        };
 
         // No config yet: a non-Replace edit is Unavailable.
         let unavailable = server
             .clone()
-            .submit_edit(ctx(), OperationId(1), BaseRef { revision: 0 }, toggle(ConfigToggle::Debug))
+            .submit_edit(
+                ctx(),
+                OperationId(1),
+                BaseRef { revision: 0 },
+                toggle(ConfigToggle::Debug),
+            )
             .await;
         assert!(matches!(unavailable, Err(SubmitError::Unavailable)));
 
         // Replace bootstraps the config against revision 0, and is a queryable settled op.
-        let bootstrap = ConfigEdit::Replace { config: CanonicalConfig::default() };
+        let bootstrap = ConfigEdit::Replace {
+            config: CanonicalConfig::default(),
+        };
         assert_eq!(
-            server.clone().submit_edit(ctx(), OperationId(2), BaseRef { revision: 0 }, bootstrap).await.expect("accepted").op,
+            server
+                .clone()
+                .submit_edit(ctx(), OperationId(2), BaseRef { revision: 0 }, bootstrap)
+                .await
+                .expect("accepted")
+                .op,
             OperationId(2),
         );
-        let record = server.clone().get_operation(ctx(), OperationId(2)).await.expect("record");
+        let record = server
+            .clone()
+            .get_operation(ctx(), OperationId(2))
+            .await
+            .expect("record");
         assert_eq!(record.settled, Some(PhaseOutcome::Confirmed));
 
         // A toggle now applies against fresh config; the revision advanced to 1.
-        assert!(server.clone().submit_edit(ctx(), OperationId(3), BaseRef { revision: 1 }, toggle(ConfigToggle::Debug)).await.is_ok());
+        assert!(
+            server
+                .clone()
+                .submit_edit(
+                    ctx(),
+                    OperationId(3),
+                    BaseRef { revision: 1 },
+                    toggle(ConfigToggle::Debug)
+                )
+                .await
+                .is_ok()
+        );
 
         // A stale base conflicts.
         let stale = server
-            .submit_edit(ctx(), OperationId(4), BaseRef { revision: 0 }, toggle(ConfigToggle::AutoHideName))
+            .submit_edit(
+                ctx(),
+                OperationId(4),
+                BaseRef { revision: 0 },
+                toggle(ConfigToggle::AutoHideName),
+            )
             .await;
         assert!(matches!(stale, Err(SubmitError::Conflict { .. })));
     }
@@ -310,23 +411,59 @@ mod tests {
         let ctx = tarpc::context::current;
 
         // First run: no file yet -> no config, revision 0. A Replace persists it.
-        let state = CoreState::load(Publisher::new(1, StateSnapshot::default()), path.clone(), None).unwrap();
+        let state = CoreState::load(
+            Publisher::new(1, StateSnapshot::default()),
+            path.clone(),
+            None,
+        )
+        .unwrap();
         assert!(!state.has_config());
         let server = CoreServer::new(state);
-        let cfg = CanonicalConfig { debug: true, ..Default::default() };
-        let replace = ConfigEdit::Replace { config: cfg.clone() };
-        server.clone().submit_edit(ctx(), OperationId(1), BaseRef { revision: 0 }, replace).await.expect("accepted");
-        assert!(path.exists(), "an accepted edit must be on disk before it is acknowledged");
+        let cfg = CanonicalConfig {
+            debug: true,
+            ..Default::default()
+        };
+        let replace = ConfigEdit::Replace {
+            config: cfg.clone(),
+        };
+        server
+            .clone()
+            .submit_edit(ctx(), OperationId(1), BaseRef { revision: 0 }, replace)
+            .await
+            .expect("accepted");
+        assert!(
+            path.exists(),
+            "an accepted edit must be on disk before it is acknowledged"
+        );
 
         // Second run (a restart): a fresh core loads the same file and recovers the config
         // at revision 1, so a follow-up edit conflict-checks against the recovered revision.
-        let restarted = CoreState::load(Publisher::new(2, StateSnapshot::default()), path.clone(), None).unwrap();
+        let restarted = CoreState::load(
+            Publisher::new(2, StateSnapshot::default()),
+            path.clone(),
+            None,
+        )
+        .unwrap();
         assert!(restarted.has_config());
         let server2 = CoreServer::new(restarted);
         let published = server2.clone().state_since(ctx(), 0, 0).await;
         assert_eq!(published.snapshot.config, Some(cfg));
         assert_eq!(published.snapshot.config_revision, 1);
         // An edit against the recovered revision applies; against a stale one it conflicts.
-        assert!(server2.clone().submit_edit(ctx(), OperationId(2), BaseRef { revision: 1 }, ConfigEdit::Toggle { field: ConfigToggle::AutoHideName, enabled: true }).await.is_ok());
+        assert!(
+            server2
+                .clone()
+                .submit_edit(
+                    ctx(),
+                    OperationId(2),
+                    BaseRef { revision: 1 },
+                    ConfigEdit::Toggle {
+                        field: ConfigToggle::AutoHideName,
+                        enabled: true
+                    }
+                )
+                .await
+                .is_ok()
+        );
     }
 }

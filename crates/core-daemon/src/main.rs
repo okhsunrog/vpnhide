@@ -13,8 +13,8 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vpnhide_core_daemon::config_file::{self, config_path_from_env};
+use vpnhide_core_daemon::{CoreClient, CoreState, Publisher, observe, serve};
 use vpnhide_core_daemon::{activation, backend};
-use vpnhide_core_daemon::{observe, serve, CoreClient, CoreState, Publisher};
 use vpnhide_core_rpc::StateSnapshot;
 
 const DEFAULT_SOCKET: &str = "/data/local/tmp/vpnhide-core.sock";
@@ -39,14 +39,20 @@ async fn main() {
         }
         _ => {}
     }
-    let path = if first.is_empty() { DEFAULT_SOCKET.to_owned() } else { first };
+    let path = if first.is_empty() {
+        DEFAULT_SOCKET.to_owned()
+    } else {
+        first
+    };
     run(&path).await;
 }
 
 /// Read-only: detect the active native backend, project a config file to *its* control-v2
 /// wire, and print it — the centralized flow (detect → project for the detected family).
 fn project(config_arg: Option<String>) {
-    let path = config_arg.map(std::path::PathBuf::from).unwrap_or_else(config_path_from_env);
+    let path = config_arg
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(config_path_from_env);
     let config = match config_file::read(&path) {
         Ok(Some(config)) => config,
         Ok(None) => {
@@ -58,9 +64,21 @@ fn project(config_arg: Option<String>) {
             std::process::exit(1);
         }
     };
-    let observed = backend::detect(Path::new(DEFAULT_CTL), Path::new(backend::MODULES_ROOT));
+    let ctl = activation::kmod_ctl_path_from_env().unwrap_or_else(|| DEFAULT_CTL.into());
+    let modules = backend::kernel_modules_from_env();
+    let kpm_lock = backend::kpm_lock_from_env();
+    let observed = backend::detect_managed(
+        &ctl,
+        modules
+            .as_deref()
+            .unwrap_or_else(|| Path::new(backend::MODULES_ROOT)),
+        kpm_lock.as_deref(),
+    );
     let Some(active) = observed.active else {
-        eprintln!("project: no active native backend at {DEFAULT_CTL}");
+        eprintln!(
+            "project: no compatible active native backend (kernel node: {})",
+            ctl.display()
+        );
         std::process::exit(1);
     };
     match activation::project_native_wire(&config, active) {
@@ -86,7 +104,10 @@ fn status(ctl: &str) {
         }
     }
     let observed = backend::detect(Path::new(ctl), Path::new(backend::MODULES_ROOT));
-    println!("active={:?} installed={:?}", observed.active, observed.installed);
+    println!(
+        "active={:?} installed={:?}",
+        observed.active, observed.installed
+    );
 }
 
 async fn run(path: &str) {
@@ -113,6 +134,27 @@ async fn run(path: &str) {
             std::process::exit(1);
         }
     };
+    // Detect the native backend once at startup and publish it (§4): the app reads the active
+    // backend from the replica instead of joining per-backend status files. Read-only — safe
+    // against the real control node even when native delivery is disabled. A later refresh
+    // trigger (module change / boot) can re-detect; identity changes rarely, not per-tick.
+    let modules = backend::kernel_modules_from_env();
+    let kpm_lock = backend::kpm_lock_from_env();
+    let observed_backend = backend::detect_managed(
+        kmod_ctl_path
+            .as_deref()
+            .unwrap_or_else(|| Path::new(DEFAULT_CTL)),
+        modules
+            .as_deref()
+            .unwrap_or_else(|| Path::new(backend::MODULES_ROOT)),
+        kpm_lock.as_deref(),
+    );
+    state
+        .publisher
+        .update(|snapshot| snapshot.backend = observed_backend.clone());
+
+    // Finish initial channel observation before admitting mutations; startup
+    // must not contend with the first request for the KPM control lock.
     let handle = match serve(Path::new(path), state.clone()) {
         Ok(handle) => handle,
         Err(e) => {
@@ -120,18 +162,14 @@ async fn run(path: &str) {
             std::process::exit(1);
         }
     };
-    // Detect the native backend once at startup and publish it (§4): the app reads the active
-    // backend from the replica instead of joining per-backend status files. Read-only — safe
-    // against the real control node even when native delivery is disabled. A later refresh
-    // trigger (module change / boot) can re-detect; identity changes rarely, not per-tick.
-    let observed_backend = backend::detect(Path::new(DEFAULT_CTL), Path::new(backend::MODULES_ROOT));
-    state.publisher.update(|snapshot| snapshot.backend = observed_backend.clone());
 
     eprintln!(
         "core: epoch={epoch} serving on {path} config={} ({}) native_ctl={} backend={:?} (ctrl-c to stop)",
         config_path.display(),
         if state.has_config() { "loaded" } else { "none" },
-        kmod_ctl_path.as_ref().map_or_else(|| "disabled".to_string(), |p| p.display().to_string()),
+        kmod_ctl_path
+            .as_ref()
+            .map_or_else(|| "disabled".to_string(), |p| p.display().to_string()),
         observed_backend.active,
     );
 
@@ -161,7 +199,7 @@ async fn dump(path: &str) {
     }
     match client.current().await {
         Ok(p) => println!(
-            "epoch={} revision={} config_present={} apps={} observed={} vpn=[{}] backend={:?} installed={:?}",
+            "epoch={} revision={} config_present={} apps={} observed={} vpn=[{}] backend={:?} selected={:?} installed={:?}",
             p.epoch,
             p.revision,
             p.snapshot.config.is_some(),
@@ -169,6 +207,7 @@ async fn dump(path: &str) {
             p.snapshot.routing.observed,
             p.snapshot.routing.vpn_interfaces.join(","),
             p.snapshot.backend.active,
+            p.snapshot.backend.selected,
             p.snapshot.backend.installed,
         ),
         Err(e) => {

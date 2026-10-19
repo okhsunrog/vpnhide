@@ -210,11 +210,7 @@ pub fn boot_load_kmod() -> Result<()> {
         crate::kernel_control::observed_backend(Path::new(KMOD_CTL)),
         || {
             Ok(if ko.is_file() {
-                let mut command = Command::new("insmod");
-                command
-                    .arg(&ko)
-                    .arg(format!("filesystem_hiding={}", u8::from(filesystem_hiding)));
-                match output_with_timeout(&mut command, CHILD_COMMAND_TIMEOUT) {
+                match load_kmod_artifact(&ko, filesystem_hiding) {
                     Ok(output) => (
                         exit_code(&output.status),
                         String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -845,6 +841,19 @@ fn module_is_loaded(name: &str) -> Result<bool> {
     Ok(fs::read_to_string("/proc/modules")?
         .lines()
         .any(|line| line.split_whitespace().next() == Some(name)))
+}
+
+/// Shared load executor. Selection and configuration ownership stay with the
+/// caller (legacy boot path or persistent core).
+pub(crate) fn load_kmod_artifact(
+    artifact: &Path,
+    filesystem_hiding: bool,
+) -> std::io::Result<Output> {
+    let mut command = Command::new("insmod");
+    command
+        .arg(artifact)
+        .arg(format!("filesystem_hiding={}", u8::from(filesystem_hiding)));
+    output_with_timeout(&mut command, CHILD_COMMAND_TIMEOUT)
 }
 
 pub(crate) fn output_with_timeout(

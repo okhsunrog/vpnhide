@@ -37,6 +37,18 @@ pub(crate) fn load_kmod_if_absent<T>(
     }
 }
 
+/// A detected runtime with unavailable authentication or failed enumeration is
+/// not evidence that KPM is absent. Never dispatch insmod in that case.
+pub(crate) fn load_without_kpm<T>(
+    observed: Result<bool>,
+    load: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    if observed? {
+        return Err("VPN Hide KPM is active; insmod refused".into());
+    }
+    load()
+}
+
 /// Check the same open proc file that receives the write. No truncation and no
 /// reopen between identity validation and delivery to a potentially new owner.
 pub(crate) fn write_config(path: &Path, expected: u32, wire: &str) -> Result<()> {
@@ -61,6 +73,16 @@ pub(crate) fn write_config(path: &Path, expected: u32, wire: &str) -> Result<()>
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn kpm_presence_or_unknown_state_blocks_loading() {
+        for observed in [Ok(true), Err("runtime cannot be enumerated".into())] {
+            assert!(
+                load_without_kpm(observed, || -> Result<()> { panic!("must not load") }).is_err()
+            );
+        }
+        assert_eq!(load_without_kpm(Ok(false), || Ok(42)).unwrap(), 42);
+    }
 
     #[test]
     fn only_absence_invokes_loader() {

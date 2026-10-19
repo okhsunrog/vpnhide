@@ -123,7 +123,11 @@ struct KpmCtlLock {
 
 impl KpmCtlLock {
     fn acquire() -> Result<Self> {
-        if let Some(parent) = Path::new(KPM_CTL_LOCK).parent() {
+        Self::acquire_at(Path::new(KPM_CTL_LOCK), false)
+    }
+
+    fn acquire_at(path: &Path, nonblocking: bool) -> Result<Self> {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             fs::create_dir_all(parent)?;
         }
         let file = OpenOptions::new()
@@ -131,16 +135,157 @@ impl KpmCtlLock {
             .write(true)
             .create(true)
             .truncate(false)
-            .open(KPM_CTL_LOCK)?;
-        fs::set_permissions(KPM_CTL_LOCK, fs::Permissions::from_mode(0o600))?;
-        if unsafe { flock(file.as_raw_fd(), LOCK_EX) } != 0 {
+            .open(path)?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        // LOCK_NB is 4 on the supported Linux/Android targets. Core reports busy
+        // rather than blocking its mutation owner behind a legacy process.
+        let flags = LOCK_EX | if nonblocking { 4 } else { 0 };
+        if unsafe { flock(file.as_raw_fd(), flags) } != 0 {
             return Err(io::Error::last_os_error().into());
         }
         Ok(Self { _file: file })
     }
 }
 
+/// One authenticated transport selected by core. It owns no policy or canonical
+/// file: artifact/lock/control paths and projected wire come from the caller.
+pub struct CoreKpm {
+    client: KpmClient,
+    lock_path: PathBuf,
+}
+
+#[derive(Debug)]
+pub enum KpmConfigError {
+    BeforeDispatch(String),
+    /// The command was dispatched, but completion is not established. No retry.
+    Unknown(String),
+}
+
+impl std::fmt::Display for KpmConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BeforeDispatch(message) | Self::Unknown(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for KpmConfigError {}
+
+impl CoreKpm {
+    /// None is definite runtime absence. Authentication/probe errors stay errors.
+    pub fn connect(lock_path: &Path) -> Result<Option<Self>> {
+        if !Path::new(APATCH_DIR).is_dir() && find_kpatch().is_none() {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            client: KpmClient::detect()?,
+            lock_path: lock_path.to_owned(),
+        }))
+    }
+
+    /// Runtime evidence, not module-directory presence. No canonical read or load.
+    pub fn status(&self) -> Result<Option<vpnhide_protocol::Status>> {
+        let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
+        self.status_locked()
+    }
+
+    fn status_locked(&self) -> Result<Option<vpnhide_protocol::Status>> {
+        if !self.client.list_contains()? {
+            return Ok(None);
+        }
+        let reply = self.client.ctl0_read_raw("vpnhide 1 status")?;
+        if !reply.ends_with('\n') {
+            return Err("truncated KPM status".into());
+        }
+        let status = vpnhide_protocol::parse_status_fields(reply.as_bytes())
+            .and_then(|fields| fields.complete())
+            .ok_or("invalid KPM status")?;
+        if status.backend != vpnhide_protocol::hook_ids::Backend::Kpm as u32 {
+            return Err("foreign KPM control owner".into());
+        }
+        Ok(Some(status))
+    }
+
+    /// Load only the artifact selected by core; never select neighbors or fallback.
+    pub fn load_selected(
+        &self,
+        ctl: &Path,
+        artifact: &Path,
+        filesystem_hiding: bool,
+    ) -> Result<()> {
+        let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
+        require_no_kernel_owner(ctl)?;
+        if self.status_locked()?.is_some() {
+            return Ok(());
+        }
+        if !crate::running_kernel_supports_kpm()? {
+            return Err(format!(
+                "unsupported KPM kernel; supported families: {}",
+                crate::KPM_SUPPORTED_KERNEL_FAMILIES
+            )
+            .into());
+        }
+        if !artifact.is_file() {
+            return Err("selected KPM artifact is missing".into());
+        }
+        require_no_kernel_owner(ctl)?;
+        self.client
+            .load_from(artifact, KpmLoadOptions { filesystem_hiding })?;
+        self.status_locked()?
+            .ok_or("KPM load did not produce a compatible runtime identity")?;
+        Ok(())
+    }
+
+    /// Identity validation and dispatch share the KPM lock. Unlike the legacy
+    /// activator this sends at most one config command; uncertain errors stay unknown.
+    pub fn configure_once(
+        &self,
+        ctl: &Path,
+        wire: &str,
+    ) -> std::result::Result<(), KpmConfigError> {
+        let preflight = || -> Result<KpmCtlLock> {
+            validate_kpm_config_wire(wire)?;
+            if parse_config(wire.as_bytes()).is_none() {
+                return Err("invalid KPM config snapshot".into());
+            }
+            let lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
+            require_no_kernel_owner(ctl)?;
+            let status = self.status_locked()?.ok_or("KPM is not loaded")?;
+            use vpnhide_protocol::hook_ids::StatusError;
+            if status.error != StatusError::Ok as u32
+                && status.error != StatusError::PartialHooks as u32
+            {
+                return Err(format!("KPM is not ready: status error {}", status.error).into());
+            }
+            require_no_kernel_owner(ctl)?;
+            Ok(lock)
+        };
+        let _lock = preflight().map_err(|e| KpmConfigError::BeforeDispatch(e.to_string()))?;
+        let result = match &self.client {
+            KpmClient::KpatchCli { path } => run_kpatch_kpm_ctl0_config(path, wire),
+            KpmClient::ApatchSupercall { key, style } => apatch_kpm_ctl0_config(key, *style, wire),
+        };
+        result.map_err(|e| KpmConfigError::Unknown(e.to_string()))
+    }
+}
+
+fn require_no_kernel_owner(ctl: &Path) -> Result<()> {
+    if crate::observed_kernel_backend(ctl)?.is_some() {
+        return Err("kernel control owner is present; KPM load/config refused".into());
+    }
+    Ok(())
+}
+
 impl KpmClient {
+    /// No runtime is different from a runtime whose loaded modules cannot be
+    /// observed. The latter must prevent a conflicting kmod load.
+    pub(crate) fn observe_loaded() -> Result<bool> {
+        if !Path::new(APATCH_DIR).is_dir() && find_kpatch().is_none() {
+            return Ok(false);
+        }
+        Self::detect()?.list_contains()
+    }
+
     pub(crate) fn detect() -> Result<Self> {
         match Self::detect_outcome()? {
             KpmClientDetection::Ready(client) => Ok(client),
@@ -206,10 +351,14 @@ impl KpmClient {
     }
 
     fn load(&self, options: KpmLoadOptions) -> Result<()> {
+        self.load_from(Path::new(KPM_MODULE_FILE), options)
+    }
+
+    fn load_from(&self, artifact: &Path, options: KpmLoadOptions) -> Result<()> {
         match self {
             Self::KpatchCli { path } => {
                 let mut cmd = Command::new(path);
-                cmd.args(["kpm", "load", KPM_MODULE_FILE]);
+                cmd.args(["kpm", "load"]).arg(artifact);
                 if let Some(args) = options.args() {
                     cmd.arg(args);
                 }
@@ -222,7 +371,8 @@ impl KpmClient {
             }
             Self::ApatchSupercall { key, style } => {
                 let auth = auth_label(key);
-                let path = CString::new(KPM_MODULE_FILE)?;
+                use std::os::unix::ffi::OsStrExt;
+                let path = CString::new(artifact.as_os_str().as_bytes())?;
                 let key = CString::new(key.as_str())?;
                 let args = options.args().map(CString::new).transpose()?;
                 let rc = unsafe {
@@ -304,7 +454,7 @@ fn kpatch_kpm_list_contains(kpatch: &Path) -> Result<bool> {
     cmd.args(["kpm", "list"]);
     let out = output_with_timeout(&mut cmd, CHILD_COMMAND_TIMEOUT)?;
     if !out.status.success() {
-        return Ok(false);
+        return Err(format!("kpatch kpm list failed with status {}", out.status).into());
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     Ok(stdout.split_whitespace().any(|token| token == KPM_NAME))
