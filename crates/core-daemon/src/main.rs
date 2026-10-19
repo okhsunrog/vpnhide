@@ -256,15 +256,21 @@ async fn dump(path: &str) {
     }
     match client.current().await {
         Ok(p) => println!(
-            "epoch={} revision={} config_present={} apps={} observed={} vpn=[{}] backend={:?} selected={:?} installed={:?}",
+            "epoch={} revision={} config_present={} apps={} routing_freshness={:?} gen={} vpn=[{}] last_good=[{}] candidates=[{}] framework={:?} uid={:?} backend_active={:?} selected={:?} applied={:?} installed={:?}",
             p.epoch,
             p.revision,
             p.snapshot.config.is_some(),
             p.snapshot.config.as_ref().map_or(0, |c| c.apps.len()),
-            p.snapshot.routing.observed,
+            p.snapshot.routing.freshness,
+            p.snapshot.routing.generation,
             p.snapshot.routing.vpn_interfaces.join(","),
+            p.snapshot.routing.last_good_vpn_interfaces.join(","),
+            p.snapshot.routing.netlink_candidates.join(","),
+            p.snapshot.routing.framework.status,
+            p.snapshot.routing.uid.as_ref().map(|u| u.state),
             p.snapshot.backend.active,
             p.snapshot.backend.selected,
+            p.snapshot.backend.applied,
             p.snapshot.backend.installed,
         ),
         Err(e) => {

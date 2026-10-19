@@ -1,17 +1,12 @@
-//! The root observation loop: a `NETLINK_ROUTE` listener that feeds VPN-presence into the
-//! [`Publisher`](crate::Publisher).
+//! The root observation loop: `NETLINK_ROUTE` + framework VPN classification (§8).
 //!
-//! The netlink internals are ported from the on-device-proven `netlink-spike` (core-2.0
-//! §12 step 1a), made async on the daemon's tokio runtime via [`AsyncFd`], and reduced to
-//! what the daemon needs today: which VPN-candidate interfaces are up. Per-uid membership
-//! (§8), which needs the target set and a framework `TRANSPORT_VPN` cross-check, lands with
-//! the config domain.
+//! Netlink answers "did routing/link state change" and supplies name-match **candidates**.
+//! Framework evidence (`TRANSPORT_VPN` via dumpsys / env stub) classifies VPN. Freshness is
+//! Current only with both; otherwise Unknown with last-good retained for display.
 //!
-//! The reliability rule proven by the spike holds here: events are change-notifications,
-//! not a log. A burst is coalesced by a debounce; an `ENOBUFS` overflow is not a silent
-//! loss — the kernel signals it and the loop resyncs by re-dumping, recovering the correct
-//! current state. Name-matching alone counts an IMS `ipsec` tunnel as a VPN, so this stays
-//! a *candidate* set until the framework cross-check lands (TODO §8).
+//! Events are change-notifications, not a log. Debounce coalesces bursts; ENOBUFS → mark
+//! Unknown then resync. Backend identity is refreshed on a bounded interval (not only at
+//! startup/apply).
 
 use std::collections::BTreeSet;
 use std::io;
@@ -23,8 +18,8 @@ use tokio::io::Interest;
 use tokio::io::unix::AsyncFd;
 use tokio::time::Instant;
 use vpnhide_checks::is_vpn_interface_name;
-use vpnhide_core_rpc::RoutingObservation;
-
+use crate::framework_vpn;
+use crate::routing_compose;
 use crate::server::CoreState;
 
 const DEBOUNCE: Duration = Duration::from_millis(250);
@@ -219,18 +214,66 @@ fn consume(batch: &[u8], state: &mut RouteState) -> bool {
     state.up != before
 }
 
-/// Publish the current VPN set into the core's snapshot, only when it actually changed.
-/// Touches only `routing`, so a concurrent config edit is never clobbered.
+fn next_generation(state: &Arc<CoreState>) -> u64 {
+    state.publisher.current().snapshot.routing.generation.saturating_add(1)
+}
+
+/// Compose netlink + framework and publish when the observation changed.
 fn publish(state: &Arc<CoreState>, route: &RouteState) {
-    let next = RoutingObservation {
-        observed: true,
-        vpn_interfaces: route.up.iter().cloned().collect(),
-    };
-    if state.publisher.current().snapshot.routing != next {
+    let previous = state.publisher.current().snapshot.routing.clone();
+    let framework = framework_vpn::classify();
+    let next = routing_compose::compose(
+        &previous,
+        next_generation(state),
+        &route.up,
+        framework,
+        routing_compose::observe_uid_from_env(),
+    );
+    if previous != next {
         state
             .publisher
             .update(move |snapshot| snapshot.routing = next);
     }
+}
+
+fn publish_unknown(state: &Arc<CoreState>, detail: &str) {
+    let previous = state.publisher.current().snapshot.routing.clone();
+    let next = routing_compose::mark_unknown(&previous, next_generation(state), detail);
+    if previous != next {
+        state
+            .publisher
+            .update(move |snapshot| snapshot.routing = next);
+    }
+}
+
+fn refresh_backend(state: &Arc<CoreState>) {
+    use std::path::Path;
+    use crate::{activation, backend};
+    // Lifecycle refresh must **not** take the KPM management lock — that races
+    // Native apply (EAGAIN). Kernel ctl + installed dirs are lock-free; KPM
+    // active identity is refreshed at startup/apply via detect_managed.
+    let ctl = activation::kmod_ctl_path_from_env()
+        .unwrap_or_else(|| Path::new("/proc/vpnhide_ctl").to_path_buf());
+    let modules = backend::kernel_modules_from_env();
+    let detected = backend::detect(
+        &ctl,
+        modules
+            .as_deref()
+            .unwrap_or_else(|| Path::new(backend::MODULES_ROOT)),
+    );
+    state.publisher.update(|snapshot| {
+        let mut next = detected;
+        next.selected = snapshot.backend.selected;
+        next.applied = snapshot.backend.applied;
+        // Keep prior KPM-active evidence if lock-free detect cannot see it.
+        if next.active.is_none() && snapshot.backend.active == Some(vpnhide_core_rpc::NativeBackend::Kpm)
+        {
+            next.active = snapshot.backend.active;
+        }
+        if snapshot.backend != next {
+            snapshot.backend = next;
+        }
+    });
 }
 
 /// Rebuild the route state from a fresh kernel dump (startup and after an ENOBUFS overflow).
@@ -280,8 +323,10 @@ pub async fn observe(state: Arc<CoreState>) -> io::Result<()> {
 
     resync(&async_fd, &mut buf, &mut route).await?;
     publish(&state, &route);
+    refresh_backend(&state);
 
     let mut pending: Option<Instant> = None;
+    let mut backend_deadline = Instant::now() + Duration::from_secs(30);
     loop {
         tokio::select! {
             readable = async_fd.readable() => {
@@ -295,13 +340,17 @@ pub async fn observe(state: Arc<CoreState>) -> io::Result<()> {
                             overflow = true;
                             break;
                         }
-                        Ok(Err(e)) => return Err(e),
+                        Ok(Err(e)) => {
+                            publish_unknown(&state, &format!("netlink_recv:{e}"));
+                            return Err(e);
+                        }
                         Err(_would_block) => break,
                     }
                 }
                 drop(guard);
                 if overflow {
-                    eprintln!("core: netlink overflow — resyncing");
+                    eprintln!("core: netlink overflow — marking Unknown then resyncing");
+                    publish_unknown(&state, "enobufs");
                     resync(&async_fd, &mut buf, &mut route).await?;
                     changed = true;
                 }
@@ -309,12 +358,13 @@ pub async fn observe(state: Arc<CoreState>) -> io::Result<()> {
                     pending = Some(Instant::now() + DEBOUNCE);
                 }
             }
-            // select! evaluates a branch's expression every iteration and the precondition
-            // only gates whether it is polled — so this deadline must be valid even when
-            // `pending` is None (a far-future sleep the precondition then disables).
             _ = tokio::time::sleep_until(pending.unwrap_or_else(far_future)), if pending.is_some() => {
                 publish(&state, &route);
                 pending = None;
+            }
+            _ = tokio::time::sleep_until(backend_deadline) => {
+                refresh_backend(&state);
+                backend_deadline = Instant::now() + Duration::from_secs(30);
             }
         }
     }
