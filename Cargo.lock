@@ -1525,12 +1525,8 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
- "tempfile",
- "tokio",
  "vpnhide_apatch_abi",
  "vpnhide_checks",
- "vpnhide_core_daemon",
- "vpnhide_core_rpc",
 ]
 
 [[package]]
@@ -1574,7 +1570,9 @@ dependencies = [
 name = "vpnhide_core_ffi"
 version = "0.0.0"
 dependencies = [
+ "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "uniffi",

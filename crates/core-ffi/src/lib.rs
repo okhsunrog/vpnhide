@@ -6,6 +6,8 @@
 
 uniffi::setup_scaffolding!();
 
+pub mod config_relay;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -33,7 +35,7 @@ pub enum CoreFfiError {
     Protocol(String),
 }
 
-/// Production UDS path (common Magisk module persist dir). Prefer this over abstract sockets.
+/// Production UDS path (the app's device-encrypted data dir, user 0).
 #[uniffi::export]
 pub fn production_socket_path() -> String {
     PRODUCTION_SOCKET_PATH.to_owned()
@@ -43,6 +45,52 @@ pub fn production_socket_path() -> String {
 #[uniffi::export]
 pub fn protocol_version() -> u32 {
     PROTOCOL_VERSION
+}
+
+/// Size cap on the canonical config JSON the save path accepts.
+#[uniffi::export]
+pub fn max_config_bytes() -> u64 {
+    config_relay::MAX_CONFIG
+}
+
+/// The core's published state for the save path: one JSON reply (`status` `ok`, or a
+/// delivery status such as `unreachable` / `protocol_skew`). Never throws.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn config_state(socket_path: String) -> String {
+    config_relay::relay(&socket_path, config_relay::Request::State).await
+}
+
+/// An operation receipt plus the current state (`ok` / `unknown_op` / delivery status).
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn config_operation(socket_path: String, op: u64) -> String {
+    config_relay::relay(&socket_path, config_relay::Request::Operation { op }).await
+}
+
+/// Submit `ConfigEdit::Replace` with the on-disk canonical JSON against `base_revision`,
+/// wait for it to settle (bounded), and reply with the receipt and the resulting state.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn config_replace(
+    socket_path: String,
+    op: u64,
+    base_revision: u64,
+    config_json: String,
+) -> String {
+    let request = config_relay::Request::Replace {
+        op,
+        base: base_revision,
+        config_json,
+    };
+    config_relay::relay(&socket_path, request).await
+}
+
+/// Submit `ConfigEdit::RepairActivation` (re-apply native + Ports for the stored config).
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn config_repair(socket_path: String, op: u64, base_revision: u64) -> String {
+    let request = config_relay::Request::Repair {
+        op,
+        base: base_revision,
+    };
+    config_relay::relay(&socket_path, request).await
 }
 
 /// Connect to the production socket path (convenience for the APK).

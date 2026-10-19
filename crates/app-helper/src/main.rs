@@ -1,4 +1,3 @@
-mod core_client;
 mod mutation;
 mod observations;
 mod probe;
@@ -18,9 +17,6 @@ fn main() {
         [command, mode] if command == "observe" && mode == "kpm-list" => {
             observations::kpm_list(&[])
         }
-        [command, rest @ ..] if command == "core" && core_client::valid_command(rest) => {
-            core_client::run(rest)
-        }
         [command, rest @ ..] if command == "mutation" && mutation::valid_command(rest) => {
             mutation::run(rest)
         }
@@ -31,7 +27,7 @@ fn main() {
 
 fn usage_error() -> i32 {
     eprintln!(
-        "usage: vhhelper probe checks | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-list | core <state | operation <op> | replace <op> <base> | repair <op> <base>> | mutation <directory> <config> <inspect|adopt|open|run|recover> ..."
+        "usage: vhhelper probe checks | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-list | mutation <directory> <config> <inspect|adopt|open|run|recover> ..."
     );
     2
 }
