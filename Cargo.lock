@@ -1519,17 +1519,6 @@ name = "vpnhide_apatch_abi"
 version = "1.1.1"
 
 [[package]]
-name = "vpnhide_app_helper"
-version = "1.3.1"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
- "vpnhide_apatch_abi",
- "vpnhide_checks",
-]
-
-[[package]]
 name = "vpnhide_checks"
 version = "1.3.1"
 dependencies = [

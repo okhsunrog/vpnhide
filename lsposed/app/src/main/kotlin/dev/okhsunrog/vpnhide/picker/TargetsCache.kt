@@ -16,7 +16,6 @@ import dev.okhsunrog.vpnhide.nativeHookFamilyFor
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.parseCanonicalConfig
 import dev.okhsunrog.vpnhide.parsePackageUidMap
-import dev.okhsunrog.vpnhide.suExec
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -24,7 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
  * manager lookups, cached once for the lifetime of the app session.
  *
  * Without this cache, every tab switch into Protection triggered 3-4
- * sequential `suExec` roundtrips per screen. Root shell roundtrips
+ * sequential root roundtrips per screen. Root roundtrips
  * are ~50-100ms each on most devices, so a single tab switch added
  * hundreds of milliseconds of "loading" time even after AppListCache
  * made the package list itself instant. Bundling every read into a

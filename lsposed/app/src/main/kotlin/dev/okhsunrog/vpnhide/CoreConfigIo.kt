@@ -1,6 +1,8 @@
 package dev.okhsunrog.vpnhide
 
-import java.util.UUID
+import dev.okhsunrog.vpnhide.core.CoreEffectOutcome
+import dev.okhsunrog.vpnhide.core.CoreRoot
+import dev.okhsunrog.vpnhide.core.CoreRootEffect
 
 /**
  * The coordinator's effect adapter in 2.0: core is the only writer.
@@ -12,15 +14,16 @@ import java.util.UUID
  * - **Native / Ports** report core's outcome for that operation. When no core operation is
  *   current (a forced reconcile, or a coupled command ran since), they submit
  *   `RepairActivation` so core re-applies from its durable config.
- * - **Secret / Cleanup** are the only shell effects left (APatch superkey, pre-1.0 legacy
- *   files). They run on the receipt-tracked [RootCommandLane]; none touches a core-owned path.
+ * - **Secret / Cleanup** are typed core root effects (`root_effect`: APatch superkey, pre-1.0
+ *   legacy files, full reset). They are idempotent, so an uncertain one is recovered by
+ *   applying the same effects again. The app runs no shell and no root process.
  *
  * Recovery queries core for the same operation id — an uncertain submission is never
  * resubmitted as a new edit.
  */
 internal class CoreConfigIo(
     private val prepareCore: () -> CoreConfigClient?,
-    private val lane: RootCommandLane,
+    private val rootEffects: CoreRootEffects = CoreRootEffects { op, effect -> CoreRoot.apply(op, effect) },
     private val newOperationId: () -> Long = CoreOperationIds::next,
 ) : ConfigCoordinatorIo {
     private var core: CoreConfigClient? = null
@@ -33,6 +36,7 @@ internal class CoreConfigIo(
     private var pending: Long? = null
     private var coupledOperation: Long? = null
     private var coupledPhase: ConfigPhase? = null
+    private var coupledEffects: List<CoreRootEffect> = emptyList()
 
     override suspend fun initialize(): ConfigInitialization {
         val client = core ?: prepareCore()?.also { core = it } ?: return ConfigInitialization(ConfigCoordinatorMode.Unavailable)
@@ -62,7 +66,7 @@ internal class CoreConfigIo(
         phase: ConfigPhase,
         base: CanonicalConfig?,
         candidate: CanonicalConfig,
-        command: String,
+        effects: List<CoreRootEffect>,
     ): ConfigPhaseEvidence {
         val client = core ?: return ConfigPhaseEvidence(PhaseOutcome.Unknown, RootCanonicalRead.Unavailable)
         return when (phase) {
@@ -81,7 +85,8 @@ internal class CoreConfigIo(
                 current = null
                 coupledOperation = ticket.owner
                 coupledPhase = phase
-                ConfigPhaseEvidence(lane.execute(command), RootCanonicalRead.Unavailable)
+                coupledEffects = effects
+                ConfigPhaseEvidence(applyEffects(effects), RootCanonicalRead.Unavailable)
             }
         }
     }
@@ -92,7 +97,7 @@ internal class CoreConfigIo(
     ): ConfigPhaseEvidence {
         if (phase == ConfigPhase.Secret || phase == ConfigPhase.Cleanup) {
             return if (coupledOperation == operationId && coupledPhase == phase) {
-                ConfigPhaseEvidence(lane.recover(), RootCanonicalRead.Unavailable)
+                ConfigPhaseEvidence(applyEffects(coupledEffects), RootCanonicalRead.Unavailable)
             } else {
                 ConfigPhaseEvidence(PhaseOutcome.Unknown, RootCanonicalRead.Unavailable)
             }
@@ -106,6 +111,25 @@ internal class CoreConfigIo(
         pending = null
         current = record
         return ConfigPhaseEvidence(phaseOutcome(record, phase), reply.state.canonical)
+    }
+
+    /** All effects in order; the first that does not apply decides the outcome. */
+    private suspend fun applyEffects(effects: List<CoreRootEffect>): PhaseOutcome {
+        if (effects.isEmpty()) return PhaseOutcome.FailedKnown
+        for (effect in effects) {
+            when (rootEffects.apply(newOperationId(), effect)) {
+                CoreEffectOutcome.Ok -> {}
+
+                CoreEffectOutcome.FailedKnown -> {
+                    return PhaseOutcome.FailedKnown
+                }
+
+                CoreEffectOutcome.Unknown -> {
+                    return PhaseOutcome.Unknown
+                }
+            }
+        }
+        return PhaseOutcome.Confirmed
     }
 
     private suspend fun submit(
@@ -181,44 +205,10 @@ private fun settledOutcome(record: CoreOperationRecord): PhaseOutcome =
         else -> PhaseOutcome.Unknown
     }
 
-/**
- * Receipt-tracked root lane for the coupled shell effects that are not core's (APatch superkey,
- * pre-1.0 legacy file cleanup). Opened lazily on first use; outcomes come from the receipt's
- * exit status only — the lane never carries or confirms a config write.
- */
-internal class RootCommandLane(
-    private val prepare: () -> RootMutationClient?,
-) {
-    private var transport: RootMutationClient? = null
-    private var session: RootMutationSession? = null
-    private var sequence = 0L
-
-    fun execute(command: String): PhaseOutcome {
-        if (command.isEmpty()) return PhaseOutcome.FailedKnown
-        val client = transport ?: prepare()?.also { transport = it } ?: return PhaseOutcome.FailedKnown
-        val opened = session ?: open(client) ?: return PhaseOutcome.FailedKnown
-        sequence += 1
-        return outcome(client.execute(opened, sequence, command), opened)
-    }
-
-    fun recover(): PhaseOutcome {
-        val client = transport ?: return PhaseOutcome.Unknown
-        val opened = session ?: return PhaseOutcome.Unknown
-        return outcome(client.recover(opened, sequence), opened)
-    }
-
-    private fun open(client: RootMutationClient): RootMutationSession? {
-        val id = UUID.randomUUID().toString()
-        val adopted = client.adopt(id) as? RootMutationReply.Observed ?: return null
-        if (!adopted.accepted) return null
-        return openedRootMutationSession(adopted, adopted.snapshot.boot, id)?.also {
-            session = it
-            sequence = adopted.snapshot.receipt.sequence
-        }
-    }
-
-    private fun outcome(
-        reply: RootMutationReply,
-        opened: RootMutationSession,
-    ): PhaseOutcome = rootMutationPhaseOutcome(reply, opened, sequence, ConfigPhase.Secret, null, CanonicalConfig())
+/** Core's `root_effect`, as a seam for tests. */
+internal fun interface CoreRootEffects {
+    suspend fun apply(
+        op: Long,
+        effect: CoreRootEffect,
+    ): CoreEffectOutcome
 }

@@ -12,7 +12,7 @@ Monorepo for hiding VPN interfaces from selected Android apps. Runtime component
 - `zygisk/` — Rust Zygisk module, inline `libc` hooks via shadowhook
 - `lsposed/` — LSPosed module + Compose target-picker app
 - `portshide/` — localhost port blocker (shell + iptables)
-- `crates/` — the Rust workspace: the wire `protocol`, the `activator` (one thin bin per backend), the app-side `checks`/`checks-jni` probes and the `app-helper` (`vhhelper`) root helper
+- `crates/` — the Rust workspace: the wire `protocol`, the `activator` (one thin bin per backend), the app-side `checks`/`checks-jni` probes, and core (`core-rpc`, `core-daemon`, `core-ffi`): the only root process, which the app reaches over the in-process core-ffi client
 
 ## Read before touching code
 
@@ -26,7 +26,7 @@ These short files cover everything specific to this repo. Skipping them leads to
 - [docs/limits.md](docs/limits.md) — every target/config/stats capacity ceiling, what binds first, and the cost of raising it. Read before changing target caps, wire density, or backend buffers.
 - [docs/config-coordinator.md](docs/config-coordinator.md) — who owns app configuration writes: the process-owned coordinator, typed edits, drafts, phase outcomes and recovery. Read before adding any code path that writes config or runs an activator.
 - [docs/observation-coordinator.md](docs/observation-coordinator.md) — how root/app observations are read, invalidated, joined and quarantined, and the Dashboard/diagnostics refresh rules. Read before adding a cache or a refresh trigger.
-- [docs/root-mutation-transport.md](docs/root-mutation-transport.md) — the `vhhelper mutation` transport: receipts, sessions, late-launch fencing, the device fixture. Read before touching privileged writes.
+- [docs/notes/core-2.0-ipc-auth.md](docs/notes/core-2.0-ipc-auth.md) — the app socket, peercred auth, typed config edits, diagnostics probes and root effects. Read before touching anything privileged: the app runs no `su` (CI: `lsposed/tests/check_no_root_exec.sh`).
 - [docs/detection-vectors.md](docs/detection-vectors.md) — what an app can probe to detect the VPN (or a hidden package), which component (kmod / built-in / KPM / zygisk / lsposed / SELinux) covers each vector, how it manifests. Read before adding or changing a hook.
 - [docs/diagnostics.md](docs/diagnostics.md) — how the app self-tests hiding and attributes *who* hid the VPN (root-differential, `CheckOutcome`, `LayerStatus`/verdict, the self-in-tunnel gate). Read before touching the diagnostics/dashboard.
 - [docs/debug-bundle.md](docs/debug-bundle.md) — how to read the diagnostic bundle a bug report ships (`vpnhide_debug_*.zip` → `state.json` + raw `sections`): what every field/section means, where each is produced in code, and triage playbooks. Read when diagnosing from a user's bundle.

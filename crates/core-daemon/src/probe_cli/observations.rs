@@ -226,15 +226,15 @@ mod tests {
 
     fn fixture(name: &str) -> Value {
         let raw = match name {
-            "kpm-empty.json" => include_str!("../../../../fixtures/app-helper/kpm-empty.json"),
-            "kpm-vpnhide.json" => include_str!("../../../../fixtures/app-helper/kpm-vpnhide.json"),
-            "kpm-other.json" => include_str!("../../../../fixtures/app-helper/kpm-other.json"),
-            "kpm-next.json" => include_str!("../../../../fixtures/app-helper/kpm-next.json"),
+            "kpm-empty.json" => include_str!("../../../../fixtures/core-probes/kpm-empty.json"),
+            "kpm-vpnhide.json" => include_str!("../../../../fixtures/core-probes/kpm-vpnhide.json"),
+            "kpm-other.json" => include_str!("../../../../fixtures/core-probes/kpm-other.json"),
+            "kpm-next.json" => include_str!("../../../../fixtures/core-probes/kpm-next.json"),
             "kpm-unavailable.json" => {
-                include_str!("../../../../fixtures/app-helper/kpm-unavailable.json")
+                include_str!("../../../../fixtures/core-probes/kpm-unavailable.json")
             }
             "kpm-malformed.json" => {
-                include_str!("../../../../fixtures/app-helper/kpm-malformed.json")
+                include_str!("../../../../fixtures/core-probes/kpm-malformed.json")
             }
             _ => panic!("unknown fixture"),
         };

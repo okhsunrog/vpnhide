@@ -8,6 +8,7 @@ import dev.okhsunrog.vpnhide.debug.VpnHideState
 import dev.okhsunrog.vpnhide.debug.buildLsposedConfigText
 import dev.okhsunrog.vpnhide.debug.buildVpnHideState
 import dev.okhsunrog.vpnhide.debug.captureBootLsposedLogcat
+import dev.okhsunrog.vpnhide.debug.captureDmesg
 import dev.okhsunrog.vpnhide.debug.captureSelfNetworkView
 import dev.okhsunrog.vpnhide.debug.exportDebug
 import dev.okhsunrog.vpnhide.debug.isoNow
@@ -102,7 +103,7 @@ internal object AgentControl {
                 checkResults = diagnostics.measurementResults.takeIf { protection is ProtectionCheck.Checked },
                 // The same projection the screens render, so getState and the UI agree.
                 diagnostics = diagnosticSummary(snapshot),
-                dmesg = if (options.forensics) suExec("dmesg 2>/dev/null").second else "",
+                dmesg = if (options.forensics) captureDmesg() else "",
                 logcat = "",
                 bootLsposedLogcat = if (options.forensics) captureBootLsposedLogcat() else "",
                 lsposedConfigDb = if (options.forensics) buildLsposedConfigText(context) else "",

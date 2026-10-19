@@ -47,16 +47,12 @@ tasks.register<Exec>("ktlintCheck") {
     commandLine("ktlint", "$projectDir/src/**/*.kt")
 }
 
-// The native check probes ship two ways from the shared `crates/checks` crate:
-//   - libvpnhide_checks.so — a cdylib loaded in-process (System.loadLibrary)
-//     for the app-view probe (real uid + SELinux domain + zygisk/kernel hooks);
-//   - vhhelper — one root-exec'able bin for checks, observations and the
-//     mutation supervisor. Shipped as an asset, not a jniLib: AGP 9 defaults
-//     to extractNativeLibs=false, so a jniLib isn't a real on-disk file and
-//     can't be exec'd.
+// The native check probes ship from the shared `crates/checks` crate as
+// libvpnhide_checks.so — a cdylib loaded in-process (System.loadLibrary) for the
+// app-view probe (real uid + SELinux domain + zygisk/kernel hooks). The root view of
+// the same probes runs in core (`vpnhide-core probe checks`, via collect_diagnostics);
+// the app ships no executable and runs no root process.
 // Built with cargo-ndk (the same toolchain the zygisk module already uses).
-// The helper is never loaded into the app's JNI process. See
-// docs/root-mutation-transport.md.
 // This replaces the gobley/UniFFI plugin (and its AGP-9 fork): the whole native
 // surface is now one JSON-returning function, so codegen bindings aren't worth
 // the dependency. -P 29 matches minSdk (getifaddrs needs API >= 24).
@@ -90,7 +86,6 @@ val appNativeCrates =
     listOf(
         "checks",
         "checks-jni",
-        "app-helper",
         "core-ffi",
         "core-daemon",
         "core-rpc",
@@ -113,7 +108,7 @@ val emulatorX86 = (project.findProperty("vpnhideEmulatorX86") as String?)?.toBoo
 val buildAppNative =
     tasks.register<Exec>("buildAppNative") {
         group = "build"
-        description = "Builds the checks JNI library, the core-ffi client library and vhhelper via cargo-ndk."
+        description = "Builds the checks JNI library and the core-ffi client library via cargo-ndk."
         workingDir = repoDir
         environment("ANDROID_NDK_HOME", rustNdkDir)
         environment("NDK_HOME", rustNdkDir)
@@ -151,8 +146,6 @@ val buildAppNative =
                 add("app-native")
                 add("--package")
                 add("vpnhide_checks_jni")
-                add("--package")
-                add("vpnhide_app_helper")
                 // The in-process core client (UniFFI cdylib, loaded by JNA): the app's
                 // only path to config mutations. Shipped in every build type.
                 add("--package")
@@ -160,28 +153,11 @@ val buildAppNative =
                 add("--locked")
             },
         )
-        // Locals (not top-level script vals) so the doLast action captures only
-        // File/Boolean values — required for configuration-cache serialization.
-        val helperBinArm = repoDir.resolve("target/aarch64-linux-android/app-native/vhhelper")
-        val helperDestArm = rustAssetsOut.resolve("bin/arm64-v8a/vhhelper")
-        val helperBinArmv7 = repoDir.resolve("target/armv7-linux-androideabi/app-native/vhhelper")
-        val helperDestArmv7 = rustAssetsOut.resolve("bin/armeabi-v7a/vhhelper")
-        val helperBinX86 = repoDir.resolve("target/x86_64-linux-android/app-native/vhhelper")
-        val helperDestX86 = rustAssetsOut.resolve("bin/x86_64/vhhelper")
-        val copyX86 = emulatorX86
         val obsoleteAssets = rustAssetsOut.resolve("bin")
         doFirst {
-            // Remove obsolete split-helper assets left by pre-helper builds;
-            // this generated APK directory is disposable, unlike root staging.
+            // The app ships no executables (core is the only root process): drop helper
+            // binaries an older build left in this disposable generated dir.
             obsoleteAssets.deleteRecursively()
-        }
-        doLast {
-            listOf(helperBinArm to helperDestArm, helperBinArmv7 to helperDestArmv7)
-                .plus(if (copyX86) listOf(helperBinX86 to helperDestX86) else emptyList())
-                .forEach { (source, destination) ->
-                    destination.parentFile.mkdirs()
-                    source.copyTo(destination, overwrite = true)
-                }
         }
     }
 
@@ -410,19 +386,15 @@ android {
         jniLibs.useLegacyPackaging = true
     }
 
-    // Pick up the cargo-ndk outputs (buildAppNative): cdylib as a jniLib, the
-    // ground-truth probe bin as an asset. buildAppNative runs via preBuild, so
-    // these dirs are populated before the merge/package tasks read them.
+    // Pick up the cargo-ndk outputs (buildAppNative) as jniLibs. buildAppNative runs via
+    // preBuild, so the dir is populated before the merge/package tasks read it.
     sourceSets["main"].jniLibs.srcDir(rustJniLibsDir.get().asFile)
-    // Root probe scripts live with core (which runs them); still loaded by the app until
-    // its root call sites move onto collect_diagnostics.
-    sourceSets["main"].resources.srcDir(repoDir.resolve("crates/core-daemon/probes"))
     // Generated UniFFI bindings (generateCoreFfiBindings, via preBuild).
     sourceSets["main"].kotlin.directories.add(coreFfiBindingsDir.get().asFile.absolutePath)
     sourceSets["main"].assets.srcDir(rustAssetsDir.get().asFile)
     // Shared helper response fixtures are consumed by the JVM parser tests and
     // the Rust checks crate, so a contract change cannot update only one side.
-    sourceSets["test"].resources.srcDir(repoDir.resolve("fixtures/app-helper"))
+    sourceSets["test"].resources.srcDir(repoDir.resolve("fixtures/core-probes"))
     // Offline guide assets synced from docs/help by syncHelpAssets (preBuild).
     sourceSets["main"].assets.srcDir(helpAssetsDir.get().asFile)
 

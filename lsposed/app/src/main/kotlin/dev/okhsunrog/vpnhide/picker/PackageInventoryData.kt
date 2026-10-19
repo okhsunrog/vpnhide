@@ -1,7 +1,6 @@
 package dev.okhsunrog.vpnhide.picker
 
 import dev.okhsunrog.vpnhide.RootSnapshotException
-import dev.okhsunrog.vpnhide.shellScriptWith
 
 internal const val PM_USERS_STATUS_PREFIX = "__VPNHIDE_PM_USERS_STATUS__:"
 internal const val PM_USER_BEGIN_PREFIX = "__VPNHIDE_PM_USER_BEGIN__:"
@@ -205,28 +204,6 @@ internal fun mergeUser0Backstop(
     }
     return merged
 }
-
-/**
- * One root-shell implementation shared by the normal root snapshot and the
- * exported debug snapshot. It enumerates users first, then queries each user
- * explicitly; relying on `--user all` is incomplete on some OEM ROMs.
- */
-internal fun buildPerUserPackageInventoryShell(
-    sectionBeginPrefix: String,
-    sectionEndPrefix: String,
-    stderrToStdout: Boolean,
-): String =
-    shellScriptWith(
-        "package_inventory.sh",
-        mapOf(
-            "VPNHIDE_SECTION_BEGIN" to sectionBeginPrefix,
-            "VPNHIDE_SECTION_END" to sectionEndPrefix,
-            "VPNHIDE_PM_USERS_STATUS" to PM_USERS_STATUS_PREFIX,
-            "VPNHIDE_PM_USER_BEGIN" to PM_USER_BEGIN_PREFIX,
-            "VPNHIDE_PM_USER_END" to PM_USER_END_PREFIX,
-            "VPNHIDE_PM_STDERR_TO_STDOUT" to if (stderrToStdout) "1" else "0",
-        ),
-    ) + "\nvpnhide_package_inventory\n"
 
 private data class MutablePackageInventoryEntry(
     var apkPath: String? = null,

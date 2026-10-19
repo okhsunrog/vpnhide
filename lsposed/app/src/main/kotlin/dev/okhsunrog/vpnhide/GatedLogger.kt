@@ -16,7 +16,7 @@ internal abstract class GatedLogger {
     /**
      * Effective "debug logging" flag. A `@Volatile` plain boolean rather than a
      * synchronized getter: info/debug/warn sit on hot paths (per-request hooks,
-     * Dashboard reload, suExec wrappers) and can't afford a monitor per call.
+     * Dashboard reload, core probe wrappers) and can't afford a monitor per call.
      * Worst case a toggle flip costs one extra log line to take effect.
      */
     @Volatile

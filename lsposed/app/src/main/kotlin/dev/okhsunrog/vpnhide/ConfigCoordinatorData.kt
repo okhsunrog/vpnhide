@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.picker.NativeTargetCapacityWarning
 
 internal enum class ConfigCoordinatorMode { Initializing, Open, Missing, Invalid, Unavailable, Paused }
@@ -42,7 +43,7 @@ internal interface ConfigCoordinatorIo {
         phase: ConfigPhase,
         base: CanonicalConfig?,
         candidate: CanonicalConfig,
-        command: String,
+        effects: List<CoreRootEffect>,
     ): ConfigPhaseEvidence
 
     suspend fun recover(
@@ -58,7 +59,7 @@ internal fun configMutationPlan(
 ): List<ConfigPhase> =
     buildList {
         if (changed && !mutation.removesCanonical) add(ConfigPhase.Persist)
-        if (mutation.coupledCommands.isNotEmpty()) {
+        if (mutation.coupledEffects.isNotEmpty()) {
             add(
                 if (mutation.cleanup ||
                     mutation.removesCanonical
@@ -69,21 +70,20 @@ internal fun configMutationPlan(
                 },
             )
         }
-        if (changed || mutation.coupledCommands.isNotEmpty() || mutation.forceActivation) {
+        if (changed || mutation.coupledEffects.isNotEmpty() || mutation.forceActivation) {
             if (mutation.activation.native || loggingChanged) add(ConfigPhase.Native)
             if (mutation.activation.ports) add(ConfigPhase.Ports)
         }
     }
 
-internal fun configPhaseCommand(
+/** The root effects a phase carries: only Secret/Cleanup do; the rest are typed core edits (see CoreConfigIo). */
+internal fun configPhaseEffects(
     phase: ConfigPhase,
     mutation: CanonicalMutation,
-): String =
+): List<CoreRootEffect> =
     when (phase) {
-        // Core-owned phases carry no shell: they are typed core edits (see CoreConfigIo).
-        ConfigPhase.Persist, ConfigPhase.Native, ConfigPhase.Ports -> ""
-
-        ConfigPhase.Secret, ConfigPhase.Cleanup -> mutation.coupledCommands.joinToString(" && ")
+        ConfigPhase.Persist, ConfigPhase.Native, ConfigPhase.Ports -> emptyList()
+        ConfigPhase.Secret, ConfigPhase.Cleanup -> mutation.coupledEffects
     }
 
 /** The canonical JSON size core-ffi `config_replace` accepts (`config_relay::MAX_CONFIG`). */
@@ -131,10 +131,7 @@ internal fun prepareConfigMutation(
             )
         // Reject unframeable/oversized effects before even the persistence phase can be dispatched.
         require(canonicalConfigJson(candidate).toByteArray(Charsets.UTF_8).size <= MAX_CORE_CONFIG_BYTES)
-        plan
-            .map { configPhaseCommand(it, mutation) }
-            .filter { it.isNotEmpty() }
-            .forEach { rootMutationScriptInput(it) }
+        require(mutation.coupledEffects.all { it.valid })
         ConfigOperationEvent.Prepared(
             ticket,
             base,

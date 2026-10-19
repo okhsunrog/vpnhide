@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.picker.autoHiddenPackagesNeedReconcile
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import kotlinx.serialization.Serializable
@@ -328,7 +329,7 @@ internal object LegacyConfigImporter {
                         applyLegacyImport(fresh, candidate, mode, selfPkg)
                     },
                     cleanup = true,
-                    coupledCommands = listOf(buildLegacyConfigDeleteCommand()),
+                    coupledEffects = listOf(CoreRootEffect.DeleteLegacyConfig),
                     activation = CanonicalActivation(native = true, ports = true),
                 ),
             )
@@ -355,7 +356,7 @@ internal object LegacyConfigImporter {
                 CanonicalMutation(
                     emptyList(),
                     cleanup = true,
-                    coupledCommands = listOf(buildLegacyConfigDeleteCommand()),
+                    coupledEffects = listOf(CoreRootEffect.DeleteLegacyConfig),
                     activation = CanonicalActivation(native = false),
                 ),
             )
@@ -369,16 +370,3 @@ internal object LegacyConfigImporter {
         return LegacyImportOutcome.Discarded
     }
 }
-
-/**
- * Deletes every legacy file, then the two directories that held nothing else.
- * Runs as a coupled command inside the canonical write transaction (joined with
- * `&&`), so it must not report failure: `rm -f` already tolerates absent files,
- * and the rmdir is explicitly forgiven — the directories are gone on most
- * devices, and a non-empty one is left alone on purpose.
- */
-internal fun buildLegacyConfigDeleteCommand(): String =
-    listOf(
-        "rm -f ${LEGACY_FILES.joinToString(" ")}",
-        "{ rmdir ${LEGACY_ORPHAN_DIRS.joinToString(" ")} 2>/dev/null || true; }",
-    ).joinToString(" && ")

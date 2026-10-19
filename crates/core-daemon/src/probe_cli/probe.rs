@@ -374,7 +374,7 @@ mod tests {
             }))
             .unwrap();
         let expected: Value = serde_json::from_str(include_str!(
-            "../../../../fixtures/app-helper/app-vpn-state-routed.json"
+            "../../../../fixtures/core-probes/app-vpn-state-routed.json"
         ))
         .unwrap();
         assert_eq!(actual, expected);

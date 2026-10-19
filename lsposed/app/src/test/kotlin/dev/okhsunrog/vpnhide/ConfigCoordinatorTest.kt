@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.diagnostics.operationAffectsSelfMeasurement
 import dev.okhsunrog.vpnhide.picker.NativeTargetCapacityWarning
 import kotlinx.coroutines.CompletableDeferred
@@ -202,7 +203,7 @@ class ConfigCoordinatorTest {
             emptyList(),
             removesCanonical = true,
             protectAllDrafts = true,
-            coupledCommands = listOf("reset-config"),
+            coupledEffects = listOf(CoreRootEffect.FullReset),
             activation = CanonicalActivation(native = false),
         )
 
@@ -274,7 +275,7 @@ class ConfigCoordinatorTest {
             val mutation =
                 CanonicalMutation(
                     listOf(CanonicalEdit.Toggle(CanonicalToggle.RememberSuperkey, true)),
-                    coupledCommands = listOf("private-test-secret"),
+                    coupledEffects = listOf(CoreRootEffect.SetSuperkey("private-test-secret")),
                     activation = CanonicalActivation(ports = true),
                 )
             val caller = async { coordinator.submit(mutation) }
@@ -582,10 +583,10 @@ private class FakeConfigIo : ConfigCoordinatorIo {
         phase: ConfigPhase,
         base: CanonicalConfig?,
         candidate: CanonicalConfig,
-        command: String,
+        effects: List<CoreRootEffect>,
     ): ConfigPhaseEvidence {
-        // Core-owned phases are typed core edits and carry no shell; only coupled effects do.
-        check(command.isEmpty() == (phase in setOf(ConfigPhase.Persist, ConfigPhase.Native, ConfigPhase.Ports)))
+        // Core-owned phases are typed core edits and carry no root effect; only coupled phases do.
+        check(effects.isEmpty() == (phase in setOf(ConfigPhase.Persist, ConfigPhase.Native, ConfigPhase.Ports)))
         val request = FakeExecution(phase, candidate)
         executions.send(request)
         val outcome = request.result.await()

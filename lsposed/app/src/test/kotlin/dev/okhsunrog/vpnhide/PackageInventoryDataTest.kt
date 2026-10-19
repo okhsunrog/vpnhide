@@ -5,7 +5,6 @@ import dev.okhsunrog.vpnhide.picker.PM_USERS_STATUS_PREFIX
 import dev.okhsunrog.vpnhide.picker.PM_USER_BEGIN_PREFIX
 import dev.okhsunrog.vpnhide.picker.PM_USER_END_PREFIX
 import dev.okhsunrog.vpnhide.picker.PackageInventoryEntry
-import dev.okhsunrog.vpnhide.picker.buildPerUserPackageInventoryShell
 import dev.okhsunrog.vpnhide.picker.mergeUser0Backstop
 import dev.okhsunrog.vpnhide.picker.parsePackageInventory
 import dev.okhsunrog.vpnhide.picker.requireNonEmptyPackageInventory
@@ -138,48 +137,6 @@ class PackageInventoryDataTest {
             )
 
         assertEquals(listOf(10123, 1010123), parsed["com.example"])
-    }
-
-    @Test
-    fun `shell scanner queries every listed user without user all`() {
-        val shell =
-            """
-            pm() {
-              if [ "${'$'}1 ${'$'}2 ${'$'}3" = "list users -v" ]; then
-                echo '0: id=0, name=Owner, type=full.SYSTEM, flags=FULL'
-                echo '1: id=10, name=Work, type=profile.MANAGED, flags=PROFILE'
-                return 0
-              fi
-              if [ "${'$'}1 ${'$'}2" = "list users" ]; then
-                echo 'Users:'
-                echo '  UserInfo{0:Owner:c13} running'
-                echo '  UserInfo{10:Work:1030} running'
-                return 0
-              fi
-              if [ "${'$'}6" = "0" ]; then
-                echo 'package:/data/app/example/base.apk=com.example uid:10123'
-                return 0
-              fi
-              echo 'package:/data/app/work/base.apk=com.work uid:1010456'
-            }
-            ${
-                buildPerUserPackageInventoryShell(
-                    sectionBeginPrefix = "__VPNHIDE_ROOT_SECTION_BEGIN__:",
-                    sectionEndPrefix = "__VPNHIDE_ROOT_SECTION_END__:",
-                    stderrToStdout = false,
-                )
-            }
-            """.trimIndent()
-        val process = ProcessBuilder("sh", "-c", shell).start()
-        val stdout = process.inputStream.bufferedReader().readText()
-        val stderr = process.errorStream.bufferedReader().readText()
-
-        assertEquals("shell stderr: $stderr", 0, process.waitFor())
-        val sections = parseRootShellSnapshot(stdout, recordMetric = { _, _ -> })
-        val inventory = requireNonEmptyPackageInventory(sections)
-        assertTrue(inventory.complete)
-        assertEquals(listOf(10), inventory.packages.getValue("com.work").userIds)
-        assertFalse(shell.contains("--user all"))
     }
 
     @Test

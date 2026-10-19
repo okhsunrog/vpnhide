@@ -13,7 +13,7 @@ use crate::generated::iface_lists::matches_vpn;
 
 // ── Probe outcome types — serialized to JSON on both transports ───────
 // In-process (app view) via the JNI export below; root ground-truth via the
-// `vhhelper probe checks`. Same code, same JSON schema on both sides.
+// `vpnhide-core probe checks`. Same code, same JSON schema on both sides.
 
 #[derive(serde::Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -1101,7 +1101,7 @@ fn check_proc_net_dev() -> CheckOutput {
 // ── Registry + JSON transport ─────────────────────────────────────────────
 // One code path, two transports: the JNI export runs this in the app's own
 // process (app view — real uid + SELinux domain + zygisk/kernel hooks); the
-// `vhhelper probe checks` runs it as root (ground truth — uid 0 is not a hook target).
+// `vpnhide-core probe checks` runs it as root (ground truth — uid 0 is not a hook target).
 // Both emit the same JSON; the app classifies by comparing per-`id`.
 
 #[derive(serde::Serialize)]
@@ -1140,7 +1140,7 @@ fn run_all() -> Vec<CheckJson> {
 
 /// Run every native probe in display order and serialize the versioned checks
 /// envelope containing `{id, status, detail}` rows. Public so both the JNI
-/// export and the `vhhelper` bin call the exact same code.
+/// export and the `vpnhide-core` probe call the exact same code.
 pub fn run_all_json() -> String {
     observation::checks(&run_all())
 }
@@ -1205,7 +1205,7 @@ mod observation_fixture_tests {
         assert_eq!(
             produced(observation::checks(&Vec::<CheckJson>::new())),
             fixture(include_str!(
-                "../../../fixtures/app-helper/checks-empty.json"
+                "../../../fixtures/core-probes/checks-empty.json"
             ))
         );
         assert_eq!(
@@ -1215,7 +1215,7 @@ mod observation_fixture_tests {
                 detail: "no VPN".to_owned(),
             }])),
             fixture(include_str!(
-                "../../../fixtures/app-helper/checks-pass.json"
+                "../../../fixtures/core-probes/checks-pass.json"
             ))
         );
     }
@@ -1229,7 +1229,7 @@ mod observation_fixture_tests {
                 detail: "netlink unavailable".to_owned(),
             })),
             fixture(include_str!(
-                "../../../fixtures/app-helper/routing-null.json"
+                "../../../fixtures/core-probes/routing-null.json"
             ))
         );
     }

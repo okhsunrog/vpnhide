@@ -387,17 +387,10 @@ internal class ConfigCoordinator(
         val mutation = requests.getValue(effect.ticket.owner).mutation
         val base = core?.confirmed.takeIf { available }
         scope.launch(Dispatchers.IO) {
-            val command = runCatching { configPhaseCommand(effect.phase, mutation) }.getOrNull()
+            val effects = configPhaseEffects(effect.phase, mutation)
             val evidence =
-                runCatching {
-                    if (command ==
-                        null
-                    ) {
-                        ConfigPhaseEvidence(PhaseOutcome.FailedKnown, base?.let(RootCanonicalRead::Available) ?: RootCanonicalRead.Missing)
-                    } else {
-                        io.execute(effect.ticket, effect.phase, base, effect.config, command)
-                    }
-                }.getOrDefault(ConfigPhaseEvidence(PhaseOutcome.Unknown, RootCanonicalRead.Unavailable))
+                runCatching { io.execute(effect.ticket, effect.phase, base, effect.config, effects) }
+                    .getOrDefault(ConfigPhaseEvidence(PhaseOutcome.Unknown, RootCanonicalRead.Unavailable))
             messages.send(CoordinatorMessage.Executed(effect.ticket, evidence, false))
         }
     }

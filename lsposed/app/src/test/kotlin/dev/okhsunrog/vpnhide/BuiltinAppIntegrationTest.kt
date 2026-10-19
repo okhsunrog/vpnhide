@@ -87,6 +87,5 @@ class BuiltinAppIntegrationTest {
                 builtin = detectBuiltinModule(builtinSections - "kmod_state" - "proc_exists"),
             )
         assertEquals(listOf(ResetBlocker.BuiltinInstalled), blockers)
-        assertTrue(FULL_RESET_DIRS.contains("/data/adb/vpnhide_builtin"))
     }
 }

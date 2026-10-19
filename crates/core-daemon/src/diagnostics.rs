@@ -632,6 +632,46 @@ mod tests {
     }
 
     #[test]
+    fn every_probe_script_is_valid_posix_sh() {
+        // The device shell is mksh; a syntax slip kills a whole batched probe silently.
+        for (name, script) in [
+            (
+                "package_inventory+root_snapshot",
+                format!("{PACKAGE_INVENTORY}\n{ROOT_SNAPSHOT}"),
+            ),
+            (
+                "package_inventory+debug_snapshot",
+                format!("{PACKAGE_INVENTORY}\n{DEBUG_SNAPSHOT}"),
+            ),
+            ("hook_counters", HOOK_COUNTERS.to_owned()),
+            ("kernel_partitions", KERNEL_PARTITIONS.to_owned()),
+            ("kernel_images", KERNEL_IMAGES.to_owned()),
+            ("lsposed_db", LSPOSED_DB.to_owned()),
+            ("logcat_lsposed_boot", LOGCAT_LSPOSED_BOOT.to_owned()),
+        ] {
+            let status = Command::new("sh")
+                .args(["-n", "-c", &script])
+                .status()
+                .unwrap();
+            assert!(status.success(), "{name} does not parse");
+        }
+    }
+
+    #[test]
+    fn root_snapshot_without_packages_skips_the_inventory_scan() {
+        let request = DiagnosticsRequest {
+            probes: vec![DiagnosticProbe::RootSnapshot { packages: false }],
+            clear_dmesg: false,
+        };
+        let report = collect(&host_env(None), &request);
+        let text = &report.outputs[0].output;
+        assert!(
+            !text.contains("__VPNHIDE_PM_USER_BEGIN__:"),
+            "no per-user package scan"
+        );
+    }
+
+    #[test]
     fn logcat_since_accepts_only_a_timestamp() {
         assert!(valid_logcat_time("10-19 21:00:00.123"));
         for bad in [

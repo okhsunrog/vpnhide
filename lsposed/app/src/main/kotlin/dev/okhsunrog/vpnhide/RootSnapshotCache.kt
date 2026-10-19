@@ -1,8 +1,7 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.picker.PM_USERS_STATUS_PREFIX
-import dev.okhsunrog.vpnhide.picker.PM_USER_BEGIN_PREFIX
-import dev.okhsunrog.vpnhide.picker.PM_USER_END_PREFIX
+import dev.okhsunrog.vpnhide.core.CoreProbe
+import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.startup.StartupTrace
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.CopyOnWriteArrayList
@@ -25,7 +24,6 @@ internal class RootSnapshotException(
 private const val ROOT_SNAPSHOT_BEGIN_PREFIX = "__VPNHIDE_ROOT_SECTION_BEGIN__:"
 private const val ROOT_SNAPSHOT_END_PREFIX = "__VPNHIDE_ROOT_SECTION_END__:"
 private const val ROOT_TIMING_PREFIX = "__VPNHIDE_ROOT_TIMING__:"
-private const val ROOT_SNAPSHOT_TIMEOUT_SEC: Long = 10
 
 internal val REQUIRED_ROOT_SNAPSHOT_SECTIONS =
     setOf(
@@ -87,16 +85,12 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
     private val dependents = CopyOnWriteArrayList<() -> Unit>()
     private val inventoryDependents = CopyOnWriteArrayList<() -> Unit>()
     private val inputLock = Any()
-    private val reader = RootProcessRunner()
     private var preloadedPackageInventory: PackageInventorySeed? = null
 
     // A complete validated snapshot read by startup with the same command; consumed
     // by the next load instead of a second shell. Any invalidation or explicit
     // refresh discards it, so a config write after the read can never be masked.
     private var preloadedSections: Map<String, String>? = null
-
-    @Volatile private var runtimeProbeSource: String? = null
-    val runtimeProbeSourcePath: String? get() = runtimeProbeSource
 
     val dependency =
         object : ObservationDependency {
@@ -118,10 +112,6 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
                 requestRefresh()
             }
         }
-
-    fun setRuntimeProbeSource(path: String?) {
-        runtimeProbeSource = path?.takeIf { it.matches(Regex("/[A-Za-z0-9_./-]+")) }
-    }
 
     suspend fun getOrLoad(): RootSnapshot = awaitValue()
 
@@ -163,7 +153,7 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
                 StartupTrace.mark("root_snapshot_seeded")
                 seeded.also(::validateRootSnapshotSections)
             } else {
-                loadRootShellSnapshot(inventory, runtimeProbeSource, reader)
+                loadRootShellSnapshot(inventory)
             }
         return RootSnapshot(sections.toMap(), request.id, request.generation)
     }
@@ -177,27 +167,14 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
     }
 }
 
-private fun loadRootShellSnapshot(
-    inventoryOverride: PackageInventorySeed?,
-    runtimeProbeSource: String?,
-    reader: RootProcessRunner,
-): Map<String, String> {
-    val result =
-        reader.runAndDrain(
-            listOf(
-                "su",
-                "-c",
-                buildRootShellSnapshotCommand(
-                    includePmPackages = inventoryOverride == null,
-                    runtimeProbeSource = runtimeProbeSource,
-                ),
-            ),
-            timeoutMillis = ROOT_SNAPSHOT_TIMEOUT_SEC * 1_000,
-        )
-    val raw =
-        (result as? RootProcessResult.Completed)?.output
-            ?: throw RootSnapshotException("root snapshot read failed or exceeded its limits")
-    val sections = parseRootShellSnapshot(raw).toMutableMap()
+/**
+ * The batched root probe core runs for the dashboard and the Hiding tab
+ * (`collect_diagnostics` `RootSnapshot`; script: core-daemon `probes/shell/root_snapshot.sh`).
+ */
+internal fun loadRootShellSnapshot(inventoryOverride: PackageInventorySeed?): Map<String, String> {
+    val result = CoreRoot.collectOneBlocking(CoreProbe.RootSnapshot(packages = inventoryOverride == null))
+    if (!result.ok || result.truncated) throw RootSnapshotException("root snapshot read failed (core exit=${result.exit})")
+    val sections = parseRootShellSnapshot(result.text).toMutableMap()
     if (inventoryOverride != null) {
         sections["pm_packages"] = inventoryOverride.packages
         sections["pm_users"] = inventoryOverride.users
@@ -212,69 +189,6 @@ internal fun validateRootSnapshotSections(sections: Map<String, String>) {
         throw RootSnapshotException("root snapshot incomplete, missing sections: ${missing.joinToString()}")
     }
 }
-
-/**
- * The batched root probe: one `su` round-trip that answers every question the
- * dashboard and the Hiding tab ask. The script itself lives in
- * `resources/shell/root_snapshot.sh` (with the shared package inventory
- * concatenated ahead of it); this only supplies the paths and prefixes it reads,
- * so a path stays defined once, in Kotlin.
- */
-internal fun buildRootShellSnapshotCommand(
-    includePmPackages: Boolean = true,
-    runtimeProbeSource: String? = null,
-): String {
-    val runtimeProbeDigest = appHelperDigest(runtimeProbeSource)
-    val runtimeProbePath = runtimeProbeDigest?.let(::appHelperStagedPath).orEmpty()
-    val stagePrelude =
-        if (runtimeProbeSource != null && runtimeProbeDigest != null) {
-            "VPNHIDE_KPM_PROBE_PATH=''\n" +
-                "if ${buildAppHelperStageCommand(runtimeProbeSource, runtimeProbeDigest)} >/dev/null 2>&1; then " +
-                "VPNHIDE_KPM_PROBE_PATH=${shellQuote(runtimeProbePath)}; fi\n"
-        } else {
-            "VPNHIDE_KPM_PROBE_PATH=''\n"
-        }
-    return stagePrelude +
-        shellVariables(
-            mapOf(
-                "VPNHIDE_SECTION_BEGIN" to ROOT_SNAPSHOT_BEGIN_PREFIX,
-                "VPNHIDE_SECTION_END" to ROOT_SNAPSHOT_END_PREFIX,
-                "VPNHIDE_TIMING" to ROOT_TIMING_PREFIX,
-                "VPNHIDE_PM_USERS_STATUS" to PM_USERS_STATUS_PREFIX,
-                "VPNHIDE_PM_USER_BEGIN" to PM_USER_BEGIN_PREFIX,
-                "VPNHIDE_PM_USER_END" to PM_USER_END_PREFIX,
-                "VPNHIDE_PM_STDERR_TO_STDOUT" to "0",
-                "VPNHIDE_WITH_PM" to if (includePmPackages) "1" else "0",
-                "VPNHIDE_KMOD_DIR" to KMOD_MODULE_DIR,
-                "VPNHIDE_BUILTIN_DIR" to BUILTIN_MODULE_DIR,
-                "VPNHIDE_KPM_DIR" to KPM_MODULE_DIR,
-                "VPNHIDE_ZYGISK_DIR" to ZYGISK_MODULE_DIR,
-                "VPNHIDE_PORTS_DIR" to PORTS_MODULE_DIR,
-                "VPNHIDE_KMOD_ACTIVATOR" to KMOD_ACTIVATOR,
-                "VPNHIDE_BUILTIN_ACTIVATOR" to BUILTIN_ACTIVATOR,
-                "VPNHIDE_KPM_ACTIVATOR" to KPM_ACTIVATOR,
-                "VPNHIDE_ZYGISK_ACTIVATOR" to ZYGISK_ACTIVATOR,
-                "VPNHIDE_PORTS_ACTIVATOR" to PORTS_ACTIVATOR,
-                "VPNHIDE_CONFIG_FILE" to CANONICAL_CONFIG_FILE,
-                "VPNHIDE_SUPERKEY_FILE" to SUPERKEY_FILE,
-                "VPNHIDE_KMOD_LOAD_STATUS" to KMOD_LOAD_STATUS_FILE,
-                "VPNHIDE_KMOD_LOAD_DMESG" to KMOD_LOAD_DMESG_FILE,
-                "VPNHIDE_BUILTIN_LOAD_STATUS" to BUILTIN_LOAD_STATUS_FILE,
-                "VPNHIDE_ZYGISK_STATUS" to ZYGISK_STATUS_FILE,
-                "VPNHIDE_KPM_LOAD_STATUS" to KPM_LOAD_STATUS_FILE,
-                "VPNHIDE_PORTS_LOAD_STATUS" to PORTS_LOAD_STATUS_FILE,
-                "VPNHIDE_PROC_CTL" to PROC_CTL,
-                "VPNHIDE_LSPOSED_STATE" to LSPOSED_STATE_FILE,
-                "VPNHIDE_LEGACY_SECTIONS" to
-                    LEGACY_CONFIG_SECTIONS.entries.joinToString(" ") { (section, path) -> "$section=$path" },
-            ),
-        ) + ShellScripts.load("package_inventory.sh") + "\n" + ShellScripts.load("root_snapshot.sh")
-}
-
-private fun appHelperDigest(path: String?): String? =
-    path
-        ?.substringAfterLast("vhhelper-", missingDelimiterValue = "")
-        ?.takeIf { it.matches(Regex("[0-9a-f]{64}")) }
 
 internal fun parseRootShellSnapshot(
     raw: String,

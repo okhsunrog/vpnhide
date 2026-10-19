@@ -61,8 +61,8 @@ import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.SelfTargetFailureKind
 import dev.okhsunrog.vpnhide.VpnHideLog
+import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.diagnostics.AppVpnStatePoller
-import dev.okhsunrog.vpnhide.diagnostics.GroundTruthProbe
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.help.HelpScreen
 import dev.okhsunrog.vpnhide.picker.AppListCache
@@ -104,8 +104,8 @@ class MainActivity : AppCompatActivity() {
         AppLanguageContext.update(this)
         val mainProfile = isMainAppProfile(Process.myUid())
         if (mainProfile) {
-            RootSnapshotCache.setRuntimeProbeSource(GroundTruthProbe.prepare(this)?.absolutePath)
-            // Load canonical debug state before runtime work so first suExec and dashboard bootstrap agree.
+            CoreRoot.attach(this)
+            // Load canonical debug state before runtime work so the first core probe and dashboard bootstrap agree.
             if (CanonicalConfigRepository.state.value.confirmed == null) VpnHideLog.init()
         }
         setContent {
@@ -200,12 +200,10 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
             var rootState by remember { mutableStateOf<RootState?>(null) }
             val rootCheckScope = rememberCoroutineScope()
             val startupCoordinator = remember(context) { StartupCoordinator.forProcess(context.applicationContext) }
-            // The root gate is the self-target preparation itself: its first root
-            // shell is the earliest privileged work of the process, so a separate
-            // `su -c id` probe in front of it only added a serial su spawn (about
-            // 190 ms on Pixel 8 Pro) to every cold start. A denied or interrupted
-            // su surfaces as RootUnavailable; every other failure is shown by the
-            // main screen, as before. "Check again" forces a fresh preparation.
+            // The root gate is the self-target preparation itself: its core root
+            // snapshot is the earliest privileged work of the process. Core missing
+            // or not answering surfaces as RootUnavailable; every other failure is
+            // shown by the main screen. "Check again" forces a fresh preparation.
             val probeRoot: (Boolean) -> Unit = { force ->
                 rootState = null
                 rootCheckScope.launch {

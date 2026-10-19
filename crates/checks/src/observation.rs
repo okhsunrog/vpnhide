@@ -1,5 +1,5 @@
 //! Versioned observation responses shared by the in-process JNI adapter and
-//! the privileged `vhhelper` executable.
+//! core (`vpnhide-core observe …`).
 //!
 //! This is deliberately separate from `crates/protocol`: that crate owns the
 //! kernel backend wire, while this small envelope is an app/helper boundary.
@@ -82,9 +82,9 @@ mod tests {
     #[test]
     fn shared_fixtures_are_valid_json_and_keep_the_wire_shapes() {
         for fixture in [
-            include_str!("../../../fixtures/app-helper/unsupported-version.json"),
-            include_str!("../../../fixtures/app-helper/routing-string-boolean.json"),
-            include_str!("../../../fixtures/app-helper/kpm-malformed.json"),
+            include_str!("../../../fixtures/core-probes/unsupported-version.json"),
+            include_str!("../../../fixtures/core-probes/routing-string-boolean.json"),
+            include_str!("../../../fixtures/core-probes/kpm-malformed.json"),
         ] {
             let value: Value = serde_json::from_str(fixture).unwrap();
             assert!(value["version"].is_number());
@@ -93,7 +93,7 @@ mod tests {
         }
         assert!(
             serde_json::from_str::<Value>(include_str!(
-                "../../../fixtures/app-helper/malformed-truncated.json"
+                "../../../fixtures/core-probes/malformed-truncated.json"
             ))
             .is_err()
         );
