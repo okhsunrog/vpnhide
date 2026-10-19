@@ -48,22 +48,55 @@ pub fn config_path_from_env() -> PathBuf {
     }
 }
 
-/// Read the durable config. `Ok(None)` means "no usable config" — the file is absent, blank,
-/// or a newer schema version this build must not interpret (matching the app's
-/// `version > 1 -> null`). A present-but-corrupt file is an error, not silently "no config":
-/// core's own durable state going unreadable is a real fault for recovery to decide on.
-pub fn read(path: &Path) -> io::Result<Option<CanonicalConfig>> {
+/// Outcome of loading the durable canonical config. Absent, present, and
+/// unsupported schema are **distinct** — never collapse unsupported/invalid into
+/// an empty default config (core-2.0 §4 / exclusive-ownership gate).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigLoad {
+    /// File missing or blank. Core may bootstrap via Replace; this is not an error.
+    Absent,
+    /// Parsed `version: 1` config.
+    Present(CanonicalConfig),
+    /// File exists with a schema version this build must not interpret.
+    UnsupportedVersion { version: u32 },
+}
+
+/// Read with full Absent / Present / Unsupported distinction.
+/// Corrupt JSON or IO failures (other than NotFound) are `Err` — also not Absent.
+pub fn read_status(path: &Path) -> io::Result<ConfigLoad> {
     let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(ConfigLoad::Absent),
         Err(e) => return Err(e),
     };
     if raw.trim().is_empty() {
-        return Ok(None);
+        return Ok(ConfigLoad::Absent);
     }
     let root: Value = serde_json::from_str(&raw)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("config parse: {e}")))?;
-    Ok(from_disk(&root))
+    let version = root.get("version").and_then(Value::as_u64).unwrap_or(1) as u32;
+    if version > 1 {
+        return Ok(ConfigLoad::UnsupportedVersion { version });
+    }
+    match from_disk(&root) {
+        Some(cfg) => Ok(ConfigLoad::Present(cfg)),
+        // from_disk only returns None for version>1, already handled above.
+        None => Ok(ConfigLoad::UnsupportedVersion { version }),
+    }
+}
+
+/// Convenience: `Present` → `Some`, `Absent` → `None`.
+/// Unsupported schema is an **error** (not silently Absent) so callers cannot
+/// treat a foreign file as "no config" and write defaults over it.
+pub fn read(path: &Path) -> io::Result<Option<CanonicalConfig>> {
+    match read_status(path)? {
+        ConfigLoad::Absent => Ok(None),
+        ConfigLoad::Present(cfg) => Ok(Some(cfg)),
+        ConfigLoad::UnsupportedVersion { version } => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported config version {version}"),
+        )),
+    }
 }
 
 /// Serialize the config to the on-disk JSON string (the polymorphic legacy format), the same
@@ -625,9 +658,14 @@ mod tests {
     fn absent_and_blank_files_are_none() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read(&dir.path().join("nope.json")).unwrap(), None);
+        assert_eq!(
+            read_status(&dir.path().join("nope.json")).unwrap(),
+            ConfigLoad::Absent
+        );
         let blank = dir.path().join("blank.json");
         fs::write(&blank, "   \n").unwrap();
         assert_eq!(read(&blank).unwrap(), None);
+        assert_eq!(read_status(&blank).unwrap(), ConfigLoad::Absent);
     }
 
     #[test]
@@ -636,5 +674,20 @@ mod tests {
         let bad = dir.path().join("bad.json");
         fs::write(&bad, "{ not json").unwrap();
         assert!(read(&bad).is_err());
+        assert!(read_status(&bad).is_err());
+    }
+
+    #[test]
+    fn unsupported_version_is_not_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cfg.json");
+        fs::write(&path, r#"{"version":2,"apps":{},"settings":{}}"#).unwrap();
+        match read_status(&path).unwrap() {
+            ConfigLoad::UnsupportedVersion { version: 2 } => {}
+            other => panic!("expected UnsupportedVersion, got {other:?}"),
+        }
+        let err = read(&path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("unsupported config version 2"));
     }
 }

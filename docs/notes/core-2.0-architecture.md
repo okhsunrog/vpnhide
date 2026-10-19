@@ -852,7 +852,15 @@ descendant accounting, manual recheck RPC / Held UX, Ports evidence, kernel
 Native apply receipts, Magisk packaging, APK cutover. Zygisk live-process
 evidence remains distinct from file publication.
 
-Next: Ports execution into core (step 3) once ownership gaps above are accepted.
+**Step 3 Ports into core (landed).** Core Ports phase (opt-in `VPNHIDE_PORTS`),
+honest IPv4/IPv6 reports, restart chain inspection, `ports_owned` uninstall fence.
+
+**Step 4 exclusive ownership gate (in progress / inventory landed).** See
+[`core-2.0-ownership-inventory.md`](core-2.0-ownership-inventory.md): writer inventory,
+`ConfigLoad` Absent≠Unsupported≠Invalid, ownership markers, legacy activator no-ops.
+Production writes remain explicitly enabled only; APK config writer not yet fenced.
+
+Next: common Magisk module + boot lifecycle (step 5) once device smoke confirms adopt/fence.
 
 Each boundary needs an explicit cutover. Do not run legacy and core writers in
 parallel against the same canonical/runtime state. Port behavioral tests before

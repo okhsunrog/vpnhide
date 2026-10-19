@@ -123,7 +123,22 @@ impl CoreState {
         journal_path: Option<PathBuf>,
         kmod_ctl_path: Option<PathBuf>,
     ) -> std::io::Result<Arc<Self>> {
-        let file_config = config_file::read(&path)?;
+        let load = if crate::ownership::adopt_on_start_enabled() {
+            crate::ownership::adopt_config_on_start(&path)?
+        } else {
+            config_file::read_status(&path)?
+        };
+        let file_config = match load {
+            config_file::ConfigLoad::Absent => None,
+            config_file::ConfigLoad::Present(cfg) => Some(cfg),
+            // Refuse to invent defaults over a foreign schema — distinguishable from Absent.
+            config_file::ConfigLoad::UnsupportedVersion { version } => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unsupported config version {version}"),
+                ));
+            }
+        };
 
         let mut journal = match &journal_path {
             Some(jp) => journal::read(jp)?,

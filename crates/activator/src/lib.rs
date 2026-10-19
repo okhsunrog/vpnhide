@@ -35,6 +35,13 @@ const PORTS_STATUS_DIR: &str = "/data/adb/vpnhide_ports";
 /// Marker file written by core when it owns Ports rules. Legacy uninstall must
 /// not tear down chains while this is present.
 pub const PORTS_CORE_OWNER_MARKER: &str = "/data/adb/vpnhide/core/ports_owned";
+/// Marker: core owns the durable canonical config file writes.
+pub const CONFIG_CORE_OWNER_MARKER: &str = "/data/adb/vpnhide/core/config_owned";
+/// Marker: core owns Native (kmod/builtin/KPM) activation delivery.
+pub const NATIVE_CORE_OWNER_MARKER: &str = "/data/adb/vpnhide/core/native_owned";
+/// Marker: core owns Zygisk `targets.txt` publication.
+pub const ZYGISK_CORE_OWNER_MARKER: &str = "/data/adb/vpnhide/core/zygisk_owned";
+pub const CORE_OWNER_DIR_ENV: &str = "VPNHIDE_CORE_OWNER_DIR";
 const PORTS_LOAD_STATUS: &str = "/data/adb/vpnhide_ports/load_status";
 const PORTS_LOAD_LOG: &str = "/data/adb/vpnhide_ports/load_log";
 const KPM_CTL_LOCK: &str = "/data/adb/vpnhide_kpm/ctl.lock";
@@ -112,6 +119,7 @@ mod kpm;
 mod lifecycle;
 mod model;
 mod ports;
+mod ownership;
 mod selection;
 pub use selection::activate_native_companion;
 
@@ -120,9 +128,13 @@ pub use kpm::{CoreKpm, KpmConfigError};
 pub use lifecycle::*;
 pub use model::*;
 pub use ports::{
-    PortsApplyResult, PortsChainPresence, PortsFamilyResult, apply_ports_rules_families,
-    inspect_ports_chains, ports_owned_by_core, ports_owner_marker_path,
-    write_ports_core_owner_marker, write_ports_load_status,
+    PORTS_OWNER_MARKER_ENV, PortsApplyResult, PortsChainPresence, PortsFamilyResult,
+    apply_ports_rules_families, inspect_ports_chains, ports_owned_by_core,
+    ports_owner_marker_path, write_ports_core_owner_marker, write_ports_load_status,
+};
+pub use ownership::{
+    activation_fenced_by_core, config_owned_by_core, core_marker_path, log_fenced,
+    native_owned_by_core, zygisk_owned_by_core,
 };
 use ports::*;
 
@@ -208,10 +220,20 @@ pub(crate) fn optional_feature_enabled_or_default(feature: &str) -> bool {
 }
 
 pub fn activate_kmod() -> Result<()> {
+    if crate::ownership::activation_fenced_by_core("native") {
+        crate::ownership::log_fenced("vpnhide_kmod", "activate_kmod");
+        return Ok(());
+    }
+
     activate_kmod_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
 }
 
 pub(crate) fn activate_kmod_boot() -> Result<()> {
+    if crate::ownership::activation_fenced_by_core("native") {
+        crate::ownership::log_fenced("vpnhide_kmod", "activate_kmod_boot");
+        return Ok(());
+    }
+
     wait_for_path(KMOD_CTL);
     activate_kmod_with_pm_wait(PmReadyWait::Forever)
 }
@@ -241,19 +263,39 @@ fn activate_builtin_with_pm_wait(wait: PmReadyWait) -> Result<()> {
 }
 
 pub fn activate_builtin() -> Result<()> {
+    if crate::ownership::activation_fenced_by_core("native") {
+        crate::ownership::log_fenced("vpnhide_builtin", "activate_builtin");
+        return Ok(());
+    }
+
     activate_builtin_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
 }
 
 pub(crate) fn activate_builtin_boot() -> Result<()> {
+    if crate::ownership::activation_fenced_by_core("native") {
+        crate::ownership::log_fenced("vpnhide_builtin", "activate_builtin_boot");
+        return Ok(());
+    }
+
     wait_for_path(KMOD_CTL);
     activate_builtin_with_pm_wait(PmReadyWait::Forever)
 }
 
 pub fn activate_zygisk() -> Result<()> {
+    if crate::ownership::activation_fenced_by_core("zygisk") {
+        crate::ownership::log_fenced("vpnhide_zygisk", "activate_zygisk");
+        return Ok(());
+    }
+
     activate_zygisk_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
 }
 
 pub(crate) fn activate_zygisk_boot() -> Result<()> {
+    if crate::ownership::activation_fenced_by_core("zygisk") {
+        crate::ownership::log_fenced("vpnhide_zygisk", "activate_zygisk_boot");
+        return Ok(());
+    }
+
     activate_zygisk_with_pm_wait(PmReadyWait::Forever)
 }
 
@@ -335,6 +377,11 @@ impl KpmBootReport {
 }
 
 pub fn activate_kpm() -> Result<()> {
+    if crate::ownership::activation_fenced_by_core("native") {
+        crate::ownership::log_fenced("vpnhide_kpm", "activate_kpm");
+        return Ok(());
+    }
+
     // App / manual path: a conflict is a hard error (conflict_is_error=true),
     // so this only ever returns Configured on success.
     activate_kpm_with_pm_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS), true).map(|_| ())
@@ -515,6 +562,11 @@ fn activate_ports_with_pm_wait(wait: PmReadyWait) -> Result<PortsActivationRepor
 }
 
 pub fn activate_ports_recorded(boot_wait: bool) -> Result<()> {
+    if crate::ownership::activation_fenced_by_core("ports") {
+        crate::ownership::log_fenced("vpnhide_ports", "activate_ports_recorded");
+        return Ok(());
+    }
+
     let source = if boot_wait { "boot" } else { "app" };
     let result = if boot_wait {
         activate_ports_boot()

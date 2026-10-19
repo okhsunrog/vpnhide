@@ -11,6 +11,7 @@ pub mod journal;
 pub mod listener;
 pub mod observer;
 pub mod operation;
+pub mod ownership;
 pub mod ports;
 pub mod publisher;
 pub mod recovery;
