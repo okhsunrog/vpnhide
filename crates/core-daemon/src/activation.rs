@@ -26,45 +26,65 @@ use vpnhide_activator::{
 use vpnhide_core_rpc::{CanonicalConfig, NativeBackend};
 use vpnhide_protocol::{Status, parse_status_fields};
 
-use crate::backend::SelectedNative;
 use crate::config_file;
 
-pub fn deliver_selected(
-    path: &Path,
-    selected: &SelectedNative,
+/// Deliver `wire` to this boot's selected backend. The outcome is the phase outcome; the
+/// error text (when any) is what the published status reports.
+pub fn deliver_to_selected(
+    env: &crate::native_boot::NativeEnv,
+    backend: NativeBackend,
     wire: &str,
-) -> vpnhide_core_rpc::PhaseOutcome {
+) -> (vpnhide_core_rpc::PhaseOutcome, Result<(), String>) {
     use vpnhide_core_rpc::PhaseOutcome;
-    match selected {
-        SelectedNative::Kernel(backend) => match deliver_native(path, *backend, wire) {
-            Ok(()) => PhaseOutcome::Confirmed,
-            Err(_) => PhaseOutcome::FailedKnown,
-        },
-        SelectedNative::Kpm(client) => match client.configure_once(path, wire) {
-            Ok(()) => PhaseOutcome::Confirmed,
-            Err(vpnhide_activator::KpmConfigError::BeforeDispatch(error)) => {
-                eprintln!("core: KPM config preflight failed: {error}");
-                PhaseOutcome::FailedKnown
+    let failed = |e: String| (PhaseOutcome::FailedKnown, Err(e));
+    match backend {
+        NativeBackend::Kmod | NativeBackend::Builtin => {
+            match deliver_native(&env.ctl, backend, wire) {
+                Ok(()) => (PhaseOutcome::Confirmed, Ok(())),
+                Err(e) => failed(e),
             }
-            Err(vpnhide_activator::KpmConfigError::Unknown(error)) => {
-                eprintln!("core: KPM config outcome unknown: {error}");
-                PhaseOutcome::Unknown
+        }
+        NativeBackend::Kpm => {
+            let Some(lock) = env.kpm_lock.as_deref() else {
+                return failed("KPM management is not enabled".into());
+            };
+            // Selection is fixed for the boot; a kernel backend that appeared since
+            // (manual insmod) would make two live hook sets, so refuse rather than add one.
+            if let Ok(status) = read_status(&env.ctl) {
+                return failed(format!(
+                    "kernel backend 0x{:x} appeared after this boot's KPM selection",
+                    status.backend
+                ));
             }
-        },
-        SelectedNative::Zygisk(target) => {
-            if let Err(error) = crate::backend::check_zygisk_dispatch(path) {
-                eprintln!("core: Zygisk dispatch preflight failed: {error}");
-                return PhaseOutcome::FailedKnown;
+            let client = match vpnhide_activator::CoreKpm::connect(lock) {
+                Ok(Some(client)) => client,
+                Ok(None) => return failed("KernelPatch runtime is gone".into()),
+                Err(e) => return failed(e.to_string()),
+            };
+            match client.configure_once(&env.ctl, wire) {
+                Ok(()) => (PhaseOutcome::Confirmed, Ok(())),
+                Err(vpnhide_activator::KpmConfigError::BeforeDispatch(e)) => failed(e),
+                Err(vpnhide_activator::KpmConfigError::Unknown(e)) => {
+                    (PhaseOutcome::Unknown, Err(format!("outcome unknown: {e}")))
+                }
+            }
+        }
+        NativeBackend::Zygisk => {
+            let Some(dir) = env.module_dir(NativeBackend::Zygisk) else {
+                return failed("no Zygisk module directory".into());
+            };
+            let target = match crate::zygisk::ZygiskTarget::open(&dir) {
+                Ok(target) => target,
+                Err(e) => return failed(e),
+            };
+            if let Err(e) = crate::backend::check_zygisk_dispatch(&env.ctl) {
+                return failed(e);
             }
             match target.publish(wire) {
-                Ok(()) => PhaseOutcome::Confirmed,
-                Err(crate::zygisk::PublishError::BeforeWrite(error)) => {
-                    eprintln!("core: Zygisk publication preflight failed: {error}");
-                    PhaseOutcome::FailedKnown
-                }
-                Err(crate::zygisk::PublishError::Unknown(error)) => {
-                    eprintln!("core: Zygisk publication outcome unknown: {error}");
-                    PhaseOutcome::Unknown
+                Ok(()) => (PhaseOutcome::Confirmed, Ok(())),
+                Err(crate::zygisk::PublishError::BeforeWrite(e)) => failed(e),
+                Err(crate::zygisk::PublishError::Unknown(e)) => {
+                    (PhaseOutcome::Unknown, Err(format!("outcome unknown: {e}")))
                 }
             }
         }

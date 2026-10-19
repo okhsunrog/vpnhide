@@ -9,9 +9,8 @@
 //! KPM management is explicitly enabled with its lock path. Zygisk file delivery
 //! is separately enabled; selection/publication never invent runtime liveness.
 //!
-//! `detect` is read-only and safe against the live node from the dev sandbox.
-//! `ensure_kernel_backend` additionally selects/loads the kernel family for a Native
-//! phase, with an explicit module-root opt-in. Delivery remains in `activation`.
+//! `detect` is read-only and safe against the live node from the dev sandbox. The
+//! once-per-boot selection and loading live in [`crate::native_boot`].
 
 use std::path::Path;
 
@@ -34,98 +33,6 @@ pub fn kpm_lock_from_env() -> Option<std::path::PathBuf> {
     std::env::var_os(KPM_LOCK_ENV)
         .filter(|p| !p.is_empty())
         .map(Into::into)
-}
-
-pub enum SelectedNative {
-    Kernel(NativeBackend),
-    Kpm(vpnhide_activator::CoreKpm),
-    Zygisk(crate::zygisk::ZygiskTarget),
-}
-
-impl SelectedNative {
-    pub fn family(&self) -> NativeBackend {
-        match self {
-            Self::Kernel(family) => *family,
-            Self::Kpm(_) => NativeBackend::Kpm,
-            Self::Zygisk(_) => NativeBackend::Zygisk,
-        }
-    }
-}
-
-/// One central choice. Adopt a compatible live owner first, then choose an
-/// eligible kmod artifact before KPM, then the enabled Zygisk recipient. A failed
-/// attempt never triggers fallback; definitely unavailable candidates are skipped.
-pub fn select_native(
-    ctl: &Path,
-    modules: Option<&Path>,
-    kpm_lock: Option<&Path>,
-    zygisk_module: Option<&Path>,
-    filesystem_hiding: bool,
-) -> Result<SelectedNative, String> {
-    if kpm_lock.is_none() && zygisk_module.is_none() {
-        return ensure_kernel_backend(ctl, modules, filesystem_hiding).map(SelectedNative::Kernel);
-    }
-    let kernel = observe_kernel(ctl)?;
-    let kpm = kpm_lock
-        .map(vpnhide_activator::CoreKpm::connect)
-        .transpose()
-        .map_err(|e| e.to_string())?
-        .flatten();
-    if kpm_lock.is_none() && vpnhide_activator::observed_kpm_loaded().map_err(|e| e.to_string())? {
-        return Err("live KPM has no enabled core management channel".into());
-    }
-    let kpm_active = kpm
-        .as_ref()
-        .map(|client| client.status())
-        .transpose()
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .is_some();
-    if let Some(kernel) = kernel {
-        if kpm_active {
-            return Err("conflicting live kernel and KPM backends".into());
-        }
-        return Ok(SelectedNative::Kernel(kernel));
-    }
-    if kpm_active {
-        return kpm
-            .map(SelectedNative::Kpm)
-            .ok_or_else(|| "active KPM transport unavailable".into());
-    }
-    if modules
-        .and_then(|root| eligible_artifact(root, NativeBackend::Kmod, "vpnhide_kmod.ko"))
-        .is_some()
-    {
-        return ensure_kernel_backend(ctl, modules, filesystem_hiding).map(SelectedNative::Kernel);
-    }
-    if let Some(artifact) =
-        modules.and_then(|root| eligible_artifact(root, NativeBackend::Kpm, "vpnhide.kpm"))
-    {
-        if let Some(kpm) = kpm {
-            kpm.load_selected(ctl, &artifact, filesystem_hiding)
-                .map_err(|e| e.to_string())?;
-            return Ok(SelectedNative::Kpm(kpm));
-        }
-        if zygisk_module.is_none() {
-            return Err("KPM artifact is present but its runtime is unavailable".into());
-        }
-    }
-    let module = zygisk_module.ok_or("no eligible native artifact")?;
-    crate::zygisk::ZygiskTarget::open(module).map(SelectedNative::Zygisk)
-}
-
-fn eligible_artifact(
-    root: &Path,
-    backend: NativeBackend,
-    name: &str,
-) -> Option<std::path::PathBuf> {
-    let module = root.join(module_dir(backend));
-    let artifact = module.join(name);
-    (!module.join("disable").exists()
-        && !module.join("remove").exists()
-        && module.join("module.prop").is_file()
-        && artifact.is_file())
-    .then_some(artifact)
 }
 
 /// Include KPM runtime evidence only when its management channel is explicitly
@@ -160,21 +67,6 @@ pub fn kernel_modules_from_env() -> Option<std::path::PathBuf> {
         .map(Into::into)
 }
 
-/// The kernel slice of the central policy: a live owner wins over installed
-/// artifacts. Built-in needs no companion. Only definite absence permits loading
-/// an enabled kmod artifact. The shared selector composes KPM/Zygisk above it.
-/// Errors never mean absence and never trigger fallback after a load attempt.
-pub fn ensure_kernel_backend(
-    ctl: &Path,
-    modules: Option<&Path>,
-    filesystem_hiding: bool,
-) -> Result<NativeBackend, String> {
-    ensure_kernel_backend_with(ctl, modules, |artifact| {
-        vpnhide_activator::load_kernel_module(ctl, artifact, filesystem_hiding)
-            .map_err(|e| e.to_string())
-    })
-}
-
 fn observe_kernel(ctl: &Path) -> Result<Option<NativeBackend>, String> {
     let id = vpnhide_activator::observed_kernel_backend(ctl).map_err(|e| e.to_string())?;
     id.map(|id| {
@@ -189,35 +81,12 @@ pub fn check_zygisk_dispatch(ctl: &Path) -> Result<(), String> {
     if observe_kernel(ctl)?.is_some() {
         return Err("kernel backend became active before Zygisk publication".into());
     }
-    if vpnhide_activator::observed_kpm_loaded().map_err(|e| e.to_string())? {
+    // Only a definitely live KPM blocks: the boot decision already settled
+    // KernelPatch, and an unauthenticated runtime must not block Zygisk.
+    if matches!(vpnhide_activator::observed_kpm_loaded(), Ok(true)) {
         return Err("KPM became active before Zygisk publication".into());
     }
     Ok(())
-}
-
-fn ensure_kernel_backend_with(
-    ctl: &Path,
-    modules: Option<&Path>,
-    load: impl FnOnce(&Path) -> Result<(), String>,
-) -> Result<NativeBackend, String> {
-    if let Some(backend) = observe_kernel(ctl)? {
-        return Ok(backend);
-    }
-    let module = modules
-        .ok_or("kernel backend absent; loading is not enabled")?
-        .join("vpnhide_kmod");
-    if module.join("disable").exists() || module.join("remove").exists() {
-        return Err("kmod artifact is disabled or scheduled for removal".into());
-    }
-    let artifact = module.join("vpnhide_kmod.ko");
-    if !module.join("module.prop").is_file() || !artifact.is_file() {
-        return Err("no usable kmod artifact".into());
-    }
-    load(&artifact)?;
-    match observe_kernel(ctl)? {
-        Some(NativeBackend::Kmod) => Ok(NativeBackend::Kmod),
-        _ => Err("kmod load did not produce the selected runtime identity".into()),
-    }
 }
 
 /// The module directory basename for each backend (its "installed" evidence).
@@ -266,117 +135,14 @@ pub fn detect(ctl_path: &Path, modules_root: &Path) -> NativeBackendStatus {
         installed,
         selected: None,
         applied: None,
+        boot: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
     use std::fs;
-
-    fn install_kmod(root: &Path) -> std::path::PathBuf {
-        let module = root.join("vpnhide_kmod");
-        fs::create_dir_all(&module).unwrap();
-        fs::write(module.join("module.prop"), "id=vpnhide_kmod\n").unwrap();
-        fs::write(module.join("vpnhide_kmod.ko"), "artifact").unwrap();
-        module
-    }
-
-    #[test]
-    fn live_owner_wins_without_a_bridge_or_module_directory() {
-        let dir = tempfile::tempdir().unwrap();
-        for (id, expected) in [("4", NativeBackend::Builtin), ("0", NativeBackend::Kmod)] {
-            let ctl = write_status(dir.path(), id);
-            let selected =
-                ensure_kernel_backend_with(&ctl, None, |_| panic!("live owner must not load"));
-            assert_eq!(selected.unwrap(), expected);
-        }
-    }
-
-    #[test]
-    fn unreadable_invalid_and_foreign_nodes_never_invoke_loader() {
-        let dir = tempfile::tempdir().unwrap();
-        install_kmod(dir.path());
-        let ctl = dir.path().join("ctl");
-        for text in [
-            "garbage",
-            "vpnhide 2 status\nbackend 0x0\nkver 0x0\nhooks 0x0\nerror 0x0\n",
-            "vpnhide 1 status\nbackend 0x99\nkver 0x0\nhooks 0x0\nerror 0x0\n",
-        ] {
-            fs::write(&ctl, text).unwrap();
-            assert!(
-                ensure_kernel_backend_with(&ctl, Some(dir.path()), |_| panic!("must not load"))
-                    .is_err()
-            );
-        }
-        fs::remove_file(&ctl).unwrap();
-        fs::create_dir(&ctl).unwrap();
-        assert!(
-            ensure_kernel_backend_with(&ctl, Some(dir.path()), |_| panic!("must not load"))
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn loading_requires_explicit_opt_in_and_usable_artifact() {
-        let dir = tempfile::tempdir().unwrap();
-        let ctl = dir.path().join("ctl");
-        assert!(ensure_kernel_backend_with(&ctl, None, |_| panic!("must not load")).is_err());
-        assert!(
-            ensure_kernel_backend_with(&ctl, Some(dir.path()), |_| panic!("must not load"))
-                .is_err()
-        );
-        let module = install_kmod(dir.path());
-        for marker in ["disable", "remove"] {
-            fs::write(module.join(marker), "").unwrap();
-            assert!(
-                ensure_kernel_backend_with(&ctl, Some(dir.path()), |_| panic!("must not load"))
-                    .is_err()
-            );
-            fs::remove_file(module.join(marker)).unwrap();
-        }
-        fs::remove_file(module.join("vpnhide_kmod.ko")).unwrap();
-        assert!(
-            ensure_kernel_backend_with(&ctl, Some(dir.path()), |_| panic!("must not load"))
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn load_is_called_once_and_identity_is_verified_afterwards() {
-        let dir = tempfile::tempdir().unwrap();
-        let module = install_kmod(dir.path());
-        let ctl = dir.path().join("vpnhide_ctl");
-        let calls = Cell::new(0);
-        let selected = ensure_kernel_backend_with(&ctl, Some(dir.path()), |artifact| {
-            assert_eq!(artifact, module.join("vpnhide_kmod.ko"));
-            calls.set(calls.get() + 1);
-            write_status(dir.path(), "0");
-            Ok(())
-        });
-        assert_eq!(selected.unwrap(), NativeBackend::Kmod);
-        assert_eq!(calls.get(), 1);
-    }
-
-    #[test]
-    fn failed_load_or_wrong_post_load_owner_never_falls_back() {
-        let dir = tempfile::tempdir().unwrap();
-        install_kmod(dir.path());
-        let ctl = dir.path().join("vpnhide_ctl");
-        assert!(
-            ensure_kernel_backend_with(&ctl, Some(dir.path()), |_| Err("load failed".into()))
-                .is_err()
-        );
-        assert!(ensure_kernel_backend_with(&ctl, Some(dir.path()), |_| Ok(())).is_err());
-        assert!(
-            ensure_kernel_backend_with(&ctl, Some(dir.path()), |_| {
-                write_status(dir.path(), "4");
-                Ok(())
-            })
-            .is_err()
-        );
-    }
 
     fn write_status(dir: &Path, backend_hex: &str) -> std::path::PathBuf {
         let path = dir.join("vpnhide_ctl");

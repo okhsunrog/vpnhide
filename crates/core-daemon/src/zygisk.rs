@@ -184,6 +184,9 @@ impl ZygiskTarget {
 }
 
 #[cfg(test)]
+pub(crate) use tests::fixture as test_fixture;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::fs::{PermissionsExt, symlink};
@@ -191,7 +194,7 @@ mod tests {
     const OLD: &str = "previous policy";
     const WIRE: &str = "vpnhide 2 config\ndebug 0\ndefault 0\nend 0\n";
 
-    fn library(path: &Path, class: u8, machine: u16) {
+    pub(crate) fn library(path: &Path, class: u8, machine: u16) {
         let mut bytes = vec![0; if class == 1 { 52 } else { 64 }];
         bytes[..4].copy_from_slice(b"\x7fELF");
         bytes[4] = class;
@@ -202,7 +205,7 @@ mod tests {
         fs::write(path, bytes).unwrap();
     }
 
-    fn fixture(path: &Path) {
+    pub(crate) fn fixture(path: &Path) {
         fs::create_dir_all(path.join("zygisk")).unwrap();
         fs::write(
             path.join("module.prop"),

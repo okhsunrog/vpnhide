@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use vpnhide_core_daemon::{CoreClient, config_file};
 use vpnhide_core_rpc::{
-    AppConfig, BaseRef, CanonicalConfig, ConfigEdit, ConfigToggle, NativeBackend, NativeRole,
-    OperationId, PhaseOutcome, SubmitError,
+    AppConfig, BaseRef, CanonicalConfig, ConfigEdit, ConfigToggle, NativeBackend,
+    NativeBootOutcome, NativeRole, OperationId, PhaseOutcome, SelectionMode, SubmitError,
 };
 
 const KPATCH: &str = r#"#!/bin/sh
@@ -138,6 +138,15 @@ async fn exercise(case: &str) {
     );
     let socket = root.join("core.sock");
     let canonical = root.join("canonical.json");
+    // Core selects and loads at startup from the durable config it boots with.
+    let mut initial = CanonicalConfig::default();
+    if case != "load-default" {
+        initial
+            .settings
+            .optional_features
+            .insert("filesystem_iface_paths".into());
+    }
+    config_file::write_atomic(&canonical, &initial).unwrap();
     let lock_path = root.join("ctl.lock");
     let _held_lock = if case == "busy" {
         let lock = fs::File::create(&lock_path).unwrap();
@@ -159,6 +168,9 @@ async fn exercise(case: &str) {
             .env("VPNHIDE_KMOD_CTL", &ctl)
             .env("VPNHIDE_KERNEL_MODULES", &modules)
             .env("VPNHIDE_KPM_LOCK", &lock_path)
+            .env("VPNHIDE_CORE_OWNER_DIR", root.join("owner"))
+            .env_remove("VPNHIDE_ZYGISK_MODULE")
+            .env_remove("VPNHIDE_BOOT_APPLY")
             .stdout(Stdio::null())
             .stderr(fs::File::create(root.join("core.log")).unwrap())
             .spawn()
@@ -199,15 +211,17 @@ async fn exercise(case: &str) {
         config: candidate.clone(),
     };
     client
-        .submit_edit(OperationId(1), BaseRef { revision: 0 }, edit.clone())
+        .submit_edit(OperationId(1), BaseRef { revision: 1 }, edit.clone())
         .await
         .unwrap()
         .unwrap();
     let record = client.get_operation(OperationId(1)).await.unwrap().unwrap();
     let succeeds = matches!(
         case,
-        "active" | "active-with-kmod" | "load" | "load-default" | "disabled-kmod" | "partial"
+        "active" | "load" | "load-default" | "disabled-kmod" | "partial" | "disabled"
     );
+    // A disabled module is not a candidate: NoBackend has nothing to deliver.
+    let delivers = succeeds && case != "disabled";
     let expected = if succeeds {
         PhaseOutcome::Confirmed
     } else if case == "lost-reply" {
@@ -227,8 +241,45 @@ async fn exercise(case: &str) {
         "{case}: saved intent"
     );
     let published = client.current().await.unwrap();
-    assert_eq!(published.snapshot.config_revision, 1, "{case}");
-    if succeeds || case == "lost-reply" {
+    assert_eq!(published.snapshot.config_revision, 2, "{case}");
+    let boot = published
+        .snapshot
+        .backend
+        .boot
+        .clone()
+        .expect("typed boot status");
+    match case {
+        "active-with-kmod" | "kmod-fails" => assert!(
+            matches!(boot.outcome, NativeBootOutcome::Conflict { .. }),
+            "{case}: {:?}",
+            boot.outcome
+        ),
+        "load" | "load-default" | "disabled-kmod" => assert!(
+            matches!(
+                boot.outcome,
+                NativeBootOutcome::Selected {
+                    backend: NativeBackend::Kpm,
+                    mode: SelectionMode::Loaded,
+                    ..
+                }
+            ),
+            "{case}: {:?}",
+            boot.outcome
+        ),
+        "unsupported" => assert!(
+            matches!(boot.outcome, NativeBootOutcome::UnsupportedKernel { .. }),
+            "{case}: {:?}",
+            boot.outcome
+        ),
+        "busy" | "list-fails" => assert!(
+            matches!(boot.outcome, NativeBootOutcome::KpmUnverifiable { .. }),
+            "{case}: {:?}",
+            boot.outcome
+        ),
+        "disabled" => assert_eq!(boot.outcome, NativeBootOutcome::NoBackend, "{case}"),
+        _ => {}
+    }
+    if delivers || case == "lost-reply" {
         assert_eq!(
             published.snapshot.backend.active,
             Some(NativeBackend::Kpm),
@@ -278,20 +329,19 @@ async fn exercise(case: &str) {
             "{case}"
         );
     }
-    assert_eq!(
-        root.join("insmod-calls").exists(),
-        case == "kmod-fails",
+    assert!(
+        !root.join("insmod-calls").exists(),
         "{case}: no conflicting/fallback load"
     );
     if case == "lost-reply" {
         client
-            .submit_edit(OperationId(1), BaseRef { revision: 0 }, edit.clone())
+            .submit_edit(OperationId(1), BaseRef { revision: 1 }, edit.clone())
             .await
             .unwrap()
             .unwrap();
         assert!(matches!(
             client
-                .submit_edit(OperationId(1), BaseRef { revision: 1 }, edit.clone())
+                .submit_edit(OperationId(1), BaseRef { revision: 2 }, edit.clone())
                 .await
                 .unwrap(),
             Err(SubmitError::IdReused)
@@ -300,7 +350,7 @@ async fn exercise(case: &str) {
             client
                 .submit_edit(
                     OperationId(1),
-                    BaseRef { revision: 0 },
+                    BaseRef { revision: 1 },
                     ConfigEdit::Toggle {
                         field: ConfigToggle::Debug,
                         enabled: true
@@ -314,7 +364,7 @@ async fn exercise(case: &str) {
             client
                 .submit_edit(
                     OperationId(2),
-                    BaseRef { revision: 1 },
+                    BaseRef { revision: 2 },
                     ConfigEdit::Toggle {
                         field: ConfigToggle::Debug,
                         enabled: true

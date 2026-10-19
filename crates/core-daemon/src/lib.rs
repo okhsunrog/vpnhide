@@ -3,6 +3,7 @@
 //! the domain (config/operation/observation) is still placeholder (see `core-rpc`).
 
 pub mod activation;
+pub mod alog;
 pub mod app_socket;
 pub mod auth;
 pub mod backend;
@@ -15,6 +16,7 @@ pub mod effects;
 pub mod framework_vpn;
 pub mod journal;
 pub mod listener;
+pub mod native_boot;
 pub mod observer;
 pub mod operation;
 pub mod ownership;

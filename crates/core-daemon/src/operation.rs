@@ -177,9 +177,18 @@ pub struct RealPhaseRunner {
     pub kmod_ctl_path: Option<PathBuf>,
     /// When true, `Ports` runs the real apply path (env `VPNHIDE_PORTS`).
     pub ports_enabled: bool,
+    /// This boot's fixed native decision. `None` = native management disabled.
+    pub native: Option<NativeBootHandle>,
+    /// Where a Ports pass came from (boot passes set this; edits default to `Edit`).
+    pub ports_source: vpnhide_core_rpc::PortsSource,
+    /// Whether netd's chains existed before a boot Ports pass.
+    pub ports_netd_ready: Option<bool>,
     selected: std::cell::Cell<Option<vpnhide_core_rpc::NativeBackend>>,
     ports_report: std::cell::RefCell<Option<vpnhide_core_rpc::PortsFamilyReport>>,
 }
+
+/// Shared handle to the per-boot native decision.
+pub type NativeBootHandle = std::sync::Arc<std::sync::Mutex<crate::native_boot::NativeBoot>>;
 
 impl RealPhaseRunner {
     pub fn new(config_path: Option<PathBuf>, kmod_ctl_path: Option<PathBuf>) -> Self {
@@ -199,6 +208,9 @@ impl RealPhaseRunner {
             config_path,
             kmod_ctl_path,
             ports_enabled,
+            native: None,
+            ports_source: vpnhide_core_rpc::PortsSource::Edit,
+            ports_netd_ready: None,
             selected: std::cell::Cell::new(None),
             ports_report: std::cell::RefCell::new(None),
         }
@@ -232,58 +244,70 @@ impl PhaseRunner for RealPhaseRunner {
                 }
                 None => PhaseOutcome::Confirmed,
             },
-            ConfigPhase::Native => match &self.kmod_ctl_path {
-                // Select the live kernel owner, or load the explicitly enabled kmod
-                // artifact when the node is definitely absent. Project for that
-                // family and deliver (which re-verifies identity on the open node).
-                Some(path) => {
-                    let modules = crate::backend::kernel_modules_from_env();
-                    let kpm_lock = crate::backend::kpm_lock_from_env();
-                    let zygisk_module = crate::zygisk::module_from_env();
-                    let backend = crate::backend::select_native(
-                        path,
-                        modules.as_deref(),
-                        kpm_lock.as_deref(),
-                        zygisk_module.as_deref(),
-                        candidate
-                            .settings
-                            .optional_features
-                            .contains(vpnhide_activator::OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS),
-                    );
-                    match backend {
-                        Ok(backend) => {
-                            self.selected.set(Some(backend.family()));
-                            match crate::activation::project_native_wire(
-                                candidate,
-                                backend.family(),
-                            ) {
-                                Ok(wire) => {
-                                    if let Err(e) =
-                                        crate::ownership::claim_before_native(backend.family())
-                                    {
-                                        eprintln!("core: native ownership claim failed: {e}");
-                                    }
-                                    crate::activation::deliver_selected(path, &backend, &wire)
-                                }
-                                Err(error) => {
-                                    eprintln!("core: native projection failed: {error}");
-                                    PhaseOutcome::FailedKnown
-                                }
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("core: native selection failed: {error}");
+            ConfigPhase::Native => {
+                // Selection happened once at boot; never re-select here. Deliver only
+                // to that backend, or report why there is none.
+                if self.kmod_ctl_path.is_none() {
+                    return PhaseOutcome::NotAttempted;
+                }
+                let Some(native) = &self.native else {
+                    return PhaseOutcome::NotAttempted;
+                };
+                let mut boot = native.lock().expect("native boot");
+                let Some(backend) = boot.selected() else {
+                    return match &boot.status.outcome {
+                        // Nothing native to configure: the phase is trivially satisfied.
+                        vpnhide_core_rpc::NativeBootOutcome::NoBackend => PhaseOutcome::Confirmed,
+                        other => {
+                            crate::alog::info(&format!(
+                                "native: no config delivered this boot: {other:?}"
+                            ));
                             PhaseOutcome::FailedKnown
                         }
+                    };
+                };
+                self.selected.set(Some(backend));
+                match crate::activation::project_native_wire(candidate, backend) {
+                    Ok(wire) => {
+                        if let Err(e) = crate::ownership::claim_before_native(backend) {
+                            eprintln!("core: native ownership claim failed: {e}");
+                        }
+                        let (outcome, result) =
+                            crate::activation::deliver_to_selected(&boot.env, backend, &wire);
+                        boot.record_delivery(result);
+                        outcome
+                    }
+                    Err(error) => {
+                        boot.record_delivery(Err(format!("projection failed: {error}")));
+                        PhaseOutcome::FailedKnown
                     }
                 }
-                None => PhaseOutcome::NotAttempted,
-            },
+            }
             ConfigPhase::Ports => {
                 if !self.ports_enabled {
                     return PhaseOutcome::NotAttempted;
                 }
-                let (outcome, report) = crate::ports::run_ports_phase(candidate);
+                let (outcome, report, detail) = crate::ports::run_ports_phase_detailed(candidate);
+                crate::alog::info(&format!(
+                    "ports: {:?} pass ipv4={:?} ipv6={:?} targets={}",
+                    self.ports_source, report.ipv4, report.ipv6, report.target_count
+                ));
+                if let Some(native) = &self.native {
+                    native.lock().expect("native boot").record_ports(
+                        vpnhide_core_rpc::PortsStatus {
+                            source: self.ports_source,
+                            ipv4: report.ipv4,
+                            ipv6: report.ipv6,
+                            target_count: report.target_count,
+                            netd_ready: self.ports_netd_ready,
+                            detail,
+                            at_ms: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0),
+                        },
+                    );
+                }
                 *self.ports_report.borrow_mut() = Some(report);
                 outcome
             }

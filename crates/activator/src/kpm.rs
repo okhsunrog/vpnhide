@@ -171,7 +171,35 @@ impl std::fmt::Display for KpmConfigError {
 
 impl std::error::Error for KpmConfigError {}
 
+/// What core learns about KernelPatch before deciding the boot's native backend.
+pub enum KpmRuntimeProbe {
+    /// No APatch/FolkPatch directory and no KPatch-Next CLI.
+    NoRuntime,
+    /// An authenticated management channel.
+    Ready(CoreKpm),
+    /// APatch/FolkPatch is present but neither the saved superkey nor a trusted `su`
+    /// grant authenticated.
+    AwaitingAuthentication(String),
+}
+
 impl CoreKpm {
+    /// Like [`Self::connect`], but keeps an authentication refusal distinct from other
+    /// probe failures so core can tell "awaiting the superkey" from "broken runtime".
+    pub fn probe(lock_path: &Path) -> Result<KpmRuntimeProbe> {
+        if !Path::new(APATCH_DIR).is_dir() && find_kpatch().is_none() {
+            return Ok(KpmRuntimeProbe::NoRuntime);
+        }
+        Ok(match KpmClient::detect_outcome()? {
+            KpmClientDetection::Ready(client) => KpmRuntimeProbe::Ready(Self {
+                client,
+                lock_path: lock_path.to_owned(),
+            }),
+            KpmClientDetection::AwaitingAuthentication(detail) => {
+                KpmRuntimeProbe::AwaitingAuthentication(detail)
+            }
+        })
+    }
+
     /// None is definite runtime absence. Authentication/probe errors stay errors.
     pub fn connect(lock_path: &Path) -> Result<Option<Self>> {
         if !Path::new(APATCH_DIR).is_dir() && find_kpatch().is_none() {

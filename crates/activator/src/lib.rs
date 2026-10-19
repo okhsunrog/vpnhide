@@ -119,7 +119,7 @@ mod ownership;
 mod ports;
 
 use kpm::*;
-pub use kpm::{CoreKpm, KpmConfigError};
+pub use kpm::{CoreKpm, KpmConfigError, KpmRuntimeProbe};
 pub use model::*;
 pub use ownership::{
     config_owned_by_core, core_marker_path, native_owned_by_core, zygisk_owned_by_core,
@@ -177,6 +177,93 @@ pub fn load_kernel_module(ctl: &Path, artifact: &Path, filesystem_hiding: bool) 
         }
         Ok(())
     })
+}
+
+/// Why a core-selected kmod load did not produce a loaded module. `exit` follows the
+/// legacy boot loader's codes: the insmod exit status, 124 timeout, 126 spawn failure,
+/// 127 missing artifact, -1 refused before dispatch (control node already owned).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KmodLoadFailure {
+    pub exit: i32,
+    pub stderr: String,
+}
+
+impl std::fmt::Display for KmodLoadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "insmod exit {}: {}", self.exit, self.stderr.trim())
+    }
+}
+
+/// Load the kmod artifact core selected for this boot. Core has already ruled out every
+/// other native backend (including a live KPM), so unlike [`load_kernel_module`] this does
+/// not re-probe KernelPatch; it still refuses a control node that is already owned.
+pub fn insmod_selected_kmod(
+    ctl: &Path,
+    artifact: &Path,
+    filesystem_hiding: bool,
+) -> std::result::Result<(), KmodLoadFailure> {
+    let refused = |e: Box<dyn Error + Send + Sync>| KmodLoadFailure {
+        exit: -1,
+        stderr: format!("kernel backend preflight refused loading: {e}"),
+    };
+    match kernel_control::observed_backend(ctl) {
+        Ok(None) => {}
+        Ok(Some(id)) => {
+            return Err(refused(
+                kernel_control::load_kmod_if_absent::<()>(Ok(Some(id)), || Ok(()))
+                    .err()
+                    .unwrap_or_else(|| "control node owned".into()),
+            ));
+        }
+        Err(e) => return Err(refused(e)),
+    }
+    if !artifact.is_file() {
+        return Err(KmodLoadFailure {
+            exit: 127,
+            stderr: format!("vpnhide_kmod.ko not found at {}", artifact.display()),
+        });
+    }
+    match load_kmod::load_kmod_artifact(artifact, filesystem_hiding) {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => Err(KmodLoadFailure {
+            exit: output.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }),
+        Err(e) if e.kind() == ErrorKind::TimedOut => Err(KmodLoadFailure {
+            exit: 124,
+            stderr: format!(
+                "insmod timed out after {}s",
+                CHILD_COMMAND_TIMEOUT.as_secs()
+            ),
+        }),
+        Err(e) => Err(KmodLoadFailure {
+            exit: 126,
+            stderr: e.to_string(),
+        }),
+    }
+}
+
+/// The running kernel release and whether the KPM has an offset table for its family.
+pub fn running_kernel_kpm_support() -> Result<(String, bool)> {
+    let release = running_kernel_release()?;
+    let supported = kernel_release_supports_kpm(&release);
+    Ok((release, supported))
+}
+
+/// Block until PackageManager lists this app — however long boot takes. Core calls this
+/// on its own boot thread, never on a request path.
+pub fn wait_for_package_manager() {
+    // Ready = PackageManager answers with its own platform package. Waiting for this
+    // app's package instead would block forever when the app is not installed.
+    loop {
+        if let Ok(stdout) = pm_list_packages(&["list", "packages", "-U"])
+            && (pm_output_has_package(&stdout, "android")
+                || pm_output_has_package(&stdout, APP_PACKAGE))
+        {
+            return;
+        }
+        thread::sleep(Duration::from_secs(1));
+    }
 }
 
 pub fn read_canonical() -> Result<String> {

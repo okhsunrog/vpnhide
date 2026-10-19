@@ -7,11 +7,12 @@
 
 use std::fs;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use vpnhide_core_rpc::{BaseRef, ConfigEdit, OperationId, PhaseOutcome, SubmitError};
+use vpnhide_core_rpc::{BaseRef, ConfigEdit, OperationId, PhaseOutcome, PortsSource, SubmitError};
 
-use crate::server::CoreState;
+use crate::operation::PlanKind;
+use crate::server::{CoreState, SubmitOptions};
 
 /// Reserved high bit so boot ops do not collide with low app-issued ids in tests.
 const BOOT_OP_TAG: u64 = 1 << 63;
@@ -44,8 +45,11 @@ impl BootApplyReport {
 
     /// Write a small status file for `logcat`/module diagnostics.
     pub fn write_status_file(&self, path: &Path) {
+        let boot_id = std::fs::read_to_string(crate::native_boot::BOOT_ID_PATH)
+            .map(|s| s.trim().to_owned())
+            .unwrap_or_default();
         let body = format!(
-            "status={:?}\nop={:?}\ndetail={}\n",
+            "status={:?}\nboot_id={boot_id}\nop={:?}\ndetail={}\n",
             self.status,
             self.op.map(|o| o.0),
             self.detail.replace('\n', " ")
@@ -68,6 +72,105 @@ fn boot_operation_id() -> OperationId {
 /// Re-apply runtime policy from durable config (Native/Ports per env). Does not
 /// rewrite canonical JSON. Safe to call once per boot before or after serve.
 pub fn reapply(state: &CoreState) -> BootApplyReport {
+    reapply_with(state, SubmitOptions::default())
+}
+
+/// How long the first boot Ports pass waits for netd's `bw_OUTPUT` chain.
+pub const NETD_WAIT: Duration = Duration::from_secs(60);
+/// netd may rebuild its chains once more after the first pass; re-apply after this.
+pub const PORTS_RETRY_DELAY: Duration = Duration::from_secs(30);
+
+/// The full boot sequence the activators used to run, now core's: wait (unbounded) for
+/// PackageManager so uid projection is complete, deliver native config to this boot's
+/// selected backend, then apply Ports once netd's chains exist and again at T+30 s.
+/// Runs on its own thread; serving and observation continue meanwhile.
+pub fn run_boot_passes(state: &CoreState, wait_for_pm: bool) -> BootApplyReport {
+    let status_path = default_boot_status_path();
+    if wait_for_pm {
+        crate::alog::info("boot: waiting for PackageManager before applying policy");
+        vpnhide_activator::wait_for_package_manager();
+    }
+    let native = state.native_enabled();
+    let ports = state.ports_enabled();
+    if !native && !ports {
+        let report = reapply(state);
+        report.write_status_file(&status_path);
+        crate::alog::info(&format!("boot: {:?} {}", report.status, report.detail));
+        return report;
+    }
+    let mut reports = Vec::new();
+    if native {
+        reports.push(reapply_with(
+            state,
+            SubmitOptions {
+                plan: Some(PlanKind::NativeOnly),
+                ..SubmitOptions::default()
+            },
+        ));
+        combine(&reports).write_status_file(&status_path);
+    }
+    if ports {
+        let ready = crate::ports::wait_for_netd(NETD_WAIT);
+        if !ready {
+            crate::alog::info("boot: netd bw_OUTPUT not present after 60 s; applying Ports anyway");
+        }
+        reports.push(reapply_with(
+            state,
+            SubmitOptions {
+                plan: Some(PlanKind::PortsOnly),
+                ports_source: PortsSource::Boot,
+                netd_ready: Some(ready),
+            },
+        ));
+        combine(&reports).write_status_file(&status_path);
+        std::thread::sleep(PORTS_RETRY_DELAY);
+        let retry = reapply_with(
+            state,
+            SubmitOptions {
+                plan: Some(PlanKind::PortsOnly),
+                ports_source: PortsSource::BootRetry,
+                netd_ready: None,
+            },
+        );
+        // The safety pass supersedes the first Ports pass in the status file.
+        reports.pop();
+        reports.push(retry);
+    }
+    let report = combine(&reports);
+    report.write_status_file(&status_path);
+    crate::alog::info(&format!("boot: {:?} {}", report.status, report.detail));
+    report
+}
+
+/// Worst status wins; details are joined in pass order.
+fn combine(reports: &[BootApplyReport]) -> BootApplyReport {
+    let worst = reports
+        .iter()
+        .find(|r| {
+            !matches!(
+                r.status,
+                BootApplyStatus::Applied | BootApplyStatus::NoIntent
+            )
+        })
+        .or_else(|| {
+            reports
+                .iter()
+                .find(|r| r.status == BootApplyStatus::Applied)
+        })
+        .or_else(|| reports.first());
+    BootApplyReport {
+        status: worst.map_or(BootApplyStatus::NoIntent, |r| r.status.clone()),
+        op: worst.and_then(|r| r.op),
+        detail: reports
+            .iter()
+            .map(|r| r.detail.as_str())
+            .collect::<Vec<_>>()
+            .join("; "),
+    }
+}
+
+/// [`reapply`] with an explicit plan / Ports source.
+pub fn reapply_with(state: &CoreState, options: SubmitOptions) -> BootApplyReport {
     if state.has_unknown_hold() {
         return BootApplyReport {
             status: BootApplyStatus::HeldUnknown,
@@ -84,7 +187,12 @@ pub fn reapply(state: &CoreState) -> BootApplyReport {
     }
     let revision = state.config_revision();
     let op = boot_operation_id();
-    match state.submit_edit_public(op, BaseRef { revision }, &ConfigEdit::RepairActivation) {
+    match state.submit_edit_with(
+        op,
+        BaseRef { revision },
+        &ConfigEdit::RepairActivation,
+        options,
+    ) {
         Ok(_) => {
             let record = state.get_operation_record(op);
             let settled = record
