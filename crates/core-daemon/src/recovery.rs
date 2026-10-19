@@ -163,6 +163,23 @@ pub fn maybe_crash_for_test(point: &str) {
     }
 }
 
+/// Test-only delay before a phase effect (`VPNHIDE_TEST_DELAY_MS` + point via
+/// `VPNHIDE_TEST_DELAY_BEFORE`). Production never sets these.
+pub fn maybe_delay_for_test(point: &str) {
+    let Ok(before) = std::env::var("VPNHIDE_TEST_DELAY_BEFORE") else {
+        return;
+    };
+    if before != point {
+        return;
+    }
+    let ms: u64 = std::env::var("VPNHIDE_TEST_DELAY_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(200);
+    eprintln!("core: test delay {ms}ms before {point}");
+    std::thread::sleep(std::time::Duration::from_millis(ms));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

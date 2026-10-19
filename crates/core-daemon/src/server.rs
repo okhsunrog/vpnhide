@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures::prelude::*;
@@ -20,10 +21,10 @@ use vpnhide_core_rpc::{
     SubmitError, VpnhideCore,
 };
 
-use crate::config_edit::apply_canonical_edit;
+use crate::config_edit::{self, apply_canonical_edit};
 use crate::config_file;
 use crate::journal::{self, Journal, JournalEntry};
-use crate::operation::{self, PhaseHook, RealPhaseRunner};
+use crate::operation::{self, PhaseHook, PlanKind, RealPhaseRunner};
 use crate::publisher::Publisher;
 
 /// This core build, reported in the handshake for diagnostics only.
@@ -41,6 +42,8 @@ struct ConfigStore {
     /// Mirror of the on-disk journal when durability is enabled; kept in lockstep with
     /// `operations` so each phase boundary can sync without rebuilding from the map.
     journal: Journal,
+    /// Last revision that committed each field path (also durable via the journal).
+    field_revisions: std::collections::BTreeMap<String, u64>,
 }
 
 struct StoredOperation {
@@ -63,6 +66,11 @@ pub struct CoreState {
     /// native activation — the safe default so the dev sandbox never writes the real
     /// `/proc/vpnhide_ctl`.
     kmod_ctl_path: Option<PathBuf>,
+    /// Dispatch generation: bumped when admitting work and by [`Self::invalidate_dispatch`].
+    /// A worker captures the value at admit and must still match before each external
+    /// effect, so a delayed predecessor cannot dispatch after newer work (or an explicit
+    /// fence) has started (§5).
+    dispatch_fence: AtomicU64,
 }
 
 impl CoreState {
@@ -75,11 +83,19 @@ impl CoreState {
                 config_revision: 0,
                 operations: HashMap::new(),
                 journal: Journal::default(),
+                field_revisions: Default::default(),
             }),
             config_path: None,
             journal_path: None,
             kmod_ctl_path: None,
+            dispatch_fence: AtomicU64::new(0),
         })
+    }
+
+    /// Invalidate in-flight external dispatch. Delayed workers whose admit ticket no
+    /// longer matches will refuse to run further effects (no blind late dispatch).
+    pub fn invalidate_dispatch(&self) {
+        self.dispatch_fence.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Load the durable config from `path` and own it going forward (§4 tier-1, restart
@@ -176,6 +192,7 @@ impl CoreState {
             );
         }
 
+        let field_revisions = journal.field_revisions.clone();
         let state = Arc::new(CoreState {
             publisher,
             config: Mutex::new(ConfigStore {
@@ -183,10 +200,12 @@ impl CoreState {
                 config_revision,
                 operations,
                 journal,
+                field_revisions,
             }),
             config_path: Some(path),
             journal_path,
             kmod_ctl_path,
+            dispatch_fence: AtomicU64::new(0),
         });
         if let Some(config) = config {
             state.publisher.update(|snapshot| {
@@ -243,30 +262,50 @@ impl CoreState {
         {
             return Err(SubmitError::Unavailable);
         }
-        // Coarse conflict: whole-config optimistic lock. Field-level merge of unrelated
-        // concurrent edits is a later refinement (§5).
-        if base.revision != store.config_revision {
-            return Err(SubmitError::Conflict {
-                field: "config".to_owned(),
-            });
+        // Field-level conflict: unrelated edits merge against fresh state; same-field
+        // (or Replace domain) overlap since base → Conflict (§5).
+        if let Some(field) = config_edit::conflict_field(
+            base.revision,
+            store.config_revision,
+            edit,
+            &store.field_revisions,
+        ) {
+            return Err(SubmitError::Conflict { field });
         }
         // Apply against fresh config. With none yet, only a Replace can bootstrap one.
+        // RepairActivation requires an existing config (nothing to re-activate otherwise).
         let current = match &store.config {
             Some(config) => config.clone(),
             None => match edit {
                 ConfigEdit::Replace { .. } => CanonicalConfig::default(),
+                ConfigEdit::RepairActivation => return Err(SubmitError::Unavailable),
                 _ => return Err(SubmitError::Unavailable),
             },
         };
         let next = apply_canonical_edit(&current, edit);
         let changed = store.config.as_ref() != Some(&next);
+        let repair = matches!(edit, ConfigEdit::RepairActivation);
+
+        // Claim a dispatch ticket so a delayed predecessor (or explicit invalidate)
+        // cannot run external effects after this admission.
+        let ticket = self.dispatch_fence.fetch_add(1, Ordering::SeqCst) + 1;
 
         // Run the operation's phase plan. The runner performs the durable write (Persist) and,
-        // when a control node is configured and the config has a native target, delivers the
-        // native wire (Native). An accepted edit is on disk before the config is committed in
-        // memory. Blocking IO under the lock is deliberate: it serializes writers.
-        let native = changed && self.kmod_ctl_path.is_some();
-        let plan = operation::plan_for(native);
+        // when a control node is configured, delivers the native wire (Native). Repair skips
+        // Persist and only activates. Blocking IO under the lock serializes writers; the RPC
+        // layer detaches via spawn_blocking so connection loss cannot cancel ownership.
+        let kind = if repair {
+            if self.kmod_ctl_path.is_some() {
+                PlanKind::NativeOnly
+            } else {
+                PlanKind::PersistOnly // no-op Persist; nothing to activate
+            }
+        } else if changed && self.kmod_ctl_path.is_some() {
+            PlanKind::PersistThenNative
+        } else {
+            PlanKind::PersistOnly
+        };
+        let plan = operation::plan_kind(kind);
         let runner = RealPhaseRunner::new(self.config_path.clone(), self.kmod_ctl_path.clone());
 
         let outcome = if let Some(journal_path) = self.journal_path.clone() {
@@ -279,15 +318,25 @@ impl CoreState {
                 candidate: &next,
                 plan: plan.clone(),
                 completed: Vec::new(),
+                ticket,
+                fence: &self.dispatch_fence,
             };
             operation::run_plan_hooked(&plan, &next, changed, &runner, Some(&mut hook))
         } else {
-            operation::run_plan(&plan, &next, changed, &runner)
+            let mut hook = FenceOnlyHook {
+                ticket,
+                fence: &self.dispatch_fence,
+            };
+            operation::run_plan_hooked(&plan, &next, changed, &runner, Some(&mut hook))
         };
 
         if outcome.persisted {
             store.config = Some(next.clone());
             store.config_revision += 1;
+            let rev = store.config_revision;
+            let writes = config_edit::write_set(edit);
+            config_edit::note_writes(&mut store.field_revisions, &writes, rev);
+            store.journal.field_revisions = store.field_revisions.clone();
         }
         let record = OperationRecord {
             op,
@@ -336,17 +385,21 @@ impl CoreState {
 
         // Loading may have changed runtime identity even if a later projection
         // or delivery failed. Publish observation separately from apply outcome.
-        let observed_backend = self.kmod_ctl_path.as_ref().filter(|_| native).map(|ctl| {
-            let modules = crate::backend::kernel_modules_from_env();
-            let kpm_lock = crate::backend::kpm_lock_from_env();
-            crate::backend::detect_managed(
-                ctl,
-                modules
-                    .as_deref()
-                    .unwrap_or_else(|| std::path::Path::new(crate::backend::MODULES_ROOT)),
-                kpm_lock.as_deref(),
-            )
-        });
+        let observed_backend = self
+            .kmod_ctl_path
+            .as_ref()
+            .filter(|_| matches!(kind, PlanKind::PersistThenNative | PlanKind::NativeOnly))
+            .map(|ctl| {
+                let modules = crate::backend::kernel_modules_from_env();
+                let kpm_lock = crate::backend::kpm_lock_from_env();
+                crate::backend::detect_managed(
+                    ctl,
+                    modules
+                        .as_deref()
+                        .unwrap_or_else(|| std::path::Path::new(crate::backend::MODULES_ROOT)),
+                    kpm_lock.as_deref(),
+                )
+            });
         let revision = store.config_revision;
         // Publish while still owning the mutation lane so a later accepted edit
         // cannot publish first and then be overwritten by this older snapshot.
@@ -377,6 +430,53 @@ impl CoreState {
     }
 }
 
+/// Dispatch fence only (no journal) — used by host tests without a journal path.
+struct FenceOnlyHook<'a> {
+    ticket: u64,
+    fence: &'a AtomicU64,
+}
+
+impl PhaseHook for FenceOnlyHook<'_> {
+    fn before(&mut self, phase: ConfigPhase) -> Result<(), PhaseOutcome> {
+        crate::recovery::maybe_delay_for_test(phase_delay_point(phase));
+        if self.fence.load(Ordering::SeqCst) != self.ticket {
+            eprintln!("core: dispatch fenced before {phase:?} (delayed predecessor)");
+            return Err(PhaseOutcome::FailedKnown);
+        }
+        crate::recovery::maybe_crash_for_test(phase_intent_point(phase));
+        Ok(())
+    }
+
+    fn after(&mut self, phase: ConfigPhase, _outcome: PhaseOutcome) {
+        if phase == ConfigPhase::Persist {
+            crate::recovery::maybe_crash_for_test("persist");
+        }
+        if phase == ConfigPhase::Native {
+            crate::recovery::maybe_crash_for_test("native");
+        }
+    }
+}
+
+fn phase_intent_point(phase: ConfigPhase) -> &'static str {
+    match phase {
+        ConfigPhase::Persist => "persist-intent",
+        ConfigPhase::Native => "native-intent",
+        ConfigPhase::Ports => "ports-intent",
+        ConfigPhase::Secret => "secret-intent",
+        ConfigPhase::Cleanup => "cleanup-intent",
+    }
+}
+
+fn phase_delay_point(phase: ConfigPhase) -> &'static str {
+    match phase {
+        ConfigPhase::Persist => "persist",
+        ConfigPhase::Native => "native",
+        ConfigPhase::Ports => "ports",
+        ConfigPhase::Secret => "secret",
+        ConfigPhase::Cleanup => "cleanup",
+    }
+}
+
 /// Syncs journal evidence at each phase boundary (durability-before-effect).
 struct JournalPhaseHook<'a> {
     path: PathBuf,
@@ -387,6 +487,8 @@ struct JournalPhaseHook<'a> {
     candidate: &'a CanonicalConfig,
     plan: Vec<ConfigPhase>,
     completed: Vec<(ConfigPhase, PhaseOutcome)>,
+    ticket: u64,
+    fence: &'a AtomicU64,
 }
 
 impl PhaseHook for JournalPhaseHook<'_> {
@@ -406,14 +508,12 @@ impl PhaseHook for JournalPhaseHook<'_> {
             eprintln!("core: journal intent failed before {phase:?}: {e}");
             PhaseOutcome::FailedKnown
         })?;
-        let point = match phase {
-            ConfigPhase::Persist => "persist-intent",
-            ConfigPhase::Native => "native-intent",
-            ConfigPhase::Ports => "ports-intent",
-            ConfigPhase::Secret => "secret-intent",
-            ConfigPhase::Cleanup => "cleanup-intent",
-        };
-        crate::recovery::maybe_crash_for_test(point);
+        crate::recovery::maybe_delay_for_test(phase_delay_point(phase));
+        if self.fence.load(Ordering::SeqCst) != self.ticket {
+            eprintln!("core: dispatch fenced before {phase:?} (delayed predecessor)");
+            return Err(PhaseOutcome::FailedKnown);
+        }
+        crate::recovery::maybe_crash_for_test(phase_intent_point(phase));
         Ok(())
     }
 
@@ -495,7 +595,13 @@ impl VpnhideCore for CoreServer {
         base: BaseRef,
         edit: ConfigEdit,
     ) -> Result<Accepted, SubmitError> {
-        self.state.submit_edit(op, base, &edit)
+        // Own the mutation independently of this RPC connection (§5): dropping the
+        // request future (client cancel / socket loss) must not cancel the work.
+        let state = self.state.clone();
+        match tokio::task::spawn_blocking(move || state.submit_edit(op, base, &edit)).await {
+            Ok(result) => result,
+            Err(_) => Err(SubmitError::Unavailable),
+        }
     }
 
     async fn get_operation(self, _ctx: Context, op: OperationId) -> Option<OperationRecord> {
@@ -614,8 +720,9 @@ mod tests {
                 .is_ok()
         );
 
-        // A stale base conflicts.
+        // A base from before the Replace conflicts on the broad settings domain.
         let stale = server
+            .clone()
             .submit_edit(
                 ctx(),
                 OperationId(4),
@@ -624,6 +731,214 @@ mod tests {
             )
             .await;
         assert!(matches!(stale, Err(SubmitError::Conflict { .. })));
+    }
+
+    #[tokio::test]
+    async fn field_level_allows_unrelated_edits_and_rejects_same_field() {
+        let server = server();
+        let ctx = tarpc::context::current;
+        server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(1),
+                BaseRef { revision: 0 },
+                ConfigEdit::Replace {
+                    config: CanonicalConfig::default(),
+                },
+            )
+            .await
+            .unwrap();
+        // Two clients both at revision 1: unrelated fields merge.
+        server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(2),
+                BaseRef { revision: 1 },
+                ConfigEdit::Toggle {
+                    field: ConfigToggle::Debug,
+                    enabled: true,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            server
+                .clone()
+                .submit_edit(
+                    ctx(),
+                    OperationId(3),
+                    BaseRef { revision: 1 },
+                    ConfigEdit::Toggle {
+                        field: ConfigToggle::AutoHideName,
+                        enabled: true,
+                    },
+                )
+                .await
+                .is_ok(),
+            "unrelated field must merge against fresh state"
+        );
+        // Same field with a stale base conflicts.
+        let conflict = server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(4),
+                BaseRef { revision: 1 },
+                ConfigEdit::Toggle {
+                    field: ConfigToggle::Debug,
+                    enabled: false,
+                },
+            )
+            .await;
+        assert!(matches!(
+            conflict,
+            Err(SubmitError::Conflict { field }) if field == "debug"
+        ));
+        // Replace against a stale base conflicts broadly.
+        let replace_conflict = server
+            .submit_edit(
+                ctx(),
+                OperationId(5),
+                BaseRef { revision: 1 },
+                ConfigEdit::Replace {
+                    config: CanonicalConfig::default(),
+                },
+            )
+            .await;
+        assert!(matches!(
+            replace_conflict,
+            Err(SubmitError::Conflict { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn activation_repair_runs_native_without_config_rewrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("cfg.json");
+        let ctl = dir.path().join("ctl");
+        std::fs::write(
+            &ctl,
+            "vpnhide 1 status\nbackend 0x4\nkver 0x0\nhooks 0x0\nerror 0x0\n",
+        )
+        .unwrap();
+        let state = CoreState::load(
+            Publisher::new(1, StateSnapshot::default()),
+            config_path.clone(),
+            Some(ctl.clone()),
+        )
+        .unwrap();
+        let server = CoreServer::new(state);
+        let ctx = tarpc::context::current;
+        let cfg = CanonicalConfig {
+            debug: true,
+            ..Default::default()
+        };
+        server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(1),
+                BaseRef { revision: 0 },
+                ConfigEdit::Replace {
+                    config: cfg.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let before = std::fs::read_to_string(&config_path).unwrap();
+        let published = server.clone().state_since(ctx(), 0, 0).await;
+        let rev = published.snapshot.config_revision;
+        server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(2),
+                BaseRef { revision: rev },
+                ConfigEdit::RepairActivation,
+            )
+            .await
+            .unwrap();
+        let record = server
+            .clone()
+            .get_operation(ctx(), OperationId(2))
+            .await
+            .unwrap();
+        assert!(
+            record.phases.iter().any(|p| p.phase == ConfigPhase::Native),
+            "repair must plan Native"
+        );
+        assert!(
+            !record
+                .phases
+                .iter()
+                .any(|p| p.phase == ConfigPhase::Persist),
+            "repair must not rewrite canonical config"
+        );
+        assert_eq!(std::fs::read_to_string(&config_path).unwrap(), before);
+        let after = server.state_since(ctx(), 0, 0).await;
+        assert_eq!(after.snapshot.config_revision, rev);
+        assert_eq!(after.snapshot.config, Some(cfg));
+    }
+
+    #[tokio::test]
+    async fn delayed_worker_is_fenced_before_native_dispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("cfg.json");
+        let ctl = dir.path().join("ctl");
+        let ctl_body = "vpnhide 1 status\nbackend 0x4\nkver 0x0\nhooks 0x0\nerror 0x0\n";
+        std::fs::write(&ctl, ctl_body).unwrap();
+        let state = CoreState::load(
+            Publisher::new(1, StateSnapshot::default()),
+            config_path,
+            Some(ctl.clone()),
+        )
+        .unwrap();
+        // Fence the in-flight Native after Persist intent while the worker delays.
+        // SAFETY: single-threaded test setup before the worker starts.
+        unsafe {
+            std::env::set_var("VPNHIDE_TEST_DELAY_BEFORE", "native");
+            std::env::set_var("VPNHIDE_TEST_DELAY_MS", "150");
+        }
+        let state2 = state.clone();
+        let fencer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            state2.invalidate_dispatch();
+        });
+        let server = CoreServer::new(state);
+        let ctx = tarpc::context::current;
+        let result = server
+            .clone()
+            .submit_edit(
+                ctx(),
+                OperationId(1),
+                BaseRef { revision: 0 },
+                ConfigEdit::Replace {
+                    config: CanonicalConfig {
+                        debug: true,
+                        ..Default::default()
+                    },
+                },
+            )
+            .await;
+        fencer.join().unwrap();
+        unsafe {
+            std::env::remove_var("VPNHIDE_TEST_DELAY_BEFORE");
+            std::env::remove_var("VPNHIDE_TEST_DELAY_MS");
+        }
+        result.expect("accepted");
+        let record = server.get_operation(ctx(), OperationId(1)).await.unwrap();
+        assert_eq!(
+            record
+                .phases
+                .iter()
+                .find(|p| p.phase == ConfigPhase::Native)
+                .map(|p| p.outcome),
+            Some(PhaseOutcome::FailedKnown),
+            "fenced Native must not dispatch"
+        );
+        assert_eq!(std::fs::read_to_string(&ctl).unwrap(), ctl_body);
     }
 
     #[tokio::test]

@@ -81,6 +81,9 @@ pub struct Journal {
     pub operations: Vec<JournalEntry>,
     /// IDs removed by retention; reuse is rejected so a pruned retry cannot mutate again.
     pub retired_ids: Vec<OperationId>,
+    /// Last config_revision that committed each field path (field-level conflicts §5).
+    #[serde(default)]
+    pub field_revisions: std::collections::BTreeMap<String, u64>,
 }
 
 impl Default for Journal {
@@ -91,6 +94,7 @@ impl Default for Journal {
             retain_settled: DEFAULT_RETAIN_SETTLED,
             operations: Vec::new(),
             retired_ids: Vec::new(),
+            field_revisions: std::collections::BTreeMap::new(),
         }
     }
 }

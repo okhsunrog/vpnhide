@@ -394,6 +394,7 @@ mod tests {
                 ConfigEdit::Replace {
                     config: sample_config(),
                 },
+                ConfigEdit::RepairActivation,
             ];
             for edit in edits {
                 assert_eq!(survives("ConfigEdit", &edit), edit);

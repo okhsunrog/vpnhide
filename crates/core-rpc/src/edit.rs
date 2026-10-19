@@ -16,13 +16,23 @@ pub enum ConfigEdit {
     /// Flip a single boolean setting.
     Toggle { field: ConfigToggle, enabled: bool },
     /// Replace a whole string-set setting (e.g. the auto-hide exclusions).
-    SettingSet { field: ConfigSetField, values: BTreeSet<String> },
+    SettingSet {
+        field: ConfigSetField,
+        values: BTreeSet<String>,
+    },
     /// Set one field of one app's config; an app left with no role is dropped.
-    App { pkg: String, field: ConfigAppField, value: AppConfig },
+    App {
+        pkg: String,
+        field: ConfigAppField,
+        value: AppConfig,
+    },
     /// Drop an app entirely.
     RemoveApp { pkg: String },
     /// Replace the whole config — a broad write set (import / reset).
     Replace { config: CanonicalConfig },
+    /// Re-apply native activation without changing the durable config (§5 repair).
+    /// Persisted intent and runtime application stay separate facts.
+    RepairActivation,
 }
 
 /// A single boolean setting addressable by [`ConfigEdit::Toggle`].
