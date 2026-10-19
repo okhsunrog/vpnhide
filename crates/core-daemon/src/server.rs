@@ -1052,14 +1052,16 @@ esac
             record
                 .phases
                 .iter()
-                .any(|p| p.phase == ConfigPhase::Ports
-                    && p.outcome == PhaseOutcome::FailedKnown),
+                .any(|p| p.phase == ConfigPhase::Ports && p.outcome == PhaseOutcome::FailedKnown),
             "Ports phase must run and settle FailedKnown on partial apply: {record:?}"
         );
         let ports = record.ports.expect("ports family report on record");
         assert_eq!(ports.ipv4, FamilyApplyOutcome::Confirmed);
         assert_eq!(ports.ipv6, FamilyApplyOutcome::FailedKnown);
-        assert!(marker.is_file(), "core must claim ownership on partial apply");
+        assert!(
+            marker.is_file(),
+            "core must claim ownership on partial apply"
+        );
 
         unsafe {
             std::env::remove_var("VPNHIDE_PORTS");

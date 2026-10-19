@@ -14,7 +14,7 @@ use std::io;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
-use libc::{SOL_SOCKET, SO_PEERCRED, getsockopt, socklen_t, ucred};
+use libc::{SO_PEERCRED, SOL_SOCKET, getsockopt, socklen_t, ucred};
 
 /// Env: comma-separated UIDs allowed to connect.
 pub const ALLOW_UIDS_ENV: &str = "VPNHIDE_CORE_ALLOW_UIDS";
@@ -202,8 +202,11 @@ mod tests {
         let _guard = crate::ports::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("uids");
-        fs::write(&path, "4242
-").unwrap();
+        fs::write(
+            &path, "4242
+",
+        )
+        .unwrap();
         // SAFETY: held under test_env_lock.
         unsafe {
             std::env::remove_var(ALLOW_UIDS_ENV);

@@ -69,10 +69,17 @@ pub fn read_status(path: &Path) -> io::Result<ConfigLoad> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(ConfigLoad::Absent),
         Err(e) => return Err(e),
     };
+    parse_status(&raw)
+}
+
+/// Decode on-disk canonical JSON text with the same Absent / Present / Unsupported
+/// distinction as [`read_status`]. Used by the APK's root helper to hand core a config in
+/// the format the app and LSPosed already speak, with one codec on the Rust side.
+pub fn parse_status(raw: &str) -> io::Result<ConfigLoad> {
     if raw.trim().is_empty() {
         return Ok(ConfigLoad::Absent);
     }
-    let root: Value = serde_json::from_str(&raw)
+    let root: Value = serde_json::from_str(raw)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("config parse: {e}")))?;
     let version = root.get("version").and_then(Value::as_u64).unwrap_or(1) as u32;
     if version > 1 {

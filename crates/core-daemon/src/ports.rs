@@ -17,9 +17,7 @@ use vpnhide_activator::{
     apply_ports_rules_families, inspect_ports_chains, parse_canonical, parse_pm_packages,
     project_ports_with_resolver, write_ports_core_owner_marker, write_ports_load_status,
 };
-use vpnhide_core_rpc::{
-    CanonicalConfig, FamilyApplyOutcome, PhaseOutcome, PortsFamilyReport,
-};
+use vpnhide_core_rpc::{CanonicalConfig, FamilyApplyOutcome, PhaseOutcome, PortsFamilyReport};
 
 use crate::config_file;
 
@@ -205,13 +203,25 @@ esac
 "#;
         write_stub_bin(dir, "iptables", script);
         write_stub_bin(dir, "ip6tables", script);
-        write_stub_bin(dir, "iptables-restore", "#!/bin/sh\ncat >/dev/null; exit 0\n");
-        write_stub_bin(dir, "ip6tables-restore", "#!/bin/sh\ncat >/dev/null; exit 0\n");
+        write_stub_bin(
+            dir,
+            "iptables-restore",
+            "#!/bin/sh\ncat >/dev/null; exit 0\n",
+        );
+        write_stub_bin(
+            dir,
+            "ip6tables-restore",
+            "#!/bin/sh\ncat >/dev/null; exit 0\n",
+        );
     }
 
     fn ipv6_fail_stubs(dir: &Path) {
         dual_ok_stubs(dir);
-        write_stub_bin(dir, "ip6tables-restore", "#!/bin/sh\ncat >/dev/null; exit 1\n");
+        write_stub_bin(
+            dir,
+            "ip6tables-restore",
+            "#!/bin/sh\ncat >/dev/null; exit 1\n",
+        );
     }
 
     fn inspect_partial_stubs(dir: &Path) {
@@ -236,7 +246,13 @@ exit 1
         let _guard = PATH_LOCK.lock().unwrap();
         // SAFETY: serialized by PATH_LOCK; restored below.
         let old = std::env::var_os("PATH");
-        let new_path = format!("{}:{}", dir.display(), old.as_ref().map(|s| s.to_string_lossy()).unwrap_or_default());
+        let new_path = format!(
+            "{}:{}",
+            dir.display(),
+            old.as_ref()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_default()
+        );
         unsafe { std::env::set_var("PATH", &new_path) };
         let out = f();
         match old {
@@ -307,10 +323,7 @@ exit 1
         write_stub_bin(dir.path(), "ip6tables", "#!/bin/sh\nexit 1\n");
         let presence = with_path(dir.path(), inspect_surviving_rules);
         assert!(!presence.any_present());
-        assert_eq!(
-            reconcile_ports_unknown(presence),
-            PhaseOutcome::FailedKnown
-        );
+        assert_eq!(reconcile_ports_unknown(presence), PhaseOutcome::FailedKnown);
     }
 
     #[test]

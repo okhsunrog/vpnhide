@@ -115,7 +115,11 @@ fn uid_membership(
 }
 
 /// Mark Unknown while retaining last-good (overflow / pre-resync / observer failure).
-pub fn mark_unknown(previous: &RoutingObservation, generation: u64, detail: &str) -> RoutingObservation {
+pub fn mark_unknown(
+    previous: &RoutingObservation,
+    generation: u64,
+    detail: &str,
+) -> RoutingObservation {
     let last_good = if previous.freshness == ObservationFreshness::Current {
         previous.vpn_interfaces.clone()
     } else {
