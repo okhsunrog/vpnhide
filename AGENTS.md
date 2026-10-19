@@ -12,7 +12,7 @@ Monorepo for hiding VPN interfaces from selected Android apps. Runtime component
 - `zygisk/` — Rust Zygisk module, inline `libc` hooks via shadowhook
 - `lsposed/` — LSPosed module + Compose target-picker app
 - `portshide/` — localhost port blocker (shell + iptables)
-- `crates/` — the Rust workspace: the wire `protocol`, the `activator` (one thin bin per backend), the app-side `checks`/`checks-jni` probes and the `app-helper` (`vhhelper`) root helper
+- `crates/` — the Rust workspace: the wire `protocol`, the `activator` (one thin bin per backend), the app-side `checks`/`checks-jni` probes, the `app-helper` (`vhhelper`) root helper, and `ai-support` (server-side support assistant sketch, separate from the core daemon)
 
 ## Read before touching code
 

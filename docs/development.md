@@ -35,7 +35,7 @@ The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNa
 | `lsposed/` | LSPosed module + target-picker Android app (Kotlin, Compose) |
 | `kmod/` | Kernel-level native backends: GKI `.ko` (C, kretprobes) and KPM (KernelPatch inline hooks) |
 | `builtin/` | The in-tree kernel backend (`CONFIG_VPNHIDE=y`): the driver, `scripts/integrate.py` that vendors it into a kernel tree, the KMI-agnostic companion module (activator only), `build.py` |
-| `crates/` | The Rust workspace: `protocol` (the wire), `activator` (one bin per backend), `checks` / `checks-jni` (the app's native probes), `app-helper` (`vhhelper`) |
+| `crates/` | The Rust workspace: `protocol` (the wire), `activator` (one bin per backend), `checks` / `checks-jni` (the app's native probes), `app-helper` (`vhhelper`), `ai-support` (server-side support assistant sketch; see `crates/ai-support/README.md`) |
 | ~~`portshide/`~~ | Removed — Ports apply is inside `vpnhide_core` |
 | `scripts/` | Release & changelog tooling |
 | `update-json/` | Magisk/KSU update metadata |
