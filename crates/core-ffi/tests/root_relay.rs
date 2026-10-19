@@ -87,7 +87,7 @@ fn diagnostics_and_effects_round_trip() {
     assert_eq!(reply["status"], "ok", "{reply}");
     assert_eq!(
         std::fs::read_to_string(root.join("data/adb/vpnhide/superkey")).unwrap(),
-        "secret"
+        "secret\n"
     );
     let empty = r#"{"kind":"set_superkey","superkey":""}"#;
     let reply = json(rt.block_on(root_effect(sock.clone(), 11, empty.into())));
