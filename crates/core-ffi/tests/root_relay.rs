@@ -35,7 +35,6 @@ fn spawn_core(socket: &Path, config: &Path) -> Core {
         )
         .expect("load");
         state.set_probe_env(ProbeEnv {
-            shell: PathBuf::from("/bin/sh"),
             core_exe: PathBuf::from("/nonexistent"),
             app_dir: None,
         });

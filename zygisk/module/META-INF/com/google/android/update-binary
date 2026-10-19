@@ -1,23 +1,27 @@
 #!/sbin/sh
-# KernelSU-Next / Magisk module installer entry point.
+# Recovery-flash shim of the Magisk module zip format: hand the zip to the root
+# manager's own installer. Never runs at boot; Magisk / KernelSU / APatch install
+# from their apps without it. Identical in every vpnhide module (scaffold check).
 umask 022
 ui_print() { echo "$1"; }
 require_new_magisk() {
   ui_print "*******************************"
-  ui_print " Please install KernelSU-Next"
-  ui_print " or Magisk v20.4+"
+  ui_print " Please install KernelSU-Next,"
+  ui_print " APatch, or Magisk v20.4+"
   ui_print "*******************************"
   exit 1
 }
 OUTFD=$2
 ZIPFILE=$3
 mount /data 2>/dev/null
-[ -f /data/adb/magisk/util_functions.sh ] || [ -f /data/adb/ksu/util_functions.sh ] || require_new_magisk
+[ -f /data/adb/magisk/util_functions.sh ] || [ -f /data/adb/ksu/util_functions.sh ] || [ -f /data/adb/ap/util_functions.sh ] || require_new_magisk
 if [ -f /data/adb/magisk/util_functions.sh ]; then
     . /data/adb/magisk/util_functions.sh
     [ $MAGISK_VER_CODE -lt 20400 ] && require_new_magisk
-else
+elif [ -f /data/adb/ksu/util_functions.sh ]; then
     . /data/adb/ksu/util_functions.sh
+else
+    . /data/adb/ap/util_functions.sh
 fi
 install_module
 exit 0

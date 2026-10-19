@@ -179,13 +179,13 @@ class LegacyConfigImportTest {
     }
 
     @Test
-    fun `both shell probes read every legacy path`() {
-        // Core hands both probes the section=path pairs (diagnostics.rs `snapshot_vars`)
-        // and both scripts iterate them.
-        listOf("root_snapshot.sh", "debug_snapshot.sh").forEach { name ->
-            assertTrue("$name ignores the legacy sections", coreProbeScript(name).contains("VPNHIDE_LEGACY_SECTIONS"))
+    fun `both probes read every legacy path`() {
+        // Core's probes (device_probes `Paths::legacy`) emit one section per pair; both the
+        // root and debug snapshots iterate them.
+        listOf("root_snapshot.rs", "debug_snapshot.rs").forEach { name ->
+            assertTrue("$name ignores the legacy sections", coreProbeSource(name).contains("paths.legacy"))
         }
-        val core = coreDiagnosticsSource()
+        val core = coreProbeSource("mod.rs")
         LEGACY_CONFIG_SECTIONS.forEach { (section, path) ->
             assertTrue("$section missing from core", core.contains("\"$section\"") && core.contains("\"$path\""))
         }

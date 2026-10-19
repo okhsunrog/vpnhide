@@ -63,9 +63,9 @@ same peercred-authenticated socket:
 - `collect_diagnostics(DiagnosticsRequest { probes, clear_dmesg })` runs a fixed probe
   set (`DiagnosticProbe`: root/debug snapshots, hook counters, dmesg, logcat by app tags /
   LSPosed boot / since a validated timestamp, kernel partitions and images, the LSPosed
-  modules db, ground-truth checks, per-uid VPN state, KPM list). Probe scripts are
-  compiled into core (`crates/core-daemon/probes/shell`); there is no way to pass a
-  command. `dmesg -c` runs only when `clear_dmesg` is set. Output up to 64 KiB is inline;
+  modules db, ground-truth checks, per-uid VPN state, KPM list). Probes are Rust in
+  core (`crates/core-daemon/src/device_probes`, run as core's own bounded
+  `vpnhide-core probe …` child; no shell); there is no way to pass a command. The kernel log is cleared (`klogctl`) only when `clear_dmesg` is set. Output up to 64 KiB is inline;
   larger output and artifacts are written to `<app data dir>/vpnhide-core-export/`, owned
   by the app uid (0600/0700) with the dir's SELinux label, and the report carries paths.
 - `root_effect(op, RootEffect)` applies a fixed effect: `SetSuperkey`, `ClearSuperkey`,

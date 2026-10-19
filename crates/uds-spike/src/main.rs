@@ -55,10 +55,7 @@ fn server(path: &str) {
         }
     };
     // Open the DAC gate wide so the SELinux layer is the only thing under test.
-    let _ = std::process::Command::new("chmod")
-        .arg("666")
-        .arg(path)
-        .status();
+    let _ = std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o666));
     println!(
         "server listening at {path} as {} — waiting for clients",
         my_context()

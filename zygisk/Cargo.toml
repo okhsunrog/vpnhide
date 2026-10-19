@@ -9,7 +9,7 @@ repository = "https://github.com/okhsunrog/vpnhide-zygisk"
 
 [lib]
 # Zygisk loads the module as an Android shared library. Name must match
-# what customize.sh places at /data/adb/modules/<id>/zygisk/arm64-v8a.so
+# what the manager's default extraction places at /data/adb/modules/<id>/zygisk/arm64-v8a.so
 name = "vpnhide_zygisk"
 crate-type = ["cdylib"]
 

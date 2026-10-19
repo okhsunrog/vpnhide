@@ -235,11 +235,7 @@ fn parse_module_names(raw: &[u8]) -> Result<Vec<String>, ()> {
 }
 
 fn apatch_kernel_version_hint() -> Option<i64> {
-    let output = process::Command::new("dmesg").output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| parse_kernel_version_hint(&String::from_utf8_lossy(&output.stdout)))?
+    parse_kernel_version_hint(&vpnhide_activator::sys::kernel_log().ok()?)
 }
 
 #[cfg(test)]

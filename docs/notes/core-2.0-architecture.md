@@ -482,7 +482,7 @@ can't dlopen it), and **R8 must not minify** the JNA runtime (`com.sun.jna.Nativ
 called from native code) — both scoped to the dev build here, and keep-rules or no-minify in prod.
 
 **Delivery and rights are manager-agnostic — core does not depend on any one manager.** The
-production core is a **Magisk-format module launched at boot** from `service.sh`/`post-fs-data.sh`,
+production core is a **Magisk-format module launched at boot** by a one-line `service.sh` exec of `vpnhide-core service`,
 the same format Magisk / KSU / KSU-Next / APatch all run (exactly how v1 already ships its
 backends). This splits cleanly by owner:
 

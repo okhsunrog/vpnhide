@@ -7,9 +7,10 @@ Requirements:
   - cargo-ndk
   - Android NDK at $ANDROID_NDK_HOME or auto-detected from $HOME/Android/Sdk/ndk/*
 
-Output: core/target/vpnhide-core.zip. The zip ships one daemon binary per ABI
-(`vpnhide-core.arm64`, `vpnhide-core.armv7`); customize.sh keeps the one that
-matches the device and renames it to `vpnhide-core`.
+Output: core/target/vpnhide-core.zip. The zip ships one daemon binary per ABI under
+`bin/<manager $ARCH>/vpnhide-core`; customize.sh (three unconditional lines) keeps
+the one the manager names for the device. All boot logic is the binary's own
+`vpnhide-core service`; `service.sh` is a single exec of it.
 """
 
 from __future__ import annotations
@@ -31,10 +32,10 @@ from build_lib import (  # type: ignore[import-not-found]
 # Android API level the daemon links against; matches the app's minSdk.
 API_LEVEL = "28"
 
-# cargo-ndk ABI -> (rust target triple, staged binary suffix customize.sh expects)
+# cargo-ndk ABI -> (rust target triple, the root manager's $ARCH for that ABI)
 ABIS = {
     "arm64-v8a": ("aarch64-linux-android", "arm64"),
-    "armeabi-v7a": ("armv7-linux-androideabi", "armv7"),
+    "armeabi-v7a": ("armv7-linux-androideabi", "arm"),
 }
 
 
@@ -82,7 +83,8 @@ def main() -> int:
         if not built.exists():
             print(f"error: expected {abi} binary at {built}, not found", file=sys.stderr)
             return 1
-        dest = staging / f"vpnhide-core.{suffix}"
+        dest = staging / "bin" / suffix / "vpnhide-core"
+        dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(built, dest)
         dest.chmod(0o755)
 

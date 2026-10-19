@@ -1,4 +1,4 @@
-//! Timed child-process helpers for core-driven loads (insmod / kpatch).
+//! Kernel module loading and the timed child-process helper for `kpatch`.
 
 use std::io::{ErrorKind, Read};
 use std::path::Path;
@@ -8,15 +8,47 @@ use std::time::{Duration, Instant};
 
 pub(crate) const CHILD_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Load the kmod artifact. On device this is `finit_module(2)` (no `insmod`, no shell);
+/// the error is `(errno, message)`. Host builds have no module loader to call, so the
+/// integration tests' orchestration runs against an `insmod` test double on `PATH`.
+#[cfg(target_os = "android")]
 pub(crate) fn load_kmod_artifact(
     artifact: &Path,
     filesystem_hiding: bool,
-) -> std::io::Result<Output> {
+) -> Result<(), (i32, String)> {
+    let params = format!("filesystem_hiding={}", u8::from(filesystem_hiding));
+    crate::sys::finit_module(artifact, &params).map_err(|e| {
+        (
+            e.raw_os_error().unwrap_or(-1),
+            format!("finit_module {}: {e}", artifact.display()),
+        )
+    })
+}
+
+#[cfg(not(target_os = "android"))]
+pub(crate) fn load_kmod_artifact(
+    artifact: &Path,
+    filesystem_hiding: bool,
+) -> Result<(), (i32, String)> {
     let mut command = Command::new("insmod");
     command
         .arg(artifact)
         .arg(format!("filesystem_hiding={}", u8::from(filesystem_hiding)));
-    output_with_timeout(&mut command, CHILD_COMMAND_TIMEOUT)
+    match output_with_timeout(&mut command, CHILD_COMMAND_TIMEOUT) {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => Err((
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )),
+        Err(e) if e.kind() == ErrorKind::TimedOut => Err((
+            124,
+            format!(
+                "insmod timed out after {}s",
+                CHILD_COMMAND_TIMEOUT.as_secs()
+            ),
+        )),
+        Err(e) => Err((126, e.to_string())),
+    }
 }
 
 pub(crate) fn output_with_timeout(

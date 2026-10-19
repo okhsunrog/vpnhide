@@ -1,68 +1,87 @@
 #!/usr/bin/env bash
-# Host check: common core module scaffold (single-writer; no legacy activator prefer-core).
+# Host check: the device runs no vpnhide shell logic. Every module script is the
+# irreducible manager stub, and core spawns no shell. Everything else is Rust in core.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MOD="$ROOT/core/module"
 fail=0
-need() {
-  if [ ! -e "$1" ]; then
-    echo "MISSING $1" >&2
-    fail=1
-  fi
+bad() {
+  echo "FAIL: $*" >&2
+  fail=1
 }
+need() { [ -e "$1" ] || bad "missing $1"; }
+
 need "$MOD/module.prop"
-need "$MOD/customize.sh"
-need "$MOD/post-fs-data.sh"
 need "$MOD/service.sh"
-need "$MOD/uninstall.sh"
+need "$MOD/customize.sh"
 need "$MOD/sepolicy.rule"
-need "$MOD/META-INF/com/google/android/update-binary"
-# Dual-writer shim must be gone
-if [ -e "$MOD/legacy-prefer-core.sh" ]; then
-  echo "legacy-prefer-core.sh must be deleted" >&2
-  fail=1
-fi
-grep -q '^id=vpnhide_core$' "$MOD/module.prop" || { echo "bad id"; fail=1; }
-grep -q 'VPNHIDE_BOOT_APPLY=1' "$MOD/service.sh" || { echo "service missing BOOT_APPLY"; fail=1; }
-grep -q 'VPNHIDE_CORE_ADOPT=1' "$MOD/service.sh" || { echo "service missing ADOPT"; fail=1; }
-grep -q 'VPNHIDE_APP_DATA_DIR=' "$MOD/service.sh" || { echo "service missing app socket dir"; fail=1; }
-grep -q 'VPNHIDE_ROOT_EFFECTS=1' "$MOD/service.sh" || { echo "service missing root effects"; fail=1; }
-# Core is the only backend loader/writer: the production lanes must be enabled.
-for VAR in VPNHIDE_KERNEL_MODULES VPNHIDE_KPM_LOCK VPNHIDE_ZYGISK_MODULE; do
-  grep -q "^export $VAR=" "$MOD/service.sh" || { echo "service missing $VAR"; fail=1; }
-done
-if grep -q 'allowed_uids' "$MOD/service.sh"; then
-  echo "service must not read an app-written uid allowlist" >&2
-  fail=1
-fi
-grep -q 'config_owned' "$MOD/post-fs-data.sh" || { echo "post-fs missing claim"; fail=1; }
-grep -q 'markers and applied policy retained' "$MOD/uninstall.sh" || { echo "uninstall not restricted"; fail=1; }
-if grep -E 'superkey|SUPERKEY|/data/adb/ap' "$MOD/uninstall.sh" "$MOD/service.sh" "$MOD/post-fs-data.sh"; then
-  echo "scripts must not touch APatch secrets" >&2
-  fail=1
-fi
-# Artifact modules must NOT ship activator boot scripts
-for f in   "$ROOT/kmod/module/service.sh"   "$ROOT/kmod/module/post-fs-data.sh"   "$ROOT/kmod/module/uninstall.sh"   "$ROOT/kmod/kpm/module/service.sh"   "$ROOT/kmod/kpm/module/post-fs-data.sh"   "$ROOT/kmod/kpm/module/uninstall.sh"   "$ROOT/zygisk/module/service.sh"   "$ROOT/zygisk/module/uninstall.sh"
-do
-  if [ -e "$f" ]; then
-    echo "activator boot/uninstall must be deleted: $f" >&2
-    fail=1
+grep -q '^id=vpnhide_core$' "$MOD/module.prop" || bad "core module.prop id"
+
+# 1. service.sh is exactly the exec stub: no env, paths, conditionals or backgrounding.
+expected_service='#!/system/bin/sh
+exec "${0%/*}/vpnhide-core" service'
+[ "$(cat "$MOD/service.sh")" = "$expected_service" ] ||
+  bad "core/module/service.sh must be exactly the exec stub:
+$expected_service"
+
+# 2. customize.sh only keeps this device's binary ($ARCH from the manager) executable.
+expected_customize='#!/system/bin/sh
+mv -f "$MODPATH/bin/$ARCH/vpnhide-core" "$MODPATH/vpnhide-core"
+rm -rf "${MODPATH:?}/bin"
+set_perm "$MODPATH/vpnhide-core" 0 0 0755'
+[ "$(cat "$MOD/customize.sh")" = "$expected_customize" ] ||
+  bad "core/module/customize.sh must be exactly the binary-placement hook:
+$expected_customize"
+
+# 3. No other script in any module tree: backend modules ship artifacts only (default
+#    extraction installs them) and core needs no post-fs-data / uninstall hook.
+INSTALLER="META-INF/com/google/android/update-binary"
+for tree in core/module kmod/module kmod/kpm/module zygisk/module; do
+  dir="$ROOT/$tree"
+  [ -d "$dir" ] || {
+    bad "missing module tree $tree"
+    continue
+  }
+  while IFS= read -r -d '' file; do
+    rel="${file#"$dir"/}"
+    case "$tree/$rel" in
+      core/module/service.sh | core/module/customize.sh) continue ;;
+      */"$INSTALLER") continue ;;
+    esac
+    case "$rel" in
+      *.sh) bad "$tree/$rel: module trees carry no scripts beyond the core stub" ;;
+    esac
+    if head -c 2 "$file" | grep -q '^#!'; then
+      bad "$tree/$rel: executable script in a module tree"
+    fi
+  done < <(find "$dir" -type f -print0)
+  # The recovery-flash shim is the one standard installer, identical everywhere.
+  if [ -f "$dir/$INSTALLER" ]; then
+    cmp -s "$dir/$INSTALLER" "$MOD/$INSTALLER" || bad "$tree/$INSTALLER differs from core's"
   fi
 done
-if [ -d "$ROOT/portshide" ]; then
-  echo "portshide/ must be deleted" >&2
-  fail=1
+[ -d "$ROOT/portshide" ] && bad "portshide/ must be deleted"
+[ -d "$ROOT/builtin/module" ] && bad "builtin/module companion must be deleted"
+[ -d "$ROOT/crates/core-daemon/probes" ] && bad "core probes are Rust (src/device_probes), not scripts"
+
+# 4. Core spawns no shell (and no su): logic is Rust; external binaries are invoked
+#    directly. Applies to every crate linked into core, tests included.
+if grep -rnE --include='*.rs' \
+  -e 'Command::new\("(/system)?(/bin/)?(sh|bash|mksh|su)"\)' \
+  -e '"/system/bin/sh"|"/bin/sh"' \
+  -e '\.args?\(\[?"-c"' \
+  "$ROOT/crates"; then
+  bad "core must not spawn a shell"
 fi
-if [ -d "$ROOT/builtin/module" ]; then
-  echo "builtin/module companion must be deleted" >&2
-  fail=1
-fi
+include_str_hits="$(grep -rnE --include='*.rs' 'include_str!\("[^"]*\.sh"\)' "$ROOT/crates" || true)"
+[ -z "$include_str_hits" ] || bad "core must not embed shell scripts: $include_str_hits"
+
 # Core is the only root process: the app must spawn none.
 sh "$ROOT/lsposed/tests/check_no_root_exec.sh" || fail=1
 if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck -s sh "$MOD/service.sh" "$MOD/post-fs-data.sh" "$MOD/uninstall.sh" "$MOD/customize.sh"     || fail=1
+  shellcheck -s sh -e SC2034 "$MOD/service.sh" "$MOD/customize.sh" || fail=1
 fi
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
-echo "OK core module scaffold (single-writer)"
+echo "OK module scaffold: exec stub only, no shell logic on device"

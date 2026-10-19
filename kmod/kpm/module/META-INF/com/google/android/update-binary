@@ -1,7 +1,7 @@
 #!/sbin/sh
-# KernelSU-Next / Magisk module installer entry point. APatch reads the
-# same format. The KPM itself is loaded at boot by post-fs-data.sh via the
-# KernelPatch runtime, not by this installer.
+# Recovery-flash shim of the Magisk module zip format: hand the zip to the root
+# manager's own installer. Never runs at boot; Magisk / KernelSU / APatch install
+# from their apps without it. Identical in every vpnhide module (scaffold check).
 umask 022
 ui_print() { echo "$1"; }
 require_new_magisk() {

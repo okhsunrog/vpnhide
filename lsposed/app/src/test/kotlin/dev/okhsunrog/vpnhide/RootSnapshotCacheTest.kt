@@ -101,22 +101,14 @@ class RootSnapshotCacheTest {
         assertTrue(thrown?.message?.contains("kmod_prop") == true)
     }
 
-    // Anti-drift guard: the detectors and the debug export read sections by name
-    // from this one snapshot. If a required section stops being emitted, module
-    // liveness silently reads wrong (this is exactly how the old debug bundle showed
-    // a healthy kmod as "inactive"). Pin that every required section is produced.
+    // Anti-drift guard: the detectors and the debug export read sections by name from
+    // this one snapshot. Core's `root_snapshot_emits_every_section_the_app_requires` test
+    // runs the Rust probe and checks its output against REQUIRED_ROOT_SNAPSHOT_SECTIONS;
+    // here, pin that the probe still reports the shell identity the honest-render gate needs.
     @Test
-    fun `the snapshot command emits every required section`() {
-        // Core runs the shared package inventory ahead of the snapshot script.
-        val command = coreProbeScript("package_inventory.sh") + coreProbeScript("root_snapshot.sh")
-        val missing = REQUIRED_ROOT_SNAPSHOT_SECTIONS.filterNot { command.contains(it) }
-        assertTrue("snapshot command is missing emits for: $missing", missing.isEmpty())
-    }
-
-    @Test
-    fun `the snapshot command probes the shell identity for the honest-render gate`() {
-        val command = coreProbeScript("root_snapshot.sh")
-        assertTrue(command.contains("snapshot_shell_uid"))
-        assertTrue("captures the effective uid", command.contains("id -u"))
+    fun `the snapshot probe reports the probe identity for the honest-render gate`() {
+        val source = coreProbeSource("root_snapshot.rs")
+        assertTrue(source.contains("\"snapshot_shell_uid\""))
+        assertTrue("captures the effective uid", source.contains("sys::uid()"))
     }
 }

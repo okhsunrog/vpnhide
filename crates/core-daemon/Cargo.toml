@@ -23,6 +23,8 @@ vpnhide_core_rpc = { path = "../core-rpc" }
 vpnhide_checks = { path = "../checks" }
 vpnhide_apatch_abi = { path = "../apatch-abi" }
 libc = "0.2"
+flate2 = "1"
+sha2 = "0.10"
 tarpc = { version = "0.38", features = ["serde-transport", "tokio1", "unix"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros", "time", "signal"] }
 tokio-serde = { version = "0.9", features = ["json"] }
