@@ -46,7 +46,7 @@ pub use edit::{ConfigAppField, ConfigEdit, ConfigSetField, ConfigToggle};
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract, §9): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -226,6 +226,24 @@ pub enum PhaseOutcome {
     Unknown,
 }
 
+/// Per-address-family Ports apply outcome on the wire. IPv4 and IPv6 are not one
+/// atomic transaction — callers must read both fields (§11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum FamilyApplyOutcome {
+    Confirmed,
+    FailedKnown,
+    Unknown,
+    NotAttempted,
+}
+
+/// Honest Ports dual-family report attached to an operation when a Ports phase ran.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PortsFamilyReport {
+    pub ipv4: FamilyApplyOutcome,
+    pub ipv6: FamilyApplyOutcome,
+    pub target_count: u32,
+}
+
 /// An operation's durable record: its phases and, once settled, its outcome (§5).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct OperationRecord {
@@ -233,6 +251,10 @@ pub struct OperationRecord {
     pub phases: Vec<PhaseRecord>,
     /// `None` while still running; `Some` once the operation settled.
     pub settled: Option<PhaseOutcome>,
+    /// Present when a Ports phase was attempted; carries per-family detail so a
+    /// single `PhaseOutcome` cannot pretend IPv4+IPv6 were atomic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ports: Option<PortsFamilyReport>,
 }
 
 /// The app <-> core boundary, spelled for a socket. Intent flows one way, published state
@@ -446,6 +468,11 @@ mod tests {
                     .map(|(phase, outcome)| PhaseRecord { phase, outcome })
                     .collect(),
                 settled: Some(PhaseOutcome::FailedKnown),
+                ports: Some(PortsFamilyReport {
+                    ipv4: FamilyApplyOutcome::Confirmed,
+                    ipv6: FamilyApplyOutcome::FailedKnown,
+                    target_count: 1,
+                }),
             });
             assert_eq!(survives("OperationRecord", &record), record);
         }
