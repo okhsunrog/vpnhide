@@ -4,7 +4,7 @@
 # shortcut is incomplete on some OEM ROMs, and tests assert its flag never
 # appears in the generated command — do not name it here either.
 #
-# Inputs (exported by the Kotlin caller, see ShellScripts.kt):
+# Inputs (exported by core, see diagnostics.rs snapshot_vars):
 #   VPNHIDE_SECTION_BEGIN / VPNHIDE_SECTION_END  section framing prefixes
 #   VPNHIDE_PM_USERS_STATUS / VPNHIDE_PM_USER_BEGIN / VPNHIDE_PM_USER_END
 #   VPNHIDE_PM_STDERR_TO_STDOUT   1 = fold pm's stderr into the section (bundle),

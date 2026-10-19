@@ -183,6 +183,18 @@ impl CoreKpm {
         }))
     }
 
+    /// Read-only `kpm_state` text for diagnostics: the status reply followed by the
+    /// stats pages, as the app's parsers read them. `None` when vpnhide is not loaded.
+    /// Each read takes the shared KPM lock, so this never races a config dispatch.
+    pub fn read_state(&self) -> Result<Option<String>> {
+        if !self.client.list_contains()? {
+            return Ok(None);
+        }
+        let mut out = self.client.ctl0_read("vpnhide 1 status")?;
+        out.push_str(&self.client.ctl0_stats()?);
+        Ok(Some(out))
+    }
+
     /// Runtime evidence, not module-directory presence. No canonical read or load.
     pub fn status(&self) -> Result<Option<vpnhide_protocol::Status>> {
         let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;

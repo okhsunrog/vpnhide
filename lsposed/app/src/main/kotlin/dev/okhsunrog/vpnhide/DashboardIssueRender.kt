@@ -87,10 +87,6 @@ private fun DashboardIssue.Native.nativeMessage(res: Resources): DashboardMessag
             err(res.getString(R.string.dashboard_issue_native_conflict_kernel), helpArticle = HelpArticle.CHOOSING_NATIVE)
         }
 
-        DashboardIssue.BuiltinCompanionMissing -> {
-            err(res.getString(R.string.dashboard_issue_builtin_companion_missing), helpArticle = HelpArticle.CHOOSING_NATIVE)
-        }
-
         DashboardIssue.RedundantKmodWithBuiltin -> {
             warn(res.getString(R.string.dashboard_issue_redundant_kmod_builtin), helpArticle = HelpArticle.CHOOSING_NATIVE)
         }
@@ -198,10 +194,6 @@ private fun DashboardIssue.Target.targetMessage(res: Resources): DashboardMessag
             info(res.getString(R.string.dashboard_issue_no_targets), helpArticle = HelpArticle.FIRST_SETUP)
         }
 
-        DashboardIssue.PortsNoObservers -> {
-            info(res.getString(R.string.dashboard_issue_ports_no_observers), helpArticle = HelpArticle.PORTS)
-        }
-
         is DashboardIssue.PortsRulesInactive -> {
             warn(
                 if (failureDetail == null) {
@@ -299,7 +291,7 @@ private val FlashableModuleKind.displayName: String
             FlashableModuleKind.Builtin -> "Built-in"
             FlashableModuleKind.Kpm -> "KPM"
             FlashableModuleKind.Zygisk -> "Zygisk"
-            FlashableModuleKind.Ports -> "Ports"
+            FlashableModuleKind.Core -> "Core"
         }
 
 // Complexity is inherent: three per-kind string tables (older / newer / equal),
@@ -326,7 +318,7 @@ private fun buildModuleVersionIssue(
                     FlashableModuleKind.Builtin -> R.string.dashboard_issue_builtin_version_mismatch
                     FlashableModuleKind.Kpm -> R.string.dashboard_issue_kpm_version_mismatch
                     FlashableModuleKind.Zygisk -> R.string.dashboard_issue_zygisk_version_mismatch
-                    FlashableModuleKind.Ports -> R.string.dashboard_issue_ports_version_mismatch
+                    FlashableModuleKind.Core -> R.string.dashboard_issue_core_version_mismatch
                 },
                 moduleVersion,
                 appVersion,
@@ -343,7 +335,7 @@ private fun buildModuleVersionIssue(
                         FlashableModuleKind.Builtin -> R.string.dashboard_issue_update_builtin
                         FlashableModuleKind.Kpm -> R.string.dashboard_issue_update_kpm
                         FlashableModuleKind.Zygisk -> R.string.dashboard_issue_update_zygisk
-                        FlashableModuleKind.Ports -> R.string.dashboard_issue_update_ports
+                        FlashableModuleKind.Core -> R.string.dashboard_issue_update_core
                     },
                     moduleVersion,
                     appVersion,
@@ -358,7 +350,7 @@ private fun buildModuleVersionIssue(
                     FlashableModuleKind.Builtin -> R.string.dashboard_issue_update_app_for_builtin
                     FlashableModuleKind.Kpm -> R.string.dashboard_issue_update_app_for_kpm
                     FlashableModuleKind.Zygisk -> R.string.dashboard_issue_update_app_for_zygisk
-                    FlashableModuleKind.Ports -> R.string.dashboard_issue_update_app_for_ports
+                    FlashableModuleKind.Core -> R.string.dashboard_issue_update_app_for_core
                 },
                 moduleVersion,
                 appVersion,

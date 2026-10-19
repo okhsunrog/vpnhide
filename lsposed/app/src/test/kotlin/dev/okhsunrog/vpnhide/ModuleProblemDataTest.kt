@@ -68,10 +68,8 @@ class ModuleProblemDataTest {
                 KpmProblemKind.NeedsSuperkey,
                 KpmProblemKind.LoadFailed("raw error"),
             ).map { ModuleProblem.Kpm(it) } +
-            FlashableModuleKind.entries.flatMap { kind ->
-                listOf(ActivatorState.Missing, ActivatorState.NotExecutable).map { state ->
-                    ModuleProblem.Integrity(ModuleIntegrityProblem(kind, state, "/data/adb/activator"))
-                }
+            FlashableModuleKind.entries.map { kind ->
+                ModuleProblem.Integrity(ModuleIntegrityProblem(kind, "/data/adb/modules/x/payload"))
             }
 
     // Exercise the production renderer with actual translations, without Android Resources.

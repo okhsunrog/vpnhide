@@ -678,7 +678,6 @@ class AppPickerDataTest {
             kmodModuleInstalled = true,
             kpmModuleInstalled = false,
             zygiskModuleInstalled = false,
-            portsModuleInstalled = true,
             uidToPkg = emptyMap(),
             canonicalConfig = CanonicalConfig(apps = apps.toMap(), settings = settings),
         )

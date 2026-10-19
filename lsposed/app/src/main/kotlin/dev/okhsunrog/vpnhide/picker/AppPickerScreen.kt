@@ -204,7 +204,6 @@ internal fun AppPickerScreen(
                         ?.settings
                         ?.optionalFeatures
                         .orEmpty(),
-            portsInstalled = targets.portsModuleInstalled,
             onToggle = { layer ->
                 onChange(
                     when (layer) {
@@ -346,7 +345,6 @@ private fun AppRow(
     nativeBackendId: NativeBackendId?,
     nativeHookFamily: NativeHookFamily,
     filesystemHidingEnabled: Boolean,
-    portsInstalled: Boolean,
     onToggle: (Layer) -> Unit,
     onJavaHooksChange: (List<String>?) -> Unit,
     onNativeHooksChange: (List<String>?) -> Unit,
@@ -405,21 +403,20 @@ private fun AppRow(
         ) {
             onToggle(Layer.APP_HIDING)
         }
-        if (portsInstalled) {
-            HookTargetChip(
-                label =
-                    roleLabel(
-                        compact = stringResource(R.string.chip_ports),
-                        full = stringResource(R.string.chip_ports_full),
-                        partial = app.ports && app.portPolicy != null,
-                        fullLabels = fullRoleLabels,
-                    ),
-                enabled = app.ports,
-                onToggle = { onToggle(Layer.PORTS) },
-                onConfigure = { portsDialogOpen = true },
-                contentDescription = stringResource(R.string.ports_policy_title),
-            )
-        }
+        // Ports is a core feature: always available.
+        HookTargetChip(
+            label =
+                roleLabel(
+                    compact = stringResource(R.string.chip_ports),
+                    full = stringResource(R.string.chip_ports_full),
+                    partial = app.ports && app.portPolicy != null,
+                    fullLabels = fullRoleLabels,
+                ),
+            enabled = app.ports,
+            onToggle = { onToggle(Layer.PORTS) },
+            onConfigure = { portsDialogOpen = true },
+            contentDescription = stringResource(R.string.ports_policy_title),
+        )
     }
 
     if (javaHookDialogOpen) {

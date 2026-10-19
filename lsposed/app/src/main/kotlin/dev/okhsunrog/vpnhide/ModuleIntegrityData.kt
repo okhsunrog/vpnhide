@@ -1,70 +1,79 @@
 package dev.okhsunrog.vpnhide
 
-internal enum class ActivatorState {
-    Executable,
+/** Whether an installed backend module still carries the payload core loads. */
+internal enum class ArtifactState {
+    Present,
     Missing,
-    NotExecutable,
     Unknown,
 }
 
-internal fun parseActivatorState(raw: String): ActivatorState =
+internal fun parseArtifactState(raw: String): ArtifactState =
     when (raw.trim()) {
-        "executable" -> ActivatorState.Executable
-        "missing" -> ActivatorState.Missing
-        "not_executable" -> ActivatorState.NotExecutable
-        else -> ActivatorState.Unknown
+        "present" -> ArtifactState.Present
+        "missing" -> ArtifactState.Missing
+        else -> ArtifactState.Unknown
     }
 
 internal data class ModuleIntegrityProblem(
     val kind: FlashableModuleKind,
-    val activatorState: ActivatorState,
-    val activatorPath: String,
+    /** The payload core expects in the module directory, as the user would look for it. */
+    val artifactPath: String,
 ) {
-    val reason: ModuleBrokenReason
-        get() =
-            when (activatorState) {
-                ActivatorState.Missing -> ModuleBrokenReason.ActivatorMissing
-                ActivatorState.NotExecutable -> ModuleBrokenReason.ActivatorNotExecutable
-                ActivatorState.Executable, ActivatorState.Unknown -> error("healthy or unknown activator is not an integrity problem")
-            }
+    val reason: ModuleBrokenReason get() = ModuleBrokenReason.ArtifactMissing
 }
 
 internal fun classifyModuleIntegrity(
     kind: FlashableModuleKind,
     module: ModuleState,
-    activatorState: ActivatorState,
-    activatorPath: String,
+    artifactState: ArtifactState,
     disabled: Boolean,
 ): ModuleIntegrityProblem? {
-    if (module !is ModuleState.Installed || disabled || activatorState !in ACTIVATOR_FAILURE_STATES) return null
-    return ModuleIntegrityProblem(kind, activatorState, activatorPath)
+    val artifactPath = moduleArtifactPath(kind) ?: return null
+    if (module !is ModuleState.Installed || disabled || artifactState != ArtifactState.Missing) return null
+    return ModuleIntegrityProblem(kind, artifactPath)
 }
 
-private fun sectionPrefix(kind: FlashableModuleKind): String =
+/** Section prefix of a module the root snapshot inspects; null when there is no module directory. */
+private fun sectionPrefix(kind: FlashableModuleKind): String? =
     when (kind) {
         FlashableModuleKind.Kmod -> "kmod"
-        FlashableModuleKind.Builtin -> "builtin"
+
+        // The in-tree driver is part of the kernel image: nothing to install.
+        FlashableModuleKind.Builtin -> null
+
         FlashableModuleKind.Kpm -> "kpm"
+
         FlashableModuleKind.Zygisk -> "zygisk"
-        FlashableModuleKind.Ports -> "ports"
+
+        FlashableModuleKind.Core -> "core"
+    }
+
+/** The payload core loads from each backend module (the snapshot's `<prefix>_artifact_state`). */
+internal fun moduleArtifactPath(kind: FlashableModuleKind): String? =
+    when (kind) {
+        FlashableModuleKind.Kmod -> "$KMOD_MODULE_DIR/vpnhide_kmod.ko"
+
+        FlashableModuleKind.Kpm -> "$KPM_MODULE_DIR/vpnhide.kpm"
+
+        FlashableModuleKind.Zygisk -> "$ZYGISK_MODULE_DIR/zygisk/"
+
+        // Core missing its binary is not running, so it could not have answered the snapshot.
+        FlashableModuleKind.Builtin, FlashableModuleKind.Core -> null
     }
 
 /**
- * True when the module's activator is absent/non-executable only because a
- * complete install is staged in modules_update/ awaiting the next reboot (the
- * root manager swaps it into modules/ on boot). This is "installed, reboot
- * needed", not a corrupt install — callers suppress the integrity error and
- * surface a reboot warning instead. Absent snapshot field ⇒ false.
+ * True when the module has an update staged in modules_update/ awaiting the next
+ * reboot (the root manager swaps it into modules/ on boot). This is "installed,
+ * reboot needed", not a corrupt install — callers suppress the integrity error
+ * and surface a reboot warning instead. Absent snapshot field ⇒ false.
  */
 internal fun modulePendingReboot(
     kind: FlashableModuleKind,
     module: ModuleState,
     sections: Map<String, String>,
 ): Boolean {
-    val prefix = sectionPrefix(kind)
+    val prefix = sectionPrefix(kind) ?: return false
     if (module !is ModuleState.Installed || sections["${prefix}_disabled"]?.trim() == "1") return false
-    val activatorState = parseActivatorState(sections["${prefix}_activator_state"].orEmpty())
-    if (activatorState !in ACTIVATOR_FAILURE_STATES) return false
     return sections["${prefix}_pending_update"]?.trim() == "1"
 }
 
@@ -72,16 +81,14 @@ internal fun moduleIntegrityProblem(
     kind: FlashableModuleKind,
     module: ModuleState,
     sections: Map<String, String>,
-    activatorPath: String,
 ): ModuleIntegrityProblem? {
     // A staged install pending reboot is not an integrity failure.
     if (modulePendingReboot(kind, module, sections)) return null
-    val prefix = sectionPrefix(kind)
+    val prefix = sectionPrefix(kind) ?: return null
     return classifyModuleIntegrity(
         kind = kind,
         module = module,
-        activatorState = parseActivatorState(sections["${prefix}_activator_state"].orEmpty()),
-        activatorPath = activatorPath,
+        artifactState = parseArtifactState(sections["${prefix}_artifact_state"].orEmpty()),
         disabled = sections["${prefix}_disabled"]?.trim() == "1",
     )
 }
@@ -91,5 +98,3 @@ internal fun ModuleState.withBrokenReason(reason: ModuleBrokenReason?): ModuleSt
 
 internal fun ModuleState.withPendingReboot(pending: Boolean): ModuleState =
     if (this is ModuleState.Installed && pending) copy(pendingReboot = true) else this
-
-private val ACTIVATOR_FAILURE_STATES = setOf(ActivatorState.Missing, ActivatorState.NotExecutable)

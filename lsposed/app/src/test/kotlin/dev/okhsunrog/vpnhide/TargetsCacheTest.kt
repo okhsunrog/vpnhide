@@ -15,7 +15,7 @@ class TargetsCacheTest {
                     mapOf(
                         "kmod_module_dir" to "1",
                         "zygisk_module_dir" to "0",
-                        "ports_prop" to "version=1.2.3",
+                        "core_prop" to "version=1.2.3",
                         "canonical_config" to
                             """
                             {
@@ -43,7 +43,6 @@ class TargetsCacheTest {
 
         assertTrue(targets.kmodModuleInstalled)
         assertFalse(targets.zygiskModuleInstalled)
-        assertTrue(targets.portsModuleInstalled)
         assertEquals(setOf("dev.okhsunrog.vpnhide", "com.bank.app", "com.chat.app"), targets.nativeTargets)
         assertEquals(setOf("system"), targets.lsposedTargets)
         assertEquals(setOf("com.hidden.one", "com.hidden.two"), targets.hiddenPkgs)
@@ -101,7 +100,7 @@ class TargetsCacheTest {
                         "kmod_module_dir" to "1",
                         "zygisk_module_dir" to "1",
                         "kpm_module_dir" to "0",
-                        "ports_prop" to "version=1.2.3",
+                        "core_prop" to "version=1.2.3",
                         "canonical_config" to
                             """
                             {
@@ -142,7 +141,7 @@ class TargetsCacheTest {
                 "kmod_module_dir" to "0",
                 "zygisk_module_dir" to "1",
                 "kpm_module_dir" to "0",
-                "ports_prop" to "",
+                "core_prop" to "",
                 "canonical_config" to "",
                 "superkey_saved" to "0",
                 "pm_packages" to "",

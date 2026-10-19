@@ -11,10 +11,8 @@ package dev.okhsunrog.vpnhide
 // reboot first.
 internal enum class ResetBlocker {
     KmodInstalled,
-    BuiltinInstalled,
     KpmInstalled,
     ZygiskInstalled,
-    PortsInstalled,
     KernelStillHooked,
     LsposedActive,
 }
@@ -22,25 +20,22 @@ internal enum class ResetBlocker {
 /**
  * Preconditions for a safe full reset, reusing the dashboard's tested module /
  * hook detection. Empty list == ready. A backend whose module dir is still
- * present (even disabled) blocks, as does a still-loaded .ko
+ * present (even disabled) blocks, as does a still-live kernel backend
  * ([kernelCtlPresent], from `/proc/vpnhide_ctl`) or an LSPosed hook active this
- * boot.
+ * boot. Core itself is no blocker: it is the one that performs the reset, and
+ * Ports rules are core's, not a module's.
  */
 internal fun resetBlockers(
     kmod: ModuleState,
     kpm: ModuleState,
     zygisk: ModuleState,
-    ports: ModuleState,
     lsposed: LsposedState,
     kernelCtlPresent: Boolean,
-    builtin: ModuleState = ModuleState.NotInstalled,
 ): List<ResetBlocker> =
     buildList {
         if (kmod is ModuleState.Installed) add(ResetBlocker.KmodInstalled)
-        if (builtin is ModuleState.Installed) add(ResetBlocker.BuiltinInstalled)
         if (kpm is ModuleState.Installed) add(ResetBlocker.KpmInstalled)
         if (zygisk is ModuleState.Installed) add(ResetBlocker.ZygiskInstalled)
-        if (ports is ModuleState.Installed) add(ResetBlocker.PortsInstalled)
         if (kernelCtlPresent) add(ResetBlocker.KernelStillHooked)
         if (lsposed is LsposedState.Active) add(ResetBlocker.LsposedActive)
     }

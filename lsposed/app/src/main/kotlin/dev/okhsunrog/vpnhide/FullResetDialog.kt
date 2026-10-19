@@ -28,10 +28,8 @@ import kotlinx.coroutines.launch
 private fun resetBlockerLabel(blocker: ResetBlocker): Int =
     when (blocker) {
         ResetBlocker.KmodInstalled -> R.string.reset_blocker_kmod
-        ResetBlocker.BuiltinInstalled -> R.string.reset_blocker_builtin
         ResetBlocker.KpmInstalled -> R.string.reset_blocker_kpm
         ResetBlocker.ZygiskInstalled -> R.string.reset_blocker_zygisk
-        ResetBlocker.PortsInstalled -> R.string.reset_blocker_ports
         ResetBlocker.KernelStillHooked -> R.string.reset_blocker_kernel
         ResetBlocker.LsposedActive -> R.string.reset_blocker_lsposed
     }
@@ -74,10 +72,8 @@ internal fun FullResetDialog(
         dash?.let {
             resetBlockers(
                 kmod = it.kmod,
-                builtin = detectBuiltinModule(snap?.sections.orEmpty()),
                 kpm = it.kpm,
                 zygisk = it.zygisk,
-                ports = it.ports,
                 lsposed = it.lsposed,
                 kernelCtlPresent = snap?.sections?.get("proc_exists")?.trim() == "1",
             )

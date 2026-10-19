@@ -371,6 +371,6 @@ internal fun toggleAllProtection(
         native = targets.anyNativeInstalled && selected,
         nativeOverrides = NativeHookOverrides(),
         appHiding = selected,
-        ports = targets.portsModuleInstalled && selected,
+        ports = selected,
     )
 }

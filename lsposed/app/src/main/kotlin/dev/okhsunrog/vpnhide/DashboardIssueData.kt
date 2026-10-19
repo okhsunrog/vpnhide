@@ -30,10 +30,6 @@ internal fun DashboardIssue.toReason(): DashboardIssueReason =
             DashboardIssueReason("native_conflict_kernel")
         }
 
-        DashboardIssue.BuiltinCompanionMissing -> {
-            DashboardIssueReason("builtin_companion_missing")
-        }
-
         DashboardIssue.RedundantKmodWithBuiltin -> {
             DashboardIssueReason("redundant_kmod_with_builtin")
         }
@@ -103,10 +99,6 @@ internal fun DashboardIssue.toReason(): DashboardIssueReason =
 
         DashboardIssue.NoTargets -> {
             DashboardIssueReason("no_targets")
-        }
-
-        DashboardIssue.PortsNoObservers -> {
-            DashboardIssueReason("ports_no_observers")
         }
 
         is DashboardIssue.PortsRulesInactive -> {
@@ -181,5 +173,5 @@ private fun FlashableModuleKind.reasonId(): String =
         FlashableModuleKind.Builtin -> "builtin"
         FlashableModuleKind.Kpm -> "kpm"
         FlashableModuleKind.Zygisk -> "zygisk"
-        FlashableModuleKind.Ports -> "ports"
+        FlashableModuleKind.Core -> "core"
     }

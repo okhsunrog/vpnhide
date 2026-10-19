@@ -66,23 +66,19 @@ class DebugShellSnapshotTest {
 
         // Paths reach the script through core's env (diagnostics.rs); check both the
         // value core passes and the script's use of it.
-        assertTrue(command.contains("\"VPNHIDE_BUILTIN_DIR\"") && command.contains("\"$BUILTIN_MODULE_DIR\""))
-        assertTrue(command.contains("\"VPNHIDE_BUILTIN_ACTIVATOR\"") && command.contains("\"$BUILTIN_ACTIVATOR\""))
-        assertTrue(command.contains("\"VPNHIDE_BUILTIN_LOAD_STATUS\"") && command.contains("\"$BUILTIN_LOAD_STATUS_FILE\""))
-        assertTrue(command.contains("emit_file builtin_prop"))
-        assertTrue(command.contains("emit_eval builtin_module_state"))
-        assertTrue(command.contains("emit_file builtin_load_status"))
-        assertTrue(command.contains("\"VPNHIDE_KPM_ACTIVATOR\"") && command.contains("\"$KPM_ACTIVATOR\""))
-        assertTrue(command.contains("${'$'}VPNHIDE_KPM_ACTIVATOR state"))
+        assertTrue(command.contains("\"VPNHIDE_CORE_DIR\"") && command.contains("\"$CORE_MODULE_DIR\""))
+        assertTrue(command.contains("emit_file core_prop"))
+        assertTrue(command.contains("emit_eval core_module_state"))
+        assertTrue(command.contains("emit_file core_boot_status"))
+        assertTrue(command.contains("\"${'$'}VPNHIDE_CORE_EXE\" observe kpm-state"))
+        // 2.0 modules ship artifacts only; nothing a module ships is ever run.
+        assertFalse(coreProbeScript("debug_snapshot.sh").contains("ACTIVATOR"))
         assertTrue(command.contains("\"VPNHIDE_KPM_LOAD_STATUS\"") && command.contains("\"$KPM_LOAD_STATUS_FILE\""))
         assertTrue(command.contains("hash_file ${'$'}VPNHIDE_KPM_DIR/vpnhide.kpm"))
         assertTrue(command.contains("\"VPNHIDE_KMOD_LOAD_STATUS\"") && command.contains("\"$KMOD_LOAD_STATUS_FILE\""))
         assertTrue(command.contains("cat ${'$'}VPNHIDE_PROC_CTL"))
         assertTrue(command.contains(ZYGISK_STATUS_FILE))
         assertTrue(command.contains("${'$'}VPNHIDE_ZYGISK_DIR/zygisk/arm64-v8a.so"))
-        assertTrue(command.contains("\"${'$'}VPNHIDE_PORTS_DIR\"/module.prop"))
-        assertTrue(command.contains(PORTS_LOAD_STATUS_FILE))
-        assertTrue(command.contains(PORTS_LOAD_LOG_FILE))
         assertTrue(command.contains("iptables -w 2 -S vpnhide_out"))
         assertTrue(command.contains("ip6tables -w 2 -S vpnhide_out6"))
         assertTrue(command.contains(LSPOSED_STATE_FILE))
@@ -101,7 +97,7 @@ class DebugShellSnapshotTest {
 
         assertTrue(command.contains("\"VPNHIDE_PROC_CTL\"") && command.contains("\"$PROC_CTL\""))
         assertTrue(command.contains("cat ${'$'}VPNHIDE_PROC_CTL"))
-        assertTrue(command.contains("${'$'}VPNHIDE_KPM_ACTIVATOR state"))
+        assertTrue(command.contains("\"${'$'}VPNHIDE_CORE_EXE\" observe kpm-state"))
         assertTrue(command.contains(LSPOSED_STATE_FILE))
         assertTrue(command.contains(ZYGISK_STATUS_FILE))
         // The counter baseline is consumed only through counts (backend+uid+hookId),

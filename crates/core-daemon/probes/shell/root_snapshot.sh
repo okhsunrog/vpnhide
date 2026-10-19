@@ -1,11 +1,11 @@
 # One batched root probe: every piece of system state the dashboard and the
-# Hiding tab derive from, framed into named sections so one su round-trip
-# answers everything.
+# Hiding tab derive from, framed into named sections so one
+# request answers everything. Core runs it for the `root_snapshot` probe.
 #
-# Inputs (assigned by the Kotlin caller, see ShellScripts.kt): VPNHIDE_SECTION_*,
+# Inputs (assigned by core, see diagnostics.rs snapshot_vars): VPNHIDE_SECTION_*,
 # VPNHIDE_TIMING, the module/file paths, VPNHIDE_LEGACY_SECTIONS
 # ("name=path name=path"), VPNHIDE_WITH_PM (1 = include the package inventory)
-# and VPNHIDE_KPM_PROBE_PATH.
+# and VPNHIDE_CORE_EXE (core itself, for its read-only `observe` children).
 #
 # vpnhide_package_inventory() comes from package_inventory.sh, which the caller
 # concatenates ahead of this file.
@@ -14,10 +14,6 @@
 # inside emit_eval, so their $VAR references must survive to that point. That is
 # what SC2016 warns about, so it is off for this file.
 # shellcheck disable=SC2016
-# Read inside a single-quoted emit_eval body below, which shellcheck
-# cannot follow.
-# shellcheck disable=SC2034
-KPM_RUNTIME_PROBE="$VPNHIDE_KPM_PROBE_PATH"
 emit_cmd() {
   NAME="$1"
   shift
@@ -41,23 +37,24 @@ emit_eval() {
   eval "$*" 2>/dev/null || true
   echo "${VPNHIDE_SECTION_END}$NAME"
 }
-activator_state() {
-  if [ -x "$1" ]; then
-    echo executable
-  elif [ -e "$1" ]; then
-    echo not_executable
-  else
-    echo missing
-  fi
+# An installed module's payload: "present" when every listed file is a regular
+# file, otherwise "missing". Core loads exactly these artifacts.
+artifact_state() {
+  for ARTIFACT in "$@"; do
+    [ -f "$ARTIFACT" ] || {
+      echo missing
+      return
+    }
+  done
+  echo present
 }
-# 1 when a complete module is staged in modules_update/ awaiting the next
-# reboot: the root manager keeps the freshly-installed files (activator,
-# scripts, payload) there and only swaps them into modules/ on boot, so the
-# active dir legitimately has no activator yet. Distinguishes "just
-# installed, reboot needed" from a genuinely corrupt install.
+# 1 when a module update is staged in modules_update/ awaiting the next reboot:
+# the root manager keeps the freshly-installed files there and only swaps them
+# into modules/ on boot. Distinguishes "just installed, reboot needed" from a
+# genuinely corrupt install.
 pending_update() {
   STAGED=/data/adb/modules_update/${1##*/}
-  if [ -x "$STAGED/activator" ]; then
+  if [ -f "$STAGED/module.prop" ]; then
     echo 1
   elif [ -f "$1/update" ] && [ -d "$STAGED" ]; then
     echo 1
@@ -94,29 +91,29 @@ phase_end() {
 phase_module_props() {
   phase_start module_props
   emit_file kmod_prop "$VPNHIDE_KMOD_DIR"/module.prop
-  emit_file builtin_prop "$VPNHIDE_BUILTIN_DIR"/module.prop
   emit_file zygisk_prop "$VPNHIDE_ZYGISK_DIR"/module.prop
   emit_file kpm_prop "$VPNHIDE_KPM_DIR"/module.prop
-  emit_file ports_prop "$VPNHIDE_PORTS_DIR"/module.prop
+  emit_file core_prop "$VPNHIDE_CORE_DIR"/module.prop
   emit_eval kmod_module_dir '[ -d $VPNHIDE_KMOD_DIR ] && echo 1 || echo 0'
-  emit_eval builtin_module_dir '[ -d $VPNHIDE_BUILTIN_DIR ] && echo 1 || echo 0'
   emit_eval zygisk_module_dir '[ -d $VPNHIDE_ZYGISK_DIR ] && echo 1 || echo 0'
   emit_eval kpm_module_dir '[ -d $VPNHIDE_KPM_DIR ] && echo 1 || echo 0'
-  emit_eval kmod_activator_state 'activator_state $VPNHIDE_KMOD_ACTIVATOR'
-  emit_eval builtin_activator_state 'activator_state $VPNHIDE_BUILTIN_ACTIVATOR'
-  emit_eval kpm_activator_state 'activator_state $VPNHIDE_KPM_ACTIVATOR'
-  emit_eval zygisk_activator_state 'activator_state $VPNHIDE_ZYGISK_ACTIVATOR'
-  emit_eval ports_activator_state 'activator_state $VPNHIDE_PORTS_ACTIVATOR'
+  emit_eval core_module_dir '[ -d $VPNHIDE_CORE_DIR ] && echo 1 || echo 0'
+  emit_eval kmod_artifact_state 'artifact_state $VPNHIDE_KMOD_DIR/vpnhide_kmod.ko'
+  emit_eval kpm_artifact_state 'artifact_state $VPNHIDE_KPM_DIR/vpnhide.kpm'
+  emit_eval zygisk_artifact_state '
+    if [ -f $VPNHIDE_ZYGISK_DIR/zygisk/arm64-v8a.so ] || [ -f $VPNHIDE_ZYGISK_DIR/zygisk/armeabi-v7a.so ]; then
+      echo present
+    else
+      echo missing
+    fi'
   emit_eval kmod_disabled '[ -f $VPNHIDE_KMOD_DIR/disable ] && echo 1 || echo 0'
-  emit_eval builtin_disabled '[ -f $VPNHIDE_BUILTIN_DIR/disable ] && echo 1 || echo 0'
   emit_eval kpm_disabled '[ -f $VPNHIDE_KPM_DIR/disable ] && echo 1 || echo 0'
   emit_eval zygisk_disabled '[ -f $VPNHIDE_ZYGISK_DIR/disable ] && echo 1 || echo 0'
-  emit_eval ports_disabled '[ -f $VPNHIDE_PORTS_DIR/disable ] && echo 1 || echo 0'
+  emit_eval core_disabled '[ -f $VPNHIDE_CORE_DIR/disable ] && echo 1 || echo 0'
   emit_eval kmod_pending_update 'pending_update $VPNHIDE_KMOD_DIR'
-  emit_eval builtin_pending_update 'pending_update $VPNHIDE_BUILTIN_DIR'
   emit_eval kpm_pending_update 'pending_update $VPNHIDE_KPM_DIR'
   emit_eval zygisk_pending_update 'pending_update $VPNHIDE_ZYGISK_DIR'
-  emit_eval ports_pending_update 'pending_update $VPNHIDE_PORTS_DIR'
+  emit_eval core_pending_update 'pending_update $VPNHIDE_CORE_DIR'
   phase_end
 }
 phase_target_files() {
@@ -143,21 +140,18 @@ phase_kmod_status_files() {
   emit_file current_boot_id /proc/sys/kernel/random/boot_id
   emit_file kmod_load_status "$VPNHIDE_KMOD_LOAD_STATUS"
   emit_file kmod_load_dmesg "$VPNHIDE_KMOD_LOAD_DMESG"
-  emit_file builtin_load_status "$VPNHIDE_BUILTIN_LOAD_STATUS"
   emit_file zygisk_status "$VPNHIDE_ZYGISK_STATUS"
   emit_file kpm_load_status "$VPNHIDE_KPM_LOAD_STATUS"
-  emit_file ports_load_status "$VPNHIDE_PORTS_LOAD_STATUS"
+  emit_file core_boot_status "$VPNHIDE_CORE_BOOT_STATUS"
   phase_end
 }
 phase_runtime_status_files() {
   phase_start runtime_status_files
   emit_cmd kernel_release uname -r
   emit_eval kmod_state '[ -e $VPNHIDE_PROC_CTL ] && cat $VPNHIDE_PROC_CTL || true'
-  emit_eval kpm_state 'if [ -x $VPNHIDE_KPM_ACTIVATOR ] && [ ! -f $VPNHIDE_KPM_DIR/disable ]; then $VPNHIDE_KPM_ACTIVATOR state; fi'
+  emit_eval kpm_state '"$VPNHIDE_CORE_EXE" observe kpm-state'
   emit_eval kpm_runtime_modules '
-    if [ -x "$KPM_RUNTIME_PROBE" ]; then
-      "$KPM_RUNTIME_PROBE" observe kpm-list 2>/dev/null
-    fi'
+    "$VPNHIDE_CORE_EXE" observe kpm-list 2>/dev/null'
   emit_file lsposed_state "$VPNHIDE_LSPOSED_STATE"
   emit_cmd getenforce getenforce
   # Is a *live* KPM runtime present (kernel actually patched, able to load
@@ -229,8 +223,8 @@ phase_ports_chain() {
   # "1" when both chains exist and OUTPUT jumps to them, "0" when a chain or a
   # jump is absent (iptables exits 1 for a missing chain, 2 for a missing
   # target), "error=<rc>" for anything else: 4 when another process holds the
-  # xtables lock (netd on a network change, the VPN client, the ports
-  # activator), 3 without CAP_NET_ADMIN. -w waits briefly for the lock instead
+  # xtables lock (netd on a network change, the VPN client, core
+  # applying Ports), 3 without CAP_NET_ADMIN. -w waits briefly for the lock instead
   # of failing at once; a probe that still could not run is reported as an
   # error and rendered as "not verified", never as an inactive module.
   emit_eval ports_chain '
