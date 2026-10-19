@@ -6,6 +6,9 @@
 
 <p align="center">对选定应用隐藏活动的 Android VPN 连接。</p>
 
+> **core-2.0 cutover:** Activator binaries, `vpnhide-ports.zip`, and `vpnhide-builtin.zip` are removed. Install **`vpnhide_core`** — it alone applies Native/Zygisk/Ports. Artifact zips (kmod/KPM/Zygisk) ship binaries only. See [docs/notes/core-2.0-activator-cutover.md](docs/notes/core-2.0-activator-cutover.md).
+
+
 <p align="center">
   <a href="https://github.com/okhsunrog/vpnhide/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/okhsunrog/vpnhide/ci.yml?label=CI" alt="CI"></a>
   <a href="https://github.com/okhsunrog/vpnhide/releases/latest"><img src="https://img.shields.io/github/v/release/okhsunrog/vpnhide" alt="Release"></a>

@@ -50,10 +50,8 @@ jobs:
     outputs:
       kmod: ${{ steps.decide.outputs.kmod }}
       kpm: ${{ steps.decide.outputs.kpm }}
-      builtin: ${{ steps.decide.outputs.builtin }}
       zygisk: ${{ steps.decide.outputs.zygisk }}
       lsposed: ${{ steps.decide.outputs.lsposed }}
-      portshide: ${{ steps.decide.outputs.portshide }}
       # Any kernel-side area: the QEMU probes feed kmod, kpm and builtin.
       native: ${{ steps.decide.outputs.native }}
       # The Rust workspace (including app-native crates and zygisk).
@@ -73,7 +71,7 @@ jobs:
               - 'kmod/test/**'
               - 'kmod/generated/**'
               - 'scripts/codegen*.py'
-            # The Rust workspace: the activator every module zip bundles, the
+            # The Rust workspace: protocol/activator lib (linked by core), the
             # app-native crates and zygisk. A change here packages every area
             # (cross-compiles and zips), but the QEMU kernels run nothing from
             # it, so it does not start the QEMU matrix on its own.
@@ -102,8 +100,6 @@ jobs:
               - 'zygisk/**'
             lsposed:
               - 'lsposed/**'
-            portshide:
-              - 'portshide/**'
       - id: decide
         env:
           EVENT: ${{ github.event_name }}
@@ -116,7 +112,6 @@ jobs:
           F_BUILTIN: ${{ steps.filter.outputs.builtin }}
           F_ZYGISK: ${{ steps.filter.outputs.zygisk }}
           F_LSPOSED: ${{ steps.filter.outputs.lsposed }}
-          F_PORTSHIDE: ${{ steps.filter.outputs.portshide }}
         run: |
           full=false
           [ "$EVENT" != pull_request ] && full=true
@@ -145,7 +140,6 @@ jobs:
           area builtin "$F_BUILTIN"
           area zygisk "$F_ZYGISK"
           area lsposed "$F_LSPOSED"
-          area portshide "$F_PORTSHIDE"
           echo "native=$native" >> "$GITHUB_OUTPUT"
           echo "native: $native"
           if [ "$full" = true ] || [ "$F_SHARED" = true ] || [ "$F_SHARED_RUST" = true ]; then rust=true; fi
@@ -284,11 +278,10 @@ jobs:
             apt-get update -qq && apt-get install -y --no-install-recommends shellcheck >/dev/null
           fi
           shellcheck -x -e SC2034,SC3043 \
-            kmod/module/customize.sh kmod/module/post-fs-data.sh kmod/module/service.sh kmod/module/uninstall.sh \
-            kmod/kpm/module/customize.sh kmod/kpm/module/post-fs-data.sh kmod/kpm/module/service.sh kmod/kpm/module/uninstall.sh \
-            zygisk/module/customize.sh zygisk/module/service.sh zygisk/module/uninstall.sh \
-            portshide/module/customize.sh portshide/module/service.sh \
-            portshide/module/uninstall.sh \
+            kmod/module/customize.sh \
+            kmod/kpm/module/customize.sh \
+            zygisk/module/customize.sh \
+            core/module/customize.sh core/module/post-fs-data.sh core/module/service.sh core/module/uninstall.sh \
             scripts/clean-device.sh scripts/update-json.sh \
             kmod/test/run.sh kmod/test/build-kernel.sh kmod/test/init.sh \
             kmod/test/verify-trim-abi.sh \
@@ -356,39 +349,10 @@ jobs:
       - name: cargo test (workspace)
         run: cargo test -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_zygisk -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_app_helper -p vpnhide_core_rpc -p vpnhide_core_daemon
 
-  kmod-activator:
-    needs: [setup, changes]
-    if: needs.changes.outputs.kmod == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    container:
-      image: ${{ needs.setup.outputs.image }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-
-      - uses: ./.github/actions/cargo-cache
-        with:
-          key: kmod-activator
-
-      - name: Build kmod activator
-        run: cargo ndk -t arm64-v8a build --release -p vpnhide_activator --bin kmod
-
-      - name: Upload kmod activator
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: kmod-activator
-          path: target/aarch64-linux-android/release/kmod
-          if-no-files-found: error
 
   kmod:
-    needs: [changes, kmod-activator]
-    if: ${{ !cancelled() && needs.changes.outputs.kmod == 'true' && needs.kmod-activator.result == 'success' }}
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.kmod == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -416,15 +380,7 @@ jobs:
       - name: Mark workspace safe
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Download kmod activator
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: kmod-activator
-          path: .artifacts/kmod-activator
-
       - name: Build and package kernel module
-        env:
-          VPNHIDE_KMOD_ACTIVATOR: ${{ github.workspace }}/.artifacts/kmod-activator/kmod
         run: python3 kmod/build.py --kmi $KMI --inside-container
 
       - name: Upload artifact
@@ -759,7 +715,7 @@ jobs:
 
   # The KPM ships as ONE cross-version flashable module (Magisk/KSU format,
   # APatch reads it too), not a raw .kpm: `make kpm` builds the relocatable
-  # object, kmod/kpm/build.py stages the boot scripts + stamps module.prop.
+  # object, kmod/kpm/build.py stages the .kpm artifact + stamps module.prop.
   # The kpm-qemu / kpm-qemu-legacy jobs above are the runtime *test* gate; this
   # job is the *publish* gate.
   kpm:
@@ -843,43 +799,7 @@ jobs:
           path: zygisk/target/vpnhide-zygisk.zip
           if-no-files-found: error
 
-  # Publish gate for the in-tree backend's companion module. Unlike kmod it
-  # ships no .ko (the driver is compiled into the user's kernel); build.py only
-  # cross-compiles the `builtin` activator (cargo-ndk, arm64) and zips
-  # builtin/module/ into one KMI-agnostic vpnhide-builtin.zip. The builtin-qemu
-  # jobs are the runtime *test* gate; this is the *publish* gate.
-  builtin:
-    needs: [setup, changes]
-    if: needs.changes.outputs.builtin == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    container:
-      image: ${{ needs.setup.outputs.image }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0           # get_build_version's `git describe`
-
-      - uses: ./.github/actions/cargo-cache
-        with:
-          key: builtin
-
-      - name: Build module zip
-        env:
-          UPDATE_JSON_URL: https://raw.githubusercontent.com/okhsunrog/vpnhide/main/update-json/update-builtin.json
-        run: python3 builtin/build.py
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: vpnhide-builtin
-          path: vpnhide-builtin.zip
-          if-no-files-found: error
-
+  # The Android app:
   # The Android app: ktlint, detekt, CPD, Android lint, unit tests and the APK
   # in one Gradle invocation, so the checks and the build share one daemon.
   android:
@@ -963,42 +883,9 @@ jobs:
           path: vpnhide.apk
           if-no-files-found: error
 
-  portshide:
-    needs: [setup, changes]
-    if: needs.changes.outputs.portshide == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    container:
-      image: ${{ needs.setup.outputs.image }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-
-      - uses: ./.github/actions/cargo-cache
-        with:
-          key: portshide
-
-      - name: Package ports module zip
-        env:
-          UPDATE_JSON_URL: https://raw.githubusercontent.com/okhsunrog/vpnhide/main/update-json/update-ports.json
-        run: |
-          cd portshide
-          python3 ./build-zip.py
-          mv vpnhide-ports.zip "$GITHUB_WORKSPACE/vpnhide-ports.zip"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: vpnhide-ports
-          path: vpnhide-ports.zip
-          if-no-files-found: error
 
   release:
-    needs: [builtin-integrator, kmod, kpm, builtin, zygisk, android, portshide]
+    needs: [builtin-integrator, kmod, kpm, zygisk, android]
     if: startsWith(github.ref, 'refs/tags/v')
     timeout-minutes: 15
     runs-on: ubuntu-latest
@@ -1050,7 +937,6 @@ jobs:
       - lint-python
       - lint-shell-c
       - rust
-      - kmod-activator
       - kmod
       - kmod-qemu
       - kpm-qemu
@@ -1058,9 +944,7 @@ jobs:
       - builtin-qemu
       - kpm
       - zygisk
-      - builtin
       - android
-      - portshide
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

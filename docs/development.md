@@ -36,7 +36,7 @@ The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNa
 | `kmod/` | Kernel-level native backends: GKI `.ko` (C, kretprobes) and KPM (KernelPatch inline hooks) |
 | `builtin/` | The in-tree kernel backend (`CONFIG_VPNHIDE=y`): the driver, `scripts/integrate.py` that vendors it into a kernel tree, the KMI-agnostic companion module (activator only), `build.py` |
 | `crates/` | The Rust workspace: `protocol` (the wire), `activator` (one bin per backend), `checks` / `checks-jni` (the app's native probes), `app-helper` (`vhhelper`) |
-| `portshide/` | Localhost port blocker (shell + iptables) |
+| ~~`portshide/`~~ | Removed — Ports apply is inside `vpnhide_core` |
 | `scripts/` | Release & changelog tooling |
 | `update-json/` | Magisk/KSU update metadata |
 | `docs/` | Contributor documentation (this directory) |
@@ -165,7 +165,7 @@ which areas a pull request exercises, and every area job is gated on it:
 | `builtin/**` | `builtin`, `builtin-integrator`, `builtin-qemu` |
 | `zygisk/**` | `zygisk` |
 | `lsposed/**` | `android` |
-| `portshide/**` | `portshide` |
+| `core/**` | `core` |
 | `shared`: `kmod/shared/**`, `kmod/test/**`, `kmod/generated/**`, `scripts/codegen*.py` | every area, QEMU matrix included |
 | `shared_rust`: `crates/**`, `Cargo.*`, `fixtures/app-helper/**`, `scripts/build_lib.py`, `scripts/build-version.py` | every area's packaging job plus `rust`; the QEMU probes and matrix only if a kernel area changed on its own |
 | `.github/**` | every area |

@@ -29,7 +29,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
 from build_lib import (  # type: ignore[import-not-found]
-    build_activator_bin,
     get_build_version,
     make_zip,
 )
@@ -49,7 +48,6 @@ def main() -> int:
     kpm_dir = Path(__file__).resolve().parent
     kmod_dir = kpm_dir.parent
     repo_root = kmod_dir.parent
-    activator = build_activator_bin(repo_root, "kpm")
     build_version = get_build_version(repo_root)
 
     # Build the .kpm. `make` decides whether anything needs rebuilding; pass
@@ -72,8 +70,6 @@ def main() -> int:
         shutil.rmtree(staging)
     shutil.copytree(kpm_dir / "module", staging)
     shutil.copy(kpm_src, staging / KPM_FILE)
-    shutil.copy(activator, staging / "activator")
-    (staging / "activator").chmod(0o755)
 
     # Stamp the effective build version into the staged module.prop without
     # touching the committed file (keeps PR diffs from churning it).
