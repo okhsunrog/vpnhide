@@ -1,12 +1,11 @@
-//! Production IPC authorization (§9 / step 7).
+//! IPC authorization.
 //!
-//! Primary gate remains DAC on the socket file. This module is defense in depth:
-//! `SO_PEERCRED` uid checks against an allowlist. Empty allowlist = allow any peer
-//! (dev/host default). Production writes allowlist via the app's one-shot su grant
-//! or `VPNHIDE_CORE_ALLOW_UIDS`.
+//! Production (2.0): the socket lives in the app's data dir with the app's owner, mode and
+//! SELinux label ([`apply_app_socket_permissions`]), and every accept is checked with
+//! `SO_PEERCRED` against [`Allowlist::AppOwner`]: root or the uid owning that dir. The app
+//! writes nothing to configure this. See `app_socket`.
 //!
-//! Package/signature mapping via packages.xml is a follow-up; uid allowlist is the
-//! fail-closed gate available on every Magisk/KSU/APatch host today.
+//! Host/dev: a plain path socket; `VPNHIDE_CORE_ALLOW_UIDS` restricts peers, unset = open.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -18,10 +17,6 @@ use libc::{SO_PEERCRED, SOL_SOCKET, getsockopt, socklen_t, ucred};
 
 /// Env: comma-separated UIDs allowed to connect.
 pub const ALLOW_UIDS_ENV: &str = "VPNHIDE_CORE_ALLOW_UIDS";
-/// Env: path to allowlist file (one uid per line, `#` comments).
-pub const ALLOW_UIDS_FILE_ENV: &str = "VPNHIDE_CORE_ALLOW_UIDS_FILE";
-/// Default allowlist path next to the production socket.
-pub const DEFAULT_ALLOW_UIDS_FILE: &str = "/data/adb/vpnhide/core/allowed_uids";
 /// Env: socket owner uid after bind (`chown`); unset leaves creator (root) ownership.
 pub const SOCKET_OWNER_UID_ENV: &str = "VPNHIDE_CORE_SOCKET_OWNER_UID";
 /// Env: socket mode octal (default `0660` when owner set, else `0666` for host tests).
@@ -31,8 +26,11 @@ pub const SOCKET_MODE_ENV: &str = "VPNHIDE_CORE_SOCKET_MODE";
 pub enum Allowlist {
     /// No allowlist configured — any peer uid is accepted (dev sandbox).
     Open,
-    /// Only these uids may connect (production).
+    /// Only these uids may connect.
     Uids(BTreeSet<u32>),
+    /// Production (2.0): root, and the uid that owns the app's data dir. Re-resolved on
+    /// every accept, so an APK reinstall (new uid) is followed without a restart.
+    AppOwner(PathBuf),
 }
 
 impl Allowlist {
@@ -43,19 +41,14 @@ impl Allowlist {
                 return Allowlist::Uids(set);
             }
         }
-        let path = std::env::var_os(ALLOW_UIDS_FILE_ENV)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_ALLOW_UIDS_FILE));
-        match load_uid_file(&path) {
-            Ok(set) if !set.is_empty() => Allowlist::Uids(set),
-            _ => Allowlist::Open,
-        }
+        Allowlist::Open
     }
 
     pub fn permits(&self, uid: u32) -> bool {
         match self {
             Allowlist::Open => true,
             Allowlist::Uids(set) => set.contains(&uid),
+            Allowlist::AppOwner(dir) => uid == 0 || owner_uid(dir).is_ok_and(|owner| owner == uid),
         }
     }
 }
@@ -64,21 +57,6 @@ fn parse_uid_list(raw: &str) -> BTreeSet<u32> {
     raw.split(|c: char| c == ',' || c.is_whitespace())
         .filter_map(|tok| tok.trim().parse().ok())
         .collect()
-}
-
-fn load_uid_file(path: &Path) -> io::Result<BTreeSet<u32>> {
-    let text = fs::read_to_string(path)?;
-    let mut set = BTreeSet::new();
-    for line in text.lines() {
-        let line = line.split('#').next().unwrap_or("").trim();
-        if line.is_empty() {
-            continue;
-        }
-        if let Ok(uid) = line.parse::<u32>() {
-            set.insert(uid);
-        }
-    }
-    Ok(set)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +99,63 @@ pub fn authorize(stream: &impl AsRawFd, allowlist: &Allowlist) -> io::Result<Pee
             format!("peer uid {} not on core allowlist", cred.uid),
         ))
     }
+}
+
+fn owner_uid(path: &Path) -> io::Result<u32> {
+    use std::os::unix::fs::MetadataExt;
+    Ok(fs::metadata(path)?.uid())
+}
+
+/// Lock the app socket down to the app: owner = the app data dir's uid/gid, mode `0600`,
+/// and the dir's SELinux label (app_data_file with the app's MLS categories) so the app
+/// domain may `write` it and no other app can even traverse to it. Root (core) bypasses DAC.
+/// The label copy is best-effort (hosts without SELinux xattrs).
+pub fn apply_app_socket_permissions(socket: &Path, app_dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let meta = fs::metadata(app_dir)?;
+    let sock = path_cstr(socket)?;
+    if unsafe { libc::geteuid() } == 0 {
+        let rc = unsafe { libc::lchown(sock.as_ptr(), meta.uid(), meta.gid()) };
+        if rc < 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    fs::set_permissions(socket, fs::Permissions::from_mode(0o600))?;
+    if let Err(e) = copy_selinux_label(app_dir, socket) {
+        eprintln!("core: socket label copy skipped: {e}");
+    }
+    Ok(())
+}
+
+fn copy_selinux_label(from: &Path, to: &Path) -> io::Result<()> {
+    const NAME: &[u8] = b"security.selinux\0";
+    let src = path_cstr(from)?;
+    let dst = path_cstr(to)?;
+    let mut buf = [0u8; 256];
+    let len = unsafe {
+        libc::getxattr(
+            src.as_ptr(),
+            NAME.as_ptr().cast(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+        )
+    };
+    if len < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let rc = unsafe {
+        libc::lsetxattr(
+            dst.as_ptr(),
+            NAME.as_ptr().cast(),
+            buf.as_ptr().cast(),
+            len as usize,
+            0,
+        )
+    };
+    if rc < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Apply DAC on the bound socket path (chown/chmod). Best-effort; errors are logged by caller.
@@ -183,41 +218,33 @@ mod tests {
     }
 
     #[test]
+    fn app_owner_admits_root_and_the_dir_owner_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let me = owner_uid(dir.path()).unwrap();
+        let list = Allowlist::AppOwner(dir.path().to_path_buf());
+        assert!(list.permits(0));
+        assert!(list.permits(me));
+        assert!(!list.permits(me.wrapping_add(1)));
+        // A missing app dir (APK uninstalled) admits only root.
+        let gone = Allowlist::AppOwner(dir.path().join("absent"));
+        assert!(gone.permits(0));
+        assert!(!gone.permits(me) || me == 0);
+    }
+
+    #[test]
+    fn app_socket_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("s.sock");
+        let _l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        apply_app_socket_permissions(&sock, dir.path()).unwrap();
+        let mode = fs::symlink_metadata(&sock).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
     fn parse_env_list() {
         let set = parse_uid_list("10123, 10124\n10125");
         assert_eq!(set, BTreeSet::from([10123, 10124, 10125]));
-    }
-
-    #[test]
-    fn load_file_skips_comments() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("uids");
-        fs::write(&path, "# app\n10123\n\n10124 # secondary\n").unwrap();
-        let set = load_uid_file(&path).unwrap();
-        assert_eq!(set, BTreeSet::from([10123, 10124]));
-    }
-
-    #[test]
-    fn load_from_file_env_is_fail_closed() {
-        let _guard = crate::ports::test_env_lock();
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("uids");
-        fs::write(
-            &path, "4242
-",
-        )
-        .unwrap();
-        // SAFETY: held under test_env_lock.
-        unsafe {
-            std::env::remove_var(ALLOW_UIDS_ENV);
-            std::env::set_var(ALLOW_UIDS_FILE_ENV, &path);
-        }
-        let list = Allowlist::load();
-        unsafe {
-            std::env::remove_var(ALLOW_UIDS_FILE_ENV);
-        }
-        assert_eq!(list, Allowlist::Uids(BTreeSet::from([4242u32])));
-        assert!(!list.permits(0));
-        assert!(list.permits(4242));
     }
 }
