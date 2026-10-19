@@ -220,7 +220,10 @@ fn boot_apply_once() {
     ) {
         Ok(state) => state,
         Err(e) => {
-            eprintln!("boot-apply: config load failed on {}: {e}", config_path.display());
+            eprintln!(
+                "boot-apply: config load failed on {}: {e}",
+                config_path.display()
+            );
             let report = vpnhide_core_daemon::boot::BootApplyReport {
                 status: vpnhide_core_daemon::boot::BootApplyStatus::Refused {
                     reason: e.to_string(),

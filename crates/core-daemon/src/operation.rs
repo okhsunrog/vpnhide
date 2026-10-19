@@ -74,7 +74,11 @@ pub fn plan_kind(kind: PlanKind) -> Vec<ConfigPhase> {
         PlanKind::PersistThenNative => vec![ConfigPhase::Persist, ConfigPhase::Native],
         PlanKind::PersistThenPorts => vec![ConfigPhase::Persist, ConfigPhase::Ports],
         PlanKind::PersistThenNativeThenPorts => {
-            vec![ConfigPhase::Persist, ConfigPhase::Native, ConfigPhase::Ports]
+            vec![
+                ConfigPhase::Persist,
+                ConfigPhase::Native,
+                ConfigPhase::Ports,
+            ]
         }
         PlanKind::NativeOnly => vec![ConfigPhase::Native],
         PlanKind::PortsOnly => vec![ConfigPhase::Ports],
@@ -179,7 +183,11 @@ pub struct RealPhaseRunner {
 
 impl RealPhaseRunner {
     pub fn new(config_path: Option<PathBuf>, kmod_ctl_path: Option<PathBuf>) -> Self {
-        Self::new_with_ports(config_path, kmod_ctl_path, crate::ports::ports_enabled_from_env())
+        Self::new_with_ports(
+            config_path,
+            kmod_ctl_path,
+            crate::ports::ports_enabled_from_env(),
+        )
     }
 
     pub fn new_with_ports(
@@ -250,9 +258,9 @@ impl PhaseRunner for RealPhaseRunner {
                                 backend.family(),
                             ) {
                                 Ok(wire) => {
-                                    if let Err(e) = crate::ownership::claim_before_native(
-                                        backend.family(),
-                                    ) {
+                                    if let Err(e) =
+                                        crate::ownership::claim_before_native(backend.family())
+                                    {
                                         eprintln!("core: native ownership claim failed: {e}");
                                     }
                                     crate::activation::deliver_selected(path, &backend, &wire)
@@ -454,7 +462,11 @@ mod tests {
         );
         assert_eq!(
             plan_kind(PlanKind::PersistThenNativeThenPorts),
-            vec![ConfigPhase::Persist, ConfigPhase::Native, ConfigPhase::Ports]
+            vec![
+                ConfigPhase::Persist,
+                ConfigPhase::Native,
+                ConfigPhase::Ports
+            ]
         );
         assert_eq!(
             plan_kind(PlanKind::NativeThenPorts),

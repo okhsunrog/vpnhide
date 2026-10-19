@@ -86,7 +86,7 @@ val rustNdkDir =
         ?: rustSdkDir.resolve("ndk/$rustNdkVersion").absolutePath
 val repoDir = projectDir.parentFile.parentFile
 val appNativeCrates =
-    listOf("checks", "checks-jni", "app-helper", "activator", "apatch-abi", "protocol")
+    listOf("checks", "checks-jni", "app-helper", "core-daemon", "core-rpc", "activator", "apatch-abi", "protocol")
         .map { repoDir.resolve("crates/$it") }
 val rustAssetsOut = rustAssetsDir.get().asFile
 

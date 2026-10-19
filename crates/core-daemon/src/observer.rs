@@ -14,13 +14,13 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::framework_vpn;
+use crate::routing_compose;
+use crate::server::CoreState;
 use tokio::io::Interest;
 use tokio::io::unix::AsyncFd;
 use tokio::time::Instant;
 use vpnhide_checks::is_vpn_interface_name;
-use crate::framework_vpn;
-use crate::routing_compose;
-use crate::server::CoreState;
 
 const DEBOUNCE: Duration = Duration::from_millis(250);
 const RECV_BUF: usize = 64 * 1024;
@@ -215,7 +215,13 @@ fn consume(batch: &[u8], state: &mut RouteState) -> bool {
 }
 
 fn next_generation(state: &Arc<CoreState>) -> u64 {
-    state.publisher.current().snapshot.routing.generation.saturating_add(1)
+    state
+        .publisher
+        .current()
+        .snapshot
+        .routing
+        .generation
+        .saturating_add(1)
 }
 
 /// Compose netlink + framework and publish when the observation changed.
@@ -247,8 +253,8 @@ fn publish_unknown(state: &Arc<CoreState>, detail: &str) {
 }
 
 fn refresh_backend(state: &Arc<CoreState>) {
-    use std::path::Path;
     use crate::{activation, backend};
+    use std::path::Path;
     // Lifecycle refresh must **not** take the KPM management lock — that races
     // Native apply (EAGAIN). Kernel ctl + installed dirs are lock-free; KPM
     // active identity is refreshed at startup/apply via detect_managed.
@@ -266,7 +272,8 @@ fn refresh_backend(state: &Arc<CoreState>) {
         next.selected = snapshot.backend.selected;
         next.applied = snapshot.backend.applied;
         // Keep prior KPM-active evidence if lock-free detect cannot see it.
-        if next.active.is_none() && snapshot.backend.active == Some(vpnhide_core_rpc::NativeBackend::Kpm)
+        if next.active.is_none()
+            && snapshot.backend.active == Some(vpnhide_core_rpc::NativeBackend::Kpm)
         {
             next.active = snapshot.backend.active;
         }

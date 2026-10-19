@@ -41,6 +41,17 @@ impl CoreClient {
         me
     }
 
+    /// A one-shot client without the mirror loop, for short-lived tools (the APK's root
+    /// helper runs one request per process). [`state`](Self::state) stays at its default.
+    pub fn connect(socket_path: impl Into<PathBuf>) -> Arc<Self> {
+        let (state, _rx) = watch::channel(StateSnapshot::default());
+        Arc::new(CoreClient {
+            socket_path: socket_path.into(),
+            client: Mutex::new(None),
+            state,
+        })
+    }
+
     /// A receiver over the mirrored read-replica.
     pub fn state(&self) -> watch::Receiver<StateSnapshot> {
         self.state.subscribe()

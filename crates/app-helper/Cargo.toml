@@ -4,7 +4,7 @@ version = "1.3.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Root observations and supervised app mutations for vpnhide."
+description = "Root observations, the app's core client, and supervised coupled commands for vpnhide."
 
 [[bin]]
 name = "vhhelper"
@@ -16,3 +16,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 vpnhide_apatch_abi = { path = "../apatch-abi" }
 vpnhide_checks = { path = "../checks" }
+vpnhide_core_daemon = { path = "../core-daemon" }
+vpnhide_core_rpc = { path = "../core-rpc" }
+tokio = { version = "1", features = ["rt", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

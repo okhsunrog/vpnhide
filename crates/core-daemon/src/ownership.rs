@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 
 use vpnhide_activator::{
     CONFIG_CORE_OWNER_MARKER, CORE_OWNER_DIR_ENV, NATIVE_CORE_OWNER_MARKER,
-    ZYGISK_CORE_OWNER_MARKER, config_owned_by_core, native_owned_by_core,
-    ports_owned_by_core, ports_owner_marker_path, zygisk_owned_by_core,
+    ZYGISK_CORE_OWNER_MARKER, config_owned_by_core, native_owned_by_core, ports_owned_by_core,
+    ports_owner_marker_path, zygisk_owned_by_core,
 };
 
 use crate::config_file::{self, ConfigLoad};
@@ -118,9 +118,7 @@ pub fn adopt_config_on_start(path: &Path) -> io::Result<ConfigLoad> {
             }
         }
         ConfigLoad::UnsupportedVersion { version } => {
-            eprintln!(
-                "core: refusing config ownership claim; unsupported version {version}"
-            );
+            eprintln!("core: refusing config ownership claim; unsupported version {version}");
         }
     }
     Ok(status)
@@ -170,10 +168,7 @@ mod tests {
         unsafe { std::env::set_var(CORE_OWNER_DIR_ENV, dir.path()) };
 
         let absent = dir.path().join("missing.json");
-        assert_eq!(
-            adopt_config_on_start(&absent).unwrap(),
-            ConfigLoad::Absent
-        );
+        assert_eq!(adopt_config_on_start(&absent).unwrap(), ConfigLoad::Absent);
         assert!(is_owned(OwnedResource::Config));
         let _ = fs::remove_file(marker_path(OwnedResource::Config));
 

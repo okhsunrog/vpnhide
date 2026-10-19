@@ -9,9 +9,7 @@ use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use vpnhide_core_rpc::{
-    BaseRef, ConfigEdit, OperationId, PhaseOutcome, SubmitError,
-};
+use vpnhide_core_rpc::{BaseRef, ConfigEdit, OperationId, PhaseOutcome, SubmitError};
 
 use crate::server::CoreState;
 
@@ -149,10 +147,10 @@ pub fn default_boot_status_path() -> std::path::PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use vpnhide_core_rpc::ConfigPhase;
     use super::*;
     use crate::publisher::Publisher;
     use std::sync::Mutex;
+    use vpnhide_core_rpc::ConfigPhase;
     use vpnhide_core_rpc::{CanonicalConfig, StateSnapshot};
 
     static ENV: Mutex<()> = Mutex::new(());
@@ -170,12 +168,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("cfg.json");
         crate::config_file::write_atomic(&cfg, &CanonicalConfig::default()).unwrap();
-        let state = CoreState::load(
-            Publisher::new(1, StateSnapshot::default()),
-            cfg,
-            None,
-        )
-        .unwrap();
+        let state =
+            CoreState::load(Publisher::new(1, StateSnapshot::default()), cfg, None).unwrap();
         let report = reapply(&state);
         assert!(
             matches!(report.status, BootApplyStatus::Applied),

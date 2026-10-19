@@ -2,15 +2,14 @@
 //! a typed client. Skeleton for core-2.0 step 2 — the publish/lifecycle machinery is real;
 //! the domain (config/operation/observation) is still placeholder (see `core-rpc`).
 
-pub mod auth;
 pub mod activation;
+pub mod auth;
 pub mod backend;
 pub mod boot;
-pub mod routing_compose;
-pub mod framework_vpn;
 pub mod client;
 pub mod config_edit;
 pub mod config_file;
+pub mod framework_vpn;
 pub mod journal;
 pub mod listener;
 pub mod observer;
@@ -19,6 +18,7 @@ pub mod ownership;
 pub mod ports;
 pub mod publisher;
 pub mod recovery;
+pub mod routing_compose;
 pub mod server;
 pub mod zygisk;
 
@@ -53,7 +53,9 @@ pub fn serve_with_allowlist(
 ) -> std::io::Result<ServerHandle> {
     match &allowlist {
         auth::Allowlist::Open => {
-            eprintln!("core: peer allowlist open (dev/host); set VPNHIDE_CORE_ALLOW_UIDS for production");
+            eprintln!(
+                "core: peer allowlist open (dev/host); set VPNHIDE_CORE_ALLOW_UIDS for production"
+            );
         }
         auth::Allowlist::Uids(set) => {
             eprintln!("core: peer allowlist uids={set:?}");
