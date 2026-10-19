@@ -283,39 +283,24 @@ impl Effects for SystemEffects {
     }
 
     fn dmesg_tail(&self) -> Vec<String> {
-        let raw = std::process::Command::new("dmesg")
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-            .unwrap_or_default();
-        dmesg_tail(&raw)
+        dmesg_tail(&vpnhide_activator::sys::kernel_log().unwrap_or_default())
     }
 
     fn uname(&self) -> String {
-        std::process::Command::new("uname")
-            .arg("-r")
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        vpnhide_activator::sys::uname()
+            .map(|u| u.release)
             .unwrap_or_default()
     }
 }
 
-fn read_gzip_text(path: &Path) -> Option<String> {
-    for (program, args) in [("zcat", vec![]), ("gunzip", vec!["-c"])] {
-        let Ok(output) = std::process::Command::new(program)
-            .args(args)
-            .arg(path)
-            .output()
-        else {
-            continue;
-        };
-        if output.status.success() {
-            return String::from_utf8(output.stdout).ok();
-        }
-    }
-    None
+/// A gzip file's text (`zcat`), decoded in-process.
+pub fn read_gzip_text(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(file.take(64 << 20))
+        .read_to_string(&mut text)
+        .ok()?;
+    Some(text)
 }
 
 /// `CONFIG_KPROBES` / `CONFIG_KRETPROBES` from a kernel config. An option absent from a

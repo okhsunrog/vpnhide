@@ -128,14 +128,13 @@ async fn exercise(case: &str) {
         &root.join("insmod"),
         "#!/bin/sh\nprintf 'insmod\\n' > \"$VH_ROOT/insmod-calls\"\nexit 1\n",
     );
-    executable(
-        &root.join("uname"),
-        if case == "unsupported" {
-            "#!/bin/sh\nprintf '6.10.0\\n'\n"
-        } else {
-            "#!/bin/sh\nprintf '6.1.44-android14\\n'\n"
-        },
-    );
+    // Core reads the release from uname(2); host builds accept a pinned family so the
+    // runner's own kernel never decides KPM support.
+    let kernel_release = if case == "unsupported" {
+        "6.10.0"
+    } else {
+        "6.1.44-android14"
+    };
     let socket = root.join("core.sock");
     let canonical = root.join("canonical.json");
     // Core selects and loads at startup from the durable config it boots with.
@@ -164,6 +163,7 @@ async fn exercise(case: &str) {
             .env("PATH", root)
             .env("VH_ROOT", root)
             .env("VH_CASE", case)
+            .env("VPNHIDE_TEST_KERNEL_RELEASE", kernel_release)
             .env("VPNHIDE_CONFIG_PATH", &canonical)
             .env("VPNHIDE_KMOD_CTL", &ctl)
             .env("VPNHIDE_KERNEL_MODULES", &modules)
@@ -266,13 +266,13 @@ async fn exercise(case: &str) {
             "{case}: {:?}",
             boot.outcome
         ),
-        "unsupported" => assert!(
-            matches!(boot.outcome, NativeBootOutcome::UnsupportedKernel { .. }),
+        "busy" | "list-fails" => assert!(
+            matches!(boot.outcome, NativeBootOutcome::KpmUnverifiable { .. }),
             "{case}: {:?}",
             boot.outcome
         ),
-        "busy" | "list-fails" => assert!(
-            matches!(boot.outcome, NativeBootOutcome::KpmUnverifiable { .. }),
+        "unsupported" => assert!(
+            matches!(boot.outcome, NativeBootOutcome::UnsupportedKernel { .. }),
             "{case}: {:?}",
             boot.outcome
         ),

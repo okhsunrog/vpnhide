@@ -117,6 +117,7 @@ pub(crate) use load_kmod::{CHILD_COMMAND_TIMEOUT, output_with_timeout};
 mod model;
 mod ownership;
 mod ports;
+pub mod sys;
 
 use kpm::*;
 pub use kpm::{CoreKpm, KpmConfigError, KpmRuntimeProbe};
@@ -161,27 +162,10 @@ pub fn observed_kernel_backend(path: &Path) -> Result<Option<u32>> {
     kernel_control::observed_backend(path)
 }
 
-/// Load an explicitly selected artifact for core. This performs only the load,
-/// never reads canonical configuration or runs an activator. The caller owns
-/// selection and must re-observe runtime identity before delivering policy.
-pub fn load_kernel_module(ctl: &Path, artifact: &Path, filesystem_hiding: bool) -> Result<()> {
-    kernel_control::load_kmod_if_absent(kernel_control::observed_backend(ctl), || {
-        if !artifact.is_file() {
-            return Err(format!("kernel artifact missing: {}", artifact.display()).into());
-        }
-        let output = kernel_control::load_without_kpm(kpm::KpmClient::observe_loaded(), || {
-            Ok(load_kmod::load_kmod_artifact(artifact, filesystem_hiding)?)
-        })?;
-        if !output.status.success() {
-            return Err(format!("insmod failed: {}", output.status).into());
-        }
-        Ok(())
-    })
-}
-
-/// Why a core-selected kmod load did not produce a loaded module. `exit` follows the
-/// legacy boot loader's codes: the insmod exit status, 124 timeout, 126 spawn failure,
-/// 127 missing artifact, -1 refused before dispatch (control node already owned).
+/// Why a core-selected kmod load did not produce a loaded module. On device `exit` is the
+/// `finit_module(2)` errno (e.g. 129 `EKEYREJECTED`, 126 `ENOKEY`, 8 `ENOEXEC`); 127 means
+/// the artifact is missing and -1 a refusal before dispatch (control node already owned).
+/// Host test builds load through an `insmod` test double and report its exit status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KmodLoadFailure {
     pub exit: i32,
@@ -190,7 +174,7 @@ pub struct KmodLoadFailure {
 
 impl std::fmt::Display for KmodLoadFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "insmod exit {}: {}", self.exit, self.stderr.trim())
+        write!(f, "kmod load exit {}: {}", self.exit, self.stderr.trim())
     }
 }
 
@@ -223,24 +207,8 @@ pub fn insmod_selected_kmod(
             stderr: format!("vpnhide_kmod.ko not found at {}", artifact.display()),
         });
     }
-    match load_kmod::load_kmod_artifact(artifact, filesystem_hiding) {
-        Ok(output) if output.status.success() => Ok(()),
-        Ok(output) => Err(KmodLoadFailure {
-            exit: output.status.code().unwrap_or(-1),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        }),
-        Err(e) if e.kind() == ErrorKind::TimedOut => Err(KmodLoadFailure {
-            exit: 124,
-            stderr: format!(
-                "insmod timed out after {}s",
-                CHILD_COMMAND_TIMEOUT.as_secs()
-            ),
-        }),
-        Err(e) => Err(KmodLoadFailure {
-            exit: 126,
-            stderr: e.to_string(),
-        }),
-    }
+    load_kmod::load_kmod_artifact(artifact, filesystem_hiding)
+        .map_err(|(exit, stderr)| KmodLoadFailure { exit, stderr })
 }
 
 /// The running kernel release and whether the KPM has an offset table for its family.
@@ -391,13 +359,15 @@ fn read_kpm_payload(wire: &str) -> Result<String> {
 }
 
 fn running_kernel_release() -> Result<String> {
-    let out = Command::new("uname").arg("-r").output()?;
-    if !out.status.success() {
-        return Err(format!("uname -r failed with status {}", out.status).into());
+    // Host test builds only: the integration tests pin an Android kernel family instead
+    // of inheriting the CI runner's. Device builds always read uname(2).
+    #[cfg(not(target_os = "android"))]
+    if let Some(release) = std::env::var_os("VPNHIDE_TEST_KERNEL_RELEASE") {
+        return Ok(release.to_string_lossy().into_owned());
     }
-    let release = String::from_utf8(out.stdout)?.trim().to_owned();
+    let release = sys::uname()?.release;
     if release.is_empty() {
-        return Err("uname -r returned an empty kernel release".into());
+        return Err("uname(2) returned an empty kernel release".into());
     }
     Ok(release)
 }

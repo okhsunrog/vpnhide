@@ -61,49 +61,38 @@ class DebugShellSnapshotTest {
     }
 
     @Test
-    fun `debug command captures all backend state paths`() {
-        val command = coreProbeScript("package_inventory.sh") + coreProbeScript("debug_snapshot.sh") + coreDiagnosticsSource()
-
-        // Paths reach the script through core's env (diagnostics.rs); check both the
-        // value core passes and the script's use of it.
-        assertTrue(command.contains("\"VPNHIDE_CORE_DIR\"") && command.contains("\"$CORE_MODULE_DIR\""))
-        assertTrue(command.contains("emit_file core_prop"))
-        assertTrue(command.contains("emit_eval core_module_state"))
-        assertTrue(command.contains("emit_file core_boot_status"))
-        assertTrue(command.contains("\"${'$'}VPNHIDE_CORE_EXE\" observe kpm-state"))
-        // 2.0 modules ship artifacts only; nothing a module ships is ever run.
-        assertFalse(coreProbeScript("debug_snapshot.sh").contains("ACTIVATOR"))
-        assertTrue(command.contains("\"VPNHIDE_KPM_LOAD_STATUS\"") && command.contains("\"$KPM_LOAD_STATUS_FILE\""))
-        assertTrue(command.contains("hash_file ${'$'}VPNHIDE_KPM_DIR/vpnhide.kpm"))
-        assertTrue(command.contains("\"VPNHIDE_KMOD_LOAD_STATUS\"") && command.contains("\"$KMOD_LOAD_STATUS_FILE\""))
-        assertTrue(command.contains("cat ${'$'}VPNHIDE_PROC_CTL"))
-        assertTrue(command.contains(ZYGISK_STATUS_FILE))
-        assertTrue(command.contains("${'$'}VPNHIDE_ZYGISK_DIR/zygisk/arm64-v8a.so"))
-        assertTrue(command.contains("iptables -w 2 -S vpnhide_out"))
-        assertTrue(command.contains("ip6tables -w 2 -S vpnhide_out6"))
-        assertTrue(command.contains(LSPOSED_STATE_FILE))
-        assertTrue(command.contains("/data/adb/lspd/config/modules_config.db"))
-        assertTrue(command.contains("dumpsys connectivity"))
-        assertTrue(command.contains("androidboot[.]serialno"))
-        assertTrue(command.contains("pm list users"))
-        assertTrue(command.contains("pm list packages -U -f --user \"${'$'}PM_USER_ID\""))
-        assertFalse(command.contains("--user all"))
-        assertFalse(command.contains("debug_logging"))
+    fun `debug probe reads the backend state paths the app shares`() {
+        // Section coverage is asserted on the probe's real output by core's
+        // `debug_snapshot_covers_every_backend_state_path`; here pin the shared paths.
+        val paths = coreProbeSource("mod.rs")
+        assertTrue(paths.contains("\"$KPM_LOAD_STATUS_FILE\""))
+        assertTrue(paths.contains("\"$KMOD_LOAD_STATUS_FILE\""))
+        assertTrue(paths.contains("\"$PROC_CTL\""))
+        assertTrue(paths.contains(ZYGISK_STATUS_FILE))
+        assertTrue(paths.contains(LSPOSED_STATE_FILE))
+        val debug = coreProbeSource("debug_snapshot.rs")
+        assertTrue(debug.contains("\"vpnhide_core\""))
+        assertTrue(debug.contains("/data/adb/lspd/config"))
+        assertTrue(debug.contains("\"dumpsys\"") && debug.contains("\"connectivity\""))
+        assertTrue(debug.contains("androidboot.serialno="))
+        assertFalse(debug.contains("debug_logging"))
+        val inventory = coreProbeSource("inventory.rs")
+        assertTrue(inventory.contains("[\"list\", \"packages\", \"-U\", \"-f\", \"--user\"]"))
+        assertFalse(inventory.contains("--user all"))
     }
 
     @Test
-    fun `counter command captures hook status without enumerating packages`() {
-        val command = coreProbeScript("hook_counters.sh") + coreDiagnosticsSource()
-
-        assertTrue(command.contains("\"VPNHIDE_PROC_CTL\"") && command.contains("\"$PROC_CTL\""))
-        assertTrue(command.contains("cat ${'$'}VPNHIDE_PROC_CTL"))
-        assertTrue(command.contains("\"${'$'}VPNHIDE_CORE_EXE\" observe kpm-state"))
-        assertTrue(command.contains(LSPOSED_STATE_FILE))
-        assertTrue(command.contains(ZYGISK_STATUS_FILE))
+    fun `counter probe captures hook status without enumerating packages`() {
+        val debug = coreProbeSource("debug_snapshot.rs")
+        val counters = debug.substringAfter("pub fn hook_counters(").substringBefore("\n}\n")
+        assertTrue(counters.contains("\"kmod_state\""))
+        assertTrue(counters.contains("kpm_state(&mut out, paths)"))
+        assertTrue(counters.contains("\"lsposed_state\""))
+        assertTrue(counters.contains("\"zygisk_status\""))
         // The counter baseline is consumed only through counts (backend+uid+hookId),
         // never package names, so it skips the expensive multi-user pm enumeration.
-        assertFalse(command.contains("pm list packages"))
-        assertFalse(command.contains("dumpsys connectivity"))
-        assertFalse(command.contains("/proc/net/fib_trie"))
+        assertFalse(counters.contains("inventory"))
+        assertFalse(counters.contains("dumpsys"))
+        assertFalse(counters.contains("fib_trie"))
     }
 }

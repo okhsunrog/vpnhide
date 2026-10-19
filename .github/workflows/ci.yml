@@ -284,20 +284,12 @@ jobs:
             apt-get update -qq && apt-get install -y --no-install-recommends shellcheck >/dev/null
           fi
           shellcheck -x -e SC2034,SC3043 \
-            kmod/module/customize.sh \
-            kmod/kpm/module/customize.sh \
-            zygisk/module/customize.sh \
-            core/module/customize.sh core/module/post-fs-data.sh core/module/service.sh core/module/uninstall.sh \
+            core/module/customize.sh core/module/service.sh \
             scripts/clean-device.sh scripts/update-json.sh lsposed/tests/check_no_root_exec.sh \
             kmod/test/run.sh kmod/test/build-kernel.sh kmod/test/init.sh \
             kmod/test/verify-trim-abi.sh \
             kmod/test/run-kpm.sh kmod/test/init-kpm.sh kmod/test/build-source-kernel.sh \
             builtin/test/run.sh builtin/test/build-kernel.sh builtin/test/build-source-kernel.sh
-          # Core's root probes (collect_diagnostics). They run with a variable
-          # prelude, so they are checked as POSIX sh (the device shell is mksh)
-          # and on their own — a stray apostrophe in one of them once killed
-          # the whole batched command silently for a release.
-          shellcheck -s sh crates/core-daemon/probes/shell/*.sh
 
       # C (kernel module)
       - name: clang-format

@@ -1244,7 +1244,6 @@ mod tests {
     async fn diagnostics_run_fixed_probes_over_rpc() {
         let state = CoreState::new(Publisher::new(1, StateSnapshot::default()));
         state.set_probe_env(crate::diagnostics::ProbeEnv {
-            shell: PathBuf::from("/bin/sh"),
             core_exe: PathBuf::from("/nonexistent"),
             app_dir: None,
         });
@@ -1261,7 +1260,10 @@ mod tests {
             )
             .await;
         assert_eq!(report.outputs.len(), 2);
-        assert_eq!(report.outputs[1].exit, -1, "missing probe binary");
+        assert!(
+            report.outputs.iter().all(|o| o.exit == -1),
+            "every probe is core's own child; none falls back to a shell"
+        );
     }
 
     #[tokio::test]

@@ -11,6 +11,7 @@ pub mod boot;
 pub mod client;
 pub mod config_edit;
 pub mod config_file;
+pub mod device_probes;
 pub mod diagnostics;
 pub mod effects;
 pub mod framework_vpn;
@@ -26,6 +27,7 @@ pub mod publisher;
 pub mod recovery;
 pub mod routing_compose;
 pub mod server;
+pub mod service;
 pub mod zygisk;
 
 pub use client::CoreClient;

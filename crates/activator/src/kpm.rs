@@ -825,11 +825,7 @@ pub(crate) fn apatch_command_candidates() -> Vec<ApatchCommandStyle> {
 }
 
 fn apatch_kernel_version_hint() -> Option<i64> {
-    let out = Command::new("dmesg").output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    parse_apatch_kernel_version_hint(&String::from_utf8_lossy(&out.stdout))
+    parse_apatch_kernel_version_hint(&crate::sys::kernel_log().ok()?)
 }
 
 /// A refused supercall says nothing about *why* on its own: the same rc comes

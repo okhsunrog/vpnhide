@@ -1,4 +1,6 @@
 //! Runnable core:
+//!   - `vpnhide-core service` — the module's boot entry: production profile from compiled-in
+//!     paths, detach, then serve as below (with boot apply).
 //!   - (default) `vpnhide-core [socket]` — bind, serve, observation loop; with
 //!     `VPNHIDE_BOOT_APPLY=1` re-applies Native/Ports once after load (module boot).
 //!   - `vpnhide-core boot-apply` — load, fence/reconcile, re-apply, write boot_status, exit.
@@ -23,6 +25,14 @@ fn main() {
     let all: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = vpnhide_core_daemon::probe_cli::run(&all) {
         std::process::exit(code);
+    }
+    if all.first().map(String::as_str) == Some("service") {
+        // The module's boot entry (`service.sh` is one `exec` of this): production
+        // profile, persist dir, detach, then serve. Before any thread exists.
+        vpnhide_core_daemon::service::enter();
+        daemon_main();
+        vpnhide_core_daemon::service::exited(0);
+        return;
     }
     daemon_main();
 }
@@ -50,7 +60,7 @@ async fn daemon_main() {
         }
         _ => {}
     }
-    let path = if first.is_empty() {
+    let path = if first.is_empty() || first == "service" {
         DEFAULT_SOCKET.to_owned()
     } else {
         first
