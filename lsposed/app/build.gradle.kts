@@ -414,6 +414,9 @@ android {
     // ground-truth probe bin as an asset. buildAppNative runs via preBuild, so
     // these dirs are populated before the merge/package tasks read them.
     sourceSets["main"].jniLibs.srcDir(rustJniLibsDir.get().asFile)
+    // Root probe scripts live with core (which runs them); still loaded by the app until
+    // its root call sites move onto collect_diagnostics.
+    sourceSets["main"].resources.srcDir(repoDir.resolve("crates/core-daemon/probes"))
     // Generated UniFFI bindings (generateCoreFfiBindings, via preBuild).
     sourceSets["main"].kotlin.directories.add(coreFfiBindingsDir.get().asFile.absolutePath)
     sourceSets["main"].assets.srcDir(rustAssetsDir.get().asFile)

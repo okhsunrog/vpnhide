@@ -36,6 +36,10 @@ export VPNHIDE_PORTS_OWNER_MARKER="$PERSIST/ports_owned"
 # that uid (SO_PEERCRED). Re-bound on reinstall / clear data. The app runs no root
 # process. See crates/core-daemon/src/app_socket.rs.
 export VPNHIDE_APP_DATA_DIR="$APP_DATA_DIR"
+# Root work the app asks for runs here, as typed RPCs: fixed diagnostics probes
+# (collect_diagnostics) and fixed effects (root_effect: secret key, legacy cleanup,
+# full reset). Large probe output lands in $APP_DATA_DIR/vpnhide-core-export.
+export VPNHIDE_ROOT_EFFECTS=1
 
 # Background: boot-apply runs inside the daemon when VPNHIDE_BOOT_APPLY=1, then serve.
 (

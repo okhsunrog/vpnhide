@@ -13,9 +13,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, watch};
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use vpnhide_core_rpc::{
-    Accepted, BaseRef, CALL_DEADLINE, ClientHello, ConfigEdit, Handshake, MAX_FRAME_BYTES,
-    OperationId, OperationRecord, PROTOCOL_VERSION, STATE_POLL_DEADLINE, StateSnapshot,
-    SubmitError, VpnhideCoreClient,
+    Accepted, BaseRef, CALL_DEADLINE, ClientHello, ConfigEdit, DIAGNOSTICS_DEADLINE,
+    DiagnosticsReport, DiagnosticsRequest, EffectError, Handshake, MAX_FRAME_BYTES, OperationId,
+    OperationRecord, PROTOCOL_VERSION, RootEffect, STATE_POLL_DEADLINE, StateSnapshot, SubmitError,
+    VpnhideCoreClient,
 };
 
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
@@ -117,6 +118,43 @@ impl CoreClient {
         let client = self.client().await.map_err(|e| e.to_string())?;
         match client.get_operation(deadline(CALL_DEADLINE), op).await {
             Ok(record) => Ok(record),
+            Err(e) => {
+                self.drop_client().await;
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Run a batch of fixed root probes. `Err` on transport failure.
+    pub async fn collect_diagnostics(
+        &self,
+        request: DiagnosticsRequest,
+    ) -> Result<DiagnosticsReport, String> {
+        let client = self.client().await.map_err(|e| e.to_string())?;
+        match client
+            .collect_diagnostics(deadline(DIAGNOSTICS_DEADLINE), request)
+            .await
+        {
+            Ok(report) => Ok(report),
+            Err(e) => {
+                self.drop_client().await;
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Apply a fixed root effect. Outer `Err`: not delivered (may or may not have run).
+    pub async fn root_effect(
+        &self,
+        op: OperationId,
+        effect: RootEffect,
+    ) -> Result<Result<(), EffectError>, String> {
+        let client = self.client().await.map_err(|e| e.to_string())?;
+        match client
+            .root_effect(deadline(CALL_DEADLINE), op, effect)
+            .await
+        {
+            Ok(result) => Ok(result),
             Err(e) => {
                 self.drop_client().await;
                 Err(e.to_string())

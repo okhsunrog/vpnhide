@@ -54,3 +54,24 @@ Host/dev runs (no `VPNHIDE_APP_DATA_DIR`) keep the plain path socket with the en
 
 Socket label copy, `connectto` under each root manager, and MLS on `connectto` are verified on
 host only (label copy is best-effort there).
+
+## Root work: typed probes and effects (protocol 5)
+
+The app runs no root process. Everything that used to need `su` is a typed RPC on the
+same peercred-authenticated socket:
+
+- `collect_diagnostics(DiagnosticsRequest { probes, clear_dmesg })` runs a fixed probe
+  set (`DiagnosticProbe`: root/debug snapshots, hook counters, dmesg, logcat by app tags /
+  LSPosed boot / since a validated timestamp, kernel partitions and images, the LSPosed
+  modules db, ground-truth checks, per-uid VPN state, KPM list). Probe scripts are
+  compiled into core (`crates/core-daemon/probes/shell`); there is no way to pass a
+  command. `dmesg -c` runs only when `clear_dmesg` is set. Output up to 64 KiB is inline;
+  larger output and artifacts are written to `<app data dir>/vpnhide-core-export/`, owned
+  by the app uid (0600/0700) with the dir's SELinux label, and the report carries paths.
+- `root_effect(op, RootEffect)` applies a fixed effect: `SetSuperkey`, `ClearSuperkey`,
+  `DeleteLegacyConfig`, `FullReset` (also drops core's config and publishes the new
+  revision). Enabled only when the service sets `VPNHIDE_ROOT_EFFECTS=1`.
+
+The app reaches both through core-ffi (`collectDiagnostics`, `rootEffect`; JSON in, one
+JSON reply with a `status` out). Non-root probes of what an unprivileged app sees stay in
+the app and run alongside the core request.
