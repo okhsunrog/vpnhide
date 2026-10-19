@@ -240,6 +240,41 @@ impl CoreState {
         self.config.lock().expect("config mutex").config.is_some()
     }
 
+    /// Current config revision (boot repair base).
+    pub fn config_revision(&self) -> u64 {
+        self.config.lock().expect("config mutex").config_revision
+    }
+
+    /// True when an Unknown operation still Holds mutation admission.
+    pub fn has_unknown_hold(&self) -> bool {
+        let store = self.config.lock().expect("config mutex");
+        store
+            .operations
+            .values()
+            .any(|s| s.record.settled == Some(PhaseOutcome::Unknown))
+            || store.journal.has_unknown()
+    }
+
+    /// Admit an edit from boot / internal callers (same path as RPC).
+    pub fn submit_edit_public(
+        &self,
+        op: OperationId,
+        base: BaseRef,
+        edit: &ConfigEdit,
+    ) -> Result<Accepted, SubmitError> {
+        self.submit_edit(op, base, edit)
+    }
+
+    /// Query a settled/in-flight operation record.
+    pub fn get_operation_record(&self, op: OperationId) -> Option<OperationRecord> {
+        self.config
+            .lock()
+            .expect("config mutex")
+            .operations
+            .get(&op)
+            .map(|s| s.record.clone())
+    }
+
     /// Admit one typed edit (§5) and run its phase plan. Coarse optimistic concurrency: the
     /// caller's `base` must match the current config revision, or the edit is a conflict.
     ///

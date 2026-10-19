@@ -1,0 +1,6 @@
+id=vpnhide_core
+name=VPN Hide (Core)
+version=v1.3.1
+versionCode=10301
+author=okhsunrog
+description=Common persistent root core for VPN Hide 2.0. Boots without the APK: recovers the journal, adopts ownership, selects a backend, and applies policy. Magisk / KernelSU / APatch.

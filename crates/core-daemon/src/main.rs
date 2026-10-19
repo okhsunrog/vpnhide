@@ -1,13 +1,10 @@
-//! Minimal runnable core:
-//!   - (default) `vpnhide-core [socket]` — bind, serve, and run the netlink observation loop.
+//! Runnable core:
+//!   - (default) `vpnhide-core [socket]` — bind, serve, observation loop; with
+//!     `VPNHIDE_BOOT_APPLY=1` re-applies Native/Ports once after load (module boot).
+//!   - `vpnhide-core boot-apply` — load, fence/reconcile, re-apply, write boot_status, exit.
 //!   - `vpnhide-core dump [socket]` — connect as a client and print the current snapshot.
-//!   - `vpnhide-core project [config.json]` — print the built-in control-v2 wire projected
-//!     from a config file (default: `$VPNHIDE_CONFIG_PATH`). **Read-only**: it only projects
-//!     (resolving uids from `pm`), never delivers — safe to run against the real config.
-//!   - `vpnhide-core status [ctl]` — read a kernel control node and print its parsed
-//!     telemetry-v1 status (default `/proc/vpnhide_ctl`). **Read-only.**
-//!
-//! Skeleton entry point — real boot integration and recovery land with the daemon proper.
+//!   - `vpnhide-core project [config.json]` — print control-v2 wire (**read-only**).
+//!   - `vpnhide-core status [ctl]` — print telemetry-v1 status (**read-only**).
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -36,6 +33,10 @@ async fn main() {
         }
         "status" => {
             status(&args.next().unwrap_or_else(|| DEFAULT_CTL.to_owned()));
+            return;
+        }
+        "boot-apply" => {
+            boot_apply_once();
             return;
         }
         _ => {}
@@ -157,6 +158,15 @@ async fn run(path: &str) {
         .publisher
         .update(|snapshot| snapshot.backend = observed_backend.clone());
 
+    if vpnhide_core_daemon::boot::boot_apply_enabled() {
+        let report = vpnhide_core_daemon::boot::reapply(&state);
+        report.write_status_file(&vpnhide_core_daemon::boot::default_boot_status_path());
+        eprintln!(
+            "core: boot-apply status={:?} detail={}",
+            report.status, report.detail
+        );
+    }
+
     // Finish initial channel observation before admitting mutations; startup
     // must not contend with the first request for the KPM control lock.
     let handle = match serve(Path::new(path), state.clone()) {
@@ -191,6 +201,48 @@ async fn run(path: &str) {
     let _ = tokio::signal::ctrl_c().await;
     eprintln!("core: shutting down");
     handle.shutdown_and_unlink();
+}
+
+/// One-shot boot path used by the Magisk module before or instead of long-run serve.
+fn boot_apply_once() {
+    let epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(1);
+    let config_path = config_path_from_env();
+    let journal_path = journal_path_from_env();
+    let kmod_ctl_path = activation::kmod_ctl_path_from_env();
+    let state = match CoreState::load_with_journal(
+        Publisher::new(epoch, StateSnapshot::default()),
+        config_path.clone(),
+        Some(journal_path),
+        kmod_ctl_path,
+    ) {
+        Ok(state) => state,
+        Err(e) => {
+            eprintln!("boot-apply: config load failed on {}: {e}", config_path.display());
+            let report = vpnhide_core_daemon::boot::BootApplyReport {
+                status: vpnhide_core_daemon::boot::BootApplyStatus::Refused {
+                    reason: e.to_string(),
+                },
+                op: None,
+                detail: format!("load failed: {e}"),
+            };
+            report.write_status_file(&vpnhide_core_daemon::boot::default_boot_status_path());
+            std::process::exit(1);
+        }
+    };
+    let report = vpnhide_core_daemon::boot::reapply(&state);
+    report.write_status_file(&vpnhide_core_daemon::boot::default_boot_status_path());
+    eprintln!(
+        "boot-apply: status={:?} detail={}",
+        report.status, report.detail
+    );
+    match report.status {
+        vpnhide_core_daemon::boot::BootApplyStatus::Applied
+        | vpnhide_core_daemon::boot::BootApplyStatus::NoIntent => {}
+        _ => std::process::exit(2),
+    }
 }
 
 async fn dump(path: &str) {
