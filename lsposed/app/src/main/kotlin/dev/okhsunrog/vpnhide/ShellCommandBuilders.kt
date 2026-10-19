@@ -20,20 +20,4 @@ internal fun buildAtomicRootOnlyRawWriteCommand(
     ).joinToString(" && ")
 }
 
-internal fun buildAtomicSystemDataRawWriteCommand(
-    path: String,
-    content: String,
-    mode: String,
-): String {
-    val b64 = base64NoWrap(content)
-    return listOf(
-        "TMP=$path.tmp.\$\$",
-        "echo '$b64' | base64 -d > \"\$TMP\"",
-        "chmod $mode \"\$TMP\" 2>/dev/null",
-        "chown root:system \"\$TMP\" 2>/dev/null",
-        "(chcon $SYSTEM_DATA_FILE_CONTEXT \"\$TMP\" 2>/dev/null || true)",
-        "mv \"\$TMP\" $path",
-    ).joinToString(" && ")
-}
-
 private fun base64NoWrap(content: String): String = Base64.getEncoder().encodeToString(content.toByteArray())

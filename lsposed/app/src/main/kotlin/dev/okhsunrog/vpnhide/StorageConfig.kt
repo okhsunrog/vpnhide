@@ -304,9 +304,6 @@ private fun StringBuilder.appendJsonString(value: String) {
     append('"')
 }
 
-internal fun buildCanonicalConfigWriteCommand(config: CanonicalConfig): String =
-    buildAtomicSystemDataRawWriteCommand(CANONICAL_CONFIG_FILE, canonicalConfigJson(config), "640")
-
 internal fun buildSuperkeyWriteCommand(superkey: String): String =
     listOf(
         "mkdir -p /data/adb/vpnhide",

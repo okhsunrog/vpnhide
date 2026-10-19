@@ -3,11 +3,10 @@ package dev.okhsunrog.vpnhide
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 
 class CanonicalConfigRepositoryTest {
     @Test
-    fun `persistence command orders write coupled state and activators`() {
+    fun `plan orders persist coupled state and activation, and only coupled phases carry shell`() {
         val mutation =
             CanonicalMutation(
                 emptyList(),
@@ -19,8 +18,11 @@ class CanonicalConfigRepositoryTest {
             listOf(ConfigPhase.Persist, ConfigPhase.Secret, ConfigPhase.Native, ConfigPhase.Ports),
             configMutationPlan(mutation, true),
         )
-        assertTrue(configPhaseCommand(ConfigPhase.Persist, CanonicalConfig(debug = true), mutation).contains(CANONICAL_CONFIG_FILE))
-        assertEquals("write-secret", configPhaseCommand(ConfigPhase.Secret, CanonicalConfig(), mutation))
+        // Persist / Native / Ports are typed core edits: the app has no shell write for them.
+        listOf(ConfigPhase.Persist, ConfigPhase.Native, ConfigPhase.Ports).forEach {
+            assertEquals("", configPhaseCommand(it, mutation))
+        }
+        assertEquals("write-secret", configPhaseCommand(ConfigPhase.Secret, mutation))
     }
 
     @Test
@@ -35,21 +37,13 @@ class CanonicalConfigRepositoryTest {
     }
 
     @Test
-    fun `native activation delegates to supervised helper without parsing wire`() {
-        assertEquals(
-            "\"${'$'}{VPNHIDE_MUTATION_HELPER:?mutation helper not supplied}\" activate native",
-            ConfigChannels.nativeActivatorCommand(),
-        )
-    }
-
-    @Test
-    fun `activator shell helper fails for a corrupted bundle`() {
-        val missing = File(System.getProperty("java.io.tmpdir"), "vpnhide-missing-activator-${System.nanoTime()}")
-        val command = "${ConfigChannels.activatorShellHelper()}; run_activator ${missing.absolutePath} Test"
-        val process = ProcessBuilder("sh", "-c", command).start()
-        val stderr = process.errorStream.bufferedReader().readText()
-
-        assertEquals(1, process.waitFor())
-        assertTrue(stderr.contains("Test activator missing or not executable at ${missing.absolutePath}"))
+    fun `no app-side command names a core-owned path`() {
+        val mutation = CanonicalMutation(emptyList(), coupledCommands = listOf(buildSuperkeyClearCommand()))
+        ConfigPhase.entries.forEach { phase ->
+            val command = configPhaseCommand(phase, mutation)
+            listOf(CANONICAL_CONFIG_FILE, "/proc/vpnhide_ctl", "targets.txt", "iptables", "activator").forEach {
+                assertTrue("$phase must not reference $it", it !in command)
+            }
+        }
     }
 }

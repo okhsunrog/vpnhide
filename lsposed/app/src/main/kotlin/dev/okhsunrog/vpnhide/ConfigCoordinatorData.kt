@@ -77,15 +77,17 @@ internal fun configMutationPlan(
 
 internal fun configPhaseCommand(
     phase: ConfigPhase,
-    config: CanonicalConfig,
     mutation: CanonicalMutation,
 ): String =
     when (phase) {
-        ConfigPhase.Persist -> buildCanonicalConfigWriteCommand(config)
+        // Core-owned phases carry no shell: they are typed core edits (see CoreConfigIo).
+        ConfigPhase.Persist, ConfigPhase.Native, ConfigPhase.Ports -> ""
+
         ConfigPhase.Secret, ConfigPhase.Cleanup -> mutation.coupledCommands.joinToString(" && ")
-        ConfigPhase.Native -> ConfigChannels.nativeActivatorCommand()
-        ConfigPhase.Ports -> ConfigChannels.portsActivatorCommand()
     }
+
+/** The canonical JSON size core-ffi `config_replace` accepts (`config_relay::MAX_CONFIG`). */
+internal const val MAX_CORE_CONFIG_BYTES = 512 * 1024
 
 internal fun pendingConfigToggles(mutations: Collection<CanonicalMutation>): Map<CanonicalToggle, Boolean> =
     buildMap {
@@ -128,7 +130,11 @@ internal fun prepareConfigMutation(
                 loggingChanged = captureEnabled != null && candidate.debug != base.debug,
             )
         // Reject unframeable/oversized effects before even the persistence phase can be dispatched.
-        plan.forEach { rootMutationScriptInput(configPhaseCommand(it, candidate, mutation)) }
+        require(canonicalConfigJson(candidate).toByteArray(Charsets.UTF_8).size <= MAX_CORE_CONFIG_BYTES)
+        plan
+            .map { configPhaseCommand(it, mutation) }
+            .filter { it.isNotEmpty() }
+            .forEach { rootMutationScriptInput(it) }
         ConfigOperationEvent.Prepared(
             ticket,
             base,

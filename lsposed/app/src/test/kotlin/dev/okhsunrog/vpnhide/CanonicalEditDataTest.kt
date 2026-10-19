@@ -131,8 +131,8 @@ class CanonicalEditDataTest {
         assertEquals(listOf(ConfigPhase.Native, ConfigPhase.Ports), configMutationPlan(repair, changed = false))
         val secret = CanonicalMutation(emptyList(), activation = noActivation, coupledCommands = listOf("private"))
         assertEquals(listOf(ConfigPhase.Secret), configMutationPlan(secret, changed = false))
-        assertEquals("private", configPhaseCommand(ConfigPhase.Secret, CanonicalConfig(), secret))
-        assertEquals(ConfigChannels.nativeActivatorCommand(), configPhaseCommand(ConfigPhase.Native, CanonicalConfig(), repair))
-        assertEquals(ConfigChannels.portsActivatorCommand(), configPhaseCommand(ConfigPhase.Ports, CanonicalConfig(), repair))
+        assertEquals("private", configPhaseCommand(ConfigPhase.Secret, secret))
+        assertEquals("", configPhaseCommand(ConfigPhase.Native, repair))
+        assertEquals("", configPhaseCommand(ConfigPhase.Ports, repair))
     }
 }

@@ -1,39 +1,56 @@
-# core-2.0 IPC authorization (step 7)
+# core-2.0 IPC authorization
+
+The app runs no root process. It reaches core with the in-process UniFFI client
+(`crates/core-ffi`, loaded through JNA) over a path socket that core binds **inside the app's
+own device-encrypted data dir**. Core is the only root process and the only writer of the
+canonical config, `/proc/vpnhide_ctl`, Zygisk `targets.txt` and the Ports rules.
+
+## Socket placement (`crates/core-daemon/src/app_socket.rs`)
+
+- Path: `/data/user_de/0/dev.okhsunrog.vpnhide/vpnhide-core.sock`
+  (`core-rpc` `PRODUCTION_SOCKET_PATH`; `service.sh` sets `VPNHIDE_APP_DATA_DIR`).
+  Device-encrypted storage exists at boot, before first unlock. `/data/adb` is `0700` root and
+  unreachable from the app.
+- Stealth: another app cannot traverse a foreign app's private data dir, so there is nothing to
+  probe — no world-visible socket, no abstract name.
+- Supervisor: core re-binds whenever the dir exists and the socket is missing (first install,
+  reinstall, "clear data"). No restart needed.
 
 ## Gates
 
-1. **DAC** on the path socket (`/data/adb/vpnhide/core/vpnhide-core.sock`): mode `0660` when
-   `VPNHIDE_CORE_SOCKET_OWNER_UID` is set (first allowlisted uid at boot), else `0666` for
-   host/dev. Parent dir is `0700`.
-2. **SELinux** (`core/module/sepolicy.rule`): `connectto` for `untrusted_app_all` onto
-   magisk/ksu sockets; `dir`/`sock_file` search+write on common labels.
-3. **SO_PEERCRED** uid allowlist (fail-closed when configured):
-   - Env `VPNHIDE_CORE_ALLOW_UIDS` (comma-separated), or
-   - File `VPNHIDE_CORE_ALLOW_UIDS_FILE` (default `/data/adb/vpnhide/core/allowed_uids`)
-   - Empty/missing → **Open** (dev/host). Production app writes its uid after one-shot su
-     (`CoreAllowlist.writeSelfUidScript`). Reinstall/UID change: rewrite file + restart core.
+1. **DAC**: socket owner = the dir's uid/gid, mode `0600`.
+2. **SELinux**: core copies the dir's label (`app_data_file` + the app's MLS categories) onto the
+   socket, so the inode is ordinary app data. `core/module/sepolicy.rule` grants only
+   `connectto` from `untrusted_app_all` onto the root manager's domain (`magisk`, `ksu`, `su`).
+3. **SO_PEERCRED**: `Allowlist::AppOwner` admits root and the uid that owns the app data dir,
+   re-resolved on every accept (a reinstall's new uid is followed automatically). Nothing is
+   written by the app; there is no uid file.
 
-Package/signature mapping via `packages.xml` is a follow-up; uid allowlist is portable across
-Magisk / KernelSU / APatch today.
+Host/dev runs (no `VPNHIDE_APP_DATA_DIR`) keep the plain path socket with the env allowlist
+(`VPNHIDE_CORE_ALLOW_UIDS`, open when unset).
 
 ## Resource bounds
 
 | Bound | Value |
 |-------|--------|
 | Max frame | `MAX_FRAME_BYTES` = 1 MiB (`LengthDelimitedCodec`) |
+| Canonical config on the save path | `config_relay::MAX_CONFIG` = 512 KiB (app: `MAX_CORE_CONFIG_BYTES`) |
 | Concurrent connections | `MAX_CONCURRENT_CONNECTIONS` = 8 |
-| State long-poll | `STATE_HOLD` / `STATE_POLL_DEADLINE` (existing) |
+| State long-poll | `STATE_HOLD` / `STATE_POLL_DEADLINE` |
 
-## APK path
+## APK save path
 
-- UniFFI `CoreClientHandle`: `hello`, `submit_edit_json`, `get_operation_json`, state mirror.
-- Kotlin `CoreFfiGateway` (dev source set): reconnect on transport failure / epoch change;
-  operation receipts queried independently of state updates.
-- `CoreIpcPrefs.useCoreReplica` default **false** — legacy `ConfigRootIo` / root-snapshot
-  remain authoritative until device validation. Editor drafts stay in Kotlin.
-- Parser `CoreReplicaParser` honors freshness: last-good is display-only when `Unknown`.
+- core-ffi `config_state` / `config_replace` / `config_repair` / `config_operation`: one JSON
+  reply each (`status` + receipt + state); the config crosses as on-disk canonical JSON through
+  core's codec (`config_file`). Kotlin bindings are generated at build time
+  (`generateCoreFfiBindings`).
+- Kotlin `FfiCoreConfigClient` → `CoreConfigIo` (the coordinator's effect adapter): Persist is
+  `Replace` against the freshly read revision; Native/Ports report core's receipt, or submit
+  `RepairActivation` when no receipt is current. An uncertain submit is recovered by querying
+  the same op id, never resubmitted.
+- Editor drafts and local preferences stay in Kotlin.
 
-## Not in this step
+## Device validation still required
 
-- Full diagnostics join (step 8)
-- Wholesale activator deletion (step 9)
+Socket label copy, `connectto` under each root manager, and MLS on `connectto` are verified on
+host only (label copy is best-effort there).

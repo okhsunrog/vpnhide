@@ -85,8 +85,21 @@ val rustNdkDir =
         ?.absolutePath
         ?: rustSdkDir.resolve("ndk/$rustNdkVersion").absolutePath
 val repoDir = projectDir.parentFile.parentFile
+val isWindowsHost = System.getProperty("os.name").lowercase().contains("windows")
 val appNativeCrates =
-    listOf("checks", "checks-jni", "app-helper", "core-daemon", "core-rpc", "activator", "apatch-abi", "protocol")
+    listOf(
+        "checks",
+        "checks-jni",
+        "app-helper",
+        "core-ffi",
+        "core-daemon",
+        "core-rpc",
+        "activator",
+        "apatch-abi",
+        "protocol",
+    ).map { repoDir.resolve("crates/$it") }
+val coreFfiCrates =
+    listOf("core-ffi", "core-daemon", "core-rpc", "activator", "apatch-abi", "protocol")
         .map { repoDir.resolve("crates/$it") }
 val rustAssetsOut = rustAssetsDir.get().asFile
 
@@ -100,7 +113,7 @@ val emulatorX86 = (project.findProperty("vpnhideEmulatorX86") as String?)?.toBoo
 val buildAppNative =
     tasks.register<Exec>("buildAppNative") {
         group = "build"
-        description = "Builds the checks JNI library and unified vhhelper via cargo-ndk."
+        description = "Builds the checks JNI library, the core-ffi client library and vhhelper via cargo-ndk."
         workingDir = repoDir
         environment("ANDROID_NDK_HOME", rustNdkDir)
         environment("NDK_HOME", rustNdkDir)
@@ -140,6 +153,10 @@ val buildAppNative =
                 add("vpnhide_checks_jni")
                 add("--package")
                 add("vpnhide_app_helper")
+                // The in-process core client (UniFFI cdylib, loaded by JNA): the app's
+                // only path to config mutations. Shipped in every build type.
+                add("--package")
+                add("vpnhide_core_ffi")
                 add("--locked")
             },
         )
@@ -168,6 +185,76 @@ val buildAppNative =
         }
     }
 
+// Kotlin bindings for the core-ffi client, generated from the crate's UniFFI metadata at
+// build time so they can never drift from the Rust side. Library mode reads metadata
+// symbols, which the stripped Android build drops, so it reads an unstripped host build of
+// the same crate. --no-format: the output must not depend on a locally installed ktlint.
+val coreFfiBindingsDir = layout.buildDirectory.dir("generated/uniffi/kotlin")
+val hostLibName =
+    when {
+        isWindowsHost -> "vpnhide_core_ffi.dll"
+        System.getProperty("os.name").lowercase().contains("mac") -> "libvpnhide_core_ffi.dylib"
+        else -> "libvpnhide_core_ffi.so"
+    }
+val buildCoreFfiHost =
+    tasks.register<Exec>("buildCoreFfiHost") {
+        group = "build"
+        description = "Builds the host core-ffi library the UniFFI bindgen reads metadata from."
+        workingDir = repoDir
+        inputs.files(coreFfiCrates).withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.file(repoDir.resolve("Cargo.lock"))
+        outputs.file(repoDir.resolve("target/debug/$hostLibName"))
+        commandLine("cargo", "build", "--package", "vpnhide_core_ffi", "--lib", "--locked")
+    }
+val generateCoreFfiBindings =
+    tasks.register<Exec>("generateCoreFfiBindings") {
+        group = "build"
+        description = "Generates the Kotlin UniFFI bindings for the core-ffi client."
+        dependsOn(buildCoreFfiHost)
+        workingDir = repoDir
+        val hostLib = repoDir.resolve("target/debug/$hostLibName")
+        val outDir = coreFfiBindingsDir.get().asFile
+        inputs.file(hostLib)
+        outputs.dir(outDir)
+        doFirst { outDir.deleteRecursively() }
+        // Generated code, held to the app's gates: compiled with warnings-as-errors (CI) and
+        // linted. Silence the two findings uniffi's template trips: init checks written as
+        // bare expressions, and java.lang.ref.Cleaner (API 33), which the template only uses
+        // after probing for it with Class.forName, falling back to JNA's cleaner below 33.
+        doLast {
+            outDir.walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+                file.writeText(
+                    file.readText().replaceFirst(
+                        "@file:Suppress(\"NAME_SHADOWING\")",
+                        "@file:Suppress(\"NAME_SHADOWING\", \"UNUSED_EXPRESSION\")\n" +
+                            "@file:android.annotation.SuppressLint(\"NewApi\")",
+                    ),
+                )
+            }
+        }
+        commandLine(
+            "cargo",
+            "run",
+            "--quiet",
+            "--locked",
+            "--package",
+            "vpnhide_core_ffi",
+            "--features",
+            "bindgen",
+            "--bin",
+            "uniffi-bindgen",
+            "--",
+            "generate",
+            "--library",
+            hostLib.absolutePath,
+            "--language",
+            "kotlin",
+            "--no-format",
+            "--out-dir",
+            outDir.absolutePath,
+        )
+    }
+
 // The offline user guide is authored once under the repo's docs/help/ (the same
 // files are published from the repo) and copied into the APK assets so it ships
 // offline. Sync mirrors the source tree — deleting an article removes its asset.
@@ -185,7 +272,7 @@ val syncHelpAssets =
         into(helpAssetsDir.map { it.dir("help") })
     }
 
-tasks.named("preBuild").configure { dependsOn(buildAppNative, syncHelpAssets) }
+tasks.named("preBuild").configure { dependsOn(buildAppNative, generateCoreFfiBindings, syncHelpAssets) }
 
 android {
     namespace = "dev.okhsunrog.vpnhide"
@@ -205,8 +292,7 @@ android {
     // Script is stdlib-only — no `uv` / pip install needed. `python` on
     // Windows, `python3` elsewhere: Ubuntu 22.04+ ships only the latter,
     // Windows python.org / Store installer ships only the former.
-    val isWindows = System.getProperty("os.name").lowercase().contains("windows")
-    val pythonExe = if (isWindows) "python" else "python3"
+    val pythonExe = if (isWindowsHost) "python" else "python3"
     val buildVersion: String =
         providers
             .exec {
@@ -304,9 +390,8 @@ android {
             isDebuggable = true
             applicationIdSuffix = ".dev"
             buildConfigField("boolean", "DEV_ISOLATED", "true")
-            // No R8 for the sandbox: the core-2.0 spike bundles JNA (UniFFI runtime), whose
-            // native-called methods (com.sun.jna.Native.fromNative) minification strips,
-            // and org.json. debug is minified, so override it here like rawDebug does.
+            // No R8 for the sandbox: faster iteration. debug is minified, so override it
+            // here like rawDebug does.
             isMinifyEnabled = false
             isShrinkResources = false
             matchingFallbacks += listOf("debug")
@@ -320,12 +405,17 @@ android {
 
     packaging {
         resources.excludes += "META-INF/*.kotlin_module"
+        // Extract native libs on disk: JNA (the UniFFI runtime) dlopens the core-ffi cdylib
+        // and must find a real file; AGP 9 otherwise keeps libs compressed inside the APK.
+        jniLibs.useLegacyPackaging = true
     }
 
     // Pick up the cargo-ndk outputs (buildAppNative): cdylib as a jniLib, the
     // ground-truth probe bin as an asset. buildAppNative runs via preBuild, so
     // these dirs are populated before the merge/package tasks read them.
     sourceSets["main"].jniLibs.srcDir(rustJniLibsDir.get().asFile)
+    // Generated UniFFI bindings (generateCoreFfiBindings, via preBuild).
+    sourceSets["main"].kotlin.directories.add(coreFfiBindingsDir.get().asFile.absolutePath)
     sourceSets["main"].assets.srcDir(rustAssetsDir.get().asFile)
     // Shared helper response fixtures are consumed by the JVM parser tests and
     // the Rust checks crate, so a contract change cannot update only one side.
@@ -361,9 +451,6 @@ androidComponents {
         variant.outputs.forEach { output ->
             output.versionName.set("2.0.0-alpha0")
         }
-        // Extract native libs on disk (core-2.0 spike): the UniFFI/JNA loader dlopens the
-        // core-ffi cdylib by path. Dev variant only — release keeps AGP 9's compressed-in-APK default.
-        variant.packaging.jniLibs.useLegacyPackaging.set(true)
     }
 }
 
@@ -415,10 +502,12 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
     add("rawDebugImplementation", libs.compose.ui.tooling)
 
-    // core-2.0 dev spike only: JNA is the UniFFI Kotlin runtime's loader for the
-    // core-ffi cdylib (Native.register). @aar pulls the per-ABI libjnidispatch.so.
-    // Scoped to the `dev` build type so release/debug never carry it.
-    add("devImplementation", "net.java.dev.jna:jna:5.17.0@aar")
+    // JNA is the UniFFI Kotlin runtime's loader for the core-ffi cdylib (Native.register).
+    // @aar pulls the per-ABI libjnidispatch.so. Every build type: core is the app's only
+    // path to config mutations.
+    implementation("net.java.dev.jna:jna:5.17.0@aar")
+    // Host JVM unit tests touch the bindings' types; the plain jar has no Android natives.
+    testImplementation("net.java.dev.jna:jna:5.17.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

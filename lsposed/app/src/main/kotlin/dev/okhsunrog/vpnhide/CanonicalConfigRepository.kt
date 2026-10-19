@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.Context
+import dev.okhsunrog.vpnhide.core.CorePaths
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticImpactObserver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,24 +23,25 @@ internal data class CanonicalWriteResult(
 }
 
 /**
- * Sole app-side coordinator for canonical JSON writes and runtime activation.
+ * Sole app-side coordinator for config edits and runtime activation.
  *
- * The process-owned actor serializes fresh field edits through root receipt recovery.
- * The filesystem write remains atomic for system_server and native readers.
- *
- * Step 7: when [dev.okhsunrog.vpnhide.core.CoreIpcPrefs.useCoreReplica] is true (dev FFI
- * build), prefer the core UDS replica + typed `submit_edit` / `get_operation` over this
- * su [ConfigRootIo] lane. Default remains legacy until device validation completes.
- * Editor drafts and local preferences stay in Kotlin either way.
+ * The process-owned actor serializes fresh field edits; every config write, native apply and
+ * Ports apply is a typed command to the root core ([CoreConfigIo] over the in-process core-ffi client). Core
+ * is the only writer of the canonical config, `/proc/vpnhide_ctl`, Zygisk targets and Ports
+ * rules. Editor drafts and local preferences stay in Kotlin.
  */
 internal object CanonicalConfigRepository {
     internal val processScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val runner = RootProcessRunner()
 
     @Volatile private var appContext: Context? = null
+
     private val coordinator =
         ConfigCoordinator(
-            ConfigRootIo { appContext?.let { prepareRootMutationTransport(it, runner) } },
+            CoreConfigIo(
+                prepareCore = { appContext?.let { FfiCoreConfigClient(CorePaths.socket(it)) } },
+                lane = RootCommandLane { appContext?.let { prepareRootMutationTransport(it, runner) } },
+            ),
             processScope,
             confirmed = { VpnHideLog.enabled = it.debug },
             refresh = { refreshDerivedCaches() },
