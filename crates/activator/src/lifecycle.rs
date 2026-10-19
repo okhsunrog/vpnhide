@@ -292,6 +292,11 @@ pub fn boot_load_kmod() -> Result<()> {
 }
 
 pub fn uninstall_kmod() -> Result<()> {
+    if crate::ownership::native_owned_by_core() {
+        crate::ownership::log_fenced("vpnhide_kmod", "uninstall_kmod");
+        return Ok(());
+    }
+
     remove_if_present(KMOD_LOAD_STATUS)?;
     remove_if_present(KMOD_LOAD_DMESG)?;
     remove_empty_dir(KMOD_STATUS_DIR)?;
@@ -406,6 +411,11 @@ pub fn boot_service_builtin() -> Result<()> {
 }
 
 pub fn uninstall_builtin() -> Result<()> {
+    if crate::ownership::native_owned_by_core() {
+        crate::ownership::log_fenced("vpnhide_builtin", "uninstall_builtin");
+        return Ok(());
+    }
+
     remove_if_present(BUILTIN_LOAD_STATUS)?;
     remove_empty_dir(BUILTIN_STATUS_DIR)?;
     log_android("vpnhide", "builtin: persistent module state removed");
@@ -620,6 +630,11 @@ pub fn boot_service_kpm() -> Result<()> {
 }
 
 pub fn uninstall_kpm() -> Result<()> {
+    if crate::ownership::native_owned_by_core() {
+        crate::ownership::log_fenced("vpnhide_kpm", "uninstall_kpm");
+        return Ok(());
+    }
+
     remove_if_present(KPM_LOAD_STATUS)?;
     remove_if_present(KPM_CTL_LOCK)?;
     remove_empty_dir(KPM_STATUS_DIR)?;
@@ -641,6 +656,11 @@ pub fn boot_service_zygisk() -> Result<()> {
 }
 
 pub fn uninstall_zygisk() {
+    if crate::ownership::zygisk_owned_by_core() {
+        crate::ownership::log_fenced("vpnhide_zygisk", "uninstall_zygisk");
+        return;
+    }
+
     log_android("vpnhide", "zygisk: module removed");
 }
 

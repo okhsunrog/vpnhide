@@ -209,10 +209,19 @@ impl PhaseRunner for RealPhaseRunner {
     fn run(&self, phase: ConfigPhase, candidate: &CanonicalConfig) -> PhaseOutcome {
         match phase {
             ConfigPhase::Persist => match &self.config_path {
-                Some(path) => match config_file::write_atomic(path, candidate) {
-                    Ok(()) => PhaseOutcome::Confirmed,
-                    Err(_) => PhaseOutcome::FailedKnown,
-                },
+                Some(path) => {
+                    // Best-effort fence: host sandboxes may lack /data/adb. A
+                    // successful claim makes legacy activators no-op; failure
+                    // must not block Persist itself.
+                    if let Err(e) = crate::ownership::claim(crate::ownership::OwnedResource::Config)
+                    {
+                        eprintln!("core: config ownership claim failed: {e}");
+                    }
+                    match config_file::write_atomic(path, candidate) {
+                        Ok(()) => PhaseOutcome::Confirmed,
+                        Err(_) => PhaseOutcome::FailedKnown,
+                    }
+                }
                 None => PhaseOutcome::Confirmed,
             },
             ConfigPhase::Native => match &self.kmod_ctl_path {
@@ -241,6 +250,11 @@ impl PhaseRunner for RealPhaseRunner {
                                 backend.family(),
                             ) {
                                 Ok(wire) => {
+                                    if let Err(e) = crate::ownership::claim_before_native(
+                                        backend.family(),
+                                    ) {
+                                        eprintln!("core: native ownership claim failed: {e}");
+                                    }
                                     crate::activation::deliver_selected(path, &backend, &wire)
                                 }
                                 Err(error) => {
