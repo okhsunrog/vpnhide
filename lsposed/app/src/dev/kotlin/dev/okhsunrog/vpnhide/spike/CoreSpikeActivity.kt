@@ -41,7 +41,10 @@ class CoreSpikeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val socket =
-            intent.getStringExtra("socket") ?: "/data/local/tmp/vpnhide-dev/core.sock"
+            intent.getStringExtra("socket")
+                ?: uniffi.vpnhide_core_ffi.productionSocketPath()
+                    .takeIf { java.io.File(it).exists() }
+                ?: "/data/local/tmp/vpnhide-dev/core.sock"
 
         var view by mutableStateOf("connecting to $socket …\n")
         setContent {
@@ -92,7 +95,14 @@ class CoreSpikeActivity : ComponentActivity() {
         // 1) Handshake — proves the async call crosses JNI and the tarpc call completes.
         try {
             val epoch = handle.hello()
-            emit("hello OK: core epoch=$epoch")
+            emit("hello OK: core epoch=$epoch protocol=${uniffi.vpnhide_core_ffi.protocolVersion()}")
+            // Operation receipt query is independent of the state mirror (step 7).
+            try {
+                val receipt = handle.getOperationJson(0u)
+                emit("get_operation(0)=$receipt")
+            } catch (e: CoreFfiException) {
+                emit("get_operation FAILED: ${e.message}")
+            }
         } catch (e: CoreFfiException) {
             emit("hello FAILED: ${e.message}")
             return
