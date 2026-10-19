@@ -258,6 +258,8 @@ pub fn collect(paths: &Paths) -> Out {
         module_state(paths, "vpnhide_core", &["vpnhide-core"]),
     );
     file(o, "core_boot_status", &paths.core_boot_status);
+    // Core's persisted once-per-boot native decision (the app reads it over RPC).
+    file(o, "core_native_boot", &paths.core_native_boot);
     o.section(
         "core_log",
         match read_text(&paths.core_log) {
@@ -277,8 +279,6 @@ pub fn collect(paths: &Paths) -> Out {
         "kmod_module_state",
         module_state(paths, "vpnhide_kmod", &["vpnhide_kmod.ko"]),
     );
-    file(o, "kmod_load_status", &paths.kmod_load_status);
-    file(o, "kmod_load_dmesg", &paths.kmod_load_dmesg);
     node(o, "kmod_state", &paths.proc_ctl);
     // Diagnostic-only companion to the control node; never parsed.
     node(o, "kmod_diag", &paths.proc_diag);
@@ -292,7 +292,6 @@ pub fn collect(paths: &Paths) -> Out {
         "kpm_module_state",
         module_state(paths, "vpnhide_kpm", &["vpnhide.kpm"]),
     );
-    file(o, "kpm_load_status", &paths.kpm_load_status);
     kpm_state(o, paths);
     o.section("kpatch_runtime", kpatch_runtime(paths, o));
 

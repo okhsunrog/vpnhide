@@ -4,6 +4,8 @@ import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.settings.FilesystemHidingStatus
 import dev.okhsunrog.vpnhide.settings.installedZygiskOptionalHooks
 import dev.okhsunrog.vpnhide.settings.resolveFilesystemHidingState
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
@@ -160,18 +162,6 @@ class FilesystemHidingDataTest {
     }
 
     @Test
-    fun `fresh boot config errors retain their detail`() {
-        val state =
-            resolveFilesystemHidingState(
-                desiredEnabled = true,
-                sections = sections(configExit = 2, configError = "invalid canonical config"),
-            )
-
-        assertEquals(FilesystemHidingStatus.BootConfigError, state.status)
-        assertEquals("invalid canonical config", state.errorDetail)
-    }
-
-    @Test
     fun `requested hook missing after a successful module load is a setup error`() {
         assertEquals(
             FilesystemHidingStatus.HookSetupError,
@@ -183,14 +173,14 @@ class FilesystemHidingDataTest {
     }
 
     @Test
-    fun `stale boot diagnostics do not override current state`() {
+    fun `a selection from an earlier boot is not a setup error`() {
         val stale =
-            sections(configExit = 2, configError = "old failure") +
+            sections(filesystemRequested = true, moduleLoaded = true) +
                 ("current_boot_id" to "new-boot")
 
         assertEquals(
-            FilesystemHidingStatus.Disabled,
-            resolveFilesystemHidingState(desiredEnabled = false, sections = stale).status,
+            FilesystemHidingStatus.PendingEnable,
+            resolveFilesystemHidingState(desiredEnabled = true, sections = stale).status,
         )
     }
 
@@ -198,8 +188,6 @@ class FilesystemHidingDataTest {
         hookInstalled: Boolean = false,
         filesystemRequested: Boolean = false,
         moduleLoaded: Boolean = false,
-        configExit: Int = if (filesystemRequested) 0 else 1,
-        configError: String = "",
         backend: HookIds.Backend = HookIds.Backend.KMOD,
         statusError: HookIds.StatusError = HookIds.StatusError.OK,
     ): Map<String, String> {
@@ -222,20 +210,32 @@ class FilesystemHidingDataTest {
                             .toLong(),
                 ),
             )
-        val loadStatus =
-            """
-            boot_id=test-boot
-            filesystem_hiding=${if (filesystemRequested) 1 else 0}
-            filesystem_config_exit=$configExit
-            filesystem_config_error=$configError
-            loaded=${if (moduleLoaded) 1 else 0}
-            """.trimIndent()
-        val loadStatusKey = if (backend == HookIds.Backend.KPM) "kpm_load_status" else "kmod_load_status"
+        val native = if (backend == HookIds.Backend.KPM) "Kpm" else "Kmod"
+        val outcome: Any =
+            if (moduleLoaded) {
+                JSONObject().put(
+                    "Selected",
+                    JSONObject().put("backend", native).put("mode", "Loaded").put("filesystem_hiding", filesystemRequested),
+                )
+            } else {
+                "NoBackend"
+            }
+        val boot =
+            JSONObject()
+                .put("boot_id", "test-boot")
+                .put("decided_epoch", 1)
+                .put("decided_at_ms", 1)
+                .put("updated_at_ms", 1)
+                .put("outcome", outcome)
+                .put("installed", JSONArray(listOf(native)))
+                .put("live", JSONArray())
+                .put("staged", JSONArray())
+                .put("zygisk_targets", "NotInstalled")
         return mapOf(
             (if (backend == HookIds.Backend.KPM) "kpm_module_dir" else "kmod_module_dir") to "1",
             (if (backend == HookIds.Backend.KPM) "kpm_state" else "kmod_state") to status,
             "current_boot_id" to "test-boot",
-            loadStatusKey to loadStatus,
+            NATIVE_BOOT_SECTION to boot.toString(),
         )
     }
 

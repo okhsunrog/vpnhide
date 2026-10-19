@@ -146,7 +146,6 @@ class StatisticsDataTest {
                             "current_boot_id" to "boot-1",
                             "zygisk_status" to "boot_id=boot-1",
                             "zygisk_prop" to "version=1.0",
-                            "kpm_load_status" to "",
                         ),
                 ),
             )

@@ -38,8 +38,24 @@ internal fun DashboardIssue.toReason(): DashboardIssueReason =
             DashboardIssueReason("multiple_native_active")
         }
 
-        DashboardIssue.NativeConflictDeferred -> {
-            DashboardIssueReason("native_conflict_deferred")
+        is DashboardIssue.NativeBackendsConflict -> {
+            DashboardIssueReason("native_backends_conflict", mapOf("backends" to backends.joinToString(",") { it.name }))
+        }
+
+        is DashboardIssue.NativeBackendsStagedConflict -> {
+            DashboardIssueReason("native_backends_staged_conflict", mapOf("backends" to backends.joinToString(",") { it.name }))
+        }
+
+        is DashboardIssue.KpmUnverifiable -> {
+            DashboardIssueReason("kpm_unverifiable", mapOf("detail" to detail))
+        }
+
+        is DashboardIssue.NativeBootFailed -> {
+            DashboardIssueReason("native_boot_failed", mapOf("detail" to detail))
+        }
+
+        is DashboardIssue.ZygiskRetireFailed -> {
+            DashboardIssueReason("zygisk_retire_failed", mapOf("detail" to detail))
         }
 
         DashboardIssue.KpmAwaitingSuperkey -> {
@@ -110,10 +126,6 @@ internal fun DashboardIssue.toReason(): DashboardIssueReason =
                 "filesystem_hiding_pending",
                 mapOf("enabling" to enabling.toString(), "zygisk" to zygisk.toString()),
             )
-        }
-
-        is DashboardIssue.FilesystemHidingBootError -> {
-            DashboardIssueReason("filesystem_hiding_boot_error", mapOf("detail" to detail))
         }
 
         DashboardIssue.FilesystemHidingSetupError -> {

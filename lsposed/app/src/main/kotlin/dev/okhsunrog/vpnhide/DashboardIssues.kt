@@ -71,8 +71,33 @@ internal sealed interface DashboardIssue {
 
     data object MultipleNativeActive : Native
 
-    /** KPM stood down at boot because a .ko was already there. */
-    data object NativeConflictDeferred : Native
+    /**
+     * Core found more than one native backend installed or live this boot, so it loaded
+     * none and delivered no config. [backends] is every backend that took part.
+     */
+    data class NativeBackendsConflict(
+        val backends: List<NativeBackendId>,
+    ) : Native
+
+    /** A module staged for the next reboot would leave more than one native backend. */
+    data class NativeBackendsStagedConflict(
+        val backends: List<NativeBackendId>,
+    ) : Native
+
+    /** KernelPatch cannot be queried and a VPN Hide KPM may be live: nothing else was loaded. */
+    data class KpmUnverifiable(
+        val detail: String,
+    ) : Native
+
+    /** Core's native boot step failed in a way no module card explains. */
+    data class NativeBootFailed(
+        val detail: String,
+    ) : Native
+
+    /** Zygisk is not the selected backend, but its old targets could not be cleared. */
+    data class ZygiskRetireFailed(
+        val detail: String,
+    ) : Native
 
     /** KPM is installed under APatch but dormant: no usable su token or saved SuperKey. */
     data object KpmAwaitingSuperkey : Native
@@ -146,10 +171,6 @@ internal sealed interface DashboardIssue {
         val zygisk: Boolean,
     ) : Environment
 
-    data class FilesystemHidingBootError(
-        val detail: String,
-    ) : Environment
-
     data object FilesystemHidingSetupError : Environment
 
     data object DebugLoggingOn : Environment
@@ -219,6 +240,8 @@ internal data class ModuleFacts(
     val currentBootId: String,
     val mismatches: List<ModuleMismatch>,
     val builtinKernelPresent: Boolean = false,
+    /** Core's once-per-boot native decision; null when core did not report one. */
+    val nativeBoot: NativeBootStatus? = null,
 )
 
 internal data class LsposedFacts(
@@ -425,6 +448,7 @@ private fun nativeChoiceIssues(facts: DashboardFacts): List<DashboardIssue> =
     buildList {
         addAll(betterBackendIssues(facts))
         addAll(multiNativeIssues(facts))
+        addAll(nativeBootIssues(facts))
         if ((facts.modules.builtinKernelPresent || moduleActive(facts.modules.builtin.state)) &&
             facts.modules.kmod.state is ModuleState.Installed
         ) {
@@ -477,6 +501,12 @@ private fun betterBackendIssues(facts: DashboardFacts): List<DashboardIssue> {
 
 private fun multiNativeIssues(facts: DashboardFacts): List<DashboardIssue> {
     val modules = facts.modules
+    val boot = modules.nativeBoot?.takeIf { it.isFreshFor(modules.currentBootId) }
+    // Core's own verdict comes first: with more than one candidate it loaded nothing, and
+    // that names every backend involved, which the active-pair heuristics below cannot.
+    (boot?.outcome as? NativeBootOutcome.Conflict)?.let {
+        return listOf(DashboardIssue.NativeBackendsConflict(it.backends))
+    }
     // Disabled or inactive modules may still have directories under
     // /data/adb/modules; they are not a freeze risk and must not raise the
     // .ko + KPM conflict banner.
@@ -487,25 +517,65 @@ private fun multiNativeIssues(facts: DashboardFacts): List<DashboardIssue> {
             kpmActive = moduleActive(modules.kpm.state),
             zygiskActive = moduleActive(modules.zygisk.state),
         )
-    return when (severity) {
-        MultiNativeSeverity.Error -> {
-            listOf(DashboardIssue.NativeConflictKernel)
+    return buildList {
+        when (severity) {
+            MultiNativeSeverity.Error -> add(DashboardIssue.NativeConflictKernel)
+            MultiNativeSeverity.Warning -> add(DashboardIssue.MultipleNativeActive)
+            MultiNativeSeverity.None -> Unit
         }
+        boot?.stagedConflict?.takeIf { it.isNotEmpty() }?.let { add(DashboardIssue.NativeBackendsStagedConflict(it)) }
+    }
+}
 
-        MultiNativeSeverity.Warning -> {
-            listOf(DashboardIssue.MultipleNativeActive)
-        }
+/**
+ * Core's native boot failures that no module card diagnoses. KPM and kmod load failures
+ * are left to [classifyKpmProblem] / [classifyKmodProblem], which own their wording.
+ */
+private fun nativeBootIssues(facts: DashboardFacts): List<DashboardIssue> {
+    val boot = facts.modules.nativeBoot?.takeIf { it.isFreshFor(facts.modules.currentBootId) } ?: return emptyList()
+    return buildList {
+        when (val outcome = boot.outcome) {
+            is NativeBootOutcome.KpmUnverifiable -> {
+                add(DashboardIssue.KpmUnverifiable(outcome.detail))
+            }
 
-        MultiNativeSeverity.None -> {
-            // The active-pair Error above is effectively unobservable — two live
-            // kernel hookers freeze the device before this screen renders. KPM
-            // standing down for a co-installed .ko is the state actually seen.
-            if (kpmDeferredForConflict(modules.kpmLoadStatus, modules.currentBootId)) {
-                listOf(DashboardIssue.NativeConflictDeferred)
-            } else {
-                emptyList()
+            is NativeBootOutcome.ForeignOwner -> {
+                add(DashboardIssue.NativeBootFailed("foreign kernel backend id ${outcome.id}"))
+            }
+
+            is NativeBootOutcome.Unknown -> {
+                add(DashboardIssue.NativeBootFailed(outcome.detail))
+            }
+
+            is NativeBootOutcome.DeliveryFailed -> {
+                if (outcome.backend != NativeBackendId.Kpm) add(DashboardIssue.NativeBootFailed(outcome.detail))
+            }
+
+            is NativeBootOutcome.UnsupportedKernel -> {
+                if (outcome.backend != NativeBackendId.Kpm) add(DashboardIssue.NativeBootFailed(outcome.detail))
+            }
+
+            is NativeBootOutcome.LoadFailed -> {
+                if (outcome.backend == NativeBackendId.Builtin || outcome.backend == NativeBackendId.Zygisk) {
+                    add(DashboardIssue.NativeBootFailed(outcome.stderr))
+                }
+            }
+
+            is NativeBootOutcome.MissingArtifact -> {
+                if (outcome.backend == NativeBackendId.Builtin || outcome.backend == NativeBackendId.Zygisk) {
+                    add(DashboardIssue.NativeBootFailed("missing ${outcome.path}"))
+                }
+            }
+
+            is NativeBootOutcome.Selected,
+            is NativeBootOutcome.Conflict,
+            is NativeBootOutcome.AwaitingAuthentication,
+            NativeBootOutcome.NoBackend,
+            -> {
+                // Healthy, or explained by the conflict banner and the module cards.
             }
         }
+        (boot.zygiskTargets as? ZygiskTargetsState.RetireFailed)?.let { add(DashboardIssue.ZygiskRetireFailed(it.detail)) }
     }
 }
 
@@ -536,10 +606,6 @@ private fun filesystemHidingIssues(state: FilesystemHidingState): List<Dashboard
 
         FilesystemHidingStatus.PendingDisable -> {
             listOf(DashboardIssue.FilesystemHidingPending(enabling = false, zygisk = zygisk))
-        }
-
-        FilesystemHidingStatus.BootConfigError -> {
-            listOf(DashboardIssue.FilesystemHidingBootError(state.errorDetail.orEmpty()))
         }
 
         FilesystemHidingStatus.HookSetupError -> {

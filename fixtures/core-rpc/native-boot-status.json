@@ -1,0 +1,490 @@
+[
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": {
+      "Selected": {
+        "backend": "Kmod",
+        "mode": "Loaded",
+        "filesystem_hiding": true
+      }
+    },
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": {
+      "Selected": {
+        "backend": "Builtin",
+        "mode": "Adopted",
+        "filesystem_hiding": null
+      }
+    },
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": {
+      "Conflict": {
+        "installed": [
+          "Kmod",
+          "Kpm"
+        ],
+        "live": [
+          "Builtin"
+        ],
+        "staged": [
+          "Zygisk"
+        ]
+      }
+    },
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": {
+      "AwaitingAuthentication": {
+        "detail": "a"
+      }
+    },
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": {
+      "KpmUnverifiable": {
+        "detail": "b"
+      }
+    },
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": {
+      "UnsupportedKernel": {
+        "backend": "Kpm",
+        "uname": "6.18",
+        "detail": "c"
+      }
+    },
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": {
+      "MissingArtifact": {
+        "backend": "Kmod",
+        "path": "/x.ko"
+      }
+    },
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": {
+      "LoadFailed": {
+        "backend": "Kmod",
+        "exit": 1,
+        "stderr": "Key was rejected by service",
+        "dmesg_tail": [
+          "vpnhide: x"
+        ],
+        "kprobes": true,
+        "kretprobes": null,
+        "signature_rejected": true
+      }
+    },
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": {
+      "DeliveryFailed": {
+        "backend": "Zygisk",
+        "detail": "d"
+      }
+    },
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": {
+      "ForeignOwner": {
+        "id": 153
+      }
+    },
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": "NoBackend",
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": {
+      "Unknown": {
+        "detail": "e"
+      }
+    },
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": {
+      "kprobes": true,
+      "kretprobes": false,
+      "gki_variant": "android14-6.1",
+      "version": "2.0.0",
+      "uname": "6.1.0"
+    },
+    "zygisk_targets": "Retired",
+    "ports": {
+      "source": "BootRetry",
+      "ipv4": "Confirmed",
+      "ipv6": "Unknown",
+      "target_count": 2,
+      "netd_ready": false,
+      "detail": "f",
+      "at_ms": 3
+    }
+  },
+  {
+    "boot_id": "b-1",
+    "decided_epoch": 7,
+    "decided_at_ms": 1,
+    "updated_at_ms": 2,
+    "outcome": "NoBackend",
+    "installed": [
+      "Kmod"
+    ],
+    "live": [
+      "Kpm"
+    ],
+    "staged": [
+      "Zygisk"
+    ],
+    "kmod": null,
+    "zygisk_targets": {
+      "RetireFailed": {
+        "detail": "read-only"
+      }
+    },
+    "ports": null
+  }
+]

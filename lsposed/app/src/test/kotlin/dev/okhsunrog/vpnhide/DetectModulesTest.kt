@@ -100,9 +100,9 @@ class DetectModulesTest {
                 "kpm_prop" to "version=2.0.0",
                 "kpm_state" to "vpnhide 1 status\nbackend 0x1\nkver 0x0\nhooks 0x3ff\nerror 0x0\n",
             )
-        val kpm = detectKpmModule(sections, parseKpmLoadStatus(""), "boot-1") as ModuleState.Installed
+        val kpm = detectKpmModule(sections, kpmStatusOf(""), "boot-1") as ModuleState.Installed
         assertEquals(true, kpm.active)
-        val idle = detectKpmModule(sections - "kpm_state", parseKpmLoadStatus(""), "boot-1") as ModuleState.Installed
+        val idle = detectKpmModule(sections - "kpm_state", kpmStatusOf(""), "boot-1") as ModuleState.Installed
         assertEquals(false, idle.active)
     }
 
@@ -199,8 +199,14 @@ class DetectModulesTest {
         val missing = detectPortsModule(mapOf("core_prop" to "version=0.6.3")) as ModuleState.Installed
         assertEquals(false, missing.runtimeCheckable)
         // An unverified reading is no evidence that the rules are missing: no warning.
-        assertEquals(null, detectPortsApplyProblem(locked, 1, "status=Applied\n", portsDisabled = false))
+        assertEquals(null, detectPortsApplyProblem(locked, 1, portsApply(), portsDisabled = false))
     }
+
+    private fun portsApply(
+        ipv4: FamilyOutcome = FamilyOutcome.Confirmed,
+        ipv6: FamilyOutcome = FamilyOutcome.Confirmed,
+        detail: String = "",
+    ) = PortsBootStatus(PortsBootSource.Boot, ipv4, ipv6, targetCount = 1, netdReady = true, detail = detail, atMs = 1)
 
     @Test
     fun `ports apply problem carries core's boot failure detail`() {
@@ -209,26 +215,26 @@ class DetectModulesTest {
             detectPortsApplyProblem(
                 ports,
                 1,
-                "status=AppliedWithFailure { settled: FailedKnown }\nop=Some(7)\ndetail=iptables-restore failed\n",
+                portsApply(ipv4 = FamilyOutcome.FailedKnown, detail = "iptables-restore failed"),
                 portsDisabled = false,
             )
 
         assertEquals("iptables-restore failed", problem?.failureDetail)
-        val refused = detectPortsApplyProblem(ports, 1, "status=HeldUnknown\nop=None\ndetail=\n", portsDisabled = false)
-        assertEquals("HeldUnknown", refused?.failureDetail)
+        val unknown = detectPortsApplyProblem(ports, 1, portsApply(ipv6 = FamilyOutcome.Unknown), portsDisabled = false)
+        assertEquals("IPv4 Confirmed, IPv6 Unknown", unknown?.failureDetail)
     }
 
     @Test
     fun `ports apply problem is generic when chains are missing after a clean boot apply`() {
         val ports = ModuleState.Installed(version = "2.0.0", active = false)
 
-        assertEquals(null, detectPortsApplyProblem(ports.copy(active = true), 1, "", portsDisabled = false))
-        assertEquals(null, detectPortsApplyProblem(ports, 0, "", portsDisabled = false))
+        assertEquals(null, detectPortsApplyProblem(ports.copy(active = true), 1, null, portsDisabled = false))
+        assertEquals(null, detectPortsApplyProblem(ports, 0, null, portsDisabled = false))
         assertEquals(
             PortsApplyProblem(failureDetail = null),
-            detectPortsApplyProblem(ports, 1, "status=Applied\nop=Some(1)\ndetail=\n", portsDisabled = false),
+            detectPortsApplyProblem(ports, 1, portsApply(), portsDisabled = false),
         )
-        assertEquals(PortsApplyProblem(failureDetail = null), detectPortsApplyProblem(ports, 1, "", portsDisabled = false))
+        assertEquals(PortsApplyProblem(failureDetail = null), detectPortsApplyProblem(ports, 1, null, portsDisabled = false))
     }
 
     @Test
@@ -237,7 +243,7 @@ class DetectModulesTest {
 
         assertEquals(
             null,
-            detectPortsApplyProblem(ports, 1, "status=AppliedWithFailure\ndetail=iptables-restore failed\n", portsDisabled = true),
+            detectPortsApplyProblem(ports, 1, portsApply(ipv4 = FamilyOutcome.FailedKnown), portsDisabled = true),
         )
     }
 
@@ -250,7 +256,7 @@ class DetectModulesTest {
                 brokenReason = ModuleBrokenReason.ArtifactMissing,
             )
 
-        assertEquals(null, detectPortsApplyProblem(ports, 1, "", portsDisabled = false))
+        assertEquals(null, detectPortsApplyProblem(ports, 1, null, portsDisabled = false))
     }
 
     @Test

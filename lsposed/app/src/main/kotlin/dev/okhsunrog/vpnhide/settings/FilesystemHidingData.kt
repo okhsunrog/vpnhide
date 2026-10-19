@@ -6,9 +6,10 @@ import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.hasHook
 import dev.okhsunrog.vpnhide.hooksInMask
 import dev.okhsunrog.vpnhide.installedHooks
+import dev.okhsunrog.vpnhide.kmodLoadStatus
+import dev.okhsunrog.vpnhide.kpmLoadStatus
+import dev.okhsunrog.vpnhide.nativeBootStatus
 import dev.okhsunrog.vpnhide.parseKeyValueLines
-import dev.okhsunrog.vpnhide.parseKpmLoadStatus
-import dev.okhsunrog.vpnhide.readKmodLoadStatus
 import dev.okhsunrog.vpnhide.statistics.parseProtocolStatusBlock
 import dev.okhsunrog.vpnhide.statusError
 
@@ -18,7 +19,6 @@ internal enum class FilesystemHidingStatus {
     Active,
     PendingEnable,
     PendingDisable,
-    BootConfigError,
     HookSetupError,
 }
 
@@ -98,11 +98,7 @@ private fun currentKmodLoadStatus(
     sections: Map<String, String>,
 ): KmodLoadStatus? =
     if (backend.id == NativeBackendId.Kmod) {
-        readKmodLoadStatus(
-            currentBootId = sections["current_boot_id"].orEmpty().trim(),
-            raw = sections["kmod_load_status"].orEmpty(),
-            dmesgRaw = "",
-        )?.takeIf { it.freshForCurrentBoot }
+        nativeBootStatus(sections).kmodLoadStatus(sections["current_boot_id"].orEmpty())?.takeIf { it.freshForCurrentBoot }
     } else {
         null
     }
@@ -113,15 +109,15 @@ private fun filesystemHookSetupFailed(
     sections: Map<String, String>,
 ): Boolean =
     when (backend.id) {
-        // The in-tree backend has no kmod load_status with filesystem-config
-        // fields (its activator only records liveness), so there is no boot-time
-        // setup-failure signal to read — same fail-open as an unavailable one.
+        // Core adopts the in-tree backend without load args, so its boot status
+        // carries no filesystem-hiding choice: no setup-failure signal to read,
+        // the same fail-open as an unavailable one.
         NativeBackendId.Kmod, NativeBackendId.Builtin -> {
             load?.let { it.loaded == true && it.filesystemHiding == true } == true
         }
 
         NativeBackendId.Kpm -> {
-            val kpmLoad = parseKpmLoadStatus(sections["kpm_load_status"].orEmpty())
+            val kpmLoad = nativeBootStatus(sections).kpmLoadStatus()
             kpmLoad.loaded == true &&
                 kpmLoad.filesystemHiding == true &&
                 kpmLoad.isFreshFor(sections["current_boot_id"].orEmpty()) &&
@@ -245,14 +241,6 @@ internal fun resolveFilesystemHidingState(
             }
         }
     val load = currentKmodLoadStatus(backend, sections)
-    val configExit = load?.filesystemConfigExit
-    if (configExit != null && configExit != 0 && configExit != 1) {
-        return FilesystemHidingState(
-            status = FilesystemHidingStatus.BootConfigError,
-            backend = backend.id,
-            errorDetail = load.filesystemConfigError ?: "exit=$configExit",
-        )
-    }
 
     return when {
         desiredEnabled && hookInstalled -> {

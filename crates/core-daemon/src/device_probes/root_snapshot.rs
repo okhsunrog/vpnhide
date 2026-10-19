@@ -27,11 +27,7 @@ pub fn collect(paths: &Paths, with_packages: bool) -> Out {
     });
     phase(&mut out, "kmod_status_files", |o| {
         file(o, "current_boot_id", &paths.boot_id);
-        file(o, "kmod_load_status", &paths.kmod_load_status);
-        file(o, "kmod_load_dmesg", &paths.kmod_load_dmesg);
         file(o, "zygisk_status", &paths.zygisk_status);
-        file(o, "kpm_load_status", &paths.kpm_load_status);
-        file(o, "core_boot_status", &paths.core_boot_status);
     });
     phase(&mut out, "runtime_status_files", |o| runtime(o, paths));
     if with_packages {

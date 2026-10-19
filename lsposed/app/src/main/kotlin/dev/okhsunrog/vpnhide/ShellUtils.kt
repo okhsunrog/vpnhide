@@ -26,8 +26,6 @@ internal const val PROC_DIAG = "/proc/vpnhide_diag"
 // writer of config, control nodes, Zygisk targets and Ports rules.
 internal const val CORE_MODULE_DIR = "/data/adb/modules/vpnhide_core"
 internal const val KMOD_MODULE_DIR = "/data/adb/modules/vpnhide_kmod"
-internal const val KMOD_LOAD_STATUS_FILE = "/data/adb/vpnhide_kmod/load_status"
-internal const val KMOD_LOAD_DMESG_FILE = "/data/adb/vpnhide_kmod/load_dmesg"
 
 // The built-in kernel backend (CONFIG_VPNHIDE=y) has no module at all: the
 // driver is part of the kernel image and core configures it over the same
@@ -42,7 +40,6 @@ internal const val ZYGISK_STATUS_FILE = "/data/user/0/dev.okhsunrog.vpnhide/file
 // channel is the KernelPatch ctl0 supercall, which core reads for the snapshot's
 // `kpm_state` section.
 internal const val KPM_MODULE_DIR = "/data/adb/modules/vpnhide_kpm"
-internal const val KPM_LOAD_STATUS_FILE = "/data/adb/vpnhide_kpm/load_status"
 
 /**
  * Lines of a vpnhide config file: trimmed, with blank lines and `#`-comments

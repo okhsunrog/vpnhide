@@ -95,13 +95,50 @@ private fun DashboardIssue.Native.nativeMessage(res: Resources): DashboardMessag
             warn(res.getString(R.string.dashboard_issue_multiple_native), helpArticle = HelpArticle.CHOOSING_NATIVE)
         }
 
-        DashboardIssue.NativeConflictDeferred -> {
-            warn(res.getString(R.string.dashboard_issue_native_conflict_deferred), helpArticle = HelpArticle.CHOOSING_NATIVE)
+        is DashboardIssue.NativeBackendsConflict -> {
+            err(
+                res.getString(R.string.dashboard_issue_native_backends_conflict, backendNames(res, backends)),
+                helpArticle = HelpArticle.CHOOSING_NATIVE,
+            )
+        }
+
+        is DashboardIssue.NativeBackendsStagedConflict -> {
+            warn(
+                res.getString(R.string.dashboard_issue_native_backends_staged_conflict, backendNames(res, backends)),
+                helpArticle = HelpArticle.CHOOSING_NATIVE,
+            )
+        }
+
+        is DashboardIssue.KpmUnverifiable -> {
+            err(res.getString(R.string.dashboard_issue_kpm_unverifiable, detail), helpArticle = HelpArticle.KPM_INSTALL)
+        }
+
+        is DashboardIssue.NativeBootFailed -> {
+            err(res.getString(R.string.dashboard_issue_native_boot_failed, detail), helpArticle = HelpArticle.COLLECT_REPORT)
+        }
+
+        is DashboardIssue.ZygiskRetireFailed -> {
+            warn(res.getString(R.string.dashboard_issue_zygisk_retire_failed, detail), helpArticle = HelpArticle.CHOOSING_NATIVE)
         }
 
         DashboardIssue.KpmAwaitingSuperkey -> {
             warn(res.getString(R.string.dashboard_issue_kpm_awaiting_superkey), helpArticle = HelpArticle.KPM_INSTALL)
         }
+    }
+
+private fun backendNames(
+    res: Resources,
+    backends: List<NativeBackendId>,
+): String =
+    backends.joinToString(", ") {
+        res.getString(
+            when (it) {
+                NativeBackendId.Kmod -> R.string.dashboard_backend_kmod
+                NativeBackendId.Builtin -> R.string.dashboard_backend_builtin
+                NativeBackendId.Kpm -> R.string.dashboard_backend_kpm
+                NativeBackendId.Zygisk -> R.string.dashboard_backend_zygisk
+            },
+        )
     }
 
 private fun DashboardIssue.Lsposed.lsposedMessage(
@@ -218,13 +255,6 @@ private fun DashboardIssue.Environment.environmentMessage(res: Resources): Dashb
                         else -> R.string.dashboard_issue_filesystem_hiding_pending_disable
                     },
                 ),
-                helpArticle = HelpArticle.EXPERIMENTAL_PROTECTION,
-            )
-        }
-
-        is DashboardIssue.FilesystemHidingBootError -> {
-            err(
-                res.getString(R.string.dashboard_issue_filesystem_hiding_boot_error, detail),
                 helpArticle = HelpArticle.EXPERIMENTAL_PROTECTION,
             )
         }

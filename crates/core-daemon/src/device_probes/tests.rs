@@ -12,10 +12,8 @@ fn tree(root: &Path) -> Paths {
         config_file: root.join("config.json"),
         superkey_file: root.join("superkey"),
         core_boot_status: root.join("boot_status"),
+        core_native_boot: root.join("native_boot.json"),
         core_log: root.join("core.log"),
-        kmod_load_status: root.join("kmod_load_status"),
-        kmod_load_dmesg: root.join("kmod_load_dmesg"),
-        kpm_load_status: root.join("kpm_load_status"),
         zygisk_status: root.join("zygisk_status"),
         proc_ctl: root.join("ctl"),
         proc_diag: root.join("diag"),
@@ -92,13 +90,11 @@ fn root_snapshot_frames_every_required_section_with_shell_compatible_values() {
         get("lsposed_framework"),
         "installed=1\ndisabled=0\nprobe_ok=1"
     );
-    for name in [
-        "kmod_load_status",
-        "kpm_load_status",
-        "core_boot_status",
-        "zygisk_status",
-    ] {
-        assert_eq!(get(name), "", "{name}");
+    assert_eq!(get("zygisk_status"), "");
+    // The per-backend load_status files are gone: core publishes the typed
+    // native decision over RPC instead.
+    for name in ["kmod_load_status", "kpm_load_status", "core_boot_status"] {
+        assert!(!s.contains_key(name), "{name}");
     }
     assert!(
         out.buf
@@ -300,6 +296,7 @@ fn debug_snapshot_covers_every_backend_state_path() {
         "core_prop",
         "core_module_state",
         "core_boot_status",
+        "core_native_boot",
         "core_log",
         "kmod_module_state",
         "kmod_state",

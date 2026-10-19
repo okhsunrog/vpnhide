@@ -381,8 +381,12 @@
     <string name="dashboard_action_learn_more">了解更多</string>
     <string name="dashboard_issue_kmod_capable_but_zygisk">当前内核支持内核模块——它在内核空间挂钩，对防篡改检测不可见。Zygisk 也能用，但为其开启原生时，银行和支付类应用可能会检测到它的钩子。请安装 %1$s 并卸载 Zygisk 模块，以获得更干净的覆盖。</string>
     <string name="dashboard_issue_native_conflict_kernel">内核后端（.ko 或内置）与 KPM 同时处于活动状态。它们挂钩相同的内核函数，可能导致设备冻结。请只保留一个内核后端；使用内置后端时请移除 KPM。</string>
-    <string name="dashboard_issue_native_conflict_deferred">内核模块（.ko）和 KPM 同时装着。KPM 已在开机时主动让位以避免冻结，因此没有起任何作用。请只保留其一——卸载 KPM（或内核模块）。</string>
-    <string name="dashboard_issue_kpm_awaiting_superkey">KPM 已安装但未生效：APatch/FolkPatch 无法用受信任的 su 令牌加载它。请在“设置 → 安全”中保存 SuperKey，然后重启以启用原生隐藏。</string>
+    <string name="dashboard_issue_native_backends_conflict">已安装多个原生后端：%1$s。请只保留一个。本次开机 VPN Hide 未加载其中任何一个，在您卸载其余后端并重启之前，原生隐藏处于关闭状态。</string>
+    <string name="dashboard_issue_native_backends_staged_conflict">下次重启后将安装以下原生后端：%1$s。请只保留一个，否则 VPN Hide 将不会加载其中任何一个。</string>
+    <string name="dashboard_issue_kpm_unverifiable">无法查询 KernelPatch，且 VPN Hide 的 KPM 可能已在运行，因此未加载其他原生后端。请在“设置 → 安全”中保存 SuperKey，或移除 KPM。详情：%1$s</string>
+    <string name="dashboard_issue_native_boot_failed">本次开机未能设置原生后端：%1$s</string>
+    <string name="dashboard_issue_zygisk_retire_failed">Zygisk 不是所选后端，但其旧目标列表无法清除，因此它可能仍在挂钩之前选择的应用。请卸载 Zygisk 模块。详情：%1$s</string>
+    <string name="dashboard_issue_kpm_awaiting_superkey">KPM 已安装但未生效：KernelPatch 拒绝了认证，VPN Hide 无法加载它。请在“设置 → 安全”中保存 SuperKey，VPN Hide 会立即加载，无需重启。</string>
     <string name="dashboard_issue_module_reboot_to_activate">%1$s 模块已安装，但尚未启用 — 重启设备后生效。</string>
     <string name="dashboard_issue_module_artifact_missing">%1$s 模块安装已损坏：缺少 %2$s，core 无可加载的内容。请从最新发行版重新安装该模块 ZIP。</string>
     <string name="dashboard_issue_kpm_unsupported_kernel">KPM 已安装，但无法在内核 %1$s 上加载，因为这一内核家族没有经过验证的偏移表。请改用 Zygisk 后端。</string>
@@ -495,7 +499,6 @@
     <string name="settings_filesystem_hiding_pending_disable">将在重启后关闭。</string>
     <string name="settings_filesystem_hiding_pending_enable_zygisk">重启指定应用后开启。</string>
     <string name="settings_filesystem_hiding_pending_disable_zygisk">重启指定应用后关闭。</string>
-    <string name="settings_filesystem_hiding_boot_error">无法读取开机设置：%1$s</string>
     <string name="settings_filesystem_hiding_setup_error">当前后端未能安装它的文件系统钩子。详情见诊断。</string>
     <string name="settings_filesystem_hiding_confirm_title">开启实验性文件系统钩子？</string>
     <string name="settings_filesystem_hiding_confirm_body">这些全局 VFS 钩子可能拖慢文件系统操作，而且已知的真实应用目前并不需要它们。通常普通的原生保护就够了。只在明确要测试文件系统路径检测时才开启；需要重启。</string>
@@ -509,7 +512,6 @@
     <string name="dashboard_issue_filesystem_hiding_pending_disable">实验性文件系统路径隐藏在下次重启前仍然生效。</string>
     <string name="dashboard_issue_filesystem_hiding_pending_enable_zygisk">文件系统路径隐藏已开启；请重启指定应用来安装 Zygisk 钩子。</string>
     <string name="dashboard_issue_filesystem_hiding_pending_disable_zygisk">在正在运行的目标应用重启之前，文件系统路径隐藏仍然生效。</string>
-    <string name="dashboard_issue_filesystem_hiding_boot_error">文件系统路径隐藏无法读取它的开机设置：%1$s</string>
     <string name="dashboard_issue_filesystem_hiding_setup_error">已请求开启实验性文件系统路径隐藏，但当前后端未能安装它的钩子。</string>
     <string name="settings_diagnostics_title">详细诊断</string>
     <string name="settings_diagnostics_sub">运行完整的隐藏检查套件</string>

@@ -16,7 +16,7 @@ import org.junit.Test
  * These assert the decision only. Wording lives in `DashboardIssueRender.kt` and
  * is the half that still needs a device.
  */
-class DashboardIssuesTest {
+internal class DashboardIssuesTest : DashboardIssuesFixture() {
     // ── Fixtures — a healthy device, so each test states only its own deviation ──
 
     @Test
@@ -26,133 +26,6 @@ class DashboardIssuesTest {
         val kernelOnly = moduleFacts(kmod = installed(active = false)).copy(builtinKernelPresent = true)
         assertTrue(dashboardIssues(facts(modules = kernelOnly)).contains(DashboardIssue.RedundantKmodWithBuiltin))
     }
-
-    private val bootId = "boot-1"
-
-    private fun installed(
-        version: String? = "1.2.5",
-        active: Boolean = true,
-    ) = ModuleState.Installed(version = version, active = active)
-
-    private fun moduleFacts(
-        kmod: ModuleState = installed(),
-        kpm: ModuleState = ModuleState.NotInstalled,
-        zygisk: ModuleState = ModuleState.NotInstalled,
-        ports: ModuleState = ModuleState.NotInstalled,
-        builtin: ModuleState = ModuleState.NotInstalled,
-        kmodProblem: ModuleProblem? = null,
-        pendingReboot: Set<FlashableModuleKind> = emptySet(),
-        standaloneKpm: Boolean = false,
-        kpmLoadStatus: KpmLoadStatus = kpmStatus(),
-        mismatches: List<ModuleMismatch> = emptyList(),
-    ): ModuleFacts {
-        val backends = NativeBackendStates(kmod = kmod, kpm = kpm, zygisk = zygisk, builtin = builtin)
-        return ModuleFacts(
-            kmod = ModuleFact(kmod, kmodProblem, FlashableModuleKind.Kmod in pendingReboot),
-            builtin = ModuleFact(builtin, null, FlashableModuleKind.Builtin in pendingReboot),
-            kpm = ModuleFact(kpm, null, FlashableModuleKind.Kpm in pendingReboot),
-            zygisk = ModuleFact(zygisk, null, FlashableModuleKind.Zygisk in pendingReboot),
-            ports = ModuleFact(ports, null, FlashableModuleKind.Core in pendingReboot),
-            backends = backends,
-            nativeBackend = displayNativeBackend(backends),
-            standaloneKpm = standaloneKpm,
-            kpmLoadStatus = kpmLoadStatus,
-            kmodLoadStatus = null,
-            currentBootId = bootId,
-            mismatches = mismatches,
-        )
-    }
-
-    private fun kpmStatus(
-        reason: KpmFailureReason = KpmFailureReason.Ok,
-        loaded: Boolean? = true,
-        boot: String? = bootId,
-    ) = KpmLoadStatus(
-        timestamp = null,
-        bootId = boot,
-        unameR = null,
-        runtime = KpmRuntime.Apatch,
-        loaded = loaded,
-        filesystemHiding = null,
-        reason = reason,
-        detail = null,
-    )
-
-    private fun facts(
-        modules: ModuleFacts = moduleFacts(),
-        lsposed: LsposedState = LsposedState.Active(version = "1.2.5", targetCount = 3),
-        framework: LsposedFramework = LsposedFramework.Installed(disabled = false),
-        config: LsposedConfig? = null,
-        brokenFields: String? = null,
-        installFailures: String? = null,
-        targets: TargetCounts = TargetCounts(lsposed = 3, native = 3, ports = 0),
-        environment: EnvironmentFacts = environment(),
-        protection: ProtectionFacts = protection(),
-        kernelRecommendation: NativeInstallRecommendation? = null,
-        appVersion: String = "1.2.5",
-        developer: DeveloperFlags = DeveloperFlags(),
-    ) = DashboardFacts(
-        modules = modules,
-        lsposed =
-            LsposedFacts(
-                state = lsposed,
-                framework = framework,
-                config = config,
-                brokenFields = brokenFields,
-                installFailures = installFailures,
-                aospSdkLabel = "35",
-            ),
-        targets = targets,
-        environment = environment,
-        protection = protection,
-        kernelRecommendation = kernelRecommendation,
-        appVersion = appVersion,
-        developer = developer,
-    )
-
-    private fun environment(
-        selinuxPermissive: Boolean = false,
-        selfProfileCount: Int = 1,
-        debugLoggingOn: Boolean = false,
-        filesystemHiding: FilesystemHidingState = FilesystemHidingState(FilesystemHidingStatus.Disabled),
-        portsApply: PortsApplyProblem? = null,
-    ) = EnvironmentFacts(
-        selinuxPermissive = selinuxPermissive,
-        selfProfileCount = selfProfileCount,
-        debugLoggingOn = debugLoggingOn,
-        filesystemHiding = filesystemHiding,
-        portsApply = portsApply,
-    )
-
-    private fun protection(
-        check: ProtectionCheck = ProtectionCheck.Checked(clean, clean),
-        gap: PartialHookGap? = null,
-    ) = ProtectionFacts(
-        check = check,
-        report = null,
-        partialHookGap = gap,
-        installedOptionalHooks = emptySet(),
-    )
-
-    private fun recommendation(
-        backend: NativeBackendId,
-        kpatchRuntime: Boolean = false,
-    ) = NativeInstallRecommendation(
-        androidVersion = "Android 15",
-        kernelVersion = "6.1.0",
-        kernelBranch = "android14",
-        recommended = backend,
-        recommendedArtifact = "vpnhide-kmod-android14-6.1.zip",
-        recommendedGkiVariant = "android14-6.1",
-        kpatchRuntimeAvailable = kpatchRuntime,
-    )
-
-    private companion object {
-        val clean = LayerStatus.Active(hidden = 6, leaks = 0)
-        val leaking = LayerStatus.Active(hidden = 4, leaks = 2)
-    }
-
-    private inline fun <reified T : DashboardIssue> List<DashboardIssue>.has(): Boolean = any { it is T }
 
     // ── A healthy device says nothing ──
 
