@@ -860,7 +860,13 @@ honest IPv4/IPv6 reports, restart chain inspection, `ports_owned` uninstall fenc
 `ConfigLoad` Absent≠Unsupported≠Invalid, ownership markers, legacy activator no-ops.
 Production writes remain explicitly enabled only; APK config writer not yet fenced.
 
-Next: common Magisk module + boot lifecycle (step 5) once device smoke confirms adopt/fence.
+**Step 5 common Magisk module (scaffolding landed).** `core/module/` boots
+`vpnhide-core` with adopt/journal/BOOT_APPLY; legacy service/post-fs scripts prefer
+core; uninstall is restricted (no hook unload / no SuperKey touch). See
+[`core-2.0-module-lifecycle.md`](core-2.0-module-lifecycle.md).
+
+Next: root observations polish / device validation (step 6) and production smoke of
+reboot-without-APK → Applied or explicit `boot_status` recovery.
 
 Each boundary needs an explicit cutover. Do not run legacy and core writers in
 parallel against the same canonical/runtime state. Port behavioral tests before

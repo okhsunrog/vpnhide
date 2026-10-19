@@ -4,6 +4,7 @@
 
 pub mod activation;
 pub mod backend;
+pub mod boot;
 pub mod client;
 pub mod config_edit;
 pub mod config_file;

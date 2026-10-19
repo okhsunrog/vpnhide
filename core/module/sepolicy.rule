@@ -1,0 +1,8 @@
+# App → core UDS (production socket under /data/adb/vpnhide/core/).
+# Managers apply this via magiskpolicy / ksud sepolicy / APatch.
+# Broad untrusted_app grant is intentional for Magisk-format portability;
+# core still fail-closes with SO_PEERCRED uid+package checks.
+allow untrusted_app_all magisk unix_stream_socket { connectto };
+allow untrusted_app_all ksu unix_stream_socket { connectto };
+# Socket file access on module/adb data — path labeling varies by manager;
+# dac_override is already available to the boot-launched core process.
