@@ -762,6 +762,31 @@ mod tests {
             assert_eq!(legacy.boot, None);
         }
 
+        /// The app parses this exact JSON (Kotlin `NativeBootStatusTest`); a wire change
+        /// fails here until the fixture is regenerated with `VPNHIDE_UPDATE_FIXTURES=1`.
+        #[test]
+        fn native_boot_status_matches_app_fixture() {
+            let mut all: Vec<NativeBootStatus> =
+                sample_outcomes().into_iter().map(sample_boot).collect();
+            let mut retire = sample_boot(NativeBootOutcome::NoBackend);
+            retire.zygisk_targets = ZygiskTargets::RetireFailed {
+                detail: "read-only".into(),
+            };
+            retire.kmod = None;
+            retire.ports = None;
+            all.push(retire);
+            let json = serde_json::to_string_pretty(&all).unwrap() + "\n";
+            let path = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../fixtures/core-rpc/native-boot-status.json"
+            );
+            if std::env::var_os("VPNHIDE_UPDATE_FIXTURES").is_some() {
+                std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+                std::fs::write(path, &json).unwrap();
+            }
+            assert_eq!(std::fs::read_to_string(path).unwrap(), json);
+        }
+
         #[test]
         fn submit_edit_arguments_and_result() {
             let edits = [

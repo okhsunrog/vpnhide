@@ -161,31 +161,11 @@ internal fun classifyMultiNative(
 }
 
 /**
- * True when the KPM boot script recorded that it deliberately stood down this
- * boot because the .ko backend is present (`load_status` runtime=conflict for
- * the current boot_id — see docs/storage.md §4.3 and kmod/kpm/module/post-fs-data.sh).
- *
- * This is the only reliable way to surface the .ko+KPM co-installation: the
- * [classifyMultiNative] Error needs *both* backends active, but two active
- * kernel hookers would already have frozen the device, so that state is never
- * actually observed. The deferred KPM (loaded=0) is the real, safe-but-
- * redundant state worth warning about so the user removes one.
- */
-internal fun kpmDeferredForConflict(
-    status: KpmLoadStatus,
-    currentBootId: String,
-): Boolean = status.runtime == KpmRuntime.Conflict && status.isFreshFor(currentBootId)
-
-/**
- * True when the KPM boot script stood down this boot because it runs under
- * APatch/FolkPatch and has no usable saved SuperKey or trusted `su` token
- * (`runtime=apatch, loaded=0, detail=awaiting_superkey` for the current
- * boot_id — see kmod/kpm/module/service.sh and docs/storage.md §4.3).
- *
- * Distinct from [kpmDeferredForConflict] (that writes `runtime=conflict`): here the
- * module is installed and healthy but dormant, waiting for an APatch SuperKey
- * in Settings so core can load it. Without this, the dashboard
- * would just show KPM as inactive with no explanation.
+ * True when core's boot scan found the KPM to be the native candidate but KernelPatch
+ * refused authentication (`NativeBootOutcome.AwaitingAuthentication` for the current boot):
+ * the module is installed and healthy but dormant until a SuperKey is saved in Settings,
+ * after which core rescans and loads it. Without this, the dashboard would just show KPM
+ * as inactive with no explanation.
  */
 internal fun kpmAwaitingSuperkey(
     status: KpmLoadStatus,
@@ -217,7 +197,7 @@ internal data class PortsApplyProblem(
 internal fun detectPortsApplyProblem(
     ports: ModuleState,
     targetCount: Int,
-    coreBootStatus: String,
+    lastApply: PortsBootStatus?,
     portsDisabled: Boolean,
 ): PortsApplyProblem? {
     val installed = ports as? ModuleState.Installed ?: return null
@@ -230,16 +210,11 @@ internal fun detectPortsApplyProblem(
     // nag "iptables rules are not active" for a deliberately disabled module.
     if (portsDisabled) return null
 
-    // Core rewrites boot_status on every boot: `status=Applied` or `NoIntent` is a
-    // clean apply, anything else carries the reason the rules could be missing.
-    val boot = parseKeyValueLines(coreBootStatus)
-    val status = boot["status"]?.trim().orEmpty()
-    val bootFailed = status.isNotEmpty() && status != "Applied" && status != "NoIntent"
+    // Core publishes its last Ports apply this boot: a family that did not confirm
+    // carries the reason the rules could be missing.
     val detail =
-        if (bootFailed) {
-            boot["detail"]?.trim()?.takeIf { it.isNotBlank() } ?: status
-        } else {
-            null
+        lastApply?.takeIf { !it.applied }?.let { apply ->
+            apply.detail.trim().ifBlank { "IPv4 ${apply.ipv4}, IPv6 ${apply.ipv6}" }
         }
     return PortsApplyProblem(failureDetail = detail)
 }
@@ -411,10 +386,9 @@ internal data class NativeInstallRecommendation(
     val preferKmod: Boolean get() = recommended == NativeBackendId.Kmod
 }
 
-// Boot-time diagnostics written by kmod/module/post-fs-data.sh into
-// /data/adb/vpnhide_kmod/load_status. Stays valid across reboots,
-// so bootId is compared against the current boot to know if the
-// record is fresh.
+// The kmod view of core's once-per-boot native decision
+// ([NativeBootStatus.kmodLoadStatus]); core loads the .ko itself and
+// publishes the outcome over RPC. bootId ties it to the current boot.
 @Serializable
 internal data class KmodLoadStatus(
     val timestamp: Long?,
@@ -431,8 +405,8 @@ internal data class KmodLoadStatus(
     val dmesgTail: String?,
     val freshForCurrentBoot: Boolean,
     val filesystemHiding: Boolean? = null,
-    val filesystemConfigExit: Int? = null,
-    val filesystemConfigError: String? = null,
+    /** Core saw the kernel refuse the module signature (EKEYREJECTED). */
+    val signatureRejected: Boolean? = null,
 )
 
 private const val TAG = LogTags.DASHBOARD
@@ -629,37 +603,6 @@ internal fun parseModuleProp(raw: String): ModulePropInfo {
     return ModulePropInfo(true, version, gkiVariant ?: updateJsonKmi)
 }
 
-internal fun readKmodLoadStatus(
-    currentBootId: String,
-    raw: String,
-    dmesgRaw: String,
-): KmodLoadStatus? {
-    if (raw.isBlank()) return null
-    val props = parseKeyValueLines(raw)
-    val bootId = props["boot_id"]?.trim()
-    return KmodLoadStatus(
-        timestamp = props["timestamp"]?.trim()?.toLongOrNull(),
-        bootId = bootId,
-        unameR = props["uname_r"]?.trim(),
-        gkiVariant = props["gki_variant"]?.trim()?.ifBlank { null },
-        kmodVersion = props["kmod_version"]?.trim()?.ifBlank { null },
-        rootManager = props["root_manager"]?.trim()?.ifBlank { null },
-        kprobes = props["kprobes"]?.trim()?.ifBlank { null },
-        kretprobes = props["kretprobes"]?.trim()?.ifBlank { null },
-        insmodExit = props["insmod_exit"]?.trim()?.toIntOrNull(),
-        loaded = props["loaded"]?.trim() == "1",
-        insmodStderr = props["insmod_stderr"]?.trim()?.ifBlank { null },
-        dmesgTail = dmesgRaw.trim().ifBlank { null },
-        freshForCurrentBoot = bootId != null && bootId == currentBootId,
-        filesystemHiding =
-            props["filesystem_hiding"]
-                ?.trim()
-                ?.let { value -> value == "1" },
-        filesystemConfigExit = props["filesystem_config_exit"]?.trim()?.toIntOrNull(),
-        filesystemConfigError = props["filesystem_config_error"]?.trim()?.ifBlank { null },
-    )
-}
-
 // ── kmod problem classification (pure, unit-tested) ──────────────────────
 
 /**
@@ -809,6 +752,7 @@ internal fun classifyKmodProblem(
 private const val EKEYREJECTED = 129
 
 internal fun KmodLoadStatus.isModuleSignatureRejected(): Boolean {
+    if (signatureRejected == true) return true
     if (insmodExit == EKEYREJECTED) return true
     val stderr = insmodStderr?.lowercase() ?: return false
     return "key was rejected" in stderr || "required key not available" in stderr
@@ -941,7 +885,7 @@ internal fun detectKpmModule(
     if (!prop.installed) return ModuleState.NotInstalled
     // The KPM has no /proc marker: its runtime channel is the KernelPatch ctl0
     // supercall, which core reads into `kpm_state`. A complete status reply there
-    // is the live runtime. A load_status stamped for this boot also counts.
+    // is the live runtime. Core selecting the KPM this boot also counts.
     val active =
         Protocol.parseStatusFields(sections["kpm_state"].orEmpty()) != null ||
             (loadStatus.loaded == true && loadStatus.isFreshFor(currentBootId))
@@ -1140,15 +1084,11 @@ private fun deriveModuleFacts(
     appVersion: String,
 ): ModuleFacts {
     val currentBootId = sections["current_boot_id"].orEmpty()
-    val kpmLoadStatus = parseKpmLoadStatus(sections["kpm_load_status"].orEmpty())
+    val nativeBoot = nativeBootStatus(sections)
+    val kpmLoadStatus = nativeBoot.kpmLoadStatus()
     val raw = detectNativeBackendStates(sections, currentBootId = currentBootId, kpmLoadStatus = kpmLoadStatus)
     val portsRaw = detectPortsModule(sections)
-    val kmodLoadStatus =
-        readKmodLoadStatus(
-            currentBootId.trim(),
-            sections["kmod_load_status"].orEmpty(),
-            sections["kmod_load_dmesg"].orEmpty(),
-        )
+    val kmodLoadStatus = nativeBoot.kmodLoadStatus(currentBootId)
     VpnHideLog.i(TAG, "kmodLoadStatus=$kmodLoadStatus")
 
     val kmod = deriveKmodFact(raw, sections, kernelRecommendation, kmodLoadStatus)
@@ -1189,6 +1129,7 @@ private fun deriveModuleFacts(
         kpmLoadStatus = kpmLoadStatus,
         kmodLoadStatus = kmodLoadStatus,
         currentBootId = currentBootId,
+        nativeBoot = nativeBoot,
         mismatches =
             detectModuleMismatches(
                 listOf(
@@ -1305,7 +1246,7 @@ private suspend fun deriveEnvironmentFacts(
             detectPortsApplyProblem(
                 ports,
                 portsTargetCount,
-                sections["core_boot_status"].orEmpty(),
+                nativeBootStatus(sections)?.takeIf { it.isFreshFor(sections["current_boot_id"].orEmpty()) }?.ports,
                 portsDisabled = sections["core_disabled"].orEmpty().trim() == "1",
             ),
     )

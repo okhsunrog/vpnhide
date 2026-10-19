@@ -47,12 +47,8 @@ internal val REQUIRED_ROOT_SNAPSHOT_SECTIONS =
         "zygisk_pending_update",
         "core_pending_update",
         "canonical_config",
-        "kpm_load_status",
-        "core_boot_status",
         "superkey_saved",
         "current_boot_id",
-        "kmod_load_status",
-        "kmod_load_dmesg",
         "zygisk_status",
         "kernel_release",
         "kmod_state",
@@ -168,7 +164,8 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
 
 /**
  * The batched root probe core runs for the dashboard and the Hiding tab
- * (`collect_diagnostics` `RootSnapshot`; script: core-daemon `probes/shell/root_snapshot.sh`).
+ * (`collect_diagnostics` `RootSnapshot`; core-daemon `device_probes/root_snapshot.rs`), plus
+ * core's typed native boot decision from its published state.
  */
 internal fun loadRootShellSnapshot(inventoryOverride: PackageInventorySeed?): Map<String, String> {
     val result = CoreRoot.collectOneBlocking(CoreProbe.RootSnapshot(packages = inventoryOverride == null))
@@ -178,6 +175,8 @@ internal fun loadRootShellSnapshot(inventoryOverride: PackageInventorySeed?): Ma
         sections["pm_packages"] = inventoryOverride.packages
         sections["pm_users"] = inventoryOverride.users
     }
+    // Core's typed native decision rides along from its published state (RPC), not a file.
+    CoreRoot.nativeBootJsonBlocking()?.let { sections[NATIVE_BOOT_SECTION] = it }
     validateRootSnapshotSections(sections)
     return sections
 }

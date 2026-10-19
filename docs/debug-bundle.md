@@ -214,12 +214,14 @@ to an `emit_*` line in
 
 **Native kernel backend (.ko)**
 - `builtin_prop`, `builtin_module_state` (companion flags, activator sha256 and staged update), `builtin_load_status`. Built-in live telemetry shares `kmod_state`; its wire backend id is `0x4`, and counters/status are attributed only to Built-in.
-- `kmod_prop`, `kmod_module_state` (file flags, `.ko` + activator sha256, staged-for-reboot state), `kmod_load_status`, `kmod_load_dmesg` (the boot load log — kretprobe registration lines), `kmod_state` (**live `/proc/vpnhide_ctl`** telemetry: installed-hook mask, per-uid counters — see [protocol.md](protocol.md)).
+- `kmod_prop`, `kmod_module_state` (file flags, `.ko` + activator sha256, staged-for-reboot state), `kmod_state` (**live `/proc/vpnhide_ctl`** telemetry: installed-hook mask, per-uid counters — see [protocol.md](protocol.md)).
 - `proc_modules` (is `vpnhide*` in `/proc/modules`), `kprobes` (`/sys/kernel/debug/kprobes/list` for our symbols), `kernel_symbols` (kallsyms presence of each hooked function — key for "symbol missing on trimmed OEM KMI").
 
 **kmod backend (diagnostic)** — `kmod_diag`, the verbatim `/proc/vpnhide_diag` dump: per-probe registration, kretprobe `nmissed` counters, active vs installed hook masks, and the live `is_vpn_ifname()` verdict per netdev ([state.md](state.md)). Absent unless the `.ko` is loaded. This is where a "the module broke my network" report gets answered — a false-positive interface match is visible here and nowhere else.
 
-**KPM backend** — `kpm_prop`, `kpm_module_state`, `kpm_load_status`, `kpm_state` (activator `state` dump), `kpatch_runtime` (APatch/KPatch presence, `kpatch hello`/`kpm list`).
+**Core** — `core_prop`, `core_module_state`, `core_boot_status` (the last boot pass report), `core_log`, and `core_native_boot`: core's persisted once-per-boot `NativeBootStatus` JSON (`/data/adb/vpnhide/core/native_boot.json`). It names the installed, live and staged native backends, the outcome (`Selected` / `Conflict` / `LoadFailed` with insmod exit, stderr and the matching `dmesg_tail` / `AwaitingAuthentication` / ...), the kmod's kprobes facts, what happened to Zygisk's targets, and the last Ports apply. It replaces the per-backend `load_status` / `load_dmesg` files; the app reads the same status over RPC.
+
+**KPM backend** — `kpm_prop`, `kpm_module_state`, `kpm_state` (activator `state` dump), `kpatch_runtime` (APatch/KPatch presence, `kpatch hello`/`kpm list`).
 
 **Zygisk backend** — `zygisk_prop`, `zygisk_module_state`, `zygisk_status`, `zygisk_runtime`.
 
@@ -239,7 +241,7 @@ to an `emit_*` line in
 
 ```sh
 # dump one section
-jq -r '.sections.kmod_load_dmesg' state.json
+jq -r '.sections.core_native_boot' state.json
 # list section names + sizes
 jq -r '.sections | to_entries | map("\(.key)\t\(.value|length)")[]' state.json
 # grep across all sections at once
@@ -312,7 +314,7 @@ is the emit order — if truncation hit `app_scan_diagnostics`, the `network_*` 
 **"Kernel module won't load / backend inactive"**
 1. `kmodLoadStatus` — `loaded`, `insmodExit`, `insmodStderr`, `unameR`,
    `kprobes`/`kretprobes`, `dmesgTail` (look for `Unknown symbol` / `register_kretprobe failed`).
-2. `sections.kmod_load_dmesg` for the full boot load log.
+2. `sections.core_native_boot` — core's outcome for this boot; a `LoadFailed` carries the insmod exit, stderr and `dmesg_tail`, a `Conflict` lists every installed/live backend.
 3. `sections.kernel_symbols` — is a hooked symbol missing from kallsyms (trimmed OEM KMI)?
 4. `sections.kernel_config` — `CONFIG_KPROBES`/`KRETPROBES`/`MODULES` present?
 5. `backends.kmod.brokenReason`, `pendingReboot`; `rootShell` (is "inactive" even trustworthy — §6).
@@ -417,7 +419,7 @@ Rule of thumb: a **typed** top-level field → find where it's *derived*
 | Question | Look at |
 |---|---|
 | Which backend is active? | `activeBackend.id`, `backends` |
-| Did the `.ko` load this boot? | `kmodLoadStatus`, `sections.kmod_load_dmesg` |
+| Did the `.ko` load this boot? | `kmodLoadStatus`, `sections.core_native_boot` |
 | Is the VPN actually hidden? | `report` + `nativeVerdict`/`javaVerdict` (requires `gate==ROUTED`) |
 | Which vector leaks? | `report.*.checks[] .outcome.kind=="leak"` |
 | Is a hook firing? | `dmesg` (`vpnhide:` traces), `hookReport`, `sections.kmod_state` |

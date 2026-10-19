@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide.core
 
 import android.content.Context
+import dev.okhsunrog.vpnhide.nativeBootFromCoreState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -151,6 +152,9 @@ internal interface CoreRootTransport {
         op: Long,
         effectJson: String,
     ): String
+
+    /** core-ffi `config_state`: core's published state, including the native boot decision. */
+    suspend fun coreState(): String = ""
 }
 
 private class FfiCoreRootTransport(
@@ -163,6 +167,8 @@ private class FfiCoreRootTransport(
         op: Long,
         effectJson: String,
     ): String = uniffi.vpnhide_core_ffi.rootEffect(socketPath, op.toULong(), effectJson)
+
+    override suspend fun coreState(): String = uniffi.vpnhide_core_ffi.configState(socketPath)
 }
 
 /**
@@ -204,6 +210,26 @@ internal object CoreRoot {
         return parseCoreDiagnostics(raw, probes.size)
     }
 
+    /**
+     * Core's once-per-boot native decision (`backend.boot` of its published state) as JSON,
+     * or null when core is unreachable, has not scanned yet, or replied with anything else.
+     */
+    suspend fun nativeBootJson(): String? {
+        val client = transport ?: return null
+        return try {
+            val raw = withTimeoutOrNull(STATE_TIMEOUT_MS) { client.coreState() } ?: return null
+            val reply = JSONTokener(raw).nextValue() as? JSONObject ?: return null
+            if (reply.optString("status") != "ok") return null
+            reply.optJSONObject("state")?.let(::nativeBootFromCoreState)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    fun nativeBootJsonBlocking(): String? = runBlocking(Dispatchers.IO) { nativeBootJson() }
+
     suspend fun collectOne(probe: CoreProbe): CoreProbeResult = collect(listOf(probe)).results(1).first()
 
     /** Blocking form for callers already on a background thread. */
@@ -235,6 +261,7 @@ internal object CoreRoot {
 
     // Core bounds the whole batch at 210 s (`DIAGNOSTICS_DEADLINE`).
     private const val DIAGNOSTICS_TIMEOUT_MS = 220_000L
+    private const val STATE_TIMEOUT_MS = 15_000L
     private const val EFFECT_TIMEOUT_MS = 30_000L
 }
 

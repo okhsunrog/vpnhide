@@ -392,8 +392,12 @@
     <string name="dashboard_action_learn_more">Learn more</string>
     <string name="dashboard_issue_kmod_capable_but_zygisk">Your kernel supports the kernel module — it hooks in kernel space and is invisible to anti-tamper checks. Zygisk works too, but banking and payment apps may detect its hooks when Native is enabled for them. Install %1$s and uninstall the Zygisk module for cleaner coverage.</string>
     <string name="dashboard_issue_native_conflict_kernel">A kernel backend (.ko or built-in) and KPM are both active. They hook the same kernel functions and can freeze the device. Keep only one kernel backend; with a built-in kernel, remove KPM.</string>
-    <string name="dashboard_issue_native_conflict_deferred">The kernel module (.ko) and the KPM are both installed. The KPM stood down at boot to avoid a freeze, so it isn\'t doing anything. Keep only one — uninstall the KPM (or the kernel module).</string>
-    <string name="dashboard_issue_kpm_awaiting_superkey">The KPM is installed but inactive: APatch/FolkPatch could not load it with the trusted su token. Save your SuperKey in Settings → Security, then reboot to activate native hiding.</string>
+    <string name="dashboard_issue_native_backends_conflict">Native backends installed: %1$s. Keep exactly one. VPN Hide loaded none of them this boot, so native hiding is off until you uninstall the others and reboot.</string>
+    <string name="dashboard_issue_native_backends_staged_conflict">After the next reboot these native backends will be installed: %1$s. Keep exactly one, or VPN Hide will load none of them.</string>
+    <string name="dashboard_issue_kpm_unverifiable">KernelPatch can\'t be queried, and a VPN Hide KPM may already be running, so no other native backend was loaded. Save your SuperKey in Settings → Security, or remove the KPM. Detail: %1$s</string>
+    <string name="dashboard_issue_native_boot_failed">The native backend could not be set up this boot: %1$s</string>
+    <string name="dashboard_issue_zygisk_retire_failed">Zygisk is not the selected backend, but its old target list could not be cleared, so it may still hook previously selected apps. Uninstall the Zygisk module. Detail: %1$s</string>
+    <string name="dashboard_issue_kpm_awaiting_superkey">The KPM is installed but inactive: KernelPatch refused authentication, so VPN Hide could not load it. Save your SuperKey in Settings → Security and VPN Hide loads it right away, no reboot needed.</string>
     <string name="dashboard_issue_module_reboot_to_activate">The %1$s module is installed but not active yet — reboot the device to activate it.</string>
     <string name="dashboard_issue_module_artifact_missing">The %1$s module installation is corrupted: %2$s is missing, so core has nothing to load. Reinstall the module ZIP from the latest release.</string>
     <string name="dashboard_issue_kpm_unsupported_kernel">KPM is installed but cannot load on kernel %1$s because this kernel family has no validated offset table. Use the Zygisk backend instead.</string>
@@ -538,7 +542,6 @@
     <string name="settings_filesystem_hiding_pending_disable">Will be disabled after reboot.</string>
     <string name="settings_filesystem_hiding_pending_enable_zygisk">Restart selected apps to enable it.</string>
     <string name="settings_filesystem_hiding_pending_disable_zygisk">Restart selected apps to disable it.</string>
-    <string name="settings_filesystem_hiding_boot_error">Could not read the boot setting: %1$s</string>
     <string name="settings_filesystem_hiding_setup_error">The active backend could not install its filesystem hooks. Check Diagnostics for details.</string>
     <string name="settings_filesystem_hiding_confirm_title">Enable experimental filesystem hooks?</string>
     <string name="settings_filesystem_hiding_confirm_body">These global VFS hooks may slow filesystem operations and are not currently needed for known real-world apps. Ordinary Native protection should normally be sufficient. Enable them only for explicit filesystem-path detection testing; a reboot is required.</string>
@@ -552,7 +555,6 @@
     <string name="dashboard_issue_filesystem_hiding_pending_disable">Experimental filesystem-path hiding is still active until the next reboot.</string>
     <string name="dashboard_issue_filesystem_hiding_pending_enable_zygisk">Filesystem-path hiding is enabled; restart selected apps to install the Zygisk hooks.</string>
     <string name="dashboard_issue_filesystem_hiding_pending_disable_zygisk">Filesystem-path hiding remains active in running target apps until they restart.</string>
-    <string name="dashboard_issue_filesystem_hiding_boot_error">Filesystem-path hiding could not read its boot setting: %1$s</string>
     <string name="dashboard_issue_filesystem_hiding_setup_error">Experimental filesystem-path hiding was requested, but the active backend failed to install its hooks.</string>
     <string name="settings_diagnostics_title">Detailed diagnostics</string>
     <string name="settings_diagnostics_sub">Run the full hiding check suite</string>

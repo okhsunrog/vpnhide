@@ -336,8 +336,12 @@
     <string name="dashboard_action_learn_more">Подробнее</string>
     <string name="dashboard_issue_kmod_capable_but_zygisk">Ваше ядро поддерживает модуль ядра — он работает в пространстве ядра и невидим для анти-тампер проверок. Zygisk тоже работает, но банковские и платёжные приложения могут обнаружить его хуки, если для них включён Native. Установите %1$s и удалите Zygisk-модуль.</string>
     <string name="dashboard_issue_native_conflict_kernel">Бэкенд ядра (.ko или встроенный) и KPM активны одновременно. Они перехватывают одни и те же функции ядра и могут вызвать зависание устройства. Оставьте один бэкенд ядра; при встроенном бэкенде удалите KPM.</string>
-    <string name="dashboard_issue_native_conflict_deferred">Модуль ядра (.ko) и KPM установлены одновременно. KPM отключился при загрузке, чтобы не подвесить устройство, и сейчас бездействует. Оставьте только один — удалите KPM (или модуль ядра).</string>
-    <string name="dashboard_issue_kpm_awaiting_superkey">KPM установлен, но не активен: APatch/FolkPatch не смог загрузить его через доверенный su-токен. Сохраните SuperKey в Настройки → Безопасность и перезагрузитесь для активации нативного скрытия.</string>
+    <string name="dashboard_issue_native_backends_conflict">Установлено несколько нативных бэкендов: %1$s. Оставьте ровно один. В этой загрузке VPN Hide не загрузил ни один из них, поэтому нативное скрытие выключено, пока вы не удалите лишние и не перезагрузитесь.</string>
+    <string name="dashboard_issue_native_backends_staged_conflict">После перезагрузки будут установлены нативные бэкенды: %1$s. Оставьте ровно один, иначе VPN Hide не загрузит ни один из них.</string>
+    <string name="dashboard_issue_kpm_unverifiable">Не удаётся опросить KernelPatch, а KPM VPN Hide, возможно, уже работает, поэтому другой нативный бэкенд не загружен. Сохраните SuperKey в Настройки → Безопасность или удалите KPM. Подробности: %1$s</string>
+    <string name="dashboard_issue_native_boot_failed">Не удалось настроить нативный бэкенд в этой загрузке: %1$s</string>
+    <string name="dashboard_issue_zygisk_retire_failed">Zygisk не выбран бэкендом, но его старый список целей не удалось очистить, поэтому он может по-прежнему перехватывать ранее выбранные приложения. Удалите модуль Zygisk. Подробности: %1$s</string>
+    <string name="dashboard_issue_kpm_awaiting_superkey">KPM установлен, но не активен: KernelPatch отклонил аутентификацию, и VPN Hide не смог его загрузить. Сохраните SuperKey в Настройки → Безопасность — VPN Hide загрузит его сразу, без перезагрузки.</string>
     <string name="dashboard_issue_module_reboot_to_activate">Модуль %1$s установлен, но ещё не активен — перезагрузите устройство, чтобы он заработал.</string>
     <string name="dashboard_issue_module_artifact_missing">Установка модуля %1$s повреждена: отсутствует %2$s, и ядру VPN Hide нечего загружать. Переустановите ZIP модуля из последнего релиза.</string>
     <string name="dashboard_issue_kpm_unsupported_kernel">KPM установлен, но не может загрузиться на ядре %1$s: для этого семейства ядра нет проверенной таблицы смещений. Используйте Zygisk.</string>
@@ -507,7 +511,6 @@
     <string name="settings_filesystem_hiding_pending_disable">Выключится после перезагрузки.</string>
     <string name="settings_filesystem_hiding_pending_enable_zygisk">Перезапустите выбранные приложения для включения.</string>
     <string name="settings_filesystem_hiding_pending_disable_zygisk">Перезапустите выбранные приложения для выключения.</string>
-    <string name="settings_filesystem_hiding_boot_error">Не удалось прочитать настройку при загрузке: %1$s</string>
     <string name="settings_filesystem_hiding_setup_error">Активный бэкенд не смог установить хуки файловой системы. Подробности доступны в диагностике.</string>
     <string name="settings_filesystem_hiding_confirm_title">Включить экспериментальные хуки файловой системы?</string>
     <string name="settings_filesystem_hiding_confirm_body">Эти глобальные VFS-хуки могут замедлять операции с файловой системой и сейчас не нужны известным реальным приложениям. Обычной Native-защиты, как правило, достаточно. Включайте их только для целевого тестирования обнаружения по путям файловой системы; потребуется перезагрузка.</string>
@@ -521,7 +524,6 @@
     <string name="dashboard_issue_filesystem_hiding_pending_disable">Экспериментальное скрытие путей останется активным до следующей перезагрузки.</string>
     <string name="dashboard_issue_filesystem_hiding_pending_enable_zygisk">Скрытие путей включено; перезапустите выбранные приложения для установки Zygisk-хуков.</string>
     <string name="dashboard_issue_filesystem_hiding_pending_disable_zygisk">Скрытие путей останется активным в запущенных целевых приложениях до их перезапуска.</string>
-    <string name="dashboard_issue_filesystem_hiding_boot_error">Скрытие путей не смогло прочитать настройку при загрузке: %1$s</string>
     <string name="dashboard_issue_filesystem_hiding_setup_error">Экспериментальное скрытие путей было запрошено, но активный бэкенд не смог установить хуки.</string>
     <string name="settings_diagnostics_title">Подробная диагностика</string>
     <string name="settings_diagnostics_sub">Полный набор проверок скрытия</string>

@@ -65,8 +65,8 @@ class DebugShellSnapshotTest {
         // Section coverage is asserted on the probe's real output by core's
         // `debug_snapshot_covers_every_backend_state_path`; here pin the shared paths.
         val paths = coreProbeSource("mod.rs")
-        assertTrue(paths.contains("\"$KPM_LOAD_STATUS_FILE\""))
-        assertTrue(paths.contains("\"$KMOD_LOAD_STATUS_FILE\""))
+        assertTrue(paths.contains("native_boot::STATE_FILE_NAME"))
+        assertFalse(paths.contains("load_status"))
         assertTrue(paths.contains("\"$PROC_CTL\""))
         assertTrue(paths.contains(ZYGISK_STATUS_FILE))
         assertTrue(paths.contains(LSPOSED_STATE_FILE))

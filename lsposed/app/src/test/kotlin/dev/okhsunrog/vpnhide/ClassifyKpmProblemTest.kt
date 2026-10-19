@@ -18,7 +18,7 @@ class ClassifyKpmProblemTest {
     ): KpmProblemKind? =
         classifyKpmProblem(
             kpm = kpm,
-            status = parseKpmLoadStatus(rawStatus),
+            status = kpmStatusOf(rawStatus),
             currentBootId = currentBootId,
             hasKpatchRuntime = hasKpatchRuntime,
             apatchSuperkeySaved = apatchSuperkeySaved,
@@ -35,7 +35,7 @@ class ClassifyKpmProblemTest {
     }
 
     @Test
-    fun `conflict runtime is not diagnosed here — handled by kpmDeferredForConflict`() {
+    fun `conflict runtime is not diagnosed here — handled by the core conflict banner`() {
         val status = "runtime=conflict\nloaded=0\nboot_id=boot-1\ndetail=vpnhide_kmod present\n"
         assertNull(classify(installed(active = false), status, "boot-1"))
     }

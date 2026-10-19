@@ -22,9 +22,10 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSummaryInfo
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import dev.okhsunrog.vpnhide.displayNativeBackend
+import dev.okhsunrog.vpnhide.kmodLoadStatus
+import dev.okhsunrog.vpnhide.kpmLoadStatus
 import dev.okhsunrog.vpnhide.lsposedHooksActiveThisBoot
-import dev.okhsunrog.vpnhide.parseKpmLoadStatus
-import dev.okhsunrog.vpnhide.readKmodLoadStatus
+import dev.okhsunrog.vpnhide.nativeBootStatus
 import dev.okhsunrog.vpnhide.settings.installedNativeOptionalHooks
 import dev.okhsunrog.vpnhide.snapshotRuntimeCheckable
 import dev.okhsunrog.vpnhide.snapshotShellUid
@@ -296,16 +297,12 @@ internal fun buildVpnHideState(
 ): VpnHideState {
     val rootSections = rootSnapshot.sections
     val currentBootId = rootSections["current_boot_id"].orEmpty()
-    val kpmLoadStatus = parseKpmLoadStatus(rootSections["kpm_load_status"].orEmpty())
+    val nativeBoot = nativeBootStatus(rootSections)
+    val kpmLoadStatus = nativeBoot.kpmLoadStatus()
     val backends = detectNativeBackendStates(rootSections, currentBootId, kpmLoadStatus)
     val activeBackend = displayNativeBackend(backends)
     val ports = detectPortsModule(rootSections)
-    val kmodLoadStatus =
-        readKmodLoadStatus(
-            currentBootId.trim(),
-            rootSections["kmod_load_status"].orEmpty(),
-            rootSections["kmod_load_dmesg"].orEmpty(),
-        )
+    val kmodLoadStatus = nativeBoot.kmodLoadStatus(currentBootId)
     val installedOptionalHooks = installedNativeOptionalHooks(activeBackend.id, rootSections, currentBootId)
 
     val report =

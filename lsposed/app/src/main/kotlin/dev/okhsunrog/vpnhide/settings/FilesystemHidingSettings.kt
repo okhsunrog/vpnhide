@@ -212,13 +212,6 @@ private fun filesystemHidingStatusText(state: FilesystemHidingState): String =
             )
         }
 
-        FilesystemHidingStatus.BootConfigError -> {
-            stringResource(
-                R.string.settings_filesystem_hiding_boot_error,
-                state.errorDetail.orEmpty(),
-            )
-        }
-
         FilesystemHidingStatus.HookSetupError -> {
             stringResource(R.string.settings_filesystem_hiding_setup_error)
         }

@@ -12,12 +12,12 @@ class NativeBackendTest {
 
     private fun fixture(name: String): String = javaClass.getResourceAsStream("/$name")!!.bufferedReader().use { it.readText() }
 
-    private fun parseStatus(raw: String): KpmLoadStatus = parseKpmLoadStatus(raw)
+    private fun parseStatus(raw: String): KpmLoadStatus = kpmStatusOf(raw)
 
     private fun detectKpm(
         sections: Map<String, String>,
         currentBootId: String,
-    ): ModuleState = detectKpmModule(sections, parseStatus(sections["kpm_load_status"].orEmpty()), currentBootId)
+    ): ModuleState = detectKpmModule(sections, nativeBootStatus(sections).kpmLoadStatus(), currentBootId)
 
     private fun states(
         kmod: ModuleState,
@@ -139,7 +139,7 @@ class NativeBackendTest {
                         "kmod_prop" to "version=v1.2.3\ngkiVariant=android14-6.1\n",
                         "proc_exists" to "1",
                         "kpm_prop" to "version=v2.0.0\n",
-                        "kpm_load_status" to "loaded=1\nboot_id=boot-1\n",
+                        selectedBootSection(NativeBackendId.Kpm, "boot-1"),
                         "zygisk_prop" to "version=v3.0.0\n",
                         "zygisk_status" to "boot_id=boot-1\n",
                         "current_boot_id" to "boot-1",
@@ -209,27 +209,6 @@ class NativeBackendTest {
         assertEquals(MultiNativeSeverity.Warning, classifyMultiNative(kmodActive = false, kpmActive = true, zygiskActive = true))
     }
 
-    // ── kpmDeferredForConflict ───────────────────────────────────────────
-
-    @Test
-    fun `kpm deferred-conflict detected for current boot`() {
-        val status = "runtime=conflict\nloaded=0\nboot_id=boot-1\ndetail=vpnhide_kmod present\n"
-        assertEquals(true, kpmDeferredForConflict(parseStatus(status), currentBootId = "boot-1"))
-    }
-
-    @Test
-    fun `kpm deferred-conflict ignored for a stale boot`() {
-        val status = "runtime=conflict\nloaded=0\nboot_id=boot-0\n"
-        assertEquals(false, kpmDeferredForConflict(parseStatus(status), currentBootId = "boot-1"))
-    }
-
-    @Test
-    fun `kpm deferred-conflict false for non-conflict runtimes and empty status`() {
-        assertEquals(false, kpmDeferredForConflict(parseStatus("runtime=activator\nloaded=1\nboot_id=boot-1\n"), "boot-1"))
-        assertEquals(false, kpmDeferredForConflict(parseStatus("runtime=conflict\nloaded=0\n"), "boot-1"))
-        assertEquals(false, kpmDeferredForConflict(parseStatus(""), "boot-1"))
-    }
-
     // ── kpmAwaitingSuperkey ──────────────────────────────────────────────
 
     @Test
@@ -248,7 +227,7 @@ class NativeBackendTest {
     fun `kpm awaiting-superkey false once loaded or for other states`() {
         // Superkey saved and module loaded this boot.
         assertEquals(false, kpmAwaitingSuperkey(parseStatus("runtime=kpatch-next\nloaded=1\nboot_id=boot-1\n"), "boot-1"))
-        // Conflict deferral is a different status, not awaiting-superkey.
+        // A conflict is a different status, not awaiting-superkey.
         assertEquals(false, kpmAwaitingSuperkey(parseStatus("runtime=conflict\nloaded=0\nboot_id=boot-1\n"), "boot-1"))
         assertEquals(false, kpmAwaitingSuperkey(parseStatus(""), "boot-1"))
     }
@@ -316,7 +295,7 @@ class NativeBackendTest {
         val sections =
             mapOf(
                 "kpm_prop" to "id=vpnhide_kpm\nversion=v1.0\n",
-                "kpm_load_status" to "loaded=1\nboot_id=boot-1\n",
+                selectedBootSection(NativeBackendId.Kpm, "boot-1"),
             )
         val state = detectKpm(sections, currentBootId = "boot-1") as ModuleState.Installed
         assertEquals(true, state.active)
@@ -324,22 +303,22 @@ class NativeBackendTest {
     }
 
     @Test
-    fun `kpm inactive when load status is from a previous boot`() {
+    fun `kpm inactive when core selected it on a previous boot`() {
         val sections =
             mapOf(
                 "kpm_prop" to "id=vpnhide_kpm\nversion=v1.0\n",
-                "kpm_load_status" to "loaded=1\nboot_id=old-boot\n",
+                selectedBootSection(NativeBackendId.Kpm, "old-boot"),
             )
         val state = detectKpm(sections, currentBootId = "boot-1") as ModuleState.Installed
         assertEquals(false, state.active)
     }
 
     @Test
-    fun `kpm inactive when load status has no boot id`() {
+    fun `kpm inactive when core selected another backend`() {
         val sections =
             mapOf(
                 "kpm_prop" to "id=vpnhide_kpm\nversion=v1.0\n",
-                "kpm_load_status" to "loaded=1\ndetail=configured\n",
+                selectedBootSection(NativeBackendId.Kmod, "boot-1"),
             )
         val state = detectKpm(sections, currentBootId = "boot-1") as ModuleState.Installed
         assertEquals(false, state.active)

@@ -151,7 +151,6 @@ class TargetsCacheTest {
                 "proc_exists" to "0",
                 "current_boot_id" to "boot-1",
                 "zygisk_status" to "boot_id=boot-1",
-                "kpm_load_status" to "",
             )
 
         assertEquals(
