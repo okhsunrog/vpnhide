@@ -12,6 +12,7 @@ pub mod listener;
 pub mod observer;
 pub mod operation;
 pub mod publisher;
+pub mod recovery;
 pub mod server;
 pub mod zygisk;
 
