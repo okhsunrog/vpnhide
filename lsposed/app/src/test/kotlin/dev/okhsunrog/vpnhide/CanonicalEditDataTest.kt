@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -13,7 +14,10 @@ class CanonicalEditDataTest {
         val read = RootCanonicalRead.Available(CanonicalConfig())
         val badConfig = CanonicalMutation(listOf(CanonicalEdit.Replace(CanonicalConfig(version = 9))))
         val badSecret =
-            CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, true)), coupledCommands = listOf("bad\u0000command"))
+            CanonicalMutation(
+                listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, true)),
+                coupledEffects = listOf(CoreRootEffect.SetSuperkey("bad\u0000key")),
+            )
         for (mutation in listOf(badConfig, badSecret)) {
             val result = prepareConfigMutation(EffectTicket(1, 1), read, mutation) as ConfigOperationEvent.PreparationFailed
             assertEquals(TransitionFailure.ValidationFailed, result.reason)
@@ -70,7 +74,7 @@ class CanonicalEditDataTest {
     fun `submitted values detach mutable collections and secret list`() {
         val hooks = mutableListOf("first")
         val features = mutableSetOf("feature")
-        val commands = mutableListOf("private secret")
+        val commands = mutableListOf<CoreRootEffect>(CoreRootEffect.SetSuperkey("private secret"))
         val edits =
             mutableListOf<CanonicalEdit>(
                 CanonicalEdit.App(
@@ -80,7 +84,7 @@ class CanonicalEditDataTest {
                 ),
                 CanonicalEdit.SettingSet(CanonicalSetField.OptionalFeatures, features),
             )
-        val mutation = CanonicalMutation(edits, coupledCommands = commands)
+        val mutation = CanonicalMutation(edits, coupledEffects = commands)
         hooks.clear()
         features.clear()
         commands.clear()
@@ -93,7 +97,7 @@ class CanonicalEditDataTest {
                 .native.overrides.kernel,
         )
         assertEquals(setOf("feature"), actual.settings.optionalFeatures)
-        assertEquals(listOf("private secret"), mutation.coupledCommands)
+        assertEquals(listOf(CoreRootEffect.SetSuperkey("private secret")), mutation.coupledEffects)
         assertFalse(mutation.toString().contains("private secret"))
     }
 
@@ -129,10 +133,10 @@ class CanonicalEditDataTest {
         assertEquals(emptyList<ConfigPhase>(), configMutationPlan(CanonicalMutation(emptyList()), changed = false))
         val repair = CanonicalMutation(emptyList(), activation = CanonicalActivation(ports = true), forceActivation = true)
         assertEquals(listOf(ConfigPhase.Native, ConfigPhase.Ports), configMutationPlan(repair, changed = false))
-        val secret = CanonicalMutation(emptyList(), activation = noActivation, coupledCommands = listOf("private"))
+        val secret = CanonicalMutation(emptyList(), activation = noActivation, coupledEffects = listOf(CoreRootEffect.ClearSuperkey))
         assertEquals(listOf(ConfigPhase.Secret), configMutationPlan(secret, changed = false))
-        assertEquals("private", configPhaseCommand(ConfigPhase.Secret, secret))
-        assertEquals("", configPhaseCommand(ConfigPhase.Native, repair))
-        assertEquals("", configPhaseCommand(ConfigPhase.Ports, repair))
+        assertEquals(listOf(CoreRootEffect.ClearSuperkey), configPhaseEffects(ConfigPhase.Secret, secret))
+        assertEquals(emptyList<CoreRootEffect>(), configPhaseEffects(ConfigPhase.Native, repair))
+        assertEquals(emptyList<CoreRootEffect>(), configPhaseEffects(ConfigPhase.Ports, repair))
     }
 }

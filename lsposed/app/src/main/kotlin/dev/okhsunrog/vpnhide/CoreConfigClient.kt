@@ -10,6 +10,19 @@ import uniffi.vpnhide_core_ffi.configReplace
 import uniffi.vpnhide_core_ffi.configState
 import java.security.SecureRandom
 
+/** The canonical config as core reports it. */
+internal sealed interface RootCanonicalRead {
+    data class Available(
+        val config: CanonicalConfig,
+    ) : RootCanonicalRead
+
+    data object Missing : RootCanonicalRead
+
+    data object Invalid : RootCanonicalRead
+
+    data object Unavailable : RootCanonicalRead
+}
+
 /** What the root core holds, as the app's coordinator consumes it. */
 internal data class CoreStateView(
     val epoch: Long,

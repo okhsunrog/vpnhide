@@ -137,7 +137,6 @@ def patch_all_sources(version: str, version_code: int, *, dry_run: bool) -> None
     update_cargo_toml(REPO_ROOT / "crates/activator/Cargo.toml", version, dry_run=dry_run)
     update_cargo_toml(REPO_ROOT / "crates/checks/Cargo.toml", version, dry_run=dry_run)
     update_cargo_toml(REPO_ROOT / "crates/checks-jni/Cargo.toml", version, dry_run=dry_run)
-    update_cargo_toml(REPO_ROOT / "crates/app-helper/Cargo.toml", version, dry_run=dry_run)
     update_cargo_toml(REPO_ROOT / "zygisk/Cargo.toml", version, dry_run=dry_run)
     update_gradle_kts(REPO_ROOT / "lsposed/app/build.gradle.kts", vc, dry_run=dry_run)
 
@@ -200,7 +199,6 @@ def main() -> int:
         REPO_ROOT / "crates/activator/Cargo.toml",
         REPO_ROOT / "crates/checks/Cargo.toml",
         REPO_ROOT / "crates/checks-jni/Cargo.toml",
-        REPO_ROOT / "crates/app-helper/Cargo.toml",
         REPO_ROOT / "zygisk/Cargo.toml",
         REPO_ROOT / "lsposed/app/build.gradle.kts",
     ]

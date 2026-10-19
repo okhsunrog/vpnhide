@@ -4,6 +4,8 @@ import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
 import android.os.Build
 import android.os.SystemClock
+import dev.okhsunrog.vpnhide.core.CoreProbe
+import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticPresentation
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
@@ -1007,32 +1009,20 @@ private fun detectLsposedFramework(sections: Map<String, String>): LsposedFramew
     return framework
 }
 
-// Copy the LSPosed config DB (+ WAL/SHM) out of root-only storage into our
-// cache dir so SQLiteDatabase can open it read-only. Returns the copied main
-// db file, or null if the root copy failed.
+// Core copies the LSPosed config DB (+ WAL/SHM) out of root-only storage into the
+// app's export dir, owned by the app, so SQLiteDatabase can open it read-only.
+// Returns the copied main db file, or null if core could not copy it.
 private fun copyLsposedConfigDb(context: android.content.Context): File? {
-    val dbCopy = File(context.cacheDir, "vpnhide_lspd_modules_config.db")
-    val walCopy = File(context.cacheDir, "vpnhide_lspd_modules_config.db-wal")
-    val shmCopy = File(context.cacheDir, "vpnhide_lspd_modules_config.db-shm")
-    dbCopy.delete()
-    walCopy.delete()
-    shmCopy.delete()
-
-    val src = "/data/adb/lspd/config/modules_config.db"
+    CoreRoot.attach(context)
     val copyStart = SystemClock.elapsedRealtime()
-    val (copyExit, copyOut) =
-        suExec(
-            "cat $src > ${dbCopy.absolutePath} && chmod 644 ${dbCopy.absolutePath} && " +
-                "(cat $src-wal > ${walCopy.absolutePath} 2>/dev/null && chmod 644 ${walCopy.absolutePath} || true) && " +
-                "(cat $src-shm > ${shmCopy.absolutePath} 2>/dev/null && chmod 644 ${shmCopy.absolutePath} || true) && " +
-                "ls -l ${dbCopy.absolutePath} ${walCopy.absolutePath} ${shmCopy.absolutePath} 2>/dev/null || true",
-        )
+    val result = CoreRoot.collectOneBlocking(CoreProbe.LsposedModulesDb)
     StartupTrace.metric("dashboard_lsposed_db_copy", SystemClock.elapsedRealtime() - copyStart)
-    if (copyExit != 0 || !dbCopy.isFile) {
-        VpnHideLog.w(TAG, "failed to copy LSPosed config db for inspection: exit=$copyExit out=$copyOut")
+    val dbCopy = result.artifacts.firstOrNull { it.name == "modules_config.db" }
+    if (!result.ok || dbCopy == null || !dbCopy.isFile) {
+        VpnHideLog.w(TAG, "failed to copy LSPosed config db for inspection: exit=${result.exit} out=${result.text}")
         return null
     }
-    VpnHideLog.i(TAG, "lsposed db copy: ${copyOut.trim()}")
+    VpnHideLog.i(TAG, "lsposed db copy: ${result.text.trim()}")
     return dbCopy
 }
 

@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.core.CoreEffectOutcome
+import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -50,10 +52,17 @@ class CoreConfigIoTest {
         ): CoreReply = repairReply(op).also { calls += "repair $op $baseRevision" }
     }
 
+    private val applied = mutableListOf<CoreRootEffect>()
+    private var effectOutcome: (CoreRootEffect) -> CoreEffectOutcome = { CoreEffectOutcome.Ok }
+
     private fun io(
         core: FakeCore?,
         ids: Iterator<Long> = generateSequence(100L) { it + 1 }.iterator(),
-    ) = CoreConfigIo(prepareCore = { core }, lane = RootCommandLane { null }, newOperationId = { ids.next() })
+    ) = CoreConfigIo(
+        prepareCore = { core },
+        rootEffects = { _, effect -> effectOutcome(effect).also { applied += effect } },
+        newOperationId = { ids.next() },
+    )
 
     private val ticket = EffectTicket(owner = 1, sequence = 1)
 
@@ -94,10 +103,10 @@ class CoreConfigIoTest {
             val io = io(core)
             io.initialize()
             io.read()
-            val persist = io.execute(ticket, ConfigPhase.Persist, config, config, "")
+            val persist = io.execute(ticket, ConfigPhase.Persist, config, config, emptyList())
             assertEquals(PhaseOutcome.Confirmed, persist.outcome)
-            assertEquals(PhaseOutcome.Confirmed, io.execute(ticket, ConfigPhase.Native, config, config, "").outcome)
-            assertEquals(PhaseOutcome.FailedKnown, io.execute(ticket, ConfigPhase.Ports, config, config, "").outcome)
+            assertEquals(PhaseOutcome.Confirmed, io.execute(ticket, ConfigPhase.Native, config, config, emptyList()).outcome)
+            assertEquals(PhaseOutcome.FailedKnown, io.execute(ticket, ConfigPhase.Ports, config, config, emptyList()).outcome)
             assertEquals(listOf("state", "state", "replace 100 4"), core.calls)
         }
 
@@ -109,9 +118,9 @@ class CoreConfigIoTest {
             val io = io(core)
             io.initialize()
             io.read()
-            assertEquals(PhaseOutcome.Confirmed, io.execute(ticket, ConfigPhase.Native, config, config, "").outcome)
+            assertEquals(PhaseOutcome.Confirmed, io.execute(ticket, ConfigPhase.Native, config, config, emptyList()).outcome)
             // Ports was not planned by core (nothing to apply): it settles with the operation.
-            assertEquals(PhaseOutcome.Confirmed, io.execute(ticket, ConfigPhase.Ports, config, config, "").outcome)
+            assertEquals(PhaseOutcome.Confirmed, io.execute(ticket, ConfigPhase.Ports, config, config, emptyList()).outcome)
             assertEquals(listOf("state", "state", "repair 100 2"), core.calls)
         }
 
@@ -122,9 +131,9 @@ class CoreConfigIoTest {
             core.replaceReply = { CoreReply.Refused("conflict", "revision") }
             val io = io(core)
             io.initialize()
-            assertEquals(PhaseOutcome.FailedKnown, io.execute(ticket, ConfigPhase.Persist, config, config, "").outcome)
+            assertEquals(PhaseOutcome.FailedKnown, io.execute(ticket, ConfigPhase.Persist, config, config, emptyList()).outcome)
             core.replaceReply = { CoreReply.Unreachable }
-            assertEquals(PhaseOutcome.FailedKnown, io.execute(ticket, ConfigPhase.Persist, config, config, "").outcome)
+            assertEquals(PhaseOutcome.FailedKnown, io.execute(ticket, ConfigPhase.Persist, config, config, emptyList()).outcome)
         }
 
     @Test
@@ -134,7 +143,7 @@ class CoreConfigIoTest {
             core.replaceReply = { CoreReply.Uncertain }
             val io = io(core)
             io.initialize()
-            assertEquals(PhaseOutcome.Unknown, io.execute(ticket, ConfigPhase.Persist, config, config, "").outcome)
+            assertEquals(PhaseOutcome.Unknown, io.execute(ticket, ConfigPhase.Persist, config, config, emptyList()).outcome)
 
             core.operationReply =
                 { op -> CoreReply.Observed(state(2), record(op, ConfigPhase.Persist to PhaseOutcome.Running, settled = null)) }
@@ -142,8 +151,38 @@ class CoreConfigIoTest {
 
             core.operationReply = { op -> CoreReply.Observed(state(2), record(op, ConfigPhase.Persist to PhaseOutcome.Confirmed)) }
             assertEquals(PhaseOutcome.Confirmed, io.recover(1, ConfigPhase.Persist).outcome)
-            assertEquals(PhaseOutcome.Confirmed, io.execute(ticket, ConfigPhase.Native, config, config, "").outcome)
+            assertEquals(PhaseOutcome.Confirmed, io.execute(ticket, ConfigPhase.Native, config, config, emptyList()).outcome)
             assertEquals(listOf("state", "replace 100 1", "operation 100", "operation 100"), core.calls)
+        }
+
+    @Test
+    fun `coupled phases apply typed root effects in order and recover by reapplying`() =
+        runTest {
+            val core = FakeCore(CoreReply.Observed(state(1)))
+            val io = io(core)
+            io.initialize()
+            val effects = listOf(CoreRootEffect.SetSuperkey("k"), CoreRootEffect.DeleteLegacyConfig)
+            assertEquals(PhaseOutcome.Confirmed, io.execute(ticket, ConfigPhase.Secret, config, config, effects).outcome)
+            assertEquals(effects, applied)
+
+            applied.clear()
+            effectOutcome = { if (it == CoreRootEffect.SetSuperkey("k")) CoreEffectOutcome.FailedKnown else CoreEffectOutcome.Ok }
+            assertEquals(PhaseOutcome.FailedKnown, io.execute(ticket, ConfigPhase.Secret, config, config, effects).outcome)
+            assertEquals(listOf(CoreRootEffect.SetSuperkey("k")), applied)
+
+            effectOutcome = { CoreEffectOutcome.Unknown }
+            assertEquals(
+                PhaseOutcome.Unknown,
+                io.execute(ticket, ConfigPhase.Cleanup, config, config, listOf(CoreRootEffect.FullReset)).outcome,
+            )
+            effectOutcome = { CoreEffectOutcome.Ok }
+            applied.clear()
+            assertEquals(PhaseOutcome.Confirmed, io.recover(ticket.owner, ConfigPhase.Cleanup).outcome)
+            assertEquals(listOf<CoreRootEffect>(CoreRootEffect.FullReset), applied)
+            // A phase this io never ran is not recoverable.
+            assertEquals(PhaseOutcome.Unknown, io.recover(99, ConfigPhase.Cleanup).outcome)
+            // A coupled phase with no effect is a known failure, never a silent success.
+            assertEquals(PhaseOutcome.FailedKnown, io.execute(ticket, ConfigPhase.Secret, config, config, emptyList()).outcome)
         }
 
     @Test

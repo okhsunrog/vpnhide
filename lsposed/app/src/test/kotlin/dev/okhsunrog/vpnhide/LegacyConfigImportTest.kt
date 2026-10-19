@@ -179,22 +179,15 @@ class LegacyConfigImportTest {
     }
 
     @Test
-    fun `delete command retires legacy files and only the orphan dirs`() {
-        val cmd = buildLegacyConfigDeleteCommand()
-        LEGACY_FILES.forEach { assertTrue("$it missing from $cmd", cmd.contains(it)) }
-        assertTrue(cmd.contains("rmdir /data/adb/vpnhide_zygisk /data/adb/vpnhide_lsposed"))
-        // Live directories: load_status / load_dmesg / ctl.lock still live here.
-        assertFalse(cmd.contains("rmdir /data/adb/vpnhide_kmod"))
-        assertFalse(cmd.contains("rm -rf"))
-    }
-
-    @Test
     fun `both shell probes read every legacy path`() {
-        listOf(buildRootShellSnapshotCommand(), buildDebugShellSnapshotCommand()).forEach { cmd ->
-            LEGACY_CONFIG_SECTIONS.forEach { (section, path) ->
-                // Both probes iterate the pairs the prelude hands them.
-                assertTrue("$section missing", cmd.contains("$section=$path"))
-            }
+        // Core hands both probes the section=path pairs (diagnostics.rs `snapshot_vars`)
+        // and both scripts iterate them.
+        listOf("root_snapshot.sh", "debug_snapshot.sh").forEach { name ->
+            assertTrue("$name ignores the legacy sections", coreProbeScript(name).contains("VPNHIDE_LEGACY_SECTIONS"))
+        }
+        val core = coreDiagnosticsSource()
+        LEGACY_CONFIG_SECTIONS.forEach { (section, path) ->
+            assertTrue("$section missing from core", core.contains("\"$section\"") && core.contains("\"$path\""))
         }
     }
 }

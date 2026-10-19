@@ -92,7 +92,7 @@ fn uid_membership(
         };
     }
     // Membership uses the framework VPN set (authoritative), not only currently-up
-    // intersection — matches vhhelper observe app-vpn-state.
+    // intersection — matches vpnhide-core observe app-vpn-state.
     let (routed, detail) = self_routed_for_interfaces(uid, Some(&framework.interfaces));
     let _ = current_vpn_ifaces;
     match routed {

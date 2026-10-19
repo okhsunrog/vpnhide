@@ -288,7 +288,7 @@ jobs:
             kmod/kpm/module/customize.sh \
             zygisk/module/customize.sh \
             core/module/customize.sh core/module/post-fs-data.sh core/module/service.sh core/module/uninstall.sh \
-            scripts/clean-device.sh scripts/update-json.sh \
+            scripts/clean-device.sh scripts/update-json.sh lsposed/tests/check_no_root_exec.sh \
             kmod/test/run.sh kmod/test/build-kernel.sh kmod/test/init.sh \
             kmod/test/verify-trim-abi.sh \
             kmod/test/run-kpm.sh kmod/test/init-kpm.sh kmod/test/build-source-kernel.sh \
@@ -351,9 +351,9 @@ jobs:
       - name: clippy (zygisk)
         run: cargo ndk -t arm64-v8a -t armeabi-v7a clippy -p vpnhide_zygisk --tests -- -D warnings
       - name: clippy (app native)
-        run: cargo ndk -t arm64-v8a -t armeabi-v7a clippy -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_app_helper --tests -- -D warnings
+        run: cargo ndk -t arm64-v8a -t armeabi-v7a clippy -p vpnhide_checks -p vpnhide_checks_jni --tests -- -D warnings
       - name: cargo test (workspace)
-        run: cargo test -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_zygisk -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_app_helper -p vpnhide_core_rpc -p vpnhide_core_daemon
+        run: cargo test -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_zygisk -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_core_rpc -p vpnhide_core_daemon
 
 
   kmod:
@@ -878,6 +878,9 @@ jobs:
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: No root process in the app
+        run: sh lsposed/tests/check_no_root_exec.sh
 
       - name: ktlint
         run: ktlint "lsposed/app/src/**/*.kt"

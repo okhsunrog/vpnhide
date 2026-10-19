@@ -12,6 +12,9 @@ import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.collectDebugShellSnapshot
 import dev.okhsunrog.vpnhide.collectHookCounterSnapshot
+import dev.okhsunrog.vpnhide.core.CoreDiagnostics
+import dev.okhsunrog.vpnhide.core.CoreProbe
+import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSnapshot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
@@ -22,7 +25,6 @@ import dev.okhsunrog.vpnhide.loadDashboardState
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.readLsposedConfig
 import dev.okhsunrog.vpnhide.statistics.buildStatisticsState
-import dev.okhsunrog.vpnhide.suExec
 import dev.okhsunrog.vpnhide.toAgentStatisticsState
 import dev.okhsunrog.vpnhide.ui.components.container
 import kotlinx.coroutines.CancellationException
@@ -109,7 +111,7 @@ private suspend fun buildDebugState(
     return try {
         val counterBaseline = if (options.forensics) collectHookCounterSnapshot() else null
         // Clear dmesg so we only capture output from the hooks the checks fire.
-        if (options.forensics) suExec("dmesg -c > /dev/null 2>&1")
+        if (options.forensics) clearDmesg()
         // The suite belongs to the run coordinator, not to the export: this is a fresh
         // capture-identified run that cannot join one whose probes started before the
         // logging and counter baseline above. Its terminal attempt is recorded either
@@ -154,7 +156,7 @@ private suspend fun buildDebugState(
             } else {
                 null
             }
-        val dmesg = if (options.forensics) suExec("dmesg 2>/dev/null").second else ""
+        val dmesg = if (options.forensics) captureDmesg() else ""
         val logcat = if (options.forensics) captureDebugLogcat().ifEmpty { "(no logcat entries)" } else ""
         val session = loggingSession?.let { it.withRestore(restoreDebugCaptureLogging(it)) }
         restoreAttempted = true
@@ -282,65 +284,31 @@ internal fun writeDiagnosticZip(
     }
 }
 
+/** The app's and its native components' log tags (core's fixed `LogcatAppTags` set). */
 private fun captureDebugLogcat(): String {
-    val tags =
-        listOf(
-            "VPNHideTest:*",
-            "VpnHide:*",
-            "VpnHide-Dashboard:*",
-            "VpnHide-Startup:*",
-            "VpnHide-LSPosed:*",
-            "VpnHide-Diag:*",
-            "VpnHide-Logcat:*",
-            "VpnHide-Update:*",
-            "VpnHideAgentBridge:*",
-            "vpnhide:*",
-            "vpnhide_ports:*",
-            "vpnhide-zygisk:*",
-            "shadowhook_tag:*",
-        ).joinToString(" ")
-    val (exit, output) = suExec("logcat -d -b all -v threadtime -s $tags 2>/dev/null")
-    return if (exit == 0) output else "(logcat failed: exit=$exit)\n$output"
+    val result = CoreRoot.collectOneBlocking(CoreProbe.LogcatAppTags)
+    return if (result.ok) result.text else "(logcat failed: core exit=${result.exit})\n${result.text}"
 }
 
+/** This boot's dmesg ring as core reads it; empty when core is unavailable. */
+internal fun captureDmesg(): String = CoreRoot.collectOneBlocking(CoreProbe.Dmesg).text
+
+/** Clear the kernel ring (`dmesg -c` in core, behind its explicit `clear_dmesg` flag). */
+internal fun clearDmesg(): Boolean =
+    (CoreRoot.collectBlocking(emptyList(), clearDmesg = true) as? CoreDiagnostics.Collected)?.dmesgCleared == true
+
 internal fun captureBootLsposedLogcat(): String {
-    val (exit, output) = suExec(buildBootLsposedLogcatCommand(), timeoutSec = 15)
+    val result = CoreRoot.collectOneBlocking(CoreProbe.LogcatLsposedBoot)
     return buildString {
-        appendLine("commandExit=$exit")
+        appendLine("commandExit=${result.exit}")
         appendLine("source=logcat -d -b all -v threadtime")
         appendLine("scope=best_effort_current_ring_buffer")
         appendLine("note=Contains boot-time LSPosed/Vector context only if the logcat ring buffer has not rotated yet.")
-        appendLine("patterns=${BOOT_LSPOSED_LOGCAT_PATTERNS.joinToString(",")}")
+        appendLine("patterns=core logcat_lsposed_boot.sh")
         appendLine()
-        appendLine(output.ifBlank { "(no LSPosed/Vector boot logcat entries in current buffers)" }.trimEnd())
+        appendLine(result.text.ifBlank { "(no LSPosed/Vector boot logcat entries in current buffers)" }.trimEnd())
     }.trimEnd()
 }
-
-internal fun buildBootLsposedLogcatCommand(): String {
-    val pattern = BOOT_LSPOSED_LOGCAT_PATTERNS.joinToString("|")
-    return """
-        logcat -d -b all -v threadtime 2>/dev/null |
-          grep -Ei '$pattern' |
-          tail -2000 || true
-        """.trimIndent()
-}
-
-private val BOOT_LSPOSED_LOGCAT_PATTERNS =
-    listOf(
-        LogTags.LSPOSED,
-        "LSPosed-Bridge",
-        "VectorNative",
-        "VectorBridge",
-        "LSPosedService",
-        "LSPlt",
-        "LSPHooker",
-        "LSPosedBridge",
-        "Xposed",
-        "org[.]lsposed",
-        "lspd",
-        "modules_config",
-        "dev[.]okhsunrog[.]vpnhide",
-    )
 
 internal fun appVersionText(context: Context): String =
     try {

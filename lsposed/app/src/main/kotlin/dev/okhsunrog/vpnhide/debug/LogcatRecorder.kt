@@ -6,8 +6,9 @@ import dev.okhsunrog.vpnhide.RootSnapshot
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.collectDebugShellSnapshot
+import dev.okhsunrog.vpnhide.core.CoreProbe
+import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
-import dev.okhsunrog.vpnhide.suExec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,15 +24,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 /**
  * Records a full `logcat -b all` session and saves it as a diagnostic ZIP.
+ *
+ * The app cannot read other apps' logs and runs no root process, so core reads them:
+ * while recording, the app polls core's fixed `LogcatSince` probe every few seconds
+ * and appends the lines newer than the last one it kept ([LogcatTail]), so a ring
+ * buffer that rotates mid-session loses nothing older than one poll.
  *
  * The raw logcat stream is captured between Start/Stop while debug logging is
  * temporarily enabled through the same canonical-config path used by the
@@ -41,7 +45,7 @@ import java.util.concurrent.TimeUnit
 internal object LogcatRecorder {
     private const val TAG = LogTags.LOGCAT
     private const val LOGCAT_STOP_GRACE_MS = 200L
-    private const val LOGCAT_PIPE_JOIN_MS = 2_000L
+    private const val LOGCAT_POLL_MS = 10_000L
 
     sealed interface State {
         data class Stopped(
@@ -62,9 +66,9 @@ internal object LogcatRecorder {
         val logcatSince: String,
         val startMs: Long,
         val selfNeedsRestart: Boolean,
-        val process: Process,
+        val tail: LogcatTail,
         val scope: CoroutineScope,
-        val pipeJob: Job,
+        val pollJob: Job,
         val sizeJob: Job,
         val loggingSession: DebugCaptureLoggingSession,
     )
@@ -109,7 +113,6 @@ internal object LogcatRecorder {
             }
 
         var loggingSession: DebugCaptureLoggingSession? = null
-        var process: Process? = null
         var scope: CoroutineScope? = null
         try {
             loggingSession = beginDebugCaptureLogging()
@@ -119,15 +122,9 @@ internal object LogcatRecorder {
             val logcatSince = formatLogcatSince(Date(startMs - 1_000L))
             writeLogcatMarker("start", id)
 
-            process = startLogcatProcess(logcatSince)
-            if (process == null) {
-                restoreDebugCaptureLogging(loggingSession)
-                runCatching { rawLogFile.delete() }
-                return null
-            }
-
+            val tail = LogcatTail(logcatSince)
             scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-            val pipeJob = pipeLogcatToFile(scope, process, rawLogFile)
+            val pollJob = pollLogcatToFile(scope, tail, rawLogFile)
             val sizeJob = publishSize(scope, rawLogFile)
 
             active =
@@ -137,16 +134,15 @@ internal object LogcatRecorder {
                     logcatSince = logcatSince,
                     startMs = startMs,
                     selfNeedsRestart = selfNeedsRestart,
-                    process = process,
+                    tail = tail,
                     scope = scope,
-                    pipeJob = pipeJob,
+                    pollJob = pollJob,
                     sizeJob = sizeJob,
                     loggingSession = loggingSession,
                 )
             _state.value = State.Recording(rawLogFile, startMs, 0L)
             return rawLogFile
         } catch (t: Throwable) {
-            process?.destroyForcibly()
             scope?.cancel()
             loggingSession?.let { restoreDebugCaptureLogging(it) }
             runCatching { rawLogFile.delete() }
@@ -202,7 +198,7 @@ internal object LogcatRecorder {
             withContext(NonCancellable) {
                 if (!processStopped) {
                     runCatching { stopLogcatProcess(recording) }
-                        .onFailure { VpnHideLog.w(TAG, "failed to stop logcat process: ${it.message}") }
+                        .onFailure { VpnHideLog.w(TAG, "failed to stop logcat polling: ${it.message}") }
                 }
                 if (!restoreAttempted) {
                     runCatching { restoreDebugCaptureLogging(recording.loggingSession) }
@@ -219,37 +215,31 @@ internal object LogcatRecorder {
         }
     }
 
-    private fun startLogcatProcess(logcatSince: String): Process? =
-        try {
-            ProcessBuilder("su", "-c", "exec logcat -b all -v threadtime -T \"$logcatSince\"")
-                .redirectErrorStream(true)
-                .start()
-        } catch (t: Throwable) {
-            VpnHideLog.w(TAG, "failed to spawn logcat via su: ${t.message}")
-            null
-        }
-
-    private fun pipeLogcatToFile(
+    private fun pollLogcatToFile(
         scope: CoroutineScope,
-        process: Process,
+        tail: LogcatTail,
         file: File,
     ): Job =
         scope.launch {
-            try {
-                process.inputStream.use { input ->
-                    file.outputStream().use { out ->
-                        val buf = ByteArray(DEFAULT_BUFFER_SIZE)
-                        while (true) {
-                            val n = input.read(buf)
-                            if (n < 0) break
-                            if (n > 0) out.write(buf, 0, n)
-                        }
-                    }
-                }
-            } catch (t: Throwable) {
-                VpnHideLog.w(TAG, "pipe error: ${t.message}")
+            while (isActive) {
+                delay(LOGCAT_POLL_MS)
+                pollOnce(tail, file)
             }
         }
+
+    /** One core read of everything since the last kept line, appended to [file]. */
+    private suspend fun pollOnce(
+        tail: LogcatTail,
+        file: File,
+    ) {
+        val result = CoreRoot.collectOne(CoreProbe.LogcatSince(tail.since))
+        if (!result.ok) {
+            VpnHideLog.w(TAG, "logcat poll failed: core exit=${result.exit}")
+            return
+        }
+        val fresh = tail.accept(result.text)
+        if (fresh.isNotEmpty()) file.appendText(fresh.joinToString("\n", postfix = "\n"))
+    }
 
     private fun publishSize(
         scope: CoroutineScope,
@@ -266,23 +256,19 @@ internal object LogcatRecorder {
         }
 
     private suspend fun stopLogcatProcess(recording: ActiveRecording) {
-        recording.process.destroy()
-        if (!recording.process.waitFor(LOGCAT_PIPE_JOIN_MS, TimeUnit.MILLISECONDS)) {
-            recording.process.destroyForcibly()
-        }
-        withTimeoutOrNull(LOGCAT_PIPE_JOIN_MS) { recording.pipeJob.join() }
+        recording.pollJob.cancelAndJoin()
         recording.sizeJob.cancelAndJoin()
         recording.scope.cancel()
+        // The final read: everything up to and including the stop marker.
+        pollOnce(recording.tail, recording.rawLogFile)
     }
 
+    /** Markers go to this app's own log, which core's logcat read includes. */
     private fun writeLogcatMarker(
         phase: String,
         id: String,
     ) {
-        suExec(
-            "log -t $TAG \"full-system-logcat $phase id=$id\" >/dev/null 2>&1",
-            timeoutSec = 2,
-        )
+        android.util.Log.i(TAG, "full-system-logcat $phase id=$id")
     }
 
     // Build the canonical state.json for this recording: the same authoritative
@@ -294,7 +280,7 @@ internal object LogcatRecorder {
         stopMs: Long,
         duration: Long,
     ): String {
-        val dmesg = suExec("dmesg 2>/dev/null").second
+        val dmesg = captureDmesg()
         val rootSnapshot =
             runCatching { RootSnapshotCache.refresh() }.getOrElse { RootSnapshot(emptyMap()) }
         val shellSnapshot = collectDebugShellSnapshot()
@@ -338,7 +324,7 @@ internal object LogcatRecorder {
             appendLine("selfNeedsRestart=${recording.selfNeedsRestart}")
             appendLine("logcatSince=${recording.logcatSince}")
             appendLine("rawLogBytes=${recording.rawLogFile.length()}")
-            appendLine("logcatCommand=logcat -b all -v threadtime -T \"${recording.logcatSince}\"")
+            appendLine("logcatSource=core logcat_since (logcat -d -b all -v threadtime -T), polled every ${LOGCAT_POLL_MS}ms")
         }.trimEnd()
 
     private fun filterVpnHideLogcat(file: File): String =
@@ -353,4 +339,45 @@ internal object LogcatRecorder {
     private fun formatLogcatSince(date: Date): String = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(date)
 
     private fun formatWallTime(ms: Long): String = SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date(ms))
+}
+
+/**
+ * Stitches repeated `logcat -d -T <since>` reads into one stream. `-T` includes lines at
+ * exactly `since`, so the lines already kept at the newest stamp are remembered and
+ * skipped; older lines and logcat's buffer banners are dropped.
+ */
+internal class LogcatTail(
+    start: String,
+) {
+    var since: String = start
+        private set
+    private var keptAtSince: MutableSet<String> = mutableSetOf()
+
+    fun accept(chunk: String): List<String> {
+        val fresh = mutableListOf<String>()
+        chunk.lineSequence().forEach { line ->
+            val stamp = logcatStamp(line) ?: return@forEach
+            when {
+                stamp < since -> {}
+
+                stamp == since -> {
+                    if (keptAtSince.add(line)) fresh += line
+                }
+
+                else -> {
+                    since = stamp
+                    keptAtSince = mutableSetOf(line)
+                    fresh += line
+                }
+            }
+        }
+        return fresh
+    }
+
+    private fun logcatStamp(line: String): String? = line.take(STAMP_LENGTH).takeIf { LOGCAT_STAMP.matches(it) }
+
+    private companion object {
+        const val STAMP_LENGTH = 18
+        val LOGCAT_STAMP = Regex("""\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}""")
+    }
 }

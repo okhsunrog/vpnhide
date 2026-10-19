@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide
 
 import android.content.Context
 import dev.okhsunrog.vpnhide.core.CorePaths
+import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticImpactObserver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +33,6 @@ internal data class CanonicalWriteResult(
  */
 internal object CanonicalConfigRepository {
     internal val processScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val runner = RootProcessRunner()
 
     @Volatile private var appContext: Context? = null
 
@@ -40,7 +40,6 @@ internal object CanonicalConfigRepository {
         ConfigCoordinator(
             CoreConfigIo(
                 prepareCore = { appContext?.let { FfiCoreConfigClient(CorePaths.socket(it)) } },
-                lane = RootCommandLane { appContext?.let { prepareRootMutationTransport(it, runner) } },
             ),
             processScope,
             confirmed = { VpnHideLog.enabled = it.debug },
@@ -53,6 +52,7 @@ internal object CanonicalConfigRepository {
 
     suspend fun initialize(context: Context): ConfigCoordinatorMode {
         appContext = context.applicationContext
+        CoreRoot.attach(context)
         return coordinator.initialize()
     }
 

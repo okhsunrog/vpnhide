@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.core.CoreRootEffect
+
 internal enum class CanonicalToggle(
     val path: List<String>,
 ) {
@@ -185,12 +187,12 @@ private fun mergeCanonicalApp(
         CanonicalAppField.Hidden -> base.copy(hidden = next.hidden)
     }
 
-/** Effect input, deliberately not a data class: secret commands must not appear in toString/state. */
+/** Effect input, deliberately not a data class: secret effects must not appear in toString/state. */
 internal class CanonicalMutation(
     edits: List<CanonicalEdit>,
     val source: OperationSource = OperationSource.Ui,
     val activation: CanonicalActivation = CanonicalActivation(),
-    coupledCommands: List<String> = emptyList(),
+    coupledEffects: List<CoreRootEffect> = emptyList(),
     val bootstrap: Boolean = false,
     val declaredWrites: Set<ConfigField> = emptySet(),
     val removesCanonical: Boolean = false,
@@ -201,7 +203,7 @@ internal class CanonicalMutation(
     val transform: (CanonicalConfig) -> CanonicalConfig = { it },
 ) {
     val edits: List<CanonicalEdit> = edits.map(::canonicalEditSnapshot)
-    val coupledCommands: List<String> = coupledCommands.toList()
+    val coupledEffects: List<CoreRootEffect> = coupledEffects.toList()
     val writes: Set<ConfigField> =
         this.edits.flatMapTo(linkedSetOf(), ::canonicalEditFields) + configFieldSnapshot(declaredWrites) +
             if (protectAllDrafts) setOf("apps", "settings", "debug", "debugSwitch").map { ConfigField(listOf(it)) } else emptySet()

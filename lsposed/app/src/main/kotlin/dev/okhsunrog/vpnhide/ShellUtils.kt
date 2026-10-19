@@ -1,12 +1,12 @@
 package dev.okhsunrog.vpnhide
 
-import android.util.Log
+import dev.okhsunrog.vpnhide.core.CoreProbe
+import dev.okhsunrog.vpnhide.core.CoreRoot
+import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.generated.IfaceLists
 import dev.okhsunrog.vpnhide.picker.parsePackageUidLine
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import java.io.File
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 private const val TAG = LogTags.APP
 
@@ -50,74 +50,6 @@ internal const val KMOD_ACTIVATOR = "$KMOD_MODULE_DIR/activator"
 internal const val BUILTIN_ACTIVATOR = "$BUILTIN_MODULE_DIR/activator"
 internal const val KPM_ACTIVATOR = "$KPM_MODULE_DIR/activator"
 internal const val ZYGISK_ACTIVATOR = "$ZYGISK_MODULE_DIR/activator"
-
-/** Default cap on a single su invocation. Most root commands here finish
- *  in milliseconds; this only fires if the su binary is genuinely stuck
- *  (e.g. waiting on a GUI prompt that the user dismissed). */
-internal const val SU_DEFAULT_TIMEOUT_SEC: Long = 10
-private const val SELF_TARGETS_TIMEOUT_SEC: Long = SU_DEFAULT_TIMEOUT_SEC
-
-/**
- * Returns exit code and stdout. Exit code -1 means the su binary
- * couldn't be executed at all (not installed, permission denied, or
- * still running after [timeoutSec] seconds — in which case it gets
- * destroyForcibly()'d so we don't leak the process).
- *
- * Both pipes are drained on dedicated threads — `readText()` directly
- * on `proc.inputStream` would block until EOF, so a hung child means
- * `waitFor(timeout)` is never even reached. The threads exit naturally
- * once the child (or destroyForcibly) closes its pipes.
- */
-internal fun suExec(
-    cmd: String,
-    timeoutSec: Long = SU_DEFAULT_TIMEOUT_SEC,
-): Pair<Int, String> {
-    // Dev sandbox build: never invoke su. -1 is the app's "no root" signal everywhere, so
-    // every legacy root/backend path goes Unavailable rather than touching the real install.
-    if (BuildConfig.DEV_ISOLATED) return -1 to ""
-    return try {
-        val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-        try {
-            val stdoutHolder = AtomicReference("")
-            val stdoutDrain =
-                Thread {
-                    runCatching { stdoutHolder.set(proc.inputStream.bufferedReader().readText()) }
-                }
-            val stderrDrain = Thread { runCatching { proc.errorStream.readBytes() } }
-            stdoutDrain.start()
-            stderrDrain.start()
-
-            val finished = proc.waitFor(timeoutSec, TimeUnit.SECONDS)
-            if (!finished) {
-                Log.w(TAG, "su exec timed out after ${timeoutSec}s: ${commandPreview(cmd)}")
-                proc.destroyForcibly()
-            }
-            // After destroyForcibly the pipes close and the drains exit;
-            // a 1s join is plenty and bounds the worst case.
-            stdoutDrain.join(1_000)
-            stderrDrain.join(1_000)
-
-            val exit = if (finished) proc.exitValue() else -1
-            exit to stdoutHolder.get()
-        } finally {
-            proc.destroy()
-        }
-    } catch (e: Exception) {
-        VpnHideLog.e(TAG, "su exec failed: ${e.message}")
-        -1 to ""
-    }
-}
-
-private fun commandPreview(cmd: String): String {
-    val preview =
-        cmd
-            .lineSequence()
-            .map { it.trimEnd() }
-            .filter { it.isNotBlank() }
-            .take(12)
-            .joinToString("\n")
-    return if (preview.length <= 800) preview else preview.take(800) + "..."
-}
 
 /**
  * Lines of a vpnhide config file: trimmed, with blank lines and `#`-comments
@@ -187,7 +119,7 @@ internal fun parseVpnIfaceStates(raw: String): List<Pair<String, String>> =
  * the point of failure (not parsed back out of a string).
  */
 internal enum class SelfTargetFailureKind {
-    /** The root command didn't run: denied, su prompt interrupted, non-zero exit. */
+    /** Core did not answer the probe: module missing or not running, or the probe failed. */
     RootUnavailable,
 
     /** Root worked, but the state probe returned incomplete data (a backend's
@@ -217,6 +149,9 @@ internal data class SelfTargetPreparation(
     val failureKind: SelfTargetFailureKind = SelfTargetFailureKind.Unknown,
 )
 
+/** This boot's id. World-readable; no root needed. */
+internal fun readBootId(): String = runCatching { File("/proc/sys/kernel/random/boot_id").readText().trim() }.getOrDefault("")
+
 internal fun cleanupStaleZygiskStatus(
     context: android.content.Context,
     knownCurrentBootId: String? = null,
@@ -237,7 +172,7 @@ internal fun cleanupStaleZygiskStatus(
         knownCurrentBootId
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
-            ?: suExec("cat /proc/sys/kernel/random/boot_id 2>/dev/null").second.trim()
+            ?: readBootId()
     val stale =
         heartbeatBootId.isNullOrBlank() ||
             heartbeatBootId != currentBootId
@@ -261,11 +196,8 @@ internal fun cleanupStaleZygiskStatus(
  * applied to the current process, restart needed for zygisk).
  * Called once at app startup; result is shared with all screens.
  */
-internal suspend fun ensureSelfInTargets(
-    selfPkg: String,
-    timeoutSec: Long = SELF_TARGETS_TIMEOUT_SEC,
-): SelfTargetPreparation {
-    val (sections, loadFailure) = loadStartupRootSections(timeoutSec)
+internal suspend fun ensureSelfInTargets(selfPkg: String): SelfTargetPreparation {
+    val (sections, loadFailure) = loadStartupRootSections()
     if (sections == null) {
         val failure = loadFailure ?: SelfTargetFailureDetail(SelfTargetFailureKind.Unknown, "snapshot load failed")
         return selfTargetPreparationFailure(failure.kind, failure.detail)
@@ -309,16 +241,15 @@ private data class SelfTargetFailureDetail(
     val detail: String,
 )
 
-private fun loadStartupRootSections(timeoutSec: Long): Pair<Map<String, String>?, SelfTargetFailureDetail?> {
-    // The same command (including the runtime probe) as RootSnapshotCache, so the
-    // result can seed the cache whole instead of being read a second time.
-    val command =
-        buildRootShellSnapshotCommand(includePmPackages = true, runtimeProbeSource = RootSnapshotCache.runtimeProbeSourcePath)
-    val (exitCode, out) = suExec(command, timeoutSec = timeoutSec)
-    if (exitCode != 0) {
-        VpnHideLog.w(TAG, "ensureSelfInTargets: root snapshot failed (exit=$exitCode): ${out.trim()}")
-        return null to SelfTargetFailureDetail(SelfTargetFailureKind.RootUnavailable, "exit=$exitCode")
+private fun loadStartupRootSections(): Pair<Map<String, String>?, SelfTargetFailureDetail?> {
+    // The same probe as RootSnapshotCache, so the result can seed the cache whole
+    // instead of being read a second time.
+    val result = CoreRoot.collectOneBlocking(CoreProbe.RootSnapshot(packages = true))
+    if (!result.ok) {
+        VpnHideLog.w(TAG, "ensureSelfInTargets: core root snapshot failed (exit=${result.exit})")
+        return null to SelfTargetFailureDetail(SelfTargetFailureKind.RootUnavailable, "exit=${result.exit}")
     }
+    val out = result.text
     return try {
         parseRootShellSnapshot(out).also(::validateRootSnapshotSections) to null
     } catch (e: RootSnapshotException) {
@@ -396,7 +327,7 @@ private suspend fun writeStartupCanonical(
                 // Same transaction as the config write: the legacy files are only
                 // retired once their contents are safely in the canonical JSON.
                 cleanup = true,
-                coupledCommands = if (legacyImported != null) listOf(buildLegacyConfigDeleteCommand()) else emptyList(),
+                coupledEffects = if (legacyImported != null) listOf(CoreRootEffect.DeleteLegacyConfig) else emptyList(),
                 activation = CanonicalActivation(native = true, ports = true),
             ),
         )

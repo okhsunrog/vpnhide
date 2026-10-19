@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.diagnostics.retryDiagnosticsAndDashboard
 import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
 import kotlinx.coroutines.launch
@@ -153,7 +154,7 @@ internal fun FullResetDialog(
                                             emptyList(),
                                             protectAllDrafts = true,
                                             removesCanonical = true,
-                                            coupledCommands = listOf(buildFullResetCommand()),
+                                            coupledEffects = listOf(CoreRootEffect.FullReset),
                                             activation = CanonicalActivation(native = false),
                                         ),
                                     )

@@ -62,21 +62,21 @@ class DebugShellSnapshotTest {
 
     @Test
     fun `debug command captures all backend state paths`() {
-        val command = buildDebugShellSnapshotCommand()
+        val command = coreProbeScript("package_inventory.sh") + coreProbeScript("debug_snapshot.sh") + coreDiagnosticsSource()
 
-        // Paths reach the script through the assignment prelude; check both the
-        // value Kotlin passes and the script's use of it.
-        assertTrue(command.contains("VPNHIDE_BUILTIN_DIR='$BUILTIN_MODULE_DIR'"))
-        assertTrue(command.contains("VPNHIDE_BUILTIN_ACTIVATOR='$BUILTIN_ACTIVATOR'"))
-        assertTrue(command.contains("VPNHIDE_BUILTIN_LOAD_STATUS='$BUILTIN_LOAD_STATUS_FILE'"))
+        // Paths reach the script through core's env (diagnostics.rs); check both the
+        // value core passes and the script's use of it.
+        assertTrue(command.contains("\"VPNHIDE_BUILTIN_DIR\"") && command.contains("\"$BUILTIN_MODULE_DIR\""))
+        assertTrue(command.contains("\"VPNHIDE_BUILTIN_ACTIVATOR\"") && command.contains("\"$BUILTIN_ACTIVATOR\""))
+        assertTrue(command.contains("\"VPNHIDE_BUILTIN_LOAD_STATUS\"") && command.contains("\"$BUILTIN_LOAD_STATUS_FILE\""))
         assertTrue(command.contains("emit_file builtin_prop"))
         assertTrue(command.contains("emit_eval builtin_module_state"))
         assertTrue(command.contains("emit_file builtin_load_status"))
-        assertTrue(command.contains("VPNHIDE_KPM_ACTIVATOR='$KPM_ACTIVATOR'"))
+        assertTrue(command.contains("\"VPNHIDE_KPM_ACTIVATOR\"") && command.contains("\"$KPM_ACTIVATOR\""))
         assertTrue(command.contains("${'$'}VPNHIDE_KPM_ACTIVATOR state"))
-        assertTrue(command.contains("VPNHIDE_KPM_LOAD_STATUS='$KPM_LOAD_STATUS_FILE'"))
+        assertTrue(command.contains("\"VPNHIDE_KPM_LOAD_STATUS\"") && command.contains("\"$KPM_LOAD_STATUS_FILE\""))
         assertTrue(command.contains("hash_file ${'$'}VPNHIDE_KPM_DIR/vpnhide.kpm"))
-        assertTrue(command.contains("VPNHIDE_KMOD_LOAD_STATUS='$KMOD_LOAD_STATUS_FILE'"))
+        assertTrue(command.contains("\"VPNHIDE_KMOD_LOAD_STATUS\"") && command.contains("\"$KMOD_LOAD_STATUS_FILE\""))
         assertTrue(command.contains("cat ${'$'}VPNHIDE_PROC_CTL"))
         assertTrue(command.contains(ZYGISK_STATUS_FILE))
         assertTrue(command.contains("${'$'}VPNHIDE_ZYGISK_DIR/zygisk/arm64-v8a.so"))
@@ -97,9 +97,9 @@ class DebugShellSnapshotTest {
 
     @Test
     fun `counter command captures hook status without enumerating packages`() {
-        val command = buildHookCounterSnapshotCommand()
+        val command = coreProbeScript("hook_counters.sh") + coreDiagnosticsSource()
 
-        assertTrue(command.contains("VPNHIDE_PROC_CTL='$PROC_CTL'"))
+        assertTrue(command.contains("\"VPNHIDE_PROC_CTL\"") && command.contains("\"$PROC_CTL\""))
         assertTrue(command.contains("cat ${'$'}VPNHIDE_PROC_CTL"))
         assertTrue(command.contains("${'$'}VPNHIDE_KPM_ACTIVATOR state"))
         assertTrue(command.contains(LSPOSED_STATE_FILE))

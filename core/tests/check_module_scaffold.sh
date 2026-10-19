@@ -53,6 +53,8 @@ if [ -d "$ROOT/builtin/module" ]; then
   echo "builtin/module companion must be deleted" >&2
   fail=1
 fi
+# Core is the only root process: the app must spawn none.
+sh "$ROOT/lsposed/tests/check_no_root_exec.sh" || fail=1
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck -s sh "$MOD/service.sh" "$MOD/post-fs-data.sh" "$MOD/uninstall.sh" "$MOD/customize.sh"     || fail=1
 fi

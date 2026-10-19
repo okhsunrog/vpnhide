@@ -98,9 +98,8 @@ import dev.okhsunrog.vpnhide.LocalConfigWriteAccess
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.buildCanonicalConfigFromTargetsSnapshot
-import dev.okhsunrog.vpnhide.buildSuperkeyClearCommand
-import dev.okhsunrog.vpnhide.buildSuperkeyWriteCommand
 import dev.okhsunrog.vpnhide.canonicalConfigJson
+import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.diagnostics.DebugToolsSection
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsScreen
 import dev.okhsunrog.vpnhide.help.HelpScreen
@@ -537,7 +536,7 @@ private fun ConfigBackupSection() {
     var status by remember { mutableStateOf<String?>(null) }
     val rootSnapshot by RootSnapshotCache.snapshot.collectAsStateWithLifecycle()
     // Pre-1.0 config still on disk (see LegacyConfigImport). Derived from the
-    // shared root snapshot TargetsCache already loads — no extra su round-trip.
+    // shared root snapshot TargetsCache already loads — no extra core round-trip.
     val legacyPrompt =
         remember(rootSnapshot, targets) {
             val uidToPkg = targets?.uidToPkg ?: return@remember null
@@ -962,12 +961,12 @@ private suspend fun writeSuperkeySetting(
     remember: Boolean,
     superkey: String,
 ): Int {
-    val secretCommand = if (remember) buildSuperkeyWriteCommand(superkey) else buildSuperkeyClearCommand()
+    val secretEffect = if (remember) CoreRootEffect.SetSuperkey(superkey) else CoreRootEffect.ClearSuperkey
     return CanonicalConfigRepository
         .commit(
             CanonicalMutation(
                 listOf(CanonicalEdit.Toggle(CanonicalToggle.RememberSuperkey, remember)),
-                coupledCommands = listOf(secretCommand),
+                coupledEffects = listOf(secretEffect),
                 activation = CanonicalActivation(native = remember),
             ),
         ).exitCode

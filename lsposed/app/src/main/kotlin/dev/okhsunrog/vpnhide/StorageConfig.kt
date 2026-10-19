@@ -303,11 +303,3 @@ private fun StringBuilder.appendJsonString(value: String) {
     }
     append('"')
 }
-
-internal fun buildSuperkeyWriteCommand(superkey: String): String =
-    listOf(
-        "mkdir -p /data/adb/vpnhide",
-        buildAtomicRootOnlyRawWriteCommand(SUPERKEY_FILE, superkey.trim() + "\n"),
-    ).joinToString(" && ")
-
-internal fun buildSuperkeyClearCommand(): String = "rm -f $SUPERKEY_FILE"

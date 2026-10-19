@@ -2,7 +2,7 @@
 //!
 //! Core runs these as a child of itself (see `diagnostics`), so a probe that hangs or panics
 //! is bounded and killed without touching the daemon. The JSON they print is the contract
-//! shared with the app's parsers (`fixtures/app-helper`).
+//! shared with the app's parsers (`fixtures/core-probes`).
 
 mod observations;
 mod probe;

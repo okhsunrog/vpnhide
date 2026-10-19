@@ -25,7 +25,7 @@ How to build vpnhide from source.
 - **`zip`** — packaging module zips.
 - **`adb`** — installing builds on a device.
 
-The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNative` Gradle `Exec` task in `lsposed/app/build.gradle.kts` (wired into `preBuild`). It bundles `libvpnhide_checks.so` into the APK's `jniLibs/` plus the root-exec'able `vhhelper` bin as an asset. The helper's `probe` and `mutation` subcommands preserve the diagnostic and [mutation transport](root-mutation-transport.md) boundaries. The task tracks every app-native path dependency, manifest, lockfile and build script, so changing a shared crate invalidates the APK native build. There is no extra Gradle plugin; no manual `cargo` invocation is needed for the APK build.
+The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNative` Gradle `Exec` task in `lsposed/app/build.gradle.kts` (wired into `preBuild`). It bundles `libvpnhide_checks.so` and the core-ffi client `libvpnhide_core_ffi.so` into the APK's `jniLibs/`. The APK ships no executable and runs no root process: root probes and effects run in core (`vpnhide-core`), see [core-2.0-ipc-auth](notes/core-2.0-ipc-auth.md). The task tracks every app-native path dependency, manifest, lockfile and build script, so changing a shared crate invalidates the APK native build. There is no extra Gradle plugin; no manual `cargo` invocation is needed for the APK build.
 
 ## Repository layout
 
@@ -35,7 +35,7 @@ The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNa
 | `lsposed/` | LSPosed module + target-picker Android app (Kotlin, Compose) |
 | `kmod/` | Kernel-level native backends: GKI `.ko` (C, kretprobes) and KPM (KernelPatch inline hooks) |
 | `builtin/` | The in-tree kernel backend (`CONFIG_VPNHIDE=y`): the driver, `scripts/integrate.py` that vendors it into a kernel tree, the KMI-agnostic companion module (activator only), `build.py` |
-| `crates/` | The Rust workspace: `protocol` (the wire), `activator` (one bin per backend), `checks` / `checks-jni` (the app's native probes), `app-helper` (`vhhelper`) |
+| `crates/` | The Rust workspace: `protocol` (the wire), `activator` (one bin per backend), `checks` / `checks-jni` (the app's native probes), `core-rpc` / `core-daemon` / `core-ffi` (core: the only root process and the app's client onto it) |
 | ~~`portshide/`~~ | Removed — Ports apply is inside `vpnhide_core` |
 | `scripts/` | Release & changelog tooling |
 | `update-json/` | Magisk/KSU update metadata |
@@ -178,7 +178,7 @@ which areas a pull request exercises, and every area job is gated on it:
 | `lsposed/**` | `android` |
 | `core/**` | `core` |
 | `shared`: `kmod/shared/**`, `kmod/test/**`, `kmod/generated/**`, `scripts/codegen*.py` | every area, QEMU matrix included |
-| `shared_rust`: `crates/**`, `Cargo.*`, `fixtures/app-helper/**`, `scripts/build_lib.py`, `scripts/build-version.py` | every area's packaging job plus `rust`; the QEMU probes and matrix only if a kernel area changed on its own |
+| `shared_rust`: `crates/**`, `Cargo.*`, `fixtures/core-probes/**`, `scripts/build_lib.py`, `scripts/build-version.py` | every area's packaging job plus `rust`; the QEMU probes and matrix only if a kernel area changed on its own |
 | `.github/**` | every area |
 
 `lint-python` (ruff, generated files), `lint-shell-c` (shellcheck, clang-format,
@@ -219,9 +219,9 @@ uvx ruff check
 
 # Rust
 cd zygisk && cargo fmt --check && cargo ndk -t arm64-v8a clippy -- -D warnings
-cd .. && cargo fmt --check && cargo ndk -t arm64-v8a clippy -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_app_helper --tests -- -D warnings
+cd .. && cargo fmt --check && cargo ndk -t arm64-v8a clippy -p vpnhide_checks -p vpnhide_checks_jni --tests -- -D warnings
 cd ../zygisk && cargo test
-cargo test -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_app_helper
+cargo test -p vpnhide_checks -p vpnhide_checks_jni
 
 # C (kernel module + built-in driver)
 scripts/clang-format-c.sh --check

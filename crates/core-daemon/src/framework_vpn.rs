@@ -80,7 +80,7 @@ fn dumpsys_connectivity() -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|_| "dumpsys_utf8".into())
 }
 
-/// Parse `dumpsys connectivity` "Current Networks:" VPN transports (shared shape with vhhelper).
+/// Parse `dumpsys connectivity` "Current Networks:" VPN transports (shared shape with `vpnhide-core observe`).
 pub fn parse_vpn_interfaces(raw: &str) -> Option<BTreeSet<String>> {
     let mut current = false;
     let mut found = false;
