@@ -1517,6 +1517,10 @@ dependencies = [
 [[package]]
 name = "vpnhide_ai_support"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "vpnhide_apatch_abi"

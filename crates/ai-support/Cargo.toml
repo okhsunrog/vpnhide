@@ -7,6 +7,10 @@ license.workspace = true
 publish = false
 description = "Server-side support assistant for VPN Hide. Sketch: snapshot contract, read-only tools, HTTP stubs."
 
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 [lib]
 name = "vpnhide_ai_support"
 

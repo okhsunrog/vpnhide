@@ -9,3 +9,5 @@
 
 /// Crate name, stable for logs.
 pub const CRATE_NAME: &str = "vpnhide_ai_support";
+
+pub mod snapshot;
