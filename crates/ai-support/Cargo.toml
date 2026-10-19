@@ -1,0 +1,15 @@
+[package]
+name = "vpnhide_ai_support"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Server-side support assistant for VPN Hide. Sketch: snapshot contract, read-only tools, HTTP stubs."
+
+[lib]
+name = "vpnhide_ai_support"
+
+[[bin]]
+name = "vpnhide-ai-support"
+path = "src/main.rs"
