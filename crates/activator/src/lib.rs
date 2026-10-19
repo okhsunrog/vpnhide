@@ -121,13 +121,13 @@ mod ports;
 use kpm::*;
 pub use kpm::{CoreKpm, KpmConfigError};
 pub use model::*;
-pub use ports::{
-    PORTS_OWNER_MARKER_ENV, PortsApplyResult, PortsChainPresence, PortsFamilyResult,
-    apply_ports_rules_families, inspect_ports_chains, ports_owned_by_core,
-    ports_owner_marker_path, write_ports_core_owner_marker, write_ports_load_status,
-};
 pub use ownership::{
     config_owned_by_core, core_marker_path, native_owned_by_core, zygisk_owned_by_core,
+};
+pub use ports::{
+    PORTS_OWNER_MARKER_ENV, PortsApplyResult, PortsChainPresence, PortsFamilyResult,
+    apply_ports_rules_families, inspect_ports_chains, ports_owned_by_core, ports_owner_marker_path,
+    write_ports_core_owner_marker, write_ports_load_status,
 };
 
 // --- core-2.0 (§4): the persistent root core absorbs the activator, linking these instead
@@ -211,7 +211,6 @@ pub(crate) fn optional_feature_enabled_or_default(feature: &str) -> bool {
     }
 }
 
-
 /// Zygisk installs hooks only in processes whose UID is explicitly listed.
 /// A non-zero default means the opposite — act on every UID not listed — which
 /// would require injecting the module into every app process. Refuse that wire
@@ -283,7 +282,6 @@ impl KpmBootReport {
     }
 }
 
-
 pub fn read_kpm_status() -> Result<String> {
     read_kpm_payload("vpnhide 1 status")
 }
@@ -304,7 +302,6 @@ fn read_kpm_payload(wire: &str) -> Result<String> {
     let client = KpmClient::detect()?;
     client.ctl0_read(wire)
 }
-
 
 fn running_kernel_release() -> Result<String> {
     let out = Command::new("uname").arg("-r").output()?;
@@ -359,7 +356,6 @@ fn parse_kernel_family(release: &str) -> Option<(u32, u32)> {
         .ok()?;
     Some((major, minor))
 }
-
 
 fn has_native_targets(cfg: &CanonicalConfig, family: NativeHookFamily) -> bool {
     cfg.apps

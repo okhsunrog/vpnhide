@@ -175,7 +175,9 @@ impl RouteSocket {
                 if set(libc::SO_RCVBUF) < 0 {
                     return Err(std::io::Error::last_os_error());
                 }
-                eprintln!("note: SO_RCVBUFFORCE denied (no CAP_NET_ADMIN); used SO_RCVBUF (kernel-floor clamped)");
+                eprintln!(
+                    "note: SO_RCVBUFFORCE denied (no CAP_NET_ADMIN); used SO_RCVBUF (kernel-floor clamped)"
+                );
             }
         }
 
@@ -231,14 +233,8 @@ impl RouteSocket {
         req[6..8].copy_from_slice(&(nl::NLM_F_REQUEST | nl::NLM_F_DUMP).to_ne_bytes());
         req[8..12].copy_from_slice(&1u32.to_ne_bytes()); // seq
         // pid=0, ifinfomsg all-zero (family AF_UNSPEC) -> dump all.
-        let sent = unsafe {
-            libc::send(
-                self.fd,
-                req.as_ptr() as *const libc::c_void,
-                req.len(),
-                0,
-            )
-        };
+        let sent =
+            unsafe { libc::send(self.fd, req.as_ptr() as *const libc::c_void, req.len(), 0) };
         if sent < 0 {
             return Err(std::io::Error::last_os_error());
         }
@@ -247,9 +243,7 @@ impl RouteSocket {
 
     /// One recv. Returns the batch, or Err whose kind is ENOBUFS on overflow.
     fn recv(&self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let n = unsafe {
-            libc::recv(self.fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0)
-        };
+        let n = unsafe { libc::recv(self.fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
         if n < 0 {
             return Err(std::io::Error::last_os_error());
         }
@@ -327,7 +321,11 @@ impl Observer {
             println!(
                 "[+{:>7}ms] MSG {} idx={index} {name} up={up}",
                 self.ms(),
-                if msg_type == nl::RTM_DELLINK { "DELLINK" } else { "NEWLINK" }
+                if msg_type == nl::RTM_DELLINK {
+                    "DELLINK"
+                } else {
+                    "NEWLINK"
+                }
             );
         }
         let removed = msg_type == nl::RTM_DELLINK || !up;
@@ -355,7 +353,11 @@ impl Observer {
                     println!(
                         "[+{:>7}ms] MSG {} oif={}",
                         self.ms(),
-                        if msg_type == nl::RTM_DELROUTE { "DELROUTE" } else { "NEWROUTE" },
+                        if msg_type == nl::RTM_DELROUTE {
+                            "DELROUTE"
+                        } else {
+                            "NEWROUTE"
+                        },
                         oif_name.map(String::as_str).unwrap_or("?")
                     );
                 }
@@ -366,7 +368,11 @@ impl Observer {
                     println!(
                         "[+{:>7}ms] MSG {}",
                         self.ms(),
-                        if msg_type == nl::RTM_DELRULE { "DELRULE" } else { "NEWRULE" }
+                        if msg_type == nl::RTM_DELRULE {
+                            "DELRULE"
+                        } else {
+                            "NEWRULE"
+                        }
                     );
                 }
                 // A policy-rule change (Android's per-uid VPN steering) always warrants a recheck.
@@ -391,7 +397,9 @@ impl Observer {
             "[+{:>7}ms] STATE {reason} vpn=[{}] routed={} detail={detail} Δvpn={} Δrouted={} evts={} gap={gap}ms",
             self.ms(),
             ifaces.join(","),
-            routed.map(|b| b.to_string()).unwrap_or_else(|| "unknown".to_owned()),
+            routed
+                .map(|b| b.to_string())
+                .unwrap_or_else(|| "unknown".to_owned()),
             if vpn_changed { "Y" } else { "n" },
             if routed_changed { "Y" } else { "n" },
             self.events_since_flush,
@@ -425,7 +433,12 @@ fn parse_args() -> Option<Config> {
             _ => return None,
         }
     }
-    uid.map(|uid| Config { uid, raw, rcvbuf, slow_ms })
+    uid.map(|uid| Config {
+        uid,
+        raw,
+        rcvbuf,
+        slow_ms,
+    })
 }
 
 fn main() {
@@ -433,7 +446,12 @@ fn main() {
         eprintln!("usage: netlink-spike --uid <uid> [--raw] [--rcvbuf <bytes>] [--slow <ms>]");
         std::process::exit(2);
     };
-    let Config { uid, raw, rcvbuf, slow_ms } = cfg;
+    let Config {
+        uid,
+        raw,
+        rcvbuf,
+        slow_ms,
+    } = cfg;
 
     let sock = match RouteSocket::open(rcvbuf) {
         Ok(s) => s,

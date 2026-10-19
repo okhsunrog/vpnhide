@@ -51,7 +51,10 @@ pub(crate) fn output_with_timeout(
             let _ = child.wait();
             let _ = join_reader(stdout_reader);
             let _ = join_reader(stderr_reader);
-            return Err(std::io::Error::new(ErrorKind::TimedOut, "command timed out"));
+            return Err(std::io::Error::new(
+                ErrorKind::TimedOut,
+                "command timed out",
+            ));
         }
         thread::sleep(Duration::from_millis(25));
     }
