@@ -148,32 +148,36 @@ async fn run(path: &str) {
             std::process::exit(1);
         }
     };
-    // Detect the native backend once at startup and publish it (§4): the app reads the active
-    // backend from the replica instead of joining per-backend status files. Read-only — safe
-    // against the real control node even when native delivery is disabled. A later refresh
-    // trigger (module change / boot) can re-detect; identity changes rarely, not per-tick.
+    // Select the native backend once for this boot (§4) before serving: scan every
+    // candidate, load the single one (or nothing on a conflict), retire Zygisk targets
+    // when Zygisk is not it, and publish the typed per-boot status. A restart within
+    // the same boot re-adopts the persisted decision instead of re-selecting.
     let modules = backend::kernel_modules_from_env();
-    let kpm_lock = backend::kpm_lock_from_env();
-    let observed_backend = backend::detect_managed(
-        kmod_ctl_path
-            .as_deref()
-            .unwrap_or_else(|| Path::new(DEFAULT_CTL)),
-        modules
-            .as_deref()
-            .unwrap_or_else(|| Path::new(backend::MODULES_ROOT)),
-        kpm_lock.as_deref(),
-    );
-    state
-        .publisher
-        .update(|snapshot| snapshot.backend = observed_backend.clone());
+    match vpnhide_core_daemon::native_boot::NativeEnv::from_env(kmod_ctl_path.clone()) {
+        Some(env) => state.start_native_boot(env, epoch),
+        None => {
+            // Native management disabled (dev sandbox): read-only identity only.
+            let observed = backend::detect(
+                Path::new(DEFAULT_CTL),
+                modules
+                    .as_deref()
+                    .unwrap_or_else(|| Path::new(backend::MODULES_ROOT)),
+            );
+            state
+                .publisher
+                .update(|snapshot| snapshot.backend = observed);
+        }
+    }
 
+    // Boot policy apply runs on its own thread: it waits for PackageManager without a
+    // bound (uid projection must be complete) and for netd's chains, then re-applies
+    // Ports at T+30 s. Serving and observation are not blocked meanwhile; mutations
+    // serialize with it on the config lane.
     if vpnhide_core_daemon::boot::boot_apply_enabled() {
-        let report = vpnhide_core_daemon::boot::reapply(&state);
-        report.write_status_file(&vpnhide_core_daemon::boot::default_boot_status_path());
-        eprintln!(
-            "core: boot-apply status={:?} detail={}",
-            report.status, report.detail
-        );
+        let booting = state.clone();
+        std::thread::spawn(move || {
+            vpnhide_core_daemon::boot::run_boot_passes(&booting, true);
+        });
     }
 
     // Finish initial channel observation before admitting mutations; startup
@@ -204,14 +208,14 @@ async fn run(path: &str) {
         .map_or_else(|| path.to_owned(), |p| p.display().to_string());
 
     eprintln!(
-        "core: epoch={epoch} serving on {path} config={} ({}) journal={} native_ctl={} backend={:?} (ctrl-c to stop)",
+        "core: epoch={epoch} serving on {path} config={} ({}) journal={} native_ctl={} native={:?} (ctrl-c to stop)",
         config_path.display(),
         if state.has_config() { "loaded" } else { "none" },
         journal_path.display(),
         kmod_ctl_path
             .as_ref()
             .map_or_else(|| "disabled".to_string(), |p| p.display().to_string()),
-        observed_backend.active,
+        state.native_boot_status().map(|s| s.outcome),
     );
 
     // The root observation loop feeds real VPN-presence into the published state. Failing to
@@ -263,8 +267,12 @@ fn boot_apply_once() {
             std::process::exit(1);
         }
     };
-    let report = vpnhide_core_daemon::boot::reapply(&state);
-    report.write_status_file(&vpnhide_core_daemon::boot::default_boot_status_path());
+    if let Some(env) =
+        vpnhide_core_daemon::native_boot::NativeEnv::from_env(activation::kmod_ctl_path_from_env())
+    {
+        state.start_native_boot(env, epoch);
+    }
+    let report = vpnhide_core_daemon::boot::run_boot_passes(&state, true);
     eprintln!(
         "boot-apply: status={:?} detail={}",
         report.status, report.detail
@@ -287,7 +295,7 @@ async fn dump(path: &str) {
     }
     match client.current().await {
         Ok(p) => println!(
-            "epoch={} revision={} config_present={} apps={} routing_freshness={:?} gen={} vpn=[{}] last_good=[{}] candidates=[{}] framework={:?} uid={:?} backend_active={:?} selected={:?} applied={:?} installed={:?}",
+            "epoch={} revision={} config_present={} apps={} routing_freshness={:?} gen={} vpn=[{}] last_good=[{}] candidates=[{}] framework={:?} uid={:?} backend_active={:?} selected={:?} applied={:?} installed={:?} native_boot={:?}",
             p.epoch,
             p.revision,
             p.snapshot.config.is_some(),
@@ -303,6 +311,7 @@ async fn dump(path: &str) {
             p.snapshot.backend.selected,
             p.snapshot.backend.applied,
             p.snapshot.backend.installed,
+            p.snapshot.backend.boot.as_ref().map(|b| &b.outcome),
         ),
         Err(e) => {
             eprintln!("dump: read failed: {e}");

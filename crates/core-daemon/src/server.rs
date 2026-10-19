@@ -78,6 +78,28 @@ pub struct CoreState {
     effect_paths: std::sync::RwLock<Option<crate::effects::EffectPaths>>,
     /// Probe environment for `collect_diagnostics`.
     probe_env: std::sync::RwLock<crate::diagnostics::ProbeEnv>,
+    /// This boot's fixed native decision (set once by [`Self::start_native_boot`]).
+    native_boot: std::sync::RwLock<Option<operation::NativeBootHandle>>,
+    /// The epoch this core run publishes under (recorded on a boot decision).
+    epoch: AtomicU64,
+}
+
+/// Internal admission options: boot passes pick their own plan and Ports source.
+#[derive(Debug, Clone, Copy)]
+pub struct SubmitOptions {
+    pub plan: Option<PlanKind>,
+    pub ports_source: vpnhide_core_rpc::PortsSource,
+    pub netd_ready: Option<bool>,
+}
+
+impl Default for SubmitOptions {
+    fn default() -> Self {
+        Self {
+            plan: None,
+            ports_source: vpnhide_core_rpc::PortsSource::Edit,
+            netd_ready: None,
+        }
+    }
 }
 
 impl CoreState {
@@ -99,6 +121,8 @@ impl CoreState {
             dispatch_fence: AtomicU64::new(0),
             effect_paths: std::sync::RwLock::new(crate::effects::effect_paths_from_env()),
             probe_env: std::sync::RwLock::new(crate::diagnostics::ProbeEnv::from_env()),
+            native_boot: std::sync::RwLock::new(None),
+            epoch: AtomicU64::new(0),
         })
     }
 
@@ -234,6 +258,8 @@ impl CoreState {
             dispatch_fence: AtomicU64::new(0),
             effect_paths: std::sync::RwLock::new(crate::effects::effect_paths_from_env()),
             probe_env: std::sync::RwLock::new(crate::diagnostics::ProbeEnv::from_env()),
+            native_boot: std::sync::RwLock::new(None),
+            epoch: AtomicU64::new(0),
         });
         if let Some(config) = config {
             state.publisher.update(|snapshot| {
@@ -242,6 +268,16 @@ impl CoreState {
             });
         }
         Ok(state)
+    }
+
+    /// True when a control node is configured (native management enabled).
+    pub fn native_enabled(&self) -> bool {
+        self.kmod_ctl_path.is_some()
+    }
+
+    /// True when the Ports writer is enabled.
+    pub fn ports_enabled(&self) -> bool {
+        self.ports_enabled
     }
 
     /// True once a durable config is loaded/created (for a startup log).
@@ -274,6 +310,128 @@ impl CoreState {
         self.submit_edit(op, base, edit)
     }
 
+    /// Admit an internal edit with an explicit plan / Ports source (boot passes).
+    pub fn submit_edit_with(
+        &self,
+        op: OperationId,
+        base: BaseRef,
+        edit: &ConfigEdit,
+        options: SubmitOptions,
+    ) -> Result<Accepted, SubmitError> {
+        self.submit_edit_opts(op, base, edit, options)
+    }
+
+    /// Make this boot's native decision (once per run, before serving). Reuses a
+    /// decision persisted earlier in the same boot; otherwise scans, loads and retires.
+    pub fn start_native_boot(&self, env: crate::native_boot::NativeEnv, epoch: u64) {
+        self.epoch.store(epoch, Ordering::SeqCst);
+        let filesystem_hiding = self.filesystem_hiding_wanted();
+        let boot = crate::native_boot::NativeBoot::start(env, epoch, filesystem_hiding);
+        self.install_native_boot(boot);
+    }
+
+    /// Install an already-made decision (tests, and [`Self::start_native_boot`]).
+    pub fn install_native_boot(&self, boot: crate::native_boot::NativeBoot) {
+        let handle = Arc::new(Mutex::new(boot));
+        *self.native_boot.write().expect("native boot") = Some(handle);
+        self.publish_native_boot(None);
+    }
+
+    /// The current per-boot native status, if native management is enabled.
+    pub fn native_boot_status(&self) -> Option<vpnhide_core_rpc::NativeBootStatus> {
+        let handle = self.native_boot.read().expect("native boot").clone()?;
+        let status = handle.lock().expect("native boot").status.clone();
+        Some(status)
+    }
+
+    fn native_handle(&self) -> Option<operation::NativeBootHandle> {
+        self.native_boot.read().expect("native boot").clone()
+    }
+
+    fn filesystem_hiding_wanted(&self) -> bool {
+        self.config
+            .lock()
+            .expect("config mutex")
+            .config
+            .as_ref()
+            .is_some_and(|c| {
+                c.settings
+                    .optional_features
+                    .contains(vpnhide_activator::OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS)
+            })
+    }
+
+    /// Publish the native boot status into the replica. `applied` is the backend a
+    /// just-confirmed Native phase configured, if any.
+    fn publish_native_boot(&self, applied: Option<vpnhide_core_rpc::NativeBackend>) {
+        let Some(handle) = self.native_handle() else {
+            return;
+        };
+        let boot = handle.lock().expect("native boot");
+        let status = boot.status.clone();
+        let selected = boot.selected();
+        drop(boot);
+        self.publisher.update(|snapshot| {
+            snapshot.backend.selected = selected;
+            if applied.is_some() {
+                snapshot.backend.applied = applied;
+            }
+            snapshot.backend.installed = status.installed.clone();
+            // A backend core loaded this boot is live once its load confirmed.
+            let loaded = match status.outcome {
+                vpnhide_core_rpc::NativeBootOutcome::Selected {
+                    backend,
+                    mode: vpnhide_core_rpc::SelectionMode::Loaded,
+                    ..
+                } => Some(backend),
+                _ => None,
+            };
+            snapshot.backend.active = selected.filter(|b| status.live.contains(b)).or(loaded);
+            snapshot.backend.boot = Some(status);
+        });
+    }
+
+    /// After a superkey change: re-decide a boot that was waiting for KernelPatch
+    /// authentication, and deliver config when that produced a backend.
+    fn retry_native_authentication(&self) {
+        let Some(handle) = self.native_handle() else {
+            return;
+        };
+        let filesystem_hiding = self.filesystem_hiding_wanted();
+        let epoch = self.epoch.load(Ordering::SeqCst);
+        let selected = {
+            let mut boot = handle.lock().expect("native boot");
+            if !boot.pending_authentication() {
+                return;
+            }
+            crate::alog::info("native: superkey changed; retrying KernelPatch authentication");
+            boot.retry_authentication(epoch, filesystem_hiding);
+            boot.selected()
+        };
+        self.publish_native_boot(None);
+        if selected.is_some() && self.has_config() && !self.has_unknown_hold() {
+            let op = OperationId(
+                (1 << 62)
+                    | (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(1)
+                        & ((1 << 62) - 1)),
+            );
+            let base = BaseRef {
+                revision: self.config_revision(),
+            };
+            let options = SubmitOptions {
+                plan: Some(PlanKind::NativeOnly),
+                ..SubmitOptions::default()
+            };
+            if let Err(e) = self.submit_edit_opts(op, base, &ConfigEdit::RepairActivation, options)
+            {
+                crate::alog::info(&format!("native: post-superkey repair refused: {e:?}"));
+            }
+        }
+    }
+
     /// Point root effects at `paths` (tests, or a sandbox root). `None` disables them.
     pub fn set_effect_paths(&self, paths: Option<crate::effects::EffectPaths>) {
         *self.effect_paths.write().expect("effect paths") = paths;
@@ -299,6 +457,11 @@ impl CoreState {
         let mut store = self.config.lock().map_err(|_| EffectError::Busy)?;
         eprintln!("core: root effect op={} {}", op.0, effect_name(effect));
         crate::effects::apply(&paths, effect)?;
+        if matches!(effect, RootEffect::SetSuperkey { .. }) {
+            drop(store);
+            self.retry_native_authentication();
+            return Ok(());
+        }
         if matches!(effect, RootEffect::FullReset) {
             if let Some(path) = &self.config_path {
                 match std::fs::remove_file(path) {
@@ -353,6 +516,16 @@ impl CoreState {
         op: OperationId,
         base: BaseRef,
         edit: &ConfigEdit,
+    ) -> Result<Accepted, SubmitError> {
+        self.submit_edit_opts(op, base, edit, SubmitOptions::default())
+    }
+
+    fn submit_edit_opts(
+        &self,
+        op: OperationId,
+        base: BaseRef,
+        edit: &ConfigEdit,
+        options: SubmitOptions,
     ) -> Result<Accepted, SubmitError> {
         let mut store = self.config.lock().expect("config mutex");
         // Deduplication precedes current-base and uncertainty gates: a lost
@@ -428,12 +601,16 @@ impl CoreState {
         } else {
             PlanKind::PersistOnly
         };
+        let kind = options.plan.unwrap_or(kind);
         let plan = operation::plan_kind(kind);
-        let runner = RealPhaseRunner::new_with_ports(
+        let mut runner = RealPhaseRunner::new_with_ports(
             self.config_path.clone(),
             self.kmod_ctl_path.clone(),
             ports,
         );
+        runner.native = self.native_handle();
+        runner.ports_source = options.ports_source;
+        runner.ports_netd_ready = options.netd_ready;
 
         let outcome = if let Some(journal_path) = self.journal_path.clone() {
             let mut hook = JournalPhaseHook {
@@ -513,48 +690,25 @@ impl CoreState {
             },
         );
 
-        // Loading may have changed runtime identity even if a later projection
-        // or delivery failed. Publish observation separately from apply outcome.
-        let observed_backend = self
-            .kmod_ctl_path
-            .as_ref()
-            .filter(|_| matches!(kind, PlanKind::PersistThenNative | PlanKind::NativeOnly))
-            .map(|ctl| {
-                let modules = crate::backend::kernel_modules_from_env();
-                let kpm_lock = crate::backend::kpm_lock_from_env();
-                crate::backend::detect_managed(
-                    ctl,
-                    modules
-                        .as_deref()
-                        .unwrap_or_else(|| std::path::Path::new(crate::backend::MODULES_ROOT)),
-                    kpm_lock.as_deref(),
-                )
-            });
         let revision = store.config_revision;
         // Publish while still owning the mutation lane so a later accepted edit
         // cannot publish first and then be overwritten by this older snapshot.
-        if outcome.persisted || observed_backend.is_some() {
+        if outcome.persisted {
             self.publisher.update(|snapshot| {
-                if outcome.persisted {
-                    snapshot.config = Some(next);
-                    snapshot.config_revision = revision;
-                }
-                if let Some(backend) = observed_backend {
-                    let last_selected = runner.selected().or(snapshot.backend.selected);
-                    let last_applied = snapshot.backend.applied;
-                    snapshot.backend = backend;
-                    snapshot.backend.selected = last_selected;
-                    // Confirmed Native → record applied runtime family (≠ Zygisk process load).
-                    let native_ok = outcome.phases.iter().any(|p| {
-                        p.phase == ConfigPhase::Native && p.outcome == PhaseOutcome::Confirmed
-                    });
-                    snapshot.backend.applied = if native_ok {
-                        last_selected.or(last_applied)
-                    } else {
-                        last_applied
-                    };
-                }
+                snapshot.config = Some(next);
+                snapshot.config_revision = revision;
             });
+        }
+        let native_ok = outcome
+            .phases
+            .iter()
+            .any(|p| p.phase == ConfigPhase::Native && p.outcome == PhaseOutcome::Confirmed);
+        let ran_native_or_ports = outcome.phases.iter().any(|p| {
+            matches!(p.phase, ConfigPhase::Native | ConfigPhase::Ports)
+                && p.outcome != PhaseOutcome::NotAttempted
+        });
+        if ran_native_or_ports {
+            self.publish_native_boot(runner.selected().filter(|_| native_ok));
         }
         drop(store);
         Ok(Accepted { op })

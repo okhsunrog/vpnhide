@@ -110,6 +110,13 @@ pub fn project(candidate: &CanonicalConfig, resolver: &PackageUidMap) -> PortsRu
 
 /// Apply projected rules, claim ownership, and record load status.
 pub fn apply(rules: &PortsRuleset) -> (PhaseOutcome, PortsFamilyReport) {
+    let (outcome, report, _) = apply_detailed(rules);
+    (outcome, report)
+}
+
+/// Like [`apply`], also returning a one-line detail (families plus the apply log tail)
+/// for the published Ports status.
+pub fn apply_detailed(rules: &PortsRuleset) -> (PhaseOutcome, PortsFamilyReport, String) {
     let result = apply_ports_rules_families(rules);
     // Claim ownership even on partial success so legacy uninstall cannot wipe
     // remnants core is responsible for.
@@ -132,14 +139,53 @@ pub fn apply(rules: &PortsRuleset) -> (PhaseOutcome, PortsFamilyReport) {
         &detail,
         &result.log,
     );
-    (overall_phase(&result), report)
+    let log = result.log.trim();
+    let tail: String = {
+        let chars: Vec<char> = log.chars().collect();
+        chars[chars.len().saturating_sub(400)..].iter().collect()
+    };
+    let detail = if tail.is_empty() {
+        detail
+    } else {
+        format!("{detail}; {}", tail.replace('\n', " | "))
+    };
+    (overall_phase(&result), report, detail)
 }
 
 /// Full Ports phase: resolve → project → apply.
 pub fn run_ports_phase(candidate: &CanonicalConfig) -> (PhaseOutcome, PortsFamilyReport) {
+    let (outcome, report, _) = run_ports_phase_detailed(candidate);
+    (outcome, report)
+}
+
+/// [`run_ports_phase`] plus the published detail line.
+pub fn run_ports_phase_detailed(
+    candidate: &CanonicalConfig,
+) -> (PhaseOutcome, PortsFamilyReport, String) {
     let resolver = resolve_uid_map(candidate);
     let rules = project(candidate, &resolver);
-    apply(&rules)
+    apply_detailed(&rules)
+}
+
+/// netd rebuilds its baseline chains during boot. Wait (at most `max` seconds) until
+/// `bw_OUTPUT` exists before the first boot pass; true when it appeared.
+pub fn wait_for_netd(max: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + max;
+    loop {
+        let ready = std::process::Command::new("iptables")
+            .args(["-w", "-L", "bw_OUTPUT", "-n"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if ready {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
 }
 
 /// Restart inspection: surviving chain/jump presence (does not invent absence).

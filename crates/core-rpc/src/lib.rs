@@ -50,7 +50,7 @@ pub use edit::{ConfigAppField, ConfigEdit, ConfigSetField, ConfigToggle};
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract, §9): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -263,6 +263,156 @@ pub struct NativeBackendStatus {
     pub active: Option<NativeBackend>,
     /// Installed artifacts on disk (module present), not necessarily running.
     pub installed: Vec<NativeBackend>,
+    /// This boot's native selection, made once by core and fixed until reboot (v6).
+    /// `None` until core has scanned (or when native management is disabled).
+    #[serde(default)]
+    pub boot: Option<NativeBootStatus>,
+}
+
+/// How a selected native backend came to be running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SelectionMode {
+    /// Already live when core scanned (built-in kernel, a backend core loaded earlier
+    /// this boot, or the Zygisk module that Zygisk itself injects).
+    Adopted,
+    /// Core loaded it during this boot's scan.
+    Loaded,
+}
+
+/// The once-per-boot native decision (v6). Exactly one backend may run; more than one
+/// candidate is a [`NativeBootOutcome::Conflict`] and nothing is loaded or configured.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NativeBootOutcome {
+    /// The single candidate is running and receives config.
+    Selected {
+        backend: NativeBackend,
+        mode: SelectionMode,
+        /// The load-time filesystem-hiding choice, when core knows it (it loaded the
+        /// backend this boot). `None` for an adopted backend whose load args are unknown.
+        filesystem_hiding: Option<bool>,
+    },
+    /// More than one candidate: nothing was loaded and no config was delivered.
+    Conflict {
+        installed: Vec<NativeBackend>,
+        live: Vec<NativeBackend>,
+        staged: Vec<NativeBackend>,
+    },
+    /// The KPM is the candidate but KernelPatch refused authentication (superkey).
+    AwaitingAuthentication { detail: String },
+    /// KernelPatch cannot be queried and a VPN Hide KPM may be live, so no other
+    /// backend can be loaded safely.
+    KpmUnverifiable { detail: String },
+    /// The selected backend does not support the running kernel.
+    UnsupportedKernel {
+        backend: NativeBackend,
+        uname: String,
+        detail: String,
+    },
+    /// The selected module is installed but its artifact is missing.
+    MissingArtifact {
+        backend: NativeBackend,
+        path: String,
+    },
+    /// Loading the selected backend failed.
+    LoadFailed {
+        backend: NativeBackend,
+        /// Loader exit code (`insmod`): 124 timeout, 126 spawn failure, 127 missing,
+        /// -1 refused before dispatch. `None` when the loader has no exit code (KPM).
+        exit: Option<i32>,
+        stderr: String,
+        /// At most [`MAX_DMESG_TAIL`] matching kernel log lines.
+        dmesg_tail: Vec<String>,
+        kprobes: Option<bool>,
+        kretprobes: Option<bool>,
+        signature_rejected: bool,
+    },
+    /// The selected backend is running, but the last config delivery failed.
+    DeliveryFailed {
+        backend: NativeBackend,
+        detail: String,
+    },
+    /// The kernel control node belongs to an unknown backend id.
+    ForeignOwner { id: u32 },
+    /// No native backend is installed or live.
+    NoBackend,
+    /// Core could not establish the facts it needs (unreadable control node, ...).
+    Unknown { detail: String },
+}
+
+/// Most kernel-log lines a [`NativeBootOutcome::LoadFailed`] carries.
+pub const MAX_DMESG_TAIL: usize = 40;
+
+/// What happened to the Zygisk module's `targets.txt` this boot.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ZygiskTargets {
+    /// No Zygisk module directory.
+    NotInstalled,
+    /// Zygisk is selected; config not delivered yet.
+    Pending,
+    /// Zygisk is selected and its targets were published.
+    Published,
+    /// Zygisk is not the selected backend: an empty snapshot replaced its targets.
+    Retired,
+    /// Retiring failed; Zygisk may still hook previously published targets.
+    RetireFailed { detail: String },
+}
+
+/// Kernel facts recorded when core loads (or tries to load) the kmod.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct KmodBootReport {
+    /// `CONFIG_KPROBES` / `CONFIG_KRETPROBES` from `/proc/config.gz`; `None` = unreadable.
+    pub kprobes: Option<bool>,
+    pub kretprobes: Option<bool>,
+    pub gki_variant: String,
+    pub version: String,
+    pub uname: String,
+}
+
+/// Where a Ports apply came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PortsSource {
+    /// The first boot pass after netd's baseline chains exist.
+    Boot,
+    /// The T+30 s boot safety pass.
+    BootRetry,
+    /// A config edit or activation repair.
+    Edit,
+}
+
+/// The last Ports apply (v6), replacing the legacy Ports `load_status`/`load_log`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PortsStatus {
+    pub source: PortsSource,
+    pub ipv4: FamilyApplyOutcome,
+    pub ipv6: FamilyApplyOutcome,
+    pub target_count: u32,
+    /// Whether netd's `bw_OUTPUT` existed before the boot pass (`None` outside boot).
+    pub netd_ready: Option<bool>,
+    pub detail: String,
+    pub at_ms: u64,
+}
+
+/// The typed per-boot native status core publishes (v6).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NativeBootStatus {
+    /// `/proc/sys/kernel/random/boot_id` the decision belongs to.
+    pub boot_id: String,
+    /// The core epoch that made the decision (a restart in the same boot keeps it).
+    pub decided_epoch: u64,
+    pub decided_at_ms: u64,
+    pub updated_at_ms: u64,
+    pub outcome: NativeBootOutcome,
+    /// Installed native modules (module.prop, not disabled, not scheduled for removal).
+    pub installed: Vec<NativeBackend>,
+    /// Live runtime identities at the scan (built-in kernel, a live kmod or KPM).
+    pub live: Vec<NativeBackend>,
+    /// Modules staged only in `modules_update`: candidates after the next reboot.
+    pub staged: Vec<NativeBackend>,
+    #[serde(default)]
+    pub kmod: Option<KmodBootReport>,
+    pub zygisk_targets: ZygiskTargets,
+    #[serde(default)]
+    pub ports: Option<PortsStatus>,
 }
 
 /// The base a submitted edit is checked against, for conflict detection (§5).
@@ -503,11 +653,113 @@ mod tests {
                             applied: Some(NativeBackend::Builtin),
                             active: Some(NativeBackend::Builtin),
                             installed: vec![NativeBackend::Builtin, NativeBackend::Zygisk],
+                            boot: Some(sample_boot(sample_outcomes()[0].clone())),
                         },
                     },
                 };
                 assert_eq!(survives("Published", &published), published);
             }
+        }
+
+        fn sample_outcomes() -> Vec<NativeBootOutcome> {
+            vec![
+                NativeBootOutcome::Selected {
+                    backend: NativeBackend::Kmod,
+                    mode: SelectionMode::Loaded,
+                    filesystem_hiding: Some(true),
+                },
+                NativeBootOutcome::Selected {
+                    backend: NativeBackend::Builtin,
+                    mode: SelectionMode::Adopted,
+                    filesystem_hiding: None,
+                },
+                NativeBootOutcome::Conflict {
+                    installed: vec![NativeBackend::Kmod, NativeBackend::Kpm],
+                    live: vec![NativeBackend::Builtin],
+                    staged: vec![NativeBackend::Zygisk],
+                },
+                NativeBootOutcome::AwaitingAuthentication { detail: "a".into() },
+                NativeBootOutcome::KpmUnverifiable { detail: "b".into() },
+                NativeBootOutcome::UnsupportedKernel {
+                    backend: NativeBackend::Kpm,
+                    uname: "6.18".into(),
+                    detail: "c".into(),
+                },
+                NativeBootOutcome::MissingArtifact {
+                    backend: NativeBackend::Kmod,
+                    path: "/x.ko".into(),
+                },
+                NativeBootOutcome::LoadFailed {
+                    backend: NativeBackend::Kmod,
+                    exit: Some(1),
+                    stderr: "Key was rejected by service".into(),
+                    dmesg_tail: vec!["vpnhide: x".into()],
+                    kprobes: Some(true),
+                    kretprobes: None,
+                    signature_rejected: true,
+                },
+                NativeBootOutcome::DeliveryFailed {
+                    backend: NativeBackend::Zygisk,
+                    detail: "d".into(),
+                },
+                NativeBootOutcome::ForeignOwner { id: 0x99 },
+                NativeBootOutcome::NoBackend,
+                NativeBootOutcome::Unknown { detail: "e".into() },
+            ]
+        }
+
+        fn sample_boot(outcome: NativeBootOutcome) -> NativeBootStatus {
+            NativeBootStatus {
+                boot_id: "b-1".into(),
+                decided_epoch: 7,
+                decided_at_ms: 1,
+                updated_at_ms: 2,
+                outcome,
+                installed: vec![NativeBackend::Kmod],
+                live: vec![NativeBackend::Kpm],
+                staged: vec![NativeBackend::Zygisk],
+                kmod: Some(KmodBootReport {
+                    kprobes: Some(true),
+                    kretprobes: Some(false),
+                    gki_variant: "android14-6.1".into(),
+                    version: "2.0.0".into(),
+                    uname: "6.1.0".into(),
+                }),
+                zygisk_targets: ZygiskTargets::Retired,
+                ports: Some(PortsStatus {
+                    source: PortsSource::BootRetry,
+                    ipv4: FamilyApplyOutcome::Confirmed,
+                    ipv6: FamilyApplyOutcome::Unknown,
+                    target_count: 2,
+                    netd_ready: Some(false),
+                    detail: "f".into(),
+                    at_ms: 3,
+                }),
+            }
+        }
+
+        #[test]
+        fn native_boot_status_every_variant() {
+            for outcome in sample_outcomes() {
+                let status = sample_boot(outcome);
+                assert_eq!(survives("NativeBootStatus", &status), status);
+            }
+            for targets in [
+                ZygiskTargets::NotInstalled,
+                ZygiskTargets::Pending,
+                ZygiskTargets::Published,
+                ZygiskTargets::Retired,
+                ZygiskTargets::RetireFailed { detail: "x".into() },
+            ] {
+                assert_eq!(survives("ZygiskTargets", &targets), targets);
+            }
+            for source in [PortsSource::Boot, PortsSource::BootRetry, PortsSource::Edit] {
+                assert_eq!(survives("PortsSource", &source), source);
+            }
+            // v5 snapshots without `boot` still decode.
+            let legacy: NativeBackendStatus =
+                serde_json::from_str(r#"{"selected":null,"active":null,"installed":[]}"#).unwrap();
+            assert_eq!(legacy.boot, None);
         }
 
         #[test]

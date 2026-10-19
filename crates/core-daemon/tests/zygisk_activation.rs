@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use vpnhide_core_daemon::{CoreClient, config_file};
 use vpnhide_core_rpc::{
-    AppConfig, BaseRef, CanonicalConfig, ConfigEdit, NativeBackend, NativeRole, OperationId,
-    PhaseOutcome,
+    AppConfig, BaseRef, CanonicalConfig, ConfigEdit, NativeBackend, NativeBootOutcome, NativeRole,
+    OperationId, PhaseOutcome, SelectionMode, ZygiskTargets,
 };
 
 const OLD: &str = "untouched policy";
@@ -140,6 +140,8 @@ async fn exercise(case: &str) {
         .env("VPNHIDE_KERNEL_MODULES", &modules)
         .env_remove("VPNHIDE_KPM_LOCK")
         .env_remove("VPNHIDE_ZYGISK_MODULE")
+        .env_remove("VPNHIDE_BOOT_APPLY")
+        .env("VPNHIDE_CORE_OWNER_DIR", root.join("owner"))
         .stdout(Stdio::null())
         .stderr(fs::File::create(root.join("core.log")).unwrap());
     if case != "opt-out" {
@@ -193,18 +195,10 @@ async fn exercise(case: &str) {
         .unwrap()
         .unwrap();
     let record = client.get_operation(OperationId(1)).await.unwrap().unwrap();
-    let publishes = matches!(
-        case,
-        "publish" | "arm32" | "first-publish" | "kpm-without-runtime"
-    );
-    let success = publishes || matches!(case, "kernel" | "kpm");
+    let expected = expectation(case);
     assert_eq!(
         record.settled,
-        Some(if success {
-            PhaseOutcome::Confirmed
-        } else {
-            PhaseOutcome::FailedKnown
-        }),
+        Some(expected.settled),
         "{case}: {}",
         fs::read_to_string(root.join("core.log")).unwrap()
     );
@@ -214,73 +208,158 @@ async fn exercise(case: &str) {
         "{case}: persisted intent"
     );
     let published = client.current().await.unwrap();
-    let selected = if publishes || matches!(case, "changed-recipient" | "kernel-race" | "kpm-race")
-    {
-        Some(NativeBackend::Zygisk)
-    } else if case == "kernel" {
-        Some(NativeBackend::Builtin)
-    } else if case == "kpm" {
-        Some(NativeBackend::Kpm)
-    } else {
-        None
-    };
     assert_eq!(
-        published.snapshot.backend.selected, selected,
+        published.snapshot.backend.selected, expected.selected,
         "{case}: selected is distinct from active"
     );
+    let boot = published
+        .snapshot
+        .backend
+        .boot
+        .clone()
+        .expect("typed boot status");
+    assert_eq!(
+        std::mem::discriminant(&boot.outcome),
+        std::mem::discriminant(&expected.outcome),
+        "{case}: {:?}",
+        boot.outcome
+    );
     assert_eq!(published.snapshot.config_revision, 1);
-    if publishes {
-        assert_eq!(
-            published.snapshot.backend.active, None,
-            "{case}: file publication does not prove injection"
-        );
-        let wire = fs::read_to_string(&policy).unwrap();
-        let parsed = vpnhide_protocol::parse_config(wire.as_bytes()).unwrap();
-        assert_eq!(
-            parsed.targets,
-            vec![vpnhide_protocol::Target {
-                uid: 10234,
-                hookmask: 1 << 19
-            }],
-            "{case}"
-        );
-        assert_eq!(
-            fs::metadata(&policy).unwrap().permissions().mode() & 0o777,
-            0o644
-        );
-        // Removing the last target must replace the old runtime policy with an empty snapshot.
-        client
-            .submit_edit(
-                OperationId(2),
-                BaseRef { revision: 1 },
-                ConfigEdit::Replace {
-                    config: CanonicalConfig::default(),
-                },
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        let wire = fs::read_to_string(&policy).unwrap();
-        assert!(
-            vpnhide_protocol::parse_config(wire.as_bytes())
+    match expected.policy {
+        Policy::Published => {
+            assert_eq!(boot.zygisk_targets, ZygiskTargets::Published, "{case}");
+            assert_eq!(
+                published.snapshot.backend.active, None,
+                "{case}: file publication does not prove injection"
+            );
+            let wire = fs::read_to_string(&policy).unwrap();
+            let parsed = vpnhide_protocol::parse_config(wire.as_bytes()).unwrap();
+            assert_eq!(
+                parsed.targets,
+                vec![vpnhide_protocol::Target {
+                    uid: 10234,
+                    hookmask: 1 << 19
+                }],
+                "{case}"
+            );
+            assert_eq!(
+                fs::metadata(&policy).unwrap().permissions().mode() & 0o777,
+                0o644
+            );
+            // Removing the last target must replace the old runtime policy with an empty snapshot.
+            client
+                .submit_edit(
+                    OperationId(2),
+                    BaseRef { revision: 1 },
+                    ConfigEdit::Replace {
+                        config: CanonicalConfig::default(),
+                    },
+                )
+                .await
                 .unwrap()
-                .targets
-                .is_empty()
-        );
-        assert_eq!(client.current().await.unwrap().snapshot.config_revision, 2);
-    } else {
-        assert_eq!(
+                .unwrap();
+            let wire = fs::read_to_string(&policy).unwrap();
+            assert!(
+                vpnhide_protocol::parse_config(wire.as_bytes())
+                    .unwrap()
+                    .targets
+                    .is_empty()
+            );
+            assert_eq!(client.current().await.unwrap().snapshot.config_revision, 2);
+        }
+        Policy::Retired => {
+            assert_eq!(boot.zygisk_targets, ZygiskTargets::Retired, "{case}");
+            let wire = fs::read_to_string(&policy).unwrap();
+            assert!(
+                vpnhide_protocol::parse_config(wire.as_bytes())
+                    .unwrap()
+                    .targets
+                    .is_empty(),
+                "{case}: a non-selected Zygisk keeps no targets"
+            );
+        }
+        Policy::Untouched => assert_eq!(
             fs::read_to_string(&policy).unwrap(),
             OLD,
-            "{case}: no lower-priority or refused write"
-        );
+            "{case}: refused or not-installed recipient is never written"
+        ),
     }
-    assert_eq!(
-        root.join("insmod-dispatch").exists(),
-        case == "kmod-fails",
-        "{case}"
+    assert!(
+        !root.join("insmod-dispatch").exists(),
+        "{case}: a conflict loads nothing"
     );
-    assert_eq!(root.join("kpm-dispatch").exists(), case == "kpm", "{case}");
+    assert!(
+        !root.join("kpm-dispatch").exists(),
+        "{case}: a conflict configures nothing"
+    );
+}
+
+enum Policy {
+    Published,
+    Retired,
+    Untouched,
+}
+
+struct Expected {
+    settled: PhaseOutcome,
+    selected: Option<NativeBackend>,
+    outcome: NativeBootOutcome,
+    policy: Policy,
+}
+
+/// Strict once-per-boot semantics: Zygisk counts as a native backend, so any second
+/// candidate is a conflict that loads nothing and retires Zygisk's targets.
+fn expectation(case: &str) -> Expected {
+    let selected_zygisk = NativeBootOutcome::Selected {
+        backend: NativeBackend::Zygisk,
+        mode: SelectionMode::Adopted,
+        filesystem_hiding: None,
+    };
+    let conflict = NativeBootOutcome::Conflict {
+        installed: vec![],
+        live: vec![],
+        staged: vec![],
+    };
+    let ok = |policy| Expected {
+        settled: PhaseOutcome::Confirmed,
+        selected: Some(NativeBackend::Zygisk),
+        outcome: selected_zygisk.clone(),
+        policy,
+    };
+    let refused = Expected {
+        settled: PhaseOutcome::FailedKnown,
+        selected: Some(NativeBackend::Zygisk),
+        outcome: NativeBootOutcome::DeliveryFailed {
+            backend: NativeBackend::Zygisk,
+            detail: String::new(),
+        },
+        policy: Policy::Untouched,
+    };
+    let stopped = |outcome| Expected {
+        settled: PhaseOutcome::FailedKnown,
+        selected: None,
+        outcome,
+        policy: Policy::Retired,
+    };
+    match case {
+        // Unauthenticated/unqueryable KernelPatch with no KPM candidate does not block.
+        "publish" | "arm32" | "first-publish" | "opt-out" | "unknown-kpm" => ok(Policy::Published),
+        "disable" | "remove" => Expected {
+            settled: PhaseOutcome::Confirmed,
+            selected: None,
+            outcome: NativeBootOutcome::NoBackend,
+            policy: Policy::Untouched,
+        },
+        "foreign" | "legacy-profile" | "changed-recipient" | "kernel-race" | "kpm-race"
+        | "symlink-module" => refused,
+        "kernel" | "kmod-fails" | "kpm" | "unmanaged-kpm" | "kpm-without-runtime" => {
+            stopped(conflict)
+        }
+        "invalid-kernel" => stopped(NativeBootOutcome::Unknown {
+            detail: String::new(),
+        }),
+        other => panic!("no expectation for {other}"),
+    }
 }
 
 #[tokio::test]
