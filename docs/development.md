@@ -66,6 +66,17 @@ keytool -genkey -v -keystore ~/vpnhide.jks \
 
 ## Build each module
 
+### core module (required)
+
+```sh
+python3 core/build.py
+# → core/target/vpnhide-core.zip
+```
+
+`vpnhide_core` is required by 2.0: it is the only writer of the canonical config,
+`/proc/vpnhide_ctl`, Zygisk `targets.txt` and the Ports rules. The kmod / KPM /
+Zygisk zips are artifact-only and need it installed.
+
 ### zygisk module
 
 ```sh

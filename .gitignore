@@ -56,3 +56,6 @@ kmod/kpm/module-staging/
 
 # Local working notes / handoffs / design drafts — never part of a product commit.
 /scratchpad/
+
+# Core module (vpnhide_core)
+core/target/
