@@ -54,9 +54,11 @@ fi
 
 # Background: boot-apply runs inside the daemon when VPNHIDE_BOOT_APPLY=1, then serve.
 (
-  echo "phase=starting $(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" >>"$LOG"
-  "$CORE" "$SOCKET" >>"$LOG" 2>&1
-  echo "phase=exited rc=$? $(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" >>"$LOG"
+  {
+    echo "phase=starting $(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"
+    "$CORE" "$SOCKET" 2>&1
+    echo "phase=exited rc=$? $(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"
+  } >>"$LOG"
 ) &
 
 exit 0

@@ -57,6 +57,7 @@ Single-command builds for both CI and local — the same scripts run in both pla
 - **kmod**: `./kmod/build.py --kmi <kmi>` (or `--all`). Auto-spawns the DDK Docker/podman container if you're not already inside it; CI passes `--inside-container` to skip the spawn. The DDK image tag is `DDK_IMAGE_TAG` in `kmod/build.py` — `.github/workflows/ci.yml` mirrors it, bump both together.
 - **KPM**: `python3 kmod/kpm/build.py` — builds the KernelPatch module and flashable `vpnhide-kpm.zip`.
 - **zygisk**: `cd zygisk && ./build.py` — host-side cargo-ndk build, same script in CI image.
+- **core** (required `vpnhide_core` module): `python3 core/build.py` — cargo-ndk build of the `vpnhide-core` daemon (arm64 + armv7), packaged as `core/target/vpnhide-core.zip`; same script in CI.
 - **lsposed APK**: `cd lsposed && ./gradlew :app:assembleRelease`.
 
 Both Rust cdylibs (`zygisk/build.rs`, `crates/checks-jni/build.rs`) pass `-Wl,-z,max-page-size=16384` so the resulting `.so` files load cleanly on 16 KiB-page Android devices (Pixel 8 Pro on Android 16, future hardware). Don't strip that flag.

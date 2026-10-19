@@ -2,9 +2,8 @@
 # Restricted maintenance uninstall (core-2.0 §11).
 # - Stop the daemon and remove the module's runtime socket/log.
 # - Do NOT unload kernel hooks, wipe Ports chains, delete SuperKey, or restore
-#   independent ordinary writers. Markers stay so legacy activators keep no-op
-#   until an admin explicitly clears /data/adb/vpnhide/core (recovery path).
-MODDIR="${0%/*}"
+#   any other writer (there is none in 2.0). Journal and markers stay so a
+#   reinstalled core recovers; an admin clears /data/adb/vpnhide/core to reset.
 PERSIST="/data/adb/vpnhide/core"
 SOCKET="$PERSIST/vpnhide-core.sock"
 
