@@ -8,3 +8,10 @@
 # Keep Xposed API types
 -keep class de.robv.android.xposed.** { *; }
 -dontwarn de.robv.android.xposed.**
+
+# core-ffi client: JNA (the UniFFI runtime) calls back into Java by reflection and from
+# native code, and maps Structure fields by name. Keep JNA and the generated bindings.
+-keep class com.sun.jna.** { *; }
+-keepclassmembers class * extends com.sun.jna.** { public *; }
+-keep class uniffi.vpnhide_core_ffi.** { *; }
+-dontwarn java.awt.**

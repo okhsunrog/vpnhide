@@ -387,7 +387,7 @@ internal class ConfigCoordinator(
         val mutation = requests.getValue(effect.ticket.owner).mutation
         val base = core?.confirmed.takeIf { available }
         scope.launch(Dispatchers.IO) {
-            val command = runCatching { configPhaseCommand(effect.phase, effect.config, mutation) }.getOrNull()
+            val command = runCatching { configPhaseCommand(effect.phase, mutation) }.getOrNull()
             val evidence =
                 runCatching {
                     if (command ==

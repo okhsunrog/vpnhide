@@ -584,7 +584,8 @@ private class FakeConfigIo : ConfigCoordinatorIo {
         candidate: CanonicalConfig,
         command: String,
     ): ConfigPhaseEvidence {
-        check(command.isNotEmpty())
+        // Core-owned phases are typed core edits and carry no shell; only coupled effects do.
+        check(command.isEmpty() == (phase in setOf(ConfigPhase.Persist, ConfigPhase.Native, ConfigPhase.Ports)))
         val request = FakeExecution(phase, candidate)
         executions.send(request)
         val outcome = request.result.await()

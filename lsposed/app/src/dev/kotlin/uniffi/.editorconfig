@@ -1,4 +1,0 @@
-# UniFFI-generated bindings (core-2.0 spike): do not lint generated code.
-# Its naming (snake_case package/file, JNA fn names) is fixed by the generator.
-[*.kt]
-ktlint = disabled

@@ -1,14 +1,21 @@
 package dev.okhsunrog.vpnhide.core
 
+import android.content.Context
+import java.io.File
+
 /**
- * Production IPC paths (core-2.0 §9 / step 7). Kept in sync with `core-rpc::PRODUCTION_SOCKET_PATH`
- * and the Magisk common module persist dir.
+ * Core module paths. The app reaches core over a socket core binds inside the app's own
+ * device-encrypted data dir (owned by the app uid, labelled like the dir), so the app needs no
+ * root and no other app can reach or probe it. Kept in sync with `core-rpc`
+ * `SOCKET_NAME` / `PRODUCTION_SOCKET_PATH` and core-daemon `app_socket`.
  */
 object CorePaths {
-    const val PERSIST_DIR = "/data/adb/vpnhide/core"
-    const val SOCKET = "$PERSIST_DIR/vpnhide-core.sock"
-    const val ALLOWED_UIDS = "$PERSIST_DIR/allowed_uids"
+    const val SOCKET_NAME = "vpnhide-core.sock"
+    const val MODULE_DIR = "/data/adb/modules/vpnhide_core"
 
-    /** Dev sandbox socket used by CoreSpikeActivity when extras omit `socket`. */
-    const val DEV_SOCKET = "/data/local/tmp/vpnhide-dev/core.sock"
+    /** The socket core serves this app on. Core binds it for the release package in user 0. */
+    fun socket(context: Context): String {
+        val dir = context.applicationInfo.deviceProtectedDataDir ?: context.createDeviceProtectedStorageContext().dataDir.absolutePath
+        return File(dir, SOCKET_NAME).absolutePath
+    }
 }
