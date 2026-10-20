@@ -19,6 +19,7 @@
 - **包（Package）**——应用的标识符（如 `com.example.bank`）。角色按包名保存。
 - **资料（Profile）**——设备上独立的用户空间：主资料、**工作资料**、**克隆应用**
   或第二空间。只在主资料中安装 VPN Hide——见[工作资料](work-profiles.md)。
+- **Core（VPN Hide Core）**——必需的 root 模块（`vpnhide-core.zip`）。只有它加载原生后端、写入配置并应用 Ports；应用通过私有本地套接字与它通信。
 - **GKI**——Google 的通用内核映像。内核模块按 GKI 代次分别构建。
 - **KMI**——Kernel Module Interface（内核模块接口），标识内核对模块二进制接口的
   标签（如 `android14-6.1`）。你据它匹配 `.ko`——见[安装内核模块](kmod-install.md)。

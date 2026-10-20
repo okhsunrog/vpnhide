@@ -15,7 +15,7 @@ JSON 配置里。你可以在 **Settings → Configuration → Config backup** �
 ## 迁移到另一台设备
 
 1. 在旧设备上 **Export JSON**。
-2. 在新设备上安装 VPN Hide 以及你使用的相同模块。
+2. 在新设备上安装 VPN Hide、VPN Hide Core 模块以及适合该设备的原生后端。
 3. 对导出的文件执行 **Import JSON**。
 
 角色按包名绑定到应用，所以任何在新设备上尚未安装的目标应用，会一直保留在配置里，

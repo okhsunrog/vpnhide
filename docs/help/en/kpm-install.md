@@ -28,8 +28,9 @@ a KernelPatch runtime."*
 2. Download `vpnhide-kpm.zip` (the Dashboard names it).
 3. Install the **whole ZIP** through your root manager's **Modules** screen, as
    an APM/Magisk-compatible module. Do **not** extract or load the inner
-   `vpnhide.kpm` file by itself — on its own it has no activator, boot scripts,
-   or config delivery, and hiding won't work.
+   `vpnhide.kpm` file by itself. The VPN Hide Core module (required) loads the KPM
+   from the installed module at every boot and delivers its config; a `.kpm`
+   loaded by hand is not loaded again after a reboot.
 4. On APatch / FolkPatch, save your **SuperKey** in **Settings → Security** (the
    same one you set in APatch/FolkPatch).
 5. **Reboot**, then open the **Dashboard** — the Native backend should read

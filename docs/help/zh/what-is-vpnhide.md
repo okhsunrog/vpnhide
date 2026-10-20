@@ -19,7 +19,7 @@ VPN Hide 改变的是应用*在设备上看到的东西*，而不是你的网络
 
 - **外部 IP 不会变。** 服务器仍然看到 VPN 的出口 IP。如果某服务按 IP 封锁或在
   服务器端检测，设备上的隐藏无能为力——那已经在手机之外。
-- **必须有 root。** Java/Apps 使用 LSPosed，Native 使用一个原生后端，Ports 使用自己的模块。
+- **必须有 root。** 所有 root 工作由 VPN Hide Core 模块完成（它加载原生后端并应用 Ports）；Java/Apps 使用 LSPosed，Native 使用一个原生后端。
   见[要求](requirements.md)。
 - 目标走隧道还是直连由 VPN 客户端决定。VPN Hide 支持两种安排，覆盖取决于所启用的层。
   见[路由](split-tunneling.md)。

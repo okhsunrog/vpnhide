@@ -23,6 +23,9 @@ Short definitions of terms used throughout this guide.
 - **Profile** — a separate user space on the device: main profile, **work
   profile**, **cloned app**, or Second Space. Install VPN Hide in the main
   profile only — see [Work profiles](work-profiles.md).
+- **Core (VPN Hide Core)** — the required root module (`vpnhide-core.zip`). It
+  is the only part that loads a native backend, writes the configuration and
+  applies Ports; the app talks to it over a private local socket.
 - **GKI** — Google's Generic Kernel Image. The kernel module is built per GKI
   generation.
 - **KMI** — Kernel Module Interface, the tag (e.g. `android14-6.1`) identifying a

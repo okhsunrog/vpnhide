@@ -15,8 +15,8 @@
 - **隐藏你已 root 或在用自定义 ROM，或让应用通过 Play Integrity。** VPN Hide 只隐藏
   VPN，别无其他。若某应用因检测到 root 或通不过完整性认证而拒绝，那是另一码事，不是
   本工具要做的。
-- **无 root 运行。** 必须有 root。Java/Apps 需要 LSPosed，Native 需要原生后端，
-  Ports 需要对应模块。可以少用一些层，但覆盖会减少。
+- **无 root 运行。** VPN Hide Core 模块必须有 root。Java/Apps 需要 LSPosed，Native 需要原生后端，
+  Ports 随核心模块提供。可以少用一些层，但覆盖会减少。
 - **对无限多的应用启用 Native。** 原生后端最多保护 **159 个应用 UID**（按 UID 计数而
   非应用数，并为 VPN Hide 自身保留一个名额）。选择器会阻止超出 UID 预算的选择或保存；
   提示达到上限时请减少 Native 目标。导入配置或新增资料也可能超出运行时容量；不要忽略

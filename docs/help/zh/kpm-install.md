@@ -22,8 +22,8 @@ KPM 使用内核 inline 挂钩，这要求内核中已存在 KernelPatch 运行�
 1. 确认已存在 KernelPatch 运行时（见上）。
 2. 下载 `vpnhide-kpm.zip`（仪表盘会指明文件）。
 3. 通过 root 管理器的 **Modules** 界面，把**整个 ZIP** 作为 APM/Magisk 兼容模块
-   安装。**不要**单独解压或加载内部的 `vpnhide.kpm` 文件——单独的它没有激活器、
-   开机脚本和配置下发，隐藏不会生效。
+   安装。**不要**单独解压或加载内部的 `vpnhide.kpm` 文件。VPN Hide Core 模块（必需）在每次启动时从已安装的
+   模块加载 KPM 并下发配置；手动加载的 `.kpm` 重启后不会再次加载。
 4. 在 APatch / FolkPatch 上，把你的 **SuperKey** 保存到 **Settings → Security**
    （与你在 APatch/FolkPatch 里设置的相同）。
 5. **重启**，然后打开**仪表盘**——Native 后端应显示 **Active**。

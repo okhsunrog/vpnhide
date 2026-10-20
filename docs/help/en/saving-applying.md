@@ -9,7 +9,7 @@ old VPN result even after hiding has been applied.
 - **Success:** the configuration was saved and the requested apply steps completed.
 - **Saved, but applying failed:** the choices are stored, but one or more layers
   may still use the previous configuration. Read the error, fix the cause (for
-  example, root access or a missing module), then use the offered apply-again action.
+  example, VPN Hide Core not running or a missing module), then use the offered apply-again action.
 - **Outcome unknown / changes paused:** VPN Hide could not confirm how the previous
   operation ended. Use **Check again**. Do not repeatedly import or change settings
   to work around it. If checking cannot resolve it, [collect a report](collect-report.md).
@@ -29,13 +29,14 @@ old VPN result even after hiding has been applied.
 | Experimental filesystem protection on a kernel backend | Reboot; follow the pending-state message |
 | Experimental filesystem protection on Zygisk | Restart the selected apps |
 
-Technically, Save runs an activator to deliver configuration; it does not unload
-and restart the kernel backend. The activator turns the saved configuration into
+Technically, Save hands the configuration to VPN Hide Core, which writes it and
+delivers it to the one native backend selected for this boot and to Ports; it does
+not unload and restart the kernel backend. Core turns the saved configuration into
 what each backend actually reads: the kernel backends receive it at once, the
 Zygisk module reads its `targets.txt` file every time a target app's process
-starts, and the Ports rules are re-applied. Those runtime files are also rebuilt
-at every boot and once whenever VPN Hide starts fresh, so they cannot drift from
-the saved configuration for long. They list apps by UID, not by name: if you
+starts, and the Ports rules are re-applied. Core also re-delivers them at every
+boot, and VPN Hide asks core to repair the native delivery once whenever it starts
+fresh, so they cannot drift from the saved configuration for long. They list apps by UID, not by name: if you
 reinstall a target app, it may get a new UID, so tap Save again (a reboot or a
 fresh start of VPN Hide does the same) before force-stopping it.
 

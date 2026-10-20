@@ -1,5 +1,3 @@
-> **Superseded for 2.0:** There is no separate `vpnhide-ports.zip`. Ports rules are applied by the **`vpnhide_core`** module. Uninstall any old `vpnhide_ports` Magisk module.
-
 # 隐藏 localhost 端口（Ports）
 
 部分 VPN/代理客户端监听本地端口，例如 `127.0.0.1:7890`。即使 VPN 接口被隐藏，
@@ -7,13 +5,14 @@
 
 ## 设置
 
-1. 从[官方发布页](https://github.com/okhsunrog/vpnhide/releases)下载 `vpnhide-ports.zip`，
-   通过 root 管理器安装，然后重启以完成安装。
-2. 在「**隐藏**」中为探测端口的应用开启 **Ports**。
-3. 如需指定范围，使用 Ports 旁的设置图标，然后**保存**。
-4. 等待应用成功，再重新打开目标应用。
+Ports 属于 **VPN Hide Core** 模块（`vpnhide-core.zip`），每个安装都已具备，无需额外安装。
+1.x 遗留的 **VPN Hide (Ports)** 模块必须卸载——只要它还在，仪表盘就会显示错误。
 
-模块可用后，更改角色或范围会在保存时更新防火墙规则，无需再次重启。
+1. 在「**隐藏**」中为探测端口的应用开启 **Ports**。
+2. 如需指定范围，使用 Ports 旁的设置图标，然后**保存**。
+3. 等待应用成功，再重新打开目标应用。
+
+更改角色或范围会在保存时更新防火墙规则，无需重启；核心也会在每次启动时重新应用它们。
 应用失败时见[保存与应用](saving-applying.md)。
 
 ## 覆盖与副作用
@@ -28,5 +27,5 @@
 
 ## 停止阻断
 
-对单个应用，关闭 Ports 角色并保存成功。要移除组件，在 root 管理器中卸载模块并重启。
-不要认为将模块标记为待移除就已清除了正在生效的防火墙规则。
+对单个应用，关闭 Ports 角色并保存成功。规则在重启前一直留在内核防火墙中：卸载核心模块
+只会让它不再重新应用规则，已加载的规则只有重启才会清除。
