@@ -83,6 +83,10 @@ internal class NativeBootIssuesTest : DashboardIssuesFixture() {
         assertTrue(
             issuesFor(boot(NativeBootOutcome.KpmUnverifiable("auth"))).contains(DashboardIssue.KpmUnverifiable("auth")),
         )
+        assertTrue(
+            issuesFor(boot(NativeBootOutcome.KpmIncompatible("1.1.1", "1.2.0", "too old")))
+                .contains(DashboardIssue.KpmIncompatible("1.1.1", "1.2.0", "too old")),
+        )
         assertTrue(issuesFor(boot(NativeBootOutcome.ForeignOwner(0x99))).has<DashboardIssue.NativeBootFailed>())
         assertTrue(
             issuesFor(boot(NativeBootOutcome.Unknown("ctl unreadable"))).contains(DashboardIssue.NativeBootFailed("ctl unreadable")),

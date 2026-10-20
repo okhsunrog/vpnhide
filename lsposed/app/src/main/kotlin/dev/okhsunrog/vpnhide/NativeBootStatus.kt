@@ -5,7 +5,7 @@ import org.json.JSONObject
 import org.json.JSONTokener
 
 /**
- * Core's once-per-boot native decision (`core-rpc` `NativeBootStatus`, protocol 6), read from
+ * Core's once-per-boot native decision (`core-rpc` `NativeBootStatus`, protocol 7), read from
  * core's published state over the app socket. Core is the only activator: it scans the
  * installed and live native backends once per boot, loads or adopts exactly one, and refuses
  * to load anything when more than one is a candidate. This replaces the per-backend
@@ -63,6 +63,17 @@ internal sealed interface NativeBootOutcome {
     ) : NativeBootOutcome
 
     data class KpmUnverifiable(
+        val detail: String,
+    ) : NativeBootOutcome
+
+    /**
+     * A VPN Hide KPM is live — loaded by core earlier, autoloaded by APatch or loaded by
+     * hand — but core cannot drive it ([found] is too old / unrecognised, or it failed the
+     * status handshake). Nothing was configured and no second copy was loaded.
+     */
+    data class KpmIncompatible(
+        val found: String?,
+        val minimum: String,
         val detail: String,
     ) : NativeBootOutcome
 
@@ -217,7 +228,7 @@ private fun tagged(raw: Any): Pair<String, JSONObject?> =
         }
     }
 
-@Suppress("CyclomaticComplexMethod")
+@Suppress("CyclomaticComplexMethod", "LongMethod") // One branch per wire variant.
 private fun outcome(raw: Any): NativeBootOutcome {
     val (tag, body) = tagged(raw)
     if (body == null) {
@@ -247,6 +258,14 @@ private fun outcome(raw: Any): NativeBootOutcome {
 
         "KpmUnverifiable" -> {
             NativeBootOutcome.KpmUnverifiable(body.getString("detail"))
+        }
+
+        "KpmIncompatible" -> {
+            NativeBootOutcome.KpmIncompatible(
+                found = body.optNullable("found") as String?,
+                minimum = body.getString("minimum"),
+                detail = body.getString("detail"),
+            )
         }
 
         "UnsupportedKernel" -> {
@@ -370,6 +389,10 @@ internal fun NativeBootStatus?.kpmLoadStatus(): KpmLoadStatus {
 
         is NativeBootOutcome.KpmUnverifiable -> {
             status(KpmRuntime.Unknown, null, KpmFailureReason.Unknown, outcome.detail)
+        }
+
+        is NativeBootOutcome.KpmIncompatible -> {
+            status(KpmRuntime.Unknown, true, KpmFailureReason.ActivationFailed, outcome.detail)
         }
 
         is NativeBootOutcome.UnsupportedKernel -> {

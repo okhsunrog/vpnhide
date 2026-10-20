@@ -5,12 +5,15 @@
 //! At startup core scans every native candidate: an installed kmod, KPM or Zygisk
 //! module (`module.prop`, no `disable`, no `remove`), the always-live built-in
 //! kernel (the control node reports 0x4), a live kmod, and a live KPM core did not
-//! load (APatch autoload, a standalone `.kpm`). Native backends are mutually
-//! exclusive:
+//! load (APatch autoload, or a `.kpm` the user loaded by hand — a supported install
+//! method, adopted like any other live backend once its version is verified). Native
+//! backends are mutually exclusive:
 //!
 //! - more than one candidate: load nothing, deliver no config to anything, retire
 //!   Zygisk's targets, publish [`NativeBootOutcome::Conflict`];
-//! - exactly one: load it (or adopt it when it is already live);
+//! - exactly one: load it (or adopt it when it is already live). An installed
+//!   `vpnhide_kpm` module whose KPM is already live is one candidate, not two: core
+//!   adopts the live copy and never loads a second one;
 //! - none: [`NativeBootOutcome::NoBackend`].
 //!
 //! The decision is persisted with the kernel `boot_id` and stays fixed for the whole
@@ -23,7 +26,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use vpnhide_activator::{CoreKpm, KmodLoadFailure, KpmRuntimeProbe};
+use vpnhide_activator::{CoreKpm, KmodLoadFailure, KpmLiveCheck, KpmRuntimeProbe};
 use vpnhide_core_rpc::{
     KmodBootReport, MAX_DMESG_TAIL, NativeBackend, NativeBootOutcome, NativeBootStatus,
     PortsStatus, SelectionMode, ZygiskTargets,
@@ -134,8 +137,15 @@ pub enum KpmFact {
     NoRuntime,
     /// Authenticated; the VPN Hide KPM is not loaded.
     Absent,
-    /// Authenticated; the VPN Hide KPM is loaded.
+    /// Authenticated; a VPN Hide KPM core can drive is loaded.
     Live,
+    /// Authenticated; a VPN Hide KPM is loaded but too old, of an unrecognised
+    /// version, or failing the status handshake. Still a live backend (it counts for
+    /// conflicts), never configured.
+    Incompatible {
+        found: Option<String>,
+        detail: String,
+    },
     /// The runtime refused authentication (no valid superkey / `su` grant).
     AuthFailed(String),
     /// The runtime is present but could not be enumerated.
@@ -152,9 +162,16 @@ pub struct ScanFacts {
     /// Independent evidence that a VPN Hide KPM may be live even though KernelPatch
     /// cannot be queried (an APatch-installed `vpnhide` KPM, or core loaded it this boot).
     pub kpm_may_be_live: bool,
+    /// The live KPM's load-time filesystem hiding, read back from KernelPatch.
+    pub kpm_filesystem_hiding: Option<bool>,
 }
 
 impl ScanFacts {
+    /// A VPN Hide KPM is loaded, whether or not core can drive it.
+    pub fn kpm_live(&self) -> bool {
+        matches!(self.kpm, KpmFact::Live | KpmFact::Incompatible { .. })
+    }
+
     pub fn live(&self) -> Vec<NativeBackend> {
         let mut live = Vec::new();
         match self.kernel {
@@ -162,7 +179,7 @@ impl ScanFacts {
             KernelFact::Kmod => live.push(NativeBackend::Kmod),
             _ => {}
         }
-        if self.kpm == KpmFact::Live {
+        if self.kpm_live() {
             live.push(NativeBackend::Kpm);
         }
         live
@@ -203,6 +220,15 @@ pub fn decide(facts: &ScanFacts) -> Plan {
             installed: ordered(facts.installed.iter().copied()),
             live,
             staged: ordered(facts.staged.iter().copied()),
+        });
+    }
+    if let (KpmFact::Incompatible { found, detail }, [NativeBackend::Kpm]) =
+        (&facts.kpm, candidates.as_slice())
+    {
+        return Plan::Stop(NativeBootOutcome::KpmIncompatible {
+            found: found.clone(),
+            minimum: vpnhide_activator::MIN_KPM_VERSION.to_owned(),
+            detail: detail.clone(),
         });
     }
     let unverifiable = match &facts.kpm {
@@ -379,25 +405,58 @@ fn kernel_fact(ctl: &Path) -> KernelFact {
     }
 }
 
-/// Probe KernelPatch through core's management channel.
-pub fn probe_kpm(lock: Option<&Path>) -> (KpmFact, Option<CoreKpm>) {
+/// What [`probe_kpm`] learned: the fact, the authenticated channel (when core may use
+/// it), and a live KPM's load-time filesystem hiding read back from KernelPatch.
+pub struct KpmProbe {
+    pub fact: KpmFact,
+    pub client: Option<CoreKpm>,
+    pub filesystem_hiding: Option<bool>,
+}
+
+/// Probe KernelPatch through core's management channel. A live `vpnhide` KPM is
+/// identified (status handshake + version) whoever loaded it.
+pub fn probe_kpm(lock: Option<&Path>) -> KpmProbe {
+    let (fact, client, filesystem_hiding) = probe_kpm_parts(lock);
+    KpmProbe {
+        fact,
+        client,
+        filesystem_hiding,
+    }
+}
+
+fn probe_kpm_parts(lock: Option<&Path>) -> (KpmFact, Option<CoreKpm>, Option<bool>) {
     let Some(lock) = lock else {
         // Unmanaged KPM is never loaded or configured, but a live one still counts.
         return match vpnhide_activator::observed_kpm_loaded() {
-            Ok(true) => (KpmFact::Live, None),
-            Ok(false) => (KpmFact::NotManaged, None),
-            Err(e) => (KpmFact::Broken(e.to_string()), None),
+            Ok(true) => (KpmFact::Live, None, None),
+            Ok(false) => (KpmFact::NotManaged, None, None),
+            Err(e) => (KpmFact::Broken(e.to_string()), None, None),
         };
     };
     match CoreKpm::probe(lock) {
-        Ok(KpmRuntimeProbe::NoRuntime) => (KpmFact::NoRuntime, None),
-        Ok(KpmRuntimeProbe::AwaitingAuthentication(detail)) => (KpmFact::AuthFailed(detail), None),
-        Ok(KpmRuntimeProbe::Ready(client)) => match client.status() {
-            Ok(Some(_)) => (KpmFact::Live, Some(client)),
-            Ok(None) => (KpmFact::Absent, Some(client)),
-            Err(e) => (KpmFact::Broken(e.to_string()), None),
+        Ok(KpmRuntimeProbe::NoRuntime) => (KpmFact::NoRuntime, None, None),
+        Ok(KpmRuntimeProbe::AwaitingAuthentication(detail)) => {
+            (KpmFact::AuthFailed(detail), None, None)
+        }
+        Ok(KpmRuntimeProbe::Ready(client)) => match client.verify_live() {
+            Ok(KpmLiveCheck::Compatible { info }) => {
+                let fs = info.as_ref().map(|i| i.filesystem_hiding());
+                alog::info(&format!(
+                    "native: live vpnhide KPM version {} (filesystem_hiding={fs:?})",
+                    info.as_ref().map_or("unreported", |i| i.version.as_str()),
+                ));
+                (KpmFact::Live, Some(client), fs)
+            }
+            Ok(KpmLiveCheck::NotLoaded) => (KpmFact::Absent, Some(client), None),
+            Ok(KpmLiveCheck::Incompatible { found, detail }) => {
+                alog::info(&format!(
+                    "native: live vpnhide KPM is incompatible: {detail}"
+                ));
+                (KpmFact::Incompatible { found, detail }, None, None)
+            }
+            Err(e) => (KpmFact::Broken(e.to_string()), None, None),
         },
-        Err(e) => (KpmFact::Broken(e.to_string()), None),
+        Err(e) => (KpmFact::Broken(e.to_string()), None, None),
     }
 }
 
@@ -454,6 +513,7 @@ pub fn gather(env: &NativeEnv, kpm: KpmFact) -> ScanFacts {
         kernel: kernel_fact(&env.ctl),
         kpm,
         kpm_may_be_live: apatch_installed_vpnhide_kpm(&env.apatch_kpms),
+        kpm_filesystem_hiding: None,
     }
 }
 
@@ -508,8 +568,10 @@ impl NativeBoot {
                 return boot;
             }
         }
-        let (kpm, client) = probe_kpm(env.kpm_lock.as_deref());
-        let facts = gather(&env, kpm);
+        let probe = probe_kpm(env.kpm_lock.as_deref());
+        let client = probe.client;
+        let mut facts = gather(&env, probe.fact);
+        facts.kpm_filesystem_hiding = probe.filesystem_hiding;
         let boot = Self::decide_and_apply(
             env,
             epoch,
@@ -530,8 +592,10 @@ impl NativeBoot {
         if !self.pending_authentication() {
             return false;
         }
-        let (kpm, client) = probe_kpm(self.env.kpm_lock.as_deref());
-        let facts = gather(&self.env, kpm);
+        let probe = probe_kpm(self.env.kpm_lock.as_deref());
+        let client = probe.client;
+        let mut facts = gather(&self.env, probe.fact);
+        facts.kpm_filesystem_hiding = probe.filesystem_hiding;
         let next = Self::decide_and_apply(
             self.env.clone(),
             epoch,
@@ -567,7 +631,9 @@ impl NativeBoot {
                 let selection = Selection {
                     backend,
                     mode: SelectionMode::Adopted,
-                    filesystem_hiding: None,
+                    filesystem_hiding: (backend == NativeBackend::Kpm)
+                        .then_some(facts.kpm_filesystem_hiding)
+                        .flatten(),
                 };
                 (selected_outcome(selection), Some(selection))
             }
@@ -712,7 +778,7 @@ impl NativeBoot {
         }
         let kpm_present = facts.installed.contains(&NativeBackend::Kpm)
             || facts.staged.contains(&NativeBackend::Kpm)
-            || facts.kpm == KpmFact::Live;
+            || facts.kpm_live();
         if !kpm_present {
             let _ = fs::remove_file(at("/data/adb/vpnhide_kpm/ctl.lock"));
         }

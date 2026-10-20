@@ -47,9 +47,6 @@ internal sealed interface DashboardIssue {
 
     // ── Native ──
 
-    /** The KPM zip was flashed as a plain module, so nothing loaded it. */
-    data object KpmStandaloneInstall : Native
-
     data object NoNativeBackend : Native
 
     /**
@@ -86,6 +83,16 @@ internal sealed interface DashboardIssue {
 
     /** KernelPatch cannot be queried and a VPN Hide KPM may be live: nothing else was loaded. */
     data class KpmUnverifiable(
+        val detail: String,
+    ) : Native
+
+    /**
+     * A live VPN Hide KPM (however it was loaded) that core cannot drive: older than
+     * [minimum], an unrecognised version, or no valid status handshake.
+     */
+    data class KpmIncompatible(
+        val found: String?,
+        val minimum: String,
         val detail: String,
     ) : Native
 
@@ -241,8 +248,6 @@ internal data class ModuleFacts(
     val ports: ModuleFact,
     val backends: NativeBackendStates,
     val nativeBackend: DisplayNativeBackend,
-    /** The KPM zip is present as a plain module with no KernelPatch to load it. */
-    val standaloneKpm: Boolean,
     val kpmLoadStatus: KpmLoadStatus,
     /** Not read by any guard; carried so the orchestrator need not re-derive it. */
     val kmodLoadStatus: KmodLoadStatus?,
@@ -344,10 +349,9 @@ internal fun dashboardIssues(facts: DashboardFacts): List<DashboardIssue> =
 /** Is there a native layer at all, and was it installed in a way that can work. */
 private fun nativePresenceIssues(facts: DashboardFacts): List<DashboardIssue> =
     buildList {
-        val modules = facts.modules
-        if (modules.standaloneKpm) {
-            add(DashboardIssue.KpmStandaloneInstall)
-        } else if (!modules.backends.anyInstalled) {
+        // A KPM the user loaded by hand (or APatch autoloads) is a normal install:
+        // detectKpmModule reports it as present, so it counts here like a module.
+        if (!facts.modules.backends.anyInstalled) {
             add(DashboardIssue.NoNativeBackend)
         }
     }
@@ -548,6 +552,10 @@ private fun nativeBootIssues(facts: DashboardFacts): List<DashboardIssue> {
         when (val outcome = boot.outcome) {
             is NativeBootOutcome.KpmUnverifiable -> {
                 add(DashboardIssue.KpmUnverifiable(outcome.detail))
+            }
+
+            is NativeBootOutcome.KpmIncompatible -> {
+                add(DashboardIssue.KpmIncompatible(outcome.found, outcome.minimum, outcome.detail))
             }
 
             is NativeBootOutcome.ForeignOwner -> {

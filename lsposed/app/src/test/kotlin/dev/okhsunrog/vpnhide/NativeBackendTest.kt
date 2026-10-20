@@ -1,6 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.diagnostics.standaloneKpmLoaded
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -9,8 +8,6 @@ import org.junit.Test
 
 class NativeBackendTest {
     private fun installed(active: Boolean) = ModuleState.Installed(version = "1.0", active = active)
-
-    private fun fixture(name: String): String = javaClass.getResourceAsStream("/$name")!!.bufferedReader().use { it.readText() }
 
     private fun parseStatus(raw: String): KpmLoadStatus = kpmStatusOf(raw)
 
@@ -325,20 +322,11 @@ class NativeBackendTest {
     }
 
     @Test
-    fun `standalone runtime KPM is detected without flashable module`() {
-        assertTrue(standaloneKpmLoaded(ModuleState.NotInstalled, fixture("kpm-vpnhide.json")))
-    }
-
-    @Test
-    fun `runtime KPM is not standalone when flashable module is installed`() {
-        val installed = ModuleState.Installed(version = "1.0", active = true)
-        assertFalse(standaloneKpmLoaded(installed, fixture("kpm-vpnhide.json")))
-    }
-
-    @Test
-    fun `unavailable runtime list or another KPM is not a standalone vpnhide install`() {
-        assertFalse(standaloneKpmLoaded(ModuleState.NotInstalled, fixture("kpm-unavailable.json")))
-        assertFalse(standaloneKpmLoaded(ModuleState.NotInstalled, fixture("kpm-other.json")))
-        assertFalse(standaloneKpmLoaded(ModuleState.NotInstalled, fixture("kpm-next.json")))
+    fun `a hand-loaded KPM without the module is a present, active backend`() {
+        val live = mapOf("kpm_state" to "vpnhide 1 status\nbackend 0x1\nkver 0x0\nhooks 0x3ff\nerror 0x0\n")
+        assertEquals(ModuleState.Installed(version = null, active = true), detectKpm(live, currentBootId = "boot-1"))
+        val adopted = mapOf(selectedBootSection(NativeBackendId.Kpm, "boot-1"))
+        assertEquals(ModuleState.Installed(version = null, active = true), detectKpm(adopted, currentBootId = "boot-1"))
+        assertEquals(ModuleState.NotInstalled, detectKpm(emptyMap(), currentBootId = "boot-1"))
     }
 }

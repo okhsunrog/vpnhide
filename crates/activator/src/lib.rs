@@ -93,6 +93,7 @@ const SUPERCALL_HELLO_MAGIC: c_long = 0x11581158;
 const SUPERCALL_KPM_LOAD: i64 = 0x1020;
 const SUPERCALL_KPM_CONTROL: i64 = 0x1022;
 const SUPERCALL_KPM_LIST: i64 = 0x1031;
+const SUPERCALL_KPM_INFO: i64 = 0x1032;
 
 unsafe extern "C" {
     fn syscall(num: c_long, ...) -> c_long;
@@ -117,7 +118,10 @@ mod ports;
 pub mod sys;
 
 use kpm::*;
-pub use kpm::{CoreKpm, KpmConfigError, KpmRuntimeProbe};
+pub use kpm::{
+    CoreKpm, KpmConfigError, KpmInfo, KpmLiveCheck, KpmRuntimeProbe, MIN_KPM_VERSION,
+    kpm_version_compatible,
+};
 pub use model::*;
 pub use ownership::{
     config_owned_by_core, core_marker_path, native_owned_by_core, zygisk_owned_by_core,

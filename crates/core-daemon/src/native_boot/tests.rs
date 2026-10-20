@@ -9,6 +9,7 @@ fn facts(installed: &[NativeBackend], kernel: KernelFact, kpm: KpmFact) -> ScanF
         kernel,
         kpm,
         kpm_may_be_live: false,
+        kpm_filesystem_hiding: None,
     }
 }
 
@@ -701,4 +702,78 @@ fn kernel_config_dmesg_and_signature_helpers() {
     assert!(signature_rejected(129, "", &[]));
     assert!(signature_rejected(1, "Required key not available", &[]));
     assert!(!signature_rejected(1, "Invalid argument", &[]));
+}
+
+fn incompatible() -> KpmFact {
+    KpmFact::Incompatible {
+        found: Some("1.1.1".into()),
+        detail: "the loaded vpnhide KPM is version 1.1.1; core needs 1.2.0 or newer".into(),
+    }
+}
+
+#[test]
+fn a_manually_loaded_kpm_is_a_normal_single_candidate() {
+    // No module, nothing else: the live KPM is selected and adopted, never re-loaded.
+    assert_eq!(
+        decide(&facts(&[], KernelFact::Absent, KpmFact::Live)),
+        Plan::Adopt(Kpm)
+    );
+}
+
+#[test]
+fn an_incompatible_live_kpm_is_a_typed_stop_whether_or_not_the_module_is_installed() {
+    for installed in [&[][..], &[Kpm][..]] {
+        assert_eq!(
+            decide(&facts(installed, KernelFact::Absent, incompatible())),
+            Plan::Stop(NativeBootOutcome::KpmIncompatible {
+                found: Some("1.1.1".into()),
+                minimum: vpnhide_activator::MIN_KPM_VERSION.into(),
+                detail: "the loaded vpnhide KPM is version 1.1.1; core needs 1.2.0 or newer".into(),
+            })
+        );
+    }
+}
+
+#[test]
+fn a_live_manual_kpm_beside_another_backend_is_a_conflict() {
+    for kpm in [KpmFact::Live, incompatible()] {
+        for (installed, kernel, live) in [
+            (&[Kmod][..], KernelFact::Absent, vec![Kpm]),
+            (&[Zygisk][..], KernelFact::Absent, vec![Kpm]),
+            (&[][..], KernelFact::Builtin, vec![Builtin, Kpm]),
+            (&[][..], KernelFact::Kmod, vec![Kmod, Kpm]),
+        ] {
+            let plan = decide(&facts(installed, kernel.clone(), kpm.clone()));
+            assert_eq!(
+                plan,
+                Plan::Stop(NativeBootOutcome::Conflict {
+                    installed: installed.to_vec(),
+                    live: live.clone(),
+                    staged: vec![],
+                }),
+                "{installed:?} {kernel:?} {kpm:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_adopted_kpm_reports_the_filesystem_hiding_it_was_loaded_with() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env(dir.path());
+    let fx = fake(&env, None);
+    for fs_hiding in [Some(true), Some(false), None] {
+        let mut f = gather(&env, KpmFact::Live);
+        f.kpm_filesystem_hiding = fs_hiding;
+        let boot = NativeBoot::decide_and_apply(env.clone(), 1, "boot-1", &f, None, false, &fx);
+        assert_eq!(
+            boot.status.outcome,
+            NativeBootOutcome::Selected {
+                backend: Kpm,
+                mode: SelectionMode::Adopted,
+                filesystem_hiding: fs_hiding,
+            }
+        );
+        assert_eq!(boot.status.live, vec![Kpm]);
+    }
 }

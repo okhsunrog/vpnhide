@@ -131,8 +131,13 @@ Supported runtimes — pick whichever matches the device's root:
 Persistence: a one-shot runtime `sc_kpm_load` is **lost on reboot**. The
 vpnhide KPM module therefore ships only `vpnhide.kpm`, and VPN Hide Core loads
 it again on every boot, once, after checking that the KPM is the only native
-backend (another backend module, a built-in kernel backend or a VPN Hide KPM
-core did not load is a conflict, and nothing is loaded). On KPatch-Next core
+backend (another backend module, a built-in kernel backend or a live kmod is a
+conflict, and nothing is loaded). A `vpnhide.kpm` loaded outside core (APatch's
+KPM screen, KPatch-Next, embedded in the boot image, by hand) is a supported
+install: core adopts the live KPM after checking its `KPM_INFO` version (at least
+1.2.0) and status handshake, reads its `filesystem_hiding=` load argument back,
+and configures it over `KPM_CTL0`. With the zip installed as well, the live copy
+is adopted and the artifact is not loaded a second time. On KPatch-Next core
 uses the runtime's `kpatch` CLI; on APatch/FolkPatch it uses the saved SuperKey
 or the trusted `su` supercall token. If KernelPatch cannot be authenticated, the
 KPM stays unloaded and the app asks for the SuperKey. Before either load path

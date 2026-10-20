@@ -26,6 +26,16 @@ case "$1 $2" in
     [ "$VH_CASE" = load-no-identity ] && exit 0
     : > "$VH_ROOT/loaded"
     exit 0 ;;
+  "kpm info")
+    [ -f "$VH_ROOT/loaded" ] || exit 1
+    case "$VH_CASE" in
+      manual-old) v=1.1.0 ;;
+      manual-garbled) v=nightly ;;
+      manual-info|installed-live) v=1.3.1-2-gabcdef0 ;;
+      *) exit 1 ;;
+    esac
+    printf 'name=vpnhide\nversion=%s\nlicense=GPL v2\nauthor=t\ndescription=d\nargs=filesystem_hiding=1\n' "$v"
+    exit 0 ;;
   "kpm ctl0")
     case "$4" in
       "vpnhide 1 status")
@@ -98,7 +108,7 @@ async fn exercise(case: &str) {
     if !needs_load {
         fs::write(root.join("loaded"), "").unwrap();
     }
-    if needs_load {
+    if needs_load || case == "installed-live" {
         let module = modules.join("vpnhide_kpm");
         fs::create_dir_all(&module).unwrap();
         fs::write(module.join("module.prop"), "id=vpnhide_kpm\n").unwrap();
@@ -220,7 +230,14 @@ async fn exercise(case: &str) {
     let record = client.get_operation(OperationId(1)).await.unwrap().unwrap();
     let succeeds = matches!(
         case,
-        "active" | "load" | "load-default" | "disabled-kmod" | "partial" | "disabled"
+        "active"
+            | "manual-info"
+            | "installed-live"
+            | "load"
+            | "load-default"
+            | "disabled-kmod"
+            | "partial"
+            | "disabled"
     );
     // A disabled module is not a candidate: NoBackend has nothing to deliver.
     let delivers = succeeds && case != "disabled";
@@ -264,6 +281,32 @@ async fn exercise(case: &str) {
                     mode: SelectionMode::Loaded,
                     ..
                 }
+            ),
+            "{case}: {:?}",
+            boot.outcome
+        ),
+        // A live KPM nobody loaded through core (APatch autoload, a hand-loaded
+        // `.kpm`), or the module's own KPM already live: one candidate, adopted.
+        "active" | "manual-info" | "installed-live" => assert_eq!(
+            boot.outcome,
+            NativeBootOutcome::Selected {
+                backend: NativeBackend::Kpm,
+                mode: SelectionMode::Adopted,
+                filesystem_hiding: (case != "active").then_some(true),
+            },
+            "{case}"
+        ),
+        "manual-old" | "manual-garbled" | "foreign" | "protocol" | "truncated" => assert!(
+            matches!(
+                &boot.outcome,
+                NativeBootOutcome::KpmIncompatible { found, minimum, .. }
+                    if minimum == vpnhide_activator::MIN_KPM_VERSION
+                        && found.as_deref()
+                            == match case {
+                                "manual-old" => Some("1.1.0"),
+                                "manual-garbled" => Some("nightly"),
+                                _ => None,
+                            }
             ),
             "{case}: {:?}",
             boot.outcome
@@ -387,6 +430,10 @@ async fn exercise(case: &str) {
 async fn kpm_lifecycle_and_refusals_over_rpc() {
     for case in [
         "active",
+        "manual-info",
+        "manual-old",
+        "manual-garbled",
+        "installed-live",
         "active-with-kmod",
         "load",
         "load-default",
