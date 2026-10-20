@@ -33,7 +33,7 @@ class CoreRootTest {
                     override suspend fun collectDiagnostics(requestJson: String): String {
                         sent += requestJson
                         return """{"status":"ok","report":{"outputs":[{"probe":{"kind":"dmesg"},"exit":0,"output":"ring"},""" +
-                            """{"probe":{"kind":"logcat_since","since":"x"},"exit":0,"output":"log"}],"dmesg_cleared":true}}"""
+                            """{"probe":{"kind":"app_vpn_state","uid":10123},"exit":0,"output":"log"}],"dmesg_cleared":true}}"""
                     }
 
                     override suspend fun rootEffect(
@@ -45,11 +45,11 @@ class CoreRootTest {
                     }
                 },
             )
-            val report = CoreRoot.collect(listOf(CoreProbe.Dmesg, CoreProbe.LogcatSince("10-19 12:00:00.000")), clearDmesg = true)
+            val report = CoreRoot.collect(listOf(CoreProbe.Dmesg, CoreProbe.AppVpnState(10123)), clearDmesg = true)
             val request = JSONObject(sent[0])
             assertTrue(request.getBoolean("clear_dmesg"))
             assertEquals("dmesg", request.getJSONArray("probes").getJSONObject(0).getString("kind"))
-            assertEquals("10-19 12:00:00.000", request.getJSONArray("probes").getJSONObject(1).getString("since"))
+            assertEquals(10123, request.getJSONArray("probes").getJSONObject(1).getInt("uid"))
             assertEquals(listOf("ring", "log"), report.results(2).map { it.text })
             assertTrue((report as CoreDiagnostics.Collected).dmesgCleared)
 

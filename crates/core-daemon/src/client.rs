@@ -14,7 +14,8 @@ use tokio::sync::{Mutex, watch};
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use vpnhide_core_rpc::{
     Accepted, BaseRef, CALL_DEADLINE, ClientHello, ConfigEdit, DIAGNOSTICS_DEADLINE,
-    DiagnosticsReport, DiagnosticsRequest, EffectError, Handshake, MAX_FRAME_BYTES, OperationId,
+    DiagnosticsReport, DiagnosticsRequest, EffectError, Handshake, LOGCAT_STOP_DEADLINE,
+    LogcatRecordingError, LogcatSessionId, LogcatSessionStatus, MAX_FRAME_BYTES, OperationId,
     OperationRecord, PROTOCOL_VERSION, RootEffect, STATE_POLL_DEADLINE, StateSnapshot, SubmitError,
     VpnhideCoreClient,
 };
@@ -152,6 +153,57 @@ impl CoreClient {
         let client = self.client().await.map_err(|e| e.to_string())?;
         match client
             .root_effect(deadline(CALL_DEADLINE), op, effect)
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                self.drop_client().await;
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Start a core-owned logcat session. Outer `Err`: not delivered.
+    pub async fn start_logcat_recording(
+        &self,
+        session: LogcatSessionId,
+    ) -> Result<Result<LogcatSessionStatus, LogcatRecordingError>, String> {
+        let client = self.client().await.map_err(|e| e.to_string())?;
+        match client
+            .start_logcat_recording(deadline(CALL_DEADLINE), session)
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                self.drop_client().await;
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Stop a logcat session; the status carries the export file. Outer `Err`: not delivered.
+    pub async fn stop_logcat_recording(
+        &self,
+        session: LogcatSessionId,
+    ) -> Result<Result<LogcatSessionStatus, LogcatRecordingError>, String> {
+        let client = self.client().await.map_err(|e| e.to_string())?;
+        match client
+            .stop_logcat_recording(deadline(LOGCAT_STOP_DEADLINE), session)
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                self.drop_client().await;
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// The current or last logcat session. Outer `Err`: not delivered.
+    pub async fn logcat_recording_status(&self) -> Result<Option<LogcatSessionStatus>, String> {
+        let client = self.client().await.map_err(|e| e.to_string())?;
+        match client
+            .logcat_recording_status(deadline(CALL_DEADLINE))
             .await
         {
             Ok(result) => Ok(result),

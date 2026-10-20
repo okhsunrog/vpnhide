@@ -23,8 +23,6 @@ pub enum DiagnosticProbe {
     LogcatAppTags,
     /// `logcat -d` filtered to the LSPosed / Vector boot lines.
     LogcatLsposedBoot,
-    /// `logcat -d` since a timestamp (`MM-DD HH:MM:SS.mmm`), for the debug recorder.
-    LogcatSince { since: String },
     /// Boot/kernel partition metadata (paths, sizes, labels).
     KernelPartitions,
     /// Gzipped boot/kernel partition images, written to the export dir.

@@ -9,7 +9,8 @@
 use serde::Serialize;
 use vpnhide_core_daemon::CoreClient;
 use vpnhide_core_rpc::{
-    DiagnosticsReport, DiagnosticsRequest, EffectError, OperationId, RootEffect,
+    DiagnosticsReport, DiagnosticsRequest, EffectError, LogcatRecordingError, LogcatSessionId,
+    LogcatSessionStatus, OperationId, RootEffect,
 };
 
 /// Bound on request JSON from the app. Requests are a handful of enum tags.
@@ -22,6 +23,12 @@ struct Reply {
     detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     report: Option<DiagnosticsReport>,
+    /// Logcat replies: the session (`null` when core holds none).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session: Option<Option<Box<LogcatSessionStatus>>>,
+    /// Logcat `busy`: the session that is recording.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    running: Option<u64>,
 }
 
 impl Reply {
@@ -29,7 +36,7 @@ impl Reply {
         Reply {
             status,
             detail: Some(detail.into()),
-            report: None,
+            ..Reply::default()
         }
     }
 }
@@ -66,8 +73,8 @@ pub async fn diagnostics(socket: &str, request_json: &str) -> String {
             .map_err(|e| Reply::status("transport", e))?;
         Ok::<_, Reply>(Reply {
             status: "ok",
-            detail: None,
             report: Some(report),
+            ..Reply::default()
         })
     };
     encode(run.await.unwrap_or_else(|reply| reply))
@@ -94,6 +101,66 @@ pub async fn root_effect(socket: &str, op: u64, effect_json: &str) -> String {
             Err(EffectError::Busy) => Reply::status("busy", "core is applying an operation"),
             Err(EffectError::Invalid(e)) => Reply::status("refused", e),
             Err(EffectError::Failed(e)) => Reply::status("failed", e),
+        })
+    };
+    encode(run.await.unwrap_or_else(|reply| reply))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum LogcatAction {
+    Start,
+    Stop,
+    Status,
+}
+
+#[derive(serde::Deserialize)]
+struct LogcatRequest {
+    action: LogcatAction,
+    #[serde(default)]
+    session: u64,
+}
+
+/// Start, stop or query core's logcat session (see [`crate::logcat_recording`]).
+pub async fn logcat_recording(socket: &str, request_json: &str) -> String {
+    let run = async {
+        let request: LogcatRequest = decode(request_json)?;
+        let client = connect(socket).await?;
+        let id = LogcatSessionId(request.session);
+        let outcome = match request.action {
+            LogcatAction::Start => client.start_logcat_recording(id).await,
+            LogcatAction::Stop => client.stop_logcat_recording(id).await,
+            LogcatAction::Status => {
+                let status = client
+                    .logcat_recording_status()
+                    .await
+                    .map_err(|e| Reply::status("transport", e))?;
+                return Ok(Reply {
+                    status: "ok",
+                    session: Some(status.map(Box::new)),
+                    ..Reply::default()
+                });
+            }
+        }
+        .map_err(|e| Reply::status("transport", e))?;
+        Ok::<_, Reply>(match outcome {
+            Ok(status) => Reply {
+                status: "ok",
+                session: Some(Some(Box::new(status))),
+                ..Reply::default()
+            },
+            Err(LogcatRecordingError::Busy { running }) => Reply {
+                running: Some(running.0),
+                ..Reply::status("busy", "another recording is running")
+            },
+            Err(LogcatRecordingError::UnknownSession) => {
+                Reply::status("unknown_session", "core holds no such session")
+            }
+            Err(LogcatRecordingError::Disabled) => {
+                Reply::status("disabled", "logcat recording is disabled in this core")
+            }
+            Err(LogcatRecordingError::Invalid(e)) => Reply::status("refused", e),
+            Err(LogcatRecordingError::Failed(e)) => Reply::status("failed", e),
         })
     };
     encode(run.await.unwrap_or_else(|reply| reply))

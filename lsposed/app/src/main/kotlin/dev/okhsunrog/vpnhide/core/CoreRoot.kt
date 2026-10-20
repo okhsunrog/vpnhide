@@ -36,13 +36,6 @@ internal sealed class CoreProbe(
 
     data object LogcatLsposedBoot : CoreProbe("logcat_lsposed_boot")
 
-    /** `logcat -d -T since`; [since] is logcat's `MM-DD HH:MM:SS.mmm` stamp. */
-    data class LogcatSince(
-        val since: String,
-    ) : CoreProbe("logcat_since") {
-        override fun json(): JSONObject = super.json().put("since", since)
-    }
-
     data object KernelPartitions : CoreProbe("kernel_partitions")
 
     data object KernelImages : CoreProbe("kernel_images")
@@ -153,6 +146,9 @@ internal interface CoreRootTransport {
 
     /** core-ffi `config_state`: core's published state, including the native boot decision. */
     suspend fun coreState(): String = ""
+
+    /** core-ffi `logcat_recording`: start/stop/status of core's logcat session. */
+    suspend fun logcatRecording(requestJson: String): String = ""
 }
 
 private class FfiCoreRootTransport(
@@ -167,6 +163,8 @@ private class FfiCoreRootTransport(
     ): String = uniffi.vpnhide_core_ffi.rootEffect(socketPath, op.toULong(), effectJson)
 
     override suspend fun coreState(): String = uniffi.vpnhide_core_ffi.configState(socketPath)
+
+    override suspend fun logcatRecording(requestJson: String): String = uniffi.vpnhide_core_ffi.logcatRecording(socketPath, requestJson)
 }
 
 /**
@@ -257,10 +255,118 @@ internal object CoreRoot {
         return parseCoreEffectReply(raw)
     }
 
+    /** Start core's logcat session [id] (idempotent per id). */
+    suspend fun startLogcat(id: Long): CoreLogcatReply = logcat("start", id, LOGCAT_CALL_TIMEOUT_MS)
+
+    /** Stop session [id]; [CoreLogcatSession.file] is the copy core put in the export dir. */
+    suspend fun stopLogcat(id: Long): CoreLogcatReply = logcat("stop", id, LOGCAT_STOP_TIMEOUT_MS)
+
+    /** The session core currently holds (running or last finished), if any. */
+    suspend fun logcatStatus(): CoreLogcatReply = logcat("status", 0L, LOGCAT_CALL_TIMEOUT_MS)
+
+    private suspend fun logcat(
+        action: String,
+        id: Long,
+        timeoutMs: Long,
+    ): CoreLogcatReply {
+        val client = transport ?: return CoreLogcatReply.Failed("unreachable", "not attached")
+        val request = JSONObject().put("action", action).put("session", id).toString()
+        val raw =
+            try {
+                withTimeoutOrNull(timeoutMs) { client.logcatRecording(request) }
+                    ?: return CoreLogcatReply.Failed("timeout", "")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                return CoreLogcatReply.Failed("unreachable", e.message.orEmpty())
+            }
+        return parseCoreLogcatReply(raw)
+    }
+
     // Core bounds the whole batch at 210 s (`DIAGNOSTICS_DEADLINE`).
     private const val DIAGNOSTICS_TIMEOUT_MS = 220_000L
     private const val STATE_TIMEOUT_MS = 15_000L
     private const val EFFECT_TIMEOUT_MS = 30_000L
+    private const val LOGCAT_CALL_TIMEOUT_MS = 20_000L
+
+    // Core's client waits 60 s for Stop (`LOGCAT_STOP_DEADLINE`).
+    private const val LOGCAT_STOP_TIMEOUT_MS = 70_000L
+}
+
+/** Why core ended a logcat session nobody stopped (`core-rpc` `LogcatAutoStopReason`). */
+internal enum class LogcatAutoStop(
+    val wire: String,
+) {
+    SizeCap("size_cap"),
+    DurationCap("duration_cap"),
+    LogcatExited("logcat_exited"),
+}
+
+/** Core's view of one logcat recording (`core-rpc` `LogcatSessionStatus`). */
+internal data class CoreLogcatSession(
+    val id: Long,
+    val recording: Boolean,
+    /** Set when core ended the session on its own limits. */
+    val autoStop: LogcatAutoStop?,
+    val startedAtMs: Long,
+    val durationMs: Long,
+    val bytes: Long,
+    val truncated: Boolean,
+    val maxBytes: Long,
+    val maxDurationMs: Long,
+    val logcatExit: Int?,
+    /** Stop only: the recording core copied into the app's export dir. */
+    val file: File?,
+)
+
+internal sealed interface CoreLogcatReply {
+    /** [session] is null only for a status query when core holds no session. */
+    data class Ok(
+        val session: CoreLogcatSession?,
+    ) : CoreLogcatReply
+
+    /** Another session ([running]) is recording. */
+    data class Busy(
+        val running: Long,
+    ) : CoreLogcatReply
+
+    /** `unknown_session`, `disabled`, `refused`, `failed`, or a delivery status. */
+    data class Failed(
+        val status: String,
+        val detail: String,
+    ) : CoreLogcatReply
+}
+
+internal fun parseCoreLogcatReply(raw: String): CoreLogcatReply =
+    try {
+        val json = strictObject(raw)
+        when (val status = json.getString("status")) {
+            "ok" -> CoreLogcatReply.Ok(json.optJSONObject("session")?.let(::parseCoreLogcatSession))
+            "busy" -> CoreLogcatReply.Busy(json.getLong("running"))
+            else -> CoreLogcatReply.Failed(status, json.optString("detail"))
+        }
+    } catch (e: Exception) {
+        CoreLogcatReply.Failed("malformed", e.message.orEmpty())
+    }
+
+internal fun parseCoreLogcatSession(json: JSONObject): CoreLogcatSession {
+    val state = json.getJSONObject("state")
+    val kind = state.getString("kind")
+    require(kind in setOf("recording", "stopped", "auto_stopped")) { "unknown logcat state $kind" }
+    val reason = state.optString("reason")
+    return CoreLogcatSession(
+        id = json.getLong("session"),
+        recording = kind == "recording",
+        autoStop = if (kind == "auto_stopped") LogcatAutoStop.entries.first { it.wire == reason } else null,
+        startedAtMs = json.getLong("started_at_ms"),
+        durationMs = json.getLong("duration_ms"),
+        bytes = json.getLong("bytes"),
+        truncated = json.optBoolean("truncated"),
+        maxBytes = json.getLong("max_bytes"),
+        maxDurationMs = json.getLong("max_duration_ms"),
+        logcatExit = if (json.has("logcat_exit") && !json.isNull("logcat_exit")) json.getInt("logcat_exit") else null,
+        file = json.optString("file").takeIf { json.has("file") && it.isNotEmpty() }?.let(::File),
+    )
 }
 
 internal fun parseCoreEffectReply(raw: String): CoreEffectOutcome =

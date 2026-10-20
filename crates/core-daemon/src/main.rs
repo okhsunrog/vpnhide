@@ -158,6 +158,8 @@ async fn run(path: &str) {
             std::process::exit(1);
         }
     };
+    // A previous run's logcat session died with it (parent-death signal); drop its file.
+    state.logcat().clean_stale();
     // Select the native backend once for this boot (§4) before serving: scan every
     // candidate, load the single one (or nothing on a conflict), retire Zygisk targets
     // when Zygisk is not it, and publish the typed per-boot status. A restart within
@@ -240,6 +242,7 @@ async fn run(path: &str) {
 
     let _ = tokio::signal::ctrl_c().await;
     eprintln!("core: shutting down");
+    state.logcat().shutdown();
     if let Some(handle) = handle {
         handle.shutdown_and_unlink();
     }

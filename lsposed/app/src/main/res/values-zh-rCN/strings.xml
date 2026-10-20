@@ -115,6 +115,12 @@
     <string name="logcat_btn_stop">停止并保存</string>
     <string name="logcat_recording_status">● 正在录制 · %1$s · %2$s</string>
     <string name="logcat_last_recording">上次录制 · %1$s · %2$s</string>
+    <string name="logcat_recording_limits">VPN Hide Core 会在达到 %1$s 或 %2$d 分钟后自动停止录制。</string>
+    <string name="logcat_auto_stopped_size">录制达到 %1$s 上限，VPN Hide Core 已将其停止。之后的日志不在其中；如果问题出现得更晚，请录制更短的会话。</string>
+    <string name="logcat_auto_stopped_duration">录制达到 %1$d 分钟上限，VPN Hide Core 已将其停止。</string>
+    <string name="logcat_auto_stopped_exited">logcat 自行退出，VPN Hide Core 提前结束了这次录制。</string>
+    <string name="logcat_start_failed">无法在 VPN Hide Core 中开始录制（%1$s）。</string>
+    <string name="logcat_stop_failed">无法从 VPN Hide Core 获取录制内容（%1$s）。</string>
     <!-- Diagnostics per-check status: coloured dot + short word (who hid the VPN on this vector). -->
     <string name="diag_status_ok">正常</string>
     <string name="diag_status_leak">暴露</string>
