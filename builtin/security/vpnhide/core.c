@@ -418,7 +418,7 @@ static const struct file_operations ctl_proc_ops = {
 /*  /proc/vpnhide_diag — read-only field-debugging dump               */
 /*                                                                    */
 /*  NOT part of the frozen control/telemetry wire: a separate proc     */
-/*  node, plain human-readable text, never parsed by the activator or  */
+/*  node, plain human-readable text, never parsed by VPN Hide Core or  */
 /*  app. Reports the live is_vpn_ifname() verdict over every netdev in */
 /*  the reader's netns — for root-causing an unexpected match hiding a  */
 /*  non-VPN interface. Deliberately reports the CURRENT verdict as-is,  */

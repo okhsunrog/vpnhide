@@ -15,7 +15,7 @@
 #include "generated/hook_ids.h"
 
 /* Mirror of vpnhide_protocol::MAX_TARGET_UIDS (crates/protocol/src/lib.rs) and
- * the .ko's MAX_TARGET_UIDS; the activator truncates the projected config to
+ * the .ko's MAX_TARGET_UIDS; VPN Hide Core truncates the projected config to
  * this many targets, so keep all three in sync. */
 #define MAX_TARGET_UIDS 160
 
