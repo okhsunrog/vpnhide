@@ -60,12 +60,9 @@ private object HelpArticle {
     const val COLLECT_REPORT = "collect-report"
 }
 
+@Suppress("LongMethod") // One exhaustive branch per native issue.
 private fun DashboardIssue.Native.nativeMessage(res: Resources): DashboardMessage =
     when (this) {
-        DashboardIssue.KpmStandaloneInstall -> {
-            err(res.getString(R.string.dashboard_issue_kpm_standalone_install), "vpnhide-kpm.zip")
-        }
-
         DashboardIssue.NoNativeBackend -> {
             err(res.getString(R.string.dashboard_issue_no_native), helpArticle = HelpArticle.CHOOSING_NATIVE)
         }
@@ -111,6 +108,19 @@ private fun DashboardIssue.Native.nativeMessage(res: Resources): DashboardMessag
 
         is DashboardIssue.KpmUnverifiable -> {
             err(res.getString(R.string.dashboard_issue_kpm_unverifiable, detail), helpArticle = HelpArticle.KPM_INSTALL)
+        }
+
+        is DashboardIssue.KpmIncompatible -> {
+            err(
+                res.getString(
+                    R.string.dashboard_issue_kpm_incompatible,
+                    found ?: res.getString(R.string.dashboard_issue_kpm_version_unreported),
+                    minimum,
+                    detail,
+                ),
+                "vpnhide-kpm.zip",
+                helpArticle = HelpArticle.KPM_INSTALL,
+            )
         }
 
         is DashboardIssue.NativeBootFailed -> {

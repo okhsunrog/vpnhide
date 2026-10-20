@@ -19,8 +19,8 @@ use vpnhide_protocol::{KPM_ARGS_LEN, Kind, TELEMETRY_VERSION, parse_config, peek
 use crate::{
     APATCH_DIR, APATCH_TRUSTED_SU_KEY, CHILD_COMMAND_TIMEOUT, KPM_CTL_LOCK, KPM_MODULE_FILE,
     KPM_NAME, KPM_TRUNCATION_MARKER, LOCK_EX, Result, SUPERCALL_HELLO, SUPERCALL_HELLO_MAGIC,
-    SUPERCALL_KPM_CONTROL, SUPERCALL_KPM_LIST, SUPERCALL_KPM_LOAD, SUPERKEY_FILE, flock,
-    output_with_timeout, syscall,
+    SUPERCALL_KPM_CONTROL, SUPERCALL_KPM_INFO, SUPERCALL_KPM_LIST, SUPERCALL_KPM_LOAD,
+    SUPERKEY_FILE, flock, output_with_timeout, syscall,
 };
 
 fn find_kpatch() -> Option<PathBuf> {
@@ -182,6 +182,86 @@ pub enum KpmRuntimeProbe {
     AwaitingAuthentication(String),
 }
 
+/// The oldest VPN Hide KPM core drives. 1.2.0 is the first release whose KPM speaks
+/// the control-v2 config snapshot and telemetry-v1 status core uses (the decimal
+/// load-argument format was removed then); every later release kept that wire.
+pub const MIN_KPM_VERSION: &str = "1.2.0";
+
+/// KernelPatch's `get_module_info` for a loaded module (`name=`, `version=`, `args=`
+/// lines). `args` are the load arguments, so they carry `filesystem_hiding=1` when the
+/// module was loaded with it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct KpmInfo {
+    pub name: String,
+    pub version: String,
+    pub args: String,
+}
+
+impl KpmInfo {
+    pub fn parse(text: &str) -> Option<Self> {
+        let mut info = KpmInfo::default();
+        let mut named = false;
+        for line in text.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let value = value.trim().to_owned();
+            match key.trim() {
+                "name" => {
+                    info.name = value;
+                    named = true;
+                }
+                "version" => info.version = value,
+                "args" => info.args = value,
+                _ => {}
+            }
+        }
+        named.then_some(info)
+    }
+
+    /// The load-time filesystem-hiding choice, read back from the load arguments.
+    /// Absence means off: core omits the argument when it is disabled.
+    pub fn filesystem_hiding(&self) -> bool {
+        self.args
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .any(|arg| arg == "filesystem_hiding=1")
+    }
+}
+
+/// Whether a KPM build version (`X.Y.Z`, optionally `-N-gSHA[-dirty]`) is at least
+/// [`MIN_KPM_VERSION`]. `None` when the version is not of that shape.
+pub fn kpm_version_compatible(version: &str) -> Option<bool> {
+    fn triple(v: &str) -> Option<(u32, u32, u32)> {
+        let core = v.trim().trim_start_matches('v');
+        let core = core.split(['-', '+']).next()?;
+        let mut parts = core.split('.');
+        let parsed = (
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+        );
+        parts.next().is_none().then_some(parsed)
+    }
+    Some(triple(version)? >= triple(MIN_KPM_VERSION)?)
+}
+
+/// What core learns about the VPN Hide KPM that is live in KernelPatch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KpmLiveCheck {
+    /// No `vpnhide` module is loaded.
+    NotLoaded,
+    /// Loaded, answers the telemetry-v1 status handshake as the KPM backend, and its
+    /// version (when KernelPatch reports one) is supported. `info` is `None` when the
+    /// runtime cannot report module info (a CLI without `kpm info`).
+    Compatible { info: Option<KpmInfo> },
+    /// Loaded, but core cannot drive it: too old, an unparseable version, or no valid
+    /// status handshake. `found` is the version KernelPatch reported, if any.
+    Incompatible {
+        found: Option<String>,
+        detail: String,
+    },
+}
+
 impl CoreKpm {
     /// Like [`Self::connect`], but keeps an authentication refusal distinct from other
     /// probe failures so core can tell "awaiting the superkey" from "broken runtime".
@@ -227,6 +307,48 @@ impl CoreKpm {
     pub fn status(&self) -> Result<Option<vpnhide_protocol::Status>> {
         let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
         self.status_locked()
+    }
+
+    /// Identify the live `vpnhide` KPM — loaded by core, by APatch autoload or by hand —
+    /// before core adopts it: the status handshake must answer as the KPM backend, and
+    /// a reported version must be at least [`MIN_KPM_VERSION`]. Transport failures stay
+    /// errors (the runtime could not be queried).
+    pub fn verify_live(&self) -> Result<KpmLiveCheck> {
+        let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
+        if !self.client.list_contains()? {
+            return Ok(KpmLiveCheck::NotLoaded);
+        }
+        let info = self.client.info().ok().flatten();
+        let found = info.as_ref().map(|i| i.version.clone());
+        if let Some(version) = found.clone() {
+            match kpm_version_compatible(&version) {
+                Some(true) => {}
+                Some(false) => {
+                    return Ok(KpmLiveCheck::Incompatible {
+                        found,
+                        detail: format!(
+                            "the loaded vpnhide KPM is version {version}; core needs {MIN_KPM_VERSION} or newer"
+                        ),
+                    });
+                }
+                None => {
+                    return Ok(KpmLiveCheck::Incompatible {
+                        found,
+                        detail: format!(
+                            "the loaded vpnhide KPM reports an unrecognised version '{version}'"
+                        ),
+                    });
+                }
+            }
+        }
+        match self.status_locked() {
+            Ok(Some(_)) => Ok(KpmLiveCheck::Compatible { info }),
+            Ok(None) => Ok(KpmLiveCheck::NotLoaded),
+            Err(e) => Ok(KpmLiveCheck::Incompatible {
+                found,
+                detail: format!("the loaded vpnhide KPM failed the status handshake: {e}"),
+            }),
+        }
     }
 
     fn status_locked(&self) -> Result<Option<vpnhide_protocol::Status>> {
@@ -390,6 +512,19 @@ impl KpmClient {
         }
     }
 
+    /// KernelPatch's module info for `vpnhide`. `Ok(None)` when the runtime has no way
+    /// to report it (a `kpatch` CLI without `kpm info`).
+    fn info(&self) -> Result<Option<KpmInfo>> {
+        let text = match self {
+            Self::KpatchCli { path } => match kpatch_kpm_info(path) {
+                Ok(text) => text,
+                Err(_) => return Ok(None),
+            },
+            Self::ApatchSupercall { key, style } => apatch_kpm_info(key, *style)?,
+        };
+        Ok(KpmInfo::parse(&text).filter(|info| info.name == KPM_NAME))
+    }
+
     fn load(&self, options: KpmLoadOptions) -> Result<()> {
         self.load_from(Path::new(KPM_MODULE_FILE), options)
     }
@@ -498,6 +633,19 @@ fn kpatch_kpm_list_contains(kpatch: &Path) -> Result<bool> {
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     Ok(stdout.split_whitespace().any(|token| token == KPM_NAME))
+}
+
+fn kpatch_kpm_info(kpatch: &Path) -> Result<String> {
+    let mut cmd = Command::new(kpatch);
+    cmd.args(["kpm", "info", KPM_NAME]);
+    let out = output_with_timeout(&mut cmd, CHILD_COMMAND_TIMEOUT)?;
+    // Like ctl0 reads, the CLI may exit with the supercall's byte count: trust stdout.
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    if text.contains("name=") {
+        Ok(text)
+    } else {
+        Err(format!("kpatch kpm info failed with status {}", out.status).into())
+    }
 }
 
 fn kpatch_hello(kpatch: &Path) -> Result<()> {
@@ -774,6 +922,26 @@ fn apatch_kpm_list(key: &str, style: ApatchCommandStyle) -> Result<String> {
     Ok(String::from_utf8_lossy(&buf[..len]).into_owned())
 }
 
+fn apatch_kpm_info(key: &str, style: ApatchCommandStyle) -> Result<String> {
+    let auth = auth_label(key);
+    let key = CString::new(key)?;
+    let name = CString::new(KPM_NAME)?;
+    let mut buf = [0u8; 2048];
+    let rc = unsafe {
+        syscall(
+            APATCH_SUPERCALL_NR as c_long,
+            key.as_ptr(),
+            supercall_cmd(style, SUPERCALL_KPM_INFO),
+            name.as_ptr(),
+            buf.as_mut_ptr().cast::<c_char>(),
+            buf.len() as c_long,
+        )
+    };
+    supercall_ok(rc, "kpm info", auth)?;
+    let len = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+    Ok(String::from_utf8_lossy(&buf[..len]).into_owned())
+}
+
 fn apatch_kpm_ctl0_config(key: &str, style: ApatchCommandStyle, wire: &str) -> Result<()> {
     let (rc, _) = apatch_kpm_ctl0_raw(key, style, wire)?;
     supercall_ok(rc, "kpm ctl0", auth_label(key))
@@ -849,5 +1017,33 @@ fn auth_label(key: &str) -> &'static str {
         "trusted su"
     } else {
         "saved superkey"
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::{KpmInfo, kpm_version_compatible};
+
+    #[test]
+    fn module_info_parses_kernelpatch_get_module_info() {
+        let text = "name=vpnhide\nversion=1.3.1-12-gabcdef0-dirty\nlicense=GPL v2\nauthor=okhsunrog\ndescription=Hide VPN\nargs=filesystem_hiding=1\nload_event=post-fs-data\nload_source=manual\n";
+        let info = KpmInfo::parse(text).unwrap();
+        assert_eq!(info.name, "vpnhide");
+        assert_eq!(info.version, "1.3.1-12-gabcdef0-dirty");
+        assert!(info.filesystem_hiding());
+        let plain = KpmInfo::parse("name=vpnhide\nversion=1.3.1\nargs=\n").unwrap();
+        assert!(!plain.filesystem_hiding());
+        assert_eq!(KpmInfo::parse("garbage"), None);
+    }
+
+    #[test]
+    fn version_floor_is_the_control_v2_release() {
+        assert_eq!(kpm_version_compatible("1.2.0"), Some(true));
+        assert_eq!(kpm_version_compatible("1.3.1-4-g1234567"), Some(true));
+        assert_eq!(kpm_version_compatible("v2.0.0"), Some(true));
+        assert_eq!(kpm_version_compatible("1.1.1"), Some(false));
+        assert_eq!(kpm_version_compatible("0.9.9"), Some(false));
+        assert_eq!(kpm_version_compatible("dev"), None);
+        assert_eq!(kpm_version_compatible("1.2"), None);
     }
 }

@@ -27,10 +27,16 @@ a KernelPatch runtime."*
 1. Make sure a KernelPatch runtime is present (above).
 2. Download `vpnhide-kpm.zip` (the Dashboard names it).
 3. Install the **whole ZIP** through your root manager's **Modules** screen, as
-   an APM/Magisk-compatible module. Do **not** extract or load the inner
-   `vpnhide.kpm` file by itself. The VPN Hide Core module (required) loads the KPM
-   from the installed module at every boot and delivers its config; a `.kpm`
-   loaded by hand is not loaded again after a reboot.
+   an APM/Magisk-compatible module. The VPN Hide Core module (required) loads the
+   KPM from the installed module at every boot and delivers its config.
+
+   Loading `vpnhide.kpm` yourself is also supported: through APatch/FolkPatch's
+   KPM screen (load or install it there), KPatch-Next, or embedded in a patched
+   boot image. Core finds the running KPM, checks its version and sends it your
+   config, just as with the module. A KPM loaded once by hand is gone after a
+   reboot, unless your KernelPatch manager loads it at boot. If you also install
+   the ZIP, core uses the copy that is already running and doesn't load a second
+   one.
 4. On APatch / FolkPatch, save your **SuperKey** in **Settings → Security** (the
    same one you set in APatch/FolkPatch).
 5. **Reboot**, then open the **Dashboard** — the Native backend should read
@@ -65,10 +71,12 @@ The Dashboard names the cause:
   trusted `su` token. Save your SuperKey in **Settings → Security** and reboot
   (or tap Refresh). Reinstalling the ZIP does not help.
 - **Needs a runtime** — no KernelPatch runtime in the kernel; install one (above).
-- **Standalone install detected** — the bare `vpnhide.kpm` was loaded but the
-  module ZIP isn't installed. Remove the standalone entry, install the full
-  `vpnhide-kpm.zip` from the Modules screen, and reboot.
-- **Conflict with the kernel module** — the `.ko` and KPM are both installed;
+- **KPM too old or not recognised** — a VPN Hide KPM is running, but it is
+  older than core supports (1.2.0) or didn't answer core's status check. Core
+  doesn't configure it and doesn't load a second copy. Replace it with the
+  current version (install the ZIP, or load the current `vpnhide.kpm`) and reboot.
+- **Conflict with the kernel module** — the `.ko` and KPM are both installed or
+  running (a hand-loaded KPM counts too);
   they hook the same functions and can hard-freeze the device, so KPM stands
   down. Uninstall one of them. **Never run both.**
 

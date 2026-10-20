@@ -54,7 +54,7 @@ You always need the **VPN Hide app** (`vpnhide.apk`) + the **VPN Hide Core** mod
 - **`KPM`** — kernel-level backend for 4.14 / 4.19 / 5.4 and other cases where the `.ko` does not fit. Requires APatch or [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest).
 - **`Zygisk`** — fallback if kmod/KPM are unavailable or you do not want to install a KernelPatch runtime.
 
-Install exactly one Native backend. Core decides once per boot: if it finds more than one (installed kmod/KPM/Zygisk modules, a kernel with VPN Hide built in, or a KPM it did not load), it loads **none** of them and the Dashboard names the conflict — uninstall the extras and reboot.
+Install exactly one Native backend. Core decides once per boot: if it finds more than one (installed kmod/KPM/Zygisk modules, a kernel with VPN Hide built in, or a running VPN Hide KPM), it loads **none** of them and the Dashboard names the conflict — uninstall the extras and reboot. Loading `vpnhide.kpm` yourself (APatch/FolkPatch KPM screen, KPatch-Next, an embedded KPM) is a supported alternative to `vpnhide-kpm.zip`: core checks its version and configures it like the module; with the ZIP installed too, core uses the running copy instead of loading a second one.
 
 See [Install](#install) for step-by-step instructions.
 

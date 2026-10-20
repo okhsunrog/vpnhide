@@ -380,8 +380,20 @@ The `.ko`/built-in and KPM exclusion is also a kernel safety boundary. They wrap
 the same kernel functions with different mechanisms (kretprobes or source call
 sites versus KernelPatch inline hooks); co-residence has hard-frozen a device.
 Core's candidate scan treats a live `/proc/vpnhide_ctl` or a live KPM as a
-candidate, so it never loads a second kernel backend over a live one. Manual
-loading outside core bypasses that guard and is unsupported.
+candidate, so it never loads a second kernel backend over a live one. A KPM
+loaded outside core (APatch/FolkPatch's KPM screen, KPatch-Next, an embedded
+KPM, or by hand) is a supported install method: it is a live candidate like any
+other, so with nothing else installed core selects and adopts it, and with
+anything else installed or live it is a `Conflict`. An installed `vpnhide_kpm`
+module whose KPM is already live is one candidate, not two: core adopts the
+running copy and never loads the module's artifact over it. Before adopting,
+core reads `KPM_INFO` (`version=`, `args=`): a version older than
+`MIN_KPM_VERSION` (1.2.0, the first control-v2 release), an unrecognised version
+or a failed status handshake is `KpmIncompatible`, and nothing is configured.
+A runtime that cannot report module info (a `kpatch` CLI without `kpm info`)
+falls back to the status handshake alone. The adopted KPM's load-time
+`filesystem_hiding=1` is read back from `args=`. Loading a kernel module with
+`insmod` outside core still bypasses the guard and is unsupported.
 
 Core verifies identity on the open proc file before writing family-specific
 configuration (`crates/activator/src/kernel_control.rs`): a node that reports

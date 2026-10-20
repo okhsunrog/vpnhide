@@ -5,8 +5,6 @@ import dev.okhsunrog.vpnhide.KpmLoadStatus
 import dev.okhsunrog.vpnhide.KpmRuntime
 import dev.okhsunrog.vpnhide.ModuleBrokenReason
 import dev.okhsunrog.vpnhide.ModuleState
-import dev.okhsunrog.vpnhide.checks.KpmListResponse
-import dev.okhsunrog.vpnhide.checks.NativeProbe
 
 internal sealed interface KpmProblemKind {
     val reason: ModuleBrokenReason?
@@ -75,21 +73,4 @@ internal fun classifyKpmProblem(
         return KpmProblemKind.NeedsSuperkey
     }
     return KpmProblemKind.LoadFailed(detail)
-}
-
-/**
- * A runtime-loaded `vpnhide` KPM without our flashable module directory is a
- * raw `.kpm` installation. It lacks the activator and boot/config lifecycle,
- * so it must not count as a valid native backend even if KernelPatch lists it.
- */
-internal fun standaloneKpmLoaded(
-    kpm: ModuleState,
-    runtimeModulesSection: String,
-): Boolean {
-    if (kpm is ModuleState.Installed) return false
-    val observation =
-        (NativeProbe.parseKpmList(runtimeModulesSection) as? KpmListResponse.Success)
-            ?.observation
-            ?: return false
-    return observation.available && "vpnhide" in observation.modules
 }

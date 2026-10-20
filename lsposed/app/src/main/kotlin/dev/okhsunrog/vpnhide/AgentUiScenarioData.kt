@@ -13,7 +13,7 @@ internal val agentUiIssues: Map<String, DashboardIssue> =
         "kmod-signature-enforced" to DashboardIssue.ModuleBroken(ModuleProblem.Kmod(KmodProblemKind.SignatureEnforced)),
         "native-conflict" to DashboardIssue.NativeConflictKernel,
         "native-missing" to DashboardIssue.NoNativeBackend,
-        "kpm-standalone" to DashboardIssue.KpmStandaloneInstall,
+        "kpm-incompatible" to DashboardIssue.KpmIncompatible("1.1.1", "1.2.0", "Fixture: the loaded vpnhide KPM is version 1.1.1"),
         "lsposed-missing" to DashboardIssue.LsposedNotInstalled,
         "lsposed-reboot" to DashboardIssue.LsposedNeedsReboot,
         "lsposed-disabled" to DashboardIssue.LsposedNotEnabled,

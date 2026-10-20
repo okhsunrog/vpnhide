@@ -56,7 +56,7 @@ vpnhide 对选定应用隐藏三样东西，全部通过四个 **J / N / A / P**
 - **`KPM`** —— 用于 4.14 / 4.19 / 5.4 以及 `.ko` 不适配的其他情况的内核级后端。需要 APatch 或 [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)。
 - **`Zygisk`** —— 当 kmod/KPM 不可用，或你不想安装 KernelPatch 运行时时的回退方案。
 
-请只安装一个原生后端。核心在每次启动时决定一次：若发现多于一个（已安装的 kmod/KPM/Zygisk 模块、内置 VPN Hide 的内核，或不是由它加载的 KPM），它**一个也不加载**，并在概览中指出冲突——卸载多余的模块后重启。
+请只安装一个原生后端。核心在每次启动时决定一次：若发现多于一个（已安装的 kmod/KPM/Zygisk 模块、内置 VPN Hide 的内核，或正在运行的 VPN Hide KPM），它**一个也不加载**，并在概览中指出冲突——卸载多余的模块后重启。自行加载 `vpnhide.kpm`（APatch/FolkPatch 的 KPM 界面、KPatch-Next、内嵌 KPM）是 `vpnhide-kpm.zip` 之外受支持的安装方式：核心会检查其版本并像模块一样配置它；若同时安装了 ZIP，核心使用已在运行的那份，不再加载第二份。
 
 分步说明见[安装](#安装)。
 

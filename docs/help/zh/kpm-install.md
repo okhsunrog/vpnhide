@@ -22,8 +22,13 @@ KPM 使用内核 inline 挂钩，这要求内核中已存在 KernelPatch 运行�
 1. 确认已存在 KernelPatch 运行时（见上）。
 2. 下载 `vpnhide-kpm.zip`（仪表盘会指明文件）。
 3. 通过 root 管理器的 **Modules** 界面，把**整个 ZIP** 作为 APM/Magisk 兼容模块
-   安装。**不要**单独解压或加载内部的 `vpnhide.kpm` 文件。VPN Hide Core 模块（必需）在每次启动时从已安装的
-   模块加载 KPM 并下发配置；手动加载的 `.kpm` 重启后不会再次加载。
+   安装。VPN Hide Core 模块（必需）在每次启动时从已安装的模块加载 KPM 并下发配置。
+
+   也支持自行加载 `vpnhide.kpm`：在 APatch/FolkPatch 的 KPM 界面加载或安装、通过
+   KPatch-Next 加载，或嵌入已修补的 boot 镜像。Core 会找到正在运行的 KPM、检查其
+   版本并像模块安装一样下发配置。只手动加载一次的 KPM 重启后会消失，除非你的
+   KernelPatch 管理器在开机时加载它。若同时安装了 ZIP，core 会使用已在运行的那份，
+   不会再加载第二份。
 4. 在 APatch / FolkPatch 上，把你的 **SuperKey** 保存到 **Settings → Security**
    （与你在 APatch/FolkPatch 里设置的相同）。
 5. **重启**，然后打开**仪表盘**——Native 后端应显示 **Active**。
@@ -53,9 +58,10 @@ KPM 在加载时校验你的内核家族。受支持的家族为 4.4、4.9、4.1
   SuperKey 保存到 **Settings → Security** 并重启（或点 Refresh）。重装 ZIP 无济
   于事。
 - **需要运行时**——内核里没有 KernelPatch 运行时；安装一个（见上）。
-- **检测到独立安装**——加载了裸的 `vpnhide.kpm`，而模块 ZIP 未安装。移除那个独立
-  条目，从 Modules 界面安装完整的 `vpnhide-kpm.zip` 并重启。
-- **与内核模块冲突**——`.ko` 和 KPM 都已安装；它们挂钩相同函数、可能使设备死机，
+- **KPM 过旧或无法识别**——VPN Hide 的 KPM 正在运行，但版本低于 core 支持的
+  1.2.0，或未通过 core 的状态检查。Core 不会配置它，也不会加载第二份。请换成当前
+  版本（安装 ZIP 或加载当前的 `vpnhide.kpm`）并重启。
+- **与内核模块冲突**——`.ko` 和 KPM 都已安装或正在运行（手动加载的 KPM 也算）；它们挂钩相同函数、可能使设备死机，
   因此 KPM 主动退让。卸载其中之一。**切勿同时保留两者生效。**
 
 若加载失败，用 **Settings → Debugging → Collect debug log** 把开机时的输出附到

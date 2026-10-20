@@ -25,8 +25,8 @@ class NativeBootStatusTest {
         val statuses = List(fixture.length()) { entry(it) }
         val kinds = statuses.map { it.outcome::class }.toSet()
 
-        assertEquals(13, statuses.size)
-        assertEquals(11, kinds.size)
+        assertEquals(15, statuses.size)
+        assertEquals(12, kinds.size)
         assertEquals(NativeBootOutcome.Selected(NativeBackendId.Kmod, NativeSelectionMode.Loaded, true), statuses[0].outcome)
         assertEquals(NativeBootOutcome.Selected(NativeBackendId.Builtin, NativeSelectionMode.Adopted, null), statuses[1].outcome)
         val first = statuses[0]
@@ -46,6 +46,19 @@ class NativeBootStatusTest {
         assertNull(last.kmod)
         assertNull(last.ports)
         assertEquals(NativeBootOutcome.NoBackend, last.outcome)
+    }
+
+    @Test
+    fun `an incompatible live KPM keeps the reported and required versions`() {
+        val incompatible = List(fixture.length()) { entry(it).outcome }.filterIsInstance<NativeBootOutcome.KpmIncompatible>()
+
+        assertEquals(
+            listOf(
+                NativeBootOutcome.KpmIncompatible("1.1.1", "1.2.0", "too old"),
+                NativeBootOutcome.KpmIncompatible(null, "1.2.0", "no status"),
+            ),
+            incompatible,
+        )
     }
 
     @Test

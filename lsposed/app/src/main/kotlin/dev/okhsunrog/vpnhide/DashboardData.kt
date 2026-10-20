@@ -13,7 +13,6 @@ import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementCoverage
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.classifyKpmProblem
-import dev.okhsunrog.vpnhide.diagnostics.standaloneKpmLoaded
 import dev.okhsunrog.vpnhide.diagnostics.token
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.generated.HookIds
@@ -882,13 +881,16 @@ internal fun detectKpmModule(
     currentBootId: String,
 ): ModuleState {
     val prop = parseModuleProp(sections["kpm_prop"].orEmpty())
-    if (!prop.installed) return ModuleState.NotInstalled
     // The KPM has no /proc marker: its runtime channel is the KernelPatch ctl0
     // supercall, which core reads into `kpm_state`. A complete status reply there
-    // is the live runtime. Core selecting the KPM this boot also counts.
+    // is the live runtime. Core selecting (or finding) the KPM this boot also counts.
     val active =
         Protocol.parseStatusFields(sections["kpm_state"].orEmpty()) != null ||
             (loadStatus.loaded == true && loadStatus.isFreshFor(currentBootId))
+    // A vpnhide.kpm loaded by hand or autoloaded by APatch, without the
+    // vpnhide-kpm.zip module, is a normal installation: core adopts it once its
+    // version checks out. Like the built-in kernel it has no module to report.
+    if (!prop.installed) return if (active) ModuleState.Installed(version = null, active = true) else ModuleState.NotInstalled
     return ModuleState.Installed(
         version = prop.version,
         active = active,
@@ -1125,7 +1127,6 @@ private fun deriveModuleFacts(
         backends = backends,
         // The single native backend the dashboard shows (kmod > builtin > KPM > Zygisk).
         nativeBackend = displayNativeBackend(backends),
-        standaloneKpm = standaloneKpmLoaded(raw.kpm, sections["kpm_runtime_modules"].orEmpty()),
         kpmLoadStatus = kpmLoadStatus,
         kmodLoadStatus = kmodLoadStatus,
         currentBootId = currentBootId,
@@ -1331,7 +1332,7 @@ private fun DashboardFacts.toDashboardState(
         // yet. Wrong-variant / broken / unsupported-kernel cases already emit a red
         // error with the same call to action — showing both duplicates it.
         nativeInstallRecommendation =
-            kernelRecommendation?.takeIf { modules.backends.noneInstalled && !modules.standaloneKpm && !modules.builtinKernelPresent },
+            kernelRecommendation?.takeIf { modules.backends.noneInstalled && !modules.builtinKernelPresent },
         kmodLoadStatus = modules.kmodLoadStatus,
         protection = protection.check,
         nativePartialHooks = protection.partialHookGap != null,

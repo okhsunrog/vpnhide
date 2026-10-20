@@ -50,7 +50,7 @@ pub use edit::{ConfigAppField, ConfigEdit, ConfigSetField, ConfigToggle};
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract, §9): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -272,8 +272,9 @@ pub struct NativeBackendStatus {
 /// How a selected native backend came to be running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SelectionMode {
-    /// Already live when core scanned (built-in kernel, a backend core loaded earlier
-    /// this boot, or the Zygisk module that Zygisk itself injects).
+    /// Already live when core scanned: the built-in kernel, a backend core loaded
+    /// earlier this boot, a KPM that APatch autoloaded or the user loaded by hand
+    /// (a supported install method), or the Zygisk module that Zygisk itself injects.
     Adopted,
     /// Core loaded it during this boot's scan.
     Loaded,
@@ -287,8 +288,9 @@ pub enum NativeBootOutcome {
     Selected {
         backend: NativeBackend,
         mode: SelectionMode,
-        /// The load-time filesystem-hiding choice, when core knows it (it loaded the
-        /// backend this boot). `None` for an adopted backend whose load args are unknown.
+        /// The load-time filesystem-hiding choice, when core knows it: it loaded the
+        /// backend this boot, or read an adopted KPM's load args back from KernelPatch.
+        /// `None` for an adopted backend whose load args are unknown.
         filesystem_hiding: Option<bool>,
     },
     /// More than one candidate: nothing was loaded and no config was delivered.
@@ -302,6 +304,16 @@ pub enum NativeBootOutcome {
     /// KernelPatch cannot be queried and a VPN Hide KPM may be live, so no other
     /// backend can be loaded safely.
     KpmUnverifiable { detail: String },
+    /// A VPN Hide KPM is live (loaded by core earlier, by APatch autoload or by hand)
+    /// and is the only candidate, but core cannot drive it: its version is older than
+    /// `minimum` or unrecognised, or it failed the status handshake. Nothing is
+    /// configured and no second copy is loaded (v7).
+    KpmIncompatible {
+        /// The version KernelPatch reported, when it reported one.
+        found: Option<String>,
+        minimum: String,
+        detail: String,
+    },
     /// The selected backend does not support the running kernel.
     UnsupportedKernel {
         backend: NativeBackend,
@@ -680,6 +692,16 @@ mod tests {
                 },
                 NativeBootOutcome::AwaitingAuthentication { detail: "a".into() },
                 NativeBootOutcome::KpmUnverifiable { detail: "b".into() },
+                NativeBootOutcome::KpmIncompatible {
+                    found: Some("1.1.1".into()),
+                    minimum: "1.2.0".into(),
+                    detail: "too old".into(),
+                },
+                NativeBootOutcome::KpmIncompatible {
+                    found: None,
+                    minimum: "1.2.0".into(),
+                    detail: "no status".into(),
+                },
                 NativeBootOutcome::UnsupportedKernel {
                     backend: NativeBackend::Kpm,
                     uname: "6.18".into(),

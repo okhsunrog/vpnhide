@@ -43,16 +43,20 @@ internal class DashboardIssuesTest : DashboardIssuesFixture() {
     }
 
     @Test
-    fun `a standalone KPM zip replaces the missing-native error rather than joining it`() {
+    fun `a hand-loaded KPM is a normal native backend, not an install error`() {
         val issues =
             dashboardIssues(
-                facts(modules = moduleFacts(kmod = ModuleState.NotInstalled, standaloneKpm = true)),
+                facts(
+                    modules =
+                        moduleFacts(
+                            kmod = ModuleState.NotInstalled,
+                            kpm = ModuleState.Installed(version = null, active = true),
+                        ),
+                ),
             )
 
-        assertTrue(issues.has<DashboardIssue.KpmStandaloneInstall>())
-        // Both would be telling the user to install a native backend; the specific
-        // diagnosis wins.
         assertFalse(issues.has<DashboardIssue.NoNativeBackend>())
+        assertTrue(issues.none { it is DashboardIssue.Native })
     }
 
     // ── LSPosed ──

@@ -14,10 +14,6 @@ internal data class DashboardIssueReason(
 @Suppress("CyclomaticComplexMethod", "LongMethod")
 internal fun DashboardIssue.toReason(): DashboardIssueReason =
     when (this) {
-        DashboardIssue.KpmStandaloneInstall -> {
-            DashboardIssueReason("kpm_standalone_install")
-        }
-
         DashboardIssue.NoNativeBackend -> {
             DashboardIssueReason("no_native_backend")
         }
@@ -48,6 +44,13 @@ internal fun DashboardIssue.toReason(): DashboardIssueReason =
 
         is DashboardIssue.KpmUnverifiable -> {
             DashboardIssueReason("kpm_unverifiable", mapOf("detail" to detail))
+        }
+
+        is DashboardIssue.KpmIncompatible -> {
+            DashboardIssueReason(
+                "kpm_incompatible",
+                mapOf("found" to found.orEmpty(), "minimum" to minimum, "detail" to detail),
+            )
         }
 
         is DashboardIssue.NativeBootFailed -> {
