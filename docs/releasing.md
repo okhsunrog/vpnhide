@@ -30,9 +30,12 @@
    ```sh
    ./scripts/update-json.sh
    ```
-6. Commit and push:
+6. Commit and push. Stage the directory explicitly: the first release that ships
+   a new module (2.0's `update-core.json`) creates an untracked file that
+   `commit -a` would leave out.
    ```sh
-   git commit -am "chore: update-json for v0.6.2"
+   git add update-json
+   git commit -m "chore: update-json for v0.6.2"
    git push
    ```
 

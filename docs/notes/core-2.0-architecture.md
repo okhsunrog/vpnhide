@@ -1,5 +1,15 @@
 # VPN Hide 2.0: persistent core architecture
 
+> **2.0 status (implemented on `dev-2.x`).** This was the design record; the
+> implementation now exists and differs from it in places. Where they disagree, the
+> code and the current docs ([storage.md](../storage.md), [state.md](../state.md),
+> [core-2.0-module-lifecycle.md](core-2.0-module-lifecycle.md)) win. Settled since:
+> core is a required module and the only root process; the app has no `su` and runs
+> no shell; there is no shell logic on the device (`service.sh` is one `exec`);
+> native selection is strict (more than one candidate loads nothing); the 1.x
+> activators, Ports module and Built-in companion module are removed. The 1.x
+> mutation transport linked below exists only on `main`.
+
 Status: discussion record and proposed architecture, not an implemented contract.
 Recorded 2026-09-17; revised the same day after a design session that read the
 current in-process coordinators and resolved several choices the first draft left
@@ -931,7 +941,7 @@ does not supersede them):
 
 - [Config coordinator](../config-coordinator.md)
 - [Observation coordinator](../observation-coordinator.md)
-- [Mutation transport and descendant guarantees](../root-mutation-transport.md)
+- [Mutation transport and descendant guarantees](https://github.com/okhsunrog/vpnhide/blob/main/docs/root-mutation-transport.md)
 - [State transitions](app-state-transitions.md)
 - [Diagnostic semantics](diagnostics-state-analysis.md)
 - [Storage and activation](../storage.md)

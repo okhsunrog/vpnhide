@@ -1,5 +1,10 @@
 # Built-in backend app integration audit
 
+> **Historical (1.x).** In 2.0 the built-in companion module and both activators
+> were removed: VPN Hide Core adopts the built-in driver (backend `0x4`) as one of
+> its strictly exclusive native candidates, and a still-installed `vpnhide_builtin`
+> module is reported as obsolete on the Dashboard.
+
 Scope: application consumers of native-backend identity, based on main
 `eec0d95f` (2026-09-16). Kernel hook implementations are outside this audit. Companion loading and
 activation guards are included in the follow-up below.

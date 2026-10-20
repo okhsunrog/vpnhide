@@ -52,8 +52,8 @@ app boundary, invalidate policy assumptions or disable the hooks entirely.
 
 The user controls the device, approves root access and installs trusted builds
 of vpnhide and its dependencies. Trust includes the kernel/ROM, root manager,
-selected native backend and its loader, LSPosed when used, the picker app,
-activator and privileged helper. Compromising any of these can undermine the
+selected native backend, VPN Hide Core (the only root process vpnhide adds),
+LSPosed when used, and the picker app. Compromising any of these can undermine the
 result; vpnhide does not isolate them from one another as hostile principals.
 
 | Boundary | Enforcement and limits |
@@ -62,11 +62,11 @@ result; vpnhide does not isolate them from one another as hostile principals.
 | Target app → in-process libc | Zygisk filters hooked libc calls. Raw syscalls, unhooked entry points and process inspection remain relevant bypass/detection paths. |
 | Target app → framework services | LSPosed hooks in `system_server` sanitize supported Binder results and callbacks using caller identity. Coverage depends on hooks attaching on the actual Android/ROM implementation. |
 | Target app → local ports | The Ports role uses configured firewall rules. It does not hide every possible endpoint or remote service and does not replace the other roles. |
-| App configuration → privileged runtime | The config coordinator owns app writes; the activator derives backend state. Helper receipts and session fencing track privileged work, including late launches and uncertain outcomes. They are not protection from a malicious root caller. |
+| App configuration → privileged runtime | The config coordinator owns app intent; core is the only writer and derives backend state. Core's operation journal tracks privileged work, including uncertain outcomes. Core accepts only root and the uid that owns the VPN Hide data directory on its socket (`SO_PEERCRED`); that is not protection from a malicious root caller. |
 | Ordinary app → stored policy/secrets | Documented ownership, modes and SELinux labels separate ordinary apps from canonical policy and privileged control data. Root remains trusted and can read or change them. |
 
 See [config-coordinator.md](config-coordinator.md),
-[root-mutation-transport.md](root-mutation-transport.md) and
+[core-2.0 architecture](notes/core-2.0-architecture.md) and
 [protocol.md](protocol.md) for those contracts. Installing a module or saving a
 configuration alone does not establish that runtime activation succeeded.
 

@@ -21,8 +21,8 @@ Stable references for anyone changing the code. Read the relevant one before a P
 | Doc | What it covers |
 |---|---|
 | [development.md](development.md) | Prereqs, per-module build quickstart, device install, CI lints |
-| [protocol.md](protocol.md) | The frozen control/telemetry wire between activator, app and backends |
-| [storage.md](storage.md) | Storage & activation design: the JSON canonical, the activator, SELinux |
+| [protocol.md](protocol.md) | The frozen control/telemetry wire between core, app and backends |
+| [storage.md](storage.md) | Storage & activation design: the JSON canonical, core and the backends, strict single native backend, SELinux |
 | [state.md](state.md) | Every persistent path / proc entry / iptables chain the project touches |
 | [threat-model.md](threat-model.md) | Attacker capabilities, trusted components, security boundaries and limits of hiding/diagnostic claims |
 | [detection-vectors.md](detection-vectors.md) | What an app can probe and which component covers each vector |

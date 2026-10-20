@@ -1,7 +1,13 @@
 # Setup wizard — design (help-UX phase 4)
 
 A design proposal for the first-run setup wizard — **not yet implemented**, to be
-built in its own PR. The `file:line` references point at the tree as it was when
+built in its own PR.
+
+> **2.0 changes the ground truth below.** A wizard for 2.0 needs a first step
+> "Install VPN Hide Core" (`vpnhide-core.zip`; the app is gated until core runs),
+> the Ports row becomes a plain explanation (Ports is part of core, there is no
+> `vpnhide-ports.zip` to download), and any reboot button must be a core root
+> effect: the app has no `suExec`. The `file:line` references point at the tree as it was when
 this was written and may drift; re-check them before implementing.
 
 ## 0. Ground truth the design rests on
@@ -340,7 +346,7 @@ only.
 |---|---|---|---|---|
 | Java layer | Todo/NotInstalled: "Install LSPosed (or LSPosed-Next / Vector), then come back." Todo/NotEnabled: "In LSPosed, enable **VPN Hide** and add **System Framework** to its scope." NoSystemScope: the scope sentence only. WaitingReboot: reboot banner. Blocked: issue text. | — (no reliable LSPosed manager intent; its package is often randomised/hidden) | Check again | `first-install` |
 | Native backend | Todo: `NativeInstallRecommendationCard(recommendation)` verbatim — it already words kmod / ambiguous-variant / KPM-needs-runtime / Zygisk and carries the download + all-releases buttons — plus one wizard sentence: "Install the ZIP from your root manager's Modules screen, then reboot." WaitingReboot: reboot banner. Blocked: `issue.toMessage().text` + `messageActionSlot` (download the right zip / Learn more). Unverified: neutral "can't verify from this shell" note. | Download (inside the card) | Check again | by recommendation: `kmod-install` / `kpm-install` / `zygisk-install`; Blocked → `module-not-active` |
-| Ports (optional) | "Only needed if your VPN/proxy runs a local port (Clash, sing-box…). Skip if unsure." Done: "Installed". | `ModuleDownloadButton("vpnhide-ports.zip")` | — | `ports` |
+| Ports (optional) | "Only needed if your VPN/proxy runs a local port (Clash, sing-box…). Skip if unsure." Done: "Installed". | ~~`ModuleDownloadButton("vpnhide-ports.zip")`~~ (none in 2.0) | — | `ports` |
 | First target | "Pick the app you want to hide the VPN **from** (a bank, not the VPN client), turn on Java and Native, Save." Done: "N apps configured" (from `nativeTargetCount` / `LsposedState.Active.targetCount` when available, else just "Configured"). | **Open Hiding** → close wizard, `currentTab = Protection` | — | `first-setup` |
 | Verify | Gated(VPN_OFF): `VpnOffPrompt(onRetry)`. Gated(SELF_NOT_ROUTED): `SelfNotRoutedPrompt(onRetry, onOpenAccelerators)` + **Finish anyway**. NeedsAppRestart: `dashboard_needs_restart` banner. Failed: `DiagnosticsFailedPrompt`. Checked+leaks: "Some checks still see the VPN" + **Details** (Diagnostics). Done: green "VPN hidden — every check passed." | Retry = the dashboard's triple re-check, extracted to one shared function (§8) | Details → `showDiagnostics = true` | `what-the-check-proves`; accelerators link only for en/zh (same gate as `SelfNotRoutedPrompt`) |
 | Completion card | Shown when `checklist.complete`: "Setup complete" + "Force-stop and reopen the app you hid the VPN from so it checks again" (the step people forget, `first-setup.md` step 6). | **Finish** (sets flag, closes) | — | `configure-hiding` |

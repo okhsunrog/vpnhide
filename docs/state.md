@@ -26,50 +26,37 @@ The single managed desired-state file.
   `settings.autoHiddenPackages: [package]`.
 - Roles per package: `java`, `native` (`Boolean` or hook-name array),
   `appHiding`, `ports`, and the app-owned extension `hidden`.
-- Writer: VPN Hide app via `su` (`StorageConfig.kt`) on Save, startup
-  self-target preparation, debug toggle, and APatch SuperKey setting.
+- Writer: VPN Hide Core only (`vpnhide-core`, `crates/core-daemon`). The app
+  submits edits over the core socket (`config_replace` / `config_repair`) on Save,
+  startup self-target preparation, the debug toggle and the APatch SuperKey
+  setting; it runs no root process and no `su`.
 - Readers:
-  - Rust activator bins (`crates/activator`) for native and ports backends.
+  - Core, which projects it onto the selected native backend and Ports (the
+    1.x per-backend activator binaries are gone; `crates/activator` is now a
+    library core links).
   - LSPosed hooks in `system_server` (`SystemServerConfigCache`) directly.
-  - App UI caches (`TargetsCache`, `DashboardData`).
+  - App UI caches (`TargetsCache`, `DashboardData`), through core's published state.
 - Permissions: `0640 root:system`, SELinux `system_data_file`.
 - Lifetime: persistent across reboot, module reinstall, and app reinstall.
 
-The process-owned `CanonicalConfigRepository` orders all app writes and activation
-through root receipts. It publishes confirmed JSON separately from observation
-caches. The app writes the file atomically via temp-file + `mv`. If it is absent, native
-activators treat it as an empty config and app startup creates a new config
-containing the mandatory VPN Hide self-target.
+The process-owned `CanonicalConfigRepository` orders all app writes through core
+operation receipts and publishes confirmed JSON separately from observation
+caches. Core writes the file atomically (temp file + rename) and journals the
+operation. If it is absent, core treats it as an empty config and app startup
+creates a new config containing the mandatory VPN Hide self-target.
 
-### App mutation transport metadata
+### Core socket and operation journal
 
-The app uses the [root mutation transport](root-mutation-transport.md) for
-configuration writes and activation. Its preparation API owns:
+- `/data/user_de/0/dev.okhsunrog.vpnhide/vpnhide-core.sock`: core's tarpc socket,
+  bound inside the app's device-encrypted data dir with that dir's owner and
+  SELinux label, peer-checked with `SO_PEERCRED`. Only the release package in user
+  0 has it; the `.dev` sandbox build and secondary-user installs cannot reach core.
+- `/data/adb/vpnhide/core/operations.json`: core's operation journal (receipts the
+  app re-queries after an epoch change). See section 3.
 
-- `/data/adb/vpnhide/app-state/` and `lane/`: root-owned `0700` directories.
-- `lane/lock`: permanent `0600` lock inode; never replace/unlink while an
-  invocation can exist.
-- `lane/state.json`: latest version-1 execution-lifetime receipt, `0600`; written
-  by `vhhelper mutation`, read under its lock, retained across app death and reboot.
-  `lane/state.next` is its atomic replacement staging file. No commands, config,
-  secrets or output are stored here; this is not an operation replay queue.
-- `vhhelper-<sha256>`: versioned root executable, `0700`. The app stages it through
-  `stage-<uuid>`, links it into place without replacing an existing executable,
-  and verifies its digest. Interrupted staging can leave a temporary binary.
-
-Full reset preserves this entire directory: unlinking its lock while the reset
-operation holds it would allow a second independent lock inode. Config, superkey
-and backend service state outside this metadata directory are still removed.
-- App-private `files/vhhelper-<sha256>` and `files/vhhelper-<uuid>.tmp`: extracted
-  APK assets, removed with app data. They contain binary code only.
-
-Old executable versions and receipts currently have no automatic cleanup; safe
-cleanup/adoption belongs to coordinator integration. A same-boot unfinished
-receipt cannot be reset merely because its PID vanished or the app restarted.
-The helper inherits the root manager's SELinux domain; no new policy is installed.
-During the helper rename, any already-staged `vhmutate-<sha256>` inode remains
-untouched so an older supervisor can finish. New sessions use the same lane and
-stage `vhhelper-<sha256>` alongside those older files.
+The 1.x root mutation transport (`/data/adb/vpnhide/app-state/`, the staged
+`vhhelper-<sha256>` executable and its lane lock) is gone; Full Reset removes a
+leftover `app-state/` with the rest of `/data/adb/vpnhide/` except `core/`.
 
 ### Pre-1.0 Config Files (import inputs)
 
@@ -96,7 +83,7 @@ the leftovers gone — nothing else on the device removes them). All three delet
 every file above and `rmdir` `/data/adb/vpnhide_zygisk` and
 `/data/adb/vpnhide_lsposed`, which hold nothing else; merge and replace do it in
 the same root transaction as the config write, delete runs on its own (no config
-write, no activator — the running config does not change).
+write, no backend apply — the running config does not change).
 
 Absence of the files is the "already imported" marker. The banner's *Hide*
 button only sets `legacyImportDismissed` in the app's `ui_settings` DataStore:
@@ -110,8 +97,10 @@ files stay, and the Settings entry keeps every action reachable.
 
 Module dirs under `/data/adb/modules/` are replaced by Magisk/KSU/APatch on
 module reinstall. They hold artifacts, not user-managed config. **No shell logic
-runs on the device**: `vpnhide-core` (in `vpnhide_core`) is the only activator,
-and the backend modules ship no script at all. See
+runs on the device** at boot: `vpnhide-core` (in `vpnhide_core`) is the only
+loader and writer, its `service.sh` is a single `exec`, and the backend modules
+ship no script at all (the core zip's install-time `customize.sh` only moves the
+ABI binary into place). See
 [notes/core-2.0-module-lifecycle.md](notes/core-2.0-module-lifecycle.md).
 
 | Module | Contents |
@@ -170,7 +159,7 @@ is exportable and readable by `system_server`.
   `broken_fields`) and `vpnhide 1 stats` sparse counters.
 - Writer: LSPosed hooks in `system_server`.
 - Reader: app dashboard via root snapshot.
-- Permissions: default root/system-server write behavior; app reads via `su`.
+- Permissions: default root/system-server write behavior; the app reads it through core's root snapshot.
 - Lifetime: per boot.
 
 `/data/system/vpnhide_hook_active` is the retired status-only marker. The Full
@@ -193,7 +182,7 @@ Created by the `.ko` backend at module init. Mode `0600`, root-only.
 | read | `status` + `stats` text response | app/debug tooling reads |
 
 The state is in-kernel and per-boot. The proc write replaces the whole config,
-so activator delivers one bounded snapshot.
+so core delivers one bounded snapshot.
 
 ### `/proc/vpnhide_diag`
 
@@ -221,7 +210,7 @@ ctl0 request/response channel.
 
 `/data/adb/modules/vpnhide_zygisk/targets.txt` is the runtime text wire consumed
 through Zygisk's module-dir fd. It survives until module reinstall or the next
-activator write, but it is derived state, not user storage.
+core write, but it is derived state, not user storage.
 
 ---
 
@@ -290,7 +279,7 @@ An empty locale list follows the system; explicit choices are `en`, `ru`, and
 `zh-CN`. On Android 13+ the platform owns persistence and exposes the same
 choice in system app-language settings through `res/xml/locales_config.xml`.
 On Android 9–12 AppCompat's `autoStoreLocales` stores the choice in app-private
-storage. This preference never enters the root canonical config or activators.
+storage. This preference never enters the root canonical config or core.
 Activity recreation preserves saveable navigation state. Locale changes update
 Dashboard wording and diagnostic labels without invalidating root observations
 or requesting another diagnostic run.
@@ -344,19 +333,16 @@ the app when Vector is active.
 - Reader: app root snapshot/dashboard/startup cleanup.
 - Lifetime: per app launch, stale records removed when boot_id changes.
 
-`/data/user/0/dev.okhsunrog.vpnhide/files/vhhelper-<sha256>`
-
-- Format: immutable executable Rust helper extracted from the APK asset.
-- Writer/reader: the app creates it once per content digest; root diagnostics use the
-  shared immutable staging builder to copy it to
-  `/data/local/tmp/vpnhide-vhhelper-<sha256>` for root-differential checks and KPM
-  enumeration through either KPatch-Next or APatch/FolkPatch.
-- Lifetime: app-private and retained across launches. Staged copies are immutable
-  and may remain after an app update so a supervisor can finish using its inode.
+Root-differential checks (ground truth, per-app VPN state) run inside core
+(`collect_diagnostics` probes `GroundTruthChecks`, `AppVpnState`), and KPM
+enumeration is the root snapshot's `kpm_runtime_modules` section; the 1.x
+`vhhelper` staged into `/data/local/tmp` is gone.
 
 ### `cacheDir`
 
-Used for temporary debug/export files and a copied read-only LSPosed config DB:
+Used for temporary debug/export files (core writes oversized probe outputs and
+kernel images into the app's export dir, owned by the app) and a copied read-only
+LSPosed config DB:
 `vpnhide_lspd_modules_config.db` plus optional WAL/SHM sidecars. These are
 deleted after use.
 
@@ -419,7 +405,7 @@ zygote app fork:
 |---|---|
 | In-kernel per boot | `/proc/vpnhide_ctl` state, KPM in-kernel state, iptables chains |
 | Per boot / last apply files | `/data/adb/vpnhide/core/native_boot.json`, `/data/adb/vpnhide/core/boot_status`, `/data/system/vpnhide_lsposed_state` |
-| Per app launch | `filesDir/vpnhide_zygisk_active`, content-addressed `filesDir/vhhelper-<sha256>` |
+| Per app launch | `filesDir/vpnhide_zygisk_active` |
 | Persistent root-managed | `/data/system/vpnhide_config.json`, `/data/adb/vpnhide/superkey` |
 | Module-dir derived state | `/data/adb/modules/vpnhide_zygisk/targets.txt` |
 | Cleaned by core's next boot scan | a removed backend module's leftover state (e.g. `/data/adb/vpnhide_kpm/`) |

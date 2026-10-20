@@ -34,9 +34,9 @@ The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNa
 | `zygisk/` | Zygisk native module (Rust, inline `libc` hooks) |
 | `lsposed/` | LSPosed module + target-picker Android app (Kotlin, Compose) |
 | `kmod/` | Kernel-level native backends: GKI `.ko` (C, kretprobes) and KPM (KernelPatch inline hooks) |
-| `builtin/` | The in-tree kernel backend (`CONFIG_VPNHIDE=y`): the driver, `scripts/integrate.py` that vendors it into a kernel tree, the KMI-agnostic companion module (activator only), `build.py` |
-| `crates/` | The Rust workspace: `protocol` (the wire), `activator` (one bin per backend), `checks` / `checks-jni` (the app's native probes), `core-rpc` / `core-daemon` / `core-ffi` (core: the only root process and the app's client onto it) |
-| ~~`portshide/`~~ | Removed — Ports apply is inside `vpnhide_core` |
+| `builtin/` | The in-tree kernel backend (`CONFIG_VPNHIDE=y`): the driver, `scripts/integrate.py` that vendors it into a kernel tree, QEMU tests (no module: core adopts the driver) |
+| `crates/` | The Rust workspace: `protocol` (the wire), `activator` (library linked into core: projection, loaders, Ports), `checks` / `checks-jni` (the app's native probes), `core-rpc` / `core-daemon` / `core-ffi` (core: the only root process and the app's client onto it) |
+| `core/` | The required VPN Hide Core Magisk module (`build.py` → `core/target/vpnhide-core.zip`) |
 | `scripts/` | Release & changelog tooling |
 | `update-json/` | Magisk/KSU update metadata |
 | `docs/` | Contributor documentation (this directory) |
@@ -126,8 +126,8 @@ The script auto-spawns the `ghcr.io/ylarod/ddk-min:<kmi>-<TAG>` container via Do
 # → vpnhide-kpm.zip at the repo root
 ```
 
-The script builds the Android `kpm` activator, builds `vpnhide.kpm` against the
-pinned KernelPatch submodule, stages `kmod/kpm/module/`, and packages the
+The script builds `vpnhide.kpm` against the pinned KernelPatch submodule,
+stages `kmod/kpm/module/` (no scripts: core loads the KPM), and packages the
 flashable zip. For runtime requirements and safety notes, see
 [kmod/kpm/README.md](../kmod/kpm/README.md).
 
@@ -137,6 +137,8 @@ flashable zip. For runtime requirements and safety notes, see
 # APK
 adb install --user 0 -r lsposed/app/build/outputs/apk/release/app-release.apk
 
+# Core module (required): build with `python3 core/build.py`.
+adb push core/target/vpnhide-core.zip /sdcard/Download/
 # Native backend: push exactly one of these, then install via the Magisk,
 # KernelSU, KernelSU-Next, or APatch manager path appropriate for the backend.
 adb push zygisk/target/vpnhide-zygisk.zip /sdcard/Download/
@@ -152,13 +154,15 @@ manages targets in every profile; extra picker copies share the same canonical
 configuration and can race each other's saves. Verify per-user installation state
 with `adb shell dumpsys package dev.okhsunrog.vpnhide` after installing.
 
-After flashing a native backend, reboot the device. Do not keep multiple native
-backends installed unless you are explicitly testing conflict handling; the app
-uses priority `kmod > built-in > KPM > Zygisk`, and `.ko` + KPM together is
-unsafe. The built-in backend has no module to flash: integrate the driver into
-a kernel tree with `builtin/scripts/integrate.py`, build and boot that kernel,
-then install the companion zip from `python3 builtin/build.py` (see
-[builtin/README.md](../builtin/README.md)).
+After flashing core or a native backend, reboot the device. Do not keep multiple
+native backends installed unless you are explicitly testing conflict handling:
+core picks exactly one per boot and, with more than one candidate (an installed
+kmod/KPM/Zygisk module, the built-in driver, or a live hand-loaded backend), it
+loads none of them. Uninstall the 1.x Ports and Built-in modules
+(`vpnhide_ports`, `vpnhide_builtin`) if present. The built-in backend has no
+module to flash: integrate the driver into a kernel tree with
+`builtin/scripts/integrate.py`, build and boot that kernel, and core adopts it
+(see [builtin/README.md](../builtin/README.md)).
 
 ## CI lints (run before pushing)
 
@@ -171,7 +175,7 @@ which areas a pull request exercises, and every area job is gated on it:
 
 | Paths | Area jobs |
 |---|---|
-| `kmod/*`, `kmod/module/**` | `kmod-activator`, `kmod`, `kmod-qemu` |
+| `kmod/*`, `kmod/module/**` | `kmod`, `kmod-qemu` |
 | `kmod/kpm/**` | `kpm`, `kpm-qemu`, `kpm-qemu-legacy` |
 | `builtin/**` | `builtin`, `builtin-integrator`, `builtin-qemu` |
 | `zygisk/**` | `zygisk` |
