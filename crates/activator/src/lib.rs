@@ -449,18 +449,34 @@ fn wait_for_path(path: &str) {
     }
 }
 
+/// PackageManager's shell command, reached through the `cmd` binder client. Never
+/// `pm`: on AOSP `/system/bin/pm` is a `#!/system/bin/sh` wrapper around exactly this
+/// call, and core spawns no shell.
+pub const PACKAGE_SERVICE_CMD: &str = "cmd";
+pub const PACKAGE_SERVICE_ARG: &str = "package";
+
+fn package_command() -> Command {
+    let mut command = Command::new(PACKAGE_SERVICE_CMD);
+    command.arg(PACKAGE_SERVICE_ARG);
+    command
+}
+
 fn pm_list_packages(args: &[&str]) -> Result<String> {
-    let out = Command::new("pm").args(args).output()?;
+    let out = package_command().args(args).output()?;
     if !out.status.success() {
-        return Err(format!("pm list packages failed with status {}", out.status).into());
+        return Err(format!(
+            "cmd package list packages failed with status {}",
+            out.status
+        )
+        .into());
     }
     Ok(String::from_utf8(out.stdout)?)
 }
 
 fn pm_list_users() -> Result<String> {
-    let out = Command::new("pm").args(["list", "users"]).output()?;
+    let out = package_command().args(["list", "users"]).output()?;
     if !out.status.success() {
-        return Err(format!("pm list users failed with status {}", out.status).into());
+        return Err(format!("cmd package list users failed with status {}", out.status).into());
     }
     Ok(String::from_utf8(out.stdout)?)
 }

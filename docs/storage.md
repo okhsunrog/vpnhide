@@ -330,6 +330,13 @@ zygisk/             # cdylib — the injected .so. deps: protocol (+ shadowhook)
   the `.so`'s dependency tree lean (protocol only) while core freely uses `serde`.
 - **When it runs:** the core module's `service.sh` is a single `exec` of the
   binary; there is no other shell on the device, and core never spawns `sh`.
+  That rules out `pm`, which AOSP ships as a `#!/system/bin/sh` wrapper around
+  `cmd package "$@"`: core calls `cmd package …` directly. Every program core
+  spawns is an ELF binary on AOSP — `cmd`, `iptables` / `ip6tables` (and their
+  `-restore` forms), `ip`, `ss`, `dumpsys`, `logcat`, `bootctl`, the root
+  manager's `magisk` / `ksud`, KPatch-Next's `kpatch`, and core itself
+  (`observe …`). `am`, `pm`, `settings`, `input`, `svc`, `wm`, `content` and
+  friends are the AOSP sh wrappers core must never call.
   At boot core selects and loads the native backend without waiting for
   PackageManager, then delivers the config once package→UID resolution is
   possible. It lists Android users first and resolves every user separately

@@ -29,7 +29,7 @@ fn has_ports_targets(cfg: &CanonicalConfig) -> bool {
 /// operation plan and applies firewall rules.
 pub const PORTS_ENV: &str = "VPNHIDE_PORTS";
 
-/// Optional file of `pm list packages -U` output for host tests (skips live `pm`).
+/// Optional file of `cmd package list packages -U` output for host tests (skips live PackageManager).
 pub const PORTS_PM_DUMP_ENV: &str = "VPNHIDE_PORTS_PM_DUMP";
 
 pub fn ports_enabled_from_env() -> bool {
@@ -78,9 +78,9 @@ pub fn resolve_uid_map(candidate: &CanonicalConfig) -> PackageUidMap {
     if !has_ports_targets(candidate) {
         return PackageUidMap::default();
     }
-    // Live `pm` waits up to a minute for PackageManager. Host/dev sandboxes have
-    // no Android PM — skip rather than hang. Production Android has /system/bin/pm.
-    if !Path::new("/system/bin/pm").is_file() && !Path::new("/system/bin/cmd").is_file() {
+    // Live `cmd package` waits up to a minute for PackageManager. Host/dev sandboxes
+    // have no Android PM — skip rather than hang. Production Android has /system/bin/cmd.
+    if !Path::new("/system/bin/cmd").is_file() {
         eprintln!("core: ports UID resolve skipped (no Android pm on this host)");
         return PackageUidMap::default();
     }

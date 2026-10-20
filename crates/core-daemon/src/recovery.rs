@@ -131,7 +131,7 @@ fn reconcile_zygisk_publication(candidate: &CanonicalConfig, module: &Path) -> P
         Err(_) => return PhaseOutcome::Unknown,
     };
     // Resolver-only projection: readback must not block on PackageManager, and host
-    // tests have no `pm`. Empty map matches a config with no package targets.
+    // tests have no PackageManager. Empty map matches a config with no package targets.
     let resolver = vpnhide_activator::PackageUidMap::default();
     match activation::project_native_wire_with_resolver(candidate, NativeBackend::Zygisk, &resolver)
     {

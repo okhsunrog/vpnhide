@@ -52,6 +52,8 @@ exit 1
 "#;
 
 const PM: &str = r#"#!/bin/sh
+[ "$1" = package ] || exit 64
+shift
 [ "$VH_CASE" = changed-owner ] && : > "$VH_ROOT/changed-owner"
 if [ "$VH_CASE" = kernel-race ]; then
   printf 'vpnhide 1 status\nbackend 0x4\nkver 0x60100\nhooks 0x3ff\nerror 0x0\n' > "$VPNHIDE_KMOD_CTL"
@@ -123,7 +125,7 @@ async fn exercise(case: &str) {
         .unwrap();
     }
     executable(&root.join("kpatch"), KPATCH);
-    executable(&root.join("pm"), PM);
+    executable(&root.join("cmd"), PM);
     executable(
         &root.join("insmod"),
         "#!/bin/sh\nprintf 'insmod\\n' > \"$VH_ROOT/insmod-calls\"\nexit 1\n",
