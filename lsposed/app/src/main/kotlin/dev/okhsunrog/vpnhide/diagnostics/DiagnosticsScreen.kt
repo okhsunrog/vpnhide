@@ -44,6 +44,7 @@ import dev.okhsunrog.vpnhide.SelfNotRoutedPrompt
 import dev.okhsunrog.vpnhide.StatusBanner
 import dev.okhsunrog.vpnhide.StatusColors
 import dev.okhsunrog.vpnhide.VpnOffPrompt
+import dev.okhsunrog.vpnhide.core.LogcatAutoStop
 import dev.okhsunrog.vpnhide.debug.DebugExportOutcome
 import dev.okhsunrog.vpnhide.debug.LogcatRecorder
 import dev.okhsunrog.vpnhide.debug.StateContentOptions
@@ -576,6 +577,8 @@ private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by LogcatRecorder.state.collectAsStateWithLifecycle()
+    // A session core is still recording from before an app restart shows up as running.
+    LaunchedEffect(Unit) { LogcatRecorder.refresh(context) }
 
     // Own gate: the card is always visible, so it holds its VPN-off/not-in-tunnel
     // verdict until re-checked (re-measured on entry and on the banner's re-check).
@@ -632,6 +635,13 @@ private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
                         color = MaterialTheme.colorScheme.error,
                         fontWeight = FontWeight.Bold,
                     )
+                    if (s.maxBytes > 0) {
+                        Text(
+                            text = stringResource(R.string.logcat_recording_limits, formatSize(s.maxBytes), s.maxDurationMs / 60_000),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Spacer(Modifier.height(12.dp))
                     EnhancedButton(
                         onClick = {
@@ -650,6 +660,14 @@ private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
                 }
 
                 is LogcatRecorder.State.Stopped -> {
+                    logcatEndNotice(s)?.let { notice ->
+                        Text(
+                            text = notice,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
                     val last = s.lastFile
                     if (last != null && last.exists()) {
                         Text(
@@ -808,6 +826,25 @@ private fun CaptureIncompleteWarning(
             }
         },
     )
+}
+
+/** Why the last recording ended early or failed, or null for an ordinary Stop. */
+@Composable
+private fun logcatEndNotice(state: LogcatRecorder.State.Stopped): String? {
+    state.failure?.let { failure ->
+        val res =
+            when (failure.stage) {
+                LogcatRecorder.Failure.Stage.Start -> R.string.logcat_start_failed
+                LogcatRecorder.Failure.Stage.Stop -> R.string.logcat_stop_failed
+            }
+        return stringResource(res, failure.status)
+    }
+    return when (state.autoStop) {
+        LogcatAutoStop.SizeCap -> stringResource(R.string.logcat_auto_stopped_size, formatSize(state.maxBytes))
+        LogcatAutoStop.DurationCap -> stringResource(R.string.logcat_auto_stopped_duration, state.maxDurationMs / 60_000)
+        LogcatAutoStop.LogcatExited -> stringResource(R.string.logcat_auto_stopped_exited)
+        null -> null
+    }
 }
 
 private fun formatElapsed(seconds: Long): String {

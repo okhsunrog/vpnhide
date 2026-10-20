@@ -126,6 +126,7 @@ Mode `0700`, root-only. Journal, ownership markers, `core.log`, plus:
 | `native_boot.json` | serde JSON of `core-rpc` `NativeBootStatus`, keyed by `boot_id` | core, once per boot (updated by deliveries and Ports applies) | core (re-adopts on restart in the same boot); debug export. The app reads the same status over RPC (`backend.boot`). | replaced on the next boot's scan |
 | `boot_status` | `key=value` boot pass report | core boot passes | debug export | overwritten each boot |
 | `boot_phase` | `boot_phase=service` | `vpnhide-core service` | debug export | overwritten each boot |
+| `logcat/session-<id>.log` | raw `logcat -b all -v threadtime` (0600) | core's logcat session child, through core (capped at 64 MiB / 30 min) | core, which copies it to the app's export dir on Stop | removed by the next session and at core start |
 
 The per-backend `load_status` / `load_dmesg` files (`/data/adb/vpnhide_kmod/`,
 `…_builtin/`, `…_kpm/`) are gone: a kmod load failure's insmod exit, stderr and
@@ -340,8 +341,9 @@ staged into `/data/local/tmp` is gone.
 
 ### `cacheDir`
 
-Used for temporary debug/export files (core writes oversized probe outputs and
-kernel images into the app's export dir, owned by the app) and a copied read-only
+Used for temporary debug/export files (core writes oversized probe outputs,
+kernel images and the finished `logcat-session-<id>.txt` into the app's export dir,
+owned by the app) and a copied read-only
 LSPosed config DB:
 `vpnhide_lspd_modules_config.db` plus optional WAL/SHM sidecars. These are
 deleted after use.

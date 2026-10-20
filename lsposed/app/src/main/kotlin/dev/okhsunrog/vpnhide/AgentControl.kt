@@ -144,15 +144,24 @@ internal object AgentControl {
         selfNeedsRestart: Boolean? = null,
     ): AgentMutationResult =
         withAppContext(context) { context ->
-            val file =
-                LogcatRecorder.start(
-                    context = context,
-                    selfNeedsRestart = selfNeedsRestart == true,
-                ) ?: error("Full system logcat recording failed to start")
-            AgentMutationResult(
-                ok = true,
-                message = "Full system logcat recording started: ${file.absolutePath}",
-            )
+            when (
+                val outcome =
+                    LogcatRecorder.start(
+                        context = context,
+                        selfNeedsRestart = selfNeedsRestart == true,
+                    )
+            ) {
+                is LogcatRecorder.StartOutcome.Started -> {
+                    AgentMutationResult(
+                        ok = true,
+                        message = "Full system logcat recording started in core: session ${outcome.sessionId}",
+                    )
+                }
+
+                is LogcatRecorder.StartOutcome.Failed -> {
+                    error("Full system logcat recording failed to start: ${outcome.status} ${outcome.detail}".trim())
+                }
+            }
         }
 
     /**

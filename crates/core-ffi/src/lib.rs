@@ -63,3 +63,12 @@ pub async fn collect_diagnostics(socket_path: String, request_json: String) -> S
 pub async fn root_effect(socket_path: String, op: u64, effect_json: String) -> String {
     root_relay::root_effect(&socket_path, op, &effect_json).await
 }
+
+/// Core's full-system logcat recording. `request_json` is
+/// `{"action":"start"|"stop"|"status","session":<id>}` (`session` unused for status);
+/// the reply is `{"status":"ok","session":…|null}`, `busy` (with `running`),
+/// `unknown_session`, `disabled`, `refused`, `failed`, or a delivery status. Never throws.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn logcat_recording(socket_path: String, request_json: String) -> String {
+    root_relay::logcat_recording(&socket_path, &request_json).await
+}

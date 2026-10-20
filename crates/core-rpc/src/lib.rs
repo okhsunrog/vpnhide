@@ -39,6 +39,7 @@ use std::time::Duration;
 mod config;
 mod diag;
 mod edit;
+mod logcat;
 
 pub use config::{
     AppConfig, CanonicalConfig, NativeRole, PortPolicy, PortProtocol, PortRule, Settings,
@@ -47,10 +48,14 @@ pub use diag::{
     DiagnosticProbe, DiagnosticsReport, DiagnosticsRequest, EffectError, ProbeOutput, RootEffect,
 };
 pub use edit::{ConfigAppField, ConfigEdit, ConfigSetField, ConfigToggle};
+pub use logcat::{
+    LogcatAutoStopReason, LogcatRecordingError, LogcatSessionId, LogcatSessionState,
+    LogcatSessionStatus,
+};
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract, §9): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -77,6 +82,10 @@ pub const CALL_DEADLINE: Duration = Duration::from_secs(15);
 /// Client deadline for [`VpnhideCore::collect_diagnostics`]: the slowest probe (kernel
 /// images) is bounded by core at [`PROBE_MAX_RUNTIME`]; this leaves room on top.
 pub const DIAGNOSTICS_DEADLINE: Duration = Duration::from_secs(210);
+
+/// Client deadline for [`VpnhideCore::stop_logcat_recording`]: core waits a few seconds
+/// for the child to exit, then copies up to its byte cap into the export dir.
+pub const LOGCAT_STOP_DEADLINE: Duration = Duration::from_secs(60);
 
 /// Core's own cap on any single probe's runtime.
 pub const PROBE_MAX_RUNTIME: Duration = Duration::from_secs(180);
@@ -580,6 +589,23 @@ pub trait VpnhideCore {
     /// Apply a fixed root effect outside the config (v5): superkey, legacy cleanup, full
     /// reset. Serialized with config operations; `op` makes a retry idempotent.
     async fn root_effect(op: OperationId, effect: RootEffect) -> Result<(), EffectError>;
+
+    /// Start core's full-system logcat recording (v8). Idempotent per `session`: the same
+    /// id while it records (or after it ended) returns its status; a different id while
+    /// one records is [`LogcatRecordingError::Busy`]. Core stops it on its own caps.
+    async fn start_logcat_recording(
+        session: LogcatSessionId,
+    ) -> Result<LogcatSessionStatus, LogcatRecordingError>;
+
+    /// Stop `session` (if still running) and copy its file into the app's export dir.
+    /// Idempotent: a repeated Stop returns the same status and re-delivers the file if the
+    /// app already removed its copy.
+    async fn stop_logcat_recording(
+        session: LogcatSessionId,
+    ) -> Result<LogcatSessionStatus, LogcatRecordingError>;
+
+    /// The current or last session, if any (`file` is never set here).
+    async fn logcat_recording_status() -> Option<LogcatSessionStatus>;
 }
 
 #[cfg(test)]
@@ -920,9 +946,6 @@ mod tests {
                 DiagnosticProbe::Dmesg,
                 DiagnosticProbe::LogcatAppTags,
                 DiagnosticProbe::LogcatLsposedBoot,
-                DiagnosticProbe::LogcatSince {
-                    since: "10-19 21:00:00.000".into(),
-                },
                 DiagnosticProbe::KernelPartitions,
                 DiagnosticProbe::KernelImages,
                 DiagnosticProbe::LsposedModulesDb,
@@ -971,6 +994,117 @@ mod tests {
             ] {
                 assert_eq!(survives("effect result", &result), result);
             }
+        }
+
+        #[test]
+        fn logcat_recording_arguments_and_results() {
+            let id = LogcatSessionId(u64::MAX);
+            assert_eq!(survives("LogcatSessionId", &id), id);
+            let states = [
+                LogcatSessionState::Recording,
+                LogcatSessionState::Stopped,
+                LogcatSessionState::AutoStopped {
+                    reason: LogcatAutoStopReason::SizeCap,
+                },
+                LogcatSessionState::AutoStopped {
+                    reason: LogcatAutoStopReason::DurationCap,
+                },
+                LogcatSessionState::AutoStopped {
+                    reason: LogcatAutoStopReason::LogcatExited,
+                },
+            ];
+            for (n, state) in states.into_iter().enumerate() {
+                let status = LogcatSessionStatus {
+                    session: LogcatSessionId(n as u64 + 1),
+                    state,
+                    started_at_ms: 1,
+                    duration_ms: 2,
+                    bytes: 3,
+                    truncated: n % 2 == 0,
+                    max_bytes: 4,
+                    max_duration_ms: 5,
+                    logcat_exit: (n == 4).then_some(1),
+                    file: (n > 0).then(|| "/d/logcat-session-1.txt".to_owned()),
+                };
+                let ok: Result<LogcatSessionStatus, LogcatRecordingError> = Ok(status.clone());
+                assert_eq!(survives("logcat result", &ok), ok);
+                assert_eq!(
+                    survives("logcat status", &Some(status.clone())),
+                    Some(status)
+                );
+            }
+            for err in [
+                LogcatRecordingError::Busy {
+                    running: LogcatSessionId(7),
+                },
+                LogcatRecordingError::UnknownSession,
+                LogcatRecordingError::Disabled,
+                LogcatRecordingError::Invalid("zero".into()),
+                LogcatRecordingError::Failed("spawn".into()),
+            ] {
+                let refused: Result<LogcatSessionStatus, LogcatRecordingError> = Err(err);
+                assert_eq!(survives("logcat error", &refused), refused);
+            }
+            let none: Option<LogcatSessionStatus> = None;
+            assert_eq!(survives("no session", &none), none);
+        }
+
+        /// The app parses this exact JSON (Kotlin `CoreLogcatRecordingTest`).
+        #[test]
+        fn logcat_session_status_matches_app_fixture() {
+            let all = vec![
+                LogcatSessionStatus {
+                    session: LogcatSessionId(42),
+                    state: LogcatSessionState::Recording,
+                    started_at_ms: 1_760_000_000_000,
+                    duration_ms: 1500,
+                    bytes: 4096,
+                    truncated: false,
+                    max_bytes: 64 << 20,
+                    max_duration_ms: 1_800_000,
+                    logcat_exit: None,
+                    file: None,
+                },
+                LogcatSessionStatus {
+                    session: LogcatSessionId(43),
+                    state: LogcatSessionState::AutoStopped {
+                        reason: LogcatAutoStopReason::SizeCap,
+                    },
+                    started_at_ms: 1_760_000_000_000,
+                    duration_ms: 600_000,
+                    bytes: 64 << 20,
+                    truncated: true,
+                    max_bytes: 64 << 20,
+                    max_duration_ms: 1_800_000,
+                    logcat_exit: None,
+                    file: Some(
+                        "/data/user_de/0/x/vpnhide-core-export/logcat-session-43.txt".into(),
+                    ),
+                },
+                LogcatSessionStatus {
+                    session: LogcatSessionId(44),
+                    state: LogcatSessionState::AutoStopped {
+                        reason: LogcatAutoStopReason::LogcatExited,
+                    },
+                    started_at_ms: 1,
+                    duration_ms: 2,
+                    bytes: 3,
+                    truncated: false,
+                    max_bytes: 64 << 20,
+                    max_duration_ms: 1_800_000,
+                    logcat_exit: Some(1),
+                    file: None,
+                },
+            ];
+            let json = serde_json::to_string_pretty(&all).unwrap() + "\n";
+            let path = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../fixtures/core-rpc/logcat-session-status.json"
+            );
+            if std::env::var_os("VPNHIDE_UPDATE_FIXTURES").is_some() {
+                std::fs::write(path, &json).unwrap();
+            }
+            assert_eq!(std::fs::read_to_string(path).unwrap(), json);
         }
 
         #[test]

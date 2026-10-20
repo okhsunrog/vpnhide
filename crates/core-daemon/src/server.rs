@@ -17,8 +17,9 @@ use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use tokio_util::sync::CancellationToken;
 use vpnhide_core_rpc::{
     Accepted, BaseRef, CanonicalConfig, ClientHello, ConfigEdit, ConfigPhase, DiagnosticsReport,
-    DiagnosticsRequest, EffectError, Handshake, OperationId, OperationRecord, PROTOCOL_VERSION,
-    PhaseOutcome, PhaseRecord, Published, RootEffect, SubmitError, VpnhideCore,
+    DiagnosticsRequest, EffectError, Handshake, LogcatRecordingError, LogcatSessionId,
+    LogcatSessionStatus, OperationId, OperationRecord, PROTOCOL_VERSION, PhaseOutcome, PhaseRecord,
+    Published, RootEffect, SubmitError, VpnhideCore,
 };
 
 use crate::config_edit::{self, apply_canonical_edit};
@@ -82,6 +83,8 @@ pub struct CoreState {
     native_boot: std::sync::RwLock<Option<operation::NativeBootHandle>>,
     /// The epoch this core run publishes under (recorded on a boot decision).
     epoch: AtomicU64,
+    /// The single full-system logcat recording slot (v8).
+    logcat: crate::logcat_session::Recorder,
 }
 
 /// Internal admission options: boot passes pick their own plan and Ports source.
@@ -123,6 +126,9 @@ impl CoreState {
             probe_env: std::sync::RwLock::new(crate::diagnostics::ProbeEnv::from_env()),
             native_boot: std::sync::RwLock::new(None),
             epoch: AtomicU64::new(0),
+            logcat: crate::logcat_session::Recorder::new(
+                crate::logcat_session::RecorderConfig::from_env(),
+            ),
         })
     }
 
@@ -260,6 +266,9 @@ impl CoreState {
             probe_env: std::sync::RwLock::new(crate::diagnostics::ProbeEnv::from_env()),
             native_boot: std::sync::RwLock::new(None),
             epoch: AtomicU64::new(0),
+            logcat: crate::logcat_session::Recorder::new(
+                crate::logcat_session::RecorderConfig::from_env(),
+            ),
         });
         if let Some(config) = config {
             state.publisher.update(|snapshot| {
@@ -471,6 +480,29 @@ impl CoreState {
     /// Replace the probe environment (tests).
     pub fn set_probe_env(&self, env: crate::diagnostics::ProbeEnv) {
         *self.probe_env.write().expect("probe env") = env;
+    }
+
+    /// The logcat recorder (start/stop/status are blocking).
+    pub fn logcat(&self) -> &crate::logcat_session::Recorder {
+        &self.logcat
+    }
+
+    /// Start a core-owned logcat session (blocking).
+    pub fn start_logcat_recording(
+        &self,
+        session: LogcatSessionId,
+    ) -> Result<LogcatSessionStatus, LogcatRecordingError> {
+        let env = self.probe_env.read().expect("probe env").clone();
+        self.logcat.start(session, &env)
+    }
+
+    /// Stop a logcat session and hand its file to the app (blocking).
+    pub fn stop_logcat_recording(
+        &self,
+        session: LogcatSessionId,
+    ) -> Result<LogcatSessionStatus, LogcatRecordingError> {
+        let env = self.probe_env.read().expect("probe env").clone();
+        self.logcat.stop(session, &env)
     }
 
     /// Run a batch of fixed probes (blocking).
@@ -963,6 +995,35 @@ impl VpnhideCore for CoreServer {
         tokio::task::spawn_blocking(move || state.root_effect(op, &effect))
             .await
             .unwrap_or(Err(EffectError::Busy))
+    }
+
+    async fn start_logcat_recording(
+        self,
+        _ctx: Context,
+        session: LogcatSessionId,
+    ) -> Result<LogcatSessionStatus, LogcatRecordingError> {
+        let state = self.state.clone();
+        tokio::task::spawn_blocking(move || state.start_logcat_recording(session))
+            .await
+            .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
+    }
+
+    async fn stop_logcat_recording(
+        self,
+        _ctx: Context,
+        session: LogcatSessionId,
+    ) -> Result<LogcatSessionStatus, LogcatRecordingError> {
+        let state = self.state.clone();
+        tokio::task::spawn_blocking(move || state.stop_logcat_recording(session))
+            .await
+            .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
+    }
+
+    async fn logcat_recording_status(self, _ctx: Context) -> Option<LogcatSessionStatus> {
+        let state = self.state.clone();
+        tokio::task::spawn_blocking(move || state.logcat().status())
+            .await
+            .unwrap_or(None)
     }
 }
 

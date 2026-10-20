@@ -456,6 +456,12 @@
     <string name="logcat_btn_stop">Остановить и сохранить</string>
     <string name="logcat_recording_status">● Запись · %1$s · %2$s</string>
     <string name="logcat_last_recording">Последняя запись · %1$s · %2$s</string>
+    <string name="logcat_recording_limits">VPN Hide Core сам остановит запись на %1$s или через %2$d мин.</string>
+    <string name="logcat_auto_stopped_size">VPN Hide Core остановил запись, когда она достигла предела %1$s. Всё, что попало в журнал позже, отсутствует, поэтому запишите сессию покороче, если ошибка случилась позже.</string>
+    <string name="logcat_auto_stopped_duration">VPN Hide Core остановил запись по пределу в %1$d мин.</string>
+    <string name="logcat_auto_stopped_exited">logcat завершился сам, поэтому VPN Hide Core закончил запись раньше времени.</string>
+    <string name="logcat_start_failed">Не удалось начать запись в VPN Hide Core (%1$s).</string>
+    <string name="logcat_stop_failed">Не удалось получить запись от VPN Hide Core (%1$s).</string>
     <string name="diag_summary_tally">Скрыто: %1$d · Утечек: %2$d</string>
     <!-- Статус проверки в диагностике: цветная точка + короткое слово (кто скрыл VPN на этом векторе). -->
     <string name="diag_status_ok">ОК</string>

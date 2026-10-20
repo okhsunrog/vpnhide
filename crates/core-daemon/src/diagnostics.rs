@@ -1,11 +1,11 @@
 //! `collect_diagnostics`: the fixed set of root probes the app may ask for (protocol v5).
 //!
 //! The app runs no root process. Every root read it needs is a [`DiagnosticProbe`]; each maps
-//! to a `vpnhide-core probe …|observe …` child (Rust, see `device_probes`), a fixed `logcat`
+//! to a `vpnhide-core probe …|observe …` child (Rust, see `device_probes`), a fixed `logcat -d`
 //! invocation, or an in-process kernel-log read. No shell runs, and no caller-supplied
 //! command, script or path exists. Probes run concurrently, each bounded in time and output.
 //!
-//! Output up to [`INLINE_MAX`] travels inline; anything larger (debug snapshot, logcat) and
+//! Output up to [`INLINE_MAX`] travels inline; anything larger (debug snapshot, logcat dumps) and
 //! every artifact (kernel images, LSPosed db copies) is written to the export dir inside the
 //! app's own data dir, owned by the app, so the reply stays far below the transport frame.
 
@@ -77,7 +77,7 @@ impl ProbeEnv {
         }
     }
 
-    fn export_dir(&self) -> Option<PathBuf> {
+    pub(crate) fn export_dir(&self) -> Option<PathBuf> {
         self.app_dir.as_ref().map(|d| d.join(EXPORT_DIR_NAME))
     }
 }
@@ -168,18 +168,6 @@ fn run_probe(env: &ProbeEnv, probe: &DiagnosticProbe) -> Captured {
         DiagnosticProbe::LogcatLsposedBoot => {
             core(&["probe", "logcat-lsposed"], Duration::from_secs(20))
         }
-        DiagnosticProbe::LogcatSince { since } => {
-            if !valid_logcat_time(since) {
-                return Captured {
-                    exit: -1,
-                    stdout: b"invalid since".to_vec(),
-                    ..Captured::default()
-                };
-            }
-            let mut cmd = Command::new("logcat");
-            cmd.args(["-d", "-b", "all", "-v", "threadtime", "-T", since]);
-            run_bounded(cmd, Duration::from_secs(60))
-        }
         DiagnosticProbe::KernelPartitions => {
             core(&["probe", "kernel-partitions"], Duration::from_secs(30))
         }
@@ -200,19 +188,6 @@ fn run_probe(env: &ProbeEnv, probe: &DiagnosticProbe) -> Captured {
             )
         }
     }
-}
-
-/// `MM-DD HH:MM:SS.mmm` (logcat's threadtime stamp) and nothing else.
-fn valid_logcat_time(raw: &str) -> bool {
-    let b = raw.as_bytes();
-    b.len() == 18
-        && b.iter().enumerate().all(|(i, c)| match i {
-            2 => *c == b'-',
-            5 => *c == b' ',
-            8 | 11 => *c == b':',
-            14 => *c == b'.',
-            _ => c.is_ascii_digit(),
-        })
 }
 
 /// Give a file-producing probe a fresh, private dir under the export dir, then hand its
@@ -246,7 +221,7 @@ fn with_out_dir(env: &ProbeEnv, name: &str, run: impl FnOnce(&Path) -> Captured)
     out
 }
 
-fn prepare_dir(env: &ProbeEnv, dir: &Path) -> std::io::Result<()> {
+pub(crate) fn prepare_dir(env: &ProbeEnv, dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     hand_to_app(env, dir, 0o700);
     Ok(())
@@ -254,7 +229,7 @@ fn prepare_dir(env: &ProbeEnv, dir: &Path) -> std::io::Result<()> {
 
 /// Owner = the app data dir's owner, `mode`, and the dir's SELinux label — the same
 /// treatment as the socket, so only the app can read what core exported for it.
-fn hand_to_app(env: &ProbeEnv, path: &Path, mode: u32) {
+pub(crate) fn hand_to_app(env: &ProbeEnv, path: &Path, mode: u32) {
     let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
     if let Some(app_dir) = &env.app_dir {
         if let Err(e) = crate::auth::hand_to_owner_of(path, app_dir) {
@@ -402,7 +377,6 @@ fn probe_slug(probe: &DiagnosticProbe) -> &'static str {
         DiagnosticProbe::Dmesg => "dmesg",
         DiagnosticProbe::LogcatAppTags => "logcat-app",
         DiagnosticProbe::LogcatLsposedBoot => "logcat-lsposed",
-        DiagnosticProbe::LogcatSince { .. } => "logcat-since",
         DiagnosticProbe::KernelPartitions => "kernel-partitions",
         DiagnosticProbe::KernelImages => "kernel-images",
         DiagnosticProbe::LsposedModulesDb => "lsposed-db",
@@ -453,29 +427,6 @@ mod tests {
         );
         assert_eq!(report.outputs[0].exit, -1);
         assert!(!report.dmesg_cleared);
-    }
-
-    #[test]
-    fn logcat_since_accepts_only_a_timestamp() {
-        assert!(valid_logcat_time("10-19 21:00:00.123"));
-        for bad in [
-            "",
-            "10-19 21:00:00",
-            "10-19 21:00:00.123; rm -rf /",
-            "aa-19 21:00:00.123",
-        ] {
-            assert!(!valid_logcat_time(bad), "{bad}");
-        }
-        let report = collect(
-            &host_env(None),
-            &DiagnosticsRequest {
-                probes: vec![DiagnosticProbe::LogcatSince {
-                    since: "$(id)".into(),
-                }],
-                clear_dmesg: false,
-            },
-        );
-        assert_eq!(report.outputs[0].exit, -1);
     }
 
     #[test]

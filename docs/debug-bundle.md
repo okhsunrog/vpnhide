@@ -34,28 +34,39 @@ JSON also compresses ~10×). Three capture kinds, told apart by
 `state.json` is present in **all** of them and is where you start.
 
 How `logcat_full.txt` is captured: the app cannot read other apps' logs and
-runs no root process. While recording, it asks core's fixed `LogcatSince`
-probe every 10 s for everything newer than the last line it kept, and drops
-the overlap (`LogcatTail`). A gap is possible only when the device's ring buffer
-rotates out lines in under one poll. That is visible as a jump in timestamps,
-not as reordered or duplicated lines. A true stream is not used, because core's
-design has no way to carry one:
+runs no root process, so core records it (protocol 8, core-daemon
+`logcat_session`):
 
-- The IPC is tarpc, which is request/response only (no server streaming), over
-  1 MiB frames. A stream would need a second, non-tarpc channel, for example
-  passing a pipe fd over the socket with `SCM_RIGHTS`.
-- Diagnostic probes are bounded children: each has a deadline, an output cap,
-  and is killed on timeout, so a hung probe cannot hold the daemon. A `logcat`
-  that runs until the user taps Stop breaks that invariant. It would need a
-  core-owned session with its own size cap and an owner lease, so that a killed
-  app cannot leave root `logcat` writing forever. Renewing that lease is polling
-  again.
-- Root effects are fixed and idempotent so that an uncertain one can be
-  re-applied. Start/stop recording is neither.
+- **Start** (`start_logcat_recording(session)`): core spawns one
+  `logcat -b all -v threadtime -T <start − 1 s>` child, by direct exec with no
+  shell. Its stdout is piped through core into a core-owned file,
+  `/data/adb/vpnhide/core/logcat/session-<id>.log` (0600). One session at a time:
+  Start with the running id is a no-op, and any other id gets `Busy`.
+- **Limits core enforces itself:** 64 MiB and 30 minutes. At either limit core
+  kills the child and marks the session `AutoStopped` (`size_cap` /
+  `duration_cap`). `logcat_exited` means logcat quit by itself. At the byte cap
+  core stops rather than rotating: the file stays one unbroken stretch from the
+  app's start marker, and `truncated` says the rest is missing. The app shows
+  why the recording ended. No owner lease is needed, because the caps bound a
+  session whether or not the app is alive.
+- **Core death:** the child has `PR_SET_PDEATHSIG(SIGKILL)` and dies with core.
+  A clean shutdown stops it first. Core deletes its `logcat/` dir at start, and
+  a new session removes the previous session's file and export copy.
+- **Stop** (`stop_logcat_recording(session)`): core kills the child, waits for
+  the file to flush, and copies it into the app's `vpnhide-core-export/` dir as
+  `logcat-session-<id>.txt` (app-owned, 0600). This is the same route large probe
+  output takes, so nothing goes inline over the 1 MiB frame. A repeated Stop
+  returns the same status, and hands the file over again if the app already
+  removed its copy.
+- **App side:** while recording, the app asks only for the session's size and
+  state (`logcat_recording_status`, every 2 s), never for log lines. When core
+  reports an auto-stop, the app collects the file at once. After an app restart,
+  the Diagnostics card adopts a session core is still recording, so Stop can
+  collect it.
 
-The fd-passing design is the path if this is ever needed. The pipe's lifetime
-is the app's, so `logcat` gets `SIGPIPE` when the app dies, with no lease. It
-is a new IPC surface, so it is not part of 2.0.
+`state.json → sections.logcat_recording` records the session id, duration,
+`rawLogBytes`, `truncated`, `autoStopped`, `coreLimits`, and whether the session
+was adopted after an app restart.
 
 ### Open it
 

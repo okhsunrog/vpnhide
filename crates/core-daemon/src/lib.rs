@@ -17,6 +17,7 @@ pub mod effects;
 pub mod framework_vpn;
 pub mod journal;
 pub mod listener;
+pub mod logcat_session;
 pub mod native_boot;
 pub mod observer;
 pub mod operation;
