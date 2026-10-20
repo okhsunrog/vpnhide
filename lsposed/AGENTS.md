@@ -63,14 +63,15 @@ directions, since `internal` is module-wide and the compiler will not.
 
 ## Data flow
 
-- **Read path:** one batched root shell → `RootSnapshotCache` → typed snapshots
+- **Read path:** one batched core `RootSnapshot` probe → `RootSnapshotCache` → typed snapshots
   (`DashboardState`, `TargetsSnapshot`) derived in pure functions → Compose.
   Root-derived projections carry the source observation ID. Dependent invalidation
   rejects obsolete loads; retained last-good screen values can temporarily belong
   to different observations while refreshes finish.
 - **Write path:** field intents → process-owned `CanonicalConfigRepository` /
-  `ConfigCoordinator` → fresh canonical read → tracked root phases for JSON,
-  secret/cleanup and native/ports activation. Switches observe coordinator intent
+  `ConfigCoordinator` → fresh canonical read → one core operation
+  (`config_replace`, plus fixed `root_effect`s for the SuperKey and cleanup) whose
+  receipt carries the config write and the native/Ports delivery phases. Switches observe coordinator intent
   and confirmed values; Activity `CanonicalEditorViewModel` instances retain
   drafts and register conflicts. Observation refresh happens separately. LSPosed
   reads canonical JSON directly from `system_server`. See
@@ -115,30 +116,34 @@ directions, since `internal` is module-wide and the compiler will not.
   (registered by `CanonicalConfigRepository`): relevance is decided by the pure
   `operationAffectsSelfMeasurement`, so a new kind of write must be classified
   there, never by adding a wait or a retry to a screen.
-- **`RootSnapshotCache`** — the single batched root read. Need new system state
-  on the Dashboard/Hiding path? Add a section to its shell snapshot; don't
-  add an ad-hoc `suExec` that races the snapshot. The deliberate exception is
-  `RoutingGateCache`: its foreground `AppVpnStatePoller` uses the narrow Rust
-  `observe app-vpn-state` helper because app-scoped VPN membership changes must
-  not refresh or depend on the heavy root snapshot.
-- **`ShellUtils`** — `suExec`, and the parsers `parseConfigLines`,
-  `parseKeyValueLines`, `parsePackageUidMap`. **Never write another `pm list`
+- **`RootSnapshotCache`** — the single batched root read (core's `RootSnapshot`
+  probe). Need new system state on the Dashboard/Hiding path? Add a section to
+  core's root snapshot (`crates/core-daemon/src/device_probes/root_snapshot.rs`);
+  don't add another root read that races the snapshot. The app runs no `su`
+  (CI: `tests/check_no_root_exec.sh`). The deliberate exception is
+  `RoutingGateCache`: its foreground `AppVpnStatePoller` uses core's narrow
+  `AppVpnState` probe because app-scoped VPN membership changes must not refresh
+  or depend on the heavy root snapshot.
+- **`core/CoreRoot`** — the only privileged surface: typed `CoreProbe`
+  diagnostics and fixed `CoreRootEffect`s over the core socket. A new root read is
+  a new core probe, never a shell line.
+- **`ShellUtils`** — startup self-target preparation and the parsers
+  `parseConfigLines`, `parseKeyValueLines`, `parsePackageUidMap` (no shell
+  despite the name). **Never write another `pm list`
   or `key=value` parser** — there used to be four; there is now one of each.
-- **`ConfigChannels`** — the one place that invokes the single active native
-  activator — folding `kmod > KPM > Zygisk` down to the first installed,
-  non-disabled backend — after the canonical JSON changes; the ports activator
-  is invoked alongside it. Save, the debug toggle, and startup reconcile go
-  through it. **Don't** hand-build per-backend runtime config in Kotlin; the
-  activators derive each backend's wire from the canonical JSON.
+- **`ConfigChannels`** — the startup reconcile (core `RepairActivation`) and the
+  auto-hidden-package refresh. Delivery to the native backend and Ports is core's
+  job: it applies each saved config to the one backend it selected this boot.
+  **Don't** hand-build per-backend runtime config in Kotlin; core derives each
+  backend's wire from the canonical JSON.
 - **`CanonicalConfigRepository`** — all app configuration writes, superkey and
   cleanup actions, and activation go through its coordinator. Submit field intent
-  or a pure transform of the fresh config; never save a cached full snapshot or
-  call a config/activation shell through `suExec`. Root outcome can be unknown:
+  or a pure transform of the fresh config; never save a cached full snapshot.
+  Writes go to core (`config_replace` / `config_repair`). Root outcome can be unknown:
   preserve phase evidence and let the coordinator reconcile it.
-- **`CanonicalConfigData` / `StorageConfig` / `ShellCommandBuilders`** — shared canonical JSON models/parsing, app-side storage builders,
-  migration helpers, and root-safe file writes (`buildCanonicalConfigWriteCommand`
-  in `StorageConfig` wraps the generic `buildAtomicSystemDataRawWriteCommand` in
-  `ShellCommandBuilders`). The canonical JSON is the persistent
+- **`CanonicalConfigData` / `StorageConfig`** — shared canonical JSON models/parsing,
+  app-side config builders and migration helpers. The app never writes the file
+  itself: core does, atomically, for each accepted edit. The canonical JSON is the persistent
   target config; legacy `targets.txt` / UID files are migration inputs or
   derived runtime state, not app-owned user config.
 - **`TargetPickerScaffold`** — `TargetPickerScreen<T>`, `TargetRowShell`,
@@ -185,9 +190,8 @@ directions, since `internal` is module-wide and the compiler will not.
   (`loadDashboardState`) from rotting back into god-functions.
 - **Keep functions short** (detekt fails new non-`@Composable` methods over
   ~60 lines). If an orchestrator grows, extract a pure helper.
-- **Add a unit test** for any new pure function (JUnit, `src/test`; run shell
-  fragments through `ProcessBuilder("sh", ...)` like `ShellCommandBuildersTest`).
-- **`grep` before adding** any parser / formatter / shell-builder / status
+- **Add a unit test** for any new pure function (JUnit, `src/test`).
+- **`grep` before adding** any parser / formatter / status
   colour — it probably already exists above.
 - **Changing a `@Serializable` type that reaches the debug bundle bumps the
   bundle schema.** `BundleSchemaGoldenTest` pins the serialized shape; when it

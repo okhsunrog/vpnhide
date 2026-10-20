@@ -8,11 +8,11 @@ Read in full before opening a PR; it's short on purpose.
 Monorepo for hiding VPN interfaces from selected Android apps. Runtime components plus tooling:
 
 - `kmod/` — kernel-level native backends: `.ko` kretprobe module per GKI generation, plus KPM for KernelPatch
-- `builtin/` — the in-tree (CONFIG_VPNHIDE=y) kernel backend: the driver plus `scripts/integrate.py` that vendors it into a kernel tree, and the KMI-agnostic companion module (activator only, no `.ko`) built by `build.py`
+- `builtin/` — the in-tree (CONFIG_VPNHIDE=y) kernel backend: the driver plus `scripts/integrate.py` that vendors it into a kernel tree. It has no module in 2.0: core adopts it when `/proc/vpnhide_ctl` reports backend `0x4`
 - `zygisk/` — Rust Zygisk module, inline `libc` hooks via shadowhook
 - `lsposed/` — LSPosed module + Compose target-picker app
-- `portshide/` — localhost port blocker (shell + iptables)
-- `crates/` — the Rust workspace: the wire `protocol`, the `activator` (one thin bin per backend), the app-side `checks`/`checks-jni` probes, and core (`core-rpc`, `core-daemon`, `core-ffi`): the only root process, which the app reaches over the in-process core-ffi client
+- `core/` — the required `vpnhide_core` module (`core/build.py` → `vpnhide-core.zip`): `module.prop`, a one-line `service.sh` exec stub, `sepolicy.rule`, the install-time `customize.sh` and the `vpnhide-core` binary. No other shell runs on the device (CI: `core/tests/check_module_scaffold.sh`)
+- `crates/` — the Rust workspace: the wire `protocol`, the `activator` library (backend loading/delivery and Ports, linked by core; no binaries), the app-side `checks`/`checks-jni` probes, and core (`core-rpc`, `core-daemon`, `core-ffi`): the only root process, which the app reaches over the in-process core-ffi client
 
 ## Read before touching code
 
@@ -21,10 +21,10 @@ These short files cover everything specific to this repo. Skipping them leads to
 - [CONTRIBUTING.md](CONTRIBUTING.md) — PR process, commit conventions, changelog requirement
 - [docs/development.md](docs/development.md) — prereqs, per-module build quickstart, keystore setup, device install, CI lints
 - [docs/state.md](docs/state.md) — every persistent path / proc entry / iptables chain the project touches; who writes, who reads, lifetime
-- [docs/storage.md](docs/storage.md) — current storage & activation design: the single JSON canonical, the activator (Rust workspace, five thin bins: kmod/builtin/kpm/zygisk/ports) that derives runtime state, LSPosed self-read, the APatch superkey, SELinux layout. Read before touching how config is stored/loaded.
-- [docs/protocol.md](docs/protocol.md) — the frozen control v2 / telemetry v1 **wire** between the activator, app, and native backends (config/stats/status); the format every backend parser must agree on
+- [docs/storage.md](docs/storage.md) — current storage & activation design: the single JSON canonical, core (the only writer, deriving each backend's runtime state and the Ports rules), LSPosed self-read, the APatch superkey, SELinux layout. Read before touching how config is stored/loaded.
+- [docs/protocol.md](docs/protocol.md) — the frozen control v2 / telemetry v1 **wire** between core, the app, and the native backends (config/stats/status); the format every backend parser must agree on
 - [docs/limits.md](docs/limits.md) — every target/config/stats capacity ceiling, what binds first, and the cost of raising it. Read before changing target caps, wire density, or backend buffers.
-- [docs/config-coordinator.md](docs/config-coordinator.md) — who owns app configuration writes: the process-owned coordinator, typed edits, drafts, phase outcomes and recovery. Read before adding any code path that writes config or runs an activator.
+- [docs/config-coordinator.md](docs/config-coordinator.md) — who owns app configuration writes: the process-owned coordinator, typed edits, drafts, phase outcomes and recovery. Read before adding any code path that writes config or applies it.
 - [docs/observation-coordinator.md](docs/observation-coordinator.md) — how root/app observations are read, invalidated, joined and quarantined, and the Dashboard/diagnostics refresh rules. Read before adding a cache or a refresh trigger.
 - [docs/notes/core-2.0-ipc-auth.md](docs/notes/core-2.0-ipc-auth.md) — the app socket, peercred auth, typed config edits, diagnostics probes and root effects. Read before touching anything privileged: the app runs no `su` (CI: `lsposed/tests/check_no_root_exec.sh`).
 - [docs/detection-vectors.md](docs/detection-vectors.md) — what an app can probe to detect the VPN (or a hidden package), which component (kmod / built-in / KPM / zygisk / lsposed / SELinux) covers each vector, how it manifests. Read before adding or changing a hook.

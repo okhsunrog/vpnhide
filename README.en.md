@@ -6,7 +6,7 @@
 
 <p align="center">Hide an active Android VPN connection from selected apps.</p>
 
-> **core-2.0 cutover:** Activator binaries, `vpnhide-ports.zip`, and `vpnhide-builtin.zip` are removed. Install **`vpnhide_core`** — it alone applies Native/Zygisk/Ports. Artifact zips (kmod/KPM/Zygisk) ship binaries only. See [docs/notes/core-2.0-activator-cutover.md](docs/notes/core-2.0-activator-cutover.md).
+> **VPN Hide 2.0:** the **`vpnhide-core.zip`** module is required. It is the only component that loads a native backend, writes the config and applies Ports; the app talks to it over a local socket and runs no `su` of its own. The 1.x activators, `vpnhide-ports.zip` and `vpnhide-builtin.zip` are gone: uninstall an old **VPN Hide (Ports)** / **VPN Hide (Built-in kernel)** module. Backend zips (kmod/KPM/Zygisk) ship artifacts only, with no scripts. See [docs/notes/core-2.0-activator-cutover.md](docs/notes/core-2.0-activator-cutover.md).
 
 
 <p align="center">
@@ -34,7 +34,7 @@ vpnhide solves both problems with a layered architecture:
 - **KPM** — a KernelPatch Module implementing the same 11 logical kernel hooks without a GKI-variant-specific `.ko`. Useful for old/non-GKI 4.14 / 4.19 / 5.4 kernels and cases where the `.ko` cannot load. Requires a KernelPatch runtime: APatch or [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest).
 - **Zygisk** — fallback when a kernel-level backend is not possible. Its `libc.so` inline hooks include best-effort `setsockopt` filtering, run inside the target process, and can be bypassed by direct syscalls, so banking and anti-fraud apps may detect it. For those apps, leave Native off and rely on the Java layer.
 
-**Layer 3 — Ports module (portshide):** a separate Magisk module. It blocks selected apps from reaching `127.0.0.1` / `::1` (via iptables), so they can't detect a locally bound VPN / proxy daemon by its open port (the **Ports** role).
+**Layer 3 — Ports (part of the core module):** blocks selected apps from reaching `127.0.0.1` / `::1` (via iptables), so they can't detect a locally bound VPN / proxy daemon by its open port (the **Ports** role). The core module applies these rules; there is no separate Ports module in 2.0.
 
 The target app's process is completely untouched when using LSPosed + a kernel-level Native backend (kmod or KPM) — no Xposed, no inline hooks, no modified memory regions. Because of that, vpnhide works with banking and government apps that actively detect and block Xposed-based modules.
 
@@ -48,14 +48,13 @@ vpnhide hides three things from selected apps, all configured per app via the fo
 
 ## Which modules do I need?
 
-You always need the **VPN Hide app** (`vpnhide.apk`) + LSPosed/Vector for the Java layer + exactly one Native backend for native hiding. The app can also use the optional Ports module if you want localhost port blocking:
+You always need the **VPN Hide app** (`vpnhide.apk`) + the **VPN Hide Core** module (`vpnhide-core.zip`) + LSPosed/Vector for the Java layer + exactly one Native backend for native hiding. Localhost port blocking (Ports) is built into the core module:
 
 - **`kmod`** (stable default) — fully out-of-process, invisible to anti-tamper. Requires a supported GKI kernel: 5.10, 5.15, 6.1, 6.6, or 6.12.
 - **`KPM`** — kernel-level backend for 4.14 / 4.19 / 5.4 and other cases where the `.ko` does not fit. Requires APatch or [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest).
 - **`Zygisk`** — fallback if kmod/KPM are unavailable or you do not want to install a KernelPatch runtime.
-- **`portshide`** (optional) — install this if you want to block selected apps from probing localhost ports.
 
-Do not install multiple Native backends at the same time. If more than one is installed, the app chooses the active one by priority: kmod, then built-in, then KPM, then Zygisk; uninstall unused modules.
+Install exactly one Native backend. Core decides once per boot: if it finds more than one (installed kmod/KPM/Zygisk modules, a kernel with VPN Hide built in, or a KPM it did not load), it loads **none** of them and the Dashboard names the conflict — uninstall the extras and reboot.
 
 See [Install](#install) for step-by-step instructions.
 
@@ -65,9 +64,9 @@ Download the latest release from [Releases](https://github.com/okhsunrog/vpnhide
 
 In short — the app's **Dashboard** tab walks you through it and tells you which module to install. Full instructions live in the built-in guide (the links below open both on GitHub and inside the app).
 
-1. **App + LSPosed.** Install `vpnhide.apk`, enable the **VPN Hide** module in LSPosed, add **"System Framework"** to its scope, and reboot. → [First install](docs/help/en/first-install.md)
-2. **One Native backend.** The Dashboard detects your kernel and names the file — kmod, KPM, or Zygisk. Install it through your root manager and reboot. If you build your own kernel, there is a fourth option: the [built-in kernel backend](builtin/README.md) with its companion module. → [Which native backend to use](docs/help/en/choosing-native.md) · [kmod](docs/help/en/kmod-install.md) · [KPM](docs/help/en/kpm-install.md) · [Zygisk](docs/help/en/zygisk-install.md)
-3. **Optional — Ports.** For localhost port blocking, install `vpnhide-ports.zip`. → [Hide localhost ports](docs/help/en/ports.md)
+1. **App + core + LSPosed.** Install `vpnhide.apk`, install `vpnhide-core.zip` from the same release through your root manager (Magisk / KernelSU / APatch), enable the **VPN Hide** module in LSPosed, add **"System Framework"** to its scope, and reboot. The app needs no root grant of its own; without the core module it shows a **VPN Hide Core is not running** screen. → [First install](docs/help/en/first-install.md)
+2. **One Native backend.** The Dashboard detects your kernel and names the file — kmod, KPM, or Zygisk. Install it through your root manager and reboot. If you build your own kernel, there is a fourth option: the [built-in kernel backend](builtin/README.md), which needs no module at all (core adopts it). → [Which native backend to use](docs/help/en/choosing-native.md) · [kmod](docs/help/en/kmod-install.md) · [KPM](docs/help/en/kpm-install.md) · [Zygisk](docs/help/en/zygisk-install.md)
+3. **Optional — Ports.** For localhost port blocking, give apps the **P** role; the core module applies the rules, nothing extra to install. → [Hide localhost ports](docs/help/en/ports.md)
 4. **Set up hiding.** In the **Hiding** tab, give the **J / N / A / P** roles to the apps you're hiding the VPN from (a bank, a government service) — not the VPN client itself. → [Set up hiding](docs/help/en/configure-hiding.md)
 
 The full offline guide is built into the app (**Settings → Help & guide**) and lives in the repo: [docs/help/en](docs/help/en/) — install, configuration, diagnostics, updating and removal, limits.
@@ -75,16 +74,9 @@ The full offline guide is built into the app (**Settings → Help & guide**) and
 <details>
 <summary><b>Shell configuration (advanced)</b></summary>
 
-The user-managed config lives in `/data/system/vpnhide_config.json`. Edit the JSON, then run the activator for the installed module:
+The user-managed config lives in `/data/system/vpnhide_config.json`, but in 2.0 **only the core writes it**: change it through the app (or the debug agent bridge), not by editing the file. A hand edit is not delivered to the native backend or Ports until core reloads it on the next boot, and core may overwrite it on the next save. There are no activator binaries to run any more.
 
-```sh
-su -c /data/adb/modules/vpnhide_kmod/activator
-su -c /data/adb/modules/vpnhide_kpm/activator
-su -c /data/adb/modules/vpnhide_zygisk/activator
-su -c /data/adb/modules/vpnhide_ports/activator
-```
-
-Run only activators for modules that are actually installed. LSPosed reads the JSON directly from `system_server`; it does not need an activator. Old `/data/adb/vpnhide_*` `targets.txt` files are the pre-1.0 config. They are no longer user config: the app imports them into the JSON once and deletes them.
+Old `/data/adb/vpnhide_*` `targets.txt` files are the pre-1.0 config. They are no longer user config: the app imports them into the JSON once and core deletes them.
 
 </details>
 
@@ -136,10 +128,10 @@ Any issues found are shown as actionable cards with specific instructions.
 
 | Directory | What | How |
 |---|---|---|
-| **[builtin/](builtin/)** | Built-in kernel backend (C) + companion module | The same driver as the `.ko`, compiled into the kernel (`CONFIG_VPNHIDE=y`) for kernels the `.ko` cannot load on: integrated modules, no kprobes, LTO. `scripts/integrate.py` vendors it into a kernel tree; the companion module carries only the activator. |
+| **[core/](core/)** + **[crates/](crates/)** | VPN Hide Core module (Rust) | `vpnhide-core.zip`: the root daemon started once per boot by a one-line `service.sh`. It picks and loads exactly one native backend, delivers the config to it, applies the Ports iptables rules, serves the app's socket and runs the app's typed diagnostics. |
+| **[builtin/](builtin/)** | Built-in kernel backend (C) | The same driver as the `.ko`, compiled into the kernel (`CONFIG_VPNHIDE=y`) for kernels the `.ko` cannot load on: integrated modules, no kprobes, LTO. `scripts/integrate.py` vendors it into a kernel tree; no module is needed, core adopts it at boot. |
 | **[kmod/](kmod/)** | `.ko` kernel module + KPM backend (C) | Two kernel-level Native backends: the GKI `.ko` using `kretprobe`, and the KPM using KernelPatch inline hooks. Both have zero footprint in the target app's process; only one should be active. ([details](kmod/README.md), [KPM](kmod/kpm/README.md)) |
 | **[lsposed/](lsposed/)** | LSPosed module + app (Kotlin + Rust) | Hooks `writeToParcel` in `system_server` for per-UID Binder filtering. The APK provides a dashboard (module status, version checks, LSPosed config validation, install recommendations), the Hiding tab for Java / Native / Apps / Ports roles, and diagnostics. ([details](lsposed/README.md)) |
-| **[portshide/](portshide/)** | Ports module (Shell + iptables) | Blocks selected apps from reaching `127.0.0.1` / `::1`, hiding locally bound VPN / proxy daemons from localhost port probes. ([details](portshide/README.md)) |
 | **[zygisk/](zygisk/)** | Zygisk module (Rust) | Inline-hooks `libc.so` in the target app's process. Fallback when a kernel-level backend is unavailable. ([details](zygisk/README.md)) |
 
 ## Detection coverage
@@ -190,6 +182,7 @@ The full vector map — per-layer breakdown, SELinux caveats, and known gaps —
 
 ## Building from source
 
+- **core**: `python3 core/build.py` — cross-compiles `vpnhide-core` for arm64 + armv7 (cargo-ndk) into `core/target/vpnhide-core.zip`.
 - **kmod**: `./kmod/build.py --kmi android14-6.1` (or `--all`) — auto-spawns the DDK container via podman/docker. Full guide: [kmod/BUILDING.md](kmod/BUILDING.md).
 - **KPM**: `python3 kmod/kpm/build.py` — builds the universal `vpnhide-kpm.zip` through the KernelPatch submodule. Details: [kmod/kpm/README.md](kmod/kpm/README.md).
 - **zygisk**: `cd zygisk && ./build.py` (Rust + NDK + cargo-ndk)
@@ -200,8 +193,6 @@ The full vector map — per-layer breakdown, SELinux caveats, and known gaps —
 If you're on Windows, there are some inconveniences with building some subprojects.
 
 **lsposed**: builds fine in Android Studio.
-
-**portshide**: `cd .\portshide\; python .\build-zip.py` runs fine.
 
 For kmod and zygisk, you'll (unfortunately) need to install [Docker for Windows](https://docs.docker.com/desktop/setup/install/windows-install/).
 

@@ -36,9 +36,9 @@ equivalent optional KPM hooks.
 ### Optional filesystem hook loader contract
 
 `filesystem_hiding` is a read-only boolean module parameter consumed only by
-`insmod`; it is not a control-v2 field. The shipped activator's `boot-load`
-command reads canonical optional feature `filesystem_iface_paths` and passes
-`filesystem_hiding=1` or `filesystem_hiding=0` accordingly. Omitting the
+`insmod`; it is not a control-v2 field. VPN Hide Core loads the module with
+`finit_module(2)` and reads canonical optional feature `filesystem_iface_paths`
+to pass `filesystem_hiding=1` or `filesystem_hiding=0` accordingly. Omitting the
 parameter has the same disabled behavior as `0`.
 
 When enabled, module init registers `filename_lookup`, `do_filp_open`,
@@ -87,22 +87,25 @@ ordinary `rmmod` is not supported.
 
 On boot:
 
-- `post-fs-data.sh` execs the Rust activator's bounded `boot-load` phase, which
-  reads the reboot-gated setting, runs `insmod`, and writes load diagnostics.
-- `service.sh` starts the activator's late-start `boot-service` phase in the
-  background and immediately returns to the root manager. The activator reads
-  `/data/system/vpnhide_config.json`, enumerates Android users, resolves package
-  names for each user separately, and emits a `vpnhide 2 config` snapshot
-  ([protocol](../docs/protocol.md)) to `/proc/vpnhide_ctl`.
+- The `vpnhide_kmod` module ships only `module.prop` and `vpnhide_kmod.ko` —
+  no boot scripts. The **VPN Hide Core** module (`vpnhide-core.zip`, required)
+  does everything at late start, once per boot: it checks that the kmod is the
+  only native backend (another installed kmod/KPM/Zygisk module, a built-in
+  kernel backend or a foreign KPM is a conflict, and then nothing is loaded),
+  loads the `.ko` with `finit_module(2)` and the reboot-gated setting, and
+  records the result in its native boot status.
+- Core then reads `/data/system/vpnhide_config.json`, enumerates Android users,
+  resolves package names for each user separately, and writes a
+  `vpnhide 2 config` snapshot ([protocol](../docs/protocol.md)) to
+  `/proc/vpnhide_ctl`.
 
 ### Target management
 
-**VPN Hide app (recommended):** open the VPN Hide app (the [lsposed](../lsposed/) APK). It lists all installed apps with icons, search, and checkboxes. Saves the canonical JSON config and runs the installed native activator immediately. Works on KernelSU, Magisk, and APatch. Managing targets this way is all a normal setup needs; the shell equivalents are in the collapsible **For developers / advanced usage** section at the end of this file.
+**VPN Hide app (recommended):** open the VPN Hide app (the [lsposed](../lsposed/) APK). It lists all installed apps with icons, search, and checkboxes. Saves through VPN Hide Core, which writes the canonical JSON config and delivers it to the selected native backend immediately. Works on KernelSU, Magisk, and APatch. Managing targets this way is all a normal setup needs; the shell equivalents are in the collapsible **For developers / advanced usage** section at the end of this file.
 
-The app first writes `/data/system/vpnhide_config.json`, the persistent
-package-keyed desired state, and then invokes the selected native activator. The
-kmod activator derives `/proc/vpnhide_ctl` from that JSON; LSPosed independently
-reads the canonical JSON from `system_server`.
+Core writes `/data/system/vpnhide_config.json`, the persistent package-keyed
+desired state, and derives the `/proc/vpnhide_ctl` snapshot from it; LSPosed
+independently reads the canonical JSON from `system_server`.
 
 ## Combined use with system_server hooks
 
@@ -178,15 +181,13 @@ The kretprobe entry handler saves the `seq` pointer and `seq->count` (current bu
 <details>
 <summary><strong>For developers / advanced usage</strong></summary>
 
-You do not need these to use the module — the VPN Hide app writes the canonical
-config and runs the activator for you. They are shell equivalents for
-development and debugging.
+You do not need these to use the module — the VPN Hide app saves the config
+through core, which delivers it for you. They are for development and debugging
+only; there is no activator binary in 2.0, and a hand-written snapshot is
+replaced by core's next delivery.
 
 ```bash
-# Edit /data/system/vpnhide_config.json, then run the module activator.
-adb shell su -c '/data/adb/modules/vpnhide_kmod/activator'
-
-# Or push a control-config snapshot straight to the kernel (docs/protocol.md):
+# Push a control-config snapshot straight to the kernel (docs/protocol.md):
 # header + folded debug flag + grouped target UIDs + mandatory end count
 # (a0003ff = shared kernel hooks plus the optional .ko filesystem hook;
 # control v2 uses bare hex).

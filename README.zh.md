@@ -6,7 +6,7 @@
 
 <p align="center">对选定应用隐藏活动的 Android VPN 连接。</p>
 
-> **core-2.0 cutover:** Activator binaries, `vpnhide-ports.zip`, and `vpnhide-builtin.zip` are removed. Install **`vpnhide_core`** — it alone applies Native/Zygisk/Ports. Artifact zips (kmod/KPM/Zygisk) ship binaries only. See [docs/notes/core-2.0-activator-cutover.md](docs/notes/core-2.0-activator-cutover.md).
+> **VPN Hide 2.0：**必须安装 **`vpnhide-core.zip`** 模块。只有它负责加载原生后端、写入配置并应用 Ports；应用通过本地套接字与它通信，自身不调用 `su`。1.x 的激活器、`vpnhide-ports.zip` 和 `vpnhide-builtin.zip` 已移除：请卸载旧的 **VPN Hide (Ports)** / **VPN Hide (Built-in kernel)** 模块。后端 zip（kmod/KPM/Zygisk）只包含产物，不含脚本。参见 [docs/notes/core-2.0-activator-cutover.md](docs/notes/core-2.0-activator-cutover.md)。
 
 
 <p align="center">
@@ -36,7 +36,7 @@ vpnhide 用分层架构同时解决这两个问题：
 - **KPM** —— 一个 KernelPatch 模块，实现与之相同的 11 个逻辑内核钩子，无需针对特定 GKI 变体的 `.ko`。适用于旧的/非 GKI 的 4.14 / 4.19 / 5.4 内核，以及 `.ko` 无法加载的情况。需要 KernelPatch 运行时：APatch 或 [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)。
 - **Zygisk** —— 当无法使用内核级后端时的回退方案。它的 `libc.so` 内联钩子包含尽力而为的 `setsockopt` 过滤，运行在目标进程内部，可被直接系统调用绕过，因此银行和反欺诈应用可能会检测到它。对于这类应用，请关闭原生并依赖 Java 层。
 
-**第 3 层 —— 端口模块（portshide）：** 一个独立的 Magisk 模块。它阻止选定应用访问 `127.0.0.1` / `::1`（通过 iptables），使其无法通过本地绑定的 VPN / 代理守护进程的开放端口来检测它们（**Ports** 角色）。
+**第 3 层 —— Ports（核心模块的一部分）：** 阻止选定应用访问 `127.0.0.1` / `::1`（通过 iptables），使其无法通过本地绑定的 VPN / 代理守护进程的开放端口来检测它们（**Ports** 角色）。这些规则由核心模块应用；2.0 中没有单独的 Ports 模块。
 
 使用 LSPosed + 内核级原生后端（kmod 或 KPM）时，目标应用的进程完全不受触碰 —— 没有 Xposed，没有内联钩子，没有被修改的内存区域。正因如此，vpnhide 能与主动检测并封锁基于 Xposed 模块的银行和政务类应用协同工作。
 
@@ -50,14 +50,13 @@ vpnhide 对选定应用隐藏三样东西，全部通过四个 **J / N / A / P**
 
 ## 我需要哪些模块？
 
-你始终需要 **VPN Hide 应用**（`vpnhide.apk`）+ 用于 Java 层的 LSPosed/Vector + 恰好一个用于原生隐藏的原生后端。若你想要本地回环端口拦截，应用还可选用可选的端口模块：
+你始终需要 **VPN Hide 应用**（`vpnhide.apk`）+ **VPN Hide Core** 模块（`vpnhide-core.zip`）+ 用于 Java 层的 LSPosed/Vector + 恰好一个用于原生隐藏的原生后端。本地回环端口拦截（Ports）已内置于核心模块：
 
 - **`kmod`**（稳定默认）—— 完全在进程外，对防篡改不可见。需要受支持的 GKI 内核：5.10、5.15、6.1、6.6 或 6.12。
 - **`KPM`** —— 用于 4.14 / 4.19 / 5.4 以及 `.ko` 不适配的其他情况的内核级后端。需要 APatch 或 [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)。
 - **`Zygisk`** —— 当 kmod/KPM 不可用，或你不想安装 KernelPatch 运行时时的回退方案。
-- **`portshide`**（可选）—— 若你想阻止选定应用探测本地回环端口，请安装它。
 
-不要同时安装多个原生后端。若安装了多个，应用会按优先级选择活动的那个：kmod，其次内核内置后端，再次 KPM，最后 Zygisk；请卸载不使用的模块。
+请只安装一个原生后端。核心在每次启动时决定一次：若发现多于一个（已安装的 kmod/KPM/Zygisk 模块、内置 VPN Hide 的内核，或不是由它加载的 KPM），它**一个也不加载**，并在概览中指出冲突——卸载多余的模块后重启。
 
 分步说明见[安装](#安装)。
 
@@ -67,9 +66,9 @@ vpnhide 对选定应用隐藏三样东西，全部通过四个 **J / N / A / P**
 
 简而言之——应用的**概览**标签页会带你逐步完成，并告诉你该装哪个模块。完整说明在内置指南里（下面的链接在 GitHub 和应用内都能打开）。
 
-1. **应用 + LSPosed。**安装 `vpnhide.apk`，在 LSPosed 中启用 **VPN Hide** 模块，把 **“系统框架”** 加入其作用域，然后重启。→ [首次安装](docs/help/zh/first-install.md)
-2. **一个 Native 后端。**概览会检测你的内核并给出文件名——kmod、KPM 或 Zygisk。通过 root 管理器安装并重启。如果你自己编译内核，还有第四种选择：[内核内置后端](builtin/README.md)及其配套模块。→ [该选哪个 Native 后端](docs/help/zh/choosing-native.md) · [kmod](docs/help/zh/kmod-install.md) · [KPM](docs/help/zh/kpm-install.md) · [Zygisk](docs/help/zh/zygisk-install.md)
-3. **可选 —— Ports。**要拦截本地回环端口，安装 `vpnhide-ports.zip`。→ [隐藏 localhost 端口](docs/help/zh/ports.md)
+1. **应用 + 核心 + LSPosed。**安装 `vpnhide.apk`，通过 root 管理器（Magisk / KernelSU / APatch）安装同一版本的 `vpnhide-core.zip`，在 LSPosed 中启用 **VPN Hide** 模块，把 **“系统框架”** 加入其作用域，然后重启。应用本身不需要 Root 授权；没有核心模块时，它会显示 **“VPN Hide Core 未运行”** 界面。→ [首次安装](docs/help/zh/first-install.md)
+2. **一个 Native 后端。**概览会检测你的内核并给出文件名——kmod、KPM 或 Zygisk。通过 root 管理器安装并重启。如果你自己编译内核，还有第四种选择：[内核内置后端](builtin/README.md)，它完全不需要模块（由核心接管）。→ [该选哪个 Native 后端](docs/help/zh/choosing-native.md) · [kmod](docs/help/zh/kmod-install.md) · [KPM](docs/help/zh/kpm-install.md) · [Zygisk](docs/help/zh/zygisk-install.md)
+3. **可选 —— Ports。**要拦截本地回环端口，给应用分配 **P** 角色即可；规则由核心模块应用，无需额外安装。→ [隐藏 localhost 端口](docs/help/zh/ports.md)
 4. **设置隐藏。**在**隐藏**标签页，把 **J / N / A / P** 角色赋给你要对其隐藏 VPN 的应用（银行、政务）——而不是 VPN 客户端本身。→ [设置隐藏](docs/help/zh/configure-hiding.md)
 
 完整的离线指南已内置于应用（**设置 → 帮助与指南**），也在仓库里：[docs/help/zh](docs/help/zh/) —— 安装、配置、诊断、更新与移除、限制。
@@ -77,16 +76,9 @@ vpnhide 对选定应用隐藏三样东西，全部通过四个 **J / N / A / P**
 <details>
 <summary><b>Shell 配置（进阶）</b></summary>
 
-用户管理的配置位于 `/data/system/vpnhide_config.json`。编辑该 JSON，然后为已安装的模块运行激活器：
+用户管理的配置位于 `/data/system/vpnhide_config.json`，但在 2.0 中**只有核心会写入它**：请通过应用（或调试用 agent bridge）修改，而不要直接编辑文件。手动编辑在核心于下次启动重新读取之前不会下发到原生后端和 Ports，并可能在下次保存时被覆盖。已不再有需要运行的激活器程序。
 
-```sh
-su -c /data/adb/modules/vpnhide_kmod/activator
-su -c /data/adb/modules/vpnhide_kpm/activator
-su -c /data/adb/modules/vpnhide_zygisk/activator
-su -c /data/adb/modules/vpnhide_ports/activator
-```
-
-只运行实际已安装模块的激活器。LSPosed 直接从 `system_server` 读取该 JSON；它不需要激活器。旧的 `/data/adb/vpnhide_*` `targets.txt` 文件是 1.0 之前版本的配置。它们不再是用户配置：应用会将其一次性导入该 JSON 并删除。
+旧的 `/data/adb/vpnhide_*` `targets.txt` 文件是 1.0 之前版本的配置。它们不再是用户配置：应用会将其一次性导入该 JSON，由核心删除。
 
 </details>
 
@@ -138,10 +130,10 @@ su -c /data/adb/modules/vpnhide_ports/activator
 
 | 目录 | 是什么 | 如何工作 |
 |---|---|---|
-| **[builtin/](builtin/)** | 内核内置后端（C）+ 配套模块 | 与 `.ko` 相同的驱动，但编译进内核（`CONFIG_VPNHIDE=y`），用于 `.ko` 无法加载的内核：集成模块、无 kprobes、LTO。`scripts/integrate.py` 将其并入内核源码树；配套模块只包含激活器。 |
+| **[core/](core/)** + **[crates/](crates/)** | VPN Hide Core 模块（Rust） | `vpnhide-core.zip`：由一行 `service.sh` 在每次启动时拉起的 root 守护进程。它选择并加载恰好一个原生后端、向其下发配置、应用 Ports 的 iptables 规则、为应用提供套接字服务，并执行应用请求的类型化诊断。 |
+| **[builtin/](builtin/)** | 内核内置后端（C） | 与 `.ko` 相同的驱动，但编译进内核（`CONFIG_VPNHIDE=y`），用于 `.ko` 无法加载的内核：集成模块、无 kprobes、LTO。`scripts/integrate.py` 将其引入内核源码树；无需模块，核心会在启动时接管它。 |
 | **[kmod/](kmod/)** | `.ko` 内核模块 + KPM 后端（C） | 两个内核级原生后端：使用 `kretprobe` 的稳定 GKI `.ko`，以及使用 KernelPatch 内联钩子的 KPM。两者在目标应用进程中均零足迹；只应有一个处于活动状态。（[详情](kmod/README.md)，[KPM](kmod/kpm/README.md)） |
 | **[lsposed/](lsposed/)** | LSPosed 模块 + 应用（Kotlin + Rust） | 在 `system_server` 中挂钩 `writeToParcel`，实现按 UID 的 Binder 过滤。APK 提供概览（模块状态、版本检查、LSPosed 配置校验、安装建议）、用于 Java / Native / Apps / Ports 角色的隐藏标签页，以及诊断。（[详情](lsposed/README.md)） |
-| **[portshide/](portshide/)** | 端口模块（Shell + iptables） | 阻止选定应用访问 `127.0.0.1` / `::1`，使本地绑定的 VPN / 代理守护进程免于本地回环端口探测。（[详情](portshide/README.md)） |
 | **[zygisk/](zygisk/)** | Zygisk 模块（Rust） | 在目标应用进程中内联挂钩 `libc.so`。当内核级后端不可用时的回退方案。（[详情](zygisk/README.md)） |
 
 ## 检测覆盖
@@ -191,6 +183,7 @@ KPM 实现与 `.ko` 相同的 11 个逻辑内核钩子，而完整的向量图�
 
 ## 从源码构建
 
+- **core**：`python3 core/build.py` —— 用 cargo-ndk 为 arm64 + armv7 交叉编译 `vpnhide-core`，输出 `core/target/vpnhide-core.zip`。
 - **kmod**：`./kmod/build.py --kmi android14-6.1`（或 `--all`）—— 通过 podman/docker 自动拉起 DDK 容器。完整指南：[kmod/BUILDING.md](kmod/BUILDING.md)。
 - **KPM**：`python3 kmod/kpm/build.py` —— 通过 KernelPatch 子模块构建通用的 `vpnhide-kpm.zip`。详情：[kmod/kpm/README.md](kmod/kpm/README.md)。
 - **zygisk**：`cd zygisk && ./build.py`（Rust + NDK + cargo-ndk）
@@ -202,7 +195,6 @@ KPM 实现与 `.ko` 相同的 11 个逻辑内核钩子，而完整的向量图�
 
 **lsposed**：在 Android Studio 中可正常构建。
 
-**portshide**：`cd .\portshide\; python .\build-zip.py` 可正常运行。
 
 对于 kmod 和 zygisk，你（很遗憾地）需要安装 [Docker for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)。
 
