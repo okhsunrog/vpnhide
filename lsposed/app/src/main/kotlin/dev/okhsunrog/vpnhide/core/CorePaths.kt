@@ -6,8 +6,8 @@ import java.io.File
 /**
  * Core module paths. The app reaches core over a socket core binds inside the app's own
  * device-encrypted data dir (owned by the app uid, labelled like the dir), so the app needs no
- * root and no other app can reach or probe it. Kept in sync with `core-rpc`
- * `SOCKET_NAME` / `PRODUCTION_SOCKET_PATH` and core-daemon `app_socket`.
+ * root and no other app can reach or probe it. Kept in sync with core-daemon `app_socket`
+ * (`SOCKET_NAME`).
  */
 object CorePaths {
     const val SOCKET_NAME = "vpnhide-core.sock"

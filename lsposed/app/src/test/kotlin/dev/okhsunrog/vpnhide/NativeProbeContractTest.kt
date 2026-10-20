@@ -4,12 +4,10 @@ import dev.okhsunrog.vpnhide.checks.AppVpnState
 import dev.okhsunrog.vpnhide.checks.AppVpnStateResponse
 import dev.okhsunrog.vpnhide.checks.CheckStatus
 import dev.okhsunrog.vpnhide.checks.ChecksResponse
-import dev.okhsunrog.vpnhide.checks.KpmListResponse
 import dev.okhsunrog.vpnhide.checks.NativeProbe
 import dev.okhsunrog.vpnhide.checks.ObservationError
 import dev.okhsunrog.vpnhide.checks.RoutingResponse
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NativeProbeContractTest {
@@ -58,18 +56,6 @@ class NativeProbeContractTest {
         val response = NativeProbe.parseRouting(fixture("routing-string-boolean.json")) as RoutingResponse.Failure
 
         assertEquals(ObservationError.Malformed, response.error)
-    }
-
-    @Test
-    fun `kpm empty and unavailable stay distinct`() {
-        val empty = NativeProbe.parseKpmList(fixture("kpm-empty.json")) as KpmListResponse.Success
-        val unavailable = NativeProbe.parseKpmList(fixture("kpm-unavailable.json")) as KpmListResponse.Failure
-        val malformed = NativeProbe.parseKpmList(fixture("kpm-malformed.json")) as KpmListResponse.Failure
-
-        assertTrue(empty.observation.available)
-        assertTrue(empty.observation.modules.isEmpty())
-        assertEquals(ObservationError.Unavailable, unavailable.error)
-        assertEquals(ObservationError.Malformed, malformed.error)
     }
 
     @Test

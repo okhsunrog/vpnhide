@@ -89,27 +89,11 @@ sealed interface RoutingResponse {
     ) : RoutingResponse
 }
 
-data class KpmListObservation(
-    val available: Boolean,
-    val modules: Set<String>,
-)
-
-sealed interface KpmListResponse {
-    data class Success(
-        val observation: KpmListObservation,
-    ) : KpmListResponse
-
-    data class Failure(
-        val error: ObservationError,
-    ) : KpmListResponse
-}
-
 /** JNI entry to the in-process (app-view) probe run. */
 object NativeProbe {
     private const val CHECKS_KIND = "checks"
     private const val ROUTING_KIND = "routing"
     private const val APP_VPN_STATE_KIND = "app_vpn_state"
-    private const val KPM_LIST_KIND = "kpm_list"
     private val probeJson = Json { ignoreUnknownKeys = true }
 
     // Keep parsing usable in JVM unit tests that do not have an Android JNI
@@ -159,13 +143,6 @@ object NativeProbe {
         when (val envelope = parseEnvelope(json, APP_VPN_STATE_KIND)) {
             is Envelope.Success -> parseAppVpnStateData(envelope.data)
             is Envelope.Failure -> AppVpnStateResponse.Failure(envelope.error)
-        }
-
-    /** Parse the structured runtime KPM listing used by the root snapshot. */
-    fun parseKpmList(json: String): KpmListResponse =
-        when (val envelope = parseEnvelope(json, KPM_LIST_KIND)) {
-            is Envelope.Success -> parseKpmListData(envelope.data)
-            is Envelope.Failure -> KpmListResponse.Failure(envelope.error)
         }
 
     /** Compatibility projection for callers that only need check values. */
@@ -238,25 +215,6 @@ object NativeProbe {
         val method = item.stringField("method") ?: return AppVpnStateResponse.Failure(ObservationError.Malformed)
         val detail = item.stringField("detail") ?: return AppVpnStateResponse.Failure(ObservationError.Malformed)
         return AppVpnStateResponse.Success(AppVpnStateObservation(uid, state, session, interfaces, method, detail))
-    }
-
-    private fun parseKpmListData(data: JsonElement): KpmListResponse {
-        val item = data as? JsonObject ?: return KpmListResponse.Failure(ObservationError.Malformed)
-        val available =
-            (item["available"] as? JsonPrimitive)?.let { primitive ->
-                if (primitive.isString) null else primitive.booleanOrNull
-            } ?: return KpmListResponse.Failure(ObservationError.Malformed)
-        val modules = item["modules"] as? JsonArray ?: return KpmListResponse.Failure(ObservationError.Malformed)
-        if (!available) return KpmListResponse.Failure(ObservationError.Malformed)
-        val names = linkedSetOf<String>()
-        for (module in modules) {
-            val name =
-                (module as? JsonPrimitive)?.takeIf { it.isString }?.content
-                    ?: return KpmListResponse.Failure(ObservationError.Malformed)
-            if (name.isEmpty()) return KpmListResponse.Failure(ObservationError.Malformed)
-            names += name
-        }
-        return KpmListResponse.Success(KpmListObservation(available = true, modules = names))
     }
 
     private fun statusOf(raw: String): CheckStatus =

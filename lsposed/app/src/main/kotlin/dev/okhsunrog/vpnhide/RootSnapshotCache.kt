@@ -53,7 +53,6 @@ internal val REQUIRED_ROOT_SNAPSHOT_SECTIONS =
         "kernel_release",
         "kmod_state",
         "kpm_state",
-        "kpm_runtime_modules",
         "lsposed_state",
         "getenforce",
         "kpatch_runtime",

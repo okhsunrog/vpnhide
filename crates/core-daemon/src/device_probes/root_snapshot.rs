@@ -155,12 +155,6 @@ fn runtime(out: &mut Out, paths: &Paths) {
         out.remaining(Duration::from_secs(10)),
     );
     out.section("kpm_state", state.stdout);
-    let list = run(
-        &exe,
-        &["observe", "kpm-list"],
-        out.remaining(Duration::from_secs(10)),
-    );
-    out.section("kpm_runtime_modules", list.stdout);
     file(out, "lsposed_state", &paths.lsposed_state);
     out.section("getenforce", getenforce());
     // A *live* KPM runtime: APatch's /data/adb/ap, or KPatch-Next's CLI whose `hello`

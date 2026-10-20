@@ -21,7 +21,6 @@ path = "src/main.rs"
 [dependencies]
 vpnhide_core_rpc = { path = "../core-rpc" }
 vpnhide_checks = { path = "../checks" }
-vpnhide_apatch_abi = { path = "../apatch-abi" }
 libc = "0.2"
 flate2 = "1"
 sha2 = "0.10"

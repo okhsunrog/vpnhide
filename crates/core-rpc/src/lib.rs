@@ -56,11 +56,6 @@ pub const PROTOCOL_VERSION: u32 = 7;
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
 pub const SOCKET_NAME: &str = "vpnhide-core.sock";
 
-/// Production UDS path: inside the app's own device-encrypted data dir (user 0), owned by
-/// the app uid with the dir's SELinux label, so the app connects with no root and no other
-/// app can reach or probe it. Bound (and re-bound across reinstalls) by core's `app_socket`.
-pub const PRODUCTION_SOCKET_PATH: &str = "/data/user_de/0/dev.okhsunrog.vpnhide/vpnhide-core.sock";
-
 /// Max length-delimited frame on the tarpc transport (bytes). Oversized frames are dropped.
 pub const MAX_FRAME_BYTES: usize = 1 << 20; // 1 MiB
 
@@ -927,7 +922,6 @@ mod tests {
                 DiagnosticProbe::LsposedModulesDb,
                 DiagnosticProbe::GroundTruthChecks,
                 DiagnosticProbe::AppVpnState { uid: 10123 },
-                DiagnosticProbe::KpmList,
             ];
             let request = DiagnosticsRequest {
                 probes: probes.clone(),

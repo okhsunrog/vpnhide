@@ -17,16 +17,13 @@ pub fn run(args: &[String]) -> Option<i32> {
         [command, mode, rest @ ..] if command == "observe" && mode == "app-vpn-state" => {
             probe::app_vpn_state(rest)
         }
-        [command, mode] if command == "observe" && mode == "kpm-list" => {
-            observations::kpm_list(&[])
-        }
         [command, mode] if command == "observe" && mode == "kpm-state" => observations::kpm_state(),
         [command, mode, rest @ ..] if command == "probe" && is_device_probe(mode) => {
             device_probe(mode, rest)
         }
         [command, ..] if command == "probe" || command == "observe" => {
             eprintln!(
-                "usage: vpnhide-core probe checks | probe root-snapshot [--packages] | probe debug-snapshot | probe hook-counters | probe kernel-partitions | probe kernel-images <dir> | probe lsposed-db <dir> | probe logcat-lsposed | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-list | observe kpm-state"
+                "usage: vpnhide-core probe checks | probe root-snapshot [--packages] | probe debug-snapshot | probe hook-counters | probe kernel-partitions | probe kernel-images <dir> | probe lsposed-db <dir> | probe logcat-lsposed | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-state"
             );
             2
         }

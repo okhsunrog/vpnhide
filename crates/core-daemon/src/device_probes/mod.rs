@@ -41,7 +41,7 @@ pub struct Paths {
     pub apatch_dir: PathBuf,
     /// Pre-1.0 per-component lists (`LegacyConfigImport`), as (section, path).
     pub legacy: Vec<(&'static str, PathBuf)>,
-    /// Core itself, for its `observe kpm-state|kpm-list` children.
+    /// Core itself, for its `observe kpm-state` child.
     pub core_exe: PathBuf,
 }
 
