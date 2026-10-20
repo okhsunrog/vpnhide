@@ -70,8 +70,10 @@
     <!-- Root status -->
     <string name="secondary_profile_error_title">Откройте VPN Hide в основном профиле</string>
     <string name="secondary_profile_error_message">Удалите эту копию VPN Hide и используйте копию из основного профиля. Она может управлять приложениями из всех профилей.</string>
-    <string name="root_error_title">Требуется root-доступ</string>
-    <string name="root_error_message">VPN Hide нужен root-доступ, чтобы управлять скрытием VPN для выбранных приложений. Выдайте его в менеджере root (Magisk, KernelSU, APatch) и нажмите «Проверить снова».</string>
+    <string name="root_error_title">VPN Hide Core не запущен</string>
+    <string name="root_error_message">Для управления скрытием VPN Hide нужен основной модуль VPN Hide Core. Установите vpnhide-core.zip из того же релиза, что и приложение, в менеджере root (Magisk, KernelSU, APatch), убедитесь, что модуль включён, перезагрузитесь и нажмите «Проверить снова». Самому приложению root-доступ не нужен.</string>
+    <string name="core_version_mismatch_message">Установленный модуль VPN Hide Core и это приложение из разных релизов и не могут взаимодействовать. Установите приложение и vpnhide-core.zip из одного релиза, перезагрузитесь и нажмите «Проверить снова».</string>
+    <string name="core_version_mismatch_title">Версия VPN Hide Core не совпадает</string>
     <string name="root_error_recheck">Проверить снова</string>
 
     <!-- Save feedback -->
@@ -84,10 +86,10 @@
     <string name="dashboard_load_failed_message">VPN Hide не смог получить данные для этого экрана через root. Проверьте менеджер root, если запрос доступа был прерван, затем нажмите «Повторить».</string>
     <string name="dashboard_refresh_failed_message">Обновление не удалось. Показываются предыдущие данные обзора.</string>
     <string name="self_targets_error_title">Подготовка запуска не удалась</string>
-    <string name="self_targets_error_body_root">VPN Hide не смог выполнить команду с root-доступом. Если вы отклонили или прервали запрос root, выдайте доступ в менеджере root и нажмите «Повторить».</string>
-    <string name="self_targets_error_body_incomplete">Root-доступ есть, но VPN Hide не смог прочитать часть данных запуска (показано ниже). Обычно это временно — нажмите «Повторить».</string>
-    <string name="self_targets_error_body_write">Root-доступ есть, но VPN Hide не смог сохранить обновлённый конфиг (показано ниже). Нажмите «Повторить».</string>
-    <string name="self_targets_error_body_unknown">VPN Hide не смог завершить подготовку запуска с root-доступом (показано ниже). Нажмите «Повторить».</string>
+    <string name="self_targets_error_body_root">VPN Hide Core не ответил. Убедитесь, что модуль core установлен и включён, перезагрузитесь, если только что установили его, и нажмите «Повторить».</string>
+    <string name="self_targets_error_body_incomplete">VPN Hide Core ответил, но часть данных запуска прочитать не удалось (показано ниже). Обычно это временно — нажмите «Повторить».</string>
+    <string name="self_targets_error_body_write">VPN Hide Core ответил, но сохранить обновлённый конфиг не удалось (показано ниже). Нажмите «Повторить».</string>
+    <string name="self_targets_error_body_unknown">VPN Hide не смог завершить подготовку запуска через core (показано ниже). Нажмите «Повторить».</string>
     <string name="targets_load_failed_title">Данные скрытия недоступны</string>
     <string name="targets_load_failed_message">VPN Hide не смог получить данные для этой вкладки через root. Проверьте менеджер root, если запрос доступа был прерван, затем нажмите «Повторить».</string>
     <string name="dashboard_ports">Скрытие портов</string>
@@ -157,7 +159,7 @@
     <string name="self_not_routed_prompt">VPN активен, но VPN Hide через него не идёт — этим проверкам нечего измерять. С обычным VPN-клиентом добавьте VPN Hide в туннель (не исключайте его сплит-туннелем) и нажмите «Повторить». Некоторые VPN пропускают только выбранные приложения и не дают добавить VPN Hide — тогда самопроверка просто не запускается, это ожидаемо, а не сбой; судите по тому, работает ли нужное приложение.</string>
     <string name="self_not_routed_accelerators">Пользуетесь игровым акселератором?</string>
     <string name="vpn_off_retry">Повторить</string>
-    <string name="diag_failed_prompt">Не удалось выполнить проверку скрытия — возможно, отклонён root-доступ или команда завершилась с ошибкой. Нажмите «Повторить». Обычно это временно.</string>
+    <string name="diag_failed_prompt">Не удалось выполнить проверку скрытия — VPN Hide Core не ответил или проверка завершилась с ошибкой. Нажмите «Повторить». Обычно это временно.</string>
 
     <!-- Statistics -->
     <string name="statistics_title">Счётчики перехватов</string>
@@ -307,14 +309,14 @@
     <string name="legacy_import_done">Перенесено приложений: %1$d.</string>
     <string name="legacy_import_discarded">Старые файлы удалены. Ничего не перенесено.</string>
     <string name="legacy_import_nothing">Переносить нечего — старых файлов на устройстве больше нет.</string>
-    <string name="legacy_import_failed">Не удалось перенести (%1$s). Возможно, не выдан root-доступ.</string>
+    <string name="legacy_import_failed">Не удалось перенести (%1$s). Убедитесь, что модуль VPN Hide Core запущен.</string>
     <!-- Full reset / leftover cleanup -->
     <string name="settings_reset_section">Сброс</string>
     <string name="reset_button">Удалить оставшиеся файлы</string>
     <string name="reset_button_sub">Удалить все файлы конфигов, состояния и целей, которые VPN Hide оставил на устройстве</string>
     <string name="reset_title">Удалить оставшиеся файлы</string>
     <string name="reset_warning">Будут безвозвратно удалены все файлы конфигов, состояния, статистики и целей, которые VPN Hide и его модули записывали вне своих модульных каталогов. Действие необратимо.</string>
-    <string name="reset_instructions">Выполняйте сброс только после того, как удалили все модули VPN Hide в root-менеджере, выключили LSPosed-модуль VPN Hide и перезагрузили устройство. Каталоги модулей, само приложение и временное состояние здесь не трогаются — они удаляются после шагов выше. Для встроенного бэкенда также загрузите ядро без VPN Hide: удаление companion-модуля не удаляет хуки ядра.</string>
+    <string name="reset_instructions">Выполняйте сброс только после того, как удалили модули бэкендов VPN Hide (модуль ядра, KPM, Zygisk) в root-менеджере, выключили LSPosed-модуль VPN Hide и перезагрузили устройство. Модуль VPN Hide Core оставьте установленным до конца сброса — его выполняет core, — а затем удалите и его. Каталоги модулей, само приложение и временное состояние здесь не трогаются. Для встроенного бэкенда также загрузите ядро без VPN Hide: удаление модулей не удаляет хуки ядра.</string>
     <string name="reset_checking">Проверка состояния модулей…</string>
     <string name="reset_running">Удаление файлов…</string>
     <string name="reset_blocked_intro">Пока нельзя — VPN Hide ещё активен. Сначала удалите это и перезагрузитесь:</string>
@@ -324,8 +326,8 @@
     <string name="reset_blocker_kernel">Хуки ядра ещё присутствуют. После удаления загружаемого модуля нужна перезагрузка; для встроенного бэкенда нужно ядро без VPN Hide.</string>
     <string name="reset_blocker_lsposed">LSPosed-хук ещё активен</string>
     <string name="reset_confirm">Удалить всё</string>
-    <string name="reset_done_body">Готово. Все оставшиеся файлы удалены. Теперь можно удалить VPN Hide.</string>
-    <string name="reset_failed_body">Не удалось удалить файлы. Убедитесь, что предоставлен root-доступ, и попробуйте снова.</string>
+    <string name="reset_done_body">Готово. Все оставшиеся файлы удалены. Теперь удалите модуль VPN Hide Core в root-менеджере, а затем приложение.</string>
+    <string name="reset_failed_body">Не удалось удалить файлы. Убедитесь, что модуль VPN Hide Core запущен, и попробуйте снова.</string>
     <string name="reset_uninstall">Удалить VPN Hide</string>
     <string name="reset_close">Закрыть</string>
     <string name="dashboard_issues">Ошибки (%d)</string>
@@ -341,6 +343,7 @@
     <string name="dashboard_issue_kpm_unverifiable">Не удаётся опросить KernelPatch, а KPM VPN Hide, возможно, уже работает, поэтому другой нативный бэкенд не загружен. Сохраните SuperKey в Настройки → Безопасность или удалите KPM. Подробности: %1$s</string>
     <string name="dashboard_issue_native_boot_failed">Не удалось настроить нативный бэкенд в этой загрузке: %1$s</string>
     <string name="dashboard_issue_zygisk_retire_failed">Zygisk не выбран бэкендом, но его старый список целей не удалось очистить, поэтому он может по-прежнему перехватывать ранее выбранные приложения. Удалите модуль Zygisk. Подробности: %1$s</string>
+    <string name="dashboard_issue_obsolete_modules">Всё ещё установлен устаревший модуль VPN Hide 1.x: %1$s. В 2.0 его заменил VPN Hide Core, а старые загрузочные скрипты модуля конфликтуют с core. Удалите его в менеджере root и перезагрузитесь.</string>
     <string name="dashboard_issue_kpm_awaiting_superkey">KPM установлен, но не активен: KernelPatch отклонил аутентификацию, и VPN Hide не смог его загрузить. Сохраните SuperKey в Настройки → Безопасность — VPN Hide загрузит его сразу, без перезагрузки.</string>
     <string name="dashboard_issue_module_reboot_to_activate">Модуль %1$s установлен, но ещё не активен — перезагрузите устройство, чтобы он заработал.</string>
     <string name="dashboard_issue_module_artifact_missing">Установка модуля %1$s повреждена: отсутствует %2$s, и ядру VPN Hide нечего загружать. Переустановите ZIP модуля из последнего релиза.</string>
@@ -365,8 +368,8 @@
     <string name="dashboard_issue_lsposed_field_rename">Обнаружено переименование AOSP-поля на Android SDK %2$s: %1$s. Java-уровень скрытия отключён для затронутых хуков: они пропущены при установке, чтобы не засорять logcat ошибками NoSuchFieldError при каждом вызове. Пожалуйста, откройте issue на github.com/okhsunrog/vpnhide/issues с этим списком — это нужно, чтобы обновить хуки под вашу версию Android.</string>
     <string name="dashboard_issue_lsposed_install_failures">LSPosed/Vector сообщил об ошибках установки хуков: %1$s. Соберите отладочный лог и приложите его к отчёту об ошибке, чтобы можно было исправить упавший хук.</string>
     <string name="dashboard_issue_no_targets">Целевые приложения не настроены. Откройте вкладку «Скрытие» и выберите нужные.</string>
-    <string name="dashboard_issue_ports_rules_inactive">Ports включён для приложений, но правила iptables не активны. Перезагрузитесь или нажмите «Сохранить» на вкладке «Скрытие»; если проблема останется, соберите отладочный лог — в него попадут Ports load_status/load_log.</string>
-    <string name="dashboard_issue_ports_apply_failed">Ports включён для приложений, но правила iptables не активны. Последнее применение завершилось ошибкой: %1$s. Соберите отладочный лог — в него попадут Ports load_status/load_log.</string>
+    <string name="dashboard_issue_ports_rules_inactive">Ports включён для приложений, но правила iptables не активны. Перезагрузитесь или нажмите «Сохранить» на вкладке «Скрытие»; если проблема останется, соберите отладочный лог — в него попадут статус и лог Ports из core.</string>
+    <string name="dashboard_issue_ports_apply_failed">Ports включён для приложений, но правила iptables не активны. Последнее применение завершилось ошибкой: %1$s. Соберите отладочный лог — в него попадут статус и лог Ports из core.</string>
     <string name="dashboard_issue_version_mismatch">Несоответствие версий LSPosed модуля: запущена %1$s, установлена %2$s. Перезагрузите устройство для обновления.</string>
     <string name="dashboard_issue_update_kmod">Версия модуля ядра %1$s старее версии приложения %2$s. Откройте KernelSU/Magisk → Модули для обновления.</string>
     <string name="dashboard_issue_update_kmod_named">Версия модуля ядра %1$s старее версии приложения %2$s. Установите %3$s из последнего релиза через KernelSU/Magisk → Модули.</string>
@@ -601,7 +604,7 @@
     <string name="settings_security">Безопасность</string>
     <string name="settings_superkey_title">APatch/FolkPatch SuperKey</string>
     <string name="settings_superkey_saved">Сохранён для активации KPM при загрузке.</string>
-    <string name="settings_superkey_not_saved">Не сохранён; APatch/FolkPatch KPM может потребовать активацию из приложения после загрузки, если доверенный su недоступен.</string>
+    <string name="settings_superkey_not_saved">Не сохранён; на APatch/FolkPatch core может загрузить KPM только через доверенный su-токен. Если он недоступен, сохраните SuperKey здесь.</string>
     <string name="settings_superkey_placeholder">SuperKey</string>
     <string name="settings_superkey_store">Сохранить SuperKey</string>
     <string name="settings_superkey_clear">Очистить</string>
@@ -610,7 +613,7 @@
     <string name="settings_superkey_failed">Не удалось обновить SuperKey.</string>
     <string name="config_initializing">Проверяем конфигурацию и предыдущие операции…</string>
     <string name="config_paused">Результат изменения конфигурации пока неизвестен. Новые записи приостановлены. Повторите проверку, чтобы продолжить.</string>
-    <string name="config_unavailable">Конфигурация недоступна. Проверьте root-доступ и повторите проверку.</string>
+    <string name="config_unavailable">Конфигурация недоступна. Убедитесь, что модуль VPN Hide Core запущен, и повторите попытку.</string>
     <string name="config_invalid">Сохранённая конфигурация повреждена или имеет неподдерживаемый формат. Изменения приостановлены.</string>
     <string name="config_missing">Сохранённая конфигурация отсутствует. Может потребоваться повторная начальная подготовка.</string>
     <string name="config_ui_conflict">Операция пересекается с несохранёнными правками в редакторе приложений. Правки сохранены в черновике. Сохраните или отмените их перед повтором.</string>
@@ -626,7 +629,7 @@
     <string name="config_capture_logging">Отладочные логи остаются включены, пока идёт сбор данных.</string>
     <string name="config_changes_unavailable">Изменение конфигурации недоступно</string>
     <string name="config_close">Закрыть</string>
-    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide встроен в работающее ядро. Удалите лишний модуль kmod и оставьте companion-модуль встроенного бэкенда.</string>
+    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide встроен в работающее ядро. Удалите лишний модуль kmod: core загружает только один нативный бэкенд и не загружает ни одного, пока установлены оба.</string>
     <string name="debug_export_complete">Отчёт собран полностью.</string>
     <string name="debug_export_partial">Собран частичный отчёт. Его можно сохранить или отправить.\n%1$s</string>
     <string name="debug_export_failed">Не удалось собрать отчёт: %1$s</string>

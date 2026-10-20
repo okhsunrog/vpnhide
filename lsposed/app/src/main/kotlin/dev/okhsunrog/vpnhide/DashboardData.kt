@@ -1249,7 +1249,18 @@ private suspend fun deriveEnvironmentFacts(
                 nativeBootStatus(sections)?.takeIf { it.isFreshFor(sections["current_boot_id"].orEmpty()) }?.ports,
                 portsDisabled = sections["core_disabled"].orEmpty().trim() == "1",
             ),
+        obsoleteModules = parseObsoleteModules(sections),
     )
+
+/** Root snapshot `obsolete_modules`: one installed 1.x module id per line. */
+internal fun parseObsoleteModules(sections: Map<String, String>): List<String> =
+    sections[OBSOLETE_MODULES_SECTION]
+        .orEmpty()
+        .lines()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+
+internal const val OBSOLETE_MODULES_SECTION = "obsolete_modules"
 
 /**
  * Everything the Dashboard derives from one root snapshot alone: the module,

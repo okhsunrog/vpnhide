@@ -144,6 +144,10 @@ internal fun DashboardIssue.toReason(): DashboardIssueReason =
             DashboardIssueReason("selinux_permissive")
         }
 
+        is DashboardIssue.ObsoleteModulesInstalled -> {
+            DashboardIssueReason("obsolete_modules_installed", mapOf("modules" to moduleIds.joinToString(",")))
+        }
+
         is DashboardIssue.InstalledInMultipleProfiles -> {
             DashboardIssueReason(
                 "installed_in_multiple_profiles",

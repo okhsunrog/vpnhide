@@ -1,6 +1,8 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.core.CoreDiagnostics
 import dev.okhsunrog.vpnhide.core.CoreProbe
+import dev.okhsunrog.vpnhide.core.CoreProbeResult
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.generated.IfaceLists
@@ -109,8 +111,12 @@ internal fun parseVpnIfaceStates(raw: String): List<Pair<String, String>> =
  * the point of failure (not parsed back out of a string).
  */
 internal enum class SelfTargetFailureKind {
-    /** Core did not answer the probe: module missing or not running, or the probe failed. */
+    /** Core did not answer: the VPN Hide Core module is missing, disabled or not running. */
     RootUnavailable,
+
+    /** Core answered but speaks another protocol version: the app and the core module
+     *  come from different releases, so one of them must be updated. */
+    CoreVersionMismatch,
 
     /** Root worked, but the state probe returned incomplete data (a backend's
      *  section was missing — e.g. a broken/garbled KPM control reply). */
@@ -231,14 +237,39 @@ private data class SelfTargetFailureDetail(
     val detail: String,
 )
 
+/**
+ * Why the startup root snapshot did not come back, or null when it did. Core not
+ * reachable is the "install/enable the core module" gate; a protocol skew is the
+ * "update the lagging component" gate; core reached but the probe failing is a
+ * retryable core-side failure, not a missing module.
+ */
+internal fun startupProbeFailure(diagnostics: CoreDiagnostics): Pair<SelfTargetFailureKind, String>? =
+    when (diagnostics) {
+        is CoreDiagnostics.Failed -> {
+            val kind =
+                if (diagnostics.status == "protocol_skew") {
+                    SelfTargetFailureKind.CoreVersionMismatch
+                } else {
+                    SelfTargetFailureKind.RootUnavailable
+                }
+            kind to listOf(diagnostics.status, diagnostics.detail).filter { it.isNotBlank() }.joinToString(": ")
+        }
+
+        is CoreDiagnostics.Collected -> {
+            val result = diagnostics.results.firstOrNull() ?: CoreProbeResult.Unavailable
+            if (result.ok) null else SelfTargetFailureKind.Unknown to "core root snapshot probe exit=${result.exit}"
+        }
+    }
+
 private fun loadStartupRootSections(): Pair<Map<String, String>?, SelfTargetFailureDetail?> {
     // The same probe as RootSnapshotCache, so the result can seed the cache whole
     // instead of being read a second time.
-    val result = CoreRoot.collectOneBlocking(CoreProbe.RootSnapshot(packages = true))
-    if (!result.ok) {
-        VpnHideLog.w(TAG, "ensureSelfInTargets: core root snapshot failed (exit=${result.exit})")
-        return null to SelfTargetFailureDetail(SelfTargetFailureKind.RootUnavailable, "exit=${result.exit}")
+    val diagnostics = CoreRoot.collectBlocking(listOf(CoreProbe.RootSnapshot(packages = true)))
+    startupProbeFailure(diagnostics)?.let { (kind, detail) ->
+        VpnHideLog.w(TAG, "ensureSelfInTargets: core root snapshot failed ($kind: $detail)")
+        return null to SelfTargetFailureDetail(kind, detail)
     }
+    val result = diagnostics.results(1).first()
     val out = result.text
     return try {
         parseRootShellSnapshot(out).also(::validateRootSnapshotSections) to null

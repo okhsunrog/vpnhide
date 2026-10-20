@@ -77,8 +77,10 @@
     <!-- Root status -->
     <string name="secondary_profile_error_title">Open VPN Hide in the main profile</string>
     <string name="secondary_profile_error_message">Uninstall this copy of VPN Hide and use the copy installed in the main profile. It can manage apps from every profile.</string>
-    <string name="root_error_title">Root access required</string>
-    <string name="root_error_message">VPN Hide needs root access to manage VPN hiding for selected apps. Grant it in your root manager (Magisk, KernelSU, APatch), then tap Check again.</string>
+    <string name="root_error_title">VPN Hide Core is not running</string>
+    <string name="root_error_message">VPN Hide needs its core module to manage hiding. Install vpnhide-core.zip from the same release as this app in your root manager (Magisk, KernelSU, APatch), make sure it is enabled, reboot, then tap Check again. The app itself does not need a root grant.</string>
+    <string name="core_version_mismatch_message">The installed VPN Hide Core module and this app come from different releases and cannot talk to each other. Install the app and vpnhide-core.zip from the same release, reboot, then tap Check again.</string>
+    <string name="core_version_mismatch_title">VPN Hide Core version mismatch</string>
     <string name="root_error_recheck">Check again</string>
 
     <!-- Save feedback -->
@@ -149,10 +151,10 @@
     <string name="dashboard_load_failed_message">VPN Hide could not collect the root state needed for this screen. Check your root manager if permission was interrupted, then tap Retry.</string>
     <string name="dashboard_refresh_failed_message">Refresh failed. Showing the previous dashboard data.</string>
     <string name="self_targets_error_title">Startup preparation failed</string>
-    <string name="self_targets_error_body_root">VPN Hide could not run a root command. If you denied or interrupted the root prompt, grant access in your root manager, then tap Retry.</string>
-    <string name="self_targets_error_body_incomplete">Root access worked, but VPN Hide could not read part of its startup state (shown below). This is usually temporary — tap Retry.</string>
-    <string name="self_targets_error_body_write">Root access worked, but VPN Hide could not save its updated config (shown below). Tap Retry.</string>
-    <string name="self_targets_error_body_unknown">VPN Hide could not finish its root-side startup (shown below). Tap Retry.</string>
+    <string name="self_targets_error_body_root">VPN Hide Core did not answer. Make sure the core module is installed and enabled, reboot if you just installed it, then tap Retry.</string>
+    <string name="self_targets_error_body_incomplete">VPN Hide Core answered, but part of the startup state could not be read (shown below). This is usually temporary — tap Retry.</string>
+    <string name="self_targets_error_body_write">VPN Hide Core answered, but the updated config could not be saved (shown below). Tap Retry.</string>
+    <string name="self_targets_error_body_unknown">VPN Hide could not finish its startup preparation through the core (shown below). Tap Retry.</string>
     <string name="targets_load_failed_title">Hiding data unavailable</string>
     <string name="targets_load_failed_message">VPN Hide could not collect the root state needed for this tab. Check your root manager if permission was interrupted, then tap Retry.</string>
     <string name="dashboard_ports">Ports hiding</string>
@@ -222,7 +224,7 @@
     <string name="self_not_routed_prompt">A VPN is active, but VPN Hide isn\'t routed through it, so there is nothing for these checks to measure. If you use a general VPN client, add VPN Hide to the tunnel (don\'t split-tunnel it out) and tap Retry. Some VPNs route only selected apps and won\'t let you add VPN Hide — then this self-test can\'t run, which is expected, not a failure; judge hiding by whether your target app works.</string>
     <string name="self_not_routed_accelerators">Using a game accelerator?</string>
     <string name="vpn_off_retry">Retry</string>
-    <string name="diag_failed_prompt">The hiding checks couldn\'t run — root access may have been denied or a command failed. Tap Retry. This is usually transient.</string>
+    <string name="diag_failed_prompt">The hiding checks couldn\'t run — VPN Hide Core did not answer or a check failed. Tap Retry. This is usually transient.</string>
 
     <!-- Statistics -->
     <string name="statistics_title">Interception counters</string>
@@ -363,14 +365,14 @@
     <string name="legacy_import_done">Imported %1$d apps.</string>
     <string name="legacy_import_discarded">The old files were deleted. Nothing was imported.</string>
     <string name="legacy_import_nothing">Nothing left to import — the old files are already gone.</string>
-    <string name="legacy_import_failed">Import failed (%1$s). Root access may have been denied.</string>
+    <string name="legacy_import_failed">Import failed (%1$s). Make sure the VPN Hide Core module is running.</string>
     <!-- Full reset / leftover cleanup -->
     <string name="settings_reset_section">Reset</string>
     <string name="reset_button">Remove leftover files</string>
     <string name="reset_button_sub">Delete all config, state and target files VPN Hide left on the device</string>
     <string name="reset_title">Remove leftover files</string>
     <string name="reset_warning">This permanently deletes every config, state, statistics and target file VPN Hide and its modules wrote outside their module folders. This cannot be undone.</string>
-    <string name="reset_instructions">Do this only after you have: removed all VPN Hide modules in your root manager, disabled the VPN Hide LSPosed module, and rebooted. Module folders, the app itself and runtime state are not touched here — they go away with the steps above. For a built-in backend, also boot a kernel without VPN Hide; removing its companion module does not remove the kernel hooks.</string>
+    <string name="reset_instructions">Do this only after you have: removed the VPN Hide backend modules (kernel module, KPM, Zygisk) in your root manager, disabled the VPN Hide LSPosed module, and rebooted. Keep the VPN Hide Core module installed until the reset is done — the core performs it — then uninstall the core module too. Module folders, the app itself and runtime state are not touched here. For a built-in backend, also boot a kernel without VPN Hide; uninstalling modules does not remove the kernel hooks.</string>
     <string name="reset_checking">Checking module state…</string>
     <string name="reset_running">Deleting files…</string>
     <string name="reset_blocked_intro">Not ready yet — VPN Hide is still active. Remove these and reboot first:</string>
@@ -380,8 +382,8 @@
     <string name="reset_blocker_kernel">Kernel hooks are still present. A loaded module needs a reboot after removal; a built-in backend requires a kernel without VPN Hide.</string>
     <string name="reset_blocker_lsposed">LSPosed hook is still active</string>
     <string name="reset_confirm">Delete everything</string>
-    <string name="reset_done_body">Done. All leftover files were removed. You can now uninstall VPN Hide.</string>
-    <string name="reset_failed_body">Could not remove the files. Make sure root access is granted and try again.</string>
+    <string name="reset_done_body">Done. All leftover files were removed. You can now uninstall the VPN Hide Core module in your root manager and then the app.</string>
+    <string name="reset_failed_body">Could not remove the files. Make sure the VPN Hide Core module is running and try again.</string>
     <string name="reset_uninstall">Uninstall VPN Hide</string>
     <string name="reset_close">Close</string>
     <string name="dashboard_issues">Errors (%d)</string>
@@ -397,6 +399,7 @@
     <string name="dashboard_issue_kpm_unverifiable">KernelPatch can\'t be queried, and a VPN Hide KPM may already be running, so no other native backend was loaded. Save your SuperKey in Settings → Security, or remove the KPM. Detail: %1$s</string>
     <string name="dashboard_issue_native_boot_failed">The native backend could not be set up this boot: %1$s</string>
     <string name="dashboard_issue_zygisk_retire_failed">Zygisk is not the selected backend, but its old target list could not be cleared, so it may still hook previously selected apps. Uninstall the Zygisk module. Detail: %1$s</string>
+    <string name="dashboard_issue_obsolete_modules">An obsolete VPN Hide 1.x module is still installed: %1$s. VPN Hide Core replaced it in 2.0, and its old boot scripts fight the core. Uninstall it in your root manager and reboot.</string>
     <string name="dashboard_issue_kpm_awaiting_superkey">The KPM is installed but inactive: KernelPatch refused authentication, so VPN Hide could not load it. Save your SuperKey in Settings → Security and VPN Hide loads it right away, no reboot needed.</string>
     <string name="dashboard_issue_module_reboot_to_activate">The %1$s module is installed but not active yet — reboot the device to activate it.</string>
     <string name="dashboard_issue_module_artifact_missing">The %1$s module installation is corrupted: %2$s is missing, so core has nothing to load. Reinstall the module ZIP from the latest release.</string>
@@ -421,8 +424,8 @@
     <string name="dashboard_issue_lsposed_field_rename">AOSP field rename detected on Android SDK %2$s: %1$s. Java-layer hiding is degraded for the affected hooks (they were skipped at install time to avoid logcat-spam from per-call NoSuchFieldError). Please file an issue at github.com/okhsunrog/vpnhide/issues with this list so the hooks can be updated for your Android version.</string>
     <string name="dashboard_issue_lsposed_install_failures">LSPosed/Vector reported hook install failures: %1$s. Collect a debug log and attach it to the issue so the failed hook can be fixed.</string>
     <string name="dashboard_issue_no_targets">No target apps configured. Open Hiding and choose the apps you need.</string>
-    <string name="dashboard_issue_ports_rules_inactive">Ports is enabled for apps, but iptables rules are not active. Reboot or tap Save in Hiding; if it stays this way, collect a debug log so Ports load_status/load_log are included.</string>
-    <string name="dashboard_issue_ports_apply_failed">Ports is enabled for apps, but iptables rules are not active. Last apply failed: %1$s. Collect a debug log so Ports load_status/load_log are included.</string>
+    <string name="dashboard_issue_ports_rules_inactive">Ports is enabled for apps, but iptables rules are not active. Reboot or tap Save in Hiding; if it stays this way, collect a debug log so the core\'s Ports status and log are included.</string>
+    <string name="dashboard_issue_ports_apply_failed">Ports is enabled for apps, but iptables rules are not active. Last apply failed: %1$s. Collect a debug log so the core\'s Ports status and log are included.</string>
     <string name="dashboard_issue_version_mismatch">LSPosed module version mismatch: running %1$s, installed %2$s. Reboot the device to apply the update.</string>
     <string name="dashboard_issue_update_kmod">Kernel module version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
     <string name="dashboard_issue_update_kmod_named">Kernel module version %1$s is older than app version %2$s. Install %3$s from the latest release via KernelSU/Magisk → Modules to update.</string>
@@ -632,7 +635,7 @@
     <string name="settings_security">Security</string>
     <string name="settings_superkey_title">APatch/FolkPatch SuperKey</string>
     <string name="settings_superkey_saved">Saved for boot-time KPM activation.</string>
-    <string name="settings_superkey_not_saved">Not saved; APatch/FolkPatch KPM may need in-app activation after boot if trusted su is unavailable.</string>
+    <string name="settings_superkey_not_saved">Not saved; on APatch/FolkPatch the core can only load the KPM with the trusted su token. If that is unavailable, save the SuperKey here.</string>
     <string name="settings_superkey_placeholder">SuperKey</string>
     <string name="settings_superkey_store">Store SuperKey</string>
     <string name="settings_superkey_clear">Clear</string>
@@ -641,7 +644,7 @@
     <string name="settings_superkey_failed">SuperKey update failed.</string>
     <string name="config_initializing">Checking configuration and previous operations…</string>
     <string name="config_paused">The outcome of a configuration operation is still unknown. New changes are paused. Check again to continue.</string>
-    <string name="config_unavailable">Configuration is unavailable. Check root access and try again.</string>
+    <string name="config_unavailable">Configuration is unavailable. Make sure the VPN Hide Core module is running and try again.</string>
     <string name="config_invalid">The saved configuration cannot be read. Configuration changes are paused.</string>
     <string name="config_missing">No saved configuration is available. Startup preparation may still be needed.</string>
     <string name="config_ui_conflict">This operation overlaps unsaved edits in an app editor. Your edits are retained. Save or discard them before retrying.</string>
@@ -657,7 +660,7 @@
     <string name="config_capture_logging">Debug logging remains active while a capture is running.</string>
     <string name="config_changes_unavailable">Configuration changes are unavailable</string>
     <string name="config_close">Close</string>
-    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide is built into the running kernel. Remove the unnecessary kmod module and keep the built-in companion module.</string>
+    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide is built into the running kernel. Remove the unnecessary kmod module: the core loads only one native backend and loads none while both are present.</string>
     <string name="debug_export_complete">Report collected successfully.</string>
     <string name="debug_export_partial">A partial report was collected. You can save or share it.\n%1$s</string>
     <string name="debug_export_failed">Report collection failed: %1$s</string>

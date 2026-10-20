@@ -117,8 +117,19 @@ class MainActivity : AppCompatActivity() {
 private sealed interface RootState {
     data object Granted : RootState
 
-    data object Denied : RootState
+    /** Core is unusable: not running ([versionMismatch] false) or from another release. */
+    data class Denied(
+        val versionMismatch: Boolean,
+    ) : RootState
 }
+
+/** The gate for a startup preparation failure kind; every other failure opens the app. */
+private fun rootGateState(kind: SelfTargetFailureKind?): RootState =
+    when (kind) {
+        SelfTargetFailureKind.RootUnavailable -> RootState.Denied(versionMismatch = false)
+        SelfTargetFailureKind.CoreVersionMismatch -> RootState.Denied(versionMismatch = true)
+        else -> RootState.Granted
+    }
 
 @Composable
 private fun BackgroundUpdatePromptDialog(
@@ -200,25 +211,27 @@ fun VpnHideApp(mainProfile: Boolean = isMainAppProfile(Process.myUid())) {
             var rootState by remember { mutableStateOf<RootState?>(null) }
             val rootCheckScope = rememberCoroutineScope()
             val startupCoordinator = remember(context) { StartupCoordinator.forProcess(context.applicationContext) }
-            // The root gate is the self-target preparation itself: its core root
+            // The core gate is the self-target preparation itself: its core root
             // snapshot is the earliest privileged work of the process. Core missing
-            // or not answering surfaces as RootUnavailable; every other failure is
-            // shown by the main screen. "Check again" forces a fresh preparation.
+            // or not answering (RootUnavailable) and a core of another release
+            // (CoreVersionMismatch) block here; every other failure is shown by the
+            // main screen. "Check again" forces a fresh preparation.
             val probeRoot: (Boolean) -> Unit = { force ->
                 rootState = null
                 rootCheckScope.launch {
                     startupCoordinator.prepareSelfTargets(force = force)
                     val failure = startupCoordinator.selfTargetState.value as? StartupSelfTargetState.Failed
-                    rootState = if (failure?.kind == SelfTargetFailureKind.RootUnavailable) RootState.Denied else RootState.Granted
+                    rootState = rootGateState(failure?.kind)
                     StartupTrace.mark("root_check_done")
                 }
             }
 
             LaunchedEffect(Unit) { probeRoot(false) }
 
-            if (rootState == RootState.Denied) {
+            val denied = rootState as? RootState.Denied
+            if (denied != null) {
                 LaunchedEffect(Unit) { StartupTrace.rootDeniedReady() }
-                RootDeniedScreen(onRecheck = { probeRoot(true) })
+                RootDeniedScreen(versionMismatch = denied.versionMismatch, onRecheck = { probeRoot(true) })
             } else {
                 // The main screen composes immediately, while the root gate is still
                 // resolving: its own loading skeleton sits inside the real scaffold,
@@ -816,6 +829,7 @@ private fun MainScreen() {
 private fun selfTargetErrorBodyRes(kind: SelfTargetFailureKind): Int =
     when (kind) {
         SelfTargetFailureKind.RootUnavailable -> R.string.self_targets_error_body_root
+        SelfTargetFailureKind.CoreVersionMismatch -> R.string.core_version_mismatch_message
         SelfTargetFailureKind.IncompleteData -> R.string.self_targets_error_body_incomplete
         SelfTargetFailureKind.ConfigWriteFailed -> R.string.self_targets_error_body_write
         SelfTargetFailureKind.Unknown -> R.string.self_targets_error_body_unknown
@@ -847,10 +861,13 @@ private fun RootPreparationErrorScreen(
 }
 
 @Composable
-private fun RootDeniedScreen(onRecheck: () -> Unit) {
+private fun RootDeniedScreen(
+    versionMismatch: Boolean,
+    onRecheck: () -> Unit,
+) {
     StartupBlockingScreen(
-        title = stringResource(R.string.root_error_title),
-        body = stringResource(R.string.root_error_message),
+        title = stringResource(if (versionMismatch) R.string.core_version_mismatch_title else R.string.root_error_title),
+        body = stringResource(if (versionMismatch) R.string.core_version_mismatch_message else R.string.root_error_message),
         actionLabel = stringResource(R.string.root_error_recheck),
         onAction = onRecheck,
     )

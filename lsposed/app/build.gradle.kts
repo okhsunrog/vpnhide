@@ -339,8 +339,8 @@ android {
                 "proguard-debug-rules.pro",
             )
             // Opt-in x86_64 (via -PvpnhideEmulatorX86) so the debug APK installs
-            // on an x86_64 API-28 emulator. Release stays arm64-only (defaultConfig
-            // above) regardless of the flag. See docs/avd-magisk-testing.md.
+            // on an x86_64 API-28 emulator. Release stays arm64-v8a + armeabi-v7a
+            // (defaultConfig above) regardless of the flag. See docs/avd-magisk-testing.md.
             if (emulatorX86) {
                 ndk {
                     abiFilters += "x86_64"

@@ -304,7 +304,7 @@ internal fun captureBootLsposedLogcat(): String {
         appendLine("source=logcat -d -b all -v threadtime")
         appendLine("scope=best_effort_current_ring_buffer")
         appendLine("note=Contains boot-time LSPosed/Vector context only if the logcat ring buffer has not rotated yet.")
-        appendLine("patterns=core logcat_lsposed_boot.sh")
+        appendLine("patterns=core LogcatLsposedBoot probe (LSPosed/Vector/Xposed tags and this package)")
         appendLine()
         appendLine(result.text.ifBlank { "(no LSPosed/Vector boot logcat entries in current buffers)" }.trimEnd())
     }.trimEnd()
