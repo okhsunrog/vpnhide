@@ -5,7 +5,7 @@ VPN Hide 的核心模块需要 **root**（应用本身不需要 Root 授权）�
 
 | 组件 | 要求 |
 |---|---|
-| 应用 | Android 9+，arm64 或 armv7 |
+| 应用 | Android 9+，arm64 或 armv7；须为安装在主用户中的正式版（`.dev` 构建或次要用户中的副本无法连接 core） |
 | 核心 | 在 Magisk、KernelSU 或 APatch 中安装并启用 **VPN Hide Core** 模块（`vpnhide-core.zip`，与应用同一版本） |
 | Java 和 Apps 角色 | LSPosed / LSPosed-Next / Vector，并为 VPN Hide 启用 System Framework 作用域 |
 | Native — kmod | 兼容的 arm64 GKI 内核及所需探针支持；按仪表盘推荐选择 |

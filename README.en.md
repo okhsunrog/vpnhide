@@ -236,6 +236,7 @@ vpnhide hides an active VPN from specific apps. It is NOT designed for:
 - `zygisk` ships arm64-v8a and armeabi-v7a (32-bit injection); the kernel backends are arm64 only
 - Direct `svc #0` syscalls bypass Zygisk's libc hooks — use a kernel-level backend (kmod or KPM) for that
 - Server-side detection is unfixable client-side — use split tunneling
+- Only the release app (`dev.okhsunrog.vpnhide`) installed in the main Android user (user 0) can reach VPN Hide Core. Core binds its socket inside that one app's data directory, so a `.dev` build (`dev.okhsunrog.vpnhide.dev`) and copies installed in a secondary user, work profile or clone space show the "core not reachable" screen. Manage every profile from the main-user copy
 
 ## Support the project
 

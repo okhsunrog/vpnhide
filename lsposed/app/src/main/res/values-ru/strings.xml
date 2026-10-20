@@ -71,7 +71,7 @@
     <string name="secondary_profile_error_title">Откройте VPN Hide в основном профиле</string>
     <string name="secondary_profile_error_message">Удалите эту копию VPN Hide и используйте копию из основного профиля. Она может управлять приложениями из всех профилей.</string>
     <string name="root_error_title">VPN Hide Core не запущен</string>
-    <string name="root_error_message">Для управления скрытием VPN Hide нужен основной модуль VPN Hide Core. Установите vpnhide-core.zip из того же релиза, что и приложение, в менеджере root (Magisk, KernelSU, APatch), убедитесь, что модуль включён, перезагрузитесь и нажмите «Проверить снова». Самому приложению root-доступ не нужен.</string>
+    <string name="root_error_message">Для управления скрытием VPN Hide нужен основной модуль VPN Hide Core. Установите vpnhide-core.zip из того же релиза, что и приложение, в менеджере root (Magisk, KernelSU, APatch), убедитесь, что модуль включён, перезагрузитесь и нажмите «Проверить снова». Самому приложению root-доступ не нужен. Тестовая сборка (имя пакета оканчивается на .dev) никогда не подключится к модулю core: используйте релизное приложение.</string>
     <string name="core_version_mismatch_message">Установленный модуль VPN Hide Core и это приложение из разных релизов и не могут взаимодействовать. Установите приложение и vpnhide-core.zip из одного релиза, перезагрузитесь и нажмите «Проверить снова».</string>
     <string name="core_version_mismatch_title">Версия VPN Hide Core не совпадает</string>
     <string name="root_error_recheck">Проверить снова</string>

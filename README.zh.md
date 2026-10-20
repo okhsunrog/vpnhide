@@ -237,6 +237,7 @@ vpnhide 对特定应用隐藏活动的 VPN。它并非为以下用途设计：
 - `lsposed` 需要 LSPosed、LSPosed-Next 或 Vector
 - `zygisk` 提供 arm64-v8a 和 armeabi-v7a（注入 32 位进程）；内核级后端仅支持 arm64
 - 直接的 `svc #0` 系统调用会绕过 Zygisk 的 libc 钩子 —— 为此请使用内核级后端（kmod 或 KPM）
+- 只有安装在 Android 主用户（user 0）中的正式版应用（`dev.okhsunrog.vpnhide`）才能连接 VPN Hide Core。Core 只在该应用的数据目录中创建套接字，因此 `.dev` 构建（`dev.okhsunrog.vpnhide.dev`）以及安装在次要用户、工作资料或分身空间中的副本都会显示“无法连接 core”页面。请在主用户中的副本里管理所有资料
 - 服务端检测在客户端无法解决 —— 请使用分应用代理
 
 ## 支持项目

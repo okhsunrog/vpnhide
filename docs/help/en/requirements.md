@@ -5,7 +5,7 @@ detects VPNs; Java + Native is the usual starting point, not an all-or-nothing r
 
 | Component | Requires |
 |---|---|
-| App | Android 9+, arm64 or armv7 |
+| App | Android 9+, arm64 or armv7; the release build, installed in the main user (a `.dev` build or a secondary-user copy cannot reach core) |
 | Core | The **VPN Hide Core** module (`vpnhide-core.zip`, same release as the app) installed and enabled in Magisk, KernelSU or APatch |
 | Java and Apps roles | LSPosed / LSPosed-Next / Vector, with VPN Hide enabled for System Framework |
 | Native — kmod | Compatible arm64 GKI kernel with the required probe support; use the Dashboard's recommendation |
