@@ -156,7 +156,11 @@ internal class CoreConfigIo(
             // Refused before any phase ran: a known failure with nothing written.
             is CoreReply.Refused -> {
                 pending = null
-                ConfigPhaseEvidence(PhaseOutcome.FailedKnown, RootCanonicalRead.Unavailable)
+                ConfigPhaseEvidence(
+                    PhaseOutcome.FailedKnown,
+                    RootCanonicalRead.Unavailable,
+                    nativeCapacity = reply.takeIf { it.reason == NATIVE_CAPACITY_EXCEEDED }?.let { parseNativeCapacityRefusal(it.detail) },
+                )
             }
 
             CoreReply.ProtocolSkew, CoreReply.Unreachable -> {

@@ -374,18 +374,19 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                 // A save error's snackbar rises above this bar, not over Save / Discard.
                 modifier = Modifier.reportConfigSnackbarInset { snackbarInsets.actionBar = it },
             ) {
+                // Counted the way core counts (see nativeTargetCapacityUsage): a selection
+                // core would refuse never reaches Save; the bar says why instead.
+                val saveError = selectionSaveError(allApps, targets, context.packageName, resources)
                 TargetActionBar(
                     count = countText(allApps, resources),
                     canDiscard = editor.state.dirty && !saving,
-                    canSave = dirty && !saving,
+                    canSave = dirty && !saving && saveError == null,
                     saving = saving,
                     onDiscard = editor::discard,
+                    supportingText = saveError,
                     onSave = save@{
                         if (!checkWrite()) return@save
-                        val error =
-                            targets.let { currentTargets ->
-                                selectionSaveError(allApps, currentTargets, context.packageName, resources)
-                            }
+                        val error = selectionSaveError(allApps, targets, context.packageName, resources)
                         if (error != null) {
                             snackDuration = SnackbarDuration.Long
                             snackMessage = error
@@ -404,27 +405,12 @@ internal fun <T : TargetEntry> TargetPickerScreen(
     }
 
     LaunchedEffect(editor.result) {
-        val result = editor.result ?: return@LaunchedEffect
-        val warning = parseNativeTargetCapacityWarning(result.output)
-        snackDuration = SnackbarDuration.Long
-        snackMessage =
-            when {
-                warning != null -> {
-                    resources.getString(
-                        R.string.save_native_target_capacity,
-                        warning.capacity,
-                        warning.total,
-                        warning.dropped,
-                    )
-                }
-
-                // A plain success needs no snackbar: the switches settle, the
-                // Save button disables and the bar hides the discard action. A
-                // snackbar only covered the navigation bar for a few seconds.
-                else -> {
-                    null
-                }
-            }
+        editor.result ?: return@LaunchedEffect
+        // A plain success needs no snackbar: the switches settle, the Save button
+        // disables and the bar hides the discard action. A refusal (including core's
+        // native capacity refusal, which lists what to deselect) is reported by the
+        // shared config failure snackbar.
+        snackMessage = null
     }
 }
 

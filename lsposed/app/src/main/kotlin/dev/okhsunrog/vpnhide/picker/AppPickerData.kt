@@ -89,12 +89,14 @@ internal data class NativeTargetCapacityUsage(
 }
 
 /**
- * Count the exact UID slots a native projection needs. Visible picker rows
+ * Count the UID slots core's native projection needs, by core's rules
+ * (`vpnhide_activator::native_target_set`), so a selection core would refuse
+ * never reaches Save: the distinct app UIDs of every native-selected package
+ * across all profiles and clones; platform UIDs below 10000 (sharedUserId
+ * packages) skipped; a package with no installed copy contributes nothing; and
+ * the app itself one fixed slot for its main-profile copy. Visible picker rows
  * override their saved role; configured packages missing from the current list
- * stay preserved, matching [buildCanonicalConfigForAppPickerSave]. UID unioning
- * handles shared identities. The app itself uses one fixed, invisible slot:
- * secondary-profile copies are unsupported and the activator projects the
- * self-target only for Android's main user.
+ * stay preserved, matching [buildCanonicalConfigForAppPickerSave].
  */
 internal fun nativeTargetCapacityUsage(
     selfPkg: String,
@@ -106,28 +108,12 @@ internal fun nativeTargetCapacityUsage(
     val selectedPackages =
         (existingNativePackages - visiblePackages) +
             selections.filter { it.native }.map { it.packageName }
-    val userSelectedPackages = selectedPackages - selfPkg
     val selectionUids = selections.associate { it.packageName to it.uids }
     val resolved = mutableSetOf<Int>()
-    var unresolvedSlots = 0
-
-    userSelectedPackages.forEach { pkg ->
-        val rawUids = selectionUids[pkg].orEmpty().ifEmpty { packageUids[pkg].orEmpty() }
-        val appUids = rawUids.filterTo(mutableSetOf(), ::isApplicationUid)
-        when {
-            rawUids.isEmpty() -> {
-                unresolvedSlots++
-            }
-
-            else -> {
-                resolved += appUids
-            }
-        }
+    (selectedPackages - selfPkg).forEach { pkg ->
+        selectionUids[pkg].orEmpty().ifEmpty { packageUids[pkg].orEmpty() }.filterTo(resolved, ::isApplicationUid)
     }
-
-    return NativeTargetCapacityUsage(
-        used = resolved.size + unresolvedSlots + NATIVE_SELF_RESERVED_UID_SLOTS,
-    )
+    return NativeTargetCapacityUsage(used = resolved.size + NATIVE_SELF_RESERVED_UID_SLOTS)
 }
 
 internal fun nativeCapacityIncreaseViolation(

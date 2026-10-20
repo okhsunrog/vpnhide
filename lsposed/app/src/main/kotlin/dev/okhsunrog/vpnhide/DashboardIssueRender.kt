@@ -123,6 +123,19 @@ private fun DashboardIssue.Native.nativeMessage(res: Resources): DashboardMessag
             )
         }
 
+        is DashboardIssue.NativeCapacityExceeded -> {
+            err(
+                res.getString(
+                    R.string.dashboard_issue_native_capacity_exceeded,
+                    report.total,
+                    report.capacity,
+                    report.overflow,
+                    report.packageList(res),
+                ),
+                helpArticle = HelpArticle.WORK_PROFILES,
+            )
+        }
+
         is DashboardIssue.NativeBootFailed -> {
             err(res.getString(R.string.dashboard_issue_native_boot_failed, detail), helpArticle = HelpArticle.COLLECT_REPORT)
         }

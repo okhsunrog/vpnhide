@@ -407,19 +407,74 @@ pub(crate) fn project_native_with_pm_wait(
     let resolver = PackageUidMap::from_pm_with_wait(wait)?;
     Ok(project_native_with_resolver_for_family(
         &cfg, &resolver, family,
-    ))
+    )?)
 }
 
-pub fn project_native_with_resolver_for_family(
+/// One package's share of an over-capacity native target set.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CapacityPackage {
+    pub package: String,
+    /// The app uids (every profile / clone) this package adds to the target set.
+    pub uids: Vec<u32>,
+}
+
+/// The projected native target set has more distinct uids than a backend can hold.
+/// Core refuses the whole projection: it never truncates, so nothing is applied and
+/// the previously applied config stays in effect.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeCapacityExceeded {
+    /// Distinct target uids the config projects to.
+    pub total: usize,
+    /// [`MAX_NATIVE_TARGETS`], the backends' fixed `targets[]` size.
+    pub capacity: usize,
+    /// Every native-target package with the uids it contributes, most uids first, so
+    /// the user can see what to deselect. The self package keeps one reserved uid.
+    pub packages: Vec<CapacityPackage>,
+}
+
+impl NativeCapacityExceeded {
+    /// How many uids must go before the set fits.
+    pub fn overflow(&self) -> usize {
+        self.total.saturating_sub(self.capacity)
+    }
+}
+
+impl std::fmt::Display for NativeCapacityExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "native target capacity exceeded: {} uids, capacity {} (deselect at least {})",
+            self.total,
+            self.capacity,
+            self.overflow()
+        )
+    }
+}
+
+impl std::error::Error for NativeCapacityExceeded {}
+
+/// The native target set: each target uid with its merged hooks and the packages that
+/// put it there. This is the one place native targets are counted — the projection,
+/// core's Save refusal and the app's pre-Save counter all follow these rules:
+/// uids across every profile / clone, non-app uids skipped, and the self package
+/// limited to its single main-profile slot.
+pub(crate) fn native_target_set(
     cfg: &CanonicalConfig,
     resolver: &PackageUidMap,
     family: NativeHookFamily,
-) -> String {
+) -> BTreeMap<u32, (HookSet, BTreeSet<String>)> {
     let filesystem_enabled = cfg
         .settings
         .optional_features
         .contains(OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS);
-    let mut by_uid = BTreeMap::<u32, HookSet>::new();
+    let mut by_uid = BTreeMap::<u32, (HookSet, BTreeSet<String>)>::new();
+    let mut add = |uid: u32, hooks: HookSet, pkg: &str| {
+        let entry = by_uid
+            .entry(uid)
+            .or_insert_with(|| (hooks, BTreeSet::new()));
+        entry.0.merge(hooks);
+        entry.1.insert(pkg.to_owned());
+    };
     for (pkg, app) in &cfg.apps {
         let Some(mut hooks) = app.native.hooks(family) else {
             continue;
@@ -448,10 +503,7 @@ pub fn project_native_with_resolver_for_family(
                 .copied()
                 .find(|uid| *uid < PER_USER_RANGE && is_app_uid(*uid))
             {
-                by_uid
-                    .entry(uid)
-                    .and_modify(|existing| existing.merge(hooks))
-                    .or_insert(hooks);
+                add(uid, hooks, pkg);
             }
             continue;
         }
@@ -469,38 +521,58 @@ pub fn project_native_with_resolver_for_family(
             if !is_app_uid(*uid) {
                 continue;
             }
-            by_uid
-                .entry(*uid)
-                .and_modify(|existing| existing.merge(hooks))
-                .or_insert(hooks);
+            add(*uid, hooks, pkg);
         }
     }
-    // `by_uid` is a BTreeMap, so iteration is ascending by UID; truncating would
-    // silently drop the highest-UID (typically most-recently-installed) apps with
-    // no diagnostic. Warn so a user with more native targets than the backend can
-    // hold learns their protection is partial, instead of failing closed silently.
+    by_uid
+}
+
+/// Project the native control-v2 wire, or refuse it whole when the target set does not
+/// fit a backend. Never truncates: dropping the highest uids would silently leave the
+/// most recently installed apps unprotected.
+pub fn project_native_with_resolver_for_family(
+    cfg: &CanonicalConfig,
+    resolver: &PackageUidMap,
+    family: NativeHookFamily,
+) -> std::result::Result<String, NativeCapacityExceeded> {
+    let by_uid = native_target_set(cfg, resolver, family);
     if by_uid.len() > MAX_NATIVE_TARGETS {
-        eprintln!("{}", native_target_capacity_warning(by_uid.len()));
+        let mut per_package = BTreeMap::<String, Vec<u32>>::new();
+        for (uid, (_, packages)) in &by_uid {
+            for pkg in packages {
+                per_package.entry(pkg.clone()).or_default().push(*uid);
+            }
+        }
+        let mut packages = per_package
+            .into_iter()
+            .map(|(package, uids)| CapacityPackage { package, uids })
+            .collect::<Vec<_>>();
+        packages.sort_by(|a, b| {
+            b.uids
+                .len()
+                .cmp(&a.uids.len())
+                .then_with(|| a.package.cmp(&b.package))
+        });
+        return Err(NativeCapacityExceeded {
+            total: by_uid.len(),
+            capacity: MAX_NATIVE_TARGETS,
+            packages,
+        });
     }
     let targets = by_uid
         .into_iter()
-        .take(MAX_NATIVE_TARGETS)
-        .map(|(uid, hooks)| Target {
+        .map(|(uid, (hooks, _))| Target {
             uid,
             hookmask: hooks.bits(),
         })
         .collect::<Vec<_>>();
-    format_config(cfg.debug, NO_DEFAULT_MASK, &targets)
+    Ok(format_config(cfg.debug, NO_DEFAULT_MASK, &targets))
 }
 
-pub(crate) fn native_target_capacity_warning(total: usize) -> String {
-    format!(
-        "vpnhide-warning native_target_cap total={total} cap={MAX_NATIVE_TARGETS} dropped={}",
-        total.saturating_sub(MAX_NATIVE_TARGETS),
-    )
-}
-
-pub fn project_native_with_resolver(cfg: &CanonicalConfig, resolver: &PackageUidMap) -> String {
+pub fn project_native_with_resolver(
+    cfg: &CanonicalConfig,
+    resolver: &PackageUidMap,
+) -> std::result::Result<String, NativeCapacityExceeded> {
     project_native_with_resolver_for_family(cfg, resolver, NativeHookFamily::Kpm)
 }
 

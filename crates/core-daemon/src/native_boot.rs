@@ -731,6 +731,25 @@ impl NativeBoot {
         self.persist();
     }
 
+    /// The config no longer fits the selected backend (Repair or boot delivery). Nothing
+    /// was written: the backend keeps whatever it held, and the status names the packages
+    /// to deselect instead of reporting a generic delivery failure.
+    pub fn record_capacity_exceeded(&mut self, report: vpnhide_core_rpc::NativeCapacityReport) {
+        let Some(selection) = self.selection else {
+            return;
+        };
+        alog::info(&format!(
+            "native: refused config for {:?}: {} target uids exceed capacity {}; nothing written",
+            selection.backend, report.total, report.capacity
+        ));
+        self.status.outcome = NativeBootOutcome::CapacityExceeded {
+            backend: selection.backend,
+            report,
+        };
+        self.status.updated_at_ms = now_ms();
+        self.persist();
+    }
+
     pub fn record_ports(&mut self, ports: PortsStatus) {
         self.status.ports = Some(ports);
         self.status.updated_at_ms = now_ms();
@@ -935,7 +954,8 @@ pub fn retire_zygisk(dir: &Path) -> Result<(), String> {
         &vpnhide_core_rpc::CanonicalConfig::default(),
         NativeBackend::Zygisk,
         &vpnhide_activator::PackageUidMap::default(),
-    )?;
+    )
+    .map_err(|e| e.to_string())?;
     target.publish(&wire).map_err(|e| match e {
         crate::zygisk::PublishError::BeforeWrite(d) | crate::zygisk::PublishError::Unknown(d) => d,
     })

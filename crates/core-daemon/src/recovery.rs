@@ -137,7 +137,9 @@ fn reconcile_zygisk_publication(candidate: &CanonicalConfig, module: &Path) -> P
     {
         Ok(wire) if wire == on_disk => PhaseOutcome::Confirmed,
         Ok(_) => PhaseOutcome::FailedKnown,
-        Err(_) => PhaseOutcome::Unknown,
+        // An over-capacity config is never written, so it cannot be what is on disk.
+        Err(activation::ProjectionError::Capacity(_)) => PhaseOutcome::FailedKnown,
+        Err(activation::ProjectionError::Failed(_)) => PhaseOutcome::Unknown,
     }
 }
 

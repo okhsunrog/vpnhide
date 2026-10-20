@@ -15,27 +15,6 @@ internal data class TargetListSection<T : TargetEntry>(
     val entries: List<T>,
 )
 
-internal data class NativeTargetCapacityWarning(
-    val total: Int,
-    val capacity: Int,
-    val dropped: Int,
-)
-
-private val NATIVE_TARGET_CAPACITY_WARNING =
-    Regex("^vpnhide-warning native_target_cap total=(\\d+) cap=(\\d+) dropped=(\\d+)$")
-
-/** Parse the activator's stable capacity marker from a combined stdout/stderr reply. */
-internal fun parseNativeTargetCapacityWarning(output: String): NativeTargetCapacityWarning? =
-    output.lineSequence().firstNotNullOfOrNull { line ->
-        val match = NATIVE_TARGET_CAPACITY_WARNING.matchEntire(line.trim()) ?: return@firstNotNullOfOrNull null
-        val (totalRaw, capacityRaw, droppedRaw) = match.destructured
-        val total = totalRaw.toIntOrNull() ?: return@firstNotNullOfOrNull null
-        val capacity = capacityRaw.toIntOrNull() ?: return@firstNotNullOfOrNull null
-        val dropped = droppedRaw.toIntOrNull() ?: return@firstNotNullOfOrNull null
-        NativeTargetCapacityWarning(total, capacity, dropped)
-            .takeIf { capacity > 0 && total > capacity && dropped == total - capacity }
-    }
-
 internal fun <T : TargetEntry> visibleTargetEntries(
     entries: List<T>,
     searchQuery: String,

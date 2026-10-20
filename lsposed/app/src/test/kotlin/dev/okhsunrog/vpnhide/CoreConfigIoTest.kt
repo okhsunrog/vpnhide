@@ -249,6 +249,16 @@ class CoreConfigIoTest {
         for (status in listOf("conflict", "id_reused", "refused_unavailable", "rejected", "invalid_input")) {
             assertEquals(status, (parseCoreReply("""{"status":"$status","detail":"x"}""") as CoreReply.Refused).reason)
         }
+        val capacity =
+            parseCoreReply(
+                """{"status":"native_capacity_exceeded","op":3,"detail":"{\"total\":162,\"capacity\":160,\"packages\":[{\"package\":\"com.a\",\"uids\":[10100,1010100]}]}"}""",
+            ) as CoreReply.Refused
+        assertEquals(NATIVE_CAPACITY_EXCEEDED, capacity.reason)
+        assertEquals(
+            NativeCapacityRefusal(162, 160, listOf(NativeCapacityPackage("com.a", listOf(10_100, 1_010_100)))),
+            parseNativeCapacityRefusal(capacity.detail),
+        )
+        assertEquals(null, parseNativeCapacityRefusal("not json"))
         assertEquals(CoreReply.ProtocolSkew, parseCoreReply("""{"status":"protocol_skew","detail":"v4 vs v5"}"""))
         assertEquals(CoreReply.Unreachable, parseCoreReply("""{"status":"unreachable","detail":"ENOENT"}"""))
         assertEquals(CoreReply.Uncertain, parseCoreReply("""{"status":"transport","op":1,"detail":"reset"}"""))

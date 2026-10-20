@@ -87,6 +87,13 @@ internal class NativeBootIssuesTest : DashboardIssuesFixture() {
             issuesFor(boot(NativeBootOutcome.KpmIncompatible("1.1.1", "1.2.0", "too old")))
                 .contains(DashboardIssue.KpmIncompatible("1.1.1", "1.2.0", "too old")),
         )
+        val refusal = NativeCapacityRefusal(161, 160, listOf(NativeCapacityPackage("com.a", listOf(10_100, 1_010_100))))
+        for (backend in NativeBackendId.entries) {
+            assertTrue(
+                issuesFor(boot(NativeBootOutcome.CapacityExceeded(backend, refusal)))
+                    .contains(DashboardIssue.NativeCapacityExceeded(refusal)),
+            )
+        }
         assertTrue(issuesFor(boot(NativeBootOutcome.ForeignOwner(0x99))).has<DashboardIssue.NativeBootFailed>())
         assertTrue(
             issuesFor(boot(NativeBootOutcome.Unknown("ctl unreadable"))).contains(DashboardIssue.NativeBootFailed("ctl unreadable")),

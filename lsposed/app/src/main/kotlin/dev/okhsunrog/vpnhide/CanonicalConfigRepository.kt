@@ -18,6 +18,8 @@ internal data class CanonicalWriteResult(
     val exitCode: Int,
     val output: String,
     val operation: ConfigOperationResult? = null,
+    /** Set when core refused the save because the native target set does not fit. */
+    val nativeCapacity: NativeCapacityRefusal? = null,
 ) {
     val succeeded: Boolean
         get() = exitCode == 0

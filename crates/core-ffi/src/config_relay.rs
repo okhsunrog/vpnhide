@@ -186,6 +186,13 @@ async fn submit(
             return Ok(refused("refused_unavailable", String::new()));
         }
         Ok(Err(SubmitError::Rejected { reason })) => return Ok(refused("rejected", reason)),
+        // Nothing was persisted or applied. The detail is the typed report as JSON
+        // (`total`, `capacity`, `packages[{package, uids}]`) so the app can list
+        // what to deselect.
+        Ok(Err(SubmitError::NativeCapacityExceeded(report))) => {
+            let detail = serde_json::to_string(&report).map_err(|e| e.to_string())?;
+            return Ok(refused("native_capacity_exceeded", detail));
+        }
         Ok(Ok(_)) => {}
     }
     let deadline = Instant::now() + SETTLE_WAIT;

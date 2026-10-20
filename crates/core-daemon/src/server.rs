@@ -344,6 +344,37 @@ impl CoreState {
         Some(status)
     }
 
+    /// Save-time capacity gate: project `next` for this boot's selected backend before any
+    /// phase runs. A target set the backend cannot hold refuses the whole edit — nothing is
+    /// persisted, applied or recorded, so the previous config stays in effect. Any other
+    /// projection failure is left to the Native phase to report. Returns the projected wire
+    /// so the Native phase can deliver it without resolving packages again.
+    fn admit_native_capacity(
+        &self,
+        next: &CanonicalConfig,
+    ) -> Result<Option<(vpnhide_core_rpc::NativeBackend, String)>, SubmitError> {
+        if self.kmod_ctl_path.is_none() {
+            return Ok(None);
+        }
+        let Some(handle) = self.native_handle() else {
+            return Ok(None);
+        };
+        let Some(backend) = handle.lock().expect("native boot").selected() else {
+            return Ok(None);
+        };
+        match crate::activation::project_native_wire(next, backend) {
+            Ok(wire) => Ok(Some((backend, wire))),
+            Err(crate::activation::ProjectionError::Capacity(report)) => {
+                crate::alog::info(&format!(
+                    "config: refused edit: {} native target uids exceed {backend:?} capacity {}",
+                    report.total, report.capacity
+                ));
+                Err(SubmitError::NativeCapacityExceeded(report))
+            }
+            Err(crate::activation::ProjectionError::Failed(_)) => Ok(None),
+        }
+    }
+
     fn native_handle(&self) -> Option<operation::NativeBootHandle> {
         self.native_boot.read().expect("native boot").clone()
     }
@@ -574,10 +605,6 @@ impl CoreState {
         let changed = store.config.as_ref() != Some(&next);
         let repair = matches!(edit, ConfigEdit::RepairActivation);
 
-        // Claim a dispatch ticket so a delayed predecessor (or explicit invalidate)
-        // cannot run external effects after this admission.
-        let ticket = self.dispatch_fence.fetch_add(1, Ordering::SeqCst) + 1;
-
         // Run the operation's phase plan. The runner performs the durable write (Persist) and,
         // when a control node is configured, delivers the native wire (Native). Repair skips
         // Persist and only activates. Blocking IO under the lock serializes writers; the RPC
@@ -603,12 +630,23 @@ impl CoreState {
         };
         let kind = options.plan.unwrap_or(kind);
         let plan = operation::plan_kind(kind);
+        let native_wire = if changed && !repair && plan.contains(&ConfigPhase::Native) {
+            self.admit_native_capacity(&next)?
+        } else {
+            None
+        };
+
+        // Claim a dispatch ticket so a delayed predecessor (or explicit invalidate)
+        // cannot run external effects after this admission.
+        let ticket = self.dispatch_fence.fetch_add(1, Ordering::SeqCst) + 1;
+
         let mut runner = RealPhaseRunner::new_with_ports(
             self.config_path.clone(),
             self.kmod_ctl_path.clone(),
             ports,
         );
         runner.native = self.native_handle();
+        runner.native_wire = native_wire;
         runner.ports_source = options.ports_source;
         runner.ports_netd_ready = options.netd_ready;
 

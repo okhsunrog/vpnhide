@@ -38,6 +38,9 @@ internal data class CoreOperationRecord(
     val settled: PhaseOutcome?,
 )
 
+/** Relay status: the edit's native target set does not fit; nothing was saved or applied. */
+internal const val NATIVE_CAPACITY_EXCEEDED = "native_capacity_exceeded"
+
 internal sealed interface CoreReply {
     /** `state` / `operation` answered; [record] is null for an id core never admitted. */
     data class Observed(
@@ -52,7 +55,10 @@ internal sealed interface CoreReply {
         val state: CoreStateView,
     ) : CoreReply
 
-    /** Core refused the edit before any phase ran (conflict, reused id, invalid, unavailable). */
+    /**
+     * Core refused the edit before any phase ran (conflict, reused id, invalid, unavailable,
+     * or [NATIVE_CAPACITY_EXCEEDED] with the typed report as JSON [detail]).
+     */
     data class Refused(
         val reason: String,
         val detail: String,
@@ -180,7 +186,7 @@ internal fun parseCoreReply(raw: String): CoreReply =
                 )
             }
 
-            "conflict", "id_reused", "refused_unavailable", "rejected", "invalid_input" -> {
+            "conflict", "id_reused", "refused_unavailable", "rejected", "invalid_input", NATIVE_CAPACITY_EXCEEDED -> {
                 CoreReply.Refused(status, json.optString("detail"))
             }
 

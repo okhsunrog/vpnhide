@@ -102,7 +102,7 @@ fn projects_native_roles_to_wire() {
          package:com.example.disabled uid:10345\n",
     );
     assert_eq!(
-        project_native_with_resolver(&cfg, &resolver),
+        project_native_with_resolver(&cfg, &resolver).unwrap(),
         "vpnhide 2 config\n\
          debug 1\n\
          targets 40 27fa\n\
@@ -129,7 +129,7 @@ fn native_projection_targets_only_the_main_profile_copy_of_vpnhide() {
     );
 
     assert_eq!(
-        project_native_with_resolver(&cfg, &resolver),
+        project_native_with_resolver(&cfg, &resolver).unwrap(),
         "vpnhide 2 config\n\
          debug 0\n\
          targets a0003ff 278b 27fa f6a3a\n\
@@ -159,7 +159,7 @@ fn native_projection_drops_platform_aids_but_keeps_preinstalled_apps() {
     );
 
     assert_eq!(
-        project_native_with_resolver(&cfg, &resolver),
+        project_native_with_resolver(&cfg, &resolver).unwrap(),
         "vpnhide 2 config\n\
          debug 0\n\
          targets a0003ff 27fa f6a3a\n\
@@ -185,11 +185,11 @@ fn kmod_projection_includes_the_optional_filesystem_hook() {
             .contains(OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS)
     );
     assert_eq!(
-        project_native_with_resolver_for_family(&cfg, &resolver, NativeHookFamily::Kmod),
+        project_native_with_resolver_for_family(&cfg, &resolver, NativeHookFamily::Kmod).unwrap(),
         "vpnhide 2 config\ndebug 0\ntargets a0003ff 278b\nend 1\n",
     );
     assert_eq!(
-        project_native_with_resolver_for_family(&cfg, &resolver, NativeHookFamily::Kpm),
+        project_native_with_resolver_for_family(&cfg, &resolver, NativeHookFamily::Kpm).unwrap(),
         "vpnhide 2 config\ndebug 0\ntargets a0003ff 278b\nend 1\n",
     );
 }
@@ -215,9 +215,11 @@ fn zygisk_projection_gates_filesystem_hook_on_the_optional_feature() {
     let filesystem_bit = Hook::FilesystemIfacePaths.bit();
 
     let disabled_wire =
-        project_native_with_resolver_for_family(&disabled, &resolver, NativeHookFamily::Zygisk);
+        project_native_with_resolver_for_family(&disabled, &resolver, NativeHookFamily::Zygisk)
+            .unwrap();
     let enabled_wire =
-        project_native_with_resolver_for_family(&enabled, &resolver, NativeHookFamily::Zygisk);
+        project_native_with_resolver_for_family(&enabled, &resolver, NativeHookFamily::Zygisk)
+            .unwrap();
     let disabled_config = vpnhide_protocol::parse_config(disabled_wire.as_bytes()).unwrap();
     let enabled_config = vpnhide_protocol::parse_config(enabled_wire.as_bytes()).unwrap();
 
@@ -250,7 +252,7 @@ fn builtin_projection_gates_filesystem_hook_on_the_optional_feature() {
     let resolver = parse_pm_packages("package:com.example.full uid:10123\n");
     let filesystem_bit = Hook::FilesystemIfacePaths.bit();
     let mask = |cfg: &_, family| {
-        let wire = project_native_with_resolver_for_family(cfg, &resolver, family);
+        let wire = project_native_with_resolver_for_family(cfg, &resolver, family).unwrap();
         vpnhide_protocol::parse_config(wire.as_bytes())
             .unwrap()
             .targets[0]
@@ -287,7 +289,7 @@ fn native_projection_ignores_non_kernel_hook_names() {
     let resolver = parse_pm_packages("package:com.example.java uid:10123\n");
 
     assert_eq!(
-        project_native_with_resolver(&cfg, &resolver),
+        project_native_with_resolver(&cfg, &resolver).unwrap(),
         "vpnhide 2 config\ndebug 0\nend 0\n",
     );
 }
@@ -312,14 +314,14 @@ fn projects_backend_specific_native_hook_overrides() {
     let resolver = parse_pm_packages("package:com.example.app uid:10234\n");
 
     assert_eq!(
-        project_native_with_resolver(&cfg, &resolver),
+        project_native_with_resolver(&cfg, &resolver).unwrap(),
         "vpnhide 2 config\n\
          debug 0\n\
          targets 40 27fa\n\
          end 1\n",
     );
     assert_eq!(
-        project_native_with_resolver_for_family(&cfg, &resolver, NativeHookFamily::Zygisk),
+        project_native_with_resolver_for_family(&cfg, &resolver, NativeHookFamily::Zygisk).unwrap(),
         "vpnhide 2 config\n\
          debug 0\n\
          targets 5040000 27fa\n\
@@ -341,14 +343,14 @@ fn legacy_native_hook_list_is_kernel_only_and_zygisk_defaults_to_all() {
     let resolver = parse_pm_packages("package:com.example.app uid:10234\n");
 
     assert_eq!(
-        project_native_with_resolver(&cfg, &resolver),
+        project_native_with_resolver(&cfg, &resolver).unwrap(),
         "vpnhide 2 config\n\
          debug 0\n\
          targets 40 27fa\n\
          end 1\n",
     );
     assert_eq!(
-        project_native_with_resolver_for_family(&cfg, &resolver, NativeHookFamily::Zygisk),
+        project_native_with_resolver_for_family(&cfg, &resolver, NativeHookFamily::Zygisk).unwrap(),
         "vpnhide 2 config\n\
          debug 0\n\
          targets 5fc0000 27fa\n\
@@ -370,11 +372,11 @@ fn empty_legacy_native_hook_list_is_disabled_for_every_backend() {
     let resolver = parse_pm_packages("package:com.example.app uid:10234\n");
 
     assert_eq!(
-        project_native_with_resolver(&cfg, &resolver),
+        project_native_with_resolver(&cfg, &resolver).unwrap(),
         "vpnhide 2 config\ndebug 0\nend 0\n",
     );
     assert_eq!(
-        project_native_with_resolver_for_family(&cfg, &resolver, NativeHookFamily::Zygisk),
+        project_native_with_resolver_for_family(&cfg, &resolver, NativeHookFamily::Zygisk).unwrap(),
         "vpnhide 2 config\ndebug 0\nend 0\n",
     );
 }
@@ -443,7 +445,7 @@ fn parses_per_hook_java_selection_without_breaking_native() {
     );
     // Native projection is unaffected: both apps still get the kernel mask.
     assert_eq!(
-        project_native_with_resolver(&cfg, &resolver),
+        project_native_with_resolver(&cfg, &resolver).unwrap(),
         "vpnhide 2 config\n\
          debug 0\n\
          targets a0003ff 278b 278c\n\
@@ -702,13 +704,11 @@ fn apatch_kernel_version_hint_parses_dmesg() {
     assert_eq!(parse_apatch_kernel_version_hint(log), Some(0xc02));
 }
 
-#[test]
-fn projection_is_bounded_to_backend_target_capacity() {
-    let projected = MAX_NATIVE_TARGETS + 10;
-    let apps = (0..projected)
+fn many_apps(count: usize) -> (CanonicalConfig, String) {
+    let apps = (0..count)
         .map(|i| {
             (
-                format!("com.example.{i:02}"),
+                format!("com.example.{i:03}"),
                 AppConfig {
                     native: NativeSelection::Enabled(true),
                     ..AppConfig::default()
@@ -722,36 +722,81 @@ fn projection_is_bounded_to_backend_target_capacity() {
         apps,
         settings: Settings::default(),
     };
-    let pm = (0..projected)
-        .map(|i| format!("package:com.example.{i:02} uid:{}", 10_000 + i))
+    let pm = (0..count)
+        .map(|i| format!("package:com.example.{i:03} uid:{}", 10_000 + i))
         .collect::<Vec<_>>()
         .join("\n");
-    let wire = project_native_with_resolver(&cfg, &parse_pm_packages(&pm));
+    (cfg, pm)
+}
 
-    // Every app shares one mask, so the whole set rides one `targets` record
-    // and the count lives in the `end` fuse — which the backend checks, so the
-    // producer has to cap itself here rather than let the backend reject it.
-    assert_eq!(
-        wire.lines().filter(|l| l.starts_with("targets ")).count(),
-        1
-    );
+#[test]
+fn a_target_set_at_capacity_projects_whole() {
+    let (cfg, pm) = many_apps(MAX_NATIVE_TARGETS);
+    let wire = project_native_with_resolver(&cfg, &parse_pm_packages(&pm)).unwrap();
     assert!(wire.ends_with(&format!("end {MAX_NATIVE_TARGETS:x}\n")));
-    let uids = wire
-        .lines()
-        .find(|l| l.starts_with("targets "))
-        .unwrap()
-        .split_whitespace()
-        .count()
-        - 2; // keyword + mask
-    assert_eq!(uids, MAX_NATIVE_TARGETS);
-
-    // And what it produces must survive its own reader: the parser rejects a
-    // payload carrying more uids than a backend can hold.
     assert!(vpnhide_protocol::parse_config(wire.as_bytes()).is_some());
+}
+
+#[test]
+fn an_over_capacity_target_set_is_refused_whole_never_truncated() {
+    let (cfg, pm) = many_apps(MAX_NATIVE_TARGETS + 10);
+    let refused = project_native_with_resolver(&cfg, &parse_pm_packages(&pm)).unwrap_err();
+    assert_eq!(refused.total, MAX_NATIVE_TARGETS + 10);
+    assert_eq!(refused.capacity, MAX_NATIVE_TARGETS);
+    assert_eq!(refused.overflow(), 10);
+    assert_eq!(refused.packages.len(), MAX_NATIVE_TARGETS + 10);
     assert_eq!(
-        native_target_capacity_warning(projected),
-        "vpnhide-warning native_target_cap total=170 cap=160 dropped=10",
+        refused.to_string(),
+        "native target capacity exceeded: 170 uids, capacity 160 (deselect at least 10)"
     );
+}
+
+#[test]
+fn capacity_counts_uids_across_profiles_skips_platform_uids_and_reserves_one_self_slot() {
+    // Two packages with a work-profile clone each, a sharedUserId package resolving to
+    // a platform uid, and the app itself in two profiles.
+    let mut cfg = CanonicalConfig {
+        version: 1,
+        debug: false,
+        apps: BTreeMap::new(),
+        settings: Settings::default(),
+    };
+    for pkg in ["com.a", "com.b", "com.platform", APP_PACKAGE] {
+        cfg.apps.insert(
+            pkg.into(),
+            AppConfig {
+                native: NativeSelection::Enabled(true),
+                ..AppConfig::default()
+            },
+        );
+    }
+    let pm = format!(
+        "package:com.a uid:10100\npackage:com.a uid:1010100\npackage:com.b uid:10101\npackage:com.b uid:1010101\npackage:com.platform uid:1000\npackage:{APP_PACKAGE} uid:10200\npackage:{APP_PACKAGE} uid:1010200\n"
+    );
+    let resolver = parse_pm_packages(&pm);
+    let set = native_target_set(&cfg, &resolver, NativeHookFamily::Kpm);
+    assert_eq!(
+        set.keys().copied().collect::<Vec<_>>(),
+        vec![10100, 10101, 10200, 1010100, 1010101]
+    );
+}
+
+#[test]
+fn the_refusal_lists_packages_by_how_many_uids_they_add() {
+    let (mut cfg, mut pm) = many_apps(MAX_NATIVE_TARGETS);
+    cfg.apps.insert(
+        "com.cloned".into(),
+        AppConfig {
+            native: NativeSelection::Enabled(true),
+            ..AppConfig::default()
+        },
+    );
+    pm.push_str("\npackage:com.cloned uid:10999\npackage:com.cloned uid:1010999\npackage:com.cloned uid:1110999");
+    let refused = project_native_with_resolver(&cfg, &parse_pm_packages(&pm)).unwrap_err();
+    assert_eq!(refused.total, MAX_NATIVE_TARGETS + 3);
+    assert_eq!(refused.packages[0].package, "com.cloned");
+    assert_eq!(refused.packages[0].uids, vec![10999, 1010999, 1110999]);
+    assert_eq!(refused.packages[1].package, "com.example.000");
 }
 
 #[test]

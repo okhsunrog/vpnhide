@@ -107,6 +107,19 @@ class NativeCapacityDataTest {
     }
 
     @Test
+    fun `a selected package with no installed copy spends nothing, as in core`() {
+        val usage =
+            nativeTargetCapacityUsage(
+                selfPkg = self,
+                selections = emptyList(),
+                existingNativePackages = setOf("com.uninstalled"),
+                packageUids = emptyMap(),
+            )
+
+        assertEquals(1, usage.used)
+    }
+
+    @Test
     fun `self always reserves exactly one slot`() {
         val usage =
             nativeTargetCapacityUsage(

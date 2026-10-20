@@ -85,7 +85,11 @@
 
     <!-- Save feedback -->
     <string name="native_target_capacity_reached">Native limit reached: at most %1$d app UIDs can be selected. Disable Native for another app first.</string>
-    <string name="save_native_target_capacity">Saved, but the Native backend can protect only %1$d of %2$d resolved app UIDs. The %3$d highest UIDs were left without Native protection.</string>
+    <string name="native_target_capacity_over">Native needs %1$d app UIDs, at most %2$d fit. Turn off Native for %3$d more UIDs to save.</string>
+    <string name="native_capacity_package">%1$s (%2$d)</string>
+    <string name="native_capacity_package_more">%1$s and %2$d more</string>
+    <string name="save_native_capacity_refused">Not saved: this selection needs %1$d app UIDs, but Native holds at most %2$d. Turn off Native for apps covering at least %3$d UIDs (UIDs per app in brackets): %4$s. Your previous settings stay in effect.</string>
+    <string name="dashboard_issue_native_capacity_exceeded">Native settings were not updated: the saved selection now needs %1$d app UIDs, but Native holds at most %2$d (for example, new work-profile or clone copies of selected apps appeared). Nothing was sent; Native keeps its previous targets. Turn off Native for apps covering at least %3$d UIDs (UIDs per app in brackets): %4$s.</string>
 
     <!-- Diagnostics -->
     <string name="diag_summary_tally">%1$d hidden · %2$d leaking</string>

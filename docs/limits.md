@@ -132,17 +132,34 @@ that is telemetry-only and already degrades visibly.
 
 ## User-visible overflow reporting
 
-The target picker refuses a selection that would exceed the native capacity
-before Save (`NativeCapacityPicker.kt`). If package→UID resolution still yields
-more UIDs than the backend holds (for example the same app in several
-profiles), core keeps the first `MAX_TARGET_UIDS` by ascending UID and logs a
-stable `vpnhide-warning native_target_cap` line with the totals to its own
-stderr (`/data/adb/vpnhide/core/core.log`, included in the debug bundle). The
-canonical package selection is still saved in full.
+Over-capacity is a **hard refusal**, never a truncation. Core counts the native
+target set in one place (`vpnhide_activator::native_target_set`): the distinct
+app UIDs of every native-selected package across all profiles and clones,
+platform UIDs below 10000 skipped, uninstalled packages contributing nothing,
+and VPN Hide itself one slot for its main-profile UID.
 
-In 2.0 core's operation receipt does not carry that warning yet, so the
-post-Save "Saved, but the Native backend can protect only …" snackbar
-(`save_native_target_capacity`) never fires; see the 2.0 review.
+- **Picker.** `nativeTargetCapacityUsage` (`AppPickerData.kt`) counts by the same
+  rules. A toggle that would push the selection over is refused, and Save is
+  disabled with the reason in the action bar while the selection is over.
+- **Save.** Before any phase runs, core projects the edited config for this boot's
+  selected backend. A set over `MAX_TARGET_UIDS` returns
+  `SubmitError::NativeCapacityExceeded(NativeCapacityReport{total, capacity,
+  packages[{package, uids}]})` (protocol 7). Nothing is persisted, no phase runs,
+  no operation is recorded and the revision does not move, so the previous config
+  stays in effect. The FFI relay reports it as `native_capacity_exceeded`, with
+  the report as JSON detail. The app's config failure snackbar names the
+  packages to deselect, most UIDs first.
+- **Repair and boot delivery.** A persisted config can stop fitting later, for
+  example when new profile or clone copies of selected apps appear. The Native
+  phase then writes nothing to the backend, which keeps its previous policy. It
+  settles `FailedKnown` and publishes
+  `NativeBootOutcome::CapacityExceeded{backend, report}`, which the dashboard
+  shows as an error with the same package list.
+
+`crates/core-daemon/tests/native_capacity.rs` proves there is no partial write.
+After a refused Save the control node, the durable config and the revision are
+byte-for-byte unchanged and no operation is recorded. A Repair leaves the node
+untouched.
 
 ## Core socket bounds
 

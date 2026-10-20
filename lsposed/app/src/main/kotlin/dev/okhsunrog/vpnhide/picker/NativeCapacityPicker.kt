@@ -25,7 +25,7 @@ internal fun nativeSelectionSaveError(
 ): String? =
     nativeCapacityUsage(entries, targets, selfPkg)
         .takeIf { it.overflow > 0 }
-        ?.run { nativeCapacityMessage(resources) }
+        ?.let { usage -> resources.getString(R.string.native_target_capacity_over, usage.used, usage.capacity, usage.overflow) }
 
 internal fun AppEntry.toRoleSelection(): AppRoleSelection =
     AppRoleSelection(

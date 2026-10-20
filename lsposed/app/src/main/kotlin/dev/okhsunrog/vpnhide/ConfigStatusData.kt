@@ -24,6 +24,8 @@ internal data class ConfigStatus(
 internal data class ConfigFailureNotice(
     val operationId: Long,
     val status: ConfigStatus,
+    /** Core refused the save because the native target set does not fit: list what to deselect. */
+    val nativeCapacity: NativeCapacityRefusal? = null,
 )
 
 internal data class ConfigDialogState(
@@ -82,7 +84,7 @@ internal fun configFailureNotice(view: ConfigCoordinatorView): ConfigFailureNoti
     if (view.mode != ConfigCoordinatorMode.Open || view.rechecking || view.operations.isNotEmpty()) return null
     val result = view.lastResult ?: return null
     if (result.failure == null) return null
-    return configStatus(view)?.let { ConfigFailureNotice(result.id, it) }
+    return configStatus(view)?.let { ConfigFailureNotice(result.id, it, view.lastNativeCapacity) }
 }
 
 internal fun configStatus(view: ConfigCoordinatorView): ConfigStatus? {

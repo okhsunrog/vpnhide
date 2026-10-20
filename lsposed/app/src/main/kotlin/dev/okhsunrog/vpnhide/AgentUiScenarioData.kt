@@ -14,6 +14,14 @@ internal val agentUiIssues: Map<String, DashboardIssue> =
         "native-conflict" to DashboardIssue.NativeConflictKernel,
         "native-missing" to DashboardIssue.NoNativeBackend,
         "kpm-incompatible" to DashboardIssue.KpmIncompatible("1.1.1", "1.2.0", "Fixture: the loaded vpnhide KPM is version 1.1.1"),
+        "native-capacity-exceeded" to
+            DashboardIssue.NativeCapacityExceeded(
+                NativeCapacityRefusal(
+                    total = 162,
+                    capacity = 160,
+                    packages = listOf(NativeCapacityPackage("org.example.cloned", listOf(10123, 1010123, 1110123))),
+                ),
+            ),
         "lsposed-missing" to DashboardIssue.LsposedNotInstalled,
         "lsposed-reboot" to DashboardIssue.LsposedNeedsReboot,
         "lsposed-disabled" to DashboardIssue.LsposedNotEnabled,
