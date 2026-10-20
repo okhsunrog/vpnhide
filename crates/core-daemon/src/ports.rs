@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use vpnhide_activator::{
     PackageUidMap, PortsApplyResult, PortsChainPresence, PortsFamilyResult, PortsRuleset,
     apply_ports_rules_families, inspect_ports_chains, parse_canonical, parse_pm_packages,
-    project_ports_with_resolver, write_ports_core_owner_marker, write_ports_load_status,
+    project_ports_with_resolver, write_ports_core_owner_marker,
 };
 use vpnhide_core_rpc::{CanonicalConfig, FamilyApplyOutcome, PhaseOutcome, PortsFamilyReport};
 
@@ -108,7 +108,7 @@ pub fn project(candidate: &CanonicalConfig, resolver: &PackageUidMap) -> PortsRu
     }
 }
 
-/// Apply projected rules, claim ownership, and record load status.
+/// Apply projected rules and claim ownership.
 pub fn apply(rules: &PortsRuleset) -> (PhaseOutcome, PortsFamilyReport) {
     let (outcome, report, _) = apply_detailed(rules);
     (outcome, report)
@@ -129,16 +129,9 @@ pub fn apply_detailed(rules: &PortsRuleset) -> (PhaseOutcome, PortsFamilyReport,
         }
     }
     let report = to_family_report(&result);
-    let loaded = report.ipv4 == FamilyApplyOutcome::Confirmed
-        && report.ipv6 == FamilyApplyOutcome::Confirmed;
+    // The result is published typed (`PortsApply` in the native boot status / receipts);
+    // the 1.x `load_status`/`load_log` files are no longer written.
     let detail = format!("ipv4={:?} ipv6={:?}", report.ipv4, report.ipv6);
-    write_ports_load_status(
-        "core",
-        loaded,
-        Some(result.target_count),
-        &detail,
-        &result.log,
-    );
     let log = result.log.trim();
     let tail: String = {
         let chars: Vec<char> = log.chars().collect();
