@@ -179,6 +179,15 @@ internal sealed interface DashboardIssue {
 
     data object SelinuxPermissive : Environment
 
+    /**
+     * A 1.x companion module 2.0 replaced with core (`vpnhide_ports`, `vpnhide_builtin`)
+     * is still installed. Its own boot scripts keep running beside core and fight it over
+     * the iptables chain and the kernel control node, so it must be uninstalled.
+     */
+    data class ObsoleteModulesInstalled(
+        val moduleIds: List<String>,
+    ) : Environment
+
     /** Installed in more than one user profile; a Save from the wrong one drops targets. */
     data class InstalledInMultipleProfiles(
         val profileCount: Int,
@@ -266,6 +275,8 @@ internal data class EnvironmentFacts(
     val debugLoggingOn: Boolean,
     val filesystemHiding: FilesystemHidingState,
     val portsApply: PortsApplyProblem?,
+    /** Installed 1.x modules core replaced (root snapshot `obsolete_modules`). */
+    val obsoleteModules: List<String> = emptyList(),
 )
 
 /**
@@ -582,6 +593,7 @@ private fun nativeBootIssues(facts: DashboardFacts): List<DashboardIssue> {
 private fun environmentIssues(facts: DashboardFacts): List<DashboardIssue> =
     buildList {
         val env = facts.environment
+        if (env.obsoleteModules.isNotEmpty()) add(DashboardIssue.ObsoleteModulesInstalled(env.obsoleteModules))
         addAll(filesystemHidingIssues(env.filesystemHiding))
         // Only adb/root can read the verbose lines, so this is a neutral note
         // rather than a problem.

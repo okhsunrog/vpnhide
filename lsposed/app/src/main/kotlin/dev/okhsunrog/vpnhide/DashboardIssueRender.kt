@@ -281,6 +281,13 @@ private fun DashboardIssue.Environment.environmentMessage(res: Resources): Dashb
         is DashboardIssue.InstalledInMultipleProfiles -> {
             warn(res.getString(R.string.dashboard_issue_self_multi_profile, profileCount), helpArticle = HelpArticle.WORK_PROFILES)
         }
+
+        is DashboardIssue.ObsoleteModulesInstalled -> {
+            err(
+                res.getString(R.string.dashboard_issue_obsolete_modules, moduleIds.joinToString(", ")),
+                helpArticle = HelpArticle.UPDATING,
+            )
+        }
     }
 
 private fun DashboardIssue.Protection.protectionMessage(res: Resources): DashboardMessage =

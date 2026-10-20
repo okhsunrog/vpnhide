@@ -116,12 +116,14 @@ internal abstract class DashboardIssuesFixture {
         debugLoggingOn: Boolean = false,
         filesystemHiding: FilesystemHidingState = FilesystemHidingState(FilesystemHidingStatus.Disabled),
         portsApply: PortsApplyProblem? = null,
+        obsoleteModules: List<String> = emptyList(),
     ) = EnvironmentFacts(
         selinuxPermissive = selinuxPermissive,
         selfProfileCount = selfProfileCount,
         debugLoggingOn = debugLoggingOn,
         filesystemHiding = filesystemHiding,
         portsApply = portsApply,
+        obsoleteModules = obsoleteModules,
     )
 
     protected fun protection(

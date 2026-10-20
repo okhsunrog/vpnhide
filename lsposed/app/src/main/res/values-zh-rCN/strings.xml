@@ -70,8 +70,10 @@
     <!-- Root status -->
     <string name="secondary_profile_error_title">请在主用户资料中打开 VPN Hide</string>
     <string name="secondary_profile_error_message">请卸载这个副本的 VPN Hide，改用主用户资料里安装的那个——它可以管理所有资料中的应用。</string>
-    <string name="root_error_title">需要 Root 权限</string>
-    <string name="root_error_message">VPN Hide 需要 Root 权限，才能为指定应用管理 VPN 隐藏。请在 Root 管理器（Magisk、KernelSU、APatch）中授权，然后点按“重新检查”。</string>
+    <string name="root_error_title">VPN Hide Core 未运行</string>
+    <string name="root_error_message">VPN Hide 需要其核心模块来管理隐藏。请在 Root 管理器（Magisk、KernelSU、APatch）中安装与本应用同一版本的 vpnhide-core.zip，确认模块已启用，重启后点按“重新检查”。应用本身不需要 Root 授权。</string>
+    <string name="core_version_mismatch_message">已安装的 VPN Hide Core 模块与本应用来自不同版本，无法通信。请安装同一版本的应用和 vpnhide-core.zip，重启后点按“重新检查”。</string>
+    <string name="core_version_mismatch_title">VPN Hide Core 版本不匹配</string>
     <string name="root_error_recheck">重新检查</string>
 
     <!-- Save feedback -->
@@ -141,10 +143,10 @@
     <string name="dashboard_load_failed_message">VPN Hide 无法获取此界面所需的 Root 状态。若是授权被中断，请检查 Root 管理器后点按“重试”。</string>
     <string name="dashboard_refresh_failed_message">刷新失败。正在显示上一次的概览数据。</string>
     <string name="self_targets_error_title">启动准备失败</string>
-    <string name="self_targets_error_body_root">VPN Hide 无法执行 Root 命令。若你拒绝或中断了 Root 授权，请在 Root 管理器中授权后点按“重试”。</string>
-    <string name="self_targets_error_body_incomplete">Root 授权已成功，但 VPN Hide 未能读取部分启动状态（见下方）。这通常是暂时的，请点按“重试”。</string>
-    <string name="self_targets_error_body_write">Root 授权已成功，但 VPN Hide 未能保存更新后的配置（见下方）。请点按“重试”。</string>
-    <string name="self_targets_error_body_unknown">VPN Hide 未能完成 Root 侧的启动流程（见下方）。请点按“重试”。</string>
+    <string name="self_targets_error_body_root">VPN Hide Core 没有响应。请确认核心模块已安装并启用；若刚安装，请先重启，然后点按“重试”。</string>
+    <string name="self_targets_error_body_incomplete">VPN Hide Core 已响应，但未能读取部分启动状态（见下方）。这通常是暂时的，请点按“重试”。</string>
+    <string name="self_targets_error_body_write">VPN Hide Core 已响应，但未能保存更新后的配置（见下方）。请点按“重试”。</string>
+    <string name="self_targets_error_body_unknown">VPN Hide 未能通过核心完成启动准备（见下方）。请点按“重试”。</string>
     <string name="targets_load_failed_title">隐藏数据不可用</string>
     <string name="targets_load_failed_message">VPN Hide 无法获取此标签页所需的 Root 状态。若是授权被中断，请检查 Root 管理器后点按“重试”。</string>
     <string name="dashboard_ports">端口隐藏</string>
@@ -214,7 +216,7 @@
     <string name="self_not_routed_prompt">VPN 已开启，但 VPN Hide 的流量没有走这条 VPN，这些检查没有可测量的内容。若使用通用 VPN 客户端，请把 VPN Hide 加入 VPN 隧道（不要用分应用代理把它排除）再点按“重试”。有些 VPN 只代理选定的应用、无法加入 VPN Hide——那么这项自检就无法运行，这是正常现象，并非失败；请以目标应用是否正常来判断隐藏效果。</string>
     <string name="self_not_routed_accelerators">在用游戏加速器？</string>
     <string name="vpn_off_retry">重试</string>
-    <string name="diag_failed_prompt">隐藏检查未能运行——可能是 Root 授权被拒绝，或某条命令执行失败。请点按“重试”，这通常是暂时的。</string>
+    <string name="diag_failed_prompt">隐藏检查未能运行——VPN Hide Core 没有响应，或某项检查失败。请点按“重试”，这通常是暂时的。</string>
 
     <!-- Statistics -->
     <string name="statistics_title">拦截计数</string>
@@ -352,14 +354,14 @@
     <string name="legacy_import_done">已导入 %1$d 个应用。</string>
     <string name="legacy_import_discarded">旧文件已删除，未导入任何内容。</string>
     <string name="legacy_import_nothing">没有可导入的内容 — 旧文件已不存在。</string>
-    <string name="legacy_import_failed">导入失败（%1$s）。可能是未授予 root 权限。</string>
+    <string name="legacy_import_failed">导入失败（%1$s）。请确认 VPN Hide Core 模块正在运行。</string>
     <!-- Full reset / leftover cleanup -->
     <string name="settings_reset_section">重置</string>
     <string name="reset_button">移除残留文件</string>
     <string name="reset_button_sub">删除 VPN Hide 留在设备上的所有配置、状态和目标文件</string>
     <string name="reset_title">移除残留文件</string>
     <string name="reset_warning">这会永久删除 VPN Hide 及其模块写在模块文件夹之外的所有配置、状态、统计和目标文件。此操作无法撤销。</string>
-    <string name="reset_instructions">请仅在完成以下步骤后再执行：在 Root 管理器中移除所有 VPN Hide 模块、在 LSPosed 中禁用 VPN Hide 模块，并重启。这里不会动模块文件夹、应用本身和运行时状态——它们会随上面的步骤一起消失。 对于内置后端，还需启动不含 VPN Hide 的内核；移除配套模块不会移除内核钩子。</string>
+    <string name="reset_instructions">请仅在完成以下步骤后再执行：在 Root 管理器中移除 VPN Hide 后端模块（内核模块、KPM、Zygisk）、在 LSPosed 中禁用 VPN Hide 模块，并重启。在重置完成前请保留 VPN Hide Core 模块——重置由核心执行——之后再卸载核心模块。这里不会动模块文件夹、应用本身和运行时状态。对于内置后端，还需启动不含 VPN Hide 的内核；卸载模块不会移除内核钩子。</string>
     <string name="reset_checking">正在检查模块状态…</string>
     <string name="reset_running">正在删除文件…</string>
     <string name="reset_blocked_intro">还不能执行——VPN Hide 仍在运行。请先移除以下项并重启：</string>
@@ -369,8 +371,8 @@
     <string name="reset_blocker_kernel">内核钩子仍然存在。移除可加载模块后需要重启；内置后端需要使用不含 VPN Hide 的内核。</string>
     <string name="reset_blocker_lsposed">LSPosed 钩子仍在生效</string>
     <string name="reset_confirm">全部删除</string>
-    <string name="reset_done_body">完成，所有残留文件已移除。现在可以卸载 VPN Hide 了。</string>
-    <string name="reset_failed_body">无法移除文件。请确认已授予 Root 权限后重试。</string>
+    <string name="reset_done_body">完成，所有残留文件已移除。现在可以在 Root 管理器中卸载 VPN Hide Core 模块，然后卸载应用。</string>
+    <string name="reset_failed_body">无法移除文件。请确认 VPN Hide Core 模块正在运行后重试。</string>
     <string name="reset_uninstall">卸载 VPN Hide</string>
     <string name="reset_close">关闭</string>
     <string name="dashboard_issues">错误（%d）</string>
@@ -386,6 +388,7 @@
     <string name="dashboard_issue_kpm_unverifiable">无法查询 KernelPatch，且 VPN Hide 的 KPM 可能已在运行，因此未加载其他原生后端。请在“设置 → 安全”中保存 SuperKey，或移除 KPM。详情：%1$s</string>
     <string name="dashboard_issue_native_boot_failed">本次开机未能设置原生后端：%1$s</string>
     <string name="dashboard_issue_zygisk_retire_failed">Zygisk 不是所选后端，但其旧目标列表无法清除，因此它可能仍在挂钩之前选择的应用。请卸载 Zygisk 模块。详情：%1$s</string>
+    <string name="dashboard_issue_obsolete_modules">仍安装着已废弃的 VPN Hide 1.x 模块：%1$s。2.0 中它已被 VPN Hide Core 取代，其旧的开机脚本会与核心冲突。请在 Root 管理器中卸载它并重启。</string>
     <string name="dashboard_issue_kpm_awaiting_superkey">KPM 已安装但未生效：KernelPatch 拒绝了认证，VPN Hide 无法加载它。请在“设置 → 安全”中保存 SuperKey，VPN Hide 会立即加载，无需重启。</string>
     <string name="dashboard_issue_module_reboot_to_activate">%1$s 模块已安装，但尚未启用 — 重启设备后生效。</string>
     <string name="dashboard_issue_module_artifact_missing">%1$s 模块安装已损坏：缺少 %2$s，core 无可加载的内容。请从最新发行版重新安装该模块 ZIP。</string>
@@ -410,8 +413,8 @@
     <string name="dashboard_issue_lsposed_field_rename">在 Android SDK %2$s 上检测到 AOSP 字段重命名：%1$s。受影响钩子的 Java 层隐藏能力已降级（为免每次调用都抛 NoSuchFieldError 刷屏 logcat，它们在安装时被跳过）。请到 github.com/okhsunrog/vpnhide/issues 提交问题并附上此列表，以便为你的 Android 版本更新这些钩子。</string>
     <string name="dashboard_issue_lsposed_install_failures">LSPosed/Vector 报告钩子安装失败：%1$s。请收集调试日志并附到问题里，以便修复失败的钩子。</string>
     <string name="dashboard_issue_no_targets">还没有配置目标应用。请打开“隐藏”并选择需要的应用。</string>
-    <string name="dashboard_issue_ports_rules_inactive">已为应用启用端口，但 iptables 规则未生效。请重启，或在“隐藏”中点按保存；若仍如此，请收集调试日志，以便包含端口的 load_status/load_log。</string>
-    <string name="dashboard_issue_ports_apply_failed">已为应用启用端口，但 iptables 规则未生效。上次应用失败：%1$s。请收集调试日志，以便包含端口的 load_status/load_log。</string>
+    <string name="dashboard_issue_ports_rules_inactive">已为应用启用端口，但 iptables 规则未生效。请重启，或在“隐藏”中点按保存；若仍如此，请收集调试日志，以便包含核心的端口状态和日志。</string>
+    <string name="dashboard_issue_ports_apply_failed">已为应用启用端口，但 iptables 规则未生效。上次应用失败：%1$s。请收集调试日志，以便包含核心的端口状态和日志。</string>
     <string name="dashboard_issue_version_mismatch">LSPosed 模块版本不一致：运行中 %1$s，已安装 %2$s。请重启设备以应用更新。</string>
     <string name="dashboard_issue_update_kmod">内核模块版本 %1$s 低于应用版本 %2$s。请打开 KernelSU/Magisk → 模块进行更新。</string>
     <string name="dashboard_issue_update_kmod_named">内核模块版本 %1$s 低于应用版本 %2$s。请从最新发行版，通过 KernelSU/Magisk → 模块安装 %3$s 进行更新。</string>
@@ -589,7 +592,7 @@
     <string name="settings_security">安全</string>
     <string name="settings_superkey_title">APatch/FolkPatch SuperKey</string>
     <string name="settings_superkey_saved">已保存，用于开机时激活 KPM。</string>
-    <string name="settings_superkey_not_saved">未保存；若受信任的 su 不可用，APatch/FolkPatch 的 KPM 可能需要在开机后于应用内手动激活。</string>
+    <string name="settings_superkey_not_saved">未保存；在 APatch/FolkPatch 上，若受信任的 su 令牌不可用，核心无法加载 KPM。此时请在此保存 SuperKey。</string>
     <string name="settings_superkey_placeholder">SuperKey</string>
     <string name="settings_superkey_store">保存 SuperKey</string>
     <string name="settings_superkey_clear">清除</string>
@@ -598,7 +601,7 @@
     <string name="settings_superkey_failed">SuperKey 更新失败。</string>
     <string name="config_initializing">正在检查配置和之前的操作…</string>
     <string name="config_paused">配置操作的结果仍不确定，已暂停新的更改。请重新检查以继续。</string>
-    <string name="config_unavailable">配置不可用。请检查 root 权限后重试。</string>
+    <string name="config_unavailable">配置不可用。请确认 VPN Hide Core 模块正在运行后重试。</string>
     <string name="config_invalid">无法读取已保存的配置。配置更改已暂停。</string>
     <string name="config_missing">没有可用的已保存配置。可能仍需完成启动准备。</string>
     <string name="config_ui_conflict">此操作与应用编辑器中未保存的更改冲突。更改已保留，请保存或放弃后重试。</string>
@@ -614,7 +617,7 @@
     <string name="config_capture_logging">采集进行期间，调试日志保持开启。</string>
     <string name="config_changes_unavailable">暂时无法更改配置</string>
     <string name="config_close">关闭</string>
-    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide 已内置于当前内核。请移除多余的 kmod 模块，并保留内置后端配套模块。</string>
+    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide 已内置于当前内核。请移除多余的 kmod 模块：核心只加载一个原生后端，两者同时存在时一个也不加载。</string>
     <string name="debug_export_complete">报告已完整收集。</string>
     <string name="debug_export_partial">已收集部分报告，仍可保存或分享。\n%1$s</string>
     <string name="debug_export_failed">报告收集失败：%1$s</string>

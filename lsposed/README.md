@@ -5,9 +5,12 @@ Hooks `writeToParcel()` in `system_server` to strip VPN data before Binder seria
 > **Just using the app?** See **[First install](../docs/help/en/first-install.md)** and **[Set up hiding](../docs/help/en/configure-hiding.md)** (or the in-app **Help & guide**) for enabling the module, the LSPosed scope, and picking targets. This README is for building and understanding the module.
 
 The APK also serves as the **target management UI** for the entire vpnhide project.
-It owns the canonical config at `/data/system/vpnhide_config.json`, then runs the
-installed activators for the native and ports modules. LSPosed itself reads the
-same JSON directly from `system_server`.
+It edits the canonical config at `/data/system/vpnhide_config.json` through the
+**VPN Hide Core** module (`vpnhide-core.zip`, required): the app connects to
+core's socket (`core-ffi`, UniFFI) and core writes the file and delivers it to the
+native backend and Ports. The app runs no `su` and no root shell; all root reads
+are core's typed diagnostic probes. LSPosed itself reads the same JSON directly
+from `system_server`.
 
 Zero presence in the target app's process -- only "System Framework" is needed in the LSPosed scope.
 
@@ -54,11 +57,11 @@ The APK includes a Compose UI for managing target apps across all vpnhide module
   - **Native** — the active native backend (kmod, KPM, or Zygisk)
   - **Apps** — PackageManager observer mode
   - **Ports** — localhost-port blocking observer
-- Save writes the canonical JSON via `su`, runs the active native module's
-  activator (installed under `vpnhide_kmod`, `vpnhide_kpm`, or `vpnhide_zygisk`),
-  and runs the ports activator if present. The LSPosed hook reloads the JSON itself.
+- Save submits the edit to core, which writes the canonical JSON and delivers it
+  to the one native backend selected this boot (kmod, KPM, built-in or Zygisk)
+  and to Ports. The LSPosed hook reloads the JSON itself.
 
-Works on KernelSU, Magisk, and any other root solution.
+Works on KernelSU, Magisk and APatch (the root manager runs the core module).
 
 ## Install
 
