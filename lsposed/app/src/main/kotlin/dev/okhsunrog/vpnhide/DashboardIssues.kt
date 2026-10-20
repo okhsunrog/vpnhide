@@ -441,7 +441,7 @@ private fun moduleVersionIssuesFor(facts: DashboardFacts): List<DashboardIssue> 
         )
     }
 
-private fun downloadArtifactFor(
+internal fun downloadArtifactFor(
     kind: FlashableModuleKind,
     recommendedArtifact: String?,
 ): String? =

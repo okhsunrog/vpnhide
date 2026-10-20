@@ -56,7 +56,9 @@ import dev.okhsunrog.vpnhide.ConfigFeedbackProvider
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DashboardLoadingState
 import dev.okhsunrog.vpnhide.DashboardScreen
+import dev.okhsunrog.vpnhide.FlashableModuleKind
 import dev.okhsunrog.vpnhide.LocalConfigSnackbarInsets
+import dev.okhsunrog.vpnhide.ModuleDownloadButton
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.SelfTargetFailureKind
@@ -64,6 +66,7 @@ import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.diagnostics.AppVpnStatePoller
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
+import dev.okhsunrog.vpnhide.downloadArtifactFor
 import dev.okhsunrog.vpnhide.help.HelpScreen
 import dev.okhsunrog.vpnhide.picker.AppListCache
 import dev.okhsunrog.vpnhide.picker.ProtectionScreen
@@ -870,5 +873,8 @@ private fun RootDeniedScreen(
         body = stringResource(if (versionMismatch) R.string.core_version_mismatch_message else R.string.root_error_message),
         actionLabel = stringResource(R.string.root_error_recheck),
         onAction = onRecheck,
+        // Core missing, not running or the wrong version: all fixed by flashing the
+        // current core zip, linked like every other module download.
+        secondaryAction = { downloadArtifactFor(FlashableModuleKind.Core, null)?.let { ModuleDownloadButton(it) } },
     )
 }

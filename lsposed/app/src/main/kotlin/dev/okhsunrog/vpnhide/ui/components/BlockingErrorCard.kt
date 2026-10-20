@@ -42,6 +42,7 @@ fun BlockingErrorCard(
     detail: String? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    secondaryAction: (@Composable () -> Unit)? = null,
 ) {
     EnhancedCard(
         modifier = modifier,
@@ -87,6 +88,10 @@ fun BlockingErrorCard(
                 EnhancedButton(onClick = onAction) {
                     Text(actionLabel)
                 }
+            }
+            if (secondaryAction != null) {
+                Spacer(Modifier.height(8.dp))
+                secondaryAction()
             }
         }
     }

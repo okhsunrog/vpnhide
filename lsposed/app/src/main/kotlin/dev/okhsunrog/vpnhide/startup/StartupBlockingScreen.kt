@@ -27,6 +27,7 @@ internal fun StartupBlockingScreen(
     body: String,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    secondaryAction: (@Composable () -> Unit)? = null,
 ) {
     Scaffold(
         containerColor = AppColors.screenBackground,
@@ -55,6 +56,7 @@ internal fun StartupBlockingScreen(
                 body = body,
                 actionLabel = actionLabel,
                 onAction = onAction,
+                secondaryAction = secondaryAction,
             )
         }
     }
