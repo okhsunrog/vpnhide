@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -90,5 +89,3 @@ def detect_android_ndk() -> str | None:
     if not versions:
         return None
     return str(ndk_base / versions[-1])
-
-
