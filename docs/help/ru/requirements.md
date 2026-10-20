@@ -5,7 +5,7 @@ VPN Hide требует **root** для своего модуля core (само
 
 | Компонент | Требует |
 |---|---|
-| Приложение | Android 9+, arm64 или armv7 |
+| Приложение | Android 9+, arm64 или armv7; релизная сборка в основном пользователе (сборка `.dev` и копия во вторичном пользователе до core не достучатся) |
 | Core | Модуль **VPN Hide Core** (`vpnhide-core.zip`, из того же релиза, что и приложение) установлен и включён в Magisk, KernelSU или APatch |
 | Роли Java и Apps | LSPosed / LSPosed-Next / Vector; VPN Hide включён для System Framework |
 | Native — kmod | Совместимое arm64 GKI-ядро с нужной поддержкой проб; следуйте рекомендации Дашборда |

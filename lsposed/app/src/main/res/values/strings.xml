@@ -78,7 +78,7 @@
     <string name="secondary_profile_error_title">Open VPN Hide in the main profile</string>
     <string name="secondary_profile_error_message">Uninstall this copy of VPN Hide and use the copy installed in the main profile. It can manage apps from every profile.</string>
     <string name="root_error_title">VPN Hide Core is not running</string>
-    <string name="root_error_message">VPN Hide needs its core module to manage hiding. Install vpnhide-core.zip from the same release as this app in your root manager (Magisk, KernelSU, APatch), make sure it is enabled, reboot, then tap Check again. The app itself does not need a root grant.</string>
+    <string name="root_error_message">VPN Hide needs its core module to manage hiding. Install vpnhide-core.zip from the same release as this app in your root manager (Magisk, KernelSU, APatch), make sure it is enabled, reboot, then tap Check again. The app itself does not need a root grant. A test build (package name ending in .dev) can never reach the core module: use the release app.</string>
     <string name="core_version_mismatch_message">The installed VPN Hide Core module and this app come from different releases and cannot talk to each other. Install the app and vpnhide-core.zip from the same release, reboot, then tap Check again.</string>
     <string name="core_version_mismatch_title">VPN Hide Core version mismatch</string>
     <string name="root_error_recheck">Check again</string>

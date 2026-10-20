@@ -71,7 +71,7 @@
     <string name="secondary_profile_error_title">请在主用户资料中打开 VPN Hide</string>
     <string name="secondary_profile_error_message">请卸载这个副本的 VPN Hide，改用主用户资料里安装的那个——它可以管理所有资料中的应用。</string>
     <string name="root_error_title">VPN Hide Core 未运行</string>
-    <string name="root_error_message">VPN Hide 需要其核心模块来管理隐藏。请在 Root 管理器（Magisk、KernelSU、APatch）中安装与本应用同一版本的 vpnhide-core.zip，确认模块已启用，重启后点按“重新检查”。应用本身不需要 Root 授权。</string>
+    <string name="root_error_message">VPN Hide 需要其核心模块来管理隐藏。请在 Root 管理器（Magisk、KernelSU、APatch）中安装与本应用同一版本的 vpnhide-core.zip，确认模块已启用，重启后点按“重新检查”。应用本身不需要 Root 授权。 测试构建（包名以 .dev 结尾）永远无法连接 core 模块：请使用正式版应用。</string>
     <string name="core_version_mismatch_message">已安装的 VPN Hide Core 模块与本应用来自不同版本，无法通信。请安装同一版本的应用和 vpnhide-core.zip，重启后点按“重新检查”。</string>
     <string name="core_version_mismatch_title">VPN Hide Core 版本不匹配</string>
     <string name="root_error_recheck">重新检查</string>
