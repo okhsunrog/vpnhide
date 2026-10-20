@@ -1,6 +1,10 @@
-> **2.0:** The Magisk companion module (`vpnhide-builtin.zip`) was removed.
-> Core detects builtin by `/proc/vpnhide_ctl` backend id and delivers wire.
-> Install `vpnhide_core` only — no companion activator zip.
+> **2.0:** there is no module for this backend. The 1.x companion module
+> (`vpnhide-builtin.zip`, id `vpnhide_builtin`) and its activator were removed —
+> uninstall it if it is still installed (the app shows an error while it is).
+> Install the required **VPN Hide Core** module (`vpnhide-core.zip`): core adopts
+> the built-in driver when `/proc/vpnhide_ctl` reports backend `0x4` and delivers
+> the config to it. Core treats it as a native backend like any other: with a
+> kmod, KPM or Zygisk module also installed it loads nothing (conflict).
 
 # builtin — in-tree (compile-time) native backend
 
@@ -33,7 +37,7 @@ mechanism* for the same logic. This mirrors what KPM already did.
 | Config transport | `/proc/vpnhide_ctl` | ctl0 supercall | **`/proc/vpnhide_ctl` (identical)** | reuses kmod's |
 | Wire format | protocol crate (control v2 / telemetry v1) | same | **same** | **yes** |
 
-So the app/activator wire path for `builtin` is byte-identical to `kmod`; only the
+So core's wire path for `builtin` is byte-identical to `kmod`; only the
 `status backend` id differs (`VPNHIDE_BACKEND_BUILTIN = 4`, added append-only to
 `data/hooks.toml`).
 
@@ -102,16 +106,17 @@ dance disappears.
 - [x] Phase 3b(iii) — fs call-site patches (filename_lookup, do_filp_open, vfs_getattr, iterate_dir).
       Compile-validated in BOTH configs: FS_HIDING=n (patched fs objects build against header stubs,
       no hook_fs.o) and FS_HIDING=y (real hooks + hook_fs.o), zero warnings.
-- [x] Phase 5a — activator: `activate_builtin` / `boot_service_builtin` / `uninstall_builtin` + `builtin` bin
+- [x] Phase 5a — activator: `activate_builtin` / `boot_service_builtin` / `uninstall_builtin` + `builtin` bin (1.x; superseded in 2.0 by core adoption)
 - [x] Phase 5b — app (Kotlin): `NativeBackendId.Builtin`, snapshot section for the ctl `backend` id
       (disambiguates kmod vs builtin on the shared node), `detectBuiltinModule`, dashboard card
-- [x] Phase 5c — `vpnhide_builtin` companion module (module.prop + boot scripts running the activator)
+- [x] Phase 5c — `vpnhide_builtin` companion module (module.prop + boot scripts running the activator) (1.x; removed in 2.0)
 - [x] Phase 4 — QEMU functional run gate (builtin/test/): boots an Image with CONFIG_VPNHIDE=y and runs
       the shared vector suite. android14-6.1: pass=35 fail=0 panic=0 — every vector hidden for the target
       UID, preserved for the non-target (ioctl/getifaddrs/routes/host-route/rule/fs/all bind cases).
 - [x] Phase 6a — packaging: `builtin/build.py` cross-compiles the `builtin` activator (cargo-ndk) and
       packages `builtin/module/` into `vpnhide-builtin.zip` (KMI-agnostic; no .ko). Feature is now
-      installable end-to-end; changelog fragment added.
+      installable end-to-end; changelog fragment added. (1.x; in 2.0 there is no zip and no
+      `build.py` — core adopts the driver.)
 - [x] Phase 6b (android16-6.12) — DONE. The integration rules derive it from 6.1 (26/30 anchors shared) with 4
       overrides (do_sock_setsockopt bind, const-ifa addr fills, iterate_shared-only readdir). QEMU gate on
       6.12.89: pass=35 fail=0 panic=0. Two KMIs proven end-to-end.
@@ -145,8 +150,8 @@ dance disappears.
 Remaining follow-ups (not blockers for the backend itself):
 - CI coverage for the full-LTO GKI KMIs (5.10 / 5.15) and the from-source legacy KMIs, like the KPM's
   `kpm-qemu-legacy` job. Only 6.1 / 6.6 / 6.12 are gated today.
-- A publish job for `vpnhide-builtin.zip` plus `update-json/update-builtin.json`, so in-app module
-  updates resolve (the zip builds via `builtin/build.py`, but nothing on `main` serves the update JSON yet).
+- (Obsolete in 2.0: there is no `vpnhide-builtin.zip` to publish. Core adopts the driver, and the
+  core module's own update JSON covers updates of the userspace side.)
 
 ### Maintaining call sites
 

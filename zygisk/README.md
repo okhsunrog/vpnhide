@@ -22,7 +22,7 @@ All hooks are inline on `libc.so` via ByteDance shadowhook:
 | `open*`, `stat`/`lstat`/`fstat`/`fstatat`, `access*`, `readlink*`, `readdir*` | `/sys/.../net/<iface>` and `/proc/sys/net/{ipv4,ipv6}/{conf,neigh}/<iface>` | Optional best-effort group: returns `ENOENT` for VPN paths and removes VPN entries from directory listings. |
 
 The filesystem group is controlled by the canonical
-`settings.optionalFeatures: ["filesystem_iface_paths"]` setting. The activator
+`settings.optionalFeatures: ["filesystem_iface_paths"]` setting. VPN Hide Core
 projects hook bit 27 only into selected Zygisk target masks, and a force-stop +
 restart is enough to apply a change. The group is installed atomically: if any
 required libc symbol cannot be hooked, its stubs are rolled back, bit 27 is
@@ -37,7 +37,7 @@ PLT hooks patch the caller library's procedure linkage table. At `post_app_speci
 
 ### Flow
 
-1. **`pre_app_specialize`** -- runs in the already-forked child, before the kernel drops it to the app's UID and SELinux context (still has zygote privileges at this point). Reads `args.nice_name`, checks against the module-dir `targets.txt` runtime wire generated from `/data/system/vpnhide_config.json` by the activator. Non-targeted apps get `DlCloseModuleLibrary` (zero cost after unload). See `src/lib.rs`'s top-level doc block for the full Zygisk lifecycle and why every Rust `static` is fresh per app launch.
+1. **`pre_app_specialize`** -- runs in the already-forked child, before the kernel drops it to the app's UID and SELinux context (still has zygote privileges at this point). Reads `args.nice_name`, checks against the module-dir `targets.txt` runtime wire generated from `/data/system/vpnhide_config.json` by VPN Hide Core. Non-targeted apps get `DlCloseModuleLibrary` (zero cost after unload). See `src/lib.rs`'s top-level doc block for the full Zygisk lifecycle and why every Rust `static` is fresh per app launch.
 2. **`post_app_specialize`** -- on targeted processes only: `shadowhook_init`, install the selected inline hooks (`ioctl`, `getifaddrs`, `setsockopt`, `openat`, `recvmsg`, `recv`, `recvfrom`, `__recvfrom_chk`, and the optional filesystem group), then scrub maps. `recv` is hooked separately because bionic's `recv()` is `b recvfrom` (tail-call) — patching `recvfrom`'s prologue would break `recv`.
 
 ### Thread-local guard
@@ -155,33 +155,32 @@ VPN interface prefixes: `tun`, `ppp`, `tap`, `wg`, `ipsec`, `xfrm`, `utun`, `l2t
 <details>
 <summary><strong>For developers / advanced usage</strong></summary>
 
-You do not need this to use the module — the VPN Hide app writes the canonical
-config and runs the activator for you. Shell equivalent for development and
-debugging:
+You do not need this to use the module — the VPN Hide app saves the config
+through VPN Hide Core, which rewrites the module-dir `targets.txt` for you (there
+is no activator binary in 2.0). After a Save, force-stop the target so it
+re-forks with the new config:
 
 ```sh
-# Edit /data/system/vpnhide_config.json, then regenerate the module-dir runtime
-# wire and force-stop the target so it re-forks with the new config:
-adb shell su -c '/data/adb/modules/vpnhide_zygisk/activator'
 adb shell am force-stop <pkg>
 ```
 
 </details>
 
-## Development V2 core delivery
+## Core delivery (2.0)
 
-The `dev-2.x` core can publish this module's existing control-v2 `targets.txt`
-directly when its Zygisk recipient is explicitly enabled. The package declares
-`vpnhideControl=2` in `module.prop`; core verifies the recipient and library ABI
-before publication. The file is read afresh when each target process launches.
-A running target keeps its cached policy until it restarts.
+The module ships `module.prop` and `zygisk/<abi>.so` only — no boot scripts.
+**VPN Hide Core** (`vpnhide-core.zip`, required) is the only writer of this
+module's control-v2 `targets.txt`. The package declares `vpnhideControl=2` in
+`module.prop`; core verifies the recipient and library ABI before publication,
+and publishes only when Zygisk is the one native backend selected for this boot.
+When core finds a conflict (another native backend installed or live), it
+retires the targets instead so Zygisk hooks nothing. The file is read afresh when
+each target process launches; a running target keeps its cached policy until it
+restarts.
 
 Core reports its selection separately from observed runtime activity. A published
-file does not confirm injection into every app. The existing app-context hook
-checks remain separate. This path adds no companion or per-hook RPC. Legacy
-service/app ownership has not been cut over; do not run both policy writers.
-See the [V2 architecture](../docs/notes/core-2.0-architecture.md) for development
-paths, current validation and recovery/ownership work.
+file does not confirm injection into every app; the app-context hook checks
+remain separate. See the [2.0 architecture](../docs/notes/core-2.0-architecture.md).
 
 ## License
 

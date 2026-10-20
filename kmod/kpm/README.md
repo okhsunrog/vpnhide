@@ -98,9 +98,11 @@ The flashable module zip is built by:
 python3 kmod/kpm/build.py
 ```
 
-That script builds the Android `kpm` activator, builds `vpnhide.kpm`, stages
-`kmod/kpm/module/`, stamps `module.prop`, and writes `vpnhide-kpm.zip` at the
-repo root. CI uses the same submodule-backed build.
+That script builds `vpnhide.kpm`, stages `kmod/kpm/module/` (just
+`module.prop` and the `.kpm` — no scripts, no activator), stamps `module.prop`,
+and writes `vpnhide-kpm.zip` at the repo root. Loading and configuring it is the
+job of the **VPN Hide Core** module (`vpnhide-core.zip`), which must be installed
+too. CI uses the same submodule-backed build.
 
 ## Deploy
 
@@ -113,9 +115,9 @@ everywhere (target the upstream `kpm.h` ABI).
 Supported runtimes — pick whichever matches the device's root:
 
 - **APatch / FolkPatch** — KernelPatch is built in; the flashable zip installs
-  as an APatch/APM module, and the vpnhide activator loads/configures
-  `vpnhide.kpm` through direct KernelPatch supercalls with the saved APatch
-  SuperKey or the runtime's trusted `su` token when available.
+  as an APatch/APM module, and VPN Hide Core loads/configures `vpnhide.kpm`
+  through direct KernelPatch supercalls with the saved APatch SuperKey or the
+  runtime's trusted `su` supercall token when available.
 - **KernelSU-Next** — flash **KPatch-Next** (one module, no switch to APatch).
 - **Magisk or stock KernelSU** — flash the standalone
   [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module).
@@ -127,11 +129,14 @@ Supported runtimes — pick whichever matches the device's root:
   which already ships KernelPatch.)
 
 Persistence: a one-shot runtime `sc_kpm_load` is **lost on reboot**. The
-vpnhide KPM module therefore ships `vpnhide.kpm` plus boot scripts: KPatch-Next
-loads through the vpnhide activator's `boot-load` phase and its runtime
-`kpatch` CLI, while APatch/FolkPatch defers to the service activator and uses
-the saved SuperKey or trusted `su` token when present. Before either load path
-invokes KernelPatch, the activator validates the leading `major.minor` family
+vpnhide KPM module therefore ships only `vpnhide.kpm`, and VPN Hide Core loads
+it again on every boot, once, after checking that the KPM is the only native
+backend (another backend module, a built-in kernel backend or a VPN Hide KPM
+core did not load is a conflict, and nothing is loaded). On KPatch-Next core
+uses the runtime's `kpatch` CLI; on APatch/FolkPatch it uses the saved SuperKey
+or the trusted `su` supercall token. If KernelPatch cannot be authenticated, the
+KPM stays unloaded and the app asks for the SuperKey. Before either load path
+invokes KernelPatch, core validates the leading `major.minor` family
 from `uname -r` against 4.4, 4.9, 4.14, 4.19, 5.4, 5.10, 5.15, 6.1, 6.6, and 6.12.
 The KPM repeats that check from KernelPatch's numeric `kver` at init, which is
 the authoritative safety boundary; userspace preflight provides an actionable
@@ -142,7 +147,7 @@ own `KPM_CTL0` supercall. The QEMU harness passes the same control-v2 snapshot
 as load args because it has no userspace ctl0 client during early bring-up —
 this is independent of KPatch-Next's generic `package_config` →
 `kpatch exclude_set <uid>` mechanism. The app stores package roles in
-`/data/system/vpnhide_config.json`; the KPM activator resolves that canonical
+`/data/system/vpnhide_config.json`; core resolves that canonical
 config and pushes the same text wire through APatch/FolkPatch direct supercalls
 or KPatch-Next `kpatch kpm ctl0`.
 
@@ -150,13 +155,13 @@ or KPatch-Next `kpatch kpm ctl0`.
 
 Optional boot features are outside control v2. When canonical
 `settings.optionalFeatures` contains `filesystem_iface_paths`, the production
-activator passes the exact KPM load argument `filesystem_hiding=1`. When it is
-disabled, the activator passes a null/absent argument; the explicit
+loader (core) passes the exact KPM load argument `filesystem_hiding=1`. When it is
+disabled, core passes a null/absent argument; the explicit
 `filesystem_hiding=0` spelling is also accepted as disabled but is not emitted by
 the shipped loader.
 
-If canonical JSON cannot be parsed during the early boot-load phase, the
-optional feature fails closed to disabled and the baseline KPM still loads.
+If canonical JSON cannot be parsed when core loads the KPM, the optional
+feature fails closed to disabled and the baseline KPM still loads.
 Late-start config delivery reports the parse failure and refuses to apply a
 partial target snapshot.
 
@@ -167,11 +172,10 @@ rolls the group back, clears hook bit 27 from the installed mask, and produces
 control-v2 `filesystem_iface_paths` bit remains the independent per-UID gate.
 Changing the boot feature therefore requires a reboot.
 
-The fixed-name shell lifecycle files contain no policy. Blocking hooks `exec`
-`activator boot-load` or `uninstall`; `service.sh` backgrounds `boot-service`
-and immediately returns to the root manager's sequential script runner. The
-Rust activator owns conflict checks, APatch deferral, status records, and
-cleanup, so outcomes stay typed instead of becoming shell exit-code branches.
+The KPM module ships no shell lifecycle files at all. Core owns conflict
+checks, authentication, the typed load status and cleanup of a removed
+module's state, so outcomes stay typed instead of becoming shell exit-code
+branches.
 
 The headless QEMU harness has no ctl0 userspace client during early bring-up, so
 KPM init additionally accepts a control-v2 snapshot in the load-argument buffer
@@ -233,8 +237,8 @@ selector is a compatibility policy, not certification of every device in that
 range. Test a specific device with an ephemeral KPM load before embedding it.
 
 The KernelPatch submodule makes `make -C kmod kpm` reproducible without an
-external checkout. `kmod/kpm/build.py` packages the same artifact and the
-activator as `vpnhide-kpm.zip`; CI uses those repository entry points.
+external checkout. `kmod/kpm/build.py` packages the same artifact as
+`vpnhide-kpm.zip`; CI uses those repository entry points.
 
 ## Credits
 
