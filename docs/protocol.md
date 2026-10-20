@@ -68,7 +68,7 @@ only in telemetry v1: its configuration input belongs to the storage contract.
 | Language | Component | Wire responsibility |
 |---|---|---|
 | C | `.ko` + KPM | parse control config; emit telemetry. Freestanding core in `kmod/shared/vpnhide_logic.h`. |
-| Rust | `crates/protocol` + activators | format control snapshots, validate native telemetry, and implement KPM framing. |
+| Rust | `crates/protocol` + `crates/activator` (linked into core) | format control snapshots, validate native telemetry, and implement KPM framing. |
 | Rust | Zygisk cdylib | parse its control profile from `targets.txt`. |
 | Kotlin | app | parse telemetry for dashboard, diagnostics, and statistics. |
 | Kotlin | LSPosed hook | emit telemetry-shaped status/stats from `system_server`; config comes from canonical JSON. |
@@ -120,7 +120,7 @@ These are *why* the format is what it is. Do not "simplify" against them.
 
   | protocol | kinds | version | writer → reader | cost of a bump |
   |---|---|---|---|---|
-  | **control** | `config` | **2** | activator → backend | none — both are files in one flashable zip and update atomically |
+  | **control** | `config` | **2** | core → backend | none — both are files in one flashable zip and update atomically |
   | **telemetry** | `stats`, `status` | **1** | backend → app | breaks an older APK's dashboard and diagnostics; the app updates on its own schedule |
 
   `stats` and `status` are one protocol, not two: a single `/proc/vpnhide_ctl`
@@ -215,7 +215,7 @@ end <count>
   have no PackageManager so they cannot key on package names, and Zygisk (which
   runs in the target's own process and could match either way) keys on `getuid()`
   for one grammar across all channels. The package→UID resolution is the
-  producer's job (the activator), the same for all backends.
+  producer's job (core), the same for all backends.
 - `end <count>` — **mandatory**. `count` is the total number of uid tokens the
   producer wrote. Missing, or not equal to what the reader counted ⇒ reject the
   payload whole. This is the truncation fuse: the KPM copies a config through a
@@ -321,7 +321,7 @@ and both are special-cased to their keyword/line.
 
 ### 4.6 Example
 
-config (activator → backend):
+config (core → backend):
 
 ```
 vpnhide 2 config
@@ -376,7 +376,7 @@ Current shared kernel hooks (`.ko` / KPM, 11): `fib_route_seq_show`,
 `fib_nl_fill_rule`, `socket_bind_interface`. Both kernel backends and Zygisk
 also own the optional `filesystem_iface_paths` capability bit. For `.ko`/KPM,
 whether the global hook group is installed is outside control v2. For Zygisk,
-the activator includes the bit in a target mask only while the same canonical
+core includes the bit in a target mask only while the same canonical
 feature is enabled; the process-local libc group reports successful
 installation through the app heartbeat rather than telemetry v1. See
 [storage.md](storage.md#22-optional-features). Current LSPosed Java hooks (8):
@@ -422,7 +422,7 @@ backend reads its own profile.
 | Channel | config records it acts on | emits stats? | emits status? |
 |---|---|---|---|
 | `.ko` / built-in / KPM | `debug`, `default`, `targets`, `end` (kernel-owned mask bits) | yes | yes (§4.3) |
-| Zygisk | `debug`, `targets`, `end`; its activator rejects a non-zero `default` because it cannot inject into every unlisted process | no | no; its app heartbeat is not telemetry v1 |
+| Zygisk | `debug`, `targets`, `end`; core rejects a non-zero `default` because it cannot inject into every unlisted process | no | no; its app heartbeat is not telemetry v1 |
 | LSPosed | — does **not** consume control v2; it reads canonical JSON directly | yes | yes |
 
 A control consumer ignores mask bits it does not own (`mask & own_hooks`). The
@@ -508,15 +508,15 @@ page 0x27ff 0x2801 0x2
 
 The fields are the requested cursor, the next cursor (or literal `done`), and
 the number of UID rows carried by this page. UID rows are strictly increasing
-and contain only UIDs greater than `after`. The activator validates the echoed
+and contain only UIDs greater than `after`. Core validates the echoed
 cursor, monotonic next cursor, row count, and every numeric field while holding
 the cross-process ctl0 lock across the full loop. It then folds all pages into
 one ordinary `vpnhide 1 stats` block, so the APK parser is unchanged.
 
 A non-final page deliberately omits the trailing `\n`; the `page` record itself
-is complete. An old activator therefore applies its existing truncation rule and
+is complete. An old core therefore applies its existing truncation rule and
 drops the incomplete stats instead of presenting a partial total. A final page
-uses `page <requested> done <count>\n`. Conversely, a new activator accepts a
+uses `page <requested> done <count>\n`. Conversely, a new core accepts a
 newline-terminated legacy response with no `page` trailer as a complete
 single-page snapshot from an older backend.
 
@@ -563,13 +563,13 @@ runtimes use low command id `ctl0=0x1022`, but their calling conventions differ:
 - **APatch:** syscall number `45`, arg0 is the real SuperKey, command word uses
   APatch's `0x1158` marker. APatch's public `apd` CLI manages APM ZIP modules
   only; it does **not** expose `kpm ctl0`. APatch's own app controls KPMs through
-  native JNI `sc_kpm_*` calls, so the vpnhide activator does the same directly.
-  The activator probes `SUPERCALL_HELLO` before control, so a
+  native JNI `sc_kpm_*` calls, so VPN Hide Core does the same directly.
+  Core probes `SUPERCALL_HELLO` before control, so a
   missing KernelPatch runtime or invalid credential fails before a stray
   original syscall can run. Credential storage is specified in
   [storage.md](storage.md#6-apatch-superkey).
 - **KPatch-Next:** syscall number `45`, arg0 is `NULL`, and the kernel side gates
-  calls by root UID rather than a SuperKey. The activator issues no raw
+  calls by root UID rather than a SuperKey. Core issues no raw
   command-word marker here — it drives KPatch-Next through the runtime's own
   `kpatch kpm ...` CLI. With the standalone
   KPatch-Next-Module that binary lives under
@@ -577,9 +577,10 @@ runtimes use low command id `ctl0=0x1022`, but their calling conventions differ:
 
 Do not ship one generic `kpatch` binary for both runtimes.
 
-Caveats from CLI/shell delivery on KPatch-Next: shell-quote the payload (single
-quotes; the format contains no `'`). APatch does not pass the key through an
-external CLI argv; the activator calls the supercall from its own process.
+KPatch-Next delivery: core execs `kpatch` directly and passes the payload as one
+argv element, with no shell in between, so nothing is quoted. APatch does not pass
+the key through an external CLI argv; core calls the supercall from its own
+process.
 
 ---
 
@@ -691,7 +692,7 @@ Recorded so they are not re-litigated.
   exposes `kpm ctl0 <name> <payload>` through its keyless `kpatch` CLI, and the
   CLI **does forward `out_msg` to stdout** — so no extra root binary is needed
   for read-back there. APatch does not expose `kpm ctl0` through `apd`; the
-  activator calls the runtime-specific supercall directly. Authentication and
+  core calls the runtime-specific supercall directly. Authentication and
   credential persistence belong to [storage.md](storage.md#6-apatch-superkey).
   The `.kpm` is cross-version, but the userspace transport is not.
 - **OPEN-6 — `debug` placement. RESOLVED: folded into the config snapshot.**

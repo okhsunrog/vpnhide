@@ -32,7 +32,11 @@ Do **not** run parallel activator + core. Dual-writer is unsupported.
 
 ## APK follow-up
 
-App must talk to core over UDS/FFI for config and observations. Legacy
-`ConfigRootIo` / root-snapshot su orchestration is transitional until the APK
-hard-cuts to core. Done for the save path: the app submits typed edits through the
-in-process core-ffi client (see `core-2.0-ipc-auth.md`).
+Done. The app talks to core only over the socket through the in-process core-ffi
+client (see `core-2.0-ipc-auth.md`): config edits (`CoreConfigIo`), root
+observations and diagnostics (core probes) and fixed root effects (SuperKey,
+legacy cleanup, full reset). `ConfigRootIo`, `suExec` and the `vhhelper` helper are
+gone; CI (`lsposed/tests/check_no_root_exec.sh`) fails on any root exec in the APK.
+
+The app also flags a still-installed `vpnhide_ports` / `vpnhide_builtin` module
+on the Dashboard (`obsolete_modules` root-snapshot section).

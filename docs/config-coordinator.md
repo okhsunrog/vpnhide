@@ -1,12 +1,13 @@
 # Config coordinator implementation
 
-Status: connected to the running app. `CanonicalConfigRepository` now owns one
-process-lived coordinator and root runner. Settings, both app editors, startup,
-legacy cleanup, import/reset, capture logging and bridge mutations use this lane.
-The previous mutex/full-snapshot write API and direct activation bypasses are gone.
+Status (2.0): connected to the running app. `CanonicalConfigRepository` owns one
+process-lived coordinator whose only effect adapter is `CoreConfigIo`: every write
+is an operation submitted to VPN Hide Core over its socket. Settings, both app
+editors, startup, legacy cleanup, import/reset, capture logging and bridge
+mutations use this lane. The app has no root runner, no `su` and no shell.
 
 This implements the configuration portion of the [transition contract](notes/app-state-transitions.md)
-through the [root transport](root-mutation-transport.md). Observation generations
+on top of core's journaled operations ([core-2.0 architecture](notes/core-2.0-architecture.md)). Observation generations
 are now connected through the [observation coordinator](observation-coordinator.md).
 Diagnostic runs and capture reservation/packaging remain separate migration work.
 
@@ -73,45 +74,45 @@ them across process death. Confirmation removes only submitted revisions. A new
 edit made while saving, including a return to the old confirmed value, survives
 the old acknowledgement. Discard advances the revision to prevent accidental reuse.
 
-Preparation verifies serialization/readback equality and validates each planned
-command's transport framing before persistence can begin. Invalid or oversized
-commands yield `ValidationFailed`, not a partial write. No-op operations execute
+Preparation verifies serialization/readback equality, checks the candidate
+against core's config size limit (`MAX_CORE_CONFIG_BYTES`, 512 KiB) and validates
+each coupled root effect before persistence can begin. Invalid or oversized
+candidates yield `ValidationFailed`, not a partial write. No-op operations execute
 no root phase; explicit activation repair or a coupled command can run without
 rewriting unchanged JSON. Bootstrap is explicit and only accepts a missing
 canonical file, never an invalid or unavailable one.
 
-## Root adapter and adoption
+## Core adapter
 
-`ConfigRootIo` retains one client, session and monotonically advancing command
-sequence. Its factory must capture one retained `RootProcessRunner` when wired to
-`prepareRootMutationTransport`; replacing the runner during retries would defeat
-its bound on outstanding processes/pipe owners.
+`CoreConfigIo` (`lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/CoreConfigIo.kt`)
+maps coordinator phases onto core:
 
-Initialization distinguishes Open, Missing, Invalid, Unavailable and Paused. A
-same-boot Running predecessor stays paused; pausing never deletes metadata or
-launches application config effects. A lane never opened in this boot (fresh
-install, or the first start after updating from a build without this transport)
-is adopted directly: commands issued before the transport existed are untracked
-writers in the same class as module boot scripts and manual activator runs, their
-overlap with the first new-session command is bounded by one activator run
-(hundreds of milliseconds) and idempotent, so demanding a reboot for that case was
-removed. Initialization uses the helper's `adopt` verb: one privileged round trip
-that inspects and opens under the helper's lock, with this policy mirrored in the
-helper so a rejected adoption still returns the receipt the mode is decided from
-(`inspect` + `open` were two round trips on every cold start).
+- **Initialize / read** take core's published state (`state_since`): the config,
+  its revision and the operations in flight. An operation still running in core
+  (for example the boot apply) starts the lane Paused.
+- **Persist** submits `Replace(candidate)` against the revision of the fresh read
+  (`config_replace`). Core persists, then applies Native and Ports inside the same
+  journaled operation; the receipt carries one outcome per phase.
+- **Native / Ports** report that operation's outcomes. With no current core
+  operation (a forced reconcile, or after a coupled command) they submit
+  `RepairActivation` (`config_repair`) so core re-applies from its durable config.
+- **Secret / Cleanup** are fixed core root effects (`root_effect`: set/clear the
+  APatch SuperKey, delete pre-1.0 legacy files, full reset). They are idempotent,
+  so an uncertain one is recovered by applying the same effects again.
+- **Recovery** asks core for the same operation id (`get_operation`); an uncertain
+  submission is never resubmitted as a new edit. A refused edit, an unreachable
+  core or a protocol skew is a known failure with nothing written.
 
-Execution and recovery are associated with an operation ID and phase as well as
-the transport session/sequence. Recovery for another operation or phase cannot
-reuse an old receipt. Readback requires matching boot and session. A missing
-bootstrap file that remains missing after a proven terminal write is a known
-failure; it does not hold the lane indefinitely.
+Core's operation journal (`/data/adb/vpnhide/core/operations.json`) replaces the
+1.x helper's session, lock and receipts, so there is no first-adoption step.
 
-`native_target_cap` is retained as validated scalar evidence by the transport.
-The adapter emits its existing safe marker only for the matching native phase,
-so the current picker warning parser remains reusable. Raw shell output and
-secret command text remain absent from receipts and coordinator results.
+Known gap: the receipt has no native target-capacity field, so the picker's
+`native_target_cap` warning (`ConfigPhaseEvidence.nativeCapacity`) is never set in
+2.0; core only logs the overflow (see [limits.md](limits.md)).
 
-## Validation
+## Validation (1.x transport, historical)
+
+The validation notes below were recorded for the 1.x root-transport adapter and are kept as history.
 
 Validation on 2026-09-15: 607 Kotlin tests passed (26 added in this stage), with
 no failures or skips. The Kotlin build, ktlint, detekt, CPD and Android lint passed.
@@ -173,9 +174,11 @@ this is distinct from replaying the interrupted operation. The switch explains
 when a capture is keeping logs enabled. Forensic capture reservation and bundle
 assembly are not migrated by this logging integration.
 
-Full reset has a separate Cleanup phase, validates canonical-file absence, and
-publishes Missing. It preserves `/data/adb/vpnhide/app-state/`, including the
-permanent lock inode and receipts. It rejects active logging capture and any open
+Full reset has a separate Cleanup phase (core's `FullReset` effect), validates
+canonical-file absence, and publishes Missing. Core empties `/data/adb/vpnhide`
+except its own `core/` directory. The app does not offer it while a backend
+module is still installed, the kernel is still hooked or the LSPosed module is
+still active (`ResetBlocker.kt`). It rejects active logging capture and any open
 draft. Ordinary queued edits cannot resurrect a removed config; only explicit
 startup/import bootstrap may create it. Invalid or inaccessible canonical data
 remain a read/recheck gate; they are never silently replaced with defaults.
@@ -185,7 +188,7 @@ Bridge results retain `ok`, `changed` and restart advice and add `errorCode`,
 confirmed persistence even when activation or a late UI conflict fails. Results
 do not claim that an uncertain phase failed or that unattempted work ran.
 
-## Runtime integration validation
+## Runtime integration validation (1.x, historical)
 
 The signed release APK built successfully with R8 and release vital lint; its
 signature verified, and both ARM64/ARMv7 mutation helpers are packaged. No APK

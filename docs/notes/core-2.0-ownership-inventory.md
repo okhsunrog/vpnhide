@@ -1,5 +1,11 @@
 # Core-2.0 exclusive ownership inventory (step 4)
 
+> **Historical (migration step 4).** Every "legacy writer" listed below (activator
+> bins, module boot scripts, the Ports module, APK `su` paths) was deleted in the
+> 2.0 hard cutover, so the fencing described here no longer runs: core is the only
+> writer. See [core-2.0-activator-cutover.md](core-2.0-activator-cutover.md) and
+> [state.md](../state.md) for the current ownership.
+
 Gate before production writes: **one owner per migrated resource** across install,
 upgrade, interruption, and rollback. Dev paths stay explicitly enabled while legacy
 writers still exist (`VPNHIDE_*` overrides, marker opt-in). Production default-on and
@@ -94,8 +100,8 @@ hooks. Markers fence **writers**, they do not roll back prior applies.
 
 | Path | Legacy writer | Notes |
 |------|---------------|--------|
-| `/data/adb/vpnhide_ports/load_status` | Ports activator / core | Not canonical; diagnostic only |
-| Kmod/KPM/builtin load_status under module dirs | Activators | Fenced with native ownership for uninstall |
+| `/data/adb/vpnhide_ports/load_status` | 1.x Ports activator (no 2.0 writer) | Removed by core's legacy cleanup at boot; 2.0 reports Ports through the typed `PortsApply` status |
+| Kmod/KPM/builtin load_status under module dirs | 1.x activators (no 2.0 writer) | 2.0 publishes `native_boot.json` / `NativeBootStatus` instead |
 | `/data/adb/vpnhide_lsposed_state` etc. | App / hooks | Out of Ports/Native migrate set; inventory in `docs/state.md` |
 
 ---

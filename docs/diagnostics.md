@@ -58,31 +58,28 @@ diffs them:
 Priority: an empty ground truth is checked **before** EACCES — if root sees nothing,
 the SELinux block is moot, it is simply nothing-to-leak.
 
-**Ground truth is the same Rust probe binary run as root**, not shell `ip`/`cat`.
-`GroundTruthProbe` extracts `vhhelper` from the APK, stages its immutable
-content-addressed copy to `/data/local/tmp`,
-and execs it via `su`; it emits the same JSON as the in-process JNI path
-(`run_all_json`), so the two views are directly comparable per check id. (This
-replaced an earlier gobley/UniFFI binding — the whole native surface is now one
-JSON-returning function built with plain cargo-ndk.)
+**Ground truth is the same Rust checks library run as root**, not shell `ip`/`cat`.
+`GroundTruthProbe` asks core for its `GroundTruthChecks` probe; core runs
+`vpnhide-core probe checks` as its own root child. It emits the same JSON as the
+in-process JNI path (`run_all_json`), so the two views are directly comparable
+per check id. The app ships no root helper and runs no `su`.
 
-The same Rust executable also has a read-only `observe kpm-list` mode used by
-the dashboard's installation-integrity check. The helper owns both runtime
-paths: it invokes `kpatch kpm list` when the KPatch-Next CLI is present and
-otherwise tries the APatch/FolkPatch list supercall. The root snapshot shell
-only stages and invokes the helper; it does not parse module names or construct
-the observation JSON. This detects a runtime-loaded `vpnhide` KPM when the
-`/data/adb/modules/vpnhide_kpm` flashable module is absent. That combination
-indicates that the user loaded or embedded the inner `vpnhide.kpm` file without
-installing the complete `vpnhide-kpm.zip`; the app explains that the raw file
-lacks the activator, boot scripts, and config delivery, then directs the user to
-remove the raw KPM, install the ZIP through the root manager's Modules screen,
-and reboot. APatch authentication uses the saved root-only SuperKey or its
+The core binary also has a read-only `observe kpm-list` mode, which core's root
+snapshot runs for the dashboard's installation-integrity check (section
+`kpm_runtime_modules`). It invokes `kpatch kpm list` when the KPatch-Next CLI is
+present and otherwise tries the APatch/FolkPatch list supercall. This detects a
+runtime-loaded `vpnhide` KPM when the `/data/adb/modules/vpnhide_kpm` flashable
+module is absent: the user loaded or embedded the inner `vpnhide.kpm` file
+without installing the complete `vpnhide-kpm.zip`. Core adopts such a KPM as the
+boot's one backend and configures it, but did not load it (its load options are
+not core's) and it is not updated with VPN Hide, so the app reports an
+unsupported install and directs the user to remove the raw KPM, install the ZIP
+through the root manager's Modules screen, and reboot. APatch authentication uses the saved root-only SuperKey or its
 trusted `su` token; the probe never prints either credential.
 
-### Helper observation envelope
+### Probe observation envelope
 
-`vhhelper` and the JNI library share a small app/helper response contract. Every
+Core's probe modes and the JNI library share a small response contract. Every
 observation is one JSON object with `version: 1`, a `kind` (`checks`,
 `app_vpn_state`, legacy `routing`, or `kpm_list`) and a `status` (`ok` or
 `error`). Successful responses carry a
@@ -98,7 +95,7 @@ typed `data` value:
 An unavailable root/runtime observation is an error object such as
 `{"version":1,"kind":"kpm_list","status":"error","error":"unavailable"}`.
 KernelPatch and KPatch-Next produce an empty buffer or module names separated by
-newlines. The helper also reads `kpm num` through the same runtime and requires
+newlines. The probe also reads `kpm num` through the same runtime and requires
 the parsed name count to match. A successful command with any other output, a
 truncated/full buffer, a count mismatch, invalid UTF-8, an unsafe/numeric name,
 a blank record, or a duplicate name is
@@ -166,15 +163,15 @@ check, so all its leaks count.
 Diagnostics are meaningless if VPN Hide itself is not routed through the VPN:
 split-tunnelled out, there is no VPN artifact for its own probes to be hidden
 *from*, so every check would read misleadingly clean. `RoutingGateCache` therefore
-owns one direct root-helper observation, `vhhelper observe app-vpn-state --uid
-<selfUid>`. It returns the complete app-scoped state: `vpn_off`, `excluded`,
+owns one narrow core observation, the `AppVpnState` probe (core runs
+`vpnhide-core observe app-vpn-state --uid <selfUid>`). It returns the complete app-scoped state: `vpn_off`, `excluded`,
 `routed`, or `unknown`, plus a VPN-session identity and candidate interfaces.
 
-The helper reads only current `NetworkAgentInfo` records from root `dumpsys
+The probe reads only current `NetworkAgentInfo` records from root `dumpsys
 connectivity`; requests, history and idle VPN-manager objects do not count.
 Transport `VPN` establishes a framework VPN and `NOT_VPN` excludes carrier
 IMS/IWLAN interfaces such as `ipsec*`. An up/unknown tunnel-named sysfs interface
-is the fallback for an unmanaged root tunnel. The helper does not dump global
+is the fallback for an unmanaged root tunnel. The probe does not dump global
 route tables or use their text as a change fingerprint.
 
 For candidate interfaces it performs the narrow netlink policy-rule check for

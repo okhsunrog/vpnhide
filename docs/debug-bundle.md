@@ -105,7 +105,7 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 | `report` | The full `DiagnosticReport` (§4). `null` when no checks ran. |
 | `backends` | Per-module state for `kmod` / `builtin` / `kpm` / `zygisk` (installed? active? version? `brokenReason`? `pendingReboot`?). |
 | `activeBackend` | The **one** native backend in charge (`id` + `state`). Priority kmod > builtin > KPM > zygisk; a live `/proc/vpnhide_ctl` decides between the two kernel backends by the `backend` id it reports. |
-| `ports` | The portshide module `ModuleState` (localhost port blocker). |
+| `ports` | The Ports (localhost port blocker) `ModuleState`. Ports is part of the core module in 2.0: installed = `vpnhide_core` is, active = the `vpnhide_out` chains are present and jumped to (`ports_chain`). |
 | `kmodLoadStatus` | Boot-time `.ko` load result (uname, kprobes/kretprobes ok, insmod exit, dmesg tail, `filesystemHiding`). The richest single "did the kernel module come up" field. |
 | `dashboard` | Dashboard derived from the capture root snapshot and one saved diagnostic presentation, shared with `diagnostics`. File exports and agent bridge use the same builder. A failed dashboard assembly leaves this null, appends a reason to `errors`, and preserves the rest of the archive. |
 | `beforeCapture` | Optional available process state before enabling capture logging or starting checks: observation time, diagnostic summary, retained Dashboard protection/messages, pending operation IDs, recovery flag and last operation phases/failure. No fresh root read or diagnostic run is requested. It may be absent or use retained screen values; it is the state available at collection start, not proof of what the user previously saw. |
@@ -213,19 +213,19 @@ to an `emit_*` line in
 - `root_manager` — Magisk/KSU/APatch presence + versions + `/data/adb` perms.
 
 **Native kernel backend (.ko)**
-- `builtin_prop`, `builtin_module_state` (companion flags, activator sha256 and staged update), `builtin_load_status`. Built-in live telemetry shares `kmod_state`; its wire backend id is `0x4`, and counters/status are attributed only to Built-in.
-- `kmod_prop`, `kmod_module_state` (file flags, `.ko` + activator sha256, staged-for-reboot state), `kmod_state` (**live `/proc/vpnhide_ctl`** telemetry: installed-hook mask, per-uid counters — see [protocol.md](protocol.md)).
+- Built-in (`CONFIG_VPNHIDE=y`) has no module and no own section in 2.0: core adopts it when `/proc/vpnhide_ctl` reports backend `0x4`, and its live telemetry is `kmod_state`; counters/status are attributed only to Built-in. A `vpnhide_builtin` dir in `module_inventory` is an obsolete 1.x companion that must be uninstalled (the root snapshot's `obsolete_modules` lists it and the Dashboard shows an error).
+- `kmod_prop`, `kmod_module_state` (file flags, `.ko` sha256, staged-for-reboot state), `kmod_state` (**live `/proc/vpnhide_ctl`** telemetry: installed-hook mask, per-uid counters — see [protocol.md](protocol.md)).
 - `proc_modules` (is `vpnhide*` in `/proc/modules`), `kprobes` (`/sys/kernel/debug/kprobes/list` for our symbols), `kernel_symbols` (kallsyms presence of each hooked function — key for "symbol missing on trimmed OEM KMI").
 
 **kmod backend (diagnostic)** — `kmod_diag`, the verbatim `/proc/vpnhide_diag` dump: per-probe registration, kretprobe `nmissed` counters, active vs installed hook masks, and the live `is_vpn_ifname()` verdict per netdev ([state.md](state.md)). Absent unless the `.ko` is loaded. This is where a "the module broke my network" report gets answered — a false-positive interface match is visible here and nowhere else.
 
-**Core** — `core_prop`, `core_module_state`, `core_boot_status` (the last boot pass report), `core_log`, and `core_native_boot`: core's persisted once-per-boot `NativeBootStatus` JSON (`/data/adb/vpnhide/core/native_boot.json`). It names the installed, live and staged native backends, the outcome (`Selected` / `Conflict` / `LoadFailed` with insmod exit, stderr and the matching `dmesg_tail` / `AwaitingAuthentication` / ...), the kmod's kprobes facts, what happened to Zygisk's targets, and the last Ports apply. It replaces the per-backend `load_status` / `load_dmesg` files; the app reads the same status over RPC.
+**Core** — `core_prop`, `core_module_state`, `core_boot_status` (the last boot pass report), `core_log`, and `core_native_boot`: core's persisted once-per-boot `NativeBootStatus` JSON (`/data/adb/vpnhide/core/native_boot.json`). It names the installed, live and staged native backends, the outcome (`Selected` / `Conflict` / `LoadFailed` with insmod exit, stderr and the matching `dmesg_tail` / `AwaitingAuthentication` / ...), the kmod's kprobes facts, what happened to Zygisk's targets, and the last Ports apply. It replaces the 1.x per-backend `load_status` / `load_dmesg` files and the Ports `load_status` / `load_log`; the app reads the same status over RPC.
 
-**KPM backend** — `kpm_prop`, `kpm_module_state`, `kpm_state` (activator `state` dump), `kpatch_runtime` (APatch/KPatch presence, `kpatch hello`/`kpm list`).
+**KPM backend** — `kpm_prop`, `kpm_module_state`, `kpm_state` (core's KPM ctl0 `status` read), `kpatch_runtime` (APatch/KPatch presence, `kpatch hello`/`kpm list`).
 
 **Zygisk backend** — `zygisk_prop`, `zygisk_module_state`, `zygisk_status`, `zygisk_runtime`.
 
-**Ports (localhost blocker)** — `ports_prop`, `ports_module_state`, `ports_load_status`, `ports_load_log`, `ports_state` (**live `iptables`/`ip6tables` `vpnhide_out` chain** dump).
+**Ports (localhost blocker)** — applied by core (no separate module in 2.0): `ports_state` (**live `iptables`/`ip6tables` `vpnhide_out` chain** dump); the last apply's per-family result and log tail are the `ports` field of `core_native_boot`.
 
 **LSPosed / Java layer** — `lsposed_state`, `lsposed_framework` (which framework: LSPosed/Vector), `lsposed_files` (config DB perms).
 
@@ -235,7 +235,7 @@ to an `emit_*` line in
 
 **Network (forensic)** — `network_addr` (`ip -d addr`), `network_operstate`, `network_routes` (`ip route show table all`), `network_rules` (`ip rule`), `network_sockets` (listening localhost sockets), `connectivity_dump` (`dumpsys connectivity`, VPN/tun/agent lines), `proc_net_route` / `proc_net_ipv6_route` / `proc_net_if_inet6` / `proc_net_tcp[6]` / `proc_net_udp[6]` / `proc_net_dev` / `proc_net_fib_trie`.
 
-**Module presence flags** (one-liners, from the root snapshot) — `kmod_module_dir`, `*_activator_state`, `*_disabled`, `*_pending_update`, `superkey_saved`, `proc_exists` (does `/proc/vpnhide_ctl` exist), `ports_chain` (does the iptables chain exist), `snapshot_shell_uid` (backs `rootShell`, §6), `module_inventory` (dump of every relevant `/data/adb/modules[_update]/*`).
+**Module presence flags** (one-liners, from the root snapshot) — `*_module_dir`, `*_artifact_state`, `*_disabled`, `*_pending_update`, `superkey_saved`, `proc_exists` (does `/proc/vpnhide_ctl` exist), `ports_chain` (does the iptables chain exist), `snapshot_shell_uid` (backs `rootShell`, §6), `module_inventory` (dump of every relevant `/data/adb/modules[_update]/*`), `obsolete_modules` (installed 1.x `vpnhide_ports` / `vpnhide_builtin`).
 
 ### Fast lookups
 
@@ -336,8 +336,8 @@ is the emit order — if truncation hit `app_scan_diagnostics`, the `network_*` 
 1. `sections.app_scan_diagnostics` — per-user `exit`, `package_lines`, `with_uid`, `with_path`, `stderr` (which user fails and how).
 2. `device` (MIUI/HyperOS?), `errors` (ARG_MAX-era failures).
 
-**"Ports / localhost blocking wrong"** — `ports`, `ports_load_status`,
-`ports_load_log`, `ports_state` (live chain), `config` (which apps have the
+**"Ports / localhost blocking wrong"** — `ports`, `core_native_boot` (`ports`:
+the last apply), `ports_state` (live chain), `config` (which apps have the
 `ports` role).
 
 **"Java/LSPosed hooks not attaching"** — `report.java`, `lsposedConfigDb`,
@@ -395,7 +395,7 @@ the bundle. All paths are under
 | Native check specs (ids, `expectedHooks`, coverage) | `NativeChecks.kt` (`NATIVE_CHECKS`) | what each `report.native.checks[].id` probes and which hooks own it |
 | Running the probes (native + app-side + Java) | `checks/NativeProbe.kt`, `JavaChecks.kt` (`runAllChecks`) | how `appDetail` / observations are produced |
 | `backends`, `activeBackend` (detection + kmod>KPM>zygisk priority) | `NativeBackendData.kt` | how installed/active/broken/pendingReboot is decided per module |
-| `ports`, `kmodLoadStatus` | `DashboardData.kt` (`detectPortsModule`, `readKmodLoadStatus`) | how the ports module + boot `.ko` load result are parsed |
+| `ports`, `kmodLoadStatus` | `DashboardData.kt` (`detectPortsModule`), `NativeBootStatus.kt` (`kmodLoadStatus`) | how Ports state + core's boot `.ko` load result are parsed |
 | Optional native hooks (filesystem-hiding coverage) | `FilesystemHidingData.kt` | which optional hooks the active backend installed |
 | `statistics` (per-uid / per-method counters) | `StatisticsData.kt` (`buildStatisticsState`) | how the hook-counter totals are built |
 | `hookReport` | `HookDiagnostics.kt` | installed-hook mask + counter deltas across the run |

@@ -75,8 +75,8 @@ Key consequences:
     - **built-in** (`CONFIG_VPNHIDE=y`) is the same driver compiled into the
       kernel, for kernels the `.ko` cannot load on (integrated modules, no
       kprobes, whole-program LTO). Same hooks and coverage as kmod, so the kmod
-      column below applies to it; it ships as kernel patches plus a companion
-      module that carries only the activator.
+      column below applies to it; it ships as kernel patches only (no module:
+      VPN Hide Core adopts the driver).
     - **KPM** is also bypass-proof and out-of-process, but beta and dependent on
       KernelPatch runtime (APatch or KPatch-Next-Module).
     - **Zygisk** is the fallback where no kernel backend is practical — works on

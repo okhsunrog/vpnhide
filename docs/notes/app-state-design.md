@@ -1,11 +1,12 @@
 # App state and synchronization redesign
 
-Status: historical design proposal, superseded. The direction it argued for was
+Status: historical design proposal, superseded (and in 2.0 the root side moved to
+VPN Hide Core; the `su`/helper mechanics discussed here no longer exist). The direction it argued for was
 formalized in the [transition contract](app-state-transitions.md) and implemented
 in stages; the current runtime is documented in
 [config coordinator](../config-coordinator.md),
 [observation coordinator](../observation-coordinator.md) and
-[root mutation transport](../root-mutation-transport.md). Read this file for the
+[root mutation transport](https://github.com/okhsunrog/vpnhide/blob/main/docs/root-mutation-transport.md). Read this file for the
 reasoning behind the design, not for current behavior.
 
 Baseline: `3818954e1615697427664a6bbcff6d9d6483f0c4` (2026-09-15).

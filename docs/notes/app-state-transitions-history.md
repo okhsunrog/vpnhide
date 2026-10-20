@@ -1,5 +1,8 @@
 # App state: implementation history of the transition contract
 
+(1.x history. In 2.0 the root side of these coordinators is VPN Hide Core; the
+transport, helper and `su` stages recorded here no longer exist.)
+
 The stage-by-stage implementation log of the
 [transition contract](app-state-transitions.md), split out on 2026-09-17 so the
 contract itself reads as the current specification. Sections keep the numbers
@@ -96,7 +99,7 @@ No APK/device or Android lifecycle validation was performed for this stage.
 The next stage implements `vhmutate` plus a bounded Kotlin process runner,
 versioned binary staging and typed receipt/readback adapters. Its protocol,
 quiescence proof, limits, device evidence and exact migration boundary are in
-[root mutation transport](../root-mutation-transport.md). The transport is packaged
+[root mutation transport](https://github.com/okhsunrog/vpnhide/blob/main/docs/root-mutation-transport.md). The transport is packaged
 but existing app writers are not connected yet.
 
 Recovery can consume a still-undispatched sequence in transport metadata. This

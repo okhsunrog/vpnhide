@@ -56,8 +56,9 @@ stale `boot_status`. Re-enable + reboot resumes.
 
 No hook. The manager removes the module dir; core simply never starts again. Journal,
 markers, `boot_status`, `core.log`, live iptables and kernel/KPM/Zygisk policy are
-retained (as before), so a reinstalled core recovers. Clearing `/data/adb/vpnhide/core`
-is an explicit `FullReset` / admin action. A removed *backend* module's leftover state
+retained (as before), so a reinstalled core recovers. A `FullReset` keeps
+`/data/adb/vpnhide/core` (it clears the config, SuperKey and backend state dirs);
+clearing core's own dir is a manual admin action after uninstalling core. A removed *backend* module's leftover state
 is cleaned by core's next boot scan.
 
 ## Interrupted upgrades

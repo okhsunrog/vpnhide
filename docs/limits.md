@@ -15,7 +15,7 @@ The single most common mistake is treating these as one budget:
 
 | | control (`config`) | telemetry (`stats`, `status`) |
 |---|---|---|
-| direction | activator → backend | backend → app |
+| direction | core → backend | backend → core → app |
 | bounds | how many apps can be **protected** | how many apps **report counters in one read** |
 | overflow costs | apps left unprotected | numbers missing from a screen |
 
@@ -76,7 +76,7 @@ single-record sizes from the real formatter, for 5-digit uids:
 The two backends are not in the same position:
 
 - **KPM** — each ctl0 reply remains capped at 4096 B by the module and both
-  clients. The backend pages by ascending UID; the activator validates and
+  clients. The backend pages by ascending UID; core validates and
   aggregates every page before exposing one normal telemetry block to the app.
 - **kmod** — `/proc/vpnhide_ctl` is a real `seq_operations` stream with one UID
   per record. There is no whole-output buffer or formatter ceiling.
@@ -98,7 +98,7 @@ Ordered by cost. None of these are scheduled; this is the menu.
    keep KPM `.bss` at 19080 B, and config parsing uses serialized static scratch
    rather than growing the KPM stack. A typical one-mask, five-digit-UID wire is
    848 B and fits the KPM transport; maximum-width UIDs or many distinct masks
-   may hit the independent byte limit sooner. The activator validates the exact
+   may hit the independent byte limit sooner. Core validates the exact
    formatted size and rejects the whole KPM update rather than sending a
    truncated target set.
 2. **Past ~190 targets on the KPM**, the 1024-byte transport is the wall. The
@@ -111,7 +111,7 @@ Ordered by cost. None of these are scheduled; this is the menu.
    handful of entries, and every ceiling above stops binding. The wire already
    carries the mechanism (`default <hookmask>`); nothing emits it yet. Zygisk
    cannot honour the inverted meaning without injecting into every app process,
-   so its activator rejects a non-zero default. See issue #248 for the design
+   so core rejects a non-zero default for it. See issue #248 for the design
    discussion and the reasons it should be opt-in rather than default.
 
 ### Telemetry
@@ -132,42 +132,44 @@ that is telemetry-only and already degrades visibly.
 
 ## User-visible overflow reporting
 
-Target-set overflow is surfaced after Save: the activator emits a stable
-`vpnhide-warning native_target_cap` marker with the resolved UID totals, the app
-captures activator stderr, and the picker shows a localized long-duration
-warning instead of the normal success message. The canonical package selection
-is still saved in full; the warning describes the capped native runtime
-projection.
+The target picker refuses a selection that would exceed the native capacity
+before Save (`NativeCapacityPicker.kt`). If package→UID resolution still yields
+more UIDs than the backend holds (for example the same app in several
+profiles), core keeps the first `MAX_TARGET_UIDS` by ascending UID and logs a
+stable `vpnhide-warning native_target_cap` line with the totals to its own
+stderr (`/data/adb/vpnhide/core/core.log`, included in the debug bundle). The
+canonical package selection is still saved in full.
 
-## App mutation transport
+In 2.0 core's operation receipt does not carry that warning yet, so the
+post-Save "Saved, but the Native backend can protect only …" snackbar
+(`save_native_target_capacity`) never fires; see the 2.0 review.
+
+## Core socket bounds
 
 These are configured allocation/input bounds, separate from the backend capacity
-measurements above. See [transport protocol and recovery](root-mutation-transport.md).
+measurements above. The core RPC caps frames and config size (`crates/core-rpc/src/lib.rs`,
+`max_config_bytes()` in core-ffi).
 
 | Resource | Enforced bound | Owner |
 |---|---|---|
-| UTF-8 command script | 2 MiB plus at most 64 B framing | `root_transport/input.rs`, Kotlin request adapter |
-| Canonical readback | 2 MiB | `root_transport/mod.rs` |
-| Latest receipt metadata | 4 KiB | `root_transport/state.rs` |
-| Retained helper stdout | 4 MiB | `RootProcessRunner` |
-| Outstanding process/pipe owners | 3 per retained runner | `RootProcessRunner` |
+| One RPC frame (either direction) | 1 MiB | `MAX_FRAME_BYTES`, `crates/core-rpc/src/lib.rs` |
+| Concurrent socket connections | 8 | `MAX_CONCURRENT_CONNECTIONS`, same file |
+| Canonical config submitted by the app | 512 KiB | `MAX_CONFIG`, `crates/core-ffi/src/config_relay.rs` |
+| One `root_effect` request | 64 KiB | `MAX_REQUEST`, `crates/core-ffi/src/root_relay.rs` |
 
-The canonical JSON is embedded as a JSON string in the helper response, so escaping
-and the receipt consume part of the stdout budget. Existing persistence builders
-also base64-encode canonical data inside the script, reducing the usable canonical
-write size below the script's 2 MiB limit. Overflow reports unavailable/rejection;
-it never falls back to an empty config or silently truncates a mutation. These
-bounds do not raise or replace the 160-UID native target limit.
+An oversized config or request is rejected before it reaches core; it never falls
+back to an empty config or silently truncates an edit. These bounds do not raise or
+replace the 160-UID native target limit.
 
 ## App observation reads
 
-The batched root snapshot retains at most **16 MiB of stdout**. Overflow drains
-the remaining output but rejects the entire snapshot; it never publishes truncated
-sections. Stderr is drained without retention. The shell deadline is 10 seconds;
-the observation coordinator reports failure at 15 seconds if the worker has not
-returned. It holds the single root-read lane until the launcher process and its
-pipe readers finish. These bounds are separate from the mutation runner's 4 MiB
-reply and three retained owners.
+The batched root snapshot is core's `RootSnapshot` probe
+(`crates/core-daemon/src/diagnostics.rs`). Core keeps at most **32 MiB** of a
+probe's stdout (`OUTPUT_MAX`); a truncated snapshot is rejected whole rather than
+published with missing sections. Up to 64 KiB is returned inline; larger output
+goes to a file in the app's `vpnhide-core-export` directory, which the app reads
+back. Stderr is discarded. Each probe is killed at core's per-probe runtime cap
+(`PROBE_MAX_RUNTIME`).
 
 Other observation deadlines are 60 seconds, except Dashboard (120 seconds while
 its loader still awaits the diagnostic suite). A read waiter can follow
@@ -195,7 +197,7 @@ Nothing here should be trusted because it is written down. The representative
 control-side figure is guarded by a test — `crates/protocol` asserts that all
 `MAX_TARGET_UIDS` ordinary Android app UIDs, using one shared full mask, fit in
 `KPM_ARGS_LEN` with room for its trailing NUL. Maximum-width UIDs and arbitrary
-per-app masks can cost more bytes, so the activator also checks the formatted
+per-app masks can cost more bytes, so core also checks the formatted
 wire's actual length before KPM delivery.
 
 The telemetry table is not guarded, because its input is a usage profile rather

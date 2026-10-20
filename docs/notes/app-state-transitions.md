@@ -1,5 +1,11 @@
 # App state: transition contract
 
+> **2.0:** the configuration lane's root side is VPN Hide Core (`CoreConfigIo`,
+> core's operation journal). Passages below about the root mutation transport,
+> `vhmutate`, helper receipts and untracked boot-script writers describe the 1.x
+> implementation; the coordinator state machines themselves are unchanged. See
+> [config-coordinator.md](../config-coordinator.md).
+
 Status: current specification of the process-owned state machines as implemented.
 Configuration, observation and diagnostic-run coordinators are connected to the
 app; config operations feed diagnostic admission and context; the screens, the
@@ -106,7 +112,7 @@ initialization/reconciliation and then Open; uncertainty follows the same initia
 readback plus one repeat, then Paused rule as an in-process timeout. A new app PID
 does not prove an old privileged descendant stopped. The transport supplies
 discoverable execution-lifetime evidence across app restarts through `vhmutate`
-([root mutation transport](../root-mutation-transport.md)), or safely remains
+([root mutation transport](https://github.com/okhsunrog/vpnhide/blob/main/docs/root-mutation-transport.md)), or safely remains
 paused; no full persistent operation journal or automatic command replay exists.
 Commands issued by builds that predate the transport are untracked writers, like
 module boot scripts: a lane never opened in this boot is adopted directly, and

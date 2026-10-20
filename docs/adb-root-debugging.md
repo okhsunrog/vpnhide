@@ -24,7 +24,7 @@ echo root_shell_pid=\$\$
 grep -E \"Cap(Inh|Prm|Eff|Bnd|Amb)\" /proc/\$\$/status
 ls -ldZ /data /data/adb /data/adb/modules /data/system
 head -c 120 /data/system/vpnhide_config.json 2>&1
-cat /data/adb/vpnhide_kpm/load_status 2>&1 | head
+cat /data/adb/vpnhide/core/native_boot.json 2>&1 | head -c 400
 "'
 ```
 
@@ -79,13 +79,21 @@ Broken examples:
 adb -s SERIAL shell 'su -c "
 cat /data/system/vpnhide_config.json
 cat /data/system/vpnhide_lsposed_state 2>/dev/null
-cat /data/adb/vpnhide_kmod/load_status 2>/dev/null
-cat /data/adb/vpnhide_kpm/load_status 2>/dev/null
-cat /data/adb/vpnhide_ports/load_status 2>/dev/null
-cat /data/adb/vpnhide_ports/load_log 2>/dev/null
-ls -lZ /data/adb/modules/vpnhide_kmod /data/adb/modules/vpnhide_kpm /data/adb/modules/vpnhide_ports 2>&1
+cat /data/adb/vpnhide/core/native_boot.json 2>/dev/null
+cat /data/adb/vpnhide/core/boot_status 2>/dev/null
+tail -n 80 /data/adb/vpnhide/core/core.log 2>/dev/null
+ls -lZ /data/user_de/0/dev.okhsunrog.vpnhide/vpnhide-core.sock 2>&1
+ls -lZ /data/adb/modules/vpnhide_core /data/adb/modules/vpnhide_kmod /data/adb/modules/vpnhide_kpm /data/adb/modules/vpnhide_zygisk 2>&1
 "'
 ```
+
+In 2.0 the core module (`vpnhide_core`) is the only thing that loads a native
+backend, applies Ports rules and writes the config; the backend modules ship
+artifacts only and the per-module `load_status` / `load_log` files of 1.x are gone
+(core deletes stale ones at boot). Its once-per-boot decision is
+`/data/adb/vpnhide/core/native_boot.json` (selected backend, conflict, Ports
+families), and `core.log` is its stderr. A `vpnhide_ports` or `vpnhide_builtin`
+module dir is a 1.x leftover that must be uninstalled.
 
 The canonical JSON is `/data/system/vpnhide_config.json`, not `/data/adb`.
 `/data/adb` is still important for module files, KPM status, superkey storage,
@@ -203,7 +211,7 @@ adb -s SERIAL shell 'su -c "
 PATH=/data/adb/modules/KPatch-Next/bin:/data/adb/ksu/bin:\$PATH
 kpatch hello
 kpatch kpm list
-cat /data/adb/vpnhide_kpm/load_status
+cat /data/adb/vpnhide/core/native_boot.json
 dmesg | grep -iE \"vpnhide|kpatch|kpm|KernelPatch\" | tail -n 80
 "'
 ```
