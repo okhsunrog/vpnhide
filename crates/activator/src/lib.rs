@@ -28,7 +28,6 @@ const APP_PACKAGE: &str = "dev.okhsunrog.vpnhide";
 const KPM_NAME: &str = "vpnhide";
 pub const PORTS_CHAIN4: &str = "vpnhide_out";
 pub const PORTS_CHAIN6: &str = "vpnhide_out6";
-const PORTS_STATUS_DIR: &str = "/data/adb/vpnhide_ports";
 /// Marker file written by core when it has applied Ports rules (diagnostics).
 pub const PORTS_CORE_OWNER_MARKER: &str = "/data/adb/vpnhide/core/ports_owned";
 /// Marker: core owns the durable canonical config file writes.
@@ -38,8 +37,6 @@ pub const NATIVE_CORE_OWNER_MARKER: &str = "/data/adb/vpnhide/core/native_owned"
 /// Marker: core owns Zygisk `targets.txt` publication.
 pub const ZYGISK_CORE_OWNER_MARKER: &str = "/data/adb/vpnhide/core/zygisk_owned";
 pub const CORE_OWNER_DIR_ENV: &str = "VPNHIDE_CORE_OWNER_DIR";
-const PORTS_LOAD_STATUS: &str = "/data/adb/vpnhide_ports/load_status";
-const PORTS_LOAD_LOG: &str = "/data/adb/vpnhide_ports/load_log";
 const KPM_CTL_LOCK: &str = "/data/adb/vpnhide_kpm/ctl.lock";
 const KPM_TRUNCATION_MARKER: &str = "# vpnhide truncated";
 pub const KPM_SUPPORTED_KERNEL_FAMILIES: &str =
@@ -128,7 +125,7 @@ pub use ownership::{
 pub use ports::{
     PORTS_OWNER_MARKER_ENV, PortsApplyResult, PortsChainPresence, PortsFamilyResult,
     apply_ports_rules_families, inspect_ports_chains, ports_owned_by_core, ports_owner_marker_path,
-    write_ports_core_owner_marker, write_ports_load_status,
+    write_ports_core_owner_marker,
 };
 
 // --- core-2.0 (§4): the persistent root core absorbs the activator, linking these instead

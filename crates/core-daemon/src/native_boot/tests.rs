@@ -650,13 +650,20 @@ fn the_boot_scan_cleans_legacy_activator_state() {
         "vpnhide_builtin/load_status",
         "vpnhide_kpm/load_status",
         "vpnhide_kpm/ctl.lock",
+        "vpnhide_ports/load_status",
+        "vpnhide_ports/load_log",
     ] {
         fs::create_dir_all(legacy.join(f).parent().unwrap()).unwrap();
         fs::write(legacy.join(f), "x").unwrap();
     }
     write_ctl(&env.ctl, "4");
     NativeBoot::start(env.clone(), 1, false);
-    for d in ["vpnhide_kmod", "vpnhide_builtin", "vpnhide_kpm"] {
+    for d in [
+        "vpnhide_kmod",
+        "vpnhide_builtin",
+        "vpnhide_kpm",
+        "vpnhide_ports",
+    ] {
         assert!(
             !legacy.join(d).exists(),
             "{d} removed with its legacy state"
@@ -666,10 +673,16 @@ fn the_boot_scan_cleans_legacy_activator_state() {
     // An installed KPM keeps its control lock.
     fs::create_dir_all(legacy.join("vpnhide_kpm")).unwrap();
     fs::write(legacy.join("vpnhide_kpm/ctl.lock"), "").unwrap();
+    // An unimported 1.x Ports observer list keeps its dir; the status files still go.
+    fs::create_dir_all(legacy.join("vpnhide_ports")).unwrap();
+    fs::write(legacy.join("vpnhide_ports/observers.txt"), "com.example\n").unwrap();
+    fs::write(legacy.join("vpnhide_ports/load_log"), "x").unwrap();
     install(dir.path(), "vpnhide_kpm", Some(KPM_ARTIFACT));
     fs::write(&env.boot_id_path, "boot-2\n").unwrap();
     NativeBoot::start(env, 2, false);
     assert!(legacy.join("vpnhide_kpm/ctl.lock").exists());
+    assert!(legacy.join("vpnhide_ports/observers.txt").exists());
+    assert!(!legacy.join("vpnhide_ports/load_log").exists());
 }
 
 #[test]

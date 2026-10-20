@@ -50,6 +50,11 @@ fn root_snapshot_frames_every_required_section_with_shell_compatible_values() {
     fs::create_dir_all(&lsposed).unwrap();
     fs::write(lsposed.join("module.prop"), "id=zygisk_lsposed\n").unwrap();
 
+    for id in ["vpnhide_ports", "vpnhide_builtin"] {
+        fs::create_dir_all(paths.module(id)).unwrap();
+    }
+    fs::write(paths.module("vpnhide_builtin").join("remove"), "").unwrap();
+
     let out = root_snapshot::collect(&paths, false);
     assert!(!out.truncated);
     let s = sections(&out.buf, prefixes::ROOT_BEGIN, prefixes::ROOT_END);
@@ -68,6 +73,8 @@ fn root_snapshot_frames_every_required_section_with_shell_compatible_values() {
     assert_eq!(get("core_disabled"), "0");
     assert_eq!(get("kpm_pending_update"), "1");
     assert_eq!(get("kmod_pending_update"), "0");
+    // Ports is still installed; Built-in is already marked for removal.
+    assert_eq!(get("obsolete_modules"), "vpnhide_ports");
     assert_eq!(get("canonical_config"), "{\"apps\":{}}");
     assert_eq!(get("superkey_saved"), "1");
     assert_eq!(get("legacy_kmod_targets"), "com.example");

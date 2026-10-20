@@ -692,7 +692,9 @@ impl NativeBoot {
     }
 
     /// The per-backend activators' state is gone with them: drop their legacy
-    /// `load_status` files, and a removed KPM's lock, on the boot scan.
+    /// `load_status` files (Ports' `load_log` too), and a removed KPM's lock, on the
+    /// boot scan. A dir is removed only when empty (an unimported 1.x `observers.txt`
+    /// keeps `vpnhide_ports`).
     fn cleanup_legacy(&self, facts: &ScanFacts) {
         let Some(root) = &self.env.legacy_root else {
             return;
@@ -703,6 +705,8 @@ impl NativeBoot {
             "/data/adb/vpnhide_kmod/load_dmesg",
             "/data/adb/vpnhide_builtin/load_status",
             "/data/adb/vpnhide_kpm/load_status",
+            "/data/adb/vpnhide_ports/load_status",
+            "/data/adb/vpnhide_ports/load_log",
         ] {
             let _ = fs::remove_file(at(file));
         }
@@ -716,6 +720,7 @@ impl NativeBoot {
             "/data/adb/vpnhide_kmod",
             "/data/adb/vpnhide_builtin",
             "/data/adb/vpnhide_kpm",
+            "/data/adb/vpnhide_ports",
         ] {
             let _ = fs::remove_dir(at(dir));
         }

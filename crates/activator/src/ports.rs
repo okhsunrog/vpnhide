@@ -1,14 +1,11 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
 use std::process::{Command, Output, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    PORTS_CHAIN4, PORTS_CHAIN6, PORTS_LOAD_LOG, PORTS_LOAD_STATUS, PORTS_STATUS_DIR, PortProtocol,
-    PortRule, PortUidPolicy, PortsActivationReport, PortsRuleset, Result, write_atomic,
+    PORTS_CHAIN4, PORTS_CHAIN6, PortProtocol, PortRule, PortUidPolicy, PortsActivationReport,
+    PortsRuleset, Result, write_atomic,
 };
 
 // Wait (bounded) for the xtables lock instead of failing instantly. netd, an
@@ -360,82 +357,6 @@ fn append_output_stream(log: &mut String, label: &str, bytes: &[u8]) {
     log.push_str(":\n");
     log.push_str(trimmed);
     log.push('\n');
-}
-
-pub fn write_ports_load_status(
-    source: &str,
-    loaded: bool,
-    target_count: Option<usize>,
-    detail: &str,
-    log: &str,
-) {
-    if let Err(err) = write_ports_load_status_inner(source, loaded, target_count, detail, log) {
-        eprintln!("vpnhide ports activator failed to write load_status: {err}");
-    }
-}
-
-fn write_ports_load_status_inner(
-    source: &str,
-    loaded: bool,
-    target_count: Option<usize>,
-    detail: &str,
-    log: &str,
-) -> Result<()> {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|_| String::new());
-    let boot_id = read_trimmed("/proc/sys/kernel/random/boot_id");
-    let uname_r = command_stdout_trimmed("uname", &["-r"]);
-    let status = format!(
-        "timestamp={timestamp}\nboot_id={boot_id}\nuname_r={uname_r}\nruntime=ports\nsource={source}\nloaded={}\ntarget_count={}\ndetail={}\n",
-        if loaded { 1 } else { 0 },
-        target_count
-            .map(|count| count.to_string())
-            .unwrap_or_else(|| "unknown".to_owned()),
-        sanitize_status_value(detail),
-    );
-    write_atomic(Path::new(PORTS_LOAD_STATUS), status.as_bytes(), 0o644)?;
-    let load_log = if log.trim().is_empty() {
-        "(empty)\n".to_owned()
-    } else {
-        format!("{}\n", log.trim_end())
-    };
-    write_atomic(Path::new(PORTS_LOAD_LOG), load_log.as_bytes(), 0o644)?;
-    let _ = fs::set_permissions(PORTS_STATUS_DIR, fs::Permissions::from_mode(0o755));
-    Ok(())
-}
-
-fn read_trimmed(path: &str) -> String {
-    fs::read_to_string(path)
-        .map(|s| s.trim().to_owned())
-        .unwrap_or_default()
-}
-
-fn command_stdout_trimmed(program: &str, args: &[&str]) -> String {
-    Command::new(program)
-        .args(args)
-        .output()
-        .ok()
-        .and_then(|out| out.status.success().then_some(out.stdout))
-        .map(|stdout| String::from_utf8_lossy(&stdout).trim().to_owned())
-        .unwrap_or_default()
-}
-
-fn sanitize_status_value(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| match ch {
-            '\n' | '\r' | '\t' => ' ',
-            _ => ch,
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(240)
-        .collect()
 }
 
 #[cfg(test)]
