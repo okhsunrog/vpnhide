@@ -1,10 +1,12 @@
 //! The diagnostics probes, in Rust. Core runs no shell: every section the app parses (and
 //! every forensic section a bug report carries) is read here with std/libc, and an external
-//! binary is spawned only where it *is* the interface: `pm` (PackageManager), `iptables` /
+//! binary is spawned only where it *is* the interface: `cmd package` (PackageManager — never
+//! `pm`, which AOSP ships as a `#!/system/bin/sh` wrapper around `cmd package`), `iptables` /
 //! `ip6tables` (xtables has no stable netlink API), `ip` / `ss` / `dumpsys` / `logcat`
 //! (their human-readable views are the forensic payload), `bootctl`, `magisk` / `ksud`
 //! (version queries), `kpatch` (KernelPatch's own CLI) and core itself (`observe …`).
-//! Every spawn is direct (no `sh -c`), bounded in time and output.
+//! Every spawn is direct (no `sh -c`), bounded in time and output, and every program is an
+//! ELF binary on AOSP (none is a shell script; see `docs/core-daemon.md`).
 
 use std::io::Read;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};

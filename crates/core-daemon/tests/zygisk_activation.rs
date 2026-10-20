@@ -14,6 +14,8 @@ use vpnhide_core_rpc::{
 
 const OLD: &str = "untouched policy";
 const PM: &str = r#"#!/bin/sh
+[ "$1" = package ] || exit 64
+shift
 if [ "$VH_CASE" = kernel-race ]; then
   printf 'vpnhide 1 status\nbackend 0x4\nkver 0x60100\nhooks 0x3ff\nerror 0x0\n' > "$VPNHIDE_KMOD_CTL"
 fi
@@ -122,7 +124,7 @@ async fn exercise(case: &str) {
     if matches!(case, "kpm" | "unmanaged-kpm" | "unknown-kpm" | "kpm-race") {
         executable(&root.join("kpatch"), KPATCH);
     }
-    executable(&root.join("pm"), PM);
+    executable(&root.join("cmd"), PM);
     executable(
         &root.join("insmod"),
         "#!/bin/sh\nprintf 'attempted\\n' > \"$VH_ROOT/insmod-dispatch\"\nexit 1\n",

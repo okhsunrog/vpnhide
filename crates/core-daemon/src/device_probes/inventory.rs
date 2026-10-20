@@ -21,8 +21,15 @@ pub fn packages_args(user: u32) -> Vec<String> {
         .collect()
 }
 
-fn pm(args: &[&str], out: &Out) -> Ran {
-    run("pm", args, out.remaining(PM_TIMEOUT))
+/// `cmd package <args>`: the binder client, never the `pm` sh wrapper.
+pub(crate) fn pm(args: &[&str], out: &Out) -> Ran {
+    pm_within(args, out.remaining(PM_TIMEOUT))
+}
+
+pub(crate) fn pm_within(args: &[&str], timeout: std::time::Duration) -> Ran {
+    let mut argv = vec![vpnhide_activator::PACKAGE_SERVICE_ARG];
+    argv.extend_from_slice(args);
+    run(vpnhide_activator::PACKAGE_SERVICE_CMD, &argv, timeout)
 }
 
 /// `fold_stderr`: the bundle folds pm's stderr into the section; the snapshot drops it.

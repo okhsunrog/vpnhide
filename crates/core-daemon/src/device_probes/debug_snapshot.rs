@@ -693,12 +693,9 @@ fn ports_state(out: &Out) -> String {
 /// Privacy-safe summary of the per-user app scan: names redacted, counts only — never
 /// package names or paths. Diagnoses "couldn't read all profiles".
 fn app_scan_diagnostics(out: &Out) -> String {
-    let plain = run(
-        "pm",
-        &["list", "users"],
-        out.remaining(Duration::from_secs(20)),
-    )
-    .stdout;
+    let plain =
+        super::inventory::pm_within(&["list", "users"], out.remaining(Duration::from_secs(20)))
+            .stdout;
     let mut s = String::from("--- pm list users (names redacted) ---\n");
     for line in trimmed(&plain).lines() {
         s.push_str(&redact_user_name(line));
@@ -713,7 +710,7 @@ fn app_scan_diagnostics(out: &Out) -> String {
         });
         let args = super::inventory::packages_args(user);
         let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-        let listed = run("pm", &argv, out.remaining(Duration::from_secs(20)));
+        let listed = super::inventory::pm_within(&argv, out.remaining(Duration::from_secs(20)));
         let lines: Vec<&str> = listed
             .stdout
             .lines()

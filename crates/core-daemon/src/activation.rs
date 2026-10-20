@@ -124,7 +124,7 @@ pub fn kmod_ctl_path_from_env() -> Option<PathBuf> {
 }
 
 /// Project a config into a backend family's control-v2 wire, resolving package uids from the
-/// live PackageManager. Device-only (needs `pm`); host tests use the resolver variant.
+/// live PackageManager. Device-only (needs `cmd package`); host tests use the resolver variant.
 pub fn project_native_wire(
     config: &CanonicalConfig,
     backend: NativeBackend,
