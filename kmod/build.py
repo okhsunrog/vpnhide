@@ -73,7 +73,6 @@ GKI_VARIANTS = (
 DEFAULT_KMI = "android14-6.1"
 
 
-
 def detect_clang_dir() -> str | None:
     """Pick the highest-versioned `clang-r*/bin` under `/opt/ddk/clang`,
     matching what the DDK image lays out. Used only when the user
