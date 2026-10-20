@@ -56,8 +56,7 @@ fn diagnostics_and_effects_round_trip() {
     let sock = socket.display().to_string();
     let core = spawn_core(&socket, &dir.path().join("vpnhide_config.json"));
 
-    let request =
-        r#"{"probes":[{"kind":"hook_counters"},{"kind":"kpm_list"}],"clear_dmesg":false}"#;
+    let request = r#"{"probes":[{"kind":"hook_counters"},{"kind":"ground_truth_checks"}],"clear_dmesg":false}"#;
     let reply = json(rt.block_on(collect_diagnostics(sock.clone(), request.into())));
     assert_eq!(reply["status"], "ok", "{reply}");
     let outputs = reply["report"]["outputs"].as_array().unwrap();

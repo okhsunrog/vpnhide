@@ -56,8 +56,6 @@ internal sealed class CoreProbe(
     ) : CoreProbe("app_vpn_state") {
         override fun json(): JSONObject = super.json().put("uid", uid)
     }
-
-    data object KpmList : CoreProbe("kpm_list")
 }
 
 /** A fixed root effect core applies (`core-rpc` `RootEffect`). */

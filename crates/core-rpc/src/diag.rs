@@ -35,8 +35,6 @@ pub enum DiagnosticProbe {
     GroundTruthChecks,
     /// Hook-inert root observation of VPN presence and `uid`'s routing.
     AppVpnState { uid: u32 },
-    /// Installed KPMs as the KernelPatch runtime reports them.
-    KpmList,
 }
 
 /// A batch of probes, run concurrently by core.

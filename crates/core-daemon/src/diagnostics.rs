@@ -199,7 +199,6 @@ fn run_probe(env: &ProbeEnv, probe: &DiagnosticProbe) -> Captured {
                 Duration::from_secs(20),
             )
         }
-        DiagnosticProbe::KpmList => core(&["observe", "kpm-list"], Duration::from_secs(10)),
     }
 }
 
@@ -409,7 +408,6 @@ fn probe_slug(probe: &DiagnosticProbe) -> &'static str {
         DiagnosticProbe::LsposedModulesDb => "lsposed-db",
         DiagnosticProbe::GroundTruthChecks => "checks",
         DiagnosticProbe::AppVpnState { .. } => "app-vpn-state",
-        DiagnosticProbe::KpmList => "kpm-list",
     }
 }
 

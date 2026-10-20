@@ -8,7 +8,8 @@ canonical config, `/proc/vpnhide_ctl`, Zygisk `targets.txt` and the Ports rules.
 ## Socket placement (`crates/core-daemon/src/app_socket.rs`)
 
 - Path: `/data/user_de/0/dev.okhsunrog.vpnhide/vpnhide-core.sock`
-  (`core-rpc` `PRODUCTION_SOCKET_PATH`; `service.sh` sets `VPNHIDE_APP_DATA_DIR`).
+  (core-daemon `app_socket`, from `VPNHIDE_APP_DATA_DIR` set by `service.sh`; the app
+  resolves the same file through `CorePaths.socket`).
   Device-encrypted storage exists at boot, before first unlock. `/data/adb` is `0700` root and
   unreachable from the app.
 - Stealth: another app cannot traverse a foreign app's private data dir, so there is nothing to

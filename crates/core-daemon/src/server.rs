@@ -1291,7 +1291,7 @@ mod tests {
                 DiagnosticsRequest {
                     probes: vec![
                         vpnhide_core_rpc::DiagnosticProbe::HookCounters,
-                        vpnhide_core_rpc::DiagnosticProbe::KpmList,
+                        vpnhide_core_rpc::DiagnosticProbe::GroundTruthChecks,
                     ],
                     clear_dmesg: false,
                 },

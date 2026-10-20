@@ -334,9 +334,9 @@ the app when Vector is active.
 - Lifetime: per app launch, stale records removed when boot_id changes.
 
 Root-differential checks (ground truth, per-app VPN state) run inside core
-(`collect_diagnostics` probes `GroundTruthChecks`, `AppVpnState`), and KPM
-enumeration is the root snapshot's `kpm_runtime_modules` section; the 1.x
-`vhhelper` staged into `/data/local/tmp` is gone.
+(`collect_diagnostics` probes `GroundTruthChecks`, `AppVpnState`); a live KPM is
+identified by core's boot selection, not by a KPM listing. The 1.x `vhhelper`
+staged into `/data/local/tmp` is gone.
 
 ### `cacheDir`
 

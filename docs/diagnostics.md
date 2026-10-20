@@ -64,24 +64,19 @@ the SELinux block is moot, it is simply nothing-to-leak.
 in-process JNI path (`run_all_json`), so the two views are directly comparable
 per check id. The app ships no root helper and runs no `su`.
 
-The core binary also has a read-only `observe kpm-list` mode, which core's root
-snapshot runs for the dashboard's installation-integrity check (section
-`kpm_runtime_modules`). It invokes `kpatch kpm list` when the KPatch-Next CLI is
-present and otherwise tries the APatch/FolkPatch list supercall. This detects a
-runtime-loaded `vpnhide` KPM when the `/data/adb/modules/vpnhide_kpm` flashable
-module is absent: the user loaded or embedded the inner `vpnhide.kpm` file
-without installing the complete `vpnhide-kpm.zip`. Core adopts such a KPM as the
-boot's one backend and configures it, but did not load it (its load options are
-not core's) and it is not updated with VPN Hide, so the app reports an
-unsupported install and directs the user to remove the raw KPM, install the ZIP
-through the root manager's Modules screen, and reboot. APatch authentication uses the saved root-only SuperKey or its
-trusted `su` token; the probe never prints either credential.
+A runtime-loaded `vpnhide` KPM is no longer detected by listing KPMs. Core's
+once-per-boot selection queries KernelPatch for the `vpnhide` module directly
+(`KPM_INFO`, then the status handshake). A KPM loaded by hand is a supported
+installation (see [storage.md](storage.md) §4). The debug snapshot still records
+`kpatch kpm list` output for forensics. APatch authentication uses the saved
+root-only SuperKey or its trusted `su` token, and no probe prints either
+credential.
 
 ### Probe observation envelope
 
 Core's probe modes and the JNI library share a small response contract. Every
 observation is one JSON object with `version: 1`, a `kind` (`checks`,
-`app_vpn_state`, legacy `routing`, or `kpm_list`) and a `status` (`ok` or
+`app_vpn_state` or legacy `routing`) and a `status` (`ok` or
 `error`). Successful responses carry a
 typed `data` value:
 
@@ -89,27 +84,15 @@ typed `data` value:
 {"version":1,"kind":"checks","status":"ok","data":[{"id":"...","status":"pass","detail":"..."}]}
 {"version":1,"kind":"app_vpn_state","status":"ok","data":{"uid":10042,"state":"routed","session":"framework:143:tun0","interfaces":["tun0"],"method":"uid_rule","detail":"uid_in_vpn_table"}}
 {"version":1,"kind":"routing","status":"ok","data":{"uid":10042,"routed":null,"detail":"netlink unavailable"}}
-{"version":1,"kind":"kpm_list","status":"ok","data":{"available":true,"modules":[]}}
 ```
 
-An unavailable root/runtime observation is an error object such as
-`{"version":1,"kind":"kpm_list","status":"error","error":"unavailable"}`.
-KernelPatch and KPatch-Next produce an empty buffer or module names separated by
-newlines. The probe also reads `kpm num` through the same runtime and requires
-the parsed name count to match. A successful command with any other output, a
-truncated/full buffer, a count mismatch, invalid UTF-8, an unsafe/numeric name,
-a blank record, or a duplicate name is
-`{"version":1,"kind":"kpm_list","status":"error","error":"malformed"}`;
-it is never interpreted as an empty list.
-For the direct APatch supercall path, a successful zero module count returns an
-empty observation without calling the list operation: older KernelPatch versions
-leave the kernel list buffer uninitialized when there are no modules. This is an
-observation at count time, not an atomic count/list snapshot.
+The envelope also defines an error form (`"status":"error"` with a closed
+`error` code). No current producer emits it, and the app still classifies it as an
+unusable observation.
 The app treats malformed/truncated JSON, an unsupported version, a wrong kind
 and unknown status/error codes as unusable observations; none can become a
-clean check or a false routing result. A valid empty KPM list (`available: true,
-modules: []`) remains distinct from unavailable and malformed output. KPM credentials and tool
-diagnostics never enter this stdout envelope.
+clean check or a false routing result. Credentials and tool diagnostics never
+enter this stdout envelope.
 
 ## 3. Per-check outcome (`CheckOutcome`)
 

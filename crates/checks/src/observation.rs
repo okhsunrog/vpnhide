@@ -11,7 +11,6 @@ pub const OBSERVATION_VERSION: u32 = 1;
 const KIND_CHECKS: &str = "checks";
 const KIND_ROUTING: &str = "routing";
 const KIND_APP_VPN_STATE: &str = "app_vpn_state";
-const KIND_KPM_LIST: &str = "kpm_list";
 
 #[derive(Serialize)]
 struct Success<'a, T: Serialize> {
@@ -19,14 +18,6 @@ struct Success<'a, T: Serialize> {
     kind: &'static str,
     status: &'static str,
     data: &'a T,
-}
-
-#[derive(Serialize)]
-struct Failure {
-    version: u32,
-    kind: &'static str,
-    status: &'static str,
-    error: &'static str,
 }
 
 /// Serialize a successful response for one of the app/helper observation
@@ -42,19 +33,6 @@ pub fn success<T: Serialize>(kind: &'static str, data: &T) -> String {
     .expect("observation response serialization cannot fail")
 }
 
-/// Serialize a typed observation failure. Error strings are deliberately a
-/// closed vocabulary at this boundary; details from root tools stay out of
-/// stdout and logs.
-pub fn error(kind: &'static str, code: &'static str) -> String {
-    serde_json::to_string(&Failure {
-        version: OBSERVATION_VERSION,
-        kind,
-        status: "error",
-        error: code,
-    })
-    .expect("observation error serialization cannot fail")
-}
-
 pub fn checks<T: Serialize>(data: &T) -> String {
     success(KIND_CHECKS, data)
 }
@@ -67,14 +45,6 @@ pub fn app_vpn_state<T: Serialize>(data: &T) -> String {
     success(KIND_APP_VPN_STATE, data)
 }
 
-pub fn kpm_list<T: Serialize>(data: &T) -> String {
-    success(KIND_KPM_LIST, data)
-}
-
-pub fn kpm_list_error(code: &'static str) -> String {
-    error(KIND_KPM_LIST, code)
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::Value;
@@ -84,7 +54,6 @@ mod tests {
         for fixture in [
             include_str!("../../../fixtures/core-probes/unsupported-version.json"),
             include_str!("../../../fixtures/core-probes/routing-string-boolean.json"),
-            include_str!("../../../fixtures/core-probes/kpm-malformed.json"),
         ] {
             let value: Value = serde_json::from_str(fixture).unwrap();
             assert!(value["version"].is_number());
