@@ -78,7 +78,11 @@
 
     <!-- Save feedback -->
     <string name="native_target_capacity_reached">Достигнут лимит Native: можно выбрать не более %1$d UID приложений. Сначала отключите Native у другого приложения.</string>
-    <string name="save_native_target_capacity">Настройки сохранены, но Native-бэкенд может защитить только %1$d из %2$d найденных UID приложений. %3$d UID с наибольшими номерами остались без Native-защиты.</string>
+    <string name="native_target_capacity_over">Native нужно %1$d UID приложений, помещается не более %2$d. Чтобы сохранить, отключите Native ещё для %3$d UID.</string>
+    <string name="native_capacity_package">%1$s (%2$d)</string>
+    <string name="native_capacity_package_more">%1$s и ещё %2$d</string>
+    <string name="save_native_capacity_refused">Не сохранено: для этого выбора нужно %1$d UID приложений, а Native вмещает не более %2$d. Отключите Native у приложений, у которых в сумме не меньше %3$d UID (в скобках — число UID у приложения): %4$s. Прежние настройки продолжают действовать.</string>
+    <string name="dashboard_issue_native_capacity_exceeded">Настройки Native не обновлены: сохранённому выбору теперь нужно %1$d UID приложений, а Native вмещает не более %2$d (например, появились копии выбранных приложений в рабочем профиле или клонах). Ничего не отправлено, Native сохраняет прежние цели. Отключите Native у приложений, у которых в сумме не меньше %3$d UID (в скобках — число UID у приложения): %4$s.</string>
 
     <!-- Dashboard -->
     <string name="dashboard_modules">Модули</string>

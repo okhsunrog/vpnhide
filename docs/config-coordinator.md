@@ -106,9 +106,11 @@ maps coordinator phases onto core:
 Core's operation journal (`/data/adb/vpnhide/core/operations.json`) replaces the
 1.x helper's session, lock and receipts, so there is no first-adoption step.
 
-Known gap: the receipt has no native target-capacity field, so the picker's
-`native_target_cap` warning (`ConfigPhaseEvidence.nativeCapacity`) is never set in
-2.0; core only logs the overflow (see [limits.md](limits.md)).
+A native target set the backend cannot hold is refused at admission with
+`native_capacity_exceeded`. Nothing is written. `CoreConfigIo` parses the typed
+report into `ConfigPhaseEvidence.nativeCapacity`, the coordinator publishes it as
+`lastNativeCapacity` next to the failed result, and the config failure snackbar
+lists the packages to deselect (see [limits.md](limits.md)).
 
 ## Validation (1.x transport, historical)
 

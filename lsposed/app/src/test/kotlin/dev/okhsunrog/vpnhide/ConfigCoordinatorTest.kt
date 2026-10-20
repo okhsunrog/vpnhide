@@ -2,7 +2,6 @@ package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.diagnostics.operationAffectsSelfMeasurement
-import dev.okhsunrog.vpnhide.picker.NativeTargetCapacityWarning
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -218,7 +217,7 @@ class ConfigCoordinatorTest {
             val historical = caller.await()
             assertEquals(TransitionFailure.ApplicationUnknown, historical.operation?.failure)
             coordinator.retry()
-            val warning = NativeTargetCapacityWarning(10, 8, 2)
+            val warning = NativeCapacityRefusal(10, 8, listOf(NativeCapacityPackage("com.example", listOf(10_123, 1_010_123))))
             io.recoveries.receive().complete(
                 ConfigPhaseEvidence(PhaseOutcome.Confirmed, RootCanonicalRead.Available(requireNotNull(io.config)), warning),
             )

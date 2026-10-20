@@ -25,8 +25,8 @@ class NativeBootStatusTest {
         val statuses = List(fixture.length()) { entry(it) }
         val kinds = statuses.map { it.outcome::class }.toSet()
 
-        assertEquals(15, statuses.size)
-        assertEquals(12, kinds.size)
+        assertEquals(16, statuses.size)
+        assertEquals(13, kinds.size)
         assertEquals(NativeBootOutcome.Selected(NativeBackendId.Kmod, NativeSelectionMode.Loaded, true), statuses[0].outcome)
         assertEquals(NativeBootOutcome.Selected(NativeBackendId.Builtin, NativeSelectionMode.Adopted, null), statuses[1].outcome)
         val first = statuses[0]
@@ -59,6 +59,26 @@ class NativeBootStatusTest {
             ),
             incompatible,
         )
+    }
+
+    @Test
+    fun `a capacity refusal keeps what to deselect`() {
+        val refused = List(fixture.length()) { entry(it).outcome }.filterIsInstance<NativeBootOutcome.CapacityExceeded>().single()
+
+        assertEquals(NativeBackendId.Kmod, refused.backend)
+        assertEquals(
+            NativeCapacityRefusal(
+                total = 162,
+                capacity = 160,
+                packages =
+                    listOf(
+                        NativeCapacityPackage("com.cloned", listOf(10_123, 1_010_123)),
+                        NativeCapacityPackage("com.example", listOf(10_200)),
+                    ),
+            ),
+            refused.report,
+        )
+        assertEquals(2, refused.report.overflow)
     }
 
     @Test

@@ -1,6 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.picker.NativeTargetCapacityWarning
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -115,7 +114,7 @@ internal class ConfigCoordinator(
     private var logging = CaptureLoggingState(false)
     private val drafts = mutableMapOf<Long, Set<ConfigField>>()
     private val requests = linkedMapOf<Long, CoordinatorMessage.Submit>()
-    private val capacities = mutableMapOf<Long, NativeTargetCapacityWarning>()
+    private val capacities = mutableMapOf<Long, NativeCapacityRefusal>()
     private val initializationWaiters = mutableListOf<CompletableDeferred<ConfigCoordinatorMode>>()
 
     init {
@@ -422,6 +421,6 @@ internal class ConfigCoordinator(
         mutableView.value = view.value.copy(lastResult = result, lastNativeCapacity = capacity)
         val request = requests.remove(result.id)
         publish()
-        request?.completion?.complete(CanonicalWriteResult(if (result.failure == null) 0 else -1, nativeCapacityOutput(capacity), result))
+        request?.completion?.complete(CanonicalWriteResult(if (result.failure == null) 0 else -1, "", result, capacity))
     }
 }

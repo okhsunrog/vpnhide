@@ -20,10 +20,13 @@
 use std::path::{Path, PathBuf};
 
 use vpnhide_activator::{
-    BUILTIN_BACKEND_ID, KMOD_BACKEND_ID, NativeHookFamily, PackageUidMap, deliver_kernel_config,
-    parse_canonical, project_native_for_family, project_native_with_resolver_for_family,
+    BUILTIN_BACKEND_ID, KMOD_BACKEND_ID, NativeCapacityExceeded, NativeHookFamily, PackageUidMap,
+    deliver_kernel_config, parse_canonical, project_native_for_family,
+    project_native_with_resolver_for_family,
 };
-use vpnhide_core_rpc::{CanonicalConfig, NativeBackend};
+use vpnhide_core_rpc::{
+    CanonicalConfig, NativeBackend, NativeCapacityPackage, NativeCapacityReport,
+};
 use vpnhide_protocol::{Status, parse_status_fields};
 
 use crate::config_file;
@@ -123,14 +126,58 @@ pub fn kmod_ctl_path_from_env() -> Option<PathBuf> {
     }
 }
 
+/// Why a config could not be projected into a backend's wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectionError {
+    /// The target set does not fit the backend. Refused whole — never truncated.
+    Capacity(NativeCapacityReport),
+    /// The config or the package lookup failed.
+    Failed(String),
+}
+
+impl std::fmt::Display for ProjectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Capacity(r) => write!(
+                f,
+                "native target capacity exceeded: {} uids, capacity {}",
+                r.total, r.capacity
+            ),
+            Self::Failed(e) => f.write_str(e),
+        }
+    }
+}
+
+/// The wire form of an activator capacity refusal.
+pub fn capacity_report(exceeded: &NativeCapacityExceeded) -> NativeCapacityReport {
+    let clamp = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+    NativeCapacityReport {
+        total: clamp(exceeded.total),
+        capacity: clamp(exceeded.capacity),
+        packages: exceeded
+            .packages
+            .iter()
+            .map(|p| NativeCapacityPackage {
+                package: p.package.clone(),
+                uids: p.uids.clone(),
+            })
+            .collect(),
+    }
+}
+
 /// Project a config into a backend family's control-v2 wire, resolving package uids from the
 /// live PackageManager. Device-only (needs `cmd package`); host tests use the resolver variant.
 pub fn project_native_wire(
     config: &CanonicalConfig,
     backend: NativeBackend,
-) -> Result<String, String> {
+) -> Result<String, ProjectionError> {
     let json = config_file::to_json_string(config);
-    project_native_for_family(&json, family_of(backend)).map_err(|e| e.to_string())
+    project_native_for_family(&json, family_of(backend)).map_err(|e| {
+        match e.downcast_ref::<NativeCapacityExceeded>() {
+            Some(exceeded) => ProjectionError::Capacity(capacity_report(exceeded)),
+            None => ProjectionError::Failed(e.to_string()),
+        }
+    })
 }
 
 /// Project with an explicit uid resolver — deterministic and PackageManager-free, for tests.
@@ -138,14 +185,11 @@ pub fn project_native_wire_with_resolver(
     config: &CanonicalConfig,
     backend: NativeBackend,
     resolver: &PackageUidMap,
-) -> Result<String, String> {
+) -> Result<String, ProjectionError> {
     let json = config_file::to_json_string(config);
-    let cfg = parse_canonical(&json).map_err(|e| e.to_string())?;
-    Ok(project_native_with_resolver_for_family(
-        &cfg,
-        resolver,
-        family_of(backend),
-    ))
+    let cfg = parse_canonical(&json).map_err(|e| ProjectionError::Failed(e.to_string()))?;
+    project_native_with_resolver_for_family(&cfg, resolver, family_of(backend))
+        .map_err(|e| ProjectionError::Capacity(capacity_report(&e)))
 }
 
 /// Deliver a control-v2 `wire` to the kernel control node at `path` for `backend`, refusing

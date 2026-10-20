@@ -53,6 +53,17 @@ internal fun DashboardIssue.toReason(): DashboardIssueReason =
             )
         }
 
+        is DashboardIssue.NativeCapacityExceeded -> {
+            DashboardIssueReason(
+                "native_capacity_exceeded",
+                mapOf(
+                    "total" to report.total.toString(),
+                    "capacity" to report.capacity.toString(),
+                    "packages" to report.packages.joinToString(",") { "${it.packageName}:${it.uids.size}" },
+                ),
+            )
+        }
+
         is DashboardIssue.NativeBootFailed -> {
             DashboardIssueReason("native_boot_failed", mapOf("detail" to detail))
         }

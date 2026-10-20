@@ -280,6 +280,25 @@ pub enum SelectionMode {
     Loaded,
 }
 
+/// One selected package's share of an over-capacity native target set (v7).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NativeCapacityPackage {
+    pub package: String,
+    /// The app uids (every profile and clone) the package adds to the target set.
+    pub uids: Vec<u32>,
+}
+
+/// Why a native target set was refused (v7): it projects to `total` distinct uids and
+/// the backends hold `capacity`. `packages` lists every native-selected package with
+/// the uids it contributes, most uids first, so the user can choose what to deselect;
+/// at least `total - capacity` uids must go. Core never truncates.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NativeCapacityReport {
+    pub total: u32,
+    pub capacity: u32,
+    pub packages: Vec<NativeCapacityPackage>,
+}
+
 /// The once-per-boot native decision (v6). Exactly one backend may run; more than one
 /// candidate is a [`NativeBootOutcome::Conflict`] and nothing is loaded or configured.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -313,6 +332,15 @@ pub enum NativeBootOutcome {
         found: Option<String>,
         minimum: String,
         detail: String,
+    },
+    /// The config projects to more distinct target uids than the selected backend can
+    /// hold. Core refused the whole projection: nothing was written to the backend and
+    /// whatever it held before stays in effect. Reached by Repair or boot delivery of a
+    /// config that no longer fits — for example after more profiles or clones of a
+    /// selected app appeared (v7).
+    CapacityExceeded {
+        backend: NativeBackend,
+        report: NativeCapacityReport,
     },
     /// The selected backend does not support the running kernel.
     UnsupportedKernel {
@@ -451,6 +479,9 @@ pub enum SubmitError {
     Unavailable,
     /// The edit failed validation before any phase could be dispatched.
     Rejected { reason: String },
+    /// The edited config projects to more native target uids than the running backend
+    /// holds. Nothing was persisted or applied; the previous config stays in effect (v7).
+    NativeCapacityExceeded(NativeCapacityReport),
 }
 
 /// The phases an operation runs, in the order the config coordinator dispatches them
@@ -564,6 +595,23 @@ mod tests {
     {
         let bytes = serde_json::to_vec(value).unwrap_or_else(|e| panic!("{what} encode: {e}"));
         serde_json::from_slice(&bytes).unwrap_or_else(|e| panic!("{what} decode: {e}"))
+    }
+
+    fn sample_capacity_report() -> NativeCapacityReport {
+        NativeCapacityReport {
+            total: 162,
+            capacity: 160,
+            packages: vec![
+                NativeCapacityPackage {
+                    package: "com.cloned".into(),
+                    uids: vec![10123, 1010123],
+                },
+                NativeCapacityPackage {
+                    package: "com.example".into(),
+                    uids: vec![10200],
+                },
+            ],
+        }
     }
 
     /// Every argument and return type of every `VpnhideCore` method, every variant.
@@ -701,6 +749,10 @@ mod tests {
                     found: None,
                     minimum: "1.2.0".into(),
                     detail: "no status".into(),
+                },
+                NativeBootOutcome::CapacityExceeded {
+                    backend: NativeBackend::Kmod,
+                    report: sample_capacity_report(),
                 },
                 NativeBootOutcome::UnsupportedKernel {
                     backend: NativeBackend::Kpm,
@@ -851,6 +903,7 @@ mod tests {
                 SubmitError::Rejected {
                     reason: "oversized".into(),
                 },
+                SubmitError::NativeCapacityExceeded(sample_capacity_report()),
             ] {
                 let refused: Result<Accepted, SubmitError> = Err(err.clone());
                 assert_eq!(survives("SubmitError", &refused), refused);

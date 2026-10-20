@@ -1,7 +1,6 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.core.CoreRootEffect
-import dev.okhsunrog.vpnhide.picker.NativeTargetCapacityWarning
 
 internal enum class ConfigCoordinatorMode { Initializing, Open, Missing, Invalid, Unavailable, Paused }
 
@@ -11,7 +10,8 @@ internal data class ConfigCoordinatorView(
     val pending: Map<CanonicalToggle, Boolean> = emptyMap(),
     val operations: Set<Long> = emptySet(),
     val lastResult: ConfigOperationResult? = null,
-    val lastNativeCapacity: NativeTargetCapacityWarning? = null,
+    /** Why [lastResult] was refused at Save, when its native target set did not fit. */
+    val lastNativeCapacity: NativeCapacityRefusal? = null,
     val activeCaptures: Int = 0,
     val recoveredResult: ConfigOperationResult? = null,
     val rechecking: Boolean = false,
@@ -25,13 +25,9 @@ internal data class ConfigInitialization(
 internal data class ConfigPhaseEvidence(
     val outcome: PhaseOutcome,
     val canonical: RootCanonicalRead,
-    val nativeCapacity: NativeTargetCapacityWarning? = null,
-) {
-    val output: String get() = nativeCapacityOutput(nativeCapacity)
-}
-
-internal fun nativeCapacityOutput(warning: NativeTargetCapacityWarning?): String =
-    warning?.let { "vpnhide-warning native_target_cap total=${it.total} cap=${it.capacity} dropped=${it.dropped}" }.orEmpty()
+    /** Core refused the edit at Save because its native target set does not fit. */
+    val nativeCapacity: NativeCapacityRefusal? = null,
+)
 
 internal interface ConfigCoordinatorIo {
     suspend fun initialize(): ConfigInitialization

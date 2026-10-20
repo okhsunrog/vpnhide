@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import android.content.Context
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +28,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
@@ -131,7 +133,9 @@ private fun ConfigFailureSnackbar(
     feedback: ConfigFeedbackViewModel,
 ) {
     val notice = configFailureNotice(view)
-    val message = notice?.status?.let { stringResource(configStatusText(it.message)) }
+    val context = LocalContext.current
+    val generic = notice?.status?.let { stringResource(configStatusText(it.message)) }
+    val message = notice?.nativeCapacity?.saveRefusedMessage(context.resources) { appLabel(context, it) } ?: generic
     val action = if (notice?.status?.canApply == true) stringResource(R.string.config_apply_again) else null
     val scope = rememberCoroutineScope()
     LaunchedEffect(notice) {
@@ -172,6 +176,16 @@ private fun ConfigBlockedDialog(
         },
     )
 }
+
+/** The user-facing name of [packageName], or the package name when it is not visible. */
+private fun appLabel(
+    context: Context,
+    packageName: String,
+): String =
+    runCatching {
+        val pm = context.packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
+    }.getOrDefault(packageName)
 
 private fun configStatusText(message: ConfigStatusMessage): Int =
     when (message) {

@@ -96,6 +96,14 @@ internal sealed interface DashboardIssue {
         val detail: String,
     ) : Native
 
+    /**
+     * The saved selection no longer fits the native backend (Repair or boot delivery):
+     * nothing was sent and the backend keeps its previous targets.
+     */
+    data class NativeCapacityExceeded(
+        val report: NativeCapacityRefusal,
+    ) : Native
+
     /** Core's native boot step failed in a way no module card explains. */
     data class NativeBootFailed(
         val detail: String,
@@ -556,6 +564,10 @@ private fun nativeBootIssues(facts: DashboardFacts): List<DashboardIssue> {
 
             is NativeBootOutcome.KpmIncompatible -> {
                 add(DashboardIssue.KpmIncompatible(outcome.found, outcome.minimum, outcome.detail))
+            }
+
+            is NativeBootOutcome.CapacityExceeded -> {
+                add(DashboardIssue.NativeCapacityExceeded(outcome.report))
             }
 
             is NativeBootOutcome.ForeignOwner -> {

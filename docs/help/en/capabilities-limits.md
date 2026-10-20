@@ -23,10 +23,10 @@ different things, and VPN Hide has a role for each: **Java**, **Native**,
   need LSPosed; Native needs a native backend; Ports comes with the core module. You can use fewer layers, with less coverage.
 - **Give Native to an unlimited number of apps.** The native backend protects up
   to **159 app UIDs** (it counts UIDs, not apps, and reserves one slot for VPN
-  Hide itself). The picker prevents selections/saves over its UID budget. Reduce
-  the Native selection if it reports the limit. An imported configuration or new
-  profile can also exceed runtime capacity; do not ignore an apply/capacity warning
-  or assume every saved target is protected. An app cloned into a work profile or Second Space counts
+  Hide itself). The picker counts the way the backend does and disables Save while
+  the selection is over its UID budget. If more profile or clone copies of selected
+  apps appear later, VPN Hide does not protect a partial set: it sends nothing,
+  keeps the previous Native targets and lists the apps to turn Native off for. An app cloned into a work profile or Second Space counts
   twice — see [Work profiles](work-profiles.md). The Java and Apps roles aren't
   capped this way.
 - **Defeat a game's own anti-cheat.** Hiding a VPN from the very game you're

@@ -183,6 +183,9 @@ pub struct RealPhaseRunner {
     pub ports_source: vpnhide_core_rpc::PortsSource,
     /// Whether netd's chains existed before a boot Ports pass.
     pub ports_netd_ready: Option<bool>,
+    /// A wire admission already projected for this backend (the Save capacity check), so
+    /// the Native phase does not resolve packages twice. Ignored for any other backend.
+    pub native_wire: Option<(vpnhide_core_rpc::NativeBackend, String)>,
     selected: std::cell::Cell<Option<vpnhide_core_rpc::NativeBackend>>,
     ports_report: std::cell::RefCell<Option<vpnhide_core_rpc::PortsFamilyReport>>,
 }
@@ -211,6 +214,7 @@ impl RealPhaseRunner {
             native: None,
             ports_source: vpnhide_core_rpc::PortsSource::Edit,
             ports_netd_ready: None,
+            native_wire: None,
             selected: std::cell::Cell::new(None),
             ports_report: std::cell::RefCell::new(None),
         }
@@ -267,7 +271,11 @@ impl PhaseRunner for RealPhaseRunner {
                     };
                 };
                 self.selected.set(Some(backend));
-                match crate::activation::project_native_wire(candidate, backend) {
+                let projected = match &self.native_wire {
+                    Some((for_backend, wire)) if *for_backend == backend => Ok(wire.clone()),
+                    _ => crate::activation::project_native_wire(candidate, backend),
+                };
+                match projected {
                     Ok(wire) => {
                         if let Err(e) = crate::ownership::claim_before_native(backend) {
                             eprintln!("core: native ownership claim failed: {e}");
@@ -277,7 +285,13 @@ impl PhaseRunner for RealPhaseRunner {
                         boot.record_delivery(result);
                         outcome
                     }
-                    Err(error) => {
+                    // Refused whole: nothing reaches the backend, which keeps its
+                    // previous policy. Never a truncated, partial target set.
+                    Err(crate::activation::ProjectionError::Capacity(report)) => {
+                        boot.record_capacity_exceeded(report);
+                        PhaseOutcome::FailedKnown
+                    }
+                    Err(crate::activation::ProjectionError::Failed(error)) => {
                         boot.record_delivery(Err(format!("projection failed: {error}")));
                         PhaseOutcome::FailedKnown
                     }

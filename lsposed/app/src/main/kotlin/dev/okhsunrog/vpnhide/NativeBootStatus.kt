@@ -77,6 +77,15 @@ internal sealed interface NativeBootOutcome {
         val detail: String,
     ) : NativeBootOutcome
 
+    /**
+     * The saved config projects to more target UIDs than the selected backend holds (a
+     * Repair or boot delivery). Core sent nothing: the backend keeps its previous targets.
+     */
+    data class CapacityExceeded(
+        val backend: NativeBackendId,
+        val report: NativeCapacityRefusal,
+    ) : NativeBootOutcome
+
     data class UnsupportedKernel(
         val backend: NativeBackendId,
         val uname: String,
@@ -268,6 +277,10 @@ private fun outcome(raw: Any): NativeBootOutcome {
             )
         }
 
+        "CapacityExceeded" -> {
+            NativeBootOutcome.CapacityExceeded(backend(body.getString("backend")), parseNativeCapacityReport(body.getJSONObject("report")))
+        }
+
         "UnsupportedKernel" -> {
             NativeBootOutcome.UnsupportedKernel(backend(body.getString("backend")), body.getString("uname"), body.getString("detail"))
         }
@@ -393,6 +406,12 @@ internal fun NativeBootStatus?.kpmLoadStatus(): KpmLoadStatus {
 
         is NativeBootOutcome.KpmIncompatible -> {
             status(KpmRuntime.Unknown, true, KpmFailureReason.ActivationFailed, outcome.detail)
+        }
+
+        // The KPM runs; the config just does not fit. The dashboard's capacity issue owns
+        // the wording, so the KPM card must not also report a load problem.
+        is NativeBootOutcome.CapacityExceeded -> {
+            kpmOnly(outcome.backend) { status(KpmRuntime.Activator, true, KpmFailureReason.Ok) }
         }
 
         is NativeBootOutcome.UnsupportedKernel -> {
