@@ -35,8 +35,9 @@ jobs:
   # Decide which areas this run exercises. A pull request runs the jobs whose
   # paths changed, plus everything an area shares: the code generators, the
   # kernel side and the QEMU probes (`shared`, which also starts the QEMU
-  # matrix) and the Rust workspace (`shared_rust`: the activator every zip
-  # bundles, so every area packages, but no QEMU kernel runs it). An `area:*`
+  # matrix) and the Rust workspace (`shared_rust`: core, its activator library
+  # and the app-native crates, so every area packages, but no QEMU kernel runs
+  # it). An `area:*`
   # label forces that area and `ci:full` forces everything, whatever the diff;
   # a change under .github runs everything; pushes to main, tags and manual
   # dispatches always run everything. A skipped job counts as passing for

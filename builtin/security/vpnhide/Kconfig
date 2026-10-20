@@ -15,7 +15,7 @@ config VPNHIDE
 	  CONFIG_KPROBES=n, or whole-program LTO that mangles hook-target symbols.
 
 	  Configuration (target UID list + per-hook masks) is delivered at runtime
-	  by the userspace activator through /proc/vpnhide_ctl using the shared
+	  by the VPN Hide Core userspace daemon through /proc/vpnhide_ctl using the shared
 	  control protocol (docs/protocol.md); with no config written the hooks
 	  are inert.
 
