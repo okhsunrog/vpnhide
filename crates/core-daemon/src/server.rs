@@ -17,9 +17,9 @@ use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use tokio_util::sync::CancellationToken;
 use vpnhide_core_rpc::{
     Accepted, BaseRef, CanonicalConfig, ClientHello, ConfigEdit, ConfigPhase, DiagnosticsReport,
-    DiagnosticsRequest, EffectError, Handshake, LogcatRecordingError, LogcatSessionId,
-    LogcatSessionStatus, OperationId, OperationRecord, PROTOCOL_VERSION, PhaseOutcome, PhaseRecord,
-    Published, RootEffect, SubmitError, VpnhideCore,
+    DiagnosticsRequest, EffectError, Handshake, LogcatDebugLease, LogcatDebugRestore,
+    LogcatRecordingError, LogcatSessionId, LogcatSessionStatus, OperationId, OperationRecord,
+    PROTOCOL_VERSION, PhaseOutcome, PhaseRecord, Published, RootEffect, SubmitError, VpnhideCore,
 };
 
 use crate::config_edit::{self, apply_canonical_edit};
@@ -85,6 +85,8 @@ pub struct CoreState {
     epoch: AtomicU64,
     /// The single full-system logcat recording slot (v8).
     logcat: crate::logcat_session::Recorder,
+    /// A logcat session holds debug logging on: every admitted edit keeps `debug` true (v9).
+    debug_lease: std::sync::atomic::AtomicBool,
 }
 
 /// Internal admission options: boot passes pick their own plan and Ports source.
@@ -129,7 +131,16 @@ impl CoreState {
             logcat: crate::logcat_session::Recorder::new(
                 crate::logcat_session::RecorderConfig::from_env(),
             ),
+            debug_lease: std::sync::atomic::AtomicBool::new(false),
         })
+        .with_debug_control()
+    }
+
+    /// Point the logcat recorder's debug lease at this core (weakly: no cycle).
+    fn with_debug_control(self: Arc<Self>) -> Arc<Self> {
+        self.logcat
+            .set_debug_control(Some(Arc::new(CoreDebugControl(Arc::downgrade(&self)))));
+        self
     }
 
     /// Invalidate in-flight external dispatch. Delayed workers whose admit ticket no
@@ -269,7 +280,9 @@ impl CoreState {
             logcat: crate::logcat_session::Recorder::new(
                 crate::logcat_session::RecorderConfig::from_env(),
             ),
-        });
+            debug_lease: std::sync::atomic::AtomicBool::new(false),
+        })
+        .with_debug_control();
         if let Some(config) = config {
             state.publisher.update(|snapshot| {
                 snapshot.config = Some(config);
@@ -505,6 +518,70 @@ impl CoreState {
         self.logcat.stop(session, &env)
     }
 
+    /// The app saved a logcat recording: core deletes its copies (blocking).
+    pub fn ack_logcat_recording(
+        &self,
+        session: LogcatSessionId,
+    ) -> Result<LogcatSessionStatus, LogcatRecordingError> {
+        let env = self.probe_env.read().expect("probe env").clone();
+        self.logcat.ack(session, &env)
+    }
+
+    /// Drop a logcat session and its files (blocking).
+    pub fn discard_logcat_recording(
+        &self,
+        session: LogcatSessionId,
+    ) -> Result<(), LogcatRecordingError> {
+        let env = self.probe_env.read().expect("probe env").clone();
+        self.logcat.discard(session, &env)
+    }
+
+    /// The currently published snapshot (tests and diagnostics).
+    pub fn snapshot(&self) -> vpnhide_core_rpc::StateSnapshot {
+        self.publisher.current().snapshot
+    }
+
+    /// Whether a logcat session holds debug logging on.
+    pub fn debug_lease_held(&self) -> bool {
+        self.debug_lease.load(Ordering::SeqCst)
+    }
+
+    fn set_debug_lease(&self, held: bool) {
+        self.debug_lease.store(held, Ordering::SeqCst);
+        self.publisher
+            .update(|snapshot| snapshot.debug_lease = held);
+    }
+
+    /// Write `debug = enabled` as core's own journaled edit, retrying a field conflict with
+    /// a fresh base. True when the stored config ends with that value.
+    fn write_debug(&self, enabled: bool) -> bool {
+        for _ in 0..3 {
+            let base = BaseRef {
+                revision: self.config_revision(),
+            };
+            let edit = ConfigEdit::Toggle {
+                field: vpnhide_core_rpc::ConfigToggle::Debug,
+                enabled,
+            };
+            match self.submit_edit(internal_op_id(), base, &edit) {
+                Ok(_) => break,
+                Err(SubmitError::Conflict { .. }) => continue,
+                Err(e) => {
+                    crate::alog::info(&format!("logcat: debug write refused: {e:?}"));
+                    break;
+                }
+            }
+        }
+        self.current_debug()
+            .is_some_and(|(debug, _)| debug == enabled)
+    }
+
+    /// The stored config's `(debug, debugSwitch)`, if core holds a config.
+    fn current_debug(&self) -> Option<(bool, bool)> {
+        let store = self.config.lock().expect("config mutex");
+        store.config.as_ref().map(|c| (c.debug, c.debug_switch))
+    }
+
     /// Run a batch of fixed probes (blocking).
     pub fn collect_diagnostics(&self, request: &DiagnosticsRequest) -> DiagnosticsReport {
         let env = self.probe_env.read().expect("probe env").clone();
@@ -633,9 +710,13 @@ impl CoreState {
                 _ => return Err(SubmitError::Unavailable),
             },
         };
-        let next = apply_canonical_edit(&current, edit);
-        let changed = store.config.as_ref() != Some(&next);
         let repair = matches!(edit, ConfigEdit::RepairActivation);
+        let mut next = apply_canonical_edit(&current, edit);
+        // A logcat session's lease keeps debug logging on whatever the edit says (v9).
+        if !repair && self.debug_lease.load(Ordering::SeqCst) {
+            next.debug = true;
+        }
+        let changed = store.config.as_ref() != Some(&next);
 
         // Run the operation's phase plan. The runner performs the durable write (Persist) and,
         // when a control node is configured, delivers the native wire (Native). Repair skips
@@ -1019,11 +1100,90 @@ impl VpnhideCore for CoreServer {
             .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
     }
 
+    async fn ack_logcat_recording(
+        self,
+        _ctx: Context,
+        session: LogcatSessionId,
+    ) -> Result<LogcatSessionStatus, LogcatRecordingError> {
+        let state = self.state.clone();
+        tokio::task::spawn_blocking(move || state.ack_logcat_recording(session))
+            .await
+            .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
+    }
+
+    async fn discard_logcat_recording(
+        self,
+        _ctx: Context,
+        session: LogcatSessionId,
+    ) -> Result<(), LogcatRecordingError> {
+        let state = self.state.clone();
+        tokio::task::spawn_blocking(move || state.discard_logcat_recording(session))
+            .await
+            .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
+    }
+
     async fn logcat_recording_status(self, _ctx: Context) -> Option<LogcatSessionStatus> {
         let state = self.state.clone();
         tokio::task::spawn_blocking(move || state.logcat().status())
             .await
             .unwrap_or(None)
+    }
+}
+
+/// Core's own operation ids (logcat debug lease writes): tagged so they never collide
+/// with the app's random ids or the boot and superkey tags.
+fn internal_op_id() -> OperationId {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(1);
+    let seq = SEQ.fetch_add(1, Ordering::SeqCst);
+    OperationId((1 << 61) | ((nanos.wrapping_add(seq)) & ((1 << 61) - 1)))
+}
+
+/// The recorder's view of this core's config for the debug-logging lease.
+struct CoreDebugControl(std::sync::Weak<CoreState>);
+
+impl crate::logcat_session::DebugControl for CoreDebugControl {
+    fn acquire(&self, persist: &dyn Fn(&LogcatDebugLease)) -> Option<LogcatDebugLease> {
+        let state = self.0.upgrade()?;
+        let (previous_debug, previous_debug_switch) = state.current_debug()?;
+        let mut lease = LogcatDebugLease {
+            previous_debug,
+            previous_debug_switch,
+            restore: LogcatDebugRestore::Pending,
+        };
+        persist(&lease);
+        state.set_debug_lease(true);
+        if !previous_debug && !state.write_debug(true) {
+            state.set_debug_lease(false);
+            return None;
+        }
+        lease.restore = LogcatDebugRestore::Held;
+        Some(lease)
+    }
+
+    fn release(&self, lease: &LogcatDebugLease) -> LogcatDebugRestore {
+        let Some(state) = self.0.upgrade() else {
+            return LogcatDebugRestore::Pending;
+        };
+        state.set_debug_lease(false);
+        // No config any more (full reset): nothing to put back.
+        let Some((debug, debug_switch)) = state.current_debug() else {
+            return LogcatDebugRestore::Restored;
+        };
+        // The user's switch is the explicit intent: a change to it during the session wins.
+        let (target, kind) = if debug_switch != lease.previous_debug_switch {
+            (debug_switch, LogcatDebugRestore::UserChoice)
+        } else {
+            (lease.previous_debug, LogcatDebugRestore::Restored)
+        };
+        if debug == target || state.write_debug(target) {
+            kind
+        } else {
+            LogcatDebugRestore::Pending
+        }
     }
 }
 

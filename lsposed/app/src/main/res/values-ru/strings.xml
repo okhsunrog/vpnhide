@@ -462,6 +462,13 @@
     <string name="logcat_auto_stopped_exited">logcat завершился сам, поэтому VPN Hide Core закончил запись раньше времени.</string>
     <string name="logcat_start_failed">Не удалось начать запись в VPN Hide Core (%1$s).</string>
     <string name="logcat_stop_failed">Не удалось получить запись от VPN Hide Core (%1$s).</string>
+    <string name="logcat_auto_stopped_core_restarted">VPN Hide Core остановился (сбой, обновление или перезагрузка) во время записи, поэтому запись заканчивается там, где остановился core.</string>
+    <string name="logcat_discard_failed">Не удалось удалить запись в VPN Hide Core (%1$s).</string>
+    <string name="logcat_undelivered_title">Есть несохранённая запись</string>
+    <string name="logcat_undelivered_body">В VPN Hide Core осталась запись от %1$s (%2$s, %3$s), которая так и не была сохранена. Сохраните её в ZIP или удалите. Новая запись тоже удалит её.</string>
+    <string name="logcat_btn_save_recording">Сохранить запись</string>
+    <string name="logcat_btn_discard_recording">Удалить</string>
+    <string name="logcat_debug_lease_note">Во время записи VPN Hide Core держит отладочное логирование включённым и потом выключает его обратно. Если вы переключите отладку за это время, останется ваш выбор.</string>
     <string name="diag_summary_tally">Скрыто: %1$d · Утечек: %2$d</string>
     <!-- Статус проверки в диагностике: цветная точка + короткое слово (кто скрыл VPN на этом векторе). -->
     <string name="diag_status_ok">ОК</string>

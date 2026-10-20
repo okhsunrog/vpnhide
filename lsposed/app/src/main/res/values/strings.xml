@@ -128,6 +128,13 @@
     <string name="logcat_auto_stopped_exited">logcat exited on its own, so VPN Hide Core ended this recording early.</string>
     <string name="logcat_start_failed">Couldn\'t start the recording in VPN Hide Core (%1$s).</string>
     <string name="logcat_stop_failed">Couldn\'t get the recording from VPN Hide Core (%1$s).</string>
+    <string name="logcat_auto_stopped_core_restarted">VPN Hide Core stopped (a crash, an update or a reboot) while this was recording, so it ends where core stopped.</string>
+    <string name="logcat_discard_failed">Couldn\'t discard the recording in VPN Hide Core (%1$s).</string>
+    <string name="logcat_undelivered_title">An unsaved recording is waiting</string>
+    <string name="logcat_undelivered_body">VPN Hide Core still holds a recording from %1$s (%2$s, %3$s) that was never saved. Save it as a ZIP or discard it. Starting a new recording also discards it.</string>
+    <string name="logcat_btn_save_recording">Save recording</string>
+    <string name="logcat_btn_discard_recording">Discard</string>
+    <string name="logcat_debug_lease_note">While recording, VPN Hide Core keeps debug logging on and turns it back off afterwards. If you change the debug switch meanwhile, your choice is kept.</string>
     <!-- Diagnostics per-check status: coloured dot + short word (who hid the VPN on this vector). -->
     <string name="diag_status_ok">OK</string>
     <string name="diag_status_selinux" translatable="false">SELinux</string>

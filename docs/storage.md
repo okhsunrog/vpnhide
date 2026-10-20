@@ -131,7 +131,10 @@ manual and automatic hiding.
 `debugSwitch` is the user intent stored by the app toggle; `debug` is the
 effective in-runtime value. On a capture path, `debug` may temporarily become
 `true` while `debugSwitch` remains `false`. Startup reconciliation restores
-`debug := debugSwitch` when they diverge.
+`debug := debugSwitch` when they diverge. A core logcat recording holds `debug`
+on through core's own lease, and core restores it when the recording ends. If
+the user changed `debugSwitch` meanwhile, the switch wins (see
+[debug-bundle.md](debug-bundle.md) §1).
 
 Migration from pre-switch configs:
 

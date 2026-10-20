@@ -121,6 +121,13 @@
     <string name="logcat_auto_stopped_exited">logcat 自行退出，VPN Hide Core 提前结束了这次录制。</string>
     <string name="logcat_start_failed">无法在 VPN Hide Core 中开始录制（%1$s）。</string>
     <string name="logcat_stop_failed">无法从 VPN Hide Core 获取录制内容（%1$s）。</string>
+    <string name="logcat_auto_stopped_core_restarted">录制期间 VPN Hide Core 已停止（崩溃、更新或重启），因此录制在 core 停止处结束。</string>
+    <string name="logcat_discard_failed">无法在 VPN Hide Core 中丢弃该录制（%1$s）。</string>
+    <string name="logcat_undelivered_title">有一份未保存的录制</string>
+    <string name="logcat_undelivered_body">VPN Hide Core 仍保留着一份来自 %1$s 的录制（%2$s，%3$s），尚未保存。可将其保存为 ZIP 或丢弃。开始新的录制也会丢弃它。</string>
+    <string name="logcat_btn_save_recording">保存录制</string>
+    <string name="logcat_btn_discard_recording">丢弃</string>
+    <string name="logcat_debug_lease_note">录制期间 VPN Hide Core 会保持调试日志开启，结束后再关闭。如果你在此期间更改了调试开关，将保留你的选择。</string>
     <!-- Diagnostics per-check status: coloured dot + short word (who hid the VPN on this vector). -->
     <string name="diag_status_ok">正常</string>
     <string name="diag_status_leak">暴露</string>

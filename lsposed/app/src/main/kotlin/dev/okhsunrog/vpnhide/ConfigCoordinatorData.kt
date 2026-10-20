@@ -46,6 +46,13 @@ internal interface ConfigCoordinatorIo {
         operationId: Long,
         phase: ConfigPhase,
     ): ConfigPhaseEvidence
+
+    /**
+     * Whether the last state read says core holds debug logging on for a logcat recording.
+     * Candidates then keep `debug` true (core enforces it anyway), so confirmed == candidate.
+     */
+    val debugLease: Boolean
+        get() = false
 }
 
 internal fun configMutationPlan(

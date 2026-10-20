@@ -332,7 +332,8 @@ internal class ConfigCoordinator(
                     )
                 publish()
                 val config = view.value.confirmed
-                if (manageLogging && config != null && config.debug != (config.debugSwitch || logging.tokens.isNotEmpty())) {
+                val wanted = config?.let { it.debugSwitch || logging.tokens.isNotEmpty() || io.debugLease }
+                if (manageLogging && config != null && config.debug != wanted) {
                     messages.trySend(
                         CoordinatorMessage.Submit(
                             CanonicalMutation(emptyList(), source = OperationSource.System),
@@ -372,11 +373,14 @@ internal class ConfigCoordinator(
 
     private fun prepare(effect: ConfigOperationEffect.Prepare) {
         val mutation = requests.getValue(effect.ticket.owner).mutation
-        val captureEnabled = logging.tokens.isNotEmpty().takeIf { manageLogging }
+        val tokens = logging.tokens.isNotEmpty()
         scope.launch(Dispatchers.IO) {
             val event =
                 runCatching {
-                    prepareConfigMutation(effect.ticket, io.read(), mutation, captureEnabled)
+                    val read = io.read()
+                    // Core's logcat lease holds `debug` on like a capture token (read with the config).
+                    val captureEnabled = (tokens || io.debugLease).takeIf { manageLogging }
+                    prepareConfigMutation(effect.ticket, read, mutation, captureEnabled)
                 }.getOrElse { ConfigOperationEvent.PreparationFailed(effect.ticket, TransitionFailure.ReadFailed) }
             messages.send(CoordinatorMessage.Input(event))
         }

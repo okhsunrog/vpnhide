@@ -65,8 +65,9 @@ pub async fn root_effect(socket_path: String, op: u64, effect_json: String) -> S
 }
 
 /// Core's full-system logcat recording. `request_json` is
-/// `{"action":"start"|"stop"|"status","session":<id>}` (`session` unused for status);
-/// the reply is `{"status":"ok","session":…|null}`, `busy` (with `running`),
+/// `{"action":"start"|"stop"|"status"|"ack"|"discard","session":<id>}` (`session` unused
+/// for status); the reply is `{"status":"ok","session":…|null}` (`null` for status with no
+/// session and for discard), `busy` (with `running`),
 /// `unknown_session`, `disabled`, `refused`, `failed`, or a delivery status. Never throws.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn logcat_recording(socket_path: String, request_json: String) -> String {

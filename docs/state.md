@@ -126,7 +126,8 @@ Mode `0700`, root-only. Journal, ownership markers, `core.log`, plus:
 | `native_boot.json` | serde JSON of `core-rpc` `NativeBootStatus`, keyed by `boot_id` | core, once per boot (updated by deliveries and Ports applies) | core (re-adopts on restart in the same boot); debug export. The app reads the same status over RPC (`backend.boot`). | replaced on the next boot's scan |
 | `boot_status` | `key=value` boot pass report | core boot passes | debug export | overwritten each boot |
 | `boot_phase` | `boot_phase=service` | `vpnhide-core service` | debug export | overwritten each boot |
-| `logcat/session-<id>.log` | raw `logcat -b all -v threadtime` (0600) | core's logcat session child, through core (capped at 64 MiB / 30 min) | core, which copies it to the app's export dir on Stop | removed by the next session and at core start |
+| `logcat/session-<id>.log` | raw `logcat -b all -v threadtime` (0600) | core's logcat session child, through core (capped at 64 MiB / 30 min) | core, which copies it to the app's export dir on Stop | kept until delivered: deleted on the app's ack, on discard, and by the next Start; kept across a core restart while undelivered |
+| `logcat/session.json` | serde JSON session record (0600): id, start, limits, end state, debug lease (`previous_debug`, `previous_debug_switch`, `restore`), `delivered` | core, atomically on every change | core at start (`recover`: end an unfinished session as `core_restarted`, release its debug lease, keep an undelivered recording) | the latest session only; removed with the session (discard, next Start), and at start once delivered |
 
 The per-backend `load_status` / `load_dmesg` files (`/data/adb/vpnhide_kmod/`,
 `…_builtin/`, `…_kpm/`) are gone: a kmod load failure's insmod exit, stderr and

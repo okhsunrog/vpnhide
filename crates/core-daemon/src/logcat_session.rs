@@ -1,4 +1,4 @@
-//! Core-owned full-system logcat recording (protocol v8).
+//! Core-owned full-system logcat recording (protocol v8; debug lease and delivery v9).
 //!
 //! The app starts and stops a session; core runs the one `logcat -b all -v threadtime`
 //! child (direct exec, never a shell) and owns everything about it:
@@ -12,9 +12,25 @@
 //!   the session is `AutoStopped`, so a killed app can't leave root logcat running.
 //! - **Dies with core.** The child gets `PR_SET_PDEATHSIG(SIGKILL)` against the supervisor
 //!   thread that spawned it, and that thread lives until the child is reaped; a clean
-//!   shutdown stops it explicitly. Files left by an earlier core run are removed at start.
+//!   shutdown stops it explicitly. At start, [`Recorder::recover`] ends a session an
+//!   earlier core run left recording (`CoreRestarted`) and removes everything else.
 //! - **Delivery.** Stop copies the file into the app's export dir (app-owned, 0600), the
-//!   same route large probe output takes, never inline over the 1 MiB frame.
+//!   same route large probe output takes, never inline over the 1 MiB frame. The session
+//!   stays undelivered until the app acknowledges it saved the recording (`ack`), or
+//!   discards it; until then core keeps the file, also across a core restart.
+//! - **Debug logging (v9).** Start takes a lease on the config's `debug` field: core writes
+//!   `debug = true` through its own journaled edit path and keeps it true on every edit it
+//!   admits while the session records. When the session ends (Stop, any auto-stop, or at
+//!   the next core start after a crash or reboot) core puts it back:
+//!   - if the user's debug switch (`debugSwitch`) still has its value from the start of the
+//!     session, `debug` returns to the value it had then (`Restored`);
+//!   - if the user changed the switch during the session, `debug` follows the switch
+//!     (`UserChoice`): an explicit change always wins over the restore.
+//!
+//!   A restore that cannot be written yet (an uncertain operation blocks writes) stays
+//!   `Pending` in the session record and is retried on the next session call and at start.
+//! - **Persistence.** `<dir>/session.json` holds the one session's record (limits, end
+//!   state, lease, delivery); only the latest session is kept.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -27,9 +43,10 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use vpnhide_core_rpc::{
-    LogcatAutoStopReason, LogcatRecordingError, LogcatSessionId, LogcatSessionState,
-    LogcatSessionStatus,
+    LogcatAutoStopReason, LogcatDebugLease, LogcatDebugRestore, LogcatRecordingError,
+    LogcatSessionId, LogcatSessionState, LogcatSessionStatus,
 };
 
 use crate::diagnostics::{ProbeEnv, hand_to_app, prepare_dir};
@@ -41,6 +58,10 @@ pub const MAX_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_DURATION: Duration = Duration::from_secs(30 * 60);
 /// How long Stop (and shutdown) waits for the child to exit and the file to flush.
 const STOP_WAIT: Duration = Duration::from_secs(10);
+/// How long shutdown and discard wait for the debug restore after the child ended.
+const SETTLE_WAIT: Duration = Duration::from_secs(30);
+/// The session record in the session dir.
+const RECORD_NAME: &str = "session.json";
 /// Name prefix of the copy core hands to the app.
 pub const EXPORT_PREFIX: &str = "logcat-session-";
 /// Core's subdir (in its own state dir) for session files.
@@ -84,95 +105,204 @@ impl RecorderConfig {
     }
 }
 
+/// Core's side of the debug-logging lease (implemented by `CoreState`).
+pub trait DebugControl: Send + Sync {
+    /// Turn `debug` on and hold it while recording. `None` when core cannot write now.
+    /// `persist` gets the lease (`restore: Pending`) after the previous values are read
+    /// and before anything is written, so a crash in between still knows what to restore.
+    fn acquire(&self, persist: &dyn Fn(&LogcatDebugLease)) -> Option<LogcatDebugLease>;
+    /// Stop holding `debug` and put it back by the restore rule (see the module docs).
+    fn release(&self, lease: &LogcatDebugLease) -> LogcatDebugRestore;
+}
+
 enum Event {
     Stop,
     Cap,
     Eof,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Ended {
     state: LogcatSessionState,
     duration_ms: u64,
+    bytes: u64,
+    truncated: bool,
+    #[serde(default)]
     logcat_exit: Option<i32>,
 }
 
-#[derive(Default)]
+/// What core persists for the one session it keeps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SessionRecord {
+    session: u64,
+    started_at_ms: u64,
+    max_bytes: u64,
+    max_duration_ms: u64,
+    #[serde(default)]
+    ended: Option<Ended>,
+    #[serde(default)]
+    debug: Option<LogcatDebugLease>,
+    #[serde(default)]
+    delivered: bool,
+}
+
 struct Shared {
     bytes: AtomicU64,
     truncated: AtomicBool,
-    ended: Mutex<Option<Ended>>,
+    record: Mutex<SessionRecord>,
+    record_path: PathBuf,
+    /// Discarded: never write the record again (a late supervisor must not recreate it).
+    discarded: AtomicBool,
+    /// The supervisor finished (child reaped, debug released).
+    settled: AtomicBool,
     cv: Condvar,
 }
 
 impl Shared {
-    fn running(&self) -> bool {
-        self.ended.lock().expect("logcat ended").is_none()
+    fn new(record: SessionRecord, record_path: PathBuf, settled: bool) -> Self {
+        let bytes = record.ended.as_ref().map_or(0, |e| e.bytes);
+        let truncated = record.ended.as_ref().is_some_and(|e| e.truncated);
+        Shared {
+            bytes: AtomicU64::new(bytes),
+            truncated: AtomicBool::new(truncated),
+            record: Mutex::new(record),
+            record_path,
+            discarded: AtomicBool::new(false),
+            settled: AtomicBool::new(settled),
+            cv: Condvar::new(),
+        }
     }
 
-    /// Wait until the supervisor recorded the end, up to `wait`.
-    fn wait_ended(&self, wait: Duration) -> bool {
-        let guard = self.ended.lock().expect("logcat ended");
+    fn record(&self) -> std::sync::MutexGuard<'_, SessionRecord> {
+        self.record.lock().expect("logcat record")
+    }
+
+    fn running(&self) -> bool {
+        self.record().ended.is_none()
+    }
+
+    /// Change the record and write it through (unless discarded).
+    fn update(&self, change: impl FnOnce(&mut SessionRecord)) {
+        let mut record = self.record();
+        change(&mut record);
+        if !self.discarded.load(Ordering::SeqCst) {
+            if let Err(e) = write_record(&self.record_path, &record) {
+                crate::alog::info(&format!("logcat: session record write failed: {e}"));
+            }
+        }
+        drop(record);
+        self.cv.notify_all();
+    }
+
+    fn wait(&self, wait: Duration, done: impl Fn(&SessionRecord, &Shared) -> bool) -> bool {
+        let guard = self.record();
         let (guard, _) = self
             .cv
-            .wait_timeout_while(guard, wait, |ended| ended.is_none())
-            .expect("logcat ended");
-        guard.is_some()
+            .wait_timeout_while(guard, wait, |record| !done(record, self))
+            .expect("logcat record");
+        done(&guard, self)
     }
+
+    fn wait_ended(&self, wait: Duration) -> bool {
+        self.wait(wait, |record, _| record.ended.is_some())
+    }
+
+    fn wait_settled(&self, wait: Duration) -> bool {
+        self.wait(wait, |_, shared| shared.settled.load(Ordering::SeqCst))
+    }
+
+    fn mark_settled(&self) {
+        let _guard = self.record();
+        self.settled.store(true, Ordering::SeqCst);
+        self.cv.notify_all();
+    }
+}
+
+fn write_record(path: &Path, record: &SessionRecord) -> std::io::Result<()> {
+    let text = serde_json::to_string_pretty(record).map_err(std::io::Error::other)? + "\n";
+    let tmp = path.with_extension("json.tmp");
+    {
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+    }
+    fs::rename(&tmp, path)
+}
+
+fn read_record(path: &Path) -> Option<SessionRecord> {
+    serde_json::from_slice(&fs::read(path).ok()?).ok()
 }
 
 struct Session {
     id: LogcatSessionId,
-    started: Instant,
-    started_at_ms: u64,
+    /// `None` for a session recovered from disk (no child of this core run).
+    started: Option<Instant>,
     file: PathBuf,
-    max_bytes: u64,
-    max_duration: Duration,
     shared: Arc<Shared>,
-    events: mpsc::Sender<Event>,
+    events: Option<mpsc::Sender<Event>>,
     /// The export copy Stop handed to the app.
-    delivered: Option<PathBuf>,
+    delivered_copy: Option<PathBuf>,
 }
 
 impl Session {
     fn status(&self) -> LogcatSessionStatus {
-        let ended = self.shared.ended.lock().expect("logcat ended");
-        let (state, duration_ms, logcat_exit) = match ended.as_ref() {
-            Some(e) => (e.state.clone(), e.duration_ms, e.logcat_exit),
+        let record = self.shared.record();
+        let (state, duration_ms, bytes, truncated, logcat_exit) = match record.ended.as_ref() {
+            Some(e) => (
+                e.state.clone(),
+                e.duration_ms,
+                e.bytes,
+                e.truncated,
+                e.logcat_exit,
+            ),
             None => (
                 LogcatSessionState::Recording,
-                millis(self.started.elapsed()),
+                self.started.map_or(0, |s| millis(s.elapsed())),
+                self.shared.bytes.load(Ordering::SeqCst),
+                self.shared.truncated.load(Ordering::SeqCst),
                 None,
             ),
         };
         LogcatSessionStatus {
             session: self.id,
             state,
-            started_at_ms: self.started_at_ms,
+            started_at_ms: record.started_at_ms,
             duration_ms,
-            bytes: self.shared.bytes.load(Ordering::SeqCst),
-            truncated: self.shared.truncated.load(Ordering::SeqCst),
-            max_bytes: self.max_bytes,
-            max_duration_ms: millis(self.max_duration),
+            bytes,
+            truncated,
+            max_bytes: record.max_bytes,
+            max_duration_ms: record.max_duration_ms,
             logcat_exit,
             file: None,
+            delivered: record.delivered,
+            debug: record.debug,
         }
     }
 
     /// Ask the supervisor to stop and wait for the flushed end.
     fn stop(&self) -> bool {
         if self.shared.running() {
-            let _ = self.events.send(Event::Stop);
+            if let Some(events) = &self.events {
+                let _ = events.send(Event::Stop);
+            }
         }
         self.shared.wait_ended(STOP_WAIT)
     }
 
-    /// Remove core's file and the app's copy (a newer session replaces this one).
-    fn discard(self) {
-        self.stop();
+    /// Delete everything this session left (core file, export copies, record).
+    fn remove_files(&self, env: &ProbeEnv) {
+        self.shared.discarded.store(true, Ordering::SeqCst);
         let _ = fs::remove_file(&self.file);
-        if let Some(copy) = &self.delivered {
+        let _ = fs::remove_file(&self.shared.record_path);
+        if let Some(copy) = &self.delivered_copy {
             let _ = fs::remove_file(copy);
         }
+        remove_stale_exports(env);
     }
 }
 
@@ -180,6 +310,7 @@ impl Session {
 #[derive(Default)]
 pub struct Recorder {
     config: Mutex<Option<RecorderConfig>>,
+    debug: Mutex<Option<Arc<dyn DebugControl>>>,
     session: Mutex<Option<Session>>,
 }
 
@@ -187,6 +318,7 @@ impl Recorder {
     pub fn new(config: Option<RecorderConfig>) -> Self {
         Recorder {
             config: Mutex::new(config),
+            debug: Mutex::new(None),
             session: Mutex::new(None),
         }
     }
@@ -196,24 +328,122 @@ impl Recorder {
         *self.config.lock().expect("logcat config") = config;
     }
 
-    /// Remove every session file a previous core run left behind (core start only:
-    /// no session of this run exists yet).
-    pub fn clean_stale(&self) {
+    /// Who takes and releases the debug-logging lease (core installs itself).
+    pub fn set_debug_control(&self, control: Option<Arc<dyn DebugControl>>) {
+        *self.debug.lock().expect("logcat debug") = control;
+    }
+
+    fn debug_control(&self) -> Option<Arc<dyn DebugControl>> {
+        self.debug.lock().expect("logcat debug").clone()
+    }
+
+    /// Core start: pick up what an earlier core run left. An unfinished session (core
+    /// crashed, or the device rebooted) ends as `CoreRestarted` and has its debug lease
+    /// released; a finished, undelivered recording is kept so the app can still save it;
+    /// anything else in the dir is removed.
+    pub fn recover(&self) {
         let Some(config) = self.config.lock().expect("logcat config").clone() else {
             return;
         };
-        if self.session.lock().expect("logcat session").is_some() {
+        let mut slot = self.session.lock().expect("logcat session");
+        if slot.is_some() {
             return;
         }
-        let _ = fs::remove_dir_all(&config.dir);
+        let record_path = config.dir.join(RECORD_NAME);
+        let Some(mut record) = read_record(&record_path) else {
+            let _ = fs::remove_dir_all(&config.dir);
+            return;
+        };
+        let file = config.dir.join(log_name(record.session));
+        if record.ended.is_none() {
+            let meta = fs::metadata(&file).ok();
+            let bytes = meta.as_ref().map_or(0, |m| m.len());
+            let last_write_ms = meta
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map_or(record.started_at_ms, millis);
+            record.ended = Some(Ended {
+                state: LogcatSessionState::AutoStopped {
+                    reason: LogcatAutoStopReason::CoreRestarted,
+                },
+                duration_ms: last_write_ms
+                    .saturating_sub(record.started_at_ms)
+                    .min(record.max_duration_ms),
+                bytes,
+                truncated: bytes >= record.max_bytes,
+                logcat_exit: None,
+            });
+            crate::alog::info(&format!(
+                "logcat: session {} was still recording when core stopped; ended it",
+                record.session
+            ));
+        }
+        if let Some(lease) = record.debug.as_mut() {
+            if matches!(
+                lease.restore,
+                LogcatDebugRestore::Held | LogcatDebugRestore::Pending
+            ) {
+                lease.restore = match self.debug_control() {
+                    Some(control) => control.release(lease),
+                    None => LogcatDebugRestore::Pending,
+                };
+            }
+        }
+        // Keep only this session's two files.
+        if let Ok(entries) = fs::read_dir(&config.dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path != record_path && path != file {
+                    let _ = fs::remove_file(path);
+                }
+            }
+        }
+        let pending = record
+            .debug
+            .is_some_and(|l| l.restore == LogcatDebugRestore::Pending);
+        if record.delivered || (!file.exists() && !pending) {
+            let _ = fs::remove_dir_all(&config.dir);
+            return;
+        }
+        let shared = Arc::new(Shared::new(record.clone(), record_path, true));
+        if let Err(e) = write_record(&shared.record_path, &record) {
+            crate::alog::info(&format!("logcat: session record write failed: {e}"));
+        }
+        *slot = Some(Session {
+            id: LogcatSessionId(record.session),
+            started: None,
+            file,
+            shared,
+            events: None,
+            delivered_copy: None,
+        });
+    }
+
+    /// A restore that could not be written earlier: try again (every session call).
+    fn retry_pending(&self, session: &Session) {
+        if !session.shared.settled.load(Ordering::SeqCst) {
+            return;
+        }
+        let lease = session.shared.record().debug;
+        let Some(lease) = lease.filter(|l| l.restore == LogcatDebugRestore::Pending) else {
+            return;
+        };
+        let Some(control) = self.debug_control() else {
+            return;
+        };
+        let restore = control.release(&lease);
+        session.shared.update(|record| {
+            if let Some(l) = record.debug.as_mut() {
+                l.restore = restore;
+            }
+        });
     }
 
     pub fn status(&self) -> Option<LogcatSessionStatus> {
-        self.session
-            .lock()
-            .expect("logcat session")
-            .as_ref()
-            .map(Session::status)
+        let slot = self.session.lock().expect("logcat session");
+        let session = slot.as_ref()?;
+        self.retry_pending(session);
+        Some(session.status())
     }
 
     pub fn start(
@@ -229,6 +459,7 @@ impl Recorder {
         };
         let mut slot = self.session.lock().expect("logcat session");
         if let Some(current) = slot.as_ref() {
+            self.retry_pending(current);
             if current.id == id {
                 return Ok(current.status());
             }
@@ -238,16 +469,20 @@ impl Recorder {
                 });
             }
         }
+        // A new Start replaces the previous session, delivered or not.
         if let Some(old) = slot.take() {
-            old.discard();
+            old.shared.wait_settled(SETTLE_WAIT);
+            old.remove_files(env);
         }
         remove_stale_exports(env);
-        let session = spawn(&config, id).map_err(LogcatRecordingError::Failed)?;
+        let debug = self.debug_control();
+        let session = spawn(&config, id, debug).map_err(LogcatRecordingError::Failed)?;
         crate::alog::info(&format!(
-            "logcat: session {} started (cap {} bytes, {} s)",
+            "logcat: session {} started (cap {} bytes, {} s, debug lease {:?})",
             id.0,
             config.max_bytes,
-            config.max_duration.as_secs()
+            config.max_duration.as_secs(),
+            session.shared.record().debug
         ));
         let status = session.status();
         *slot = Some(session);
@@ -266,22 +501,78 @@ impl Recorder {
         if !session.stop() {
             return Err(LogcatRecordingError::Failed("logcat did not stop".into()));
         }
-        let copy = match &session.delivered {
+        self.retry_pending(session);
+        let mut status = session.status();
+        if status.delivered {
+            // The app already saved it; core's copies are gone.
+            return Ok(status);
+        }
+        let copy = match &session.delivered_copy {
             Some(copy) if copy.exists() => copy.clone(),
             _ => deliver(env, &session.file, id).map_err(LogcatRecordingError::Failed)?,
         };
-        session.delivered = Some(copy.clone());
-        let mut status = session.status();
+        session.delivered_copy = Some(copy.clone());
         status.file = Some(copy.display().to_string());
         Ok(status)
     }
 
-    /// Core is exiting: stop a running child and wait for it.
+    /// The app saved the recording: mark it delivered and delete core's copies.
+    pub fn ack(
+        &self,
+        id: LogcatSessionId,
+        env: &ProbeEnv,
+    ) -> Result<LogcatSessionStatus, LogcatRecordingError> {
+        let slot = self.session.lock().expect("logcat session");
+        let Some(session) = slot.as_ref().filter(|s| s.id == id) else {
+            return Err(LogcatRecordingError::UnknownSession);
+        };
+        if session.shared.running() {
+            return Err(LogcatRecordingError::Invalid(
+                "the session is still recording".into(),
+            ));
+        }
+        self.retry_pending(session);
+        if !session.shared.record().delivered {
+            session.shared.update(|record| record.delivered = true);
+            let _ = fs::remove_file(&session.file);
+            if let Some(copy) = &session.delivered_copy {
+                let _ = fs::remove_file(copy);
+            }
+            remove_stale_exports(env);
+            crate::alog::info(&format!("logcat: session {} delivered", id.0));
+        }
+        Ok(session.status())
+    }
+
+    /// Drop the session: stop it if it records, restore debug logging, delete its files.
+    pub fn discard(&self, id: LogcatSessionId, env: &ProbeEnv) -> Result<(), LogcatRecordingError> {
+        let mut slot = self.session.lock().expect("logcat session");
+        if !slot.as_ref().is_some_and(|s| s.id == id) {
+            return Ok(());
+        }
+        let session = slot.take().expect("checked");
+        if !session.stop() {
+            *slot = Some(session);
+            return Err(LogcatRecordingError::Failed("logcat did not stop".into()));
+        }
+        session.shared.wait_settled(SETTLE_WAIT);
+        self.retry_pending(&session);
+        session.remove_files(env);
+        crate::alog::info(&format!("logcat: session {} discarded", id.0));
+        Ok(())
+    }
+
+    /// Core is exiting: stop a running child and wait until its debug lease is released.
     pub fn shutdown(&self) {
         if let Some(session) = self.session.lock().expect("logcat session").as_ref() {
             session.stop();
+            session.shared.wait_settled(SETTLE_WAIT);
         }
     }
+}
+
+fn log_name(id: u64) -> String {
+    format!("session-{id}.log")
 }
 
 fn millis(d: Duration) -> u64 {
@@ -302,11 +593,16 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Create the file, start the supervisor, and return once the child is running.
-fn spawn(config: &RecorderConfig, id: LogcatSessionId) -> Result<Session, String> {
+/// Create the file and record, take the debug lease, start the supervisor, and return once
+/// the child is running.
+fn spawn(
+    config: &RecorderConfig,
+    id: LogcatSessionId,
+    debug: Option<Arc<dyn DebugControl>>,
+) -> Result<Session, String> {
     fs::create_dir_all(&config.dir).map_err(|e| format!("logcat dir: {e}"))?;
     let _ = fs::set_permissions(&config.dir, fs::Permissions::from_mode(0o700));
-    let path = config.dir.join(format!("session-{}.log", id.0));
+    let path = config.dir.join(log_name(id.0));
     let _ = fs::remove_file(&path);
     let out = OpenOptions::new()
         .write(true)
@@ -315,48 +611,101 @@ fn spawn(config: &RecorderConfig, id: LogcatSessionId) -> Result<Session, String
         .custom_flags(libc::O_NOFOLLOW)
         .open(&path)
         .map_err(|e| format!("logcat file: {e}"))?;
-    let shared = Arc::new(Shared::default());
+    let record = SessionRecord {
+        session: id.0,
+        started_at_ms: now_ms(),
+        max_bytes: config.max_bytes,
+        max_duration_ms: millis(config.max_duration),
+        ended: None,
+        debug: None,
+        delivered: false,
+    };
+    let shared = Arc::new(Shared::new(record, config.dir.join(RECORD_NAME), false));
+    // Persist first: a crash after the lease is taken must still find a record to restore from.
+    shared.update(|_| {});
+    let failed = |e: String| {
+        shared.discarded.store(true, Ordering::SeqCst);
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(&shared.record_path);
+        Err(e)
+    };
+    // Lease before the child starts, so the first lines are already verbose.
+    let lease = debug.as_ref().and_then(|control| {
+        let persist =
+            |lease: &LogcatDebugLease| shared.update(|record| record.debug = Some(*lease));
+        let lease = control.acquire(&persist);
+        shared.update(|record| record.debug = lease);
+        lease
+    });
     let (events, inbox) = mpsc::channel();
     let (ready_tx, ready_rx) = mpsc::channel();
     let started = Instant::now();
-    let started_at_ms = now_ms();
     {
         let config = config.clone();
         let shared = shared.clone();
         let events = events.clone();
-        std::thread::Builder::new()
+        let control = debug.clone();
+        let spawned = std::thread::Builder::new()
             .name("logcat-session".into())
-            .spawn(move || supervise(config, out, shared, events, inbox, ready_tx, started))
-            .map_err(|e| format!("logcat thread: {e}"))?;
+            .spawn(move || {
+                supervise(config, out, &shared, events, inbox, ready_tx, started);
+                release_lease(&shared, control.as_deref());
+                shared.mark_settled();
+            });
+        if let Err(e) = spawned {
+            if let (Some(lease), Some(control)) = (lease, debug.as_ref()) {
+                control.release(&lease);
+            }
+            return failed(format!("logcat thread: {e}"));
+        }
     }
     match ready_rx.recv() {
         Ok(Ok(())) => Ok(Session {
             id,
-            started,
-            started_at_ms,
+            started: Some(started),
             file: path,
-            max_bytes: config.max_bytes,
-            max_duration: config.max_duration,
             shared,
-            events,
-            delivered: None,
+            events: Some(events),
+            delivered_copy: None,
         }),
+        // The supervisor already released the lease on its way out.
         Ok(Err(e)) => {
-            let _ = fs::remove_file(&path);
-            Err(e)
+            shared.wait_settled(SETTLE_WAIT);
+            failed(e)
         }
         Err(_) => {
-            let _ = fs::remove_file(&path);
-            Err("logcat supervisor ended".into())
+            shared.wait_settled(SETTLE_WAIT);
+            failed("logcat supervisor ended".into())
         }
     }
+}
+
+/// The session ended: put debug logging back (the record says how).
+fn release_lease(shared: &Shared, control: Option<&dyn DebugControl>) {
+    let lease = shared.record().debug;
+    let Some(lease) = lease.filter(|l| {
+        matches!(
+            l.restore,
+            LogcatDebugRestore::Held | LogcatDebugRestore::Pending
+        )
+    }) else {
+        return;
+    };
+    // `Held` on disk already means "still to restore" to the next core run.
+    let restore = control.map_or(LogcatDebugRestore::Pending, |c| c.release(&lease));
+    crate::alog::info(&format!("logcat: debug lease released: {restore:?}"));
+    shared.update(|record| {
+        if let Some(l) = record.debug.as_mut() {
+            l.restore = restore;
+        }
+    });
 }
 
 /// Owns the child from spawn to reap: the parent-death signal is tied to this thread.
 fn supervise(
     config: RecorderConfig,
     out: File,
-    shared: Arc<Shared>,
+    shared: &Arc<Shared>,
     events: mpsc::Sender<Event>,
     inbox: mpsc::Receiver<Event>,
     ready: mpsc::Sender<Result<(), String>>,
@@ -440,12 +789,17 @@ fn supervise(
         "logcat: session ended {state:?} after {duration_ms} ms, {} bytes",
         shared.bytes.load(Ordering::SeqCst)
     ));
-    *shared.ended.lock().expect("logcat ended") = Some(Ended {
-        state,
-        duration_ms,
-        logcat_exit: if exited_alone { exit } else { None },
+    let bytes = shared.bytes.load(Ordering::SeqCst);
+    let truncated = shared.truncated.load(Ordering::SeqCst);
+    shared.update(|record| {
+        record.ended = Some(Ended {
+            state,
+            duration_ms,
+            bytes,
+            truncated,
+            logcat_exit: if exited_alone { exit } else { None },
+        });
     });
-    shared.cv.notify_all();
 }
 
 /// Pipe → file up to `max` bytes. Past the cap the rest is dropped and the supervisor told.

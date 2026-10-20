@@ -1,6 +1,8 @@
 //! Core-owned logcat sessions: idempotency, Busy, the byte and duration caps, a child that
-//! exits by itself, delivery into the app's export dir, and stale-file cleanup. A real
-//! child runs (`sleep` / `yes` / `true` stand in for `logcat`).
+//! exits by itself, delivery into the app's export dir, the debug-logging lease (taken on
+//! Start, restored on every end and after a core restart, never over a user change), and
+//! the undelivered-recording lifecycle (ack, discard, kept across restarts). A real child
+//! runs (`sleep` / `yes` / `false` stand in for `logcat`).
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -11,7 +13,9 @@ use vpnhide_core_daemon::diagnostics::{EXPORT_DIR_NAME, ProbeEnv};
 use vpnhide_core_daemon::logcat_session::{EXPORT_PREFIX, RecorderConfig};
 use vpnhide_core_daemon::{CoreState, Publisher};
 use vpnhide_core_rpc::{
-    LogcatAutoStopReason, LogcatRecordingError, LogcatSessionId, LogcatSessionState, StateSnapshot,
+    BaseRef, CanonicalConfig, ConfigEdit, ConfigToggle, LogcatAutoStopReason, LogcatDebugRestore,
+    LogcatRecordingError, LogcatSessionId, LogcatSessionState, LogcatSessionStatus, OperationId,
+    StateSnapshot,
 };
 
 struct Fixture {
@@ -26,25 +30,110 @@ fn fixture(program: &str, args: &[&str], max_bytes: u64, max_duration: Duration)
     let core_dir = tmp.path().join("core/logcat");
     let app_dir = tmp.path().join("app");
     std::fs::create_dir_all(&app_dir).unwrap();
-    let state = CoreState::new(Publisher::new(1, StateSnapshot::default()));
-    state.set_probe_env(ProbeEnv {
-        core_exe: PathBuf::from("/nonexistent"),
-        app_dir: Some(app_dir.clone()),
-    });
-    state.logcat().set_config(Some(RecorderConfig {
-        program: PathBuf::from(program),
-        args: args.iter().map(|a| a.to_string()).collect(),
-        dir: core_dir.clone(),
-        max_bytes,
-        max_duration,
-        since_start: false,
-    }));
+    let state = core(&core_dir, &app_dir, program, args, max_bytes, max_duration);
     Fixture {
         state,
         core_dir,
         app_dir,
         _tmp: tmp,
     }
+}
+
+/// A fresh core run over the same dirs (what a restart sees).
+fn core(
+    core_dir: &Path,
+    app_dir: &Path,
+    program: &str,
+    args: &[&str],
+    max_bytes: u64,
+    max_duration: Duration,
+) -> Arc<CoreState> {
+    let state = CoreState::new(Publisher::new(1, StateSnapshot::default()));
+    attach(
+        &state,
+        core_dir,
+        app_dir,
+        program,
+        args,
+        max_bytes,
+        max_duration,
+    );
+    state
+}
+
+fn attach(
+    state: &CoreState,
+    core_dir: &Path,
+    app_dir: &Path,
+    program: &str,
+    args: &[&str],
+    max_bytes: u64,
+    max_duration: Duration,
+) {
+    state.set_probe_env(ProbeEnv {
+        core_exe: PathBuf::from("/nonexistent"),
+        app_dir: Some(app_dir.to_path_buf()),
+    });
+    state.logcat().set_config(Some(RecorderConfig {
+        program: PathBuf::from(program),
+        args: args.iter().map(|a| a.to_string()).collect(),
+        dir: core_dir.to_path_buf(),
+        max_bytes,
+        max_duration,
+        since_start: false,
+    }));
+}
+
+static NEXT_OP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn op() -> OperationId {
+    OperationId(NEXT_OP.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+}
+
+/// An edit the app would send, against the current revision.
+fn edit(state: &CoreState, edit: ConfigEdit) {
+    let base = BaseRef {
+        revision: state.config_revision(),
+    };
+    state.submit_edit_public(op(), base, &edit).unwrap();
+}
+
+fn bootstrap(state: &CoreState, debug: bool, debug_switch: bool) {
+    edit(
+        state,
+        ConfigEdit::Replace {
+            config: CanonicalConfig {
+                debug,
+                debug_switch,
+                ..CanonicalConfig::default()
+            },
+        },
+    );
+}
+
+fn toggle(state: &CoreState, field: ConfigToggle, enabled: bool) {
+    edit(state, ConfigEdit::Toggle { field, enabled });
+}
+
+/// `(debug, debugSwitch)` of the confirmed config.
+fn debug_of(state: &CoreState) -> (bool, bool) {
+    let config = state.snapshot().config.expect("config");
+    (config.debug, config.debug_switch)
+}
+
+fn restore_of(status: &LogcatSessionStatus) -> Option<LogcatDebugRestore> {
+    status.debug.map(|l| l.restore)
+}
+
+/// Wait until the session's lease left `Held` (the supervisor restores after the end).
+fn released(state: &CoreState) -> LogcatSessionStatus {
+    wait_until("the debug restore", || {
+        let status = state.logcat().status().unwrap();
+        status.state != LogcatSessionState::Recording
+            && !matches!(restore_of(&status), Some(LogcatDebugRestore::Held))
+            && !state.debug_lease_held()
+    });
+    state.logcat().status().unwrap()
 }
 
 fn idle() -> Fixture {
@@ -88,7 +177,10 @@ fn start_is_idempotent_and_a_second_id_is_busy() {
         f.state.start_logcat_recording(LogcatSessionId(0)),
         Err(LogcatRecordingError::Invalid("session id 0".into()))
     );
-    assert_eq!(session_files(&f.core_dir), vec!["session-11.log"]);
+    assert_eq!(
+        session_files(&f.core_dir),
+        vec!["session-11.log", "session.json"]
+    );
     let mode = std::fs::metadata(f.core_dir.join("session-11.log"))
         .unwrap()
         .permissions()
@@ -99,7 +191,7 @@ fn start_is_idempotent_and_a_second_id_is_busy() {
 }
 
 #[test]
-fn stop_delivers_once_and_repeats_the_same_result() {
+fn stop_hands_over_a_copy_and_repeats_the_same_result() {
     let f = idle();
     let id = LogcatSessionId(21);
     f.state.start_logcat_recording(id).unwrap();
@@ -116,6 +208,7 @@ fn stop_delivers_once_and_repeats_the_same_result() {
     let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
 
+    assert!(!stopped.delivered);
     let again = f.state.stop_logcat_recording(id).unwrap();
     assert_eq!(again, stopped);
     // The app consumed its copy: a repeated Stop hands it over again.
@@ -229,12 +322,13 @@ fn shutdown_stops_the_running_child() {
 }
 
 #[test]
-fn stale_files_are_removed_at_start_and_by_the_next_session() {
+fn recover_removes_files_without_a_session_record_and_start_clears_old_exports() {
     let f = idle();
     std::fs::create_dir_all(&f.core_dir).unwrap();
     std::fs::write(f.core_dir.join("session-1.log"), b"old run").unwrap();
-    f.state.logcat().clean_stale();
+    f.state.logcat().recover();
     assert!(!f.core_dir.exists());
+    assert_eq!(f.state.logcat().status(), None);
 
     let export = f.app_dir.join(EXPORT_DIR_NAME);
     std::fs::create_dir_all(&export).unwrap();
@@ -248,10 +342,391 @@ fn stale_files_are_removed_at_start_and_by_the_next_session() {
         vec![format!("{EXPORT_PREFIX}81.txt")]
     );
 
+    // A new Start replaces the finished, undelivered session and its copies.
     f.state.start_logcat_recording(LogcatSessionId(82)).unwrap();
-    assert_eq!(session_files(&f.core_dir), vec!["session-82.log"]);
+    assert_eq!(
+        session_files(&f.core_dir),
+        vec!["session-82.log", "session.json"]
+    );
     assert!(session_files(&export).is_empty());
+    assert_eq!(
+        f.state.stop_logcat_recording(first),
+        Err(LogcatRecordingError::UnknownSession)
+    );
     f.state.logcat().shutdown();
+}
+
+#[test]
+fn start_turns_debug_on_and_stop_restores_it() {
+    let f = idle();
+    bootstrap(&f.state, false, false);
+    let id = LogcatSessionId(101);
+    let started = f.state.start_logcat_recording(id).unwrap();
+    let lease = started.debug.expect("lease");
+    assert!(!lease.previous_debug && !lease.previous_debug_switch);
+    assert_eq!(lease.restore, LogcatDebugRestore::Held);
+    assert_eq!(debug_of(&f.state), (true, false));
+    assert!(f.state.snapshot().debug_lease);
+
+    // The app's own writes (here: debug = switch, as without a capture) can't turn it off.
+    edit(
+        &f.state,
+        ConfigEdit::Replace {
+            config: CanonicalConfig::default(),
+        },
+    );
+    toggle(&f.state, ConfigToggle::Debug, false);
+    assert_eq!(debug_of(&f.state), (true, false));
+
+    f.state.stop_logcat_recording(id).unwrap();
+    let status = released(&f.state);
+    assert_eq!(restore_of(&status), Some(LogcatDebugRestore::Restored));
+    assert_eq!(debug_of(&f.state), (false, false));
+    assert!(!f.state.snapshot().debug_lease);
+    // Once released, edits are the user's again.
+    toggle(&f.state, ConfigToggle::Debug, true);
+    assert_eq!(debug_of(&f.state), (true, false));
+}
+
+#[test]
+fn debug_that_was_already_on_stays_on() {
+    let f = idle();
+    bootstrap(&f.state, true, true);
+    let id = LogcatSessionId(102);
+    let revision = f.state.config_revision();
+    f.state.start_logcat_recording(id).unwrap();
+    // Nothing to write: debug was on already.
+    assert_eq!(f.state.config_revision(), revision);
+    f.state.stop_logcat_recording(id).unwrap();
+    let status = released(&f.state);
+    assert_eq!(restore_of(&status), Some(LogcatDebugRestore::Restored));
+    assert_eq!(debug_of(&f.state), (true, true));
+    assert_eq!(f.state.config_revision(), revision);
+}
+
+#[test]
+fn a_user_switch_change_during_the_session_wins_over_the_restore() {
+    // Switched on during the session: debug stays on.
+    let f = idle();
+    bootstrap(&f.state, false, false);
+    let on = LogcatSessionId(111);
+    f.state.start_logcat_recording(on).unwrap();
+    toggle(&f.state, ConfigToggle::DebugSwitch, true);
+    f.state.stop_logcat_recording(on).unwrap();
+    assert_eq!(
+        restore_of(&released(&f.state)),
+        Some(LogcatDebugRestore::UserChoice)
+    );
+    assert_eq!(debug_of(&f.state), (true, true));
+
+    // Switched off during the session: debug goes off although it was on before.
+    let off = LogcatSessionId(112);
+    f.state.start_logcat_recording(off).unwrap();
+    toggle(&f.state, ConfigToggle::DebugSwitch, false);
+    assert_eq!(debug_of(&f.state), (true, false));
+    f.state.stop_logcat_recording(off).unwrap();
+    assert_eq!(
+        restore_of(&released(&f.state)),
+        Some(LogcatDebugRestore::UserChoice)
+    );
+    assert_eq!(debug_of(&f.state), (false, false));
+}
+
+#[test]
+fn every_auto_stop_restores_debug() {
+    for (program, args, max_bytes, reason) in [
+        (
+            "yes",
+            &["vpnhide-logcat-line"][..],
+            64 * 1024,
+            LogcatAutoStopReason::SizeCap,
+        ),
+        (
+            "false",
+            &[][..],
+            1 << 20,
+            LogcatAutoStopReason::LogcatExited,
+        ),
+    ] {
+        let f = fixture(program, args, max_bytes, Duration::from_secs(60));
+        bootstrap(&f.state, false, false);
+        f.state
+            .start_logcat_recording(LogcatSessionId(121))
+            .unwrap();
+        let status = released(&f.state);
+        assert_eq!(status.state, LogcatSessionState::AutoStopped { reason });
+        assert_eq!(restore_of(&status), Some(LogcatDebugRestore::Restored));
+        assert_eq!(debug_of(&f.state), (false, false));
+    }
+    let f = fixture("sleep", &["30"], 1 << 20, Duration::from_millis(300));
+    bootstrap(&f.state, false, false);
+    f.state
+        .start_logcat_recording(LogcatSessionId(122))
+        .unwrap();
+    let status = released(&f.state);
+    assert_eq!(
+        status.state,
+        LogcatSessionState::AutoStopped {
+            reason: LogcatAutoStopReason::DurationCap
+        }
+    );
+    assert_eq!(restore_of(&status), Some(LogcatDebugRestore::Restored));
+    assert_eq!(debug_of(&f.state), (false, false));
+}
+
+#[test]
+fn without_a_config_the_session_records_without_a_lease() {
+    let f = idle();
+    let status = f
+        .state
+        .start_logcat_recording(LogcatSessionId(131))
+        .unwrap();
+    assert_eq!(status.debug, None);
+    assert!(!f.state.debug_lease_held());
+    f.state.logcat().shutdown();
+}
+
+/// What a crash leaves: the record and file as they were while recording.
+fn crash_copy(f: &Fixture) -> Vec<(PathBuf, Vec<u8>)> {
+    session_files(&f.core_dir)
+        .into_iter()
+        .map(|n| {
+            let path = f.core_dir.join(n);
+            let bytes = std::fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect()
+}
+
+#[test]
+fn a_session_unfinished_at_core_start_ends_and_restores_debug() {
+    let f = idle();
+    bootstrap(&f.state, false, false);
+    let id = LogcatSessionId(141);
+    f.state.start_logcat_recording(id).unwrap();
+    let left = crash_copy(&f);
+    f.state.logcat().shutdown();
+    for (path, bytes) in &left {
+        std::fs::write(path, bytes).unwrap();
+    }
+    // What logcat had written by the crash.
+    std::fs::write(f.core_dir.join("session-141.log"), b"line\n").unwrap();
+
+    // The next run: the config file still says debug = true (the lease's write).
+    let next = core(
+        &f.core_dir,
+        &f.app_dir,
+        "sleep",
+        &["30"],
+        1 << 20,
+        Duration::from_secs(60),
+    );
+    bootstrap(&next, true, false);
+    next.logcat().recover();
+    let status = next.logcat().status().expect("recovered");
+    assert_eq!(status.session, id);
+    assert_eq!(
+        status.state,
+        LogcatSessionState::AutoStopped {
+            reason: LogcatAutoStopReason::CoreRestarted
+        }
+    );
+    assert_eq!(status.bytes, 5);
+    assert!(!status.delivered);
+    assert_eq!(restore_of(&status), Some(LogcatDebugRestore::Restored));
+    assert_eq!(debug_of(&next), (false, false));
+    assert!(!next.debug_lease_held());
+    // Still offered: Stop hands it over, ack ends it.
+    let stopped = next.stop_logcat_recording(id).unwrap();
+    let file = stopped.file.expect("copy");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "line\n");
+    next.ack_logcat_recording(id).unwrap();
+}
+
+#[test]
+fn a_restart_does_not_clobber_a_switch_the_user_changed() {
+    let f = idle();
+    bootstrap(&f.state, false, false);
+    let id = LogcatSessionId(142);
+    f.state.start_logcat_recording(id).unwrap();
+    let left = crash_copy(&f);
+    f.state.logcat().shutdown();
+    for (path, bytes) in &left {
+        std::fs::write(path, bytes).unwrap();
+    }
+    let next = core(
+        &f.core_dir,
+        &f.app_dir,
+        "sleep",
+        &["30"],
+        1 << 20,
+        Duration::from_secs(60),
+    );
+    // The user turned the switch on while the session recorded.
+    bootstrap(&next, true, true);
+    next.logcat().recover();
+    let status = next.logcat().status().expect("recovered");
+    assert_eq!(restore_of(&status), Some(LogcatDebugRestore::UserChoice));
+    assert_eq!(debug_of(&next), (true, true));
+}
+
+#[test]
+fn ack_marks_delivered_deletes_core_copies_and_is_idempotent() {
+    let f = idle();
+    let id = LogcatSessionId(151);
+    f.state.start_logcat_recording(id).unwrap();
+    assert_eq!(
+        f.state.ack_logcat_recording(id),
+        Err(LogcatRecordingError::Invalid(
+            "the session is still recording".into()
+        ))
+    );
+    let stopped = f.state.stop_logcat_recording(id).unwrap();
+    let copy = PathBuf::from(stopped.file.unwrap());
+    let acked = f.state.ack_logcat_recording(id).unwrap();
+    assert!(acked.delivered);
+    assert_eq!(acked.file, None);
+    assert!(!copy.exists());
+    assert_eq!(session_files(&f.core_dir), vec!["session.json"]);
+    assert_eq!(f.state.ack_logcat_recording(id).unwrap(), acked);
+    // A late Stop (lost ack reply) answers without a file instead of failing.
+    let late = f.state.stop_logcat_recording(id).unwrap();
+    assert!(late.delivered);
+    assert_eq!(late.file, None);
+    assert_eq!(
+        f.state.ack_logcat_recording(LogcatSessionId(9)),
+        Err(LogcatRecordingError::UnknownSession)
+    );
+    // Delivered sessions are not kept across a restart.
+    let next = core(
+        &f.core_dir,
+        &f.app_dir,
+        "sleep",
+        &["30"],
+        1 << 20,
+        Duration::from_secs(60),
+    );
+    next.logcat().recover();
+    assert_eq!(next.logcat().status(), None);
+    assert!(!f.core_dir.exists());
+}
+
+#[test]
+fn an_undelivered_recording_is_offered_after_a_restart() {
+    let f = idle();
+    let id = LogcatSessionId(161);
+    f.state.start_logcat_recording(id).unwrap();
+    let first = f.state.stop_logcat_recording(id).unwrap();
+    // The app died before saving (its copy is gone with its cache).
+    std::fs::remove_file(first.file.as_ref().unwrap()).unwrap();
+    f.state.logcat().shutdown();
+
+    let next = core(
+        &f.core_dir,
+        &f.app_dir,
+        "sleep",
+        &["30"],
+        1 << 20,
+        Duration::from_secs(60),
+    );
+    next.logcat().recover();
+    let offered = next.logcat().status().expect("offered");
+    assert_eq!(offered.session, id);
+    assert_eq!(offered.state, LogcatSessionState::Stopped);
+    assert!(!offered.delivered);
+    assert_eq!(offered.bytes, first.bytes);
+    assert_eq!(offered.started_at_ms, first.started_at_ms);
+    // Restarting again keeps it too.
+    let again = core(
+        &f.core_dir,
+        &f.app_dir,
+        "sleep",
+        &["30"],
+        1 << 20,
+        Duration::from_secs(60),
+    );
+    again.logcat().recover();
+    assert_eq!(again.logcat().status(), Some(offered.clone()));
+    let saved = again.stop_logcat_recording(id).unwrap();
+    assert!(PathBuf::from(saved.file.unwrap()).exists());
+    assert!(again.ack_logcat_recording(id).unwrap().delivered);
+}
+
+#[test]
+fn discard_stops_restores_and_deletes_everything() {
+    let f = idle();
+    bootstrap(&f.state, false, false);
+    let id = LogcatSessionId(171);
+    f.state.start_logcat_recording(id).unwrap();
+    assert_eq!(debug_of(&f.state), (true, false));
+    f.state.discard_logcat_recording(id).unwrap();
+    assert_eq!(f.state.logcat().status(), None);
+    assert_eq!(debug_of(&f.state), (false, false));
+    assert!(!f.state.debug_lease_held());
+    assert!(session_files(&f.core_dir).is_empty());
+    // Idempotent, and an unknown id is already gone.
+    f.state.discard_logcat_recording(id).unwrap();
+    f.state
+        .discard_logcat_recording(LogcatSessionId(5))
+        .unwrap();
+
+    // A finished, delivered-to-export session: the copy goes too.
+    let second = LogcatSessionId(172);
+    f.state.start_logcat_recording(second).unwrap();
+    let copy = PathBuf::from(f.state.stop_logcat_recording(second).unwrap().file.unwrap());
+    f.state.discard_logcat_recording(second).unwrap();
+    assert!(!copy.exists());
+    assert!(session_files(&f.core_dir).is_empty());
+    let next = core(
+        &f.core_dir,
+        &f.app_dir,
+        "sleep",
+        &["30"],
+        1 << 20,
+        Duration::from_secs(60),
+    );
+    next.logcat().recover();
+    assert_eq!(next.logcat().status(), None);
+}
+
+#[test]
+fn a_restore_that_cannot_be_written_stays_pending_and_is_retried() {
+    let tmp = tempfile::tempdir().unwrap();
+    let core_dir = tmp.path().join("core/logcat");
+    let app_dir = tmp.path().join("app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let config_path = tmp.path().join("config.json");
+    let state = CoreState::load(
+        Publisher::new(1, StateSnapshot::default()),
+        config_path.clone(),
+        None,
+    )
+    .unwrap();
+    attach(
+        &state,
+        &core_dir,
+        &app_dir,
+        "sleep",
+        &["30"],
+        1 << 20,
+        Duration::from_secs(60),
+    );
+    bootstrap(&state, false, false);
+    let id = LogcatSessionId(181);
+    state.start_logcat_recording(id).unwrap();
+    assert_eq!(debug_of(&state), (true, false));
+    // The config file can't be replaced now (a dir stands in its place).
+    std::fs::remove_file(&config_path).unwrap();
+    std::fs::create_dir(&config_path).unwrap();
+    state.stop_logcat_recording(id).unwrap();
+    let status = released(&state);
+    assert_eq!(restore_of(&status), Some(LogcatDebugRestore::Pending));
+    assert_eq!(debug_of(&state), (true, false));
+    // Writable again: the next session call retries.
+    std::fs::remove_dir(&config_path).unwrap();
+    let status = state.logcat().status().unwrap();
+    assert_eq!(restore_of(&status), Some(LogcatDebugRestore::Restored));
+    assert_eq!(debug_of(&state), (false, false));
 }
 
 #[test]

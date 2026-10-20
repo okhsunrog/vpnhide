@@ -158,8 +158,6 @@ async fn run(path: &str) {
             std::process::exit(1);
         }
     };
-    // A previous run's logcat session died with it (parent-death signal); drop its file.
-    state.logcat().clean_stale();
     // Select the native backend once for this boot (§4) before serving: scan every
     // candidate, load the single one (or nothing on a conflict), retire Zygisk targets
     // when Zygisk is not it, and publish the typed per-boot status. A restart within
@@ -180,6 +178,10 @@ async fn run(path: &str) {
                 .update(|snapshot| snapshot.backend = observed);
         }
     }
+
+    // A previous run's logcat session died with it (parent-death signal): end it, put its
+    // debug logging back, and keep a recording the app has not saved yet.
+    state.logcat().recover();
 
     // Boot policy apply runs on its own thread: it waits for PackageManager without a
     // bound (uid projection must be complete) and for netd's chains, then re-applies

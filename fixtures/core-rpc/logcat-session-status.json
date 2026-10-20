@@ -9,7 +9,13 @@
     "bytes": 4096,
     "truncated": false,
     "max_bytes": 67108864,
-    "max_duration_ms": 1800000
+    "max_duration_ms": 1800000,
+    "delivered": false,
+    "debug": {
+      "previous_debug": false,
+      "previous_debug_switch": false,
+      "restore": "held"
+    }
   },
   {
     "session": 43,
@@ -23,7 +29,13 @@
     "truncated": true,
     "max_bytes": 67108864,
     "max_duration_ms": 1800000,
-    "file": "/data/user_de/0/x/vpnhide-core-export/logcat-session-43.txt"
+    "file": "/data/user_de/0/x/vpnhide-core-export/logcat-session-43.txt",
+    "delivered": false,
+    "debug": {
+      "previous_debug": false,
+      "previous_debug_switch": false,
+      "restore": "user_choice"
+    }
   },
   {
     "session": 44,
@@ -37,6 +49,26 @@
     "truncated": false,
     "max_bytes": 67108864,
     "max_duration_ms": 1800000,
-    "logcat_exit": 1
+    "logcat_exit": 1,
+    "delivered": true
+  },
+  {
+    "session": 45,
+    "state": {
+      "kind": "auto_stopped",
+      "reason": "core_restarted"
+    },
+    "started_at_ms": 1,
+    "duration_ms": 900000,
+    "bytes": 1048576,
+    "truncated": false,
+    "max_bytes": 67108864,
+    "max_duration_ms": 1800000,
+    "delivered": false,
+    "debug": {
+      "previous_debug": false,
+      "previous_debug_switch": false,
+      "restore": "restored"
+    }
   }
 ]

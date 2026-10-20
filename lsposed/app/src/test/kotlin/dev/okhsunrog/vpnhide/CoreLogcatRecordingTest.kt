@@ -4,8 +4,11 @@ import dev.okhsunrog.vpnhide.core.CoreLogcatReply
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.core.CoreRootTransport
 import dev.okhsunrog.vpnhide.core.LogcatAutoStop
+import dev.okhsunrog.vpnhide.core.LogcatDebugRestore
 import dev.okhsunrog.vpnhide.core.parseCoreLogcatReply
 import dev.okhsunrog.vpnhide.core.parseCoreLogcatSession
+import dev.okhsunrog.vpnhide.debug.DebugCaptureInfo
+import dev.okhsunrog.vpnhide.debug.debugCaptureInfo
 import kotlinx.coroutines.test.runTest
 import org.json.JSONArray
 import org.json.JSONObject
@@ -42,6 +45,32 @@ class CoreLogcatRecordingTest {
 
         assertEquals(LogcatAutoStop.LogcatExited, sessions[2].autoStop)
         assertEquals(1, sessions[2].logcatExit)
+
+        // Core's debug lease and delivery state.
+        assertEquals(LogcatDebugRestore.Held, running.debug?.restore)
+        assertTrue(running.debug!!.forced)
+        assertFalse(running.undelivered)
+        assertEquals(LogcatDebugRestore.UserChoice, capped.debug?.restore)
+        assertTrue(capped.undelivered)
+        assertTrue(sessions[2].delivered)
+        assertNull(sessions[2].debug)
+        assertFalse(sessions[2].undelivered)
+
+        val restarted = sessions[3]
+        assertEquals(LogcatAutoStop.CoreRestarted, restarted.autoStop)
+        assertEquals(LogcatDebugRestore.Restored, restarted.debug?.restore)
+        assertTrue(restarted.undelivered)
+    }
+
+    @Test
+    fun `the zip's debug capture comes from core's lease`() {
+        val all = JSONArray(File("../../fixtures/core-rpc/logcat-session-status.json").readText())
+        val sessions = List(all.length()) { parseCoreLogcatSession(all.getJSONObject(it)) }
+        assertEquals(DebugCaptureInfo(true, 0, null, "core lease, restore=held"), sessions[0].debugCaptureInfo())
+        assertEquals(DebugCaptureInfo(true, 0, 0, "core lease, restore=user_choice"), sessions[1].debugCaptureInfo())
+        assertNull(sessions[2].debugCaptureInfo())
+        val pending = sessions[3].copy(debug = sessions[3].debug!!.copy(previousDebug = true, restore = LogcatDebugRestore.Pending))
+        assertEquals(DebugCaptureInfo(false, 0, -1, "core lease, restore=pending"), pending.debugCaptureInfo())
     }
 
     @Test
@@ -56,7 +85,7 @@ class CoreLogcatRecordingTest {
     }
 
     @Test
-    fun `start, stop and status name the action and session only`() =
+    fun `every action names the action and session only`() =
         runTest {
             val sent = mutableListOf<JSONObject>()
             CoreRoot.setTransport(
@@ -77,9 +106,12 @@ class CoreLogcatRecordingTest {
             CoreRoot.startLogcat(5)
             CoreRoot.stopLogcat(5)
             assertEquals(CoreLogcatReply.Failed("unknown_session", "none"), CoreRoot.logcatStatus())
-            assertEquals(listOf("start", "stop", "status"), sent.map { it.getString("action") })
+            CoreRoot.ackLogcat(5)
+            CoreRoot.discardLogcat(5)
+            assertEquals(listOf("start", "stop", "status", "ack", "discard"), sent.map { it.getString("action") })
             assertEquals(5L, sent[0].getLong("session"))
-            assertEquals(setOf("action", "session"), sent[1].keys().asSequence().toSet())
+            assertEquals(listOf(5L, 5L), sent.drop(3).map { it.getLong("session") })
+            sent.forEach { assertEquals(setOf("action", "session"), it.keys().asSequence().toSet()) }
         }
 
     @Test
