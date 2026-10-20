@@ -627,6 +627,7 @@ fn a_pending_authentication_is_rescanned_after_restart() {
             kmod: None,
             zygisk_targets: ZygiskTargets::NotInstalled,
             ports: None,
+            obsolete_modules: vec![],
         },
         selection: None,
     };
@@ -776,4 +777,22 @@ fn an_adopted_kpm_reports_the_filesystem_hiding_it_was_loaded_with() {
         );
         assert_eq!(boot.status.live, vec![Kpm]);
     }
+}
+
+#[test]
+fn installed_obsolete_1x_modules_are_recorded_in_the_boot_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env(dir.path());
+    install(dir.path(), "vpnhide_ports", None);
+    install(dir.path(), "vpnhide_builtin", None);
+    // Marked for removal: gone after the next reboot, so not reported.
+    fs::write(dir.path().join("modules/vpnhide_builtin/remove"), "").unwrap();
+    let fx = fake(&env, None);
+    let f = gather(&env, KpmFact::NoRuntime);
+    let boot = NativeBoot::decide_and_apply(env, 1, "boot-1", &f, None, false, &fx);
+    assert_eq!(
+        boot.status.obsolete_modules,
+        vec!["vpnhide_ports".to_string()]
+    );
+    assert_eq!(boot.status.outcome, NativeBootOutcome::NoBackend);
 }

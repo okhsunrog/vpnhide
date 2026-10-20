@@ -448,6 +448,11 @@ pub struct NativeBootStatus {
     pub zygisk_targets: ZygiskTargets,
     #[serde(default)]
     pub ports: Option<PortsStatus>,
+    /// Installed 1.x modules that 2.0 replaced (`vpnhide_ports`, `vpnhide_builtin`).
+    /// Their own boot scripts still run beside core, so they are reported even
+    /// when the app is never opened (v7).
+    #[serde(default)]
+    pub obsolete_modules: Vec<String>,
 }
 
 /// The base a submitted edit is checked against, for conflict detection (§5).
@@ -804,6 +809,7 @@ mod tests {
                     detail: "f".into(),
                     at_ms: 3,
                 }),
+                obsolete_modules: vec!["vpnhide_ports".into()],
             }
         }
 

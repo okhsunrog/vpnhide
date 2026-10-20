@@ -24,6 +24,12 @@ internal data class NativeBootStatus(
     val kmod: KmodBootReport?,
     val zygiskTargets: ZygiskTargetsState,
     val ports: PortsBootStatus?,
+    /**
+     * Installed 1.x modules core found at its boot scan (core.log has the same line).
+     * The Dashboard reads the live root-snapshot list instead; this is the record
+     * that survives without the app.
+     */
+    val obsoleteModules: List<String> = emptyList(),
 ) {
     fun isFreshFor(currentBootId: String): Boolean = bootId.isNotEmpty() && bootId == currentBootId.trim()
 
@@ -209,6 +215,7 @@ private fun nativeBootStatusFrom(json: JSONObject): NativeBootStatus =
         kmod = json.optNullable("kmod")?.let { kmodReport(it as JSONObject) },
         zygiskTargets = zygiskTargets(json.get("zygisk_targets")),
         ports = json.optNullable("ports")?.let { ports(it as JSONObject) },
+        obsoleteModules = json.optJSONArray("obsolete_modules")?.let { array -> List(array.length()) { array.getString(it) } }.orEmpty(),
     )
 
 private fun JSONObject.optNullable(key: String): Any? = if (!has(key) || isNull(key)) null else get(key)

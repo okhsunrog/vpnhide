@@ -486,6 +486,23 @@ pub fn apatch_installed_vpnhide_kpm(dir: &Path) -> bool {
 }
 
 /// Gather the scan facts. `kpm` is the already-probed KernelPatch fact.
+/// 1.x companion modules 2.0 replaced with core. One still installed keeps running its
+/// own boot scripts beside core (iptables `vpnhide_out`, `/proc/vpnhide_ctl`). A module
+/// already marked for removal (`remove`) is gone after the next reboot and is not listed.
+pub const OBSOLETE_MODULE_IDS: [&str; 2] = ["vpnhide_ports", "vpnhide_builtin"];
+
+/// The [`OBSOLETE_MODULE_IDS`] still installed under `modules_root`.
+pub fn obsolete_modules(modules_root: &Path) -> Vec<String> {
+    OBSOLETE_MODULE_IDS
+        .into_iter()
+        .filter(|id| {
+            let dir = modules_root.join(id);
+            dir.is_dir() && !dir.join("remove").exists()
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
 pub fn gather(env: &NativeEnv, kpm: KpmFact) -> ScanFacts {
     let mut installed = Vec::new();
     let mut staged = Vec::new();
@@ -666,11 +683,22 @@ impl NativeBoot {
                 kmod: kmod_report,
                 zygisk_targets: ZygiskTargets::NotInstalled,
                 ports: None,
+                obsolete_modules: env
+                    .modules
+                    .as_deref()
+                    .map(obsolete_modules)
+                    .unwrap_or_default(),
             },
             selection,
             env,
         };
         boot.status.zygisk_targets = boot.settle_zygisk(facts);
+        if !boot.status.obsolete_modules.is_empty() {
+            alog::info(&format!(
+                "native: obsolete 1.x modules installed: {}; their boot scripts still run beside core (iptables, /proc/vpnhide_ctl). Uninstall them and reboot",
+                boot.status.obsolete_modules.join(", ")
+            ));
+        }
         alog::info(&format!(
             "native: boot decision {:?} (installed={:?} live={:?} staged={:?} zygisk={:?})",
             boot.status.outcome,
