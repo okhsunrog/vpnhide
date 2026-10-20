@@ -33,6 +33,30 @@ JSON also compresses ~10×). Three capture kinds, told apart by
 
 `state.json` is present in **all** of them and is where you start.
 
+How `logcat_full.txt` is captured: the app cannot read other apps' logs and
+runs no root process. While recording, it asks core's fixed `LogcatSince`
+probe every 10 s for everything newer than the last line it kept, and drops
+the overlap (`LogcatTail`). A gap is possible only when the device's ring buffer
+rotates out lines in under one poll. That is visible as a jump in timestamps,
+not as reordered or duplicated lines. A true stream is not used, because core's
+design has no way to carry one:
+
+- The IPC is tarpc, which is request/response only (no server streaming), over
+  1 MiB frames. A stream would need a second, non-tarpc channel, for example
+  passing a pipe fd over the socket with `SCM_RIGHTS`.
+- Diagnostic probes are bounded children: each has a deadline, an output cap,
+  and is killed on timeout, so a hung probe cannot hold the daemon. A `logcat`
+  that runs until the user taps Stop breaks that invariant. It would need a
+  core-owned session with its own size cap and an owner lease, so that a killed
+  app cannot leave root `logcat` writing forever. Renewing that lease is polling
+  again.
+- Root effects are fixed and idempotent so that an uncertain one can be
+  re-applied. Start/stop recording is neither.
+
+The fd-passing design is the path if this is ever needed. The pipe's lifetime
+is the app's, so `logcat` gets `SIGPIPE` when the app dies, with no lease. It
+is a new IPC surface, so it is not part of 2.0.
+
 ### Open it
 
 ```sh

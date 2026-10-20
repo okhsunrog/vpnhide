@@ -35,7 +35,10 @@ import java.util.Locale
  * The app cannot read other apps' logs and runs no root process, so core reads them:
  * while recording, the app polls core's fixed `LogcatSince` probe every few seconds
  * and appends the lines newer than the last one it kept ([LogcatTail]), so a ring
- * buffer that rotates mid-session loses nothing older than one poll.
+ * buffer that rotates mid-session loses nothing older than one poll. Polling rather
+ * than streaming is deliberate: core's tarpc IPC has no server streaming and its
+ * probes are bounded, killable children (see docs/debug-bundle.md, "How
+ * `logcat_full.txt` is captured").
  *
  * The raw logcat stream is captured between Start/Stop while debug logging is
  * temporarily enabled through the same canonical-config path used by the
