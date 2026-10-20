@@ -36,6 +36,7 @@ class NativeBootStatusTest {
         assertEquals(listOf(NativeBackendId.Zygisk), first.staged)
         assertEquals(KmodBootReport(true, false, "android14-6.1", "2.0.0", "6.1.0"), first.kmod)
         assertEquals(ZygiskTargetsState.Retired, first.zygiskTargets)
+        assertEquals(listOf("vpnhide_ports"), first.obsoleteModules)
         val ports = requireNotNull(first.ports)
         assertEquals(PortsBootSource.BootRetry, ports.source)
         assertEquals(FamilyOutcome.Unknown, ports.ipv6)

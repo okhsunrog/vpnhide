@@ -120,21 +120,9 @@ fn module_props(out: &mut Out, paths: &Paths) {
     out.section("obsolete_modules", obsolete_modules(paths));
 }
 
-/// 1.x companion modules 2.0 replaced with core. One still installed keeps running its
-/// own boot scripts beside core (iptables `vpnhide_out`, `/proc/vpnhide_ctl`), so the
-/// app tells the user to uninstall it. One id per line; a module already marked for
-/// removal (`remove`) is gone after the next reboot and is not listed.
-pub const OBSOLETE_MODULE_IDS: [&str; 2] = ["vpnhide_ports", "vpnhide_builtin"];
-
+/// Shared with core's boot scan (`NativeBootStatus::obsolete_modules`). One id per line.
 fn obsolete_modules(paths: &Paths) -> String {
-    OBSOLETE_MODULE_IDS
-        .into_iter()
-        .filter(|id| {
-            let dir = paths.module(id);
-            dir.is_dir() && !dir.join("remove").exists()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    crate::native_boot::obsolete_modules(&paths.modules).join("\n")
 }
 
 fn runtime(out: &mut Out, paths: &Paths) {
