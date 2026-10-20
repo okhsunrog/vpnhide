@@ -1165,7 +1165,7 @@ private fun Context.openUrl(url: String) {
 /** Compact "download this zip" button for a module-problem banner (wrong variant,
  * outdated version, …) — grabs the exact named artifact from the latest release. */
 @Composable
-private fun ModuleDownloadButton(artifact: String) {
+internal fun ModuleDownloadButton(artifact: String) {
     val uriHandler = LocalUriHandler.current
     EnhancedOutlinedButton(onClick = { runCatching { uriHandler.openUri(releaseAssetUrl(artifact)) } }) {
         Text(stringResource(R.string.dashboard_install_recommendation_download, artifact))
