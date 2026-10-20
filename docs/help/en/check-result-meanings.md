@@ -33,8 +33,8 @@ the labels are:
 attempt is not a pass. The screen can retain earlier measurements and explain why
 the latest attempt did not finish; read that notice before interpreting the rows.
 
-If routing could not be determined, it is **unknown**, not “VPN is off”. Check root
-access and retry. If a configuration change is applying, wait; if it failed or its
+If routing could not be determined, it is **unknown**, not “VPN is off”. Check that
+the VPN Hide Core module is running and retry. If a configuration change is applying, wait; if it failed or its
 outcome is unknown, resolve that first using [Saving and applying](saving-applying.md).
 
 A single **No data** result can also mean a probe failed or returned incomplete

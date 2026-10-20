@@ -23,20 +23,21 @@ recommends the right one for your device and gives you its download name.
   compiling their own kernel with the project's patches. Ready-made kernels are
   not currently a supported distribution option. This is not a ZIP that adds
   support to a stock kernel. See the [developer integration guide](https://github.com/okhsunrog/vpnhide/tree/main/builtin).
-  A self-built integration also needs its matching companion/activator to deliver
-  configuration. A detected driver alone does not prove configuration is applied.
+  It needs no module: VPN Hide Core adopts the built-in driver at boot and delivers
+  the configuration to it. A detected driver alone does not prove configuration is
+  applied — check the Dashboard.
 
 ## Keep one native backend
 
-Install one native backend. The app's choice of an activator does **not** guarantee
-that every other installed backend has stopped hooking. In particular, leftover
-Zygisk hooks can still run inside app processes.
+Install one native backend. VPN Hide Core decides once per boot: if it finds more
+than one — installed kmod, KPM or Zygisk modules, a kernel with VPN Hide built in,
+or a VPN Hide KPM it did not load — it loads **none** of them, clears Zygisk's
+target list, and the Dashboard names every backend involved. Remove the redundant
+ones and reboot; core never picks one for you.
 
-Kernel loaders check for conflicting backends and may refuse to load. These guards
-are not a reason to keep conflicting installations: remove the redundant component
-and reboot. Never force `.ko` and KPM to run together; they hook the same kernel
-functions and can freeze the device. With a self-built Built-in kernel, do not add
-`.ko` or KPM on top; keep the companion matching that integration.
+Never force `.ko` and KPM to run together; they hook the same kernel functions and
+can freeze the device. With a self-built Built-in kernel, do not add `.ko` or KPM
+on top.
 
 **Java** and **Native** cover different detection paths. Both are recommended for
 broader coverage, but a single layer can be used with reduced coverage. The Apps

@@ -35,7 +35,7 @@
           "id": "first-install",
           "title": { "en": "First install", "ru": "Первая установка", "zh": "首次安装" },
           "keywords": {
-            "en": ["install", "setup", "lsposed scope", "system framework", "reboot", "module", "not active", "verify"],
+            "en": ["install", "setup", "vpnhide-core", "core module", "lsposed scope", "system framework", "reboot", "module", "not active", "verify"],
             "ru": ["установка", "установить", "scope lsposed", "system framework", "перезагрузка", "модуль", "не активен", "проверка"],
             "zh": ["安装", "配置", "lsposed 作用域", "系统框架", "重启", "模块", "未生效", "验证"]
           }
@@ -170,9 +170,9 @@
           "id": "module-not-active",
           "title": { "en": "A module is installed but not active", "ru": "Модуль установлен, но не активен", "zh": "模块已安装但未生效" },
           "keywords": {
-            "en": ["not active", "inactive", "reboot to activate", "scope", "superkey", "activator missing", "conflict", "unsupported kernel"],
-            "ru": ["не активен", "неактивен", "перезагрузите для активации", "scope", "superkey", "активатор отсутствует", "конфликт", "неподдерживаемое ядро"],
-            "zh": ["未生效", "不生效", "重启以激活", "作用域", "superkey", "激活器缺失", "冲突", "内核不受支持"]
+            "en": ["not active", "inactive", "reboot to activate", "scope", "superkey", "core not running", "obsolete module", "conflict", "unsupported kernel"],
+            "ru": ["не активен", "неактивен", "перезагрузите для активации", "scope", "superkey", "core не запущен", "устаревший модуль", "конфликт", "неподдерживаемое ядро"],
+            "zh": ["未生效", "不生效", "重启以激活", "作用域", "superkey", "核心未运行", "废弃模块", "冲突", "内核不受支持"]
           }
         },
         {

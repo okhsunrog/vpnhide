@@ -19,8 +19,8 @@ different things, and VPN Hide has a role for each: **Java**, **Native**,
   Integrity.** VPN Hide hides the VPN and nothing else. An app that refuses
   because it detects root or fails attestation needs a different approach — that
   isn't what this tool does.
-- **Work without root.** Root is required. Java/Apps need LSPosed; Native needs
-  a native backend; Ports needs its module. You can use fewer layers, with less coverage.
+- **Work without root.** Root is required for the VPN Hide Core module. Java/Apps
+  need LSPosed; Native needs a native backend; Ports comes with the core module. You can use fewer layers, with less coverage.
 - **Give Native to an unlimited number of apps.** The native backend protects up
   to **159 app UIDs** (it counts UIDs, not apps, and reserves one slot for VPN
   Hide itself). The picker prevents selections/saves over its UID budget. Reduce

@@ -1,5 +1,3 @@
-> **Superseded for 2.0:** There is no separate `vpnhide-ports.zip`. Ports rules are applied by the **`vpnhide_core`** module. Uninstall any old `vpnhide_ports` Magisk module.
-
 # Hide localhost ports (Ports)
 
 Some VPN/proxy clients listen on local ports, for example `127.0.0.1:7890`.
@@ -8,14 +6,17 @@ these connections for the target app; it does not stop the proxy itself.
 
 ## Set it up
 
-1. Install `vpnhide-ports.zip` from the [official releases](https://github.com/okhsunrog/vpnhide/releases)
-   through your root manager, then reboot to finish installation.
-2. In **Hiding**, enable **Ports** for the app doing the probing.
-3. Use the settings icon beside Ports if you want to choose port ranges, then **Save**.
-4. Wait for a successful apply and reopen the target app.
+Ports is part of the **VPN Hide Core** module (`vpnhide-core.zip`), which every
+installation already has; there is nothing extra to install. A **VPN Hide (Ports)**
+module left over from 1.x must be uninstalled — the Dashboard shows an error while
+it is still there.
 
-Once the module is available, changing roles or ranges applies firewall rules on
-Save without another reboot. If applying fails, follow [Saving and applying](saving-applying.md).
+1. In **Hiding**, enable **Ports** for the app doing the probing.
+2. Use the settings icon beside Ports if you want to choose port ranges, then **Save**.
+3. Wait for a successful apply and reopen the target app.
+
+Changing roles or ranges applies firewall rules on Save without a reboot; core
+also re-applies them at every boot. If applying fails, follow [Saving and applying](saving-applying.md).
 
 ## Coverage and side effects
 
@@ -31,6 +32,6 @@ or a service reachable on another network address.
 
 ## Stop blocking
 
-For one app, turn off its Ports role and Save successfully. To remove the component,
-uninstall it in the root manager and reboot. Do not assume that marking a module
-for removal has already cleared live firewall rules.
+For one app, turn off its Ports role and Save successfully. The rules live in the
+kernel's firewall until reboot: uninstalling the core module stops core from
+re-applying them, but only a reboot clears rules that are already loaded.

@@ -16,7 +16,8 @@ setup back with one import.
 ## Moving to another device
 
 1. On the old device, **Export JSON**.
-2. On the new device, install VPN Hide and the same modules you use.
+2. On the new device, install VPN Hide, the VPN Hide Core module and the native
+   backend that fits that device.
 3. **Import JSON** the file you exported.
 
 Roles apply to apps by package name, so any target app you don't have installed

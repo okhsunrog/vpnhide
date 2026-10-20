@@ -39,5 +39,5 @@ device supports one — see
 paths from every app. Filtering still follows target configuration. This option
 only addresses filesystem-path detection; it cannot turn every “Not covered” row
 into a pass. For a self-built Built-in integration, check the capabilities of your
-kernel build and the setting's status instead of assuming a companion update adds
-missing kernel hooks.
+kernel build and the setting's status instead of assuming an app or core update
+adds missing kernel hooks.
