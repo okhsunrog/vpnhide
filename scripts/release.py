@@ -253,7 +253,10 @@ def main() -> int:
         "review on the Releases page, click Publish"
     )
     console.print("  ./scripts/update-json.sh")
-    console.print(f'  git commit -am "chore: update-json for v{version}"')
+    # `add` first: the first release that ships a new module (2.0: update-core.json)
+    # creates an untracked file that `commit -a` would leave behind.
+    console.print("  git add update-json")
+    console.print(f'  git commit -m "chore: update-json for v{version}"')
     console.print("  git push")
     return 0
 
