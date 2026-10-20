@@ -115,6 +115,8 @@ pub struct StateReply {
     config: Option<String>,
     operations_in_flight: Vec<u64>,
     backend: NativeBackendStatus,
+    /// A logcat session holds debug logging on (core keeps `debug` true meanwhile).
+    debug_lease: bool,
 }
 
 async fn dispatch(socket: &str, request: Request) -> Result<Reply, String> {
@@ -231,6 +233,7 @@ async fn state(client: &CoreClient) -> Result<StateReply, String> {
             .map(|op| op.0)
             .collect(),
         backend: snapshot.backend,
+        debug_lease: snapshot.debug_lease,
     })
 }
 

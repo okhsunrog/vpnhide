@@ -49,13 +49,13 @@ pub use diag::{
 };
 pub use edit::{ConfigAppField, ConfigEdit, ConfigSetField, ConfigToggle};
 pub use logcat::{
-    LogcatAutoStopReason, LogcatRecordingError, LogcatSessionId, LogcatSessionState,
-    LogcatSessionStatus,
+    LogcatAutoStopReason, LogcatDebugLease, LogcatDebugRestore, LogcatRecordingError,
+    LogcatSessionId, LogcatSessionState, LogcatSessionStatus,
 };
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract, §9): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -153,6 +153,10 @@ pub struct StateSnapshot {
     /// detected identity instead of each activator probing for itself — is the point of core
     /// owning all state: the family to project for, and what the app shows, come from here.
     pub backend: NativeBackendStatus,
+    /// A logcat recording holds debug logging on (v9): while set, core keeps `debug` true
+    /// on every admitted edit, and the app's candidates should say so too.
+    #[serde(default)]
+    pub debug_lease: bool,
 }
 
 /// Whether observation evidence is current, never obtained, or explicitly Unknown (§6/§8).
@@ -604,8 +608,20 @@ pub trait VpnhideCore {
         session: LogcatSessionId,
     ) -> Result<LogcatSessionStatus, LogcatRecordingError>;
 
-    /// The current or last session, if any (`file` is never set here).
+    /// The current or last session, if any (`file` is never set here). A finished session
+    /// with `delivered: false` is a recording the app has not saved yet.
     async fn logcat_recording_status() -> Option<LogcatSessionStatus>;
+
+    /// The app saved `session`'s recording (v9): core marks it delivered and deletes its
+    /// file and the export copy. Idempotent; refused while the session still records.
+    async fn ack_logcat_recording(
+        session: LogcatSessionId,
+    ) -> Result<LogcatSessionStatus, LogcatRecordingError>;
+
+    /// Drop `session` (v9): stop it if it records (restoring debug logging), delete its
+    /// files and forget it. Idempotent: an id core does not hold is already discarded.
+    async fn discard_logcat_recording(session: LogcatSessionId)
+    -> Result<(), LogcatRecordingError>;
 }
 
 #[cfg(test)]
@@ -741,6 +757,7 @@ mod tests {
                             installed: vec![NativeBackend::Builtin, NativeBackend::Zygisk],
                             boot: Some(sample_boot(sample_outcomes()[0].clone())),
                         },
+                        debug_lease: true,
                     },
                 };
                 assert_eq!(survives("Published", &published), published);
@@ -1012,6 +1029,15 @@ mod tests {
                 LogcatSessionState::AutoStopped {
                     reason: LogcatAutoStopReason::LogcatExited,
                 },
+                LogcatSessionState::AutoStopped {
+                    reason: LogcatAutoStopReason::CoreRestarted,
+                },
+            ];
+            let restores = [
+                LogcatDebugRestore::Held,
+                LogcatDebugRestore::Pending,
+                LogcatDebugRestore::Restored,
+                LogcatDebugRestore::UserChoice,
             ];
             for (n, state) in states.into_iter().enumerate() {
                 let status = LogcatSessionStatus {
@@ -1025,6 +1051,12 @@ mod tests {
                     max_duration_ms: 5,
                     logcat_exit: (n == 4).then_some(1),
                     file: (n > 0).then(|| "/d/logcat-session-1.txt".to_owned()),
+                    delivered: n == 2,
+                    debug: (n > 0).then(|| LogcatDebugLease {
+                        previous_debug: n % 2 == 0,
+                        previous_debug_switch: n == 3,
+                        restore: restores[n % restores.len()],
+                    }),
                 };
                 let ok: Result<LogcatSessionStatus, LogcatRecordingError> = Ok(status.clone());
                 assert_eq!(survives("logcat result", &ok), ok);
@@ -1047,6 +1079,16 @@ mod tests {
             }
             let none: Option<LogcatSessionStatus> = None;
             assert_eq!(survives("no session", &none), none);
+            for discarded in [Ok(()), Err(LogcatRecordingError::Disabled)] {
+                assert_eq!(survives("discard result", &discarded), discarded);
+            }
+            // v8 statuses without the v9 fields still decode.
+            let v8: LogcatSessionStatus = serde_json::from_str(
+                r#"{"session":1,"state":{"kind":"stopped"},"started_at_ms":1,"duration_ms":2,"bytes":3,"max_bytes":4,"max_duration_ms":5}"#,
+            )
+            .unwrap();
+            assert!(!v8.delivered);
+            assert_eq!(v8.debug, None);
         }
 
         /// The app parses this exact JSON (Kotlin `CoreLogcatRecordingTest`).
@@ -1064,6 +1106,12 @@ mod tests {
                     max_duration_ms: 1_800_000,
                     logcat_exit: None,
                     file: None,
+                    delivered: false,
+                    debug: Some(LogcatDebugLease {
+                        previous_debug: false,
+                        previous_debug_switch: false,
+                        restore: LogcatDebugRestore::Held,
+                    }),
                 },
                 LogcatSessionStatus {
                     session: LogcatSessionId(43),
@@ -1080,6 +1128,12 @@ mod tests {
                     file: Some(
                         "/data/user_de/0/x/vpnhide-core-export/logcat-session-43.txt".into(),
                     ),
+                    delivered: false,
+                    debug: Some(LogcatDebugLease {
+                        previous_debug: false,
+                        previous_debug_switch: false,
+                        restore: LogcatDebugRestore::UserChoice,
+                    }),
                 },
                 LogcatSessionStatus {
                     session: LogcatSessionId(44),
@@ -1094,6 +1148,28 @@ mod tests {
                     max_duration_ms: 1_800_000,
                     logcat_exit: Some(1),
                     file: None,
+                    delivered: true,
+                    debug: None,
+                },
+                LogcatSessionStatus {
+                    session: LogcatSessionId(45),
+                    state: LogcatSessionState::AutoStopped {
+                        reason: LogcatAutoStopReason::CoreRestarted,
+                    },
+                    started_at_ms: 1,
+                    duration_ms: 900_000,
+                    bytes: 1 << 20,
+                    truncated: false,
+                    max_bytes: 64 << 20,
+                    max_duration_ms: 1_800_000,
+                    logcat_exit: None,
+                    file: None,
+                    delivered: false,
+                    debug: Some(LogcatDebugLease {
+                        previous_debug: false,
+                        previous_debug_switch: false,
+                        restore: LogcatDebugRestore::Restored,
+                    }),
                 },
             ];
             let json = serde_json::to_string_pretty(&all).unwrap() + "\n";

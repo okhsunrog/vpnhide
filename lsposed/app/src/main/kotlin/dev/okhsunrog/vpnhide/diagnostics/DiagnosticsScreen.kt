@@ -642,6 +642,11 @@ private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    Text(
+                        text = stringResource(R.string.logcat_debug_lease_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Spacer(Modifier.height(12.dp))
                     EnhancedButton(
                         onClick = {
@@ -659,8 +664,52 @@ private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
                     }
                 }
 
+                is LogcatRecorder.State.Undelivered -> {
+                    logcatEndNotice(s.failure, s.autoStop, s.maxBytes, s.maxDurationMs)?.let { notice ->
+                        Text(
+                            text = notice,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    Text(
+                        text = stringResource(R.string.logcat_undelivered_title),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text =
+                            stringResource(
+                                R.string.logcat_undelivered_body,
+                                formatStartTime(s.startMs),
+                                formatElapsed(s.durationMs / 1000),
+                                formatSize(s.sizeBytes),
+                            ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    EnhancedButton(
+                        onClick = {
+                            val restartState = selfNeedsRestart ?: return@EnhancedButton
+                            scope.launch { LogcatRecorder.saveUndelivered(context, restartState) }
+                        },
+                        enabled = selfNeedsRestart != null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.logcat_btn_save_recording))
+                    }
+                    TextButton(
+                        onClick = { scope.launch { LogcatRecorder.discardUndelivered() } },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.logcat_btn_discard_recording))
+                    }
+                }
+
                 is LogcatRecorder.State.Stopped -> {
-                    logcatEndNotice(s)?.let { notice ->
+                    logcatEndNotice(s.failure, s.autoStop, s.maxBytes, s.maxDurationMs)?.let { notice ->
                         Text(
                             text = notice,
                             style = MaterialTheme.typography.bodySmall,
@@ -830,22 +879,34 @@ private fun CaptureIncompleteWarning(
 
 /** Why the last recording ended early or failed, or null for an ordinary Stop. */
 @Composable
-private fun logcatEndNotice(state: LogcatRecorder.State.Stopped): String? {
-    state.failure?.let { failure ->
+private fun logcatEndNotice(
+    failure: LogcatRecorder.Failure?,
+    autoStop: LogcatAutoStop?,
+    maxBytes: Long,
+    maxDurationMs: Long,
+): String? {
+    failure?.let {
         val res =
-            when (failure.stage) {
+            when (it.stage) {
                 LogcatRecorder.Failure.Stage.Start -> R.string.logcat_start_failed
                 LogcatRecorder.Failure.Stage.Stop -> R.string.logcat_stop_failed
+                LogcatRecorder.Failure.Stage.Discard -> R.string.logcat_discard_failed
             }
-        return stringResource(res, failure.status)
+        return stringResource(res, it.status)
     }
-    return when (state.autoStop) {
-        LogcatAutoStop.SizeCap -> stringResource(R.string.logcat_auto_stopped_size, formatSize(state.maxBytes))
-        LogcatAutoStop.DurationCap -> stringResource(R.string.logcat_auto_stopped_duration, state.maxDurationMs / 60_000)
+    return when (autoStop) {
+        LogcatAutoStop.SizeCap -> stringResource(R.string.logcat_auto_stopped_size, formatSize(maxBytes))
+        LogcatAutoStop.DurationCap -> stringResource(R.string.logcat_auto_stopped_duration, maxDurationMs / 60_000)
         LogcatAutoStop.LogcatExited -> stringResource(R.string.logcat_auto_stopped_exited)
+        LogcatAutoStop.CoreRestarted -> stringResource(R.string.logcat_auto_stopped_core_restarted)
         null -> null
     }
 }
+
+private fun formatStartTime(ms: Long): String =
+    java.text.DateFormat
+        .getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+        .format(java.util.Date(ms))
 
 private fun formatElapsed(seconds: Long): String {
     val m = seconds / 60

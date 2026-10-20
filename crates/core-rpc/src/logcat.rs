@@ -1,9 +1,15 @@
-//! Core-owned full-system logcat recording (protocol v8).
+//! Core-owned full-system logcat recording (protocol v8; debug lease and delivery v9).
 //!
 //! The app asks core to record `logcat -b all`, and core alone owns the root child, its
 //! output file and its limits: one session at a time, a byte cap and a wall-clock cap
 //! after which core stops the child itself. A killed app therefore can never leave a
-//! root logcat running. Both calls are idempotent and keyed by the app's session id.
+//! root logcat running. Every call is idempotent and keyed by the app's session id.
+//!
+//! The session also owns the temporary debug logging a capture needs (v9): core turns
+//! `debug` on through its own journaled config write, holds it on while recording, and puts
+//! it back when the session ends, also after a crash or reboot. The finished recording
+//! stays with core until the app acknowledges it has saved it (or discards it), so an
+//! app killed between Stop and saving can still offer it later.
 
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +27,32 @@ pub enum LogcatAutoStopReason {
     DurationCap,
     /// `logcat` exited by itself (see [`LogcatSessionStatus::logcat_exit`]).
     LogcatExited,
+    /// Core found the session unfinished when it started (it crashed, or the device
+    /// rebooted). The file ends where the old core stopped.
+    CoreRestarted,
+}
+
+/// What the session's debug-logging lease did with the config's `debug` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogcatDebugRestore {
+    /// Recording: core holds `debug` on.
+    Held,
+    /// Ended, but the restore write could not run yet (retried by core).
+    Pending,
+    /// Ended: `debug` is back to its value before the session.
+    Restored,
+    /// Ended: the user changed the debug switch during the session; that choice was kept.
+    UserChoice,
+}
+
+/// The session's hold on debug logging (`debug` in the canonical config).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogcatDebugLease {
+    /// `debug` and `debugSwitch` when the session started.
+    pub previous_debug: bool,
+    pub previous_debug_switch: bool,
+    pub restore: LogcatDebugRestore,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +89,13 @@ pub struct LogcatSessionStatus {
     /// Set by Stop: the recording, copied into the app's export dir (app-owned, 0600).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    /// The app acknowledged it saved the recording; core has deleted its copies.
+    #[serde(default)]
+    pub delivered: bool,
+    /// Core's debug-logging lease. `None` when core could not take one (no config yet, or
+    /// an uncertain operation blocks writes); the recording runs without forced logging.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<LogcatDebugLease>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

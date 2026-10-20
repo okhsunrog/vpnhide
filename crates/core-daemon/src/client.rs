@@ -199,6 +199,42 @@ impl CoreClient {
         }
     }
 
+    /// The app saved a logcat recording. Outer `Err`: not delivered.
+    pub async fn ack_logcat_recording(
+        &self,
+        session: LogcatSessionId,
+    ) -> Result<Result<LogcatSessionStatus, LogcatRecordingError>, String> {
+        let client = self.client().await.map_err(|e| e.to_string())?;
+        match client
+            .ack_logcat_recording(deadline(CALL_DEADLINE), session)
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                self.drop_client().await;
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Drop a logcat session. Outer `Err`: not delivered.
+    pub async fn discard_logcat_recording(
+        &self,
+        session: LogcatSessionId,
+    ) -> Result<Result<(), LogcatRecordingError>, String> {
+        let client = self.client().await.map_err(|e| e.to_string())?;
+        match client
+            .discard_logcat_recording(deadline(LOGCAT_STOP_DEADLINE), session)
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                self.drop_client().await;
+                Err(e.to_string())
+            }
+        }
+    }
+
     /// The current or last logcat session. Outer `Err`: not delivered.
     pub async fn logcat_recording_status(&self) -> Result<Option<LogcatSessionStatus>, String> {
         let client = self.client().await.map_err(|e| e.to_string())?;

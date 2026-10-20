@@ -29,6 +29,10 @@ internal class CoreConfigIo(
     private var core: CoreConfigClient? = null
     private var revision = 0L
 
+    @Volatile
+    override var debugLease = false
+        private set
+
     /** The core operation the current Native/Ports phases report from, if still current. */
     private var current: CoreOperationRecord? = null
 
@@ -42,6 +46,7 @@ internal class CoreConfigIo(
         val client = core ?: prepareCore()?.also { core = it } ?: return ConfigInitialization(ConfigCoordinatorMode.Unavailable)
         val state = (client.state() as? CoreReply.Observed)?.state ?: return ConfigInitialization(ConfigCoordinatorMode.Unavailable)
         revision = state.configRevision
+        debugLease = state.debugLease
         val config = (state.canonical as? RootCanonicalRead.Available)?.config
         // Core serializes its own operations; one still running (e.g. boot apply) pauses the lane.
         if (state.operationsInFlight.isNotEmpty()) return ConfigInitialization(ConfigCoordinatorMode.Paused, config)
@@ -57,6 +62,7 @@ internal class CoreConfigIo(
         val state = (core?.state() as? CoreReply.Observed)?.state ?: return RootCanonicalRead.Unavailable
         // The base the next Replace is conflict-checked against: exactly what was just read.
         revision = state.configRevision
+        debugLease = state.debugLease
         current = null
         return state.canonical
     }
@@ -106,6 +112,7 @@ internal class CoreConfigIo(
         val reply =
             core?.operation(op) as? CoreReply.Observed ?: return ConfigPhaseEvidence(PhaseOutcome.Unknown, RootCanonicalRead.Unavailable)
         revision = reply.state.configRevision
+        debugLease = reply.state.debugLease
         val record = reply.record ?: return ConfigPhaseEvidence(PhaseOutcome.Unknown, reply.state.canonical)
         if (record.settled == null) return ConfigPhaseEvidence(PhaseOutcome.Unknown, reply.state.canonical)
         pending = null

@@ -34,8 +34,8 @@ JSON also compresses ~10×). Three capture kinds, told apart by
 `state.json` is present in **all** of them and is where you start.
 
 How `logcat_full.txt` is captured: the app cannot read other apps' logs and
-runs no root process, so core records it (protocol 8, core-daemon
-`logcat_session`):
+runs no root process, so core records it (protocol 8; the debug lease and
+delivery state are protocol 9; core-daemon `logcat_session`):
 
 - **Start** (`start_logcat_recording(session)`): core spawns one
   `logcat -b all -v threadtime -T <start − 1 s>` child, by direct exec with no
@@ -49,24 +49,65 @@ runs no root process, so core records it (protocol 8, core-daemon
   app's start marker, and `truncated` says the rest is missing. The app shows
   why the recording ended. No owner lease is needed, because the caps bound a
   session whether or not the app is alive.
+- **Debug logging (v9):** Start takes a lease on the config's `debug` field.
+  Core records `debug` and `debugSwitch` as they were in the session record,
+  then writes `debug = true` as its own journaled config edit (the same write
+  path as any edit, so the kernel module, Zygisk and Ports see it). While the
+  session records, core keeps `debug` true on every edit it admits, and the
+  published state carries `debug_lease: true` so the app's candidates agree.
+  When the session ends, however it ends (Stop, any auto-stop, discard, or the
+  next core start after a crash or reboot), core puts it back by one rule:
+  - if `debugSwitch` (the user's explicit choice) still has its value from the
+    start, `debug` returns to its value from the start (`restored`);
+  - if the user changed `debugSwitch` during the session, `debug` follows the
+    switch (`user_choice`), so a restore never undoes an explicit change.
+
+  A restore core can't write yet (an uncertain operation blocks all writes) stays
+  `pending` in the session record and is retried on every session call and at
+  the next core start. With no config at Start, the session records without a
+  lease (`debug: null`). One edge case: if the app's one-shot debug ZIP holds
+  its own capture at the moment core restores, core may turn `debug` off under
+  it; the app's next config write turns it back on.
 - **Core death:** the child has `PR_SET_PDEATHSIG(SIGKILL)` and dies with core.
-  A clean shutdown stops it first. Core deletes its `logcat/` dir at start, and
-  a new session removes the previous session's file and export copy.
+  A clean shutdown stops it first. Core keeps one session record,
+  `logcat/session.json`. At start, core ends a session that was still recording
+  as `AutoStopped(core_restarted)` (its duration comes from the file's last
+  write), restores the debug lease, and keeps the recording so the app can still
+  save it. Anything else in `logcat/` is removed, and so is a session that was
+  already delivered.
 - **Stop** (`stop_logcat_recording(session)`): core kills the child, waits for
   the file to flush, and copies it into the app's `vpnhide-core-export/` dir as
   `logcat-session-<id>.txt` (app-owned, 0600). This is the same route large probe
   output takes, so nothing goes inline over the 1 MiB frame. A repeated Stop
   returns the same status, and hands the file over again if the app already
   removed its copy.
+- **Delivery (v9):** the session stays `delivered: false` until the app
+  acknowledges it (`ack_logcat_recording(session)`), which it does only after
+  the ZIP is written. Ack marks the session delivered and deletes core's file
+  and the export copy. It is idempotent: a repeated ack returns the same status,
+  and a Stop after an ack answers without a file. A lost ack reply only means the
+  recording is offered again. `discard_logcat_recording(session)` stops the
+  session if it still records, restores the lease and deletes everything; an
+  unknown or already discarded id is a no-op. Only the latest session is kept,
+  so a new Start replaces an undelivered one.
 - **App side:** while recording, the app asks only for the session's size and
   state (`logcat_recording_status`, every 2 s), never for log lines. When core
   reports an auto-stop, the app collects the file at once. After an app restart,
   the Diagnostics card adopts a session core is still recording, so Stop can
-  collect it.
+  collect it. If core holds a finished recording that was never delivered (the
+  app was killed while collecting, or the session auto-stopped or ended in a core
+  restart while the app was gone), Diagnostics offers to save it as a ZIP or to
+  discard it.
 
 `state.json → sections.logcat_recording` records the session id, duration,
-`rawLogBytes`, `truncated`, `autoStopped`, `coreLimits`, and whether the session
-was adopted after an app restart.
+`rawLogBytes`, `truncated`, `autoStopped`, `coreLimits`, `debugLease`, and
+whether the session was adopted after an app restart or saved later.
+`selfNeedsRestart` is the collecting app process's own view at collect time;
+it is app state, not core's. For a recording saved after an app restart, it
+describes the new process. `debugCapture` comes from core's lease: `forced`
+means core turned debug logging on, and `restoreExit` is `0` once core restored
+it, `-1` while the restore is pending, and `null` while the lease is still held
+(as it is in the Stop reply).
 
 ### Open it
 
@@ -153,7 +194,7 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 | `lsposedConfigDb` | LSPosed module enable state + scope for this app. |
 | `hookReport` | Native hook install mask + counter deltas across the forced check run (§7). |
 | `networkView` | The framework network model as this uid sees it after Binder — handles, per-handle capabilities/link properties/`NetworkInfo`, legacy type answers, every callback delivered during a 2 s window (default, listen-without-NOT_VPN, VPN listen, PendingIntent) and the consistency `invariants` over all of it ([lsposed-hook-debugging.md §9](lsposed-hook-debugging.md)). Forensics only; `null` when it could not be taken (reason in `errors`). |
-| `debugCapture` | Whether debug logging was force-enabled for this capture (`forced`) and the toggle exit codes. |
+| `debugCapture` | Whether debug logging was force-enabled for this capture (`forced`) and the toggle exit codes. For `full_system_logcat` it is core's lease (§1): `detail` is `core lease, restore=<held/pending/restored/user_choice>`; `null` when core recorded without a lease. |
 | `captureOptions` | `{forensics, appList}` — self-documents what was included. |
 | `errors` | Non-fatal capture failures (a probe that threw, a truncated section). Partial data is flagged here, never silently dropped. |
 

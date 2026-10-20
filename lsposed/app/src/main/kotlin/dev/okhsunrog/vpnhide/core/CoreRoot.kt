@@ -147,7 +147,7 @@ internal interface CoreRootTransport {
     /** core-ffi `config_state`: core's published state, including the native boot decision. */
     suspend fun coreState(): String = ""
 
-    /** core-ffi `logcat_recording`: start/stop/status of core's logcat session. */
+    /** core-ffi `logcat_recording`: start/stop/status/ack/discard of core's logcat session. */
     suspend fun logcatRecording(requestJson: String): String = ""
 }
 
@@ -261,8 +261,14 @@ internal object CoreRoot {
     /** Stop session [id]; [CoreLogcatSession.file] is the copy core put in the export dir. */
     suspend fun stopLogcat(id: Long): CoreLogcatReply = logcat("stop", id, LOGCAT_STOP_TIMEOUT_MS)
 
-    /** The session core currently holds (running or last finished), if any. */
+    /** The session core currently holds (running, or finished and not yet saved), if any. */
     suspend fun logcatStatus(): CoreLogcatReply = logcat("status", 0L, LOGCAT_CALL_TIMEOUT_MS)
+
+    /** The app saved session [id]: core marks it delivered and deletes its copies (idempotent). */
+    suspend fun ackLogcat(id: Long): CoreLogcatReply = logcat("ack", id, LOGCAT_CALL_TIMEOUT_MS)
+
+    /** Drop session [id] and its files; stops it first if it still records (idempotent). */
+    suspend fun discardLogcat(id: Long): CoreLogcatReply = logcat("discard", id, LOGCAT_STOP_TIMEOUT_MS)
 
     private suspend fun logcat(
         action: String,
@@ -300,6 +306,29 @@ internal enum class LogcatAutoStop(
     SizeCap("size_cap"),
     DurationCap("duration_cap"),
     LogcatExited("logcat_exited"),
+
+    /** Core stopped (crash, update, reboot) while the session recorded. */
+    CoreRestarted("core_restarted"),
+}
+
+/** How core put debug logging back after a session (`core-rpc` `LogcatDebugRestore`). */
+internal enum class LogcatDebugRestore(
+    val wire: String,
+) {
+    Held("held"),
+    Pending("pending"),
+    Restored("restored"),
+    UserChoice("user_choice"),
+}
+
+/** Core's debug-logging lease for a session (`core-rpc` `LogcatDebugLease`). */
+internal data class CoreLogcatDebugLease(
+    val previousDebug: Boolean,
+    val previousDebugSwitch: Boolean,
+    val restore: LogcatDebugRestore,
+) {
+    /** Core turned debug logging on for the session (it was off). */
+    val forced: Boolean get() = !previousDebug
 }
 
 /** Core's view of one logcat recording (`core-rpc` `LogcatSessionStatus`). */
@@ -317,7 +346,14 @@ internal data class CoreLogcatSession(
     val logcatExit: Int?,
     /** Stop only: the recording core copied into the app's export dir. */
     val file: File?,
-)
+    /** The app acknowledged it saved the recording; core holds no copy any more. */
+    val delivered: Boolean = false,
+    /** Null when core recorded without forcing debug logging (no config to write). */
+    val debug: CoreLogcatDebugLease? = null,
+) {
+    /** Finished and not saved yet: the app should offer to save or discard it. */
+    val undelivered: Boolean get() = !recording && !delivered
+}
 
 internal sealed interface CoreLogcatReply {
     /** [session] is null only for a status query when core holds no session. */
@@ -366,6 +402,17 @@ internal fun parseCoreLogcatSession(json: JSONObject): CoreLogcatSession {
         maxDurationMs = json.getLong("max_duration_ms"),
         logcatExit = if (json.has("logcat_exit") && !json.isNull("logcat_exit")) json.getInt("logcat_exit") else null,
         file = json.optString("file").takeIf { json.has("file") && it.isNotEmpty() }?.let(::File),
+        delivered = json.optBoolean("delivered"),
+        debug = json.optJSONObject("debug")?.let(::parseCoreLogcatDebugLease),
+    )
+}
+
+private fun parseCoreLogcatDebugLease(json: JSONObject): CoreLogcatDebugLease {
+    val restore = json.getString("restore")
+    return CoreLogcatDebugLease(
+        previousDebug = json.getBoolean("previous_debug"),
+        previousDebugSwitch = json.getBoolean("previous_debug_switch"),
+        restore = LogcatDebugRestore.entries.first { it.wire == restore },
     )
 }
 

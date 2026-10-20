@@ -112,6 +112,8 @@ enum LogcatAction {
     Start,
     Stop,
     Status,
+    Ack,
+    Discard,
 }
 
 #[derive(serde::Deserialize)]
@@ -121,47 +123,67 @@ struct LogcatRequest {
     session: u64,
 }
 
-/// Start, stop or query core's logcat session (see [`crate::logcat_recording`]).
+/// Start, stop, query, acknowledge or discard core's logcat session
+/// (see [`crate::logcat_recording`]).
 pub async fn logcat_recording(socket: &str, request_json: &str) -> String {
     let run = async {
         let request: LogcatRequest = decode(request_json)?;
         let client = connect(socket).await?;
         let id = LogcatSessionId(request.session);
-        let outcome = match request.action {
-            LogcatAction::Start => client.start_logcat_recording(id).await,
-            LogcatAction::Stop => client.stop_logcat_recording(id).await,
+        let transport = |e: String| Reply::status("transport", e);
+        let session = |status: Option<LogcatSessionStatus>| Reply {
+            status: "ok",
+            session: Some(status.map(Box::new)),
+            ..Reply::default()
+        };
+        Ok::<_, Reply>(match request.action {
             LogcatAction::Status => {
-                let status = client
-                    .logcat_recording_status()
+                session(client.logcat_recording_status().await.map_err(transport)?)
+            }
+            LogcatAction::Start => {
+                match client.start_logcat_recording(id).await.map_err(transport)? {
+                    Ok(status) => session(Some(status)),
+                    Err(e) => logcat_error(e),
+                }
+            }
+            LogcatAction::Stop => {
+                match client.stop_logcat_recording(id).await.map_err(transport)? {
+                    Ok(status) => session(Some(status)),
+                    Err(e) => logcat_error(e),
+                }
+            }
+            LogcatAction::Ack => match client.ack_logcat_recording(id).await.map_err(transport)? {
+                Ok(status) => session(Some(status)),
+                Err(e) => logcat_error(e),
+            },
+            LogcatAction::Discard => {
+                match client
+                    .discard_logcat_recording(id)
                     .await
-                    .map_err(|e| Reply::status("transport", e))?;
-                return Ok(Reply {
-                    status: "ok",
-                    session: Some(status.map(Box::new)),
-                    ..Reply::default()
-                });
+                    .map_err(transport)?
+                {
+                    Ok(()) => session(None),
+                    Err(e) => logcat_error(e),
+                }
             }
-        }
-        .map_err(|e| Reply::status("transport", e))?;
-        Ok::<_, Reply>(match outcome {
-            Ok(status) => Reply {
-                status: "ok",
-                session: Some(Some(Box::new(status))),
-                ..Reply::default()
-            },
-            Err(LogcatRecordingError::Busy { running }) => Reply {
-                running: Some(running.0),
-                ..Reply::status("busy", "another recording is running")
-            },
-            Err(LogcatRecordingError::UnknownSession) => {
-                Reply::status("unknown_session", "core holds no such session")
-            }
-            Err(LogcatRecordingError::Disabled) => {
-                Reply::status("disabled", "logcat recording is disabled in this core")
-            }
-            Err(LogcatRecordingError::Invalid(e)) => Reply::status("refused", e),
-            Err(LogcatRecordingError::Failed(e)) => Reply::status("failed", e),
         })
     };
     encode(run.await.unwrap_or_else(|reply| reply))
+}
+
+fn logcat_error(e: LogcatRecordingError) -> Reply {
+    match e {
+        LogcatRecordingError::Busy { running } => Reply {
+            running: Some(running.0),
+            ..Reply::status("busy", "another recording is running")
+        },
+        LogcatRecordingError::UnknownSession => {
+            Reply::status("unknown_session", "core holds no such session")
+        }
+        LogcatRecordingError::Disabled => {
+            Reply::status("disabled", "logcat recording is disabled in this core")
+        }
+        LogcatRecordingError::Invalid(e) => Reply::status("refused", e),
+        LogcatRecordingError::Failed(e) => Reply::status("failed", e),
+    }
 }

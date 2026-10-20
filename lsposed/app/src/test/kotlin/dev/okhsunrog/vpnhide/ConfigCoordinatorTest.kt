@@ -103,6 +103,33 @@ class ConfigCoordinatorTest {
         }
 
     @Test
+    fun `a core logcat lease keeps debug on in candidates until core releases it`() =
+        coordinatorTest(manageLogging = true) {
+            // Core holds debug logging for a recording: the config says debug = true.
+            io.config = CanonicalConfig(debug = true, debugSwitch = false)
+            io.debugLease = true
+            coordinator.initialize()
+            val during = async { coordinator.submit(toggle(CanonicalToggle.Filesystem, true)) }
+            val write = io.executions.receive()
+            assertTrue(write.candidate.debug)
+            assertFalse(write.candidate.debugSwitch)
+            write.finish(PhaseOutcome.Confirmed)
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            assertTrue(during.await().succeeded)
+            assertTrue(requireNotNull(coordinator.view.value.confirmed).debug)
+
+            // Released and restored by core: the next write follows the switch again.
+            io.debugLease = false
+            io.config = io.config?.copy(debug = false)
+            val after = async { coordinator.submit(toggle(CanonicalToggle.Filesystem, false)) }
+            val next = io.executions.receive()
+            assertFalse(next.candidate.debug)
+            next.finish(PhaseOutcome.Confirmed)
+            io.executions.receive().finish(PhaseOutcome.Confirmed)
+            assertTrue(after.await().succeeded)
+        }
+
+    @Test
     fun `overlapping captures preserve user choice and release only the last logging owner`() =
         coordinatorTest(manageLogging = true) {
             coordinator.initialize()
@@ -556,6 +583,8 @@ private class CoordinatorFixture(
 
 private class FakeConfigIo : ConfigCoordinatorIo {
     @Volatile var config: CanonicalConfig? = CanonicalConfig()
+
+    @Volatile override var debugLease = false
     var reads = 0
     var initializations = 0
     var initializationGate: CompletableDeferred<Unit>? = null

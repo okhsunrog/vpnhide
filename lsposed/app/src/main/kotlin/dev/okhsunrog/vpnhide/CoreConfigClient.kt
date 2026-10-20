@@ -29,6 +29,8 @@ internal data class CoreStateView(
     val configRevision: Long,
     val canonical: RootCanonicalRead,
     val operationsInFlight: List<Long>,
+    /** A core logcat recording holds debug logging on: core keeps `debug` true meanwhile. */
+    val debugLease: Boolean = false,
 )
 
 /** A core operation receipt: phase outcomes as core executed them, and the settled result. */
@@ -220,6 +222,7 @@ private fun parseCoreState(json: JSONObject): CoreStateView {
         configRevision = json.getLong("config_revision").also { require(it >= 0) },
         canonical = canonical,
         operationsInFlight = List(inFlight?.length() ?: 0) { inFlight!!.getLong(it) },
+        debugLease = json.optBoolean("debug_lease"),
     )
 }
 

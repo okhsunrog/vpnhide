@@ -152,6 +152,21 @@ fn logcat_recording_round_trip() {
     let file = reply["session"]["file"].as_str().unwrap().to_owned();
     assert!(std::path::Path::new(&file).exists());
     assert_eq!(call(r#"{"action":"stop","session":7}"#), reply);
+    assert_eq!(reply["session"]["delivered"], false);
+
+    let acked = call(r#"{"action":"ack","session":7}"#);
+    assert_eq!(acked["status"], "ok", "{acked}");
+    assert_eq!(acked["session"]["delivered"], true);
+    assert!(!std::path::Path::new(&file).exists());
+    assert_eq!(call(r#"{"action":"ack","session":7}"#), acked);
+    let reply = call(r#"{"action":"ack","session":8}"#);
+    assert_eq!(reply["status"], "unknown_session", "{reply}");
+
+    let reply = call(r#"{"action":"discard","session":7}"#);
+    assert_eq!(reply["status"], "ok", "{reply}");
+    assert!(reply["session"].is_null(), "{reply}");
+    assert!(call(r#"{"action":"status"}"#)["session"].is_null());
+    assert_eq!(call(r#"{"action":"discard","session":7}"#), reply);
 
     let reply = call(r#"{"action":"record","session":7}"#);
     assert_eq!(reply["status"], "invalid_input", "{reply}");

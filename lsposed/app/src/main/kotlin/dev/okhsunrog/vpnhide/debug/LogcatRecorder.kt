@@ -10,6 +10,7 @@ import dev.okhsunrog.vpnhide.core.CoreLogcatReply
 import dev.okhsunrog.vpnhide.core.CoreLogcatSession
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.core.LogcatAutoStop
+import dev.okhsunrog.vpnhide.core.LogcatDebugRestore
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,9 +42,15 @@ import java.util.Locale
  * state; when core reports it auto-stopped, the app collects the file at once and says why.
  * After an app restart the running session is adopted ([refresh]) and can be stopped.
  *
- * Debug logging is temporarily enabled through the same canonical-config path used by the
- * one-shot debug ZIP. Stop then adds the shared device/backend/kernel snapshot so reports
- * about a third-party app still carry enough VPN Hide context.
+ * Debug logging is core's too: Start makes core turn it on through its own journaled config
+ * write and hold it on, and core restores it when the session ends however it ends (Stop, an
+ * auto-stop, or the next core start after a crash), so a killed app can't leave it on. The
+ * ZIP's `debugCapture` comes from core's lease record.
+ *
+ * Delivery is acknowledged: once the ZIP is written the app tells core ([CoreRoot.ackLogcat]),
+ * and only then does core drop its copy. A finished recording the app never saved (killed
+ * mid-collect, or auto-stopped while the app was gone) stays in core and is offered on
+ * Diagnostics as [State.Undelivered]: save it ([saveUndelivered]) or discard it.
  */
 internal object LogcatRecorder {
     private const val TAG = LogTags.LOGCAT
@@ -58,7 +65,7 @@ internal object LogcatRecorder {
             val autoStop: LogcatAutoStop? = null,
             val maxBytes: Long = 0L,
             val maxDurationMs: Long = 0L,
-            /** The last Start or Stop failed: core's reply status. */
+            /** The last Start, Stop, save or discard failed: core's reply status. */
             val failure: Failure? = null,
         ) : State
 
@@ -69,13 +76,26 @@ internal object LogcatRecorder {
             val maxBytes: Long,
             val maxDurationMs: Long,
         ) : State
+
+        /** Core holds a finished recording the app has not saved yet. */
+        data class Undelivered(
+            val sessionId: Long,
+            val startMs: Long,
+            val durationMs: Long,
+            val sizeBytes: Long,
+            val autoStop: LogcatAutoStop?,
+            val maxBytes: Long,
+            val maxDurationMs: Long,
+            /** The last save or discard attempt failed: core's reply status. */
+            val failure: Failure? = null,
+        ) : State
     }
 
     data class Failure(
         val stage: Stage,
         val status: String,
     ) {
-        enum class Stage { Start, Stop }
+        enum class Stage { Start, Stop, Discard }
     }
 
     sealed interface StartOutcome {
@@ -93,9 +113,9 @@ internal object LogcatRecorder {
         val id: Long,
         val startMs: Long,
         val selfNeedsRestart: Boolean,
-        /** Null for a session adopted after an app restart (its lease died with the old process). */
-        val loggingSession: DebugCaptureLoggingSession?,
-        val watchJob: Job,
+        /** Started by an earlier app process (adopted, or offered after the fact). */
+        val adopted: Boolean,
+        val watchJob: Job?,
     )
 
     private val _state = MutableStateFlow<State>(State.Stopped(null))
@@ -119,15 +139,32 @@ internal object LogcatRecorder {
         }
 
     /**
-     * Adopt a session core is still recording (the app was restarted mid-recording), so the
-     * card shows it and Stop collects it. No-op while this process holds one.
+     * Pick up what core holds: adopt a session it is still recording (the app was restarted
+     * mid-recording) so the card shows it and Stop collects it, or offer a finished one the
+     * app never saved. No-op while this process holds one.
      */
     suspend fun refresh(context: Context) =
         withContext(Dispatchers.IO) {
             activeMutex.withLock {
                 if (active != null) return@withLock
-                val session = (CoreRoot.logcatStatus() as? CoreLogcatReply.Ok)?.session ?: return@withLock
-                if (session.recording) adoptLocked(context.applicationContext, session, selfNeedsRestart = false)
+                val session = (CoreRoot.logcatStatus() as? CoreLogcatReply.Ok)?.session
+                when {
+                    session == null -> {
+                        if (_state.value is State.Undelivered) _state.value = State.Stopped(null)
+                    }
+
+                    session.recording -> {
+                        adoptLocked(context.applicationContext, session, selfNeedsRestart = false)
+                    }
+
+                    session.undelivered -> {
+                        _state.value = session.toUndelivered()
+                    }
+
+                    _state.value is State.Undelivered -> {
+                        _state.value = State.Stopped(null)
+                    }
+                }
             }
         }
 
@@ -136,23 +173,20 @@ internal object LogcatRecorder {
         selfNeedsRestart: Boolean,
     ): StartOutcome {
         val id = newSessionId()
-        val loggingSession = beginDebugCaptureLogging()
         return when (val reply = CoreRoot.startLogcat(id)) {
             is CoreLogcatReply.Ok -> {
                 val session = reply.session
                 if (session == null || !session.recording) {
-                    restoreDebugCaptureLogging(loggingSession)
                     fail(Failure.Stage.Start, "not_recording", "core ended the session at once")
                 } else {
                     writeLogcatMarker("start", id)
-                    track(context, session, selfNeedsRestart, loggingSession)
+                    track(context, session, selfNeedsRestart, adopted = false)
                     StartOutcome.Started(id)
                 }
             }
 
             is CoreLogcatReply.Busy -> {
                 // A session from before an app restart: show it so it can be stopped.
-                restoreDebugCaptureLogging(loggingSession)
                 val running = (CoreRoot.logcatStatus() as? CoreLogcatReply.Ok)?.session
                 if (running != null && running.recording && running.id == reply.running) {
                     adoptLocked(context, running, selfNeedsRestart)
@@ -163,7 +197,6 @@ internal object LogcatRecorder {
             }
 
             is CoreLogcatReply.Failed -> {
-                restoreDebugCaptureLogging(loggingSession)
                 fail(Failure.Stage.Start, reply.status, reply.detail)
             }
         }
@@ -185,27 +218,30 @@ internal object LogcatRecorder {
         selfNeedsRestart: Boolean,
     ) {
         VpnHideLog.i(TAG, "adopting core logcat session ${session.id}")
-        track(context, session, selfNeedsRestart, loggingSession = null)
+        track(context, session, selfNeedsRestart, adopted = true)
     }
 
     private fun track(
         context: Context,
         session: CoreLogcatSession,
         selfNeedsRestart: Boolean,
-        loggingSession: DebugCaptureLoggingSession?,
+        adopted: Boolean,
     ) {
         active =
             ActiveRecording(
                 id = session.id,
                 startMs = session.startedAtMs,
                 selfNeedsRestart = selfNeedsRestart,
-                loggingSession = loggingSession,
+                adopted = adopted,
                 watchJob = watch(context, session.id),
             )
         _state.value = session.toRecording()
     }
 
     private fun CoreLogcatSession.toRecording() = State.Recording(id, startedAtMs, bytes, maxBytes, maxDurationMs)
+
+    private fun CoreLogcatSession.toUndelivered(failure: Failure? = null) =
+        State.Undelivered(id, startedAtMs, durationMs, bytes, autoStop, maxBytes, maxDurationMs, failure)
 
     /** Size and state only (no log lines cross); an auto-stop is collected at once. */
     private fun watch(
@@ -241,34 +277,70 @@ internal object LogcatRecorder {
                 val recording = active ?: return@withLock null
                 if (expectedId != null && recording.id != expectedId) return@withLock null
                 active = null
-                stopRecordingLocked(context.applicationContext, recording)
+                recording.watchJob?.cancel()
+                writeLogcatMarker("stop", recording.id)
+                delay(LOGCAT_STOP_GRACE_MS)
+                collectLocked(context.applicationContext, recording)
             }
         }
 
-    private suspend fun stopRecordingLocked(
+    /**
+     * Save the finished recording core still holds ([State.Undelivered]) as a ZIP.
+     * [selfNeedsRestart] is this app process's current view (the original one is gone).
+     */
+    suspend fun saveUndelivered(
+        context: Context,
+        selfNeedsRestart: Boolean,
+    ): File? =
+        withContext(Dispatchers.IO) {
+            activeMutex.withLock {
+                if (active != null) return@withLock null
+                val offered = _state.value as? State.Undelivered ?: return@withLock null
+                val recording = ActiveRecording(offered.sessionId, offered.startMs, selfNeedsRestart, adopted = true, watchJob = null)
+                collectLocked(context.applicationContext, recording)
+            }
+        }
+
+    /** Drop the finished recording core still holds; core deletes it. */
+    suspend fun discardUndelivered() =
+        withContext(Dispatchers.IO) {
+            activeMutex.withLock {
+                if (active != null) return@withLock
+                val offered = _state.value as? State.Undelivered ?: return@withLock
+                when (val reply = CoreRoot.discardLogcat(offered.sessionId)) {
+                    is CoreLogcatReply.Ok -> _state.value = State.Stopped(null)
+                    is CoreLogcatReply.Busy -> _state.value = offered.copy(failure = Failure(Failure.Stage.Discard, "busy"))
+                    is CoreLogcatReply.Failed -> _state.value = offered.copy(failure = Failure(Failure.Stage.Discard, reply.status))
+                }
+            }
+        }
+
+    /** Stop (or re-collect) [recording] in core, build the ZIP, then acknowledge it to core. */
+    private suspend fun collectLocked(
         context: Context,
         recording: ActiveRecording,
     ): File? {
-        var restoreAttempted = false
         var rawLogFile: File? = null
         try {
-            recording.watchJob.cancel()
-            writeLogcatMarker("stop", recording.id)
-            delay(LOGCAT_STOP_GRACE_MS)
-            val session =
-                when (val reply = CoreRoot.stopLogcat(recording.id)) {
-                    is CoreLogcatReply.Ok -> reply.session
-                    is CoreLogcatReply.Busy -> null
-                    is CoreLogcatReply.Failed -> null.also { fail(Failure.Stage.Stop, reply.status, reply.detail) }
-                }
+            val reply = CoreRoot.stopLogcat(recording.id)
+            val session = (reply as? CoreLogcatReply.Ok)?.session
             rawLogFile = session?.file
             if (session == null || rawLogFile == null || !rawLogFile.exists()) {
-                if (_state.value !is State.Stopped) _state.value = State.Stopped(null, failure = Failure(Failure.Stage.Stop, "no_file"))
+                val status =
+                    when (reply) {
+                        is CoreLogcatReply.Failed -> reply.status
+                        is CoreLogcatReply.Busy -> "busy"
+                        is CoreLogcatReply.Ok -> if (session?.delivered == true) "already_saved" else "no_file"
+                    }
+                VpnHideLog.w(TAG, "logcat collect failed: $status")
+                // Still in core and not saved: keep offering it.
+                _state.value =
+                    session?.takeIf { it.undelivered }?.toUndelivered(Failure(Failure.Stage.Stop, status))
+                        ?: State.Stopped(null, failure = Failure(Failure.Stage.Stop, status))
                 return null
             }
             val stopMs = System.currentTimeMillis()
             val stateJson = captureLogcatState(context, recording, session, stopMs)
-            restoreAttempted = true
 
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(stopMs))
             val zipFile = File(context.cacheDir, "vpnhide_logcat_$timestamp.zip")
@@ -277,6 +349,19 @@ internal object LogcatRecorder {
                 textEntries = mapOf("state.json" to stateJson),
                 fileEntries = listOf(DiagnosticFileEntry("logcat_full.txt", rawLogFile)),
             )
+            // The ZIP is on disk: now core may drop its copy. A lost ack leaves the session
+            // undelivered in core; the next refresh offers it again (and a repeated ack is a no-op).
+            when (val ack = CoreRoot.ackLogcat(recording.id)) {
+                is CoreLogcatReply.Ok -> {}
+
+                is CoreLogcatReply.Busy -> {
+                    VpnHideLog.w(TAG, "logcat ack: busy")
+                }
+
+                is CoreLogcatReply.Failed -> {
+                    VpnHideLog.w(TAG, "logcat ack failed: ${ack.status} ${ack.detail}")
+                }
+            }
             _state.value =
                 State.Stopped(
                     lastFile = zipFile,
@@ -288,14 +373,8 @@ internal object LogcatRecorder {
             return zipFile
         } finally {
             withContext(NonCancellable) {
-                if (!restoreAttempted) {
-                    recording.loggingSession?.let { session ->
-                        runCatching { restoreDebugCaptureLogging(session) }
-                            .onFailure { VpnHideLog.w(TAG, "failed to restore debug logging: ${it.message}") }
-                    }
-                }
-                // Core's copy has been packed into the ZIP (or the run failed); a repeated
-                // Stop would hand it over again, so it is not kept here.
+                // Core's export copy is packed into the ZIP (or the run failed); core still
+                // holds its own until the ack, so a retry is handed a fresh copy.
                 rawLogFile?.let { runCatching { it.delete() } }
             }
         }
@@ -318,7 +397,7 @@ internal object LogcatRecorder {
 
     // Build the canonical state.json for this recording: the same authoritative
     // root snapshot the dashboard uses, plus forensic sections, minus a diagnostics
-    // run (the payload is the raw log). Restores debug logging as part of the flow.
+    // run (the payload is the raw log). Debug logging is core's (see the lease).
     private suspend fun captureLogcatState(
         context: Context,
         recording: ActiveRecording,
@@ -330,7 +409,6 @@ internal object LogcatRecorder {
         val rootSnapshot =
             runCatching { RootSnapshotCache.refresh() }.getOrElse { RootSnapshot(emptyMap()) }
         val shellSnapshot = collectDebugShellSnapshot()
-        val logging = recording.loggingSession?.let { it.withRestore(restoreDebugCaptureLogging(it)) }
         return buildVpnHideState(
             context = context,
             captureKind = "full_system_logcat",
@@ -349,7 +427,7 @@ internal object LogcatRecorder {
             bootLsposedLogcat = captureBootLsposedLogcat(),
             lsposedConfigDb = buildLsposedConfigText(context),
             hookReport = buildHookDiagnosticsText(context, shellSnapshot),
-            debugCapture = logging?.toDebugCaptureInfo(),
+            debugCapture = session.debugCaptureInfo(),
             errors = emptyList(),
             // A full-logcat bug report wants the forensic context; keep the
             // installed-app list private (redacted) as before.
@@ -368,11 +446,16 @@ internal object LogcatRecorder {
             appendLine("stopped=${formatWallTime(stopMs)}")
             appendLine("durationMs=${session.durationMs}")
             appendLine("selfNeedsRestart=${recording.selfNeedsRestart}")
-            appendLine("adoptedAfterAppRestart=${recording.loggingSession == null}")
+            appendLine("adoptedAfterAppRestart=${recording.adopted}")
             appendLine("rawLogBytes=${session.bytes}")
             appendLine("truncated=${session.truncated}")
             appendLine("autoStopped=${session.autoStop?.wire ?: "no"}")
             session.logcatExit?.let { appendLine("logcatExit=$it") }
+            appendLine(
+                "debugLease=${session.debug?.let {
+                    "previousDebug=${it.previousDebug} previousDebugSwitch=${it.previousDebugSwitch} restore=${it.restore.wire}"
+                } ?: "none"}",
+            )
             appendLine("coreLimits=${session.maxBytes} bytes, ${session.maxDurationMs} ms")
             appendLine("logcatSource=core session (logcat -b all -v threadtime -T <start-1s>, one child, core-owned file)")
         }.trimEnd()
@@ -387,4 +470,25 @@ internal object LogcatRecorder {
     private fun isVpnHideLogcatLine(line: String): Boolean = (LogTags.APP_TAGS + LogTags.NATIVE_TAGS).any { line.contains(it) }
 
     private fun formatWallTime(ms: Long): String = SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date(ms))
+}
+
+/**
+ * The ZIP's `debugCapture` from core's lease: forced when core turned debug logging on;
+ * apply/restore are 0 when core's write landed, -1 for a restore still pending, null when
+ * nothing was written (no lease, or still held).
+ */
+internal fun CoreLogcatSession.debugCaptureInfo(): DebugCaptureInfo? {
+    val lease = debug ?: return null
+    val restoreExit =
+        when (lease.restore) {
+            LogcatDebugRestore.Restored, LogcatDebugRestore.UserChoice -> 0
+            LogcatDebugRestore.Pending -> -1
+            LogcatDebugRestore.Held -> null
+        }
+    return DebugCaptureInfo(
+        forced = lease.forced,
+        applyExit = 0,
+        restoreExit = restoreExit,
+        detail = "core lease, restore=${lease.restore.wire}",
+    )
 }
