@@ -65,17 +65,25 @@ KPM 在加载时校验你的内核家族。受支持的家族为 4.4、4.9、4.1
 
 适用于 Magisk / KernelSU / KernelSU-Next：
 
+**警告：**修补启动分区可能导致设备无法启动。请提前准备好恢复设备的方法。
+
 1. 从[官方发布页](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)
    下载 [KPatch-Next-Module.zip](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest/download/KPatch-Next-Module.zip)。
-   它提供 KPM 运行时，不是 `vpnhide-kpm.zip`；两个模块都需要安装。
+   KPatch-Next-Module 可让你将 KernelPatch 运行时安装到内核中，`vpnhide-kpm.zip` 则提供在该运行时中
+   工作的 VPN Hide 后端。两个模块都需要安装。
 2. 在 root 管理器的**模块**页面安装 ZIP，然后打开 KPatch-Next 模块的 WebUI。
-   如果管理器无法打开 WebUI，模块的操作按钮会提供
-   [KsuWebUIStandalone](https://github.com/KOWX712/KsuWebUIStandalone/releases) 下载入口。
-3. 在 WebUI 中打开 **Patch** 并修补启动镜像。必须刷入修改后的镜像并重启，
-   运行中的内核才会具备运行时。只安装 ZIP 不够。
-   刷入前请保留可用的启动镜像及恢复方法。
-4. 重启后确认 WebUI 显示 **Working**，再按上面的步骤安装 `vpnhide-kpm.zip`。
-   如果已经安装，请打开 VPN Hide 并刷新状态。
+   WebUI 就是模块的设置界面。在 KernelSU / KernelSU-Next 中，从模块卡片打开 WebUI。
+   在 Magisk 中，点击 KPatch-Next 卡片上的 **Action**，通过
+   [KsuWebUIStandalone](https://github.com/KOWX712/KsuWebUIStandalone) 应用打开界面。
+   如果尚未安装该应用，**Action** 会打开其发布页。安装应用，按提示授予 root 权限，
+   然后再次点击 **Action**。
+3. 在 WebUI 中打开 **Patch** 标签页并点击 **Start**。使用默认设置时，模块会自动
+   识别启动分区、修补并将更改写入设备。无需查找或下载 `boot.img`。
+   等待操作成功的提示。
+4. 修补成功后**重启**，重新打开 WebUI 并确认状态为 **Working**，表示 KernelPatch
+   运行时已在工作。
+5. 按上面的步骤安装 `vpnhide-kpm.zip`，重启后在 VPN Hide **仪表盘**确认 Native 后端
+   显示 **Active**。如果 ZIP 已经安装，请打开 VPN Hide 并刷新状态。
 
 APatch / FolkPatch 通常无需另装 KPatch-Next-Module：其修补后的内核已包含运行时。
 如果 VPN Hide 仍提示缺少运行时，请在 root 管理器中检查状态并
