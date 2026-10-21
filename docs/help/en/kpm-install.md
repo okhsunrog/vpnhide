@@ -83,7 +83,7 @@ Prepare a way to recover your device beforehand.
 
 1. Download [KPatch-Next-Module.zip](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest/download/KPatch-Next-Module.zip)
    from the [official releases](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest).
-   KPatch-Next-Module installs the KernelPatch runtime; `vpnhide-kpm.zip` provides
+   KPatch-Next-Module lets you install the KernelPatch runtime in the kernel; `vpnhide-kpm.zip` provides
    the VPN Hide backend that runs in it. You need both modules.
 2. Install the ZIP through your root manager's **Modules** screen, then open
    the KPatch-Next module's WebUI — its setup interface. In KernelSU / KernelSU-Next,

@@ -69,7 +69,7 @@ KPM 在加载时校验你的内核家族。受支持的家族为 4.4、4.9、4.1
 
 1. 从[官方发布页](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)
    下载 [KPatch-Next-Module.zip](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest/download/KPatch-Next-Module.zip)。
-   KPatch-Next-Module 安装 KernelPatch 运行时，`vpnhide-kpm.zip` 则提供在该运行时中
+   KPatch-Next-Module 可让你将 KernelPatch 运行时安装到内核中，`vpnhide-kpm.zip` 则提供在该运行时中
    工作的 VPN Hide 后端。两个模块都需要安装。
 2. 在 root 管理器的**模块**页面安装 ZIP，然后打开 KPatch-Next 模块的 WebUI。
    WebUI 就是模块的设置界面。在 KernelSU / KernelSU-Next 中，从模块卡片打开 WebUI。

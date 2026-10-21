@@ -83,7 +83,7 @@ KPM проверяет семейство вашего ядра при загр�
 
 1. Скачайте [KPatch-Next-Module.zip](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest/download/KPatch-Next-Module.zip)
    из [официальных релизов](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest).
-   KPatch-Next-Module устанавливает среду KernelPatch, а `vpnhide-kpm.zip` —
+   KPatch-Next-Module позволяет установить среду KernelPatch в ядро, а `vpnhide-kpm.zip` —
    бэкенд VPN Hide, который работает в этой среде. Нужны оба модуля.
 2. Установите ZIP через **Модули** root-менеджера, затем откройте WebUI
    модуля KPatch-Next — его интерфейс настройки. В KernelSU / KernelSU-Next
