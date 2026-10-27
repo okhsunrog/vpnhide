@@ -3,12 +3,17 @@ package dev.okhsunrog.vpnhide
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.settings.FilesystemHidingStatus
 import dev.okhsunrog.vpnhide.settings.installedZygiskOptionalHooks
-import dev.okhsunrog.vpnhide.settings.resolveFilesystemHidingState
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
+
+private fun resolveFixtureFilesystemHidingState(
+    desiredEnabled: Boolean,
+    sections: Map<String, String>,
+) = dev.okhsunrog.vpnhide.settings
+    .resolveFilesystemHidingState(desiredEnabled, sections, nativeBootStatus(sections))
 
 class FilesystemHidingDataTest {
     @Test
@@ -23,7 +28,7 @@ class FilesystemHidingDataTest {
     fun `feature is unavailable without a native backend`() {
         assertEquals(
             FilesystemHidingStatus.Unavailable,
-            resolveFilesystemHidingState(desiredEnabled = false, sections = emptyMap()).status,
+            resolveFixtureFilesystemHidingState(desiredEnabled = false, sections = emptyMap()).status,
         )
     }
 
@@ -31,14 +36,14 @@ class FilesystemHidingDataTest {
     fun `KPM owns the same reboot gated feature`() {
         assertEquals(
             FilesystemHidingStatus.Active,
-            resolveFilesystemHidingState(
+            resolveFixtureFilesystemHidingState(
                 desiredEnabled = true,
                 sections = sections(hookInstalled = true, backend = HookIds.Backend.KPM),
             ).status,
         )
         assertEquals(
             FilesystemHidingStatus.PendingEnable,
-            resolveFilesystemHidingState(
+            resolveFixtureFilesystemHidingState(
                 desiredEnabled = true,
                 sections = sections(backend = HookIds.Backend.KPM),
             ).status,
@@ -53,7 +58,7 @@ class FilesystemHidingDataTest {
 
         assertEquals(
             FilesystemHidingStatus.Active,
-            resolveFilesystemHidingState(desiredEnabled = true, sections = sections).status,
+            resolveFixtureFilesystemHidingState(desiredEnabled = true, sections = sections).status,
         )
     }
 
@@ -61,7 +66,7 @@ class FilesystemHidingDataTest {
     fun `KPM partial hook setup is reported as an error`() {
         assertEquals(
             FilesystemHidingStatus.HookSetupError,
-            resolveFilesystemHidingState(
+            resolveFixtureFilesystemHidingState(
                 desiredEnabled = true,
                 sections =
                     sections(
@@ -84,7 +89,7 @@ class FilesystemHidingDataTest {
 
         assertEquals(
             FilesystemHidingStatus.Active,
-            resolveFilesystemHidingState(desiredEnabled = true, sections = sections).status,
+            resolveFixtureFilesystemHidingState(desiredEnabled = true, sections = sections).status,
         )
         assertEquals(
             setOf(HookIds.Hook.FILESYSTEM_IFACE_PATHS),
@@ -100,7 +105,7 @@ class FilesystemHidingDataTest {
                 installed = HookIds.Hook.FILESYSTEM_IFACE_PATHS.bit,
             ) + ("kmod_module_dir" to "1")
 
-        val state = resolveFilesystemHidingState(desiredEnabled = true, sections = sections)
+        val state = resolveFixtureFilesystemHidingState(desiredEnabled = true, sections = sections)
         assertEquals(FilesystemHidingStatus.Active, state.status)
         assertEquals(NativeBackendId.Zygisk, state.backend)
     }
@@ -113,7 +118,7 @@ class FilesystemHidingDataTest {
                 installed = 0,
                 error = "shadowhook failed",
             )
-        val state = resolveFilesystemHidingState(desiredEnabled = true, sections = sections)
+        val state = resolveFixtureFilesystemHidingState(desiredEnabled = true, sections = sections)
 
         assertEquals(FilesystemHidingStatus.HookSetupError, state.status)
         assertEquals(NativeBackendId.Zygisk, state.backend)
@@ -135,7 +140,7 @@ class FilesystemHidingDataTest {
 
         assertEquals(
             FilesystemHidingStatus.PendingEnable,
-            resolveFilesystemHidingState(desiredEnabled = true, sections = sections).status,
+            resolveFixtureFilesystemHidingState(desiredEnabled = true, sections = sections).status,
         )
     }
 
@@ -143,18 +148,18 @@ class FilesystemHidingDataTest {
     fun `desired and runtime states distinguish both reboot directions`() {
         assertEquals(
             FilesystemHidingStatus.PendingEnable,
-            resolveFilesystemHidingState(desiredEnabled = true, sections = sections()).status,
+            resolveFixtureFilesystemHidingState(desiredEnabled = true, sections = sections()).status,
         )
         assertEquals(
             FilesystemHidingStatus.PendingDisable,
-            resolveFilesystemHidingState(
+            resolveFixtureFilesystemHidingState(
                 desiredEnabled = false,
                 sections = sections(hookInstalled = true),
             ).status,
         )
         assertEquals(
             FilesystemHidingStatus.Active,
-            resolveFilesystemHidingState(
+            resolveFixtureFilesystemHidingState(
                 desiredEnabled = true,
                 sections = sections(hookInstalled = true),
             ).status,
@@ -165,7 +170,7 @@ class FilesystemHidingDataTest {
     fun `requested hook missing after a successful module load is a setup error`() {
         assertEquals(
             FilesystemHidingStatus.HookSetupError,
-            resolveFilesystemHidingState(
+            resolveFixtureFilesystemHidingState(
                 desiredEnabled = true,
                 sections = sections(filesystemRequested = true, moduleLoaded = true),
             ).status,
@@ -180,7 +185,7 @@ class FilesystemHidingDataTest {
 
         assertEquals(
             FilesystemHidingStatus.PendingEnable,
-            resolveFilesystemHidingState(desiredEnabled = true, sections = stale).status,
+            resolveFixtureFilesystemHidingState(desiredEnabled = true, sections = stale).status,
         )
     }
 

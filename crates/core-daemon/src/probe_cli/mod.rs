@@ -1,10 +1,10 @@
 //! `vpnhide-core probe …` / `vpnhide-core observe …`: one-shot root probes.
 //!
 //! Core runs these as a child of itself (see `diagnostics`), so a probe that hangs or panics
-//! is bounded and killed without touching the daemon. The JSON they print is the contract
-//! shared with the app's parsers (`fixtures/core-probes`).
+//! is bounded and killed without touching the daemon. JSON reports and framed diagnostic
+//! sections retain the formats shared with the app (`fixtures/core-probes`).
 
-mod observations;
+pub(crate) mod observations;
 mod probe;
 
 /// Dispatch a probe subcommand. `None` when `args` is not one (the caller runs the daemon).
@@ -50,7 +50,27 @@ fn is_device_probe(mode: &str) -> bool {
 fn device_probe(mode: &str, rest: &[String]) -> i32 {
     use crate::device_probes::{Paths, debug_snapshot, kernel, lsposed, root_snapshot};
     use std::io::Write;
-    let paths = Paths::default();
+    let mut paths = Paths::default();
+    let rest = if rest
+        .last()
+        .is_some_and(|arg| arg == crate::device_probes::KPM_STDIN_FLAG)
+    {
+        if !matches!(mode, "root-snapshot" | "debug-snapshot" | "hook-counters") {
+            eprintln!("probe inputs are not supported for {mode}");
+            return 2;
+        }
+        let inputs = match crate::device_probes::ProbeInputs::read(std::io::stdin().lock()) {
+            Ok(inputs) => inputs,
+            Err(error) => {
+                eprintln!("invalid probe input: {error}");
+                return 2;
+            }
+        };
+        paths.kpm_observation = Some(inputs.kpm);
+        &rest[..rest.len() - 1]
+    } else {
+        rest
+    };
     let out_dir = || rest.first().map(std::path::PathBuf::from);
     let (code, text) = match (mode, rest) {
         ("root-snapshot", []) => (0, root_snapshot::collect(&paths, false).buf),

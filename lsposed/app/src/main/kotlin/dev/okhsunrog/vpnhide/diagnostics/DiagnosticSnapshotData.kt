@@ -57,9 +57,11 @@ internal fun diagnosticSnapshot(
                 selfPackage = current?.selfPackage.orEmpty(),
                 processIdentity = processIdentity,
                 now = wallTime,
-                readiness = configReadiness(sources.impact),
+                readiness = coreMeasurementReadiness(sources.config, configReadiness(sources.impact)),
                 changeEpoch = sources.impact.changeEpoch,
                 initialized = current != null,
+                delivery = desiredDeliveryIdentity(sources.config, current?.selfPackage.orEmpty()),
+                configJoined = coreInputsJoined(currentObservationValue(sources.root), sources.config),
             )
         } else {
             null

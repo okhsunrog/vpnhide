@@ -170,12 +170,12 @@ internal data class PortsBootStatus(
 }
 
 /**
- * The root-snapshot key the loader stores core's native status JSON under. Not a probe
- * section: the value comes from core's published state over RPC, not from a file.
+ * Historical forensic section name, retained for reading saved diagnostic fixtures.
+ * Runtime root observations carry the typed native status separately.
  */
 internal const val NATIVE_BOOT_SECTION = "core_native_boot"
 
-/** The typed native status carried in a root snapshot, or null when core did not report one. */
+/** Native status from a historical forensic section; ordinary app state uses the typed publication. */
 internal fun nativeBootStatus(sections: Map<String, String>): NativeBootStatus? =
     parseNativeBootStatus(sections[NATIVE_BOOT_SECTION].orEmpty())
 
@@ -196,13 +196,6 @@ internal fun parseNativeBootStatus(raw: String): NativeBootStatus? =
     } catch (_: Exception) {
         null
     }
-
-/** The `backend.boot` object of a core `state` reply, or null when absent or malformed. */
-internal fun nativeBootFromCoreState(state: JSONObject): String? {
-    val backend = state.optJSONObject("backend") ?: return null
-    val boot = backend.optJSONObject("boot") ?: return null
-    return boot.toString().takeIf { runCatching { nativeBootStatusFrom(boot) }.isSuccess }
-}
 
 private fun nativeBootStatusFrom(json: JSONObject): NativeBootStatus =
     NativeBootStatus(

@@ -1,75 +1,181 @@
-//! App-side FFI surface for the persistent root core (core-2.0 §9 / step 7).
-//!
-//! UniFFI + JSON boundary for domain payloads. Kotlin owns editor drafts and local
-//! preferences; this crate is the typed client onto core for config, operations, and
-//! root observations. Every export is one request → one JSON reply that never throws;
-//! the app passes its own socket path (`CorePaths.socket`), so nothing here hard-codes
-//! the user-0 path, and there is no long-lived handle or mirror object to manage.
-
+//! Typed UniFFI facade over the app's single persistent transport connection.
+//! Core owns commands and recovery; Kotlin owns one fenced state publisher.
+use std::sync::Arc;
+use vpnhide_core_client::CoreClient;
+use vpnhide_core_rpc as rpc;
 uniffi::setup_scaffolding!();
+mod api;
+mod types;
+pub use api::*;
+pub use types::*;
 
-pub mod config_relay;
-pub mod root_relay;
-
-/// The core's published state for the save path: one JSON reply (`status` `ok`, or a
-/// delivery status such as `unreachable` / `protocol_skew`). Never throws.
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn config_state(socket_path: String) -> String {
-    config_relay::relay(&socket_path, config_relay::Request::State).await
+#[derive(uniffi::Object)]
+pub struct CoreSession {
+    client: Arc<CoreClient>,
 }
 
-/// An operation receipt plus the current state (`ok` / `unknown_op` / delivery status).
 #[uniffi::export(async_runtime = "tokio")]
-pub async fn config_operation(socket_path: String, op: u64) -> String {
-    config_relay::relay(&socket_path, config_relay::Request::Operation { op }).await
-}
+impl CoreSession {
+    #[uniffi::constructor]
+    pub fn new(socket_path: String) -> Arc<Self> {
+        Arc::new(Self {
+            client: CoreClient::connect(socket_path),
+        })
+    }
 
-/// Submit `ConfigEdit::Replace` with the on-disk canonical JSON against `base_revision`,
-/// wait for it to settle (bounded), and reply with the receipt and the resulting state.
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn config_replace(
-    socket_path: String,
-    op: u64,
-    base_revision: u64,
-    config_json: String,
-) -> String {
-    let request = config_relay::Request::Replace {
-        op,
-        base: base_revision,
-        config_json,
-    };
-    config_relay::relay(&socket_path, request).await
-}
-
-/// Submit `ConfigEdit::RepairActivation` (re-apply native + Ports for the stored config).
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn config_repair(socket_path: String, op: u64, base_revision: u64) -> String {
-    let request = config_relay::Request::Repair {
-        op,
-        base: base_revision,
-    };
-    config_relay::relay(&socket_path, request).await
-}
-
-/// Run fixed root probes in core. `request_json` is a `core-rpc` `DiagnosticsRequest`;
-/// the reply is `{"status":"ok","report":…}` or a delivery status. Never throws.
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn collect_diagnostics(socket_path: String, request_json: String) -> String {
-    root_relay::diagnostics(&socket_path, &request_json).await
-}
-
-/// Apply a fixed root effect (`core-rpc` `RootEffect` JSON) in core. Never throws.
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn root_effect(socket_path: String, op: u64, effect_json: String) -> String {
-    root_relay::root_effect(&socket_path, op, &effect_json).await
-}
-
-/// Core's full-system logcat recording. `request_json` is
-/// `{"action":"start"|"stop"|"status"|"ack"|"discard","session":<id>}` (`session` unused
-/// for status); the reply is `{"status":"ok","session":…|null}` (`null` for status with no
-/// session and for discard), `busy` (with `running`),
-/// `unknown_session`, `disabled`, `refused`, `failed`, or a delivery status. Never throws.
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn logcat_recording(socket_path: String, request_json: String) -> String {
-    root_relay::logcat_recording(&socket_path, &request_json).await
+    pub async fn read_state(&self) -> Result<StateReply, CoreError> {
+        self.await_state(0, 0).await
+    }
+    pub async fn await_state(&self, epoch: u64, revision: u64) -> Result<StateReply, CoreError> {
+        Ok(self
+            .client
+            .state_since_tagged(epoch, revision)
+            .await?
+            .into())
+    }
+    pub async fn allocate_operation_id(&self) -> Result<u64, CoreError> {
+        self.client
+            .allocate_operation_id()
+            .await?
+            .map(|id| id.0)
+            .map_err(|error| CoreError::Refused {
+                reason: error.into(),
+            })
+    }
+    pub async fn submit_edit(
+        &self,
+        op: u64,
+        base_revision: u64,
+        edit: CoreEdit,
+    ) -> Result<SubmitReply, CoreError> {
+        self.submit_command(
+            op,
+            CoreCommand::Edit {
+                base_revision,
+                edit,
+            },
+        )
+        .await
+    }
+    pub async fn submit_command(
+        &self,
+        op: u64,
+        command: CoreCommand,
+    ) -> Result<SubmitReply, CoreError> {
+        if op == 0 {
+            return Err(CoreError::InvalidInput {
+                detail: "operation ID must be allocated by core".into(),
+            });
+        }
+        match self
+            .client
+            .submit_command(rpc::OperationId(op), command.into())
+            .await?
+        {
+            Ok(accepted) => Ok(SubmitReply::Accepted {
+                op: accepted.op.0,
+                // Accepted work remains accepted even if these optional reads disconnect.
+                record: self
+                    .client
+                    .get_operation(accepted.op)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(Into::into),
+                state: self.read_state().await.ok().map(Box::new),
+            }),
+            Err(error) => Ok(SubmitReply::Refused {
+                reason: error.into(),
+            }),
+        }
+    }
+    pub async fn operation(&self, op: u64) -> Result<OperationReply, CoreError> {
+        Ok(OperationReply {
+            record: self
+                .client
+                .get_operation(rpc::OperationId(op))
+                .await?
+                .map(Into::into),
+            state: self.read_state().await.ok(),
+        })
+    }
+    pub async fn collect_diagnostics(
+        &self,
+        request: CoreDiagnosticsRequest,
+    ) -> Result<CoreDiagnosticsReport, CoreError> {
+        Ok(self
+            .client
+            .collect_diagnostics(request.into())
+            .await?
+            .into())
+    }
+    pub async fn acquire_debug_lease(
+        &self,
+        id: u64,
+        owner: CoreDebugLeaseOwner,
+    ) -> Result<(), CoreError> {
+        self.client
+            .acquire_debug_lease(rpc::DebugLeaseId(id), owner.into())
+            .await?
+            .map_err(|error| CoreError::Refused {
+                reason: error.into(),
+            })
+    }
+    pub async fn release_debug_lease(&self, id: u64) -> Result<(), CoreError> {
+        self.client
+            .release_debug_lease(rpc::DebugLeaseId(id))
+            .await?
+            .map_err(|error| CoreError::Refused {
+                reason: error.into(),
+            })
+    }
+    pub async fn logcat_recording(
+        &self,
+        request: CoreLogcatRequest,
+    ) -> Result<LogcatReply, CoreError> {
+        let outcome = match request {
+            CoreLogcatRequest::Status => {
+                return Ok(LogcatReply::Ok {
+                    session: self.client.logcat_recording_status().await?.map(Into::into),
+                });
+            }
+            CoreLogcatRequest::Start { session } => {
+                self.client
+                    .start_logcat_recording(rpc::LogcatSessionId(session))
+                    .await?
+            }
+            CoreLogcatRequest::Stop { session } => {
+                self.client
+                    .stop_logcat_recording(rpc::LogcatSessionId(session))
+                    .await?
+            }
+            CoreLogcatRequest::Ack { session } => {
+                self.client
+                    .ack_logcat_recording(rpc::LogcatSessionId(session))
+                    .await?
+            }
+            CoreLogcatRequest::Discard { session } => {
+                return Ok(
+                    match self
+                        .client
+                        .discard_logcat_recording(rpc::LogcatSessionId(session))
+                        .await?
+                    {
+                        Ok(()) => LogcatReply::Ok { session: None },
+                        Err(error) => LogcatReply::Refused {
+                            reason: error.into(),
+                        },
+                    },
+                );
+            }
+        };
+        Ok(match outcome {
+            Ok(session) => LogcatReply::Ok {
+                session: Some(session.into()),
+            },
+            Err(error) => LogcatReply::Refused {
+                reason: error.into(),
+            },
+        })
+    }
 }

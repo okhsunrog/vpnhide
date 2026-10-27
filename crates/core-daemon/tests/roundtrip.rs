@@ -2,10 +2,13 @@
 //! tarpc + JSON, and the four methods — the honest check that the contract survives the
 //! real transport, not just serde in isolation.
 
+mod common;
+
 use std::sync::Arc;
 use std::time::Duration;
 
-use vpnhide_core_daemon::{CoreClient, CoreState, Publisher, ServerHandle, serve};
+use vpnhide_core_client::CoreClient;
+use vpnhide_core_daemon::{CoreState, Publisher, ServerHandle, serve};
 use vpnhide_core_rpc::{
     BaseRef, CanonicalConfig, ConfigEdit, OperationId, PhaseOutcome, StateSnapshot,
 };
@@ -17,12 +20,13 @@ fn spawn_core(path: &std::path::Path, epoch: u64) -> (Arc<CoreState>, ServerHand
 }
 
 #[tokio::test]
-async fn handshake_submit_get_and_mirror() {
+async fn handshake_submit_get_and_state_since() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("core.sock");
     let (_state, _handle) = spawn_core(&path, 4242);
 
-    let client = CoreClient::connect_and_mirror(path.clone());
+    let client = CoreClient::connect(path.clone());
+    common::reserve_operation_ids(&client, 1).await;
 
     // Version handshake returns this run's epoch.
     assert_eq!(client.hello().await.expect("handshake"), 4242);
@@ -52,22 +56,16 @@ async fn handshake_submit_get_and_mirror() {
         .expect("record exists");
     assert_eq!(record.settled, Some(PhaseOutcome::Confirmed));
 
-    // The submit bumped the published state; the mirror reflects it.
-    let mut replica = client.state();
-    tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            if replica.borrow_and_update().config.is_some() {
-                break;
-            }
-            replica.changed().await.expect("publisher alive");
-        }
-    })
-    .await
-    .expect("the mirror reflected the submit");
+    // The same state_since call used by the app observes the committed config.
+    let published = tokio::time::timeout(Duration::from_secs(3), client.state_since(4242, 0))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(published.snapshot.config.is_some());
 }
 
 #[tokio::test]
-async fn a_restarted_core_is_adopted_by_the_mirror() {
+async fn a_restarted_core_answers_an_old_epoch_cursor() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("core.sock");
 
@@ -79,14 +77,20 @@ async fn a_restarted_core_is_adopted_by_the_mirror() {
             operations_in_flight: vec![],
             ..StateSnapshot::default()
         });
-        let client = CoreClient::connect_and_mirror(path.clone());
+        let client = CoreClient::connect(path.clone());
+        common::reserve_operation_ids(&client, 1).await;
         assert_eq!(client.hello().await.expect("handshake"), 100);
         handle.shutdown_and_unlink();
     }
 
-    // A new run at a different epoch, lower revision: a fresh client adopts it rather than
-    // stalling on the old run's numbers.
+    // A restarted epoch answers an old cursor immediately despite its lower revision.
     let (_state, _handle) = spawn_core(&path, 200);
-    let client = CoreClient::connect_and_mirror(path.clone());
-    assert_eq!(client.hello().await.expect("handshake"), 200);
+    let client = CoreClient::connect(path.clone());
+    common::reserve_operation_ids(&client, 1).await;
+    let published = tokio::time::timeout(Duration::from_secs(2), client.state_since(100, u64::MAX))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(published.epoch, 200);
+    assert!(published.revision < 100);
 }

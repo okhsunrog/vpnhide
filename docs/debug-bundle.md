@@ -34,8 +34,7 @@ JSON also compresses ~10×). Three capture kinds, told apart by
 `state.json` is present in **all** of them and is where you start.
 
 How `logcat_full.txt` is captured: the app cannot read other apps' logs and
-runs no root process, so core records it (protocol 8; the debug lease and
-delivery state are protocol 9; core-daemon `logcat_session`):
+runs no root process, so core records it (RPC 11, core-daemon `logcat_session`):
 
 - **Start** (`start_logcat_recording(session)`): core spawns one
   `logcat -b all -v threadtime -T <start − 1 s>` child, by direct exec with no
@@ -47,10 +46,9 @@ delivery state are protocol 9; core-daemon `logcat_session`):
   `duration_cap`). `logcat_exited` means logcat quit by itself. At the byte cap
   core stops rather than rotating: the file stays one unbroken stretch from the
   app's start marker, and `truncated` says the rest is missing. The app shows
-  why the recording ended. No owner lease is needed, because the caps bound a
-  session whether or not the app is alive.
-- **Debug logging (v9):** Start takes a lease on the config's `debug` field.
-  Core records `debug` and `debugSwitch` as they were in the session record,
+  why the recording ended. The caps bound the session even if the app dies.
+- **Debug logging:** Start takes a generic core-owned lease on `debug`.
+  Core records the previous `debug` and `debugSwitch` in the operation journal,
   then writes `debug = true` as its own journaled config edit (the same write
   path as any edit, so the kernel module, Zygisk and Ports see it). While the
   session records, core keeps `debug` true on every edit it admits, and the
@@ -62,12 +60,12 @@ delivery state are protocol 9; core-daemon `logcat_session`):
   - if the user changed `debugSwitch` during the session, `debug` follows the
     switch (`user_choice`), so a restore never undoes an explicit change.
 
-  A restore core can't write yet (an uncertain operation blocks all writes) stays
-  `pending` in the session record and is retried on every session call and at
-  the next core start. With no config at Start, the session records without a
-  lease (`debug: null`). One edge case: if the app's one-shot debug ZIP holds
-  its own capture at the moment core restores, core may turn `debug` off under
-  it; the app's next config write turns it back on.
+  Forensic ZIP capture uses the same lease owner, renewing while alive; releasing
+  one capture does not disable logging beneath another. After the final release
+  or expiry, core journals one restoration command. A blocked/uncertain restore
+  remains `pending` with its operation ID and is never blindly replayed. It lives
+  independently of the recorder file, so ack, discard or a new Start cannot erase
+  it. With no config at Start, the session records without a lease (`debug: null`).
 - **Core death:** the child has `PR_SET_PDEATHSIG(SIGKILL)` and dies with core.
   A clean shutdown stops it first. Core keeps one session record,
   `logcat/session.json`. At start, core ends a session that was still recording
@@ -137,11 +135,12 @@ Everything below is a `state.json` field unless noted.
 ### 2.1 Schema versions
 
 `state.json → schema` says which shape the bundle was written in. **This doc
-describes schema 2.** One number covers the whole bundle; there is no per-object
+describes schema 3.** One number covers the whole bundle; there is no per-object
 version.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
+| 3 | dev-2.x (unreleased) | Measurement summaries and snapshots separate desired config revision, delivery identity and whether delivery was confirmed. An observed passing suite under uncertain delivery cannot establish current success; the UI shows application uncertainty while retaining its measured results. |
 | 2 | 1.3.0 | Sealed `kind` discriminators are compact snake_case everywhere. Previously `dashboard.lsposed` and `dashboard.protection` carried fully-qualified class names (`dev.okhsunrog.vpnhide.LsposedState.Active`) instead of `active`/`blocked`. The separate `report.schema` field is gone — the top-level one is the only version. |
 | 1 | 1.0.0 – 1.2.5 | Initial format. |
 
@@ -168,7 +167,7 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 
 | Field | Meaning |
 |---|---|
-| `schema` | Bundle schema version — **this doc describes 2** (§2.1). |
+| `schema` | Bundle schema version — **this doc describes 3** (§2.1). |
 | `generatedAt` | ISO-8601 capture time. |
 | `captureKind` | `debug` / `full_system_logcat` / `kernel_images` (§1). |
 | `app` | `{packageName, version}` — `version` is `"1.2.5 (10205)"` (name + versionCode). |
@@ -198,12 +197,23 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 | `captureOptions` | `{forensics, appList}` — self-documents what was included. |
 | `errors` | Non-fatal capture failures (a probe that threw, a truncated section). Partial data is flagged here, never silently dropped. |
 
+In schema 3, `diagnostics.measurement` carries the run's captured
+`desiredRevision`, `deliveryIdentity` and `desiredDeliveryConfirmed`;
+`diagnostics.snapshot` carries those fields for the current accepted config and
+delivery evidence. Their vintages may differ. These identities remain separate
+from run times and routing identity. Unknown delivery keeps observed results useful,
+but cannot establish current success. The app also joins root and config state
+only after the coordinator has accepted the root snapshot's core epoch, config
+revision and publication sequence; last-good data never fills that join silently.
+
 ---
 
 ## 4. The diagnostic report — is the VPN actually hidden?
 
-`report` is the single canonical verdict object; the dashboard, Diagnostics
-screen and this bundle are all pure renders of it. *Computed in
+`report` contains the measured per-vector results. Dashboard, Diagnostics and
+this bundle use the shared diagnostic presentation to decide whether those
+results apply now; `diagnostics.currentSuccess` is the current positive claim.
+The report is *computed in
 [`DiagnosticReport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/DiagnosticReport.kt)
 (`buildDiagnosticReport`); outcome classification in
 [`CheckOutcome.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/CheckOutcome.kt)

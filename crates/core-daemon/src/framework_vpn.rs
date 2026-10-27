@@ -1,137 +1,157 @@
-//! Framework VPN classification (§8): netlink cannot mark an interface as VPN.
-//!
-//! Sources (first match wins):
-//! 1. `VPNHIDE_FRAMEWORK_VPN_IFACES` — comma list (host tests / forced classify)
-//! 2. `VPNHIDE_FRAMEWORK_VPN=unavailable|failed` — force non-current evidence
-//! 3. `dumpsys connectivity` parse (device); missing/unparseable → Unavailable
-//!
-//! Name-match netlink candidates alone must not set freshness to Current.
+//! Framework VPN classification and per-app membership for the continuous observer.
+//! Kernel name matches alone never establish TRANSPORT_VPN. The explicit probe and
+//! continuous source share one parser/session identity, including unmanaged tunnels.
 
+use crate::vpn_networks::{
+    FrameworkNetworks, parse_current_networks, session_key, unmanaged_vpn_interfaces,
+};
 use std::collections::BTreeSet;
-use std::process::Command;
+use std::time::Duration;
+use vpnhide_checks::self_routed_for_interfaces;
+use vpnhide_core_rpc::{
+    FrameworkVpnEvidence, FrameworkVpnStatus, UidRoutingObservation, UidVpnRouteState,
+};
 
-use vpnhide_core_rpc::{FrameworkVpnEvidence, FrameworkVpnStatus};
-
-/// Env: comma-separated framework VPN iface names (test stub / override).
 pub const FRAMEWORK_IFACES_ENV: &str = "VPNHIDE_FRAMEWORK_VPN_IFACES";
-/// Env: `unavailable` | `failed` | `auto` (default).
 pub const FRAMEWORK_MODE_ENV: &str = "VPNHIDE_FRAMEWORK_VPN";
 
 pub fn classify() -> FrameworkVpnEvidence {
-    if let Ok(v) = std::env::var(FRAMEWORK_MODE_ENV) {
-        let v = v.trim().to_ascii_lowercase();
-        if v == "unavailable" {
-            return FrameworkVpnEvidence {
-                status: FrameworkVpnStatus::Unavailable,
-                interfaces: Vec::new(),
-                detail: "VPNHIDE_FRAMEWORK_VPN=unavailable".into(),
-            };
-        }
-        if v == "failed" {
-            return FrameworkVpnEvidence {
-                status: FrameworkVpnStatus::Failed,
-                interfaces: Vec::new(),
-                detail: "VPNHIDE_FRAMEWORK_VPN=failed".into(),
-            };
+    classify_networks().0
+}
+
+/// One framework read supplies both VPN classification and the main app's membership.
+/// UID session identity changes when Android replaces a VPN even if it reuses tun0.
+pub fn sample(uid: Option<u32>) -> (FrameworkVpnEvidence, Option<UidRoutingObservation>) {
+    let (framework, networks) = classify_networks();
+    let member = uid.map(|uid| membership(uid, &framework, networks.as_ref()));
+    (framework, member)
+}
+
+fn classify_networks() -> (FrameworkVpnEvidence, Option<FrameworkNetworks>) {
+    if let Ok(mode) = std::env::var(FRAMEWORK_MODE_ENV) {
+        let status = match mode.trim().to_ascii_lowercase().as_str() {
+            "unavailable" => Some(FrameworkVpnStatus::Unavailable),
+            "failed" => Some(FrameworkVpnStatus::Failed),
+            _ => None,
+        };
+        if let Some(status) = status {
+            return (
+                FrameworkVpnEvidence {
+                    status,
+                    interfaces: Vec::new(),
+                    detail: "env_override".into(),
+                },
+                None,
+            );
         }
     }
     if let Ok(raw) = std::env::var(FRAMEWORK_IFACES_ENV) {
-        let interfaces = raw
+        let interfaces: BTreeSet<String> = raw
             .split(',')
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
-            .collect::<Vec<_>>();
-        return FrameworkVpnEvidence {
-            status: FrameworkVpnStatus::Classified,
-            detail: "env_stub".into(),
-            interfaces,
-        };
-    }
-    match dumpsys_connectivity() {
-        Ok(text) => match parse_vpn_interfaces(&text) {
-            Some(interfaces) => FrameworkVpnEvidence {
+            .collect();
+        return (
+            FrameworkVpnEvidence {
                 status: FrameworkVpnStatus::Classified,
+                detail: session_key(&BTreeSet::new(), &interfaces, false),
                 interfaces: interfaces.into_iter().collect(),
-                detail: "dumpsys_connectivity".into(),
             },
-            None => FrameworkVpnEvidence {
+            None,
+        );
+    }
+    // Reuse core's bounded ELF command runner; a stalled framework cannot occupy the
+    // observer indefinitely or grow an unbounded command-output allocation.
+    let output = crate::device_probes::run("dumpsys", &["connectivity"], Duration::from_secs(3));
+    if output.exit != 0 || output.stdout.len() >= 16 << 20 {
+        return (
+            FrameworkVpnEvidence {
+                status: FrameworkVpnStatus::Unavailable,
+                interfaces: Vec::new(),
+                detail: format!("dumpsys_status:{}", output.exit),
+            },
+            None,
+        );
+    }
+    match parse_current_networks(&output.stdout) {
+        Some(networks) => (
+            FrameworkVpnEvidence {
+                status: FrameworkVpnStatus::Classified,
+                detail: session_key(&networks.vpn_network_ids, &networks.vpn_interfaces, false),
+                interfaces: networks.vpn_interfaces.iter().cloned().collect(),
+            },
+            Some(networks),
+        ),
+        None => (
+            FrameworkVpnEvidence {
                 status: FrameworkVpnStatus::Unavailable,
                 interfaces: Vec::new(),
                 detail: "dumpsys_unparsed".into(),
             },
-        },
-        Err(detail) => FrameworkVpnEvidence {
-            status: FrameworkVpnStatus::Unavailable,
-            interfaces: Vec::new(),
-            detail,
-        },
+            None,
+        ),
     }
 }
 
-fn dumpsys_connectivity() -> Result<String, String> {
-    let output = Command::new("dumpsys")
-        .args(["connectivity"])
-        .output()
-        .map_err(|e| format!("dumpsys_spawn:{e}"))?;
-    if !output.status.success() {
-        return Err(format!("dumpsys_status:{}", output.status));
+fn membership(
+    uid: u32,
+    framework: &FrameworkVpnEvidence,
+    networks: Option<&FrameworkNetworks>,
+) -> UidRoutingObservation {
+    let mut observation = UidRoutingObservation {
+        uid,
+        state: UidVpnRouteState::Unknown,
+        detail: framework.detail.clone(),
+        session: None,
+        interfaces: Vec::new(),
+    };
+    if framework.status != FrameworkVpnStatus::Classified {
+        return observation;
     }
-    String::from_utf8(output.stdout).map_err(|_| "dumpsys_utf8".into())
+    let mut interfaces = framework
+        .interfaces
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut unmanaged = false;
+    if interfaces.is_empty() {
+        if let Some(networks) = networks {
+            match unmanaged_vpn_interfaces(&networks.non_vpn_interfaces) {
+                Ok((found, is_unmanaged)) => {
+                    interfaces = found;
+                    unmanaged = is_unmanaged;
+                }
+                Err(()) => {
+                    observation.detail = "interfaces_unavailable".into();
+                    return observation;
+                }
+            }
+        }
+    }
+    if interfaces.is_empty() {
+        observation.state = UidVpnRouteState::VpnOff;
+        observation.detail = "no_vpn".into();
+        return observation;
+    }
+    observation.session = Some(if unmanaged {
+        session_key(&BTreeSet::new(), &interfaces, true)
+    } else {
+        framework.detail.clone()
+    });
+    observation.interfaces = interfaces.into_iter().collect();
+    let (routed, detail) = self_routed_for_interfaces(uid, Some(&observation.interfaces));
+    observation.state = match routed {
+        Some(true) => UidVpnRouteState::Routed,
+        Some(false) => UidVpnRouteState::Excluded,
+        None => UidVpnRouteState::Unknown,
+    };
+    observation.detail = detail;
+    observation
 }
 
-/// Parse `dumpsys connectivity` "Current Networks:" VPN transports (shared shape with `vpnhide-core observe`).
 pub fn parse_vpn_interfaces(raw: &str) -> Option<BTreeSet<String>> {
-    let mut current = false;
-    let mut found = false;
-    let mut vpn = BTreeSet::new();
-    for line in raw.lines() {
-        if line.trim() == "Current Networks:" {
-            current = true;
-            found = true;
-            continue;
-        }
-        if !current {
-            continue;
-        }
-        if !line.is_empty() && !line.as_bytes()[0].is_ascii_whitespace() {
-            break;
-        }
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with("NetworkAgentInfo")
-            || trimmed.contains("DISCONNECTED")
-            || trimmed.contains("CONNECTING")
-        {
-            continue;
-        }
-        let Some(interface) = interface_after(trimmed, "InterfaceName: ") else {
-            continue;
-        };
-        let transports = field_after(trimmed, "Transports: ").unwrap_or_default();
-        if transports.split('|').any(|value| value == "VPN") {
-            vpn.insert(interface);
-        }
-    }
-    found.then_some(vpn)
-}
-
-fn field_after<'a>(raw: &'a str, marker: &str) -> Option<&'a str> {
-    let value = raw.split_once(marker)?.1;
-    value
-        .split(|character: char| character.is_ascii_whitespace() || matches!(character, '}' | ']'))
-        .next()
-}
-
-fn interface_after(raw: &str, marker: &str) -> Option<String> {
-    let token = field_after(raw, marker)?;
-    valid_interface(token).then(|| token.to_owned())
-}
-
-fn valid_interface(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'-'))
+    parse_current_networks(raw).map(|networks| networks.vpn_interfaces)
 }
 
 #[cfg(test)]
@@ -153,6 +173,19 @@ Other section:
     #[test]
     fn missing_current_networks_is_none() {
         assert!(parse_vpn_interfaces("no section here").is_none());
+    }
+
+    #[test]
+    fn replacing_a_vpn_on_the_same_interface_changes_session_identity() {
+        let first = "Current Networks:\n  NetworkAgentInfo{ network{100} InterfaceName: tun0 Transports: VPN CONNECTED }\n";
+        let next = first.replace("network{100}", "network{101}");
+        let a = parse_current_networks(first).unwrap();
+        let b = parse_current_networks(&next).unwrap();
+        assert_eq!(a.vpn_interfaces, b.vpn_interfaces);
+        assert_ne!(
+            session_key(&a.vpn_network_ids, &a.vpn_interfaces, false),
+            session_key(&b.vpn_network_ids, &b.vpn_interfaces, false),
+        );
     }
 
     #[test]

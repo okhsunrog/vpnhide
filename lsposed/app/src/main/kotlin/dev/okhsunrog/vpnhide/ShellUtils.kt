@@ -1,7 +1,6 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.core.CoreDiagnostics
-import dev.okhsunrog.vpnhide.core.CoreProbe
 import dev.okhsunrog.vpnhide.core.CoreProbeResult
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.core.CoreRootEffect
@@ -9,6 +8,7 @@ import dev.okhsunrog.vpnhide.generated.IfaceLists
 import dev.okhsunrog.vpnhide.picker.parsePackageUidLine
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import java.io.File
+import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
 private const val TAG = LogTags.APP
 
@@ -288,7 +288,7 @@ private fun buildCanonicalSelfUpdate(
     sections: Map<String, String>,
     selfPkg: String,
 ): CanonicalSelfUpdate {
-    val targets = parseTargetsSnapshot(RootSnapshot(sections))
+    val targets = parseTargetsSnapshot(joinRootSnapshot(sections, CoreSessions.updates.value))
     val baseCanonical = targets.canonicalConfig ?: CanonicalConfig()
     // Nothing configured yet + a pre-1.0 config still on disk: fold it in without
     // asking, the way 1.0.0 did. There is no user choice to conflict with, and
@@ -349,7 +349,6 @@ private suspend fun writeStartupCanonical(
                 // retired once their contents are safely in the canonical JSON.
                 cleanup = true,
                 coupledEffects = if (legacyImported != null) listOf(CoreRootEffect.DeleteLegacyConfig) else emptyList(),
-                activation = CanonicalActivation(native = true, ports = true),
             ),
         )
     if (result.succeeded) return null

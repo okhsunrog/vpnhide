@@ -1,12 +1,15 @@
 //! Policy publication through the actual core process/RPC. No APK, LSPosed,
 //! Zygisk injection or companion participates in these host scenarios.
+
+mod common;
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use vpnhide_core_daemon::{CoreClient, config_file};
+use vpnhide_core_client::CoreClient;
+use vpnhide_core_daemon::config_file;
 use vpnhide_core_rpc::{
     AppConfig, BaseRef, CanonicalConfig, ConfigEdit, NativeBackend, NativeBootOutcome, NativeRole,
     OperationId, PhaseOutcome, SelectionMode, ZygiskTargets,
@@ -159,6 +162,9 @@ async fn exercise(case: &str) {
     if case == "kpm" {
         command.env("VPNHIDE_KPM_LOCK", root.join("kpm.lock"));
     }
+    if case == "crash-native" {
+        command.env("VPNHIDE_TEST_CRASH_AFTER", "native");
+    }
     let mut process = Process(command.spawn().unwrap());
     tokio::time::timeout(Duration::from_secs(5), async {
         while !socket.exists() {
@@ -171,7 +177,8 @@ async fn exercise(case: &str) {
     })
     .await
     .expect("core bound its socket");
-    let client = CoreClient::connect_and_mirror(&socket);
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 2).await;
     client.hello().await.unwrap();
     let mut candidate = CanonicalConfig::default();
     candidate.apps.insert(
@@ -185,7 +192,7 @@ async fn exercise(case: &str) {
             ..Default::default()
         },
     );
-    client
+    let submitted = client
         .submit_edit(
             OperationId(1),
             BaseRef { revision: 0 },
@@ -193,9 +200,53 @@ async fn exercise(case: &str) {
                 config: candidate.clone(),
             },
         )
+        .await;
+    if case == "crash-native" {
+        assert!(submitted.is_err() || submitted.unwrap().is_err());
+        process.0.wait().unwrap();
+        let published_wire = fs::read_to_string(&policy).unwrap();
+        let parsed = vpnhide_protocol::parse_config(published_wire.as_bytes()).unwrap();
+        assert_eq!(parsed.targets.len(), 1);
+        assert_eq!(parsed.targets[0].uid, 10234);
+        let journal =
+            vpnhide_core_daemon::journal::read(&canonical.with_file_name("core_operations.json"))
+                .unwrap();
+        let intent = journal
+            .get(OperationId(1))
+            .unwrap()
+            .native_intent
+            .as_ref()
+            .unwrap();
+        assert_eq!(intent.backend, NativeBackend::Zygisk);
+        assert_eq!(intent.wire, published_wire);
+        let published_at = fs::metadata(&policy).unwrap().modified().unwrap();
+
+        fs::remove_file(&socket).unwrap();
+        command.env_remove("VPNHIDE_TEST_CRASH_AFTER");
+        process = Process(command.spawn().unwrap());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !socket.exists() {
+                assert!(process.0.try_wait().unwrap().is_none());
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
         .await
-        .unwrap()
         .unwrap();
+        let restarted = CoreClient::connect(&socket);
+        let record = restarted
+            .get_operation(OperationId(1))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.settled, Some(PhaseOutcome::Confirmed));
+        assert_eq!(
+            fs::metadata(&policy).unwrap().modified().unwrap(),
+            published_at,
+            "recovery must read the exact intent without re-publishing policy"
+        );
+        return;
+    }
+    submitted.unwrap().unwrap();
     let record = client.get_operation(OperationId(1)).await.unwrap().unwrap();
     let expected = expectation(case);
     assert_eq!(
@@ -362,6 +413,11 @@ fn expectation(case: &str) -> Expected {
         }),
         other => panic!("no expectation for {other}"),
     }
+}
+
+#[tokio::test]
+async fn zygisk_crash_recovers_exact_uid_wire_without_republishing() {
+    exercise("crash-native").await;
 }
 
 #[tokio::test]

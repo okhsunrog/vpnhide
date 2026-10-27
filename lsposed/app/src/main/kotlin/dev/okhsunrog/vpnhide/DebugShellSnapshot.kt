@@ -1,8 +1,8 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.core.CoreProbe
 import dev.okhsunrog.vpnhide.core.CoreProbeResult
 import dev.okhsunrog.vpnhide.core.CoreRoot
+import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
 internal data class DebugShellSnapshot(
     val sections: Map<String, String>,

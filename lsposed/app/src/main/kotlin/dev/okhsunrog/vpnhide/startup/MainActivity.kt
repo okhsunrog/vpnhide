@@ -47,7 +47,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import dev.okhsunrog.vpnhide.AgentControlBridge
 import dev.okhsunrog.vpnhide.AgentUiScenarioHost
 import dev.okhsunrog.vpnhide.BackgroundUpdateChecks
@@ -64,7 +63,6 @@ import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.SelfTargetFailureKind
 import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.core.CoreRoot
-import dev.okhsunrog.vpnhide.diagnostics.AppVpnStatePoller
 import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.downloadArtifactFor
 import dev.okhsunrog.vpnhide.help.HelpScreen
@@ -447,11 +445,6 @@ private fun MainScreen() {
     // on ON_RESUME if it's been a while. Listener lives as long as
     // MainScreen is composed.
     val lifecycleOwner = LocalLifecycleOwner.current
-    LaunchedEffect(lifecycleOwner) {
-        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            launch { AppVpnStatePoller.pollWhileVisible() }
-        }
-    }
     DisposableEffect(lifecycleOwner) {
         val observer =
             LifecycleEventObserver { _, event ->

@@ -63,15 +63,21 @@ directions, since `internal` is module-wide and the compiler will not.
 
 ## Data flow
 
-- **Read path:** one batched core `RootSnapshot` probe → `RootSnapshotCache` → typed snapshots
+- **Read path:** one persistent process `CoreSession` publishes confirmed config,
+  debug lease, native boot decision and per-main-app routing. Heavy batched core
+  `RootSnapshot` probes supply inventory/counters/forensic details to typed snapshots
   (`DashboardState`, `TargetsSnapshot`) derived in pure functions → Compose.
-  Root-derived projections carry the source observation ID. Dependent invalidation
+  Root-derived projections carry the source observation ID and the accepted typed
+  publication, joined identically after a fresh or seeded probe. Current native
+  observation, desired config, delivery receipts and actual measurements are
+  separate evidence. Dependent invalidation
   rejects obsolete loads; retained last-good screen values can temporarily belong
   to different observations while refreshes finish.
 - **Write path:** field intents → process-owned `CanonicalConfigRepository` /
-  `ConfigCoordinator` → fresh canonical read → one core operation
-  (`config_replace`, plus fixed `root_effect`s for the SuperKey and cleanup) whose
-  receipt carries the config write and the native/Ports delivery phases. Switches observe coordinator intent
+  `ConfigCoordinator` → one atomic typed field batch against fresh core state.
+  Core owns the phase plan and durable recovery; the app has no phase executor or
+  `CoreConfigIo`. Explicit import/bootstrap and SuperKey/cleanup use durable generated
+  `CoreCommand` variants. The receipt carries persistence and native/Ports outcomes. Switches observe coordinator intent
   and confirmed values; Activity `CanonicalEditorViewModel` instances retain
   drafts and register conflicts. Observation refresh happens separately. LSPosed
   reads canonical JSON directly from `system_server`. See
@@ -116,17 +122,20 @@ directions, since `internal` is module-wide and the compiler will not.
   (registered by `CanonicalConfigRepository`): relevance is decided by the pure
   `operationAffectsSelfMeasurement`, so a new kind of write must be classified
   there, never by adding a wait or a retry to a screen.
-- **`RootSnapshotCache`** — the single batched root read (core's `RootSnapshot`
-  probe). Need new system state on the Dashboard/Hiding path? Add a section to
+- **`RootSnapshotCache`** — the batched heavy root read (core's `RootSnapshot`
+  probe). CoreSession owns current config, native selection and routing; do not
+  derive a competing authority from a retained root snapshot. Need new detail on the Dashboard/Hiding path? Add a section to
   core's root snapshot (`crates/core-daemon/src/device_probes/root_snapshot.rs`);
   don't add another root read that races the snapshot. The app runs no `su`
   (CI: `tests/check_no_root_exec.sh`). The deliberate exception is
-  `RoutingGateCache`: its foreground `AppVpnStatePoller` uses core's narrow
-  `AppVpnState` probe because app-scoped VPN membership changes must not refresh
-  or depend on the heavy root snapshot.
-- **`core/CoreRoot`** — the only privileged surface: typed `CoreProbe`
-  diagnostics and fixed `CoreRootEffect`s over the core socket. A new root read is
-  a new core probe, never a shell line.
+  `RoutingGateCache`: it consumes the session's per-main-app UID routing publication
+  independently of the heavy root snapshot. There is no foreground polling timer.
+- **`core/CoreRoot`** — bounded generated `CoreDiagnosticProbe` reads, logcat
+  commands and debug leases over the shared core session. Privileged mutations
+  use generated `CoreCommand` through the config coordinator. A new root read is
+  a new core probe, never a shell line. Do not add serialized JSON control codecs:
+  config, commands, publications, refusals and receipts cross UniFFI as generated
+  records/enums; raw text belongs to import/export and forensic probe payloads.
 - **`ShellUtils`** — startup self-target preparation and the parsers
   `parseConfigLines`, `parseKeyValueLines`, `parsePackageUidMap` (no shell
   despite the name). **Never write another `pm list`
@@ -136,11 +145,12 @@ directions, since `internal` is module-wide and the compiler will not.
   job: it applies each saved config to the one backend it selected this boot.
   **Don't** hand-build per-backend runtime config in Kotlin; core derives each
   backend's wire from the canonical JSON.
-- **`CanonicalConfigRepository`** — all app configuration writes, superkey and
-  cleanup actions, and activation go through its coordinator. Submit field intent
-  or a pure transform of the fresh config; never save a cached full snapshot.
-  Writes go to core (`config_replace` / `config_repair`). Root outcome can be unknown:
-  preserve phase evidence and let the coordinator reconcile it.
+- **`CanonicalConfigRepository`** — all app configuration intent, superkey and
+  cleanup actions, and explicit repair go through its coordinator. Submit field
+  intent or a pure transform; never save a cached full snapshot. Ordinary writes
+  use typed Batch, full Replace is import/bootstrap only. Preserve core phase
+  evidence. Unknown submission recovery queries the same core-issued op ID; compound commands
+  must never be blindly replayed. See `docs/core-architecture.md`.
 - **`CanonicalConfigData` / `StorageConfig`** — shared canonical JSON models/parsing,
   app-side config builders and migration helpers. The app never writes the file
   itself: core does, atomically, for each accepted edit. The canonical JSON is the persistent

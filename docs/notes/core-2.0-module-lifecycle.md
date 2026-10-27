@@ -38,13 +38,21 @@ Persist dir: `/data/adb/vpnhide/core/` — journal, markers, `boot_status`,
    Zygisk module dir, Ports, app socket dir, root effects, boot apply.
 3. Detach (fork + setsid; stdout/stderr appended to `core.log`) so the manager's
    late-start step returns at once.
-4. **load_with_journal**: fence Running→Unknown, reconcile evidence, adopt.
-5. **Native selection, once per boot** (`native_boot.rs`): scan kmod / KPM / built-in /
+4. Hold the service-supervisor lock and start a worker. Crashes restart with
+   exponential backoff (1–60 s); clean exit or duplicate ownership ends the loop.
+   The worker terminates when its supervisor dies. `supervisor_status` records
+   running/restarting/stopped state; disabled/removed modules are not restarted.
+5. The worker acquires both canonical and journal lifetime flocks, then
+   **load_with_journal** fences unfinished phases and reconciles evidence. Invalid
+   durable state exposes read-only diagnostics with `startup_error`; no mutation
+   or boot delivery is admitted.
+6. **Native selection, once per boot** (`native_boot.rs`): scan kmod / KPM / built-in /
    Zygisk; load the single candidate (kmod via `finit_module(2)`, KPM via KernelPatch),
    or nothing on a conflict; retire Zygisk targets when Zygisk is not the selection.
-6. **Boot passes** on their own thread: unbounded PackageManager wait, Native repair,
+7. **Boot passes** on their own thread: PackageManager readiness loop (each child
+   command is bounded), Native repair,
    netd `bw_OUTPUT` wait (≤60 s), Ports, Ports again at T+30 s → `boot_status`.
-7. Serve UDS + netlink observation. The APK may be closed for the entire boot.
+8. Serve UDS + netlink observation. The APK may be closed for the entire boot.
 
 ## Disable
 
@@ -65,8 +73,9 @@ is cleaned by core's next boot scan.
 
 A new zip lands in `modules_update/`; core reports it as `staged` (and a staged second
 backend as "conflict after reboot") until the manager swaps it in at boot.
-If boot-apply hits HeldUnknown, core serves but refuses mutation until evidence
-resolves (explicit recovery).
+An unresolved phase holds its affected resource. Core still serves; explicit
+desired-state repair can supersede that hold where new delivery is confirmed,
+without rewriting the original Unknown receipt.
 
 ## Production write gating
 

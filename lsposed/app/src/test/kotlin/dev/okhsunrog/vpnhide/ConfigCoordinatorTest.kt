@@ -1,644 +1,447 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.core.CoreRootEffect
-import dev.okhsunrog.vpnhide.diagnostics.operationAffectsSelfMeasurement
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.util.concurrent.atomic.AtomicInteger
+import uniffi.vpnhide_core_ffi.CoreCommand
+import uniffi.vpnhide_core_ffi.CoreEdit
+import uniffi.vpnhide_core_ffi.CoreFieldEdit
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ConfigCoordinatorTest {
     @Test
-    fun `the operation observer sees acceptance, each mutating dispatch and the single result in order`() =
-        coordinatorTest {
-            coordinator.initialize()
-            val caller = async { coordinator.submit(toggle(CanonicalToggle.Filesystem, true)) }
-            assertEquals("accepted:1:[settings/optionalFeatures]", observed.receive())
-            assertEquals("prepared:1:[settings/optionalFeatures]", observed.receive())
-            assertEquals("dispatched:1:Persist", observed.receive())
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            assertEquals("dispatched:1:Native", observed.receive())
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            assertTrue(caller.await().succeeded)
-            assertEquals("settled:1:null", observed.receive())
-            assertTrue(observed.tryReceive().isFailure)
+    fun `one typed batch owns the receipt and core publishes confirmed configuration`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            assertEquals(ConfigCoordinatorMode.Open, init.await())
+            val saving = async { owner.submit(CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, true)))) }
+            runCurrent()
+            val request = core.submissions.receive()
+            val command = request.command as CoreCommand.Edit
+            val edit = (command.edit as CoreEdit.Batch).edits.single() as CoreFieldEdit.Toggle
+            assertTrue(edit.enabled)
+            core.complete(request, CanonicalConfig(debugSwitch = true))
+            runCurrent()
+            assertTrue(saving.await().succeeded)
+            assertTrue(requireNotNull(owner.view.value.confirmed).debugSwitch)
+            assertTrue(
+                owner.view.value.operations
+                    .isEmpty(),
+            )
+            assertEquals(1, core.submitCount)
         }
 
     @Test
-    fun `a transform-only mutation declares nothing but is relevant from its prepared write set`() =
-        coordinatorTest {
-            coordinator.initialize()
-            val self = "dev.okhsunrog.vpnhide"
-            val caller =
+    fun `cancelling a screen waiter does not cancel its accepted operation`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val saving = async { owner.submit(CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, true)))) }
+            runCurrent()
+            val request = core.submissions.receive()
+            saving.cancel()
+            core.complete(request, CanonicalConfig(debugSwitch = true))
+            runCurrent()
+            assertTrue(requireNotNull(owner.view.value.confirmed).debugSwitch)
+            assertTrue(
+                owner.view.value.operations
+                    .isEmpty(),
+            )
+        }
+
+    @Test
+    fun `core logcat lease publications update app logging without a config action`() =
+        runTest {
+            val core = FakeSession()
+            var appDebug = false
+            val owner = ConfigCoordinator({ core }, backgroundScope, confirmed = { appDebug = it.debug })
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            core.publish(CanonicalConfig(debug = true), debugLease = true)
+            runCurrent()
+            assertTrue(appDebug)
+            assertTrue(requireNotNull(owner.view.value.confirmed).debug)
+            core.publish(CanonicalConfig(), debugLease = false)
+            runCurrent()
+            assertFalse(appDebug)
+            assertEquals(0, core.submitCount)
+        }
+
+    @Test
+    fun `same value bridge intent respects drafts before dispatch`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            owner.draftChanged(5, setOf(ConfigField(listOf("debugSwitch"))))
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val saving =
                 async {
-                    coordinator.submit(
+                    owner.submit(
+                        CanonicalMutation(
+                            listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, false)),
+                            source = OperationSource.Bridge,
+                        ),
+                    )
+                }
+            runCurrent()
+            assertEquals(TransitionFailure.UiEditConflict, saving.await().operation?.failure)
+            assertEquals(0, core.submitCount)
+        }
+
+    @Test
+    fun `late draft conflict retains actual persistence evidence`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val saving =
+                async {
+                    owner.submit(
+                        CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, true)), source = OperationSource.Bridge),
+                    )
+                }
+            runCurrent()
+            val request = core.submissions.receive()
+            owner.draftChanged(5, setOf(ConfigField(listOf("debugSwitch"))))
+            runCurrent()
+            core.complete(request, CanonicalConfig(debugSwitch = true))
+            runCurrent()
+            val result = requireNotNull(saving.await().operation)
+            assertEquals(TransitionFailure.UiEditConflict, result.failure)
+            assertEquals(PhaseOutcome.Confirmed, result.phases[ConfigPhase.Persist])
+            assertTrue(result.draftPending)
+        }
+
+    @Test
+    fun `lost submission is queried by the same id and never submitted again`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val saving =
+                async {
+                    owner.submit(
+                        CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, true)), source = OperationSource.Bridge),
+                    )
+                }
+            runCurrent()
+            val request = core.submissions.receive()
+            owner.draftChanged(5, setOf(ConfigField(listOf("debugSwitch"))))
+            runCurrent()
+            request.reply.complete(CoreReply.Uncertain)
+            runCurrent()
+            val query = core.queries.receive()
+            assertEquals(request.op, query.op)
+            query.reply.complete(CoreReply.Observed(core.state))
+            runCurrent()
+            val unresolved = requireNotNull(saving.await().operation)
+            assertEquals(TransitionFailure.ApplicationUnknown, unresolved.failure)
+            assertTrue(unresolved.conflicts.isNotEmpty())
+            assertEquals(ConfigCoordinatorMode.Paused, owner.view.value.mode)
+            owner.retry()
+            runCurrent()
+            val recheck = core.queries.receive()
+            core.publish(CanonicalConfig(debugSwitch = true))
+            recheck.reply.complete(CoreReply.Observed(core.state, receipt(request.op)))
+            runCurrent()
+            assertEquals(ConfigCoordinatorMode.Open, owner.view.value.mode)
+            assertEquals(
+                unresolved.id,
+                owner.view.value.recoveredResult
+                    ?.id,
+            )
+            assertEquals(1, core.submitCount)
+        }
+
+    @Test
+    fun `uncertain secret command is recovered by its durable id without replay`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val saving = async { owner.submit(CanonicalMutation(emptyList(), coupledEffects = listOf(CoreRootEffect.ClearSuperkey))) }
+            runCurrent()
+            val request = core.submissions.receive()
+            assertEquals(CoreCommand.ClearSuperkey(0u), request.command)
+            request.reply.complete(CoreReply.Uncertain)
+            runCurrent()
+            val query = core.queries.receive()
+            assertEquals(request.op, query.op)
+            query.reply.complete(CoreReply.Observed(core.state))
+            runCurrent()
+            assertEquals(TransitionFailure.ApplicationUnknown, saving.await().operation?.failure)
+            owner.retry()
+            runCurrent()
+            core.queries
+                .receive()
+                .reply
+                .complete(CoreReply.Observed(core.state, receipt(request.op)))
+            runCurrent()
+            assertEquals(1, core.submitCount)
+            assertEquals(ConfigCoordinatorMode.Open, owner.view.value.mode)
+        }
+
+    @Test
+    fun `disconnect retains last good values but prevents new writes`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            core.updates.value = core.updates.value.copy(current = false)
+            runCurrent()
+            assertEquals(ConfigCoordinatorMode.Unavailable, owner.view.value.mode)
+            assertEquals(CanonicalConfig(), owner.view.value.confirmed)
+            val saving = async { owner.submit(CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, true)))) }
+            runCurrent()
+            assertFalse(saving.await().succeeded)
+            assertEquals(0, core.submitCount)
+        }
+
+    @Test
+    fun `failed receipt queries keep uncertain admission paused`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val saving = async { owner.submit(CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, true)))) }
+            runCurrent()
+            val request = core.submissions.receive()
+            request.reply.complete(CoreReply.Uncertain)
+            runCurrent()
+            core.queries
+                .receive()
+                .reply
+                .complete(CoreReply.Unreachable)
+            runCurrent()
+            assertEquals(TransitionFailure.ApplicationUnknown, saving.await().operation?.failure)
+            owner.retry()
+            runCurrent()
+            core.queries
+                .receive()
+                .reply
+                .complete(CoreReply.ProtocolSkew)
+            runCurrent()
+            assertEquals(ConfigCoordinatorMode.Paused, owner.view.value.mode)
+            val refused = async { owner.submit(CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, false)))) }
+            runCurrent()
+            assertFalse(refused.await().succeeded)
+            assertEquals(1, core.submitCount)
+        }
+
+    @Test
+    fun `saving a key is one durable command and displays core phase evidence`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val saving =
+                async {
+                    owner.submit(
+                        CanonicalMutation(
+                            listOf(CanonicalEdit.Toggle(CanonicalToggle.RememberSuperkey, true)),
+                            coupledEffects = listOf(CoreRootEffect.SetSuperkey("private")),
+                        ),
+                    )
+                }
+            runCurrent()
+            val request = core.submissions.receive()
+            val command = request.command as CoreCommand.SetSuperkey
+            assertTrue(command.remember)
+            core.publish(CanonicalConfig(settings = CanonicalSettings(rememberSuperkey = true)))
+            val record =
+                CoreOperationRecord(
+                    request.op,
+                    mapOf(
+                        ConfigPhase.Persist to PhaseOutcome.Confirmed,
+                        ConfigPhase.Secret to PhaseOutcome.Confirmed,
+                        ConfigPhase.Native to PhaseOutcome.FailedKnown,
+                    ),
+                    PhaseOutcome.FailedKnown,
+                )
+            request.reply.complete(CoreReply.Accepted(request.op, record, core.state))
+            runCurrent()
+            val result = saving.await()
+            assertFalse(result.succeeded)
+            assertEquals(PhaseOutcome.Confirmed, result.operation?.phases?.get(ConfigPhase.Secret))
+            assertEquals(PhaseOutcome.Confirmed, result.operation?.phases?.get(ConfigPhase.Persist))
+            assertEquals(1, core.submitCount)
+        }
+
+    @Test
+    fun `accepted running receipt is queried even when its publication already reports no operation`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val saving = async { owner.submit(CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, true)))) }
+            runCurrent()
+            val command = core.submissions.receive()
+            command.reply.complete(CoreReply.Accepted(command.op, null, core.state))
+            runCurrent()
+            assertEquals(TransitionFailure.ApplicationUnknown, saving.await().operation?.failure)
+            val query = core.queries.receive()
+            assertEquals(command.op, query.op)
+            query.reply.complete(CoreReply.Observed(core.state, receipt(command.op)))
+            runCurrent()
+            assertEquals(ConfigCoordinatorMode.Open, owner.view.value.mode)
+            assertEquals(1, core.submitCount)
+        }
+
+    @Test
+    fun `explicit repair is available after restart for core held native delivery`() =
+        runTest {
+            val core = FakeSession()
+            core.updates.value = CoreSessionUpdate(core.state.copy(mutationHeld = true, heldResources = setOf(ConfigPhase.Native)), true)
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            assertEquals(ConfigCoordinatorMode.Paused, owner.view.value.mode)
+            assertTrue(owner.view.value.canRepair)
+            val repair = async { owner.submit(CanonicalMutation(emptyList(), forceActivation = true)) }
+            runCurrent()
+            val command = core.submissions.receive()
+            assertEquals(CoreEdit.RepairActivation, (command.command as CoreCommand.Edit).edit)
+            core.updates.value = CoreSessionUpdate(core.state.copy(mutationHeld = false, heldResources = emptySet()), true)
+            command.reply.complete(CoreReply.Accepted(command.op, receipt(command.op), core.state))
+            runCurrent()
+            assertTrue(repair.await().succeeded)
+            assertEquals(ConfigCoordinatorMode.Open, owner.view.value.mode)
+        }
+
+    @Test
+    fun `published capture ownership blocks full reset before dispatch`() =
+        runTest {
+            val core = FakeSession()
+            core.updates.value = CoreSessionUpdate(core.state.copy(activeCaptures = 1), true)
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val reset =
+                async {
+                    owner.submit(
                         CanonicalMutation(
                             emptyList(),
-                            source = OperationSource.System,
-                            transform = { it.copy(apps = it.apps + (self to CanonicalApp(java = true))) },
+                            removesCanonical = true,
+                            coupledEffects = listOf(CoreRootEffect.FullReset),
                         ),
                     )
                 }
-            // Nothing was declared at submission, so the submitted spec classifies as irrelevant.
-            assertEquals("accepted:1:[]", observed.receive())
-            val (id, spec) = preparedSpecs.receive()
-            assertEquals(1L, id)
-            assertTrue(operationAffectsSelfMeasurement(spec, self))
-            assertFalse(operationAffectsSelfMeasurement(ConfigOperationSpec(OperationSource.System, emptySet()), self))
-            // …and the observer learns it before the first mutating dispatch.
-            assertEquals("prepared:1:[apps/$self/java]", observed.receive())
-            assertEquals("dispatched:1:Persist", observed.receive())
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            assertEquals("dispatched:1:Native", observed.receive())
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            assertTrue(caller.await().succeeded)
+            runCurrent()
+            assertEquals("capture_active", reset.await().output)
+            assertEquals(0, core.submitCount)
         }
 
-    @Test
-    fun `phase completion invalidates observations before the next phase and caller completion`() =
-        coordinatorTest {
-            coordinator.initialize()
-            val caller = async { coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true)) }
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            val activation = io.executions.receive()
-            assertEquals(1, invalidations.get())
-            activation.finish(PhaseOutcome.Confirmed)
-            assertTrue(caller.await().succeeded)
-            assertEquals(2, invalidations.get())
-            assertFalse(refreshRelease.isCompleted)
+    private class FakeSession : CoreSessionClient {
+        override val updates = MutableStateFlow(CoreSessionUpdate(state(), current = true))
+        val state: CoreStateView get() = requireNotNull(updates.value.state)
+        val submissions = Channel<Submission>(Channel.UNLIMITED)
+        val queries = Channel<Query>(Channel.UNLIMITED)
+        var submitCount = 0
+
+        override suspend fun read(): CoreReply = CoreReply.Observed(state)
+
+        private var next = 1000L
+
+        override suspend fun allocateOperationId(): Long = ++next
+
+        override suspend fun submit(
+            op: Long,
+            command: CoreCommand,
+        ): CoreReply {
+            submitCount++
+            return Submission(op, command).let {
+                submissions.send(it)
+                it.reply.await()
+            }
         }
 
-    @Test
-    fun `healing interrupted capture propagates debug even during a settings only write`() =
-        coordinatorTest(manageLogging = true) {
-            io.config = CanonicalConfig(debug = true, debugSwitch = false)
-            coordinator.initialize()
-            val caller =
-                async {
-                    coordinator.submit(
-                        CanonicalMutation(
-                            listOf(CanonicalEdit.Toggle(CanonicalToggle.Filesystem, true)),
-                            activation = CanonicalActivation(native = false),
-                        ),
-                    )
-                }
-            val write = io.executions.receive()
-            assertFalse(write.candidate.debug)
-            write.finish(PhaseOutcome.Confirmed)
-            val activation = io.executions.receive()
-            assertEquals(ConfigPhase.Native, activation.phase)
-            activation.finish(PhaseOutcome.Confirmed)
-            assertTrue(caller.await().succeeded)
-        }
+        override suspend fun operation(op: Long): CoreReply =
+            Query(op).let {
+                queries.send(it)
+                it.reply.await()
+            }
 
-    @Test
-    fun `a core logcat lease keeps debug on in candidates until core releases it`() =
-        coordinatorTest(manageLogging = true) {
-            // Core holds debug logging for a recording: the config says debug = true.
-            io.config = CanonicalConfig(debug = true, debugSwitch = false)
-            io.debugLease = true
-            coordinator.initialize()
-            val during = async { coordinator.submit(toggle(CanonicalToggle.Filesystem, true)) }
-            val write = io.executions.receive()
-            assertTrue(write.candidate.debug)
-            assertFalse(write.candidate.debugSwitch)
-            write.finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            assertTrue(during.await().succeeded)
-            assertTrue(requireNotNull(coordinator.view.value.confirmed).debug)
-
-            // Released and restored by core: the next write follows the switch again.
-            io.debugLease = false
-            io.config = io.config?.copy(debug = false)
-            val after = async { coordinator.submit(toggle(CanonicalToggle.Filesystem, false)) }
-            val next = io.executions.receive()
-            assertFalse(next.candidate.debug)
-            next.finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            assertTrue(after.await().succeeded)
-        }
-
-    @Test
-    fun `overlapping captures preserve user choice and release only the last logging owner`() =
-        coordinatorTest(manageLogging = true) {
-            coordinator.initialize()
-            val capture = async { coordinator.submit(logging(CaptureLoggingEvent.Acquire(1))) }
-            val enable = io.executions.receive()
-            assertTrue(enable.candidate.debug)
-            assertFalse(enable.candidate.debugSwitch)
-            enable.finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            assertTrue(capture.await().succeeded)
-            assertTrue(coordinator.submit(logging(CaptureLoggingEvent.Acquire(2))).succeeded)
-            assertTrue(coordinator.submit(toggle(CanonicalToggle.DebugSwitch, false)).succeeded)
-            assertTrue(coordinator.submit(logging(CaptureLoggingEvent.Release(1))).succeeded)
-            assertTrue(requireNotNull(coordinator.view.value.confirmed).debug)
-            assertEquals(1, coordinator.view.value.activeCaptures)
-            val release = async { coordinator.submit(logging(CaptureLoggingEvent.Release(2))) }
-            val disable = io.executions.receive()
-            assertFalse(disable.candidate.debug)
-            disable.finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            assertTrue(release.await().succeeded)
-            assertEquals(0, coordinator.view.value.activeCaptures)
-        }
-
-    @Test
-    fun `release during pause is retained and reconciled after manual recovery`() =
-        coordinatorTest(manageLogging = true) {
-            coordinator.initialize()
-            val capture = async { coordinator.submit(logging(CaptureLoggingEvent.Acquire(1))) }
-            val write = io.executions.receive()
-            io.config = write.candidate
-            write.finish(PhaseOutcome.Unknown)
-            repeat(2) { io.recoveries.receive().complete(ConfigPhaseEvidence(PhaseOutcome.Unknown, RootCanonicalRead.Unavailable)) }
-            assertFalse(capture.await().succeeded)
-            assertFalse(coordinator.submit(logging(CaptureLoggingEvent.Release(1))).succeeded)
-            assertEquals(0, coordinator.view.value.activeCaptures)
-            coordinator.retry()
-            io.recoveries.receive().complete(
-                ConfigPhaseEvidence(PhaseOutcome.Confirmed, RootCanonicalRead.Available(requireNotNull(io.config))),
-            )
-            val repair = io.executions.receive()
-            assertEquals(ConfigPhase.Persist, repair.phase)
-            assertFalse(repair.candidate.debug)
-            repair.finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            val view = coordinator.view.first { it.mode == ConfigCoordinatorMode.Open && it.operations.isEmpty() }
-            assertFalse(requireNotNull(view.confirmed).debug)
-            assertEquals(PhaseOutcome.Confirmed, view.recoveredResult?.phases?.get(ConfigPhase.Persist))
-            assertEquals(PhaseOutcome.NotAttempted, view.recoveredResult?.phases?.get(ConfigPhase.Native))
-        }
-
-    @Test
-    fun `reset publishes missing and subsequent edits cannot recreate deleted config`() =
-        coordinatorTest {
-            coordinator.initialize()
-            val reset = async { coordinator.submit(resetMutation()) }
-            val cleanup = io.executions.receive()
-            assertEquals(ConfigPhase.Cleanup, cleanup.phase)
-            io.config = null
-            cleanup.finish(PhaseOutcome.Confirmed)
-            assertTrue(reset.await().succeeded)
-            assertEquals(ConfigCoordinatorMode.Missing, coordinator.view.value.mode)
-            assertEquals(null, coordinator.view.value.confirmed)
-            assertFalse(coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true)).succeeded)
-            assertTrue(io.executions.tryReceive().isFailure)
-        }
-
-    @Test
-    fun `reset validates deletion and protects drafts and active capture`() =
-        coordinatorTest(manageLogging = true) {
-            coordinator.initialize()
-            val reset = async { coordinator.submit(resetMutation()) }
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            assertEquals(
-                PhaseOutcome.FailedKnown,
-                reset
-                    .await()
-                    .operation
-                    ?.phases
-                    ?.get(ConfigPhase.Cleanup),
-            )
-            coordinator.draftChanged(1, setOf(ConfigField(listOf("apps", "com.example.app", "java"))))
-            assertEquals(TransitionFailure.UiEditConflict, coordinator.submit(resetMutation()).operation?.failure)
-            coordinator.draftChanged(1, emptySet())
-            val capture = async { coordinator.submit(logging(CaptureLoggingEvent.Acquire(1))) }
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            capture.await()
-            assertEquals("capture_active", coordinator.submit(resetMutation()).output)
-            assertTrue(io.executions.tryReceive().isFailure)
-        }
-
-    private fun logging(event: CaptureLoggingEvent) = CanonicalMutation(emptyList(), source = OperationSource.System, captureEvent = event)
-
-    private fun resetMutation() =
-        CanonicalMutation(
-            emptyList(),
-            removesCanonical = true,
-            protectAllDrafts = true,
-            coupledEffects = listOf(CoreRootEffect.FullReset),
-            activation = CanonicalActivation(native = false),
-        )
-
-    @Test
-    fun `manual activation readback publishes warning without rewriting historical unknown result`() =
-        coordinatorTest {
-            coordinator.initialize()
-            val caller = async { coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true)) }
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Unknown)
-            repeat(2) { io.recoveries.receive().complete(ConfigPhaseEvidence(PhaseOutcome.Unknown, RootCanonicalRead.Unavailable)) }
-            val historical = caller.await()
-            assertEquals(TransitionFailure.ApplicationUnknown, historical.operation?.failure)
-            coordinator.retry()
-            val warning = NativeCapacityRefusal(10, 8, listOf(NativeCapacityPackage("com.example", listOf(10_123, 1_010_123))))
-            io.recoveries.receive().complete(
-                ConfigPhaseEvidence(PhaseOutcome.Confirmed, RootCanonicalRead.Available(requireNotNull(io.config)), warning),
-            )
-            // Admission reopens before the recovered result is published. Await the
-            // result as well; observing Open alone races the capacity evidence.
-            coordinator.view.first { it.mode == ConfigCoordinatorMode.Open && it.lastResult?.failure == null }
-            assertEquals(warning, coordinator.view.value.lastNativeCapacity)
-            assertEquals(
-                null,
-                coordinator.view.value.lastResult
-                    ?.failure,
-            )
-            assertEquals("", historical.output)
-            assertEquals(TransitionFailure.ApplicationUnknown, historical.operation?.failure)
-        }
-
-    @Test
-    fun `initialization retries once and explicit retry retains preexisting drafts`() =
-        coordinatorTest {
-            io.initializationResult = ConfigInitialization(ConfigCoordinatorMode.Unavailable)
-            coordinator.draftChanged(1, setOf(ConfigField(listOf("debugSwitch"))))
-            assertEquals(ConfigCoordinatorMode.Unavailable, coordinator.initialize())
-            assertEquals(ConfigCoordinatorMode.Unavailable, coordinator.initialize())
-            assertEquals(2, io.initializations)
-            io.initializationResult = null
-            coordinator.retry()
-            coordinator.view.first { it.mode == ConfigCoordinatorMode.Open }
-            assertEquals(3, io.initializations)
-            val result = coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true, source = OperationSource.Bridge))
-            assertEquals(TransitionFailure.UiEditConflict, result.operation?.failure)
-        }
-
-    @Test
-    fun `known persistence failure removes optimistic state without invoking activation`() =
-        coordinatorTest {
-            coordinator.initialize()
-            val caller = async { coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true)) }
-            val write = io.executions.receive()
-            assertEquals(true, coordinator.view.value.pending[CanonicalToggle.DebugSwitch])
-            write.finish(PhaseOutcome.FailedKnown)
-            assertEquals(TransitionFailure.ExecutionFailed, caller.await().operation?.failure)
-            assertFalse(requireNotNull(coordinator.view.value.confirmed).debugSwitch)
-            assertTrue(
-                coordinator.view.value.pending
-                    .isEmpty(),
-            )
-            assertTrue(io.executions.tryReceive().isFailure)
-        }
-
-    @Test
-    fun `secret failure is separate from confirmed config and never enters observable state`() =
-        coordinatorTest {
-            coordinator.initialize()
-            val mutation =
-                CanonicalMutation(
-                    listOf(CanonicalEdit.Toggle(CanonicalToggle.RememberSuperkey, true)),
-                    coupledEffects = listOf(CoreRootEffect.SetSuperkey("private-test-secret")),
-                    activation = CanonicalActivation(ports = true),
+        fun publish(
+            config: CanonicalConfig,
+            debugLease: Boolean = false,
+        ) {
+            updates.value =
+                CoreSessionUpdate(
+                    state.copy(
+                        configRevision = state.configRevision + 1,
+                        revision = state.revision + 1,
+                        canonical = RootCanonicalRead.Available(config),
+                        debugLease = debugLease,
+                    ),
+                    current = true,
                 )
-            val caller = async { coordinator.submit(mutation) }
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            val secret = io.executions.receive()
-            assertEquals(ConfigPhase.Secret, secret.phase)
-            secret.finish(PhaseOutcome.FailedKnown)
-            val result = caller.await()
-            assertEquals(PhaseOutcome.Confirmed, result.operation?.phases?.get(ConfigPhase.Persist))
-            assertEquals(PhaseOutcome.FailedKnown, result.operation?.phases?.get(ConfigPhase.Secret))
-            assertEquals(PhaseOutcome.NotAttempted, result.operation?.phases?.get(ConfigPhase.Native))
-            assertTrue(requireNotNull(coordinator.view.value.confirmed).settings.rememberSuperkey)
-            assertFalse(
-                coordinator.view.value
-                    .toString()
-                    .contains("private-test-secret"),
-            )
-            assertFalse(result.toString().contains("private-test-secret"))
         }
 
-    @Test
-    fun `concurrent initialization joins and later call returns without restarting`() =
-        coordinatorTest {
-            val gate = CompletableDeferred<Unit>()
-            io.initializationGate = gate
-            val first = async { coordinator.initialize() }
-            io.initializationStarted.receive()
-            val second = async { coordinator.initialize() }
-            gate.complete(Unit)
-            assertEquals(ConfigCoordinatorMode.Open, first.await())
-            assertEquals(ConfigCoordinatorMode.Open, second.await())
-            assertEquals(ConfigCoordinatorMode.Open, coordinator.initialize())
-            assertEquals(1, io.initializations)
+        fun complete(
+            request: Submission,
+            config: CanonicalConfig,
+        ) {
+            publish(config)
+            request.reply.complete(CoreReply.Accepted(request.op, receipt(request.op), state))
         }
+    }
 
-    @Test
-    fun `queued patches read fresh config and publish persistence before activation completes`() =
-        coordinatorTest {
-            coordinator.initialize()
-            val first = async { coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true)) }
-            val persist = io.executions.receive()
-            assertEquals(mapOf(CanonicalToggle.DebugSwitch to true), coordinator.view.value.pending)
-            assertFalse(requireNotNull(coordinator.view.value.confirmed).debugSwitch)
-            val second = async { coordinator.submit(toggle(CanonicalToggle.AutoHideName, true)) }
-            coordinator.view.first { it.operations.size == 2 }
-            persist.finish(PhaseOutcome.Confirmed)
-            val native = io.executions.receive()
-            assertEquals(ConfigPhase.Native, native.phase)
-            assertTrue(requireNotNull(coordinator.view.value.confirmed).debugSwitch)
-            assertFalse(first.isCompleted)
-            native.finish(PhaseOutcome.Confirmed)
-            assertTrue(first.await().succeeded)
-            val next = io.executions.receive()
-            assertTrue(next.candidate.debugSwitch)
-            assertTrue(next.candidate.settings.autoHideVpnName)
-            next.finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            assertTrue(second.await().succeeded)
-            assertEquals(2, io.reads)
-            assertTrue(
-                coordinator.view.value.pending
-                    .isEmpty(),
-            )
-        }
+    private data class Submission(
+        val op: Long,
+        val command: CoreCommand,
+        val reply: CompletableDeferred<CoreReply> = CompletableDeferred(),
+    )
 
-    @Test
-    fun `caller cancellation leaves accepted write owned by coordinator`() =
-        coordinatorTest {
-            coordinator.initialize()
-            val caller = async { coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true)) }
-            val write = io.executions.receive()
-            caller.cancel()
-            write.finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            val done = coordinator.view.first { it.lastResult != null && it.operations.isEmpty() }
-            assertTrue(requireNotNull(done.confirmed).debugSwitch)
-            assertEquals(null, done.lastResult?.failure)
-        }
+    private data class Query(
+        val op: Long,
+        val reply: CompletableDeferred<CoreReply> = CompletableDeferred(),
+    )
 
-    @Test
-    fun `failed activation retains persisted value and independent phase result`() =
-        coordinatorTest {
-            coordinator.initialize()
-            val caller = async { coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true, ports = true)) }
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.FailedKnown)
-            val result = caller.await()
-            assertFalse(result.succeeded)
-            assertTrue(requireNotNull(coordinator.view.value.confirmed).debugSwitch)
-            assertEquals(
+    private companion object {
+        fun state() = CoreStateView(1, 0, RootCanonicalRead.Available(CanonicalConfig()), emptyList())
+
+        fun receipt(op: Long) =
+            CoreOperationRecord(
+                op,
                 mapOf(
                     ConfigPhase.Persist to PhaseOutcome.Confirmed,
-                    ConfigPhase.Native to PhaseOutcome.FailedKnown,
-                    ConfigPhase.Ports to PhaseOutcome.NotAttempted,
+                    ConfigPhase.Native to PhaseOutcome.Confirmed,
                 ),
-                result.operation?.phases,
+                PhaseOutcome.Confirmed,
             )
-            assertTrue(io.executions.tryReceive().isFailure)
-        }
-
-    @Test
-    fun `unknown checks exactly twice pauses queued handles and manual recovery never replays`() =
-        coordinatorTest {
-            coordinator.initialize()
-            val first = async { coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true)) }
-            val write = io.executions.receive()
-            val queued = async { coordinator.submit(toggle(CanonicalToggle.AutoHideName, true)) }
-            coordinator.view.first { it.operations.size == 2 }
-            write.finish(PhaseOutcome.Unknown)
-            repeat(2) { io.recoveries.receive().complete(ConfigPhaseEvidence(PhaseOutcome.Unknown, RootCanonicalRead.Unavailable)) }
-            val historical = first.await()
-            assertEquals(TransitionFailure.ApplicationUnknown, historical.operation?.failure)
-            assertEquals(TransitionFailure.MutationPaused, queued.await().operation?.failure)
-            assertEquals(ConfigCoordinatorMode.Paused, coordinator.view.value.mode)
-            assertFalse(coordinator.submit(toggle(CanonicalToggle.DebugSwitch, false)).succeeded)
-            assertTrue(io.recoveries.tryReceive().isFailure)
-            assertTrue(io.executions.tryReceive().isFailure)
-            coordinator.retry()
-            io.config = write.candidate
-            io.recoveries.receive().complete(ConfigPhaseEvidence(PhaseOutcome.Confirmed, RootCanonicalRead.Available(write.candidate)))
-            coordinator.view.first { it.mode == ConfigCoordinatorMode.Open }
-            assertEquals(TransitionFailure.ApplicationUnknown, historical.operation?.failure)
-            assertEquals(
-                PhaseOutcome.NotAttempted,
-                coordinator.view.value.lastResult
-                    ?.phases
-                    ?.get(ConfigPhase.Native),
-            )
-            assertTrue(io.executions.tryReceive().isFailure)
-        }
-
-    @Test
-    fun `draft registered before initialization rejects same value bridge intent without writing`() =
-        coordinatorTest {
-            coordinator.draftChanged(7, setOf(ConfigField(listOf("debugSwitch"))))
-            coordinator.initialize()
-            val result = coordinator.submit(toggle(CanonicalToggle.DebugSwitch, false, source = OperationSource.Bridge))
-            assertEquals(TransitionFailure.UiEditConflict, result.operation?.failure)
-            assertTrue(io.executions.tryReceive().isFailure)
-        }
-
-    @Test
-    fun `fresh transform participates in conflict check and late draft reports actual persistence`() =
-        coordinatorTest {
-            coordinator.initialize()
-            coordinator.draftChanged(7, setOf(ConfigField(listOf("settings", "autoHideVpnName"))))
-            val transform =
-                CanonicalMutation(emptyList(), source = OperationSource.System, transform = {
-                    it.copy(settings = it.settings.copy(autoHideVpnName = true))
-                })
-            assertEquals(TransitionFailure.UiEditConflict, coordinator.submit(transform).operation?.failure)
-            coordinator.draftChanged(7, emptySet())
-            val caller = async { coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true, source = OperationSource.Bridge)) }
-            val write = io.executions.receive()
-            coordinator.draftChanged(8, setOf(ConfigField(listOf("debugSwitch"))))
-            write.finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            val result = requireNotNull(caller.await().operation)
-            assertEquals(TransitionFailure.UiEditConflict, result.failure)
-            assertTrue(result.draftPending)
-            assertEquals(PhaseOutcome.Confirmed, result.phases[ConfigPhase.Persist])
-        }
-
-    @Test
-    fun `no op finishes without effects and refresh never blocks next write`() =
-        coordinatorTest {
-            coordinator.initialize()
-            assertTrue(coordinator.submit(toggle(CanonicalToggle.DebugSwitch, false)).succeeded)
-            assertTrue(io.executions.tryReceive().isFailure)
-            val first = async { coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true)) }
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            first.await()
-            refreshStarted.receive()
-            val next = async { coordinator.submit(toggle(CanonicalToggle.AutoHideName, true)) }
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            io.executions.receive().finish(PhaseOutcome.Confirmed)
-            assertTrue(next.await().succeeded)
-            assertFalse(refreshRelease.isCompleted)
-        }
-
-    @Test
-    fun `missing bootstrap can fail known after readback without holding lane forever`() =
-        coordinatorTest {
-            io.config = null
-            coordinator.initialize()
-            assertFalse(coordinator.submit(toggle(CanonicalToggle.DebugSwitch, true)).succeeded)
-            val caller = async { coordinator.submit(CanonicalMutation(emptyList(), bootstrap = true)) }
-            io.executions.receive().finish(PhaseOutcome.Unknown)
-            io.recoveries.receive().complete(ConfigPhaseEvidence(PhaseOutcome.FailedKnown, RootCanonicalRead.Missing))
-            assertFalse(caller.await().succeeded)
-            assertEquals(ConfigCoordinatorMode.Missing, coordinator.view.value.mode)
-            assertEquals(null, coordinator.view.value.confirmed)
-        }
-}
-
-private fun toggle(
-    field: CanonicalToggle,
-    enabled: Boolean,
-    ports: Boolean = false,
-    source: OperationSource = OperationSource.Ui,
-) = CanonicalMutation(listOf(CanonicalEdit.Toggle(field, enabled)), source = source, activation = CanonicalActivation(ports = ports))
-
-private fun coordinatorTest(
-    manageLogging: Boolean = false,
-    block: suspend CoordinatorFixture.() -> Unit,
-) = runBlocking {
-    withTimeout(10_000) {
-        val fixture = CoordinatorFixture(this, manageLogging)
-        try {
-            fixture.block()
-        } finally {
-            fixture.close()
-        }
-    }
-}
-
-private class CoordinatorFixture(
-    callerScope: CoroutineScope,
-    manageLogging: Boolean,
-) : CoroutineScope by callerScope {
-    private val owner = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val io = FakeConfigIo()
-    val invalidations = AtomicInteger()
-    val refreshStarted = Channel<Unit>(Channel.UNLIMITED)
-    val refreshRelease = CompletableDeferred<Unit>()
-    val observed = Channel<String>(Channel.UNLIMITED)
-    val preparedSpecs = Channel<Pair<Long, ConfigOperationSpec>>(Channel.UNLIMITED)
-    val coordinator =
-        ConfigCoordinator(
-            io,
-            owner,
-            manageLogging = manageLogging,
-            invalidateObservations = {
-                invalidations.incrementAndGet()
-            },
-            refresh = {
-                refreshStarted.send(Unit)
-                refreshRelease.await()
-            },
-            observer =
-                object : ConfigOperationObserver {
-                    override fun accepted(
-                        id: Long,
-                        spec: ConfigOperationSpec,
-                    ) {
-                        observed.trySend("accepted:$id:${spec.writes.map { it.segments.joinToString("/") }}")
-                    }
-
-                    override fun prepared(
-                        id: Long,
-                        spec: ConfigOperationSpec,
-                    ) {
-                        observed.trySend("prepared:$id:${spec.writes.map { it.segments.joinToString("/") }}")
-                        preparedSpecs.trySend(id to spec)
-                    }
-
-                    override fun dispatched(
-                        id: Long,
-                        phase: ConfigPhase,
-                    ) {
-                        observed.trySend("dispatched:$id:$phase")
-                    }
-
-                    override fun settled(result: ConfigOperationResult) {
-                        observed.trySend("settled:${result.id}:${result.failure}")
-                    }
-
-                    override fun recovered(result: ConfigOperationResult) {
-                        observed.trySend("recovered:${result.id}:${result.failure}")
-                    }
-                },
-        )
-
-    fun close() {
-        owner.cancel()
-    }
-}
-
-private class FakeConfigIo : ConfigCoordinatorIo {
-    @Volatile var config: CanonicalConfig? = CanonicalConfig()
-
-    @Volatile override var debugLease = false
-    var reads = 0
-    var initializations = 0
-    var initializationGate: CompletableDeferred<Unit>? = null
-    var initializationResult: ConfigInitialization? = null
-    val initializationStarted = Channel<Unit>(Channel.UNLIMITED)
-    val executions = Channel<FakeExecution>(Channel.UNLIMITED)
-    val recoveries = Channel<CompletableDeferred<ConfigPhaseEvidence>>(Channel.UNLIMITED)
-
-    override suspend fun initialize(): ConfigInitialization {
-        initializations += 1
-        initializationStarted.send(Unit)
-        initializationGate?.await()
-        initializationResult?.let { return it }
-        return ConfigInitialization(if (config == null) ConfigCoordinatorMode.Missing else ConfigCoordinatorMode.Open, config)
-    }
-
-    override suspend fun read(): RootCanonicalRead {
-        reads += 1
-        return config?.let(RootCanonicalRead::Available) ?: RootCanonicalRead.Missing
-    }
-
-    override suspend fun execute(
-        ticket: EffectTicket,
-        phase: ConfigPhase,
-        base: CanonicalConfig?,
-        candidate: CanonicalConfig,
-        effects: List<CoreRootEffect>,
-    ): ConfigPhaseEvidence {
-        // Core-owned phases are typed core edits and carry no root effect; only coupled phases do.
-        check(effects.isEmpty() == (phase in setOf(ConfigPhase.Persist, ConfigPhase.Native, ConfigPhase.Ports)))
-        val request = FakeExecution(phase, candidate)
-        executions.send(request)
-        val outcome = request.result.await()
-        if (phase == ConfigPhase.Persist && outcome == PhaseOutcome.Confirmed) config = candidate
-        return ConfigPhaseEvidence(outcome, config?.let(RootCanonicalRead::Available) ?: RootCanonicalRead.Missing)
-    }
-
-    override suspend fun recover(
-        operationId: Long,
-        phase: ConfigPhase,
-    ): ConfigPhaseEvidence {
-        val result = CompletableDeferred<ConfigPhaseEvidence>()
-        recoveries.send(result)
-        return result.await()
-    }
-}
-
-private class FakeExecution(
-    val phase: ConfigPhase,
-    val candidate: CanonicalConfig,
-) {
-    val result = CompletableDeferred<PhaseOutcome>()
-
-    fun finish(outcome: PhaseOutcome) {
-        result.complete(outcome)
     }
 }

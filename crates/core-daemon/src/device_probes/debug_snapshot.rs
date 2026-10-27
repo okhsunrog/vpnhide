@@ -42,11 +42,7 @@ fn tool(out: &mut Out, name: &str, program: &str, args: &[&str]) {
 }
 
 fn kpm_state(out: &mut Out, paths: &Paths) {
-    let ran = run(
-        &paths.core_exe.display().to_string(),
-        &["observe", "kpm-state"],
-        out.remaining(Duration::from_secs(10)),
-    );
+    let ran = paths.kpm_state(out.remaining(Duration::from_secs(10)));
     let mut body = ran.combined();
     if !body.is_empty() && !body.ends_with('\n') {
         body.push('\n');

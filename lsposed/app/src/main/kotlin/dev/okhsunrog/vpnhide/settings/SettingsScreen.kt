@@ -81,7 +81,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.okhsunrog.vpnhide.CanonicalActivation
 import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.CanonicalEdit
@@ -967,7 +966,6 @@ private suspend fun writeSuperkeySetting(
             CanonicalMutation(
                 listOf(CanonicalEdit.Toggle(CanonicalToggle.RememberSuperkey, remember)),
                 coupledEffects = listOf(secretEffect),
-                activation = CanonicalActivation(native = remember),
             ),
         ).exitCode
 }
@@ -1022,7 +1020,6 @@ private suspend fun importConfigFromUri(
             CanonicalMutation(
                 listOf(CanonicalEdit.Replace(canonical)),
                 bootstrap = true,
-                activation = CanonicalActivation(native = true, ports = true),
             ),
         )
     if (!result.succeeded) return ConfigImportResult.RootFailed
@@ -1271,7 +1268,6 @@ private suspend fun writeRemoveUnavailableConfiguredApps(
         .commit(
             CanonicalMutation(
                 (packages - context.packageName).map { CanonicalEdit.RemoveApp(it) },
-                activation = CanonicalActivation(ports = true),
             ),
         ).exitCode
 }

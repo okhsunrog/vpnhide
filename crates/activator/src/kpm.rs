@@ -6,8 +6,8 @@ use std::os::raw::{c_char, c_long, c_void};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
-use std::time::Duration;
-use std::{env, ptr, thread};
+use std::sync::Mutex;
+use std::{env, ptr};
 
 use vpnhide_apatch_abi::{
     APATCH_SUPERCALL_NR, CommandStyle as ApatchCommandStyle,
@@ -17,11 +17,19 @@ use vpnhide_apatch_abi::{
 use vpnhide_protocol::{KPM_ARGS_LEN, Kind, TELEMETRY_VERSION, parse_config, peek_kind};
 
 use crate::{
-    APATCH_DIR, APATCH_TRUSTED_SU_KEY, CHILD_COMMAND_TIMEOUT, KPM_CTL_LOCK, KPM_MODULE_FILE,
-    KPM_NAME, KPM_TRUNCATION_MARKER, LOCK_EX, Result, SUPERCALL_HELLO, SUPERCALL_HELLO_MAGIC,
+    APATCH_DIR, APATCH_TRUSTED_SU_KEY, CHILD_COMMAND_TIMEOUT, KPM_CTL_LOCK, KPM_NAME,
+    KPM_TRUNCATION_MARKER, LOCK_EX, Result, SUPERCALL_HELLO, SUPERCALL_HELLO_MAGIC,
     SUPERCALL_KPM_CONTROL, SUPERCALL_KPM_INFO, SUPERCALL_KPM_LIST, SUPERCALL_KPM_LOAD,
     SUPERKEY_FILE, flock, output_with_timeout, syscall,
 };
+
+// A non-persistent key belongs to this core process. It is never included in config,
+// journals, diagnostics or command arguments; a restart requires authentication again.
+static SESSION_SUPERKEY: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn set_session_superkey(key: Option<String>) {
+    *SESSION_SUPERKEY.lock().expect("session superkey") = key;
+}
 
 fn find_kpatch() -> Option<PathBuf> {
     [
@@ -56,8 +64,13 @@ fn read_superkey() -> Result<String> {
 
 fn apatch_auth_candidates() -> Vec<String> {
     let mut keys = Vec::new();
-    if let Ok(key) = read_superkey() {
+    if let Some(key) = SESSION_SUPERKEY.lock().expect("session superkey").clone() {
         keys.push(key);
+    }
+    if let Ok(key) = read_superkey() {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
     }
     if !keys.iter().any(|key| key == APATCH_TRUSTED_SU_KEY) {
         keys.push(APATCH_TRUSTED_SU_KEY.to_owned());
@@ -294,12 +307,42 @@ impl CoreKpm {
     /// Read-only `kpm_state` text for diagnostics: the status reply followed by the
     /// stats pages, as the app's parsers read them. `None` when vpnhide is not loaded.
     /// Each read takes the shared KPM lock, so this never races a config dispatch.
+    /// The whole snapshot shares one child-call budget; one already-running
+    /// bounded transport call may overrun it. No detached reader survives timeout.
     pub fn read_state(&self) -> Result<Option<String>> {
-        if !self.client.list_contains()? {
+        self.read_state_with_budget(CHILD_COMMAND_TIMEOUT)
+    }
+
+    fn read_state_with_budget(&self, budget: std::time::Duration) -> Result<Option<String>> {
+        let deadline = std::time::Instant::now() + budget;
+        let check = || -> Result<()> {
+            if std::time::Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "KPM state snapshot deadline exceeded",
+                )
+                .into());
+            }
+            Ok(())
+        };
+        check()?;
+        let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
+        check()?;
+        let loaded = self.client.list_contains()?;
+        check()?;
+        if !loaded {
             return Ok(None);
         }
-        let mut out = self.client.ctl0_read("vpnhide 1 status")?;
-        out.push_str(&self.client.ctl0_stats()?);
+        // Keep the configured lock across the complete snapshot. Client read
+        // helpers take the legacy default lock and must not nest inside it.
+        let read = |wire: &str| -> Result<String> {
+            check()?;
+            let reply = self.client.ctl0_read_raw(wire)?;
+            check()?;
+            Ok(reply)
+        };
+        let mut out = normalize_kpm_reply("vpnhide 1 status", read("vpnhide 1 status")?)?;
+        out.push_str(&collect_kpm_stats_pages(read)?);
         Ok(Some(out))
     }
 
@@ -487,21 +530,6 @@ impl KpmClient {
         Ok(KpmClientDetection::Ready(Self::KpatchCli { path }))
     }
 
-    pub(crate) fn ensure_loaded(&self, options: KpmLoadOptions) -> Result<()> {
-        if self.list_contains()? {
-            return Ok(());
-        }
-        if !Path::new(KPM_MODULE_FILE).is_file() {
-            return Err(format!("{KPM_MODULE_FILE} not found").into());
-        }
-        self.load(options)?;
-        if self.list_contains()? {
-            Ok(())
-        } else {
-            Err("kpm load returned success but vpnhide is not listed".into())
-        }
-    }
-
     fn list_contains(&self) -> Result<bool> {
         match self {
             Self::KpatchCli { path } => kpatch_kpm_list_contains(path),
@@ -523,10 +551,6 @@ impl KpmClient {
             Self::ApatchSupercall { key, style } => apatch_kpm_info(key, *style)?,
         };
         Ok(KpmInfo::parse(&text).filter(|info| info.name == KPM_NAME))
-    }
-
-    fn load(&self, options: KpmLoadOptions) -> Result<()> {
-        self.load_from(Path::new(KPM_MODULE_FILE), options)
     }
 
     fn load_from(&self, artifact: &Path, options: KpmLoadOptions) -> Result<()> {
@@ -563,31 +587,6 @@ impl KpmClient {
                 supercall_ok(rc, "kpm load", auth)
             }
         }
-    }
-
-    pub(crate) fn ctl0_config(&self, wire: &str) -> Result<()> {
-        validate_kpm_config_wire(wire)?;
-        let _lock = KpmCtlLock::acquire()?;
-        const ATTEMPTS: usize = 4;
-        for attempt in 0..ATTEMPTS {
-            let result = match self {
-                Self::KpatchCli { path } => run_kpatch_kpm_ctl0_config(path, wire),
-                Self::ApatchSupercall { key, style } => apatch_kpm_ctl0_config(key, *style, wire),
-            };
-            match result {
-                Ok(()) => return Ok(()),
-                Err(_) if attempt + 1 < ATTEMPTS => {
-                    // A concurrent boot/app ctl0 config gets the KPM's short
-                    // busy return instead of spinning inside the kernel. The
-                    // critical section is only a bounded target-array copy,
-                    // so a brief retry also covers runtimes that flatten
-                    // negative return codes to a generic CLI failure.
-                    thread::sleep(Duration::from_millis(20));
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        unreachable!()
     }
 
     pub(crate) fn ctl0_read(&self, wire: &str) -> Result<String> {
@@ -1045,5 +1044,77 @@ mod identity_tests {
         assert_eq!(kpm_version_compatible("0.9.9"), Some(false));
         assert_eq!(kpm_version_compatible("dev"), None);
         assert_eq!(kpm_version_compatible("1.2"), None);
+    }
+
+    #[test]
+    fn state_snapshot_refuses_a_busy_configured_lock_before_runtime_access() {
+        use super::{CoreKpm, KpmClient, KpmCtlLock};
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "vpnhide-kpm-state-lock-{}-{nonce}",
+            std::process::id()
+        ));
+        let held = KpmCtlLock::acquire_at(&path, true).unwrap();
+        let client = CoreKpm {
+            client: KpmClient::KpatchCli {
+                path: "/must-not-be-executed".into(),
+            },
+            lock_path: path.clone(),
+        };
+        let error = client.read_state().unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        drop(held);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn state_snapshot_deadline_stops_multi_page_reads_without_leaving_a_worker() {
+        use super::{CoreKpm, KpmClient};
+        use std::os::unix::fs::PermissionsExt;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "vpnhide-kpm-state-budget-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let program = root.join("kpatch");
+        std::fs::write(&program, r#"#!/bin/sh
+case "$1 $2" in
+  "kpm list") printf 'vpnhide\n' ;;
+  "kpm ctl0") case "$4" in
+    "vpnhide 1 status") printf 'vpnhide 1 status\nbackend 0x1\nkver 0x60100\nhooks 0x3ff\nerror 0x0\n' ;;
+    "vpnhide 1 stats"*)
+      printf 'page\n' >> "${0%/*}/pages"
+      sleep 0.35
+      printf 'vpnhide 1 stats\n0x2800 0x0:0x1\npage 0x0 0x2800 0x1' ;;
+  esac ;;
+esac
+"#).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let client = CoreKpm {
+            client: KpmClient::KpatchCli { path: program },
+            lock_path: root.join("control.lock"),
+        };
+        let error = client
+            .read_state_with_budget(std::time::Duration::from_millis(250))
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("pages")).unwrap(),
+            "page\n"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

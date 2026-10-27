@@ -35,7 +35,7 @@ The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNa
 | `lsposed/` | LSPosed module + target-picker Android app (Kotlin, Compose) |
 | `kmod/` | Kernel-level native backends: GKI `.ko` (C, kretprobes) and KPM (KernelPatch inline hooks) |
 | `builtin/` | The in-tree kernel backend (`CONFIG_VPNHIDE=y`): the driver, `scripts/integrate.py` that vendors it into a kernel tree, QEMU tests (no module: core adopts the driver) |
-| `crates/` | The Rust workspace: `protocol` (the wire), `activator` (library linked into core: projection, loaders, Ports), `checks` / `checks-jni` (the app's native probes), `core-rpc` / `core-daemon` / `core-ffi` (core: the only root process and the app's client onto it) |
+| `crates/` | The Rust workspace: `protocol` (backend wire), `activator` (core-side projection, loaders, Ports), `checks` / `checks-jni` (app-native probes), `core-rpc` (shared types), `core-client` (transport), `core-ffi` (typed generated UniFFI API), `core-daemon` (privileged engine) |
 | `core/` | The required VPN Hide Core Magisk module (`build.py` → `core/target/vpnhide-core.zip`) |
 | `scripts/` | Release & changelog tooling |
 | `update-json/` | Magisk/KSU update metadata |

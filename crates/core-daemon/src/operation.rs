@@ -1,21 +1,10 @@
-//! The operation lifecycle: an accepted edit runs an ordered **phase plan**, each phase
-//! producing a [`PhaseOutcome`], and the whole settles into a queryable operation record
-//! (core-2.0 §5). This is the core-side port of the execution core of the app's
-//! `reduceConfigOperation` — deliberately *without* the app-only concerns that migration
-//! leaves in Kotlin (drafts, UI-edit conflicts, bridge-source, defensive collection copies;
-//! §3/§7): the core receives an already-resolved typed edit.
+//! Phase plans for core-owned commands. Persistence and coupled secret/cleanup
+//! effects are dependencies; Native and Ports remain independent after known
+//! failures. A confirmed Persist remains saved when a later apply fails.
 //!
-//! # Scope (minimal C)
-//!
-//! Phases run **in order**; the first non-`Confirmed` outcome stops the plan and the
-//! remaining phases stay `NotAttempted` (so a failed activation still *exposes* the ports it
-//! never reached). `Persist` is the only phase that changes the durable config, and only a
-//! confirmed `Persist` commits the candidate — a later phase failing keeps what `Persist`
-//! already wrote (the app's "failed activation retains the persisted switch" rule).
-//!
-//! Persist and Native are real phases. A KPM dispatch without completion evidence
-//! returns Unknown and is not retried. Core blocks new edits while Unknown remains.
-//! Durable operation records and restart fencing live in [`crate::journal`].
+//! Effects are fenced by durable intent before dispatch. Returned Unknown receipts
+//! remain historical facts. Explicit desired-state repair can supersede held
+//! resources without replaying the interrupted command.
 
 use std::path::PathBuf;
 
@@ -24,8 +13,8 @@ use vpnhide_core_rpc::{CanonicalConfig, ConfigPhase, PhaseOutcome, PhaseRecord};
 use crate::config_file;
 
 /// Runs one phase of an operation against the candidate config and reports its outcome.
-/// The real runner performs the side effect (Persist writes the durable file); D adds the
-/// backend-activation runners. Tests inject a fake that returns scripted outcomes.
+/// The production runner owns canonical, backend, firewall and fixed root effects.
+/// Tests inject a runner with scripted phase outcomes.
 pub trait PhaseRunner {
     fn run(&self, phase: ConfigPhase, candidate: &CanonicalConfig) -> PhaseOutcome;
 }
@@ -35,7 +24,7 @@ pub trait PhaseRunner {
 /// returning `Err` aborts that phase as the given outcome (typically `FailedKnown`).
 pub trait PhaseHook {
     fn before(&mut self, phase: ConfigPhase) -> Result<(), PhaseOutcome>;
-    fn after(&mut self, phase: ConfigPhase, outcome: PhaseOutcome);
+    fn after(&mut self, phase: ConfigPhase, outcome: PhaseOutcome) -> Result<(), PhaseOutcome>;
 }
 
 /// What an admitted edit needs to run.
@@ -58,8 +47,8 @@ pub enum PlanKind {
 }
 
 /// The phase plan for an edit, in [`ConfigPhase`] order.
-/// Coupled `Secret`/`Cleanup` join later. The plan reflects what is actually
-/// runnable; a planned phase should not settle `NotAttempted` under normal wiring.
+/// These common plans compose desired-state persistence and independent runtime
+/// resources. Command admission adds coupled Secret/Cleanup dependencies.
 pub fn plan_for(native: bool) -> Vec<ConfigPhase> {
     plan_kind(if native {
         PlanKind::PersistThenNative
@@ -130,9 +119,11 @@ pub fn run_plan_hooked(
             match blocked {
                 Some(fail) => fail,
                 None => {
-                    let outcome = runner.run(phase, candidate);
+                    let mut outcome = runner.run(phase, candidate);
                     if let Some(h) = hook.as_mut() {
-                        h.after(phase, outcome);
+                        if let Err(uncertain) = h.after(phase, outcome) {
+                            outcome = uncertain;
+                        }
                     }
                     outcome
                 }
@@ -144,10 +135,21 @@ pub fn run_plan_hooked(
             persisted = changed;
         }
 
-        if outcome != PhaseOutcome::Confirmed {
+        // Persist is a dependency. Native and Ports are independent once desired
+        // state is durable: a known Native failure must still permit Ports.
+        if outcome != PhaseOutcome::Confirmed
+            && (outcome == PhaseOutcome::Unknown
+                || settled == PhaseOutcome::Confirmed
+                || (outcome == PhaseOutcome::FailedKnown && settled != PhaseOutcome::Unknown))
+        {
+            settled = outcome;
+        }
+        if outcome != PhaseOutcome::Confirmed
+            && !(outcome == PhaseOutcome::FailedKnown
+                && matches!(phase, ConfigPhase::Native | ConfigPhase::Ports))
+        {
             // Stop the plan; everything after a non-confirmed phase stays NotAttempted so the
             // record still shows what was never reached.
-            settled = outcome;
             for &rest in &plan[i + 1..] {
                 phases.push(PhaseRecord {
                     phase: rest,
@@ -165,12 +167,15 @@ pub fn run_plan_hooked(
     }
 }
 
-/// The production runner. `Persist` writes the durable config atomically (no path → confirmed
-/// no-op, for host tests). `Native` projects the config to the built-in control-v2 wire and
-/// delivers it to the configured control node (step D); it is only ever planned when a node
-/// path is set, so a `Native` with no path is a bug, reported `NotAttempted`. `Ports` applies
-/// firewall rules when opted in via `VPNHIDE_PORTS`. `Secret`/`Cleanup` land later.
+/// Runs persistence, the selected native backend, Ports and fixed typed effects.
+/// Host tests may disable paths. Production never substitutes an arbitrary shell
+/// command for one of these operations.
 pub struct RealPhaseRunner {
+    pub effect_paths: Option<crate::effects::EffectPaths>,
+    pub effects: Vec<(ConfigPhase, vpnhide_core_rpc::RootEffect)>,
+    pub reset_config: bool,
+    pub remember_secret: bool,
+    pub epoch: u64,
     pub config_path: Option<PathBuf>,
     /// The kernel control node to deliver `Native` to. `None` disables native delivery
     /// entirely (the dev sandbox default — it never touches the real `/proc/vpnhide_ctl`).
@@ -186,6 +191,9 @@ pub struct RealPhaseRunner {
     /// A wire admission already projected for this backend (the Save capacity check), so
     /// the Native phase does not resolve packages twice. Ignored for any other backend.
     pub native_wire: Option<(vpnhide_core_rpc::NativeBackend, String)>,
+    prepared_native: std::cell::RefCell<
+        Option<Result<crate::journal::NativeIntent, crate::activation::ProjectionError>>,
+    >,
     selected: std::cell::Cell<Option<vpnhide_core_rpc::NativeBackend>>,
     ports_report: std::cell::RefCell<Option<vpnhide_core_rpc::PortsFamilyReport>>,
 }
@@ -208,6 +216,11 @@ impl RealPhaseRunner {
         ports_enabled: bool,
     ) -> Self {
         Self {
+            effect_paths: None,
+            effects: Vec::new(),
+            reset_config: false,
+            remember_secret: true,
+            epoch: 0,
             config_path,
             kmod_ctl_path,
             ports_enabled,
@@ -215,6 +228,7 @@ impl RealPhaseRunner {
             ports_source: vpnhide_core_rpc::PortsSource::Edit,
             ports_netd_ready: None,
             native_wire: None,
+            prepared_native: std::cell::RefCell::new(None),
             selected: std::cell::Cell::new(None),
             ports_report: std::cell::RefCell::new(None),
         }
@@ -222,6 +236,35 @@ impl RealPhaseRunner {
 
     pub fn selected(&self) -> Option<vpnhide_core_rpc::NativeBackend> {
         self.selected.get()
+    }
+
+    /// Freeze the actual recipient and UID-resolved wire before journaling Native
+    /// intent. The runner then dispatches these exact bytes, even if packages change.
+    pub fn native_intent(
+        &self,
+        candidate: &CanonicalConfig,
+    ) -> Option<crate::journal::NativeIntent> {
+        if let Some(intent) = self.prepared_native.borrow().as_ref() {
+            return intent.clone().ok();
+        }
+        let boot = self.native.as_ref()?.lock().expect("native boot");
+        let backend = boot.selected().or_else(|| {
+            boot.pending_authentication()
+                .then_some(vpnhide_core_rpc::NativeBackend::Kpm)
+        })?;
+        let wire = match &self.native_wire {
+            Some((for_backend, wire)) if *for_backend == backend => Ok(wire.clone()),
+            _ => crate::activation::project_native_wire(candidate, backend),
+        };
+        let intent = wire.map(|wire| crate::journal::NativeIntent {
+            backend,
+            wire,
+            zygisk_module: (backend == vpnhide_core_rpc::NativeBackend::Zygisk)
+                .then(|| boot.env.module_dir(backend))
+                .flatten(),
+        });
+        *self.prepared_native.borrow_mut() = Some(intent.clone());
+        intent.ok()
     }
 
     pub fn take_ports_report(&self) -> Option<vpnhide_core_rpc::PortsFamilyReport> {
@@ -234,6 +277,20 @@ impl PhaseRunner for RealPhaseRunner {
         match phase {
             ConfigPhase::Persist => match &self.config_path {
                 Some(path) => {
+                    if self.reset_config {
+                        return match std::fs::remove_file(path) {
+                            Ok(()) => match crate::config_file::sync_after_rename(
+                                path.parent().unwrap_or_else(|| std::path::Path::new(".")),
+                            ) {
+                                Ok(()) => PhaseOutcome::Confirmed,
+                                Err(_) => PhaseOutcome::Unknown,
+                            },
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                                PhaseOutcome::Confirmed
+                            }
+                            Err(_) => PhaseOutcome::FailedKnown,
+                        };
+                    }
                     // Best-effort fence: host sandboxes may lack /data/adb. A
                     // claim records inventory ownership; failure
                     // must not block Persist itself.
@@ -243,6 +300,9 @@ impl PhaseRunner for RealPhaseRunner {
                     }
                     match config_file::write_atomic(path, candidate) {
                         Ok(()) => PhaseOutcome::Confirmed,
+                        Err(error) if config_file::is_post_rename_error(&error) => {
+                            PhaseOutcome::Unknown
+                        }
                         Err(_) => PhaseOutcome::FailedKnown,
                     }
                 }
@@ -258,11 +318,31 @@ impl PhaseRunner for RealPhaseRunner {
                     return PhaseOutcome::NotAttempted;
                 };
                 let mut boot = native.lock().expect("native boot");
+                // Authentication-triggered load is part of Native, whose exact
+                // intent is already durable; Secret owns only key storage.
+                let retried_authentication = boot.pending_authentication();
+                if retried_authentication {
+                    boot.retry_authentication(
+                        self.epoch,
+                        candidate
+                            .settings
+                            .optional_features
+                            .contains(crate::config_edit::FILESYSTEM_FEATURE),
+                    );
+                }
                 let Some(backend) = boot.selected() else {
                     return match &boot.status.outcome {
                         // Nothing native to configure: the phase is trivially satisfied.
                         vpnhide_core_rpc::NativeBootOutcome::NoBackend => PhaseOutcome::Confirmed,
+                        vpnhide_core_rpc::NativeBootOutcome::LoadFailed { .. }
+                            if retried_authentication =>
+                        {
+                            PhaseOutcome::Unknown
+                        }
                         other => {
+                            // Scan/auth/list refusals stopped before load or
+                            // config dispatch. Their observation can remain
+                            // unavailable while this apply failed definitively.
                             crate::alog::info(&format!(
                                 "native: no config delivered this boot: {other:?}"
                             ));
@@ -271,8 +351,11 @@ impl PhaseRunner for RealPhaseRunner {
                     };
                 };
                 self.selected.set(Some(backend));
-                let projected = match &self.native_wire {
-                    Some((for_backend, wire)) if *for_backend == backend => Ok(wire.clone()),
+                let prepared = self.prepared_native.borrow();
+                let projected = match (&*prepared, &self.native_wire) {
+                    (Some(Ok(intent)), _) if intent.backend == backend => Ok(intent.wire.clone()),
+                    (Some(Err(error)), _) => Err(error.clone()),
+                    (_, Some((for_backend, wire))) if *for_backend == backend => Ok(wire.clone()),
                     _ => crate::activation::project_native_wire(candidate, backend),
                 };
                 match projected {
@@ -325,8 +408,37 @@ impl PhaseRunner for RealPhaseRunner {
                 *self.ports_report.borrow_mut() = Some(report);
                 outcome
             }
-            // Secret / Cleanup: later.
-            _ => PhaseOutcome::NotAttempted,
+            ConfigPhase::Secret | ConfigPhase::Cleanup => {
+                let Some(paths) = &self.effect_paths else {
+                    return PhaseOutcome::FailedKnown;
+                };
+                let Some((_, effect)) = self.effects.iter().find(|(p, _)| *p == phase) else {
+                    return PhaseOutcome::NotAttempted;
+                };
+                let result = match effect {
+                    vpnhide_core_rpc::RootEffect::SetSuperkey { superkey } => {
+                        vpnhide_activator::set_session_superkey(Some(superkey.trim().to_owned()));
+                        if self.remember_secret {
+                            crate::effects::apply(paths, effect)
+                        } else {
+                            crate::effects::apply(
+                                paths,
+                                &vpnhide_core_rpc::RootEffect::ClearSuperkey,
+                            )
+                        }
+                    }
+                    vpnhide_core_rpc::RootEffect::ClearSuperkey
+                    | vpnhide_core_rpc::RootEffect::FullReset => {
+                        vpnhide_activator::set_session_superkey(None);
+                        crate::effects::apply(paths, effect)
+                    }
+                    _ => crate::effects::apply(paths, effect),
+                };
+                if result.is_err() {
+                    return PhaseOutcome::Unknown;
+                }
+                PhaseOutcome::Confirmed
+            }
         }
     }
 }
@@ -421,11 +533,12 @@ mod tests {
     }
 
     #[test]
-    fn failed_activation_retains_persist_and_exposes_unattempted_ports() {
-        // Persist confirmed (config committed), Native fails, Ports never reached.
+    fn known_native_failure_retains_persist_and_still_applies_ports() {
+        // Persist confirmed, Native fails, and the independent Ports resource still applies.
         let runner = FakeRunner::new(&[
             (ConfigPhase::Persist, PhaseOutcome::Confirmed),
             (ConfigPhase::Native, PhaseOutcome::FailedKnown),
+            (ConfigPhase::Ports, PhaseOutcome::Confirmed),
         ]);
         let plan = [
             ConfigPhase::Persist,
@@ -440,10 +553,14 @@ mod tests {
         );
         assert_eq!(record(&out, ConfigPhase::Persist), PhaseOutcome::Confirmed);
         assert_eq!(record(&out, ConfigPhase::Native), PhaseOutcome::FailedKnown);
-        assert_eq!(record(&out, ConfigPhase::Ports), PhaseOutcome::NotAttempted);
+        assert_eq!(record(&out, ConfigPhase::Ports), PhaseOutcome::Confirmed);
         assert_eq!(
             *runner.ran.borrow(),
-            vec![ConfigPhase::Persist, ConfigPhase::Native]
+            vec![
+                ConfigPhase::Persist,
+                ConfigPhase::Native,
+                ConfigPhase::Ports
+            ]
         );
     }
 
@@ -485,7 +602,7 @@ mod tests {
             PhaseOutcome::Confirmed,
         );
         assert!(path.exists());
-        // An unimplemented backend phase is NotAttempted, not silently confirmed.
+        // A disabled backend phase is NotAttempted, not silently confirmed.
         assert_eq!(
             real.run(ConfigPhase::Native, &CanonicalConfig::default()),
             PhaseOutcome::NotAttempted,

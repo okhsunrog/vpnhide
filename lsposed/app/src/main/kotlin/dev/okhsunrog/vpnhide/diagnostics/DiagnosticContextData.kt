@@ -7,6 +7,7 @@ import dev.okhsunrog.vpnhide.RootSnapshot
 import dev.okhsunrog.vpnhide.currentObservationValue
 import dev.okhsunrog.vpnhide.detectNativeBackendStates
 import dev.okhsunrog.vpnhide.displayNativeBackend
+import dev.okhsunrog.vpnhide.kpmLoadStatus
 import dev.okhsunrog.vpnhide.lsposedHooksActiveThisBoot
 import dev.okhsunrog.vpnhide.settings.installedNativeOptionalHooks
 import java.util.concurrent.atomic.AtomicReference
@@ -137,13 +138,17 @@ internal fun buildDiagnosticContextObservation(
     readiness: ConfigReadiness = ConfigReadiness.Settled,
     changeEpoch: Long = 0,
     initialized: Boolean = true,
+    delivery: DesiredDeliveryIdentity? = null,
+    configJoined: Boolean = true,
 ): DiagnosticContextObservation {
     val routing = appVpn.routing
     val restart = if (selfNeedsRestart) RestartRequirement.App else RestartRequirement.None
-    val eligibility = diagnosticEligibility(initialized, restart, readiness, selfRoutingObservation(routing))
+    val baseEligibility = diagnosticEligibility(initialized, restart, readiness, selfRoutingObservation(routing))
+    val eligibility =
+        if (!configJoined && baseEligibility == DiagnosticEligibility.Eligible) DiagnosticEligibility.Checking else baseEligibility
     val gate = currentObservationValue(routing)
     val context =
-        if (gate != null && snapshot != null && appVpn.identity != null) {
+        if (configJoined && gate != null && snapshot != null && appVpn.identity != null) {
             val coverage = measurementCoverageFor(snapshot)
             MeasurementContext(
                 subject = "$processIdentity;boot:${snapshot.sections["current_boot_id"].orEmpty().trim()}",
@@ -154,6 +159,9 @@ internal fun buildDiagnosticContextObservation(
                 observationId = snapshot.observationId,
                 observedAt = now,
                 coverageLayers = coverage,
+                desiredRevision = delivery?.desiredRevision,
+                deliveryIdentity = delivery?.identity,
+                desiredDeliveryConfirmed = delivery?.confirmed ?: true,
             )
         } else {
             null
@@ -180,9 +188,16 @@ internal fun selfConfigurationIdentity(
 }
 
 /** The hiding layers a root snapshot shows: the active native backend, its installed optional hooks and LSPosed liveness this boot. */
-internal fun measurementCoverage(sections: Map<String, String>): MeasurementCoverage {
+internal fun measurementCoverage(
+    sections: Map<String, String>,
+    nativeBoot: dev.okhsunrog.vpnhide.NativeBootStatus? = null,
+    published: dev.okhsunrog.vpnhide.CoreBackendView? = null,
+): MeasurementCoverage {
     val bootId = sections["current_boot_id"].orEmpty().trim()
-    val backend = displayNativeBackend(detectNativeBackendStates(sections, currentBootId = bootId))
+    val backend =
+        displayNativeBackend(
+            detectNativeBackendStates(sections, currentBootId = bootId, kpmLoadStatus = nativeBoot.kpmLoadStatus(), published = published),
+        )
     return MeasurementCoverage(
         backend = backend,
         installedOptionalHooks = installedNativeOptionalHooks(backend.id, sections, bootId),
@@ -201,5 +216,7 @@ private val coverageMemo = AtomicReference<Pair<Long, MeasurementCoverage>?>(nul
 
 internal fun measurementCoverageFor(snapshot: RootSnapshot): MeasurementCoverage {
     coverageMemo.get()?.let { (id, coverage) -> if (id == snapshot.observationId) return coverage }
-    return measurementCoverage(snapshot.sections).also { coverageMemo.set(snapshot.observationId to it) }
+    return measurementCoverage(snapshot.sections, snapshot.nativeBoot, snapshot.backend).also {
+        coverageMemo.set(snapshot.observationId to it)
+    }
 }

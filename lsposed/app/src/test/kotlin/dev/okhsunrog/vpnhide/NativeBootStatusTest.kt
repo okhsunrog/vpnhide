@@ -109,17 +109,6 @@ class NativeBootStatusTest {
     }
 
     @Test
-    fun `the boot decision is lifted out of core's state reply`() {
-        val boot = fixture.getJSONObject(0)
-        val state = JSONObject().put("backend", JSONObject().put("installed", JSONArray()).put("boot", boot))
-
-        assertNotNull(nativeBootFromCoreState(state)?.let(::parseNativeBootStatus))
-        assertNull(nativeBootFromCoreState(JSONObject().put("backend", JSONObject().put("boot", JSONObject.NULL))))
-        assertNull(nativeBootFromCoreState(JSONObject()))
-        assertNull(nativeBootFromCoreState(JSONObject().put("backend", JSONObject().put("boot", JSONObject().put("boot_id", "x")))))
-    }
-
-    @Test
     fun `the snapshot carries the status under its own key`() {
         val raw = fixture.getJSONObject(0).toString()
 

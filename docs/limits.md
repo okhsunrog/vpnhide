@@ -146,8 +146,8 @@ and VPN Hide itself one slot for its main-profile UID.
   `SubmitError::NativeCapacityExceeded(NativeCapacityReport{total, capacity,
   packages[{package, uids}]})` (protocol 7). Nothing is persisted, no phase runs,
   no operation is recorded and the revision does not move, so the previous config
-  stays in effect. The FFI relay reports it as `native_capacity_exceeded`, with
-  the report as JSON detail. The app's config failure snackbar names the
+  stays in effect. UniFFI reports a typed `NativeCapacityExceeded` refusal and
+  capacity record. The app's config failure snackbar names the
   packages to deselect, most UIDs first.
 - **Repair and boot delivery.** A persisted config can stop fitting later, for
   example when new profile or clone copies of selected apps appear. The Native
@@ -164,18 +164,26 @@ untouched.
 ## Core socket bounds
 
 These are configured allocation/input bounds, separate from the backend capacity
-measurements above. The core RPC caps frames and config size (`crates/core-rpc/src/lib.rs`,
-`max_config_bytes()` in core-ffi).
+measurements above. The core RPC caps frames and resulting canonical config size.
+Generated UniFFI types carry requests; there is no serialized-text request facade.
 
 | Resource | Enforced bound | Owner |
 |---|---|---|
 | One RPC frame (either direction) | 1 MiB | `MAX_FRAME_BYTES`, `crates/core-rpc/src/lib.rs` |
 | Concurrent socket connections | 8 | `MAX_CONCURRENT_CONNECTIONS`, same file |
-| Canonical config submitted by the app | 512 KiB | `MAX_CONFIG`, `crates/core-ffi/src/config_relay.rs` |
-| One `root_effect` request | 64 KiB | `MAX_REQUEST`, `crates/core-ffi/src/root_relay.rs` |
+| Resulting canonical config | 512 KiB | daemon admission, `config_edit::validate_candidate` |
+| Atomic field batch | 4096 edits; no nested batch/import/repair | `MAX_BATCH_EDITS`, core-rpc; daemon admission |
+| Serialized writer queue | 16 tasks; Busy on overload | core-daemon `server` |
+| Terminal operation retention | 64 receipts + one pinned debug-restore receipt + at most one in-flight; expired uncertainty retains at most five held phases and one pending Persist proof | core-daemon `journal`; monotonic expiry floor |
+| Heavy diagnostic collections | 2 concurrent | core-daemon `server` semaphore |
+| Probes per collection | 32, identical probes deduplicated | core-daemon `diagnostics` |
+| Probe worker threads | 4 per collection | same file |
+| Retained command output | 64 MiB per collection; at most 32 MiB per probe | same file and activator `capture_command` |
+| Collection runtime | 200 s; queued probes receive only the remaining budget | same file; below the 210 s RPC deadline |
 
-An oversized config or request is rejected before it reaches core; it never falls
-back to an empty config or silently truncates an edit. These bounds do not raise or
+Daemon admission checks the resulting canonical config before any phase, and
+the transport rejects oversized frames. Neither path falls back
+to an empty config or silently truncates an edit. These bounds do not raise or
 replace the 160-UID native target limit.
 
 ## App observation reads

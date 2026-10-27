@@ -1,7 +1,6 @@
 package dev.okhsunrog.vpnhide
 
 import android.util.Log
-import dev.okhsunrog.vpnhide.debug.debugFromCanonicalSnapshot
 
 /**
  * App-process logcat facade. Info/debug/warn are gated by the runtime "debug
@@ -16,13 +15,13 @@ internal object VpnHideLog : GatedLogger() {
      * the settings UI to be opened.
      */
     fun init() {
-        enabled = CanonicalConfigRepository.state.value.confirmed
-            ?.debug ?: debugFromCanonicalSnapshot(RootSnapshotCache.snapshot.value)
+        corePublishedDebug(CoreSessions.updates.value)?.let { enabled = it }
     }
 
-    fun setFromRootSnapshot(rootSnapshot: RootSnapshot?) {
-        enabled = CanonicalConfigRepository.state.value.confirmed
-            ?.debug ?: debugFromCanonicalSnapshot(rootSnapshot)
+    fun setFromRootSnapshot(
+        @Suppress("UNUSED_PARAMETER") rootSnapshot: RootSnapshot?,
+    ) {
+        corePublishedDebug(CoreSessions.updates.value)?.let { enabled = it }
     }
 
     override fun emit(

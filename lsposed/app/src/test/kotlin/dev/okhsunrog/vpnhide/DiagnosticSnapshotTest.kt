@@ -25,6 +25,8 @@ import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
 import dev.okhsunrog.vpnhide.diagnostics.Situation
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticContextObservation
 import dev.okhsunrog.vpnhide.diagnostics.configReadiness
+import dev.okhsunrog.vpnhide.diagnostics.coreInputsJoined
+import dev.okhsunrog.vpnhide.diagnostics.desiredDeliveryIdentity
 import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
 import dev.okhsunrog.vpnhide.diagnostics.gateProjection
 import kotlinx.coroutines.CompletableDeferred
@@ -153,7 +155,9 @@ class DiagnosticSnapshotTest {
             runCurrent()
             capture.await()
             fixture.routing.value = routing(DiagnosticGate.ROUTED, id = 2)
-            fixture.config.value = ConfigCoordinatorView(confirmed = CanonicalConfig(apps = mapOf(SELF to CanonicalApp(java = true))))
+            val changed = CanonicalConfig(apps = mapOf(SELF to CanonicalApp(java = true)))
+            fixture.config.value = fixture.config.value.copy(confirmed = changed, desiredRevision = 1)
+            fixture.rootState.value = observedRoot(root(2, changed, revision = 1))
             runCurrent()
             val snapshot = fixture.domain.awaitSnapshot()
             assertEquals(MeasurementApplicability.Changed, snapshot.presentation.applicability)
@@ -262,7 +266,8 @@ class DiagnosticSnapshotTest {
         val routing = MutableStateFlow(routing(DiagnosticGate.ROUTED))
         val rootState = MutableStateFlow(observedRoot(root(1)))
         val roots = ProjectedStateFlow(rootState) { it.lastGood?.value }
-        val config = MutableStateFlow(ConfigCoordinatorView())
+        val config =
+            MutableStateFlow(ConfigCoordinatorView(confirmed = CanonicalConfig(), desiredRevision = 0, coreCurrent = true, coreEpoch = 1))
         var probeGate: CompletableDeferred<Unit>? = null
         var probes = 0
         val domain: DiagnosticDomain =
@@ -291,6 +296,8 @@ class DiagnosticSnapshotTest {
                                 now = clock(),
                                 readiness = configReadiness(impact),
                                 changeEpoch = impact.changeEpoch,
+                                delivery = desiredDeliveryIdentity(config.value, SELF),
+                                configJoined = coreInputsJoined(roots.value, config.value),
                             )
                         }
 
@@ -333,7 +340,17 @@ class DiagnosticSnapshotTest {
     private companion object {
         const val SELF = "dev.okhsunrog.vpnhide"
 
-        fun root(id: Long): RootSnapshot = RootSnapshot(mapOf("current_boot_id" to "boot-1"), observationId = id, generation = 1)
+        fun root(
+            id: Long,
+            config: CanonicalConfig = CanonicalConfig(),
+            revision: Long = 0,
+        ): RootSnapshot =
+            RootSnapshot(
+                mapOf("current_boot_id" to "boot-1"),
+                observationId = id,
+                generation = 1,
+                core = CoreSessionUpdate(CoreStateView(1, revision, RootCanonicalRead.Available(config), emptyList()), true),
+            )
 
         fun observedRoot(root: RootSnapshot): ObservationState<RootSnapshot> =
             ObservationState(

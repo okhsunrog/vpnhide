@@ -27,7 +27,7 @@ The single managed desired-state file.
 - Roles per package: `java`, `native` (`Boolean` or hook-name array),
   `appHiding`, `ports`, and the app-owned extension `hidden`.
 - Writer: VPN Hide Core only (`vpnhide-core`, `crates/core-daemon`). The app
-  submits edits over the core socket (`config_replace` / `config_repair`) on Save,
+  submits edits over the core socket (typed field batches / explicit repair) on Save,
   startup self-target preparation, the debug toggle and the APatch SuperKey
   setting; it runs no root process and no `su`.
 - Readers:
@@ -40,8 +40,8 @@ The single managed desired-state file.
 - Lifetime: persistent across reboot, module reinstall, and app reinstall.
 
 The process-owned `CanonicalConfigRepository` orders all app writes through core
-operation receipts and publishes confirmed JSON separately from observation
-caches. Core writes the file atomically (temp file + rename) and journals the
+operation receipts and publishes typed confirmed state separately from observation
+caches. Core writes the file atomically (temp file + rename + directory fsync) and journals the
 operation. If it is absent, core treats it as an empty config and app startup
 creates a new config containing the mandatory VPN Hide self-target.
 
@@ -53,6 +53,12 @@ creates a new config containing the mandatory VPN Hide self-target.
   0 has it; the `.dev` sandbox build and secondary-user installs cannot reach core.
 - `/data/adb/vpnhide/core/operations.json`: core's operation journal (receipts the
   app re-queries after an epoch change). See section 3.
+- `/data/system/vpnhide_config.json.lock` and
+  `/data/adb/vpnhide/core/operations.json.lock`: permanent root-only regular
+  lockfiles. Core holds both flocks from before load until shutdown. Alternate
+  state paths cannot bypass ownership of either resource. FullReset preserves them.
+- `<app data dir>/vpnhide-core.sock.lock`: root-owned socket lifetime lock,
+  preventing another server from unlinking a live socket. The app need not open it.
 
 The 1.x root mutation transport (`/data/adb/vpnhide/app-state/`, the staged
 `vhhelper-<sha256>` executable and its lane lock) is gone; Full Reset removes a
@@ -123,11 +129,15 @@ Mode `0700`, root-only. Journal, ownership markers, `core.log`, plus:
 
 | File | Format | Writer | Reader | Lifetime |
 |---|---|---|---|---|
+| `operations.json` | journal schema 2: issued-ID counter, expiry floor, retained receipts, actual revision/write-set evidence, held resources, expiring debug leases and pending logging restoration operation | core writer queue, atomically with directory fsync | startup recovery and receipt queries; schema 1 is migrated, corrupt/unsupported state refuses mutation | preserved by FullReset; 64 terminal receipts plus active/restoration records; expired Unknown receipts retain compact held-resource/Persist evidence |
+| `operations.json.lock` | permanent empty regular inode, mode `0600`, exclusive flock | core lifetime owner | another core refuses ownership before load/boot/bind | preserved by FullReset; never unlink a live lockfile |
+| `supervisor.lock` | permanent root-only regular inode and exclusive flock | service supervisor | duplicate service invocation refuses | supervisor lifetime; inode persists |
+| `supervisor_status` | running/restarting/stopped status and retry delay | service supervisor | diagnostics/manual inspection | overwritten as worker lifecycle changes |
 | `native_boot.json` | serde JSON of `core-rpc` `NativeBootStatus`, keyed by `boot_id` | core, once per boot (updated by deliveries and Ports applies) | core (re-adopts on restart in the same boot); debug export. The app reads the same status over RPC (`backend.boot`). | replaced on the next boot's scan |
 | `boot_status` | `key=value` boot pass report | core boot passes | debug export | overwritten each boot |
 | `boot_phase` | `boot_phase=service` | `vpnhide-core service` | debug export | overwritten each boot |
 | `logcat/session-<id>.log` | raw `logcat -b all -v threadtime` (0600) | core's logcat session child, through core (capped at 64 MiB / 30 min) | core, which copies it to the app's export dir on Stop | kept until delivered: deleted on the app's ack, on discard, and by the next Start; kept across a core restart while undelivered |
-| `logcat/session.json` | serde JSON session record (0600): id, start, limits, end state, debug lease (`previous_debug`, `previous_debug_switch`, `restore`), `delivered` | core, atomically on every change | core at start (`recover`: end an unfinished session as `core_restarted`, release its debug lease, keep an undelivered recording) | the latest session only; removed with the session (discard, next Start), and at start once delivered |
+| `logcat/session.json` | serde JSON session record (0600): id, start, limits, end state, debug status and `delivered` | core, atomically with directory fsync | core at start (`recover`: end an unfinished session as `core_restarted`, release its generic lease, keep an undelivered recording) | latest session only; discard/next Start/delivered cleanup may delete it; the independent restoration obligation stays in `operations.json` |
 
 The per-backend `load_status` / `load_dmesg` files (`/data/adb/vpnhide_kmod/`,
 `…_builtin/`, `…_kpm/`) are gone: a kmod load failure's insmod exit, stderr and
@@ -312,7 +322,8 @@ Keys currently in use:
 - `help_collapsed_*: Boolean`: help accordions.
 
 `debug` / `debugSwitch` are not stored here anymore. Diagnostics and debug
-capture state comes from canonical JSON (`/data/system/vpnhide_config.json`).
+capture state comes from core's typed publication, durable leases and recorder
+session. Canonical JSON holds the effective runtime logging flags.
 
 Vector LSPosed redirects this storage to:
 

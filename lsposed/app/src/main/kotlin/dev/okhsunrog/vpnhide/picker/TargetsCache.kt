@@ -13,9 +13,9 @@ import dev.okhsunrog.vpnhide.StateCache
 import dev.okhsunrog.vpnhide.activeNativeBackendId
 import dev.okhsunrog.vpnhide.builtinKernelPresent
 import dev.okhsunrog.vpnhide.detectNativeBackendStates
+import dev.okhsunrog.vpnhide.kpmLoadStatus
 import dev.okhsunrog.vpnhide.nativeHookFamilyFor
 import dev.okhsunrog.vpnhide.next
-import dev.okhsunrog.vpnhide.parseCanonicalConfig
 import dev.okhsunrog.vpnhide.parsePackageUidMap
 import kotlinx.coroutines.flow.StateFlow
 
@@ -123,7 +123,7 @@ internal object TargetsCache : StateCache<RootProjection<TargetsSnapshot>>(
 
 internal fun parseTargetsSnapshot(rootSnapshot: RootSnapshot): TargetsSnapshot {
     val sections = rootSnapshot.sections
-    val canonical = runCatching { parseCanonicalConfig(sections["canonical_config"].orEmpty()) }.getOrNull()
+    val canonical = (rootSnapshot.canonical as? dev.okhsunrog.vpnhide.RootCanonicalRead.Available)?.config
 
     // The inventory contains one block per Android user. Each resolved UID
     // becomes its own reverse-map entry so observer lookups from any profile
@@ -133,7 +133,12 @@ internal fun parseTargetsSnapshot(rootSnapshot: RootSnapshot): TargetsSnapshot {
     pkgToUids.forEach { (pkg, uids) ->
         uids.forEach { uidToPkg[it] = pkg }
     }
-    val activeNativeBackendId = detectNativeBackendStates(sections).activeId
+    val activeNativeBackendId =
+        detectNativeBackendStates(
+            sections,
+            kpmLoadStatus = rootSnapshot.nativeBoot.kpmLoadStatus(),
+            published = rootSnapshot.backend,
+        ).activeId
 
     // Per-role sets are projections of the config (see TargetsSnapshot), not
     // fields — there is nothing to fill in here beyond the config itself.

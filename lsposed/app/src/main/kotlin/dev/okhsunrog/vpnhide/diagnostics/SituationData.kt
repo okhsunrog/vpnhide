@@ -41,6 +41,9 @@ internal sealed interface Staleness {
 
     data object Changed : Staleness
 
+    /** Actual probes completed, but the saved desired policy has no confirmed delivery. */
+    data object DeliveryUnconfirmed : Staleness
+
     /** A re-read or an automatic re-run is confirming the measurement; [since] null when no grace is tracked (an automatic run has its own deadline). */
     data class Confirming(
         val reason: ReadReason,
@@ -256,7 +259,16 @@ private fun measuredSituation(
     failedAttemptSituation(presentation)?.let { return it }
     noMeasurementSituation(presentation, now, fact)?.let { return it }
     val evidence = requireNotNull(presentation.evidence) { "a measurement always carries its evidence summary" }
-    return Situation.Measured(evidence.conclusion, staleness(presentation.applicability, confirming))
+    val freshness =
+        if (presentation.desiredDeliveryConfirmed) {
+            staleness(
+                presentation.applicability,
+                confirming,
+            )
+        } else {
+            Staleness.DeliveryUnconfirmed
+        }
+    return Situation.Measured(evidence.conclusion, freshness)
 }
 
 /**

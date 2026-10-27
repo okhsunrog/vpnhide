@@ -14,8 +14,7 @@ use vpnhide_core_daemon::logcat_session::{EXPORT_PREFIX, RecorderConfig};
 use vpnhide_core_daemon::{CoreState, Publisher};
 use vpnhide_core_rpc::{
     BaseRef, CanonicalConfig, ConfigEdit, ConfigToggle, LogcatAutoStopReason, LogcatDebugRestore,
-    LogcatRecordingError, LogcatSessionId, LogcatSessionState, LogcatSessionStatus, OperationId,
-    StateSnapshot,
+    LogcatRecordingError, LogcatSessionId, LogcatSessionState, LogcatSessionStatus, StateSnapshot,
 };
 
 struct Fixture {
@@ -48,7 +47,14 @@ fn core(
     max_bytes: u64,
     max_duration: Duration,
 ) -> Arc<CoreState> {
-    let state = CoreState::new(Publisher::new(1, StateSnapshot::default()));
+    let state_dir = core_dir.parent().unwrap();
+    let state = CoreState::load_with_journal(
+        Publisher::new(1, StateSnapshot::default()),
+        state_dir.join("canonical.json"),
+        Some(state_dir.join("operations.json")),
+        None,
+    )
+    .unwrap();
     attach(
         &state,
         core_dir,
@@ -84,18 +90,14 @@ fn attach(
     }));
 }
 
-static NEXT_OP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-
-fn op() -> OperationId {
-    OperationId(NEXT_OP.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
-}
-
 /// An edit the app would send, against the current revision.
 fn edit(state: &CoreState, edit: ConfigEdit) {
     let base = BaseRef {
         revision: state.config_revision(),
     };
-    state.submit_edit_public(op(), base, &edit).unwrap();
+    state
+        .submit_edit_public(state.issue_operation_id().unwrap(), base, &edit)
+        .unwrap();
 }
 
 fn bootstrap(state: &CoreState, debug: bool, debug_switch: bool) {
@@ -158,6 +160,19 @@ fn session_files(dir: &Path) -> Vec<String> {
         .unwrap_or_default();
     names.sort();
     names
+}
+
+#[test]
+fn recording_durability_failure_precedes_logging_lease_and_child_spawn() {
+    let f = fixture("sleep", &["30"], 1024, Duration::from_secs(60));
+    bootstrap(&f.state, false, false);
+    std::fs::create_dir_all(f.core_dir.join("session.json")).unwrap();
+    assert!(f.state.start_logcat_recording(LogcatSessionId(9)).is_err());
+    let snapshot = f.state.publisher.current().snapshot;
+    assert!(!snapshot.config.unwrap().debug);
+    assert!(!snapshot.debug_lease);
+    assert!(snapshot.debug_leases.is_empty());
+    assert!(!f.state.logcat().is_active());
 }
 
 #[test]
@@ -488,10 +503,20 @@ fn without_a_config_the_session_records_without_a_lease() {
 
 /// What a crash leaves: the record and file as they were while recording.
 fn crash_copy(f: &Fixture) -> Vec<(PathBuf, Vec<u8>)> {
-    session_files(&f.core_dir)
+    let mut paths: Vec<PathBuf> = session_files(&f.core_dir)
         .into_iter()
-        .map(|n| {
-            let path = f.core_dir.join(n);
+        .map(|name| f.core_dir.join(name))
+        .collect();
+    // The debug baseline belongs to the journal, independently of recorder files.
+    for name in ["canonical.json", "operations.json"] {
+        let path = f.core_dir.parent().unwrap().join(name);
+        if path.exists() {
+            paths.push(path);
+        }
+    }
+    paths
+        .into_iter()
+        .map(|path| {
             let bytes = std::fs::read(&path).unwrap();
             (path, bytes)
         })
@@ -505,7 +530,7 @@ fn a_session_unfinished_at_core_start_ends_and_restores_debug() {
     let id = LogcatSessionId(141);
     f.state.start_logcat_recording(id).unwrap();
     let left = crash_copy(&f);
-    f.state.logcat().shutdown();
+    f.state.shutdown();
     for (path, bytes) in &left {
         std::fs::write(path, bytes).unwrap();
     }
@@ -521,7 +546,6 @@ fn a_session_unfinished_at_core_start_ends_and_restores_debug() {
         1 << 20,
         Duration::from_secs(60),
     );
-    bootstrap(&next, true, false);
     next.logcat().recover();
     let status = next.logcat().status().expect("recovered");
     assert_eq!(status.session, id);
@@ -549,8 +573,17 @@ fn a_restart_does_not_clobber_a_switch_the_user_changed() {
     bootstrap(&f.state, false, false);
     let id = LogcatSessionId(142);
     f.state.start_logcat_recording(id).unwrap();
+    // The choice belongs to the durable pre-crash state, not a racing import
+    // submitted while the restarted core is restoring its capture baseline.
+    edit(
+        &f.state,
+        ConfigEdit::Toggle {
+            field: ConfigToggle::DebugSwitch,
+            enabled: true,
+        },
+    );
     let left = crash_copy(&f);
-    f.state.logcat().shutdown();
+    f.state.shutdown();
     for (path, bytes) in &left {
         std::fs::write(path, bytes).unwrap();
     }
@@ -562,8 +595,6 @@ fn a_restart_does_not_clobber_a_switch_the_user_changed() {
         1 << 20,
         Duration::from_secs(60),
     );
-    // The user turned the switch on while the session recorded.
-    bootstrap(&next, true, true);
     next.logcat().recover();
     let status = next.logcat().status().expect("recovered");
     assert_eq!(restore_of(&status), Some(LogcatDebugRestore::UserChoice));
@@ -690,7 +721,7 @@ fn discard_stops_restores_and_deletes_everything() {
 }
 
 #[test]
-fn a_restore_that_cannot_be_written_stays_pending_and_is_retried() {
+fn a_known_failed_restore_can_be_explicitly_retried_after_storage_is_fixed() {
     let tmp = tempfile::tempdir().unwrap();
     let core_dir = tmp.path().join("core/logcat");
     let app_dir = tmp.path().join("app");
@@ -722,8 +753,12 @@ fn a_restore_that_cannot_be_written_stays_pending_and_is_retried() {
     let status = released(&state);
     assert_eq!(restore_of(&status), Some(LogcatDebugRestore::Pending));
     assert_eq!(debug_of(&state), (true, false));
-    // Writable again: the next session call retries.
+    // An explicit release retries a known failure with a fresh receipt. It must
+    // not rewrite the original receipt or replay an Unknown dispatch.
     std::fs::remove_dir(&config_path).unwrap();
+    state
+        .release_debug_lease(vpnhide_core_rpc::DebugLeaseId(u64::MAX))
+        .unwrap();
     let status = state.logcat().status().unwrap();
     assert_eq!(restore_of(&status), Some(LogcatDebugRestore::Restored));
     assert_eq!(debug_of(&state), (false, false));

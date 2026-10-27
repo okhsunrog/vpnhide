@@ -45,10 +45,7 @@ internal class CanonicalEditorViewModel : ViewModel() {
         register()
     }
 
-    fun save(
-        activation: CanonicalActivation = CanonicalActivation(),
-        transform: (CanonicalConfig) -> CanonicalConfig = { it },
-    ) {
+    fun save(transform: (CanonicalConfig) -> CanonicalConfig = { it }) {
         if (saving) return
         val submitted = state.draft.edits.toMap()
         saving = true
@@ -61,7 +58,6 @@ internal class CanonicalEditorViewModel : ViewModel() {
                             submitted.values.map {
                                 it.value
                             },
-                            activation = activation,
                             transform = transform,
                         ),
                     )

@@ -690,4 +690,5 @@
     <string name="agent_ui_preview_label">UI preview · %1$s · synthetic data</string>
     <string name="agent_ui_preview_exit">Exit preview</string>
     <string name="agent_ui_preview_action">Intercepted action: %1$s</string>
+    <string name="reset_capture_active">Finish the active diagnostic capture before resetting.</string>
 </resources>

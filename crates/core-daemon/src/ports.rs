@@ -7,15 +7,14 @@
 //!
 //! Partial application is honest: IPv4 and IPv6 are independent restores. The
 //! phase outcome is the worst of the two families; [`PortsFamilyReport`] on the
-//! operation record carries both. On restart, [`inspect_surviving_rules`] reads
-//! chain/jump presence rather than assuming daemon death cleared netfilter.
+//! operation record carries both. An uncertain apply stays Unknown after restart:
+//! chain/jump presence does not prove the intended policy was installed.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use vpnhide_activator::{
-    PackageUidMap, PortsApplyResult, PortsChainPresence, PortsFamilyResult, PortsRuleset,
-    apply_ports_rules_families, inspect_ports_chains, parse_canonical, parse_pm_packages,
-    project_ports_with_resolver, write_ports_core_owner_marker,
+    PackageUidMap, PortsApplyResult, PortsFamilyResult, PortsRuleset, apply_ports_rules_families,
+    parse_canonical, parse_pm_packages, project_ports_with_resolver, write_ports_core_owner_marker,
 };
 use vpnhide_core_rpc::{CanonicalConfig, FamilyApplyOutcome, PhaseOutcome, PortsFamilyReport};
 
@@ -66,46 +65,33 @@ pub fn to_family_report(r: &PortsApplyResult) -> PortsFamilyReport {
     }
 }
 
-/// Resolve UIDs: prefer a test dump, else live PackageManager, else empty map
-/// (still applies a RETURN-only chain — cleanup / no targets).
-pub fn resolve_uid_map(candidate: &CanonicalConfig) -> PackageUidMap {
-    if let Ok(path) = std::env::var(PORTS_PM_DUMP_ENV) {
-        match std::fs::read_to_string(&path) {
-            Ok(text) => return parse_pm_packages(&text),
-            Err(err) => eprintln!("core: ports pm dump unreadable ({path}): {err}"),
-        }
-    }
+/// Resolve every Android profile before replacing any live rule. An unavailable
+/// PackageManager is an error, never evidence that the target set is empty.
+pub fn resolve_uid_map(candidate: &CanonicalConfig) -> Result<PackageUidMap, String> {
     if !has_ports_targets(candidate) {
-        return PackageUidMap::default();
+        return Ok(PackageUidMap::default());
+    }
+    if let Ok(path) = std::env::var(PORTS_PM_DUMP_ENV) {
+        return std::fs::read_to_string(&path)
+            .map(|text| parse_pm_packages(&text))
+            .map_err(|error| format!("ports UID dump unreadable ({path}): {error}"));
     }
     // Live `cmd package` waits up to a minute for PackageManager. Host/dev sandboxes
     // have no Android PM — skip rather than hang. Production Android has /system/bin/cmd.
     if !Path::new("/system/bin/cmd").is_file() {
-        eprintln!("core: ports UID resolve skipped (no Android pm on this host)");
-        return PackageUidMap::default();
+        return Err("ports UID resolution unavailable (no Android PackageManager)".into());
     }
-    match PackageUidMap::from_pm() {
-        Ok(map) => map,
-        Err(err) => {
-            eprintln!("core: ports UID resolve via pm failed: {err}");
-            PackageUidMap::default()
-        }
-    }
+    PackageUidMap::from_pm().map_err(|error| format!("ports UID resolution failed: {error}"))
 }
 
-pub fn project(candidate: &CanonicalConfig, resolver: &PackageUidMap) -> PortsRuleset {
+pub fn project(
+    candidate: &CanonicalConfig,
+    resolver: &PackageUidMap,
+) -> Result<PortsRuleset, String> {
     let json = config_file::to_json_string(candidate);
-    match parse_canonical(&json) {
-        Ok(cfg) => project_ports_with_resolver(&cfg, resolver),
-        Err(err) => {
-            eprintln!("core: ports projection parse failed: {err}");
-            PortsRuleset {
-                ipv4: String::new(),
-                ipv6: String::new(),
-                target_count: 0,
-            }
-        }
-    }
+    parse_canonical(&json)
+        .map(|config| project_ports_with_resolver(&config, resolver))
+        .map_err(|error| format!("ports projection failed: {error}"))
 }
 
 /// Apply projected rules and claim ownership.
@@ -155,9 +141,18 @@ pub fn run_ports_phase(candidate: &CanonicalConfig) -> (PhaseOutcome, PortsFamil
 pub fn run_ports_phase_detailed(
     candidate: &CanonicalConfig,
 ) -> (PhaseOutcome, PortsFamilyReport, String) {
-    let resolver = resolve_uid_map(candidate);
-    let rules = project(candidate, &resolver);
-    apply_detailed(&rules)
+    match resolve_uid_map(candidate).and_then(|resolver| project(candidate, &resolver)) {
+        Ok(rules) => apply_detailed(&rules),
+        Err(error) => (
+            PhaseOutcome::FailedKnown,
+            PortsFamilyReport {
+                ipv4: FamilyApplyOutcome::NotAttempted,
+                ipv6: FamilyApplyOutcome::NotAttempted,
+                target_count: 0,
+            },
+            error,
+        ),
+    }
 }
 
 /// netd rebuilds its baseline chains during boot. Wait (at most `max` seconds) until
@@ -165,12 +160,15 @@ pub fn run_ports_phase_detailed(
 pub fn wait_for_netd(max: std::time::Duration) -> bool {
     let deadline = std::time::Instant::now() + max;
     loop {
-        let ready = std::process::Command::new("iptables")
-            .args(["-w", "-L", "bw_OUTPUT", "-n"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success());
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        let ready = vpnhide_activator::output_with_timeout(
+            std::process::Command::new("iptables").args(["-w", "5", "-L", "bw_OUTPUT", "-n"]),
+            left.min(std::time::Duration::from_secs(10)),
+        )
+        .is_ok_and(|out| out.status.success());
         if ready {
             return true;
         }
@@ -179,33 +177,6 @@ pub fn wait_for_netd(max: std::time::Duration) -> bool {
         }
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
-}
-
-/// Restart inspection: surviving chain/jump presence (does not invent absence).
-pub fn inspect_surviving_rules() -> PortsChainPresence {
-    inspect_ports_chains()
-}
-
-/// Bounded Ports Unknown reconciliation: promote to Confirmed only when both
-/// families still show chain+jump; to FailedKnown only when both are fully
-/// absent. Mixed or unreadable remnants stay Unknown — no auto-repair.
-pub fn reconcile_ports_unknown(presence: PortsChainPresence) -> PhaseOutcome {
-    let v4_ok = presence.ipv4_chain && presence.ipv4_jump;
-    let v6_ok = presence.ipv6_chain && presence.ipv6_jump;
-    let v4_gone = !presence.ipv4_chain && !presence.ipv4_jump;
-    let v6_gone = !presence.ipv6_chain && !presence.ipv6_jump;
-    if v4_ok && v6_ok {
-        PhaseOutcome::Confirmed
-    } else if v4_gone && v6_gone {
-        PhaseOutcome::FailedKnown
-    } else {
-        PhaseOutcome::Unknown
-    }
-}
-
-/// Marker path helper for tests.
-pub fn owner_marker_path() -> PathBuf {
-    vpnhide_activator::ports_owner_marker_path()
 }
 
 /// Lock for tests that mutate PATH / VPNHIDE_PORTS* (process-global).
@@ -260,24 +231,6 @@ esac
             dir,
             "ip6tables-restore",
             "#!/bin/sh\ncat >/dev/null; exit 1\n",
-        );
-    }
-
-    fn inspect_partial_stubs(dir: &Path) {
-        // IPv4 present, IPv6 absent
-        write_stub_bin(
-            dir,
-            "iptables",
-            r#"#!/bin/sh
-exit 0
-"#,
-        );
-        write_stub_bin(
-            dir,
-            "ip6tables",
-            r#"#!/bin/sh
-exit 1
-"#,
         );
     }
 
@@ -342,27 +295,48 @@ exit 1
     }
 
     #[test]
-    fn restart_inspection_mixed_presence_stays_unknown() {
+    fn failed_uid_scan_never_dispatches_firewall_mutations() {
         let dir = tempfile::tempdir().unwrap();
-        inspect_partial_stubs(dir.path());
-        let presence = with_path(dir.path(), inspect_surviving_rules);
-        assert!(presence.ipv4_chain && presence.ipv4_jump);
-        assert!(!presence.ipv6_chain && !presence.ipv6_jump);
-        assert_eq!(
-            reconcile_ports_unknown(presence),
-            PhaseOutcome::Unknown,
-            "mixed remnants must not invent Confirmed or FailedKnown"
+        let previous = dir.path().join("rules");
+        fs::write(&previous, "previous protection").unwrap();
+        for binary in [
+            "iptables",
+            "ip6tables",
+            "iptables-restore",
+            "ip6tables-restore",
+        ] {
+            write_stub_bin(
+                dir.path(),
+                binary,
+                "#!/bin/sh\nprintf overwritten >\"$VPNHIDE_TEST_RULES\"\nexit 0\n",
+            );
+        }
+        let mut cfg = CanonicalConfig::default();
+        cfg.apps.insert(
+            "com.example.app".into(),
+            vpnhide_core_rpc::AppConfig {
+                ports: true,
+                ..Default::default()
+            },
         );
-    }
-
-    #[test]
-    fn restart_inspection_full_absence_is_failed_known() {
-        let dir = tempfile::tempdir().unwrap();
-        write_stub_bin(dir.path(), "iptables", "#!/bin/sh\nexit 1\n");
-        write_stub_bin(dir.path(), "ip6tables", "#!/bin/sh\nexit 1\n");
-        let presence = with_path(dir.path(), inspect_surviving_rules);
-        assert!(!presence.any_present());
-        assert_eq!(reconcile_ports_unknown(presence), PhaseOutcome::FailedKnown);
+        let (outcome, report, detail) = with_path(dir.path(), || {
+            // SAFETY: process env is serialized by with_path's PATH_LOCK.
+            unsafe {
+                std::env::set_var(PORTS_PM_DUMP_ENV, dir.path().join("unreadable-pm"));
+                std::env::set_var("VPNHIDE_TEST_RULES", &previous);
+            }
+            let result = run_ports_phase_detailed(&cfg);
+            unsafe {
+                std::env::remove_var(PORTS_PM_DUMP_ENV);
+                std::env::remove_var("VPNHIDE_TEST_RULES");
+            }
+            result
+        });
+        assert_eq!(outcome, PhaseOutcome::FailedKnown);
+        assert_eq!(report.ipv4, FamilyApplyOutcome::NotAttempted);
+        assert_eq!(report.ipv6, FamilyApplyOutcome::NotAttempted);
+        assert!(detail.contains("UID dump unreadable"));
+        assert_eq!(fs::read_to_string(previous).unwrap(), "previous protection");
     }
 
     #[test]
@@ -385,8 +359,8 @@ exit 1
                 ..Default::default()
             },
         );
-        let resolver = resolve_uid_map(&cfg);
-        let rules = project(&cfg, &resolver);
+        let resolver = resolve_uid_map(&cfg).unwrap();
+        let rules = project(&cfg, &resolver).unwrap();
         assert_eq!(rules.target_count, 1);
         assert!(rules.ipv4.contains("10123"));
         assert!(!rules.ipv4.contains("10456"));

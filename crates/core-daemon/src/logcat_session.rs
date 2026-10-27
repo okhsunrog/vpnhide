@@ -110,7 +110,10 @@ pub trait DebugControl: Send + Sync {
     /// Turn `debug` on and hold it while recording. `None` when core cannot write now.
     /// `persist` gets the lease (`restore: Pending`) after the previous values are read
     /// and before anything is written, so a crash in between still knows what to restore.
-    fn acquire(&self, persist: &dyn Fn(&LogcatDebugLease)) -> Option<LogcatDebugLease>;
+    fn acquire(
+        &self,
+        persist: &dyn Fn(&LogcatDebugLease) -> std::io::Result<()>,
+    ) -> Option<LogcatDebugLease>;
     /// Stop holding `debug` and put it back by the restore rule (see the module docs).
     fn release(&self, lease: &LogcatDebugLease) -> LogcatDebugRestore;
 }
@@ -186,12 +189,25 @@ impl Shared {
         let mut record = self.record();
         change(&mut record);
         if !self.discarded.load(Ordering::SeqCst) {
-            if let Err(e) = write_record(&self.record_path, &record) {
-                crate::alog::info(&format!("logcat: session record write failed: {e}"));
+            if let Err(error) = write_record(&self.record_path, &record) {
+                crate::alog::info(&format!("logcat: session record write failed: {error}"));
             }
         }
         drop(record);
         self.cv.notify_all();
+    }
+
+    fn try_update(&self, change: impl FnOnce(&mut SessionRecord)) -> std::io::Result<()> {
+        let mut record = self.record();
+        let mut candidate = record.clone();
+        change(&mut candidate);
+        if !self.discarded.load(Ordering::SeqCst) {
+            write_record(&self.record_path, &candidate)?;
+        }
+        *record = candidate;
+        drop(record);
+        self.cv.notify_all();
+        Ok(())
     }
 
     fn wait(&self, wait: Duration, done: impl Fn(&SessionRecord, &Shared) -> bool) -> bool {
@@ -231,7 +247,8 @@ fn write_record(path: &Path, record: &SessionRecord) -> std::io::Result<()> {
         f.write_all(text.as_bytes())?;
         f.sync_all()?;
     }
-    fs::rename(&tmp, path)
+    fs::rename(&tmp, path)?;
+    File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_all()
 }
 
 fn read_record(path: &Path) -> Option<SessionRecord> {
@@ -315,6 +332,18 @@ pub struct Recorder {
 }
 
 impl Recorder {
+    /// Admission checks use the physical session, independently of app-local UI tokens.
+    pub fn is_active(&self) -> bool {
+        // Recorder callbacks may await the writer queue while holding this slot.
+        // Reset admission on that writer must refuse a concurrent transition,
+        // rather than wait on the slot and deadlock the callback behind itself.
+        match self.session.try_lock() {
+            Ok(slot) => slot
+                .as_ref()
+                .is_some_and(|session| session.shared.running()),
+            Err(_) => true,
+        }
+    }
     pub fn new(config: Option<RecorderConfig>) -> Self {
         Recorder {
             config: Mutex::new(config),
@@ -622,7 +651,9 @@ fn spawn(
     };
     let shared = Arc::new(Shared::new(record, config.dir.join(RECORD_NAME), false));
     // Persist first: a crash after the lease is taken must still find a record to restore from.
-    shared.update(|_| {});
+    shared
+        .try_update(|_| {})
+        .map_err(|error| format!("logcat record: {error}"))?;
     let failed = |e: String| {
         shared.discarded.store(true, Ordering::SeqCst);
         let _ = fs::remove_file(&path);
@@ -632,7 +663,7 @@ fn spawn(
     // Lease before the child starts, so the first lines are already verbose.
     let lease = debug.as_ref().and_then(|control| {
         let persist =
-            |lease: &LogcatDebugLease| shared.update(|record| record.debug = Some(*lease));
+            |lease: &LogcatDebugLease| shared.try_update(|record| record.debug = Some(*lease));
         let lease = control.acquire(&persist);
         shared.update(|record| record.debug = lease);
         lease
@@ -718,17 +749,26 @@ fn supervise(
     }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    // SAFETY: prctl is async-signal-safe and touches only the child being exec'd.
+        .stderr(Stdio::null())
+        .process_group(0);
+    let parent = unsafe { libc::getpid() };
+    // SAFETY: only async-signal-safe syscalls before exec. The parent check
+    // closes the fork/prctl window where core could already have died.
     unsafe {
-        cmd.pre_exec(|| {
-            libc::prctl(
+        cmd.pre_exec(move || {
+            if libc::prctl(
                 libc::PR_SET_PDEATHSIG,
                 libc::SIGKILL as libc::c_ulong,
                 0,
                 0,
                 0,
-            );
+            ) != 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::getppid() != parent {
+                libc::_exit(1);
+            }
             Ok(())
         });
     }
@@ -778,9 +818,9 @@ fn supervise(
             reason: LogcatAutoStopReason::LogcatExited
         }
     );
-    if !exited_alone {
-        let _ = child.kill();
-    }
+    // The leader is still unreaped, reserving its PID/group identity. Kill any
+    // descendants too so inherited pipe owners cannot strand the reader join.
+    unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
     let exit = child.wait().ok().and_then(|s| s.code());
     // The pipe hits EOF once the child is gone; the reader then flushes and syncs.
     let _ = reader.join();

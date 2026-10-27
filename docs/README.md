@@ -20,6 +20,9 @@ Stable references for anyone changing the code. Read the relevant one before a P
 
 | Doc | What it covers |
 |---|---|
+| [core-architecture.md](core-architecture.md) | Current core/app ownership, persistent session, typed edits, observations and recovery |
+| [notes/core-2.0-ipc-auth.md](notes/core-2.0-ipc-auth.md) | Production socket, access control and bounded RPC surface |
+| [notes/core-2.0-module-lifecycle.md](notes/core-2.0-module-lifecycle.md) | Core boot, disable, uninstall and upgrade behavior |
 | [development.md](development.md) | Prereqs, per-module build quickstart, device install, CI lints |
 | [protocol.md](protocol.md) | The frozen control/telemetry wire between core, app and backends |
 | [storage.md](storage.md) | Storage & activation design: the JSON canonical, core and the backends, strict single native backend, SELinux |
@@ -56,7 +59,6 @@ a release commitment — lives in **[`notes/`](notes/)**:
 - [notes/diagnostics-state-analysis.md](notes/diagnostics-state-analysis.md) — historical analysis of what "diagnostics" meant before the refactor and why
 - [notes/app-state-design.md](notes/app-state-design.md) — the original state redesign proposal (superseded by the contract)
 - [notes/ci-kernel-config-trim.md](notes/ci-kernel-config-trim.md) — the QEMU test-kernel trim: what it switches off and what it measures, the ABI guard that keeps it from moving a struct offset, and the options that look trimmable but are not
-- [notes/core-2.0-architecture.md](notes/core-2.0-architecture.md) — forward-looking design for a persistent root daemon replacing the per-call root helper: ownership, projection, auth and observer decisions
 - [notes/builtin-app-integration-audit.md](notes/builtin-app-integration-audit.md) — audit of how the app integrates the built-in kernel backend (picker, statistics, diagnostics, capture, reset)
 - [notes/ui-state-presentation-review.md](notes/ui-state-presentation-review.md) — design review that led to the Situation classifier; decisions recorded, two since superseded
 - [notes/vpn-poll-device-validation.md](notes/vpn-poll-device-validation.md) — device acceptance evidence for the foreground app-VPN poller and the network callback lifecycle

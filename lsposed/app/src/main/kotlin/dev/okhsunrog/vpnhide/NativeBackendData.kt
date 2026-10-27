@@ -64,7 +64,8 @@ private val NATIVE_BACKEND_PRIORITY =
 internal fun detectNativeBackendStates(
     sections: Map<String, String>,
     currentBootId: String = sections["current_boot_id"].orEmpty(),
-    kpmLoadStatus: KpmLoadStatus = nativeBootStatus(sections).kpmLoadStatus(),
+    kpmLoadStatus: KpmLoadStatus = KPM_STATUS_NONE,
+    published: CoreBackendView? = null,
 ): NativeBackendStates =
     NativeBackendStates(
         kmod = detectKmodModule(sections),
@@ -76,7 +77,34 @@ internal fun detectNativeBackendStates(
                 zygiskStatusRaw = sections["zygisk_status"].orEmpty(),
                 currentBootId = currentBootId,
             ),
+    ).let { if (published == null) it else joinNativeBackendStates(it, published) }
+
+/** A boot plan cannot stand in for a current observed identity. */
+internal fun joinNativeBackendStates(
+    raw: NativeBackendStates,
+    published: CoreBackendView,
+): NativeBackendStates {
+    fun state(
+        id: NativeBackendId,
+        value: ModuleState,
+    ): ModuleState {
+        val installed = value as? ModuleState.Installed
+        return if (installed != null || id in published.installed || published.active == id) {
+            (installed ?: ModuleState.Installed(null, false)).copy(
+                active = published.current && published.active == id,
+                runtimeCheckable = published.current,
+            )
+        } else {
+            value
+        }
+    }
+    return NativeBackendStates(
+        state(NativeBackendId.Kmod, raw.kmod),
+        state(NativeBackendId.Kpm, raw.kpm),
+        state(NativeBackendId.Zygisk, raw.zygisk),
+        state(NativeBackendId.Builtin, raw.builtin),
     )
+}
 
 internal fun activeNativeBackendId(states: NativeBackendStates): NativeBackendId? =
     prioritizedNativeBackends(states).firstOrNull { moduleActive(it.second) }?.first

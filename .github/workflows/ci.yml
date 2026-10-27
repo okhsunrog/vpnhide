@@ -338,7 +338,7 @@ jobs:
       - name: rustfmt
         run: cargo fmt --check
       - name: clippy (protocol + activator + core)
-        run: cargo clippy -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_core_rpc -p vpnhide_core_daemon -p vpnhide_core_ffi --all-targets -- -D warnings
+        run: cargo clippy -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_core_rpc -p vpnhide_core_client -p vpnhide_core_daemon -p vpnhide_core_ffi --all-targets -- -D warnings
       - name: rustup target add armv7 (zygisk 32-bit)
         run: rustup target add armv7-linux-androideabi
       - name: clippy (zygisk)
@@ -346,7 +346,7 @@ jobs:
       - name: clippy (app native)
         run: cargo ndk -t arm64-v8a -t armeabi-v7a clippy -p vpnhide_checks -p vpnhide_checks_jni --tests -- -D warnings
       - name: cargo test (workspace)
-        run: cargo test -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_zygisk -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_core_rpc -p vpnhide_core_daemon
+        run: cargo test -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_zygisk -p vpnhide_checks -p vpnhide_checks_jni -p vpnhide_core_rpc -p vpnhide_core_client -p vpnhide_core_daemon -p vpnhide_core_ffi
 
 
   kmod:

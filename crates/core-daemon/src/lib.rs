@@ -1,6 +1,6 @@
-//! vpnhide 2.0 persistent root core: a UDS tarpc server for the `core-rpc` contract, plus
-//! a typed client. Skeleton for core-2.0 step 2 — the publish/lifecycle machinery is real;
-//! the domain (config/operation/observation) is still placeholder (see `core-rpc`).
+//! The persistent privileged core: durable command engine, root observations and
+//! authenticated UDS RPC server. App transport lives in the separate `core-client`
+//! crate; ownership and lifecycle are described in `docs/core-architecture.md`.
 
 pub mod activation;
 pub mod alog;
@@ -8,13 +8,13 @@ pub mod app_socket;
 pub mod auth;
 pub mod backend;
 pub mod boot;
-pub mod client;
 pub mod config_edit;
 pub mod config_file;
 pub mod device_probes;
 pub mod diagnostics;
 pub mod effects;
 pub mod framework_vpn;
+pub mod instance;
 pub mod journal;
 pub mod listener;
 pub mod logcat_session;
@@ -31,7 +31,6 @@ pub mod server;
 pub mod service;
 pub mod zygisk;
 
-pub use client::CoreClient;
 pub use listener::{ServerHandle, listen};
 pub use observer::observe;
 pub use publisher::Publisher;
@@ -127,6 +126,7 @@ mod ipc_auth_tests {
     use super::*;
     use std::collections::BTreeSet;
     use std::time::Duration;
+    use vpnhide_core_client::CoreClient;
     use vpnhide_core_rpc::StateSnapshot;
 
     #[tokio::test]
@@ -139,7 +139,7 @@ mod ipc_auth_tests {
         let _handle = serve_with_allowlist(&path, state, deny).expect("listen");
         tokio::task::yield_now().await;
 
-        let client = CoreClient::connect_and_mirror(&path);
+        let client = CoreClient::connect(&path);
         let hello = tokio::time::timeout(Duration::from_secs(2), client.hello()).await;
         match hello {
             Ok(Err(_)) | Err(_) => {}
@@ -155,7 +155,7 @@ mod ipc_auth_tests {
         let _handle =
             serve_with_allowlist(&path, Arc::clone(&state), auth::Allowlist::Open).expect("listen");
         tokio::task::yield_now().await;
-        let client = CoreClient::connect_and_mirror(&path);
+        let client = CoreClient::connect(&path);
         let epoch = tokio::time::timeout(Duration::from_secs(5), client.hello())
             .await
             .expect("hello timed out")
@@ -163,3 +163,5 @@ mod ipc_auth_tests {
         assert_eq!(epoch, 1);
     }
 }
+
+mod vpn_networks;

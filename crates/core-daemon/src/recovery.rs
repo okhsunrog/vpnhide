@@ -1,27 +1,22 @@
-//! Evidence readback for uncertain operations (core-2.0 §5).
+//! One-time evidence readback for unfinished commands.
 //!
 //! After restart fencing turns in-flight work into durable `Unknown`, recovery
-//! may **reconcile** against observed durable state. It must not invent success
-//! and must not re-dispatch effects. Matching the app coordinator: Unknown →
-//! readback → Confirmed / FailedKnown when evidence is reliable, otherwise keep
-//! Unknown (Held) and leave mutation admission paused.
+//! reconciles exact durable evidence without dispatching effects. Once an Unknown
+//! receipt was returned or recovered, it stays immutable. Explicit desired-state
+//! repair records new resource evidence and supersedes held phases separately.
 
 use std::fs;
 use std::path::Path;
 
 use vpnhide_core_rpc::{CanonicalConfig, ConfigPhase, NativeBackend, PhaseOutcome, PhaseRecord};
 
-use crate::activation;
 use crate::config_file;
-use crate::journal::JournalEntry;
+use crate::journal::{JournalEntry, NativeIntent};
 
 /// Paths/observations available for readback. All optional: missing evidence
 /// keeps the phase Unknown rather than guessing.
 pub struct EvidenceSources<'a> {
     pub config_path: Option<&'a Path>,
-    /// Kernel control node (or Zygisk selection root is separate).
-    pub kmod_ctl_path: Option<&'a Path>,
-    pub zygisk_module: Option<&'a Path>,
 }
 
 /// Reconcile one journal entry in place. Returns whether anything changed.
@@ -35,6 +30,22 @@ pub struct EvidenceSources<'a> {
 /// - Overall `settled` becomes Confirmed only when every planned phase is
 ///   Confirmed; FailedKnown if any failed and none remain Unknown; else Unknown.
 pub fn reconcile_entry(entry: &mut JournalEntry, sources: &EvidenceSources<'_>) -> bool {
+    if entry.superseded_by.is_some() || entry.finalized_unknown {
+        return false;
+    }
+    // A completed failed plan intentionally leaves later phases NotAttempted. It
+    // must not become an unfinished operation just because core restarted.
+    if matches!(
+        entry.record.settled,
+        Some(PhaseOutcome::Confirmed | PhaseOutcome::FailedKnown)
+    ) && !entry
+        .record
+        .phases
+        .iter()
+        .any(|p| matches!(p.outcome, PhaseOutcome::Unknown | PhaseOutcome::Running))
+    {
+        return false;
+    }
     let Some(candidate) = entry.candidate.as_ref() else {
         // Without a stored candidate we cannot prove Persist intent; leave as-is.
         return false;
@@ -42,16 +53,26 @@ pub fn reconcile_entry(entry: &mut JournalEntry, sources: &EvidenceSources<'_>) 
     let mut changed = false;
 
     for phase in &mut entry.record.phases {
-        if phase.outcome != PhaseOutcome::Unknown {
+        if phase.outcome != PhaseOutcome::Unknown || entry.superseded_phases.contains(&phase.phase)
+        {
             continue;
         }
         let resolved = match phase.phase {
-            ConfigPhase::Persist => reconcile_persist(candidate, sources.config_path),
-            ConfigPhase::Native => reconcile_native(candidate, sources),
-            ConfigPhase::Ports => {
-                let presence = crate::ports::inspect_surviving_rules();
-                crate::ports::reconcile_ports_unknown(presence)
+            ConfigPhase::Persist => {
+                if entry.command == Some(crate::journal::CommandIntent::FullReset) {
+                    match sources.config_path.map(config_file::read) {
+                        Some(Ok(None)) => PhaseOutcome::Confirmed,
+                        Some(Ok(Some(_))) => PhaseOutcome::FailedKnown,
+                        _ => PhaseOutcome::Unknown,
+                    }
+                } else {
+                    reconcile_persist(candidate, sources.config_path)
+                }
             }
+            ConfigPhase::Native => reconcile_native(entry.native_intent.as_ref()),
+            // A chain's existence proves neither its contents nor this operation's
+            // IPv4/IPv6 policy. No exact readback receipt is available yet.
+            ConfigPhase::Ports => PhaseOutcome::Unknown,
             // Secret/Cleanup: no evidence path in this slice.
             _ => PhaseOutcome::Unknown,
         };
@@ -73,14 +94,11 @@ fn settle_from_phases(phases: &[PhaseRecord]) -> PhaseOutcome {
     if phases.is_empty() {
         return PhaseOutcome::Unknown;
     }
-    if phases.iter().any(|p| {
-        matches!(
-            p.outcome,
-            PhaseOutcome::Unknown | PhaseOutcome::Running | PhaseOutcome::NotAttempted
-        )
-    }) {
-        // NotAttempted after a restart means the plan did not finish; hold without
-        // dispatching. Running should already have been fenced to Unknown.
+    if phases
+        .iter()
+        .any(|p| matches!(p.outcome, PhaseOutcome::Unknown | PhaseOutcome::Running))
+    {
+        // Running should already have been fenced to Unknown.
         return PhaseOutcome::Unknown;
     }
     if phases
@@ -88,6 +106,13 @@ fn settle_from_phases(phases: &[PhaseRecord]) -> PhaseOutcome {
         .any(|p| p.outcome == PhaseOutcome::FailedKnown)
     {
         return PhaseOutcome::FailedKnown;
+    }
+    if phases
+        .iter()
+        .any(|p| p.outcome == PhaseOutcome::NotAttempted)
+    {
+        // With no known failure, this is an unfinished plan. Never dispatch it.
+        return PhaseOutcome::Unknown;
     }
     if phases.iter().all(|p| p.outcome == PhaseOutcome::Confirmed) {
         return PhaseOutcome::Confirmed;
@@ -110,18 +135,22 @@ fn reconcile_persist(candidate: &CanonicalConfig, config_path: Option<&Path>) ->
     }
 }
 
-fn reconcile_native(candidate: &CanonicalConfig, sources: &EvidenceSources<'_>) -> PhaseOutcome {
-    // Zygisk: publication is a regular file we can compare to the projected wire.
-    if let Some(module) = sources.zygisk_module {
-        return reconcile_zygisk_publication(candidate, module);
+fn reconcile_native(intent: Option<&NativeIntent>) -> PhaseOutcome {
+    let Some(intent) = intent else {
+        return PhaseOutcome::Unknown;
+    };
+    if intent.backend == NativeBackend::Zygisk {
+        let Some(module) = intent.zygisk_module.as_deref() else {
+            return PhaseOutcome::Unknown;
+        };
+        return reconcile_zygisk_publication(module, &intent.wire);
     }
     // Kernel / KPM: telemetry proves liveness, not that this candidate’s wire
     // was applied. Refusing to invent Confirmed leaves the op Held.
-    let _ = (candidate, sources.kmod_ctl_path);
     PhaseOutcome::Unknown
 }
 
-fn reconcile_zygisk_publication(candidate: &CanonicalConfig, module: &Path) -> PhaseOutcome {
+fn reconcile_zygisk_publication(module: &Path, expected_wire: &str) -> PhaseOutcome {
     let targets = module.join("targets.txt");
     let on_disk = match fs::read_to_string(&targets) {
         Ok(text) => text,
@@ -130,29 +159,55 @@ fn reconcile_zygisk_publication(candidate: &CanonicalConfig, module: &Path) -> P
         }
         Err(_) => return PhaseOutcome::Unknown,
     };
-    // Resolver-only projection: readback must not block on PackageManager, and host
-    // tests have no PackageManager. Empty map matches a config with no package targets.
-    let resolver = vpnhide_activator::PackageUidMap::default();
-    match activation::project_native_wire_with_resolver(candidate, NativeBackend::Zygisk, &resolver)
-    {
-        Ok(wire) if wire == on_disk => PhaseOutcome::Confirmed,
-        Ok(_) => PhaseOutcome::FailedKnown,
-        // An over-capacity config is never written, so it cannot be what is on disk.
-        Err(activation::ProjectionError::Capacity(_)) => PhaseOutcome::FailedKnown,
-        Err(activation::ProjectionError::Failed(_)) => PhaseOutcome::Unknown,
+    if expected_wire == on_disk {
+        PhaseOutcome::Confirmed
+    } else {
+        PhaseOutcome::FailedKnown
     }
 }
 
 /// After Persist is reconciled to Confirmed, advance the durable revision if the
 /// journal still carries the pre-edit counter (crash between Persist and settle).
-pub fn revision_after_reconcile(entry: &JournalEntry, journal_revision: u64) -> u64 {
-    let persist_confirmed = entry
-        .record
-        .phases
-        .iter()
-        .any(|p| p.phase == ConfigPhase::Persist && p.outcome == PhaseOutcome::Confirmed);
-    if persist_confirmed && journal_revision <= entry.base.revision {
-        entry.base.revision + 1
+pub fn persist_commit_observed(entry: &JournalEntry, durable: &Option<CanonicalConfig>) -> bool {
+    entry.record.phases.iter().any(|phase| {
+        phase.phase == ConfigPhase::Persist
+            && (phase.outcome == PhaseOutcome::Confirmed
+                || (phase.outcome == PhaseOutcome::Unknown
+                    && if entry.command == Some(crate::journal::CommandIntent::FullReset) {
+                        durable.is_none()
+                    } else {
+                        entry.candidate.is_some() && entry.candidate == *durable
+                    }))
+    })
+}
+
+pub fn pending_persist_matches(
+    proof: &crate::journal::PendingPersist,
+    durable: &Option<CanonicalConfig>,
+) -> bool {
+    if proof.reset {
+        durable.is_none()
+    } else {
+        proof.candidate.is_some() && proof.candidate == *durable
+    }
+}
+
+pub fn revision_after_reconcile(
+    entry: &JournalEntry,
+    journal_revision: u64,
+    durable: &Option<CanonicalConfig>,
+) -> u64 {
+    let persist_confirmed = persist_commit_observed(entry, durable);
+    // Never derive commit identity from the client's (possibly stale) base.
+    // Legacy entries without admitted metadata retain uncertainty rather than
+    // inventing a revision or losing same-field conflicts.
+    if persist_confirmed {
+        entry
+            .admission
+            .as_ref()
+            .map_or(journal_revision, |admission| {
+                journal_revision.max(admission.commit_revision)
+            })
     } else {
         journal_revision
     }
@@ -189,6 +244,7 @@ pub fn maybe_delay_for_test(point: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::activation;
     use crate::journal::JournalEntry;
     use vpnhide_core_rpc::{BaseRef, ConfigEdit, ConfigToggle, OperationId, OperationRecord};
 
@@ -208,6 +264,12 @@ mod tests {
             });
         }
         JournalEntry {
+            admission: None,
+            command: None,
+            superseded_by: None,
+            superseded_phases: Vec::new(),
+            finalized_unknown: false,
+            native_intent: None,
             base: BaseRef { revision: 0 },
             edit: ConfigEdit::Toggle {
                 field: ConfigToggle::Debug,
@@ -235,8 +297,6 @@ mod tests {
         let mut e = entry(PhaseOutcome::Unknown, None, candidate);
         let sources = EvidenceSources {
             config_path: Some(&path),
-            kmod_ctl_path: None,
-            zygisk_module: None,
         };
         assert!(reconcile_entry(&mut e, &sources));
         assert_eq!(e.record.phases[0].outcome, PhaseOutcome::Confirmed);
@@ -255,8 +315,6 @@ mod tests {
         let mut e = entry(PhaseOutcome::Unknown, None, candidate);
         let sources = EvidenceSources {
             config_path: Some(&path),
-            kmod_ctl_path: None,
-            zygisk_module: None,
         };
         assert!(reconcile_entry(&mut e, &sources));
         assert_eq!(e.record.phases[0].outcome, PhaseOutcome::FailedKnown);
@@ -280,10 +338,15 @@ mod tests {
             Some(PhaseOutcome::Unknown),
             candidate,
         );
+        e.native_intent = Some(NativeIntent {
+            backend: NativeBackend::Builtin,
+            wire: "vpnhide 2 config\ndebug 1\nend 0\n".into(),
+            // A production Zygisk path exists in the profile for every backend;
+            // it must never decide which backend this operation delivered to.
+            zygisk_module: Some(dir.path().join("missing-zygisk")),
+        });
         let sources = EvidenceSources {
             config_path: Some(&config),
-            kmod_ctl_path: Some(&ctl),
-            zygisk_module: None,
         };
         assert!(
             !reconcile_entry(&mut e, &sources)
@@ -299,25 +362,40 @@ mod tests {
         let module = dir.path().join("module");
         fs::create_dir_all(&module).unwrap();
         fs::write(module.join("module.prop"), "id=vpnhide_zygisk\n").unwrap();
-        let candidate = CanonicalConfig::default();
-        let resolver = vpnhide_activator::PackageUidMap::default();
+        let mut candidate = CanonicalConfig::default();
+        candidate.apps.insert(
+            "com.example.app".into(),
+            vpnhide_core_rpc::AppConfig {
+                native: vpnhide_core_rpc::NativeRole {
+                    enabled: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        let resolver = vpnhide_activator::parse_pm_packages("package:com.example.app uid:10123\n");
         let wire = activation::project_native_wire_with_resolver(
             &candidate,
             NativeBackend::Zygisk,
             &resolver,
         )
         .unwrap();
+        assert!(
+            wire.contains("278b"),
+            "resolved UID must be in the actual wire"
+        );
         fs::write(module.join("targets.txt"), &wire).unwrap();
         let mut e = entry(
             PhaseOutcome::Confirmed,
             Some(PhaseOutcome::Unknown),
             candidate,
         );
-        let sources = EvidenceSources {
-            config_path: None,
-            kmod_ctl_path: None,
-            zygisk_module: Some(&module),
-        };
+        e.native_intent = Some(NativeIntent {
+            backend: NativeBackend::Zygisk,
+            wire,
+            zygisk_module: Some(module.clone()),
+        });
+        let sources = EvidenceSources { config_path: None };
         assert!(reconcile_entry(&mut e, &sources));
         assert_eq!(e.record.phases[1].outcome, PhaseOutcome::Confirmed);
         assert_eq!(e.record.settled, Some(PhaseOutcome::Confirmed));
@@ -335,13 +413,61 @@ mod tests {
             candidate,
         );
         e.record.settled = Some(PhaseOutcome::Unknown);
-        let sources = EvidenceSources {
-            config_path: None,
-            kmod_ctl_path: None,
-            zygisk_module: None,
-        };
+        let sources = EvidenceSources { config_path: None };
         reconcile_entry(&mut e, &sources);
         assert_eq!(e.record.settled, Some(PhaseOutcome::Unknown));
         assert_eq!(e.record.phases[1].outcome, PhaseOutcome::NotAttempted);
+    }
+
+    #[test]
+    fn known_failure_with_skipped_later_phases_is_terminal() {
+        let mut e = entry(
+            PhaseOutcome::Confirmed,
+            Some(PhaseOutcome::FailedKnown),
+            CanonicalConfig::default(),
+        );
+        e.record.phases.push(PhaseRecord {
+            phase: ConfigPhase::Ports,
+            outcome: PhaseOutcome::NotAttempted,
+        });
+        e.record.settled = Some(PhaseOutcome::FailedKnown);
+        let before = e.clone();
+        assert!(!reconcile_entry(
+            &mut e,
+            &EvidenceSources { config_path: None }
+        ));
+        assert_eq!(e, before);
+        // A crash before writing the overall terminal result is also recoverable.
+        e.record.settled = Some(PhaseOutcome::Unknown);
+        assert!(reconcile_entry(
+            &mut e,
+            &EvidenceSources { config_path: None }
+        ));
+        assert_eq!(e.record.settled, Some(PhaseOutcome::FailedKnown));
+    }
+
+    #[test]
+    fn legacy_native_without_exact_intent_keeps_uncertainty() {
+        let mut e = entry(
+            PhaseOutcome::Confirmed,
+            Some(PhaseOutcome::Unknown),
+            CanonicalConfig::default(),
+        );
+        assert!(!reconcile_entry(
+            &mut e,
+            &EvidenceSources { config_path: None }
+        ));
+        assert_eq!(e.record.phases[1].outcome, PhaseOutcome::Unknown);
+    }
+
+    #[test]
+    fn ports_without_exact_rule_receipt_stays_unknown() {
+        let mut e = entry(PhaseOutcome::Confirmed, None, CanonicalConfig::default());
+        e.record.phases.push(PhaseRecord {
+            phase: ConfigPhase::Ports,
+            outcome: PhaseOutcome::Unknown,
+        });
+        reconcile_entry(&mut e, &EvidenceSources { config_path: None });
+        assert_eq!(e.record.settled, Some(PhaseOutcome::Unknown));
     }
 }

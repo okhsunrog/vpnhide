@@ -2,13 +2,16 @@
 //! whole. Save fails with a typed error and nothing is persisted, delivered or recorded;
 //! Repair of an over-capacity persisted config writes nothing to the backend and reports
 //! a typed outcome. Never a truncated, partially applied target set.
+
+mod common;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use vpnhide_core_daemon::{CoreClient, config_file};
+use vpnhide_core_client::CoreClient;
+use vpnhide_core_daemon::config_file;
 use vpnhide_core_rpc::{
     AppConfig, BaseRef, CanonicalConfig, ConfigEdit, ConfigPhase, NativeBackend, NativeBootOutcome,
     NativeRole, OperationId, PhaseOutcome, SubmitError,
@@ -110,7 +113,8 @@ async fn start(initial: &CanonicalConfig, installed: usize) -> Harness {
     })
     .await
     .expect("core bound its socket");
-    let client = CoreClient::connect_and_mirror(&socket);
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 2).await;
     client.hello().await.unwrap();
     Harness {
         _dir: dir,

@@ -60,6 +60,7 @@ internal fun FullResetDialog(
     val checkWrite = LocalConfigWriteAccess.current
     val dash by DashboardCache.state.collectAsState()
     val snap by RootSnapshotCache.snapshot.collectAsState()
+    val config by CanonicalConfigRepository.state.collectAsState()
 
     androidx.compose.runtime.LaunchedEffect(Unit) {
         DashboardCache.ensureLoaded(context, selfNeedsRestart)
@@ -78,7 +79,7 @@ internal fun FullResetDialog(
                 kernelCtlPresent = snap?.sections?.get("proc_exists")?.trim() == "1",
             )
         }
-    val ready = blockers != null && blockers.isEmpty()
+    val ready = blockers != null && blockers.isEmpty() && config.activeCaptures == 0
 
     AlertDialog(
         onDismissRequest = { if (!running) onDismiss() },
@@ -115,6 +116,7 @@ internal fun FullResetDialog(
                 else -> {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(stringResource(R.string.reset_blocked_intro))
+                        if (config.activeCaptures > 0) Text(stringResource(R.string.reset_capture_active))
                         blockers?.forEach { blocker ->
                             Text("•  " + stringResource(resetBlockerLabel(blocker)))
                         }
@@ -151,7 +153,6 @@ internal fun FullResetDialog(
                                             protectAllDrafts = true,
                                             removesCanonical = true,
                                             coupledEffects = listOf(CoreRootEffect.FullReset),
-                                            activation = CanonicalActivation(native = false),
                                         ),
                                     )
                                 val exit = result.exitCode

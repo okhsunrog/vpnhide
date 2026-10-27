@@ -25,7 +25,7 @@
 
 use std::fs;
 use std::io::{self, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
@@ -116,8 +116,28 @@ pub fn to_json_string(config: &CanonicalConfig) -> String {
 
 /// Serialize and write the config atomically (temp in the same dir → `rename`), mode `0640`.
 /// The rename is the commit point, so a reader (LSPosed, the activator, a restarting core)
-/// never sees a half-written file. Core runs as root, so the file lands `root:root`.
+/// never sees a half-written file. Android publication requires `root:system` and
+/// `system_data_file` so the LSPosed reader in system_server can read the new inode.
 pub fn write_atomic(path: &Path, config: &CanonicalConfig) -> io::Result<()> {
+    write_atomic_with_metadata(path, config, set_reader_metadata)
+}
+
+fn write_atomic_with_metadata(
+    path: &Path,
+    config: &CanonicalConfig,
+    metadata: impl FnOnce(&fs::File) -> io::Result<()>,
+) -> io::Result<()> {
+    write_atomic_with_sync(path, config, metadata, |dir| {
+        fs::File::open(dir)?.sync_all()
+    })
+}
+
+fn write_atomic_with_sync(
+    path: &Path,
+    config: &CanonicalConfig,
+    metadata: impl FnOnce(&fs::File) -> io::Result<()>,
+    sync_directory: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
     let value = to_disk(config);
     let mut text = serde_json::to_string_pretty(&value)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -125,18 +145,78 @@ pub fn write_atomic(path: &Path, config: &CanonicalConfig) -> io::Result<()> {
 
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let tmp = path.with_extension("json.tmp");
-    {
-        let mut f = fs::File::create(&tmp)?;
+    let prepared = (|| {
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&tmp)?;
+        metadata(&f)?;
         f.write_all(text.as_bytes())?;
         f.sync_all()?;
-        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o640))?;
+        Ok::<_, io::Error>(())
+    })();
+    if let Err(error) = prepared {
+        let _ = fs::remove_file(&tmp);
+        return Err(error);
     }
     fs::rename(&tmp, path)?;
-    // Best-effort durability of the rename itself; a missing dir fsync is not fatal.
-    if let Ok(d) = fs::File::open(dir) {
-        let _ = d.sync_all();
+    sync_directory(dir).map_err(|error| io::Error::new(error.kind(), PostRenameError(error)))
+}
+
+#[derive(Debug)]
+struct PostRenameError(io::Error);
+
+impl std::fmt::Display for PostRenameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "publication renamed but directory durability is unconfirmed: {}",
+            self.0
+        )
     }
-    Ok(())
+}
+impl std::error::Error for PostRenameError {}
+
+pub fn is_post_rename_error(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|inner| inner.is::<PostRenameError>())
+}
+
+pub fn sync_after_rename(dir: &Path) -> io::Result<()> {
+    fs::File::open(dir)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| io::Error::new(error.kind(), PostRenameError(error)))
+}
+
+fn set_reader_metadata(file: &fs::File) -> io::Result<()> {
+    #[cfg(target_os = "android")]
+    {
+        use std::os::fd::AsRawFd;
+        // AID_SYSTEM is stable Android ABI. Set metadata before publication and
+        // refuse the write if it cannot be made readable by system_server.
+        if unsafe { libc::fchown(file.as_raw_fd(), 0, 1000) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        const NAME: &[u8] = b"security.selinux\0";
+        const LABEL: &[u8] = b"u:object_r:system_data_file:s0\0";
+        if unsafe {
+            libc::fsetxattr(
+                file.as_raw_fd(),
+                NAME.as_ptr().cast(),
+                LABEL.as_ptr().cast(),
+                LABEL.len(),
+                0,
+            )
+        } != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    file.set_permissions(fs::Permissions::from_mode(0o640))
 }
 
 // ---- disk JSON -> model (port of parseCanonicalConfig) ----------------------------------
@@ -569,6 +649,53 @@ mod tests {
         assert_eq!(mode, 0o640);
         assert!(!path.with_extension("json.tmp").exists());
         assert_eq!(read(&path).unwrap(), Some(cfg));
+    }
+
+    #[test]
+    fn reader_metadata_failure_preserves_previous_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vpnhide_config.json");
+        let previous = CanonicalConfig::default();
+        write_atomic(&path, &previous).unwrap();
+        let error = write_atomic_with_metadata(&path, &rich(), |_| {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "reader label denied",
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(read(&path).unwrap(), Some(previous));
+        assert!(!path.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn directory_sync_failure_after_rename_is_uncertain_and_never_known_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        write_atomic(&path, &CanonicalConfig::default()).unwrap();
+        let candidate = rich();
+        let error = write_atomic_with_sync(&path, &candidate, set_reader_metadata, |_| {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "directory fsync refused",
+            ))
+        })
+        .unwrap_err();
+        assert!(is_post_rename_error(&error));
+        assert_eq!(read(&path).unwrap(), Some(candidate));
+    }
+
+    #[test]
+    fn staging_symlink_cannot_redirect_config_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vpnhide_config.json");
+        let victim = dir.path().join("other-file");
+        fs::write(&victim, "untouched").unwrap();
+        std::os::unix::fs::symlink(&victim, path.with_extension("json.tmp")).unwrap();
+        assert!(write_atomic(&path, &rich()).is_err());
+        assert_eq!(fs::read_to_string(victim).unwrap(), "untouched");
+        assert!(!path.exists());
     }
 
     #[test]

@@ -55,6 +55,9 @@ internal data class DiagnosticMeasurementInfo(
     val completed: Boolean,
     val interrupted: Boolean,
     val observationId: Long,
+    val desiredRevision: Long? = null,
+    val deliveryIdentity: String? = null,
+    val desiredDeliveryConfirmed: Boolean? = null,
 )
 
 /** [now] is the coordinator's monotonic base ([ObservationClock]), the base a pending read's `since` is in. */
@@ -72,7 +75,17 @@ internal fun diagnosticSummary(
             },
         measurement =
             presentation.measurement?.let {
-                DiagnosticMeasurementInfo(it.runId, it.startedAt, it.endedAt, it.completed, it.interrupted, it.context.observationId)
+                DiagnosticMeasurementInfo(
+                    it.runId,
+                    it.startedAt,
+                    it.endedAt,
+                    it.completed,
+                    it.interrupted,
+                    it.context.observationId,
+                    it.context.desiredRevision,
+                    it.context.deliveryIdentity,
+                    it.context.desiredDeliveryConfirmed,
+                )
             },
         applicability = presentation.applicability,
         evidence = presentation.evidence,
@@ -100,6 +113,9 @@ internal data class DiagnosticSnapshotInfo(
     val routingObservationId: Long?,
     val routingGeneration: Long,
     val changeEpoch: Long,
+    val desiredRevision: Long? = null,
+    val deliveryIdentity: String? = null,
+    val desiredDeliveryConfirmed: Boolean? = null,
 )
 
 internal fun diagnosticSummary(snapshot: DiagnosticSnapshot): DiagnosticSummaryInfo =
@@ -116,5 +132,20 @@ internal fun diagnosticSummary(snapshot: DiagnosticSnapshot): DiagnosticSummaryI
                         ?.id,
                 routingGeneration = snapshot.sources.routing.generation,
                 changeEpoch = snapshot.sources.impact.changeEpoch,
+                desiredRevision = snapshot.sources.config.desiredRevision,
+                deliveryIdentity =
+                    desiredDeliveryIdentity(
+                        snapshot.sources.config,
+                        snapshot.sources.inputs
+                            ?.selfPackage
+                            .orEmpty(),
+                    ).identity,
+                desiredDeliveryConfirmed =
+                    desiredDeliveryIdentity(
+                        snapshot.sources.config,
+                        snapshot.sources.inputs
+                            ?.selfPackage
+                            .orEmpty(),
+                    ).confirmed,
             ),
     )

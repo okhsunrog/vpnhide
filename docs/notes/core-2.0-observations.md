@@ -1,36 +1,50 @@
-# Core observations and freshness (step 6)
+# Core observations and freshness
 
-## Model (`PROTOCOL_VERSION` 4)
+Current implementation; app/core RPC protocol 11. See the
+[current architecture](../core-architecture.md) for the complete ownership contract.
 
-`RoutingObservation`:
+## Model
 
-| Field | Meaning |
-|-------|---------|
-| `freshness` | `Never` / `Current` / `Unknown` |
-| `generation` | Bumps on each publish |
-| `vpn_interfaces` | Authoritative **only** when `Current` |
-| `last_good_vpn_interfaces` | Display cache when `Unknown` — not current |
-| `netlink_candidates` | Name-match ups (may include IMS `ipsec`) |
-| `framework` | `TRANSPORT_VPN` channel status + ifaces |
-| `uid` | Optional membership (`VPNHIDE_OBSERVE_UID`) |
+`RoutingObservation` distinguishes Never, Current and Unknown. Current VPN
+interfaces require framework classification; last-good interfaces are display
+history when the source is Unknown. Netlink name matches can include IMS and are
+never sufficient proof of TRANSPORT_VPN.
 
-Current requires **classified** framework evidence ∩ netlink ups. Netlink alone → Unknown.
+UID evidence includes the observed main-app UID, Routed/Excluded/VpnOff/Unknown,
+VPN session identity and interfaces. The UID is resolved from the same app data
+directory that gates IPC, so reinstall updates membership without a daemon restart.
+Session identity includes framework network IDs, preserving replacement of a VPN
+that reuses an interface name. Unmanaged-tunnel membership retains its provenance.
 
-`NativeBackendStatus`: `installed` (artifacts) ≠ `selected` (apply attempt) ≠ `applied` (Native Confirmed) ≠ `active` (runtime identity). Zygisk publication ≠ process loaded hooks.
+`NativeBackendStatus` keeps installed artifacts, selected backend, applied policy
+and live identity separate. `observed_freshness` qualifies the runtime read.
+Zygisk publication is not proof that a process loaded its hooks. The boot decision
+is core-owned and fixed per boot; observer refresh never replaces it or delivery.
 
-## Sources
+## Sources and delivery
 
-- Netlink link group (debounce 250ms; ENOBUFS → Unknown then resync)
-- Framework: `VPNHIDE_FRAMEWORK_VPN_IFACES` stub, or `dumpsys connectivity` parse, or forced Unavailable/Failed via `VPNHIDE_FRAMEWORK_VPN`
-- UID: `self_routed_for_interfaces` from `vpnhide_checks`
+- Netlink link, IPv4/IPv6 route and rule notifications, debounced for 250 ms.
+- Bounded dump resync at startup and after overflow.
+- Two follow-up samples after an event (750 ms, then 1500 ms) catch delayed
+  framework registration. A 30-second full fallback covers idle drift; app-dir UID
+  metadata is checked every five seconds and changes trigger a full sample.
+- Bounded framework classification via `dumpsys connectivity`, shared with explicit
+  probe parsing; test overrides remain `VPNHIDE_FRAMEWORK_VPN_IFACES` and
+  `VPNHIDE_FRAMEWORK_VPN`.
+- UID membership via shared `self_routed_for_interfaces`.
+- Thirty-second backend observation refresh runs outside the async executor;
+  KPM reads use the management lock. A boot/delivery change supersedes an older
+  in-flight observation before publication.
 
-## Backend lifecycle refresh
+An interrupted/failed event source withdraws current evidence and is reopened.
+Unchanged reconciliation does not bump routing generation. Core publishes changes
+through state_since; the app uses one persistent CoreSession long-poll, not a
+foreground app-VPN polling timer. The app rejects stale epochs and treats a
+transport disconnect as unavailable current evidence.
 
-Every ~30s lock-free `detect()` (kernel ctl + installed dirs). Does **not** take the KPM management lock (avoids racing Native apply). KPM active identity remains from startup/`detect_managed` / apply path.
+## Validation boundary
 
-## Device-only gaps
-
-- Real `dumpsys` shape drift across Android versions
-- Rule-only / split-routing edge cases beyond shared `self_routed_for_interfaces`
-- Handover soak; live ENOBUFS under load
-- App-context Zygisk hook checks (still APK-side)
+Host tests cover link/rule invalidation, dump deletion/interruption/sequence,
+unchanged samples, session identity, unknown/last-good composition and client
+restart/disconnect. Real dumpsys shape drift, Android UID rules, SELinux, handover,
+ENOBUFS under device load and app-context hooks still need device validation.

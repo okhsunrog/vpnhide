@@ -16,6 +16,17 @@ class BuiltinAppIntegrationTest {
             "proc_exists" to "1",
             "kmod_state" to "vpnhide 1 status\nbackend 0x4\nkver 0x60100\nhooks 0x20003ff\nerror 0x0\n",
         )
+    private val builtinPublication =
+        CoreSessionUpdate(
+            CoreStateView(
+                1,
+                1,
+                RootCanonicalRead.Missing,
+                emptyList(),
+                backend = CoreBackendView(current = true, active = NativeBackendId.Builtin, installed = setOf(NativeBackendId.Builtin)),
+            ),
+            current = true,
+        )
 
     @Test
     fun `builtin participates in native conflict classification`() {
@@ -26,7 +37,7 @@ class BuiltinAppIntegrationTest {
 
     @Test
     fun `whole row toggle includes builtin native and can clear it again`() {
-        val targets = parseTargetsSnapshot(RootSnapshot(builtinSections))
+        val targets = parseTargetsSnapshot(joinRootSnapshot(builtinSections, builtinPublication))
         val app = AppEntry(packageName = "com.byxiaorun.detector", label = "Ruru", icon = null, isSystem = false)
         val selected = toggleAllProtection(app, targets)
         assertTrue(selected.java && selected.native && selected.appHiding && selected.ports)
@@ -35,7 +46,7 @@ class BuiltinAppIntegrationTest {
 
     @Test
     fun `builtin exposes native picker role and kernel hook configuration`() {
-        val targets = parseTargetsSnapshot(RootSnapshot(builtinSections))
+        val targets = parseTargetsSnapshot(joinRootSnapshot(builtinSections, builtinPublication))
         assertTrue(targets.anyNativeInstalled)
         assertFalse(targets.kmodModuleInstalled)
         assertEquals(NativeBackendId.Builtin, targets.activeNativeBackendId)

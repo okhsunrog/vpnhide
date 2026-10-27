@@ -12,13 +12,14 @@ Monorepo for hiding VPN interfaces from selected Android apps. Runtime component
 - `zygisk/` — Rust Zygisk module, inline `libc` hooks via shadowhook
 - `lsposed/` — LSPosed module + Compose target-picker app
 - `core/` — the required `vpnhide_core` module (`core/build.py` → `vpnhide-core.zip`): `module.prop`, a one-line `service.sh` exec stub, `sepolicy.rule`, the install-time `customize.sh` and the `vpnhide-core` binary. No other shell runs on the device (CI: `core/tests/check_module_scaffold.sh`)
-- `crates/` — the Rust workspace: the wire `protocol`, the `activator` library (backend loading/delivery and Ports, linked by core; no binaries), the app-side `checks`/`checks-jni` probes, and core (`core-rpc`, `core-daemon`, `core-ffi`): the only root process, which the app reaches over the in-process core-ffi client
+- `crates/` — the Rust workspace: backend wire `protocol`, core-side `activator` library (loading/delivery and Ports), app-native `checks`/`checks-jni`, and core's shared types (`core-rpc`), transport (`core-client`), generated typed UniFFI API (`core-ffi`) and privileged engine (`core-daemon`). The APK never links the engine.
 
 ## Read before touching code
 
 These short files cover everything specific to this repo. Skipping them leads to broken commits and unnecessary review iterations.
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — PR process, commit conventions, changelog requirement
+- [docs/core-architecture.md](docs/core-architecture.md) — current core/app ownership, persistent session, typed edits, observations and recovery; read before changing these boundaries.
 - [docs/development.md](docs/development.md) — prereqs, per-module build quickstart, keystore setup, device install, CI lints
 - [docs/state.md](docs/state.md) — every persistent path / proc entry / iptables chain the project touches; who writes, who reads, lifetime
 - [docs/storage.md](docs/storage.md) — current storage & activation design: the single JSON canonical, core (the only writer, deriving each backend's runtime state and the Ports rules), LSPosed self-read, the APatch superkey, SELinux layout. Read before touching how config is stored/loaded.

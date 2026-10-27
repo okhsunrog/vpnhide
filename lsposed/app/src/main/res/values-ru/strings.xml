@@ -659,4 +659,5 @@
     <string name="agent_ui_preview_label">Предпросмотр · %1$s · тестовые данные</string>
     <string name="agent_ui_preview_exit">Завершить</string>
     <string name="agent_ui_preview_action">Перехваченное действие: %1$s</string>
+    <string name="reset_capture_active">Завершите активный сбор диагностики перед сбросом.</string>
 </resources>

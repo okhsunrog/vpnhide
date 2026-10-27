@@ -1,4 +1,4 @@
-//! The canonical config as it crosses the app<->core wire (core-2.0 §4).
+//! The canonical config as it crosses the app<->core RPC wire.
 //!
 //! This is a **clean projection**, not the legacy on-disk canonical JSON. The on-disk
 //! format the activator and LSPosed read is polymorphic — `native` is a bool, an array or

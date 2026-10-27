@@ -17,6 +17,7 @@ pub struct ServerHandle {
     shutdown_tx: watch::Sender<bool>,
     connections: CancellationToken,
     socket_path: PathBuf,
+    _owner: crate::instance::InstanceGuard,
 }
 
 impl ServerHandle {
@@ -49,8 +50,21 @@ pub fn listen(
     socket_path: &Path,
     mut on_connect: impl FnMut(UnixStream, CancellationToken) + Send + 'static,
 ) -> std::io::Result<ServerHandle> {
-    // A stale socket at the path blocks bind; remove it first (only here and on an owner's
-    // explicit unlink, never from the accept task, which would race the next bind).
+    // Different state paths must not let a second live server unlink this socket.
+    // Ownership is separate from the socket inode, which gets replaced on restart.
+    let mut lock_path = socket_path.as_os_str().to_owned();
+    lock_path.push(".lock");
+    let owner = crate::instance::InstanceGuard::acquire([PathBuf::from(lock_path)])?;
+    // Only the owner may remove a stale socket. Never unlink a regular file or symlink.
+    if let Ok(metadata) = std::fs::symlink_metadata(socket_path) {
+        use std::os::unix::fs::FileTypeExt;
+        if !metadata.file_type().is_socket() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "socket path is not a socket",
+            ));
+        }
+    }
     remove_socket(socket_path);
     let listener = UnixListener::bind(socket_path)?;
     eprintln!("core: listening on {}", socket_path.display());
@@ -81,6 +95,7 @@ pub fn listen(
         shutdown_tx,
         connections,
         socket_path: socket_path.to_path_buf(),
+        _owner: owner,
     })
 }
 
@@ -98,6 +113,26 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn a_second_listener_cannot_unlink_the_live_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("core.sock");
+        let handle = listen(&path, |_, _| {}).unwrap();
+        assert!(listen(&path, |_, _| {}).is_err());
+        UnixStream::connect(&path).await.unwrap();
+        handle.shutdown_and_unlink();
+        let _replacement = listen(&path, |_, _| {}).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_existing_regular_file_is_not_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("core.sock");
+        std::fs::write(&path, b"preserve").unwrap();
+        assert!(listen(&path, |_, _| {}).is_err());
+        assert_eq!(std::fs::read(path).unwrap(), b"preserve");
+    }
 
     async fn wait_until_refused(path: &Path) {
         tokio::time::timeout(Duration::from_secs(5), async {

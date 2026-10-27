@@ -1,18 +1,11 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.Context
-import dev.okhsunrog.vpnhide.core.CorePaths
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticImpactObserver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-
-/** Runtime channels that must be re-derived after the canonical config changes. */
-internal data class CanonicalActivation(
-    val native: Boolean = true,
-    val ports: Boolean = false,
-)
 
 internal data class CanonicalWriteResult(
     val exitCode: Int,
@@ -29,7 +22,7 @@ internal data class CanonicalWriteResult(
  * Sole app-side coordinator for config edits and runtime activation.
  *
  * The process-owned actor serializes fresh field edits; every config write, native apply and
- * Ports apply is a typed command to the root core ([CoreConfigIo] over the in-process core-ffi client). Core
+ * Ports apply is a typed command to the root core ([CoreSessionClient] over the in-process core-ffi client). Core
  * is the only writer of the canonical config, `/proc/vpnhide_ctl`, Zygisk targets and Ports
  * rules. Editor drafts and local preferences stay in Kotlin.
  */
@@ -40,13 +33,9 @@ internal object CanonicalConfigRepository {
 
     private val coordinator =
         ConfigCoordinator(
-            CoreConfigIo(
-                prepareCore = { appContext?.let { FfiCoreConfigClient(CorePaths.socket(it)) } },
-            ),
+            prepareCore = { CoreSessions.client },
             processScope,
-            confirmed = { VpnHideLog.enabled = it.debug },
             refresh = { refreshDerivedCaches() },
-            manageLogging = true,
             invalidateObservations = RootSnapshotCache::invalidate,
             observer = DiagnosticImpactObserver { requireNotNull(appContext).packageName },
         )
@@ -67,12 +56,11 @@ internal object CanonicalConfigRepository {
 
     suspend fun commit(mutation: CanonicalMutation): CanonicalWriteResult = coordinator.submit(mutation)
 
-    suspend fun reconcile(ports: Boolean = false): CanonicalWriteResult =
+    suspend fun reconcile(): CanonicalWriteResult =
         commit(
             CanonicalMutation(
                 emptyList(),
                 source = OperationSource.System,
-                activation = CanonicalActivation(ports = ports),
                 forceActivation = true,
             ),
         )

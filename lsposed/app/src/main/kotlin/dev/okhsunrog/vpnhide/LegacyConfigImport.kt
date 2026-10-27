@@ -330,7 +330,6 @@ internal object LegacyConfigImporter {
                     },
                     cleanup = true,
                     coupledEffects = listOf(CoreRootEffect.DeleteLegacyConfig),
-                    activation = CanonicalActivation(native = true, ports = true),
                 ),
             )
         if (!result.succeeded) {
@@ -357,7 +356,6 @@ internal object LegacyConfigImporter {
                     emptyList(),
                     cleanup = true,
                     coupledEffects = listOf(CoreRootEffect.DeleteLegacyConfig),
-                    activation = CanonicalActivation(native = false),
                 ),
             )
         val exit = result.exitCode

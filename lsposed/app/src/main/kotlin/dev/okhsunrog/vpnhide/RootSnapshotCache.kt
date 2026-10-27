@@ -1,16 +1,21 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.core.CoreProbe
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.startup.StartupTrace
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.CopyOnWriteArrayList
+import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
 internal data class RootSnapshot(
     val sections: Map<String, String>,
     val observationId: Long = 0,
     val generation: Long = 0,
-)
+    val core: CoreSessionUpdate = CoreSessionUpdate(),
+) {
+    val canonical: RootCanonicalRead get() = core.state?.canonical.takeIf { core.current } ?: RootCanonicalRead.Unavailable
+    val nativeBoot: NativeBootStatus? get() = core.state?.nativeBoot.takeIf { core.current }
+    val backend: CoreBackendView? get() = if (core.current) core.state?.backend else CoreBackendView(current = false)
+}
 
 internal data class PackageInventorySeed(
     val packages: String,
@@ -149,7 +154,7 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
             } else {
                 loadRootShellSnapshot(inventory)
             }
-        return RootSnapshot(sections.toMap(), request.id, request.generation)
+        return joinRootSnapshot(sections, CoreSessions.updates.value, request.id, request.generation)
     }
 
     override fun observationChanged(
@@ -174,8 +179,6 @@ internal fun loadRootShellSnapshot(inventoryOverride: PackageInventorySeed?): Ma
         sections["pm_packages"] = inventoryOverride.packages
         sections["pm_users"] = inventoryOverride.users
     }
-    // Core's typed native decision rides along from its published state (RPC), not a file.
-    CoreRoot.nativeBootJsonBlocking()?.let { sections[NATIVE_BOOT_SECTION] = it }
     validateRootSnapshotSections(sections)
     return sections
 }
@@ -214,3 +217,11 @@ internal fun parseRootShellSnapshot(
             }
         },
     ).complete
+
+/** Seeded startup reads and new probes join through this same typed provenance boundary. */
+internal fun joinRootSnapshot(
+    sections: Map<String, String>,
+    core: CoreSessionUpdate,
+    observationId: Long = 0,
+    generation: Long = 0,
+): RootSnapshot = RootSnapshot(sections.toMap(), observationId, generation, core)

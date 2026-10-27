@@ -11,7 +11,7 @@
 use std::io::Read;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 pub mod debug_snapshot;
@@ -43,6 +43,8 @@ pub struct Paths {
     pub legacy: Vec<(&'static str, PathBuf)>,
     /// Core itself, for its `observe kpm-state` child.
     pub core_exe: PathBuf,
+    /// Nonsecret telemetry gathered by the authenticated daemon before exec.
+    pub kpm_observation: Option<Ran>,
 }
 
 impl Default for Paths {
@@ -85,11 +87,22 @@ impl Default for Paths {
             apatch_dir: "/data/adb/ap".into(),
             legacy: legacy.iter().map(|(n, p)| (*n, PathBuf::from(p))).collect(),
             core_exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("vpnhide-core")),
+            kpm_observation: None,
         }
     }
 }
 
 impl Paths {
+    pub fn kpm_state(&self, timeout: Duration) -> Ran {
+        self.kpm_observation.clone().unwrap_or_else(|| {
+            run(
+                &self.core_exe.display().to_string(),
+                &["observe", "kpm-state"],
+                timeout,
+            )
+        })
+    }
+
     pub fn module(&self, id: &str) -> PathBuf {
         self.modules.join(id)
     }
@@ -196,11 +209,39 @@ pub fn non_empty(path: &Path) -> bool {
 
 /// What a bounded child produced. `exit` is 127 when the binary could not be spawned
 /// (the shell's convention, which the app's parsers already know) and -1 on a timeout.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Ran {
     pub exit: i32,
     pub stdout: String,
     pub stderr: String,
+}
+
+/// Internal probe input carries observations only, never authentication material.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ProbeInputs {
+    pub kpm: Ran,
+}
+
+pub(crate) const PROBE_INPUT_MAX: usize = 1 << 20;
+pub(crate) const KPM_STDIN_FLAG: &str = "--kpm-state-stdin";
+
+impl ProbeInputs {
+    pub(crate) fn read(reader: impl Read) -> std::io::Result<Self> {
+        let mut bytes = Vec::new();
+        reader
+            .take((PROBE_INPUT_MAX + 1) as u64)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > PROBE_INPUT_MAX {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "probe input exceeds 1 MiB",
+            ));
+        }
+        serde_json::from_slice(&bytes)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+    }
 }
 
 impl Ran {
@@ -222,57 +263,23 @@ const TOOL_OUTPUT_MAX: usize = 16 << 20;
 /// Spawn `program args…` directly (never through a shell), drain both streams up to a
 /// cap and kill it at `timeout`.
 pub fn run(program: &str, args: &[&str], timeout: Duration) -> Ran {
-    let mut cmd = Command::new(program);
-    cmd.args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let Ok(mut child) = cmd.spawn() else {
-        return Ran {
+    let mut command = Command::new(program);
+    command.args(args);
+    match vpnhide_activator::capture_command(&mut command, None, timeout, TOOL_OUTPUT_MAX) {
+        Ok(captured) => Ran {
+            exit: if captured.timed_out || captured.truncated {
+                -1
+            } else {
+                captured.output.status.code().unwrap_or(-1)
+            },
+            stdout: String::from_utf8_lossy(&captured.output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&captured.output.stderr).into_owned(),
+        },
+        Err(error) => Ran {
             exit: 127,
-            stderr: format!("{program}: not found\n"),
+            stderr: format!("{program}: {error}\n"),
             ..Ran::default()
-        };
-    };
-    fn drain(mut r: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = (&mut r).take(TOOL_OUTPUT_MAX as u64).read_to_end(&mut buf);
-            // Keep draining so a chatty child never blocks on a full pipe.
-            let _ = std::io::copy(&mut r, &mut std::io::sink());
-            buf
-        })
-    }
-    let out = drain(child.stdout.take().expect("piped"));
-    let err = drain(child.stderr.take().expect("piped"));
-    let deadline = Instant::now() + timeout;
-    let exit = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status.code().unwrap_or(-1),
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break -1;
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
-            Err(_) => break -1,
-        }
-    };
-    let join = |h: std::thread::JoinHandle<Vec<u8>>| {
-        let limit = Instant::now() + Duration::from_secs(2);
-        while !h.is_finished() && Instant::now() < limit {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        if h.is_finished() {
-            String::from_utf8_lossy(&h.join().unwrap_or_default()).into_owned()
-        } else {
-            String::new()
-        }
-    };
-    Ran {
-        exit,
-        stdout: join(out),
-        stderr: join(err),
+        },
     }
 }
 

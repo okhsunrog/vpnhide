@@ -3,6 +3,7 @@ package dev.okhsunrog.vpnhide.debug
 import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
+import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DashboardState
 import dev.okhsunrog.vpnhide.LogTags
@@ -13,7 +14,6 @@ import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.collectDebugShellSnapshot
 import dev.okhsunrog.vpnhide.collectHookCounterSnapshot
 import dev.okhsunrog.vpnhide.core.CoreDiagnostics
-import dev.okhsunrog.vpnhide.core.CoreProbe
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSnapshot
@@ -29,6 +29,7 @@ import dev.okhsunrog.vpnhide.toAgentStatisticsState
 import dev.okhsunrog.vpnhide.ui.components.container
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
@@ -37,6 +38,7 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
 private const val TAG = LogTags.TEST
 
@@ -68,33 +70,34 @@ internal suspend fun exportDebug(
     options: StateContentOptions,
     attachKernelImage: Boolean,
 ): DebugExportOutcome =
-    withContext(Dispatchers.IO) {
-        try {
-            val state = buildDebugState(context, selfNeedsRestart, options)
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val file =
-                if (attachKernelImage) {
-                    // Packaging tens of MB of partition images can fail on its own (a
-                    // full /data); it reports that as a missing file, not an exception.
-                    writeKernelBundleZip(context, timestamp, state.toJson())
-                        ?: return@withContext DebugExportOutcome.Failed("kernel image packaging produced no archive")
-                } else {
-                    // Bundle the single state.json in a .zip too: forums/messengers (4pda,
-                    // the main report channel) whitelist .zip but reject a bare .json, and
-                    // the JSON compresses ~10x. Every export kind is now a .zip carrying
-                    // state.json, so the caller has one format to handle.
-                    File(context.cacheDir, "vpnhide_debug_$timestamp.zip").also {
-                        writeDiagnosticZip(it, mapOf("state.json" to state.toJson()))
+    CanonicalConfigRepository.processScope
+        .async(Dispatchers.IO) {
+            try {
+                val state = buildDebugState(context, selfNeedsRestart, options)
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val file =
+                    if (attachKernelImage) {
+                        // Packaging tens of MB of partition images can fail on its own (a
+                        // full /data); it reports that as a missing file, not an exception.
+                        writeKernelBundleZip(context, timestamp, state.toJson())
+                            ?: return@async DebugExportOutcome.Failed("kernel image packaging produced no archive")
+                    } else {
+                        // Bundle the single state.json in a .zip too: forums/messengers (4pda,
+                        // the main report channel) whitelist .zip but reject a bare .json, and
+                        // the JSON compresses ~10x. Every export kind is now a .zip carrying
+                        // state.json, so the caller has one format to handle.
+                        File(context.cacheDir, "vpnhide_debug_$timestamp.zip").also {
+                            writeDiagnosticZip(it, mapOf("state.json" to state.toJson()))
+                        }
                     }
-                }
-            DebugExportOutcome.Written(file, state.errors)
-        } catch (c: CancellationException) {
-            throw c
-        } catch (e: Exception) {
-            VpnHideLog.e(TAG, "Debug export failed", e)
-            DebugExportOutcome.Failed(e.message ?: e.javaClass.simpleName)
-        }
-    }
+                DebugExportOutcome.Written(file, state.errors)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                VpnHideLog.e(TAG, "Debug export failed", e)
+                DebugExportOutcome.Failed(e.message ?: e.javaClass.simpleName)
+            }
+        }.await()
 
 @Suppress("LongMethod")
 private suspend fun buildDebugState(

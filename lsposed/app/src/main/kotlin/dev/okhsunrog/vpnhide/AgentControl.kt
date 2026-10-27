@@ -268,7 +268,6 @@ internal object AgentControl {
                     listOf(CanonicalEdit.Replace(canonical)),
                     bootstrap = true,
                     source = OperationSource.Bridge,
-                    activation = CanonicalActivation(ports = true),
                 ),
             )
         }
@@ -437,7 +436,6 @@ internal object AgentControl {
                 CanonicalMutation(
                     edits,
                     source = OperationSource.Bridge,
-                    activation = CanonicalActivation(ports = true),
                     transform = { base ->
                         val nextSettings =
                             base.settings.copy(
@@ -474,10 +472,6 @@ internal object AgentControl {
                     emptyList(),
                     source = OperationSource.Bridge,
                     declaredWrites = (visiblePackages + selected).mapTo(linkedSetOf()) { ConfigField(listOf("apps", it, "hidden")) },
-                    activation =
-                        CanonicalActivation(
-                            ports = true,
-                        ),
                     transform = { base ->
                         val next =
                             updateManualHiddenPackages(
@@ -511,7 +505,6 @@ internal object AgentControl {
                         CanonicalEdit.RemoveApp(it)
                     },
                     source = OperationSource.Bridge,
-                    activation = CanonicalActivation(ports = true),
                 ),
             )
         }
@@ -534,7 +527,7 @@ internal object AgentControl {
      */
     suspend fun activateConfig(context: Context): AgentMutationResult =
         withAppContext(context) { context ->
-            CanonicalConfigRepository.reconcile(ports = true).toAgentMutationResult()
+            CanonicalConfigRepository.reconcile().toAgentMutationResult()
         }
 }
 
@@ -565,7 +558,6 @@ private suspend fun mutateAgentApp(
         CanonicalMutation(
             emptyList(),
             source = OperationSource.Bridge,
-            activation = CanonicalActivation(ports = true),
             declaredWrites = fields.mapTo(linkedSetOf()) { ConfigField(listOf("apps", pkg, it.name.replaceFirstChar(Char::lowercase))) },
             transform = { fresh ->
                 canonicalConfigWithSelfTarget(fresh.withApp(pkg, transform(fresh.apps[pkg] ?: CanonicalApp())), context.packageName)

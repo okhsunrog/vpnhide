@@ -10,8 +10,8 @@ use vpnhide_protocol::hook_ids::{
 use crate::ports::build_ports_ruleset;
 use crate::{
     APP_PACKAGE, MAX_NATIVE_TARGETS, NO_DEFAULT_MASK, PER_USER_RANGE, PM_READY_ATTEMPTS,
-    PORTS_CHAIN4, PORTS_CHAIN6, PmReadyWait, Result, has_native_targets, has_ports_targets,
-    is_app_uid, pm_list_packages, pm_list_users, wait_for_pm_ready,
+    PORTS_CHAIN4, PORTS_CHAIN6, PmReadyWait, Result, has_native_targets, is_app_uid,
+    pm_list_packages, pm_list_users, wait_for_pm_ready,
 };
 
 pub const OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS: &str = Hook::FilesystemIfacePaths.name();
@@ -160,9 +160,9 @@ impl NativeHookFamily {
     }
 
     /// True for backends with no separate loader ABI (no insmod module param,
-    /// no ensure_loaded): the optional filesystem hook must be gated in the
+    /// no kernel loader): the optional filesystem hook must be gated in the
     /// projected mask itself, because there is no load-time gate behind it.
-    /// The .ko (module_param) and KPM (ensure_loaded) gate at load, so their
+    /// The .ko (module_param) and KPM load parameters gate at load, so their
     /// mask may carry the bit unconditionally; the compiled-in built-in driver
     /// and zygisk cannot, so their mask is the only gate.
     fn filesystem_gated_in_mask(self) -> bool {
@@ -479,7 +479,7 @@ pub(crate) fn native_target_set(
         let Some(mut hooks) = app.native.hooks(family) else {
             continue;
         };
-        // The .ko (module_param) and KPM (ensure_loaded) gate the optional
+        // The .ko (module_param) and KPM load parameters gate the optional
         // filesystem hook at load time, so their projected mask may carry the
         // bit unconditionally; runtime status reports the installed capability.
         // Backends with no separate loader ABI — zygisk (per-process mask) and
@@ -602,15 +602,6 @@ impl PortUidPolicy {
         self.rules
             .extend(policy.rules.iter().copied().map(PortRule::normalized));
     }
-}
-
-pub(crate) fn project_ports_with_pm_wait(json: &str, wait: PmReadyWait) -> Result<PortsRuleset> {
-    let cfg = parse_canonical(json)?;
-    if !has_ports_targets(&cfg) {
-        return Ok(project_ports_with_resolver(&cfg, &PackageUidMap::default()));
-    }
-    let resolver = PackageUidMap::from_pm_with_wait(wait)?;
-    Ok(project_ports_with_resolver(&cfg, &resolver))
 }
 
 pub fn project_ports_with_resolver(

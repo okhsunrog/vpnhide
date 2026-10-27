@@ -25,7 +25,6 @@ import dev.okhsunrog.vpnhide.displayNativeBackend
 import dev.okhsunrog.vpnhide.kmodLoadStatus
 import dev.okhsunrog.vpnhide.kpmLoadStatus
 import dev.okhsunrog.vpnhide.lsposedHooksActiveThisBoot
-import dev.okhsunrog.vpnhide.nativeBootStatus
 import dev.okhsunrog.vpnhide.settings.installedNativeOptionalHooks
 import dev.okhsunrog.vpnhide.snapshotRuntimeCheckable
 import dev.okhsunrog.vpnhide.snapshotShellUid
@@ -62,7 +61,7 @@ import kotlinx.serialization.json.JsonElement
  *    names, which also made them unmovable between packages.
  * 1: initial.
  */
-internal const val VPNHIDE_STATE_SCHEMA: Int = 2
+internal const val VPNHIDE_STATE_SCHEMA: Int = 3
 
 /**
  * What to include in a captured [VpnHideState]. The ONE source of truth for the
@@ -297,9 +296,9 @@ internal fun buildVpnHideState(
 ): VpnHideState {
     val rootSections = rootSnapshot.sections
     val currentBootId = rootSections["current_boot_id"].orEmpty()
-    val nativeBoot = nativeBootStatus(rootSections)
+    val nativeBoot = rootSnapshot.nativeBoot
     val kpmLoadStatus = nativeBoot.kpmLoadStatus()
-    val backends = detectNativeBackendStates(rootSections, currentBootId, kpmLoadStatus)
+    val backends = detectNativeBackendStates(rootSections, currentBootId, kpmLoadStatus, rootSnapshot.backend)
     val activeBackend = displayNativeBackend(backends)
     val ports = detectPortsModule(rootSections)
     val kmodLoadStatus = nativeBoot.kmodLoadStatus(currentBootId)

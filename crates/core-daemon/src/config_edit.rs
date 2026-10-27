@@ -24,6 +24,11 @@ pub fn has_any_role(app: &AppConfig) -> bool {
 pub fn apply_canonical_edit(config: &CanonicalConfig, edit: &ConfigEdit) -> CanonicalConfig {
     let mut next = config.clone();
     match edit {
+        ConfigEdit::Batch { edits } => {
+            for edit in edits {
+                next = apply_canonical_edit(&next, edit);
+            }
+        }
         ConfigEdit::Toggle { field, enabled } => apply_toggle(&mut next, *field, *enabled),
         ConfigEdit::SettingSet { field, values } => match field {
             ConfigSetField::OptionalFeatures => next.settings.optional_features = values.clone(),
@@ -277,6 +282,12 @@ pub fn fields_overlap(a: &str, b: &str) -> bool {
 /// The write set of an edit — the fields it intends to change (§5).
 pub fn write_set(edit: &ConfigEdit) -> Vec<FieldPath> {
     match edit {
+        ConfigEdit::Batch { edits } => edits
+            .iter()
+            .flat_map(write_set)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect(),
         ConfigEdit::Toggle { field, .. } => vec![toggle_path(*field)],
         ConfigEdit::SettingSet { field, .. } => vec![set_field_path(*field)],
         ConfigEdit::App { pkg, field, .. } => {
@@ -292,6 +303,42 @@ pub fn write_set(edit: &ConfigEdit) -> Vec<FieldPath> {
         ],
         // Activation repair does not rewrite canonical fields.
         ConfigEdit::RepairActivation => Vec::new(),
+    }
+}
+
+/// A batch is one bounded, atomic field-intent operation. Imports and activation repair
+/// are separate commands; nesting cannot hide a broad replacement or unbounded work.
+pub fn validate_edit(edit: &ConfigEdit) -> Result<(), String> {
+    let ConfigEdit::Batch { edits } = edit else {
+        return Ok(());
+    };
+    if edits.len() > vpnhide_core_rpc::MAX_BATCH_EDITS {
+        return Err("too many config edits".into());
+    }
+    if edits.iter().any(|edit| {
+        matches!(
+            edit,
+            ConfigEdit::Batch { .. } | ConfigEdit::Replace { .. } | ConfigEdit::RepairActivation
+        )
+    }) {
+        return Err("config batch accepts field edits only".into());
+    }
+    Ok(())
+}
+
+/// The daemon validates the resulting canonical value, including clients that talk
+/// directly to RPC. A typed FFI request must not bypass the shared disk-codec contract.
+pub fn validate_candidate(candidate: &CanonicalConfig) -> Result<(), String> {
+    if candidate.version != 1 {
+        return Err("unsupported canonical config version".into());
+    }
+    let json = crate::config_file::to_json_string(candidate);
+    if json.len() > 512 * 1024 {
+        return Err("canonical config exceeds 512 KiB".into());
+    }
+    match crate::config_file::parse_status(&json) {
+        Ok(crate::config_file::ConfigLoad::Present(parsed)) if parsed == *candidate => Ok(()),
+        _ => Err("config does not round-trip through the canonical codec".into()),
     }
 }
 
@@ -363,7 +410,10 @@ pub fn note_writes(
     revision: u64,
 ) {
     for w in writes {
-        field_revisions.insert(w.clone(), revision);
+        field_revisions
+            .entry(w.clone())
+            .and_modify(|last| *last = (*last).max(revision))
+            .or_insert(revision);
     }
 }
 
