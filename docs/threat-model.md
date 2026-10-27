@@ -66,7 +66,7 @@ result; vpnhide does not isolate them from one another as hostile principals.
 | Ordinary app → stored policy/secrets | Documented ownership, modes and SELinux labels separate ordinary apps from canonical policy and privileged control data. Root remains trusted and can read or change them. |
 
 See [config-coordinator.md](config-coordinator.md),
-[core-2.0 architecture](notes/core-2.0-architecture.md) and
+[core-2.0 architecture](core-architecture.md) and
 [protocol.md](protocol.md) for those contracts. Installing a module or saving a
 configuration alone does not establish that runtime activation succeeded.
 

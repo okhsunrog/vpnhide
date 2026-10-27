@@ -1,21 +1,24 @@
 package dev.okhsunrog.vpnhide.debug
 
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
-import dev.okhsunrog.vpnhide.CanonicalMutation
-import dev.okhsunrog.vpnhide.CanonicalWriteResult
-import dev.okhsunrog.vpnhide.CaptureLoggingEvent
-import dev.okhsunrog.vpnhide.OperationSource
+import dev.okhsunrog.vpnhide.CoreOperationIds
+import dev.okhsunrog.vpnhide.core.CoreEffectOutcome
+import dev.okhsunrog.vpnhide.core.CoreRoot
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.atomic.AtomicLong
-
-private val nextDebugCaptureSessionId = AtomicLong(1L)
 
 internal data class DebugCaptureLoggingSession(
     val id: Long,
     val originalDebug: Boolean,
     val apply: DebugCaptureLoggingStep,
     val restore: DebugCaptureLoggingStep? = null,
+    val renewal: Job? = null,
 ) {
     val forced: Boolean
         get() = !originalDebug
@@ -73,23 +76,33 @@ internal data class DebugCaptureLoggingStep(
 
 internal suspend fun beginDebugCaptureLogging(): DebugCaptureLoggingSession =
     withContext(NonCancellable) {
-        val id = nextDebugCaptureSessionId.getAndIncrement()
+        val id = CoreOperationIds.next()
         val original =
             CanonicalConfigRepository.state.value.confirmed
                 ?.debug ?: false
-        val result =
-            CanonicalConfigRepository.commit(
-                CanonicalMutation(emptyList(), source = OperationSource.System, captureEvent = CaptureLoggingEvent.Acquire(id)),
-            )
-        DebugCaptureLoggingSession(id, original, captureStep(true, result))
+        val result = CoreRoot.debugLease(id, acquire = true)
+        DebugCaptureLoggingSession(
+            id,
+            original,
+            captureStep(true, result),
+            renewal =
+                if (result != CoreEffectOutcome.FailedKnown) {
+                    CanonicalConfigRepository.processScope.launch(Dispatchers.IO) {
+                        while (isActive) {
+                            delay(30_000)
+                            CoreRoot.debugLease(id, acquire = true)
+                        }
+                    }
+                } else {
+                    null
+                },
+        )
     }
 
 internal suspend fun restoreDebugCaptureLogging(session: DebugCaptureLoggingSession): DebugCaptureLoggingStep =
     withContext(NonCancellable) {
-        val result =
-            CanonicalConfigRepository.commit(
-                CanonicalMutation(emptyList(), source = OperationSource.System, captureEvent = CaptureLoggingEvent.Release(session.id)),
-            )
+        session.renewal?.cancelAndJoin()
+        val result = CoreRoot.debugLease(session.id, acquire = false)
         captureStep(
             (
                 CanonicalConfigRepository.state.value.confirmed
@@ -102,11 +115,11 @@ internal suspend fun restoreDebugCaptureLogging(session: DebugCaptureLoggingSess
 
 private fun captureStep(
     enabled: Boolean,
-    result: CanonicalWriteResult,
+    result: CoreEffectOutcome,
 ) = DebugCaptureLoggingStep(
     requestedEnabled = enabled,
-    source = "config_coordinator",
+    source = "core_debug_lease",
     rootSnapshotExit = null,
-    commandExit = result.exitCode,
-    detail = result.operation?.failure?.name ?: result.output,
+    commandExit = if (result == CoreEffectOutcome.Ok) 0 else -1,
+    detail = result.name,
 )

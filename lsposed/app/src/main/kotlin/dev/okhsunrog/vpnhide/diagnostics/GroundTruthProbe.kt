@@ -8,8 +8,8 @@ import dev.okhsunrog.vpnhide.checks.AppVpnStateResponse
 import dev.okhsunrog.vpnhide.checks.CheckOutput
 import dev.okhsunrog.vpnhide.checks.ChecksResponse
 import dev.okhsunrog.vpnhide.checks.NativeProbe
-import dev.okhsunrog.vpnhide.core.CoreProbe
 import dev.okhsunrog.vpnhide.core.CoreRoot
+import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
 /**
  * Runs the same native probes as **root** — uid 0 is not a hook target, so its
@@ -44,7 +44,14 @@ object GroundTruthProbe {
     /** One hook-inert root observation of VPN presence and this app's UID routing. */
     internal fun observeAppVpnState(context: Context): AppVpnStateObservation? {
         CoreRoot.attach(context)
-        val result = CoreRoot.collectOneBlocking(CoreProbe.AppVpnState(android.os.Process.myUid()))
+        val result =
+            CoreRoot.collectOneBlocking(
+                CoreProbe.AppVpnState(
+                    android.os.Process
+                        .myUid()
+                        .toUInt(),
+                ),
+            )
         if (!result.ok) {
             VpnHideLog.w(TAG, "app VPN state unavailable (core exit=${result.exit})")
             return null

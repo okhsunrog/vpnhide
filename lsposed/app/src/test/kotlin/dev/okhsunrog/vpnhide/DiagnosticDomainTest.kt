@@ -25,6 +25,8 @@ import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
 import dev.okhsunrog.vpnhide.diagnostics.Situation
 import dev.okhsunrog.vpnhide.diagnostics.Staleness
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticContextObservation
+import dev.okhsunrog.vpnhide.diagnostics.coreInputsJoined
+import dev.okhsunrog.vpnhide.diagnostics.desiredDeliveryIdentity
 import dev.okhsunrog.vpnhide.diagnostics.gateProjection
 import dev.okhsunrog.vpnhide.diagnostics.situation
 import kotlinx.coroutines.CompletableDeferred
@@ -143,8 +145,16 @@ class DiagnosticDomainTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val routing = MutableStateFlow(ObservationState<AppVpnStateSnapshot>())
         val snapshots =
-            MutableStateFlow<RootSnapshot?>(RootSnapshot(mapOf("current_boot_id" to "boot-1"), observationId = 1, generation = 1))
-        val config = MutableStateFlow(ConfigCoordinatorView())
+            MutableStateFlow<RootSnapshot?>(
+                RootSnapshot(
+                    mapOf("current_boot_id" to "boot-1"),
+                    observationId = 1,
+                    generation = 1,
+                    core = CoreSessionUpdate(CoreStateView(1, 0, RootCanonicalRead.Available(CanonicalConfig()), emptyList()), true),
+                ),
+            )
+        val config =
+            MutableStateFlow(ConfigCoordinatorView(confirmed = CanonicalConfig(), desiredRevision = 0, coreCurrent = true, coreEpoch = 1))
         val inputs = MutableStateFlow<DiagnosticInputs?>(DiagnosticInputs(SELF_PACKAGE, selfNeedsRestart = false))
         val suites = AtomicInteger()
 
@@ -201,6 +211,8 @@ class DiagnosticDomainTest {
                     selfPackage = SELF_PACKAGE,
                     processIdentity = "pid:1;uid:10",
                     now = 0,
+                    delivery = desiredDeliveryIdentity(config.value, SELF_PACKAGE),
+                    configJoined = coreInputsJoined(snapshots.value, config.value),
                 )
             }
 

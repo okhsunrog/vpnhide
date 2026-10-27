@@ -53,6 +53,7 @@ internal data class DiagnosticPresentation(
      * for a manual re-check.
      */
     val confirmationPending: Boolean = false,
+    val desiredDeliveryConfirmed: Boolean = true,
 )
 
 /**
@@ -98,7 +99,13 @@ private fun presentationWithoutConfirmation(
 ): DiagnosticPresentation {
     val core = view.core
     val measurement = core.lastComplete
-    val applicability = measurementApplicability(measurement, current?.context, changeEpoch, routing !is RoutingKnowledge.Known)
+    val applicability =
+        measurementApplicability(
+            measurement,
+            current?.context,
+            changeEpoch,
+            routing !is RoutingKnowledge.Known || current?.context?.desiredDeliveryConfirmed == false,
+        )
     val eligibility = current?.eligibility ?: DiagnosticEligibility.Checking
     return DiagnosticPresentation(
         eligibility = eligibility,
@@ -115,5 +122,6 @@ private fun presentationWithoutConfirmation(
         currentSuccess = canPresentCurrentSuccess(measurement, applicability, eligibility),
         probeUnavailable = core.quarantined,
         currentKey = current?.context?.key,
+        desiredDeliveryConfirmed = current?.context?.desiredDeliveryConfirmed ?: true,
     )
 }

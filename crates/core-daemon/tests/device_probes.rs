@@ -48,3 +48,46 @@ fn unexpected_probe_arguments_are_refused() {
     assert_eq!(probe(&["root-snapshot", "--evil"]).0, 2);
     assert_eq!(probe(&["kernel-images"]).0, 2);
 }
+
+fn probe_with_inputs(input: &[u8]) -> std::process::Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_vpnhide-core"));
+    command.args(["probe", "hook-counters", "--kpm-state-stdin"]);
+    vpnhide_activator::capture_command(
+        &mut command,
+        Some(input),
+        std::time::Duration::from_secs(3),
+        1 << 20,
+    )
+    .unwrap()
+    .output
+}
+
+#[test]
+fn fixed_child_input_flag_consumes_only_bounded_nonsecret_observations() {
+    for observation in [
+        vpnhide_core_daemon::device_probes::Ran {
+            exit: 0,
+            stdout: "authenticated parent telemetry".into(),
+            stderr: String::new(),
+        },
+        vpnhide_core_daemon::device_probes::Ran {
+            exit: 1,
+            stdout: String::new(),
+            stderr: "KPM observation unavailable".into(),
+        },
+    ] {
+        let input = serde_json::to_vec(&serde_json::json!({ "kpm": observation })).unwrap();
+        let output = probe_with_inputs(&input);
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        let framed = sections(&text, prefixes::DEBUG_BEGIN, prefixes::DEBUG_END);
+        let kpm = &framed["kpm_state"];
+        assert!(kpm.contains(observation.combined().trim_end_matches('\n')));
+        assert!(kpm.ends_with(&format!("[exit={}]", observation.exit)));
+    }
+    assert_eq!(probe_with_inputs(b"invalid record").status.code(), Some(2));
+    assert_eq!(
+        probe_with_inputs(&vec![b' '; (1 << 20) + 1]).status.code(),
+        Some(2)
+    );
+}

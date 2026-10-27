@@ -77,7 +77,8 @@ pub async fn supervise(app_dir: PathBuf, state: Arc<CoreState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CoreClient, Publisher};
+    use crate::Publisher;
+    use vpnhide_core_client::CoreClient;
     use vpnhide_core_rpc::StateSnapshot;
 
     #[tokio::test]

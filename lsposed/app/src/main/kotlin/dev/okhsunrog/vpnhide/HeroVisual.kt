@@ -180,6 +180,15 @@ private fun measuredVisual(
     warningCount: Int,
 ): HeroVisual {
     val rank = maxOf(tilesRank(tiles), issuesRank(errorCount, warningCount))
+    if (measured.staleness == Staleness.DeliveryUnconfirmed) {
+        return HeroVisual(
+            toneOf(maxOf(rank, RANK_ATTENTION)),
+            HeroTitle.NeedsAttention,
+            HeroSubtitle.ApplicationUnknown,
+            HeroPrompt.None,
+            checking = false,
+        )
+    }
     if (measured.staleness == Staleness.Changed) {
         return HeroVisual(
             toneOf(maxOf(rank, RANK_ATTENTION)),

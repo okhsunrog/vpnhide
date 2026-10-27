@@ -12,9 +12,10 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use vpnhide_core_client::CoreClient;
 use vpnhide_core_daemon::config_file::{self, config_path_from_env};
 use vpnhide_core_daemon::journal::journal_path_from_env;
-use vpnhide_core_daemon::{CoreClient, CoreState, Publisher, observe, serve};
+use vpnhide_core_daemon::{CoreState, Publisher, serve};
 use vpnhide_core_daemon::{activation, backend};
 use vpnhide_core_rpc::StateSnapshot;
 
@@ -30,9 +31,9 @@ fn main() {
         // The module's boot entry (`service.sh` is one `exec` of this): production
         // profile, persist dir, detach, then serve. Before any thread exists.
         vpnhide_core_daemon::service::enter();
-        daemon_main();
-        vpnhide_core_daemon::service::exited(0);
-        return;
+        let code = vpnhide_core_daemon::service::supervise();
+        vpnhide_core_daemon::service::exited(code);
+        std::process::exit(code);
     }
     daemon_main();
 }
@@ -60,7 +61,7 @@ async fn daemon_main() {
         }
         _ => {}
     }
-    let path = if first.is_empty() || first == "service" {
+    let path = if first.is_empty() || first == "service-worker" {
         DEFAULT_SOCKET.to_owned()
     } else {
         first
@@ -132,18 +133,26 @@ fn status(ctl: &str) {
 }
 
 async fn run(path: &str) {
-    // A fresh epoch per run: the client adopts on an epoch change after a restart (§6).
+    // A fresh epoch per run: clients adopt a restarted core through a new connection.
     let epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(1);
 
-    // The durable canonical config (§4 tier-1). Path is overridable via VPNHIDE_CONFIG_PATH
+    // The durable canonical config. Path is overridable via VPNHIDE_CONFIG_PATH
     // so the dev sandbox core never touches the real /data/system file.
     let config_path = config_path_from_env();
-    // Private operation journal (§4 tier 3 / §5). Overridable via VPNHIDE_JOURNAL_PATH.
+    // Private durable operation journal. Overridable via VPNHIDE_JOURNAL_PATH.
     let journal_path = journal_path_from_env();
-    // The Native phase's control node (§4/§9.1). Unset via VPNHIDE_KMOD_CTL = no native write,
+    let instance =
+        match vpnhide_core_daemon::instance::InstanceGuard::state(&config_path, &journal_path) {
+            Ok(guard) => guard,
+            Err(error) => {
+                eprintln!("core: cannot acquire writer ownership: {error}");
+                std::process::exit(73);
+            }
+        };
+    // The Native phase's control node. Unset via VPNHIDE_KMOD_CTL = no native write,
     // so the dev sandbox core never touches the real /proc/vpnhide_ctl.
     let kmod_ctl_path = vpnhide_core_daemon::activation::kmod_ctl_path_from_env();
     let state = match CoreState::load_with_journal(
@@ -155,15 +164,24 @@ async fn run(path: &str) {
         Ok(state) => state,
         Err(e) => {
             eprintln!("core: config load failed on {}: {e}", config_path.display());
-            std::process::exit(1);
+            CoreState::degraded(
+                Publisher::new(epoch, StateSnapshot::default()),
+                e.to_string(),
+            )
         }
     };
-    // Select the native backend once for this boot (§4) before serving: scan every
+    state
+        .own_instance_guard(instance)
+        .expect("one instance guard");
+    let operational = state.publisher.current().snapshot.startup_error.is_none();
+    // Select the native backend once for this boot before serving: scan every
     // candidate, load the single one (or nothing on a conflict), retire Zygisk targets
     // when Zygisk is not it, and publish the typed per-boot status. A restart within
     // the same boot re-adopts the persisted decision instead of re-selecting.
     let modules = backend::kernel_modules_from_env();
-    match vpnhide_core_daemon::native_boot::NativeEnv::from_env(kmod_ctl_path.clone()) {
+    match vpnhide_core_daemon::native_boot::NativeEnv::from_env(kmod_ctl_path.clone())
+        .filter(|_| operational)
+    {
         Some(env) => state.start_native_boot(env, epoch),
         None => {
             // Native management disabled (dev sandbox): read-only identity only.
@@ -181,13 +199,15 @@ async fn run(path: &str) {
 
     // A previous run's logcat session died with it (parent-death signal): end it, put its
     // debug logging back, and keep a recording the app has not saved yet.
-    state.logcat().recover();
+    if operational {
+        state.logcat().recover();
+    }
 
     // Boot policy apply runs on its own thread: it waits for PackageManager without a
     // bound (uid projection must be complete) and for netd's chains, then re-applies
     // Ports at T+30 s. Serving and observation are not blocked meanwhile; mutations
     // serialize with it on the config lane.
-    if vpnhide_core_daemon::boot::boot_apply_enabled() {
+    if operational && vpnhide_core_daemon::boot::boot_apply_enabled() {
         let booting = state.clone();
         std::thread::spawn(move || {
             vpnhide_core_daemon::boot::run_boot_passes(&booting, true);
@@ -200,16 +220,16 @@ async fn run(path: &str) {
     // Production: the socket lives in the app's data dir and is re-bound across
     // reinstalls (app_socket). Host/dev: a plain path socket.
     let app_dir = vpnhide_core_daemon::app_socket::app_data_dir_from_env();
-    let handle = match &app_dir {
+    let (handle, app_socket_task) = match &app_dir {
         Some(dir) => {
-            tokio::spawn(vpnhide_core_daemon::app_socket::supervise(
+            let task = tokio::spawn(vpnhide_core_daemon::app_socket::supervise(
                 dir.clone(),
                 state.clone(),
             ));
-            None
+            (None, Some(task))
         }
         None => match serve(Path::new(path), state.clone()) {
-            Ok(handle) => Some(handle),
+            Ok(handle) => (Some(handle), None),
             Err(e) => {
                 eprintln!("core: bind failed on {path}: {e}");
                 std::process::exit(1);
@@ -233,21 +253,26 @@ async fn run(path: &str) {
     );
 
     // The root observation loop feeds real VPN-presence into the published state. Failing to
-    // open netlink (no permission, restricted SELinux) is logged, not fatal: the socket still
-    // serves and the app sees routing as never-yet-observed rather than a crash.
-    let observed = state.clone();
-    tokio::spawn(async move {
-        if let Err(e) = observe(observed).await {
-            eprintln!("core: observation loop stopped: {e}");
-        }
-    });
+    // open netlink is non-fatal: withdraw current evidence and retry the source while
+    // keeping the socket available for commands and explicit diagnostics.
+    let observer_task = tokio::spawn(vpnhide_core_daemon::observer::supervise(state.clone()));
 
-    let _ = tokio::signal::ctrl_c().await;
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("SIGTERM handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {},
+        _ = terminate.recv() => {},
+    }
     eprintln!("core: shutting down");
-    state.logcat().shutdown();
+    observer_task.abort();
+    if let Some(task) = app_socket_task {
+        task.abort();
+        let _ = task.await;
+    }
     if let Some(handle) = handle {
         handle.shutdown_and_unlink();
     }
+    state.shutdown();
 }
 
 /// One-shot boot path used by the Magisk module before or instead of long-run serve.
@@ -258,6 +283,14 @@ fn boot_apply_once() {
         .unwrap_or(1);
     let config_path = config_path_from_env();
     let journal_path = journal_path_from_env();
+    let instance =
+        match vpnhide_core_daemon::instance::InstanceGuard::state(&config_path, &journal_path) {
+            Ok(guard) => guard,
+            Err(error) => {
+                eprintln!("boot-apply: cannot acquire writer ownership: {error}");
+                std::process::exit(73);
+            }
+        };
     let kmod_ctl_path = activation::kmod_ctl_path_from_env();
     let state = match CoreState::load_with_journal(
         Publisher::new(epoch, StateSnapshot::default()),
@@ -282,6 +315,9 @@ fn boot_apply_once() {
             std::process::exit(1);
         }
     };
+    state
+        .own_instance_guard(instance)
+        .expect("one instance guard");
     if let Some(env) =
         vpnhide_core_daemon::native_boot::NativeEnv::from_env(activation::kmod_ctl_path_from_env())
     {
@@ -292,6 +328,7 @@ fn boot_apply_once() {
         "boot-apply: status={:?} detail={}",
         report.status, report.detail
     );
+    state.shutdown();
     match report.status {
         vpnhide_core_daemon::boot::BootApplyStatus::Applied
         | vpnhide_core_daemon::boot::BootApplyStatus::NoIntent => {}
@@ -300,7 +337,7 @@ fn boot_apply_once() {
 }
 
 async fn dump(path: &str) {
-    let client = CoreClient::connect_and_mirror(path.to_owned());
+    let client = CoreClient::connect(path.to_owned());
     match client.hello().await {
         Ok(epoch) => eprintln!("dump: handshake ok, core epoch={epoch}"),
         Err(e) => {

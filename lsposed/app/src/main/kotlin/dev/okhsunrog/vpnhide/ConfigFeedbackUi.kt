@@ -144,7 +144,7 @@ private fun ConfigFailureSnackbar(
         val result = host.showSnackbar(message, actionLabel = action, withDismissAction = true, duration = SnackbarDuration.Long)
         if (result == SnackbarResult.ActionPerformed) {
             // The provider remains composed while the new operation replaces this notice.
-            scope.launch { CanonicalConfigRepository.reconcile(ports = true) }
+            scope.launch { CanonicalConfigRepository.reconcile() }
         }
     }
 }
@@ -155,6 +155,7 @@ private fun ConfigBlockedDialog(
     onDismiss: () -> Unit,
 ) {
     val status = configStatus(view) ?: return
+    val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.config_changes_unavailable)) },
@@ -167,7 +168,11 @@ private fun ConfigBlockedDialog(
             }
         },
         confirmButton = {
-            if (status.canRecheck) {
+            if (status.canApply) {
+                TextButton(onClick = { scope.launch { CanonicalConfigRepository.reconcile() } }) {
+                    Text(stringResource(R.string.config_apply_again))
+                }
+            } else if (status.canRecheck) {
                 TextButton(onClick = CanonicalConfigRepository::retry) { Text(stringResource(R.string.config_recheck)) }
             }
         },

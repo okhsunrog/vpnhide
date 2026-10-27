@@ -1,10 +1,12 @@
 //! Ownership and conflict behaviour over the real RPC transport: accepted work
 //! survives client disconnect; unrelated field edits from two clients merge;
 //! same-field stale bases conflict; delayed Native dispatch can be fenced.
+
+mod common;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use vpnhide_core_daemon::CoreClient;
+use vpnhide_core_client::CoreClient;
 use vpnhide_core_rpc::{
     BaseRef, CanonicalConfig, ConfigEdit, ConfigToggle, OperationId, PhaseOutcome, SubmitError,
 };
@@ -76,7 +78,8 @@ async fn accepted_edit_survives_client_disconnect() {
     let submit = tokio::spawn({
         let socket = socket.clone();
         async move {
-            let client = CoreClient::connect_and_mirror(&socket);
+            let client = CoreClient::connect(&socket);
+            common::reserve_operation_ids(&client, 4).await;
             client.hello().await.unwrap();
             client
                 .submit_edit(
@@ -99,7 +102,8 @@ async fn accepted_edit_survives_client_disconnect() {
     // Give the owned worker time to finish Persist after the client vanished.
     tokio::time::sleep(Duration::from_millis(400)).await;
 
-    let client = CoreClient::connect_and_mirror(&socket);
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 4).await;
     client.hello().await.unwrap();
     let record = client
         .get_operation(OperationId(1))
@@ -118,8 +122,9 @@ async fn two_clients_merge_unrelated_fields_and_conflict_on_same_field() {
     let mut child = spawn(&socket, &config, None, None);
     wait_bound(&socket, &mut child).await;
 
-    let a = CoreClient::connect_and_mirror(&socket);
-    let b = CoreClient::connect_and_mirror(&socket);
+    let a = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&a, 4).await;
+    let b = CoreClient::connect(&socket);
     a.hello().await.unwrap();
     b.hello().await.unwrap();
 

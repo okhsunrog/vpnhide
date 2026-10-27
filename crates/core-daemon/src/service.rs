@@ -9,7 +9,10 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{Duration, Instant};
 
 /// Core's private state dir (journal, markers, boot status, log).
 pub const PERSIST_DIR: &str = "/data/adb/vpnhide/core";
@@ -124,6 +127,99 @@ pub fn exited(code: i32) {
     let _ = std::io::stderr().flush();
 }
 
+/// A small boot supervisor. Only the worker owns config/journal locks; the
+/// supervisor has its own lifetime lock so repeated service entries do not
+/// create competing restart loops. Intentional clean exit and ownership refusal
+/// stop supervision; crashes restart with bounded backoff.
+pub fn supervise() -> i32 {
+    let persist = Path::new(PERSIST_DIR);
+    let _guard = match crate::instance::InstanceGuard::acquire([persist.join("supervisor.lock")]) {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!("core: service supervisor already present: {error}");
+            return 73;
+        }
+    };
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(error) => {
+            eprintln!("core: cannot locate worker: {error}");
+            return 1;
+        }
+    };
+    let module = exe.parent().unwrap_or_else(|| Path::new("."));
+    supervise_worker(module, persist, Duration::from_secs(1), || {
+        let mut command = Command::new(&exe);
+        command.arg("service-worker");
+        command
+    })
+}
+
+fn supervise_worker(
+    module: &Path,
+    persist: &Path,
+    initial_backoff: Duration,
+    mut command: impl FnMut() -> Command,
+) -> i32 {
+    let mut backoff = initial_backoff;
+    loop {
+        if !module.is_dir() || module.join("disable").exists() || module.join("remove").exists() {
+            let _ = fs::write(
+                persist.join("supervisor_status"),
+                "stopped=module_disabled_or_removed\n",
+            );
+            return 0;
+        }
+        let started = Instant::now();
+        let mut command = command();
+        let parent = unsafe { libc::getpid() };
+        // SAFETY: only async-signal-safe syscalls in the fork child. The worker
+        // terminates with its supervisor, including the fork/prctl race window.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM, 0, 0, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::getppid() != parent {
+                    libc::_exit(1);
+                }
+                Ok(())
+            });
+        }
+        let result = command.spawn().and_then(|mut child| {
+            let _ = fs::write(
+                persist.join("supervisor_status"),
+                format!("running=1 pid={}\n", child.id()),
+            );
+            child.wait()
+        });
+        if result
+            .as_ref()
+            .is_ok_and(|status| status.success() || status.code() == Some(73))
+        {
+            let code = result.ok().and_then(|status| status.code()).unwrap_or(0);
+            let _ = fs::write(
+                persist.join("supervisor_status"),
+                format!("stopped=worker_exit rc={code}\n"),
+            );
+            return code;
+        }
+        if started.elapsed() >= Duration::from_secs(60) {
+            backoff = initial_backoff;
+        }
+        eprintln!(
+            "core: worker exited {result:?}; restart in {}s",
+            backoff.as_secs()
+        );
+        let _ = fs::write(
+            persist.join("supervisor_status"),
+            format!("restarting=1 delay_s={}\n", backoff.as_secs()),
+        );
+        std::thread::sleep(backoff);
+        backoff = (backoff * 2).min(Duration::from_secs(60));
+    }
+}
+
 fn now_utc() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -135,6 +231,79 @@ fn now_utc() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supervisor_child_fixture() {
+        let Some(path) = std::env::var_os("VPNHIDE_SUPERVISOR_FIXTURE") else {
+            return;
+        };
+        let path = PathBuf::from(path);
+        match std::env::var("VPNHIDE_SUPERVISOR_FIXTURE_MODE")
+            .unwrap()
+            .as_str()
+        {
+            "owner_refusal" => std::process::exit(73),
+            "crash_once" => {
+                if !path.exists() {
+                    fs::write(path, b"first-worker-crashed").unwrap();
+                    std::process::exit(9);
+                }
+            }
+            _ => panic!("unknown fixture mode"),
+        }
+    }
+
+    fn fixture_command(path: &Path, mode: &str) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "service::tests::supervisor_child_fixture",
+                "--nocapture",
+            ])
+            .env("VPNHIDE_SUPERVISOR_FIXTURE", path)
+            .env("VPNHIDE_SUPERVISOR_FIXTURE_MODE", mode)
+            .stdout(std::process::Stdio::null());
+        command
+    }
+
+    #[test]
+    fn supervisor_restarts_a_crash_but_stops_on_clean_exit_or_ownership_refusal() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("crash-marker");
+        let mut starts = 0;
+        let code = supervise_worker(dir.path(), dir.path(), Duration::from_millis(1), || {
+            starts += 1;
+            fixture_command(&marker, "crash_once")
+        });
+        assert_eq!(code, 0);
+        assert_eq!(starts, 2);
+        assert!(marker.exists());
+        starts = 0;
+        let code = supervise_worker(dir.path(), dir.path(), Duration::from_millis(1), || {
+            starts += 1;
+            fixture_command(&marker, "owner_refusal")
+        });
+        assert_eq!(code, 73);
+        assert_eq!(starts, 1);
+        assert!(
+            fs::read_to_string(dir.path().join("supervisor_status"))
+                .unwrap()
+                .contains("rc=73")
+        );
+    }
+
+    #[test]
+    fn supervisor_does_not_launch_disabled_modules() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("disable"), "").unwrap();
+        assert_eq!(
+            supervise_worker(dir.path(), dir.path(), Duration::from_millis(1), || panic!(
+                "disabled module launched"
+            )),
+            0
+        );
+    }
 
     #[test]
     fn modules_root_comes_from_moddir_or_the_compiled_in_root() {

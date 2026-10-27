@@ -22,6 +22,7 @@ fn tree(root: &Path) -> Paths {
         apatch_dir: root.join("ap"),
         legacy: vec![("legacy_kmod_targets", root.join("legacy_kmod"))],
         core_exe: root.join("no-core"),
+        kpm_observation: None,
     }
 }
 
@@ -324,4 +325,64 @@ fn debug_snapshot_covers_every_backend_state_path() {
     assert!(s["kpm_module_state"].contains("vpnhide.kpm"));
     assert!(s["zygisk_module_state"].contains("zygisk/arm64-v8a.so"));
     assert!(!s.contains_key("debug_logging"));
+}
+
+#[test]
+fn authenticated_kpm_inputs_are_used_without_a_nested_core_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut paths = tree(dir.path());
+    for observation in [
+        Ran {
+            exit: 0,
+            stdout: "vpnhide 1 status\nbackend 0x3\n".into(),
+            stderr: String::new(),
+        },
+        Ran {
+            exit: 1,
+            stdout: "seeded unavailable observation".into(),
+            stderr: "authentication unavailable".into(),
+        },
+    ] {
+        paths.kpm_observation = Some(observation.clone());
+        let root = root_snapshot::collect(&paths, false);
+        let root = sections(&root.buf, prefixes::ROOT_BEGIN, prefixes::ROOT_END);
+        assert_eq!(root["kpm_state"], observation.stdout.trim_end_matches('\n'));
+        for snapshot in [
+            debug_snapshot::collect(&paths),
+            debug_snapshot::hook_counters(&paths),
+        ] {
+            let debug = sections(&snapshot.buf, prefixes::DEBUG_BEGIN, prefixes::DEBUG_END);
+            let kpm = &debug["kpm_state"];
+            assert!(kpm.contains(observation.stdout.trim_end_matches('\n')));
+            assert!(kpm.ends_with(&format!("[exit={}]", observation.exit)));
+            assert!(
+                !kpm.contains("[exit=127]"),
+                "fake core must never run for seeded observations"
+            );
+        }
+    }
+}
+
+#[test]
+fn probe_inputs_decode_is_bounded_and_rejects_invalid_records() {
+    let seed = ProbeInputs {
+        kpm: Ran {
+            exit: 0,
+            stdout: "parent telemetry".into(),
+            stderr: String::new(),
+        },
+    };
+    let encoded = serde_json::to_vec(&seed).unwrap();
+    assert_eq!(
+        ProbeInputs::read(encoded.as_slice()).unwrap().kpm.stdout,
+        "parent telemetry"
+    );
+    assert!(ProbeInputs::read(&b"invalid json"[..]).is_err());
+    assert!(
+        ProbeInputs::read(
+            &b"{\"kpm\":{\"exit\":0,\"stdout\":\"x\",\"stderr\":\"\"},\"secret\":\"refused\"}"[..]
+        )
+        .is_err()
+    );
+    assert!(ProbeInputs::read(vec![b' '; PROBE_INPUT_MAX + 1].as_slice()).is_err());
 }

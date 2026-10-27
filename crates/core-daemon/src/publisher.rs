@@ -1,6 +1,6 @@
 //! The core's published state, and the `state_since` long-poll over it.
 //!
-//! tarpc-free and host-tested: the epoch/revision adoption rule (core-2.0 §6) is exactly
+//! tarpc-free and host-tested: the epoch/revision adoption rule is exactly
 //! the kind of thing that must not be checked only on a phone. A restart is a new `epoch`
 //! whose `revision` starts over, so a client following a dead epoch is answered at once
 //! rather than stalled on sequence numbers that are no longer comparable.
@@ -49,6 +49,19 @@ impl Publisher {
         self.tx.send_modify(|p| {
             p.revision += 1;
             edit(&mut p.snapshot);
+        });
+    }
+
+    /// Publish only when the owning source changed its fields. The closure must
+    /// leave state unchanged when returning false (including stale-source rejection).
+    pub fn update_if_changed(&self, edit: impl FnOnce(&mut StateSnapshot) -> bool) {
+        self.tx.send_if_modified(|published| {
+            if edit(&mut published.snapshot) {
+                published.revision += 1;
+                true
+            } else {
+                false
+            }
         });
     }
 

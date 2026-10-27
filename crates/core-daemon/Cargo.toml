@@ -1,6 +1,5 @@
-# The persistent root core: a UDS tarpc server (and a typed client) speaking the
-# `core-rpc` contract. Skeleton for core-2.0 step 2 — the publish/lifecycle machinery
-# is real; the domain (config/operation/observation) is still placeholder (see core-rpc).
+# The persistent privileged core, speaking the shared core-rpc contract.
+# The APK uses the separate core-client crate and never links this engine.
 [package]
 name = "vpnhide_core_daemon"
 version = "0.0.0"
@@ -8,7 +7,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
-description = "vpnhide 2.0 persistent root core: UDS tarpc server + typed client skeleton."
+description = "vpnhide persistent root core: durable command engine and UDS RPC server."
 
 [lib]
 name = "vpnhide_core_daemon"
@@ -33,6 +32,7 @@ serde_json = "1.0.151"
 serde = { version = "1", features = ["derive"] }
 vpnhide_activator = { version = "1.2.5", path = "../activator" }
 vpnhide_protocol = { version = "1.2.5", path = "../protocol" }
+vpnhide_core_client = { version = "0.1.0", path = "../core-client" }
 
 [dev-dependencies]
 tempfile = "3"

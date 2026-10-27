@@ -1,7 +1,6 @@
 package dev.okhsunrog.vpnhide.debug
 
 import android.content.Context
-import dev.okhsunrog.vpnhide.core.CoreProbe
 import dev.okhsunrog.vpnhide.core.CoreProbeResult
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.hook.HookLog
@@ -9,6 +8,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
 internal fun buildKernelPartitionMetadataText(): String =
     kernelPartitionMetadataText(CoreRoot.collectOneBlocking(CoreProbe.KernelPartitions))

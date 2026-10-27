@@ -226,6 +226,8 @@ private fun measuredBanner(measured: Situation.Measured): DiagnosticBanner =
     when {
         measured.evidence == EvidenceConclusion.Insufficient -> DiagnosticBanner.InsufficientEvidence
 
+        measured.staleness == Staleness.DeliveryUnconfirmed -> DiagnosticBanner.ApplicationUnknown
+
         measured.staleness == Staleness.Changed -> DiagnosticBanner.ResultsChanged
 
         // Confirming renders like Current: a re-read inside its grace is silent by design.

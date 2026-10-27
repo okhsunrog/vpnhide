@@ -145,10 +145,8 @@ fun DashboardScreen(
         return
     }
 
-    // A VPN off → on while the app is foregrounded is noticed by AppVpnStatePoller, the
-    // single deduplicated trigger; it requests one confirmation suite and re-derives
-    // the tiles. The screen no longer watches the gate for this, which flapped through
-    // the tunnel's settling states and re-ran the suite (green → checking → green).
+    // Core publications update shared routing readiness; DiagnosticDomain alone decides
+    // whether that accepted observation needs one confirmation suite.
 
     Column(
         modifier =

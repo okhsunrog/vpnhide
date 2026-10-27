@@ -108,10 +108,8 @@ fun DiagnosticsScreen(
         // guarantees the shared gate is ready even if Diagnostics is opened first.
         RoutingGateCache.ensureLoaded(context, selfNeedsRestart)
     }
-    // A VPN up / routed transition while foregrounded is noticed by AppVpnStatePoller,
-    // the single deduplicated trigger, which runs one confirmation suite; the check
-    // list re-renders reactively from the presentation. The screen no longer watches
-    // the gate itself, which re-ran the suite on every settling flap.
+    // Core publications feed readiness. Confirmation runs belong to DiagnosticDomain;
+    // the screen only renders its accepted presentation.
 
     val results = decision.results
     // Native probes that couldn't run (ECONNREFUSED from socket()) classify as

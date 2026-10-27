@@ -22,8 +22,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.SecureRandom
@@ -121,9 +119,9 @@ internal object LogcatRecorder {
     private val _state = MutableStateFlow<State>(State.Stopped(null))
     val state: StateFlow<State> = _state
 
-    private val activeMutex = Mutex()
     private var active: ActiveRecording? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val actions = CaptureActionOwner(scope)
     private val random = SecureRandom()
 
     /** Start recording. If a session is already running (ours or one core still holds), it is kept. */
@@ -131,11 +129,9 @@ internal object LogcatRecorder {
         context: Context,
         selfNeedsRestart: Boolean,
     ): StartOutcome =
-        withContext(Dispatchers.IO) {
-            activeMutex.withLock {
-                active?.let { return@withLock StartOutcome.Started(it.id) }
-                startRecordingLocked(context.applicationContext, selfNeedsRestart)
-            }
+        actions.perform {
+            active?.let { return@perform StartOutcome.Started(it.id) }
+            startRecordingLocked(context.applicationContext, selfNeedsRestart)
         }
 
     /**
@@ -144,26 +140,26 @@ internal object LogcatRecorder {
      * app never saved. No-op while this process holds one.
      */
     suspend fun refresh(context: Context) =
-        withContext(Dispatchers.IO) {
-            activeMutex.withLock {
-                if (active != null) return@withLock
-                val session = (CoreRoot.logcatStatus() as? CoreLogcatReply.Ok)?.session
-                when {
-                    session == null -> {
-                        if (_state.value is State.Undelivered) _state.value = State.Stopped(null)
-                    }
+        actions.perform {
+            if (active != null) return@perform
+            val reply = CoreRoot.logcatStatus()
+            if (reply !is CoreLogcatReply.Ok) return@perform
+            val session = reply.session
+            when {
+                session == null -> {
+                    if (_state.value is State.Undelivered) _state.value = State.Stopped(null)
+                }
 
-                    session.recording -> {
-                        adoptLocked(context.applicationContext, session, selfNeedsRestart = false)
-                    }
+                session.recording -> {
+                    adoptLocked(context.applicationContext, session, selfNeedsRestart = false)
+                }
 
-                    session.undelivered -> {
-                        _state.value = session.toUndelivered()
-                    }
+                session.undelivered -> {
+                    _state.value = session.toUndelivered()
+                }
 
-                    _state.value is State.Undelivered -> {
-                        _state.value = State.Stopped(null)
-                    }
+                _state.value is State.Undelivered -> {
+                    _state.value = State.Stopped(null)
                 }
             }
         }
@@ -257,7 +253,6 @@ internal object LogcatRecorder {
                     if (_state.value is State.Recording) _state.value = session.toRecording()
                 } else {
                     scope.launch { stop(context, expectedId = id) }
-                    return@launch
                 }
             }
         }
@@ -272,16 +267,12 @@ internal object LogcatRecorder {
         context: Context,
         expectedId: Long?,
     ): File? =
-        withContext(Dispatchers.IO) {
-            activeMutex.withLock {
-                val recording = active ?: return@withLock null
-                if (expectedId != null && recording.id != expectedId) return@withLock null
-                active = null
-                recording.watchJob?.cancel()
-                writeLogcatMarker("stop", recording.id)
-                delay(LOGCAT_STOP_GRACE_MS)
-                collectLocked(context.applicationContext, recording)
-            }
+        actions.perform {
+            val recording = active ?: return@perform null
+            if (expectedId != null && recording.id != expectedId) return@perform null
+            writeLogcatMarker("stop", recording.id)
+            delay(LOGCAT_STOP_GRACE_MS)
+            collectLocked(context.applicationContext, recording)
         }
 
     /**
@@ -292,26 +283,22 @@ internal object LogcatRecorder {
         context: Context,
         selfNeedsRestart: Boolean,
     ): File? =
-        withContext(Dispatchers.IO) {
-            activeMutex.withLock {
-                if (active != null) return@withLock null
-                val offered = _state.value as? State.Undelivered ?: return@withLock null
-                val recording = ActiveRecording(offered.sessionId, offered.startMs, selfNeedsRestart, adopted = true, watchJob = null)
-                collectLocked(context.applicationContext, recording)
-            }
+        actions.perform {
+            if (active != null) return@perform null
+            val offered = _state.value as? State.Undelivered ?: return@perform null
+            val recording = ActiveRecording(offered.sessionId, offered.startMs, selfNeedsRestart, adopted = true, watchJob = null)
+            collectLocked(context.applicationContext, recording)
         }
 
     /** Drop the finished recording core still holds; core deletes it. */
     suspend fun discardUndelivered() =
-        withContext(Dispatchers.IO) {
-            activeMutex.withLock {
-                if (active != null) return@withLock
-                val offered = _state.value as? State.Undelivered ?: return@withLock
-                when (val reply = CoreRoot.discardLogcat(offered.sessionId)) {
-                    is CoreLogcatReply.Ok -> _state.value = State.Stopped(null)
-                    is CoreLogcatReply.Busy -> _state.value = offered.copy(failure = Failure(Failure.Stage.Discard, "busy"))
-                    is CoreLogcatReply.Failed -> _state.value = offered.copy(failure = Failure(Failure.Stage.Discard, reply.status))
-                }
+        actions.perform {
+            if (active != null) return@perform
+            val offered = _state.value as? State.Undelivered ?: return@perform
+            when (val reply = CoreRoot.discardLogcat(offered.sessionId)) {
+                is CoreLogcatReply.Ok -> _state.value = State.Stopped(null)
+                is CoreLogcatReply.Busy -> _state.value = offered.copy(failure = Failure(Failure.Stage.Discard, "busy"))
+                is CoreLogcatReply.Failed -> _state.value = offered.copy(failure = Failure(Failure.Stage.Discard, reply.status))
             }
         }
 
@@ -325,18 +312,12 @@ internal object LogcatRecorder {
             val reply = CoreRoot.stopLogcat(recording.id)
             val session = (reply as? CoreLogcatReply.Ok)?.session
             rawLogFile = session?.file
+            if (session != null && !session.recording && active?.id == recording.id) {
+                active = null
+                recording.watchJob?.cancel()
+            }
             if (session == null || rawLogFile == null || !rawLogFile.exists()) {
-                val status =
-                    when (reply) {
-                        is CoreLogcatReply.Failed -> reply.status
-                        is CoreLogcatReply.Busy -> "busy"
-                        is CoreLogcatReply.Ok -> if (session?.delivered == true) "already_saved" else "no_file"
-                    }
-                VpnHideLog.w(TAG, "logcat collect failed: $status")
-                // Still in core and not saved: keep offering it.
-                _state.value =
-                    session?.takeIf { it.undelivered }?.toUndelivered(Failure(Failure.Stage.Stop, status))
-                        ?: State.Stopped(null, failure = Failure(Failure.Stage.Stop, status))
+                reportMissingRecording(recording, reply, session)
                 return null
             }
             val stopMs = System.currentTimeMillis()
@@ -378,6 +359,28 @@ internal object LogcatRecorder {
                 rawLogFile?.let { runCatching { it.delete() } }
             }
         }
+    }
+
+    private fun reportMissingRecording(
+        recording: ActiveRecording,
+        reply: CoreLogcatReply,
+        session: CoreLogcatSession?,
+    ) {
+        val status =
+            when (reply) {
+                is CoreLogcatReply.Failed -> reply.status
+                is CoreLogcatReply.Busy -> "busy"
+                is CoreLogcatReply.Ok -> if (session?.delivered == true) "already_saved" else "no_file"
+            }
+        VpnHideLog.w(TAG, "logcat collect failed: $status")
+        // Still in core and not saved: keep offering it.
+        _state.value =
+            if (active?.id == recording.id) {
+                session?.takeIf { it.recording }?.toRecording() ?: _state.value
+            } else {
+                session?.takeIf { it.undelivered }?.toUndelivered(Failure(Failure.Stage.Stop, status))
+                    ?: State.Stopped(null, failure = Failure(Failure.Stage.Stop, status))
+            }
     }
 
     private fun newSessionId(): Long {

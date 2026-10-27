@@ -65,7 +65,7 @@ shared canonical file nor consume extra native target slots.
 - **Path:** `/data/system/vpnhide_config.json`
 - **Perms / label:** `0640 root:system`, SELinux `system_data_file`.
 - **Writer:** core only (atomic `tmp`+`rename`), for each edit the app submits
-  over the core socket (`config_replace`).
+  over its persistent core session as typed field edits (or an explicit import/bootstrap).
 - **Readers:** core (root), the LSPosed hook (directly, from `system_server`),
   and the app through core's published config state. **Not** readable by
   unprivileged apps or non-root `adb` (see §7).
@@ -130,10 +130,11 @@ manual and automatic hiding.
 
 `debugSwitch` is the user intent stored by the app toggle; `debug` is the
 effective in-runtime value. On a capture path, `debug` may temporarily become
-`true` while `debugSwitch` remains `false`. Startup reconciliation restores
-`debug := debugSwitch` when they diverge. A core logcat recording holds `debug`
-on through core's own lease, and core restores it when the recording ends. If
-the user changed `debugSwitch` meanwhile, the switch wins (see
+`true` while `debugSwitch` remains `false`. Core-owned expiring leases cover both
+forensic ZIP capture and logcat. The operation journal retains the baseline and
+restoration obligation independently of recorder artifacts; the last release or
+expiry triggers restoration. If the user changed `debugSwitch` meanwhile, the
+switch wins (see
 [debug-bundle.md](debug-bundle.md) §1).
 
 Migration from pre-switch configs:
@@ -276,7 +277,7 @@ it and applies the Ports iptables rules. The backend modules carry only their
 payload (`.ko`, `.kpm`, Zygisk `.so`) and no scripts; the 1.x per-module
 activators, the Ports module and the built-in companion module are gone. The app
 reaches core over its socket and never runs `su`. The design record is
-[notes/core-2.0-architecture.md](notes/core-2.0-architecture.md).
+[core-architecture.md](core-architecture.md).
 
 The native backends are **strictly mutually exclusive**, enforced once per boot
 (`crates/core-daemon/src/native_boot.rs`). The candidates are every installed
@@ -452,15 +453,11 @@ single-writer / atomic-replace, and stats are never written back into it.
 - **kmod / KPM: yes** — counters live in one place (kernel memory), so a
   pull-read is natural. They emit cumulative-since-load non-zero
   `(uid, hook_id)` cells for hooks that actually hid or rewrote a result.
-- **Zygisk: deferred.** Its counters would live **per app process** with no shared
-  aggregation point. A unix socket is out — it violates protocol.md §2 (pull-only,
-  no per-hit push) and needs a resident root collector, contrary to §4.3. Shared
-  memory is the pull-compatible direction, but there is no clean way
-  to share *writable* memory across all injected app-domain processes without a
-  daemon (the module-dir file isn't writable by `untrusted_app` under SELinux; a
-  zygote-inherited memfd must be created in the zygote, where our code does not run).
-  So Zygisk consumes per-target hookmasks but does not emit per-hook stats yet;
-  stats remain a future problem, not a blocker for this design.
+- **Zygisk: deferred.** Counters would live per app process. Core provides a
+  resident management service, but a statistics transport/aggregation contract is
+  not implemented. Hooks must not gain per-hit RPC or a writable shared endpoint
+  merely because core exists. Current Zygisk consumes policy snapshots and does
+  not emit per-hook statistics.
 - **LSPosed: yes** — counters live in `system_server`, so the hook aggregates
   cumulative-since-boot non-zero `(uid, hook_id)` cells and writes them into
   `/data/system/vpnhide_lsposed_state` next to its `status` block.
@@ -497,8 +494,10 @@ Magisk/KSU is **keyless**; this whole section is **APatch/FolkPatch-only**.)
   (protection active after a reboot, no app open needed). Some FolkPatch/APatch
   builds expose a trusted `su` token to already-authorized root callers; on those
   builds core can use that token and no saved SuperKey is needed. Without either
-  token, the boot outcome waits for the SuperKey; saving it in Settings (a fixed
-  core `root_effect`) makes core retry the load.
+  token, the boot outcome waits for the SuperKey; saving it in Settings (one
+  durable `SetSuperkey` command) makes its journaled Native phase retry the load.
+  With remembering disabled the key stays in core memory only; a daemon restart
+  requires authentication again unless a trusted root token is available.
 - **Plain file, not Keystore.** Core is a Rust binary, not an Android
   app, so it cannot call Android Keystore (a framework/binder API). Keystore-wrapping
   could protect the *app-time* use only, not the boot path. So the boot-usable copy
@@ -571,7 +570,7 @@ redefining the other contracts:
 | Concern | Authoritative document |
 |---|---|
 | Canonical JSON schema and desired state | this document (§2) |
-| JSON projection, native selection, and activation policy | this document (§4); [core-2.0 architecture](notes/core-2.0-architecture.md) |
+| JSON projection, native selection, and activation policy | this document (§4); [core-2.0 architecture](core-architecture.md) |
 | Persistent paths, diagnostic files, lifetimes, and boot sequence | [state.md](state.md) |
 | Control-v2 / telemetry-v1 bytes, registries, and runtime framing | [protocol.md](protocol.md) |
 | `.ko` module parameters and hook-install behavior | [kmod README](../kmod/README.md) |
@@ -584,14 +583,13 @@ not hand-build per-channel wire payloads.
 
 ## App-side operation ownership
 
-`CanonicalConfigRepository` owns one process-lived configuration coordinator.
-Every app write goes to core as one operation; screens submit field intent
-applied to a fresh canonical read. Core's operation receipt reports persistence
-and native/Ports delivery as separate phases; secret and cleanup steps are fixed
-core `root_effect`s with their own outcomes. Confirmed
-config reaches controls before slower observation-cache refresh completes.
-See [config coordinator](config-coordinator.md) for conflicts, logging ownership,
-unknown-outcome recovery and first-adoption behavior. This does not change the
-canonical schema, backend protocol or LSPosed direct-read contract.
+`CanonicalConfigRepository` owns one process-lived intent/draft coordinator and
+consumes confirmed config from the shared core session. Ordinary edits are one
+atomic typed field batch, merged against fresh core state. Full replacement is
+reserved for explicit import/bootstrap. Core executes and journals persistence
+and native/Ports delivery; the app displays its receipt without a second phase
+executor. Fixed secret/cleanup commands remain explicit effects with distinct
+uncertainty semantics. See [config intents](config-coordinator.md) and
+[current architecture](core-architecture.md).
 
 Live-kernel identity checks before loading or configuring are described in §4.3.

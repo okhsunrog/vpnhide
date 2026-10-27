@@ -102,19 +102,31 @@ pub fn apply(paths: &EffectPaths, effect: &RootEffect) -> Result<(), EffectError
                 remove_dir_all(&paths.at(dir))?;
             }
             let state = paths.at(STATE_DIR);
-            if let Ok(entries) = fs::read_dir(&state) {
-                for entry in entries.flatten() {
-                    let name = entry.file_name();
-                    if STATE_DIR_KEEP.iter().any(|keep| name == *keep) {
-                        continue;
+            match fs::read_dir(&state) {
+                Ok(entries) => {
+                    for entry in entries {
+                        let entry = entry.map_err(|error| {
+                            EffectError::Failed(format!("reset inventory: {}", error.kind()))
+                        })?;
+                        let name = entry.file_name();
+                        if STATE_DIR_KEEP.iter().any(|keep| name == *keep) {
+                            continue;
+                        }
+                        let path = entry.path();
+                        let removed = if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                            remove_dir_all(&path)
+                        } else {
+                            remove_file(&path)
+                        };
+                        removed?;
                     }
-                    let path = entry.path();
-                    let removed = if entry.file_type().is_ok_and(|t| t.is_dir()) {
-                        remove_dir_all(&path)
-                    } else {
-                        remove_file(&path)
-                    };
-                    removed?;
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(EffectError::Failed(format!(
+                        "reset inventory: {}",
+                        error.kind()
+                    )));
                 }
             }
             Ok(())
@@ -124,7 +136,7 @@ pub fn apply(paths: &EffectPaths, effect: &RootEffect) -> Result<(), EffectError
 
 fn remove_file(path: &Path) -> Result<(), EffectError> {
     match fs::remove_file(path) {
-        Ok(()) => Ok(()),
+        Ok(()) => sync_parent(path),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(EffectError::Failed(format!(
             "remove {}: {}",
@@ -136,7 +148,7 @@ fn remove_file(path: &Path) -> Result<(), EffectError> {
 
 fn remove_dir_all(path: &Path) -> Result<(), EffectError> {
     match fs::remove_dir_all(path) {
-        Ok(()) => Ok(()),
+        Ok(()) => sync_parent(path),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(EffectError::Failed(format!(
             "remove {}: {}",
@@ -163,12 +175,19 @@ fn write_secret(path: &Path, contents: &str) -> io::Result<()> {
             .create(true)
             .truncate(true)
             .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .open(&tmp)?;
         f.write_all(contents.as_bytes())?;
         f.sync_all()?;
     }
     fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
-    fs::rename(&tmp, path)
+    fs::rename(&tmp, path)?;
+    crate::config_file::sync_after_rename(parent)
+}
+
+fn sync_parent(path: &Path) -> Result<(), EffectError> {
+    crate::config_file::sync_after_rename(path.parent().unwrap_or_else(|| Path::new(".")))
+        .map_err(|error| EffectError::Failed(format!("directory durability: {}", error.kind())))
 }
 
 #[cfg(test)]

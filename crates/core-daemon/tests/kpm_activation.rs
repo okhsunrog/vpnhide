@@ -1,5 +1,7 @@
 //! Real core process and RPC with isolated fake KernelPatch/PackageManager.
 //! These tests validate orchestration, not an Android kernel or APatch supercall.
+
+mod common;
 use std::fs;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
@@ -7,7 +9,8 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use vpnhide_core_daemon::{CoreClient, config_file};
+use vpnhide_core_client::CoreClient;
+use vpnhide_core_daemon::config_file;
 use vpnhide_core_rpc::{
     AppConfig, BaseRef, CanonicalConfig, ConfigEdit, ConfigToggle, NativeBackend,
     NativeBootOutcome, NativeRole, OperationId, PhaseOutcome, SelectionMode, SubmitError,
@@ -199,7 +202,8 @@ async fn exercise(case: &str) {
     })
     .await
     .expect("core bound its socket");
-    let client = CoreClient::connect_and_mirror(&socket);
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 2).await;
     client.hello().await.unwrap();
     let mut candidate = CanonicalConfig::default();
     if case != "load-default" {

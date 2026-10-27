@@ -1,15 +1,83 @@
 //! Crash-window coverage for the durable journal: kill the core at phase
 //! boundaries, restart, and assert intent/identity/uncertainty without effect
 //! replay. Uses `VPNHIDE_TEST_CRASH_AFTER` (production never sets it).
+
+mod common;
 use std::fs;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use vpnhide_core_daemon::{CoreClient, config_file, journal};
+use vpnhide_core_client::CoreClient;
+use vpnhide_core_daemon::{config_file, journal};
 use vpnhide_core_rpc::{
     BaseRef, CanonicalConfig, ConfigEdit, ConfigPhase, ConfigToggle, OperationId, PhaseOutcome,
     SubmitError,
 };
+
+#[tokio::test]
+async fn completed_failure_with_skipped_ports_does_not_block_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("core.sock");
+    let config_path = dir.path().join("config.json");
+    let config = CanonicalConfig::default();
+    config_file::write_atomic(&config_path, &config).unwrap();
+    let mut stored = journal::Journal {
+        config_revision: 1,
+        ..Default::default()
+    };
+    stored.upsert(journal::JournalEntry {
+        admission: None,
+        command: None,
+        superseded_by: None,
+        superseded_phases: Vec::new(),
+        finalized_unknown: false,
+        base: BaseRef { revision: 0 },
+        edit: ConfigEdit::Replace {
+            config: config.clone(),
+        },
+        candidate: Some(config),
+        native_intent: None,
+        record: vpnhide_core_rpc::OperationRecord {
+            op: OperationId(1),
+            phases: vec![
+                vpnhide_core_rpc::PhaseRecord {
+                    phase: ConfigPhase::Persist,
+                    outcome: PhaseOutcome::Confirmed,
+                },
+                vpnhide_core_rpc::PhaseRecord {
+                    phase: ConfigPhase::Native,
+                    outcome: PhaseOutcome::FailedKnown,
+                },
+                vpnhide_core_rpc::PhaseRecord {
+                    phase: ConfigPhase::Ports,
+                    outcome: PhaseOutcome::NotAttempted,
+                },
+            ],
+            settled: Some(PhaseOutcome::FailedKnown),
+            ports: None,
+        },
+    });
+    journal::write_atomic(&config_path.with_file_name("core_operations.json"), &stored).unwrap();
+    let mut child = spawn_core(&socket, &config_path, None, None);
+    wait_bound(&socket, &mut child).await;
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 8).await;
+    client.hello().await.unwrap();
+    let failed = client.get_operation(OperationId(1)).await.unwrap().unwrap();
+    assert_eq!(failed.settled, Some(PhaseOutcome::FailedKnown));
+    assert!(
+        client
+            .submit_edit(
+                OperationId(2),
+                BaseRef { revision: 1 },
+                ConfigEdit::RepairActivation,
+            )
+            .await
+            .unwrap()
+            .is_ok(),
+        "a historical known failure must not hold new operations"
+    );
+}
 
 struct CoreProcess(Child);
 
@@ -77,7 +145,8 @@ async fn crash_after_persist_intent_reconciles_to_failed_without_replay() {
 
     let mut child = spawn_core(&socket, &config_path, Some("persist-intent"), None);
     wait_bound(&socket, &mut child).await;
-    let client = CoreClient::connect_and_mirror(&socket);
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 8).await;
     client.hello().await.unwrap();
     let submit = client
         .submit_edit(
@@ -114,7 +183,8 @@ async fn crash_after_persist_intent_reconciles_to_failed_without_replay() {
     let _ = fs::remove_file(&socket);
     let mut child = spawn_core(&socket, &config_path, None, None);
     wait_bound(&socket, &mut child).await;
-    let client = CoreClient::connect_and_mirror(&socket);
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 8).await;
     client.hello().await.unwrap();
     let record = client
         .get_operation(OperationId(1))
@@ -163,7 +233,8 @@ async fn crash_after_persist_reconciles_confirmed_and_holds_unfinished_native() 
 
     let mut child = spawn_core(&socket, &config_path, Some("persist"), Some(&ctl));
     wait_bound(&socket, &mut child).await;
-    let client = CoreClient::connect_and_mirror(&socket);
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 8).await;
     client.hello().await.unwrap();
     let candidate = CanonicalConfig {
         debug: true,
@@ -195,7 +266,8 @@ async fn crash_after_persist_reconciles_confirmed_and_holds_unfinished_native() 
     let _ = fs::remove_file(&socket);
     let mut child = spawn_core(&socket, &config_path, None, Some(&ctl));
     wait_bound(&socket, &mut child).await;
-    let client = CoreClient::connect_and_mirror(&socket);
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 8).await;
     client.hello().await.unwrap();
     let record = client
         .get_operation(OperationId(7))
@@ -245,7 +317,8 @@ async fn crash_after_native_intent_keeps_unknown_without_replay() {
 
     let mut child = spawn_core(&socket, &config_path, Some("native-intent"), Some(&ctl));
     wait_bound(&socket, &mut child).await;
-    let client = CoreClient::connect_and_mirror(&socket);
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 8).await;
     client.hello().await.unwrap();
     let submit = client
         .submit_edit(
@@ -266,7 +339,8 @@ async fn crash_after_native_intent_keeps_unknown_without_replay() {
     let _ = fs::remove_file(&socket);
     let mut child = spawn_core(&socket, &config_path, None, Some(&ctl));
     wait_bound(&socket, &mut child).await;
-    let client = CoreClient::connect_and_mirror(&socket);
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 8).await;
     client.hello().await.unwrap();
     let record = client.get_operation(OperationId(3)).await.unwrap().unwrap();
     assert_eq!(

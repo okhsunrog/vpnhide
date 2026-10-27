@@ -6,6 +6,22 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private fun RootSnapshot.withPublication(): RootSnapshot =
+    joinRootSnapshot(
+        sections,
+        CoreSessionUpdate(
+            CoreStateView(
+                1,
+                1,
+                parseCanonicalConfig(
+                    sections["canonical_config"].orEmpty(),
+                )?.let(RootCanonicalRead::Available) ?: RootCanonicalRead.Missing,
+                emptyList(),
+            ),
+            current = true,
+        ),
+    )
+
 class TargetsCacheTest {
     @Test
     fun `targets snapshot derives roles and observer UIDs from canonical config`() {
@@ -39,7 +55,7 @@ class TargetsCacheTest {
                     ),
             )
 
-        val targets = parseTargetsSnapshot(rootSnapshot)
+        val targets = parseTargetsSnapshot(rootSnapshot.withPublication())
 
         assertTrue(targets.kmodModuleInstalled)
         assertFalse(targets.zygiskModuleInstalled)
@@ -83,7 +99,7 @@ class TargetsCacheTest {
                     ),
             )
 
-        val targets = parseTargetsSnapshot(rootSnapshot)
+        val targets = parseTargetsSnapshot(rootSnapshot.withPublication())
 
         assertEquals(setOf("com.invisible", "com.known"), targets.observerNames)
         // Its UID is genuinely unknown, so it contributes none — that is a
@@ -118,7 +134,7 @@ class TargetsCacheTest {
                     ),
             )
 
-        val targets = parseTargetsSnapshot(rootSnapshot)
+        val targets = parseTargetsSnapshot(rootSnapshot.withPublication())
 
         assertEquals(setOf("com.java"), targets.lsposedTargets)
         assertEquals(
@@ -135,7 +151,7 @@ class TargetsCacheTest {
     }
 
     @Test
-    fun `targets snapshot reports active zygisk only for current boot heartbeat`() {
+    fun `targets snapshot consumes accepted observed backend instead of stale heartbeat text`() {
         val sections =
             mapOf(
                 "kmod_module_dir" to "0",
@@ -153,13 +169,24 @@ class TargetsCacheTest {
                 "zygisk_status" to "boot_id=boot-1",
             )
 
+        val publication =
+            CoreSessionUpdate(
+                CoreStateView(
+                    1,
+                    1,
+                    RootCanonicalRead.Missing,
+                    emptyList(),
+                    backend = CoreBackendView(true, active = NativeBackendId.Zygisk),
+                ),
+                true,
+            )
         assertEquals(
             NativeBackendId.Zygisk,
-            parseTargetsSnapshot(RootSnapshot(sections)).activeNativeBackendId,
+            parseTargetsSnapshot(joinRootSnapshot(sections + ("zygisk_status" to "boot_id=old"), publication)).activeNativeBackendId,
         )
         assertEquals(
             null,
-            parseTargetsSnapshot(RootSnapshot(sections + ("zygisk_status" to "boot_id=old"))).activeNativeBackendId,
+            parseTargetsSnapshot(joinRootSnapshot(sections, publication.copy(current = false))).activeNativeBackendId,
         )
     }
 }

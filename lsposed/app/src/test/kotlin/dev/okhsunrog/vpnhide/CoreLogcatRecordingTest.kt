@@ -2,121 +2,91 @@ package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.core.CoreLogcatReply
 import dev.okhsunrog.vpnhide.core.CoreRoot
-import dev.okhsunrog.vpnhide.core.CoreRootTransport
 import dev.okhsunrog.vpnhide.core.LogcatAutoStop
 import dev.okhsunrog.vpnhide.core.LogcatDebugRestore
-import dev.okhsunrog.vpnhide.core.parseCoreLogcatReply
-import dev.okhsunrog.vpnhide.core.parseCoreLogcatSession
+import dev.okhsunrog.vpnhide.core.coreLogcatReply
+import dev.okhsunrog.vpnhide.core.coreLogcatSession
 import dev.okhsunrog.vpnhide.debug.DebugCaptureInfo
 import dev.okhsunrog.vpnhide.debug.debugCaptureInfo
 import kotlinx.coroutines.test.runTest
-import org.json.JSONArray
-import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
+import uniffi.vpnhide_core_ffi.CoreLogcatAutoStopReason
+import uniffi.vpnhide_core_ffi.CoreLogcatDebugLease
+import uniffi.vpnhide_core_ffi.CoreLogcatDebugRestore
+import uniffi.vpnhide_core_ffi.CoreLogcatError
+import uniffi.vpnhide_core_ffi.CoreLogcatRequest
+import uniffi.vpnhide_core_ffi.CoreLogcatSessionState
+import uniffi.vpnhide_core_ffi.CoreLogcatSessionStatus
+import uniffi.vpnhide_core_ffi.LogcatReply
 
-/** Core's logcat session wire (`fixtures/core-rpc/logcat-session-status.json`, written by core-rpc). */
 class CoreLogcatRecordingTest {
     @After fun detach() = CoreRoot.setTransport(null)
 
     @Test
-    fun `parses every session shape core writes`() {
-        val all = JSONArray(File("../../fixtures/core-rpc/logcat-session-status.json").readText())
-        val sessions = List(all.length()) { parseCoreLogcatSession(all.getJSONObject(it)) }
-
-        val running = sessions[0]
-        assertEquals(42L, running.id)
+    fun `typed session retains auto stop delivery and lease evidence`() {
+        val native =
+            CoreLogcatSessionStatus(
+                42u,
+                CoreLogcatSessionState.Recording,
+                1u,
+                20u,
+                32u,
+                false,
+                64uL shl 20,
+                1800000u,
+                null,
+                null,
+                false,
+                CoreLogcatDebugLease(false, false, CoreLogcatDebugRestore.HELD),
+            )
+        val running = coreLogcatSession(native)
         assertTrue(running.recording)
-        assertNull(running.autoStop)
-        assertEquals(64L shl 20, running.maxBytes)
-        assertEquals(1_800_000L, running.maxDurationMs)
-        assertNull(running.file)
-
-        val capped = sessions[1]
-        assertFalse(capped.recording)
-        assertEquals(LogcatAutoStop.SizeCap, capped.autoStop)
-        assertTrue(capped.truncated)
-        assertEquals("logcat-session-43.txt", capped.file?.name)
-
-        assertEquals(LogcatAutoStop.LogcatExited, sessions[2].autoStop)
-        assertEquals(1, sessions[2].logcatExit)
-
-        // Core's debug lease and delivery state.
-        assertEquals(LogcatDebugRestore.Held, running.debug?.restore)
-        assertTrue(running.debug!!.forced)
         assertFalse(running.undelivered)
-        assertEquals(LogcatDebugRestore.UserChoice, capped.debug?.restore)
-        assertTrue(capped.undelivered)
-        assertTrue(sessions[2].delivered)
-        assertNull(sessions[2].debug)
-        assertFalse(sessions[2].undelivered)
-
-        val restarted = sessions[3]
-        assertEquals(LogcatAutoStop.CoreRestarted, restarted.autoStop)
-        assertEquals(LogcatDebugRestore.Restored, restarted.debug?.restore)
-        assertTrue(restarted.undelivered)
+        assertEquals(LogcatDebugRestore.Held, running.debug!!.restore)
+        assertEquals(DebugCaptureInfo(true, 0, null, "core lease, restore=held"), running.debugCaptureInfo())
+        native.state = CoreLogcatSessionState.AutoStopped(CoreLogcatAutoStopReason.CORE_RESTARTED)
+        native.file = "/x/logcat-42.txt"
+        val stopped = coreLogcatSession(native)
+        assertEquals(LogcatAutoStop.CoreRestarted, stopped.autoStop)
+        assertTrue(stopped.undelivered)
+        assertEquals("logcat-42.txt", stopped.file!!.name)
+        native.debug!!.restore = CoreLogcatDebugRestore.USER_CHOICE
+        assertEquals(LogcatDebugRestore.UserChoice, coreLogcatSession(native).debug!!.restore)
+        native.delivered = true
+        assertFalse(coreLogcatSession(native).undelivered)
     }
 
     @Test
-    fun `the zip's debug capture comes from core's lease`() {
-        val all = JSONArray(File("../../fixtures/core-rpc/logcat-session-status.json").readText())
-        val sessions = List(all.length()) { parseCoreLogcatSession(all.getJSONObject(it)) }
-        assertEquals(DebugCaptureInfo(true, 0, null, "core lease, restore=held"), sessions[0].debugCaptureInfo())
-        assertEquals(DebugCaptureInfo(true, 0, 0, "core lease, restore=user_choice"), sessions[1].debugCaptureInfo())
-        assertNull(sessions[2].debugCaptureInfo())
-        val pending = sessions[3].copy(debug = sessions[3].debug!!.copy(previousDebug = true, restore = LogcatDebugRestore.Pending))
-        assertEquals(DebugCaptureInfo(false, 0, -1, "core lease, restore=pending"), pending.debugCaptureInfo())
-    }
-
-    @Test
-    fun `replies map to ok, busy and failure`() {
-        assertEquals(CoreLogcatReply.Ok(null), parseCoreLogcatReply("""{"status":"ok","session":null}"""))
-        assertEquals(CoreLogcatReply.Busy(7), parseCoreLogcatReply("""{"status":"busy","detail":"x","running":7}"""))
-        assertEquals(
-            CoreLogcatReply.Failed("disabled", "off"),
-            parseCoreLogcatReply("""{"status":"disabled","detail":"off"}"""),
-        )
-        assertEquals("malformed", (parseCoreLogcatReply("""{"status":"ok"} trailing""") as CoreLogcatReply.Failed).status)
-    }
-
-    @Test
-    fun `every action names the action and session only`() =
+    fun `actions and refusals use generated vocabulary`() =
         runTest {
-            val sent = mutableListOf<JSONObject>()
+            val sent = mutableListOf<CoreLogcatRequest>()
             CoreRoot.setTransport(
-                object : CoreRootTransport {
-                    override suspend fun collectDiagnostics(requestJson: String): String = ""
-
-                    override suspend fun rootEffect(
-                        op: Long,
-                        effectJson: String,
-                    ): String = ""
-
-                    override suspend fun logcatRecording(requestJson: String): String {
-                        sent += JSONObject(requestJson)
-                        return """{"status":"unknown_session","detail":"none"}"""
+                object : TestCoreRootTransport() {
+                    override suspend fun logcatRecording(request: CoreLogcatRequest): LogcatReply {
+                        sent += request
+                        return LogcatReply.Refused(CoreLogcatError.UnknownSession)
                     }
                 },
             )
             CoreRoot.startLogcat(5)
             CoreRoot.stopLogcat(5)
-            assertEquals(CoreLogcatReply.Failed("unknown_session", "none"), CoreRoot.logcatStatus())
+            assertEquals(CoreLogcatReply.Failed("unknown_session", ""), CoreRoot.logcatStatus())
             CoreRoot.ackLogcat(5)
             CoreRoot.discardLogcat(5)
-            assertEquals(listOf("start", "stop", "status", "ack", "discard"), sent.map { it.getString("action") })
-            assertEquals(5L, sent[0].getLong("session"))
-            assertEquals(listOf(5L, 5L), sent.drop(3).map { it.getLong("session") })
-            sent.forEach { assertEquals(setOf("action", "session"), it.keys().asSequence().toSet()) }
-        }
-
-    @Test
-    fun `an unattached core is unreachable`() =
-        runTest {
-            assertEquals("unreachable", (CoreRoot.startLogcat(1) as CoreLogcatReply.Failed).status)
+            assertEquals(
+                listOf(
+                    CoreLogcatRequest.Start(5u),
+                    CoreLogcatRequest.Stop(5u),
+                    CoreLogcatRequest.Status,
+                    CoreLogcatRequest.Ack(5u),
+                    CoreLogcatRequest.Discard(5u),
+                ),
+                sent,
+            )
+            assertEquals(CoreLogcatReply.Busy(7), coreLogcatReply(LogcatReply.Refused(CoreLogcatError.Busy(7u))))
         }
 }

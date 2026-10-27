@@ -1,7 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.core.CoreRootEffect
-
 internal enum class ConfigCoordinatorMode { Initializing, Open, Missing, Invalid, Unavailable, Paused }
 
 internal data class ConfigCoordinatorView(
@@ -10,177 +8,115 @@ internal data class ConfigCoordinatorView(
     val pending: Map<CanonicalToggle, Boolean> = emptyMap(),
     val operations: Set<Long> = emptySet(),
     val lastResult: ConfigOperationResult? = null,
-    /** Why [lastResult] was refused at Save, when its native target set did not fit. */
     val lastNativeCapacity: NativeCapacityRefusal? = null,
     val activeCaptures: Int = 0,
+    val desiredRevision: Long? = null,
+    val nativeObservationCurrent: Boolean = false,
+    val coreOperations: Set<Long> = emptySet(),
+    val applyEvidence: List<CoreApplyIdentity> = emptyList(),
+    val heldResources: Set<ConfigPhase> = emptySet(),
+    val canRepair: Boolean = false,
+    val coreCurrent: Boolean = false,
+    val coreEpoch: Long? = null,
+    val coreSequence: Long = 0,
     val recoveredResult: ConfigOperationResult? = null,
     val rechecking: Boolean = false,
 )
 
-internal data class ConfigInitialization(
-    val mode: ConfigCoordinatorMode,
-    val config: CanonicalConfig? = null,
+internal const val MAX_CORE_CONFIG_BYTES = 512 * 1024
+
+internal data class PreparedConfigIntent(
+    val candidate: CanonicalConfig,
+    val edits: List<CanonicalEdit>,
+    val writes: Set<ConfigField>,
 )
 
-internal data class ConfigPhaseEvidence(
-    val outcome: PhaseOutcome,
-    val canonical: RootCanonicalRead,
-    /** Core refused the edit at Save because its native target set does not fit. */
-    val nativeCapacity: NativeCapacityRefusal? = null,
-)
+internal sealed interface ConfigIntentPreparation {
+    data class Prepared(
+        val intent: PreparedConfigIntent,
+    ) : ConfigIntentPreparation
 
-internal interface ConfigCoordinatorIo {
-    suspend fun initialize(): ConfigInitialization
-
-    suspend fun read(): RootCanonicalRead
-
-    suspend fun execute(
-        ticket: EffectTicket,
-        phase: ConfigPhase,
-        base: CanonicalConfig?,
-        candidate: CanonicalConfig,
-        effects: List<CoreRootEffect>,
-    ): ConfigPhaseEvidence
-
-    suspend fun recover(
-        operationId: Long,
-        phase: ConfigPhase,
-    ): ConfigPhaseEvidence
-
-    /**
-     * Whether the last state read says core holds debug logging on for a logcat recording.
-     * Candidates then keep `debug` true (core enforces it anyway), so confirmed == candidate.
-     */
-    val debugLease: Boolean
-        get() = false
+    data class Failed(
+        val reason: TransitionFailure,
+    ) : ConfigIntentPreparation
 }
 
-internal fun configMutationPlan(
+/** Resolve app-owned transforms into field intents; core alone plans execution. */
+internal fun prepareConfigIntent(
+    read: RootCanonicalRead,
     mutation: CanonicalMutation,
-    changed: Boolean,
-    loggingChanged: Boolean = false,
-): List<ConfigPhase> =
-    buildList {
-        if (changed && !mutation.removesCanonical) add(ConfigPhase.Persist)
-        if (mutation.coupledEffects.isNotEmpty()) {
-            add(
-                if (mutation.cleanup ||
-                    mutation.removesCanonical
-                ) {
-                    ConfigPhase.Cleanup
-                } else {
-                    ConfigPhase.Secret
-                },
-            )
+): ConfigIntentPreparation {
+    val base =
+        (read as? RootCanonicalRead.Available)?.config
+            ?: if (read == RootCanonicalRead.Missing && (mutation.bootstrap || mutation.removesCanonical)) {
+                CanonicalConfig()
+            } else {
+                return ConfigIntentPreparation.Failed(TransitionFailure.ReadFailed)
+            }
+    return runCatching {
+        val candidate = applyCanonicalMutation(base, mutation)
+        require(parseCanonicalConfig(canonicalConfigJson(candidate)) == candidate)
+        require(canonicalConfigJson(candidate).toByteArray(Charsets.UTF_8).size <= MAX_CORE_CONFIG_BYTES)
+        require(mutation.coupledEffects.all { it.valid })
+        val edits = configIntentEdits(base, candidate, mutation, read == RootCanonicalRead.Missing)
+        ConfigIntentPreparation.Prepared(PreparedConfigIntent(candidate, edits, mutation.writes + edits.flatMap(::canonicalEditFields)))
+    }.getOrElse { ConfigIntentPreparation.Failed(TransitionFailure.ValidationFailed) }
+}
+
+private fun configIntentEdits(
+    base: CanonicalConfig,
+    candidate: CanonicalConfig,
+    mutation: CanonicalMutation,
+    missing: Boolean,
+): List<CanonicalEdit> {
+    if (mutation.removesCanonical) return emptyList()
+    if (missing || mutation.edits.any { it is CanonicalEdit.Replace }) return listOf(CanonicalEdit.Replace(candidate))
+    val changed = canonicalEdits(base, candidate)
+    // Same-value setters still declare intent and must participate in core's conflict check.
+    val changedFields = changed.flatMapTo(linkedSetOf(), ::canonicalEditFields)
+    return changed +
+        mutation.edits
+            .flatMap { finalIntentEdits(it, candidate) }
+            .filter { canonicalEditFields(it).none { field -> field in changedFields } }
+}
+
+/** Policies may override a requested value (notably the app's own protected roles). */
+private fun finalIntentEdits(
+    edit: CanonicalEdit,
+    candidate: CanonicalConfig,
+): List<CanonicalEdit> =
+    when (edit) {
+        is CanonicalEdit.Toggle -> {
+            listOf(edit.copy(enabled = canonicalToggle(candidate, edit.field)))
         }
-        if (changed || mutation.coupledEffects.isNotEmpty() || mutation.forceActivation) {
-            if (mutation.activation.native || loggingChanged) add(ConfigPhase.Native)
-            if (mutation.activation.ports) add(ConfigPhase.Ports)
+
+        is CanonicalEdit.SettingSet -> {
+            listOf(edit.copy(values = canonicalSet(candidate, edit.field)))
+        }
+
+        is CanonicalEdit.App -> {
+            listOf(edit.copy(value = candidate.apps[edit.pkg] ?: CanonicalApp()))
+        }
+
+        is CanonicalEdit.RemoveApp -> {
+            candidate.apps[edit.pkg]?.let { app ->
+                CanonicalAppField.entries.map { field -> CanonicalEdit.App(edit.pkg, field, app) }
+            } ?: listOf(edit)
+        }
+
+        is CanonicalEdit.Replace -> {
+            listOf(CanonicalEdit.Replace(candidate))
         }
     }
-
-/** The root effects a phase carries: only Secret/Cleanup do; the rest are typed core edits (see CoreConfigIo). */
-internal fun configPhaseEffects(
-    phase: ConfigPhase,
-    mutation: CanonicalMutation,
-): List<CoreRootEffect> =
-    when (phase) {
-        ConfigPhase.Persist, ConfigPhase.Native, ConfigPhase.Ports -> emptyList()
-        ConfigPhase.Secret, ConfigPhase.Cleanup -> mutation.coupledEffects
-    }
-
-/** The canonical JSON size core-ffi `config_replace` accepts (`config_relay::MAX_CONFIG`). */
-internal const val MAX_CORE_CONFIG_BYTES = 512 * 1024
 
 internal fun pendingConfigToggles(mutations: Collection<CanonicalMutation>): Map<CanonicalToggle, Boolean> =
     buildMap {
-        mutations.forEach { mutation ->
-            mutation.edits.filterIsInstance<CanonicalEdit.Toggle>().forEach { put(it.field, it.enabled) }
-        }
+        mutations.forEach { mutation -> mutation.edits.filterIsInstance<CanonicalEdit.Toggle>().forEach { put(it.field, it.enabled) } }
     }
 
-internal fun prepareConfigMutation(
-    ticket: EffectTicket,
-    read: RootCanonicalRead,
-    mutation: CanonicalMutation,
-    captureEnabled: Boolean? = null,
-): ConfigOperationEvent {
-    val base =
-        (read as? RootCanonicalRead.Available)?.config
-            ?: if (read == RootCanonicalRead.Missing &&
-                (mutation.bootstrap || mutation.removesCanonical)
-            ) {
-                CanonicalConfig()
-            } else {
-                return ConfigOperationEvent.PreparationFailed(ticket, TransitionFailure.ReadFailed)
-            }
-    return runCatching {
-        val edited = applyCanonicalMutation(base, mutation)
-        val candidate =
-            if (captureEnabled == null ||
-                mutation.removesCanonical
-            ) {
-                edited
-            } else {
-                edited.copy(debug = edited.debugSwitch || captureEnabled)
-            }
-        // Readback must represent exactly the candidate, including normalized policies and disabled roles.
-        require(parseCanonicalConfig(canonicalConfigJson(candidate)) == candidate)
-        val plan =
-            configMutationPlan(
-                mutation,
-                candidate != base || read == RootCanonicalRead.Missing,
-                loggingChanged = captureEnabled != null && candidate.debug != base.debug,
-            )
-        // Reject unframeable/oversized effects before even the persistence phase can be dispatched.
-        require(canonicalConfigJson(candidate).toByteArray(Charsets.UTF_8).size <= MAX_CORE_CONFIG_BYTES)
-        require(mutation.coupledEffects.all { it.valid })
-        ConfigOperationEvent.Prepared(
-            ticket,
-            base,
-            candidate,
-            plan,
-            canonicalEdits(base, candidate).flatMapTo(linkedSetOf(), ::canonicalEditFields),
-            read is RootCanonicalRead.Available,
-        )
-    }.getOrElse { ConfigOperationEvent.PreparationFailed(ticket, TransitionFailure.ValidationFailed) }
-}
-
-internal fun configRecoveryEvidence(
-    active: ActiveConfigOperation,
-    evidence: ConfigPhaseEvidence,
-    available: Boolean,
-): ConfigRecoveryEvidence? {
-    if (evidence.outcome !in setOf(PhaseOutcome.Confirmed, PhaseOutcome.FailedKnown)) return null
-    val config =
-        (evidence.canonical as? RootCanonicalRead.Available)?.config ?: if (
-            evidence.canonical == RootCanonicalRead.Missing &&
-            (
-                (!available && active.phase == ConfigPhase.Persist && evidence.outcome == PhaseOutcome.FailedKnown) ||
-                    (active.request.spec.removesCanonical && active.phase == ConfigPhase.Cleanup)
-            )
-        ) {
-            CanonicalConfig()
-        } else {
-            return null
-        }
-    return ConfigRecoveryEvidence(config, active.outcomes + (requireNotNull(active.phase) to evidence.outcome))
-}
-
-internal fun configCompletionEvidence(
-    active: ActiveConfigOperation,
-    evidence: ConfigPhaseEvidence,
-): ConfigPhaseEvidence {
-    if (!active.request.spec.removesCanonical || active.phase != ConfigPhase.Cleanup ||
-        evidence.outcome == PhaseOutcome.Unknown
-    ) {
-        return evidence
+internal fun coreRecordFailure(record: CoreOperationRecord): TransitionFailure? =
+    when (record.settled) {
+        PhaseOutcome.Confirmed -> null
+        PhaseOutcome.FailedKnown -> TransitionFailure.ExecutionFailed
+        else -> TransitionFailure.ApplicationUnknown
     }
-    val outcome =
-        when (evidence.canonical) {
-            RootCanonicalRead.Missing -> evidence.outcome
-            is RootCanonicalRead.Available -> PhaseOutcome.FailedKnown
-            else -> PhaseOutcome.Unknown
-        }
-    return evidence.copy(outcome = outcome)
-}

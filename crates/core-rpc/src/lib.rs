@@ -1,4 +1,5 @@
-//! The wire between the app and the persistent root core (core-2.0 §5/§9).
+//! The typed RPC wire between the app and the persistent root core.
+//! Ownership and lifecycle are documented in `docs/core-architecture.md`.
 //!
 //! This is a **different boundary** from the frozen kernel control/telemetry protocol
 //! (the `protocol` crate / docs/protocol.md); changing core IPC does not touch that.
@@ -47,7 +48,7 @@ pub use config::{
 pub use diag::{
     DiagnosticProbe, DiagnosticsReport, DiagnosticsRequest, EffectError, ProbeOutput, RootEffect,
 };
-pub use edit::{ConfigAppField, ConfigEdit, ConfigSetField, ConfigToggle};
+pub use edit::{ConfigAppField, ConfigEdit, ConfigSetField, ConfigToggle, MAX_BATCH_EDITS};
 pub use logcat::{
     LogcatAutoStopReason, LogcatDebugLease, LogcatDebugRestore, LogcatRecordingError,
     LogcatSessionId, LogcatSessionState, LogcatSessionStatus,
@@ -55,9 +56,9 @@ pub use logcat::{
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 11;
 
-/// Filesystem path of the core's UDS socket. A path socket (never abstract, §9): its
+/// Filesystem path of the core's UDS socket. A path socket (never abstract): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
 pub const SOCKET_NAME: &str = "vpnhide-core.sock";
 
@@ -90,10 +91,64 @@ pub const LOGCAT_STOP_DEADLINE: Duration = Duration::from_secs(60);
 /// Core's own cap on any single probe's runtime.
 pub const PROBE_MAX_RUNTIME: Duration = Duration::from_secs(180);
 
-/// A stable identifier for a config-mutation operation. Reusing an id with the same
-/// payload queries/deduplicates it; reuse with a different payload is rejected (§5).
+/// A durable monotonic identity allocated by core before command submission.
+/// Receipts deduplicate exact non-secret requests while retained; expired identities
+/// can never dispatch again. Secret-bearing commands are recovered by receipt query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct OperationId(pub u64);
+
+/// Core owns composition, ordering and durable receipts for every privileged command.
+/// Secret values exist only in the submitted request and the command worker's memory.
+/// A submitted SetSuperkey is recovered with get_operation; resubmission refuses
+/// IdReused because durable storage intentionally has no secret payload verifier.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CoreCommand {
+    Edit {
+        base: BaseRef,
+        edit: ConfigEdit,
+    },
+    SetSuperkey {
+        base: BaseRef,
+        remember: bool,
+        superkey: String,
+    },
+    ClearSuperkey {
+        base: BaseRef,
+    },
+    Import {
+        base: BaseRef,
+        config: CanonicalConfig,
+        cleanup_legacy: bool,
+    },
+    CleanupLegacy,
+    FullReset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DebugLeaseId(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum DebugLeaseOwner {
+    Forensic,
+    Logcat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DebugLease {
+    pub id: DebugLeaseId,
+    pub owner: DebugLeaseOwner,
+    pub expires_at_ms: u64,
+}
+
+/// A resource's latest confirmed delivery is separate from desired canonical state.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ApplyEvidence {
+    pub phase: ConfigPhase,
+    pub desired_revision: u64,
+    pub op: OperationId,
+    pub outcome: PhaseOutcome,
+}
 
 /// The client's identity in the handshake.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -106,7 +161,7 @@ pub struct ClientHello {
 /// The core's answer to [`VpnhideCore::hello`].
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Handshake {
-    /// Compatible: the current core instance/epoch the caller should follow (§6).
+    /// Compatible: the current core instance/epoch the caller should follow.
     Compatible {
         core_protocol: u32,
         core_build: String,
@@ -117,7 +172,7 @@ pub enum Handshake {
     Incompatible { core_protocol: u32 },
 }
 
-/// A published state and which run of the core published it (§6 cross-process epoch).
+/// A published state and which run of the core published it.
 ///
 /// `epoch` identifies the core instance; `revision` only ever grows *within one epoch*.
 /// A restart is a new `epoch`, whose `revision` starts over — so the client adopts on an
@@ -130,36 +185,48 @@ pub struct Published {
     pub snapshot: StateSnapshot,
 }
 
-/// The read-only replica the app mirrors from the core.
-///
-/// The read-only replica the app mirrors (§3): the confirmed canonical config, the
-/// operations in flight, and the root observation. `config` is `None` when the core holds
-/// no usable config (absent ≠ empty — a distinct state, §3). TODO(§3): join in the
-/// provenance-tagged app-context measurements when diagnostics move onto the wire.
+/// Core-owned facts mirrored into the app: confirmed canonical config, command
+/// receipts and root observations. `config: None` means no usable config, distinct
+/// from an empty config. App-context measurements remain in the actual app process
+/// and are joined with these facts at its observation boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct StateSnapshot {
+    #[serde(default)]
+    pub startup_error: Option<String>,
     /// The confirmed canonical config, or `None` when the core has none.
     pub config: Option<CanonicalConfig>,
     /// A monotonic counter that bumps only when the config changes — the base a
-    /// [`submit_edit`](VpnhideCore::submit_edit) conflict-checks against. Distinct from
+    /// [`submit_command`](VpnhideCore::submit_command) conflict-checks against. Distinct from
     /// [`Published::revision`], which bumps on any snapshot change (including observations),
     /// so an observation update never spuriously conflicts a config edit.
     pub config_revision: u64,
     /// Ids of operations still in flight, so the app can show pending intent.
     pub operations_in_flight: Vec<OperationId>,
-    /// What the root observation loop currently sees of real routing (§8).
+    /// Admission is held by an unresolved effect, including durable uncertainty after restart.
+    #[serde(default)]
+    pub mutation_held: bool,
+    /// What the root observation loop currently sees of real routing.
     pub routing: RoutingObservation,
-    /// Which native backend core observes as active/installed (§4). Centralizing this — one
+    /// Which native backend core observes as active/installed. Centralizing this — one
     /// detected identity instead of each activator probing for itself — is the point of core
     /// owning all state: the family to project for, and what the app shows, come from here.
     pub backend: NativeBackendStatus,
-    /// A logcat recording holds debug logging on (v9): while set, core keeps `debug` true
-    /// on every admitted edit, and the app's candidates should say so too.
+    /// Any active capture lease holds effective debug logging on. User debug intent
+    /// remains separate and is restored when the last bounded lease ends.
     #[serde(default)]
     pub debug_lease: bool,
+    #[serde(default)]
+    pub debug_leases: Vec<DebugLease>,
+    /// Bounded recent receipts, including in-flight phase progress.
+    #[serde(default)]
+    pub operations: Vec<OperationRecord>,
+    #[serde(default)]
+    pub apply_evidence: Vec<ApplyEvidence>,
+    #[serde(default)]
+    pub held_resources: Vec<ConfigPhase>,
 }
 
-/// Whether observation evidence is current, never obtained, or explicitly Unknown (§6/§8).
+/// Whether observation evidence is current, never obtained, or explicitly Unknown.
 /// Last-good display data may still be present when [`ObservationFreshness::Unknown`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -196,7 +263,7 @@ pub struct FrameworkVpnEvidence {
     pub detail: String,
 }
 
-/// Per-UID VPN membership once framework VPN ifaces are known (§8).
+/// Per-UID VPN membership once framework VPN ifaces are known.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UidVpnRouteState {
@@ -211,9 +278,15 @@ pub struct UidRoutingObservation {
     pub uid: u32,
     pub state: UidVpnRouteState,
     pub detail: String,
+    /// Framework VPN session identity, retained independently of interface reuse.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Interfaces used for this UID's routing evidence (including unmanaged tunnels).
+    #[serde(default)]
+    pub interfaces: Vec<String>,
 }
 
-/// The core's own view of real routing (§8). Netlink triggers/membership; framework
+/// The core's own view of real routing. Netlink triggers/membership; framework
 /// classifies VPN. Independent of the app's filterable callbacks.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct RoutingObservation {
@@ -251,13 +324,15 @@ pub enum NativeBackend {
     Zygisk,
 }
 
-/// What core observes of the native backend (§4), detected from runtime identity rather than
-/// from a module directory merely existing (§2). `installed` ≠ `active`: a module can be
+/// What core observes of the native backend, detected from runtime identity rather than
+/// from a module directory merely existing. `installed` ≠ `active`: a module can be
 /// present but not the running backend. This is observed state (like [`RoutingObservation`]),
 /// published so the app reads the active backend from one place instead of joining per-backend
 /// status files.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct NativeBackendStatus {
+    #[serde(default)]
+    pub observed_freshness: ObservationFreshness,
     /// Last backend selected by this core instance for an apply attempt.
     /// Distinct from [`Self::applied`]: selection/publication attempt ≠ confirmed apply.
     /// Zygisk file publication is not proof of per-process hooks.
@@ -468,14 +543,14 @@ pub struct NativeBootStatus {
     pub obsolete_modules: Vec<String>,
 }
 
-/// The base a submitted edit is checked against, for conflict detection (§5).
+/// The base a submitted edit is checked against, for conflict detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BaseRef {
     pub revision: u64,
 }
 
 /// The core accepted a durable mutation. It now owns the operation independently of the
-/// caller's connection (§5): client death does not cancel it.
+/// caller's connection: client death does not cancel it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Accepted {
     pub op: OperationId,
@@ -484,10 +559,14 @@ pub struct Accepted {
 /// Why the core refused an edit at submission.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SubmitError {
-    /// A stale change to a field another accepted change already moved (§5).
+    /// A stale change to a field another accepted change already moved.
     Conflict { field: String },
     /// The same id was reused with a different payload.
     IdReused,
+    /// The bounded receipt window has passed this core-issued identifier.
+    Expired,
+    /// The bounded command queue has no capacity. No command was admitted.
+    Busy,
     /// The core has no usable canonical config and the edit is not a bootstrap/reset.
     Unavailable,
     /// The edit failed validation before any phase could be dispatched.
@@ -517,7 +596,7 @@ pub struct PhaseRecord {
 }
 
 /// A phase's outcome (mirrors `PhaseOutcome`): known success, known failure and unknown are
-/// preserved as distinct (§3), as are not-yet-attempted and still-running.
+/// preserved as distinct, as are not-yet-attempted and still-running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PhaseOutcome {
     NotAttempted,
@@ -528,7 +607,7 @@ pub enum PhaseOutcome {
 }
 
 /// Per-address-family Ports apply outcome on the wire. IPv4 and IPv6 are not one
-/// atomic transaction — callers must read both fields (§11).
+/// atomic transaction — callers must read both fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FamilyApplyOutcome {
     Confirmed,
@@ -545,7 +624,7 @@ pub struct PortsFamilyReport {
     pub target_count: u32,
 }
 
-/// An operation's durable record: its phases and, once settled, its outcome (§5).
+/// An operation's durable record: its phases and, once settled, its outcome.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct OperationRecord {
     pub op: OperationId,
@@ -564,7 +643,7 @@ pub struct OperationRecord {
 pub trait VpnhideCore {
     /// Version handshake. **Must be the first call** on a connection. On
     /// [`Handshake::Incompatible`] the client refuses and asks the user to update the
-    /// lagging component (§9); it never falls back to a foreign wire format.
+    /// lagging component; it never falls back to a foreign wire format.
     async fn hello(client: ClientHello) -> Handshake;
 
     /// The first published state newer than what the caller holds (a `watch` over
@@ -575,13 +654,18 @@ pub trait VpnhideCore {
     /// current state unchanged. Nothing is missed and nothing is replayed.
     async fn state_since(epoch: u64, revision: u64) -> Published;
 
-    /// Submit a typed field edit, checked against `base`. Accepted (the core now owns the
-    /// operation) or rejected with an explicit reason (§5).
-    async fn submit_edit(
-        op: OperationId,
-        base: BaseRef,
-        edit: ConfigEdit,
-    ) -> Result<Accepted, SubmitError>;
+    /// Allocate a durable monotonic identity before submission. Abandoned identities may
+    /// expire when the bounded receipt window advances; they are never admitted again.
+    async fn allocate_operation_id() -> Result<OperationId, SubmitError>;
+
+    async fn submit_command(op: OperationId, command: CoreCommand)
+    -> Result<Accepted, SubmitError>;
+
+    async fn acquire_debug_lease(
+        id: DebugLeaseId,
+        owner: DebugLeaseOwner,
+    ) -> Result<(), SubmitError>;
+    async fn release_debug_lease(id: DebugLeaseId) -> Result<(), SubmitError>;
 
     /// Query an operation's phases and outcome. Survives the submitting client's death,
     /// so a reconnecting app can find out what happened. `None` if the id is unknown.
@@ -589,10 +673,6 @@ pub trait VpnhideCore {
 
     /// Run a batch of fixed root probes (v5). No caller-chosen command or path exists.
     async fn collect_diagnostics(request: DiagnosticsRequest) -> DiagnosticsReport;
-
-    /// Apply a fixed root effect outside the config (v5): superkey, legacy cleanup, full
-    /// reset. Serialized with config operations; `op` makes a retry idempotent.
-    async fn root_effect(op: OperationId, effect: RootEffect) -> Result<(), EffectError>;
 
     /// Start core's full-system logcat recording (v8). Idempotent per `session`: the same
     /// id while it records (or after it ended) returns its status; a different id while
@@ -733,6 +813,7 @@ mod tests {
                         config,
                         config_revision: 5,
                         operations_in_flight: vec![OperationId(1), OperationId(u64::MAX)],
+                        mutation_held: true,
                         routing: RoutingObservation {
                             freshness: ObservationFreshness::Current,
                             generation: 3,
@@ -748,9 +829,12 @@ mod tests {
                                 uid: 10123,
                                 state: UidVpnRouteState::Excluded,
                                 detail: "uid_not_in_vpn_table".into(),
+                                session: Some("vpn:7".into()),
+                                interfaces: vec!["tun0".into()],
                             }),
                         },
                         backend: NativeBackendStatus {
+                            observed_freshness: ObservationFreshness::Current,
                             selected: Some(NativeBackend::Zygisk),
                             applied: Some(NativeBackend::Builtin),
                             active: Some(NativeBackend::Builtin),
@@ -758,6 +842,20 @@ mod tests {
                             boot: Some(sample_boot(sample_outcomes()[0].clone())),
                         },
                         debug_lease: true,
+                        startup_error: None,
+                        debug_leases: vec![DebugLease {
+                            id: DebugLeaseId(7),
+                            owner: DebugLeaseOwner::Forensic,
+                            expires_at_ms: u64::MAX,
+                        }],
+                        operations: Vec::new(),
+                        apply_evidence: vec![ApplyEvidence {
+                            phase: ConfigPhase::Native,
+                            desired_revision: 5,
+                            op: OperationId(1),
+                            outcome: PhaseOutcome::Unknown,
+                        }],
+                        held_resources: vec![ConfigPhase::Native],
                     },
                 };
                 assert_eq!(survives("Published", &published), published);
@@ -908,6 +1006,12 @@ mod tests {
         #[test]
         fn submit_edit_arguments_and_result() {
             let edits = [
+                ConfigEdit::Batch {
+                    edits: vec![ConfigEdit::Toggle {
+                        field: ConfigToggle::DebugSwitch,
+                        enabled: true,
+                    }],
+                },
                 ConfigEdit::Toggle {
                     field: ConfigToggle::Debug,
                     enabled: true,
@@ -1010,6 +1114,47 @@ mod tests {
                 Err(EffectError::Failed("y".into())),
             ] {
                 assert_eq!(survives("effect result", &result), result);
+            }
+        }
+
+        #[test]
+        fn command_and_lease_arguments_and_results() {
+            let base = BaseRef { revision: 7 };
+            for command in [
+                CoreCommand::Edit {
+                    base,
+                    edit: ConfigEdit::RepairActivation,
+                },
+                CoreCommand::SetSuperkey {
+                    base,
+                    remember: false,
+                    superkey: "test".into(),
+                },
+                CoreCommand::ClearSuperkey { base },
+                CoreCommand::Import {
+                    base,
+                    config: sample_config(),
+                    cleanup_legacy: true,
+                },
+                CoreCommand::CleanupLegacy,
+                CoreCommand::FullReset,
+            ] {
+                assert_eq!(survives("CoreCommand", &command), command);
+            }
+            for owner in [DebugLeaseOwner::Forensic, DebugLeaseOwner::Logcat] {
+                let lease = DebugLease {
+                    id: DebugLeaseId(u64::MAX),
+                    owner,
+                    expires_at_ms: u64::MAX,
+                };
+                assert_eq!(survives("DebugLease", &lease), lease);
+            }
+            for result in [
+                Err(SubmitError::Expired),
+                Err(SubmitError::Busy),
+                Ok(Accepted { op: OperationId(8) }),
+            ] {
+                assert_eq!(survives("command admission", &result), result);
             }
         }
 

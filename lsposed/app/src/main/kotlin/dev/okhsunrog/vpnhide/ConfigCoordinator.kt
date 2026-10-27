@@ -2,429 +2,497 @@ package dev.okhsunrog.vpnhide
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-private sealed interface CoordinatorMessage {
-    data class Submit(
-        val mutation: CanonicalMutation,
-        val completion: CompletableDeferred<CanonicalWriteResult>,
-    ) : CoordinatorMessage
+private data class ConfigIntentRequest(
+    val id: Long,
+    val mutation: CanonicalMutation,
+    val completion: CompletableDeferred<CanonicalWriteResult>,
+    var writes: Set<ConfigField> = mutation.writes,
+    var conflicts: Set<ConfigField> = emptySet(),
+)
 
-    data class Input(
-        val event: ConfigOperationEvent,
-    ) : CoordinatorMessage
+private data class ConfigIntentOutcome(
+    val phases: Map<ConfigPhase, PhaseOutcome> = emptyMap(),
+    val failure: TransitionFailure? = null,
+    val nativeCapacity: NativeCapacityRefusal? = null,
+    /** Only a core config operation can be queried; uncertain fixed effects are never replayed. */
+    val uncertainOperation: Long? = null,
+)
 
-    data class Initialized(
-        val result: ConfigInitialization,
-    ) : CoordinatorMessage
-
-    data class Executed(
-        val ticket: EffectTicket,
-        val evidence: ConfigPhaseEvidence,
-        val recovery: Boolean,
-    ) : CoordinatorMessage
-
+private sealed interface ConfigIntentMessage {
     data class Initialize(
         val completion: CompletableDeferred<ConfigCoordinatorMode>,
-    ) : CoordinatorMessage
+    ) : ConfigIntentMessage
 
-    data object Retry : CoordinatorMessage
+    data class Initialized(
+        val reply: CoreReply,
+    ) : ConfigIntentMessage
+
+    data class Publication(
+        val update: CoreSessionUpdate,
+    ) : ConfigIntentMessage
+
+    data class Submit(
+        val request: ConfigIntentRequest,
+    ) : ConfigIntentMessage
+
+    data class Draft(
+        val id: Long,
+        val fields: Set<ConfigField>,
+    ) : ConfigIntentMessage
+
+    data class Prepared(
+        val request: ConfigIntentRequest,
+        val reply: CoreReply,
+    ) : ConfigIntentMessage
+
+    data class Finished(
+        val request: ConfigIntentRequest,
+        val outcome: ConfigIntentOutcome,
+        val recovery: Boolean = false,
+    ) : ConfigIntentMessage
+
+    data object Retry : ConfigIntentMessage
 }
 
 /**
- * Lifecycle of accepted operations, published synchronously from the actor in
- * dispatch order: acceptance (before any effect), preparation (the write set as
- * the fresh config actually turned out, before the first dispatch), each mutating
- * root dispatch, and the one result delivery, plus a later manual recovery of an
- * unresolved one. Callbacks must only record or invalidate; they never read back
- * or wait.
- */
-internal interface ConfigOperationObserver {
-    fun accepted(
-        id: Long,
-        spec: ConfigOperationSpec,
-    )
-
-    /**
-     * The operation's spec with the prepared write set merged in. A mutation that
-     * carries only a `transform` declares nothing at submission, so this is the
-     * first moment its real write set is known (transition contract §7).
-     */
-    fun prepared(
-        id: Long,
-        spec: ConfigOperationSpec,
-    )
-
-    fun dispatched(
-        id: Long,
-        phase: ConfigPhase,
-    )
-
-    fun settled(result: ConfigOperationResult)
-
-    fun recovered(result: ConfigOperationResult)
-
-    object None : ConfigOperationObserver {
-        override fun accepted(
-            id: Long,
-            spec: ConfigOperationSpec,
-        ) = Unit
-
-        override fun prepared(
-            id: Long,
-            spec: ConfigOperationSpec,
-        ) = Unit
-
-        override fun dispatched(
-            id: Long,
-            phase: ConfigPhase,
-        ) = Unit
-
-        override fun settled(result: ConfigOperationResult) = Unit
-
-        override fun recovered(result: ConfigOperationResult) = Unit
-    }
-}
-
-/**
- * One actor publishes before launching identified effects. Its scope must belong to the process.
- * Cancelling a caller only stops that caller's wait; it never cancels an accepted root operation.
+ * Owns app intents, drafts and completion waiters. Core owns phase execution, admission and
+ * recovery. A queued intent becomes one typed core command; cancelling a waiter cannot cancel it.
  */
 internal class ConfigCoordinator(
-    private val io: ConfigCoordinatorIo,
+    private val prepareCore: () -> CoreSessionClient?,
     private val scope: CoroutineScope,
     private val confirmed: (CanonicalConfig) -> Unit = {},
     refresh: suspend () -> Unit = {},
-    private val manageLogging: Boolean = false,
     private val invalidateObservations: () -> Unit = {},
     private val observer: ConfigOperationObserver = ConfigOperationObserver.None,
+    private val newOperationId: () -> Long = CoreOperationIds::next,
 ) {
-    private val messages = Channel<CoordinatorMessage>(Channel.UNLIMITED)
+    private val messages = Channel<ConfigIntentMessage>(Channel.UNLIMITED)
     private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
     private val mutableView = MutableStateFlow(ConfigCoordinatorView())
     val view = mutableView.asStateFlow()
-    private var core: ConfigOperationState? = null
-    private var initializing = false
-    private var initialized = false
-    private var available = false
-    private var logging = CaptureLoggingState(false)
+    private val queue = ArrayDeque<ConfigIntentRequest>()
     private val drafts = mutableMapOf<Long, Set<ConfigField>>()
-    private val requests = linkedMapOf<Long, CoordinatorMessage.Submit>()
-    private val capacities = mutableMapOf<Long, NativeCapacityRefusal>()
-    private val initializationWaiters = mutableListOf<CompletableDeferred<ConfigCoordinatorMode>>()
+    private val initializers = mutableListOf<CompletableDeferred<ConfigCoordinatorMode>>()
+    private var client: CoreSessionClient? = null
+    private var publication = CoreSessionUpdate()
+    private var active: ConfigIntentRequest? = null
+    private var held: Pair<ConfigIntentRequest, Long?>? = null
+    private var initializing = false
 
     init {
         scope.launch { for (message in messages) consume(message) }
-        scope.launch(Dispatchers.IO) { for (request in refreshRequests) runCatching { refresh() } }
+        scope.launch { for (request in refreshRequests) runCatching { refresh() } }
     }
 
     suspend fun initialize(): ConfigCoordinatorMode {
-        val completion = CompletableDeferred<ConfigCoordinatorMode>()
-        messages.send(CoordinatorMessage.Initialize(completion))
-        return completion.await()
+        val result = CompletableDeferred<ConfigCoordinatorMode>()
+        messages.send(ConfigIntentMessage.Initialize(result))
+        return result.await()
     }
 
     suspend fun submit(mutation: CanonicalMutation): CanonicalWriteResult {
-        val completion = CompletableDeferred<CanonicalWriteResult>()
-        messages.send(CoordinatorMessage.Submit(mutation, completion))
-        return completion.await()
+        val result = CompletableDeferred<CanonicalWriteResult>()
+        messages.send(ConfigIntentMessage.Submit(ConfigIntentRequest(newOperationId(), mutation, result)))
+        return result.await()
     }
 
     fun draftChanged(
         id: Long,
         fields: Set<ConfigField>,
     ) {
-        messages.trySend(CoordinatorMessage.Input(ConfigOperationEvent.DraftChanged(id, configFieldSnapshot(fields))))
+        messages.trySend(ConfigIntentMessage.Draft(id, configFieldSnapshot(fields)))
     }
 
     fun retry() {
-        messages.trySend(CoordinatorMessage.Retry)
+        messages.trySend(ConfigIntentMessage.Retry)
     }
 
-    private fun consume(message: CoordinatorMessage) {
+    private fun consume(message: ConfigIntentMessage) {
         when (message) {
-            is CoordinatorMessage.Initialize -> {
-                if (initialized && !initializing) {
-                    message.completion.complete(view.value.mode)
-                } else {
-                    initializationWaiters.add(message.completion)
-                    if (!initializing) startInitialization(repeat = true)
-                }
-            }
-
-            CoordinatorMessage.Retry -> {
-                when {
-                    initializing -> Unit
-                    core?.active?.stage == OperationStage.Held -> input(ConfigOperationEvent.Recheck)
-                    core == null -> startInitialization(repeat = false)
-                }
-            }
-
-            is CoordinatorMessage.Initialized -> {
-                initialized(message.result)
-            }
-
-            is CoordinatorMessage.Submit -> {
-                submitRequest(message)
-            }
-
-            is CoordinatorMessage.Input -> {
-                input(message.event)
-            }
-
-            is CoordinatorMessage.Executed -> {
-                executed(message)
-            }
+            is ConfigIntentMessage.Initialize -> initialize(message.completion)
+            is ConfigIntentMessage.Initialized -> initialized(message.reply)
+            is ConfigIntentMessage.Publication -> acceptPublication(client?.updates?.value ?: message.update)
+            is ConfigIntentMessage.Submit -> acceptIntent(message.request)
+            is ConfigIntentMessage.Draft -> draft(message)
+            is ConfigIntentMessage.Prepared -> prepared(message)
+            is ConfigIntentMessage.Finished -> finished(message)
+            ConfigIntentMessage.Retry -> retryReadback()
         }
     }
 
-    private fun startInitialization(repeat: Boolean) {
+    private fun initialize(completion: CompletableDeferred<ConfigCoordinatorMode>) {
+        if (client != null && publication.current) {
+            completion.complete(view.value.mode)
+            return
+        }
+        initializers.add(completion)
+        if (initializing) return
+        val session =
+            client ?: prepareCore()?.also { attached ->
+                client = attached
+                scope.launch { attached.updates.collect { messages.send(ConfigIntentMessage.Publication(it)) } }
+            }
+        if (session == null) {
+            initialized(CoreReply.Unreachable)
+            return
+        }
         initializing = true
-        mutableView.value = view.value.copy(mode = ConfigCoordinatorMode.Initializing)
-        scope.launch(Dispatchers.IO) {
-            var result = runCatching { io.initialize() }.getOrDefault(ConfigInitialization(ConfigCoordinatorMode.Unavailable))
-            if (repeat && result.mode in setOf(ConfigCoordinatorMode.Unavailable, ConfigCoordinatorMode.Paused)) {
-                result = runCatching { io.initialize() }.getOrDefault(ConfigInitialization(ConfigCoordinatorMode.Unavailable))
-            }
-            messages.send(CoordinatorMessage.Initialized(result))
-        }
-    }
-
-    private fun initialized(result: ConfigInitialization) {
-        initializing = false
-        initialized = true
-        available = result.config != null
-        if (result.mode in setOf(ConfigCoordinatorMode.Open, ConfigCoordinatorMode.Missing)) {
-            core = ConfigOperationState(canonicalConfigSnapshot(result.config ?: CanonicalConfig()), drafts = drafts.toMap())
-        }
-        mutableView.value = view.value.copy(mode = result.mode, confirmed = result.config?.let(::canonicalConfigSnapshot))
-        result.config?.let { runCatching { confirmed(it) } }
-        initializationWaiters.forEach { it.complete(result.mode) }
-        initializationWaiters.clear()
-    }
-
-    private fun submitRequest(request: CoordinatorMessage.Submit) {
-        request.mutation.captureEvent?.let { logging = reduceCaptureLogging(logging, it) }
-        mutableView.value = view.value.copy(activeCaptures = logging.tokens.size)
-        val state = core
-        if (request.mutation.removesCanonical && logging.tokens.isNotEmpty()) {
-            request.completion.complete(CanonicalWriteResult(-1, "capture_active"))
-            return
-        }
-        if (state == null || initializing || (!available && !request.mutation.bootstrap && !request.mutation.removesCanonical)) {
-            request.completion.complete(CanonicalWriteResult(-1, view.value.mode.name))
-            return
-        }
-        requests[state.nextId] = request
-        val spec =
-            ConfigOperationSpec(
-                request.mutation.source,
-                request.mutation.writes,
-                configMutationPlan(request.mutation, changed = true, loggingChanged = manageLogging && !request.mutation.removesCanonical),
-                request.mutation.protectsDrafts,
-                request.mutation.removesCanonical,
-            )
-        input(ConfigOperationEvent.Submit(spec))
-    }
-
-    private fun input(event: ConfigOperationEvent) {
-        if (event is ConfigOperationEvent.DraftChanged) {
-            if (event.fields.isEmpty()) drafts.remove(event.draftId) else drafts[event.draftId] = event.fields
-        }
-        val state = core ?: return
-        if (event is ConfigOperationEvent.Prepared && event.ticket == state.active?.ticket &&
-            state.active.stage == OperationStage.Preparing
-        ) {
-            available = event.baseAvailable
-        }
-        val transition = reduceConfigOperation(state, event)
-        core = transition.state
-        if (event is ConfigOperationEvent.PhaseFinished && event.ticket == state.active?.ticket &&
-            event.outcome == PhaseOutcome.Confirmed && state.active.phase == ConfigPhase.Persist
-        ) {
-            available = true
-        }
-        if (event is ConfigOperationEvent.PhaseFinished && event.ticket == state.active?.ticket &&
-            state.active.request.spec.removesCanonical && state.active.phase == ConfigPhase.Cleanup &&
-            event.outcome == PhaseOutcome.Confirmed
-        ) {
-            available = false
-        }
         publish()
-        // The reducer has merged the prepared write set into the spec; observers see
-        // it before this reduction's first Execute effect reports a mutating dispatch.
-        if (event is ConfigOperationEvent.Prepared) {
-            preparedSpec(event.ticket.owner)?.let { spec -> runCatching { observer.prepared(event.ticket.owner, spec) } }
-        }
-        transition.effects.forEach(::effect)
+        scope.launch { messages.send(ConfigIntentMessage.Initialized(session.read())) }
     }
 
-    /** Null when the preparation did not leave this operation active (a conflict or an empty plan finished it). */
-    private fun preparedSpec(id: Long): ConfigOperationSpec? =
-        core
-            ?.active
-            ?.request
-            ?.takeIf { it.id == id }
-            ?.spec
-
-    private fun publish() {
-        val state = core ?: return
-        val ids = (listOfNotNull(state.active?.request?.id) + state.queue.map { it.id }).filter { it in requests }.toSet()
-        mutableView.value =
-            view.value.copy(
-                mode =
-                    if (state.active?.resultDelivered ==
-                        true
-                    ) {
-                        ConfigCoordinatorMode.Paused
-                    } else if (available) {
-                        ConfigCoordinatorMode.Open
-                    } else {
-                        ConfigCoordinatorMode.Missing
-                    },
-                confirmed = state.confirmed.takeIf { available },
-                pending = pendingConfigToggles(ids.mapNotNull { requests[it]?.mutation }),
-                operations = ids,
-                rechecking = state.active?.stage == OperationStage.Reconciling,
-            )
-        if (available) runCatching { confirmed(state.confirmed) }
+    private fun initialized(reply: CoreReply) {
+        initializing = false
+        updateFromReply(reply)
+        publish()
+        initializers.forEach { it.complete(view.value.mode) }
+        initializers.clear()
+        startNext()
     }
 
-    private fun effect(effect: ConfigOperationEffect) {
-        when (effect) {
-            is ConfigOperationEffect.Prepare -> {
-                prepare(effect)
-            }
+    private fun acceptPublication(update: CoreSessionUpdate) {
+        val before = publication.state
+        publication = update
+        acceptCoreFacts(before, update)
+        publish()
+        observeHeldOperation(update)
+        startNext()
+    }
 
-            is ConfigOperationEffect.Execute -> {
-                // Observers learn about the known change before the root effect starts.
-                runCatching { observer.dispatched(effect.ticket.owner, effect.phase) }
-                execute(effect)
-            }
-
-            is ConfigOperationEffect.Reconcile -> {
-                val phase = requireNotNull(core?.active?.phase)
-                scope.launch(Dispatchers.IO) {
-                    val evidence =
-                        runCatching {
-                            io.recover(effect.ticket.owner, phase)
-                        }.getOrDefault(ConfigPhaseEvidence(PhaseOutcome.Unknown, RootCanonicalRead.Unavailable))
-                    messages.send(CoordinatorMessage.Executed(effect.ticket, evidence, true))
-                }
-            }
-
-            is ConfigOperationEffect.Completed -> {
-                runCatching { observer.settled(effect.result) }
-                complete(effect.result)
-            }
-
-            is ConfigOperationEffect.Recovered -> {
-                runCatching { observer.recovered(effect.result) }
-                mutableView.value =
-                    view.value.copy(
-                        lastResult = effect.result,
-                        recoveredResult = effect.result,
-                        lastNativeCapacity = capacities.remove(effect.result.id),
-                    )
-                publish()
-                val config = view.value.confirmed
-                val wanted = config?.let { it.debugSwitch || logging.tokens.isNotEmpty() || io.debugLease }
-                if (manageLogging && config != null && config.debug != wanted) {
-                    messages.trySend(
-                        CoordinatorMessage.Submit(
-                            CanonicalMutation(emptyList(), source = OperationSource.System),
-                            CompletableDeferred(),
-                        ),
-                    )
-                }
-            }
-
-            is ConfigOperationEffect.Rejected -> {
-                requests.remove(requireNotNull(core).nextId)?.completion?.complete(CanonicalWriteResult(-1, effect.reason.name))
-                publish()
-            }
-
-            ConfigOperationEffect.RefreshObservations -> {
+    private fun acceptCoreFacts(
+        before: CoreStateView?,
+        update: CoreSessionUpdate,
+    ) {
+        val after = update.state
+        if (update.current && after != null) {
+            if (before?.canonical != after.canonical || before.nativeBoot != after.nativeBoot || before.backend != after.backend) {
+                invalidateObservations()
                 refreshRequests.trySend(Unit)
             }
-
-            is ConfigOperationEffect.Accepted -> {
-                // Admission itself is published by input(); observers only learn the identity and intent.
-                acceptedSpec(effect.id)?.let { spec -> runCatching { observer.accepted(effect.id, spec) } }
-            }
-
-            else -> {
-                // CancelRejected needs no effect work.
-            }
+            (after.canonical as? RootCanonicalRead.Available)?.config?.let { confirmed(it) }
+        } else if (before != null && view.value.mode != ConfigCoordinatorMode.Unavailable) {
+            invalidateObservations()
         }
     }
 
-    private fun acceptedSpec(id: Long): ConfigOperationSpec? {
-        val state = core ?: return null
-        return state.active
-            ?.request
-            ?.takeIf { it.id == id }
-            ?.spec ?: state.queue.firstOrNull { it.id == id }?.spec
+    private fun observeHeldOperation(update: CoreSessionUpdate) {
+        val pending = held?.second ?: return
+        val state = update.state ?: return
+        if (update.current && pending !in state.operationsInFlight && !state.mutationHeld) retryReadback()
     }
 
-    private fun prepare(effect: ConfigOperationEffect.Prepare) {
-        val mutation = requests.getValue(effect.ticket.owner).mutation
-        val tokens = logging.tokens.isNotEmpty()
-        scope.launch(Dispatchers.IO) {
-            val event =
-                runCatching {
-                    val read = io.read()
-                    // Core's logcat lease holds `debug` on like a capture token (read with the config).
-                    val captureEnabled = (tokens || io.debugLease).takeIf { manageLogging }
-                    prepareConfigMutation(effect.ticket, read, mutation, captureEnabled)
-                }.getOrElse { ConfigOperationEvent.PreparationFailed(effect.ticket, TransitionFailure.ReadFailed) }
-            messages.send(CoordinatorMessage.Input(event))
-        }
-    }
-
-    private fun execute(effect: ConfigOperationEffect.Execute) {
-        val mutation = requests.getValue(effect.ticket.owner).mutation
-        val base = core?.confirmed.takeIf { available }
-        scope.launch(Dispatchers.IO) {
-            val effects = configPhaseEffects(effect.phase, mutation)
-            val evidence =
-                runCatching { io.execute(effect.ticket, effect.phase, base, effect.config, effects) }
-                    .getOrDefault(ConfigPhaseEvidence(PhaseOutcome.Unknown, RootCanonicalRead.Unavailable))
-            messages.send(CoordinatorMessage.Executed(effect.ticket, evidence, false))
-        }
-    }
-
-    private fun executed(message: CoordinatorMessage.Executed) {
-        val active = core?.active ?: return
-        if (active.ticket != message.ticket) return
-        // Advance observation generations before publishing phase evidence or resolving callers.
-        runCatching { invalidateObservations() }
-        val evidence = configCompletionEvidence(active, message.evidence)
-        if (active.request.spec.removesCanonical && active.phase == ConfigPhase.Cleanup &&
-            evidence.canonical == RootCanonicalRead.Missing &&
-            evidence.outcome != PhaseOutcome.Unknown
-        ) {
-            available = false
-        }
-        evidence.nativeCapacity?.let { capacities[active.request.id] = it }
-        if (message.recovery) {
-            val recovered = configRecoveryEvidence(active, evidence, available)
-            if (recovered != null) available = message.evidence.canonical is RootCanonicalRead.Available
-            input(ConfigOperationEvent.RecoveryFinished(message.ticket, recovered))
-        } else {
-            input(ConfigOperationEvent.PhaseFinished(message.ticket, evidence.outcome))
-        }
-    }
-
-    private fun complete(result: ConfigOperationResult) {
-        val capacity = capacities.remove(result.id)
-        mutableView.value = view.value.copy(lastResult = result, lastNativeCapacity = capacity)
-        val request = requests.remove(result.id)
+    private fun acceptIntent(request: ConfigIntentRequest) {
         publish()
-        request?.completion?.complete(CanonicalWriteResult(if (result.failure == null) 0 else -1, "", result, capacity))
+        val failure =
+            when {
+                request.mutation.removesCanonical && (publication.state?.activeCaptures ?: 0) > 0 -> "capture_active"
+
+                (held != null || publication.state?.mutationHeld == true) && !request.mutation.forceActivation -> "MutationPaused"
+
+                !publication.current || initializing -> view.value.mode.name
+
+                publication.state?.canonical !is RootCanonicalRead.Available && !request.mutation.bootstrap &&
+                    !request.mutation.removesCanonical -> view.value.mode.name
+
+                else -> null
+            }
+        if (failure != null) {
+            request.completion.complete(CanonicalWriteResult(-1, failure))
+            return
+        }
+        queue.addLast(request)
+        observer.accepted(request.id, spec(request))
+        publish()
+        startNext()
+    }
+
+    private fun startNext() {
+        if (active != null || queue.isEmpty() || !publication.current) return
+        if (held != null && !queue.first().mutation.forceActivation) return
+        val session = client ?: return
+        val request = queue.removeFirst()
+        active = request
+        publish()
+        scope.launch { messages.send(ConfigIntentMessage.Prepared(request, session.read())) }
+    }
+
+    private fun prepared(message: ConfigIntentMessage.Prepared) {
+        if (active != message.request) return
+        updateFromReply(message.reply)
+        val state = publication.state.takeIf { publication.current && message.reply is CoreReply.Observed }
+        val request = message.request
+        val preparation =
+            state?.let {
+                prepareConfigIntent(it.canonical, request.mutation)
+            }
+        if (preparation !is ConfigIntentPreparation.Prepared) {
+            val failure = (preparation as? ConfigIntentPreparation.Failed)?.reason ?: TransitionFailure.ReadFailed
+            finished(ConfigIntentMessage.Finished(request, ConfigIntentOutcome(failure = failure)))
+            return
+        }
+        request.writes = preparation.intent.writes
+        request.conflicts = conflicts(request)
+        observer.prepared(request.id, spec(request))
+        if (request.conflicts.isNotEmpty()) {
+            finished(ConfigIntentMessage.Finished(request, ConfigIntentOutcome(failure = TransitionFailure.UiEditConflict)))
+            return
+        }
+        scope.launch {
+            val outcome =
+                runCatching { executeIntent(request, requireNotNull(state), preparation.intent) }
+                    .getOrElse { ConfigIntentOutcome(failure = TransitionFailure.ValidationFailed) }
+            messages.send(ConfigIntentMessage.Finished(request, outcome))
+        }
+    }
+
+    private suspend fun executeIntent(
+        request: ConfigIntentRequest,
+        state: CoreStateView,
+        intent: PreparedConfigIntent,
+    ): ConfigIntentOutcome {
+        val session = requireNotNull(client)
+        val command = coreCommand(state.configRevision, request.mutation, intent) ?: return ConfigIntentOutcome()
+        // The app action ID is local feedback identity. Only a core-issued ID can dispatch root work.
+        val operation =
+            runCatching { session.allocateOperationId() }.getOrElse {
+                return ConfigIntentOutcome(failure = TransitionFailure.ReadFailed)
+            }
+        observer.dispatched(request.id, if (request.mutation.removesCanonical) ConfigPhase.Cleanup else ConfigPhase.Persist)
+        val reply = runCatching { session.submit(operation, command) }.getOrDefault(CoreReply.Uncertain)
+        return commandOutcome(operation, reply)
+    }
+
+    private suspend fun commandOutcome(
+        op: Long,
+        reply: CoreReply,
+    ): ConfigIntentOutcome {
+        if (reply ==
+            CoreReply.Uncertain
+        ) {
+            return readbackOutcome(op, runCatching { requireNotNull(client).operation(op) }.getOrDefault(CoreReply.Uncertain))
+        }
+        val result = reply
+        return when (result) {
+            is CoreReply.Accepted -> {
+                recordOutcome(op, result.record)
+            }
+
+            is CoreReply.Observed -> {
+                recordOutcome(op, result.record)
+            }
+
+            is CoreReply.Refused -> {
+                ConfigIntentOutcome(
+                    failure =
+                        if (result.reason is uniffi.vpnhide_core_ffi.CoreSubmitRefusal.Conflict) {
+                            TransitionFailure.UiEditConflict
+                        } else {
+                            TransitionFailure.ExecutionFailed
+                        },
+                    nativeCapacity = result.nativeCapacity,
+                )
+            }
+
+            CoreReply.Unreachable, CoreReply.ProtocolSkew -> {
+                ConfigIntentOutcome(failure = TransitionFailure.ReadFailed)
+            }
+
+            CoreReply.Uncertain -> {
+                ConfigIntentOutcome(failure = TransitionFailure.ApplicationUnknown, uncertainOperation = op)
+            }
+        }
+    }
+
+    /** Only an actual receipt can resolve an already uncertain dispatch. */
+    private fun readbackOutcome(
+        op: Long,
+        reply: CoreReply,
+    ): ConfigIntentOutcome =
+        when (reply) {
+            is CoreReply.Observed -> recordOutcome(op, reply.record)
+            is CoreReply.Accepted -> recordOutcome(op, reply.record)
+            else -> ConfigIntentOutcome(failure = TransitionFailure.ApplicationUnknown, uncertainOperation = op)
+        }
+
+    private fun recordOutcome(
+        op: Long,
+        record: CoreOperationRecord?,
+    ): ConfigIntentOutcome =
+        if (record == null || record.settled == null) {
+            ConfigIntentOutcome(record?.phases.orEmpty(), TransitionFailure.ApplicationUnknown, uncertainOperation = op)
+        } else {
+            ConfigIntentOutcome(
+                record.phases,
+                coreRecordFailure(record),
+                uncertainOperation =
+                    op.takeIf {
+                        record.settled ==
+                            PhaseOutcome.Unknown
+                    },
+            )
+        }
+
+    private fun finished(message: ConfigIntentMessage.Finished) {
+        val request = message.request
+        if (message.recovery) {
+            if (held?.first != request) return
+            mutableView.value = view.value.copy(rechecking = false)
+            if (message.outcome.failure == TransitionFailure.ApplicationUnknown) return
+            held = null
+        } else if (active != request) {
+            return
+        }
+        request.conflicts = request.conflicts + conflicts(request)
+        val result =
+            ConfigOperationResult(
+                request.id,
+                message.outcome.phases,
+                when {
+                    message.outcome.failure == TransitionFailure.ApplicationUnknown -> TransitionFailure.ApplicationUnknown
+                    request.conflicts.isNotEmpty() -> TransitionFailure.UiEditConflict
+                    else -> message.outcome.failure
+                },
+                request.conflicts,
+                conflicts(request).isNotEmpty(),
+            )
+        if (message.outcome.failure == TransitionFailure.ApplicationUnknown) {
+            held = request to message.outcome.uncertainOperation
+        }
+        if (request.mutation.forceActivation && message.outcome.failure == null) held = null
+        active = null
+        invalidateObservations()
+        refreshRequests.trySend(Unit)
+        mutableView.value =
+            view.value.copy(
+                lastResult = result,
+                lastNativeCapacity = message.outcome.nativeCapacity,
+                recoveredResult = result.takeIf { message.recovery } ?: view.value.recoveredResult,
+            )
+        deliverIntentResult(request, message, result)
+        if (held != null) pauseQueuedIntents()
+        publish()
+        if (message.outcome.uncertainOperation != null) observeHeldOperation(publication)
+        startNext()
+    }
+
+    private fun deliverIntentResult(
+        request: ConfigIntentRequest,
+        message: ConfigIntentMessage.Finished,
+        result: ConfigOperationResult,
+    ) {
+        if (message.recovery) {
+            observer.recovered(result)
+        } else {
+            observer.settled(result)
+            request.completion.complete(
+                CanonicalWriteResult(
+                    if (result.failure ==
+                        null
+                    ) {
+                        0
+                    } else {
+                        -1
+                    },
+                    "",
+                    result,
+                    message.outcome.nativeCapacity,
+                ),
+            )
+        }
+    }
+
+    private fun pauseQueuedIntents() {
+        while (queue.isNotEmpty()) {
+            val pending = queue.removeFirst()
+            val paused = ConfigOperationResult(pending.id, emptyMap(), TransitionFailure.MutationPaused)
+            observer.settled(paused)
+            pending.completion.complete(CanonicalWriteResult(-1, "MutationPaused", paused))
+        }
+    }
+
+    private fun retryReadback() {
+        val session = client ?: return
+        if (view.value.rechecking) return
+        mutableView.value = view.value.copy(rechecking = true)
+        val pending = held
+        scope.launch {
+            val reply = session.read()
+            messages.send(ConfigIntentMessage.Initialized(reply))
+            if (pending != null) {
+                val outcome =
+                    pending.second?.let { readbackOutcome(it, session.operation(it)) }
+                        ?: ConfigIntentOutcome(failure = TransitionFailure.ApplicationUnknown)
+                messages.send(ConfigIntentMessage.Finished(pending.first, outcome, recovery = true))
+            } else {
+                messages.send(ConfigIntentMessage.Publication(session.updates.value))
+            }
+        }
+    }
+
+    private fun draft(message: ConfigIntentMessage.Draft) {
+        if (message.fields.isEmpty()) drafts.remove(message.id) else drafts[message.id] = message.fields
+        active?.let { it.conflicts = it.conflicts + conflicts(it) }
+    }
+
+    private fun conflicts(request: ConfigIntentRequest): Set<ConfigField> =
+        if (request.mutation.protectsDrafts || request.mutation.source == OperationSource.Bridge) {
+            conflictingFields(request.writes, drafts.values.flatten().toSet())
+        } else {
+            emptySet()
+        }
+
+    private fun spec(request: ConfigIntentRequest): ConfigOperationSpec =
+        ConfigOperationSpec(
+            request.mutation.source,
+            request.writes,
+            protectsDrafts = request.mutation.protectsDrafts,
+            removesCanonical = request.mutation.removesCanonical,
+        )
+
+    private fun updateFromReply(
+        @Suppress("UNUSED_PARAMETER") reply: CoreReply,
+    ) {
+        client?.updates?.value?.let(::acceptPublication)
+    }
+
+    private fun publish() {
+        val state = publication.state
+        val mode =
+            when {
+                initializing -> ConfigCoordinatorMode.Initializing
+                held != null || state?.mutationHeld == true -> ConfigCoordinatorMode.Paused
+                !publication.current -> ConfigCoordinatorMode.Unavailable
+                state?.canonical == RootCanonicalRead.Missing -> ConfigCoordinatorMode.Missing
+                state?.canonical == RootCanonicalRead.Invalid -> ConfigCoordinatorMode.Invalid
+                state?.canonical is RootCanonicalRead.Available -> ConfigCoordinatorMode.Open
+                else -> ConfigCoordinatorMode.Unavailable
+            }
+        val requests = listOfNotNull(active) + queue
+        mutableView.value =
+            view.value.copy(
+                mode = mode,
+                confirmed = (state?.canonical as? RootCanonicalRead.Available)?.config,
+                coreCurrent = publication.current,
+                coreEpoch = state?.epoch,
+                coreSequence = publication.sequence,
+                operations = requests.mapTo(linkedSetOf()) { it.id },
+                pending = pendingConfigToggles(requests.map { it.mutation }),
+                activeCaptures = state?.activeCaptures ?: 0,
+                desiredRevision = state?.configRevision,
+                nativeObservationCurrent = publication.current && state?.backend?.current == true,
+                coreOperations = state?.operationsInFlight.orEmpty().toSet(),
+                applyEvidence = state?.applyEvidence.orEmpty(),
+                heldResources = state?.heldResources.orEmpty(),
+                canRepair =
+                    publication.current && state?.operationsInFlight?.isEmpty() == true &&
+                        state.heldResources.isNotEmpty() && state.heldResources.all { it == ConfigPhase.Native || it == ConfigPhase.Ports },
+                rechecking = view.value.rechecking && (held != null || initializing),
+            )
     }
 }

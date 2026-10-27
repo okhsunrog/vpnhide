@@ -136,12 +136,7 @@ fn runtime(out: &mut Out, paths: &Paths) {
         String::new()
     };
     out.section("kmod_state", ctl);
-    let exe = paths.core_exe.display().to_string();
-    let state = run(
-        &exe,
-        &["observe", "kpm-state"],
-        out.remaining(Duration::from_secs(10)),
-    );
+    let state = paths.kpm_state(out.remaining(Duration::from_secs(10)));
     out.section("kpm_state", state.stdout);
     file(out, "lsposed_state", &paths.lsposed_state);
     out.section("getenforce", getenforce());

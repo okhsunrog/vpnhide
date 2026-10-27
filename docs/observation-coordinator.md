@@ -2,8 +2,9 @@
 
 Status: connected to the app through `StateCache`, including the shared batched
 root reader, Dashboard, targets, statistics, routing readiness and app inventory.
-Configuration remains owned by `ConfigCoordinator`; observations never overwrite
-its confirmed values or optimistic intent.
+Confirmed configuration is a read replica of core, delivered through the shared
+process `CoreSession`. The app coordinator owns local intent and drafts; observation
+caches never become a second canonical writer. See [core architecture](core-architecture.md).
 
 ## Ownership and publication
 
@@ -22,33 +23,20 @@ once when rendering an app-list response.
 
 `value` retains the last successful observation while loading and after failure.
 It is useful display history, not evidence of current readiness. `current` is null
-while loading, stale, failed or quarantined. `RoutingGateCache.gate` uses `current`:
-a shared refresh marks the prior value stale before its direct helper read. The
-one-second foreground comparison is silent and does not enter this state when its
-result is unchanged. A real refresh changes readiness freshness, not diagnostic
-result classification or retention.
-For eligibility, an invalidated observation that still awaits its re-read is
-`Checking`; `Unknown` is reserved for a read that failed, a quarantined source, or
-an attempt that never produced a value. Mapping the stale window to `Unknown`
-flashed "couldn't determine whether VPN Hide is routed" on every VPN toggle. What
-the screens render during that window is not the eligibility but the routing
-knowledge the presentation keeps (`RoutingKnowledge.Verifying` with the last
-known fact and the read's reason): a user-requested or network-triggered re-read
-shows a neutral "Checking…" at once, a background one keeps the last known state
-for a 2 s grace (transition contract §8).
-`AppVpnStatePoller` runs while the main UI is RESUMED, with a one-second delay
-between completed samples. Each sample is a silent root-helper request for the app-scoped
-VPN state: current framework VPN session and interfaces plus this app UID's policy
-rule membership. It does not read or compare global route/rule text and does not
-refresh `RootSnapshotCache`. An equal sample leaves the shared observation untouched,
-so the timer cannot make a stable screen enter Checking. Only a changed fact (or a
-successful recovery sample after a failed/stale read) requests a process-owned
-`StateCache` refresh. That refresh publishes a routed result immediately. `VPN_OFF`
-and `EXCLUDED` require two equal samples 750 ms apart; a state/session change continues
-settling instead of publishing the tunnel's setup edge as a current negative fact.
-Probe failures are ignored by the silent timer, never translated to VPN-off. A
-quarantined or active shared read is not replaced by the timer. ON_RESUME always
-requests fresh present-tense evidence, and explicit Retry remains available.
+while loading, stale, failed or quarantined. `RoutingGateCache.gate` uses `current`.
+Core's shared routing publication supplies the main app UID, VPN session identity,
+interfaces and membership. Disconnect, Unknown or an unexpected UID withdraws
+readiness while retaining last-good display history. There is no foreground
+`AppVpnStatePoller` or second per-app root probe. Link, route and rule events plus
+bounded periodic reconciliation belong to core.
+
+A changed routing fact invalidates the process observation. Routed results publish
+immediately; negative facts settle for 750 ms against the current shared source.
+An unchanged core sample does not invalidate a measurement or enter Checking.
+Explicit Retry and ON_RESUME re-evaluate the shared current source.
+For eligibility, an invalidated observation awaiting recomputation is Checking;
+a failed/unavailable source is Unknown. Presentation retains its existing
+Verifying/grace semantics and does not relabel a historical measurement as current.
 
 The confirmation suite has one owner too, and it is not an edge detector.
 `DiagnosticsCache` runs `confirmMeasurements` over its own presentation: whenever
@@ -68,8 +56,8 @@ at least five seconds from the previous automatic request so a flapping VPN
 cannot keep the suite busy. Because the rule reads state rather than transitions, a cold
 start already routed, a foreground return after the tunnel was re-established
 (the excluded → included split-tunnel case: a new framework network id is a new
-routing identity) and a session change seen by the poller all take the same path,
-and none of them can be lost to a missing baseline. A poll that reveals no new key
+routing identity) and a session change published by core all take the same path,
+and none of them can be lost to a missing baseline. A publication that reveals no new key
 reruns nothing; the negative confirmation in `RoutingGateCache` still suppresses
 the brief false exclusion seen during tunnel setup.
 
@@ -224,16 +212,13 @@ result is discarded. A queued refresh or changed generation then starts one
 successor. Without either, the cache remains failed until explicit retry.
 There is no automatic endless timeout/retry loop.
 
-The batched root reader uses `RootProcessRunner.runAndDrain`: a command deadline
-can stop the launcher, but the worker retains ownership until that process and
-its stream readers finish. Output retention is bounded; see [limits](limits.md).
-This is not proof that every root descendant exited after closing its pipes.
-The snapshot command is read-only and does not intentionally detach work.
-
-Other blocking probes inside the existing Dashboard/routing/diagnostic loaders
-still use legacy shell/probe adapters. Their coroutine return is not a new proof
-of descendant-process quiescence. Migrating diagnostic execution, cancellation,
-capture collection and cleanup is a separate stage.
+Heavy root reads are fixed core diagnostics on the shared session, with bounded
+child execution and output. They retain process observation deadlines and generation
+rejection. Current config, debug lease, native decision and app-VPN readiness come
+from core publications, independently of heavy forensic snapshots. App-context
+probes keep their own physical-worker/quarantine rules; a disconnected waiter does
+not prove a probe stopped. The 1.x process/shell-draining validation below is history,
+not evidence for the new root transport.
 
 ## Presentation boundary and validation
 

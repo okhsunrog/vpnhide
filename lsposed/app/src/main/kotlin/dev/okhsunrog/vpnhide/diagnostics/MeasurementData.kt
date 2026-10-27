@@ -21,6 +21,9 @@ internal data class MeasurementContext(
     val observedAt: Long,
     /** The layers behind [coverage], kept so a retained measurement's report is built against them, never against the current backend (§6). */
     val coverageLayers: MeasurementCoverage? = null,
+    val desiredRevision: Long? = null,
+    val deliveryIdentity: String? = null,
+    val desiredDeliveryConfirmed: Boolean = true,
 )
 
 /**
@@ -52,10 +55,11 @@ internal data class MeasurementKey(
     val routing: String,
     val coverage: String,
     val changeEpoch: Long,
+    val deliveryIdentity: String? = null,
 )
 
 internal val MeasurementContext.key: MeasurementKey
-    get() = MeasurementKey(subject, configuration, routing, coverage, changeEpoch)
+    get() = MeasurementKey(subject, configuration, routing, coverage, changeEpoch, deliveryIdentity)
 
 internal fun sameMeasurementConditions(
     first: MeasurementContext,
@@ -135,6 +139,7 @@ internal fun canPresentCurrentSuccess(
     applicability: MeasurementApplicability,
     eligibility: DiagnosticEligibility,
 ): Boolean =
-    eligibility == DiagnosticEligibility.Eligible && measurement != null && measurement.completed &&
+    eligibility == DiagnosticEligibility.Eligible && measurement != null && measurement.context.desiredDeliveryConfirmed &&
+        measurement.completed &&
         applicability == MeasurementApplicability.MatchesLastObservation &&
         summarizeMeasurement(measurement).conclusion == EvidenceConclusion.NoObservedLeak

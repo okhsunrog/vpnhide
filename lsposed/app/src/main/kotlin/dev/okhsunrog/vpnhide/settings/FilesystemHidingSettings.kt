@@ -20,7 +20,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.okhsunrog.vpnhide.CanonicalActivation
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.CanonicalEdit
 import dev.okhsunrog.vpnhide.CanonicalMutation
@@ -64,6 +63,7 @@ internal fun FilesystemHidingSettingsSection() {
             resolveFilesystemHidingState(
                 desiredEnabled = enabled,
                 sections = rootSnapshot?.sections.orEmpty(),
+                nativeBoot = rootSnapshot?.nativeBoot,
             )
         }
     val savedMessage =
@@ -222,6 +222,5 @@ private suspend fun writeFilesystemHidingSetting(enabled: Boolean): Int =
         .commit(
             CanonicalMutation(
                 listOf(CanonicalEdit.Toggle(CanonicalToggle.Filesystem, enabled)),
-                activation = CanonicalActivation(native = false),
             ),
         ).exitCode

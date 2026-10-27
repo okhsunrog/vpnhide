@@ -1,4 +1,4 @@
-//! Typed field intents (core-2.0 §5) — the edit vocabulary a client submits, mirroring the
+//! Typed field intents — the edit vocabulary a client submits, mirroring the
 //! app's `CanonicalEdit` (CanonicalEditData.kt). A client sends the change it wants, never
 //! an authoritative replacement of a screen snapshot; the core prepares each against fresh
 //! state and can reject a stale one as a conflict.
@@ -13,6 +13,9 @@ use crate::config::{AppConfig, CanonicalConfig};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigEdit {
+    /// A flat set of field intents committed as one operation against one base.
+    /// Nested batches, whole replacements and repair commands are rejected.
+    Batch { edits: Vec<ConfigEdit> },
     /// Flip a single boolean setting.
     Toggle { field: ConfigToggle, enabled: bool },
     /// Replace a whole string-set setting (e.g. the auto-hide exclusions).
@@ -30,10 +33,13 @@ pub enum ConfigEdit {
     RemoveApp { pkg: String },
     /// Replace the whole config — a broad write set (import / reset).
     Replace { config: CanonicalConfig },
-    /// Re-apply native activation without changing the durable config (§5 repair).
+    /// Re-apply native activation without changing the durable config.
     /// Persisted intent and runtime application stay separate facts.
     RepairActivation,
 }
+
+/// Enough for every field of a broad app-role editor while keeping admission work bounded.
+pub const MAX_BATCH_EDITS: usize = 4096;
 
 /// A single boolean setting addressable by [`ConfigEdit::Toggle`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

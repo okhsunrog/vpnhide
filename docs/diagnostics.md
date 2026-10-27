@@ -146,8 +146,9 @@ check, so all its leaks count.
 Diagnostics are meaningless if VPN Hide itself is not routed through the VPN:
 split-tunnelled out, there is no VPN artifact for its own probes to be hidden
 *from*, so every check would read misleadingly clean. `RoutingGateCache` therefore
-owns one narrow core observation, the `AppVpnState` probe (core runs
-`vpnhide-core observe app-vpn-state --uid <selfUid>`). It returns the complete app-scoped state: `vpn_off`, `excluded`,
+consumes the shared core session's per-main-app UID observation. Core's
+continuous observer and explicit `AppVpnState` probe share the framework parser
+and membership implementation. The published app-scoped state contains: `vpn_off`, `excluded`,
 `routed`, or `unknown`, plus a VPN-session identity and candidate interfaces.
 
 The probe reads only current `NetworkAgentInfo` records from root `dumpsys
@@ -166,18 +167,26 @@ the VPN table. Table identifiers are scoped by address family and an
 output-interface-only rule is not UID membership. Any unavailable or malformed
 framework/rule observation becomes `unknown`, never `vpn_off` or `excluded`.
 
-The foreground `AppVpnStatePoller` requests this observation after each one-second
-delay and on every Activity resume. `routed` publishes immediately; negative
-states require two equal samples 750 ms apart, so tunnel setup cannot briefly
-publish a false exclusion. The poller only keeps the observation current; the
-confirmation suite is owed by the presentation it produces (`owedConfirmation`):
-one automatic run per measurement key (routing identity, coverage, self
-configuration, change epoch) that no measurement and no attempt covers, so a
+Core publishes observations on link/route/rule changes and bounded periodic
+reconciliation. The APK has no foreground VPN polling loop. `routed` publishes
+immediately; negative facts settle for 750 ms against the shared current source.
+Disconnect and Unknown withdraw readiness instead of becoming VPN-off. The
+confirmation suite is owed by the presentation (`owedConfirmation`): one automatic
+run per measurement key (routing identity, coverage, self
+configuration, change epoch and delivery identity) that no measurement and no attempt covers, so a
 re-established tunnel, an excluded → routed return or a coverage change each get
 exactly one run, whether the app was in the foreground for the edge or not.
 Repeated samples of one routed session reveal no new key and rerun nothing. User
 Retry uses the same cache and queues an explicit suite behind any automatic run
 already in progress, so the click cannot be absorbed by that run.
+
+Desired config revision, delivery evidence and measured behavior are separate
+identities. `MeasurementContext` captures `desiredRevision`, `deliveryIdentity`
+and `desiredDeliveryConfirmed`. An app-context probe may still run while delivery
+is uncertain and its measured results remain visible, but `DeliveryUnconfirmed`
+renders an application warning and cannot produce `currentSuccess`. The bundle's
+diagnostic summary and measurement snapshot expose those same identities; a
+passing measurement does not prove the desired revision reached every resource.
 
 ## 6. Empirical facts that shape the checks
 

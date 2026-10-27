@@ -1,4 +1,3 @@
-#![allow(dead_code)] // Boot activator entry points removed; keep projection helpers for core.
 use std::error::Error;
 use std::fs;
 use std::io::{ErrorKind, Write};
@@ -105,22 +104,25 @@ const LOCK_EX: c_int = 2;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PmReadyWait {
     Bounded(u32),
-    Forever,
 }
 
 mod kernel_control;
 mod kpm;
 mod load_kmod;
-pub(crate) use load_kmod::{CHILD_COMMAND_TIMEOUT, output_with_timeout};
+pub(crate) use load_kmod::CHILD_COMMAND_TIMEOUT;
+pub use process::{
+    CapturedCommand, capture_command, output_with_input_timeout, output_with_timeout,
+};
 mod model;
 mod ownership;
 mod ports;
+mod process;
 pub mod sys;
 
 use kpm::*;
 pub use kpm::{
     CoreKpm, KpmConfigError, KpmInfo, KpmLiveCheck, KpmRuntimeProbe, MIN_KPM_VERSION,
-    kpm_version_compatible,
+    kpm_version_compatible, set_session_superkey,
 };
 pub use model::*;
 pub use ownership::{
@@ -243,30 +245,6 @@ pub fn read_canonical() -> Result<String> {
     }
 }
 
-/// Read one optional feature without waiting for PackageManager. Kernel boot
-/// loaders query their relevant features before loading the backend, so a
-/// disabled load-time feature never registers its probes at all.
-pub(crate) fn optional_feature_enabled(feature: &str) -> Result<bool> {
-    let config = parse_canonical(&read_canonical()?)?;
-    Ok(config.settings.optional_features.contains(feature))
-}
-
-/// Optional boot hardening is never a prerequisite for the baseline backend.
-/// A corrupt desired-state file therefore falls back to the disabled default;
-/// late-start config delivery still reports the parse error and refuses a
-/// partial snapshot.
-pub(crate) fn optional_feature_enabled_or_default(feature: &str) -> bool {
-    match optional_feature_enabled(feature) {
-        Ok(enabled) => enabled,
-        Err(err) => {
-            eprintln!(
-                "cannot read optional boot feature {feature}; loading with the safe default: {err}"
-            );
-            false
-        }
-    }
-}
-
 /// Zygisk installs hooks only in processes whose UID is explicitly listed.
 /// A non-zero default means the opposite — act on every UID not listed — which
 /// would require injecting the module into every app process. Refuse that wire
@@ -287,55 +265,6 @@ pub fn validate_zygisk_config_wire(wire: &str) -> Result<()> {
 /// failures remain errors, rather than permission to select Zygisk.
 pub fn observed_kpm_loaded() -> Result<bool> {
     kpm::KpmClient::observe_loaded()
-}
-
-/// Outcome of a KPM boot activation. A kmod conflict is a legitimate,
-/// non-error result (the KPM deliberately stands down — see docs/storage.md
-/// §4.3), so it must
-/// be distinguishable from a successful configure: the lifecycle layer records
-/// each as a different typed `load_status`, and reporting a deferral as
-/// "configured" would lie to the diagnostics screen.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum KpmBootOutcome {
-    /// Wire snapshot was delivered to the KPM over ctl0.
-    Configured,
-    /// The .ko backend is present, so the KPM stood down without loading or
-    /// configuring (co-residence freezes the kernel — docs/storage.md §4.3).
-    DeferredConflict,
-    /// APatch/FolkPatch is installed, but neither a saved superkey nor the
-    /// trusted `su` supercall grant authenticated yet. Boot may legitimately
-    /// reach this state before the user unlocks the device and supplies the
-    /// key, so the service records it as deferred rather than parsing an error
-    /// message to guess what happened.
-    AwaitingAuthentication,
-    /// The running kernel's major.minor family has no validated KPM offset
-    /// table. The KPM itself performs the same authoritative check at init;
-    /// this userspace preflight exists so boot diagnostics can name the cause.
-    UnsupportedKernel,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct KpmBootReport {
-    pub(crate) outcome: KpmBootOutcome,
-    /// Exact boot-only loader choice used by this activation attempt. It is
-    /// absent when conflict/kernel preflight stopped before canonical parsing.
-    pub(crate) filesystem_hiding: Option<bool>,
-}
-
-impl KpmBootReport {
-    fn before_config(outcome: KpmBootOutcome) -> Self {
-        Self {
-            outcome,
-            filesystem_hiding: None,
-        }
-    }
-
-    fn with_feature(outcome: KpmBootOutcome, filesystem_hiding: bool) -> Self {
-        Self {
-            outcome,
-            filesystem_hiding: Some(filesystem_hiding),
-        }
-    }
 }
 
 pub fn read_kpm_status() -> Result<String> {
@@ -447,12 +376,6 @@ fn wait_for_pm_ready(wait: PmReadyWait) -> Result<()> {
     }
 }
 
-fn wait_for_path(path: &str) {
-    while !Path::new(path).exists() {
-        thread::sleep(Duration::from_secs(1));
-    }
-}
-
 /// PackageManager's shell command, reached through the `cmd` binder client. Never
 /// `pm`: on AOSP `/system/bin/pm` is a `#!/system/bin/sh` wrapper around exactly this
 /// call, and core spawns no shell.
@@ -466,7 +389,7 @@ fn package_command() -> Command {
 }
 
 fn pm_list_packages(args: &[&str]) -> Result<String> {
-    let out = package_command().args(args).output()?;
+    let out = output_with_timeout(package_command().args(args), CHILD_COMMAND_TIMEOUT)?;
     if !out.status.success() {
         return Err(format!(
             "cmd package list packages failed with status {}",
@@ -478,7 +401,10 @@ fn pm_list_packages(args: &[&str]) -> Result<String> {
 }
 
 fn pm_list_users() -> Result<String> {
-    let out = package_command().args(["list", "users"]).output()?;
+    let out = output_with_timeout(
+        package_command().args(["list", "users"]),
+        CHILD_COMMAND_TIMEOUT,
+    )?;
     if !out.status.success() {
         return Err(format!("cmd package list users failed with status {}", out.status).into());
     }
@@ -490,29 +416,6 @@ fn pm_output_has_package(output: &str, package: &str) -> bool {
     output
         .lines()
         .any(|line| line.split_whitespace().next() == Some(expected.as_str()))
-}
-
-/// True when the .ko backend is present and not disabled. This is the most
-/// complete of the project's "is the kmod here?" checks: it catches both an
-/// installed-and-enabled module directory *and* a live `/proc/vpnhide_ctl`
-/// (e.g. a manually-loaded .ko whose module dir is gone). Both lifecycle phases
-/// use this authoritative, ordering-independent gate. See docs/storage.md §4.3.
-pub(crate) fn kmod_backend_present() -> bool {
-    Path::new(KMOD_CTL).exists()
-        || (Path::new(KMOD_MODULE_DIR).is_dir()
-            && !Path::new(KMOD_MODULE_DIR).join("disable").exists())
-}
-
-fn skip_kpm_for_kmod_conflict(conflict_is_error: bool) -> Result<bool> {
-    if !kmod_backend_present() {
-        return Ok(false);
-    }
-    // .ko present. App/manual path treats this as a hard error; boot path
-    // signals a (non-error) deferral to the caller.
-    if conflict_is_error {
-        return Err("kmod backend present; refusing to load/configure KPM".into());
-    }
-    Ok(true)
 }
 
 pub fn write_atomic(path: &Path, content: &[u8], mode: u32) -> Result<()> {

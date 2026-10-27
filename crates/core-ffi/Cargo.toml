@@ -1,5 +1,5 @@
 # The app's in-process core client (core-2.0): the Rust `CoreClient` (tarpc over the
-# app-owned UDS) behind UniFFI, async methods with a JSON-string boundary for domain payloads.
+# app-owned UDS) behind UniFFI with typed async domain commands and publications.
 # Shipped in every APK build type; the app runs no root process of its own.
 [package]
 name = "vpnhide_core_ffi"
@@ -8,7 +8,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
-description = "The app's in-process core client: UniFFI over the tarpc UDS CoreClient (async, JSON boundary)."
+description = "The app's in-process core client: UniFFI over the tarpc UDS CoreClient (typed async domain API)."
 
 [lib]
 name = "vpnhide_core_ffi"
@@ -24,13 +24,11 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1.0.151"
-tokio = { version = "1.53.1", features = ["sync", "time"] }
 uniffi = { version = "0.32", features = ["tokio"] }
-vpnhide_core_daemon = { path = "../core-daemon" }
+vpnhide_core_client = { version = "0.1.0", path = "../core-client" }
 vpnhide_core_rpc = { path = "../core-rpc" }
 
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
+vpnhide_core_daemon = { path = "../core-daemon" }

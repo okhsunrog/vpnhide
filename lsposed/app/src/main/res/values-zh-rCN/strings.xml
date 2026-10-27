@@ -647,4 +647,5 @@
     <string name="agent_ui_preview_label">界面预览 · %1$s · 测试数据</string>
     <string name="agent_ui_preview_exit">退出预览</string>
     <string name="agent_ui_preview_action">已拦截操作：%1$s</string>
+    <string name="reset_capture_active">请先结束当前诊断采集，再重置。</string>
 </resources>

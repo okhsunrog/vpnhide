@@ -7,8 +7,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CanonicalEditDataTest {
-    private val noActivation = CanonicalActivation(native = false)
-
     @Test
     fun `invalid candidate and unframeable secret reject before any persistence`() {
         val read = RootCanonicalRead.Available(CanonicalConfig())
@@ -19,7 +17,7 @@ class CanonicalEditDataTest {
                 coupledEffects = listOf(CoreRootEffect.SetSuperkey("bad\u0000key")),
             )
         for (mutation in listOf(badConfig, badSecret)) {
-            val result = prepareConfigMutation(EffectTicket(1, 1), read, mutation) as ConfigOperationEvent.PreparationFailed
+            val result = prepareConfigIntent(read, mutation) as ConfigIntentPreparation.Failed
             assertEquals(TransitionFailure.ValidationFailed, result.reason)
         }
     }
@@ -105,38 +103,34 @@ class CanonicalEditDataTest {
     fun `explicit same value intent remains in write set while no op plan executes nothing`() {
         val mutation = CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, false)))
         val prepared =
-            prepareConfigMutation(
-                EffectTicket(1, 1),
-                RootCanonicalRead.Available(CanonicalConfig()),
-                mutation,
-            ) as ConfigOperationEvent.Prepared
-        assertEquals(emptyList<ConfigPhase>(), prepared.plan)
+            prepareConfigIntent(RootCanonicalRead.Available(CanonicalConfig()), mutation) as ConfigIntentPreparation.Prepared
+        assertEquals(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, false)), prepared.intent.edits)
         assertEquals(setOf(ConfigField(listOf("debugSwitch"))), mutation.writes)
         assertEquals(mapOf(CanonicalToggle.DebugSwitch to false), pendingConfigToggles(listOf(mutation)))
     }
 
     @Test
     fun `missing canonical is only writable by explicit bootstrap`() {
-        val ticket = EffectTicket(1, 1)
-        val normal = CanonicalMutation(emptyList(), activation = noActivation)
-        assertTrue(prepareConfigMutation(ticket, RootCanonicalRead.Missing, normal) is ConfigOperationEvent.PreparationFailed)
-        val bootstrap = CanonicalMutation(emptyList(), activation = noActivation, bootstrap = true)
-        val prepared = prepareConfigMutation(ticket, RootCanonicalRead.Missing, bootstrap) as ConfigOperationEvent.Prepared
-        assertEquals(listOf(ConfigPhase.Persist), prepared.plan)
+        val normal = CanonicalMutation(emptyList())
+        assertTrue(prepareConfigIntent(RootCanonicalRead.Missing, normal) is ConfigIntentPreparation.Failed)
+        val bootstrap = CanonicalMutation(emptyList(), bootstrap = true)
+        val prepared = prepareConfigIntent(RootCanonicalRead.Missing, bootstrap) as ConfigIntentPreparation.Prepared
+        assertTrue(prepared.intent.edits.single() is CanonicalEdit.Replace)
         listOf(RootCanonicalRead.Invalid, RootCanonicalRead.Unavailable).forEach {
-            assertTrue(prepareConfigMutation(ticket, it, bootstrap) is ConfigOperationEvent.PreparationFailed)
+            assertTrue(prepareConfigIntent(it, bootstrap) is ConfigIntentPreparation.Failed)
         }
     }
 
     @Test
-    fun `phase plan keeps secret and activation repair separate from persistence`() {
-        assertEquals(emptyList<ConfigPhase>(), configMutationPlan(CanonicalMutation(emptyList()), changed = false))
-        val repair = CanonicalMutation(emptyList(), activation = CanonicalActivation(ports = true), forceActivation = true)
-        assertEquals(listOf(ConfigPhase.Native, ConfigPhase.Ports), configMutationPlan(repair, changed = false))
-        val secret = CanonicalMutation(emptyList(), activation = noActivation, coupledEffects = listOf(CoreRootEffect.ClearSuperkey))
-        assertEquals(listOf(ConfigPhase.Secret), configMutationPlan(secret, changed = false))
-        assertEquals(listOf(CoreRootEffect.ClearSuperkey), configPhaseEffects(ConfigPhase.Secret, secret))
-        assertEquals(emptyList<CoreRootEffect>(), configPhaseEffects(ConfigPhase.Native, repair))
-        assertEquals(emptyList<CoreRootEffect>(), configPhaseEffects(ConfigPhase.Ports, repair))
+    fun `self target policy overrides same value role intent and explicit removal`() {
+        val protected = canonicalConfigWithSelfTarget(CanonicalConfig(), "self.app")
+        val forbidden = CanonicalEdit.App("self.app", CanonicalAppField.Ports, CanonicalApp(ports = true))
+        for (edit in listOf(forbidden, CanonicalEdit.RemoveApp("self.app"))) {
+            val mutation = CanonicalMutation(listOf(edit), transform = { canonicalConfigWithSelfTarget(it, "self.app") })
+            val preparation = prepareConfigIntent(RootCanonicalRead.Available(protected), mutation) as ConfigIntentPreparation.Prepared
+            val applied = preparation.intent.edits.fold(protected, ::applyCanonicalEdit)
+            assertEquals(protected, applied)
+            assertFalse(applied.apps.getValue("self.app").ports)
+        }
     }
 }

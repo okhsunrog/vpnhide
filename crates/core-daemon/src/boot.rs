@@ -7,15 +7,12 @@
 
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use vpnhide_core_rpc::{BaseRef, ConfigEdit, OperationId, PhaseOutcome, PortsSource, SubmitError};
 
 use crate::operation::PlanKind;
 use crate::server::{CoreState, SubmitOptions};
-
-/// Reserved high bit so boot ops do not collide with low app-issued ids in tests.
-const BOOT_OP_TAG: u64 = 1 << 63;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BootApplyStatus {
@@ -59,14 +56,6 @@ impl BootApplyReport {
         }
         let _ = fs::write(path, body);
     }
-}
-
-fn boot_operation_id() -> OperationId {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(1);
-    OperationId(BOOT_OP_TAG | (nanos & !BOOT_OP_TAG))
 }
 
 /// Re-apply runtime policy from durable config (Native/Ports per env). Does not
@@ -186,7 +175,18 @@ pub fn reapply_with(state: &CoreState, options: SubmitOptions) -> BootApplyRepor
         };
     }
     let revision = state.config_revision();
-    let op = boot_operation_id();
+    let op = match state.issue_operation_id() {
+        Ok(op) => op,
+        Err(error) => {
+            return BootApplyReport {
+                status: BootApplyStatus::Refused {
+                    reason: format!("{error:?}"),
+                },
+                op: None,
+                detail: "could not allocate boot operation identity".into(),
+            };
+        }
+    };
     match state.submit_edit_with(
         op,
         BaseRef { revision },

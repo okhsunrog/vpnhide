@@ -2,18 +2,20 @@
 //!
 //! The app runs no root process. Every root read it needs is a [`DiagnosticProbe`]; each maps
 //! to a `vpnhide-core probe …|observe …` child (Rust, see `device_probes`), a fixed `logcat -d`
-//! invocation, or an in-process kernel-log read. No shell runs, and no caller-supplied
-//! command, script or path exists. Probes run concurrently, each bounded in time and output.
+//! invocation, or a parent-owned kernel/KPM observation. KPM credentials remain in the
+//! daemon; isolated snapshot children consume typed nonsecret telemetry over stdin.
+//! No caller-supplied command, script or path exists. Probes run concurrently with
+//! bounded child runtimes and captured output.
 //!
 //! Output up to [`INLINE_MAX`] travels inline; anything larger (debug snapshot, logcat dumps) and
 //! every artifact (kernel images, LSPosed db copies) is written to the export dir inside the
 //! app's own data dir, owned by the app, so the reply stays far below the transport frame.
 
 use std::collections::BTreeMap;
-use std::io::Read;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -27,6 +29,9 @@ pub const INLINE_MAX: usize = 64 * 1024;
 pub const OUTPUT_MAX: usize = 32 * 1024 * 1024;
 /// Total inline bytes per report, well inside the 1 MiB frame.
 const REPORT_INLINE_BUDGET: usize = 640 * 1024;
+const MAX_PROBES: usize = 32;
+const MAX_PROBE_WORKERS: usize = 4;
+const REQUEST_OUTPUT_MAX: usize = 64 * 1024 * 1024;
 /// The export subdir (inside the app data dir) core writes probe files to.
 pub const EXPORT_DIR_NAME: &str = "vpnhide-core-export";
 
@@ -94,28 +99,96 @@ struct Captured {
 /// Run every requested probe concurrently and assemble the report. Blocking; call from a
 /// blocking context.
 pub fn collect(env: &ProbeEnv, request: &DiagnosticsRequest) -> DiagnosticsReport {
-    let dmesg_cleared = request.clear_dmesg && clear_dmesg();
-    let captured: Vec<(DiagnosticProbe, Captured)> = std::thread::scope(|scope| {
-        let handles: Vec<_> = request
-            .probes
-            .iter()
-            .map(|probe| (probe.clone(), scope.spawn(|| run_probe(env, probe))))
-            .collect();
-        handles
-            .into_iter()
-            .map(|(probe, h)| {
-                let out = h.join().unwrap_or(Captured {
+    if request.probes.len() > MAX_PROBES {
+        return DiagnosticsReport {
+            outputs: request
+                .probes
+                .first()
+                .map(|probe| ProbeOutput {
+                    probe: probe.clone(),
                     exit: -1,
-                    ..Captured::default()
-                });
-                (probe, out)
-            })
-            .collect()
+                    output: "too many probes in one request".into(),
+                    file: None,
+                    artifacts: Vec::new(),
+                    truncated: false,
+                })
+                .into_iter()
+                .collect(),
+            dmesg_cleared: false,
+        };
+    }
+    let mut probes = Vec::new();
+    for probe in &request.probes {
+        if !probes.contains(probe) {
+            probes.push(probe.clone());
+        }
+    }
+    let dmesg_cleared = request.clear_dmesg && clear_dmesg();
+    // A queue of individually bounded probes must also finish inside the RPC
+    // budget, rather than retaining workers long after its caller timed out.
+    let deadline = Instant::now()
+        + vpnhide_core_rpc::DIAGNOSTICS_DEADLINE.saturating_sub(Duration::from_secs(10));
+    // Credentials stay in this process. Children receive only the already-public
+    // telemetry, so a session-only KPM key remains usable without crossing exec.
+    let inputs = probes
+        .iter()
+        .any(|probe| {
+            matches!(
+                probe,
+                DiagnosticProbe::RootSnapshot { .. }
+                    | DiagnosticProbe::DebugSnapshot
+                    | DiagnosticProbe::HookCounters
+            )
+        })
+        .then(|| {
+            use crate::device_probes::{PROBE_INPUT_MAX, ProbeInputs, Ran};
+            let mut inputs = ProbeInputs {
+                kpm: crate::probe_cli::observations::collect_kpm_state(),
+            };
+            let encoded = serde_json::to_vec(&inputs).expect("fixed probe observations serialize");
+            if encoded.len() <= PROBE_INPUT_MAX {
+                encoded
+            } else {
+                inputs.kpm = Ran {
+                    exit: 1,
+                    stdout: String::new(),
+                    stderr: "KPM telemetry exceeds the probe input limit\n".into(),
+                };
+                serde_json::to_vec(&inputs).expect("fixed probe observations serialize")
+            }
+        });
+    let limit = OUTPUT_MAX.min(REQUEST_OUTPUT_MAX / probes.len().max(1));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let captured = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|scope| {
+        for _ in 0..MAX_PROBE_WORKERS.min(probes.len()) {
+            let (next, captured, probes, inputs) = (&next, &captured, &probes, inputs.as_deref());
+            scope.spawn(move || {
+                loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(probe) = probes.get(index) else {
+                        break;
+                    };
+                    let result =
+                        std::panic::catch_unwind(|| run_probe(env, probe, limit, deadline, inputs))
+                            .unwrap_or(Captured {
+                                exit: -1,
+                                ..Default::default()
+                            });
+                    captured
+                        .lock()
+                        .expect("probe results")
+                        .push((index, probe.clone(), result));
+                }
+            });
+        }
     });
+    let mut captured = captured.into_inner().expect("probe results");
+    captured.sort_by_key(|(index, _, _)| *index);
     let mut budget = REPORT_INLINE_BUDGET;
     let outputs = captured
         .into_iter()
-        .map(|(probe, c)| place(env, probe, c, &mut budget))
+        .map(|(_, probe, result)| place(env, probe, result, &mut budget))
         .collect();
     DiagnosticsReport {
         outputs,
@@ -127,15 +200,42 @@ fn clear_dmesg() -> bool {
     vpnhide_activator::sys::clear_kernel_log().is_ok()
 }
 
-fn run_probe(env: &ProbeEnv, probe: &DiagnosticProbe) -> Captured {
+fn run_probe(
+    env: &ProbeEnv,
+    probe: &DiagnosticProbe,
+    limit: usize,
+    deadline: Instant,
+    inputs: Option<&[u8]>,
+) -> Captured {
+    let expired = || Captured {
+        exit: -1,
+        stdout: b"diagnostic collection deadline exceeded".to_vec(),
+        truncated: true,
+        ..Default::default()
+    };
+    if Instant::now() >= deadline {
+        return expired();
+    }
     // Every probe is core's own bounded child (`vpnhide-core probe …`, Rust in
     // `device_probes`) or a fixed system tool invoked directly. Never a shell.
     let core = |args: &[&str], timeout: Duration| {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return expired();
+        }
         let mut cmd = Command::new(&env.core_exe);
         cmd.args(args);
-        run_bounded(cmd, timeout)
+        let inputs = inputs.filter(|_| {
+            args.get(1).is_some_and(|mode| {
+                matches!(*mode, "root-snapshot" | "debug-snapshot" | "hook-counters")
+            })
+        });
+        if inputs.is_some() {
+            cmd.arg(crate::device_probes::KPM_STDIN_FLAG);
+        }
+        run_bounded_limit_with_input(cmd, timeout.min(left), limit, inputs)
     };
-    match probe {
+    let mut result = match probe {
         DiagnosticProbe::RootSnapshot { packages } => {
             let mut args = vec!["probe", "root-snapshot"];
             if *packages {
@@ -163,7 +263,12 @@ fn run_probe(env: &ProbeEnv, probe: &DiagnosticProbe) -> Captured {
             let mut cmd = Command::new("logcat");
             cmd.args(["-d", "-b", "all", "-v", "threadtime", "-s"])
                 .args(APP_LOG_TAGS);
-            run_bounded(cmd, Duration::from_secs(30))
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                expired()
+            } else {
+                run_bounded_limit(cmd, Duration::from_secs(30).min(left), limit)
+            }
         }
         DiagnosticProbe::LogcatLsposedBoot => {
             core(&["probe", "logcat-lsposed"], Duration::from_secs(20))
@@ -187,7 +292,12 @@ fn run_probe(env: &ProbeEnv, probe: &DiagnosticProbe) -> Captured {
                 Duration::from_secs(20),
             )
         }
+    };
+    if result.stdout.len() > limit {
+        result.stdout.truncate(limit);
+        result.truncated = true;
     }
+    result
 }
 
 /// Give a file-producing probe a fresh, private dir under the export dir, then hand its
@@ -200,15 +310,16 @@ fn with_out_dir(env: &ProbeEnv, name: &str, run: impl FnOnce(&Path) -> Captured)
             ..Captured::default()
         };
     };
-    let dir = export.join(name);
-    let _ = std::fs::remove_dir_all(&dir);
-    if let Err(e) = prepare_dir(env, &export).and_then(|()| prepare_dir(env, &dir)) {
+    let sequence = FILE_SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = export.join(format!("{name}-{}-{sequence}", export_instance()));
+    if let Err(e) = prepare_dir(env, &export).and_then(|()| std::fs::create_dir(&dir)) {
         return Captured {
             exit: -1,
             stdout: format!("export dir: {e}").into_bytes(),
             ..Captured::default()
         };
     }
+    hand_to_app(env, &dir, 0o700);
     let mut out = run(&dir);
     let mut artifacts: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map(|it| it.filter_map(|e| e.ok().map(|e| e.path())).collect())
@@ -223,6 +334,9 @@ fn with_out_dir(env: &ProbeEnv, name: &str, run: impl FnOnce(&Path) -> Captured)
 
 pub(crate) fn prepare_dir(env: &ProbeEnv, dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
+    if !std::fs::symlink_metadata(dir)?.is_dir() {
+        return Err(std::io::Error::other("export path is not a directory"));
+    }
     hand_to_app(env, dir, 0o700);
     Ok(())
 }
@@ -239,79 +353,51 @@ pub(crate) fn hand_to_app(env: &ProbeEnv, path: &Path, mode: u32) {
 }
 
 /// Spawn, drain stdout up to [`OUTPUT_MAX`], and kill on `timeout`. stderr is discarded.
-fn run_bounded(mut cmd: Command, timeout: Duration) -> Captured {
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(_) => {
-            return Captured {
-                exit: -1,
-                ..Captured::default()
-            };
-        }
-    };
-    let mut stdout = child.stdout.take().expect("piped");
-    let reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let mut truncated = false;
-        let mut chunk = [0u8; 64 * 1024];
-        loop {
-            match stdout.read(&mut chunk) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    let room = OUTPUT_MAX.saturating_sub(buf.len());
-                    if n > room {
-                        buf.extend_from_slice(&chunk[..room]);
-                        truncated = true;
-                    } else {
-                        buf.extend_from_slice(&chunk[..n]);
-                    }
-                }
-            }
-        }
-        (buf, truncated)
-    });
-    let deadline = Instant::now() + timeout;
-    let (exit, timed_out) = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break (status.code().unwrap_or(-1), false),
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break (-1, true);
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(_) => break (-1, false),
-        }
-    };
-    // A grandchild holding stdout open (e.g. a backgrounded pipeline) must not hang us.
-    let (stdout, truncated) = join_with_deadline(reader, Duration::from_secs(2));
-    Captured {
-        exit,
-        stdout,
-        truncated: truncated || timed_out,
-        artifacts: Vec::new(),
-    }
+#[cfg(test)]
+fn run_bounded(cmd: Command, timeout: Duration) -> Captured {
+    run_bounded_limit(cmd, timeout, OUTPUT_MAX)
 }
 
-fn join_with_deadline(
-    handle: std::thread::JoinHandle<(Vec<u8>, bool)>,
-    wait: Duration,
-) -> (Vec<u8>, bool) {
-    let deadline = Instant::now() + wait;
-    while !handle.is_finished() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    if handle.is_finished() {
-        handle.join().unwrap_or_default()
-    } else {
-        (Vec::new(), true)
+fn run_bounded_limit(cmd: Command, timeout: Duration, limit: usize) -> Captured {
+    run_bounded_limit_with_input(cmd, timeout, limit, None)
+}
+
+fn run_bounded_limit_with_input(
+    mut cmd: Command,
+    timeout: Duration,
+    limit: usize,
+    input: Option<&[u8]>,
+) -> Captured {
+    match vpnhide_activator::capture_command(&mut cmd, input, timeout, limit) {
+        Ok(captured) => Captured {
+            exit: if captured.timed_out {
+                -1
+            } else {
+                captured.output.status.code().unwrap_or(-1)
+            },
+            stdout: captured.output.stdout,
+            truncated: captured.truncated || captured.timed_out,
+            artifacts: Vec::new(),
+        },
+        Err(_) => Captured {
+            exit: -1,
+            ..Captured::default()
+        },
     }
 }
 
 static FILE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn export_instance() -> &'static str {
+    static INSTANCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        let time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        format!("{}-{time:x}", std::process::id())
+    })
+}
 
 /// Inline small output (within the report budget); write the rest to the export dir.
 fn place(env: &ProbeEnv, probe: DiagnosticProbe, c: Captured, budget: &mut usize) -> ProbeOutput {
@@ -335,8 +421,17 @@ fn place(env: &ProbeEnv, probe: DiagnosticProbe, c: Captured, budget: &mut usize
     let file = env.export_dir().and_then(|export| {
         prepare_dir(env, &export).ok()?;
         let seq = FILE_SEQ.fetch_add(1, Ordering::Relaxed);
-        let path = export.join(format!("{}-{seq}.txt", probe_slug(&probe)));
-        std::fs::write(&path, text.as_bytes()).ok()?;
+        let path = export.join(format!(
+            "{}-{}-{seq}.txt",
+            probe_slug(&probe),
+            export_instance()
+        ));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .ok()?;
+        file.write_all(text.as_bytes()).ok()?;
         hand_to_app(env, &path, 0o600);
         Some(path.display().to_string())
     });
@@ -466,14 +561,31 @@ mod tests {
     fn file_probes_write_into_their_own_export_subdir() {
         let dir = tempfile::tempdir().unwrap();
         let env = host_env(Some(dir.path().to_path_buf()));
-        let out = with_out_dir(&env, "t", |d| {
-            std::fs::write(d.join("a.bin"), b"1").unwrap();
-            Captured::default()
-        });
-        assert_eq!(
-            out.artifacts,
-            vec![dir.path().join(EXPORT_DIR_NAME).join("t/a.bin")]
-        );
+        let collect = |contents: &[u8]| {
+            with_out_dir(&env, "t", |d| {
+                std::fs::write(d.join("a.bin"), contents).unwrap();
+                Captured::default()
+            })
+        };
+        let first = collect(b"1");
+        let second = collect(b"2");
+        assert_eq!(first.artifacts.len(), 1);
+        assert_eq!(second.artifacts.len(), 1);
+        assert_ne!(first.artifacts, second.artifacts);
+        for (artifact, expected) in [(&first.artifacts[0], b"1"), (&second.artifacts[0], b"2")] {
+            assert!(artifact.starts_with(dir.path().join(EXPORT_DIR_NAME)));
+            assert!(
+                artifact
+                    .parent()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .starts_with("t-")
+            );
+            assert_eq!(std::fs::read(artifact).unwrap(), expected);
+        }
     }
 
     #[test]
@@ -485,5 +597,22 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(5));
         assert_eq!(c.exit, -1);
         assert!(c.truncated);
+    }
+
+    #[test]
+    fn queued_artifact_probe_past_collection_deadline_does_not_create_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = host_env(Some(dir.path().to_path_buf()));
+        let result = run_probe(
+            &env,
+            &DiagnosticProbe::KernelImages,
+            OUTPUT_MAX,
+            Instant::now() - Duration::from_secs(1),
+            None,
+        );
+        assert_eq!(result.exit, -1);
+        assert!(result.truncated);
+        assert!(result.artifacts.is_empty());
+        assert!(!dir.path().join(EXPORT_DIR_NAME).exists());
     }
 }

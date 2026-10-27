@@ -1,25 +1,12 @@
 # App state: transition contract
 
-> **2.0:** the configuration lane's root side is VPN Hide Core (`CoreConfigIo`,
-> core's operation journal). Passages below about the root mutation transport,
-> `vhmutate`, helper receipts and untracked boot-script writers describe the 1.x
-> implementation; the coordinator state machines themselves are unchanged. See
-> [config-coordinator.md](../config-coordinator.md).
+Current 2.0 contract for app observation, diagnostic runs, presentation and
+capture integration. Privileged commands and recovery belong to core; see
+[core architecture](../core-architecture.md) and
+[app intents/drafts](../config-coordinator.md). The app's config execution and
+root-mutation transport machines have been removed.
 
-Status: current specification of the process-owned state machines as implemented.
-Configuration, observation and diagnostic-run coordinators are connected to the
-app; config operations feed diagnostic admission and context; the screens, the
-bridge and the bundle render one shared presentation; the Dashboard state is a
-projection of that presentation; capture runs through the run coordinator but
-keeps its older orchestration. Where the implementation deliberately deviates
-from the design agreed on 2026-09-15, the deviation is recorded in place. The
-stage-by-stage implementation log with its validation records is in
-[app-state-transitions-history.md](app-state-transitions-history.md) (its
-sections keep their original numbers, §13–§22). This contract extends
-[app state design](app-state-design.md) and follows the
-[diagnostics investigation](diagnostics-state-analysis.md). Runtime paths and
-deadlines are documented in [storage](../storage.md),
-[config coordinator](../config-coordinator.md),
+Runtime paths and deadlines are documented in [storage](../storage.md),
 [observation coordinator](../observation-coordinator.md) and
 [diagnostics](../diagnostics.md).
 
@@ -42,11 +29,11 @@ Effects run outside the reducer and return identified completion events.
 
 | Owner | State | Exclusive work |
 |---|---|---|
-| `ConfigCoordinator` behind `CanonicalConfigRepository` | Initialization, operation queue, confirmed config, phase outcomes | One mutating root operation, through activation/recovery |
+| `ConfigCoordinator` behind `CanonicalConfigRepository` | Initialization, intent queue, confirmed config and core receipts | Prepare and submit one core command; privileged execution/recovery belongs to core |
 | Draft registry and lifecycle state holders | Base identity, field patch, draft revision, submitted revision | Short edit/registration transitions; no lock held through I/O |
 | `ObservationCoordinator` behind every `StateCache` facade | Last observation, request generation, active request, stale mark, error, quarantine | One physical load per resource; coalesce requests |
 | `DiagnosticRunCoordinator` inside `DiagnosticDomain`, behind `DiagnosticsCache` | Request admission, active run, immutable run records, operation impact, the claimed confirmation key | One suite at a time, including export requests |
-| Capture (`DebugExport`, `LogcatRecorder`) | Capture phase, logging token, evidence/errors | One forensic capture session; the §9 capture machine is designed, not implemented |
+| Capture (`DebugExport`, `LogcatRecorder`) | Process-owned action, core lease, evidence/errors | Forensic action lifetime and noncancellable release; recording lifecycle belongs to core |
 | Pure presentation functions | Eligibility, applicability, evidence summary, Situation, Dashboard assembly | No I/O and no independently mutable verdict |
 
 Deviation from the original design, recorded deliberately: there is no global
@@ -90,34 +77,17 @@ Universal rules for the transition tables below:
 
 ## 2. Initialization and command admission
 
-Config availability: `Uninitialized`, `Loading(request)`, `Available(config)`,
-`Missing`, `Invalid(error)`, `Unavailable(error)`. Keep a last confirmed config
-separately when a later read fails; it is historical, not a writable base.
+Config availability distinguishes uninitialized/loading, available, missing and
+unavailable/invalid. The shared typed core publication supplies config revision
+and startup error; the app never assigns a revision or reads the canonical file
+through a second root path. Last-good config is historical display state when
+current evidence is unavailable, never a writable base.
 
-| State / event | Next state and effects |
-|---|---|
-| Uninitialized / first demand | Loading; issue dedicated canonical read |
-| Loading / valid read | Available; assign config revision; start allowed startup reconciliation |
-| Loading / absent file | Missing; only explicit startup initialization/import may establish config |
-| Loading / malformed or inaccessible | Invalid or Unavailable; show reason, no empty-default write |
-| Missing, Invalid, Unavailable / retry read | Loading with new request identity |
-| Not Available / ordinary mutation | Reject `config_unavailable`; preserve drafts |
-| Startup reconciliation unresolved | Hold mutations as in section 3; reads remain possible |
-| Self preparation not completed / request self-test | Terminal `NotStarted(initialization_pending)`; no inferred `selfNeedsRestart=false` |
-
-Config availability alone does not open mutation admission. Startup also checks
-whether previous app-owned root effects are quiescent. While that bounded check
-runs, coordinator mode is Initializing. Proven quiescence permits explicit startup
-initialization/reconciliation and then Open; uncertainty follows the same initial
-readback plus one repeat, then Paused rule as an in-process timeout. A new app PID
-does not prove an old privileged descendant stopped. The transport supplies
-discoverable execution-lifetime evidence across app restarts through `vhmutate`
-([root mutation transport](https://github.com/okhsunrog/vpnhide/blob/main/docs/root-mutation-transport.md)), or safely remains
-paused; no full persistent operation journal or automatic command replay exists.
-Commands issued by builds that predate the transport are untracked writers, like
-module boot scripts: a lane never opened in this boot is adopted directly, and
-their bounded, idempotent overlap with the first new-session command is an
-accepted risk, not a reboot requirement (decided 2026-09-15).
+A missing canonical file permits explicit bootstrap/import. Corrupt config or
+journal never causes an empty-default write. Core exposes read-only diagnostics
+and refuses mutation; its resource holds and receipts survive app/process restart.
+Accepted command lifetime does not depend on a live app waiter. No app-owned
+`vhmutate` process or quiescence probe remains.
 
 The startup self-test intent (`DiagnosticsCache.run`) starts the first suite of
 the process and afterwards only joins the active run or reads the latest attempt.
@@ -128,76 +98,26 @@ is covered by nothing, and the owed confirmation of §7 requests exactly one
 automatic suite. All these facts survive Activity recreation and reset on
 process death.
 
-## 3. Config operation machine
+## 3. App operation lifecycle and core receipts
 
-Coordinator mode: `Initializing`, `Open`, `Recovering(operation, attempt)`, or
-`Paused(operation, uncertainty)`. A recovery cause may refer to previous-process
-effects rather than an extant in-memory operation. Each accepted operation has:
+The process-owned app actor queues local actions, prepares field write sets and
+protects editor drafts. Each dispatch obtains one durable core-issued operation
+ID and sends one typed `CoreCommand`; the app does not execute Persist, Secret,
+Native or Ports phases. Import with cleanup, credentials and reset use compound
+core commands as described in [config coordinator](../config-coordinator.md).
 
-```text
-Queued -> Preparing -> Executing(step) -> Settled(result)
-                           |
-                           +-> Reconciling(0) -> Reconciling(1) -> Held
-```
+A cancelled waiter detaches. A lost submission response queries the same operation
+ID, including when the in-flight publication was missed. Readback failure keeps
+uncertainty visible; it cannot establish that no effect ran. Terminal phase
+results describe core's receipt. Confirmed persistence remains saved after a
+known delivery failure, while Unknown holds the affected resource. Explicit repair
+may supersede a hold only where new delivery is confirmed; old receipts remain
+immutable. No automatic mutation replay occurs.
 
-The immutable result records phases independently: canonical persistence, coupled
-secret work and each backend activation. A phase is `NotAttempted`, `Running`,
-`Confirmed`, `FailedKnown`, or `Unknown`. `FailedKnown` requires a known outcome;
-a shell exit/timeout alone must not imply that the file remained unchanged.
-
-The default effect plan preserves current prerequisites: read/validate current
-config, canonical replacement, coupled secret commands if any, native activation,
-then ports activation if required. Stop subsequent effect steps on failure. This
-does not make the steps transactional; an earlier success remains successful.
-Secret material stays inside effect execution, never in observable state/errors.
-
-| From / event / guard | To | Effects and publication |
-|---|---|---|
-| Open / submit, valid command envelope | Queued | Allocate ID and immutable intent; immediately publish requested switch position/progress |
-| Initializing / ordinary submit | Unchanged | Reject initialization_pending; startup bootstrap commands alone may run after predecessor quiescence is established |
-| Queued / lane free | Preparing | Read fresh canonical config and required inventory; no whole-root scan solely for config |
-| Preparing / read or validation fails | Settled(rejected) | No mutating effect; keep latest confirmed config and caller's draft |
-| Preparing / candidate valid, bridge conflicts with registered draft | Settled(ui_edit_conflict) | Reject whole bridge command; no partial write |
-| Preparing / candidate equal, no coupled work or explicit activation needed | Settled(no_change) | No write/activation; confirm against the fresh read |
-| Preparing / validated candidate | Executing(persist) | Recheck drafts in the dispatch transition; reserve write lane; dispatch effect |
-| Executing / canonical replacement confirmed | Executing(next step) or Settled | Publish confirmed config immediately; derive logger; continue prerequisite plan |
-| Executing / known persistence failure before replacement | Settled(failed) | Remove pending intent; show latest confirmed position/error |
-| Executing / known coupled/activation failure | Settled(partial_failure) | Keep confirmed config; report failed and unattempted phases; offer explicit recovery action |
-| Executing / all required steps confirmed | Settled(command_completed) | Release lane; schedule affected observations outside it; no assertion of per-process consumption |
-| Executing / outcome unknown | Reconciling(0) | Hold successors; read back phase evidence and transport termination evidence; never repeat mutation |
-| Reconciling(0) / still unknown or check fails | Reconciling(1) | Exactly one automatic repeat of the read-only reconciliation check |
-| Reconciling(1) / still unknown or check fails | Held; coordinator Paused | Resolve handle once as `unresolved`; show manual recheck; reject queued commands as `mutation_paused` |
-| Either reconciliation / effects proven quiescent and phase outcomes known | Settled(reconciled result); Open | Publish actual readback, retain phase detail, release lane; do not auto-run missing effect steps |
-| Paused / new mutation | Paused | Reject `mutation_paused`; do not accumulate hidden writes for later |
-| Paused / manual recheck | Recovering(manual) | One read-only attempt, no automatic retry budget reset |
-| Manual recovery / unknown | Paused | Update recovery evidence; retain same unresolved cause |
-| Manual recovery / resolved | Open | Publish actual state and a separate recovery record; previously resolved handles stay immutable |
-| Recovery check already active / another manual recheck | Unchanged | Join that read-only check; never launch duplicate recovery or replenish retry budget |
-| Queued or Preparing / explicit cancel before mutating dispatch | Settled(cancelled) | Retire read request; no write |
-| Executing or Reconciling / explicit cancel | Unchanged | Return `too_late_to_cancel`; finish/reconcile bounded effects |
-
-Reconciliation attempt 0 is the initial readback, attempt 1 is its single automatic
-repeat. A matching JSON is insufficient if an activator/descendant can still run.
-Late acknowledgements may trigger a recovery decision only with sufficient evidence
-that all effects have stopped. A late success line alone does not reopen the lane.
-Recovery may consume a still-undispatched sequence in transport metadata: this
-fences a root launch delayed beyond the app timeout and never repeats a config,
-secret or activation effect; the "read-only" recovery policy excludes application
-mutations while permitting this lifetime-metadata update.
-
-After a known apply failure, a later ordinary command may proceed once effects are
-quiescent. Retry activation is a new operation against **current** config, not a
-replay of the failed command's old snapshot. After uncertainty resolves, queued
-commands rejected during pause require resubmission, so recovery cannot unexpectedly
-write old intent. Reads, navigation, drafts and unrelated DataStore settings remain
-usable while mutations are paused.
-
-Each accepted operation's lifecycle is published to a `ConfigOperationObserver`
-synchronously from the coordinator's actor, in dispatch order: acceptance (before
-any effect, with the operation's spec), preparation (the spec with the prepared
-write set merged in: the diff of the transformed candidate against the fresh
-base), every mutating root dispatch (phase), the single result delivery, and a
-later manual recovery. Section 7 says what the diagnostic domain does with it.
+The app publishes preparation, dispatch and completion to diagnostic admission in
+actor order. Pending intent, observed core receipts and measured app behavior are
+distinct. Reads, navigation, drafts and unrelated DataStore settings remain
+usable while mutation is held. See section 7 for diagnostic-run consequences.
 
 ## 4. Drafts and UI priority
 
@@ -622,33 +542,21 @@ Implemented: the debug export does not measure on its own. `DiagnosticsCache.cap
 submits an explicit request carrying a unique `captureId`, which is part of the
 request identity, so a capture can never join a suite whose probes began before
 its logging and counter baseline; with a run active it is admitted as the pending
-run and waits. Forensic order is: acquire the logging token, clear dmesg, then
+run and waits. Forensic order is: acquire the core debug lease, clear dmesg, then
 run. The bundle reports the run's own outcome: only `Completed` may be `ROUTED`;
 a blocked eligibility becomes its gate; an interrupted, failed, not-started or
 never-admitted run contributes its partial evidence and an explicit reason
 instead of a verdict. `exportDebug` returns `Written(file, errors)` or
-`Failed(reason)`, so an export cannot be silently lost. Capture tokens belong to
-captures, never composables; `effectiveDebug = debugSwitch OR tokens`; release is
-idempotent and never restores an old whole-config snapshot. If mutations are
-paused, cleanup cannot bypass the write barrier: `logging_restore_pending` is
-recorded and recomputed at startup from persisted debug/debugSwitch after process
-death, not from a lost token list. `getState(refresh=true)` remains an observation
-refresh, not a hidden forced suite run.
+`Failed(reason)`, so an export cannot be silently lost. Leases belong to captures,
+never composables. The process-owned forensic action renews its core lease every
+30 seconds and releases it in a noncancellable finalizer. The core journal keeps
+the previous user logging intent and pending restoration operation separately
+from recorder files. Recorder ack/discard cannot erase restoration. An uncertain
+restore remains pending without automatic replay. See the current
+[capture and recovery contract](../core-architecture.md).
 
-Designed, not implemented (recorded so the remaining gap is explicit): the
-capture machine
-
-```text
-Queued -> PreparingLogging -> Baseline -> Checking/Recording
-       -> CollectingEvidence -> ReleasingLogging -> Packaging -> Finished
-```
-
-with its suite reservation between logging setup and baseline, its own deadlines
-and its cancellation path through ReleasingLogging. Capture-logging acquire and
-release keep their `finally` semantics and `LogcatRecorder` is unchanged. The
-rules that machine must keep when it is built: all failure/cancel paths after
-token acquisition pass through ReleasingLogging; a packaging deadline cannot
-falsely mark cleanup complete; package only finalized files or bounded immutable
+Cancelling a UI waiter does not cancel the process-owned action or clear an active
+recorder before Stop confirms. Package only finalized files or bounded immutable
 copies; a recorder whose termination is unproven is never represented as a
 completed recording; failure to obtain root evidence never suppresses
 already-collected app-side evidence; new measurement/attempt/eligibility meanings
@@ -691,7 +599,7 @@ intermediate publications and effect counts, not just final values.
 | T1 | Two unrelated config commands submitted from one old screen snapshot | Both patches survive fresh execution reads; I1–I3 |
 | T2 | Toggle -> JSON confirmed -> activation fails | Immediate requested position; confirmed position retained with apply error; I2–I3 |
 | T3 | Timeout -> initial readback unknown -> automatic repeat unknown | Two read-only checks total; pause; queued handles rejected; no new writes; I1, I5 |
-| T4 | T3 -> late success line without termination proof -> manual recovery | Stay paused until full proof; never duplicate write/activation; I1 |
+| T4 | T3 -> late transport response without confirmed receipt -> manual readback | Keep uncertainty visible until core evidence resolves it; never duplicate a command; I1 |
 | T5 | Root load A -> relevant invalidation -> A success -> load B failure | A cannot publish; B error plus lastGood historical; I4 |
 | T6 | UI dirty field -> overlapping bridge command | ui_edit_conflict, no persistence; unrelated field command allowed; I8 |
 | T7 | Bridge mutating dispatch -> UI edits same field -> root success | UI patch retained; bridge conflict includes confirmed persistence; I7–I8 |
@@ -734,14 +642,8 @@ the pull requests that shipped each stage.
 
 Known gaps, deliberately open:
 
-- The §9 capture machine (reservation, its own states, deadlines and
-  cancellation path).
 - No single presentation revision across all coordinators (§1 deviation); the
   diagnostic presentation is one instant of its own sources.
-- The startup runtime reconcile invalidates every root observation because the
-  activator does not report whether a forced activation changed anything; the
-  Background grace keeps that re-read silent. A targeted invalidation of
-  runtime-only sections is the cheaper follow-up if the background work matters.
 
 ### Shared diagnostic snapshot publication
 

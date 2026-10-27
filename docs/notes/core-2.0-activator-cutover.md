@@ -33,9 +33,10 @@ Do **not** run parallel activator + core. Dual-writer is unsupported.
 ## APK follow-up
 
 Done. The app talks to core only over the socket through the in-process core-ffi
-client (see `core-2.0-ipc-auth.md`): config edits (`CoreConfigIo`), root
-observations and diagnostics (core probes) and fixed root effects (SuperKey,
-legacy cleanup, full reset). `ConfigRootIo`, `suExec` and the `vhhelper` helper are
+client (see `core-2.0-ipc-auth.md`): typed `CoreCommand` requests, core observations,
+diagnostic probes and recording/lease APIs. SuperKey, import plus legacy cleanup
+and full reset have durable compound receipts. `CoreConfigIo`, `ConfigRootIo`,
+`suExec` and the `vhhelper` helper are
 gone; CI (`lsposed/tests/check_no_root_exec.sh`) fails on any root exec in the APK.
 
 The app also flags a still-installed `vpnhide_ports` / `vpnhide_builtin` module

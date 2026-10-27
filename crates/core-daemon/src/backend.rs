@@ -1,8 +1,7 @@
-//! Central native-backend detection (core-2.0 §4). Today each activator probes runtime
-//! identity and self-selects; core owns all state, so it makes that **one** observation and
-//! everything downstream (which family to project for, what the app shows) reads it.
+//! Central native-backend observation. Core owns boot selection and delivery;
+//! these read-only runtime observations qualify liveness without replacing those facts.
 //!
-//! `active` comes from **runtime identity**, not a module directory merely existing (§2): the
+//! `active` comes from **runtime identity**, not a module directory merely existing: the
 //! kernel control node reports the live backend id. `installed` is the weaker "module present
 //! on disk" signal. This slice covers the kernel families (Kmod/Builtin, one shared control
 //! node) and KPM (authenticated runtime enumeration plus telemetry identity).
@@ -15,9 +14,7 @@
 use std::path::Path;
 
 use vpnhide_activator::{BUILTIN_BACKEND_ID, KMOD_BACKEND_ID};
-use vpnhide_core_rpc::{NativeBackend, NativeBackendStatus};
-
-use crate::activation;
+use vpnhide_core_rpc::{NativeBackend, NativeBackendStatus, ObservationFreshness};
 
 /// The production module root; each backend installs a directory (or artifact) under it.
 pub const MODULES_ROOT: &str = "/data/adb/modules";
@@ -56,6 +53,11 @@ pub fn detect_managed(ctl: &Path, modules: &Path, kpm_lock: Option<&Path>) -> Na
                 (kernel, false) => Ok(kernel),
             }
         })();
+        detected.observed_freshness = if observed.is_ok() {
+            ObservationFreshness::Current
+        } else {
+            ObservationFreshness::Unknown
+        };
         detected.active = observed.ok().flatten();
     }
     detected
@@ -115,9 +117,13 @@ pub fn kernel_backend_from_id(id: u32) -> Option<NativeBackend> {
 /// backend whose module is present under `modules_root`.
 pub fn detect(ctl_path: &Path, modules_root: &Path) -> NativeBackendStatus {
     // Active: the live kernel backend id, if the node is present and reports one of ours.
-    let active = activation::read_status(ctl_path)
-        .ok()
-        .and_then(|status| kernel_backend_from_id(status.backend));
+    let observed = observe_kernel(ctl_path);
+    let observed_freshness = if observed.is_ok() {
+        ObservationFreshness::Current
+    } else {
+        ObservationFreshness::Unknown
+    };
+    let active = observed.ok().flatten();
 
     // Installed: module directories present. In ConfigPhase/enum order for a stable list.
     let installed = [
@@ -136,6 +142,7 @@ pub fn detect(ctl_path: &Path, modules_root: &Path) -> NativeBackendStatus {
         selected: None,
         applied: None,
         boot: None,
+        observed_freshness,
     }
 }
 

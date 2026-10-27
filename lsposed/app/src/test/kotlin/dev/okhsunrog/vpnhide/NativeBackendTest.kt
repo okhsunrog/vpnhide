@@ -141,6 +141,7 @@ class NativeBackendTest {
                         "zygisk_status" to "boot_id=boot-1\n",
                         "current_boot_id" to "boot-1",
                     ),
+                kpmLoadStatus = parseNativeBootStatus(selectedBootSection(NativeBackendId.Kpm, "boot-1").second).kpmLoadStatus(),
             )
 
         assertEquals(

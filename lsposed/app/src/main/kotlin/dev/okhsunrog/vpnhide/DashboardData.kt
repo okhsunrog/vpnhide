@@ -4,7 +4,6 @@ import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
 import android.os.Build
 import android.os.SystemClock
-import dev.okhsunrog.vpnhide.core.CoreProbe
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticPresentation
@@ -29,6 +28,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.io.File
+import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
 // ── Domain types — invalid states are unrepresentable ────────────────────
 
@@ -1084,11 +1084,12 @@ private fun deriveModuleFacts(
     kernelRecommendation: NativeInstallRecommendation?,
     hasKpatchRuntime: Boolean,
     appVersion: String,
+    nativeBoot: NativeBootStatus?,
+    backend: CoreBackendView?,
 ): ModuleFacts {
     val currentBootId = sections["current_boot_id"].orEmpty()
-    val nativeBoot = nativeBootStatus(sections)
     val kpmLoadStatus = nativeBoot.kpmLoadStatus()
-    val raw = detectNativeBackendStates(sections, currentBootId = currentBootId, kpmLoadStatus = kpmLoadStatus)
+    val raw = detectNativeBackendStates(sections, currentBootId = currentBootId, kpmLoadStatus = kpmLoadStatus, published = backend)
     val portsRaw = detectPortsModule(sections)
     val kmodLoadStatus = nativeBoot.kmodLoadStatus(currentBootId)
     VpnHideLog.i(TAG, "kmodLoadStatus=$kmodLoadStatus")
@@ -1221,6 +1222,7 @@ private suspend fun deriveEnvironmentFacts(
     targetsSnapshot: TargetsSnapshot,
     ports: ModuleState,
     portsTargetCount: Int,
+    nativeBoot: NativeBootStatus?,
 ): EnvironmentFacts =
     EnvironmentFacts(
         selinuxPermissive = sections["getenforce"].orEmpty().trim().equals("Permissive", ignoreCase = true),
@@ -1242,12 +1244,13 @@ private suspend fun deriveEnvironmentFacts(
                             ?.optionalFeatures
                             .orEmpty(),
                 sections = sections,
+                nativeBoot = nativeBoot,
             ),
         portsApply =
             detectPortsApplyProblem(
                 ports,
                 portsTargetCount,
-                nativeBootStatus(sections)?.takeIf { it.isFreshFor(sections["current_boot_id"].orEmpty()) }?.ports,
+                nativeBoot?.takeIf { it.isFreshFor(sections["current_boot_id"].orEmpty()) }?.ports,
                 portsDisabled = sections["core_disabled"].orEmpty().trim() == "1",
             ),
         obsoleteModules = parseObsoleteModules(sections),
@@ -1393,7 +1396,8 @@ internal suspend fun deriveDashboardRootFacts(
             hasKpatchRuntime,
         )
     val appVersion = BuildConfig.VERSION_NAME
-    val modules = deriveModuleFacts(sections, kernelRecommendation, hasKpatchRuntime, appVersion)
+    val modules =
+        deriveModuleFacts(sections, kernelRecommendation, hasKpatchRuntime, appVersion, rootSnapshot.nativeBoot, rootSnapshot.backend)
     StartupTrace.mark("dashboard_modules_done")
     StartupTrace.mark("dashboard_kernel_done")
 
@@ -1407,6 +1411,7 @@ internal suspend fun deriveDashboardRootFacts(
             targetsSnapshot = targetsSnapshot,
             ports = modules.ports.state,
             portsTargetCount = targets.ports,
+            nativeBoot = rootSnapshot.nativeBoot,
         )
     val installedOptionalHooks = installedNativeOptionalHooks(modules.nativeBackend.id, sections, modules.currentBootId)
     val nativeStatusError = nativeBackendStatusError(modules.nativeBackend.id, sections)

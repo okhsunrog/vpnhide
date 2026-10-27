@@ -105,6 +105,7 @@ internal fun configStatus(view: ConfigCoordinatorView): ConfigStatus? {
             modeMessage,
             canRecheck =
                 view.mode !in setOf(ConfigCoordinatorMode.Initializing, ConfigCoordinatorMode.Missing),
+            canApply = view.canRepair,
         )
     }
     if (view.operations.isNotEmpty()) return ConfigStatus(ConfigStatusMessage.Applying)

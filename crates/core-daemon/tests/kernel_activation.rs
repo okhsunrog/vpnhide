@@ -2,12 +2,15 @@
 //! -> delivery to the selected backend only. The child alone receives PATH overrides;
 //! no process-global test env mutation. Fake insmod and a regular control file do not
 //! establish device/kernel support.
+
+mod common;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use vpnhide_core_daemon::{CoreClient, config_file};
+use vpnhide_core_client::CoreClient;
+use vpnhide_core_daemon::config_file;
 use vpnhide_core_rpc::{
     BaseRef, CanonicalConfig, ConfigEdit, ConfigPhase, NativeBackend, NativeBootOutcome,
     OperationId, PhaseOutcome, SelectionMode,
@@ -110,7 +113,8 @@ async fn exercise(case: Case, check: impl FnOnce(&NativeBootOutcome)) {
     } else {
         assert!(!args_path.exists(), "core must not insmod");
     }
-    let client = CoreClient::connect_and_mirror(&socket);
+    let client = CoreClient::connect(&socket);
+    common::reserve_operation_ids(&client, 1).await;
     client.hello().await.unwrap();
     let mut candidate = initial.clone();
     candidate.debug = true;

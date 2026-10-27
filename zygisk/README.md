@@ -180,7 +180,7 @@ restarts.
 
 Core reports its selection separately from observed runtime activity. A published
 file does not confirm injection into every app; the app-context hook checks
-remain separate. See the [2.0 architecture](../docs/notes/core-2.0-architecture.md).
+remain separate. See the [2.0 architecture](../docs/core-architecture.md).
 
 ## License
 

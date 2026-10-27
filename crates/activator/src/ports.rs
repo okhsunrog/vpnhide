@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 
 use crate::{
-    PORTS_CHAIN4, PORTS_CHAIN6, PortProtocol, PortRule, PortUidPolicy, PortsActivationReport,
-    PortsRuleset, Result, write_atomic,
+    PORTS_CHAIN4, PORTS_CHAIN6, PortProtocol, PortRule, PortUidPolicy, PortsRuleset, Result,
+    write_atomic,
 };
 
 // Wait (bounded) for the xtables lock instead of failing instantly. netd, an
@@ -183,42 +182,29 @@ pub fn inspect_ports_chains() -> PortsChainPresence {
     }
 }
 
+fn command_output(program: &str, args: &[&str]) -> Result<Output> {
+    Ok(crate::output_with_timeout(
+        Command::new(program).args(XTABLES_WAIT).args(args),
+        crate::CHILD_COMMAND_TIMEOUT,
+    )?)
+}
+
 fn chain_exists(program: &str, chain: &str) -> bool {
-    Command::new(program)
-        .args(XTABLES_WAIT)
-        .args(["-L", chain, "-n"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    command_output(program, &["-L", chain, "-n"]).is_ok_and(|out| out.status.success())
 }
 
 fn jump_exists(program: &str, chain: &str) -> bool {
-    Command::new(program)
-        .args(XTABLES_WAIT)
-        .args(["-C", "OUTPUT", "-j", chain])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    command_output(program, &["-C", "OUTPUT", "-j", chain]).is_ok_and(|out| out.status.success())
 }
 
 /// Apply Ports rules with independent IPv4/IPv6 outcomes.
 pub fn apply_ports_rules_families(rules: &PortsRuleset) -> PortsApplyResult {
     let mut log = String::new();
 
-    if let Ok(out) = Command::new("iptables")
-        .args(XTABLES_WAIT)
-        .args(["-N", PORTS_CHAIN4])
-        .output()
-    {
+    if let Ok(out) = command_output("iptables", &["-N", PORTS_CHAIN4]) {
         append_command_output(&mut log, "iptables -N vpnhide_out", &out);
     }
-    if let Ok(out) = Command::new("ip6tables")
-        .args(XTABLES_WAIT)
-        .args(["-N", PORTS_CHAIN6])
-        .output()
-    {
+    if let Ok(out) = command_output("ip6tables", &["-N", PORTS_CHAIN6]) {
         append_command_output(&mut log, "ip6tables -N vpnhide_out6", &out);
     }
 
@@ -277,52 +263,21 @@ fn apply_one_family(
     }
 }
 
-/// Legacy activator entry: both families must succeed.
-pub(crate) fn apply_ports_rules(rules: &PortsRuleset) -> Result<PortsActivationReport> {
-    let result = apply_ports_rules_families(rules);
-    match result.overall() {
-        PortsFamilyResult::Confirmed => Ok(PortsActivationReport {
-            target_count: result.target_count,
-            log: result.log,
-        }),
-        PortsFamilyResult::FailedKnown | PortsFamilyResult::Unknown => Err(format!(
-            "ports apply failed: ipv4={:?} ipv6={:?}\n{}",
-            result.ipv4,
-            result.ipv6,
-            result.log.trim_end()
-        )
-        .into()),
-    }
-}
-
 fn run_with_stdin(program: &str, args: &[&str], stdin: &str) -> Result<Output> {
-    let mut child = Command::new(program)
-        .args(XTABLES_WAIT)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    {
-        let pipe = child.stdin.as_mut().ok_or("stdin pipe unavailable")?;
-        pipe.write_all(stdin.as_bytes())?;
-    }
-    Ok(child.wait_with_output()?)
+    Ok(crate::output_with_input_timeout(
+        Command::new(program).args(XTABLES_WAIT).args(args),
+        Some(stdin.as_bytes()),
+        crate::CHILD_COMMAND_TIMEOUT,
+    )?)
 }
 
 fn ensure_output_jump(program: &str, chain: &str, log: &mut String) -> Result<()> {
-    let check = Command::new(program)
-        .args(XTABLES_WAIT)
-        .args(["-C", "OUTPUT", "-j", chain])
-        .output()?;
+    let check = command_output(program, &["-C", "OUTPUT", "-j", chain])?;
     append_command_output(log, &format!("{program} -C OUTPUT -j {chain}"), &check);
     if check.status.success() {
         return Ok(());
     }
-    let insert = Command::new(program)
-        .args(XTABLES_WAIT)
-        .args(["-I", "OUTPUT", "-j", chain])
-        .output()?;
+    let insert = command_output(program, &["-I", "OUTPUT", "-j", chain])?;
     append_command_output(log, &format!("{program} -I OUTPUT -j {chain}"), &insert);
     if insert.status.success() {
         Ok(())

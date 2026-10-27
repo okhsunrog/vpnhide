@@ -191,13 +191,11 @@ private fun mergeCanonicalApp(
 internal class CanonicalMutation(
     edits: List<CanonicalEdit>,
     val source: OperationSource = OperationSource.Ui,
-    val activation: CanonicalActivation = CanonicalActivation(),
     coupledEffects: List<CoreRootEffect> = emptyList(),
     val bootstrap: Boolean = false,
     val declaredWrites: Set<ConfigField> = emptySet(),
     val removesCanonical: Boolean = false,
     val cleanup: Boolean = false,
-    val captureEvent: CaptureLoggingEvent? = null,
     val protectAllDrafts: Boolean = false,
     val forceActivation: Boolean = false,
     val transform: (CanonicalConfig) -> CanonicalConfig = { it },

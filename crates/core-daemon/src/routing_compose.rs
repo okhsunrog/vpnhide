@@ -13,9 +13,17 @@ use vpnhide_core_rpc::{
 pub const OBSERVE_UID_ENV: &str = "VPNHIDE_OBSERVE_UID";
 
 pub fn observe_uid_from_env() -> Option<u32> {
-    std::env::var(OBSERVE_UID_ENV)
+    if let Ok(value) = std::env::var(OBSERVE_UID_ENV) {
+        return value.trim().parse().ok();
+    }
+    use std::os::unix::fs::MetadataExt;
+    // The same main-profile app directory gates IPC. Resolve it for each sample so
+    // first install and reinstall never leave membership pinned to an obsolete UID.
+    let dir = crate::app_socket::app_data_dir_from_env()?;
+    std::fs::metadata(dir)
         .ok()
-        .and_then(|s| s.trim().parse().ok())
+        .map(|metadata| metadata.uid())
+        .filter(|uid| *uid >= 10_000)
 }
 
 /// Build the next routing observation.
@@ -65,6 +73,8 @@ pub fn compose(
                 uid,
                 state: UidVpnRouteState::Unknown,
                 detail: format!("framework_{:?}", framework.status).to_ascii_lowercase(),
+                session: None,
+                interfaces: Vec::new(),
             });
             RoutingObservation {
                 freshness: ObservationFreshness::Unknown,
@@ -89,6 +99,8 @@ fn uid_membership(
             uid,
             state: UidVpnRouteState::VpnOff,
             detail: "no_vpn".into(),
+            session: None,
+            interfaces: Vec::new(),
         };
     }
     // Membership uses the framework VPN set (authoritative), not only currently-up
@@ -100,16 +112,22 @@ fn uid_membership(
             uid,
             state: UidVpnRouteState::Routed,
             detail,
+            session: Some(framework.detail.clone()),
+            interfaces: framework.interfaces.clone(),
         },
         Some(false) => UidRoutingObservation {
             uid,
             state: UidVpnRouteState::Excluded,
             detail,
+            session: Some(framework.detail.clone()),
+            interfaces: framework.interfaces.clone(),
         },
         None => UidRoutingObservation {
             uid,
             state: UidVpnRouteState::Unknown,
             detail,
+            session: Some(framework.detail.clone()),
+            interfaces: framework.interfaces.clone(),
         },
     }
 }
@@ -140,6 +158,8 @@ pub fn mark_unknown(
             uid: u.uid,
             state: UidVpnRouteState::Unknown,
             detail: detail.into(),
+            session: u.session.clone(),
+            interfaces: u.interfaces.clone(),
         }),
     }
 }

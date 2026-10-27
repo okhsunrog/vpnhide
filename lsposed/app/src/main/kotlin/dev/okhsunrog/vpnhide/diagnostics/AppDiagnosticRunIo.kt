@@ -41,17 +41,21 @@ internal class AppDiagnosticRunIo(
         }
         val impact = impact()
         val appVpnState = RoutingGateCache.observation.value
+        val root = RootSnapshotCache.current.value
+        val config = CanonicalConfigRepository.state.value
         val observation =
             buildDiagnosticContextObservation(
                 selfNeedsRestart = false,
                 appVpn = AppVpnContext(appVpnState.gateProjection(), appVpnState.lastGood?.value?.identity),
-                snapshot = RootSnapshotCache.snapshot.value,
-                config = CanonicalConfigRepository.state.value.confirmed,
+                snapshot = root,
+                config = config.confirmed,
                 selfPackage = current.context.packageName,
                 processIdentity = "pid:${Process.myPid()};uid:${Process.myUid()}",
                 now = clock(),
-                readiness = configReadiness(impact),
+                readiness = coreMeasurementReadiness(config, configReadiness(impact)),
                 changeEpoch = impact.changeEpoch,
+                delivery = desiredDeliveryIdentity(config, current.context.packageName),
+                configJoined = coreInputsJoined(root, config),
             )
         if (stage == DiagnosticStage.Checking) traceEligibility(observation.eligibility)
         return observation

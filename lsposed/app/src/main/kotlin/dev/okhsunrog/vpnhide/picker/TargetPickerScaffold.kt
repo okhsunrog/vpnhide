@@ -60,7 +60,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.okhsunrog.vpnhide.CanonicalActivation
 import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.HelpAccordion
@@ -394,7 +393,7 @@ internal fun <T : TargetEntry> TargetPickerScreen(
                             val selfPkg = context.packageName
                             val signals = cachedApps.orEmpty().map(AppSummary::toAutoHideSignal)
                             val partial = scanWarning != null
-                            editor.save(CanonicalActivation(ports = true)) { fresh ->
+                            editor.save { fresh ->
                                 applyAutoHiddenPackages(fresh, selfPkg, signals, partial)
                             }
                         }

@@ -34,6 +34,34 @@ class DiagnosticPresentationDataTest {
     private val verifying = RoutingKnowledge.Verifying(SelfRouting.Routed, ReadReason.Transition, 5)
 
     @Test
+    fun `actual completed measurements stay visible while desired delivery remains unconfirmed`() {
+        val unknown = context.copy(desiredRevision = 9, deliveryIdentity = "native:unknown", desiredDeliveryConfirmed = false)
+        val view = viewWith(completed(unknown))
+        val presentation = diagnosticPresentation(view, eligible(unknown), changeEpoch = 0, routing = routed)
+        assertEquals(DiagnosticEligibility.Eligible, presentation.eligibility)
+        assertEquals(EvidenceConclusion.NoObservedLeak, presentation.evidence?.conclusion)
+        assertFalse(presentation.currentSuccess)
+        val situation =
+            dev.okhsunrog.vpnhide.diagnostics.situation(
+                presentation,
+                10,
+            ) as dev.okhsunrog.vpnhide.diagnostics.Situation.Measured
+        assertEquals(dev.okhsunrog.vpnhide.diagnostics.Staleness.DeliveryUnconfirmed, situation.staleness)
+        val screen =
+            dev.okhsunrog.vpnhide.diagnostics
+                .diagnosticScreenDecision(situation, presentation)
+        assertEquals(dev.okhsunrog.vpnhide.diagnostics.DiagnosticBanner.ApplicationUnknown, screen.banner)
+        assertEquals(presentation.measurementResults, screen.results)
+        val exported =
+            dev.okhsunrog.vpnhide.diagnostics
+                .diagnosticSummary(presentation, 10)
+                .measurement
+        assertEquals(9L, exported?.desiredRevision)
+        assertEquals("native:unknown", exported?.deliveryIdentity)
+        assertEquals(false, exported?.desiredDeliveryConfirmed)
+    }
+
+    @Test
     fun `a completed applicable measurement under eligible conditions is the only current success`() {
         val view = viewWith(completed(context))
         val presentation = diagnosticPresentation(view, eligible(context), changeEpoch = 0, routing = routed)
