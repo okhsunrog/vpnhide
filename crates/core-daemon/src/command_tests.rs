@@ -954,6 +954,18 @@ fn lease_expiry_restores_baseline_without_a_recorder_session() {
             store.journal.debug_leases[0].expires_at_ms = 0;
             state.persist_store(&store).unwrap();
             state.expire_debug_leases();
+            assert!(
+                state.debug_lease_held(),
+                "wall-clock expiry must not expire a live lease"
+            );
+            state
+                .live_leases
+                .lock()
+                .unwrap()
+                .get_mut(&DebugLeaseId(10))
+                .unwrap()
+                .deadline = std::time::Instant::now() - std::time::Duration::from_secs(1);
+            state.expire_debug_leases();
         })
         .unwrap();
     assert!(!state.snapshot().config.unwrap().debug);
@@ -1282,4 +1294,66 @@ fn journal_faults_never_publish_a_nondurable_terminal_receipt() {
             assert!(restarted.snapshot().storage_fault.is_none());
         }
     }
+}
+
+#[test]
+fn failed_lease_acquire_cannot_be_renewed_as_active_without_logging() {
+    let root = tempfile::tempdir().unwrap();
+    let state = load(root.path(), 1);
+    bootstrap(&state);
+    let blocked = root.path().join("config.json.tmp");
+    std::fs::create_dir(&blocked).unwrap();
+    let id = DebugLeaseId(77);
+    for _ in 0..2 {
+        assert_eq!(
+            state.acquire_debug_lease(id, DebugLeaseOwner::Forensic),
+            Err(SubmitError::Unavailable)
+        );
+        assert!(!state.current_debug().unwrap().0);
+        assert!(!state.live_leases.lock().unwrap().get(&id).unwrap().active);
+        assert_eq!(
+            state.config.lock().unwrap().journal.debug_restore,
+            Some((false, false))
+        );
+    }
+    std::fs::remove_dir(blocked).unwrap();
+    state
+        .acquire_debug_lease(id, DebugLeaseOwner::Forensic)
+        .unwrap();
+    assert!(state.current_debug().unwrap().0);
+    assert_eq!(
+        state.acquire_debug_lease(id, DebugLeaseOwner::Logcat),
+        Err(SubmitError::IdReused)
+    );
+    state.release_debug_lease(id).unwrap();
+    assert!(!state.current_debug().unwrap().0);
+}
+
+#[test]
+fn restart_retires_both_lease_owners_and_restores_the_original_baseline() {
+    let root = tempfile::tempdir().unwrap();
+    let state = load(root.path(), 1);
+    bootstrap(&state);
+    state
+        .acquire_debug_lease(DebugLeaseId(1), DebugLeaseOwner::Forensic)
+        .unwrap();
+    state
+        .acquire_debug_lease(DebugLeaseId(2), DebugLeaseOwner::Logcat)
+        .unwrap();
+    drop(state);
+    let restarted = load(root.path(), 2);
+    assert!(!restarted.debug_lease_held());
+    restarted
+        .call_writer(|state| state.expire_debug_leases())
+        .unwrap();
+    assert!(!restarted.current_debug().unwrap().0);
+    assert!(
+        restarted
+            .config
+            .lock()
+            .unwrap()
+            .journal
+            .debug_restore
+            .is_none()
+    );
 }
