@@ -10,9 +10,9 @@ different things, and VPN Hide has a role for each: **Java**, **Native**,
 
 ## What it can't do
 
-- **Change your external IP.** A server sees the VPN's exit IP. Anti-fraud and
-  geo-checks that run server-side, or key off the IP, are outside the phone — the
-  device can't hide that.
+- **Change your external IP.** For traffic through the tunnel, a server sees the
+  VPN's exit IP. Anti-fraud and geo-checks that run server-side, or key off the IP,
+  are outside the phone — the device can't hide that.
 - **Beat server-side or account-level detection.** If a service decides from its
   own backend that you're on a VPN, on-device hiding won't change the answer.
 - **Hide that you're rooted or on a custom ROM, or make an app pass Play
