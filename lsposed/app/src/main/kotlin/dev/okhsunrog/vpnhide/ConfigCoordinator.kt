@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private data class ConfigIntentRequest(
@@ -286,7 +287,7 @@ internal class ConfigCoordinator(
         val result = reply
         return when (result) {
             is CoreReply.Accepted -> {
-                recordOutcome(op, result.record)
+                if (result.record?.settled != null) recordOutcome(op, result.record) else awaitAcceptedOperation(op)
             }
 
             is CoreReply.Observed -> {
@@ -312,6 +313,26 @@ internal class ConfigCoordinator(
             CoreReply.Uncertain -> {
                 ConfigIntentOutcome(failure = TransitionFailure.ApplicationUnknown, uncertainOperation = op)
             }
+        }
+    }
+
+    /** Accepted is durable admission, not completion. Keep the action pending
+     * while the process-owned session observes progress; never resubmit it. */
+    private suspend fun awaitAcceptedOperation(op: Long): ConfigIntentOutcome {
+        val session = requireNotNull(client)
+        var update = session.updates.value
+        while (true) {
+            if (!update.current || update.state?.storageFault != null) {
+                return ConfigIntentOutcome(failure = TransitionFailure.ApplicationUnknown, uncertainOperation = op)
+            }
+            if (op !in update.state?.operationsInFlight.orEmpty()) {
+                val reply = runCatching { session.operation(op) }.getOrDefault(CoreReply.Uncertain)
+                val record = (reply as? CoreReply.Observed)?.record
+                if (record?.settled != null) return recordOutcome(op, record)
+                if (reply !is CoreReply.Observed || record == null) return readbackOutcome(op, reply)
+            }
+            val sequence = update.sequence
+            update = session.updates.first { !it.current || it.sequence > sequence }
         }
     }
 

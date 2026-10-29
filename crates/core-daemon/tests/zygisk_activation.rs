@@ -202,7 +202,8 @@ async fn exercise(case: &str) {
         )
         .await;
     if case == "crash-native" {
-        assert!(submitted.is_err() || submitted.unwrap().is_err());
+        // Admission may have reached the client before the injected crash.
+        let _ = submitted;
         process.0.wait().unwrap();
         let published_wire = fs::read_to_string(&policy).unwrap();
         let parsed = vpnhide_protocol::parse_config(published_wire.as_bytes()).unwrap();
@@ -247,7 +248,7 @@ async fn exercise(case: &str) {
         return;
     }
     submitted.unwrap().unwrap();
-    let record = client.get_operation(OperationId(1)).await.unwrap().unwrap();
+    let record = common::settled(&client, OperationId(1)).await;
     let expected = expectation(case);
     assert_eq!(
         record.settled,
@@ -311,6 +312,7 @@ async fn exercise(case: &str) {
                 .await
                 .unwrap()
                 .unwrap();
+            common::settled(&client, OperationId(2)).await;
             let wire = fs::read_to_string(&policy).unwrap();
             assert!(
                 vpnhide_protocol::parse_config(wire.as_bytes())

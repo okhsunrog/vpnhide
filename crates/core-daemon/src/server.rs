@@ -40,8 +40,8 @@ pub const CORE_BUILD: &str = env!("CARGO_PKG_VERSION");
 /// `config_revision` changes only with canonical state. The bounded command writer
 /// owns modifications; short mutex reads expose config and journal progress while
 /// effects run outside the lock.
-#[derive(Clone)]
-struct ConfigStore {
+#[derive(Clone, Default)]
+pub(crate) struct ConfigStore {
     config: Option<CanonicalConfig>,
     config_revision: u64,
     /// Mirror of the on-disk journal when durability is enabled; kept in lockstep with
@@ -50,8 +50,6 @@ struct ConfigStore {
     /// Last revision that committed each field path (also durable via the journal).
     field_revisions: std::collections::BTreeMap<String, u64>,
 }
-
-type WriterTask = Box<dyn FnOnce(&CoreState) + Send>;
 
 fn wall_time_ms() -> u64 {
     std::time::SystemTime::now()
@@ -76,6 +74,7 @@ struct LiveLease {
 }
 
 struct CommandSpec {
+    admitted: Option<crate::command_engine::AdmissionReply>,
     intent: journal::CommandIntent,
     effect: Option<(ConfigPhase, RootEffect)>,
     plan: Option<Vec<ConfigPhase>>,
@@ -86,6 +85,7 @@ struct CommandSpec {
 impl Default for CommandSpec {
     fn default() -> Self {
         Self {
+            admitted: None,
             intent: journal::CommandIntent::Edit,
             effect: None,
             plan: None,
@@ -98,16 +98,11 @@ impl Default for CommandSpec {
 /// The core's owned state: the published-state store plus the authoritative config.
 pub struct CoreState {
     pub publisher: Publisher,
-    writer: std::sync::OnceLock<std::sync::mpsc::SyncSender<WriterTask>>,
-    writer_admission: Mutex<()>,
+    engine: crate::command_engine::CommandEngine,
     shutting_down: std::sync::atomic::AtomicBool,
-    writer_stop: std::sync::atomic::AtomicBool,
-    writer_closed: std::sync::atomic::AtomicBool,
-    writer_join: Mutex<Option<std::thread::JoinHandle<()>>>,
     shutdown_gate: Mutex<()>,
     logcat_gate: Mutex<()>,
     heavy_rpc: Arc<tokio::sync::Semaphore>,
-    config: Mutex<ConfigStore>,
     live_leases: Mutex<std::collections::HashMap<DebugLeaseId, LiveLease>>,
     /// Where the durable canonical config lives. `None` = no persistence (host tests); a
     /// path means every accepted change is written there before it is acknowledged.
@@ -175,10 +170,11 @@ impl CoreState {
     pub fn shutdown(&self) {
         let _shutdown = self.shutdown_gate.lock().expect("shutdown gate");
         {
-            let _admission = self.writer_admission.lock().expect("writer admission");
+            let _admission = self.engine.admission.lock().expect("writer admission");
             if self.shutting_down.swap(true, Ordering::SeqCst) {
                 return;
             }
+            self.engine.stopping.store(true, Ordering::SeqCst);
         }
         {
             let _logcat = self.logcat_gate.lock().expect("logcat gate");
@@ -188,7 +184,7 @@ impl CoreState {
         // enough to restore baseline once; an uncertain restore stays durable.
         let _ = self.call_writer_owned(
             |state| {
-                let mut store = state.config.lock().expect("config mutex").clone();
+                let mut store = state.engine.store.lock().expect("config mutex").clone();
                 if store.journal.debug_leases.is_empty() && store.journal.debug_restore.is_none() {
                     return Ok(());
                 }
@@ -198,24 +194,7 @@ impl CoreState {
             },
             true,
         );
-        let receiver = {
-            let _admission = self.writer_admission.lock().expect("writer admission");
-            self.writer_closed.store(true, Ordering::SeqCst);
-            let (sender, receiver) = std::sync::mpsc::channel();
-            if let Some(writer) = self.writer.get() {
-                let _ = writer.send(Box::new(move |state| {
-                    state.writer_stop.store(true, Ordering::SeqCst);
-                    let _ = sender.send(());
-                }));
-            }
-            receiver
-        };
-        let _ = receiver.recv();
-        if let Some(writer) = self.writer_join.lock().expect("writer join").take() {
-            if writer.join().is_err() {
-                eprintln!("core: command writer panicked during shutdown");
-            }
-        }
+        self.engine.close();
     }
 
     /// Start read-only after corrupt/unsupported storage; absence is not invented.
@@ -242,28 +221,7 @@ impl CoreState {
         if self.shutting_down.load(Ordering::SeqCst) && !internal_release {
             return Err(SubmitError::Unavailable);
         }
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let admission = self.writer_admission.lock().expect("writer admission");
-        if self.writer_closed.load(Ordering::SeqCst)
-            || (self.shutting_down.load(Ordering::SeqCst) && !internal_release)
-        {
-            return Err(SubmitError::Unavailable);
-        }
-        let task: WriterTask = Box::new(move |state| {
-            let result = work(state);
-            let _ = sender.send(result);
-        });
-        let writer = self.writer.get().ok_or(SubmitError::Unavailable)?;
-        if internal_release {
-            writer.send(task).map_err(|_| SubmitError::Unavailable)?;
-        } else {
-            writer.try_send(task).map_err(|error| match error {
-                std::sync::mpsc::TrySendError::Full(_) => SubmitError::Busy,
-                _ => SubmitError::Unavailable,
-            })?;
-        }
-        drop(admission);
-        receiver.recv().map_err(|_| SubmitError::Unavailable)
+        self.engine.call(work, internal_release)
     }
 
     pub fn issue_operation_id(&self) -> Result<OperationId, SubmitError> {
@@ -274,7 +232,7 @@ impl CoreState {
         if self.snapshot().startup_error.is_some() || self.snapshot().storage_fault.is_some() {
             return Err(SubmitError::Unavailable);
         }
-        let mut store = self.config.lock().expect("config mutex").clone();
+        let mut store = self.engine.store.lock().expect("config mutex").clone();
         store.journal.issued_through = store
             .journal
             .issued_through
@@ -282,13 +240,13 @@ impl CoreState {
             .ok_or(SubmitError::Unavailable)?;
         if let Some(path) = &self.journal_path {
             if let Err(error) = journal::write_atomic(path, &store.journal) {
-                let previous = self.config.lock().expect("config mutex").clone();
+                let previous = self.engine.store.lock().expect("config mutex").clone();
                 self.freeze_storage_fault(&previous, OperationId(0), &error);
                 return Err(SubmitError::Unavailable);
             }
         }
         let id = OperationId(store.journal.issued_through);
-        *self.config.lock().expect("config mutex") = store;
+        *self.engine.store.lock().expect("config mutex") = store;
         Ok(id)
     }
 
@@ -305,10 +263,26 @@ impl CoreState {
         op: OperationId,
         command: CoreCommand,
     ) -> Result<Accepted, SubmitError> {
+        self.execute_command_admitted(op, command, None)
+    }
+
+    pub(crate) fn execute_command_admitted(
+        &self,
+        op: OperationId,
+        command: CoreCommand,
+        admitted: Option<crate::command_engine::AdmissionReply>,
+    ) -> Result<Accepted, SubmitError> {
         if self.snapshot().startup_error.is_some() || self.snapshot().storage_fault.is_some() {
             return Err(SubmitError::Unavailable);
         }
-        if let Some(entry) = self.config.lock().expect("config mutex").journal.get(op) {
+        if let Some(entry) = self
+            .engine
+            .store
+            .lock()
+            .expect("config mutex")
+            .journal
+            .get(op)
+        {
             if matches!(
                 (&command, &entry.command),
                 (
@@ -323,7 +297,8 @@ impl CoreState {
             }
         }
         let original_base = self
-            .config
+            .engine
+            .store
             .lock()
             .expect("config mutex")
             .journal
@@ -336,7 +311,7 @@ impl CoreState {
             field: vpnhide_core_rpc::ConfigToggle::RememberSuperkey,
             enabled,
         };
-        let (base, edit, spec) = match command {
+        let (base, edit, mut spec) = match command {
             CoreCommand::Edit { base, edit } => (base, edit, CommandSpec::default()),
             CoreCommand::SetSuperkey {
                 base,
@@ -416,6 +391,7 @@ impl CoreState {
                         ),
                         reset: true,
                         lease: false,
+                        admitted: None,
                     },
                 )
             }
@@ -425,11 +401,12 @@ impl CoreState {
                 reason: "root effects disabled".into(),
             });
         }
+        spec.admitted = admitted;
         self.execute_edit_opts(op, base, &edit, SubmitOptions::default(), spec)
     }
 
     fn publish_progress(&self, journal: &Journal) {
-        let mut store = self.config.lock().expect("config mutex");
+        let mut store = self.engine.store.lock().expect("config mutex");
         store.journal = journal.clone();
         for entry in &journal.operations {
             if entry.record.phases.iter().any(|phase| {
@@ -451,7 +428,7 @@ impl CoreState {
     }
 
     fn freeze_storage_fault(&self, store: &ConfigStore, op: OperationId, error: &std::io::Error) {
-        *self.config.lock().expect("config mutex") = store.clone();
+        *self.engine.store.lock().expect("config mutex") = store.clone();
         self.publish_store(store);
         self.publisher.update(|snapshot| {
             snapshot.storage_fault = Some(format!(
@@ -533,7 +510,7 @@ impl CoreState {
         owner: DebugLeaseOwner,
     ) -> Result<(), SubmitError> {
         self.call_writer(move |state| {
-            let mut store = state.config.lock().expect("config mutex").clone();
+            let mut store = state.engine.store.lock().expect("config mutex").clone();
             let existing = store
                 .journal
                 .debug_leases
@@ -624,21 +601,21 @@ impl CoreState {
     }
 
     fn release_debug_lease_direct(&self, id: DebugLeaseId) -> Result<(), SubmitError> {
-        let mut store = self.config.lock().expect("config mutex").clone();
+        let mut store = self.engine.store.lock().expect("config mutex").clone();
         store.journal.debug_leases.retain(|lease| lease.id != id);
         self.persist_store(&store)?;
         self.live_leases.lock().expect("live leases").remove(&id);
         self.restore_debug_if_unleased(true)
     }
 
-    fn expire_debug_leases(&self) {
+    pub(crate) fn expire_debug_leases(&self) {
         if self.shutting_down.load(Ordering::SeqCst) || self.snapshot().storage_fault.is_some() {
             return;
         }
         if self.native_enabled() && self.native_handle().is_none() {
             return;
         }
-        let mut store = self.config.lock().expect("config mutex").clone();
+        let mut store = self.engine.store.lock().expect("config mutex").clone();
         let before = store.journal.debug_leases.len();
         let now = std::time::Instant::now();
         let live = self.live_leases.lock().expect("live leases").clone();
@@ -710,7 +687,7 @@ impl CoreState {
     }
 
     fn restore_debug_if_unleased(&self, retry_known_failure: bool) -> Result<(), SubmitError> {
-        let mut store = self.config.lock().expect("config mutex").clone();
+        let mut store = self.engine.store.lock().expect("config mutex").clone();
         if !store.journal.debug_leases.is_empty() {
             return Ok(());
         }
@@ -756,7 +733,7 @@ impl CoreState {
             op
         } else {
             let op = self.issue_operation_id_direct()?;
-            store = self.config.lock().expect("config mutex").clone();
+            store = self.engine.store.lock().expect("config mutex").clone();
             store.journal.debug_restore_op = Some(op);
             self.persist_store(&store)?;
             op
@@ -786,7 +763,7 @@ impl CoreState {
                 ..Default::default()
             },
         )?;
-        let mut store = self.config.lock().expect("config mutex").clone();
+        let mut store = self.engine.store.lock().expect("config mutex").clone();
         if store
             .journal
             .get(op)
@@ -806,12 +783,12 @@ impl CoreState {
         }
         if let Some(path) = &self.journal_path {
             if let Err(error) = journal::write_atomic(path, &store.journal) {
-                let previous = self.config.lock().expect("config mutex").clone();
+                let previous = self.engine.store.lock().expect("config mutex").clone();
                 self.freeze_storage_fault(&previous, OperationId(0), &error);
                 return Err(SubmitError::Unavailable);
             }
         }
-        *self.config.lock().expect("config mutex") = store.clone();
+        *self.engine.store.lock().expect("config mutex") = store.clone();
         self.publish_store(store);
         Ok(())
     }
@@ -855,23 +832,13 @@ impl CoreState {
     pub fn new(publisher: Publisher) -> Arc<Self> {
         Arc::new(CoreState {
             publisher,
-            writer: std::sync::OnceLock::new(),
-            writer_admission: Mutex::new(()),
+            engine: Default::default(),
             shutting_down: std::sync::atomic::AtomicBool::new(false),
-            writer_stop: std::sync::atomic::AtomicBool::new(false),
-            writer_closed: std::sync::atomic::AtomicBool::new(false),
-            writer_join: Mutex::new(None),
             shutdown_gate: Mutex::new(()),
             logcat_gate: Mutex::new(()),
             instance_guard: std::sync::OnceLock::new(),
             heavy_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
             live_leases: Mutex::new(Default::default()),
-            config: Mutex::new(ConfigStore {
-                config: None,
-                config_revision: 0,
-                journal: Journal::default(),
-                field_revisions: Default::default(),
-            }),
             config_path: None,
             journal_path: None,
             kmod_ctl_path: None,
@@ -890,36 +857,7 @@ impl CoreState {
 
     /// Point the logcat recorder's debug lease at this core (weakly: no cycle).
     fn with_debug_control(self: Arc<Self>) -> Arc<Self> {
-        let (sender, receiver) = std::sync::mpsc::sync_channel::<WriterTask>(16);
-        assert!(self.writer.set(sender).is_ok(), "writer initialized once");
-        let weak = Arc::downgrade(&self);
-        let writer = std::thread::Builder::new()
-            .name("core-command-writer".into())
-            .spawn(move || {
-                loop {
-                    match receiver.recv_timeout(std::time::Duration::from_secs(1)) {
-                        Ok(task) => {
-                            let Some(state) = weak.upgrade() else {
-                                break;
-                            };
-                            task(&state);
-                            if state.writer_stop.load(Ordering::SeqCst) {
-                                break;
-                            }
-                            state.expire_debug_leases();
-                        }
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            let Some(state) = weak.upgrade() else {
-                                break;
-                            };
-                            state.expire_debug_leases();
-                        }
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                    }
-                }
-            })
-            .expect("start command writer");
-        *self.writer_join.lock().expect("writer join") = Some(writer);
+        self.engine.start(Arc::downgrade(&self));
         self.logcat
             .set_debug_control(Some(Arc::new(CoreDebugControl(Arc::downgrade(&self)))));
         self
@@ -1065,23 +1003,18 @@ impl CoreState {
         let field_revisions = journal.field_revisions.clone();
         let state = Arc::new(CoreState {
             publisher,
-            writer: std::sync::OnceLock::new(),
-            writer_admission: Mutex::new(()),
-            shutting_down: std::sync::atomic::AtomicBool::new(false),
-            writer_stop: std::sync::atomic::AtomicBool::new(false),
-            writer_closed: std::sync::atomic::AtomicBool::new(false),
-            writer_join: Mutex::new(None),
-            shutdown_gate: Mutex::new(()),
-            logcat_gate: Mutex::new(()),
-            instance_guard: std::sync::OnceLock::new(),
-            heavy_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
-            live_leases: Mutex::new(Default::default()),
-            config: Mutex::new(ConfigStore {
+            engine: crate::command_engine::CommandEngine::with_store(ConfigStore {
                 config: config.clone(),
                 config_revision,
                 journal,
                 field_revisions,
             }),
+            shutting_down: std::sync::atomic::AtomicBool::new(false),
+            shutdown_gate: Mutex::new(()),
+            logcat_gate: Mutex::new(()),
+            instance_guard: std::sync::OnceLock::new(),
+            heavy_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
+            live_leases: Mutex::new(Default::default()),
             config_path: Some(path),
             journal_path,
             kmod_ctl_path,
@@ -1096,7 +1029,7 @@ impl CoreState {
             ),
         })
         .with_debug_control();
-        let store = state.config.lock().expect("config mutex").clone();
+        let store = state.engine.store.lock().expect("config mutex").clone();
         state.publish_store(&store);
         Ok(state)
     }
@@ -1113,17 +1046,26 @@ impl CoreState {
 
     /// True once a durable config is loaded/created (for a startup log).
     pub fn has_config(&self) -> bool {
-        self.config.lock().expect("config mutex").config.is_some()
+        self.engine
+            .store
+            .lock()
+            .expect("config mutex")
+            .config
+            .is_some()
     }
 
     /// Current config revision (boot repair base).
     pub fn config_revision(&self) -> u64 {
-        self.config.lock().expect("config mutex").config_revision
+        self.engine
+            .store
+            .lock()
+            .expect("config mutex")
+            .config_revision
     }
 
     /// True when an Unknown operation still Holds mutation admission.
     pub fn has_unknown_hold(&self) -> bool {
-        let store = self.config.lock().expect("config mutex");
+        let store = self.engine.store.lock().expect("config mutex");
         store.journal.has_unknown()
     }
 
@@ -1213,7 +1155,8 @@ impl CoreState {
     }
 
     fn filesystem_hiding_wanted(&self) -> bool {
-        self.config
+        self.engine
+            .store
             .lock()
             .expect("config mutex")
             .config
@@ -1330,7 +1273,8 @@ impl CoreState {
     /// Whether a logcat session holds debug logging on.
     pub fn debug_lease_held(&self) -> bool {
         !self
-            .config
+            .engine
+            .store
             .lock()
             .expect("config mutex")
             .journal
@@ -1340,7 +1284,7 @@ impl CoreState {
 
     /// The stored config's `(debug, debugSwitch)`, if core holds a config.
     fn current_debug(&self) -> Option<(bool, bool)> {
-        let store = self.config.lock().expect("config mutex");
+        let store = self.engine.store.lock().expect("config mutex");
         store.config.as_ref().map(|c| (c.debug, c.debug_switch))
     }
 
@@ -1352,7 +1296,8 @@ impl CoreState {
 
     /// Query a settled/in-flight operation record.
     pub fn get_operation_record(&self, op: OperationId) -> Option<OperationRecord> {
-        self.config
+        self.engine
+            .store
             .lock()
             .expect("config mutex")
             .journal
@@ -1400,12 +1345,12 @@ impl CoreState {
         base: BaseRef,
         edit: &ConfigEdit,
         options: SubmitOptions,
-        spec: CommandSpec,
+        mut spec: CommandSpec,
     ) -> Result<Accepted, SubmitError> {
         if self.snapshot().startup_error.is_some() || self.snapshot().storage_fault.is_some() {
             return Err(SubmitError::Unavailable);
         }
-        let mut store = self.config.lock().expect("config mutex").clone();
+        let mut store = self.engine.store.lock().expect("config mutex").clone();
         // Deduplication precedes current-base and uncertainty gates: a lost
         // receipt may be queried using its original base, but never a new payload.
         if let Some(previous) = store.journal.get(op) {
@@ -1687,7 +1632,7 @@ impl CoreState {
                 ports: None,
             },
         });
-        *self.config.lock().expect("config mutex") = store.clone();
+        *self.engine.store.lock().expect("config mutex") = store.clone();
         self.publish_store(&store);
         let outcome = if let Some(journal_path) = self.journal_path.clone() {
             let mut hook = JournalPhaseHook {
@@ -1703,9 +1648,13 @@ impl CoreState {
                 fence: &self.dispatch_fence,
                 runner: &runner,
                 state: self,
+                admitted: spec.admitted.take(),
             };
             operation::run_plan_hooked(&plan, &next, changed, &runner, Some(&mut hook))
         } else {
+            if let Some(reply) = spec.admitted.take() {
+                let _ = reply.send(Ok(Accepted { op }));
+            }
             let mut hook = FenceOnlyHook {
                 ticket,
                 fence: &self.dispatch_fence,
@@ -1821,7 +1770,7 @@ impl CoreState {
             }
         }
 
-        *self.config.lock().expect("config mutex") = store.clone();
+        *self.engine.store.lock().expect("config mutex") = store.clone();
         self.publish_store(&store);
         let revision = store.config_revision;
         // Publish while still owning the mutation lane so a later accepted edit
@@ -1853,7 +1802,8 @@ impl CoreState {
     }
 
     fn get_operation(&self, op: OperationId) -> Option<OperationRecord> {
-        self.config
+        self.engine
+            .store
             .lock()
             .expect("config mutex")
             .journal
@@ -1924,6 +1874,7 @@ struct JournalPhaseHook<'a> {
     fence: &'a AtomicU64,
     runner: &'a RealPhaseRunner,
     state: &'a CoreState,
+    admitted: Option<crate::command_engine::AdmissionReply>,
 }
 
 impl PhaseHook for JournalPhaseHook<'_> {
@@ -1954,6 +1905,9 @@ impl PhaseHook for JournalPhaseHook<'_> {
             }
         })?;
         self.state.publish_progress(self.journal);
+        if let Some(reply) = self.admitted.take() {
+            let _ = reply.send(Ok(Accepted { op: self.op }));
+        }
         crate::recovery::maybe_delay_for_test(phase_delay_point(phase));
         if self.fence.load(Ordering::SeqCst) != self.ticket {
             eprintln!("core: dispatch fenced before {phase:?} (delayed predecessor)");
@@ -2063,9 +2017,14 @@ impl VpnhideCore for CoreServer {
         command: CoreCommand,
     ) -> Result<Accepted, SubmitError> {
         let state = self.state;
-        tokio::task::spawn_blocking(move || state.submit_command(op, command))
-            .await
-            .unwrap_or(Err(SubmitError::Unavailable))
+        tokio::task::spawn_blocking(move || {
+            if state.shutting_down.load(Ordering::SeqCst) {
+                return Err(SubmitError::Unavailable);
+            }
+            state.engine.submit(op, command)
+        })
+        .await
+        .unwrap_or(Err(SubmitError::Unavailable))
     }
 
     async fn acquire_debug_lease(
@@ -2260,6 +2219,32 @@ mod tests {
     };
 
     impl CoreServer {
+        // Most legacy orchestration tests assert completed effects. Keep that
+        // explicit here; real-RPC tests separately assert early admission.
+        async fn submit_test_command(
+            self,
+            ctx: Context,
+            op: OperationId,
+            command: CoreCommand,
+        ) -> Result<Accepted, SubmitError> {
+            let state = self.state.clone();
+            let accepted = self.submit_command(ctx, op, command).await?;
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    if state
+                        .get_operation_record(op)
+                        .is_some_and(|record| record.settled.is_some())
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("terminal receipt");
+            Ok(accepted)
+        }
+
         async fn submit_test_edit(
             self,
             ctx: Context,
@@ -2267,10 +2252,19 @@ mod tests {
             base: BaseRef,
             edit: ConfigEdit,
         ) -> Result<Accepted, SubmitError> {
-            while self.state.config.lock().unwrap().journal.issued_through < op.0 {
+            while self
+                .state
+                .engine
+                .store
+                .lock()
+                .unwrap()
+                .journal
+                .issued_through
+                < op.0
+            {
                 self.clone().allocate_operation_id(ctx).await?;
             }
-            self.submit_command(ctx, op, CoreCommand::Edit { base, edit })
+            self.submit_test_command(ctx, op, CoreCommand::Edit { base, edit })
                 .await
         }
     }
@@ -2462,7 +2456,7 @@ mod tests {
         let server = server();
         let op = server.state.issue_operation_id().unwrap();
         let result = server
-            .submit_command(
+            .submit_test_command(
                 tarpc::context::current(),
                 op,
                 CoreCommand::ClearSuperkey {
@@ -2507,7 +2501,7 @@ mod tests {
         assert!(config_path.exists());
         server
             .clone()
-            .submit_command(
+            .submit_test_command(
                 ctx(),
                 state.issue_operation_id().unwrap(),
                 CoreCommand::SetSuperkey {
@@ -2525,7 +2519,7 @@ mod tests {
 
         server
             .clone()
-            .submit_command(
+            .submit_test_command(
                 ctx(),
                 state.issue_operation_id().unwrap(),
                 CoreCommand::FullReset,

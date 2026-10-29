@@ -143,12 +143,7 @@ async fn an_over_capacity_save_is_refused_and_writes_nothing() {
         .await
         .unwrap()
         .unwrap();
-    let record = h
-        .client
-        .get_operation(OperationId(1))
-        .await
-        .unwrap()
-        .unwrap();
+    let record = common::settled(&h.client, OperationId(1)).await;
     assert_eq!(record.settled, Some(PhaseOutcome::Confirmed));
     let applied_wire = fs::read_to_string(&h.ctl).unwrap();
     assert!(
@@ -207,12 +202,7 @@ async fn repair_of_an_over_capacity_config_reports_it_and_writes_nothing() {
         .await
         .unwrap()
         .unwrap();
-    let record = h
-        .client
-        .get_operation(OperationId(1))
-        .await
-        .unwrap()
-        .unwrap();
+    let record = common::settled(&h.client, OperationId(1)).await;
     assert_eq!(record.settled, Some(PhaseOutcome::FailedKnown));
     let native = record
         .phases

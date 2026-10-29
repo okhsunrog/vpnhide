@@ -49,11 +49,7 @@ async fn handshake_submit_get_and_state_since() {
         .expect("accepted");
     assert_eq!(accepted.op, OperationId(1));
 
-    let record = client
-        .get_operation(OperationId(1))
-        .await
-        .expect("delivered")
-        .expect("record exists");
+    let record = common::settled(&client, OperationId(1)).await;
     assert_eq!(record.settled, Some(PhaseOutcome::Confirmed));
 
     // The same state_since call used by the app observes the committed config.
