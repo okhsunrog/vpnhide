@@ -19,6 +19,22 @@ pub fn permits_held(action: RecoveryAction, held: &[ConfigPhase]) -> bool {
     ) || !held.contains(&ConfigPhase::Persist)
 }
 
+/// Automatic boot repair may restore only independent runtime resources. Unlike
+/// explicit user repair, it must not resolve/retry a held effect. Native delivery
+/// also depends on credentials; every delivery depends on known canonical intent.
+pub fn permits_boot_phase(phase: ConfigPhase, held: &[ConfigPhase]) -> bool {
+    if held.contains(&ConfigPhase::Persist) || held.contains(&phase) {
+        return false;
+    }
+    match phase {
+        ConfigPhase::Native => !held.contains(&ConfigPhase::Secret),
+        ConfigPhase::Ports => true,
+        // Persist is a no-op in a repair without runtime writers.
+        ConfigPhase::Persist => true,
+        ConfigPhase::Secret | ConfigPhase::Cleanup => false,
+    }
+}
+
 pub fn refusal(state: &StateSnapshot, action: RecoveryAction) -> Option<&'static str> {
     if state.startup_error.is_some() {
         return Some("startup_fault");

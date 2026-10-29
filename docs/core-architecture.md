@@ -210,3 +210,12 @@ and Android label are applied through the same open descriptor. App-controlled
 path replacement cannot redirect writes or metadata changes. The same publication
 primitive serves large text probes and logcat. Staging is removed on completion,
 timeout/error, and after a daemon restart under the exclusive state locks.
+
+Automatic boot repair uses the same recovery-policy module, but deliberately has
+a stricter rule than explicit user repair. The writer checks the current journal,
+including retained aggregate holds, before effects: Persist uncertainty blocks all
+boot delivery; Native uncertainty or Secret uncertainty blocks Native; Ports
+uncertainty blocks Ports. Independent resources may still receive a fresh boot
+repair. Cleanup alone does not block Native/Ports. Boot never replays the old
+operation or reconciles a dependent held Persist implicitly. The original Unknown
+receipts and their holds remain unchanged. This includes the delayed Ports pass.

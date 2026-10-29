@@ -1136,3 +1136,91 @@ fn import_retains_sources_on_persist_failure_and_duplicate_never_replays_cleanup
         "new user source\n"
     );
 }
+
+#[test]
+fn boot_repairs_only_independent_resources_and_preserves_unknown_receipts() {
+    let phases = [
+        ConfigPhase::Persist,
+        ConfigPhase::Secret,
+        ConfigPhase::Cleanup,
+        ConfigPhase::Native,
+        ConfigPhase::Ports,
+    ];
+    for expired in [false, true] {
+        for bits in 0..32 {
+            for (kind, resource) in [
+                (operation::PlanKind::NativeOnly, ConfigPhase::Native),
+                (operation::PlanKind::PortsOnly, ConfigPhase::Ports),
+            ] {
+                let root = tempfile::tempdir().unwrap();
+                let config = CanonicalConfig::default();
+                crate::config_file::write_atomic(&root.path().join("config.json"), &config)
+                    .unwrap();
+                let held: Vec<_> = phases
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| bits & (1 << i) != 0)
+                    .map(|(_, phase)| *phase)
+                    .collect();
+                let mut journal = Journal {
+                    config_revision: 1,
+                    ..Default::default()
+                };
+                for (i, phase) in held.iter().enumerate() {
+                    journal.upsert(uncertain(i as u64 + 1, *phase, config.clone(), 1));
+                }
+                if expired {
+                    journal.operations.clear();
+                    journal.expired_holds = held.clone();
+                }
+                journal::write_atomic(&root.path().join("operations.json"), &journal).unwrap();
+                let state = load(root.path(), 1);
+                let before = state.snapshot().operations;
+                let report = crate::boot::reapply_with(
+                    &state,
+                    SubmitOptions {
+                        plan: Some(kind),
+                        ..Default::default()
+                    },
+                );
+                // Independent oracle, including Native's credential dependency.
+                let allowed = bits & 1 == 0
+                    && !held.contains(&resource)
+                    && !(resource == ConfigPhase::Native && bits & 2 != 0);
+                assert_eq!(
+                    report.op.is_some(),
+                    allowed,
+                    "bits={bits}, expired={expired}, {kind:?}: {report:?}"
+                );
+                if !allowed {
+                    assert_eq!(report.status, crate::boot::BootApplyStatus::HeldUnknown);
+                }
+                // Host runtime writers are disabled: this checks real admission,
+                // journal and restart, not an actual firewall/backend delivery.
+                for old in before {
+                    assert_eq!(state.get_operation_record(old.op), Some(old));
+                }
+                let saved = journal::read(&root.path().join("operations.json")).unwrap();
+                for old in &journal.operations {
+                    assert_eq!(saved.get(old.record.op).unwrap().record, old.record);
+                    assert!(
+                        saved
+                            .get(old.record.op)
+                            .unwrap()
+                            .superseded_phases
+                            .is_empty()
+                    );
+                }
+                assert_eq!(saved.expired_holds, journal.expired_holds);
+                drop(state);
+                let restarted = load(root.path(), 2);
+                for old in journal.operations {
+                    assert_eq!(
+                        restarted.get_operation_record(old.record.op),
+                        Some(old.record)
+                    );
+                }
+            }
+        }
+    }
+}

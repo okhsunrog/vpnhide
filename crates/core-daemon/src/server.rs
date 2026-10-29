@@ -137,6 +137,7 @@ pub struct SubmitOptions {
     pub plan: Option<PlanKind>,
     pub ports_source: vpnhide_core_rpc::PortsSource,
     pub netd_ready: Option<bool>,
+    pub automatic_repair: bool,
 }
 
 impl Default for SubmitOptions {
@@ -145,6 +146,7 @@ impl Default for SubmitOptions {
             plan: None,
             ports_source: vpnhide_core_rpc::PortsSource::Edit,
             netd_ready: None,
+            automatic_repair: false,
         }
     }
 }
@@ -1370,6 +1372,39 @@ impl CoreState {
             .is_some_and(|action| !vpnhide_core_rpc::recovery::permits_held(action, &held))
         {
             return Err(SubmitError::Unavailable);
+        }
+        if options.automatic_repair {
+            // This runs inside the writer, against the current journal: a hold
+            // created while boot queued cannot slip past a snapshot-only check.
+            let held: Vec<_> = store
+                .journal
+                .expired_holds
+                .iter()
+                .copied()
+                .chain(
+                    store
+                        .journal
+                        .operations
+                        .iter()
+                        .flat_map(JournalEntry::held_phases),
+                )
+                .collect();
+            let kind =
+                options
+                    .plan
+                    .unwrap_or(match (self.native_enabled(), self.ports_enabled()) {
+                        (true, true) => PlanKind::NativeThenPorts,
+                        (true, false) => PlanKind::NativeOnly,
+                        (false, true) => PlanKind::PortsOnly,
+                        (false, false) => PlanKind::PersistOnly,
+                    });
+            if !repair
+                || operation::plan_kind(kind)
+                    .iter()
+                    .any(|phase| !vpnhide_core_rpc::recovery::permits_boot_phase(*phase, &held))
+            {
+                return Err(SubmitError::Unavailable);
+            }
         }
         let persist_readback = if repair || spec.lease {
             self.reconcile_held_persist(&mut store)?
