@@ -97,9 +97,72 @@ impl Publisher {
     }
 }
 
+/// Measure the complete response, including the largest request ID. Config has
+/// its own admission budget; variable diagnostic metadata must not kill the UDS.
+pub(crate) fn response_size(value: &Published) -> usize {
+    let response = tarpc::Response {
+        request_id: u64::MAX,
+        message: Ok(vpnhide_core_rpc::VpnhideCoreResponse::StateSince(
+            value.clone(),
+        )),
+    };
+    serde_json::to_vec(&response)
+        .expect("publication serializes")
+        .len()
+}
+
+pub(crate) fn bounded_response(mut value: Published) -> Published {
+    let limit = vpnhide_core_rpc::MAX_FRAME_BYTES;
+    if response_size(&value) <= limit {
+        return value;
+    }
+    // Receipts remain queryable by ID; omit history before withdrawing current
+    // observations. Never truncate the canonical policy or claim it is empty.
+    value.snapshot.operations.clear();
+    if response_size(&value) <= limit {
+        return value;
+    }
+    let config = value.snapshot.config.take();
+    let config_revision = value.snapshot.config_revision;
+    value.snapshot = StateSnapshot {
+        config,
+        config_revision,
+        mutation_held: true,
+        startup_error: Some(
+            "publication metadata exceeds RPC limit; observations unavailable".into(),
+        ),
+        ..StateSnapshot::default()
+    };
+    if response_size(&value) > limit {
+        // A journal from an older build can contain an oversized candidate.
+        value.snapshot.config = None;
+        value.snapshot.startup_error = Some("stored config exceeds RPC limit".into());
+    }
+    value
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_observation_returns_bounded_explicit_failure_with_config_intact() {
+        let config = vpnhide_core_rpc::CanonicalConfig::default();
+        let value = Published {
+            epoch: u64::MAX,
+            revision: u64::MAX,
+            snapshot: StateSnapshot {
+                config: Some(config.clone()),
+                startup_error: Some("x".repeat(2 * vpnhide_core_rpc::MAX_FRAME_BYTES)),
+                ..Default::default()
+            },
+        };
+        let bounded = bounded_response(value);
+        assert!(response_size(&bounded) <= vpnhide_core_rpc::MAX_FRAME_BYTES);
+        assert_eq!(bounded.snapshot.config, Some(config));
+        assert!(bounded.snapshot.mutation_held);
+        assert!(bounded.snapshot.startup_error.is_some());
+    }
 
     fn snap(available: bool) -> StateSnapshot {
         StateSnapshot {

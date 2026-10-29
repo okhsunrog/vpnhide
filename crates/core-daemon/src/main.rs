@@ -155,6 +155,9 @@ async fn run(path: &str) {
     // The Native phase's control node. Unset via VPNHIDE_KMOD_CTL = no native write,
     // so the dev sandbox core never touches the real /proc/vpnhide_ctl.
     let kmod_ctl_path = vpnhide_core_daemon::activation::kmod_ctl_path_from_env();
+    if let Err(error) = vpnhide_core_daemon::diagnostics::cleanup_interrupted_exports() {
+        eprintln!("core: cannot clean interrupted exports: {error}");
+    }
     let state = match CoreState::load_with_journal(
         Publisher::new(epoch, StateSnapshot::default()),
         config_path.clone(),

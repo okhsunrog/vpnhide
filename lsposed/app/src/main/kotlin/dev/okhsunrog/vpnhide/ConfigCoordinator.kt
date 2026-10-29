@@ -193,12 +193,18 @@ internal class ConfigCoordinator(
             when {
                 request.mutation.removesCanonical && (publication.state?.activeCaptures ?: 0) > 0 -> "capture_active"
 
-                (held != null || publication.state?.mutationHeld == true) && !request.mutation.forceActivation -> "MutationPaused"
+                (held != null || publication.state?.mutationHeld == true) &&
+                    !recoveryAllowed(publication.state?.recovery, request.mutation) -> "MutationPaused"
 
                 !publication.current || initializing -> view.value.mode.name
 
                 publication.state?.canonical !is RootCanonicalRead.Available && !request.mutation.bootstrap &&
-                    !request.mutation.removesCanonical -> view.value.mode.name
+                    !request.mutation.removesCanonical &&
+                    !recoveryAllowed(
+                        publication.state?.recovery,
+                        request.mutation,
+                    )
+                -> view.value.mode.name
 
                 else -> null
             }
@@ -214,7 +220,7 @@ internal class ConfigCoordinator(
 
     private fun startNext() {
         if (active != null || queue.isEmpty() || !publication.current) return
-        if (held != null && !queue.first().mutation.forceActivation) return
+        if (held != null && !recoveryAllowed(publication.state?.recovery, queue.first().mutation)) return
         val session = client ?: return
         val request = queue.removeFirst()
         active = request
@@ -364,7 +370,7 @@ internal class ConfigCoordinator(
         if (message.outcome.failure == TransitionFailure.ApplicationUnknown) {
             held = request to message.outcome.uncertainOperation
         }
-        if (request.mutation.forceActivation && message.outcome.failure == null) held = null
+        if (recoveryAllowed(publication.state?.recovery, request.mutation) && message.outcome.failure == null) held = null
         active = null
         invalidateObservations()
         refreshRequests.trySend(Unit)
@@ -489,9 +495,9 @@ internal class ConfigCoordinator(
                 coreOperations = state?.operationsInFlight.orEmpty().toSet(),
                 applyEvidence = state?.applyEvidence.orEmpty(),
                 heldResources = state?.heldResources.orEmpty(),
-                canRepair =
-                    publication.current && state?.operationsInFlight?.isEmpty() == true &&
-                        state.heldResources.isNotEmpty() && state.heldResources.all { it == ConfigPhase.Native || it == ConfigPhase.Ports },
+                recovery = state?.recovery.takeIf { publication.current },
+                startupError = state?.startupError,
+                canRepair = publication.current && state?.recovery?.let { it.repair == null } == true,
                 rechecking = view.value.rechecking && (held != null || initializing),
             )
     }

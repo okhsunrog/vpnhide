@@ -17,6 +17,7 @@ model together:
 | `hook/` | everything LSPosed loads into `system_server` |
 | `picker/` | the Hiding tab: app list, target model, per-app caches |
 | `diagnostics/` | the check suite, the canonical report, the Diagnostics screen |
+| `migration/` | pre-1.0 package/UID sources and strict 1.x/current JSON import, producing the current typed model |
 | `settings/` | Settings and its sub-screens, plus the UI preference store |
 | `debug/` | the bundle, the logcat recorder, kernel-image export |
 | `statistics/`, `startup/` | the Statistics tab; MainActivity and startup wiring |

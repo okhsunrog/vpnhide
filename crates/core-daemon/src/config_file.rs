@@ -28,10 +28,14 @@ use std::io::{self, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-use serde_json::{Map, Value, json};
-use vpnhide_core_rpc::{
-    AppConfig, CanonicalConfig, NativeRole, PortPolicy, PortProtocol, PortRule, Settings,
-};
+#[cfg(test)]
+use serde_json::json;
+use vpnhide_core_rpc::CanonicalConfig;
+#[cfg(test)]
+use vpnhide_core_rpc::{AppConfig, NativeRole, PortPolicy, PortProtocol, PortRule, Settings};
+
+mod codec;
+pub use codec::{parse_status, to_json_string};
 
 /// The production path of the durable canonical config.
 pub const DEFAULT_CONFIG_PATH: &str = "/data/system/vpnhide_config.json";
@@ -53,7 +57,7 @@ pub fn config_path_from_env() -> PathBuf {
 /// an empty default config (core-2.0 §4 / exclusive-ownership gate).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigLoad {
-    /// File missing or blank. Core may bootstrap via Replace; this is not an error.
+    /// File missing (or empty import input). An existing blank file is an error.
     Absent,
     /// Parsed `version: 1` config.
     Present(CanonicalConfig),
@@ -69,27 +73,13 @@ pub fn read_status(path: &Path) -> io::Result<ConfigLoad> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(ConfigLoad::Absent),
         Err(e) => return Err(e),
     };
-    parse_status(&raw)
-}
-
-/// Decode on-disk canonical JSON text with the same Absent / Present / Unsupported
-/// distinction as [`read_status`]. Used by the APK's root helper to hand core a config in
-/// the format the app and LSPosed already speak, with one codec on the Rust side.
-pub fn parse_status(raw: &str) -> io::Result<ConfigLoad> {
     if raw.trim().is_empty() {
-        return Ok(ConfigLoad::Absent);
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "blank canonical file",
+        ));
     }
-    let root: Value = serde_json::from_str(raw)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("config parse: {e}")))?;
-    let version = root.get("version").and_then(Value::as_u64).unwrap_or(1) as u32;
-    if version > 1 {
-        return Ok(ConfigLoad::UnsupportedVersion { version });
-    }
-    match from_disk(&root) {
-        Some(cfg) => Ok(ConfigLoad::Present(cfg)),
-        // from_disk only returns None for version>1, already handled above.
-        None => Ok(ConfigLoad::UnsupportedVersion { version }),
-    }
+    parse_status(&raw)
 }
 
 /// Convenience: `Present` → `Some`, `Absent` → `None`.
@@ -104,14 +94,6 @@ pub fn read(path: &Path) -> io::Result<Option<CanonicalConfig>> {
             format!("unsupported config version {version}"),
         )),
     }
-}
-
-/// Serialize the config to the on-disk JSON string (the polymorphic legacy format), the same
-/// text [`write_atomic`] persists. Core hands this to the activator projection, which parses
-/// exactly this shape (§4: core absorbs the activator, so it feeds it the durable canon).
-pub fn to_json_string(config: &CanonicalConfig) -> String {
-    // to_disk builds a finite, well-formed Value, so serialization cannot fail.
-    serde_json::to_string(&to_disk(config)).expect("config serializes")
 }
 
 /// Serialize and write the config atomically (temp in the same dir → `rename`), mode `0640`.
@@ -138,7 +120,7 @@ fn write_atomic_with_sync(
     metadata: impl FnOnce(&fs::File) -> io::Result<()>,
     sync_directory: impl FnOnce(&Path) -> io::Result<()>,
 ) -> io::Result<()> {
-    let value = to_disk(config);
+    let value = codec::to_disk(config);
     let mut text = serde_json::to_string_pretty(&value)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     text.push('\n');
@@ -219,327 +201,28 @@ fn set_reader_metadata(file: &fs::File) -> io::Result<()> {
     file.set_permissions(fs::Permissions::from_mode(0o640))
 }
 
-// ---- disk JSON -> model (port of parseCanonicalConfig) ----------------------------------
-
-fn from_disk(root: &Value) -> Option<CanonicalConfig> {
-    let version = root.get("version").and_then(Value::as_u64).unwrap_or(1) as u32;
-    // A newer schema than this build understands: refuse rather than misread it.
-    if version > 1 {
-        return None;
-    }
-    let debug = bool_at(root, "debug", false);
-    let debug_switch = bool_at(root, "debugSwitch", debug);
-
-    let mut apps = std::collections::BTreeMap::new();
-    if let Some(obj) = root.get("apps").and_then(Value::as_object) {
-        for (pkg, app_val) in obj {
-            let app = app_from_disk(app_val);
-            if has_any_role(&app) {
-                apps.insert(pkg.clone(), app);
-            }
-        }
-    }
-
-    let s = root.get("settings");
-    let defaults = Settings::default();
-    let settings = Settings {
-        remember_superkey: opt_bool_at(s, "rememberSuperkey").unwrap_or(defaults.remember_superkey),
-        optional_features: string_set_at(s, "optionalFeatures"),
-        auto_hide_vpn_services: opt_bool_at(s, "autoHideVpnServices")
-            .unwrap_or(defaults.auto_hide_vpn_services),
-        auto_hide_vpn_name: opt_bool_at(s, "autoHideVpnName")
-            .unwrap_or(defaults.auto_hide_vpn_name),
-        auto_hide_excluded_packages: string_set_at(s, "autoHideExcludedPackages"),
-        auto_hidden_packages: string_set_at(s, "autoHiddenPackages"),
-    };
-
-    Some(CanonicalConfig {
-        version,
-        debug,
-        debug_switch,
-        apps,
-        settings,
-    })
-}
-
-fn app_from_disk(value: &Value) -> AppConfig {
-    let (java, java_hooks) = hook_role(value.get("java"));
-
-    let ports_requested = value.get("ports").and_then(Value::as_bool).unwrap_or(false);
-    let policy_present = value.get("portPolicy").is_some_and(|v| !v.is_null());
-    let port_policy = if ports_requested && policy_present {
-        port_policy_from_disk(value.get("portPolicy"))
-    } else {
-        None
-    };
-    // A missing policy keeps the legacy "all ports" meaning; a present-but-malformed one
-    // disables the role, so the activator never broadens it into an all-ports block.
-    let ports = ports_requested && (!policy_present || port_policy.is_some());
-
-    AppConfig {
-        java,
-        java_hooks,
-        native: native_role_from_disk(value.get("native")),
-        app_hiding: value
-            .get("appHiding")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        ports,
-        port_policy,
-        hidden: value
-            .get("hidden")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-    }
-}
-
-/// `java`/native-list fields: bool, or a non-empty hook array (empty array == disabled).
-fn hook_role(value: Option<&Value>) -> (bool, Option<Vec<String>>) {
-    match value {
-        Some(Value::Bool(b)) => (*b, None),
-        Some(Value::Array(_)) => {
-            let hooks = string_list(value);
-            match hooks {
-                Some(h) if !h.is_empty() => (true, Some(h)),
-                _ => (false, None),
-            }
-        }
-        _ => (false, None),
-    }
-}
-
-fn native_role_from_disk(value: Option<&Value>) -> NativeRole {
-    match value {
-        Some(Value::Object(o)) => {
-            // An object with no explicit `enabled` defaults to enabled (the activator's
-            // authoritative serde default); a disabled object drops its overrides.
-            let enabled = o.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-            if !enabled {
-                return NativeRole::default();
-            }
-            NativeRole {
-                enabled: true,
-                kernel: string_list(o.get("kernel")),
-                zygisk: string_list(o.get("zygisk")),
-            }
-        }
-        _ => {
-            let (enabled, hooks) = hook_role(value);
-            if enabled {
-                NativeRole {
-                    enabled: true,
-                    kernel: hooks,
-                    zygisk: None,
-                }
-            } else {
-                NativeRole::default()
-            }
-        }
-    }
-}
-
-fn port_policy_from_disk(value: Option<&Value>) -> Option<PortPolicy> {
-    let obj = value?.as_object()?;
-    // Best-effort: one malformed rule drops the whole policy (→ ports disabled), never
-    // unwinds the whole config.
-    let rules_json = obj.get("rules")?.as_array()?;
-    let mut rules = Vec::with_capacity(rules_json.len());
-    for r in rules_json {
-        rules.push(port_rule_from_disk(r.as_object()?)?);
-    }
-    let mode = obj
-        .get("mode")
-        .and_then(Value::as_str)
-        .unwrap_or("custom")
-        .to_owned();
-    let preset = obj
-        .get("preset")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned);
-    Some(PortPolicy {
-        mode,
-        preset,
-        rules,
-    })
-}
-
-fn port_rule_from_disk(obj: &Map<String, Value>) -> Option<PortRule> {
-    let start = obj.get("start").and_then(Value::as_u64)?;
-    let end = match obj.get("end") {
-        Some(v) => v.as_u64()?,
-        None => start,
-    };
-    if start == 0 || start > u16::MAX as u64 || end < start || end > u16::MAX as u64 {
-        return None;
-    }
-    let protocol = match obj
-        .get("protocol")
-        .and_then(Value::as_str)
-        .unwrap_or("both")
-    {
-        "tcp" => PortProtocol::Tcp,
-        "udp" => PortProtocol::Udp,
-        _ => PortProtocol::Both,
-    };
-    Some(PortRule {
-        protocol,
-        start: start as u16,
-        end: end as u16,
-    })
-}
-
-// ---- model -> disk JSON (port of canonicalConfigJson) -----------------------------------
-
-fn to_disk(config: &CanonicalConfig) -> Value {
-    let mut apps = Map::new();
-    for (pkg, app) in &config.apps {
-        if has_any_role(app) {
-            apps.insert(pkg.clone(), app_to_disk(app));
-        }
-    }
-    json!({
-        "version": config.version,
-        "debug": config.debug,
-        "debugSwitch": config.debug_switch,
-        "apps": Value::Object(apps),
-        "settings": {
-            "rememberSuperkey": config.settings.remember_superkey,
-            "optionalFeatures": sorted_array(&config.settings.optional_features),
-            "autoHideVpnServices": config.settings.auto_hide_vpn_services,
-            "autoHideVpnName": config.settings.auto_hide_vpn_name,
-            "autoHideExcludedPackages": sorted_array(&config.settings.auto_hide_excluded_packages),
-            "autoHiddenPackages": sorted_array(&config.settings.auto_hidden_packages),
-        },
-    })
-}
-
-fn app_to_disk(app: &AppConfig) -> Value {
-    let mut o = Map::new();
-    o.insert(
-        "java".into(),
-        hook_role_value(app.java, app.java_hooks.as_deref()),
-    );
-    o.insert("native".into(), native_role_value(&app.native));
-    o.insert("appHiding".into(), Value::Bool(app.app_hiding));
-    o.insert("ports".into(), Value::Bool(app.ports));
-    if app.ports {
-        if let Some(policy) = &app.port_policy {
-            o.insert("portPolicy".into(), port_policy_value(policy));
-        }
-    }
-    // `hidden` is written only when true (its absence parses back to false).
-    if app.hidden {
-        o.insert("hidden".into(), Value::Bool(true));
-    }
-    Value::Object(o)
-}
-
-fn hook_role_value(enabled: bool, hooks: Option<&[String]>) -> Value {
-    match (enabled, hooks) {
-        (false, _) => Value::Bool(false),
-        (true, None) => Value::Bool(true),
-        (true, Some(h)) => json!(h),
-    }
-}
-
-fn native_role_value(native: &NativeRole) -> Value {
-    if !native.enabled {
-        return Value::Bool(false);
-    }
-    if native.kernel.is_none() && native.zygisk.is_none() {
-        return Value::Bool(true);
-    }
-    let mut o = Map::new();
-    o.insert("enabled".into(), Value::Bool(true));
-    if let Some(k) = &native.kernel {
-        o.insert("kernel".into(), json!(k));
-    }
-    if let Some(z) = &native.zygisk {
-        o.insert("zygisk".into(), json!(z));
-    }
-    Value::Object(o)
-}
-
-fn port_policy_value(policy: &PortPolicy) -> Value {
-    let mut o = Map::new();
-    o.insert("mode".into(), Value::String(policy.mode.clone()));
-    if let Some(p) = &policy.preset {
-        if !p.is_empty() {
-            o.insert("preset".into(), Value::String(p.clone()));
-        }
-    }
-    let rules: Vec<Value> = policy.rules.iter().map(port_rule_value).collect();
-    o.insert("rules".into(), Value::Array(rules));
-    Value::Object(o)
-}
-
-fn port_rule_value(rule: &PortRule) -> Value {
-    let proto = match rule.protocol {
-        PortProtocol::Both => "both",
-        PortProtocol::Tcp => "tcp",
-        PortProtocol::Udp => "udp",
-    };
-    let mut o = Map::new();
-    o.insert("protocol".into(), Value::String(proto.into()));
-    o.insert("start".into(), json!(rule.start));
-    // `end` is omitted when it equals `start` (a single port), read back as start.
-    if rule.end != rule.start {
-        o.insert("end".into(), json!(rule.end));
-    }
-    Value::Object(o)
-}
-
-// ---- shared helpers ---------------------------------------------------------------------
-
-/// An app with no role at all is dropped from `apps` (matches the app on both read/write).
-fn has_any_role(app: &AppConfig) -> bool {
-    app.java || app.native.enabled || app.app_hiding || app.ports || app.hidden
-}
-
-fn bool_at(v: &Value, key: &str, default: bool) -> bool {
-    v.get(key).and_then(Value::as_bool).unwrap_or(default)
-}
-
-fn opt_bool_at(v: Option<&Value>, key: &str) -> Option<bool> {
-    v.and_then(|v| v.get(key)).and_then(Value::as_bool)
-}
-
-fn string_list(value: Option<&Value>) -> Option<Vec<String>> {
-    let arr = value?.as_array()?;
-    Some(
-        arr.iter()
-            .filter_map(Value::as_str)
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned)
-            .collect(),
-    )
-}
-
-fn string_set_at(v: Option<&Value>, key: &str) -> std::collections::BTreeSet<String> {
-    v.and_then(|v| v.get(key))
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn sorted_array(set: &std::collections::BTreeSet<String>) -> Value {
-    Value::Array(set.iter().map(|s| Value::String(s.clone())).collect())
-}
-
 #[cfg(test)]
 mod tests {
+    use super::codec::{app_from_disk, from_disk, to_disk};
     use super::*;
     use std::collections::{BTreeMap, BTreeSet};
+
+    #[test]
+    fn shared_v1_fixture_normalizes_once_and_survives_atomic_roundtrip() {
+        let raw = include_str!("../../../fixtures/migrations/canonical-v1.json");
+        let ConfigLoad::Present(config) = parse_status(raw).unwrap() else {
+            panic!("present");
+        };
+        assert!(config.apps["com.bank.app"].ports);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        write_atomic(&path, &config).unwrap();
+        assert_eq!(read(&path).unwrap(), Some(config.clone()));
+        assert_eq!(
+            parse_status(&to_json_string(&config)).unwrap(),
+            ConfigLoad::Present(config)
+        );
+    }
 
     fn app(f: impl FnOnce(&mut AppConfig)) -> AppConfig {
         let mut a = AppConfig::default();
@@ -789,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn absent_and_blank_files_are_none() {
+    fn missing_file_is_absent_but_present_blank_file_is_invalid() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(read(&dir.path().join("nope.json")).unwrap(), None);
         assert_eq!(
@@ -798,8 +481,8 @@ mod tests {
         );
         let blank = dir.path().join("blank.json");
         fs::write(&blank, "   \n").unwrap();
-        assert_eq!(read(&blank).unwrap(), None);
-        assert_eq!(read_status(&blank).unwrap(), ConfigLoad::Absent);
+        assert!(read(&blank).is_err());
+        assert!(read_status(&blank).is_err());
     }
 
     #[test]

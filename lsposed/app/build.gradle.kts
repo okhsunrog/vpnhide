@@ -395,6 +395,7 @@ android {
     // Shared helper response fixtures are consumed by the JVM parser tests and
     // the Rust checks crate, so a contract change cannot update only one side.
     sourceSets["test"].resources.srcDir(repoDir.resolve("fixtures/core-probes"))
+    sourceSets["test"].resources.srcDir(repoDir.resolve("fixtures/migrations"))
     // Offline guide assets synced from docs/help by syncHelpAssets (preBuild).
     sourceSets["main"].assets.srcDir(helpAssetsDir.get().asFile)
 

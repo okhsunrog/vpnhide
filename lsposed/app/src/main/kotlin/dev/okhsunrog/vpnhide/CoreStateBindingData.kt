@@ -12,8 +12,12 @@ internal fun CorePublication.toState(): CoreStateView =
         epoch = epoch.toLong(),
         configRevision = configRevision.toLong(),
         canonical =
-            config?.let { runCatching { RootCanonicalRead.Available(it.toCanonical()) }.getOrDefault(RootCanonicalRead.Invalid) }
-                ?: if (startupError == null) RootCanonicalRead.Missing else RootCanonicalRead.Unavailable,
+            if (startupError != null) {
+                RootCanonicalRead.Invalid
+            } else {
+                config?.let { runCatching { RootCanonicalRead.Available(it.toCanonical()) }.getOrDefault(RootCanonicalRead.Invalid) }
+                    ?: RootCanonicalRead.Missing
+            },
         operationsInFlight = operationsInFlight.map(ULong::toLong),
         debugLease = debugLease,
         revision = revision.toLong(),
@@ -29,6 +33,8 @@ internal fun CorePublication.toState(): CoreStateView =
                 routing.uid?.session,
             ),
         mutationHeld = mutationHeld,
+        recovery = recovery,
+        startupError = startupError,
         applyEvidence =
             applyEvidence.map {
                 CoreApplyIdentity(it.phase.toPhase(), it.desiredRevision.toLong(), it.op.toLong(), it.outcome.toOutcome())

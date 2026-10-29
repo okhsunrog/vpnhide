@@ -323,7 +323,15 @@ class ConfigCoordinatorTest {
     fun `explicit repair is available after restart for core held native delivery`() =
         runTest {
             val core = FakeSession()
-            core.updates.value = CoreSessionUpdate(core.state.copy(mutationHeld = true, heldResources = setOf(ConfigPhase.Native)), true)
+            core.updates.value =
+                CoreSessionUpdate(
+                    core.state.copy(
+                        mutationHeld = true,
+                        heldResources = setOf(ConfigPhase.Native),
+                        recovery = uniffi.vpnhide_core_ffi.CoreRecoveryAccess(null, null, null, null, null),
+                    ),
+                    true,
+                )
             val owner = ConfigCoordinator({ core }, backgroundScope)
             val init = async { owner.initialize() }
             runCurrent()

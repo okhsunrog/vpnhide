@@ -92,7 +92,6 @@ import dev.okhsunrog.vpnhide.ContactModal
 import dev.okhsunrog.vpnhide.DonateModal
 import dev.okhsunrog.vpnhide.FullResetDialog
 import dev.okhsunrog.vpnhide.LegacyImportDialog
-import dev.okhsunrog.vpnhide.LegacyImportPrompt
 import dev.okhsunrog.vpnhide.LocalConfigWriteAccess
 import dev.okhsunrog.vpnhide.R
 import dev.okhsunrog.vpnhide.RootSnapshotCache
@@ -102,9 +101,11 @@ import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.diagnostics.DebugToolsSection
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsScreen
 import dev.okhsunrog.vpnhide.help.HelpScreen
+import dev.okhsunrog.vpnhide.migration.LegacyImportPrompt
+import dev.okhsunrog.vpnhide.migration.parseImportedCanonicalConfig
+import dev.okhsunrog.vpnhide.migration.parseLegacyConfigCandidate
+import dev.okhsunrog.vpnhide.migration.toPrompt
 import dev.okhsunrog.vpnhide.next
-import dev.okhsunrog.vpnhide.parseImportedCanonicalConfig
-import dev.okhsunrog.vpnhide.parseLegacyConfigCandidate
 import dev.okhsunrog.vpnhide.picker.AppListCache
 import dev.okhsunrog.vpnhide.picker.AppSummary
 import dev.okhsunrog.vpnhide.picker.TargetsCache
@@ -116,7 +117,6 @@ import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
 import dev.okhsunrog.vpnhide.settings.ThemeMode
 import dev.okhsunrog.vpnhide.shouldRequestUpdateNotificationPermission
-import dev.okhsunrog.vpnhide.toPrompt
 import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
 import dev.okhsunrog.vpnhide.ui.components.EnhancedButton
 import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
@@ -911,7 +911,9 @@ private fun SuperkeySettingsSection() {
         Row(modifier = Modifier.fillMaxWidth()) {
             TextButton(
                 onClick = write@{
-                    if (!checkWrite()) return@write
+                    if (repository.recovery?.clearSuperkey != null || repository.recovery == null) {
+                        if (!checkWrite()) return@write
+                    }
                     saving = true
                     status = null
                     scope.launch {
@@ -930,7 +932,9 @@ private fun SuperkeySettingsSection() {
             Spacer(Modifier.width(8.dp))
             EnhancedButton(
                 onClick = write@{
-                    if (!checkWrite()) return@write
+                    if (repository.recovery?.setSuperkey != null || repository.recovery == null) {
+                        if (!checkWrite()) return@write
+                    }
                     saving = true
                     status = null
                     val keyToWrite = superkey

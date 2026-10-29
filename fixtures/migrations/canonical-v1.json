@@ -1,0 +1,1 @@
+{"version":1,"debug":false,"apps":{"com.bank.app":{"java":["network_capabilities"],"native":{"kernel":["ifaddrs"],"zygisk":null},"ports":true},"com.vpn.client":{"hidden":true}},"settings":{"autoHideVpnServices":true}}

@@ -336,6 +336,15 @@ pub fn validate_candidate(candidate: &CanonicalConfig) -> Result<(), String> {
     if json.len() > 512 * 1024 {
         return Err("canonical config exceeds 512 KiB".into());
     }
+    // The normalized RPC shape is larger than the compact legacy disk codec.
+    // Reserve half the frame for observations, receipts and the tarpc envelope.
+    if serde_json::to_vec(candidate)
+        .map_err(|e| e.to_string())?
+        .len()
+        > 512 * 1024
+    {
+        return Err("canonical RPC config exceeds 512 KiB".into());
+    }
     match crate::config_file::parse_status(&json) {
         Ok(crate::config_file::ConfigLoad::Present(parsed)) if parsed == *candidate => Ok(()),
         _ => Err("config does not round-trip through the canonical codec".into()),

@@ -80,7 +80,8 @@ shared canonical file nor consume extra native target slots.
   than 1.0.0 kept per-component `targets.txt`/observer files; the app folds them
   into this JSON and deletes them (silently at startup when nothing is configured
   yet, otherwise via a Dashboard banner offering merge / replace). Paths and
-  exact behaviour: [state.md §1](state.md), code in `LegacyConfigImport.kt`.
+  exact behaviour: [state.md §1](state.md), code in `migration/LegacyConfigImport.kt`. Incomplete inputs are retained; see
+  [migration boundary](migration.md).
   Nothing outside that importer reads them — no backend has a legacy read path.
 
 ### 2.1 Canonical JSON schema
