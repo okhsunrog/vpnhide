@@ -122,7 +122,7 @@ Core-owned expiring leases cover forensic capture and logcat. The journal keeps
 the previous user logging intent and a separate restoration obligation, including
 its operation ID. Deleting, acknowledging or replacing a recording cannot erase
 that obligation. Forensic captures renew while alive; expired leases are retired
-by the writer's maintenance loop. Orphan logcat leases are released at restart.
+by the writer's maintenance loop. All orphan leases are released at daemon restart.
 An uncertain restoration remains visible and is not automatically replayed.
 A known failed restoration can use a fresh operation after an explicit release;
 superseding uncertainty still requires restoring the actual baseline target.
@@ -228,3 +228,12 @@ retention/repair-metadata write failed, the durable terminal receipt is preserve
 Restart reconciles only unfinished intent from disk; an already durable terminal
 receipt remains immutable. The app exposes the storage fault in its blocked-state
 feedback and disables recovery mutations while the storage fault persists.
+
+Lease registration reserves a restoration obligation before enabling logging.
+A failed acquire leaves a bounded pending reservation, never an active-success
+claim: renewal must ensure logging and a confirmed activation receipt before
+returning success. Known failures may be retried; held Persist/Native/Secret
+resources needed for logging refuse acquire rather than replay uncertain effects.
+Live deadlines use `Instant`; the journal wall-clock expiry is display metadata.
+Restart discards both forensic and logcat leases from the old daemon instance,
+while retaining the original baseline/restoration receipt for safe maintenance.

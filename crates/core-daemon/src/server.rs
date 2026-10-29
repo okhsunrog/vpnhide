@@ -59,11 +59,20 @@ fn wall_time_ms() -> u64 {
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
 }
-fn lease_deadline(owner: DebugLeaseOwner) -> u64 {
-    wall_time_ms().saturating_add(match owner {
+fn lease_duration(owner: DebugLeaseOwner) -> std::time::Duration {
+    std::time::Duration::from_millis(match owner {
         DebugLeaseOwner::Forensic => 5 * 60_000,
         DebugLeaseOwner::Logcat => 31 * 60_000,
     })
+}
+fn lease_deadline(owner: DebugLeaseOwner) -> u64 {
+    wall_time_ms().saturating_add(lease_duration(owner).as_millis() as u64)
+}
+
+#[derive(Clone, Copy)]
+struct LiveLease {
+    deadline: std::time::Instant,
+    active: bool,
 }
 
 struct CommandSpec {
@@ -99,6 +108,7 @@ pub struct CoreState {
     logcat_gate: Mutex<()>,
     heavy_rpc: Arc<tokio::sync::Semaphore>,
     config: Mutex<ConfigStore>,
+    live_leases: Mutex<std::collections::HashMap<DebugLeaseId, LiveLease>>,
     /// Where the durable canonical config lives. `None` = no persistence (host tests); a
     /// path means every accepted change is written there before it is acknowledged.
     config_path: Option<PathBuf>,
@@ -524,46 +534,83 @@ impl CoreState {
     ) -> Result<(), SubmitError> {
         self.call_writer(move |state| {
             let mut store = state.config.lock().expect("config mutex").clone();
+            let existing = store
+                .journal
+                .debug_leases
+                .iter()
+                .find(|lease| lease.id == id);
+            if existing.is_some_and(|lease| lease.owner != owner) {
+                return Err(SubmitError::IdReused);
+            }
+            if existing.is_none() && store.journal.debug_leases.len() >= 16 {
+                return Err(SubmitError::Busy);
+            }
+            let relevant_hold = |phase| {
+                phase == ConfigPhase::Persist
+                    || (state.native_enabled()
+                        && matches!(phase, ConfigPhase::Native | ConfigPhase::Secret))
+            };
+            if store
+                .journal
+                .expired_holds
+                .iter()
+                .copied()
+                .any(relevant_hold)
+                || store
+                    .journal
+                    .operations
+                    .iter()
+                    .flat_map(JournalEntry::held_phases)
+                    .any(relevant_hold)
+            {
+                return Err(SubmitError::Unavailable);
+            }
+            let already_active = state
+                .live_leases
+                .lock()
+                .expect("live leases")
+                .get(&id)
+                .is_some_and(|lease| lease.active)
+                && store.config.as_ref().is_some_and(|config| config.debug);
+            let config = store.config.as_ref().ok_or(SubmitError::Unavailable)?;
+            if store.journal.debug_restore.is_none() {
+                store.journal.debug_restore = Some((config.debug, config.debug_switch));
+            }
             if let Some(lease) = store
                 .journal
                 .debug_leases
                 .iter_mut()
                 .find(|lease| lease.id == id)
             {
-                if lease.owner != owner {
-                    return Err(SubmitError::IdReused);
-                }
                 lease.expires_at_ms = lease_deadline(owner);
-                return state.persist_store(&store);
-            }
-            if store.journal.debug_leases.len() >= 16 {
-                return Err(SubmitError::Busy);
-            }
-            if store.journal.expired_holds.contains(&ConfigPhase::Persist)
-                || store
+            } else {
+                store
                     .journal
-                    .operations
-                    .iter()
-                    .any(|entry| entry.held_phases().contains(&ConfigPhase::Persist))
-            {
-                return Err(SubmitError::Unavailable);
+                    .debug_leases
+                    .push(vpnhide_core_rpc::DebugLease {
+                        id,
+                        owner,
+                        expires_at_ms: lease_deadline(owner),
+                    });
             }
-            let config = store.config.as_ref().ok_or(SubmitError::Unavailable)?;
-            if store.journal.debug_restore.is_none() {
-                store.journal.debug_restore = Some((config.debug, config.debug_switch));
-            }
-            store
-                .journal
-                .debug_leases
-                .push(vpnhide_core_rpc::DebugLease {
-                    id,
-                    owner,
-                    expires_at_ms: lease_deadline(owner),
-                });
             state.persist_store(&store)?;
-            if !state.write_debug_direct(true) {
+            state.live_leases.lock().expect("live leases").insert(
+                id,
+                LiveLease {
+                    deadline: std::time::Instant::now() + lease_duration(owner),
+                    active: already_active,
+                },
+            );
+            if !already_active && !state.write_debug_direct(true) {
                 return Err(SubmitError::Unavailable);
             }
+            state
+                .live_leases
+                .lock()
+                .expect("live leases")
+                .get_mut(&id)
+                .expect("registered lease")
+                .active = true;
             Ok(())
         })?
     }
@@ -580,6 +627,7 @@ impl CoreState {
         let mut store = self.config.lock().expect("config mutex").clone();
         store.journal.debug_leases.retain(|lease| lease.id != id);
         self.persist_store(&store)?;
+        self.live_leases.lock().expect("live leases").remove(&id);
         self.restore_debug_if_unleased(true)
     }
 
@@ -592,13 +640,25 @@ impl CoreState {
         }
         let mut store = self.config.lock().expect("config mutex").clone();
         let before = store.journal.debug_leases.len();
-        store
-            .journal
-            .debug_leases
-            .retain(|lease| lease.expires_at_ms > wall_time_ms());
+        let now = std::time::Instant::now();
+        let live = self.live_leases.lock().expect("live leases").clone();
+        store.journal.debug_leases.retain(|lease| {
+            live.get(&lease.id)
+                .is_some_and(|lease| lease.deadline > now)
+        });
         if before != store.journal.debug_leases.len() && self.persist_store(&store).is_err() {
             return;
         }
+        self.live_leases
+            .lock()
+            .expect("live leases")
+            .retain(|id, _| {
+                store
+                    .journal
+                    .debug_leases
+                    .iter()
+                    .any(|lease| lease.id == *id)
+            });
         let _ = self.restore_debug_if_unleased(false);
     }
 
@@ -770,13 +830,23 @@ impl CoreState {
                 revision: self.config_revision(),
             },
             &edit,
-            SubmitOptions::default(),
+            SubmitOptions {
+                plan: Some(if self.native_enabled() {
+                    PlanKind::PersistThenNative
+                } else {
+                    PlanKind::PersistOnly
+                }),
+                ..Default::default()
+            },
             CommandSpec {
                 lease: true,
                 ..Default::default()
             },
         );
         result.is_ok()
+            && self
+                .get_operation_record(op)
+                .is_some_and(|record| record.settled == Some(PhaseOutcome::Confirmed))
             && self
                 .current_debug()
                 .is_some_and(|(debug, _)| debug == enabled)
@@ -795,6 +865,7 @@ impl CoreState {
             logcat_gate: Mutex::new(()),
             instance_guard: std::sync::OnceLock::new(),
             heavy_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
+            live_leases: Mutex::new(Default::default()),
             config: Mutex::new(ConfigStore {
                 config: None,
                 config_revision: 0,
@@ -909,9 +980,10 @@ impl CoreState {
         // Fence before exposing operations: Running → Unknown; unfinished ops Held.
         // Effects are never replayed.
         journal.fence_unresolved();
-        journal
-            .debug_leases
-            .retain(|lease| lease.owner != DebugLeaseOwner::Logcat);
+        // Leases belong to the daemon instance, not wall-clock timestamps.
+        // No capture can keep its previous daemon-owned execution across restart.
+        // Preserve debug_restore so maintenance restores the user's baseline.
+        journal.debug_leases.clear();
 
         // Evidence readback may resolve Unknown → Confirmed/FailedKnown without dispatch.
         let sources = crate::recovery::EvidenceSources {
@@ -1003,6 +1075,7 @@ impl CoreState {
             logcat_gate: Mutex::new(()),
             instance_guard: std::sync::OnceLock::new(),
             heavy_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
+            live_leases: Mutex::new(Default::default()),
             config: Mutex::new(ConfigStore {
                 config: config.clone(),
                 config_revision,
