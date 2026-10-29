@@ -130,8 +130,51 @@ mod load_options_tests {
 /// dispatching the handler, so boot activation, app reconciliation, and stats
 /// reads must not enter ctl0 concurrently even though the handler also guards
 /// its own live config snapshot.
+// Coordinate threads in this daemon before taking the process-external flock.
+// Observations are opportunistic; delivery waits only before its first dispatch.
+// No failed or uncertain config command is retried.
+static LOCAL_KPM_GATE: std::sync::LazyLock<(
+    Mutex<std::collections::HashSet<PathBuf>>,
+    std::sync::Condvar,
+)> = std::sync::LazyLock::new(|| (Mutex::new(Default::default()), std::sync::Condvar::new()));
+struct LocalKpmGuard(PathBuf);
+impl LocalKpmGuard {
+    fn acquire(path: &Path, wait: bool) -> io::Result<Self> {
+        let (active, changed) = &*LOCAL_KPM_GATE;
+        let deadline = std::time::Instant::now() + CHILD_COMMAND_TIMEOUT;
+        let mut active = active
+            .lock()
+            .map_err(|_| io::Error::other("local KPM gate poisoned"))?;
+        while active.contains(path) {
+            if !wait {
+                return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            }
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
+            active = changed
+                .wait_timeout(active, remaining)
+                .map_err(|_| io::Error::other("local KPM gate poisoned"))?
+                .0;
+        }
+        active.insert(path.to_owned());
+        Ok(Self(path.to_owned()))
+    }
+}
+impl Drop for LocalKpmGuard {
+    fn drop(&mut self) {
+        let (active, changed) = &*LOCAL_KPM_GATE;
+        active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&self.0);
+        changed.notify_all();
+    }
+}
+
 struct KpmCtlLock {
     _file: fs::File,
+    _local: LocalKpmGuard,
 }
 
 impl KpmCtlLock {
@@ -140,6 +183,15 @@ impl KpmCtlLock {
     }
 
     fn acquire_at(path: &Path, nonblocking: bool) -> Result<Self> {
+        Self::acquire_coordinated(path, nonblocking, false)
+    }
+
+    fn acquire_delivery(path: &Path) -> Result<Self> {
+        Self::acquire_coordinated(path, true, true)
+    }
+
+    fn acquire_coordinated(path: &Path, nonblocking: bool, wait_local: bool) -> Result<Self> {
+        let local = LocalKpmGuard::acquire(path, wait_local)?;
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             fs::create_dir_all(parent)?;
         }
@@ -156,7 +208,10 @@ impl KpmCtlLock {
         if unsafe { flock(file.as_raw_fd(), flags) } != 0 {
             return Err(io::Error::last_os_error().into());
         }
-        Ok(Self { _file: file })
+        Ok(Self {
+            _file: file,
+            _local: local,
+        })
     }
 }
 
@@ -418,7 +473,7 @@ impl CoreKpm {
         artifact: &Path,
         filesystem_hiding: bool,
     ) -> Result<()> {
-        let _lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
+        let _lock = KpmCtlLock::acquire_delivery(&self.lock_path)?;
         require_no_kernel_owner(ctl)?;
         if self.status_locked()?.is_some() {
             return Ok(());
@@ -453,7 +508,7 @@ impl CoreKpm {
             if parse_config(wire.as_bytes()).is_none() {
                 return Err("invalid KPM config snapshot".into());
             }
-            let lock = KpmCtlLock::acquire_at(&self.lock_path, true)?;
+            let lock = KpmCtlLock::acquire_delivery(&self.lock_path)?;
             require_no_kernel_owner(ctl)?;
             let status = self.status_locked()?.ok_or("KPM is not loaded")?;
             use vpnhide_protocol::hook_ids::StatusError;
@@ -1074,8 +1129,42 @@ mod identity_tests {
     }
 
     #[test]
-    fn concurrent_observation_makes_delivery_fail_before_dispatch_without_retry() {
+    fn external_control_lock_still_refuses_delivery_before_dispatch() {
         use super::{CoreKpm, KpmClient, KpmConfigError};
+        use std::os::fd::AsRawFd;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "vpnhide-external-lock-{}-{nonce}",
+            std::process::id()
+        ));
+        let file = std::fs::File::create(&path).unwrap();
+        assert_eq!(
+            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
+        let client = CoreKpm {
+            client: KpmClient::KpatchCli {
+                path: "/must-not-run".into(),
+            },
+            lock_path: path.clone(),
+        };
+        let result = client.configure_once(
+            &path.with_extension("no-ctl"),
+            "vpnhide 2 config\ndebug 0\nend 0\n",
+        );
+        assert!(
+            matches!(result, Err(KpmConfigError::BeforeDispatch(ref error)) if error.contains("os error 11"))
+        );
+        drop(file);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn delivery_waits_for_local_observation_and_dispatches_once() {
+        use super::{CoreKpm, KpmClient};
         use std::os::unix::fs::PermissionsExt;
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1094,8 +1183,11 @@ case "$1 $2" in
   "kpm list")
     : > "${0%/*}/observing"
     while [ ! -f "${0%/*}/release" ]; do sleep 0.01; done
-    exit 0 ;;
-  "kpm ctl0") : > "${0%/*}/dispatched" ;;
+    printf 'vpnhide\n'; exit 0 ;;
+  "kpm ctl0") case "$4" in
+    "vpnhide 1 status") printf 'vpnhide 1 status\nbackend 0x1\nkver 0x60100\nhooks 0x3ff\nerror 0x0\n' ;;
+    "vpnhide 2 config"*) printf 'config\n' >> "${0%/*}/dispatched" ;;
+  esac ;;
 esac
 "#,
         )
@@ -1108,27 +1200,38 @@ esac
             lock_path: root.join("control.lock"),
         };
         let observer = client();
-        let reader = std::thread::spawn(move || {
-            observer.read_state_with_budget(std::time::Duration::from_secs(3))
-        });
+        let reader = std::thread::spawn(move || observer.status());
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while !root.join("observing").exists() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         assert!(root.join("observing").exists());
-        let result = client().configure_once(
-            &root.join("no-kernel-ctl"),
-            "vpnhide 2 config\ndebug 0\nend 0\n",
+        let delivery = client();
+        let ctl = root.join("no-kernel-ctl");
+        let (finished, result) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            finished
+                .send(delivery.configure_once(&ctl, "vpnhide 2 config\ndebug 0\nend 0\n"))
+                .unwrap();
+        });
+        assert!(
+            result
+                .recv_timeout(std::time::Duration::from_millis(50))
+                .is_err()
         );
+        assert!(!root.join("dispatched").exists());
         std::fs::write(root.join("release"), "").unwrap();
-        assert!(reader.join().unwrap().unwrap().is_none());
+        assert!(reader.join().unwrap().unwrap().is_some());
         assert!(
-            matches!(result, Err(KpmConfigError::BeforeDispatch(ref detail)) if detail.contains("os error 11")),
-            "{result:?}"
+            result
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap()
+                .is_ok()
         );
-        assert!(
-            !root.join("dispatched").exists(),
-            "contention must not dispatch or retry a config"
+        writer.join().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("dispatched")).unwrap(),
+            "config\n"
         );
         std::fs::remove_dir_all(root).unwrap();
     }
