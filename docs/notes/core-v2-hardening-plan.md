@@ -9,7 +9,8 @@
 Отмеченный checkbox означает реализованный код/host regression, а не device acceptance.
 D2 проверен 128 сочетаниями ресурса/holds/retention с повторной загрузкой journal.
 Повторный общий Rust-прогон: 284 passed; Clippy/fmt прошли. Первый общий прогон
-имел неповторившийся KPM EAGAIN (подробности B3); он не объявляется исправленным.
+имел KPM EAGAIN (подробности B3); позже конкуренция была воспроизведена
+отдельно и исправлена в `30380d65`.
 Повторены 868 JVM-тестов, ktlint/detekt/CPD/Android lint; Gradle test+assembleDebug
 завершился успешно. Core ZIP собран для arm64/armv7. Это по-прежнему host-only
 проверки и APK с временной тестовой подписью, а не device acceptance.
@@ -21,9 +22,11 @@ D2 проверен 128 сочетаниями ресурса/holds/retention с
 | A1 | Реализовано: `export.rs`, descriptor-relative публикация, приватный staging; host-тесты symlink/подмены родителя/timeout | DAC/SELinux и crash на Android не проверены |
 | A2 | Частично: `core-rpc/src/recovery.rs`, typed FFI/UI, матрица 32 holds; startup fault виден в UI | Структурированный fault в bundle; дальнейшее упрощение coordinator |
 | A3 | Реализовано: `config_file/codec.rs`, строгие типы/версия/blank-file, сохранение ошибочного источника | Device acceptance импорта |
-| A4, A5 | Не исправлены этим проходом | Durable receipt при journal failure; debug lease renewal/deadline |
+| A4 | Реализовано (`c2ddec74`): storage fault отдельно от terminal receipt; fault matrix до/после rename и restart | RPC v12 требует совместимых APK/core; device fault acceptance |
+| A5 | Реализовано (`15d43f07`): pending/active внутри lifecycle, подтверждённый logging, Instant deadlines, orphan cleanup | Device capture/reboot acceptance |
 | B1 | Исправлены доказанные переполнения: disk+RPC budget, полный envelope, escaped diagnostics | Компактный отдельный config fetch — предложение, не реализовано |
-| B2–B4 | Не реализованы | Admission/execution, handlers/deadlines, профили запуска |
+| B2 | `574eae03`: реализовано разделение durable admission/execution; CommandEngine владеет store, mailbox и writer; UI ждёт receipt | Queue/admission latency и отдельная подготовка остаются связанными с B3 |
+| B3–B4 | Не реализованы целиком | Handlers/deadlines, профили запуска; device validation KPM gate |
 | C1–C3 | Не реализованы | Provenance, export lifecycle, measurement identity |
 | D2 | [`fbc60b6c`](https://github.com/okhsunrog/vpnhide/commit/fbc60b6c): реализована проверка зависимостей boot внутри writer; матрица holds/retention/restart в `command_tests.rs` | Реальный reboot и независимый Ports repair на устройстве |
 | D1, D3 | Не реализованы | Runtime reconciliation, служебная durability/логи |
@@ -111,15 +114,15 @@ Native/Ports. Поэтому восстановительные команды �
 
 ### A4. P2: различить durable receipt и недолговечную неопределённость
 
-Воспроизведено при отказе journal temp write после Persist: get_operation
+Исходное воспроизведение (исправлено) при отказе journal temp write после Persist: get_operation
 возвращает settled Unknown, а после рестарта тот же ID становится Confirmed.
-В [server.rs](../../crates/core-daemon/src/server.rs) fallback меняет результат
+В [server.rs](../../crates/core-daemon/src/server.rs) старый fallback менял результат
 только в памяти, тогда как на диске остаётся предшествующая запись.
 
-- [ ] Определить отдельную семантику storage fault и недоступного terminal receipt.
-- [ ] Не публиковать несохранённый результат как durable terminal Unknown.
-- [ ] Сохранить первоначальный pending intent для последующей проверки evidence.
-- [ ] Добавить fault matrix: отказ до/после rename, after-Persist, settlement,
+- [x] Определить отдельную семантику storage fault и недоступного terminal receipt.
+- [x] Не публиковать несохранённый результат как durable terminal Unknown.
+- [x] Сохранить первоначальный pending intent для последующей проверки evidence.
+- [x] Добавить fault matrix: отказ до/после rename, after-Persist, settlement,
   повторное чтение и рестарт после уже отправленного клиенту ответа.
 
 Готово, когда durable terminal receipt неизменяем, а временная неопределённость
@@ -127,13 +130,13 @@ Native/Ports. Поэтому восстановительные команды �
 
 ### A5. P2: восстановить инвариант debug lease
 
-Воспроизведено: lease сохраняется до включения debug. После неудачного включения
+Исходное воспроизведение (исправлено): lease сохранялась до включения debug. После неудачного включения
 повторный acquire того же ID лишь продлевает срок и возвращает Ok при debug=false.
 
-- [ ] Разделить Pending/Active либо проверять обеспечение debug при renewal.
-- [ ] Определить поведение повторного acquire после FailedKnown и Unknown.
-- [ ] Сохранить baseline и обязательство восстановления при всех отказах.
-- [ ] Использовать monotonic deadline внутри boot; wall time оставить для
+- [x] Разделить Pending/Active либо проверять обеспечение debug при renewal.
+- [x] Определить поведение повторного acquire после FailedKnown и Unknown.
+- [x] Сохранить baseline и обязательство восстановления при всех отказах.
+- [x] Использовать monotonic deadline внутри boot; wall time оставить для
   отображения. Для рестарта определить политику с учётом boot identity.
 
 Готово, когда успешная активная lease гарантирует обещанное состояние logging,
@@ -164,15 +167,24 @@ Handshake проходит, чтение состояния закрывает �
 
 ### B2. P2: отделить durable admission от execution
 
-Сейчас submit_command ждёт execute_command целиком через writer receiver при
-клиентском дедлайне 15 секунд. Штатно долгие PM/KPM/firewall операции становятся
-транспортной ошибкой и требуют receipt recovery.
+Исходная проблема: submit_command ждал execute_command целиком при клиентском
+дедлайне 15 секунд. Теперь typed CommandEngine отделяет admission waiter от
+владельца исполнения. После проверки конфликтов/capacity и sync первого phase
+intent возвращается Accepted до внешнего эффекта. UI остаётся pending и наблюдает
+receipt без повторной отправки. Внутренние boot/lease команды сохраняют ожидание
+completion. Очередь ограничена 16 сообщениями, при заполнении возвращается Busy.
 
-- [ ] Возвращать Accepted после durable admission, до завершения внешних эффектов.
+Подготовка/capacity checks и ожидание очереди ещё предшествуют admission: их
+latency и ID allocation могут ждать занятого writer. Поэтому ранний Accepted не
+закрывает B3 и не обещает отсутствие всех transport timeouts. Новый тест проверяет
+ответ до двухсекундного эффекта и завершение после disconnect; crash fixtures
+принимают как доставленный Accepted, так и потерю ответа, сверяя один и тот же ID.
+
+- [x] Возвращать Accepted после durable admission, до завершения внешних эффектов.
 - [ ] Явно представить подготовку, прогресс и terminal result операции.
-- [ ] Сохранить field conflict и capacity semantics; определить, какие отказы
+- [x] Сохранить field conflict и capacity semantics; определить, какие отказы
   относятся к admission, а какие завершают уже принятую операцию.
-- [ ] Проверить очередь, disconnect и рестарт между admission и первым эффектом.
+- [x] Проверить очередь, disconnect и рестарт между admission и первым эффектом.
 
 Готово, когда долгая штатная операция наблюдается как прогресс, а потеря ответа
 восстанавливается по тому же ID без повторения effects.
@@ -189,12 +201,15 @@ Handshake проходит, чтение состояния закрывает �
 Готово, когда нагрузочный тест показывает ограниченное число задач и объём памяти,
 а нормальная работа в разрешённом бюджете не объявляется timeout другим слоем.
 
-Дополнительное наблюдение при проверке D2: один общий host-прогон
-`kpm_lifecycle_and_refusals_over_rpc` отказал в `installed-live` с EAGAIN при
-доставке KPM; отдельный повтор прошёл. Boot apply в этом fixture выключен.
-Observer и delivery используют один nonblocking KPM lock: конкуренция является
-возможной причиной, но этим проходом не доказана и не исправлена. Нужен отдельный
-детерминированный concurrent observation/delivery test, а не скрытый retry эффекта.
+KPM observation/delivery contention был подтверждён детерминированным тестом
+в `e316470b`: read_state/status мог держать flock, из-за чего delivery получала
+BeforeDispatch/EAGAIN. Теперь локальный per-path gate отделяет конкуренцию внутри
+core от внешнего владельца lock. Observation остаётся неблокирующей; load/delivery
+ждёт локального владельца не более 10 секунд **до первого dispatch**. Внешний flock
+остаётся nonblocking, а неизвестный результат отправленного эффекта не повторяется.
+Регрессии: `delivery_waits_for_local_observation_and_dispatches_once` и
+`external_control_lock_still_refuses_delivery_before_dispatch`. Это исправление
+локальной конкуренции, не завершение всех B3 deadlines или device acceptance.
 
 ### B4. P2: сделать профили запуска и подготовку socket явными
 
@@ -303,9 +318,11 @@ Native также зависит от Secret и Native, Ports — от Ports. Cl
   продление lease не должно переписывать 64 полных candidate configs. Для дедупа
   несекретных команд рассмотреть canonical fingerprint. Не сохранять verifier
   секрета. Отделить hot lease metadata от тяжёлой истории.
-- [ ] **Довести writer до владения состоянием.** Выделить CommandEngine с owned
-  mutable state и typed messages; читателям публиковать immutable snapshot.
-  Уменьшить shared mutex/clone пути и оставить тонкий RPC adapter.
+- [ ] **Довести writer до владения состоянием.** Частично выполнено: CommandEngine
+  владеет ConfigStore, typed command mailbox и жизненным циклом writer; immutable
+  publication отделена от execution. Короткие mutex sections и working clones
+  вокруг IO пока сохранены. Не отмечать весь пункт завершённым: удаление остальных
+  clone-путей и дальнейшее отделение executor от CoreState — следующий рефакторинг.
 - [ ] **Типизировать обычные root reads.** RuntimeInventory, ModuleStatus и
   PackageInventory должны заменить section-name mini-protocol в Dashboard/Hiding.
   Raw sections сохранить как forensic content.
@@ -340,13 +357,11 @@ Canonical JSON v1 нельзя удалить без согласованной 
 1. Завершённый проход: A1/A3, доказанные случаи B1, UI recovery из A2 и изоляция
    миграций. Следующий небольшой шаг D2 устраняет независимый boot blocker без
    изменения RPC и формата journal.
-2. A4: сначала определить durable/non-durable результат и fault matrix. После
-   этого A5: lease Pending/Active, renewal и monotonic deadlines. Эти пункты
-   затрагивают публичный смысл результата; не маскировать их механическим переносом.
-3. B2: отделить durable admission от исполнения. Здесь оправдано выделить
-   CommandEngine с typed writer messages и immutable publication. Сначала
-   characterization tests текущих conflict/dedup/retention, затем перенос владения,
-   затем отдельное изменение Accepted/progress с согласованным app/core контрактом.
+2. A4/A5 выполнены отдельными коммитами с регрессиями. Они меняют смысл результата
+   и lifetime; перед beta остаётся device acceptance, а не повторный перенос кода.
+3. B2: первый CommandEngine и ранний Accepted реализованы с сохранением
+   conflict/dedup/retention, queue/shutdown tests и новым UI ожиданием. Остаток —
+   preparation/queue latency и дальнейшее сокращение clone/store путей.
 4. B3/B4: ограничить handlers, проверить reads под нагрузкой, согласовать deadlines
    и профили запуска. D1 — после этого bounded reconcile через тот же engine;
    автоматическое добавление RU-приложений не входит в beta scope.
@@ -412,14 +427,15 @@ D2 реализован следующим отдельным шагом; стр
 проверенные чистая установка, прямой перенос 0.x/1.x, reboot/restart, сохранение
 и repair при потере соединения, файловый export с реальными DAC/SELinux и работа
 выбранного backend/Ports с закрытым APK. Без устройства эти сценарии не считаются
-проверенными. A4/A5, B2/B3 и D1 остаются открытыми; D2 требует device acceptance; большой CommandEngine/DTO
+проверенными. B3/D1 и остаток B2 остаются открытыми; A4/A5/D2 требуют device acceptance; большой CommandEngine/DTO
 rewrite не является обязательным условием этой ограниченной серии исправлений.
 
 
 ## Открытые gates первой надёжной beta
 
-- **Correctness:** закрыть A4/A5 регрессиями на journal faults и lease renewal;
-  runtime Unknown не должен маскироваться как неизменяемый durable terminal receipt.
+- **Correctness:** A4/A5 закрыты host-регрессиями; проверить отказы хранения и
+  lifecycle на устройстве. Проверить на устройстве согласованный KPM observation/delivery gate
+  и его timeout; host-тесты подтверждают отсутствие повторного dispatch.
 - **Основные сценарии:** B2/B3 должны выдерживать реальные длительные операции,
   disconnect и нагрузку без ложного повторения effects; D1 — package/profile
   change и потерю Ports при закрытом APK. Пока этого evidence нет, соответствующая
@@ -430,3 +446,29 @@ rewrite не является обязательным условием этой
 - **Поставка:** совместимые APK/core, обычная подпись для upgrade, проверенные
   артефакты точного кандидата. Тестовый APK и отсутствие GitHub CI не выдаются за
   пройденный release gate. RU auto-add и полный transport rewrite сюда не входят.
+
+
+## Завершённая итерация A4 → A5 → CommandEngine
+
+- [`c2ddec74`](https://github.com/okhsunrog/vpnhide/commit/c2ddec74): runtime storage
+  fault отдельно от durable terminal receipt; RPC/FFI v12 и UI blocked feedback.
+- [`15d43f07`](https://github.com/okhsunrog/vpnhide/commit/15d43f07): pending lease
+  не выдаётся за успешную active; монотонный lifetime и восстановление baseline.
+- [`e316470b`](https://github.com/okhsunrog/vpnhide/commit/e316470b): воспроизведение
+  локальной KPM contention; [`30380d65`](https://github.com/okhsunrog/vpnhide/commit/30380d65)
+  исправляет её через ограниченное ожидание до dispatch, без повторения эффекта.
+- [`574eae03`](https://github.com/okhsunrog/vpnhide/commit/574eae03): CommandEngine,
+  durable Accepted до effects, ожидание terminal receipt в приложении.
+
+Итоговые проверки: **349 Rust-тестов** (activator/core-rpc/core-daemon/core-client/
+core-ffi), Clippy all-targets с `-D warnings`, cargo fmt; **870 JVM-тестов**,
+ktlint, detekt, CPD, Android lint и assembleDebug. Core ZIP собран для arm64/armv7;
+module scaffold, no-root-exec, changelog preview и ссылки изменённых документов
+проверены. Ранние неуспешные прогоны выявили старые тестовые предположения
+«Accepted = completed» и KPM contention; финальный общий прогон проходит целиком.
+
+APK остаётся подписанным временным тестовым ключом. Device acceptance и GitHub CI
+не выполнены; запрещённый ручной dispatch не повторялся. Отсутствие device/CI
+нельзя заменять количеством host-тестов. Следующий scope: B3 (queue/admission
+latency, handlers, deadlines), B4 и D1; дальнейшее сокращение clone/store путей
+выполнять отдельно, не возвращая app-owned effects или старые активаторы.
