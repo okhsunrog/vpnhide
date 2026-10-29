@@ -5,6 +5,11 @@ import dev.okhsunrog.vpnhide.core.CoreProbeResult
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.generated.IfaceLists
+import dev.okhsunrog.vpnhide.migration.LegacyConfigCandidate
+import dev.okhsunrog.vpnhide.migration.LegacyImportMode
+import dev.okhsunrog.vpnhide.migration.applyLegacyImport
+import dev.okhsunrog.vpnhide.migration.hasUserConfiguredApps
+import dev.okhsunrog.vpnhide.migration.parseLegacyConfigCandidate
 import dev.okhsunrog.vpnhide.picker.parsePackageUidLine
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import java.io.File
@@ -348,7 +353,7 @@ private suspend fun writeStartupCanonical(
                 // Same transaction as the config write: the legacy files are only
                 // retired once their contents are safely in the canonical JSON.
                 cleanup = true,
-                coupledEffects = if (legacyImported != null) listOf(CoreRootEffect.DeleteLegacyConfig) else emptyList(),
+                coupledEffects = if (legacyImported?.canCleanupSources == true) listOf(CoreRootEffect.DeleteLegacyConfig) else emptyList(),
             ),
         )
     if (result.succeeded) return null

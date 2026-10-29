@@ -54,6 +54,8 @@ pub use logcat::{
     LogcatSessionId, LogcatSessionState, LogcatSessionStatus,
 };
 
+pub mod recovery;
+
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
 pub const PROTOCOL_VERSION: u32 = 11;

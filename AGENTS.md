@@ -22,6 +22,7 @@ These short files cover everything specific to this repo. Skipping them leads to
 - [docs/core-architecture.md](docs/core-architecture.md) — current core/app ownership, persistent session, typed edits, observations and recovery; read before changing these boundaries.
 - [docs/development.md](docs/development.md) — prereqs, per-module build quickstart, keystore setup, device install, CI lints
 - [docs/state.md](docs/state.md) — every persistent path / proc entry / iptables chain the project touches; who writes, who reads, lifetime
+- [docs/migration.md](docs/migration.md) — isolated direct 0.x/1.x import adapters, source preservation and fixtures. Read before changing settings migration.
 - [docs/storage.md](docs/storage.md) — current storage & activation design: the single JSON canonical, core (the only writer, deriving each backend's runtime state and the Ports rules), LSPosed self-read, the APatch superkey, SELinux layout. Read before touching how config is stored/loaded.
 - [docs/protocol.md](docs/protocol.md) — the frozen control v2 / telemetry v1 **wire** between core, the app, and the native backends (config/stats/status); the format every backend parser must agree on
 - [docs/limits.md](docs/limits.md) — every target/config/stats capacity ceiling, what binds first, and the cost of raising it. Read before changing target caps, wire density, or backend buffers.

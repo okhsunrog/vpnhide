@@ -45,6 +45,7 @@ import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.retryDiagnosticsAndDashboard
 import dev.okhsunrog.vpnhide.diagnostics.verdict
+import dev.okhsunrog.vpnhide.migration.LegacyImportPrompt
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
 import dev.okhsunrog.vpnhide.settings.SettingsRepository

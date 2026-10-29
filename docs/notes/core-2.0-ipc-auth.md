@@ -35,7 +35,7 @@ Host/dev runs (no `VPNHIDE_APP_DATA_DIR`) keep the plain path socket with the en
 | Bound | Value |
 |-------|--------|
 | Max frame | `MAX_FRAME_BYTES` = 1 MiB (`LengthDelimitedCodec`) |
-| Resulting canonical config | 512 KiB (`config_edit::validate_candidate`; app: `MAX_CORE_CONFIG_BYTES`) |
+| Resulting canonical config | 512 KiB each for disk and normalized RPC JSON (`config_edit::validate_candidate`; app additionally checks disk size) |
 | Concurrent connections | `MAX_CONCURRENT_CONNECTIONS` = 8 |
 | State long-poll | `STATE_HOLD` / `STATE_POLL_DEADLINE` |
 | Writer queue | 16 tasks; overload returns Busy |

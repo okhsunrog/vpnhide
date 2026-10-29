@@ -143,7 +143,12 @@ internal fun FullResetDialog(
                 ready -> {
                     TextButton(
                         onClick = reset@{
-                            if (!checkWrite()) return@reset
+                            if (CanonicalConfigRepository.state.value.recovery
+                                    ?.let { it.fullReset == null } != true &&
+                                !checkWrite()
+                            ) {
+                                return@reset
+                            }
                             running = true
                             scope.launch {
                                 val result =

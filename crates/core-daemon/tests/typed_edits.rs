@@ -146,3 +146,75 @@ fn direct_rpc_import_cannot_bypass_canonical_schema_validation() {
     assert_eq!(state.config_revision(), 0);
     assert!(state.get_operation_record(OperationId(1)).is_none());
 }
+
+#[test]
+fn oversized_normalized_config_is_rejected_before_persist_and_on_load() {
+    use vpnhide_core_daemon::config_file;
+    use vpnhide_core_rpc::AppConfig;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    let mut candidate = CanonicalConfig::default();
+    for i in 0..6300 {
+        candidate.apps.insert(
+            format!("com.example.a{i:04}"),
+            AppConfig {
+                java: true,
+                ..Default::default()
+            },
+        );
+    }
+    let raw = config_file::to_json_string(&candidate);
+    assert!(raw.len() < 512 * 1024);
+    let state = CoreState::load(
+        Publisher::new(1, StateSnapshot::default()),
+        path.clone(),
+        None,
+    )
+    .unwrap();
+    let id = state.issue_operation_id().unwrap();
+    assert!(matches!(
+        state.submit_edit_public(
+            id,
+            BaseRef { revision: 0 },
+            &ConfigEdit::Replace { config: candidate }
+        ),
+        Err(SubmitError::Rejected { .. })
+    ));
+    assert!(!path.exists());
+    drop(state);
+    std::fs::write(&path, &raw).unwrap();
+    assert!(
+        CoreState::load(
+            Publisher::new(2, StateSnapshot::default()),
+            path.clone(),
+            None
+        )
+        .is_err()
+    );
+    assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
+}
+
+#[test]
+fn damaged_config_is_never_bootstrapped_or_overwritten_on_load() {
+    for raw in [
+        "null",
+        "[]",
+        r#"{"apps":[]}"#,
+        r#"{"version":4294967297}"#,
+        r#"{"apps":{"com.x":{"native":42}}}"#,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, raw).unwrap();
+        assert!(
+            CoreState::load(
+                Publisher::new(1, StateSnapshot::default()),
+                path.clone(),
+                None
+            )
+            .is_err(),
+            "{raw}"
+        );
+        assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
+    }
+}

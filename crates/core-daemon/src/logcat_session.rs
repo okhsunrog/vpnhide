@@ -49,7 +49,7 @@ use vpnhide_core_rpc::{
     LogcatSessionId, LogcatSessionState, LogcatSessionStatus,
 };
 
-use crate::diagnostics::{ProbeEnv, hand_to_app, prepare_dir};
+use crate::diagnostics::ProbeEnv;
 
 /// Byte cap per session. A busy device writes roughly 1–3 MiB/min across all buffers,
 /// so a full-length session normally fits; the app zips the result.
@@ -879,45 +879,23 @@ fn copy_capped(
 
 /// Copy core's file into the app's export dir as an app-owned 0600 file.
 fn deliver(env: &ProbeEnv, file: &Path, id: LogcatSessionId) -> Result<PathBuf, String> {
-    let export = env
-        .export_dir()
-        .ok_or_else(|| "no app data dir".to_owned())?;
-    prepare_dir(env, &export).map_err(|e| format!("export dir: {e}"))?;
-    // The export dir is the app's: never follow a link it planted there.
-    let meta = fs::symlink_metadata(&export).map_err(|e| format!("export dir: {e}"))?;
-    if !meta.is_dir() {
-        return Err("export dir is not a directory".into());
-    }
-    let path = export.join(format!("{EXPORT_PREFIX}{}.txt", id.0));
-    let _ = fs::remove_file(&path);
-    let mut to = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)
-        .map_err(|e| format!("export file: {e}"))?;
+    let export = crate::export::ExportDir::open(env).map_err(|e| format!("export dir: {e}"))?;
+    let filename = format!("{EXPORT_PREFIX}{}.txt", id.0);
+    export.remove(&filename);
     let mut from = File::open(file).map_err(|e| format!("session file: {e}"))?;
-    std::io::copy(&mut from, &mut to).map_err(|e| format!("export copy: {e}"))?;
-    hand_to_app(env, &path, 0o600);
-    Ok(path)
+    export
+        .write(&filename, |to| std::io::copy(&mut from, to).map(|_| ()))
+        .map_err(|e| format!("export copy: {e}"))
 }
 
-/// Copies an earlier session left in the export dir (the app normally removes its own).
+/// Remove names only relative to the pinned export directory.
 fn remove_stale_exports(env: &ProbeEnv) {
-    let Some(export) = env.export_dir() else {
+    let Ok(export) = crate::export::ExportDir::open(env) else {
         return;
     };
-    let Ok(entries) = fs::read_dir(&export) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        if entry
-            .file_name()
-            .to_str()
-            .is_some_and(|n| n.starts_with(EXPORT_PREFIX))
-        {
-            let _ = fs::remove_file(entry.path());
+    for filename in export.names().unwrap_or_default() {
+        if filename.starts_with(EXPORT_PREFIX) {
+            export.remove(&filename);
         }
     }
 }

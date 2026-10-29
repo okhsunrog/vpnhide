@@ -1,6 +1,18 @@
-package dev.okhsunrog.vpnhide
+package dev.okhsunrog.vpnhide.migration
 
+import dev.okhsunrog.vpnhide.CanonicalApp
+import dev.okhsunrog.vpnhide.CanonicalConfig
+import dev.okhsunrog.vpnhide.CanonicalConfigRepository
+import dev.okhsunrog.vpnhide.CanonicalMutation
+import dev.okhsunrog.vpnhide.DashboardState
+import dev.okhsunrog.vpnhide.LEGACY_HOOK_STATUS_FILE
+import dev.okhsunrog.vpnhide.LogTags
+import dev.okhsunrog.vpnhide.NativeRole
+import dev.okhsunrog.vpnhide.RootSnapshotCache
+import dev.okhsunrog.vpnhide.VpnHideLog
+import dev.okhsunrog.vpnhide.canonicalConfigWithSelfTarget
 import dev.okhsunrog.vpnhide.core.CoreRootEffect
+import dev.okhsunrog.vpnhide.parseConfigLines
 import dev.okhsunrog.vpnhide.picker.autoHiddenPackagesNeedReconcile
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import kotlinx.serialization.Serializable
@@ -98,7 +110,11 @@ internal data class LegacyConfigCandidate(
     val roles: Map<String, LegacyRoles>,
     /** Observer UIDs with no installed package today (app uninstalled since). */
     val unresolvedObserverUids: Int = 0,
+    val invalidLines: Int = 0,
+    val sourceReadComplete: Boolean = true,
 ) {
+    val canCleanupSources: Boolean get() = sourceReadComplete && unresolvedObserverUids == 0 && invalidLines == 0
+
     fun count(predicate: (LegacyRoles) -> Boolean): Int = roles.values.count(predicate)
 }
 
@@ -140,7 +156,15 @@ internal fun parseLegacyConfigCandidate(
 
     val packages = (native + java + ports + hidden + appHiding).sorted()
     if (packages.isEmpty()) return null
+    val invalidLines =
+        LEGACY_CONFIG_SECTIONS.keys.sumOf { section ->
+            parseConfigLines(sections[section].orEmpty()).count { line ->
+                if (section == "legacy_observer_uids") line.toIntOrNull()?.let { it >= 0 } != true else !line.isValidPackageName()
+            }
+        }
     return LegacyConfigCandidate(
+        invalidLines = invalidLines,
+        sourceReadComplete = LEGACY_CONFIG_SECTIONS.keys.all(sections::containsKey),
         roles =
             packages.associateWith { pkg ->
                 LegacyRoles(
@@ -329,7 +353,7 @@ internal object LegacyConfigImporter {
                         applyLegacyImport(fresh, candidate, mode, selfPkg)
                     },
                     cleanup = true,
-                    coupledEffects = listOf(CoreRootEffect.DeleteLegacyConfig),
+                    coupledEffects = if (candidate.canCleanupSources) listOf(CoreRootEffect.DeleteLegacyConfig) else emptyList(),
                 ),
             )
         if (!result.succeeded) {

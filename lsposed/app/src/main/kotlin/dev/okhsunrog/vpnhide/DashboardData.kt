@@ -16,6 +16,9 @@ import dev.okhsunrog.vpnhide.diagnostics.token
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.hook.HookEntry
+import dev.okhsunrog.vpnhide.migration.LegacyImportPrompt
+import dev.okhsunrog.vpnhide.migration.parseLegacyConfigCandidate
+import dev.okhsunrog.vpnhide.migration.toPrompt
 import dev.okhsunrog.vpnhide.picker.TargetsSnapshot
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import dev.okhsunrog.vpnhide.settings.AppLanguageContext

@@ -99,16 +99,6 @@ internal fun canonicalConfigWithSelfTarget(
     return config.copy(apps = (config.apps + (selfPkg to updated)).toSortedMap())
 }
 
-internal fun parseImportedCanonicalConfig(
-    raw: String,
-    selfPkg: String,
-): CanonicalConfig? =
-    try {
-        parseCanonicalConfig(raw)?.let { canonicalConfigWithSelfTarget(it, selfPkg) }
-    } catch (_: Throwable) {
-        null
-    }
-
 internal fun canonicalConfigJson(config: CanonicalConfig): String =
     buildString {
         append("{\n")

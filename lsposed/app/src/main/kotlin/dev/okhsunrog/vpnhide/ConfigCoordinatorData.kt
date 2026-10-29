@@ -1,5 +1,7 @@
 package dev.okhsunrog.vpnhide
 
+import uniffi.vpnhide_core_ffi.CoreRecoveryAccess
+
 internal enum class ConfigCoordinatorMode { Initializing, Open, Missing, Invalid, Unavailable, Paused }
 
 internal data class ConfigCoordinatorView(
@@ -14,6 +16,8 @@ internal data class ConfigCoordinatorView(
     val nativeObservationCurrent: Boolean = false,
     val coreOperations: Set<Long> = emptySet(),
     val applyEvidence: List<CoreApplyIdentity> = emptyList(),
+    val recovery: CoreRecoveryAccess? = null,
+    val startupError: String? = null,
     val heldResources: Set<ConfigPhase> = emptySet(),
     val canRepair: Boolean = false,
     val coreCurrent: Boolean = false,
@@ -48,7 +52,9 @@ internal fun prepareConfigIntent(
 ): ConfigIntentPreparation {
     val base =
         (read as? RootCanonicalRead.Available)?.config
-            ?: if (read == RootCanonicalRead.Missing && (mutation.bootstrap || mutation.removesCanonical)) {
+            ?: if (read == RootCanonicalRead.Missing &&
+                (mutation.bootstrap || mutation.removesCanonical || mutation.forceActivation || mutation.cleanup)
+            ) {
                 CanonicalConfig()
             } else {
                 return ConfigIntentPreparation.Failed(TransitionFailure.ReadFailed)

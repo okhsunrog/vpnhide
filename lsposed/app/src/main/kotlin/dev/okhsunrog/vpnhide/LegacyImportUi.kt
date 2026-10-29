@@ -22,6 +22,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.okhsunrog.vpnhide.migration.LegacyConfigImporter
+import dev.okhsunrog.vpnhide.migration.LegacyImportAction
+import dev.okhsunrog.vpnhide.migration.LegacyImportOutcome
+import dev.okhsunrog.vpnhide.migration.LegacyImportPrompt
 import dev.okhsunrog.vpnhide.settings.AppSettings
 import dev.okhsunrog.vpnhide.ui.components.ButtonSpinner
 import dev.okhsunrog.vpnhide.ui.components.EnhancedOutlinedButton
@@ -95,7 +99,14 @@ internal fun LegacyImportDialog(
     var state by remember { mutableStateOf<LegacyImportUiState>(LegacyImportUiState.Choosing) }
 
     fun run(action: LegacyImportAction) {
-        if (!checkWrite()) return
+        if (!(
+                action.mode == null && CanonicalConfigRepository.state.value.recovery
+                    ?.let { it.cleanup == null } == true
+            ) &&
+            !checkWrite()
+        ) {
+            return
+        }
         state = LegacyImportUiState.Running
         scope.launch {
             state = LegacyImportUiState.Done(LegacyConfigImporter.run(action, context.packageName))

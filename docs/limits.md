@@ -171,7 +171,7 @@ Generated UniFFI types carry requests; there is no serialized-text request facad
 |---|---|---|
 | One RPC frame (either direction) | 1 MiB | `MAX_FRAME_BYTES`, `crates/core-rpc/src/lib.rs` |
 | Concurrent socket connections | 8 | `MAX_CONCURRENT_CONNECTIONS`, same file |
-| Resulting canonical config | 512 KiB | daemon admission, `config_edit::validate_candidate` |
+| Resulting canonical config | 512 KiB in each of disk JSON and normalized RPC JSON | daemon admission and startup, `config_edit::validate_candidate` |
 | Atomic field batch | 4096 edits; no nested batch/import/repair | `MAX_BATCH_EDITS`, core-rpc; daemon admission |
 | Serialized writer queue | 16 tasks; Busy on overload | core-daemon `server` |
 | Terminal operation retention | 64 receipts + one pinned debug-restore receipt + at most one in-flight; expired uncertainty retains at most five held phases and one pending Persist proof | core-daemon `journal`; monotonic expiry floor |
@@ -231,3 +231,11 @@ than a constant. To redo it, format `n` uids × `k` hooks with
 C, built with `gcc -I kmod`) and divide by the buffer under test. The KPM `.bss`
 figure comes from `llvm-size --format=sysv kmod/vpnhide.kpm` after
 `python3 kmod/kpm/build.py`.
+
+Publication responses are measured with the complete tarpc envelope. Oversized
+receipt history is omitted from the publication (receipts remain queryable by ID).
+If observation metadata still exceeds the frame, core returns an explicit unavailable
+snapshot instead of closing the shared channel or presenting stale observations as
+current. Config admission reserves half the frame for metadata. Diagnostics count
+JSON-encoded inline bytes, including escaping; excess output uses the fd-based
+export path or a marked truncated response when file export is unavailable.

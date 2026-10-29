@@ -861,7 +861,11 @@ impl CoreState {
         };
         let file_config = match load {
             config_file::ConfigLoad::Absent => None,
-            config_file::ConfigLoad::Present(cfg) => Some(cfg),
+            config_file::ConfigLoad::Present(cfg) => {
+                config_edit::validate_candidate(&cfg)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                Some(cfg)
+            }
             // Refuse to invent defaults over a foreign schema — distinguishable from Absent.
             config_file::ConfigLoad::UnsupportedVersion { version } => {
                 return Err(std::io::Error::new(
@@ -1341,11 +1345,29 @@ impl CoreState {
                 .operations
                 .iter()
                 .any(|entry| entry.held_phases().contains(&ConfigPhase::Persist));
-        if held_persist
-            && matches!(
-                spec.intent,
-                journal::CommandIntent::SetSuperkey { .. } | journal::CommandIntent::ClearSuperkey
-            )
+        let recovery_action = match spec.intent {
+            journal::CommandIntent::SetSuperkey { .. } => {
+                Some(vpnhide_core_rpc::recovery::RecoveryAction::SetSuperkey)
+            }
+            journal::CommandIntent::ClearSuperkey => {
+                Some(vpnhide_core_rpc::recovery::RecoveryAction::ClearSuperkey)
+            }
+            journal::CommandIntent::FullReset => {
+                Some(vpnhide_core_rpc::recovery::RecoveryAction::FullReset)
+            }
+            journal::CommandIntent::CleanupLegacy => {
+                Some(vpnhide_core_rpc::recovery::RecoveryAction::Cleanup)
+            }
+            _ if repair => Some(vpnhide_core_rpc::recovery::RecoveryAction::Repair),
+            _ => None,
+        };
+        let held = if held_persist {
+            vec![ConfigPhase::Persist]
+        } else {
+            Vec::new()
+        };
+        if recovery_action
+            .is_some_and(|action| !vpnhide_core_rpc::recovery::permits_held(action, &held))
         {
             return Err(SubmitError::Unavailable);
         }
@@ -1354,16 +1376,7 @@ impl CoreState {
         } else {
             false
         };
-        if store.journal.has_unknown()
-            && !spec.lease
-            && !repair
-            && !matches!(
-                spec.intent,
-                journal::CommandIntent::SetSuperkey { .. }
-                    | journal::CommandIntent::ClearSuperkey
-                    | journal::CommandIntent::FullReset
-            )
-        {
+        if store.journal.has_unknown() && !spec.lease && !repair && recovery_action.is_none() {
             return Err(SubmitError::Unavailable);
         }
         if base.revision < store.journal.conflict_floor && !repair && !spec.lease && !spec.reset {
@@ -1905,7 +1918,7 @@ impl VpnhideCore for CoreServer {
     }
 
     async fn state_since(self, _ctx: Context, epoch: u64, revision: u64) -> Published {
-        self.state.publisher.state_since(epoch, revision).await
+        crate::publisher::bounded_response(self.state.publisher.state_since(epoch, revision).await)
     }
 
     async fn allocate_operation_id(self, _ctx: Context) -> Result<OperationId, SubmitError> {

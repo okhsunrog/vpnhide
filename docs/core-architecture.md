@@ -180,3 +180,33 @@ See [storage](storage.md), [state](state.md) and
 RPC skew fails the handshake; update APK and core together for version 11.
 Host tests/builds do not establish Android DAC/SELinux behavior, root-manager boot,
 ROM parsing or hook coverage; these still require device validation.
+
+## Review hardening and migration boundary
+
+Canonical file IO is separated from the pure schema-1 adapter in
+`crates/core-daemon/src/config_file/codec.rs`. Present invalid fields, overflowing
+versions and blank files fail startup without replacing their contents. Schema 1
+is still the live LSPosed interchange contract, so it is retained deliberately.
+The typed engine does not interpret polymorphic disk roles.
+
+App import adapters live together in `migration/`: pre-1.0 component lists and
+observer UID mapping, and strict schema-1 JSON import for 1.x/current backups.
+Both produce the current typed model and use normal core validation, atomic Persist
+and journaled cleanup. No old activator or runtime write path is restored.
+Unresolved UIDs or malformed source lines prevent automatic source cleanup;
+explicit discard remains a separate user action. See [migration](migration.md).
+
+Recovery permissions are projected through typed UniFFI from the shared
+`core-rpc::recovery` policy used by admission. A held operation does not block
+explicit Repair, credential recovery, cleanup or reset indiscriminately. Persist
+uncertainty still prevents credential changes, captures prevent reset, and core
+revalidates every command. Startup fault text is retained in the app state and
+shown in the blocked-state dialog. The v11 RPC shape is unchanged; these additions
+are local typed FFI projections over its existing fields.
+
+File-producing probes run in private root-owned staging. Completed files are copied
+through exclusive, no-follow descriptor-relative destinations; permissions, owner
+and Android label are applied through the same open descriptor. App-controlled
+path replacement cannot redirect writes or metadata changes. The same publication
+primitive serves large text probes and logcat. Staging is removed on completion,
+timeout/error, and after a daemon restart under the exclusive state locks.

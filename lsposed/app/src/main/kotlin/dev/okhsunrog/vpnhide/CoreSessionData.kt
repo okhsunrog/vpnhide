@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import uniffi.vpnhide_core_ffi.CoreRecoveryAccess
 import java.security.SecureRandom
 
 /** The canonical config as core reports it. */
@@ -27,6 +28,8 @@ internal data class CoreStateView(
     val nativeBoot: NativeBootStatus? = null,
     val activeCaptures: Int = 0,
     val applyEvidence: List<CoreApplyIdentity> = emptyList(),
+    val recovery: CoreRecoveryAccess? = null,
+    val startupError: String? = null,
     val heldResources: Set<ConfigPhase> = emptySet(),
     val backend: CoreBackendView? = null,
     val routing: CoreRoutingView? = null,

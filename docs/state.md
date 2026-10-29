@@ -69,7 +69,7 @@ leftover `app-state/` with the rest of `/data/adb/vpnhide/` except `core/`.
 Nothing writes these; up to 0.7.1 they *were* the user's config. 1.0.0 folded
 them into the canonical JSON on first launch, 1.2.0 dropped that fold (and the
 cleanup with it), so a device upgrading 0.7.x → 1.2.x kept the files and lost
-the settings. `LegacyConfigImport.kt` reads them again:
+the settings. `migration/LegacyConfigImport.kt` reads them again:
 
 - `/data/adb/vpnhide_kmod/targets.txt`, `…_kpm/targets.txt`,
   `…_zygisk/targets.txt` — native role, package names.
@@ -85,11 +85,15 @@ The import runs silently at startup when the canonical config holds no
 user-configured app. When it does hold one, a Dashboard banner and a Settings →
 Configuration entry offer three actions: merge, replace, or **delete without
 importing** (for the user who has already reconfigured by hand and only wants
-the leftovers gone — nothing else on the device removes them). All three delete
+the leftovers gone — nothing else on the device removes them). Successful complete imports and explicit discard delete
 every file above and `rmdir` `/data/adb/vpnhide_zygisk` and
 `/data/adb/vpnhide_lsposed`, which hold nothing else; merge and replace do it in
 the same root transaction as the config write, delete runs on its own (no config
 write, no backend apply — the running config does not change).
+
+Imports with unresolved UIDs or malformed source lines keep the source files for
+a later retry; explicit discard remains available. A Persist failure never starts
+cleanup. See [migration boundary](migration.md).
 
 Absence of the files is the "already imported" marker. The banner's *Hide*
 button only sets `legacyImportDismissed` in the app's `ui_settings` DataStore:
@@ -134,6 +138,7 @@ Mode `0700`, root-only. Journal, ownership markers, `core.log`, plus:
 | `supervisor.lock` | permanent root-only regular inode and exclusive flock | service supervisor | duplicate service invocation refuses | supervisor lifetime; inode persists |
 | `supervisor_status` | running/restarting/stopped status and retry delay | service supervisor | diagnostics/manual inspection | overwritten as worker lifecycle changes |
 | `native_boot.json` | serde JSON of `core-rpc` `NativeBootStatus`, keyed by `boot_id` | core, once per boot (updated by deliveries and Ports applies) | core (re-adopts on restart in the same boot); debug export. The app reads the same status over RPC (`backend.boot`). | replaced on the next boot's scan |
+| `export-staging/vpnhide-probe-*` | private 0700 directories with captured artifacts | root probe children only | root publication through pinned descriptors | removed on completion/error/timeout; interrupted directories removed at daemon startup under lifetime state locks |
 | `boot_status` | `key=value` boot pass report | core boot passes | debug export | overwritten each boot |
 | `boot_phase` | `boot_phase=service` | `vpnhide-core service` | debug export | overwritten each boot |
 | `logcat/session-<id>.log` | raw `logcat -b all -v threadtime` (0600) | core's logcat session child, through core (capped at 64 MiB / 30 min) | core, which copies it to the app's export dir on Stop | kept until delivered: deleted on the app's ack, on discard, and by the next Start; kept across a core restart while undelivered |

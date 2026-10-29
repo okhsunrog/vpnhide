@@ -13,6 +13,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
+#[cfg(test)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -81,10 +82,6 @@ impl ProbeEnv {
             app_dir: crate::app_socket::app_data_dir_from_env(),
         }
     }
-
-    pub(crate) fn export_dir(&self) -> Option<PathBuf> {
-        self.app_dir.as_ref().map(|d| d.join(EXPORT_DIR_NAME))
-    }
 }
 
 /// What one probe run produced, before placement (inline vs file).
@@ -94,6 +91,19 @@ struct Captured {
     stdout: Vec<u8>,
     truncated: bool,
     artifacts: Vec<PathBuf>,
+}
+
+/// Called only after acquiring the daemon's lifetime state locks, before probes.
+/// A process killed mid-capture cannot run TempDir's destructor.
+pub fn cleanup_interrupted_exports() -> std::io::Result<()> {
+    #[cfg(target_os = "android")]
+    {
+        let root = crate::ownership::owner_dir().join("export-staging");
+        if root.exists() {
+            std::fs::remove_dir_all(root)?;
+        }
+    }
+    Ok(())
 }
 
 /// Run every requested probe concurrently and assemble the report. Blocking; call from a
@@ -303,53 +313,43 @@ fn run_probe(
 /// Give a file-producing probe a fresh, private dir under the export dir, then hand its
 /// contents to the app.
 fn with_out_dir(env: &ProbeEnv, name: &str, run: impl FnOnce(&Path) -> Captured) -> Captured {
-    let Some(export) = env.export_dir() else {
-        return Captured {
-            exit: -1,
-            stdout: b"no app data dir".to_vec(),
-            ..Captured::default()
-        };
-    };
-    let sequence = FILE_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = export.join(format!("{name}-{}-{sequence}", export_instance()));
-    if let Err(e) = prepare_dir(env, &export).and_then(|()| std::fs::create_dir(&dir)) {
-        return Captured {
-            exit: -1,
-            stdout: format!("export dir: {e}").into_bytes(),
-            ..Captured::default()
-        };
-    }
-    hand_to_app(env, &dir, 0o700);
-    let mut out = run(&dir);
-    let mut artifacts: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .map(|it| it.filter_map(|e| e.ok().map(|e| e.path())).collect())
-        .unwrap_or_default();
-    artifacts.sort();
-    for path in &artifacts {
-        hand_to_app(env, path, 0o600);
-    }
-    out.artifacts = artifacts;
-    out
-}
-
-pub(crate) fn prepare_dir(env: &ProbeEnv, dir: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
-    if !std::fs::symlink_metadata(dir)?.is_dir() {
-        return Err(std::io::Error::other("export path is not a directory"));
-    }
-    hand_to_app(env, dir, 0o700);
-    Ok(())
-}
-
-/// Owner = the app data dir's owner, `mode`, and the dir's SELinux label — the same
-/// treatment as the socket, so only the app can read what core exported for it.
-pub(crate) fn hand_to_app(env: &ProbeEnv, path: &Path, mode: u32) {
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
-    if let Some(app_dir) = &env.app_dir {
-        if let Err(e) = crate::auth::hand_to_owner_of(path, app_dir) {
-            eprintln!("core: export ownership {}: {e}", path.display());
+    let collect = || -> std::io::Result<Captured> {
+        let stage = crate::export::staging()?;
+        let mut out = run(stage.path());
+        // A timeout can leave a partially written image; never publish it as a file.
+        if out.truncated {
+            return Ok(out);
         }
-    }
+        let sequence = FILE_SEQ.fetch_add(1, Ordering::Relaxed);
+        let export = crate::export::ExportDir::open(env)?
+            .subdir(&format!("{name}-{}-{sequence}", export_instance()))?;
+        let mut entries = std::fs::read_dir(stage.path())?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut source = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(entry.path())?;
+            if !source.metadata()?.is_file() {
+                return Err(std::io::Error::other("probe artifact is not a file"));
+            }
+            let filename = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| std::io::Error::other("invalid artifact name"))?;
+            let path = export.write(&filename, |file| {
+                std::io::copy(&mut source, file).map(|_| ())
+            })?;
+            out.artifacts.push(path);
+        }
+        Ok(out)
+    };
+    collect().unwrap_or_else(|e| Captured {
+        exit: -1,
+        stdout: format!("export: {e}").into_bytes(),
+        ..Captured::default()
+    })
 }
 
 /// Spawn, drain stdout up to [`OUTPUT_MAX`], and kill on `timeout`. stderr is discarded.
@@ -407,8 +407,9 @@ fn place(env: &ProbeEnv, probe: DiagnosticProbe, c: Captured, budget: &mut usize
         .iter()
         .map(|p| p.display().to_string())
         .collect();
-    if text.len() <= INLINE_MAX && text.len() <= *budget {
-        *budget -= text.len();
+    let encoded_len = serde_json::to_vec(&text).expect("string serializes").len();
+    if text.len() <= INLINE_MAX && encoded_len <= *budget {
+        *budget -= encoded_len;
         return ProbeOutput {
             probe,
             exit: c.exit,
@@ -418,22 +419,15 @@ fn place(env: &ProbeEnv, probe: DiagnosticProbe, c: Captured, budget: &mut usize
             truncated: c.truncated,
         };
     }
-    let file = env.export_dir().and_then(|export| {
-        prepare_dir(env, &export).ok()?;
+    let file = crate::export::ExportDir::open(env).ok().and_then(|export| {
         let seq = FILE_SEQ.fetch_add(1, Ordering::Relaxed);
-        let path = export.join(format!(
-            "{}-{}-{seq}.txt",
-            probe_slug(&probe),
-            export_instance()
-        ));
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .ok()?;
-        file.write_all(text.as_bytes()).ok()?;
-        hand_to_app(env, &path, 0o600);
-        Some(path.display().to_string())
+        export
+            .write(
+                &format!("{}-{}-{seq}.txt", probe_slug(&probe), export_instance()),
+                |file| file.write_all(text.as_bytes()),
+            )
+            .ok()
+            .map(|p| p.display().to_string())
     });
     match file {
         Some(file) => ProbeOutput {
@@ -446,12 +440,17 @@ fn place(env: &ProbeEnv, probe: DiagnosticProbe, c: Captured, budget: &mut usize
         },
         // No export dir (host/dev): inline what fits and flag the cut.
         None => {
-            let cap = INLINE_MAX.min(*budget);
+            // A JSON byte may escape to six bytes (\\u0000).
+            let cap = INLINE_MAX.min(budget.saturating_sub(2) / 6);
             let mut end = cap.min(text.len());
             while !text.is_char_boundary(end) {
                 end -= 1;
             }
-            *budget -= end;
+            *budget = budget.saturating_sub(
+                serde_json::to_vec(&text[..end])
+                    .expect("string serializes")
+                    .len(),
+            );
             ProbeOutput {
                 probe,
                 exit: c.exit,
@@ -509,6 +508,53 @@ mod tests {
             core_exe: PathBuf::from("/nonexistent/vpnhide-core"),
             app_dir,
         }
+    }
+
+    #[test]
+    fn inline_budget_counts_json_escaping() {
+        let mut budget = REPORT_INLINE_BUDGET;
+        let mut outputs = Vec::new();
+        for _ in 0..32 {
+            outputs.push(place(
+                &host_env(None),
+                DiagnosticProbe::Dmesg,
+                Captured {
+                    stdout: vec![0; INLINE_MAX],
+                    ..Captured::default()
+                },
+                &mut budget,
+            ));
+        }
+        let report = DiagnosticsReport {
+            outputs,
+            dmesg_cleared: false,
+        };
+        let response = tarpc::Response {
+            request_id: u64::MAX,
+            message: Ok(vpnhide_core_rpc::VpnhideCoreResponse::CollectDiagnostics(
+                report,
+            )),
+        };
+        assert!(serde_json::to_vec(&response).unwrap().len() < vpnhide_core_rpc::MAX_FRAME_BYTES);
+    }
+
+    #[test]
+    fn timed_out_artifacts_are_not_published_and_staging_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = host_env(Some(dir.path().into()));
+        let stage = std::sync::Mutex::new(PathBuf::new());
+        let output = with_out_dir(&env, "timeout", |path| {
+            *stage.lock().unwrap() = path.into();
+            assert!(!path.starts_with(dir.path()));
+            std::fs::write(path.join("partial.img"), b"partial").unwrap();
+            Captured {
+                truncated: true,
+                exit: -1,
+                ..Captured::default()
+            }
+        });
+        assert!(output.artifacts.is_empty());
+        assert!(!stage.lock().unwrap().exists());
     }
 
     #[test]

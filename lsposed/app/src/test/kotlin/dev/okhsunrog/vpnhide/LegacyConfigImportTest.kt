@@ -1,5 +1,12 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.migration.LEGACY_CONFIG_SECTIONS
+import dev.okhsunrog.vpnhide.migration.LegacyConfigCandidate
+import dev.okhsunrog.vpnhide.migration.LegacyImportMode
+import dev.okhsunrog.vpnhide.migration.LegacyRoles
+import dev.okhsunrog.vpnhide.migration.applyLegacyImport
+import dev.okhsunrog.vpnhide.migration.hasUserConfiguredApps
+import dev.okhsunrog.vpnhide.migration.parseLegacyConfigCandidate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -21,7 +28,35 @@ class LegacyConfigImportTest {
             10222 to "com.messenger",
         )
 
-    private fun sections(vararg pairs: Pair<String, String>): Map<String, String> = pairs.toMap()
+    private fun sections(vararg pairs: Pair<String, String>): Map<String, String> =
+        dev.okhsunrog.vpnhide.migration.LEGACY_CONFIG_SECTIONS.keys
+            .associateWith { "" } + pairs.toMap()
+
+    @Test
+    fun `pre1 fixture retains all roles through direct current import`() {
+        val raw = org.json.JSONObject(javaClass.getResource("/pre1-sections.json")!!.readText())
+        val sections = raw.keys().asSequence().associateWith(raw::getString)
+        val candidate = parseLegacyConfigCandidate(sections, uidToPkg)!!
+        val current = applyLegacyImport(CanonicalConfig(), candidate, LegacyImportMode.Merge, selfPkg)
+        assertTrue(candidate.canCleanupSources)
+        assertTrue(current.apps.getValue("com.bank.app").appHiding)
+        assertTrue(current.apps.getValue("com.chat.app").ports)
+        assertTrue(current.apps.getValue("com.vpn.client").hidden)
+        assertEquals(current, applyLegacyImport(current, candidate, LegacyImportMode.Merge, selfPkg))
+    }
+
+    @Test
+    fun `direct pre1 import is idempotent and incomplete sources are retained`() {
+        val source = sections("legacy_kmod_targets" to "com.bank.app\n", "legacy_observer_uids" to "10999\n")
+        val candidate = parseLegacyConfigCandidate(source, uidToPkg)!!
+        assertFalse(candidate.canCleanupSources)
+        val first = applyLegacyImport(CanonicalConfig(), candidate, LegacyImportMode.Merge, selfPkg)
+        assertEquals(first, applyLegacyImport(first, candidate, LegacyImportMode.Merge, selfPkg))
+        val malformed = parseLegacyConfigCandidate(sections("legacy_kmod_targets" to "com.bank.app\nbroken\n"), uidToPkg)!!
+        assertFalse(malformed.canCleanupSources)
+        assertFalse(parseLegacyConfigCandidate(mapOf("legacy_kmod_targets" to "com.bank.app\n"), uidToPkg)!!.canCleanupSources)
+        assertTrue(parseLegacyConfigCandidate(sections("legacy_kmod_targets" to "com.bank.app\n"), uidToPkg)!!.canCleanupSources)
+    }
 
     @Test
     fun `no legacy files means nothing to offer`() {

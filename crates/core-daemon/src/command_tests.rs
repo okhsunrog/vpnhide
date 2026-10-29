@@ -1066,3 +1066,73 @@ fn explicit_repair_releases_only_covered_resources_and_preserves_old_unknown_rec
     );
     assert!(!restarted.has_unknown_hold());
 }
+
+#[test]
+fn import_retains_sources_on_persist_failure_and_duplicate_never_replays_cleanup() {
+    let _env = crate::ports::test_env_lock();
+    let root = tempfile::tempdir().unwrap();
+    let state = load(root.path(), 1);
+    let effects = root.path().join("root");
+    state.set_effect_paths(Some(crate::effects::EffectPaths {
+        root: effects.clone(),
+    }));
+    bootstrap(&state);
+    let source = effects.join("data/adb/vpnhide_kmod/targets.txt");
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    std::fs::write(&source, "com.bank\n").unwrap();
+    let mut config = CanonicalConfig::default();
+    config.apps.insert(
+        "com.bank".into(),
+        vpnhide_core_rpc::AppConfig {
+            java: true,
+            ..Default::default()
+        },
+    );
+    let request = CoreCommand::Import {
+        base: BaseRef {
+            revision: state.config_revision(),
+        },
+        config: config.clone(),
+        cleanup_legacy: true,
+    };
+    let failed_id = state.issue_operation_id().unwrap();
+    std::fs::create_dir(root.path().join("config.json.tmp")).unwrap();
+    state.submit_command(failed_id, request).unwrap();
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), "com.bank\n");
+    assert!(
+        !state
+            .snapshot()
+            .config
+            .unwrap()
+            .apps
+            .contains_key("com.bank")
+    );
+    std::fs::remove_dir(root.path().join("config.json.tmp")).unwrap();
+    let id = state.issue_operation_id().unwrap();
+    let request = CoreCommand::Import {
+        base: BaseRef {
+            revision: state.config_revision(),
+        },
+        config,
+        cleanup_legacy: true,
+    };
+    state.submit_command(id, request.clone()).unwrap();
+    assert!(!source.exists());
+    assert!(
+        state
+            .snapshot()
+            .config
+            .unwrap()
+            .apps
+            .contains_key("com.bank")
+    );
+    drop(state);
+    std::fs::write(&source, "new user source\n").unwrap();
+    let restarted = load(root.path(), 2);
+    restarted.set_effect_paths(Some(crate::effects::EffectPaths { root: effects }));
+    restarted.submit_command(id, request).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(source).unwrap(),
+        "new user source\n"
+    );
+}

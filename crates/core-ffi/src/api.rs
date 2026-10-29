@@ -4,6 +4,29 @@ use crate::types::*;
 use vpnhide_core_client::{ClientError, ClientReply};
 use vpnhide_core_rpc as rpc;
 
+/// Availability is computed from the same core policy as command admission.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreRecoveryAccess {
+    pub repair: Option<String>,
+    pub set_superkey: Option<String>,
+    pub clear_superkey: Option<String>,
+    pub cleanup: Option<String>,
+    pub full_reset: Option<String>,
+}
+impl From<&rpc::StateSnapshot> for CoreRecoveryAccess {
+    fn from(state: &rpc::StateSnapshot) -> Self {
+        use rpc::recovery::{RecoveryAction as A, refusal};
+        let reason = |a| refusal(state, a).map(str::to_owned);
+        Self {
+            repair: reason(A::Repair),
+            set_superkey: reason(A::SetSuperkey),
+            clear_superkey: reason(A::ClearSuperkey),
+            cleanup: reason(A::Cleanup),
+            full_reset: reason(A::FullReset),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct StateReply {
     pub connection_generation: u64,
@@ -12,6 +35,7 @@ pub struct StateReply {
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CorePublication {
+    pub recovery: CoreRecoveryAccess,
     pub startup_error: Option<String>,
     pub epoch: u64,
     pub revision: u64,
@@ -34,6 +58,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
             revision,
             snapshot,
         } = reply.value;
+        let recovery = CoreRecoveryAccess::from(&snapshot);
         let rpc::StateSnapshot {
             startup_error,
             config,
@@ -51,6 +76,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
         Self {
             connection_generation: reply.generation,
             state: CorePublication {
+                recovery,
                 startup_error,
                 epoch,
                 revision,

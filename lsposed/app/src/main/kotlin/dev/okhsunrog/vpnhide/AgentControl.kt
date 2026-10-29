@@ -25,6 +25,7 @@ import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
 import dev.okhsunrog.vpnhide.diagnostics.diffCapture
 import dev.okhsunrog.vpnhide.diagnostics.snapshotCounters
 import dev.okhsunrog.vpnhide.generated.HookIds
+import dev.okhsunrog.vpnhide.migration.parseImportedCanonicalConfig
 import dev.okhsunrog.vpnhide.picker.AppListCache
 import dev.okhsunrog.vpnhide.picker.AppSummary
 import dev.okhsunrog.vpnhide.picker.TargetsSnapshot

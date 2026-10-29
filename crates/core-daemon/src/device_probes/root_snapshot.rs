@@ -22,7 +22,7 @@ pub fn collect(paths: &Paths, with_packages: bool) -> Out {
     });
     phase(&mut out, "legacy_config", |o| {
         for (name, path) in &paths.legacy {
-            file(o, name, path);
+            o.section(name, legacy_source(path));
         }
     });
     phase(&mut out, "kmod_status_files", |o| {
@@ -64,6 +64,22 @@ fn phase(out: &mut Out, name: &str, body: impl FnOnce(&mut Out)) {
 /// `emit_file`: a regular file's content, or an empty section.
 fn file(out: &mut Out, name: &str, path: &Path) {
     out.section(name, read_text(path).unwrap_or_default());
+}
+
+/// Missing is an empty source; unreadable or oversized must prevent importer cleanup.
+fn legacy_source(path: &Path) -> String {
+    use std::io::Read;
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return String::new(),
+        Err(_) => return "(unreadable legacy source)".into(),
+    };
+    const LIMIT: u64 = 8 << 20;
+    let mut bytes = Vec::new();
+    if (&mut file).take(LIMIT + 1).read_to_end(&mut bytes).is_err() || bytes.len() as u64 > LIMIT {
+        return "(incomplete legacy source)".into();
+    }
+    String::from_utf8(bytes).unwrap_or_else(|_| "(invalid legacy source encoding)".into())
 }
 
 fn module_props(out: &mut Out, paths: &Paths) {
@@ -213,4 +229,26 @@ fn lsposed_framework(paths: &Paths) -> String {
         }
     }
     "installed=0\nprobe_ok=1\n".into()
+}
+
+#[cfg(test)]
+mod legacy_source_tests {
+    use super::*;
+
+    #[test]
+    fn missing_sources_are_empty_but_failed_reads_are_not_silent_absence() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(legacy_source(&root.path().join("missing")).is_empty());
+        assert!(legacy_source(root.path()).contains("incomplete"));
+        let file = root.path().join("targets");
+        std::fs::write(&file, b"com.bank\n").unwrap();
+        assert_eq!(legacy_source(&file), "com.bank\n");
+        std::fs::write(&file, [0xff]).unwrap();
+        assert!(legacy_source(&file).contains("invalid"));
+        std::fs::File::create(&file)
+            .unwrap()
+            .set_len((8 << 20) + 1)
+            .unwrap();
+        assert!(legacy_source(&file).contains("incomplete"));
+    }
 }
