@@ -53,6 +53,7 @@ Forward-looking, non-reference material — directions, plans and TODOs that are
 a release commitment — lives in **[`notes/`](notes/)**:
 
 - [notes/ROADMAP.md](notes/ROADMAP.md) — larger product directions
+- [notes/core-v2-hardening-plan.md](notes/core-v2-hardening-plan.md) — prioritized v2 architecture review plan: privileged boundaries, recovery, RPC bounds, diagnostics, runtime ownership and legacy removal
 - [notes/setup-wizard-design.md](notes/setup-wizard-design.md) — design proposal for the first-run setup wizard (not yet implemented)
 - [notes/app-state-transitions.md](notes/app-state-transitions.md) — the app state transition contract as implemented: machines, invariants, scenario traces, the recorded deviations and the known gaps
 - [notes/app-state-transitions-history.md](notes/app-state-transitions-history.md) — the stage-by-stage implementation log of that contract (§13–§22) with each stage's boundaries and validation
