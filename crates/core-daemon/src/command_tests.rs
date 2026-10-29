@@ -1224,3 +1224,62 @@ fn boot_repairs_only_independent_resources_and_preserves_unknown_receipts() {
         }
     }
 }
+
+#[test]
+fn journal_faults_never_publish_a_nondurable_terminal_receipt() {
+    for after_rename in [false, true] {
+        for write in 1..=4 {
+            let root = tempfile::tempdir().unwrap();
+            let state = load(root.path(), 1);
+            bootstrap(&state);
+            let op = state.issue_operation_id().unwrap();
+            let result = state
+                .call_writer(move |state| {
+                    journal::fail_write(write, after_rename);
+                    state.execute_command(
+                        op,
+                        CoreCommand::Edit {
+                            base: BaseRef {
+                                revision: state.config_revision(),
+                            },
+                            edit: ConfigEdit::Toggle {
+                                field: ConfigToggle::Debug,
+                                enabled: true,
+                            },
+                        },
+                    )
+                })
+                .unwrap();
+            let observed = state.get_operation_record(op).unwrap();
+            if write == 3 {
+                assert!(result.is_err());
+                assert_eq!(
+                    observed.settled, None,
+                    "settlement sync failure is not terminal Unknown"
+                );
+            } else {
+                assert!(result.is_ok(), "write={write}, after={after_rename}");
+                assert!(observed.settled.is_some());
+            }
+            assert_eq!(state.snapshot().storage_fault.is_some(), write >= 3);
+            if write >= 3 {
+                assert!(state.snapshot().mutation_held);
+                assert!(state.snapshot().operations_in_flight.is_empty());
+                assert_eq!(state.issue_operation_id(), Err(SubmitError::Unavailable));
+                assert_eq!(state.get_operation_record(op), Some(observed.clone()));
+            }
+            drop(state);
+            let restarted = load(root.path(), 2);
+            let reconciled = restarted.get_operation_record(op).unwrap();
+            if observed.settled.is_some() {
+                assert_eq!(
+                    observed, reconciled,
+                    "durable terminal receipt changed on restart"
+                );
+            } else {
+                assert_eq!(reconciled.settled, Some(PhaseOutcome::Confirmed));
+            }
+            assert!(restarted.snapshot().storage_fault.is_none());
+        }
+    }
+}

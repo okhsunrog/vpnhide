@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation on `dev-2.x`, app/core RPC version 11. The backend
+Current implementation on `dev-2.x`, app/core RPC version 12. The backend
 control-v2 / telemetry-v1 wire is a separate boundary. This document describes
 the implemented ownership and execution contract.
 
@@ -177,7 +177,7 @@ and IPv6 outcomes remain independent.
 
 See [storage](storage.md), [state](state.md) and
 [module lifecycle](notes/core-2.0-module-lifecycle.md) for paths and boot details.
-RPC skew fails the handshake; update APK and core together for version 11.
+RPC skew fails the handshake; update APK and core together for version 12.
 Host tests/builds do not establish Android DAC/SELinux behavior, root-manager boot,
 ROM parsing or hook coverage; these still require device validation.
 
@@ -201,8 +201,7 @@ Recovery permissions are projected through typed UniFFI from the shared
 explicit Repair, credential recovery, cleanup or reset indiscriminately. Persist
 uncertainty still prevents credential changes, captures prevent reset, and core
 revalidates every command. Startup fault text is retained in the app state and
-shown in the blocked-state dialog. The v11 RPC shape is unchanged; these additions
-are local typed FFI projections over its existing fields.
+shown in the blocked-state dialog. Recovery actions are local typed FFI projections over the RPC state.
 
 File-producing probes run in private root-owned staging. Completed files are copied
 through exclusive, no-follow descriptor-relative destinations; permissions, owner
@@ -219,3 +218,13 @@ uncertainty blocks Ports. Independent resources may still receive a fresh boot
 repair. Cleanup alone does not block Native/Ports. Boot never replays the old
 operation or reconciles a dependent held Persist implicitly. The original Unknown
 receipts and their holds remain unchanged. This includes the delayed Ports pass.
+
+Runtime journal failure is separate from terminal effect uncertainty. RPC v12
+publishes `storage_fault` and blocks mutations until restart/reconciliation. If
+terminal settlement could not be synced, `get_operation` retains an unsettled
+record (`settled = None`), not a fabricated terminal Unknown; no operation is
+claimed to be running while storage is faulted. If settlement synced but a later
+retention/repair-metadata write failed, the durable terminal receipt is preserved.
+Restart reconciles only unfinished intent from disk; an already durable terminal
+receipt remains immutable. The app exposes the storage fault in its blocked-state
+feedback and disables recovery mutations while the storage fault persists.

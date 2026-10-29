@@ -41,7 +41,7 @@ Host/dev runs (no `VPNHIDE_APP_DATA_DIR`) keep the plain path socket with the en
 | Writer queue | 16 tasks; overload returns Busy |
 | Heavy diagnostic collections | 2; each has at most 32 probes and 4 workers |
 
-## APK connection and save path (protocol 11)
+## APK connection and save path (protocol 12)
 
 - One process-retained UniFFI `CoreSession` owns a shared multiplexed connection.
   `awaitState(epoch, revision)` long-polls core publications; reads and commands use

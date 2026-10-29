@@ -58,7 +58,7 @@ pub mod recovery;
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -195,6 +195,9 @@ pub struct Published {
 pub struct StateSnapshot {
     #[serde(default)]
     pub startup_error: Option<String>,
+    /// Runtime journal failure: terminal receipt may be unavailable until restart.
+    #[serde(default)]
+    pub storage_fault: Option<String>,
     /// The confirmed canonical config, or `None` when the core has none.
     pub config: Option<CanonicalConfig>,
     /// A monotonic counter that bumps only when the config changes — the base a
@@ -845,6 +848,7 @@ mod tests {
                         },
                         debug_lease: true,
                         startup_error: None,
+                        storage_fault: None,
                         debug_leases: vec![DebugLease {
                             id: DebugLeaseId(7),
                             owner: DebugLeaseOwner::Forensic,

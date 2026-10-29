@@ -36,6 +36,9 @@ pub fn permits_boot_phase(phase: ConfigPhase, held: &[ConfigPhase]) -> bool {
 }
 
 pub fn refusal(state: &StateSnapshot, action: RecoveryAction) -> Option<&'static str> {
+    if state.storage_fault.is_some() {
+        return Some("storage_fault_restart_required");
+    }
     if state.startup_error.is_some() {
         return Some("startup_fault");
     }

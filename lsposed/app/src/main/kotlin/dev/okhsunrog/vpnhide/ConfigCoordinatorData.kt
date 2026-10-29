@@ -18,6 +18,7 @@ internal data class ConfigCoordinatorView(
     val applyEvidence: List<CoreApplyIdentity> = emptyList(),
     val recovery: CoreRecoveryAccess? = null,
     val startupError: String? = null,
+    val storageFault: String? = null,
     val heldResources: Set<ConfigPhase> = emptySet(),
     val canRepair: Boolean = false,
     val coreCurrent: Boolean = false,

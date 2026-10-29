@@ -30,6 +30,7 @@ internal data class CoreStateView(
     val applyEvidence: List<CoreApplyIdentity> = emptyList(),
     val recovery: CoreRecoveryAccess? = null,
     val startupError: String? = null,
+    val storageFault: String? = null,
     val heldResources: Set<ConfigPhase> = emptySet(),
     val backend: CoreBackendView? = null,
     val routing: CoreRoutingView? = null,
