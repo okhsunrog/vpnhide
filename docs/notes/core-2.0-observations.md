@@ -1,6 +1,6 @@
 # Core observations and freshness
 
-Current implementation; app/core RPC protocol 11. See the
+Current implementation; app/core RPC protocol 12. See the
 [current architecture](../core-architecture.md) for the complete ownership contract.
 
 ## Model

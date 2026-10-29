@@ -261,7 +261,7 @@ impl CoreState {
     }
 
     fn issue_operation_id_direct(&self) -> Result<OperationId, SubmitError> {
-        if self.snapshot().startup_error.is_some() {
+        if self.snapshot().startup_error.is_some() || self.snapshot().storage_fault.is_some() {
             return Err(SubmitError::Unavailable);
         }
         let mut store = self.config.lock().expect("config mutex").clone();
@@ -271,7 +271,11 @@ impl CoreState {
             .checked_add(1)
             .ok_or(SubmitError::Unavailable)?;
         if let Some(path) = &self.journal_path {
-            journal::write_atomic(path, &store.journal).map_err(|_| SubmitError::Unavailable)?;
+            if let Err(error) = journal::write_atomic(path, &store.journal) {
+                let previous = self.config.lock().expect("config mutex").clone();
+                self.freeze_storage_fault(&previous, OperationId(0), &error);
+                return Err(SubmitError::Unavailable);
+            }
         }
         let id = OperationId(store.journal.issued_through);
         *self.config.lock().expect("config mutex") = store;
@@ -291,7 +295,7 @@ impl CoreState {
         op: OperationId,
         command: CoreCommand,
     ) -> Result<Accepted, SubmitError> {
-        if self.snapshot().startup_error.is_some() {
+        if self.snapshot().startup_error.is_some() || self.snapshot().storage_fault.is_some() {
             return Err(SubmitError::Unavailable);
         }
         if let Some(entry) = self.config.lock().expect("config mutex").journal.get(op) {
@@ -436,6 +440,19 @@ impl CoreState {
         self.publish_store(&store);
     }
 
+    fn freeze_storage_fault(&self, store: &ConfigStore, op: OperationId, error: &std::io::Error) {
+        *self.config.lock().expect("config mutex") = store.clone();
+        self.publish_store(store);
+        self.publisher.update(|snapshot| {
+            snapshot.storage_fault = Some(format!(
+                "journal storage fault for operation {}: {}; restart core to reconcile durable evidence",
+                op.0, error
+            ));
+            snapshot.mutation_held = true;
+            snapshot.operations_in_flight.clear();
+        });
+    }
+
     fn publish_store(&self, store: &ConfigStore) {
         self.publisher.update(|snapshot| {
             snapshot.config = store.config.clone();
@@ -455,7 +472,8 @@ impl CoreState {
                 .filter(|entry| entry.record.settled.is_none())
                 .map(|entry| entry.record.op)
                 .collect();
-            snapshot.mutation_held = store.journal.has_unknown();
+            snapshot.mutation_held =
+                snapshot.storage_fault.is_some() || store.journal.has_unknown();
             snapshot.held_resources = store
                 .journal
                 .expired_holds
@@ -566,7 +584,7 @@ impl CoreState {
     }
 
     fn expire_debug_leases(&self) {
-        if self.shutting_down.load(Ordering::SeqCst) {
+        if self.shutting_down.load(Ordering::SeqCst) || self.snapshot().storage_fault.is_some() {
             return;
         }
         if self.native_enabled() && self.native_handle().is_none() {
@@ -723,8 +741,15 @@ impl CoreState {
     }
 
     fn persist_store(&self, store: &ConfigStore) -> Result<(), SubmitError> {
+        if self.snapshot().storage_fault.is_some() {
+            return Err(SubmitError::Unavailable);
+        }
         if let Some(path) = &self.journal_path {
-            journal::write_atomic(path, &store.journal).map_err(|_| SubmitError::Unavailable)?;
+            if let Err(error) = journal::write_atomic(path, &store.journal) {
+                let previous = self.config.lock().expect("config mutex").clone();
+                self.freeze_storage_fault(&previous, OperationId(0), &error);
+                return Err(SubmitError::Unavailable);
+            }
         }
         *self.config.lock().expect("config mutex") = store.clone();
         self.publish_store(store);
@@ -1304,7 +1329,7 @@ impl CoreState {
         options: SubmitOptions,
         spec: CommandSpec,
     ) -> Result<Accepted, SubmitError> {
-        if self.snapshot().startup_error.is_some() {
+        if self.snapshot().startup_error.is_some() || self.snapshot().storage_fault.is_some() {
             return Err(SubmitError::Unavailable);
         }
         let mut store = self.config.lock().expect("config mutex").clone();
@@ -1631,6 +1656,7 @@ impl CoreState {
             ports: ports_report.clone(),
         };
         if let Some(journal_path) = &self.journal_path {
+            let pending = store.journal.clone();
             let revision_for_journal = store.config_revision;
             if let Err(e) = journal::record_settled(
                 journal_path,
@@ -1643,21 +1669,10 @@ impl CoreState {
                 revision_for_journal,
             ) {
                 eprintln!("core: journal settle failed: {e}");
-                // Evidence of the effect may already exist; surface uncertainty rather than
-                // pretending the operation vanished.
-                if let Some(entry) = store.journal.get_mut(op) {
-                    entry.record.settled = Some(PhaseOutcome::Unknown);
-                }
-                *self.config.lock().expect("config mutex") = store.clone();
-                self.publish_store(&store);
-                self.publisher.update(|snapshot| {
-                    snapshot
-                        .operations_in_flight
-                        .retain(|running| *running != op);
-                    snapshot.mutation_held = true;
-                    snapshot.config = store.config.clone();
-                    snapshot.config_revision = store.config_revision;
-                });
+                // A failed sync is not a durable terminal receipt. Preserve the
+                // pending intent in memory and on disk for evidence reconciliation.
+                store.journal = pending;
+                self.freeze_storage_fault(&store, op, &e);
                 return Err(SubmitError::Unavailable);
             }
         }
@@ -1667,6 +1682,7 @@ impl CoreState {
             }
         }
 
+        let durable_settled = store.journal.clone();
         if spec.lease
             || (matches!(spec.intent, journal::CommandIntent::Edit) && repair)
             || matches!(
@@ -1723,12 +1739,15 @@ impl CoreState {
         store.journal.prune();
         store.field_revisions = store.journal.field_revisions.clone();
         if let Some(path) = &self.journal_path {
-            if journal::write_atomic(path, &store.journal).is_err() {
-                if let Some(entry) = store.journal.get_mut(op) {
-                    entry.record.settled = Some(PhaseOutcome::Unknown);
-                }
+            if let Err(error) = journal::write_atomic(path, &store.journal) {
+                // Settlement already synced. A failed retention/repair-metadata
+                // update must never rewrite that terminal receipt as Unknown.
+                store.journal = durable_settled;
+                self.freeze_storage_fault(&store, op, &error);
+                return Ok(Accepted { op });
             }
         }
+
         *self.config.lock().expect("config mutex") = store.clone();
         self.publish_store(&store);
         let revision = store.config_revision;
@@ -1742,7 +1761,8 @@ impl CoreState {
             snapshot
                 .operations_in_flight
                 .retain(|running| *running != op);
-            snapshot.mutation_held = store.journal.has_unknown();
+            snapshot.mutation_held =
+                snapshot.storage_fault.is_some() || store.journal.has_unknown();
         });
         let native_ok = outcome
             .phases

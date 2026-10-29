@@ -497,6 +497,7 @@ internal class ConfigCoordinator(
                 heldResources = state?.heldResources.orEmpty(),
                 recovery = state?.recovery.takeIf { publication.current },
                 startupError = state?.startupError,
+                storageFault = state?.storageFault,
                 canRepair = publication.current && state?.recovery?.let { it.repair == null } == true,
                 rechecking = view.value.rechecking && (held != null || initializing),
             )

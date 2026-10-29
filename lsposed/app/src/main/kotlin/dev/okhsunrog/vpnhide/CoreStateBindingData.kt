@@ -35,6 +35,7 @@ internal fun CorePublication.toState(): CoreStateView =
         mutationHeld = mutationHeld,
         recovery = recovery,
         startupError = startupError,
+        storageFault = storageFault,
         applyEvidence =
             applyEvidence.map {
                 CoreApplyIdentity(it.phase.toPhase(), it.desiredRevision.toLong(), it.op.toLong(), it.outcome.toOutcome())

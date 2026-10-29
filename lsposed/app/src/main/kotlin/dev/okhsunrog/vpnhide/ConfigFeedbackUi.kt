@@ -163,6 +163,7 @@ private fun ConfigBlockedDialog(
             Column {
                 Text(stringResource(configStatusText(status.message)))
                 view.startupError?.let { Text(it) }
+                view.storageFault?.let { Text(it) }
                 if (view.rechecking || view.mode == ConfigCoordinatorMode.Initializing) {
                     ButtonSpinner(Modifier.padding(top = 12.dp))
                 }

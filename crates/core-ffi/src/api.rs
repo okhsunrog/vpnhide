@@ -37,6 +37,7 @@ pub struct StateReply {
 pub struct CorePublication {
     pub recovery: CoreRecoveryAccess,
     pub startup_error: Option<String>,
+    pub storage_fault: Option<String>,
     pub epoch: u64,
     pub revision: u64,
     pub config_revision: u64,
@@ -61,6 +62,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
         let recovery = CoreRecoveryAccess::from(&snapshot);
         let rpc::StateSnapshot {
             startup_error,
+            storage_fault,
             config,
             config_revision,
             operations_in_flight,
@@ -78,6 +80,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
             state: CorePublication {
                 recovery,
                 startup_error,
+                storage_fault,
                 epoch,
                 revision,
                 config_revision,

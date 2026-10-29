@@ -375,8 +375,41 @@ pub fn read(path: &Path) -> io::Result<Journal> {
     Ok(journal)
 }
 
+#[cfg(test)]
+thread_local! {
+    static WRITE_FAULT: std::cell::Cell<Option<(usize, bool)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Writer-thread-local injection; never enabled in production builds.
+#[cfg(test)]
+pub(crate) fn fail_write(number: usize, after_rename: bool) {
+    WRITE_FAULT.set(Some((number, after_rename)));
+}
+
+#[cfg(test)]
+fn take_write_fault() -> Option<bool> {
+    WRITE_FAULT.with(|fault| match fault.get() {
+        Some((1, after)) => {
+            fault.set(None);
+            Some(after)
+        }
+        Some((n, after)) => {
+            fault.set(Some((n - 1, after)));
+            None
+        }
+        None => None,
+    })
+}
+
 /// Serialize and write atomically (temp + fsync + rename), mode `0600`.
 pub fn write_atomic(path: &Path, journal: &Journal) -> io::Result<()> {
+    #[cfg(test)]
+    let fault = take_write_fault();
+    #[cfg(test)]
+    if fault == Some(false) {
+        return Err(io::Error::other("injected journal temp write failure"));
+    }
+
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -399,6 +432,11 @@ pub fn write_atomic(path: &Path, journal: &Journal) -> io::Result<()> {
         f.sync_all()?;
     }
     fs::rename(&tmp, path)?;
+    #[cfg(test)]
+    if fault == Some(true) {
+        // Exercise the same post-rename error wrapper as a failed directory sync.
+        return crate::config_file::sync_after_rename(&dir.join("missing-fault-directory"));
+    }
     crate::config_file::sync_after_rename(dir)
 }
 
