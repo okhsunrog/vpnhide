@@ -10,9 +10,9 @@ different things, and VPN Hide has a role for each: **Java**, **Native**,
 
 ## What it can't do
 
-- **Change your external IP.** A server sees the VPN's exit IP. Anti-fraud and
-  geo-checks that run server-side, or key off the IP, are outside the phone — the
-  device can't hide that.
+- **Change your external IP.** For traffic through the tunnel, a server sees the
+  VPN's exit IP. Anti-fraud and geo-checks that run server-side, or key off the IP,
+  are outside the phone — the device can't hide that.
 - **Beat server-side or account-level detection.** If a service decides from its
   own backend that you're on a VPN, on-device hiding won't change the answer.
 - **Hide that you're rooted or on a custom ROM, or make an app pass Play
@@ -35,7 +35,9 @@ different things, and VPN Hide has a role for each: **Java**, **Native**,
 
 ## Routing is a separate choice
 
-Targets can be inside or outside the tunnel. VPN Hide changes the local view,
-not your VPN client's routing rules or the public IP. Start with the roles you
-need, check the target's actual behavior, and undo a change if it breaks a feature.
-See [Direct or through the tunnel](split-tunneling.md).
+Targets can be inside or outside the tunnel. VPN Hide does not configure the
+VPN client's routing policy, but Java hooks can change the network returned to
+an app. An app binding to that network may connect directly if Android and VPN
+policy permit bypass. Hiding checks do not verify tunnel retention.
+See [Direct access or through the tunnel](split-tunneling.md) and
+[Security and privacy](security-and-privacy.md).

@@ -32,9 +32,11 @@ outside VPN Hide's control.
 Other possible causes include:
 
 - **Server-side checks.** The service sees your exit IP. If that IP belongs to a
-  known VPN/hosting range, it can block you no matter what the device reports —
-  route that app **directly** instead of through the tunnel (your VPN client's
-  split-tunnel setting). See [Direct access or through the tunnel](split-tunneling.md)
+  known VPN/hosting range, it can block you no matter what the device reports.
+  Only if direct access is acceptable to you, route that app **directly** using
+  your VPN client's split-tunnel setting. If the app must stay in the tunnel,
+  keep that policy even if the server refuses the connection.
+  See [Direct access or through the tunnel](split-tunneling.md)
   and [A third-party tester still finds the VPN](tester-finds-vpn.md).
 - **A detection path outside the active backend's reach.** Diagnostics marks
   these *"Not covered."* A kernel backend, or Experimental protection, may close

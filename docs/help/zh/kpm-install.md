@@ -10,8 +10,8 @@ KPM 是面向可加载 `.ko` **无法**支持的内核的内核级 Native 后端
 KPM 使用内核 inline 挂钩，这要求内核中已存在 KernelPatch 运行时。按你的 root
 选择路径：
 
-- **APatch / FolkPatch**——已内置 KernelPatch。直接安装模块 ZIP 并保存
-  **SuperKey**（见下）。
+- **APatch / FolkPatch**——已内置 KernelPatch。安装模块 ZIP。只有无法通过受信任令牌激活时，
+  才需要保存 **SuperKey**，见 [SuperKey 存储](#superkey-存储)。
 - **Magisk / KernelSU / KernelSU-Next**——使用 [**KPatch-Next-Module**](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest) 并按下方步骤
   修补内核，或在自行编译内核时集成 KPatch-Next。只安装 VPN Hide 不会提供此运行时。
 
@@ -24,9 +24,17 @@ KPM 使用内核 inline 挂钩，这要求内核中已存在 KernelPatch 运行�
 3. 通过 root 管理器的 **Modules** 界面，把**整个 ZIP** 作为 APM/Magisk 兼容模块
    安装。**不要**单独解压或加载内部的 `vpnhide.kpm` 文件——单独的它没有激活器、
    开机脚本和配置下发，隐藏不会生效。
-4. 在 APatch / FolkPatch 上，把你的 **SuperKey** 保存到 **Settings → Security**
-   （与你在 APatch/FolkPatch 里设置的相同）。
+4. 在 APatch / FolkPatch 上，仅在应用要求时保存 **SuperKey**，
+   见 [SuperKey 存储](#superkey-存储)。
 5. **重启**，然后打开**仪表盘**——Native 后端应显示 **Active**。
+
+## SuperKey 存储
+
+仅当 APatch/FolkPatch 无法通过受信任的 `su` 令牌激活 KPM，且仪表盘要求密钥时，
+才保存 SuperKey。在 **Settings → Security** 中输入你在 APatch/FolkPatch 设置的密钥。
+保存会把密钥写入仅 root 可读的文件，应用退出或设备重启后仍保留，并非仅限当前会话。
+清除会删除保存的副本。如果无法使用受信任的令牌，以后激活时可能再次需要密钥。
+见[安全与隐私](security-and-privacy.md#保存的密钥)。
 
 ## 受支持的内核
 

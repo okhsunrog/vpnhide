@@ -13,8 +13,9 @@ module** — there's no GKI variant to match. See
 KPM uses inline kernel hooks, which require the KernelPatch runtime to be present
 in your kernel. Pick the path that matches your root:
 
-- **APatch / FolkPatch** — KernelPatch is already built in. Just install the
-  module ZIP and save your **SuperKey** (below).
+- **APatch / FolkPatch** — KernelPatch is already built in. Install the
+  module ZIP; a saved **SuperKey** is needed only if trusted-token activation
+  is unavailable (see [SuperKey storage](#superkey-storage)).
 - **Magisk / KernelSU / KernelSU-Next** — use [**KPatch-Next-Module**](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest) and the
   setup steps below, or integrate KPatch-Next into a self-built
   kernel. Installing VPN Hide alone does not provide this runtime.
@@ -30,10 +31,19 @@ a KernelPatch runtime."*
    an APM/Magisk-compatible module. Do **not** extract or load the inner
    `vpnhide.kpm` file by itself — on its own it has no activator, boot scripts,
    or config delivery, and hiding won't work.
-4. On APatch / FolkPatch, save your **SuperKey** in **Settings → Security** (the
-   same one you set in APatch/FolkPatch).
+4. On APatch / FolkPatch, save your **SuperKey** only if requested; see
+   [SuperKey storage](#superkey-storage).
 5. **Reboot**, then open the **Dashboard** — the Native backend should read
    **Active**.
+
+## SuperKey storage
+
+Save a SuperKey only if APatch/FolkPatch cannot activate KPM with its trusted
+`su` token and the Dashboard asks for a key. In **Settings → Security**, use the
+key you set in APatch/FolkPatch. Saving stores it in a root-only file that survives
+app and device restarts; it is not limited to this session. Clear removes the
+saved copy. A later activation may need the key again if trusted-token access
+is unavailable. See [Security and privacy](security-and-privacy.md#saved-credentials).
 
 ## Supported kernels
 
