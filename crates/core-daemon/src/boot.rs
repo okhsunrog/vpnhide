@@ -109,6 +109,7 @@ pub fn run_boot_passes(state: &CoreState, wait_for_pm: bool) -> BootApplyReport 
                 plan: Some(PlanKind::PortsOnly),
                 ports_source: PortsSource::Boot,
                 netd_ready: Some(ready),
+                ..SubmitOptions::default()
             },
         ));
         combine(&reports).write_status_file(&status_path);
@@ -119,6 +120,7 @@ pub fn run_boot_passes(state: &CoreState, wait_for_pm: bool) -> BootApplyReport 
                 plan: Some(PlanKind::PortsOnly),
                 ports_source: PortsSource::BootRetry,
                 netd_ready: None,
+                ..SubmitOptions::default()
             },
         );
         // The safety pass supersedes the first Ports pass in the status file.
@@ -160,13 +162,6 @@ fn combine(reports: &[BootApplyReport]) -> BootApplyReport {
 
 /// [`reapply`] with an explicit plan / Ports source.
 pub fn reapply_with(state: &CoreState, options: SubmitOptions) -> BootApplyReport {
-    if state.has_unknown_hold() {
-        return BootApplyReport {
-            status: BootApplyStatus::HeldUnknown,
-            op: None,
-            detail: "journal or in-memory Unknown still Held; refusing boot re-apply".into(),
-        };
-    }
     if !state.has_config() {
         return BootApplyReport {
             status: BootApplyStatus::NoIntent,
@@ -191,7 +186,10 @@ pub fn reapply_with(state: &CoreState, options: SubmitOptions) -> BootApplyRepor
         op,
         BaseRef { revision },
         &ConfigEdit::RepairActivation,
-        options,
+        SubmitOptions {
+            automatic_repair: true,
+            ..options
+        },
     ) {
         Ok(_) => {
             let record = state.get_operation_record(op);
@@ -223,6 +221,11 @@ pub fn reapply_with(state: &CoreState, options: SubmitOptions) -> BootApplyRepor
                 }
             }
         }
+        Err(SubmitError::Unavailable) if state.has_unknown_hold() => BootApplyReport {
+            status: BootApplyStatus::HeldUnknown,
+            op: None,
+            detail: "boot repair depends on a held resource; explicit recovery required".into(),
+        },
         Err(SubmitError::Unavailable) => BootApplyReport {
             status: BootApplyStatus::NoIntent,
             op: None,
