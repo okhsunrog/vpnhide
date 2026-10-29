@@ -1074,6 +1074,66 @@ mod identity_tests {
     }
 
     #[test]
+    fn concurrent_observation_makes_delivery_fail_before_dispatch_without_retry() {
+        use super::{CoreKpm, KpmClient, KpmConfigError};
+        use std::os::unix::fs::PermissionsExt;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "vpnhide-observe-deliver-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let program = root.join("kpatch");
+        std::fs::write(
+            &program,
+            r#"#!/bin/sh
+case "$1 $2" in
+  "kpm list")
+    : > "${0%/*}/observing"
+    while [ ! -f "${0%/*}/release" ]; do sleep 0.01; done
+    exit 0 ;;
+  "kpm ctl0") : > "${0%/*}/dispatched" ;;
+esac
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let client = || CoreKpm {
+            client: KpmClient::KpatchCli {
+                path: program.clone(),
+            },
+            lock_path: root.join("control.lock"),
+        };
+        let observer = client();
+        let reader = std::thread::spawn(move || {
+            observer.read_state_with_budget(std::time::Duration::from_secs(3))
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !root.join("observing").exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(root.join("observing").exists());
+        let result = client().configure_once(
+            &root.join("no-kernel-ctl"),
+            "vpnhide 2 config\ndebug 0\nend 0\n",
+        );
+        std::fs::write(root.join("release"), "").unwrap();
+        assert!(reader.join().unwrap().unwrap().is_none());
+        assert!(
+            matches!(result, Err(KpmConfigError::BeforeDispatch(ref detail)) if detail.contains("os error 11")),
+            "{result:?}"
+        );
+        assert!(
+            !root.join("dispatched").exists(),
+            "contention must not dispatch or retry a config"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn state_snapshot_deadline_stops_multi_page_reads_without_leaving_a_worker() {
         use super::{CoreKpm, KpmClient};
         use std::os::unix::fs::PermissionsExt;
