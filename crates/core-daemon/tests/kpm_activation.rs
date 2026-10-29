@@ -231,7 +231,7 @@ async fn exercise(case: &str) {
         .await
         .unwrap()
         .unwrap();
-    let record = client.get_operation(OperationId(1)).await.unwrap().unwrap();
+    let record = common::settled(&client, OperationId(1)).await;
     let succeeds = matches!(
         case,
         "active"

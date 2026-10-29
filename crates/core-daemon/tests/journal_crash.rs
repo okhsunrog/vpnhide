@@ -158,8 +158,8 @@ async fn crash_after_persist_intent_reconciles_to_failed_without_replay() {
             },
         )
         .await;
-    // Core crashes mid-RPC; connection error is expected.
-    assert!(submit.is_err() || submit.unwrap().is_err());
+    // Durable admission may arrive before the injected crash.
+    let _ = submit;
     let _ = child.0.wait();
 
     let journal_path = config_path.with_file_name("core_operations.json");
@@ -212,6 +212,7 @@ async fn crash_after_persist_intent_reconciles_to_failed_without_replay() {
             .unwrap()
             .is_ok()
     );
+    common::settled(&client, OperationId(2)).await;
     // Config only matches the successful second edit.
     let loaded = config_file::read(&config_path).unwrap().unwrap();
     assert!(loaded.debug);
@@ -249,7 +250,7 @@ async fn crash_after_persist_reconciles_confirmed_and_holds_unfinished_native() 
             },
         )
         .await;
-    assert!(submit.is_err() || submit.unwrap().is_err());
+    let _ = submit; // Accepted or a lost reply are both recoverable by ID.
     let _ = child.0.wait();
 
     // Persist must have landed; Native must not have run (ctl unchanged).
@@ -332,7 +333,7 @@ async fn crash_after_native_intent_keeps_unknown_without_replay() {
             },
         )
         .await;
-    assert!(submit.is_err() || submit.unwrap().is_err());
+    let _ = submit; // Accepted or a lost reply are both recoverable by ID.
     let _ = child.0.wait();
     assert_eq!(fs::read_to_string(&ctl).unwrap(), ctl_before);
 
@@ -364,4 +365,75 @@ async fn crash_after_native_intent_keeps_unknown_without_replay() {
     );
     assert_eq!(record.settled, Some(PhaseOutcome::Unknown));
     assert_eq!(fs::read_to_string(&ctl).unwrap(), ctl_before);
+}
+
+#[tokio::test]
+async fn durable_admission_precedes_slow_effect_and_survives_disconnect() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("core.sock");
+    let config = dir.path().join("config.json");
+    let mut child = CoreProcess(
+        Command::new(env!("CARGO_BIN_EXE_vpnhide-core"))
+            .arg(&socket)
+            .env("VPNHIDE_CONFIG_PATH", &config)
+            .env("VPNHIDE_TEST_DELAY_BEFORE", "persist")
+            .env("VPNHIDE_TEST_DELAY_MS", "2000")
+            .env_remove("VPNHIDE_KPM_LOCK")
+            .env_remove("VPNHIDE_KERNEL_MODULES")
+            .env_remove("VPNHIDE_KMOD_CTL")
+            .env_remove("VPNHIDE_BOOT_APPLY")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    wait_bound(&socket, &mut child).await;
+    let client = CoreClient::connect(&socket);
+    let op = client.allocate_operation_id().await.unwrap().unwrap();
+    let edit = ConfigEdit::Replace {
+        config: CanonicalConfig {
+            debug: true,
+            ..Default::default()
+        },
+    };
+    let accepted = tokio::time::timeout(
+        Duration::from_secs(1),
+        client.submit_edit(op, BaseRef { revision: 0 }, edit.clone()),
+    )
+    .await
+    .expect("Accepted must not wait for the two-second external effect")
+    .unwrap()
+    .unwrap();
+    assert_eq!(accepted.op, op);
+    assert!(!config.exists());
+    let disk = journal::read(&dir.path().join("core_operations.json")).unwrap();
+    assert_eq!(disk.get(op).unwrap().record.settled, None);
+    assert!(
+        client
+            .current()
+            .await
+            .unwrap()
+            .snapshot
+            .operations_in_flight
+            .contains(&op)
+    );
+    drop(client);
+    let reconnected = CoreClient::connect(&socket);
+    let record = common::settled(&reconnected, op).await;
+    assert_eq!(record.settled, Some(PhaseOutcome::Confirmed));
+    reconnected
+        .submit_edit(op, BaseRef { revision: 0 }, edit)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reconnected.get_operation(op).await.unwrap(), Some(record));
+    assert_eq!(
+        reconnected
+            .current()
+            .await
+            .unwrap()
+            .snapshot
+            .config_revision,
+        1
+    );
 }

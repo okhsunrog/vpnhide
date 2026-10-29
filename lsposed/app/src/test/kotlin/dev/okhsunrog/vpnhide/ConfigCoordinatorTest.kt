@@ -310,11 +310,12 @@ class ConfigCoordinatorTest {
             val command = core.submissions.receive()
             command.reply.complete(CoreReply.Accepted(command.op, null, core.state))
             runCurrent()
-            assertEquals(TransitionFailure.ApplicationUnknown, saving.await().operation?.failure)
+            assertFalse(saving.isCompleted)
             val query = core.queries.receive()
             assertEquals(command.op, query.op)
             query.reply.complete(CoreReply.Observed(core.state, receipt(command.op)))
             runCurrent()
+            assertTrue(saving.await().succeeded)
             assertEquals(ConfigCoordinatorMode.Open, owner.view.value.mode)
             assertEquals(1, core.submitCount)
         }
@@ -371,6 +372,57 @@ class ConfigCoordinatorTest {
             runCurrent()
             assertEquals("capture_active", reset.await().output)
             assertEquals(0, core.submitCount)
+        }
+
+    @Test
+    fun `accepted pending operation stays active until publication and receipt settle`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val saving = async { owner.submit(CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, true)))) }
+            runCurrent()
+            val request = core.submissions.receive()
+            core.updates.value = CoreSessionUpdate(core.state.copy(operationsInFlight = listOf(request.op)), true, sequence = 1)
+            request.reply.complete(CoreReply.Accepted(request.op, receipt(request.op).copy(settled = null), core.state))
+            runCurrent()
+            assertFalse(saving.isCompleted)
+            assertTrue(
+                owner.view.value.operations
+                    .isNotEmpty(),
+            )
+            assertEquals(null, owner.view.value.lastResult)
+            core.updates.value = CoreSessionUpdate(core.state.copy(operationsInFlight = emptyList()), true, sequence = 2)
+            runCurrent()
+            val query = core.queries.receive()
+            assertEquals(request.op, query.op)
+            query.reply.complete(CoreReply.Observed(core.state, receipt(request.op)))
+            runCurrent()
+            assertTrue(saving.await().succeeded)
+            assertEquals(1, core.submitCount)
+        }
+
+    @Test
+    fun `storage fault after admission pauses without inventing a terminal receipt`() =
+        runTest {
+            val core = FakeSession()
+            val owner = ConfigCoordinator({ core }, backgroundScope)
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val saving = async { owner.submit(CanonicalMutation(listOf(CanonicalEdit.Toggle(CanonicalToggle.DebugSwitch, true)))) }
+            runCurrent()
+            val request = core.submissions.receive()
+            core.updates.value = CoreSessionUpdate(core.state.copy(operationsInFlight = listOf(request.op)), true, sequence = 1)
+            request.reply.complete(CoreReply.Accepted(request.op, receipt(request.op).copy(settled = null), core.state))
+            runCurrent()
+            core.updates.value = CoreSessionUpdate(core.state.copy(storageFault = "disk failed", mutationHeld = true), true, sequence = 2)
+            runCurrent()
+            assertEquals(TransitionFailure.ApplicationUnknown, saving.await().operation?.failure)
+            assertEquals("disk failed", owner.view.value.storageFault)
+            assertEquals(1, core.submitCount)
         }
 
     private class FakeSession : CoreSessionClient {

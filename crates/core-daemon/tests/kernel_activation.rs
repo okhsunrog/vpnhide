@@ -129,7 +129,7 @@ async fn exercise(case: Case, check: impl FnOnce(&NativeBootOutcome)) {
         .await
         .unwrap()
         .unwrap();
-    let record = client.get_operation(OperationId(1)).await.unwrap().unwrap();
+    let record = common::settled(&client, OperationId(1)).await;
     assert_eq!(record.settled, Some(case.expected));
     assert_eq!(record.phases[0].phase, ConfigPhase::Persist);
     assert_eq!(record.phases[0].outcome, PhaseOutcome::Confirmed);

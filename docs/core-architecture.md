@@ -77,8 +77,12 @@ stale edits can merge; overlapping edits refuse atomically. Explicit import uses
 round-trip and capacity validation precede normal persistence. Credential updates
 remain admissible when activation capacity fails; their Native phase reports it.
 
-A bounded single-writer queue executes accepted work independently of socket or
-waiter lifetime. Blocking children and durable writes do not hold the readable
+CommandEngine owns the authoritative ConfigStore, a bounded 16-message mailbox,
+typed command messages and the single writer's lifecycle. Internal boot/lease work
+uses completion waiters; RPC command submission uses an admission waiter. The
+writer validates schema, conflicts, capacity and identity before syncing the first
+phase intent. Only then does RPC receive Accepted, before the effect starts.
+Execution continues independently of socket or waiter lifetime. Blocking children and durable writes do not hold the readable
 state mutex. Publications and receipt queries remain available during a slow
 operation. The actual admitted revision and write set are journaled before
 Persist. Persist gates delivery; a known Native failure still permits independent
@@ -237,3 +241,19 @@ resources needed for logging refuse acquire rather than replay uncertain effects
 Live deadlines use `Instant`; the journal wall-clock expiry is display metadata.
 Restart discards both forensic and logcat leases from the old daemon instance,
 while retaining the original baseline/restoration receipt for safe maintenance.
+
+The app keeps an admitted, unsettled action pending and observes the process-owned
+session before querying its terminal receipt. It does not classify normal progress
+as ApplicationUnknown and never re-submits an admitted command. Disconnect or a
+storage fault still enters explicit uncertainty/recovery. Commands queued behind
+an active writer have not yet been admitted: the mailbox stays bounded and full
+queues return Busy. Queue wait and ID allocation can still wait behind a slow
+writer; bounding their deadlines is remaining B3 work, not solved by early Accepted.
+ConfigStore snapshots still use short mutex sections and working clones around IO;
+this change does not claim elimination of every clone/converter or a transport rewrite.
+
+KPM observations and delivery share a process-local per-lock-path gate before the
+external flock. Reads fail busy rather than blocking; delivery/load may wait up to
+10 seconds for a local observation before first dispatch. An external process's
+flock still refuses immediately. This prevents core's own read from spuriously
+failing its delivery; it never retries an already-dispatched or uncertain effect.

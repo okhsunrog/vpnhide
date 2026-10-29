@@ -8,6 +8,7 @@ pub mod app_socket;
 pub mod auth;
 pub mod backend;
 pub mod boot;
+mod command_engine;
 pub mod config_edit;
 pub mod config_file;
 pub mod device_probes;

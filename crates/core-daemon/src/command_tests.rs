@@ -110,7 +110,7 @@ fn landed_unknown(
     config_file::write_atomic(state.config_path.as_deref().unwrap(), &candidate).unwrap();
     state
         .call_writer(move |state| {
-            let mut store = state.config.lock().unwrap().clone();
+            let mut store = state.engine.store.lock().unwrap().clone();
             let mut entry = uncertain(op.0, ConfigPhase::Persist, candidate, store.config_revision);
             entry.admission = Some(journal::Admission {
                 from_revision: store.config_revision,
@@ -663,10 +663,8 @@ fn reader_and_receipts_remain_available_while_the_bounded_writer_is_busy() {
     let (started, entered) = std::sync::mpsc::channel();
     let (release, wait) = std::sync::mpsc::channel();
     state
-        .writer
-        .get()
-        .unwrap()
-        .try_send(Box::new(move |_| {
+        .engine
+        .enqueue_test(Box::new(move |_| {
             started.send(()).unwrap();
             wait.recv().unwrap();
         }))
@@ -675,14 +673,19 @@ fn reader_and_receipts_remain_available_while_the_bounded_writer_is_busy() {
         .recv_timeout(std::time::Duration::from_secs(1))
         .unwrap();
     for _ in 0..16 {
-        state
-            .writer
-            .get()
-            .unwrap()
-            .try_send(Box::new(|_| {}))
-            .unwrap();
+        state.engine.enqueue_test(Box::new(|_| {})).unwrap();
     }
     assert_eq!(state.call_writer(|_| ()), Err(SubmitError::Busy));
+    assert_eq!(
+        state.engine.submit(
+            OperationId(1),
+            CoreCommand::Edit {
+                base: BaseRef { revision: 0 },
+                edit: ConfigEdit::RepairActivation,
+            }
+        ),
+        Err(SubmitError::Busy)
+    );
     let start = std::time::Instant::now();
     assert_eq!(
         state.get_operation_record(OperationId(1)).unwrap().settled,
@@ -700,10 +703,8 @@ fn accepted_work_survives_loss_of_its_result_waiter() {
     let op = state.issue_operation_id().unwrap();
     let (result, waiter) = std::sync::mpsc::channel();
     state
-        .writer
-        .get()
-        .unwrap()
-        .try_send(Box::new(move |state| {
+        .engine
+        .enqueue_test(Box::new(move |state| {
             let receipt = state.execute_command(
                 op,
                 CoreCommand::Edit {
@@ -741,10 +742,8 @@ fn shutdown_closes_admission_drains_accepted_commands_and_joins_writer() {
     let (started, entered) = std::sync::mpsc::channel();
     let (release, wait) = std::sync::mpsc::channel();
     state
-        .writer
-        .get()
-        .unwrap()
-        .try_send(Box::new(move |_| {
+        .engine
+        .enqueue_test(Box::new(move |_| {
             started.send(()).unwrap();
             wait.recv().unwrap();
         }))
@@ -753,10 +752,8 @@ fn shutdown_closes_admission_drains_accepted_commands_and_joins_writer() {
         .recv_timeout(std::time::Duration::from_secs(1))
         .unwrap();
     state
-        .writer
-        .get()
-        .unwrap()
-        .try_send(Box::new(move |state| {
+        .engine
+        .enqueue_test(Box::new(move |state| {
             state
                 .execute_command(
                     op,
@@ -784,7 +781,7 @@ fn shutdown_closes_admission_drains_accepted_commands_and_joins_writer() {
         state.get_operation_record(op).unwrap().settled,
         Some(PhaseOutcome::Confirmed)
     );
-    assert!(state.writer_join.lock().unwrap().is_none());
+    assert!(state.engine.is_joined());
     state.shutdown();
 }
 
@@ -800,10 +797,8 @@ fn singleton_guard_outlives_the_callers_last_reference_while_writer_runs() {
     let (started, entered) = std::sync::mpsc::channel();
     let (release, wait) = std::sync::mpsc::channel();
     state
-        .writer
-        .get()
-        .unwrap()
-        .try_send(Box::new(move |_| {
+        .engine
+        .enqueue_test(Box::new(move |_| {
             started.send(()).unwrap();
             wait.recv().unwrap();
         }))
@@ -950,7 +945,7 @@ fn lease_expiry_restores_baseline_without_a_recorder_session() {
         .unwrap();
     state
         .call_writer(|state| {
-            let mut store = state.config.lock().unwrap().clone();
+            let mut store = state.engine.store.lock().unwrap().clone();
             store.journal.debug_leases[0].expires_at_ms = 0;
             state.persist_store(&store).unwrap();
             state.expire_debug_leases();
@@ -1312,7 +1307,7 @@ fn failed_lease_acquire_cannot_be_renewed_as_active_without_logging() {
         assert!(!state.current_debug().unwrap().0);
         assert!(!state.live_leases.lock().unwrap().get(&id).unwrap().active);
         assert_eq!(
-            state.config.lock().unwrap().journal.debug_restore,
+            state.engine.store.lock().unwrap().journal.debug_restore,
             Some((false, false))
         );
     }
@@ -1349,7 +1344,8 @@ fn restart_retires_both_lease_owners_and_restores_the_original_baseline() {
     assert!(!restarted.current_debug().unwrap().0);
     assert!(
         restarted
-            .config
+            .engine
+            .store
             .lock()
             .unwrap()
             .journal
