@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev-2.x]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
   # and the app-native crates, so every area packages, but no QEMU kernel runs
   # it). An `area:*`
   # label forces that area and `ci:full` forces everything, whatever the diff;
-  # a change under .github runs everything; pushes to main, tags and manual
+  # a change under .github runs everything; pushes to main/dev-2.x, tags and manual
   # dispatches always run everything. A skipped job counts as passing for
   # `ci-ok`, the one check branch protection requires.
   changes:
@@ -88,6 +88,8 @@ jobs:
               - 'scripts/build-version.py'
             ci:
               - '.github/**'
+              - 'scripts/ci_android_keystore.py'
+              - 'scripts/test_ci_android_keystore.py'
             # No negation here: in paths-filter a lone `!kmod/kpm/**` matches every
             # path outside kmod/kpm, which made a docs-only change run the kmod jobs.
             # kmod/shared, kmod/test and kmod/generated are `shared` above;
@@ -242,6 +244,8 @@ jobs:
         with:
           version: ${{ env.RUFF_VERSION }}
           args: check
+      - name: Signing setup failure tests (no credentials)
+        run: python3 -m unittest discover -s scripts -p test_ci_android_keystore.py -v
       - name: Verify generated files are up to date (iface lists + hook registry + help index)
         run: |
           python3 scripts/codegen-interfaces.py
@@ -842,9 +846,7 @@ jobs:
           path: core/target/vpnhide-core.zip
           if-no-files-found: error
 
-  # The Android app:
-  # The Android app: ktlint, detekt, CPD, Android lint, unit tests and the APK
-  # in one Gradle invocation, so the checks and the build share one daemon.
+  # Android checks run on PRs; trusted pushes/tags/manual runs also sign an APK.
   android:
     needs: [setup, changes]
     if: needs.changes.outputs.lsposed == 'true'
@@ -866,7 +868,7 @@ jobs:
           targets: target
 
       # Gradle cache (deps + configuration cache + wrapper). cache-read-only
-      # on PRs so only main pushes write the cache.
+      # on PRs so only trusted push/manual runs write the cache.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
@@ -877,57 +879,50 @@ jobs:
 
       - name: ktlint
         run: ktlint "lsposed/app/src/**/*.kt"
-      - name: Set up keystore
+      # PR code (including same-repo PRs) runs checks without signing secrets.
+      # Installable APKs are produced only by push/tag/manual runs.
+      - name: Set up required signing key
+        if: github.event_name != 'pull_request'
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          KEYSTORE_PATH="$GITHUB_WORKSPACE/lsposed/release.jks"
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
-          else
-            echo "ANDROID_KEYSTORE_BASE64 is empty (fork PR); generating an ephemeral keystore. Resulting APK is signed with a throwaway key and is NOT suitable for release."
-            KEYSTORE_PASSWORD=ephemeral
-            KEY_ALIAS=ephemeral
-            keytool -genkeypair -v \
-              -keystore "$KEYSTORE_PATH" \
-              -storepass "$KEYSTORE_PASSWORD" \
-              -keypass "$KEYSTORE_PASSWORD" \
-              -alias "$KEY_ALIAS" \
-              -keyalg RSA -keysize 4096 -validity 365 \
-              -dname "CN=vpnhide-fork-ci, O=vpnhide, C=US"
-          fi
-          # Build via printf — `%s` swallows the value verbatim with no
-          # shell expansion of $, backticks, backslashes, or `!`. Heredoc
-          # without single-quoted EOF would re-expand each line.
-          {
-            printf 'password=%s\n' "$KEYSTORE_PASSWORD"
-            printf 'keyAlias=%s\n' "$KEY_ALIAS"
-            printf 'storeFile=%s\n' "$KEYSTORE_PATH"
-          } > "$GITHUB_WORKSPACE/lsposed/keystore.properties"
+        run: python3 scripts/ci_android_keystore.py
 
-      # Release tags get the full assembleRelease (R8/ProGuard, signed APK
-      # ready for the GitHub release). PRs and main pushes get assembleDebug
-      # — same code paths exercised, no R8 step (~1.5–2 min faster).
-      # `case` instead of `[[`: container jobs default to /bin/sh (POSIX).
-      - name: detekt + CPD + Android lint + unit tests + APK
+      - name: detekt + CPD + Android lint + unit tests
+        run: |
+          cd "$GITHUB_WORKSPACE/lsposed"
+          ./gradlew -PvpnhideWarningsAsErrors=true \
+            :app:detekt cpdCheck :app:lintDebug :app:testDebugUnitTest
+
+      - name: Explain PR artifact policy
+        if: github.event_name == 'pull_request'
+        run: echo "PR checks run without signing secrets. No APK is built or uploaded; use a trusted branch push for a signed phone-test build."
+
+      # Tags build Release; branch pushes/manual runs build Debug. Both use the
+      # project signing key and R8/resource shrinking; Debug stays debuggable.
+      - name: Build signed APK
+        if: github.event_name != 'pull_request'
         run: |
           cd "$GITHUB_WORKSPACE/lsposed"
           case "$GITHUB_REF" in
             refs/tags/v*) variant=Release; out=release/app-release.apk ;;
             *)            variant=Debug;   out=debug/app-debug.apk ;;
           esac
-          ./gradlew -PvpnhideWarningsAsErrors=true \
-            :app:detekt cpdCheck :app:lintDebug :app:testDebugUnitTest "assemble$variant"
+          ./gradlew -PvpnhideWarningsAsErrors=true "assemble$variant"
           cp "app/build/outputs/apk/$out" "$GITHUB_WORKSPACE/vpnhide.apk"
 
-      - name: Upload artifact
+      - name: Upload signed APK
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vpnhide-apk
           path: vpnhide.apk
           if-no-files-found: error
+
+      - name: Remove runner signing files
+        if: always() && github.event_name != 'pull_request'
+        run: rm -f "$GITHUB_WORKSPACE/lsposed/release.jks" "$GITHUB_WORKSPACE/lsposed/keystore.properties"
 
 
   release:

@@ -45,7 +45,7 @@ Each module has its own README with architecture and design notes.
 
 ## Signing keystore (required for lsposed)
 
-`lsposed/app/build.gradle.kts` routes all APK build types (`debug`, `rawDebug`, and `release`) through a single signing config that reads `lsposed/keystore.properties`. Without that file, `./gradlew assembleDebug`, `:app:assembleRawDebug`, and `:app:assembleRelease` fail with:
+`lsposed/app/build.gradle.kts` routes all APK build types (`debug`, `dev`, `rawDebug`, and `release`) through a single signing config that reads `lsposed/keystore.properties`. Without that file, `./gradlew assembleDebug`, `:app:assembleRawDebug`, and `:app:assembleRelease` fail with:
 
 > SigningConfig 'release' is missing required property 'storeFile'
 
@@ -168,6 +168,31 @@ module to flash: integrate the driver into a kernel tree with
 
 CI runs the same checks. See [.github/workflows/ci.yml](../.github/workflows/ci.yml) for the authoritative list.
 
+### CI signing and phone-test artifacts
+
+Pushes to `main` and `dev-2.x`, plus manual dispatches, build a signed Debug APK.
+`v*` tags build a signed Release APK. Both variants use R8/resource shrinking;
+Debug remains debuggable. Signing requires the existing `ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS` secrets. Missing or empty
+secrets, invalid base64, an unreadable keystore or an unusable private-key alias
+fail the Android job; CI never creates a replacement signing key. Signing files
+are removed from the runner after the job's steps and are not uploaded.
+
+All pull requests, including same-repository PRs and fork PRs, run the applicable
+checks without signing secrets. Android lint and JVM unit tests do not require a
+keystore. PRs do not build or upload an APK; use a trusted branch push for a
+signed phone-test build. The workflow uses `pull_request`, not
+`pull_request_target`, and does not grant PR code extra privileges.
+
+For phone tests, download `vpnhide-apk` (`vpnhide.apk`) and `vpnhide-core`
+(`vpnhide-core.zip`) from the **same successful run and commit**. Every push to
+`dev-2.x` runs both jobs, including Gradle, identity and workflow-only changes.
+Artifacts are separate job outputs: the existence of one does not establish that
+its partner or the full pipeline passed. CI does not install anything on a phone.
+An update over an existing installation still requires the same signing key and
+an acceptable version code; a locally generated validation key cannot provide
+that compatibility.
+
 ### Which CI jobs a pull request runs
 
 The `changes` job at the top of `ci.yml` decides from the diff (`dorny/paths-filter`)
@@ -183,14 +208,15 @@ which areas a pull request exercises, and every area job is gated on it:
 | `core/**` | `core` |
 | `shared`: `kmod/shared/**`, `kmod/test/**`, `kmod/generated/**`, `scripts/codegen*.py` | every area, QEMU matrix included |
 | `shared_rust`: `crates/**`, `Cargo.*`, `fixtures/core-probes/**`, `scripts/build_lib.py`, `scripts/build-version.py` | every area's packaging job plus `rust`; the QEMU probes and matrix only if a kernel area changed on its own |
-| `.github/**` | every area |
+| `.github/**`, `scripts/ci_android_keystore.py`, `scripts/test_ci_android_keystore.py` | every area |
 
 `lint-python` (ruff, generated files), `lint-shell-c` (shellcheck, clang-format,
 the host-side C tests) and `setup` always run. `rust` (rustfmt, clippy, cargo
 tests for the workspace and app-native crates) runs for the shared inputs, `zygisk`
-and `lsposed`; `android` (ktlint, detekt, CPD, Android lint, unit tests and the APK
-in one Gradle run) for `lsposed`; `qemu-native-probes` when any kernel-side area
-does. Pushes to `main`, tags and manual dispatches run everything. The `ci-ok` job
+and `lsposed`; `android` (ktlint, detekt, CPD, Android lint and unit tests) for
+`lsposed`; `qemu-native-probes` when any kernel-side area does. Pushes to `main`
+and `dev-2.x`, `v*` tags and manual dispatches run everything, including both
+APK and core packaging. The `ci-ok` job
 is green when every job succeeded or was skipped by `changes` and red on any
 failure, so it is the one status branch protection requires.
 
