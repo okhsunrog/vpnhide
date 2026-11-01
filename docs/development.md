@@ -272,3 +272,27 @@ add fixture settings. `service`/`service-worker` always select production paths 
 are not fixture entry points. Host process tests retain crash/delay hooks; Android
 binaries compile those hooks out. These choices do not isolate arbitrary host OS access.
 See [IPC authorization](notes/core-2.0-ipc-auth.md) for validation and preparation rules.
+
+## Android application identity
+
+All build types, including `dev`, use main's application ID
+`dev.okhsunrog.vpnhide` and label **VPN Hide** in every supported locale. The
+Kotlin namespace and LSPosed entry class remain unchanged. `dev` remains an
+unminified prerelease build, but is not an isolated app or sandbox; it uses the
+same signing configuration as debug/release and the normal core endpoint.
+
+An upgrade over a release APK requires the same signing certificate and a
+compatible versionCode. A temporary validation keystore only verifies the build;
+it does not produce an APK that can update an official installation. Keep APK
+and core from the same 2.x build for their RPC contract. Core already binds
+`/data/user_de/0/dev.okhsunrog.vpnhide/vpnhide-core.sock`; this identity alignment
+does not change its embedded path or protocol.
+
+Previously installed `dev.okhsunrog.vpnhide.dev` / **VPN Hide Dev** is a distinct
+Android package and may remain installed separately. Its private preferences,
+drafts and files are not automatically transferred. The root canonical file
+`/data/system/vpnhide_config.json` is shared state, not that APK's sandbox; existing
+settings and isolated 0.x/1.x import behavior are retained. No old package,
+sandbox or canonical entries are deleted by this change. The old `.dev` package
+still cannot use the production AppOwner socket. Do not enable both copies as
+LSPosed modules when validating the new APK.

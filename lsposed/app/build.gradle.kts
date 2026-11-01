@@ -289,11 +289,6 @@ android {
         versionCode = 10301
         versionName = buildVersion
 
-        // Off by default; the `dev` build type flips it on. When true, the app cuts every
-        // root/backend connection (see suExec / RootProcessRunner), so a Dev build coexists
-        // with a real vpnhide install without touching its files, backends, or config.
-        buildConfigField("boolean", "DEV_ISOLATED", "false")
-
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
@@ -355,19 +350,12 @@ android {
             isShrinkResources = false
             matchingFallbacks += listOf("debug")
         }
-        // Isolated sandbox build for core-2.0 work: a distinct package that coexists with a
-        // real vpnhide install and cuts all connection to its components/files (DEV_ISOLATED).
-        // Version is set to 2.0.0-alpha0 via androidComponents below.
+        // Unminified 2.x development build with the same Android identity and
+        // signing configuration as main/debug. It uses the normal core endpoint.
         create("dev") {
             initWith(getByName("debug"))
-            // The auto-generated debug keystore, not the release keystore: a Dev sandbox must
-            // build in a fresh worktree that has no keystore.properties.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             isDebuggable = true
-            applicationIdSuffix = ".dev"
-            buildConfigField("boolean", "DEV_ISOLATED", "true")
-            // No R8 for the sandbox: faster iteration. debug is minified, so override it
-            // here like rawDebug does.
             isMinifyEnabled = false
             isShrinkResources = false
             matchingFallbacks += listOf("debug")
@@ -420,7 +408,7 @@ android {
     }
 }
 
-// The Dev sandbox build carries an explicit pre-release version, independent of the
+// The dev build carries an explicit pre-release version, independent of the
 // git-derived versionName the shipping builds use.
 androidComponents {
     onVariants(selector().withBuildType("dev")) { variant ->

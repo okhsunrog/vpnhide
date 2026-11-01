@@ -5,9 +5,9 @@ in the system-wide `system_server`; a copy in each profile is not needed. The ap
 blocks its UI in secondary profiles. Remove redundant copies if prompted.
 
 This is also a hard limit of the core connection, not only a recommendation.
-VPN Hide Core opens its connection only inside the data folder of the release app
+VPN Hide Core opens its connection only inside the data folder of the app
 in the main Android user (user 0). A copy in a secondary user, work profile or clone
-space, and a `.dev` test build (`dev.okhsunrog.vpnhide.dev`), cannot reach core
+space cannot reach core
 and stay on the startup screen however often you tap Check again.
 
 ## One package, one selection
