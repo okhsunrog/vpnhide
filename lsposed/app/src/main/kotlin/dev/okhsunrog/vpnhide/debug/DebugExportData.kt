@@ -17,6 +17,7 @@ internal sealed interface DebugExportOutcome {
     data class Written(
         val file: File,
         val errors: List<String>,
+        val attachments: ArchiveSummaryData? = null,
     ) : DebugExportOutcome
 
     data class Failed(

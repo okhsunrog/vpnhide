@@ -128,7 +128,6 @@ internal object AgentControl {
                 exportDebug(
                     context = context,
                     selfNeedsRestart = false,
-                    options = StateContentOptions(forensics = true),
                     attachKernelImage = true,
                 )
             when (outcome) {

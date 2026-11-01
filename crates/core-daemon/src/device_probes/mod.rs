@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 pub mod debug_snapshot;
 pub mod inventory;
+pub mod java;
 pub mod kernel;
 pub mod lsposed;
 pub mod root_snapshot;

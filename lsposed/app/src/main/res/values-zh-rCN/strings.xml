@@ -89,7 +89,7 @@
     <string name="btn_export_debug">收集调试日志</string>
     <string name="debug_export_card_title">调试导出</string>
     <string name="debug_export_card_description">将诊断收集为单个文件发给开发者。可选择包含哪些内容（日志、应用列表、内核镜像）。</string>
-    <string name="debug_export_modal_title">包含哪些内容</string>
+    <string name="debug_export_modal_title">收集诊断</string>
     <string name="debug_export_modal_confirm">导出</string>
     <string name="debug_export_collect_again">重新收集</string>
     <string name="capture_incomplete_vpn_off">VPN 未开启。日志将缺少关键信息，几乎无法用于诊断。请开启 VPN 后重新检测。</string>
@@ -98,10 +98,6 @@
     <string name="capture_checking_vpn">正在检测 VPN 隧道</string>
     <string name="capture_collect_anyway">仍然收集不完整日志</string>
     <string name="logcat_start_anyway">仍然录制不完整日志</string>
-    <string name="debug_export_opt_forensics">详细日志</string>
-    <string name="debug_export_opt_forensics_desc">dmesg、logcat 及内核/网络原始探测。文件更大；通常正是错误报告所需。</string>
-    <string name="debug_export_opt_applist">已安装应用列表</string>
-    <string name="debug_export_opt_applist_desc">会暴露你安装了哪些应用。默认关闭；仅在开发者要求时开启。</string>
     <string name="debug_export_opt_kernel">内核镜像</string>
     <string name="debug_export_opt_kernel_desc">附带当前的 boot/内核分区。较大，约需一分钟；输出为 .zip。用于启动/内核问题。</string>
     <string name="btn_export_debug_running">正在收集调试信息…</string>
@@ -648,4 +644,22 @@
     <string name="agent_ui_preview_exit">退出预览</string>
     <string name="agent_ui_preview_action">已拦截操作：%1$s</string>
     <string name="reset_capture_active">请先结束当前诊断采集，再重置。</string>
+
+    <string name="debug_export_kernel_reason">内核镜像：%1$s</string>
+    <string name="debug_export_java_reason">框架文件：%1$s</string>
+    <string name="debug_export_advanced">其他设置 ▾</string>
+    <string name="debug_export_advanced_hide">隐藏其他设置 ▴</string>
+    <string name="debug_export_manual">本次导出使用手动选择；以上建议保持不变。</string>
+    <string name="debug_export_reset">使用建议</string>
+    <string name="debug_export_java">Java 框架文件</string>
+    <string name="debug_export_java_desc">仅收集相关系统 JAR/APK，最多 96 MiB。跳过项和限制会记录在归档中。</string>
+    <string name="export_reason_core">不建议包含：core 不可用，请先收集基础报告。</string>
+    <string name="export_reason_incomplete">暂不建议包含：缺少当前完整检查，将包含基础信息。</string>
+    <string name="export_reason_none">不建议包含：未发现相关故障。</string>
+    <string name="export_reason_kernel_hooks">建议包含：检查发现内核后端负责的检测项存在泄漏。</string>
+    <string name="export_reason_kernel_compat">建议包含：需要调查内核兼容性或钩子支持。</string>
+    <string name="export_reason_java_hooks">建议包含：当前 Java 检查发现泄漏。</string>
+    <string name="export_reason_java_attach">建议包含：本次启动报告了方法缺失或钩子安装错误。</string>
+    <string name="export_reason_configuration">不建议包含：应先检查后端配置或授权；日志已包含。</string>
+    <string name="debug_export_actual">已收集：%1$d 个内核镜像、%2$d 个框架文件。跳过 %3$d 个 Java 文件。归档中的收集报告说明了缺失项。</string>
 </resources>

@@ -121,6 +121,10 @@ class HookEntry : IXposedHookLoadPackage {
         if (!inSystemServer) return
 
         if (hookInstalled.compareAndSet(false, true)) {
+            JavaHookDiagnostics.record(
+                "initialization",
+                "process=${lpparam.processName} pid=${android.os.Process.myPid()} uid=${android.os.Process.myUid()}",
+            )
             HookLog.install()
             HookLog.i("VpnHide: system_server detected, installing Binder hooks")
             val hookInstall = installSystemServerHooks()
@@ -147,9 +151,11 @@ class HookEntry : IXposedHookLoadPackage {
     ): Boolean =
         try {
             block()
+            JavaHookDiagnostics.record("registration $name", "completed; see installed mask and method counts")
             true
         } catch (t: Throwable) {
             HookLog.e("VpnHide: $name hook failed: ${t::class.java.simpleName}: ${t.message}")
+            JavaHookDiagnostics.record("registration $name", formatInstallFailure(name, t))
             failures?.add(formatInstallFailure(name, t))
             false
         }
@@ -588,6 +594,9 @@ class HookEntry : IXposedHookLoadPackage {
     )
 
     private fun installSystemServerHooks(): HookInstallResult {
+        listOf(NetworkCapabilities::class.java, Network::class.java, NetworkInfo::class.java, LinkProperties::class.java).forEach {
+            JavaHookDiagnostics.inspect(it, setOf("writeToParcel"))
+        }
         val brokenFields = runHookReflectionSmokeCheck()
         if (brokenFields.isNotEmpty()) {
             HookLog.e("VpnHide: reflection smoke-check found broken keys: $brokenFields")
@@ -979,6 +988,19 @@ class HookEntry : IXposedHookLoadPackage {
         // all counts=1, but no connectivity counter ever moves). binder.javaClass
         // IS the live class, so hooking it always intercepts the real calls.
         val csClass = binder.javaClass
+        JavaHookDiagnostics.inspect(
+            csClass,
+            setOf(
+                "getActiveNetwork",
+                "getAllNetworks",
+                "getNetworkForType",
+                "getNetworkInfo",
+                "getNetworkCapabilities",
+                "getLinkProperties",
+                "callCallbackForRequest",
+                "sendPendingIntentForRequest",
+            ),
+        )
         val loader = csClass.classLoader
         // Permanent guard: does name-resolution return this same live class?
         // nameResolvesSame=false is the delegation trap above — a one-line tell in

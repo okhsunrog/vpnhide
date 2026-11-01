@@ -36,8 +36,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
 private const val TAG = LogTags.TEST
@@ -56,9 +54,9 @@ private val nextDebugCaptureId = AtomicLong(1L)
 
 /**
  * The single debug-export entry point behind the Diagnostics "Collect" modal. The
- * [options] (forensics / app-list) drive the JSON content — the SAME type the agent
- * bridge getState takes — and [attachKernelImage] decides the container: a plain
- * `.json`, or a `.zip` bundling the boot/kernel images next to that same state.json.
+ * extended diagnostics and app inventory are always included. The ZIP carries
+ * lightweight Java evidence; [attachKernelImage] and [attachJavaFiles] control
+ * the two optional binary attachments.
  *
  * The outcome is explicit: a bundle whose self-test could not measure is still
  * [DebugExportOutcome.Written], carrying the reason. [DebugExportOutcome.Failed]
@@ -67,30 +65,47 @@ private val nextDebugCaptureId = AtomicLong(1L)
 internal suspend fun exportDebug(
     context: Context,
     selfNeedsRestart: Boolean,
-    options: StateContentOptions,
     attachKernelImage: Boolean,
+    attachJavaFiles: Boolean = false,
+    exportPlan: String = "Explicit caller selection; extended diagnostics and installed apps included.",
 ): DebugExportOutcome =
     CanonicalConfigRepository.processScope
         .async(Dispatchers.IO) {
             try {
-                val state = buildDebugState(context, selfNeedsRestart, options)
-                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val state = buildDebugState(context, selfNeedsRestart, StateContentOptions(forensics = true, appList = true))
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+                val attachmentErrors = mutableListOf<String>()
                 val file =
-                    if (attachKernelImage) {
-                        // Packaging tens of MB of partition images can fail on its own (a
-                        // full /data); it reports that as a missing file, not an exception.
-                        writeKernelBundleZip(context, timestamp, state.toJson())
-                            ?: return@async DebugExportOutcome.Failed("kernel image packaging produced no archive")
-                    } else {
-                        // Bundle the single state.json in a .zip too: forums/messengers (4pda,
-                        // the main report channel) whitelist .zip but reject a bare .json, and
-                        // the JSON compresses ~10x. Every export kind is now a .zip carrying
-                        // state.json, so the caller has one format to handle.
-                        File(context.cacheDir, "vpnhide_debug_$timestamp.zip").also {
-                            writeDiagnosticZip(it, mapOf("state.json" to state.toJson()))
+                    collectJavaArtifacts(context, attachJavaFiles).use { collected ->
+                        if (collected.entries.isEmpty()) attachmentErrors += collected.status
+                        val java = collected.copy(status = "$exportPlan\n${collected.status}")
+                        if (attachKernelImage) {
+                            // Packaging tens of MB of partition images can fail on its own (a
+                            // full /data); it reports that as a missing file, not an exception.
+                            writeKernelBundleZip(context, timestamp, state.toJson(), java)
+                                ?: File(context.cacheDir, "vpnhide_debug_$timestamp.zip").also {
+                                    attachmentErrors += "Kernel packaging failed; baseline preserved."
+                                    writeDebugArchive(
+                                        it,
+                                        mapOf(
+                                            "state.json" to state.toJson(),
+                                            "kernel/collection.txt" to "Kernel packaging failed; baseline preserved.",
+                                        ),
+                                        emptyList(),
+                                        java,
+                                    )
+                                }
+                        } else {
+                            // Bundle the single state.json in a .zip too: forums/messengers (4pda,
+                            // the main report channel) whitelist .zip but reject a bare .json, and
+                            // the JSON compresses ~10x. Every export kind is now a .zip carrying
+                            // state.json, so the caller has one format to handle.
+                            File(context.cacheDir, "vpnhide_debug_$timestamp.zip").also {
+                                writeDebugArchive(it, mapOf("state.json" to state.toJson()), emptyList(), java)
+                            }
                         }
                     }
-                DebugExportOutcome.Written(file, state.errors)
+                DebugExportOutcome.Written(file, state.errors + attachmentErrors, archiveSummary(file))
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Exception) {
@@ -105,8 +120,8 @@ private suspend fun buildDebugState(
     selfNeedsRestart: Boolean,
     options: StateContentOptions,
 ): VpnHideState {
-    // Forensics forces debug logging + a fresh dmesg window while the capture runs;
-    // a lean (no-forensics) export skips all of that and just serializes the state.
+    // Keep the existing scoped capture lease and restoration. Export verbosity
+    // does not change the persistent user logging preference.
     val beforeCapture = beforeDebugCapture()
     val loggingSession = if (options.forensics) beginDebugCaptureLogging() else null
     var restoreAttempted = false
@@ -260,32 +275,6 @@ internal fun captureSelfNetworkView(
 
 /** ISO-8601 timestamp for [VpnHideState.generatedAt] (the serializer has no clock). */
 internal fun isoNow(): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US).format(Date())
-
-/**
- * Pack a ZIP: named text entries + raw file entries. The one packaging primitive for
- * every debug export — the plain debug export (just `state.json`), the kernel-image
- * export (+ binary partition images), and the full-logcat recorder (+ a multi-MB raw
- * log). Every bundle is a `.zip` carrying the canonical `state.json`; the heavy
- * variants add their payload alongside it.
- */
-internal fun writeDiagnosticZip(
-    zipFile: File,
-    textEntries: Map<String, String>,
-    fileEntries: List<DiagnosticFileEntry> = emptyList(),
-) {
-    ZipOutputStream(zipFile.outputStream()).use { zos ->
-        for ((name, content) in textEntries) {
-            zos.putNextEntry(ZipEntry(name))
-            zos.write(content.toByteArray())
-            zos.closeEntry()
-        }
-        for ((name, file) in fileEntries) {
-            zos.putNextEntry(ZipEntry(name))
-            file.inputStream().use { it.copyTo(zos) }
-            zos.closeEntry()
-        }
-    }
-}
 
 /** The app's and its native components' log tags (core's fixed `LogcatAppTags` set). */
 private fun captureDebugLogcat(): String {

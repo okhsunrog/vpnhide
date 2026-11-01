@@ -50,6 +50,21 @@ fn directory(path: &Path) -> io::Result<File> {
     Ok(dir)
 }
 
+/// Open a regular source through pinned, no-follow directory descriptors.
+pub(crate) fn open_regular(path: &Path) -> io::Result<File> {
+    let parent = directory(path.parent().ok_or_else(|| io::Error::other("no parent"))?)?;
+    let file = open_at(
+        &parent,
+        path.file_name()
+            .ok_or_else(|| io::Error::other("no name"))?,
+        libc::O_RDONLY | libc::O_NONBLOCK,
+    )?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("source is not regular"));
+    }
+    Ok(file)
+}
+
 fn hand_to_app(file: &File, owner: &File, mode: u32) -> io::Result<()> {
     let meta = owner.metadata()?;
     if unsafe { libc::geteuid() } == 0

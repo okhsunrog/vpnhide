@@ -47,7 +47,6 @@ import dev.okhsunrog.vpnhide.VpnOffPrompt
 import dev.okhsunrog.vpnhide.core.LogcatAutoStop
 import dev.okhsunrog.vpnhide.debug.DebugExportOutcome
 import dev.okhsunrog.vpnhide.debug.LogcatRecorder
-import dev.okhsunrog.vpnhide.debug.StateContentOptions
 import dev.okhsunrog.vpnhide.debug.exportDebug
 import dev.okhsunrog.vpnhide.generated.IfaceLists
 import dev.okhsunrog.vpnhide.hook.HookLog
@@ -379,10 +378,11 @@ private fun DebugExportSheet(
     var outcome by remember { mutableStateOf<DebugExportOutcome?>(null) }
     val resultFile = (outcome as? DebugExportOutcome.Written)?.file
 
-    // One export recipe, shared with the agent bridge's getState.
-    var optForensics by remember { mutableStateOf(true) }
-    var optAppList by remember { mutableStateOf(false) }
-    var optKernelImage by remember { mutableStateOf(false) }
+    val snapshot by DiagnosticsCache.snapshot.collectAsStateWithLifecycle()
+    val recommendation = exportRecommendation(snapshot)
+    var overrides by remember { mutableStateOf(ExportOverrides()) }
+    var advanced by remember { mutableStateOf(false) }
+    val (optKernelImage, optJavaFiles) = overrides.resolve(recommendation)
 
     // Every export kind is now a .zip (carrying state.json), so one MIME type fits all.
     val saveLauncher = rememberZipSaveLauncher("debug-export")
@@ -401,6 +401,7 @@ private fun DebugExportSheet(
             modifier =
                 Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp)
                     .padding(bottom = 24.dp),
         ) {
@@ -410,48 +411,64 @@ private fun DebugExportSheet(
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(12.dp))
-            ExportToggle(
-                title = stringResource(R.string.debug_export_opt_forensics),
-                description = stringResource(R.string.debug_export_opt_forensics_desc),
-                checked = optForensics,
-                enabled = !exporting,
-                onCheckedChange = {
-                    optForensics = it
-                    clearResult()
-                },
+            Text(
+                stringResource(R.string.debug_export_kernel_reason, stringResource(exportReasonResource(recommendation.kernelReason))),
+                style = MaterialTheme.typography.bodySmall,
             )
-            ExportToggle(
-                title = stringResource(R.string.debug_export_opt_applist),
-                description = stringResource(R.string.debug_export_opt_applist_desc),
-                checked = optAppList && optForensics,
-                enabled = optForensics && !exporting,
-                onCheckedChange = {
-                    optAppList = it
-                    clearResult()
-                },
+            Text(
+                stringResource(R.string.debug_export_java_reason, stringResource(exportReasonResource(recommendation.javaReason))),
+                style = MaterialTheme.typography.bodySmall,
             )
-            ExportToggle(
-                title = stringResource(R.string.debug_export_opt_kernel),
-                description = stringResource(R.string.debug_export_opt_kernel_desc),
-                checked = optKernelImage,
-                enabled = !exporting,
-                onCheckedChange = {
-                    optKernelImage = it
+            TextButton(onClick = { advanced = !advanced }, enabled = !exporting) {
+                Text(stringResource(if (advanced) R.string.debug_export_advanced_hide else R.string.debug_export_advanced))
+            }
+            if (advanced) {
+                if (overrides !=
+                    ExportOverrides()
+                ) {
+                    Text(stringResource(R.string.debug_export_manual), style = MaterialTheme.typography.bodySmall)
+                }
+                ExportToggle(
+                    title = stringResource(R.string.debug_export_opt_kernel),
+                    description = stringResource(R.string.debug_export_opt_kernel_desc),
+                    checked = optKernelImage,
+                    enabled = !exporting,
+                    onCheckedChange = {
+                        overrides = overrides.copy(kernel = it)
+                        clearResult()
+                    },
+                )
+                ExportToggle(
+                    title = stringResource(R.string.debug_export_java),
+                    description = stringResource(R.string.debug_export_java_desc),
+                    checked = optJavaFiles,
+                    enabled = !exporting,
+                    onCheckedChange = {
+                        overrides = overrides.copy(java = it)
+                        clearResult()
+                    },
+                )
+                TextButton(onClick = {
+                    overrides = ExportOverrides()
                     clearResult()
-                },
-            )
+                }, enabled = !exporting) {
+                    Text(stringResource(R.string.debug_export_reset))
+                }
+            }
             Spacer(Modifier.height(16.dp))
 
             val doExport = {
                 selfNeedsRestart?.let { restartState ->
-                    val options =
-                        StateContentOptions(forensics = optForensics, appList = optAppList && optForensics)
                     val kernel = optKernelImage
+                    val java = optJavaFiles
+                    val plan =
+                        "snapshot=${snapshot.revision}; recommended=$recommendation; " +
+                            "overrides=$overrides; selected kernel=$kernel java=$java"
                     exporting = true
                     scope.launch {
                         outcome = null
                         try {
-                            outcome = exportDebug(context, restartState, options, kernel)
+                            outcome = exportDebug(context, restartState, kernel, java, plan)
                         } finally {
                             exporting = false
                         }
@@ -462,6 +479,12 @@ private fun DebugExportSheet(
 
             val file = resultFile
             if (!exporting) outcome?.let { ExportOutcomeBanner(it) }
+            (outcome as? DebugExportOutcome.Written)?.attachments?.let {
+                Text(
+                    stringResource(R.string.debug_export_actual, it.kernelImages, it.frameworkFiles, it.javaSkipped),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
 
             // Configure phase only: warn that a VPN-off / not-in-tunnel capture
             // will be incomplete. The encouraged action (Re-check) rides on the

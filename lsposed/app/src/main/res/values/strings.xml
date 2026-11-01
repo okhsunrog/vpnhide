@@ -96,7 +96,7 @@
     <string name="btn_export_debug">Collect debug log</string>
     <string name="debug_export_card_title">Debug export</string>
     <string name="debug_export_card_description">Collect diagnostics into one file to send the developer. Choose what to include (logs, app list, kernel image).</string>
-    <string name="debug_export_modal_title">What to include</string>
+    <string name="debug_export_modal_title">Collect diagnostics</string>
     <string name="debug_export_modal_confirm">Export</string>
     <string name="debug_export_collect_again">Collect again</string>
     <string name="capture_incomplete_vpn_off">VPN is off. This log will contain incomplete information and is little help for diagnosis. Turn the VPN on and re-check.</string>
@@ -105,10 +105,6 @@
     <string name="capture_checking_vpn">Checking VPN tunnel</string>
     <string name="capture_collect_anyway">Collect an incomplete log anyway</string>
     <string name="logcat_start_anyway">Record an incomplete log anyway</string>
-    <string name="debug_export_opt_forensics">Verbose logs</string>
-    <string name="debug_export_opt_forensics_desc">dmesg, logcat and raw kernel/network probes. Bigger file; usually what a bug report needs.</string>
-    <string name="debug_export_opt_applist">Installed-app list</string>
-    <string name="debug_export_opt_applist_desc">Reveals which apps you have installed. Off by default; enable only when the developer asks.</string>
     <string name="debug_export_opt_kernel">Kernel image</string>
     <string name="debug_export_opt_kernel_desc">Attaches the active boot/kernel partitions. Large, takes ~a minute; produces a .zip. For boot/kernel bugs.</string>
     <string name="btn_export_debug_running">Collecting debug info&#8230;</string>
@@ -691,4 +687,22 @@
     <string name="agent_ui_preview_exit">Exit preview</string>
     <string name="agent_ui_preview_action">Intercepted action: %1$s</string>
     <string name="reset_capture_active">Finish the active diagnostic capture before resetting.</string>
+
+    <string name="debug_export_kernel_reason">Kernel images: %1$s</string>
+    <string name="debug_export_java_reason">Framework files: %1$s</string>
+    <string name="debug_export_advanced">Additional settings ▾</string>
+    <string name="debug_export_advanced_hide">Hide additional settings ▴</string>
+    <string name="debug_export_manual">Manual selection for this export; recommendations above are unchanged.</string>
+    <string name="debug_export_reset">Use recommendations</string>
+    <string name="debug_export_java">Java framework files</string>
+    <string name="debug_export_java_desc">Relevant system JAR/APK files only, up to 96 MiB. Skips and limits are recorded in the archive.</string>
+    <string name="export_reason_core">not recommended — core is unavailable; collect the baseline report first.</string>
+    <string name="export_reason_incomplete">not recommended yet — no current complete checks; baseline evidence is included.</string>
+    <string name="export_reason_none">not recommended — no matching failure was found.</string>
+    <string name="export_reason_kernel_hooks">recommended — checks found a leak in a vector owned by the kernel backend.</string>
+    <string name="export_reason_kernel_compat">recommended — kernel compatibility or missing hook support needs investigation.</string>
+    <string name="export_reason_java_hooks">recommended — current Java checks found a leak.</string>
+    <string name="export_reason_java_attach">recommended — this boot reports missing methods or hook installation errors.</string>
+    <string name="export_reason_configuration">not recommended — resolve backend configuration or authentication first; logs are included.</string>
+    <string name="debug_export_actual">Collected: %1$d kernel images, %2$d framework files. Java files skipped: %3$d. Collection reports in the archive explain missing items.</string>
 </resources>

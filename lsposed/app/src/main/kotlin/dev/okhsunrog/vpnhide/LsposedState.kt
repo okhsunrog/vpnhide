@@ -128,6 +128,13 @@ internal object LsposedStats {
         writeHandler.post(flushRunnable)
     }
 
+    @Volatile private var javaMeta: Map<String, String> = emptyMap()
+
+    fun setJavaDiagnostics(meta: Map<String, String>) {
+        javaMeta = meta
+        scheduleWrite()
+    }
+
     fun setStatus(
         installedHookMask: Long,
         broken: List<String>,
@@ -222,6 +229,7 @@ internal object LsposedStats {
         // path, per-method hooked counts, attempt log). The rendered hookReport
         // emits every meta key, so these appear automatically in a debug bundle.
         meta.putAll(connectivityMeta)
+        meta.putAll(javaMeta)
         return meta
     }
 

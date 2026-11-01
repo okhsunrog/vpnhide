@@ -58,7 +58,7 @@ pub mod recovery;
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -1075,6 +1075,12 @@ mod tests {
                 DiagnosticProbe::LogcatLsposedBoot,
                 DiagnosticProbe::KernelPartitions,
                 DiagnosticProbe::KernelImages,
+                DiagnosticProbe::JavaHookArtifacts {
+                    include_files: false,
+                },
+                DiagnosticProbe::JavaHookArtifacts {
+                    include_files: true,
+                },
                 DiagnosticProbe::LsposedModulesDb,
                 DiagnosticProbe::GroundTruthChecks,
                 DiagnosticProbe::AppVpnState { uid: 10123 },

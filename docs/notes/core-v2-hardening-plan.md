@@ -545,3 +545,26 @@ GitHub CI не запускался: workflow не подписан на push в
 manual dispatch не повторялся. Device tests, реальные Android RSS/latency, DAC/SELinux
 и root-manager recovery остаются acceptance gates. Локальные тесты не означают,
 что beta уже прошла эти проверки.
+
+
+### Integrated Java support diagnostics (current iteration)
+
+The existing export now separates attachment recommendations from bounded
+collection. Extended diagnostics and installed apps are unconditional; only kernel
+images/framework binaries have advanced per-export overrides. See
+[automatic attachment planning](../debug-bundle.md#automatic-attachment-planning-rpc-13)
+for the exact policy and budgets. Lightweight Java evidence extends the existing
+LSPosed telemetry; the fixed Java artifact probe advances APK/core RPC to 13.
+This does not implement unrelated D1 or new hiding features. Host checks are not
+on-device acceptance: framework provenance, SELinux access and the small-phone
+expanded sheet still require device verification.
+
+Validation for this iteration: 397 supported Rust tests passed, fmt and relevant
+Clippy targets passed; the full workspace ran 445 passing tests and the two known
+Zygisk self-memory-copy tests failed because this cloud environment returns
+ENOSYS for process_vm_readv(self). They were not weakened or skipped in that run.
+All 884 JVM tests, ktlint, detekt, CPD, lintDebug and the R8 Debug APK build passed.
+Core arm64/armv7 packaging and both module-boundary scripts passed. The local APK
+uses the temporary validation key, not the project's installation key. GitHub
+Actions status remains unverified because previously denied access was not retried.
+No device acceptance or deployment was performed.

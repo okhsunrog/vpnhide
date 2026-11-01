@@ -430,7 +430,7 @@
     <string name="btn_export_debug">Собрать отладочный лог</string>
     <string name="debug_export_card_title">Экспорт диагностики</string>
     <string name="debug_export_card_description">Собрать диагностику в один файл для разработчика. Выбери, что включить (логи, список приложений, образ ядра).</string>
-    <string name="debug_export_modal_title">Что включить</string>
+    <string name="debug_export_modal_title">Собрать диагностику</string>
     <string name="debug_export_modal_confirm">Экспорт</string>
     <string name="debug_export_collect_again">Собрать заново</string>
     <string name="capture_incomplete_vpn_off">VPN выключен. В логе не будет главного, и диагностировать по нему почти нечего. Включите VPN и проверьте ещё раз.</string>
@@ -439,10 +439,6 @@
     <string name="capture_checking_vpn">Проверяю VPN туннель</string>
     <string name="capture_collect_anyway">Всё равно собрать неполный лог</string>
     <string name="logcat_start_anyway">Всё равно записать неполный лог</string>
-    <string name="debug_export_opt_forensics">Расширенный лог</string>
-    <string name="debug_export_opt_forensics_desc">dmesg, logcat и сырые пробы ядра/сети. Файл больше; обычно именно это и нужно для баг-репорта.</string>
-    <string name="debug_export_opt_applist">Список приложений</string>
-    <string name="debug_export_opt_applist_desc">Раскрывает, какие приложения у тебя установлены. По умолчанию выкл; включай только по просьбе разработчика.</string>
     <string name="debug_export_opt_kernel">Образ ядра</string>
     <string name="debug_export_opt_kernel_desc">Прикладывает активные разделы boot/ядра. Большой, занимает ~минуту; на выходе .zip. Для багов загрузки/ядра.</string>
     <string name="btn_export_debug_running">Собираю отладочную информацию&#8230;</string>
@@ -660,4 +656,22 @@
     <string name="agent_ui_preview_exit">Завершить</string>
     <string name="agent_ui_preview_action">Перехваченное действие: %1$s</string>
     <string name="reset_capture_active">Завершите активный сбор диагностики перед сбросом.</string>
+
+    <string name="debug_export_kernel_reason">Образы ядра: %1$s</string>
+    <string name="debug_export_java_reason">Файлы фреймворка: %1$s</string>
+    <string name="debug_export_advanced">Дополнительные настройки ▾</string>
+    <string name="debug_export_advanced_hide">Скрыть дополнительные настройки ▴</string>
+    <string name="debug_export_manual">Ручной выбор для этого экспорта; рекомендации выше остаются прежними.</string>
+    <string name="debug_export_reset">Вернуть рекомендации</string>
+    <string name="debug_export_java">Файлы Java-фреймворка</string>
+    <string name="debug_export_java_desc">Только связанные системные JAR/APK, до 96 МиБ. Пропуски и ограничения отражаются в архиве.</string>
+    <string name="export_reason_core">не рекомендуются — core недоступен; сначала нужен основной отчёт.</string>
+    <string name="export_reason_incomplete">пока не рекомендуются — нет актуальных полных проверок; основной отчёт будет включён.</string>
+    <string name="export_reason_none">не рекомендуются — соответствующий сбой не обнаружен.</string>
+    <string name="export_reason_kernel_hooks">рекомендуются — проверка обнаружила утечку в зоне ответственности бэкенда ядра.</string>
+    <string name="export_reason_kernel_compat">рекомендуются — нужно проверить совместимость ядра или поддержку хуков.</string>
+    <string name="export_reason_java_hooks">рекомендуются — актуальные Java-проверки обнаружили утечку.</string>
+    <string name="export_reason_java_attach">рекомендуются — в этой загрузке обнаружены отсутствующие методы или ошибки установки хуков.</string>
+    <string name="export_reason_configuration">не рекомендуются — сначала нужно разобраться с настройкой бэкендов или авторизацией; логи включены.</string>
+    <string name="debug_export_actual">Собрано: образы ядра — %1$d, файлы фреймворка — %2$d. Пропущено Java-файлов: %3$d. Причины отсутствующих данных указаны в отчётах внутри архива.</string>
 </resources>

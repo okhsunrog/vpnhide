@@ -66,7 +66,7 @@ Other read/write errors propagate. Peer authorization remains required in every 
 | RPC writer queue wait | 2 seconds before start; expired/cancelled commands cannot execute later |
 | Diagnostic collections | 2 forensic + 1 reserved standalone RootSnapshot; at most 32 probes and 4 workers each |
 
-## APK connection and save path (protocol 12)
+## APK connection and save path (protocol 13)
 
 - One process-retained UniFFI `CoreSession` owns a shared multiplexed connection.
   `awaitState(epoch, revision)` long-polls core publications; reads and commands use

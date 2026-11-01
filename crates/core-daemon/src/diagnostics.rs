@@ -286,6 +286,16 @@ fn run_probe(
         DiagnosticProbe::KernelPartitions => {
             core(&["probe", "kernel-partitions"], Duration::from_secs(30))
         }
+        DiagnosticProbe::JavaHookArtifacts { include_files } => {
+            with_out_dir(env, "java-hooks", |dir| {
+                let path = dir.display().to_string();
+                let mut args = vec!["probe", "java-hooks", &path];
+                if *include_files {
+                    args.push("--files");
+                }
+                core(&args, Duration::from_secs(30))
+            })
+        }
         DiagnosticProbe::KernelImages => with_out_dir(env, "kernel-images", |dir| {
             let dir = dir.display().to_string();
             core(&["probe", "kernel-images", &dir], PROBE_MAX_RUNTIME)
@@ -325,23 +335,36 @@ fn with_out_dir(env: &ProbeEnv, name: &str, run: impl FnOnce(&Path) -> Captured)
             .subdir(&format!("{name}-{}-{sequence}", export_instance()))?;
         let mut entries = std::fs::read_dir(stage.path())?.collect::<Result<Vec<_>, _>>()?;
         entries.sort_by_key(|entry| entry.file_name());
-        for entry in entries {
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut source = std::fs::OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NOFOLLOW)
-                .open(entry.path())?;
-            if !source.metadata()?.is_file() {
-                return Err(std::io::Error::other("probe artifact is not a file"));
+        let publication = (|| -> std::io::Result<()> {
+            for entry in entries {
+                use std::os::unix::fs::OpenOptionsExt;
+                let mut source = std::fs::OpenOptions::new()
+                    .read(true)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(entry.path())?;
+                if !source.metadata()?.is_file() {
+                    return Err(std::io::Error::other("probe artifact is not a file"));
+                }
+                let filename = entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| std::io::Error::other("invalid artifact name"))?;
+                let path = export.write(&filename, |file| {
+                    std::io::copy(&mut source, file).map(|_| ())
+                })?;
+                out.artifacts.push(path);
             }
-            let filename = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| std::io::Error::other("invalid artifact name"))?;
-            let path = export.write(&filename, |file| {
-                std::io::copy(&mut source, file).map(|_| ())
-            })?;
-            out.artifacts.push(path);
+            Ok(())
+        })();
+        if let Err(error) = publication {
+            // Roll back a partially handed-off batch using the pinned directory,
+            // including ENOSPC; otherwise failed exports strand large app copies.
+            for path in &out.artifacts {
+                if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                    export.remove(name);
+                }
+            }
+            return Err(error);
         }
         Ok(out)
     };
@@ -473,6 +496,7 @@ fn probe_slug(probe: &DiagnosticProbe) -> &'static str {
         DiagnosticProbe::LogcatLsposedBoot => "logcat-lsposed",
         DiagnosticProbe::KernelPartitions => "kernel-partitions",
         DiagnosticProbe::KernelImages => "kernel-images",
+        DiagnosticProbe::JavaHookArtifacts { .. } => "java-hooks",
         DiagnosticProbe::LsposedModulesDb => "lsposed-db",
         DiagnosticProbe::GroundTruthChecks => "checks",
         DiagnosticProbe::AppVpnState { .. } => "app-vpn-state",
@@ -632,6 +656,33 @@ mod tests {
             );
             assert_eq!(std::fs::read(artifact).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn failed_or_timed_out_artifact_batches_never_leave_published_partial_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = host_env(Some(dir.path().to_path_buf()));
+        let result = with_out_dir(&env, "java-hooks", |stage| {
+            std::fs::write(stage.join("a.jar"), b"partial").unwrap();
+            std::fs::create_dir(stage.join("z.jar")).unwrap();
+            Captured::default()
+        });
+        assert_eq!(result.exit, -1);
+        assert!(result.artifacts.is_empty());
+        for directory in std::fs::read_dir(dir.path().join(EXPORT_DIR_NAME))
+            .unwrap()
+            .flatten()
+        {
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        }
+        let result = with_out_dir(&env, "java-hooks", |stage| {
+            std::fs::write(stage.join("partial.jar"), b"partial").unwrap();
+            Captured {
+                truncated: true,
+                ..Captured::default()
+            }
+        });
+        assert!(result.artifacts.is_empty());
     }
 
     #[test]

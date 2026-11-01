@@ -27,6 +27,8 @@ pub enum DiagnosticProbe {
     KernelPartitions,
     /// Gzipped boot/kernel partition images, written to the export dir.
     KernelImages,
+    /// Lightweight hook manifest; framework containers only when selected by export policy.
+    JavaHookArtifacts { include_files: bool },
     /// LSPosed's `modules_config.db` (+ wal/shm), copied to the export dir.
     LsposedModulesDb,
     /// Root-side ground truth for the app's checks (`vpnhide_checks`, unhooked).

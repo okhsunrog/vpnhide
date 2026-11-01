@@ -59,6 +59,7 @@ internal object PackageVisibilityHooks {
                 try {
                     classLoader.loadClass(IPM_LEGACY)
                 } catch (t: Throwable) {
+                    JavaHookDiagnostics.record("PackageVisibility class", "${t.javaClass.name}: ${t.message}")
                     HookLog.e("VpnHide/PV: neither $IPM_BASE nor $IPM_LEGACY found: ${t.message}")
                     return
                 }
@@ -69,6 +70,7 @@ internal object PackageVisibilityHooks {
             try {
                 classLoader.loadClass(PARCELED_LIST_SLICE)
             } catch (t: Throwable) {
+                JavaHookDiagnostics.record("PackageVisibility wrapper", "${t.javaClass.name}: ${t.message}")
                 HookLog.e("VpnHide/PV: ParceledListSlice not found: ${t.message}")
                 return
             }
@@ -149,7 +151,12 @@ internal object PackageVisibilityHooks {
         minApi: Int = 0,
     ) {
         try {
+            JavaHookDiagnostics.inspect(clazz, setOf(methodName))
             val hooked = XposedBridge.hookAllMethods(clazz, methodName, handler)
+            JavaHookDiagnostics.record(
+                "registration ${clazz.name}.$methodName",
+                "matched=${hooked.size} minApi=$minApi sdk=${Build.VERSION.SDK_INT}",
+            )
             if (hooked.isEmpty()) {
                 if (minApi > 0 && Build.VERSION.SDK_INT < minApi) {
                     HookLog.i("VpnHide/PV: $methodName absent on API ${Build.VERSION.SDK_INT} (added in API $minApi)")
@@ -160,6 +167,7 @@ internal object PackageVisibilityHooks {
                 HookLog.i("VpnHide/PV: hooked $methodName (${hooked.size} overload(s))")
             }
         } catch (t: Throwable) {
+            JavaHookDiagnostics.record("registration ${clazz.name}.$methodName", "${t.javaClass.name}: ${t.message}")
             HookLog.e("VpnHide/PV: hook $methodName failed: ${t::class.java.simpleName}: ${t.message}")
         }
     }

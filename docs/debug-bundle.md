@@ -276,7 +276,7 @@ jq -r '.report | (.native,.java) | .checks[] | select(.outcome.kind=="leak")
 
 `sections` is a `name → text` map of raw root-shell probe output. It is the
 evidence the typed fields were derived from. **Only populated when forensics is
-on** (the "Расширенный лог" toggle, default on for bug reports); a lean export has
+on** (always enabled for explicit diagnostic exports); a lean agent state response has
 `sections: {}`. Two collectors are merged into it — the authoritative root
 snapshot (used to derive the typed state) plus the forensic batch (network,
 proc/net, kernel symbols, inventory) — with the root snapshot winning on key
@@ -434,16 +434,15 @@ the last apply), `ports_state` (live chain), `config` (which apps have the
 
 ## 10. Privacy / redaction (what's deliberately omitted)
 
-- `pm_packages` and `pm_users` (full installed-app list with paths+UIDs, profile
-  names) are **redacted out of `sections` unless the user opted in** via the
-  app-list toggle (`captureOptions.appList=true`). The privacy-safe
-  `app_scan_diagnostics` (counts only, names redacted) always stays.
+- Explicit diagnostic exports include `pm_packages` and `pm_users` (installed-app
+  paths, UIDs and profile names); `captureOptions.appList=true`. Agent state
+  requests can still omit inventory. `app_scan_diagnostics` contains counts only.
 - `proc_cmdline` has `androidboot.serialno` / `wifi_macaddr` / `btmacaddr`
   scrubbed.
 - `networkView` records transport-info objects by class name only (never the
   `WifiInfo` SSID/BSSID); link addresses, DNS and routes are kept, like the
   network sections.
-- A lean (non-forensics) export carries **no `sections` and no logs** — just the
+- A lean (non-forensics) agent state response carries **no `sections` and no logs** — just the
   typed state. Check `captureOptions.forensics` before concluding "the section
   isn't there."
 
@@ -553,3 +552,75 @@ and diagnostic summary. That summary can describe newer knowledge (or a later
 run), so inspect run IDs and applicability before interpreting historical probe
 results. A VPN/config change during capture must not promote old evidence to a
 current success. `beforeCapture` similarly uses one Dashboard publication.
+
+
+## Automatic attachment planning (RPC 13)
+
+The existing Collect diagnostics sheet has one collect/save/share flow. Extended
+forensics and the installed-app inventory are always included in explicit debug
+exports; this does not turn on persistent debug logging. The existing scoped
+capture lease/restoration remains in place. Agent `getState` options and ordinary
+Dashboard observations do not trigger framework copies.
+
+Only two optional attachments exist: kernel images and Java framework binaries.
+Recommendations and short reasons are visible in the sheet. A collapsed Additional
+settings section contains the two overrides and reset-to-recommendations. Overrides
+belong to that open sheet, survive incoming observations, and disappear on reopen.
+No extra baseline controls or explanatory baseline row are shown.
+
+The planner uses current complete, applicable measurements and fresh boot state:
+
+- Owned native leaks with Kmod/Builtin/KPM select kernel images. Zygisk or unowned
+  leaks do not. Known kernel incompatibility, missing kprobe support, unknown
+  symbols and invalid module format can also select them.
+- Java leaks or current-boot installation/missing-method evidence select framework
+  files. Missing/stale telemetry alone is not proof that a framework dump helps.
+- Missing core, incomplete/stale checks, backend conflicts, missing artifacts,
+  capacity limits, authentication and signature-policy refusals do not themselves
+  select kernel images. Baseline evidence still records the situation.
+
+Every explicit debug ZIP contains `collection-plan.txt` and `java/collection.txt`: the frozen selection,
+recommendation reasons, manual overrides and collection outcome. The lightweight
+`java/java-manifest.json` is requested even when framework binaries are not selected.
+It records telemetry freshness/missing producer, bounded hook report, ROM properties,
+file origins, sizes, SHA-256, DEX presence and individual skip/error reasons. Absence
+of this manifest is reported in collection.txt; ordinary state.json is preserved.
+After collection, the sheet reports actual image/framework counts and Java skips.
+The state.json schema is unchanged; this is an additive archive attachment contract.
+
+Hook installation appends bounded `java_*` metadata to the existing LSPosed state
+writer (not to a competing log). It includes process identity, live classes and
+superclasses, declaring classes, method signatures, classloader evidence and
+registration failures/counts, including PackageVisibility. Existing hook counters
+remain the execution evidence. No call arguments, Binder payloads or app-private
+files are captured. ClassLoader.toString origins are best-effort: unavailable or
+missing origins do not justify arbitrary reflection into ART internals.
+
+Root selects at most 12 regular containers / 96 MiB total / 64 MiB each. It uses
+bounded known-target origin hints, framework.jar and services.jar fallbacks and
+known Connectivity JARs on active Connectivity/Tethering APEX mounts. Allowed roots
+are system/system_ext/product/vendor framework directories and APEX javalib only.
+Both original and resolved paths are validated; sources are root-owned, not
+writable by group/others, and opened through pinned no-follow descriptors. Special
+files, hardlinks and escapes are rejected. ZIP directories are inspected without
+inflation; DEX-absent, malformed and unsupported ZIP64 containers are labelled.
+There is no universal OAT/VDEX reconstruction, third-party APK dump or upload.
+
+The child has a 25-second cooperative deadline and a 30-second outer kill budget.
+Private staging is cleaned on success/failure; publication failures roll back
+already handed-off files. Core staging plus app handoff is bounded to about 192 MiB
+per framework collection, plus bounded metadata (two diagnostic batches may run).
+App packaging streams data, uses a private temporary ZIP and atomic replacement,
+and removes Java handoff copies after success/cancellation/failure. Packaging has
+an input/output bound of 128 MiB normally or 2200 MiB when the existing kernel
+images are selected, and a 180-second cooperative deadline. Kernel source limits
+remain 512 MiB per selected partition. Text entries are capped at 16 MiB. Optional
+Java packaging errors retry the archive without those binaries and explain why.
+Large exports still need free storage for source copies and the final archive.
+
+Framework/vendor files can be proprietary; review the bundle before publicly
+sharing it. Manifest facts do not prove a hook executes: compare registration with
+counters and the measured app view. RPC 13 requires a matching APK/core pair and
+rebooting system_server to run updated LSPosed instrumentation. Device acceptance
+must verify real APEX/classloader origins, SELinux reads, missing-core fallback,
+manual overrides and real archive size/time on the target ROM.

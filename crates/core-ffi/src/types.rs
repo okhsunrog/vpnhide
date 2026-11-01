@@ -1273,6 +1273,7 @@ pub enum CoreDiagnosticProbe {
     LogcatLsposedBoot,
     KernelPartitions,
     KernelImages,
+    JavaHookArtifacts { include_files: bool },
     LsposedModulesDb,
     GroundTruthChecks,
     AppVpnState { uid: u32 },
@@ -1288,6 +1289,9 @@ impl From<rpc::DiagnosticProbe> for CoreDiagnosticProbe {
             rpc::DiagnosticProbe::LogcatLsposedBoot => Self::LogcatLsposedBoot,
             rpc::DiagnosticProbe::KernelPartitions => Self::KernelPartitions,
             rpc::DiagnosticProbe::KernelImages => Self::KernelImages,
+            rpc::DiagnosticProbe::JavaHookArtifacts { include_files } => {
+                Self::JavaHookArtifacts { include_files }
+            }
             rpc::DiagnosticProbe::LsposedModulesDb => Self::LsposedModulesDb,
             rpc::DiagnosticProbe::GroundTruthChecks => Self::GroundTruthChecks,
             rpc::DiagnosticProbe::AppVpnState { uid } => Self::AppVpnState { uid },
@@ -1305,6 +1309,9 @@ impl From<CoreDiagnosticProbe> for rpc::DiagnosticProbe {
             CoreDiagnosticProbe::LogcatLsposedBoot => Self::LogcatLsposedBoot,
             CoreDiagnosticProbe::KernelPartitions => Self::KernelPartitions,
             CoreDiagnosticProbe::KernelImages => Self::KernelImages,
+            CoreDiagnosticProbe::JavaHookArtifacts { include_files } => {
+                Self::JavaHookArtifacts { include_files }
+            }
             CoreDiagnosticProbe::LsposedModulesDb => Self::LsposedModulesDb,
             CoreDiagnosticProbe::GroundTruthChecks => Self::GroundTruthChecks,
             CoreDiagnosticProbe::AppVpnState { uid } => Self::AppVpnState { uid },

@@ -30,6 +30,7 @@ internal suspend fun writeKernelBundleZip(
     context: Context,
     timestamp: String,
     stateJson: String,
+    java: JavaArtifacts,
 ): File? =
     withContext(Dispatchers.IO) {
         val appContext = context.applicationContext
@@ -49,15 +50,18 @@ internal suspend fun writeKernelBundleZip(
                     .firstOrNull { it.name == "manifest.txt" && it.isFile }
                     ?.readText()
                     .orEmpty()
-            writeDiagnosticZip(
-                zipFile = zipFile,
-                textEntries =
+            writeDebugArchive(
+                zip = zipFile,
+                text =
                     mapOf(
                         "state.json" to stateJson,
+                        "kernel/collection.txt" to
+                            "requested=true captured=${imageFiles.size} exit=${images.exit} truncated=${images.truncated}; see manifest.txt",
                         "manifest.txt" to manifest.ifBlank { "(missing manifest)" },
                         "kernel_partitions.txt" to kernelPartitionMetadataText(partitions),
                     ),
-                fileEntries = imageFiles.map { file -> DiagnosticFileEntry("images/${file.name}", file) },
+                files = imageFiles.map { file -> DiagnosticFileEntry("images/${file.name}", file) },
+                java = java,
             )
             zipFile
         } catch (c: CancellationException) {

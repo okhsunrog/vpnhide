@@ -23,7 +23,7 @@ pub fn run(args: &[String]) -> Option<i32> {
         }
         [command, ..] if command == "probe" || command == "observe" => {
             eprintln!(
-                "usage: vpnhide-core probe checks | probe root-snapshot [--packages] | probe debug-snapshot | probe hook-counters | probe kernel-partitions | probe kernel-images <dir> | probe lsposed-db <dir> | probe logcat-lsposed | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-state"
+                "usage: vpnhide-core probe checks | probe root-snapshot [--packages] | probe debug-snapshot | probe hook-counters | probe kernel-partitions | probe kernel-images <dir> | probe java-hooks <dir> [--files] | probe lsposed-db <dir> | probe logcat-lsposed | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-state"
             );
             2
         }
@@ -38,6 +38,7 @@ const DEVICE_PROBES: &[&str] = &[
     "hook-counters",
     "kernel-partitions",
     "kernel-images",
+    "java-hooks",
     "lsposed-db",
     "logcat-lsposed",
 ];
@@ -81,6 +82,10 @@ fn device_probe(mode: &str, rest: &[String]) -> i32 {
         ("hook-counters", []) => (0, debug_snapshot::hook_counters(&paths).buf),
         ("kernel-partitions", []) => kernel::partitions(),
         ("logcat-lsposed", []) => lsposed::boot_log(),
+        ("java-hooks", [_]) => crate::device_probes::java::collect(&out_dir().expect("dir"), false),
+        ("java-hooks", [_, flag]) if flag == "--files" => {
+            crate::device_probes::java::collect(&out_dir().expect("dir"), true)
+        }
         ("kernel-images", [_]) => kernel::images(&out_dir().expect("dir")),
         ("lsposed-db", [_]) => lsposed::copy_db(&out_dir().expect("dir")),
         _ => {
