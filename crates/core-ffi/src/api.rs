@@ -251,6 +251,8 @@ impl From<rpc::SubmitError> for CoreSubmitRefusal {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum SubmitReply {
+    /// Durable admission only. Optional receipt/state are best-effort snapshots,
+    /// not a completion barrier; observe publications and query the same op ID.
     Accepted {
         op: u64,
         record: Option<CoreOperationRecord>,

@@ -1,4 +1,5 @@
 //! Fixed root probes and core-owned recording through the generated API's typed surface.
+mod common;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -154,6 +155,8 @@ fn compound_command_crosses_the_typed_boundary_as_one_receipt() {
                 .unwrap(),
             SubmitReply::Accepted { .. }
         ));
+        let (bootstrap_record, _) = common::settled(&session, bootstrap).await;
+        assert_eq!(bootstrap_record.settled, Some(CorePhaseOutcome::Confirmed));
         let op = session.allocate_operation_id().await.unwrap();
         let command = CoreCommand::SetSuperkey {
             base_revision: 1,
@@ -161,14 +164,8 @@ fn compound_command_crosses_the_typed_boundary_as_one_receipt() {
             superkey: "test-superkey".into(),
         };
         let reply = session.submit_command(op, command.clone()).await.unwrap();
-        let SubmitReply::Accepted {
-            record: Some(record),
-            state: Some(state),
-            ..
-        } = reply
-        else {
-            panic!("{reply:?}")
-        };
+        assert!(matches!(reply, SubmitReply::Accepted { op: accepted, .. } if accepted == op));
+        let (record, state) = common::settled(&session, op).await;
         assert_eq!(record.settled, Some(CorePhaseOutcome::Confirmed));
         assert!(
             record

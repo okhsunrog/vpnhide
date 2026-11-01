@@ -1,5 +1,6 @@
 //! The production typed UniFFI API over a real multiplexed socket. No JSON command
 //! facade is involved; canonical JSON is only the daemon's durable storage format.
+mod common;
 use std::{path::Path, sync::Arc};
 use vpnhide_core_daemon::{CoreState, Publisher, ServerHandle, serve};
 use vpnhide_core_ffi::*;
@@ -60,7 +61,7 @@ fn typed_replace_batch_conflict_deduplication_and_receipts() {
         assert!(initial.state.config.is_none());
         assert_eq!(initial.connection_generation, 1);
         let op = session.allocate_operation_id().await.unwrap();
-        let (_, record, state) = accepted(
+        let (accepted_op, _, _) = accepted(
             session
                 .submit_edit(
                     op,
@@ -72,8 +73,10 @@ fn typed_replace_batch_conflict_deduplication_and_receipts() {
                 .await
                 .unwrap(),
         );
-        assert_eq!(record.unwrap().settled, Some(CorePhaseOutcome::Confirmed));
-        assert_eq!(state.unwrap().state.config_revision, 1);
+        assert_eq!(accepted_op, op);
+        let (record, state) = common::settled(&session, op).await;
+        assert_eq!(record.settled, Some(CorePhaseOutcome::Confirmed));
+        assert_eq!(state.state.config_revision, 1);
         let batch = CoreEdit::Batch {
             edits: vec![
                 CoreFieldEdit::Toggle {
@@ -88,6 +91,8 @@ fn typed_replace_batch_conflict_deduplication_and_receipts() {
         };
         let id = session.allocate_operation_id().await.unwrap();
         accepted(session.submit_edit(id, 1, batch.clone()).await.unwrap());
+        let (batch_record, _) = common::settled(&session, id).await;
+        assert_eq!(batch_record.settled, Some(CorePhaseOutcome::Confirmed));
         // An unrelated stale edit still merges.
         let other = session.allocate_operation_id().await.unwrap();
         accepted(
@@ -96,6 +101,8 @@ fn typed_replace_batch_conflict_deduplication_and_receipts() {
                 .await
                 .unwrap(),
         );
+        let (other_record, _) = common::settled(&session, other).await;
+        assert_eq!(other_record.settled, Some(CorePhaseOutcome::Confirmed));
         let conflicting = session.allocate_operation_id().await.unwrap();
         let refused = session
             .submit_edit(
@@ -139,7 +146,8 @@ fn typed_replace_batch_conflict_deduplication_and_receipts() {
             }
         ));
         let receipt = session.operation(id).await.unwrap();
-        assert_eq!(receipt.record.unwrap().op, id);
+        assert_eq!(receipt.record.unwrap(), batch_record);
+        assert_eq!(session.read_state().await.unwrap().state.config_revision, 3);
         assert!(session.operation(u64::MAX).await.unwrap().record.is_none());
         assert!(matches!(
             session.submit_edit(0, 3, CoreEdit::RepairActivation).await,
