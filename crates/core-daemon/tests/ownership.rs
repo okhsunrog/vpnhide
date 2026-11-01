@@ -3,7 +3,7 @@
 //! same-field stale bases conflict; delayed Native dispatch can be fenced.
 
 mod common;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::time::Duration;
 
 use vpnhide_core_client::CoreClient;
@@ -26,7 +26,7 @@ fn spawn(
     ctl: Option<&std::path::Path>,
     delay_before: Option<&str>,
 ) -> CoreProcess {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_vpnhide-core"));
+    let mut cmd = common::core_command();
     cmd.arg(socket)
         .env("VPNHIDE_CONFIG_PATH", config_path)
         .env_remove("VPNHIDE_KPM_LOCK")

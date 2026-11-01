@@ -6,7 +6,7 @@ use std::fs;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::time::Duration;
 
 use vpnhide_core_client::CoreClient;
@@ -173,7 +173,7 @@ async fn exercise(case: &str) {
         None
     };
     let mut process = CoreProcess(
-        Command::new(env!("CARGO_BIN_EXE_vpnhide-core"))
+        common::core_command()
             .arg(&socket)
             .env("PATH", root)
             .env("VH_ROOT", root)

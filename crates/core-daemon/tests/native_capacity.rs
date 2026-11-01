@@ -7,7 +7,7 @@ mod common;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::time::Duration;
 
 use vpnhide_core_client::CoreClient;
@@ -87,7 +87,7 @@ async fn start(initial: &CanonicalConfig, installed: usize) -> Harness {
     config_file::write_atomic(&config_path, initial).unwrap();
     fake_cmd(&dir.path().join("cmd"), installed);
     let mut child = CoreProcess(
-        Command::new(env!("CARGO_BIN_EXE_vpnhide-core"))
+        common::core_command()
             .arg(&socket)
             .env("PATH", dir.path())
             .env("VPNHIDE_CONFIG_PATH", &config_path)

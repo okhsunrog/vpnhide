@@ -48,6 +48,16 @@ impl Drop for ServerHandle {
 /// down or dropped. Must be called from within a Tokio runtime.
 pub fn listen(
     socket_path: &Path,
+    on_connect: impl FnMut(UnixStream, CancellationToken) + Send + 'static,
+) -> std::io::Result<ServerHandle> {
+    listen_prepared(socket_path, |_| Ok(()), on_connect)
+}
+
+/// Preparation runs while this generation owns the bound socket, before any
+/// accept task exists. Failure closes/unlinks the endpoint and releases ownership.
+pub(crate) fn listen_prepared(
+    socket_path: &Path,
+    prepare: impl FnOnce(&Path) -> std::io::Result<()>,
     mut on_connect: impl FnMut(UnixStream, CancellationToken) + Send + 'static,
 ) -> std::io::Result<ServerHandle> {
     // Different state paths must not let a second live server unlink this socket.
@@ -67,6 +77,11 @@ pub fn listen(
     }
     remove_socket(socket_path);
     let listener = UnixListener::bind(socket_path)?;
+    if let Err(error) = prepare(socket_path) {
+        drop(listener);
+        remove_socket(socket_path);
+        return Err(error);
+    }
     eprintln!("core: listening on {}", socket_path.display());
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
@@ -194,5 +209,75 @@ mod tests {
         wait_for(&accepted, "accepted").await;
         handle.shutdown();
         wait_for(&ended, "the accepted connection was told to stop").await;
+    }
+}
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn failed_owner_or_mode_setup_never_runs_handlers_and_can_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("prepared.sock");
+        let calls = Arc::new(AtomicUsize::new(0));
+        for stage in ["owner", "mode"] {
+            let count = calls.clone();
+            let failed = listen_prepared(
+                &socket,
+                |path| {
+                    // A peer can enter the kernel backlog, but no application handler
+                    // may run before mandatory preparation returns successfully.
+                    let _peer = std::os::unix::net::UnixStream::connect(path).unwrap();
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    assert_eq!(calls.load(Ordering::SeqCst), 0);
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        stage,
+                    ))
+                },
+                move |_, _| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                },
+            );
+            assert_eq!(
+                failed.err().unwrap().kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+            assert!(!socket.exists());
+        }
+        let prepared = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ready = prepared.clone();
+        let count = calls.clone();
+        let handle = listen_prepared(
+            &socket,
+            |path| {
+                crate::auth::apply_private_socket_permissions(path, 0o600, None)?;
+                prepared.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+            move |_, _| {
+                assert!(ready.load(Ordering::SeqCst));
+                count.fetch_add(1, Ordering::SeqCst);
+            },
+        )
+        .unwrap();
+        // A failed duplicate bind cannot change this generation's permissions.
+        assert!(
+            listen_prepared(&socket, |_| panic!("duplicate must not prepare"), |_, _| {}).is_err()
+        );
+        let _client = UnixStream::connect(&socket).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while calls.load(Ordering::SeqCst) != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        handle.shutdown_and_unlink();
     }
 }

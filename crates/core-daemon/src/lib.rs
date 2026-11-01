@@ -17,6 +17,7 @@ pub mod effects;
 mod export;
 pub mod framework_vpn;
 pub mod instance;
+pub mod ipc_config;
 pub mod journal;
 pub mod listener;
 pub mod logcat_session;
@@ -45,10 +46,10 @@ use std::sync::Arc;
 /// accepted connection is served until it closes or the handle is shut down/dropped.
 /// Must be called from within a Tokio runtime.
 ///
-/// Loads the peer allowlist from env/file ([`auth::Allowlist::load`]). Prefer
+/// Resolves validated endpoint configuration from env. Prefer
 /// [`serve_with_allowlist`] in tests.
 pub fn serve(socket_path: &Path, state: Arc<CoreState>) -> std::io::Result<ServerHandle> {
-    serve_with_allowlist(socket_path, state, auth::Allowlist::load())
+    serve_endpoint(ipc_config::EndpointConfig::from_env(socket_path)?, state)
 }
 
 /// Like [`serve`], but with an explicit peer allowlist (host tests / injected production policy).
@@ -61,11 +62,21 @@ pub fn serve_with_allowlist(
     state: Arc<CoreState>,
     allowlist: auth::Allowlist,
 ) -> std::io::Result<ServerHandle> {
+    serve_endpoint(
+        ipc_config::EndpointConfig::explicit(socket_path, allowlist)?,
+        state,
+    )
+}
+
+pub fn serve_endpoint(
+    config: ipc_config::EndpointConfig,
+    state: Arc<CoreState>,
+) -> std::io::Result<ServerHandle> {
+    let socket_path = config.path().to_path_buf();
+    let allowlist = config.policy();
     match &allowlist {
         auth::Allowlist::Open => {
-            eprintln!(
-                "core: peer allowlist open (dev/host); set VPNHIDE_CORE_ALLOW_UIDS for production"
-            );
+            eprintln!("core: explicit unrestricted peer policy (library test caller)");
         }
         auth::Allowlist::Uids(set) => {
             eprintln!("core: peer allowlist uids={set:?}");
@@ -74,52 +85,43 @@ pub fn serve_with_allowlist(
             eprintln!("core: peer allowlist root + owner of {}", dir.display());
         }
     }
-    let app_dir = match &allowlist {
-        auth::Allowlist::AppOwner(dir) => Some(dir.clone()),
-        _ => None,
-    };
     let inflight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let handle = listen(socket_path, move |stream, cancel| {
-        match auth::authorize(&stream, &allowlist) {
-            Ok(cred) => {
-                eprintln!(
-                    "core: accepted peer uid={} gid={} pid={}",
-                    cred.uid, cred.gid, cred.pid
-                );
+    let handle = listener::listen_prepared(
+        &socket_path,
+        |path| config.prepare(path),
+        move |stream, cancel| {
+            match auth::authorize(&stream, &allowlist) {
+                Ok(cred) => {
+                    eprintln!(
+                        "core: accepted peer uid={} gid={} pid={}",
+                        cred.uid, cred.gid, cred.pid
+                    );
+                }
+                Err(e) => {
+                    eprintln!("core: rejected peer: {e}");
+                    drop(stream);
+                    return;
+                }
             }
-            Err(e) => {
-                eprintln!("core: rejected peer: {e}");
+            let n = inflight.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n >= vpnhide_core_rpc::MAX_CONCURRENT_CONNECTIONS {
+                inflight.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                eprintln!(
+                    "core: refusing connection (at MAX_CONCURRENT_CONNECTIONS={})",
+                    vpnhide_core_rpc::MAX_CONCURRENT_CONNECTIONS
+                );
                 drop(stream);
                 return;
             }
-        }
-        let n = inflight.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if n >= vpnhide_core_rpc::MAX_CONCURRENT_CONNECTIONS {
-            inflight.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-            eprintln!(
-                "core: refusing connection (at MAX_CONCURRENT_CONNECTIONS={})",
-                vpnhide_core_rpc::MAX_CONCURRENT_CONNECTIONS
-            );
-            drop(stream);
-            return;
-        }
-        let inflight = inflight.clone();
-        let state = state.clone();
-        let cancel = cancel.clone();
-        tokio::spawn(async move {
-            serve_connection(stream, state, cancel).await;
-            inflight.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-        });
-    })?;
-    // Bind created the socket inode — set DAC now (before clients race in). The peer
-    // allowlist still gates every accept, so a client racing this window is refused.
-    let perms = match &app_dir {
-        Some(dir) => auth::apply_app_socket_permissions(socket_path, dir),
-        None => auth::apply_socket_permissions(socket_path),
-    };
-    if let Err(e) = perms {
-        eprintln!("core: socket permissions: {e}");
-    }
+            let inflight = inflight.clone();
+            let state = state.clone();
+            let cancel = cancel.clone();
+            tokio::spawn(async move {
+                serve_connection(stream, state, cancel).await;
+                inflight.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            });
+        },
+    )?;
     Ok(handle)
 }
 

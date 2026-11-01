@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use vpnhide_core_client::CoreClient;
 use vpnhide_core_daemon::config_file::{self, config_path_from_env};
 use vpnhide_core_daemon::journal::journal_path_from_env;
-use vpnhide_core_daemon::{CoreState, Publisher, serve};
+use vpnhide_core_daemon::{CoreState, Publisher};
 use vpnhide_core_daemon::{activation, backend};
 use vpnhide_core_rpc::StateSnapshot;
 
@@ -34,6 +34,15 @@ fn main() {
         let code = vpnhide_core_daemon::service::supervise();
         vpnhide_core_daemon::service::exited(code);
         std::process::exit(code);
+    }
+    if all.first().map(String::as_str) == Some("service-worker") {
+        let exe = std::env::current_exe().expect("worker executable");
+        // SAFETY: main has not started the runtime or any threads.
+        unsafe {
+            vpnhide_core_daemon::service::configure_production_environment(
+                &vpnhide_core_daemon::service::modules_root(&exe),
+            )
+        };
     }
     daemon_main();
 }
@@ -133,6 +142,11 @@ fn status(ctl: &str) {
 }
 
 async fn run(path: &str) {
+    let endpoint = vpnhide_core_daemon::ipc_config::EndpointConfig::from_env(Path::new(path))
+        .unwrap_or_else(|error| {
+            eprintln!("core: invalid IPC configuration: {error}");
+            std::process::exit(2)
+        });
     // A fresh epoch per run: clients adopt a restarted core through a new connection.
     let epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -222,7 +236,7 @@ async fn run(path: &str) {
     //
     // Production: the socket lives in the app's data dir and is re-bound across
     // reinstalls (app_socket). Host/dev: a plain path socket.
-    let app_dir = vpnhide_core_daemon::app_socket::app_data_dir_from_env();
+    let app_dir = endpoint.app_dir().map(Path::to_path_buf);
     let (handle, app_socket_task) = match &app_dir {
         Some(dir) => {
             let task = tokio::spawn(vpnhide_core_daemon::app_socket::supervise(
@@ -231,7 +245,7 @@ async fn run(path: &str) {
             ));
             (None, Some(task))
         }
-        None => match serve(Path::new(path), state.clone()) {
+        None => match vpnhide_core_daemon::serve_endpoint(endpoint, state.clone()) {
             Ok(handle) => (Some(handle), None),
             Err(e) => {
                 eprintln!("core: bind failed on {path}: {e}");
@@ -245,7 +259,7 @@ async fn run(path: &str) {
         .map_or_else(|| path.to_owned(), |p| p.display().to_string());
 
     eprintln!(
-        "core: epoch={epoch} serving on {path} config={} ({}) journal={} native_ctl={} native={:?} (ctrl-c to stop)",
+        "core: epoch={epoch} IPC configured at {path} config={} ({}) journal={} native_ctl={} native={:?} (ctrl-c to stop)",
         config_path.display(),
         if state.has_config() { "loaded" } else { "none" },
         journal_path.display(),

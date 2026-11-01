@@ -4,7 +4,7 @@
 
 mod common;
 use std::fs;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::time::Duration;
 
 use vpnhide_core_client::CoreClient;
@@ -94,7 +94,7 @@ fn spawn_core(
     crash_after: Option<&str>,
     kmod_ctl: Option<&std::path::Path>,
 ) -> CoreProcess {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_vpnhide-core"));
+    let mut cmd = common::core_command();
     cmd.arg(socket)
         .env("VPNHIDE_CONFIG_PATH", config_path)
         .env_remove("VPNHIDE_KPM_LOCK")
@@ -373,7 +373,7 @@ async fn durable_admission_precedes_slow_effect_and_survives_disconnect() {
     let socket = dir.path().join("core.sock");
     let config = dir.path().join("config.json");
     let mut child = CoreProcess(
-        Command::new(env!("CARGO_BIN_EXE_vpnhide-core"))
+        common::core_command()
             .arg(&socket)
             .env("VPNHIDE_CONFIG_PATH", &config)
             .env("VPNHIDE_TEST_DELAY_BEFORE", "persist")

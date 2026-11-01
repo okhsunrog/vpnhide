@@ -27,8 +27,29 @@ canonical config, `/proc/vpnhide_ctl`, Zygisk `targets.txt` and the Ports rules.
    re-resolved on every accept (a reinstall's new uid is followed automatically). Nothing is
    written by the app; there is no uid file.
 
-Host/dev runs (no `VPNHIDE_APP_DATA_DIR`) keep the plain path socket with the env allowlist
-(`VPNHIDE_CORE_ALLOW_UIDS`, open when unset).
+Plain runs (no `VPNHIDE_APP_DATA_DIR`) default to the effective UID and socket mode
+`0600`. `VPNHIDE_CORE_ALLOW_UIDS` accepts a nonempty comma/whitespace-separated list
+of decimal UIDs; malformed, overflowing or non-UTF-8 values fail startup before
+opening durable state. Root is not implicitly added to an explicit UID list.
+`VPNHIDE_CORE_SOCKET_OWNER_UID` and octal `VPNHIDE_CORE_SOCKET_MODE` are validated
+plain-socket overrides. AppOwner takes precedence over these plain-only settings
+and derives placement, ownership and mode together in `EndpointConfig`.
+There is no environment-selected Open policy; explicit Open library callers exist
+for tests. This is IPC configuration, not a filesystem or process sandbox.
+
+`service` and `service-worker` replace inherited `VPNHIDE_*` settings with compiled
+production values before starting threads; PATH and root-manager variables remain.
+Process integration tests instead clear inherited environment and explicitly supply
+fixture paths and flags. Crash/delay injection is compiled out on Android; host
+integration binaries retain it (they are built without `cfg(test)`).
+
+Binding acquires endpoint ownership, binds, completes mandatory DAC/label preparation,
+and only then starts accepting. Failed preparation closes/unlinks the endpoint and
+releases its lock. The app-socket supervisor retries without restarting core or
+replaying boot effects. An already-correct SELinux label needs no relabel syscall.
+Known missing xattr support is allowed on hosts or Android without mounted SELinux;
+with Android SELinux present, a missing/wrong label must be repaired and verified.
+Other read/write errors propagate. Peer authorization remains required in every case.
 
 ## Resource bounds
 
@@ -69,8 +90,10 @@ See [current core architecture](../core-architecture.md) and
 
 ## Device validation still required
 
-Socket label copy, `connectto` under each root manager, and MLS on `connectto` are verified on
-host only (label copy is best-effort there).
+Host tests cover label decision/error cases, preparation ordering, endpoint retries,
+app-directory disappearance and dynamic owner lookup. They do not verify Android
+SELinux policy. Real label copying, `connectto` under Magisk/KernelSU/APatch, first
+install, clear-data and reinstall with a changed UID still require device acceptance.
 
 ## Root work: typed probes and effects
 

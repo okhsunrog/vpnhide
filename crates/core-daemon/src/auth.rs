@@ -5,7 +5,8 @@
 //! `SO_PEERCRED` against [`Allowlist::AppOwner`]: root or the uid owning that dir. The app
 //! writes nothing to configure this. See `app_socket`.
 //!
-//! Host/dev: a plain path socket; `VPNHIDE_CORE_ALLOW_UIDS` restricts peers, unset = open.
+//! Private sockets default to the current UID and 0600; explicit policies are
+//! validated by `ipc_config` before bind. Open exists only for explicit library tests.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -17,14 +18,14 @@ use libc::{SO_PEERCRED, SOL_SOCKET, getsockopt, socklen_t, ucred};
 
 /// Env: comma-separated UIDs allowed to connect.
 pub const ALLOW_UIDS_ENV: &str = "VPNHIDE_CORE_ALLOW_UIDS";
-/// Env: socket owner uid after bind (`chown`); unset leaves creator (root) ownership.
+/// Env: socket owner uid after bind (`chown`); unset leaves creator ownership.
 pub const SOCKET_OWNER_UID_ENV: &str = "VPNHIDE_CORE_SOCKET_OWNER_UID";
-/// Env: socket mode octal (default `0660` when owner set, else `0666` for host tests).
+/// Env: explicitly requested socket mode octal (default `0600`).
 pub const SOCKET_MODE_ENV: &str = "VPNHIDE_CORE_SOCKET_MODE";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Allowlist {
-    /// No allowlist configured — any peer uid is accepted (dev sandbox).
+    /// Explicit unrestricted library policy for tests; never selected by environment parsing.
     Open,
     /// Only these uids may connect.
     Uids(BTreeSet<u32>),
@@ -34,16 +35,6 @@ pub enum Allowlist {
 }
 
 impl Allowlist {
-    pub fn load() -> Self {
-        if let Ok(raw) = std::env::var(ALLOW_UIDS_ENV) {
-            let set = parse_uid_list(&raw);
-            if !set.is_empty() {
-                return Allowlist::Uids(set);
-            }
-        }
-        Allowlist::Open
-    }
-
     pub fn permits(&self, uid: u32) -> bool {
         match self {
             Allowlist::Open => true,
@@ -53,10 +44,30 @@ impl Allowlist {
     }
 }
 
-fn parse_uid_list(raw: &str) -> BTreeSet<u32> {
-    raw.split(|c: char| c == ',' || c.is_whitespace())
-        .filter_map(|tok| tok.trim().parse().ok())
-        .collect()
+pub(crate) fn parse_uid_list(raw: &str) -> io::Result<BTreeSet<u32>> {
+    let set: BTreeSet<_> = raw
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|token| !token.is_empty())
+        .map(parse_uid)
+        .collect::<io::Result<_>>()?;
+    if set.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "empty UID allowlist",
+        ));
+    }
+    Ok(set)
+}
+
+pub(crate) fn parse_uid(raw: &str) -> io::Result<u32> {
+    // uid_t::MAX is the chown "leave unchanged" sentinel, never an owner.
+    if raw.is_empty() || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid UID"));
+    }
+    raw.parse::<u32>()
+        .ok()
+        .filter(|uid| *uid != u32::MAX)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid UID"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,7 +120,8 @@ fn owner_uid(path: &Path) -> io::Result<u32> {
 /// Lock the app socket down to the app: owner = the app data dir's uid/gid, mode `0600`,
 /// and the dir's SELinux label (app_data_file with the app's MLS categories) so the app
 /// domain may `write` it and no other app can even traverse to it. Root (core) bypasses DAC.
-/// The label copy is best-effort (hosts without SELinux xattrs).
+/// Missing SELinux xattrs are allowed on hosts/disabled kernels; a known app
+/// label must match, and already-correct labels do not require relabel permission.
 pub fn apply_app_socket_permissions(socket: &Path, app_dir: &Path) -> io::Result<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let meta = fs::metadata(app_dir)?;
@@ -121,10 +133,14 @@ pub fn apply_app_socket_permissions(socket: &Path, app_dir: &Path) -> io::Result
         }
     }
     fs::set_permissions(socket, fs::Permissions::from_mode(0o600))?;
-    if let Err(e) = copy_selinux_label(app_dir, socket) {
-        eprintln!("core: socket label copy skipped: {e}");
+    let actual = fs::metadata(socket)?;
+    if actual.uid() != meta.uid() || actual.gid() != meta.gid() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "socket owner does not match app directory",
+        ));
     }
-    Ok(())
+    copy_selinux_label(app_dir, socket)
 }
 
 /// Give `path` the uid/gid and SELinux label of `owner_dir` (an app data dir), so only that
@@ -142,68 +158,102 @@ pub fn hand_to_owner_of(path: &Path, owner_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn copy_selinux_label(from: &Path, to: &Path) -> io::Result<()> {
-    const NAME: &[u8] = b"security.selinux\0";
-    let src = path_cstr(from)?;
-    let dst = path_cstr(to)?;
-    let mut buf = [0u8; 256];
+fn read_selinux_label(path: &Path) -> io::Result<Vec<u8>> {
+    let path = path_cstr(path)?;
+    let mut buffer = vec![0u8; 4096];
     let len = unsafe {
         libc::getxattr(
-            src.as_ptr(),
-            NAME.as_ptr().cast(),
-            buf.as_mut_ptr().cast(),
-            buf.len(),
+            path.as_ptr(),
+            c"security.selinux".as_ptr(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
         )
     };
     if len < 0 {
         return Err(io::Error::last_os_error());
     }
-    let rc = unsafe {
-        libc::lsetxattr(
-            dst.as_ptr(),
-            NAME.as_ptr().cast(),
-            buf.as_ptr().cast(),
-            len as usize,
-            0,
-        )
+    buffer.truncate(len as usize);
+    Ok(buffer)
+}
+
+fn copy_selinux_label(from: &Path, to: &Path) -> io::Result<()> {
+    // Missing xattr support is normal on hosts or an Android kernel without
+    // SELinux. A mounted Android SELinux policy (also permissive) keeps labels.
+    let optional = !cfg!(target_os = "android")
+        || matches!(
+            fs::metadata("/sys/fs/selinux/enforce"), Err(error) if error.kind() == io::ErrorKind::NotFound
+        );
+    ensure_label(
+        read_selinux_label(from),
+        optional,
+        || read_selinux_label(to),
+        |label| {
+            let dst = path_cstr(to)?;
+            let rc = unsafe {
+                libc::lsetxattr(
+                    dst.as_ptr(),
+                    c"security.selinux".as_ptr(),
+                    label.as_ptr().cast(),
+                    label.len(),
+                    0,
+                )
+            };
+            if rc < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        },
+    )
+}
+
+fn unavailable_label(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(libc::ENODATA | libc::EOPNOTSUPP | libc::ENOSYS)
+    )
+}
+
+fn ensure_label(
+    source: io::Result<Vec<u8>>,
+    optional: bool,
+    mut read_target: impl FnMut() -> io::Result<Vec<u8>>,
+    write: impl FnOnce(&[u8]) -> io::Result<()>,
+) -> io::Result<()> {
+    let source = match source {
+        Ok(label) => label,
+        Err(error) if optional && unavailable_label(&error) => return Ok(()),
+        Err(error) => return Err(error),
     };
-    if rc < 0 {
-        return Err(io::Error::last_os_error());
+    match read_target() {
+        Ok(current) if current == source => return Ok(()),
+        Ok(_) => {}
+        Err(error) if unavailable_label(&error) => {}
+        Err(error) => return Err(error),
+    }
+    write(&source)?;
+    if read_target()? != source {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "socket SELinux label did not match app directory after preparation",
+        ));
     }
     Ok(())
 }
 
-/// Apply DAC on the bound socket path (chown/chmod). Best-effort; errors are logged by caller.
-pub fn apply_socket_permissions(path: &Path) -> io::Result<()> {
-    let mode = match std::env::var(SOCKET_MODE_ENV) {
-        Ok(s) => {
-            let s = s.trim().trim_start_matches("0o");
-            u32::from_str_radix(s, 8).unwrap_or(0o660)
-        }
-        Err(_) => {
-            if std::env::var_os(SOCKET_OWNER_UID_ENV).is_some() {
-                0o660
-            } else {
-                // Host tests: world-connectable path under /tmp is fine.
-                0o666
-            }
-        }
-    };
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
-        if let Ok(uid_s) = std::env::var(SOCKET_OWNER_UID_ENV) {
-            if let Ok(uid) = uid_s.parse::<u32>() {
-                let gid = uid; // app primary gid ≈ uid on Android
-                let rc = unsafe { libc::chown(path_cstr(path)?.as_ptr(), uid, gid) };
-                if rc < 0 {
-                    return Err(io::Error::last_os_error());
-                }
-            }
+/// Apply the already validated private endpoint settings. No ambient env reads.
+pub(crate) fn apply_private_socket_permissions(
+    path: &Path,
+    mode: u32,
+    owner: Option<u32>,
+) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if let Some(uid) = owner {
+        if unsafe { libc::chown(path_cstr(path)?.as_ptr(), uid, uid) } < 0 {
+            return Err(io::Error::last_os_error());
         }
     }
-    Ok(())
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
 }
 
 #[cfg(unix)]
@@ -259,7 +309,121 @@ mod tests {
 
     #[test]
     fn parse_env_list() {
-        let set = parse_uid_list("10123, 10124\n10125");
+        let set = parse_uid_list("10123, 10124\n10125").unwrap();
         assert_eq!(set, BTreeSet::from([10123, 10124, 10125]));
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+    #[test]
+    fn missing_host_xattrs_are_optional_but_android_policy_is_not() {
+        for errno in [libc::ENODATA, libc::EOPNOTSUPP, libc::ENOSYS] {
+            assert!(
+                ensure_label(
+                    Err(io::Error::from_raw_os_error(errno)),
+                    true,
+                    || panic!("no target read"),
+                    |_| panic!("no write")
+                )
+                .is_ok()
+            );
+            assert!(
+                ensure_label(
+                    Err(io::Error::from_raw_os_error(errno)),
+                    false,
+                    || panic!("no target read"),
+                    |_| panic!("no write")
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            ensure_label(
+                Err(io::Error::from_raw_os_error(libc::EACCES)),
+                true,
+                || panic!("no target read"),
+                |_| panic!("no write")
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn already_correct_label_does_not_require_relabel_permission() {
+        assert!(
+            ensure_label(
+                Ok(b"app-label".to_vec()),
+                false,
+                || Ok(b"app-label".to_vec()),
+                |_| panic!("already correct label must not be written")
+            )
+            .is_ok()
+        );
+    }
+    #[test]
+    fn incorrect_label_requires_successful_verified_repair() {
+        assert!(
+            ensure_label(
+                Ok(b"app".to_vec()),
+                false,
+                || Ok(b"wrong".to_vec()),
+                |_| Err(io::Error::from_raw_os_error(libc::EPERM))
+            )
+            .is_err()
+        );
+        assert!(
+            ensure_label(
+                Ok(b"app".to_vec()),
+                false,
+                || Ok(b"wrong".to_vec()),
+                |_| Ok(())
+            )
+            .is_err()
+        );
+        let label = std::cell::RefCell::new(b"wrong".to_vec());
+        assert!(
+            ensure_label(
+                Ok(b"app".to_vec()),
+                false,
+                || Ok(label.borrow().clone()),
+                |bytes| {
+                    *label.borrow_mut() = bytes.to_vec();
+                    Ok(())
+                }
+            )
+            .is_ok()
+        );
+    }
+    #[test]
+    fn app_owner_follows_changed_uid_without_rebuilding_policy() {
+        use std::os::unix::fs::MetadataExt;
+        if unsafe { libc::geteuid() } != 0 {
+            // Exercise real metadata resolution without requiring host chown:
+            // replace a fixture directory link with a root-owned directory.
+            let dir = tempfile::tempdir().unwrap();
+            let app = dir.path().join("app");
+            std::os::unix::fs::symlink(dir.path(), &app).unwrap();
+            let uid = fs::metadata(dir.path()).unwrap().uid();
+            let policy = Allowlist::AppOwner(app.clone());
+            assert!(policy.permits(uid));
+            fs::remove_file(&app).unwrap();
+            std::os::unix::fs::symlink("/", &app).unwrap();
+            assert!(!policy.permits(uid));
+            assert!(policy.permits(0));
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let old = fs::metadata(dir.path()).unwrap();
+        let policy = Allowlist::AppOwner(dir.path().into());
+        let c = path_cstr(dir.path()).unwrap();
+        assert_eq!(unsafe { libc::chown(c.as_ptr(), 12345, 12345) }, 0);
+        assert!(policy.permits(12345));
+        assert!(!policy.permits(12346));
+        assert_eq!(unsafe { libc::chown(c.as_ptr(), 12346, 12346) }, 0);
+        assert!(!policy.permits(12345));
+        assert!(policy.permits(12346));
+        assert!(policy.permits(0));
+        assert_eq!(unsafe { libc::chown(c.as_ptr(), old.uid(), old.gid()) }, 0);
     }
 }

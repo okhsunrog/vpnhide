@@ -79,5 +79,13 @@ without rewriting the original Unknown receipt.
 
 ## Production write gating
 
-Host/dev runs (`vpnhide-core [socket]`) leave every writer off. Only the `service`
-entry point — i.e. installing this module — enables them.
+Plain runs (`vpnhide-core [socket]`) disable native/Ports/root-effect writers by default,
+but canonical configuration and journal writes remain enabled; their default paths
+are production paths. A manual fixture must explicitly isolate persistent paths.
+This command is not a sandbox, and inherited flags can enable additional writers.
+
+Both `service` and its internal `service-worker` entry point establish the compiled
+production preset before threads start. They remove inherited `VPNHIDE_*` overrides
+and restore required paths/flags, preserving PATH and root-manager environment.
+Starting `service-worker` manually therefore starts production configuration, not a
+fixture. Endpoint setup failure retries the app socket without restarting this worker.

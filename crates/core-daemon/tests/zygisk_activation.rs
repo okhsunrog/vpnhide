@@ -5,7 +5,7 @@ mod common;
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::time::Duration;
 
 use vpnhide_core_client::CoreClient;
@@ -134,7 +134,7 @@ async fn exercise(case: &str) {
     );
     let socket = root.join("core.sock");
     let canonical = root.join("canonical.json");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_vpnhide-core"));
+    let mut command = common::core_command();
     command
         .arg(&socket)
         .env("PATH", root)

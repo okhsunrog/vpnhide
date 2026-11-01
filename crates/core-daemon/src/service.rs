@@ -35,7 +35,7 @@ pub fn modules_root(exe: &Path) -> PathBuf {
 }
 
 /// The production configuration, as the variables the daemon's lanes read. Enabled only
-/// by this entry point; host/dev runs leave every writer off.
+/// by this entry point; plain runs disable native/Ports/effect writers by default, but still write config/journal.
 pub fn production_env(modules: &Path) -> Vec<(&'static str, String)> {
     let persist = Path::new(PERSIST_DIR);
     let p = |rel: &str| persist.join(rel).display().to_string();
@@ -63,6 +63,39 @@ pub fn production_env(modules: &Path) -> Vec<(&'static str, String)> {
     ]
 }
 
+/// Only project-owned runtime knobs are replaced. Root-manager variables and
+/// PATH are deliberately retained; this is not a general process sandbox.
+fn environment_overrides(
+    keys: impl IntoIterator<Item = std::ffi::OsString>,
+    modules: &Path,
+) -> Vec<(std::ffi::OsString, Option<std::ffi::OsString>)> {
+    use std::os::unix::ffi::OsStrExt;
+    keys.into_iter()
+        .filter(|key| key.as_bytes().starts_with(b"VPNHIDE_"))
+        .map(|key| (key, None))
+        .chain(
+            production_env(modules)
+                .into_iter()
+                .map(|(key, value)| (key.into(), Some(value.into()))),
+        )
+        .collect()
+}
+
+/// # Safety
+/// Call only from the single-threaded entry point, before starting Tokio/threads.
+pub unsafe fn configure_production_environment(modules: &Path) {
+    let overrides = environment_overrides(std::env::vars_os().map(|(key, _)| key), modules);
+    for (key, value) in overrides {
+        // SAFETY: guaranteed by this function's caller before any thread exists.
+        unsafe {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+}
+
 /// Prepare the persist dir and phase markers, export the production profile into this
 /// process, then detach from the manager's script runner with stdout/stderr appended to
 /// `core.log`. Returns in the detached child only; the parent exits 0 so the manager's
@@ -80,11 +113,9 @@ pub fn enter() {
         let _ = fs::write(&owned, "owned-by-core\n");
     }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from(MODULES_ROOT));
-    for (key, value) in production_env(&modules_root(&exe)) {
-        // SAFETY: called from `main` before the async runtime or any thread starts, so
-        // no other thread can read the environment concurrently.
-        unsafe { std::env::set_var(key, value) };
-    }
+    // Prepare the supervisor's descendants deterministically; worker also
+    // establishes this preset when invoked directly, before starting Tokio.
+    unsafe { configure_production_environment(&modules_root(&exe)) };
     detach(&persist.join("core.log"));
     let started = now_utc();
     eprintln!("phase=starting {started}");
@@ -340,5 +371,65 @@ mod tests {
             Some("/data/adb/vpnhide/core/ports_owned")
         );
         assert!(env.iter().all(|(k, _)| *k != "VPNHIDE_CORE_ALLOW_UIDS"));
+    }
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+    #[test]
+    fn production_replaces_owned_overrides_but_preserves_manager_environment() {
+        use std::{collections::BTreeMap, ffi::OsString};
+        let mut env: BTreeMap<OsString, OsString> = [
+            ("PATH", "/manager/bin:/system/bin"),
+            ("KSU", "true"),
+            ("VPNHIDE_CONFIG_PATH", "/tmp/foreign.json"),
+            ("VPNHIDE_APP_DATA_DIR", "/tmp/foreign-app"),
+            ("VPNHIDE_CORE_ALLOW_UIDS", "garbage"),
+            ("VPNHIDE_TEST_CRASH_AFTER", "persist"),
+            ("VPNHIDE_TEST_DELAY_MS", "999999"),
+            ("VPNHIDE_PORTS_PM_DUMP", "/tmp/foreign-pm"),
+            ("VPNHIDE_OBSERVE_UID", "99999"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.into(), value.into()))
+        .collect();
+        for (key, value) in environment_overrides(
+            env.keys().cloned().collect::<Vec<_>>(),
+            Path::new("/data/adb/modules"),
+        ) {
+            match value {
+                Some(value) => {
+                    env.insert(key, value);
+                }
+                None => {
+                    env.remove(&key);
+                }
+            }
+        }
+        assert_eq!(
+            env.get(std::ffi::OsStr::new("PATH")).unwrap(),
+            "/manager/bin:/system/bin"
+        );
+        assert_eq!(env.get(std::ffi::OsStr::new("KSU")).unwrap(), "true");
+        assert_eq!(
+            env.get(std::ffi::OsStr::new("VPNHIDE_CONFIG_PATH"))
+                .unwrap(),
+            CONFIG_PATH
+        );
+        assert_eq!(
+            env.get(std::ffi::OsStr::new("VPNHIDE_APP_DATA_DIR"))
+                .unwrap(),
+            APP_DATA_DIR
+        );
+        for key in [
+            "VPNHIDE_CORE_ALLOW_UIDS",
+            "VPNHIDE_TEST_CRASH_AFTER",
+            "VPNHIDE_TEST_DELAY_MS",
+            "VPNHIDE_PORTS_PM_DUMP",
+            "VPNHIDE_OBSERVE_UID",
+        ] {
+            assert!(!env.contains_key(std::ffi::OsStr::new(key)));
+        }
     }
 }

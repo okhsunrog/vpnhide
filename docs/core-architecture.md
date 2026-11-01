@@ -296,3 +296,12 @@ These are ceilings, not delays imposed on successful reads. The process observat
 owner still quarantines a genuinely overdue worker and rejects its late result;
 no replacement runs until that worker returns. Filesystem IO is not forcibly
 interruptible; physical permits continue to bound lingering work.
+
+### IPC startup configuration
+
+`EndpointConfig` validates endpoint settings before CLI durable-state initialization.
+Service uses AppOwner (derived app path/owner/0600, dynamic UID lookup per accept);
+plain launch defaults to current UID/0600 with strict explicit overrides. Mandatory
+endpoint preparation completes before handlers start. Failures retry only the app
+endpoint, preserving core/receipt lifecycle. This small configuration type introduces
+no new runtime profile, wire DTO or transport; see [IPC authorization](notes/core-2.0-ipc-auth.md).

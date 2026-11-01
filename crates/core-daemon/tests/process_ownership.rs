@@ -1,5 +1,7 @@
 //! Real process ownership and diagnostic availability with unreadable durable state.
 
+mod common;
+
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -16,7 +18,7 @@ impl Drop for Daemon {
 }
 
 fn command(socket: &Path, config: &Path, journal: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_vpnhide-core"));
+    let mut command = common::core_command();
     command
         .arg(socket)
         .env_clear()

@@ -6,7 +6,7 @@
 mod common;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::time::Duration;
 
 use vpnhide_core_client::CoreClient;
@@ -72,7 +72,7 @@ async fn exercise(case: Case, check: impl FnOnce(&NativeBootOutcome)) {
     }
 
     let mut child = CoreProcess(
-        Command::new(env!("CARGO_BIN_EXE_vpnhide-core"))
+        common::core_command()
             .arg(&socket)
             .env("PATH", dir.path())
             .env("VPNHIDE_CONFIG_PATH", &config_path)

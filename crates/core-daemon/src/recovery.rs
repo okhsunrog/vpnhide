@@ -214,6 +214,7 @@ pub fn revision_after_reconcile(
 }
 
 /// Test-only crash injection. Production never sets `VPNHIDE_TEST_CRASH_AFTER`.
+#[cfg(not(target_os = "android"))]
 pub fn maybe_crash_for_test(point: &str) {
     match std::env::var("VPNHIDE_TEST_CRASH_AFTER") {
         Ok(v) if v == point => {
@@ -226,6 +227,7 @@ pub fn maybe_crash_for_test(point: &str) {
 
 /// Test-only delay before a phase effect (`VPNHIDE_TEST_DELAY_MS` + point via
 /// `VPNHIDE_TEST_DELAY_BEFORE`). Production never sets these.
+#[cfg(not(target_os = "android"))]
 pub fn maybe_delay_for_test(point: &str) {
     let Ok(before) = std::env::var("VPNHIDE_TEST_DELAY_BEFORE") else {
         return;
@@ -240,6 +242,13 @@ pub fn maybe_delay_for_test(point: &str) {
     eprintln!("core: test delay {ms}ms before {point}");
     std::thread::sleep(std::time::Duration::from_millis(ms));
 }
+
+// Android artifacts never interpret fault-injection environment settings.
+// Host integration tests execute the normal CARGO_BIN_EXE binary, not cfg(test).
+#[cfg(target_os = "android")]
+pub fn maybe_crash_for_test(_point: &str) {}
+#[cfg(target_os = "android")]
+pub fn maybe_delay_for_test(_point: &str) {}
 
 #[cfg(test)]
 mod tests {

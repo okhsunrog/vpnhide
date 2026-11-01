@@ -28,7 +28,7 @@ D2 проверен 128 сочетаниями ресурса/holds/retention с
 | B1 | Исправлены доказанные переполнения: disk+RPC budget, полный envelope, escaped diagnostics | Компактный отдельный config fetch — предложение, не реализовано |
 | B2 | `574eae03`: реализовано разделение durable admission/execution; CommandEngine владеет store, mailbox и writer; UI ждёт receipt | Queue wait ограничен в B3; отдельная preparation остаётся последующим упрощением |
 | B3 | Реализованы bounds handlers/blocking workers, queue cancellation и бюджеты наблюдений; проверки ниже | Device stress и измерение RSS на Android остаются acceptance |
-| B4 | Не реализован | Профили запуска; вне этой итерации |
+| B4 | Реализован; device acceptance остаётся | Валидируемый EndpointConfig, strict UID/DAC/SELinux, детерминированный service/test environment; детали ниже |
 | C1–C3 | Не реализованы | Provenance, export lifecycle, measurement identity |
 | D2 | [`fbc60b6c`](https://github.com/okhsunrog/vpnhide/commit/fbc60b6c): реализована проверка зависимостей boot внутри writer; матрица holds/retention/restart в `command_tests.rs` | Реальный reboot и независимый Ports repair на устройстве |
 | D1, D3 | Не реализованы | Runtime reconciliation, служебная durability/логи |
@@ -231,18 +231,50 @@ core от внешнего владельца lock. Observation остаётся
 `external_control_lock_still_refuses_delivery_before_dispatch`. Это исправление
 локальной конкуренции, не завершение всех B3 deadlines или device acceptance.
 
-### B4. P2: сделать профили запуска и подготовку socket явными
+### B4. P2: валидируемая конфигурация IPC и подготовка socket
 
-Штатный service задаёт AppOwner. Ручной запуск допускает опасное сочетание:
-production config/journal paths, Open allowlist и socket mode 0666. Ошибочная
-UID-строка также превращается в Open. Доступ на Android дополнительно зависит
-от SELinux; это footgun ручного запуска, а не доказанная экспозиция штатного service.
+Реализовано без большого framework профилей: service остаётся production preset,
+`EndpointConfig` объединяет endpoint/policy/DAC. Отдельные Sandbox/diagnostic/recovery
+режимы не добавлены: действующим callers достаточно явных параметров и общего test
+launcher. Изначальная проблема Open касалась ручного plain запуска, а не доказанного
+обхода AppOwner штатного service.
 
-- [ ] Ввести явные Production/Sandbox настройки, прочитанные один раз при запуске.
-- [ ] Для Sandbox требовать изолированные пути и принимать свой UID по умолчанию.
-- [ ] Для Production требовать AppOwner и завершённую подготовку DAC/SELinux.
-- [ ] Ошибку chown/chmod/relabel считать ошибкой bind с повтором и диагностикой,
-  а не успешным listening; host-only отсутствие SELinux обрабатывать отдельно.
+- [x] UID-параметры валидируются строго; отсутствующий plain allowlist означает
+  текущий effective UID, mode 0600. Ошибка/пустой список не превращаются в Open.
+  Explicit UID policy не добавляет root. Open доступен лишь явному library caller.
+- [x] AppOwner приоритетен над plain knobs; path/owner/mode согласованы, владелец
+  app directory по-прежнему определяется при каждом accept.
+- [x] Validate до durable state; bind → обязательная подготовка → accept.
+  Ошибки owner/mode/обязательного label закрывают endpoint и освобождают lock;
+  app supervisor повторяет попытку без перезапуска core/boot effects.
+- [x] Уже правильный SELinux label не требует записи. Отсутствие xattrs на host
+  или Android без mounted SELinux допускается; активный Android SELinux требует
+  доступного source label и проверенного совпадения после исправления.
+- [x] service/worker заменяют только унаследованные VPNHIDE_* compiled preset,
+  сохраняя PATH/root-manager environment. Process fixtures очищают environment
+  общим launcher; Android crash/delay injection удалён на этапе компиляции.
+- [x] Документация исправлена: plain запуск не sandbox, config/journal writable.
+- [ ] Device acceptance: SELinux labels/connectto для root managers, установка/
+  отсутствие APK, clear-data/reinstall с новым UID и восстановление endpoint.
+
+Evidence: `ipc_config::tests`, `auth::label_tests`, `listener::preparation_tests`,
+`service::environment_tests`, `tests/ipc_startup.rs`, существующие app_socket и
+process_ownership tests. Host проверки моделируют ошибки label/permission и смену
+владельца через filesystem metadata; это не Android device validation.
+
+Проверки B4 (2026-11-01): 368 Rust tests в пяти core/activator пакетах,
+871 JVM tests; rustfmt, Clippy all-targets с `-D warnings`, ktlint, detekt,
+CPD, Android lint, `assembleDebug` и core arm64/armv7 build прошли. APK подписан
+временным validation key, это не release artifact. Имена crash/delay env hooks
+отсутствуют в обоих Android core binaries. Module scaffold/no-root-exec,
+changelog preview, локальные Markdown links и `git diff --check` также прошли.
+
+Реальный device test не выполнялся: `adb devices -l` в этой среде завершается
+ошибкой создания `/home/agent/.android` на read-only filesystem; настройки
+ANDROID_USER_HOME/ANDROID_SDK_HOME этот adb не перенаправили. Host tests не
+подменяют проверку SELinux/root-manager policy. CI workflow запускается на main,
+не на direct dev-2.x push; запрещённый ранее manual dispatch не повторялся.
+RPC protocol 12, миграции 0.x/1.x и durable admission/receipts не изменены.
 
 ## Этап 3. Согласованность измерений и экспортов
 
@@ -381,8 +413,8 @@ Canonical JSON v1 нельзя удалить без согласованной 
 3. B2: первый CommandEngine и ранний Accepted реализованы с сохранением
    conflict/dedup/retention, queue/shutdown tests и новым UI ожиданием. Остаток —
    preparation/queue latency и дальнейшее сокращение clone/store путей.
-4. B3 реализован в итерации ниже. B4 (профили запуска) и D1 (bounded reconcile
-   через тот же engine) остаются отдельными следующими этапами;
+4. B3 реализован в итерации ниже. B4 реализован ниже; D1 (bounded reconcile
+   через тот же engine) остаётся отдельным следующим этапом;
    автоматическое добавление RU-приложений не входит в beta scope.
 5. C1–C3 и D3 остаются необходимыми проверками перед соответствующими beta
    сценариями; не считать диагностику достоверной только потому, что ZIP создан.
@@ -489,7 +521,7 @@ module scaffold, no-root-exec, changelog preview и ссылки изменён�
 APK остаётся подписанным временным тестовым ключом. Device acceptance и GitHub CI
 не выполнены; запрещённый ручной dispatch не повторялся. Отсутствие device/CI
 нельзя заменять количеством host-тестов. На момент этого отчёта следующим scope
-был B3 (реализация ниже); после него остаются B4 и D1; дальнейшее сокращение clone/store путей
+был B3 (реализация ниже); B4 реализован следующим этапом ниже; остаётся D1; дальнейшее сокращение clone/store путей
 выполнять отдельно, не возвращая app-owned effects или старые активаторы.
 
 

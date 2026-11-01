@@ -253,3 +253,22 @@ See [releasing.md](releasing.md#build-versions) for details.
 - [releasing.md](releasing.md) — version bump, tag, release flow
 - [changelog.md](changelog.md) — how changelog entries flow from JSON → markdown
 - [kmod/BUILDING.md](../kmod/BUILDING.md) — kernel-module build deep dive
+
+## Isolated host core fixtures
+
+A plain `vpnhide-core [socket]` invocation is not a sandbox: config and journal are
+writable even when Native/Ports/root effects are disabled. For a manual host fixture:
+
+```sh
+fixture_dir=$(mktemp -d)
+env -i PATH="$PATH" VPNHIDE_CONFIG_PATH="$fixture_dir/config.json" \
+  VPNHIDE_JOURNAL_PATH="$fixture_dir/operations.json" \
+  target/debug/vpnhide-core "$fixture_dir/core.sock"
+```
+
+The socket defaults to the current effective UID and `0600`. Tests use
+`tests/common::core_command` to clear inherited runtime overrides and then explicitly
+add fixture settings. `service`/`service-worker` always select production paths and
+are not fixture entry points. Host process tests retain crash/delay hooks; Android
+binaries compile those hooks out. These choices do not isolate arbitrary host OS access.
+See [IPC authorization](notes/core-2.0-ipc-auth.md) for validation and preparation rules.

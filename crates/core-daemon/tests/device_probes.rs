@@ -1,10 +1,10 @@
 //! The diagnostics probes run as core's own child (`vpnhide-core probe …`), in Rust.
-use std::process::Command;
+mod common;
 
 use vpnhide_core_daemon::diagnostics::{prefixes, sections};
 
 fn probe(args: &[&str]) -> (i32, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_vpnhide-core"))
+    let out = common::core_command()
         .arg("probe")
         .args(args)
         .output()
@@ -50,7 +50,7 @@ fn unexpected_probe_arguments_are_refused() {
 }
 
 fn probe_with_inputs(input: &[u8]) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_vpnhide-core"));
+    let mut command = common::core_command();
     command.args(["probe", "hook-counters", "--kpm-state-stdin"]);
     vpnhide_activator::capture_command(
         &mut command,
