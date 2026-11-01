@@ -262,3 +262,11 @@ Bridge/export `awaitSnapshot` waits for a requested root checkpoint (or a newer
 one) and acceptance of already-published source events. It returns an existing
 owner publication, rather than rebuilding a context from independent flow reads.
 This is coherent accepted knowledge, not simultaneous physical device sampling.
+
+B3 aligns the root observation budget with core's existing bounded collection:
+225 seconds in RootSnapshotCache, beyond the 210-second RPC / 200-second collector.
+Root-dependent caches add this source budget before their projection allowance,
+so a valid slow source is not quarantined by an earlier dependent timer. Forensic
+collections cannot consume the standalone RootSnapshot slot. Fast current state
+and receipts remain on the publication path. Virtual-time tests cover a valid
+45-second collection, actual deadline quarantine and rejection of late results.

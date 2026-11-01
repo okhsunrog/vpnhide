@@ -151,7 +151,8 @@ five seconds, and full framework fallback runs every 30 seconds while idle.
 Unchanged evidence does not advance routing generation. Runtime backend refresh
 updates liveness/freshness without overwriting boot selection or delivery facts.
 
-Diagnostics admit at most two concurrent collections, 32 probes per request and
+Diagnostics reserve one collection for a standalone Dashboard/inventory RootSnapshot,
+independently of at most two forensic collections, with 32 probes per request and
 four probe workers. Capture is bounded to 64 MiB per request and 32 MiB per probe;
 the whole collection has a 200-second budget. Large outputs use unique export
 directories. Fixed external commands have output
@@ -247,8 +248,10 @@ session before querying its terminal receipt. It does not classify normal progre
 as ApplicationUnknown and never re-submits an admitted command. Disconnect or a
 storage fault still enters explicit uncertainty/recovery. Commands queued behind
 an active writer have not yet been admitted: the mailbox stays bounded and full
-queues return Busy. Queue wait and ID allocation can still wait behind a slow
-writer; bounding their deadlines is remaining B3 work, not solved by early Accepted.
+queues return Busy. RPC queue wait is bounded to two seconds; expired unstarted allocation/lease work
+and command tickets cannot execute later. Once the writer starts admission, a lost
+reply is still recovered by operation ID. Internal boot and restoration work keep
+completion semantics. See the RPC bounds below.
 ConfigStore snapshots still use short mutex sections and working clones around IO;
 this change does not claim elimination of every clone/converter or a transport rewrite.
 
@@ -257,3 +260,39 @@ external flock. Reads fail busy rather than blocking; delivery/load may wait up 
 10 seconds for a local observation before first dispatch. An external process's
 flock still refuses immediately. This prevents core's own read from spuriously
 failing its delivery; it never retries an already-dispatched or uncertain effect.
+
+## B3 RPC overload and deadlines
+
+Each of the eight accepted connections tracks at most 16 requests and drives at
+most 32 response futures without spawning detached RPC tasks (global bounds 128
+tracked requests / 256 driver futures). Response buffering is one plus the bounded
+sender reservations; frames stay capped at 1 MiB. The driver limit exceeds the
+request limit so it can keep pumping writes and cancellation while responses wait.
+A non-reading peer stalls its own channel, not another connection.
+
+Actual blocking work owns permits until return, even after cancellation: six
+ordinary mutation/allocation workers, two recovery/recording-finalization workers,
+two recording-status workers, two forensic collections and one root snapshot.
+Repair/credentials/cleanup/reset use the recovery pool; all commands still pass
+normal admission policy. There are at most two held state polls per connection;
+extra polls return the current publication unchanged. State/receipt queries do
+not queue behind the writer or diagnostic workers. Recording status overload and
+channel overload return tarpc WouldBlock; mutation saturation/expired queued
+admission returns Busy; diagnostic saturation returns an explicit failed probe.
+There is no automatic mutation retry. Server refusal and a per-call deadline no
+longer evict the shared client connection; genuine channel failure still does.
+
+An atomic queued/started/cancelled ticket prevents a cancelled or expired queued
+command from executing later. Cancellation cannot revoke a ticket the writer has
+started, including durable admission. Cancellation races after that point require
+receipt recovery; they never produce a false Busy assertion that no work started.
+The two-second limit is a queue budget, not a bound on fsync or effect execution.
+
+RootSnapshotCache allows 225 seconds, beyond the 200-second collection budget and
+210-second RPC deadline and CoreRoot’s 220-second call envelope, including parent
+KPM observations and child probes.
+Dependent caches include the source budget before their own projection budget.
+These are ceilings, not delays imposed on successful reads. The process observation
+owner still quarantines a genuinely overdue worker and rejects its late result;
+no replacement runs until that worker returns. Filesystem IO is not forcibly
+interruptible; physical permits continue to bound lingering work.

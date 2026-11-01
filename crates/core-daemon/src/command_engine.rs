@@ -1,17 +1,72 @@
 //! Single command owner. RPC waits for durable admission, internal maintenance
 //! waits for completion; neither waiter owns or cancels accepted execution.
 use crate::server::CoreState;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock, Weak, mpsc};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, Weak, mpsc};
 use vpnhide_core_rpc::{Accepted, CoreCommand, OperationId, SubmitError};
 
 pub(crate) type AdmissionReply = mpsc::Sender<Result<Accepted, SubmitError>>;
+thread_local! {
+    static RPC_QUEUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+// The blocking RPC owner scopes its queue policy. Internal boot, restoration and
+// shutdown retain completion semantics; the writer thread never inherits this flag.
+pub(crate) struct RpcQueueBudget(bool);
+impl RpcQueueBudget {
+    pub(crate) fn enter() -> Self {
+        Self(RPC_QUEUE.replace(true))
+    }
+}
+impl Drop for RpcQueueBudget {
+    fn drop(&mut self) {
+        RPC_QUEUE.set(self.0);
+    }
+}
+
+const QUEUE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+// Only Queued -> Started grants execution. Dropping a caller or expiring its
+// queue budget may win Queued -> Cancelled, never cancel Started/durable work.
+#[derive(Clone)]
+pub(crate) struct AdmissionTicket {
+    state: Arc<AtomicU8>,
+    deadline: std::time::Instant,
+}
+impl AdmissionTicket {
+    pub(crate) fn new(deadline: std::time::Instant) -> Self {
+        Self {
+            state: Arc::new(AtomicU8::new(0)),
+            deadline: deadline.min(std::time::Instant::now() + QUEUE_WAIT),
+        }
+    }
+    fn start(&self) -> bool {
+        if std::time::Instant::now() >= self.deadline {
+            self.cancel();
+        }
+        self.state
+            .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+    pub(crate) fn cancel(&self) {
+        let _ = self
+            .state
+            .compare_exchange(0, 2, Ordering::SeqCst, Ordering::SeqCst);
+    }
+}
+pub(crate) struct CancelQueued(pub(crate) AdmissionTicket);
+impl Drop for CancelQueued {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
 type InternalWork = Box<dyn FnOnce(&CoreState) + Send>;
 enum Message {
     Command {
         op: OperationId,
         command: Box<CoreCommand>,
         reply: AdmissionReply,
+        ticket: AdmissionTicket,
     },
     Internal(InternalWork),
     Stop,
@@ -43,9 +98,17 @@ impl CommandEngine {
                     let message = receiver.recv_timeout(std::time::Duration::from_secs(1));
                     let Some(state) = state.upgrade() else { break };
                     match message {
-                        Ok(Message::Command { op, command, reply }) => {
-                            let result =
-                                state.execute_command_admitted(op, *command, Some(reply.clone()));
+                        Ok(Message::Command {
+                            op,
+                            command,
+                            reply,
+                            ticket,
+                        }) => {
+                            let result = if ticket.start() {
+                                state.execute_command_admitted(op, *command, Some(reply.clone()))
+                            } else {
+                                Err(SubmitError::Busy)
+                            };
                             // Sent only if admission did not already acknowledge; the
                             // waiter drops after its first response. Execution survives.
                             let _ = reply.send(result);
@@ -76,41 +139,94 @@ impl CommandEngine {
             })
         }
     }
+    fn gate(&self, bounded: bool) -> Result<std::sync::MutexGuard<'_, ()>, SubmitError> {
+        if bounded {
+            self.admission.try_lock().map_err(|error| match error {
+                std::sync::TryLockError::WouldBlock => SubmitError::Busy,
+                std::sync::TryLockError::Poisoned(_) => SubmitError::Unavailable,
+            })
+        } else {
+            self.admission.lock().map_err(|_| SubmitError::Unavailable)
+        }
+    }
     pub(crate) fn call<T: Send + 'static>(
         &self,
         work: impl FnOnce(&CoreState) -> T + Send + 'static,
         internal_release: bool,
     ) -> Result<T, SubmitError> {
         let (sender, receiver) = mpsc::channel();
+        let ticket = AdmissionTicket::new(std::time::Instant::now() + QUEUE_WAIT);
+        let work_ticket = ticket.clone();
+        let bounded = RPC_QUEUE.get() && !internal_release;
         {
-            let _gate = self.admission.lock().expect("engine admission");
+            let _gate = self.gate(bounded)?;
             self.enqueue(
                 Message::Internal(Box::new(move |state| {
-                    let _ = sender.send(work(state));
+                    let result = if bounded && !work_ticket.start() {
+                        Err(SubmitError::Busy)
+                    } else {
+                        Ok(work(state))
+                    };
+                    let _ = sender.send(result);
                 })),
                 internal_release,
             )?;
         }
-        receiver.recv().map_err(|_| SubmitError::Unavailable)
+        if !bounded {
+            return receiver.recv().map_err(|_| SubmitError::Unavailable)?;
+        }
+        match receiver.recv_timeout(
+            ticket
+                .deadline
+                .saturating_duration_since(std::time::Instant::now()),
+        ) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(SubmitError::Unavailable),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                ticket.cancel();
+                if ticket.state.load(Ordering::SeqCst) == 2 {
+                    Err(SubmitError::Busy)
+                } else {
+                    receiver.recv().map_err(|_| SubmitError::Unavailable)?
+                }
+            }
+        }
     }
     pub(crate) fn submit(
         &self,
         op: OperationId,
         command: CoreCommand,
+        ticket: AdmissionTicket,
     ) -> Result<Accepted, SubmitError> {
         let (reply, receiver) = mpsc::channel();
         {
-            let _gate = self.admission.lock().expect("engine admission");
+            let _gate = self.gate(true)?;
             self.enqueue(
                 Message::Command {
                     op,
                     command: Box::new(command),
                     reply,
+                    ticket: ticket.clone(),
                 },
                 false,
             )?;
         }
-        receiver.recv().map_err(|_| SubmitError::Unavailable)?
+        match receiver.recv_timeout(
+            ticket
+                .deadline
+                .saturating_duration_since(std::time::Instant::now()),
+        ) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(SubmitError::Unavailable),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                ticket.cancel();
+                if ticket.state.load(Ordering::SeqCst) == 2 {
+                    Err(SubmitError::Busy)
+                } else {
+                    receiver.recv().map_err(|_| SubmitError::Unavailable)?
+                }
+            }
+        }
     }
     #[cfg(test)]
     pub(crate) fn enqueue_test(&self, work: InternalWork) -> Result<(), SubmitError> {

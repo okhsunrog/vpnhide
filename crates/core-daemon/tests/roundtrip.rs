@@ -90,3 +90,65 @@ async fn a_restarted_core_answers_an_old_epoch_cursor() {
     assert_eq!(published.epoch, 200);
     assert!(published.revision < 100);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn slow_response_reader_is_bounded_and_resumes_without_blocking_other_connections() {
+    use futures::{SinkExt, StreamExt};
+    use tokio_util::codec::length_delimited::LengthDelimitedCodec;
+    use vpnhide_core_rpc::{VpnhideCoreRequest, VpnhideCoreResponse};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("slow.sock");
+    let (state, _handle) = spawn_core(&path, 321);
+    state
+        .publisher
+        .update(|snapshot| snapshot.startup_error = Some("x".repeat(256 * 1024)));
+    let stream = tokio::net::UnixStream::connect(&path).await.unwrap();
+    let framed = LengthDelimitedCodec::builder()
+        .max_frame_length(vpnhide_core_rpc::MAX_FRAME_BYTES)
+        .new_framed(stream);
+    let mut raw = tarpc::serde_transport::new(
+        framed,
+        tokio_serde::formats::Json::<
+            tarpc::Response<VpnhideCoreResponse>,
+            tarpc::ClientMessage<VpnhideCoreRequest>,
+        >::default(),
+    );
+    for id in 0..128 {
+        let mut context = tarpc::context::current();
+        context.deadline = std::time::Instant::now() + Duration::from_secs(30);
+        raw.send(tarpc::ClientMessage::Request(tarpc::Request {
+            context,
+            id,
+            message: VpnhideCoreRequest::StateSince {
+                epoch: 0,
+                revision: 0,
+            },
+        }))
+        .await
+        .unwrap();
+    }
+    // Enough large responses to fill the socket. A second connection must still
+    // read receipts/state; resuming this reader must flush, not deadlock on a full
+    // response queue while the driver waits for its own handler futures.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let other = CoreClient::connect(path);
+    let current = tokio::time::timeout(Duration::from_secs(2), other.current())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.epoch, 321);
+    assert!(
+        other
+            .get_operation(OperationId(999))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    tokio::time::timeout(Duration::from_secs(10), async {
+        for _ in 0..128 {
+            raw.next().await.unwrap().unwrap();
+        }
+    })
+    .await
+    .expect("slow reader can resume all bounded responses");
+}

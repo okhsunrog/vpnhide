@@ -173,9 +173,12 @@ Generated UniFFI types carry requests; there is no serialized-text request facad
 | Concurrent socket connections | 8 | `MAX_CONCURRENT_CONNECTIONS`, same file |
 | Resulting canonical config | 512 KiB in each of disk JSON and normalized RPC JSON | daemon admission and startup, `config_edit::validate_candidate` |
 | Atomic field batch | 4096 edits; no nested batch/import/repair | `MAX_BATCH_EDITS`, core-rpc; daemon admission |
-| Serialized writer queue | 16 tasks; Busy on overload | core-daemon `server` |
+| RPC handlers | 16 tracked requests / 32 driver futures per connection; 128 / 256 globally at 8 connections | core-daemon `server` |
+| Physical blocking RPC workers | 6 ordinary + 2 recovery + 2 recording status; permits held until physical return | core-daemon `server` |
+| Held state polls | 2 per connection; excess returns current state | core-daemon `server` |
+| Serialized writer queue | 16 tasks; RPC wait before start at most 2 s; Busy on overload/expiry | core-daemon `command_engine` |
 | Terminal operation retention | 64 receipts + one pinned debug-restore receipt + at most one in-flight; expired uncertainty retains at most five held phases and one pending Persist proof | core-daemon `journal`; monotonic expiry floor |
-| Heavy diagnostic collections | 2 concurrent | core-daemon `server` semaphore |
+| Diagnostic collections | 2 forensic + 1 reserved standalone RootSnapshot | core-daemon `server` semaphore |
 | Probes per collection | 32, identical probes deduplicated | core-daemon `diagnostics` |
 | Probe worker threads | 4 per collection | same file |
 | Retained command output | 64 MiB per collection; at most 32 MiB per probe | same file and activator `capture_command` |
@@ -196,8 +199,10 @@ goes to a file in the app's `vpnhide-core-export` directory, which the app reads
 back. Stderr is discarded. Each probe is killed at core's per-probe runtime cap
 (`PROBE_MAX_RUNTIME`).
 
-Other observation deadlines are 60 seconds, except Dashboard (120 seconds while
-its loader still awaits the diagnostic suite). A read waiter can follow
+RootSnapshotCache allows 225 seconds, covering the CoreRoot 220-second call
+envelope and the 210-second RPC deadline. Other caches allow 60 seconds of their
+own work (Dashboard: 120), plus the declared source budget when they depend on root
+observations. A read waiter can follow
 superseded generations for at most twice its cache deadline. This bounds waiting,
 not the lifetime of an uncooperative worker. See
 [observation coordinator](observation-coordinator.md) for quarantine and retry rules.

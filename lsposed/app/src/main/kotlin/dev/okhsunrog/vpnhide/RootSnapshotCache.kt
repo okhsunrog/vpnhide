@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.CopyOnWriteArrayList
 import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
+internal const val ROOT_SNAPSHOT_TIMEOUT_MS = 225_000L
+
 internal data class RootSnapshot(
     val sections: Map<String, String>,
     val observationId: Long = 0,
@@ -78,7 +80,8 @@ internal val REQUIRED_ROOT_SNAPSHOT_SECTIONS =
 internal object RootSnapshotCache : StateCache<RootSnapshot>(
     traceName = "root_snapshot",
     logTag = LogTags.APP,
-    timeoutMillis = 15_000,
+    // Covers CoreRoot's 220s call envelope (200s collector / 210s RPC), including KPM input.
+    timeoutMillis = ROOT_SNAPSHOT_TIMEOUT_MS,
 ) {
     val snapshot: StateFlow<RootSnapshot?> get() = value
     private val dependents = CopyOnWriteArrayList<() -> Unit>()
@@ -93,6 +96,8 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
 
     val dependency =
         object : ObservationDependency {
+            override val collectionBudgetMillis: Long = ROOT_SNAPSHOT_TIMEOUT_MS
+
             override fun subscribe(invalidate: () -> Unit) {
                 dependents.add(invalidate)
             }
@@ -103,6 +108,8 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
         }
     val inventoryDependency =
         object : ObservationDependency {
+            override val collectionBudgetMillis: Long = ROOT_SNAPSHOT_TIMEOUT_MS
+
             override fun subscribe(invalidate: () -> Unit) {
                 inventoryDependents.add(invalidate)
             }

@@ -10,6 +10,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -210,6 +213,44 @@ class ObservationCoordinatorTest {
             read.result.complete("new")
             assertEquals("new", explicit.await())
             assertNull(owner.state.value.stale)
+        }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun `root budget accepts slow valid collection and quarantines actual overrun`() =
+        runTest {
+            val result = CompletableDeferred<String>()
+            val owner =
+                ObservationCoordinator(
+                    scope = backgroundScope,
+                    timeoutMillis = ROOT_SNAPSHOT_TIMEOUT_MS,
+                    load = { result.await() },
+                )
+            val read = async { owner.read() }
+            runCurrent()
+            advanceTimeBy(45_000)
+            assertFalse(owner.state.value.quarantined)
+            result.complete("valid slow root")
+            runCurrent()
+            assertEquals("valid slow root", read.await())
+
+            val late = CompletableDeferred<String>()
+            val hung =
+                ObservationCoordinator(
+                    scope = backgroundScope,
+                    timeoutMillis = ROOT_SNAPSHOT_TIMEOUT_MS,
+                    load = { late.await() },
+                )
+            val failed = async { runCatching { hung.read() } }
+            runCurrent()
+            advanceTimeBy(ROOT_SNAPSHOT_TIMEOUT_MS)
+            runCurrent()
+            assertTrue(failed.await().isFailure)
+            assertTrue(hung.state.value.quarantined)
+            late.complete("obsolete")
+            runCurrent()
+            assertFalse(hung.state.value.quarantined)
+            assertNull(hung.state.value.lastGood)
         }
 
     private fun observationTest(

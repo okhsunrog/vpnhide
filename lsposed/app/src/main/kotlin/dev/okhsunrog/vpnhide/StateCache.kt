@@ -8,6 +8,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.StateFlow
 
 internal interface ObservationDependency {
+    /** Budget of the source a projection may have to join before doing its own work. */
+    val collectionBudgetMillis: Long get() = 0
+
     fun subscribe(invalidate: () -> Unit)
 
     fun refresh()
@@ -27,7 +30,7 @@ internal abstract class StateCache<T>(
     private val coordinator by lazy {
         ObservationCoordinator(
             scope = ObservationRuntime.scope,
-            timeoutMillis = timeoutMillis,
+            timeoutMillis = timeoutMillis + (source?.collectionBudgetMillis ?: 0),
             ready = { ready },
             load = { request ->
                 StartupTrace.mark("${traceName}_start")

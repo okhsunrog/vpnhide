@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::prelude::*;
 use tarpc::context::Context;
-use tarpc::server::{BaseChannel, Channel};
+use tarpc::server::{BaseChannel, Channel, Serve};
 use tokio::net::UnixStream;
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 use tokio_util::sync::CancellationToken;
@@ -32,8 +32,17 @@ use crate::publisher::Publisher;
 #[path = "command_tests.rs"]
 mod command_tests;
 
+#[cfg(test)]
+#[path = "rpc_bounds_tests.rs"]
+mod rpc_bounds_tests;
+
 /// This core build, reported in the handshake for diagnostics only.
 pub const CORE_BUILD: &str = env!("CARGO_PKG_VERSION");
+
+// Keep the driver bound above tracked requests: it must continue polling the
+// channel to flush responses/cancellations, including for a slow reader.
+const RPC_REQUESTS_PER_CONNECTION: usize = 16;
+const RPC_FUTURES_PER_CONNECTION: usize = 32;
 
 /// The authoritative config, its revision, and this instance's operation records.
 ///
@@ -103,6 +112,10 @@ pub struct CoreState {
     shutdown_gate: Mutex<()>,
     logcat_gate: Mutex<()>,
     heavy_rpc: Arc<tokio::sync::Semaphore>,
+    work_rpc: Arc<tokio::sync::Semaphore>,
+    status_rpc: Arc<tokio::sync::Semaphore>,
+    root_rpc: Arc<tokio::sync::Semaphore>,
+    recovery_rpc: Arc<tokio::sync::Semaphore>,
     live_leases: Mutex<std::collections::HashMap<DebugLeaseId, LiveLease>>,
     /// Where the durable canonical config lives. `None` = no persistence (host tests); a
     /// path means every accepted change is written there before it is acknowledged.
@@ -838,6 +851,10 @@ impl CoreState {
             logcat_gate: Mutex::new(()),
             instance_guard: std::sync::OnceLock::new(),
             heavy_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
+            work_rpc: Arc::new(tokio::sync::Semaphore::new(6)),
+            status_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
+            root_rpc: Arc::new(tokio::sync::Semaphore::new(1)),
+            recovery_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
             live_leases: Mutex::new(Default::default()),
             config_path: None,
             journal_path: None,
@@ -1014,6 +1031,10 @@ impl CoreState {
             logcat_gate: Mutex::new(()),
             instance_guard: std::sync::OnceLock::new(),
             heavy_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
+            work_rpc: Arc::new(tokio::sync::Semaphore::new(6)),
+            status_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
+            root_rpc: Arc::new(tokio::sync::Semaphore::new(1)),
+            recovery_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
             live_leases: Mutex::new(Default::default()),
             config_path: Some(path),
             journal_path,
@@ -1976,11 +1997,17 @@ impl PhaseHook for JournalPhaseHook<'_> {
 #[derive(Clone)]
 pub struct CoreServer {
     state: Arc<CoreState>,
+    polls: Arc<tokio::sync::Semaphore>,
+    status_permit: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
 
 impl CoreServer {
     pub fn new(state: Arc<CoreState>) -> Self {
-        CoreServer { state }
+        CoreServer {
+            state,
+            polls: Arc::new(tokio::sync::Semaphore::new(2)),
+            status_permit: None,
+        }
     }
 }
 
@@ -2000,28 +2027,64 @@ impl VpnhideCore for CoreServer {
     }
 
     async fn state_since(self, _ctx: Context, epoch: u64, revision: u64) -> Published {
+        let Ok(_permit) = self.polls.try_acquire() else {
+            return crate::publisher::bounded_response(self.state.publisher.current());
+        };
         crate::publisher::bounded_response(self.state.publisher.state_since(epoch, revision).await)
     }
 
     async fn allocate_operation_id(self, _ctx: Context) -> Result<OperationId, SubmitError> {
+        let permit = self
+            .state
+            .work_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| SubmitError::Busy)?;
         let state = self.state;
-        tokio::task::spawn_blocking(move || state.issue_operation_id())
-            .await
-            .unwrap_or(Err(SubmitError::Unavailable))
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _queue_budget = crate::command_engine::RpcQueueBudget::enter();
+            state.issue_operation_id()
+        })
+        .await
+        .unwrap_or(Err(SubmitError::Unavailable))
     }
 
     async fn submit_command(
         self,
-        _ctx: Context,
+        ctx: Context,
         op: OperationId,
         command: CoreCommand,
     ) -> Result<Accepted, SubmitError> {
+        let recovery = matches!(
+            &command,
+            CoreCommand::Edit {
+                edit: ConfigEdit::RepairActivation,
+                ..
+            } | CoreCommand::SetSuperkey { .. }
+                | CoreCommand::ClearSuperkey { .. }
+                | CoreCommand::CleanupLegacy
+                | CoreCommand::FullReset
+        );
+        let pool = if recovery {
+            &self.state.recovery_rpc
+        } else {
+            &self.state.work_rpc
+        };
+        let permit = pool
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| SubmitError::Busy)?;
+        let ticket = crate::command_engine::AdmissionTicket::new(ctx.deadline);
+        let _cancel = crate::command_engine::CancelQueued(ticket.clone());
         let state = self.state;
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _queue_budget = crate::command_engine::RpcQueueBudget::enter();
             if state.shutting_down.load(Ordering::SeqCst) {
                 return Err(SubmitError::Unavailable);
             }
-            state.engine.submit(op, command)
+            state.engine.submit(op, command, ticket)
         })
         .await
         .unwrap_or(Err(SubmitError::Unavailable))
@@ -2033,24 +2096,41 @@ impl VpnhideCore for CoreServer {
         id: DebugLeaseId,
         owner: DebugLeaseOwner,
     ) -> Result<(), SubmitError> {
+        let permit = self
+            .state
+            .work_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| SubmitError::Busy)?;
         let state = self.state;
-        tokio::task::spawn_blocking(move || state.acquire_debug_lease(id, owner))
-            .await
-            .unwrap_or(Err(SubmitError::Unavailable))
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _queue_budget = crate::command_engine::RpcQueueBudget::enter();
+            state.acquire_debug_lease(id, owner)
+        })
+        .await
+        .unwrap_or(Err(SubmitError::Unavailable))
     }
 
     async fn release_debug_lease(self, _ctx: Context, id: DebugLeaseId) -> Result<(), SubmitError> {
+        let permit = self
+            .state
+            .recovery_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| SubmitError::Busy)?;
         let state = self.state;
-        tokio::task::spawn_blocking(move || state.release_debug_lease(id))
-            .await
-            .unwrap_or(Err(SubmitError::Unavailable))
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _queue_budget = crate::command_engine::RpcQueueBudget::enter();
+            state.release_debug_lease(id)
+        })
+        .await
+        .unwrap_or(Err(SubmitError::Unavailable))
     }
 
     async fn get_operation(self, _ctx: Context, op: OperationId) -> Option<OperationRecord> {
-        let state = self.state;
-        tokio::task::spawn_blocking(move || state.get_operation(op))
-            .await
-            .unwrap_or(None)
+        self.state.get_operation(op)
     }
 
     async fn collect_diagnostics(
@@ -2059,7 +2139,17 @@ impl VpnhideCore for CoreServer {
         request: DiagnosticsRequest,
     ) -> DiagnosticsReport {
         let state = self.state.clone();
-        let Ok(permit) = state.heavy_rpc.clone().try_acquire_owned() else {
+        // Dashboard/inventory never waits for a forensic export to release a slot.
+        let pool = if matches!(
+            request.probes.as_slice(),
+            [vpnhide_core_rpc::DiagnosticProbe::RootSnapshot { .. }]
+        ) && !request.clear_dmesg
+        {
+            &state.root_rpc
+        } else {
+            &state.heavy_rpc
+        };
+        let Ok(permit) = pool.clone().try_acquire_owned() else {
             return DiagnosticsReport {
                 outputs: request
                     .probes
@@ -2079,6 +2169,7 @@ impl VpnhideCore for CoreServer {
         };
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
+            let _queue_budget = crate::command_engine::RpcQueueBudget::enter();
             state.collect_diagnostics(&request)
         })
         .await
@@ -2090,10 +2181,22 @@ impl VpnhideCore for CoreServer {
         _ctx: Context,
         session: LogcatSessionId,
     ) -> Result<LogcatSessionStatus, LogcatRecordingError> {
+        let permit = self
+            .state
+            .work_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                LogcatRecordingError::Failed("core recording busy; retry after current work".into())
+            })?;
         let state = self.state.clone();
-        tokio::task::spawn_blocking(move || state.start_logcat_recording(session))
-            .await
-            .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _queue_budget = crate::command_engine::RpcQueueBudget::enter();
+            state.start_logcat_recording(session)
+        })
+        .await
+        .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
     }
 
     async fn stop_logcat_recording(
@@ -2101,10 +2204,22 @@ impl VpnhideCore for CoreServer {
         _ctx: Context,
         session: LogcatSessionId,
     ) -> Result<LogcatSessionStatus, LogcatRecordingError> {
+        let permit = self
+            .state
+            .recovery_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                LogcatRecordingError::Failed("core recording busy; retry after current work".into())
+            })?;
         let state = self.state.clone();
-        tokio::task::spawn_blocking(move || state.stop_logcat_recording(session))
-            .await
-            .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _queue_budget = crate::command_engine::RpcQueueBudget::enter();
+            state.stop_logcat_recording(session)
+        })
+        .await
+        .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
     }
 
     async fn ack_logcat_recording(
@@ -2112,10 +2227,22 @@ impl VpnhideCore for CoreServer {
         _ctx: Context,
         session: LogcatSessionId,
     ) -> Result<LogcatSessionStatus, LogcatRecordingError> {
+        let permit = self
+            .state
+            .recovery_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                LogcatRecordingError::Failed("core recording busy; retry after current work".into())
+            })?;
         let state = self.state.clone();
-        tokio::task::spawn_blocking(move || state.ack_logcat_recording(session))
-            .await
-            .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _queue_budget = crate::command_engine::RpcQueueBudget::enter();
+            state.ack_logcat_recording(session)
+        })
+        .await
+        .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
     }
 
     async fn discard_logcat_recording(
@@ -2123,17 +2250,44 @@ impl VpnhideCore for CoreServer {
         _ctx: Context,
         session: LogcatSessionId,
     ) -> Result<(), LogcatRecordingError> {
+        let permit = self
+            .state
+            .recovery_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                LogcatRecordingError::Failed("core recording busy; retry after current work".into())
+            })?;
         let state = self.state.clone();
-        tokio::task::spawn_blocking(move || state.discard_logcat_recording(session))
-            .await
-            .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _queue_budget = crate::command_engine::RpcQueueBudget::enter();
+            state.discard_logcat_recording(session)
+        })
+        .await
+        .unwrap_or_else(|_| Err(LogcatRecordingError::Failed("core task failed".into())))
     }
 
     async fn logcat_recording_status(self, _ctx: Context) -> Option<LogcatSessionStatus> {
-        let state = self.state.clone();
-        tokio::task::spawn_blocking(move || state.logcat().status())
-            .await
-            .unwrap_or(None)
+        let state = self.state;
+        let permit = match self.status_permit {
+            Some(permit) => permit,
+            None => Arc::new(
+                state
+                    .status_rpc
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .expect("status pool open"),
+            ),
+        };
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _queue_budget = crate::command_engine::RpcQueueBudget::enter();
+            state.logcat().status()
+        })
+        .await
+        .unwrap_or(None)
     }
 }
 
@@ -2199,11 +2353,37 @@ pub async fn serve_connection(
         .new_framed(stream);
     let transport = tarpc::serde_transport::new(framed, tokio_serde::formats::Json::default());
     let server = CoreServer::new(state);
-    let serve = BaseChannel::with_defaults(transport)
-        .execute(server.serve())
-        .for_each(|response| async move {
-            tokio::spawn(response);
-        });
+    let serve = BaseChannel::new(
+        tarpc::server::Config {
+            pending_response_buffer: 1,
+        },
+        transport,
+    )
+    .max_concurrent_requests(RPC_REQUESTS_PER_CONNECTION)
+    .execute(tarpc::server::serve(move |ctx, request| {
+        let mut server = server.clone();
+        async move {
+            if matches!(
+                request,
+                vpnhide_core_rpc::VpnhideCoreRequest::LogcatRecordingStatus {}
+            ) {
+                let permit = server
+                    .state
+                    .status_rpc
+                    .clone()
+                    .try_acquire_owned()
+                    .map_err(|_| {
+                        tarpc::ServerError::new(
+                            std::io::ErrorKind::WouldBlock,
+                            "recording status busy".into(),
+                        )
+                    })?;
+                server.status_permit = Some(Arc::new(permit));
+            }
+            server.serve().serve(ctx, request).await
+        }
+    }))
+    .for_each_concurrent(RPC_FUTURES_PER_CONNECTION, std::convert::identity);
     tokio::select! {
         _ = cancel.cancelled() => {}
         _ = serve => {}

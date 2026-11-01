@@ -682,7 +682,10 @@ fn reader_and_receipts_remain_available_while_the_bounded_writer_is_busy() {
             CoreCommand::Edit {
                 base: BaseRef { revision: 0 },
                 edit: ConfigEdit::RepairActivation,
-            }
+            },
+            crate::command_engine::AdmissionTicket::new(
+                std::time::Instant::now() + std::time::Duration::from_secs(1)
+            ),
         ),
         Err(SubmitError::Busy)
     );

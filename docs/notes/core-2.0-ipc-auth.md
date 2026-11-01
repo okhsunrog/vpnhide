@@ -39,7 +39,11 @@ Host/dev runs (no `VPNHIDE_APP_DATA_DIR`) keep the plain path socket with the en
 | Concurrent connections | `MAX_CONCURRENT_CONNECTIONS` = 8 |
 | State long-poll | `STATE_HOLD` / `STATE_POLL_DEADLINE` |
 | Writer queue | 16 tasks; overload returns Busy |
-| Heavy diagnostic collections | 2; each has at most 32 probes and 4 workers |
+| RPC requests / driver futures | 16 / 32 per connection; 128 / 256 globally at 8 connections |
+| Physical RPC blocking workers | 6 ordinary + 2 recovery + 2 recording-status; permits survive waiter cancellation |
+| Held state polls | 2 per connection; extra polls return current publication |
+| RPC writer queue wait | 2 seconds before start; expired/cancelled commands cannot execute later |
+| Diagnostic collections | 2 forensic + 1 reserved standalone RootSnapshot; at most 32 probes and 4 workers each |
 
 ## APK connection and save path (protocol 12)
 

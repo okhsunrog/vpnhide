@@ -7,6 +7,7 @@
 [`9613e21a`](https://github.com/okhsunrog/vpnhide/commit/9613e21a9fcdb42c19fc250f83aab9d7761099a2).
 Текущий контракт описан в [core-architecture.md](../core-architecture.md).
 Отмеченный checkbox означает реализованный код/host regression, а не device acceptance.
+Историческая проверка D2 (актуальные результаты B3 — в конце документа):
 D2 проверен 128 сочетаниями ресурса/holds/retention с повторной загрузкой journal.
 Повторный общий Rust-прогон: 284 passed; Clippy/fmt прошли. Первый общий прогон
 имел KPM EAGAIN (подробности B3); позже конкуренция была воспроизведена
@@ -25,8 +26,9 @@ D2 проверен 128 сочетаниями ресурса/holds/retention с
 | A4 | Реализовано (`c2ddec74`): storage fault отдельно от terminal receipt; fault matrix до/после rename и restart | RPC v12 требует совместимых APK/core; device fault acceptance |
 | A5 | Реализовано (`15d43f07`): pending/active внутри lifecycle, подтверждённый logging, Instant deadlines, orphan cleanup | Device capture/reboot acceptance |
 | B1 | Исправлены доказанные переполнения: disk+RPC budget, полный envelope, escaped diagnostics | Компактный отдельный config fetch — предложение, не реализовано |
-| B2 | `574eae03`: реализовано разделение durable admission/execution; CommandEngine владеет store, mailbox и writer; UI ждёт receipt | Queue/admission latency и отдельная подготовка остаются связанными с B3 |
-| B3–B4 | Не реализованы целиком | Handlers/deadlines, профили запуска; device validation KPM gate |
+| B2 | `574eae03`: реализовано разделение durable admission/execution; CommandEngine владеет store, mailbox и writer; UI ждёт receipt | Queue wait ограничен в B3; отдельная preparation остаётся последующим упрощением |
+| B3 | Реализованы bounds handlers/blocking workers, queue cancellation и бюджеты наблюдений; проверки ниже | Device stress и измерение RSS на Android остаются acceptance |
+| B4 | Не реализован | Профили запуска; вне этой итерации |
 | C1–C3 | Не реализованы | Provenance, export lifecycle, measurement identity |
 | D2 | [`fbc60b6c`](https://github.com/okhsunrog/vpnhide/commit/fbc60b6c): реализована проверка зависимостей boot внутри writer; матрица holds/retention/restart в `command_tests.rs` | Реальный reboot и независимый Ports repair на устройстве |
 | D1, D3 | Не реализованы | Runtime reconciliation, служебная durability/логи |
@@ -191,15 +193,33 @@ latency и ID allocation могут ждать занятого writer. Поэт
 
 ### B3. P2: ограничить обработчики и согласовать сквозные дедлайны
 
-- [ ] Ограничить число RPC handlers внутри соединения и глобально: текущий
-  for_each(tokio::spawn) не покрывается лимитом восьми соединений или writer queue.
-- [ ] Сохранить доступность state/receipt reads при перегрузке тяжёлой работой.
-- [ ] Согласовать root-cache deadline 15 секунд с разрешённым временем core probe
-  и parent-side KPM observation; проверить late completion и quarantine.
-- [ ] Выделить быстрый status/inventory из тяжёлого forensic read path.
+- [x] Не более 16 tracked requests и 32 driver futures на соединение; при восьми
+  соединениях глобальные bounds 128/256. Нет отдельного spawn на каждый handler.
+- [x] Физические blocking workers сохраняют permits после отмены waiter:
+  6 ordinary, 2 recovery, 2 recording status, 2 forensic + 1 RootSnapshot.
+- [x] Не более двух long polls на соединение; лишний возвращает текущую публикацию.
+  State/receipt reads не используют writer queue или diagnostic workers.
+- [x] Queue budget 2 секунды; атомарный ticket исключает исполнение отменённого/
+  просроченного queued command. Начатый admission не отменяется, receipt semantics
+  A4/B2 сохранены. Internal boot/restoration не получают RPC queue deadline.
+- [x] Root cache: 225 секунд поверх RPC 210 / collector 200; dependent caches
+  учитывают budget источника. Quarantine и отбрасывание позднего результата сохранены.
+- [x] Standalone Dashboard/inventory RootSnapshot имеет отдельный слот от forensic
+  export. Быстрый статус уже идёт через publication; новый DTO/transport не введён.
 
-Готово, когда нагрузочный тест показывает ограниченное число задач и объём памяти,
-а нормальная работа в разрешённом бюджете не объявляется timeout другим слоем.
+Overload явный: Busy для mutations, failed probe для diagnostics, tarpc WouldBlock
+для channel/recording-status saturation. Deadline/refusal одного RPC не уничтожает
+мультиплексированное соединение. При slow reader ограничены pending responses;
+обслуживание других соединений продолжается. Лимит driver выше tracked requests,
+чтобы очередь ответов не блокировала собственный flush/cancellation pump.
+
+Регрессии: `rpc_bounds_tests` (queue expiry/cancellation, сохранение physical permits,
+reads под нагрузкой, long-poll saturation, независимый root slot), реальный UDS
+`slow_response_reader_is_bounded_and_resumes_without_blocking_other_connections`,
+существующий durable-admission/disconnect test; JVM virtual-time slow-root/quarantine.
+Это фиксированные bounds количества объектов и размеров входных frames, не замер
+точного RSS. Android RSS/slow storage/device acceptance ещё не выполнены. Двухсекундный
+budget ограничивает ожидание writer, но не обещает прервать уже начатый fsync.
 
 KPM observation/delivery contention был подтверждён детерминированным тестом
 в `e316470b`: read_state/status мог держать flock, из-за чего delivery получала
@@ -355,15 +375,14 @@ Canonical JSON v1 нельзя удалить без согласованной 
 ## Порядок реализации и проверка результата
 
 1. Завершённый проход: A1/A3, доказанные случаи B1, UI recovery из A2 и изоляция
-   миграций. Следующий небольшой шаг D2 устраняет независимый boot blocker без
-   изменения RPC и формата journal.
+   миграций. D2 также завершён: независимые boot resources учитывают durable holds.
 2. A4/A5 выполнены отдельными коммитами с регрессиями. Они меняют смысл результата
    и lifetime; перед beta остаётся device acceptance, а не повторный перенос кода.
 3. B2: первый CommandEngine и ранний Accepted реализованы с сохранением
    conflict/dedup/retention, queue/shutdown tests и новым UI ожиданием. Остаток —
    preparation/queue latency и дальнейшее сокращение clone/store путей.
-4. B3/B4: ограничить handlers, проверить reads под нагрузкой, согласовать deadlines
-   и профили запуска. D1 — после этого bounded reconcile через тот же engine;
+4. B3 реализован в итерации ниже. B4 (профили запуска) и D1 (bounded reconcile
+   через тот же engine) остаются отдельными следующими этапами;
    автоматическое добавление RU-приложений не входит в beta scope.
 5. C1–C3 и D3 остаются необходимыми проверками перед соответствующими beta
    сценариями; не считать диагностику достоверной только потому, что ZIP создан.
@@ -427,7 +446,7 @@ D2 реализован следующим отдельным шагом; стр
 проверенные чистая установка, прямой перенос 0.x/1.x, reboot/restart, сохранение
 и repair при потере соединения, файловый export с реальными DAC/SELinux и работа
 выбранного backend/Ports с закрытым APK. Без устройства эти сценарии не считаются
-проверенными. B3/D1 и остаток B2 остаются открытыми; A4/A5/D2 требуют device acceptance; большой CommandEngine/DTO
+проверенными. D1 и остаток B2 остаются открытыми; B3 реализован в текущей итерации; A4/A5/D2 требуют device acceptance; большой CommandEngine/DTO
 rewrite не является обязательным условием этой ограниченной серии исправлений.
 
 
@@ -469,6 +488,28 @@ module scaffold, no-root-exec, changelog preview и ссылки изменён�
 
 APK остаётся подписанным временным тестовым ключом. Device acceptance и GitHub CI
 не выполнены; запрещённый ручной dispatch не повторялся. Отсутствие device/CI
-нельзя заменять количеством host-тестов. Следующий scope: B3 (queue/admission
-latency, handlers, deadlines), B4 и D1; дальнейшее сокращение clone/store путей
+нельзя заменять количеством host-тестов. На момент этого отчёта следующим scope
+был B3 (реализация ниже); после него остаются B4 и D1; дальнейшее сокращение clone/store путей
 выполнять отдельно, не возвращая app-owned effects или старые активаторы.
+
+
+### Итерация B3 (2026-11-01)
+
+База: `d965b9316ce6df66ba56dc95fb2c0ffedb73e2e1`; работа непосредственно в `dev-2.x`.
+
+Scope ограничен RPC bounds, cancellation/overload и observation budgets. Protocol
+остаётся 12: wire methods/types, backend wire и migration adapters не менялись.
+B4/D1, installer и новые функции не включены.
+
+Итоговые проверки конечного кода: **355 Rust-тестов**, Clippy для activator/core-rpc/
+core-daemon/core-client/core-ffi (`--all-targets -- -D warnings`), cargo fmt;
+**871 JVM-тест**, ktlint, detekt, CPD, Android lintDebug и assembleDebug.
+После конфликта incremental cache в пересёкшихся проверочных Gradle-запусках
+выполнена успешная последовательная сборка с `:app:clean -Pkotlin.incremental=false`.
+Core ZIP собран для arm64/armv7; scaffold/no-root-exec, changelog preview и ссылки
+изменённых документов проверены. APK подписан временным validation key.
+
+GitHub CI не запускался: workflow не подписан на push в dev-2.x, запрещённый ранее
+manual dispatch не повторялся. Device tests, реальные Android RSS/latency, DAC/SELinux
+и root-manager recovery остаются acceptance gates. Локальные тесты не означают,
+что beta уже прошла эти проверки.

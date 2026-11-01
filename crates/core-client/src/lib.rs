@@ -76,7 +76,7 @@ macro_rules! call {
             let channel = self.channel().await?;
             match channel.rpc.$name(deadline($timeout), $($arg),*).await {
                 Ok(value) => Ok(value),
-                Err(error) => Err(self.failed(channel.generation, error.to_string()).await),
+                Err(error) => Err(self.rpc_failed(channel.generation, error).await),
             }
         }
     };
@@ -121,7 +121,7 @@ impl CoreClient {
                 generation: channel.generation,
                 value,
             }),
-            Err(error) => Err(self.failed(channel.generation, error.to_string()).await),
+            Err(error) => Err(self.rpc_failed(channel.generation, error).await),
         }
     }
 
@@ -227,6 +227,21 @@ impl CoreClient {
         Ok(channel)
     }
 
+    async fn rpc_failed(&self, generation: u64, error: tarpc::client::RpcError) -> ClientError {
+        // A rejected request or expired waiter is not a broken multiplexed socket.
+        // In particular, do not disconnect a still-running admitted command or watch.
+        if matches!(
+            error,
+            tarpc::client::RpcError::Server(_) | tarpc::client::RpcError::DeadlineExceeded
+        ) {
+            return ClientError::Transport {
+                generation,
+                detail: error.to_string(),
+            };
+        }
+        self.failed(generation, error.to_string()).await
+    }
+
     async fn failed(&self, generation: u64, detail: String) -> ClientError {
         let mut state = self.connection.lock().await;
         if state
@@ -275,6 +290,20 @@ mod tests {
             }
         );
         assert_eq!(client.hello().await.unwrap(), 300);
+        assert_eq!(client.state_generation().await, Some(2));
+        client
+            .rpc_failed(2, tarpc::client::RpcError::DeadlineExceeded)
+            .await;
+        assert_eq!(client.state_generation().await, Some(2));
+        client
+            .rpc_failed(
+                2,
+                tarpc::client::RpcError::Server(tarpc::ServerError::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "overloaded".into(),
+                )),
+            )
+            .await;
         assert_eq!(client.state_generation().await, Some(2));
         client.failed(2, "current socket closed".into()).await;
         assert_eq!(client.state_generation().await, None);
