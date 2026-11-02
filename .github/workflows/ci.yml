@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.12.10"
       - run: uv run --python 3.12 --no-project python -m unittest discover -s builtin/scripts -p 'test_*.py' -v
@@ -232,7 +232,7 @@ jobs:
             .artifacts/qemu-native-probes/bind-probe-compat
 
       - name: Upload QEMU native probes
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: qemu-native-probes
           path: .artifacts/qemu-native-probes
@@ -399,7 +399,7 @@ jobs:
         run: python3 kmod/build.py --kmi "$KMI" --inside-container
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: vpnhide-kmod-${{ matrix.kmi }}
           path: vpnhide-kmod-${{ matrix.kmi }}.zip
@@ -451,7 +451,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Download QEMU native probes
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: qemu-native-probes
           path: .artifacts/qemu-native-probes
@@ -509,7 +509,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Download QEMU native probes
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: qemu-native-probes
           path: .artifacts/qemu-native-probes
@@ -566,7 +566,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Download QEMU native probes
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: qemu-native-probes
           path: .artifacts/qemu-native-probes
@@ -641,7 +641,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.12.10"
 
@@ -649,7 +649,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Download QEMU native probes
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: qemu-native-probes
           path: .artifacts/qemu-native-probes
@@ -722,7 +722,7 @@ jobs:
           key: ccache-builtin-${{ matrix.kmi }}-${{ github.run_id }}
       - name: Upload built-in integration review
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: builtin-review-${{ matrix.kmi }}
           path: /tmp/vpnhide-review
@@ -766,7 +766,7 @@ jobs:
           python3 kmod/kpm/build.py
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: vpnhide-kpm
           path: vpnhide-kpm.zip
@@ -808,7 +808,7 @@ jobs:
           python3 ./build.py
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: vpnhide-zygisk
           path: zygisk/target/vpnhide-zygisk.zip
@@ -854,7 +854,7 @@ jobs:
           mv core/target/vpnhide-core.zip core/target/vpnhide-core-base.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: vpnhide-core-base
           path: core/target/vpnhide-core-base.zip
@@ -869,7 +869,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: vpnhide-*
           path: .artifacts/core-inputs
@@ -878,7 +878,7 @@ jobs:
         run: >-
           python3 scripts/payload_bundle.py --inputs .artifacts/core-inputs
           --output dist/vpnhide-core.zip --commit "$GITHUB_SHA"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: vpnhide-core
           path: dist/vpnhide-core.zip
@@ -908,7 +908,7 @@ jobs:
       # Gradle cache (deps + configuration cache + wrapper). cache-read-only
       # on PRs so only trusted push/manual runs write the cache.
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
@@ -963,7 +963,7 @@ jobs:
 
       - name: Upload signed APK
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: vpnhide-apk
           path: |
@@ -992,7 +992,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: dist/
           merge-multiple: true
