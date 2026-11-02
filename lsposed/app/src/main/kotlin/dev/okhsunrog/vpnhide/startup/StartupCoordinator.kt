@@ -147,9 +147,8 @@ internal class StartupCoordinator(
         // also the earliest point the process-scoped VPN transport watcher (Phase 3)
         // can find inputs to refresh against.
         RoutingGateCache.ensureLoaded(appContext, selfNeedsRestart)
-        // The cache parks at Blocked(NEEDS_RESTART) itself when selfNeedsRestart — this
-        // is also the first run() call, so it stamps the process-constant flag.
-        DiagnosticsCache.run(appContext, selfNeedsRestart)
+        // Subscribe only. Core owns autonomous admission and cached evidence.
+        DiagnosticsCache.snapshot
         startAutoHideReconcile()
     }
 

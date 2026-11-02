@@ -40,6 +40,8 @@ internal interface CoreSessionClient {
     ): CoreReply
 
     suspend fun operation(op: Long): CoreReply
+
+    suspend fun requestDiagnosticRun(force: Boolean): uniffi.vpnhide_core_ffi.CoreDiagnosticRun
 }
 
 /** One native handle, one long poll and one ordering owner for the app process. */
@@ -128,7 +130,7 @@ internal class FfiCoreSessionClient(
     /** Every privileged surface uses the same generation-aware failure owner. */
     suspend fun <T> rootRequest(block: suspend () -> T): T = coreRootRequest(requests.incrementAndGet(), ::failed, block)
 
-    suspend fun requestDiagnosticRun(force: Boolean): uniffi.vpnhide_core_ffi.CoreDiagnosticRun =
+    override suspend fun requestDiagnosticRun(force: Boolean): uniffi.vpnhide_core_ffi.CoreDiagnosticRun =
         rootRequest { native.requestDiagnosticRun(force) }
 
     private fun failed(

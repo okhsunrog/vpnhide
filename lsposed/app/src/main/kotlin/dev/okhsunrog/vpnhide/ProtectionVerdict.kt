@@ -90,5 +90,5 @@ internal fun bridgeGate(protection: ProtectionCheck): DiagnosticGate? =
     when (protection) {
         is ProtectionCheck.Blocked -> protection.gate
         is ProtectionCheck.Checked -> DiagnosticGate.ROUTED
-        ProtectionCheck.Failed -> null
+        ProtectionCheck.Failed, is ProtectionCheck.Autonomous -> null
     }

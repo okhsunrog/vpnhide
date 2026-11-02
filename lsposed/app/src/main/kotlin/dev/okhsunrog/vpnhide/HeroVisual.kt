@@ -244,7 +244,7 @@ private fun subtitleOf(rank: Int): HeroSubtitle =
 private fun tilesRank(tiles: ProtectionCheck): Int =
     when (tiles) {
         is ProtectionCheck.Checked -> maxOf(tiles.native.heroRank(), tiles.java.heroRank())
-        is ProtectionCheck.Blocked, ProtectionCheck.Failed -> RANK_ATTENTION
+        is ProtectionCheck.Blocked, ProtectionCheck.Failed, is ProtectionCheck.Autonomous -> RANK_ATTENTION
     }
 
 private fun issuesRank(

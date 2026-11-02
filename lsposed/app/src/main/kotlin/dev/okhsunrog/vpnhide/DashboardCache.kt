@@ -1,6 +1,6 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSnapshot
+import dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticSnapshot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.settings.AppLanguageContext
 import kotlinx.coroutines.Dispatchers
@@ -12,7 +12,7 @@ import kotlinx.coroutines.withContext
 
 /** The hero and the tiles travel together, including while matching root facts are pending. */
 internal data class DashboardPresentation(
-    val diagnostics: DiagnosticSnapshot,
+    val diagnostics: AutonomousDiagnosticSnapshot,
     val state: DashboardState?,
     val core: CoreDashboardData = CoreDashboardData(),
 )
@@ -57,14 +57,13 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardRootF
             DiagnosticsCache.snapshot,
             DeveloperFlagsCache.flags,
             AppLanguageContext.context,
-            CoreSessions.updates,
-        ) { facts, snapshot, developer, _, core ->
+        ) { facts, snapshot, developer, _ ->
             val context = inputs?.context
             val state =
-                if (facts?.belongsTo(snapshot.rootSnapshot) == true && context != null && snapshot.presentation.lastAttempt != null &&
+                if (facts?.belongsTo(snapshot.rootSnapshot) == true && context != null &&
                     developer != null
                 ) {
-                    assembleDashboardState(context, facts.value, snapshot.presentation, developer, core)
+                    assembleDashboardState(context, facts.value, snapshot, developer, snapshot.sources.core)
                 } else {
                     null
                 }
@@ -72,7 +71,7 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardRootF
                 snapshot,
                 state,
                 coreDashboardData(
-                    core,
+                    snapshot.sources.core,
                     (
                         facts
                             ?.value

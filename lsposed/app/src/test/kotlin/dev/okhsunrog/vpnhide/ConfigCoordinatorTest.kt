@@ -487,6 +487,9 @@ class ConfigCoordinatorTest {
 
         override suspend fun read(): CoreReply = CoreReply.Observed(state)
 
+        override suspend fun requestDiagnosticRun(force: Boolean): uniffi.vpnhide_core_ffi.CoreDiagnosticRun =
+            error("config coordination must not request a suite")
+
         private var next = 1000L
 
         override suspend fun allocateOperationId(): Long = ++next

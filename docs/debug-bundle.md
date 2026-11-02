@@ -125,7 +125,7 @@ Everything below is a `state.json` field unless noted.
 ## 2. The 30-second triage (read in this order)
 
 1. **`captureKind`, `app.version`, `device`, `schema`** — what am I even looking at? (model, Android release, ABI, app+backend version, and which bundle format — §2.1 if it isn't the one this doc describes).
-2. **`gate`** — was the run *measurable*? Only `ROUTED` yields real verdicts. `VPN_OFF` / `SELF_NOT_ROUTED` / `NEEDS_RESTART` mean "we deliberately measured nothing" — a clean-looking report there is **not** evidence of health. (See §4.)
+2. **Schema 4: `autonomousDiagnostics`** — read availability/current, Core source identity and assessment first (§2.2). For schemas 1–3, **`gate`** — was the run *measurable*? Only `ROUTED` yields real verdicts. `VPN_OFF` / `SELF_NOT_ROUTED` / `NEEDS_RESTART` mean "we deliberately measured nothing" — a clean-looking report there is **not** evidence of health. (See §4.)
 3. **`nativeVerdict` / `javaVerdict`** — `Ok` / `Partial` / `Broken` / `null`. `null` = gated (see #2) or not measured.
 4. **`rootShell`** — did the snapshot shell actually have root? If `uid != 0` or `runtimeCheckable=false`, "inactive"/"not verified" readings are unreliable, not facts. (See §6 — this is the #1 misread.)
 5. **`activeBackend` + `kmodLoadStatus`** — which backend is in charge, did it load this boot, any `brokenReason`.
@@ -135,11 +135,12 @@ Everything below is a `state.json` field unless noted.
 ### 2.1 Schema versions
 
 `state.json → schema` says which shape the bundle was written in. **This doc
-describes schema 3.** One number covers the whole bundle; there is no per-object
+describes schema 4.** One number covers the whole bundle; there is no per-object
 version.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
+| 4 | main (unreleased) | Dashboard, Diagnostics, agent and captures consume retained autonomous Core evidence. `autonomousDiagnostics` identifies the accepted Core/config/root sources, required/proven/leaked/unverified vectors, controls, cleanup and reuse blockers. Legacy gate/report/diagnostics/verdict fields remain nullable for old readers; new captures do not fabricate an app-process self-test. |
 | 3 | dev-2.x (unreleased) | Measurement summaries and snapshots separate desired config revision, delivery identity and whether delivery was confirmed. An observed passing suite under uncertain delivery cannot establish current success; the UI shows application uncertainty while retaining its measured results. |
 | 2 | 1.3.0 | Sealed `kind` discriminators are compact snake_case everywhere. Previously `dashboard.lsposed` and `dashboard.protection` carried fully-qualified class names (`dev.okhsunrog.vpnhide.LsposedState.Active`) instead of `active`/`blocked`. The separate `report.schema` field is gone — the top-level one is the only version. |
 | 1 | 1.0.0 – 1.2.5 | Initial format. |
@@ -160,6 +161,43 @@ you.
 
 ---
 
+### 2.2 Autonomous evidence (schema 4)
+
+Opening a screen, agent state read, debug export or logcat collection does not
+launch a diagnostic suite. `autonomousDiagnostics.provenance` is
+`retained_core_publication`: capture time is not the measurement time. Explicit
+Retry requests a Core-owned run; the Core publication stream remains its only
+result source. Existing logcat/debug-lease ownership is unchanged.
+
+`availability`, `current`, `sourceEpoch`, `sourceSequence`,
+`connectionGeneration` and `sourceConfigRevision` qualify the report. Historical
+run evidence remains visible during a disconnect, unjoined configuration or
+stale fingerprint, but cannot establish current protection. Run identity includes
+boot, policy/runtime/platform/loaded-generation fingerprints and framework
+worker attribution. Incomplete process generations remain an explicit reuse
+blocker; a new worker does not prove old game processes updated their hooks.
+
+The assessment is evaluated by Core: `required` comes from the supported product
+contract and enabled features, and is partitioned into `proven`, `leaked` and
+`unverified`. Controls, infrastructure detail and cleanup are separate. Leaks
+remain evidence even when other vectors or controls are unverified. Current
+partial implementation has no full-success assessment. Neither a clean Java
+response nor an empty native enumeration proves a vector without RAW stimulus
+and preservation controls.
+
+`rootJoined` and the `rootSource*` fields distinguish retained heavy root
+metadata from the live Core publication. An unjoined export keeps installation
+facts and raw forensic sections, withdraws runtime active/checkable claims and
+omits the derived Dashboard. Its canonical config comes only from the accepted
+current Core publication, never from an app draft or a raw snapshot fallback.
+Legacy `gate`, `report`, `diagnostics`, `selfTestRunId`, `nativeVerdict` and
+`javaVerdict` are null in new Core-backed captures. The same rule applies to
+`beforeCapture`; exports preserve cached evidence rather than claiming a new
+post-logging baseline. Sections below describing those legacy fields apply to
+schemas 1–3 or explicitly legacy data.
+
+---
+
 ## 3. Top-level `state.json` fields
 
 Derived (typed) fields first — these are the *same domain objects the app UI
@@ -167,7 +205,8 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 
 | Field | Meaning |
 |---|---|
-| `schema` | Bundle schema version — **this doc describes 3** (§2.1). |
+| `schema` | Bundle schema version — **this doc describes 4** (§2.1). |
+| `autonomousDiagnostics` | Retained Core-owned run and assessment with explicit currentness, source identities and root join (§2.2). |
 | `generatedAt` | ISO-8601 capture time. |
 | `captureKind` | `debug` / `full_system_logcat` / `kernel_images` (§1). |
 | `app` | `{packageName, version}` — `version` is `"1.2.5 (10205)"` (name + versionCode). |

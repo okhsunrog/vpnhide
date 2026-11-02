@@ -1,5 +1,5 @@
 {
-    "schema": 3,
+    "schema": 4,
     "generatedAt": "2026-08-22T12:00:00+0300",
     "captureKind": "debug",
     "app": {
@@ -16,88 +16,115 @@
         ]
     },
     "selfNeedsRestart": false,
-    "gate": "ROUTED",
-    "selfTestRunId": 4,
-    "diagnostics": {
-        "eligibility": "Eligible",
-        "activeRunId": 5,
-        "activeStage": "Core",
-        "lastAttempt": {
-            "runId": 4,
-            "outcome": "Failed",
-            "failure": "ExecutionFailed",
-            "eligibility": null
+    "gate": null,
+    "selfTestRunId": null,
+    "diagnostics": null,
+    "autonomousDiagnostics": {
+        "availability": "published",
+        "current": true,
+        "sourceEpoch": 9,
+        "sourceConfigRevision": 3,
+        "sourceSequence": 12,
+        "connectionGeneration": 1,
+        "snapshotRevision": 14,
+        "rootObservationId": 9,
+        "rootGeneration": 3,
+        "rootJoined": true,
+        "rootSourceEpoch": 9,
+        "rootSourceSequence": 12,
+        "rootSourceConnectionGeneration": 1,
+        "rootSourceConfigRevision": 3,
+        "selectedBackend": "kmod",
+        "appliedBackend": "kmod",
+        "mutationHeld": false,
+        "heldResources": [],
+        "provenance": "retained_core_publication",
+        "run": {
+            "session": 99,
+            "coreEpoch": 9,
+            "bootId": "boot-1",
+            "policySha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "runtimeSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "platformSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "loadedGenerationsSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "loadedGenerationsComplete": false,
+            "contract": 2,
+            "stale": false,
+            "frameworkAttribution": {
+                "session": 99,
+                "coreEpoch": 9,
+                "bootId": "boot-1",
+                "workerUid": 10041,
+                "workerPid": 2345,
+                "workerStartTicks": 15000,
+                "systemServerPid": 100,
+                "systemServerStartTicks": 320,
+                "hookSourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "sourceProfileSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            }
         },
-        "measurement": {
-            "runId": 3,
-            "startedAt": 1755856800000,
-            "endedAt": 1755856802000,
-            "completed": true,
-            "interrupted": false,
-            "observationId": 7,
-            "desiredRevision": null,
-            "deliveryIdentity": null,
-            "desiredDeliveryConfirmed": null
-        },
-        "applicability": "Changed",
-        "evidence": {
-            "hidden": 9,
-            "systemBlocked": 1,
-            "nothingToLeak": 2,
-            "leaks": 0,
-            "notMeasured": 0,
-            "notRun": 0,
-            "uncoveredLeaks": 0,
-            "conclusion": "NoObservedLeak"
-        },
-        "currentSuccess": false,
-        "probeUnavailable": true,
-        "lastKnownRouting": "VpnOff",
-        "routingRead": {
-            "reason": "Transition",
-            "pendingMs": 820
-        },
-        "snapshot": {
-            "revision": 12,
-            "rootObservationId": 9,
-            "rootGeneration": 3,
-            "rootCurrent": true,
-            "routingObservationId": 8,
-            "routingGeneration": 4,
-            "changeEpoch": 2,
-            "desiredRevision": null,
-            "deliveryIdentity": null,
-            "desiredDeliveryConfirmed": null
+        "assessment": {
+            "phase": "incomplete",
+            "required": [
+                "ioctl_flags",
+                "ioctl_mtu",
+                "getifaddrs",
+                "netlink_links",
+                "ioctl_addresses",
+                "bind_to_device",
+                "netlink_addresses",
+                "netlink_routes",
+                "netlink_rules",
+                "proc_routes",
+                "proc_interfaces",
+                "sys_interfaces",
+                "framework_networks",
+                "framework_default_network",
+                "framework_capabilities",
+                "framework_link_properties",
+                "framework_legacy_info",
+                "framework_callbacks",
+                "framework_pending_intent"
+            ],
+            "proven": [
+                "ioctl_flags",
+                "ioctl_mtu",
+                "getifaddrs",
+                "netlink_links",
+                "framework_capabilities"
+            ],
+            "leaked": [
+                "framework_networks"
+            ],
+            "unverified": [
+                "ioctl_addresses",
+                "bind_to_device",
+                "netlink_addresses",
+                "netlink_routes",
+                "netlink_rules",
+                "proc_routes",
+                "proc_interfaces",
+                "sys_interfaces",
+                "framework_default_network",
+                "framework_link_properties",
+                "framework_legacy_info",
+                "framework_callbacks",
+                "framework_pending_intent"
+            ],
+            "nativeControls": [],
+            "frameworkControls": [
+                "probe_unavailable"
+            ],
+            "reuseBlockers": [
+                "loaded_generations_incomplete"
+            ],
+            "infrastructureDetail": null,
+            "cleanupConfirmed": null
         }
     },
-    "nativeVerdict": "Ok",
-    "javaVerdict": "Ok",
-    "report": {
-        "gate": "ROUTED",
-        "native": {
-            "layer": "NATIVE",
-            "backend": "Kmod",
-            "status": {
-                "kind": "active",
-                "hidden": 0,
-                "leaks": 0
-            },
-            "unownedLeaks": 0,
-            "checks": []
-        },
-        "java": {
-            "layer": "JAVA",
-            "backend": null,
-            "status": {
-                "kind": "active",
-                "hidden": 0,
-                "leaks": 0
-            },
-            "unownedLeaks": 0,
-            "checks": []
-        },
-        "complete": true
-    },
+    "nativeVerdict": null,
+    "javaVerdict": null,
+    "report": null,
     "backends": {
         "kmod": {
             "kind": "installed",
@@ -187,8 +214,110 @@
         "nativeInstallRecommendation": null,
         "kmodLoadStatus": null,
         "protection": {
-            "kind": "blocked",
-            "gate": "VPN_OFF"
+            "kind": "autonomous",
+            "evidence": {
+                "availability": "published",
+                "current": true,
+                "sourceEpoch": 9,
+                "sourceConfigRevision": 3,
+                "sourceSequence": 12,
+                "connectionGeneration": 1,
+                "snapshotRevision": 14,
+                "rootObservationId": 9,
+                "rootGeneration": 3,
+                "rootJoined": true,
+                "rootSourceEpoch": 9,
+                "rootSourceSequence": 12,
+                "rootSourceConnectionGeneration": 1,
+                "rootSourceConfigRevision": 3,
+                "selectedBackend": "kmod",
+                "appliedBackend": "kmod",
+                "mutationHeld": false,
+                "heldResources": [],
+                "provenance": "retained_core_publication",
+                "run": {
+                    "session": 99,
+                    "coreEpoch": 9,
+                    "bootId": "boot-1",
+                    "policySha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "runtimeSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "platformSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                    "loadedGenerationsSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                    "loadedGenerationsComplete": false,
+                    "contract": 2,
+                    "stale": false,
+                    "frameworkAttribution": {
+                        "session": 99,
+                        "coreEpoch": 9,
+                        "bootId": "boot-1",
+                        "workerUid": 10041,
+                        "workerPid": 2345,
+                        "workerStartTicks": 15000,
+                        "systemServerPid": 100,
+                        "systemServerStartTicks": 320,
+                        "hookSourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                        "sourceProfileSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    }
+                },
+                "assessment": {
+                    "phase": "incomplete",
+                    "required": [
+                        "ioctl_flags",
+                        "ioctl_mtu",
+                        "getifaddrs",
+                        "netlink_links",
+                        "ioctl_addresses",
+                        "bind_to_device",
+                        "netlink_addresses",
+                        "netlink_routes",
+                        "netlink_rules",
+                        "proc_routes",
+                        "proc_interfaces",
+                        "sys_interfaces",
+                        "framework_networks",
+                        "framework_default_network",
+                        "framework_capabilities",
+                        "framework_link_properties",
+                        "framework_legacy_info",
+                        "framework_callbacks",
+                        "framework_pending_intent"
+                    ],
+                    "proven": [
+                        "ioctl_flags",
+                        "ioctl_mtu",
+                        "getifaddrs",
+                        "netlink_links",
+                        "framework_capabilities"
+                    ],
+                    "leaked": [
+                        "framework_networks"
+                    ],
+                    "unverified": [
+                        "ioctl_addresses",
+                        "bind_to_device",
+                        "netlink_addresses",
+                        "netlink_routes",
+                        "netlink_rules",
+                        "proc_routes",
+                        "proc_interfaces",
+                        "sys_interfaces",
+                        "framework_default_network",
+                        "framework_link_properties",
+                        "framework_legacy_info",
+                        "framework_callbacks",
+                        "framework_pending_intent"
+                    ],
+                    "nativeControls": [],
+                    "frameworkControls": [
+                        "probe_unavailable"
+                    ],
+                    "reuseBlockers": [
+                        "loaded_generations_incomplete"
+                    ],
+                    "infrastructureDetail": null,
+                    "cleanupConfirmed": null
+                }
+            }
         },
         "nativePartialHooks": false,
         "messages": [],
@@ -204,56 +333,108 @@
     },
     "beforeCapture": {
         "observedAt": "2026-08-22T11:59:59+0300",
-        "diagnostics": {
-            "eligibility": "Eligible",
-            "activeRunId": 5,
-            "activeStage": "Core",
-            "lastAttempt": {
-                "runId": 4,
-                "outcome": "Failed",
-                "failure": "ExecutionFailed",
-                "eligibility": null
+        "diagnostics": null,
+        "autonomousDiagnostics": {
+            "availability": "published",
+            "current": false,
+            "sourceEpoch": 9,
+            "sourceConfigRevision": 3,
+            "sourceSequence": 12,
+            "connectionGeneration": 1,
+            "snapshotRevision": 14,
+            "rootObservationId": 9,
+            "rootGeneration": 3,
+            "rootJoined": true,
+            "rootSourceEpoch": 9,
+            "rootSourceSequence": 12,
+            "rootSourceConnectionGeneration": 1,
+            "rootSourceConfigRevision": 3,
+            "selectedBackend": "kmod",
+            "appliedBackend": "kmod",
+            "mutationHeld": false,
+            "heldResources": [],
+            "provenance": "retained_core_publication",
+            "run": {
+                "session": 99,
+                "coreEpoch": 9,
+                "bootId": "boot-1",
+                "policySha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "runtimeSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "platformSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "loadedGenerationsSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                "loadedGenerationsComplete": false,
+                "contract": 2,
+                "stale": false,
+                "frameworkAttribution": {
+                    "session": 99,
+                    "coreEpoch": 9,
+                    "bootId": "boot-1",
+                    "workerUid": 10041,
+                    "workerPid": 2345,
+                    "workerStartTicks": 15000,
+                    "systemServerPid": 100,
+                    "systemServerStartTicks": 320,
+                    "hookSourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                    "sourceProfileSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                }
             },
-            "measurement": {
-                "runId": 3,
-                "startedAt": 1755856800000,
-                "endedAt": 1755856802000,
-                "completed": true,
-                "interrupted": false,
-                "observationId": 7,
-                "desiredRevision": null,
-                "deliveryIdentity": null,
-                "desiredDeliveryConfirmed": null
-            },
-            "applicability": "Changed",
-            "evidence": {
-                "hidden": 9,
-                "systemBlocked": 1,
-                "nothingToLeak": 2,
-                "leaks": 0,
-                "notMeasured": 0,
-                "notRun": 0,
-                "uncoveredLeaks": 0,
-                "conclusion": "NoObservedLeak"
-            },
-            "currentSuccess": false,
-            "probeUnavailable": true,
-            "lastKnownRouting": "VpnOff",
-            "routingRead": {
-                "reason": "Transition",
-                "pendingMs": 820
-            },
-            "snapshot": {
-                "revision": 12,
-                "rootObservationId": 9,
-                "rootGeneration": 3,
-                "rootCurrent": true,
-                "routingObservationId": 8,
-                "routingGeneration": 4,
-                "changeEpoch": 2,
-                "desiredRevision": null,
-                "deliveryIdentity": null,
-                "desiredDeliveryConfirmed": null
+            "assessment": {
+                "phase": "incomplete",
+                "required": [
+                    "ioctl_flags",
+                    "ioctl_mtu",
+                    "getifaddrs",
+                    "netlink_links",
+                    "ioctl_addresses",
+                    "bind_to_device",
+                    "netlink_addresses",
+                    "netlink_routes",
+                    "netlink_rules",
+                    "proc_routes",
+                    "proc_interfaces",
+                    "sys_interfaces",
+                    "framework_networks",
+                    "framework_default_network",
+                    "framework_capabilities",
+                    "framework_link_properties",
+                    "framework_legacy_info",
+                    "framework_callbacks",
+                    "framework_pending_intent"
+                ],
+                "proven": [
+                    "ioctl_flags",
+                    "ioctl_mtu",
+                    "getifaddrs",
+                    "netlink_links",
+                    "framework_capabilities"
+                ],
+                "leaked": [
+                    "framework_networks"
+                ],
+                "unverified": [
+                    "ioctl_addresses",
+                    "bind_to_device",
+                    "netlink_addresses",
+                    "netlink_routes",
+                    "netlink_rules",
+                    "proc_routes",
+                    "proc_interfaces",
+                    "sys_interfaces",
+                    "framework_default_network",
+                    "framework_link_properties",
+                    "framework_legacy_info",
+                    "framework_callbacks",
+                    "framework_pending_intent"
+                ],
+                "nativeControls": [],
+                "frameworkControls": [
+                    "probe_unavailable"
+                ],
+                "reuseBlockers": [
+                    "loaded_generations_incomplete"
+                ],
+                "infrastructureDetail": null,
+                "cleanupConfirmed": null
             }
         },
         "protection": null,

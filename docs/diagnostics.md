@@ -1,5 +1,17 @@
 # Diagnostics — how VPN Hide self-tests hiding and attributes the result
 
+> Current v2 ownership (RPC19): Core owns autonomous runs, required plans,
+> attribution, cleanup and cache. Dashboard, Diagnostics, agent and exports read
+> the same retained publication; opening the APK or a capture does not launch a
+> suite. Explicit Retry requests a run. Current implementation reports scoped
+> incomplete/infrastructure/leak evidence and has no full-success variant.
+> Foreign VPN presence and the main app's split-tunnel membership are not
+> prerequisites. See [the implementation ledger](notes/unified-core-implementation.md)
+> and [schema 4](debug-bundle.md#22-autonomous-evidence-schema-4) for current source
+> identities and coverage limitations. The local main-app orchestration described
+> below is historical and disconnected; do not restore it as production authority.
+
+
 This is the **self-diagnosis** model: how the app checks that hiding actually
 works for its own process and honestly reports *who* hid the VPN on each vector.
 For the hiding side (which backend covers which detection vector) see

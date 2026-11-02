@@ -1314,3 +1314,48 @@ and Kotlin quality gates. No-root/module-scaffold checks passed. Logs:
 `/tmp/vpnhide-autonomous-rpc19-{tests,clippy,arm,process,android,android-cleanup}.log`.
 RPC19 APK/Core must be paired; private journal11 reads1–10 and kernel control2 /
 telemetry1 do not change. Old phone APK/Core045b58a remain untouched.
+
+## Cloud continuation: autonomous consumer cutover (RPC19 / journal11)
+
+Production DiagnosticsCache is now a read-only Core subscription plus explicit
+retry admission. Dashboard, Diagnostics screen, agent state, debug export and
+logcat metadata share the accepted autonomous packet; startup/tab changes,
+config edits and export do not launch the old main-app suite. Retry coalesces
+pending taps on the process owner and ignores reply data as a publication source.
+Diagnostic transport failure still withdraws only the affected connection.
+
+The UI presents scoped Core required/proven/leaked/unverified evidence, cleanup,
+infrastructure and process-generation limitations; partial proof is never green.
+The foreign-VPN/split-tunnel prerequisite and capture warning are removed from
+these production paths. Save/Cancel/footer and app-picker drafts remain intact.
+
+Bundle schema4 adds the retained Core run/assessment and exact Core/config/root
+source identities. Legacy report/gate/selfTestRunId/diagnostics/verdict fields are
+null in these paths. The canonical config comes from that accepted current Core
+publication even if the config actor has not caught up; an offline publication
+cannot borrow canonical text from raw metadata. Root join compares the consumed
+canonical/backend/native-boot identity, not unrelated routing/receipt updates.
+Dashboard status stays visible while root metadata is unavailable; real load
+errors remain errors. Cached Dashboard data does not regress startup readiness.
+Unjoined exports withdraw runtime liveness and active statistics but retain raw
+forensics and installation metadata. Optional root failure no longer prevents
+agent Core state reads, and cancellation remains cancellation. No fresh
+post-debug-baseline measurement is claimed.
+
+Not yet removed in this checkpoint: unreachable old DiagnosticDomain/coordinator
+and their old presentation/test helpers. Their retirement and transfer of useful
+regressions is a following code step, not completed by disconnecting production.
+Core base plan remains nineteen vectors; expanded native/framework stimuli,
+full game-generation proof, remaining maintenance/bootstrap, provisioner adapters
+and the final kernel/bundle matrix remain implementation work. Phone acceptance,
+production signing key and fork publication target are separate external gates.
+The final screenshot startup regression must still run after subsequent changes.
+
+Consumer validation: 916 JVM tests passed, including zero-admission on reads,
+process-owned/coalesced Retry, refusal/cancellation, epoch/config/root acceptance,
+unrelated routing/receipt liveness, immutable transport copies, retained export
+provenance and current canonical source. ktlint, detekt, CPD and lintDebug passed;
+69 unused retired-screen resource names were removed across all three locales,
+not suppressed. No-root and module-scaffold checks passed. Read-only reviewer
+identified the agent metadata failure/statistics gaps; both were corrected and
+rechecked. Log: `/tmp/vpnhide-consumer-tests-final.log`.

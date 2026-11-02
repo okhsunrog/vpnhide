@@ -95,34 +95,17 @@ directions, since `internal` is module-wide and the compiler will not.
   loading needs application context plus restart state. Readiness must use `current`,
   not retained `value`. See `docs/observation-coordinator.md` for lifecycle and
   publication rules. Diagnostic runs are a separate domain, not an observation cache.
-- **`DiagnosticDomain` / `DiagnosticsCache`** — the one owner of the
-  self-test suite. `DiagnosticDomain` is the domain wired from its inputs
-  (observation flows, a `DiagnosticRunIo`, a scope, clocks), so
-  `DiagnosticDomainTest` drives it exactly as production does with plain state
-  flows and a fake helper; `DiagnosticsCache` is only the production wiring.
-  Consume `DiagnosticSnapshot` when values must agree: it owns accepted inputs,
-  presentation and Situation, and publishes before terminal handles complete.
-  Bridge/export use its acceptance barrier; do not assemble independent flow values.
-  It executes the pure `reduceDiagnosticRun` with identified effects on the
-  process scope; a waiter detaching never cancels a run, and a retry is a new run.
-  A suite starts in exactly three ways: `DiagnosticsCache.run` (startup intent:
-  the first suite of the process, a join or a read afterwards),
-  `retryDiagnosticsAndDashboard` (the one explicit entry point: Retry on both
-  screens, pull-to-refresh, the post-reset re-check) and the owed confirmation
-  (`owedConfirmation` in `DiagnosticConfirmationData.kt`: one automatic run per
-  measurement key nothing covers). Never launch `runCoreChecks` from a screen,
-  never request a run from a cache refresh hook, and never add an edge-triggered
-  "the gate changed, run a suite" path — feed the observation and let the rule
-  decide. Anything that must agree with the presentation (the Dashboard tiles
-  and banners: `assembleDashboardState`) is projected from it, never cached
-  beside it.
-  The probe plan and per-run outcomes are keyed by the stable check ids in
-  `NATIVE_CHECKS` / `NATIVE_EXTRA_CHECKS` / `CORE_JAVA_CHECKS` / `EXTRA_JAVA_CHECKS`
-  — a new probe is a new spec entry with an id, not a bare list item.
-  Config operations reach the suite only through `DiagnosticImpactObserver`
-  (registered by `CanonicalConfigRepository`): relevance is decided by the pure
-  `operationAffectsSelfMeasurement`, so a new kind of write must be classified
-  there, never by adding a wait or a retry to a screen.
+- **`DiagnosticsCache` / `AutonomousDiagnostics`** — subscribe to the Core-owned
+  retained run and assessment. `AutonomousDiagnosticSnapshotOwner` accepts Core,
+  config and root source identities in one immutable packet. Reads, startup,
+  opening tabs, export and agent state perform no diagnostic admission.
+  `retryDiagnosticsAndDashboard` is the explicit user request; process-owned
+  pending taps coalesce, and request replies never publish results. Core owns
+  required checks, attribution, completeness, verdict, cleanup and cache.
+  Render `AutonomousDiagnosticSnapshot`; preserve historical evidence with its
+  currentness and root-join qualifications. Missing proof is unverified, never
+  green. The old local DiagnosticDomain/coordinator is disconnected pending
+  retirement; do not wire it back or use foreign-VPN routing as a prerequisite.
 - **`RootSnapshotCache`** — the batched heavy root read (core's `RootSnapshot`
   probe). CoreSession owns current config, native selection and routing; do not
   derive a competing authority from a retained root snapshot. Need new detail on the Dashboard/Hiding path? Add a section to

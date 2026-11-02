@@ -141,6 +141,34 @@ class AutonomousDiagnosticSnapshotTest {
     }
 
     @Test
+    fun `routing and receipt updates do not invalidate unrelated heavy root metadata`() {
+        val initial = update()
+        val root = RootSnapshot(emptyMap(), observationId = 1, core = initial)
+        val changed =
+            initial.copy(
+                sequence = 4,
+                state =
+                    initial.state?.copy(
+                        revision = 2,
+                        operationsInFlight = listOf(17),
+                        routing = dev.okhsunrog.vpnhide.CoreRoutingView(true, 2, 10041, null, listOf("tun0")),
+                        activeCaptures = 1,
+                    ),
+            )
+        assertTrue(autonomousDiagnosticSnapshot(AutonomousDiagnosticSources(changed, observed(root), config(changed)), 1, 0).rootJoined)
+    }
+
+    @Test
+    fun `published evidence does not alias mutable transport records`() {
+        val initial = update()
+        val snapshot = autonomousDiagnosticSnapshot(AutonomousDiagnosticSources(initial, ObservationState(), config(initial)), 1, 0)
+        initial.state?.autonomousDiagnostics?.session = 99uL
+        initial.state?.autonomousAssessment?.phase = CoreAssessmentPhase.INFRASTRUCTURE
+        assertEquals(1L, snapshot.run?.session)
+        assertEquals("running", snapshot.assessment?.phase)
+    }
+
+    @Test
     fun `disconnect releases root waiter with retained evidence qualified unavailable`() =
         runTest {
             val initial = update()
@@ -156,7 +184,7 @@ class AutonomousDiagnosticSnapshotTest {
             val unavailable = waiter.await()
             assertEquals(AutonomousAvailability.Offline, unavailable.availability)
             assertFalse(unavailable.current)
-            assertSame(initial.state?.autonomousDiagnostics, unavailable.run)
+            assertEquals(initial.state?.autonomousDiagnostics?.toDiagnosticInfo(), unavailable.run)
         }
 
     @Test

@@ -112,6 +112,36 @@ internal fun exportRecommendation(snapshot: DiagnosticSnapshot): ExportRecommend
     return recommendExport(root?.core?.current == true, report, boot, javaFailure)
 }
 
+/** Recommendations consume the same accepted Core facts as UI/export/agent. */
+internal fun exportRecommendation(snapshot: AutonomousDiagnosticSnapshot): ExportRecommendation {
+    val core = snapshot.sources.core
+    if (!core.current) return ExportRecommendation(kernelReason = ExportReason.CoreUnavailable, javaReason = ExportReason.CoreUnavailable)
+    val boot = core.state?.nativeBoot?.outcome
+    val compatibility = kernelCompatibilityEvidence(boot)
+    val configuration = configurationOnlyFailure(boot)
+    val leaks =
+        snapshot.assessment
+            ?.leaked
+            .orEmpty()
+            .takeIf { snapshot.current }
+            .orEmpty()
+    val native = leaks.any { !it.startsWith("framework_") && it !in setOf("package_visibility", "ports") }
+    val java = leaks.any { it.startsWith("framework_") || it == "package_visibility" }
+    val kernel = native && core.state?.backend?.selected in setOf(NativeBackendId.Kmod, NativeBackendId.Builtin, NativeBackendId.Kpm)
+    return ExportRecommendation(
+        kernel = !configuration && (kernel || compatibility),
+        java = java,
+        kernelReason =
+            when {
+                configuration -> ExportReason.Configuration
+                compatibility -> ExportReason.KernelCompatibility
+                kernel -> ExportReason.KernelHooks
+                else -> ExportReason.Incomplete
+            },
+        javaReason = if (java) ExportReason.JavaHooks else ExportReason.Incomplete,
+    )
+}
+
 private fun kernelCompatibilityEvidence(boot: NativeBootOutcome?): Boolean =
     when (boot) {
         is NativeBootOutcome.UnsupportedKernel -> {

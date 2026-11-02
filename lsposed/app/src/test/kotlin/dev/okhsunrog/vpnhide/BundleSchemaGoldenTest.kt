@@ -115,26 +115,19 @@ internal fun sampleBundleState(): VpnHideState {
             kpm = ModuleState.NotInstalled,
             zygisk = ModuleState.Installed(version = "1.2.5", active = false, runtimeCheckable = true),
         )
-    val report =
-        buildDiagnosticReport(
-            gate = DiagnosticGate.ROUTED,
-            results = CheckResults(native = emptyList()),
-            backend = displayNativeBackend(backends),
-            lsposedActive = true,
-            complete = true,
-        )
     return VpnHideState(
         generatedAt = "2026-08-22T12:00:00+0300",
         captureKind = "debug",
         app = AppInfo("dev.okhsunrog.vpnhide", "1.2.5 (10205)"),
         device = DeviceInfo("Google", "Pixel 8 Pro", "17", 36, listOf("arm64-v8a")),
         selfNeedsRestart = false,
-        gate = report.gate,
-        selfTestRunId = 4,
-        diagnostics = sampleDiagnosticSummary(),
-        nativeVerdict = report.nativeVerdict,
-        javaVerdict = report.javaVerdict,
-        report = report,
+        gate = null,
+        selfTestRunId = null,
+        diagnostics = null,
+        autonomousDiagnostics = sampleAutonomousDiagnosticInfo(),
+        nativeVerdict = null,
+        javaVerdict = null,
+        report = null,
         backends = backends,
         activeBackend = displayNativeBackend(backends),
         ports = ModuleState.NotInstalled,
@@ -213,53 +206,15 @@ private fun sampleDashboard(
         nativeBackend = displayNativeBackend(backends),
         nativeInstallRecommendation = null,
         kmodLoadStatus = null,
-        protection = ProtectionCheck.Blocked(DiagnosticGate.VPN_OFF),
+        protection = ProtectionCheck.Autonomous(sampleAutonomousDiagnosticInfo()),
         messages = emptyList(),
-    )
-
-/**
- * The presentation block with every optional field set: a run in flight, a
- * failed later attempt and an older complete measurement whose conditions
- * changed since, so the golden pins each nested shape and every enum wire name.
- */
-private fun sampleDiagnosticSummary(): DiagnosticSummaryInfo =
-    DiagnosticSummaryInfo(
-        eligibility = DiagnosticEligibility.Eligible,
-        activeRunId = 5,
-        activeStage = DiagnosticStage.Core,
-        lastAttempt = DiagnosticAttemptInfo(4, RunOutcome.Failed, TransitionFailure.ExecutionFailed, eligibility = null),
-        measurement =
-            DiagnosticMeasurementInfo(
-                runId = 3,
-                startedAt = 1_755_856_800_000,
-                endedAt = 1_755_856_802_000,
-                completed = true,
-                interrupted = false,
-                observationId = 7,
-            ),
-        applicability = MeasurementApplicability.Changed,
-        evidence =
-            MeasurementEvidence(
-                hidden = 9,
-                systemBlocked = 1,
-                nothingToLeak = 2,
-                leaks = 0,
-                notMeasured = 0,
-                notRun = 0,
-                uncoveredLeaks = 0,
-                conclusion = EvidenceConclusion.NoObservedLeak,
-            ),
-        currentSuccess = false,
-        probeUnavailable = true,
-        lastKnownRouting = SelfRouting.VpnOff,
-        routingRead = RoutingReadInfo(ReadReason.Transition, pendingMs = 820),
-        snapshot = DiagnosticSnapshotInfo(12, 9, 3, true, 8, 4, 2),
     )
 
 private fun sampleBeforeCapture(): BeforeCaptureInfo =
     BeforeCaptureInfo(
         observedAt = "2026-08-22T11:59:59+0300",
-        diagnostics = sampleDiagnosticSummary(),
+        diagnostics = null,
+        autonomousDiagnostics = sampleAutonomousDiagnosticInfo().copy(current = false),
         protection = null,
         messages =
             listOf(
@@ -278,4 +233,97 @@ private fun sampleBeforeCapture(): BeforeCaptureInfo =
             ),
         pendingOperationIds = listOf(7),
         operationRechecking = true,
+    )
+
+internal fun sampleAutonomousDiagnosticInfo(): dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticInfo {
+    val required = sampleRequiredChecks()
+    val proven = listOf("ioctl_flags", "ioctl_mtu", "getifaddrs", "netlink_links", "framework_capabilities")
+    val leaked = listOf("framework_networks")
+    return dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticInfo(
+        availability = "published",
+        current = true,
+        sourceEpoch = 9,
+        sourceConfigRevision = 3,
+        sourceSequence = 12,
+        connectionGeneration = 1,
+        snapshotRevision = 14,
+        rootObservationId = 9,
+        rootGeneration = 3,
+        rootJoined = true,
+        rootSourceEpoch = 9,
+        rootSourceSequence = 12,
+        rootSourceConnectionGeneration = 1,
+        rootSourceConfigRevision = 3,
+        selectedBackend = "kmod",
+        appliedBackend = "kmod",
+        mutationHeld = false,
+        heldResources = emptyList(),
+        run = sampleAutonomousRun(),
+        assessment =
+            dev.okhsunrog.vpnhide.diagnostics.AutonomousAssessmentInfo(
+                phase = "incomplete",
+                required = required,
+                proven = proven,
+                leaked = leaked,
+                unverified = required - proven.toSet() - leaked.toSet(),
+                nativeControls = emptyList(),
+                frameworkControls = listOf("probe_unavailable"),
+                reuseBlockers = listOf("loaded_generations_incomplete"),
+                infrastructureDetail = null,
+                cleanupConfirmed = null,
+            ),
+    )
+}
+
+private fun sampleRequiredChecks() =
+    listOf(
+        "ioctl_flags",
+        "ioctl_mtu",
+        "getifaddrs",
+        "netlink_links",
+        "ioctl_addresses",
+        "bind_to_device",
+        "netlink_addresses",
+        "netlink_routes",
+        "netlink_rules",
+        "proc_routes",
+        "proc_interfaces",
+        "sys_interfaces",
+        "framework_networks",
+        "framework_default_network",
+        "framework_capabilities",
+        "framework_link_properties",
+        "framework_legacy_info",
+        "framework_callbacks",
+        "framework_pending_intent",
+    )
+
+private fun sampleFrameworkAttribution() =
+    dev.okhsunrog.vpnhide.diagnostics.AutonomousFrameworkAttributionInfo(
+        99,
+        9,
+        "boot-1",
+        10041,
+        2345,
+        15000,
+        100,
+        320,
+        "c".repeat(64),
+        "d".repeat(64),
+    )
+
+private fun sampleAutonomousRun() =
+    dev.okhsunrog.vpnhide.diagnostics.AutonomousRunInfo(
+        session = 99,
+        coreEpoch = 9,
+        bootId = "boot-1",
+        policySha256 = "a".repeat(64),
+        runtimeSha256 = "b".repeat(64),
+        platformSha256 = "e".repeat(64),
+        loadedGenerationsSha256 = "f".repeat(64),
+        loadedGenerationsComplete = false,
+        contract = 2,
+        stale = false,
+        frameworkAttribution =
+            sampleFrameworkAttribution(),
     )

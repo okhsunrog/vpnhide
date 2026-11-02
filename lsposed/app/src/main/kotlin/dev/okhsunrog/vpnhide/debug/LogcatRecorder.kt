@@ -12,6 +12,7 @@ import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.core.LogcatAutoStop
 import dev.okhsunrog.vpnhide.core.LogcatDebugRestore
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
+import dev.okhsunrog.vpnhide.diagnostics.toDiagnosticInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -409,8 +410,16 @@ internal object LogcatRecorder {
     ): String {
         val rawLogFile = requireNotNull(session.file)
         val dmesg = captureDmesg()
-        val rootSnapshot =
-            runCatching { RootSnapshotCache.refresh() }.getOrElse { RootSnapshot(emptyMap()) }
+        val errors = mutableListOf<String>()
+        val refreshedRoot =
+            dev.okhsunrog.vpnhide.diagnostics.readAutonomousRoot(
+                read = { RootSnapshotCache.refresh() },
+                onFailure = { errors += "root snapshot failed: ${it.message}" },
+            )
+        val diagnostics =
+            dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
+                .awaitSnapshot(refreshedRoot)
+        val rootSnapshot = diagnostics.rootSnapshot ?: RootSnapshot(emptyMap(), core = diagnostics.sources.core)
         val shellSnapshot = collectDebugShellSnapshot()
         return buildVpnHideState(
             context = context,
@@ -418,20 +427,22 @@ internal object LogcatRecorder {
             generatedAt = isoNow(),
             selfNeedsRestart = recording.selfNeedsRestart,
             rootSnapshot =
-                RootSnapshot(
-                    rootSnapshot.sections +
-                        ("logcat_recording" to buildRecordingText(recording, session, stopMs)),
+                rootSnapshot.copy(
+                    sections =
+                        rootSnapshot.sections +
+                            ("logcat_recording" to buildRecordingText(recording, session, stopMs)),
                 ),
             shellSnapshot = shellSnapshot,
             gate = null,
             checkResults = null,
+            autonomousSnapshot = diagnostics,
             dmesg = dmesg,
             logcat = filterVpnHideLogcat(rawLogFile),
             bootLsposedLogcat = captureBootLsposedLogcat(),
             lsposedConfigDb = buildLsposedConfigText(context),
             hookReport = buildHookDiagnosticsText(context, shellSnapshot),
             debugCapture = session.debugCaptureInfo(),
-            errors = emptyList(),
+            errors = errors,
             // A full-logcat bug report wants the forensic context; keep the
             // installed-app list private (redacted) as before.
             options = StateContentOptions(forensics = true, appList = false),

@@ -428,7 +428,6 @@ private fun CommunitySettingsSection() {
 internal fun DiagnosticsSettingsScreen(
     selfNeedsRestart: Boolean?,
     onBack: () -> Unit,
-    onOpenAccelerators: (() -> Unit)? = null,
 ) {
     SettingsSubScreenScaffold(stringResource(R.string.settings_diagnostics_title), onBack) { padding ->
         if (selfNeedsRestart == null) {
@@ -442,7 +441,6 @@ internal fun DiagnosticsSettingsScreen(
             DiagnosticsScreen(
                 selfNeedsRestart = selfNeedsRestart,
                 modifier = Modifier.padding(padding),
-                onOpenAccelerators = onOpenAccelerators,
             )
         }
     }

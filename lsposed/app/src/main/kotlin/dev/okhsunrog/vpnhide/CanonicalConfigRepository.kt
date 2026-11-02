@@ -2,7 +2,6 @@ package dev.okhsunrog.vpnhide
 
 import android.content.Context
 import dev.okhsunrog.vpnhide.core.CoreRoot
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticImpactObserver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,7 +36,6 @@ internal object CanonicalConfigRepository {
             processScope,
             refresh = { refreshDerivedCaches() },
             invalidateObservations = RootSnapshotCache::invalidate,
-            observer = DiagnosticImpactObserver { requireNotNull(appContext).packageName },
         )
     val state = coordinator.view
 

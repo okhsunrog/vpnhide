@@ -21,9 +21,9 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.MethodSurface
 import dev.okhsunrog.vpnhide.diagnostics.buildAppProbeStats
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
-import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
 import dev.okhsunrog.vpnhide.diagnostics.diffCapture
 import dev.okhsunrog.vpnhide.diagnostics.snapshotCounters
+import dev.okhsunrog.vpnhide.diagnostics.toDiagnosticInfo
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.migration.parseImportedCanonicalConfig
 import dev.okhsunrog.vpnhide.picker.AppListCache
@@ -67,27 +67,40 @@ internal object AgentControl {
         options: StateContentOptions = StateContentOptions(),
     ): VpnHideState =
         withAppContext(context) { context ->
-            val requestedRoot = rootSnapshot(refresh == true)
-            // Root, results, presentation and Situation belong to one accepted domain revision.
-            val snapshot = DiagnosticsCache.awaitTerminal(context, selfNeedsRestart = false, root = requestedRoot)
-            val rootSnapshot = requireNotNull(snapshot.rootSnapshot)
-            val diagnostics = snapshot.presentation
-            val derived = loadDashboardState(context, selfNeedsRestart = false, rootSnapshot = rootSnapshot, diagnostics = diagnostics)
-            val protection = overlayCondition(derived.protection, snapshot.situation)
-            val dashboard = derived.copy(protection = protection)
-            val statistics = buildStatisticsState(rootSnapshot).toAgentStatisticsState(selfPackage = context.packageName)
-            val config =
-                snapshot.sources.config.confirmed
-                    ?.let { AgentBridgeJson.parseToJsonElement(canonicalConfigJson(it)) }
+            val errors = mutableListOf<String>()
+            val requestedRoot =
+                dev.okhsunrog.vpnhide.diagnostics.readAutonomousRoot(
+                    read = { rootSnapshot(refresh == true) },
+                    onFailure = { errors += "root snapshot failed: ${it.message}" },
+                )
+            // Core evidence remains readable when optional heavy metadata fails.
+            val snapshot = DiagnosticsCache.awaitSnapshot(requestedRoot)
+            val rootSnapshot = snapshot.rootSnapshot ?: RootSnapshot(emptyMap(), core = snapshot.sources.core)
+            val dashboard =
+                if (snapshot.rootJoined) {
+                    loadDashboardState(
+                        context,
+                        selfNeedsRestart = false,
+                        rootSnapshot = rootSnapshot,
+                        diagnostics = snapshot,
+                    )
+                } else {
+                    null
+                }
+            val statistics =
+                rootSnapshot.takeIf { snapshot.rootJoined }?.let {
+                    buildStatisticsState(
+                        it,
+                    ).toAgentStatisticsState(selfPackage = context.packageName)
+                }
 
             // Forensic blobs (shell snapshot, dmesg, boot logcat, lsposed config,
             // hook counters, raw sections) only on request — they run extra root
             // shells and bloat the live payload. Same options as the file export.
             val shellSnapshot = if (options.forensics) collectDebugShellSnapshot() else null
-            val errors = mutableListOf<String>()
             val networkView =
                 if (options.forensics) {
-                    runCatching { captureSelfNetworkView(context, bridgeGate(protection) == DiagnosticGate.ROUTED) }
+                    runCatching { captureSelfNetworkView(context, expectHidden = false) }
                         .onFailure { errors += "network view: ${it.message}" }
                         .getOrNull()
                 } else {
@@ -100,10 +113,9 @@ internal object AgentControl {
                 selfNeedsRestart = false,
                 rootSnapshot = rootSnapshot,
                 shellSnapshot = shellSnapshot,
-                gate = bridgeGate(protection),
-                checkResults = diagnostics.measurementResults.takeIf { protection is ProtectionCheck.Checked },
-                // The same projection the screens render, so getState and the UI agree.
-                diagnostics = diagnosticSummary(snapshot),
+                gate = null,
+                checkResults = null,
+                autonomousSnapshot = snapshot,
                 dmesg = if (options.forensics) captureDmesg() else "",
                 logcat = "",
                 bootLsposedLogcat = if (options.forensics) captureBootLsposedLogcat() else "",
@@ -113,7 +125,6 @@ internal object AgentControl {
                 errors = errors,
                 networkView = networkView,
                 dashboard = dashboard,
-                config = config,
                 statistics = statistics,
                 options = options,
             )

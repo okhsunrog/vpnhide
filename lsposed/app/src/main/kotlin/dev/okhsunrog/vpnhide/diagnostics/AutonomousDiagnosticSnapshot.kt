@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import uniffi.vpnhide_core_ffi.CoreDiagnosticRun
 
 internal enum class AutonomousAvailability {
     Initializing,
@@ -39,8 +38,8 @@ internal data class AutonomousDiagnosticSnapshot(
     val observedAt: Long,
     val sources: AutonomousDiagnosticSources,
     val availability: AutonomousAvailability,
-    val run: CoreDiagnosticRun?,
-    val assessment: uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment?,
+    val run: AutonomousRunInfo?,
+    val assessment: AutonomousAssessmentInfo?,
     val rootJoined: Boolean,
 ) {
     val rootSnapshot: RootSnapshot? get() = sources.root.lastGood?.value
@@ -81,7 +80,15 @@ internal fun autonomousDiagnosticSnapshot(
 
             else -> AutonomousAvailability.Published
         }
-    return AutonomousDiagnosticSnapshot(revision, now, sources, availability, run, state?.autonomousAssessment, currentRootJoined(sources))
+    return AutonomousDiagnosticSnapshot(
+        revision,
+        now,
+        sources,
+        availability,
+        run?.toDiagnosticInfo(),
+        state?.autonomousAssessment?.toDiagnosticInfo(),
+        currentRootJoined(sources),
+    )
 }
 
 private fun currentRootJoined(sources: AutonomousDiagnosticSources): Boolean {
@@ -89,13 +96,12 @@ private fun currentRootJoined(sources: AutonomousDiagnosticSources): Boolean {
     val update = sources.core
     val state = update.state ?: return false
     val rootState = root.core.state ?: return false
-    // Only the run publication/cursor may differ. A same-config runtime change
-    // cannot silently lend its older backend/apply facts to the new report.
+    // Compare only facts this heavy root projection actually consumed. Routing,
+    // receipts and process telemetry have their own live Core publications.
     return update.current && root.core.current && rootState.epoch == state.epoch &&
         root.core.connectionGeneration == update.connectionGeneration &&
         rootState.configRevision == state.configRevision && coreInputsJoined(root, sources.config) &&
-        rootState.copy(revision = 0, autonomousDiagnostics = null, autonomousAssessment = null) ==
-        state.copy(revision = 0, autonomousDiagnostics = null, autonomousAssessment = null)
+        rootState.canonical == state.canonical && rootState.backend == state.backend && rootState.nativeBoot == state.nativeBoot
 }
 
 /** One publication owner; construction, reads and input changes perform no RPC. */

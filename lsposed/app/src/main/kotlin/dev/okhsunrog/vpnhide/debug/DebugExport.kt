@@ -15,11 +15,11 @@ import dev.okhsunrog.vpnhide.collectDebugShellSnapshot
 import dev.okhsunrog.vpnhide.collectHookCounterSnapshot
 import dev.okhsunrog.vpnhide.core.CoreDiagnostics
 import dev.okhsunrog.vpnhide.core.CoreRoot
+import dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticSnapshot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSnapshot
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
-import dev.okhsunrog.vpnhide.diagnostics.diagnosticSummary
+import dev.okhsunrog.vpnhide.diagnostics.toDiagnosticInfo
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.loadDashboardState
 import dev.okhsunrog.vpnhide.next
@@ -44,9 +44,6 @@ internal data class DiagnosticFileEntry(
     val name: String,
     val file: File,
 )
-
-/** Capture identity: unique per export, so a capture's request can never join an earlier suite. */
-private val nextDebugCaptureId = AtomicLong(1L)
 
 // ==========================================================================
 //  Debug export — one canonical JSON
@@ -128,27 +125,15 @@ private suspend fun buildDebugState(
     val errors = mutableListOf<String>()
     return try {
         val counterBaseline = if (options.forensics) collectHookCounterSnapshot() else null
-        // Clear dmesg so we only capture output from the hooks the checks fire.
-        if (options.forensics) clearDmesg()
-        // The suite belongs to the run coordinator, not to the export: this is a fresh
-        // capture-identified run that cannot join one whose probes started before the
-        // logging and counter baseline above. Its terminal attempt is recorded either
-        // way — a blocked, interrupted or failed run is evidence, not a dead export.
-        val selfTest =
-            debugSelfTestFrom(
-                DiagnosticsCache.captureRun(context, selfNeedsRestart, nextDebugCaptureId.getAndIncrement()),
-            )
-        errors += selfTest.errors
-
+        // Retained Core evidence: no post-baseline measurement or fresh suite is claimed.
         // Authoritative module/liveness state — the SAME snapshot the dashboard
         // derives from. This is what fixes the old export path silently reading
         // "inactive" from a shell that never emitted proc_exists/ports_chain.
         val refreshedRoot =
-            runCatching { RootSnapshotCache.refresh() }
-                .getOrElse {
-                    errors += "root snapshot failed: ${it.message}"
-                    null
-                }
+            dev.okhsunrog.vpnhide.diagnostics.readAutonomousRoot(
+                read = { RootSnapshotCache.refresh() },
+                onFailure = { errors += "root snapshot failed: ${it.message}" },
+            )
 
         val diagnosticSnapshot = DiagnosticsCache.awaitSnapshot(refreshedRoot)
         val rootSnapshot = diagnosticSnapshot.rootSnapshot ?: RootSnapshot(emptyMap())
@@ -163,12 +148,11 @@ private suspend fun buildDebugState(
             } else {
                 null
             }
-        // The post-Binder network model as this uid sees it. Taken after the suite
-        // so its callback window does not overlap the suite's own callback probe;
-        // the VPN is expected hidden only when the run itself was ROUTED.
+        // Independent raw forensic observation of this existing app process.
+        // It cannot promote the retained Core run or claim fresh hiding proof.
         val networkView =
             if (options.forensics) {
-                runCatching { captureSelfNetworkView(context, selfTest.gate == DiagnosticGate.ROUTED) }
+                runCatching { captureSelfNetworkView(context, expectHidden = false) }
                     .onFailure { errors += "network view: ${it.message}" }
                     .getOrNull()
             } else {
@@ -186,13 +170,9 @@ private suspend fun buildDebugState(
             selfNeedsRestart = selfNeedsRestart,
             rootSnapshot = rootSnapshot,
             shellSnapshot = shellSnapshot,
-            // The gate is the run's own outcome now, never a second independent probe:
-            // only a completed run is ROUTED, and an unmeasurable one says why in errors.
-            gate = selfTest.gate,
-            checkResults = selfTest.checkResults,
-            selfTestRunId = selfTest.runId,
-            // The projection after the capture's own run settled: what the screens show now.
-            diagnostics = diagnosticSummary(diagnosticSnapshot),
+            gate = null,
+            checkResults = null,
+            autonomousSnapshot = diagnosticSnapshot,
             dashboard = dashboard,
             beforeCapture = beforeCapture,
             dmesg = dmesg,
@@ -225,11 +205,11 @@ private suspend fun captureDashboard(
     context: Context,
     selfNeedsRestart: Boolean,
     root: RootSnapshot,
-    snapshot: DiagnosticSnapshot,
+    snapshot: AutonomousDiagnosticSnapshot,
     errors: MutableList<String>,
 ): DashboardState? =
     try {
-        loadDashboardState(context, selfNeedsRestart, root, snapshot.presentation)
+        if (snapshot.rootJoined) loadDashboardState(context, selfNeedsRestart, root, snapshot) else null
     } catch (c: CancellationException) {
         throw c
     } catch (e: Exception) {
@@ -244,7 +224,8 @@ private fun beforeDebugCapture(): BeforeCaptureInfo? =
         val operation = display.diagnostics.sources.config
         BeforeCaptureInfo(
             observedAt = isoNow(),
-            diagnostics = diagnosticSummary(display.diagnostics),
+            diagnostics = null,
+            autonomousDiagnostics = display.diagnostics.toDiagnosticInfo(),
             protection = dashboard?.protection,
             messages = dashboard?.messages.orEmpty(),
             pendingOperationIds = operation.operations.sorted(),

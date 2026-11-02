@@ -70,7 +70,6 @@ fun DashboardScreen(
     selfNeedsRestart: Boolean,
     onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
-    onOpenAccelerators: (() -> Unit)? = null,
     onOpenHelp: (String?) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -84,7 +83,6 @@ fun DashboardScreen(
     // projection (routing knowledge, the run in flight, the latest attempt, the
     // measurement and its staleness). The hero and the prompt under it are two
     // wordings of it (heroVisual), never an overlay of flows of different vintages.
-    val situation = display.diagnostics.situation
     var showChangelog by remember { mutableStateOf(false) }
     var changelogData by remember { mutableStateOf<ChangelogData?>(null) }
     var showContact by remember { mutableStateOf(false) }
@@ -141,17 +139,6 @@ fun DashboardScreen(
         )
     }
 
-    if (state == null && loadError == null) {
-        Column(modifier = modifier.padding(16.dp)) {
-            CoreComponentCard(display.core, index = 0, count = 1)
-            DashboardLoadingState()
-        }
-        return
-    }
-
-    // Core publications update shared routing readiness; DiagnosticDomain alone decides
-    // whether that accepted observation needs one confirmation suite.
-
     Column(
         modifier =
             modifier
@@ -159,6 +146,10 @@ fun DashboardScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp),
     ) {
+        Spacer(Modifier.height(12.dp))
+        dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticStatusCard(display.diagnostics) {
+            retryDiagnosticsAndDashboard(context, selfNeedsRestart)
+        }
         Spacer(Modifier.height(12.dp))
 
         // Pinned status palette — shared by the Protection status banners
@@ -200,7 +191,21 @@ fun DashboardScreen(
                 return@Column
             }
         }
-        val loadedState = s ?: return@Column
+        if (s == null) {
+            CoreComponentCard(display.core, index = 0, count = 1)
+            return@Column
+        }
+        if (!display.diagnostics.rootJoined) {
+            CoreComponentCard(display.core, index = 0, count = 1)
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.autonomous_metadata_pending))
+            EnhancedButton(onClick = { DashboardCache.refresh(context, selfNeedsRestart) }) {
+                Text(stringResource(R.string.vpn_off_retry))
+            }
+            return@Column
+        }
+
+        val loadedState = s
 
         // Messages split by severity. Only errors/warnings affect the hero:
         // info messages are neutral notes rendered below without changing the
@@ -209,34 +214,6 @@ fun DashboardScreen(
         val warnings = loadedState.messages.filter { it.severity == DashboardMessageSeverity.WARNING }
         val infos = loadedState.messages.filter { it.severity == DashboardMessageSeverity.INFO }
 
-        // Hero: the whole setup's health at a glance, worded from the one Situation.
-        // The tiles are projected from the same presentation, so they cannot lag behind it.
-        val visual = heroVisual(situation, loadedState.protection, errorCount = errors.size, warningCount = warnings.size)
-        DashboardHeroCard(
-            state = loadedState,
-            visual = visual,
-            errorCount = errors.size,
-            warningCount = warnings.size,
-        )
-
-        // The condition the user can act on sits right under the hero (not in a
-        // separate mid-screen section), and which one it is comes from [visual] —
-        // the same classification that coloured the hero, so the two cannot
-        // contradict each other in one frame. Retry re-reads dashboard state (re-runs
-        // its own VPN + protection probes) and re-runs the diag cache so both screens
-        // recover together. The coordinator performs one VPN-state read, one fresh
-        // diagnostic run and one Dashboard derivation; the retry cannot be absorbed
-        // by an automatic run already in flight.
-        val onRetry = {
-            retryDiagnosticsAndDashboard(context, selfNeedsRestart)
-        }
-        HeroPromptBlock(
-            visual = visual,
-            onRetry = onRetry,
-            onOpenAccelerators = onOpenAccelerators,
-            warningBg = warningBg,
-            onBannerColor = onBannerColor,
-        )
         Spacer(Modifier.height(20.dp))
 
         // Module status cards — one grouped block (byIndex corners).
@@ -610,250 +587,6 @@ private fun SectionHeader(
 ) {
     SharedSectionHeader(text = text, color = color, emphasized = true)
 }
-
-/** The container/accent/icon triple a [HeroTone] is drawn with. */
-private data class HeroPalette(
-    val container: Color,
-    val accent: Color,
-    val icon: ImageVector,
-)
-
-/** Neutral keeps the palette the VPN-off hero has always used. */
-@Composable
-private fun heroPalette(tone: HeroTone): HeroPalette =
-    when (tone) {
-        HeroTone.Protected -> {
-            HeroPalette(StatusColors.successContainer(), StatusColors.successDot, Icons.Default.Shield)
-        }
-
-        HeroTone.Attention -> {
-            HeroPalette(StatusColors.warningContainer(), StatusColors.warningAccent, Icons.Default.Warning)
-        }
-
-        HeroTone.Unprotected -> {
-            HeroPalette(StatusColors.errorContainer(), StatusColors.errorAccent, Icons.Default.Warning)
-        }
-
-        HeroTone.Neutral -> {
-            HeroPalette(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, Icons.Default.Info)
-        }
-    }
-
-private fun heroTitleRes(title: HeroTitle): Int =
-    when (title) {
-        HeroTitle.VpnHidden -> R.string.dashboard_hero_protected_title
-        HeroTitle.NeedsAttention -> R.string.dashboard_hero_attention_title
-        HeroTitle.VpnVisible -> R.string.dashboard_hero_unprotected_title
-        HeroTitle.VpnOff -> R.string.dashboard_hero_vpnoff_title
-        HeroTitle.Checking -> R.string.dashboard_hero_checking_title
-        HeroTitle.CannotCheck -> R.string.dashboard_hero_cannot_check_title
-        HeroTitle.RestartToCheck -> R.string.dashboard_hero_restart_title
-        HeroTitle.CouldNotCheck -> R.string.dashboard_hero_could_not_check_title
-        HeroTitle.RecheckNeeded -> R.string.dashboard_hero_recheck_title
-    }
-
-private fun heroSubtitleRes(subtitle: HeroSubtitle): Int =
-    when (subtitle) {
-        HeroSubtitle.AllLayersActive -> R.string.dashboard_hero_protected_subtitle
-        HeroSubtitle.SomeChecksNeedLook -> R.string.dashboard_hero_attention_subtitle
-        HeroSubtitle.HidingNotActive -> R.string.dashboard_hero_unprotected_subtitle
-        HeroSubtitle.InactiveWithoutVpn -> R.string.dashboard_hero_vpnoff_subtitle
-        HeroSubtitle.CheckingVpn -> R.string.dashboard_hero_checking_vpn
-        HeroSubtitle.RunningChecks -> R.string.dashboard_hero_checking_suite
-        HeroSubtitle.ApplyingConfig -> R.string.dashboard_hero_checking_config
-        HeroSubtitle.SelfExcluded -> R.string.dashboard_hero_self_excluded_subtitle
-        HeroSubtitle.RestartApp -> R.string.dashboard_hero_restart_app_subtitle
-        HeroSubtitle.RestartDevice -> R.string.dashboard_hero_restart_device_subtitle
-        HeroSubtitle.ApplicationUnknown -> R.string.dashboard_hero_note_application_unknown
-        HeroSubtitle.ApplicationFailed -> R.string.dashboard_hero_note_application_failed
-        HeroSubtitle.RoutingUnknown -> R.string.dashboard_hero_note_routing_unknown
-        HeroSubtitle.LastCheckFailed -> R.string.dashboard_hero_note_failed
-        HeroSubtitle.LastCheckInterrupted -> R.string.dashboard_hero_note_interrupted
-        HeroSubtitle.ProbeUnavailable -> R.string.dashboard_hero_note_probe_unavailable
-        HeroSubtitle.ResultsChanged -> R.string.dashboard_hero_note_results_changed
-        HeroSubtitle.InsufficientEvidence -> R.string.dashboard_hero_note_insufficient
-    }
-
-/**
- * The condition block under the hero. Which prompt appears is [HeroVisual.prompt];
- * only the wording is decided here. A [HeroPrompt.Recheck] asks for the same action
- * whatever led to it, so it reuses the message the Diagnostics screen already words
- * for that cause rather than inventing a second vocabulary.
- */
-@Composable
-private fun HeroPromptBlock(
-    visual: HeroVisual,
-    onRetry: () -> Unit,
-    onOpenAccelerators: (() -> Unit)?,
-    warningBg: Color,
-    onBannerColor: Color,
-) {
-    if (visual.prompt == HeroPrompt.None) return
-    Spacer(Modifier.height(12.dp))
-    when (visual.prompt) {
-        HeroPrompt.VpnOff -> {
-            VpnOffPrompt(onRetry = onRetry, enabled = !visual.checking)
-        }
-
-        HeroPrompt.SelfExcluded -> {
-            SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators, enabled = !visual.checking)
-        }
-
-        HeroPrompt.Restart -> {
-            StatusBanner(
-                text = stringResource(R.string.dashboard_needs_restart),
-                containerColor = warningBg,
-                contentColor = onBannerColor,
-            )
-        }
-
-        HeroPrompt.Recheck -> {
-            DiagnosticsRetryPrompt(heroRecheckPromptRes(visual.subtitle), onRetry)
-        }
-
-        // Returned above; the branch only keeps the `when` exhaustive.
-        HeroPrompt.None -> {}
-    }
-}
-
-private fun heroRecheckPromptRes(subtitle: HeroSubtitle): Int =
-    when (subtitle) {
-        HeroSubtitle.ResultsChanged -> R.string.diag_banner_results_changed
-        HeroSubtitle.RoutingUnknown -> R.string.diag_banner_routing_unknown
-        HeroSubtitle.LastCheckInterrupted -> R.string.diag_banner_interrupted
-        else -> R.string.diag_failed_prompt
-    }
-
-/**
- * The big at-a-glance status card at the top of the Dashboard. [visual] carries the
- * whole decision — tone, title, subtitle and whether a read or a run is in flight —
- * so this only picks colours and strings. The tiles keep rendering the measurement
- * in [state]; they are the evidence, the hero is the claim about it.
- */
-@Composable
-private fun DashboardHeroCard(
-    state: DashboardState,
-    visual: HeroVisual,
-    errorCount: Int,
-    warningCount: Int,
-) {
-    val palette = heroPalette(visual.tone)
-    EnhancedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = AppColors.cardContainer,
-    ) {
-        Column(modifier = Modifier.padding(18.dp).fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // No idle animation here: a looping scale on this icon kept the whole
-                // Dashboard rendering at the display's refresh rate (~95% of a core)
-                // for a movement nobody noticed.
-                IconBubble(
-                    icon = palette.icon,
-                    tint = palette.accent,
-                    container = palette.container,
-                    progress = visual.checking,
-                )
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(heroTitleRes(visual.title)),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = stringResource(heroSubtitleRes(visual.subtitle)),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-            val nativeMetric = protectionMetric(state.protection) { it.native }
-            val javaMetric = protectionMetric(state.protection) { it.java }
-            MetricGrid(
-                MetricContent(stringResource(R.string.dashboard_summary_modules), moduleSummaryText(state), moduleSummaryAccent(state)),
-                MetricContent(stringResource(R.string.dashboard_native_protection), nativeMetric.text, nativeMetric.accent),
-                MetricContent(stringResource(R.string.dashboard_java_protection), javaMetric.text, javaMetric.accent),
-                MetricContent(
-                    stringResource(R.string.dashboard_summary_issues),
-                    (errorCount + warningCount).toString(),
-                    when {
-                        errorCount > 0 -> StatusColors.errorAccent
-                        warningCount > 0 -> StatusColors.warningAccent
-                        else -> StatusColors.successDot
-                    },
-                ),
-            )
-        }
-    }
-}
-
-@Composable
-private fun moduleSummaryAccent(state: DashboardState): Color {
-    val nativeActive = moduleActive(state.nativeBackend.state)
-    val nativeBroken = (state.nativeBackend.state as? ModuleState.Installed)?.brokenReason != null
-    return when {
-        nativeBroken -> StatusColors.errorAccent
-        state.lsposed is LsposedState.Active && nativeActive -> StatusColors.successDot
-        activeModuleCount(state) > 0 -> StatusColors.warningAccent
-        else -> StatusColors.errorAccent
-    }
-}
-
-/** A metric tile's text + accent, kept in lock-step so they can't diverge. */
-private data class MetricSpec(
-    val text: String,
-    val accent: Color,
-)
-
-/** One tile's text + accent for any protection layer, from its
- * [LayerStatus]/[Verdict]. Native and Java tiles share this mapping. */
-@Composable
-private fun layerSummary(layer: LayerStatus): MetricSpec =
-    when (layer) {
-        LayerStatus.Absent -> {
-            MetricSpec(stringResource(R.string.dashboard_protection_no_module), MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-
-        LayerStatus.Inactive -> {
-            MetricSpec(stringResource(R.string.dashboard_protection_not_active), MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-
-        LayerStatus.Unverified -> {
-            MetricSpec(stringResource(R.string.dashboard_protection_not_verified), MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-
-        is LayerStatus.Active -> {
-            when (layer.verdict) {
-                Verdict.Ok -> MetricSpec(stringResource(R.string.dashboard_protection_ok), StatusColors.successDot)
-                Verdict.Partial -> MetricSpec(stringResource(R.string.dashboard_protection_partial), StatusColors.warningAccent)
-                Verdict.Broken -> MetricSpec(stringResource(R.string.dashboard_protection_fail), StatusColors.errorAccent)
-            }
-        }
-    }
-
-/** The native/java tile metric for [protection]. [layer] picks which measured
- * layer to summarize. VPN off / app not in the tunnel / needs restart reads
- * "not checked" — the hero and banner carry the actual reason. */
-@Composable
-private fun protectionMetric(
-    protection: ProtectionCheck,
-    layer: (ProtectionCheck.Checked) -> LayerStatus,
-): MetricSpec =
-    when (protection) {
-        is ProtectionCheck.Blocked, ProtectionCheck.Failed -> {
-            MetricSpec(stringResource(R.string.dashboard_protection_unknown), MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-
-        is ProtectionCheck.Checked -> {
-            layerSummary(layer(protection))
-        }
-    }
 
 private data class InstalledVisual(
     val subtitle: String,

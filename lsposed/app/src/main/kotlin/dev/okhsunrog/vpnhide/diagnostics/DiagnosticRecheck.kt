@@ -14,7 +14,6 @@ internal fun retryDiagnosticsAndDashboard(
     context: Context,
     selfNeedsRestart: Boolean,
 ) {
-    RoutingGateCache.refresh(context, selfNeedsRestart)
-    DiagnosticsCache.retry(context, selfNeedsRestart)
+    DiagnosticsCache.retry(context)
     DashboardCache.refresh(context, selfNeedsRestart)
 }

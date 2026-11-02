@@ -12,6 +12,7 @@ import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.diagnostics.MeasurementCoverage
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.classifyKpmProblem
+import dev.okhsunrog.vpnhide.diagnostics.toDiagnosticInfo
 import dev.okhsunrog.vpnhide.diagnostics.token
 import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.generated.HookIds
@@ -109,6 +110,12 @@ sealed interface LsposedState {
 
 @Serializable
 internal sealed interface ProtectionCheck {
+    @Serializable
+    @SerialName("autonomous")
+    data class Autonomous(
+        val evidence: dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticInfo,
+    ) : ProtectionCheck
+
     // The gate stopped the run before anything could be measured — VPN off, this app
     // split-tunnelled out (hiding is moot for us → "add to tunnel"), or a pending
     // self-restart. Carries the shared [DiagnosticGate] so the hero/agent explain
@@ -1359,11 +1366,11 @@ internal suspend fun loadDashboardState(
     context: android.content.Context,
     selfNeedsRestart: Boolean,
     rootSnapshot: RootSnapshot,
-    diagnostics: DiagnosticPresentation,
+    diagnostics: dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticSnapshot,
 ): DashboardState {
     val facts = deriveDashboardRootFacts(context, selfNeedsRestart, rootSnapshot)
     val developer = SettingsRepository(context.applicationContext).settings.first().toDeveloperFlags()
-    return assembleDashboardState(context, facts, diagnostics, developer, CoreSessions.updates.value)
+    return assembleDashboardState(context, facts, diagnostics, developer, diagnostics.sources.core)
 }
 
 /**
@@ -1454,9 +1461,36 @@ internal fun assembleDashboardState(
     diagnostics: DiagnosticPresentation,
     developer: DeveloperFlags,
     coreUpdate: CoreSessionUpdate = facts.coreUpdate,
+): DashboardState = assembleDashboardState(context, facts, resolveProtectionFacts(facts, diagnostics), developer, coreUpdate)
+
+internal fun assembleDashboardState(
+    context: android.content.Context,
+    facts: DashboardRootFacts,
+    diagnostics: dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticSnapshot,
+    developer: DeveloperFlags,
+    coreUpdate: CoreSessionUpdate = facts.coreUpdate,
+): DashboardState =
+    assembleDashboardState(
+        context,
+        facts,
+        ProtectionFacts(
+            check = ProtectionCheck.Autonomous(diagnostics.toDiagnosticInfo()),
+            report = null,
+            partialHookGap = facts.partialHookGap,
+            installedOptionalHooks = facts.installedOptionalHooks,
+        ),
+        developer,
+        coreUpdate,
+    )
+
+private fun assembleDashboardState(
+    context: android.content.Context,
+    facts: DashboardRootFacts,
+    protection: ProtectionFacts,
+    developer: DeveloperFlags,
+    coreUpdate: CoreSessionUpdate = facts.coreUpdate,
 ): DashboardState {
     val localized = AppLanguageContext.localized(context)
-    val protection = resolveProtectionFacts(facts, diagnostics)
     val dashboardFacts =
         DashboardFacts(
             facts.modules,

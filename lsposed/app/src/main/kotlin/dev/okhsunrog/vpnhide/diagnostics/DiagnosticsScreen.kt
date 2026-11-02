@@ -79,204 +79,17 @@ import java.util.zip.ZipOutputStream
 fun DiagnosticsScreen(
     selfNeedsRestart: Boolean,
     modifier: Modifier = Modifier,
-    onOpenAccelerators: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
-
-    // The banner is the one Situation the Dashboard hero renders too, so the two
-    // surfaces cannot disagree about what the user is looking at. The presentation
-    // supplies only this screen's side channels (which results to list, whether they
-    // are complete, their coverage, the notice about the latest attempt), from the
-    // same instant. The screen words the pure decision; it never combines flows.
     val snapshot by DiagnosticsCache.snapshot.collectAsStateWithLifecycle()
-    val presentation = snapshot.presentation
-    val situation = snapshot.situation
-    val decision = diagnosticScreenDecision(situation, presentation)
-    val tallyFmt = stringResource(R.string.diag_summary_tally)
-
-    // Kick off the diagnostics run once per process. The cache parks at
-    // Blocked(NEEDS_RESTART) itself when selfNeedsRestart (hooks aren't applied to this
-    // app yet, so a run would be meaningless); run is idempotent otherwise.
-    LaunchedEffect(selfNeedsRestart) {
-        DiagnosticsCache.run(context, selfNeedsRestart)
-        // Ensure the backend/ownership state is available even when the user opens
-        // Diagnostics without visiting the Dashboard first (cheap no-op if cached).
-        DashboardCache.ensureLoaded(context, selfNeedsRestart)
-        // Same belt-and-suspenders init as DashboardCache above: usually already
-        // seeded by StartupCoordinator.ensureInitialCaches, but a cheap no-op here
-        // guarantees the shared gate is ready even if Diagnostics is opened first.
-        RoutingGateCache.ensureLoaded(context, selfNeedsRestart)
-    }
-    // Core publications feed readiness. Confirmation runs belong to DiagnosticDomain;
-    // the screen only renders its accepted presentation.
-
-    val results = decision.results
-    // Native probes that couldn't run (ECONNREFUSED from socket()) classify as
-    // NotMeasured(NoNetworkPermission). Java-level checks never produce that state,
-    // so this isolates the "app has no network permission" banner from everything else.
-    val networkBlocked = results?.native?.anyNetworkBlocked() == true
-
-    Column(
-        modifier =
-            modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp)
-                .verticalScroll(rememberScrollState()),
-    ) {
+    LaunchedEffect(selfNeedsRestart) { DashboardCache.ensureLoaded(context, selfNeedsRestart) }
+    Column(modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(8.dp))
-
-        // One coordinated retry refreshes VPN state, queues one fresh suite and
-        // then re-derives Dashboard from that result.
-        val onRetry = {
-            retryDiagnosticsAndDashboard(context, selfNeedsRestart)
-        }
-        DiagnosticBannerContent(decision.banner, decision.checking, onRetry, onOpenAccelerators)
-        decision.attemptNotice?.let { notice ->
-            Spacer(Modifier.height(6.dp))
-            StatusBanner(
-                text =
-                    stringResource(
-                        when (notice) {
-                            DiagnosticAttemptNotice.Interrupted -> R.string.diag_notice_interrupted
-                            DiagnosticAttemptNotice.Failed -> R.string.diag_notice_failed
-                        },
-                    ),
-                containerColor = StatusColors.warningContainer(),
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-
-        if (networkBlocked) {
-            Spacer(Modifier.height(6.dp))
-            StatusBanner(
-                text = stringResource(R.string.banner_network_blocked),
-                containerColor = StatusColors.errorContainer(),
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-
-        results?.let { r ->
-            // Build the canonical report when the dashboard has loaded so each
-            // check knows whether the active backend OWNS its vector; otherwise
-            // render the raw list (every leak reads as a leak — the pre-report
-            // behaviour, used only in the brief window before the dashboard loads).
-            // A retained measurement keeps the layers it was measured against; only an
-            // active run's partial evidence uses the root in the same domain snapshot.
-            val layers =
-                decision.coverage
-                    ?: snapshot.rootSnapshot?.let(::measurementCoverageFor)
-            val report =
-                layers?.let { c ->
-                    buildDiagnosticReport(
-                        gate = DiagnosticGate.ROUTED,
-                        results = r,
-                        backend = c.backend,
-                        lsposedActive = c.lsposedActive,
-                        complete = decision.complete,
-                        installedOptionalHooks = c.installedOptionalHooks,
-                    )
-                }
-            DiagnosticsResults(report = report, results = r, tallyFmt = tallyFmt)
-        }
-
+        AutonomousDiagnosticStatusCard(snapshot) { retryDiagnosticsAndDashboard(context, selfNeedsRestart) }
+        Spacer(Modifier.height(12.dp))
+        AutonomousDiagnosticRows(snapshot)
         Spacer(Modifier.height(16.dp))
     }
-}
-
-/**
- * Words one [DiagnosticBanner]; the decision itself is pure and tested, this only
- * renders it. [checking] holds a condition's prompt in place with a busy button
- * while the fact behind it is being re-read.
- */
-@Composable
-private fun DiagnosticBannerContent(
-    banner: DiagnosticBanner,
-    checking: Boolean,
-    onRetry: () -> Unit,
-    onOpenAccelerators: (() -> Unit)?,
-) {
-    when (banner) {
-        DiagnosticBanner.Progress -> {
-            Box(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
-        }
-
-        DiagnosticBanner.RestartApp -> {
-            StatusBanner(
-                text = stringResource(R.string.banner_added_self),
-                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            )
-        }
-
-        DiagnosticBanner.VpnOff -> {
-            VpnOffPrompt(onRetry = onRetry, enabled = !checking)
-        }
-
-        DiagnosticBanner.SelfExcluded -> {
-            SelfNotRoutedPrompt(onRetry = onRetry, onOpenAccelerators = onOpenAccelerators, enabled = !checking)
-        }
-
-        DiagnosticBanner.Applying -> {
-            NeutralBanner(R.string.diag_banner_applying, StatusColors.neutralContainer())
-        }
-
-        DiagnosticBanner.ApplicationUnknown -> {
-            NeutralBanner(R.string.diag_banner_application_unknown, StatusColors.warningContainer())
-        }
-
-        DiagnosticBanner.ApplicationFailed -> {
-            NeutralBanner(R.string.diag_banner_application_failed, StatusColors.errorContainer())
-        }
-
-        DiagnosticBanner.RoutingUnknown -> {
-            DiagnosticsRetryPrompt(R.string.diag_banner_routing_unknown, onRetry)
-        }
-
-        DiagnosticBanner.ProbeUnavailable -> {
-            NeutralBanner(R.string.diag_banner_probe_unavailable, StatusColors.warningContainer())
-        }
-
-        DiagnosticBanner.Failed -> {
-            DiagnosticsFailedPrompt(onRetry = onRetry)
-        }
-
-        DiagnosticBanner.Interrupted -> {
-            DiagnosticsRetryPrompt(R.string.diag_banner_interrupted, onRetry)
-        }
-
-        DiagnosticBanner.Ready -> {
-            NeutralBanner(R.string.banner_ready, StatusColors.successContainer())
-        }
-
-        DiagnosticBanner.ResultsChanged -> {
-            DiagnosticsRetryPrompt(R.string.diag_banner_results_changed, onRetry)
-        }
-
-        DiagnosticBanner.ResultsUnverified -> {
-            NeutralBanner(R.string.diag_banner_results_unverified, StatusColors.neutralContainer())
-        }
-
-        DiagnosticBanner.InsufficientEvidence -> {
-            NeutralBanner(R.string.diag_banner_insufficient, StatusColors.warningContainer())
-        }
-    }
-}
-
-@Composable
-private fun NeutralBanner(
-    textRes: Int,
-    containerColor: Color,
-) {
-    StatusBanner(
-        text = stringResource(textRes),
-        containerColor = containerColor,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-    )
 }
 
 /** Capture the source before opening Android's picker; its callback can arrive after recreation. */
@@ -349,7 +162,7 @@ fun DebugToolsSection(
 
         Spacer(Modifier.height(16.dp))
 
-        // The logcat card measures its own gate (persistent while the card is shown).
+        // Core owns the recorder; recording does not depend on a foreign VPN.
         LogcatRecordCard(selfNeedsRestart = selfNeedsRestart)
     }
 
@@ -389,13 +202,6 @@ private fun DebugExportSheet(
 
     // Changing any toggle invalidates a result produced with the old recipe.
     val clearResult = { outcome = null }
-    // Recreated with this composable, so a reopened sheet never flashes the previous
-    // verdict while a fresh probe runs (e.g. user closed the blocked sheet, turned the
-    // VPN on, reopened). rememberCaptureGate re-measures on first composition = on open.
-    val gate = rememberCaptureGate(selfNeedsRestart)
-    val incompleteGate = gate.incompleteGate
-    val rechecking = gate.rechecking
-    val onRecheck = gate.recheck
     ModalBottomSheet(onDismissRequest = { if (!exporting) onDismiss() }) {
         Column(
             modifier =
@@ -486,18 +292,6 @@ private fun DebugExportSheet(
                 )
             }
 
-            // Configure phase only: warn that a VPN-off / not-in-tunnel capture
-            // will be incomplete. The encouraged action (Re-check) rides on the
-            // banner; collecting anyway becomes a de-emphasized escape hatch below.
-            if (incompleteGate != null && !exporting && file == null) {
-                CaptureIncompleteWarning(
-                    gate = incompleteGate,
-                    rechecking = rechecking,
-                    onRecheck = onRecheck,
-                )
-                Spacer(Modifier.height(12.dp))
-            }
-
             when {
                 // In-progress: a disabled progress button, no competing actions.
                 exporting -> {
@@ -508,38 +302,16 @@ private fun DebugExportSheet(
                     }
                 }
 
-                // Configure phase, capture would be incomplete: no prominent primary
-                // (that would invite a blind tap) — only "collect anyway" + Cancel.
-                file == null && incompleteGate != null -> {
-                    TextButton(onClick = doExport, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.capture_collect_anyway))
-                    }
-                    TextButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.btn_cancel))
-                    }
-                }
-
                 // Configure phase: the one primary action. Held disabled while a
                 // fresh gate re-check is in flight so the user can't collect on a
                 // stale "routed" verdict before the VPN-off warning resolves.
                 file == null -> {
                     EnhancedButton(
                         onClick = doExport,
-                        enabled = selfNeedsRestart != null && !rechecking,
+                        enabled = selfNeedsRestart != null,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        if (rechecking) {
-                            ButtonSpinner()
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text(
-                            stringResource(
-                                if (rechecking) R.string.capture_checking_vpn else R.string.debug_export_modal_confirm,
-                            ),
-                        )
+                        Text(stringResource(R.string.debug_export_modal_confirm))
                     }
                 }
 
@@ -600,13 +372,6 @@ private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
     val state by LogcatRecorder.state.collectAsStateWithLifecycle()
     // A session core is still recording from before an app restart shows up as running.
     LaunchedEffect(Unit) { LogcatRecorder.refresh(context) }
-
-    // Own gate: the card is always visible, so it holds its VPN-off/not-in-tunnel
-    // verdict until re-checked (re-measured on entry and on the banner's re-check).
-    val gate = rememberCaptureGate(selfNeedsRestart)
-    val incompleteGate = gate.incompleteGate
-    val rechecking = gate.rechecking
-    val onRecheck = gate.recheck
 
     // Tick every second while recording so the elapsed counter updates
     // even when sizeBytes happens to hold steady.
@@ -760,42 +525,22 @@ private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
                         )
                         Spacer(Modifier.height(8.dp))
                     }
-                    if (incompleteGate != null) {
-                        // Same VPN-off / not-in-tunnel guard as the debug export: a
-                        // recording started now captures nothing worth diagnosing.
-                        CaptureIncompleteWarning(
-                            gate = incompleteGate,
-                            rechecking = rechecking,
-                            onRecheck = onRecheck,
+
+                    EnhancedButton(
+                        onClick = {
+                            val restartState = selfNeedsRestart ?: return@EnhancedButton
+                            scope.launch { LogcatRecorder.start(context, restartState) }
+                        },
+                        enabled = selfNeedsRestart != null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            Icons.Default.FiberManualRecord,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
                         )
-                        Spacer(Modifier.height(8.dp))
-                        TextButton(
-                            onClick = {
-                                val restartState = selfNeedsRestart ?: return@TextButton
-                                scope.launch { LogcatRecorder.start(context, restartState) }
-                            },
-                            enabled = selfNeedsRestart != null,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(stringResource(R.string.logcat_start_anyway))
-                        }
-                    } else {
-                        EnhancedButton(
-                            onClick = {
-                                val restartState = selfNeedsRestart ?: return@EnhancedButton
-                                scope.launch { LogcatRecorder.start(context, restartState) }
-                            },
-                            enabled = selfNeedsRestart != null,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(
-                                Icons.Default.FiberManualRecord,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.logcat_btn_start))
-                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.logcat_btn_start))
                     }
                 }
             }
@@ -803,102 +548,6 @@ private fun LogcatRecordCard(selfNeedsRestart: Boolean?) {
     }
 }
 
-/** Composition-scoped capture-gate state: [incompleteGate] non-null when a capture
- * now would be incomplete, [rechecking] while a probe is in flight, [recheck] to
- * re-measure. Lifetime follows the call site — see [rememberCaptureGate]. */
-private data class CaptureGate(
-    val incompleteGate: DiagnosticGate?,
-    val rechecking: Boolean,
-    val recheck: () -> Unit,
-)
-
-/**
- * Reads the shared [RoutingGateCache] — the same cheap app VPN-state observation
- * the export used to run privately via the now-removed
- * `measureCaptureGate` — so a re-check from any surface (this sheet, the logcat
- * card, Dashboard, Diagnostics' own retry) updates every other one through the one
- * underlying [StateFlow].
- *
- * [awaitingFreshSinceOpen] preserves the old per-open freshness guarantee on top of
- * that shared state: a reopened sheet must never flash a stale verdict left over from
- * before it was closed (e.g. the sheet was dismissed VPN-off, the user turns the VPN
- * on, then reopens it — the shared cache still holds the old VPN_OFF gate until this
- * composition's own recheck lands). It starts true and flips to false only once THIS
- * composition's own triggered reload has completed, so [CaptureGate.incompleteGate]
- * reports null (show "checking", not a banner) until then.
- *
- * Scope follows the call site: called under `if (showModal)` the state is recreated
- * on every open, so a reopened sheet always re-measures; called in the always-visible
- * logcat card it persists until re-checked.
- */
-@Composable
-private fun rememberCaptureGate(selfNeedsRestart: Boolean?): CaptureGate {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val sharedGate by RoutingGateCache.gate.collectAsStateWithLifecycle()
-    val sharedLoading by RoutingGateCache.loading.collectAsStateWithLifecycle()
-    var awaitingFreshSinceOpen by remember { mutableStateOf(true) }
-
-    val recheck: () -> Unit = {
-        selfNeedsRestart?.let { needsRestart ->
-            awaitingFreshSinceOpen = true
-            scope.launch {
-                RoutingGateCache.ensureLoaded(context, needsRestart)
-                RoutingGateCache.refreshInPlace(force = true)
-                awaitingFreshSinceOpen = false
-            }
-        }
-    }
-    LaunchedEffect(selfNeedsRestart) { recheck() }
-    return CaptureGate(
-        incompleteGate =
-            sharedGate
-                ?.takeUnless { awaitingFreshSinceOpen }
-                ?.takeIf { it == DiagnosticGate.VPN_OFF || it == DiagnosticGate.SELF_NOT_ROUTED },
-        rechecking = awaitingFreshSinceOpen || sharedLoading,
-        recheck = recheck,
-    )
-}
-
-/**
- * Red banner shown before a debug export or a logcat recording when the freshly
- * measured gate says the capture would be incomplete (VPN off, or this app not routed
- * through the tunnel). The encouraged action is a Re-check (re-measures the gate);
- * collecting anyway stays available as a de-emphasized button next to this banner.
- * Message adapts to the gate so the fix is actionable.
- */
-@Composable
-private fun CaptureIncompleteWarning(
-    gate: DiagnosticGate,
-    rechecking: Boolean,
-    onRecheck: () -> Unit,
-) {
-    val message =
-        when (gate) {
-            DiagnosticGate.SELF_NOT_ROUTED -> stringResource(R.string.capture_incomplete_not_routed)
-            else -> stringResource(R.string.capture_incomplete_vpn_off)
-        }
-    StatusBanner(
-        text = message,
-        containerColor = StatusColors.errorContainer(),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        action = {
-            EnhancedButton(
-                onClick = onRecheck,
-                enabled = !rechecking,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (rechecking) {
-                    ButtonSpinner()
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(stringResource(R.string.capture_incomplete_recheck))
-            }
-        },
-    )
-}
-
-/** Why the last recording ended early or failed, or null for an ordinary Stop. */
 @Composable
 private fun logcatEndNotice(
     failure: LogcatRecorder.Failure?,
@@ -941,237 +590,6 @@ private fun formatSize(bytes: Long): String {
     if (kb < 1024.0) return "%.1f KB".format(kb)
     val mb = kb / 1024.0
     return "%.1f MB".format(mb)
-}
-
-/**
- * One row on the Diagnostics list, unified across sources so [CheckCard] renders one
- * shape. [uncovered] marks a native leak on a vector the active backend does not own
- * — a detection surface no active hook covers on this device. It is shown neutrally
- * (see [diagStatusUncovered]), never as a red leak, and grouped apart from the
- * backend's own vectors.
- */
-private data class DiagCard(
-    val id: String,
-    val name: String,
-    val detail: String,
-    val groundTruthDetail: String?,
-    val outcome: CheckOutcome,
-    val uncovered: Boolean,
-    // Hook names the active kernel backend owns but did not install this boot.
-    // Turns an unexplained red leak into "your kernel does not expose this".
-    val missingHooks: List<String> = emptyList(),
-)
-
-/** From a canonical report check — the only source that knows [DiagnosticCheck.owned],
- * so it is the only one that can flag an uncovered native leak. */
-private fun DiagnosticCheck.toDiagCard(): DiagCard =
-    DiagCard(
-        id = id,
-        name = label,
-        detail = appDetail,
-        groundTruthDetail = groundTruthDetail,
-        outcome = outcome,
-        uncovered = layer == CheckLayer.NATIVE && outcome is CheckOutcome.Leak && !owned,
-        missingHooks = missingHooks.map { it.hookName },
-    )
-
-/** Raw-list fallback (dashboard not yet loaded): no ownership known, so nothing is
- * marked uncovered — a leak reads as a leak, the pre-report behaviour. */
-private fun CheckResult.toDiagCard(): DiagCard = DiagCard(id, name, detail, groundTruthDetail, outcome, uncovered = false)
-
-/**
- * The results body: the honest headline (hidden vs still-leaking) plus the check
- * cards, split into the backend's own vectors, the vectors no active backend covers
- * on this device (shown neutrally), and the Java layer. [report] is null only in the
- * brief window before the dashboard loads, when we fall back to the raw list.
- */
-@Composable
-private fun DiagnosticsResults(
-    report: DiagnosticReport?,
-    results: CheckResults,
-    tallyFmt: String,
-) {
-    val nativeCards = report?.native?.checks?.map { it.toDiagCard() } ?: results.nativeAll.map { it.toDiagCard() }
-    val javaCards = report?.java?.checks?.map { it.toDiagCard() } ?: results.java.map { it.toDiagCard() }
-    val covered = nativeCards.filterNot { it.uncovered }
-    val uncovered = nativeCards.filter { it.uncovered }
-
-    // Headline counts the backend's job: hidden vectors vs still-leaking OWNED
-    // vectors. Uncovered vectors are out of the active backend's scope, so they are
-    // reported below rather than folded into "leaking".
-    val scored = covered + javaCards
-    val hidden = scored.count { it.outcome is CheckOutcome.HiddenByBackend || it.outcome is CheckOutcome.HiddenBySelinux }
-    val leaks = scored.count { it.outcome is CheckOutcome.Leak }
-
-    Spacer(Modifier.height(12.dp))
-    Text(
-        text = String.format(tallyFmt, hidden, leaks),
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold,
-    )
-
-    Spacer(Modifier.height(16.dp))
-    SectionHeader(stringResource(R.string.section_native))
-    Spacer(Modifier.height(6.dp))
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        covered.forEachIndexed { i, c -> CheckCard(c, index = i, count = covered.size) }
-    }
-
-    if (uncovered.isNotEmpty()) {
-        Spacer(Modifier.height(16.dp))
-        SectionHeader(stringResource(R.string.section_native_uncovered))
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = stringResource(R.string.diag_uncovered_caption),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(6.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            uncovered.forEachIndexed { i, c -> CheckCard(c, index = i, count = uncovered.size) }
-        }
-    }
-
-    Spacer(Modifier.height(16.dp))
-    SectionHeader(stringResource(R.string.section_java))
-    Spacer(Modifier.height(6.dp))
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        javaCards.forEachIndexed { i, c -> CheckCard(c, index = i, count = javaCards.size) }
-    }
-}
-
-/**
- * One check's status: a coloured **dot + short word** (the "3-B" treatment — the
- * app's own status-dot idiom from the module rows). The card colour tracks current
- * reality only — green when hidden (by backend OR SELinux) or nothing-to-leak, red
- * on a real leak, neutral when not measured — so a normal enforcing device is all
- * green. The backend-vs-SELinux attribution rides on the dot colour + word, never
- * on the card colour (no alarm on SELinux-protected items). Detail is collapsed by
- * default and revealed on tap; a leak is the only thing expanded up front.
- */
-private data class DiagStatus(
-    val label: String,
-    val accent: Color,
-    val container: Color,
-    val expandedByDefault: Boolean,
-)
-
-// Thin renderer: the bucket decision lives in [diagStatusKind] (pure, unit-tested);
-// here we only attach the localized word + theme colour. A leak is the one thing
-// expanded by default. NothingToLeak/SELinux keep the no-alarm green container but
-// a distinct dot + word (grey "nothing", blue "SELinux") so attribution shows.
-@Composable
-private fun diagStatus(outcome: CheckOutcome): DiagStatus =
-    when (outcome.diagStatusKind()) {
-        DiagStatusKind.Ok -> {
-            DiagStatus(stringResource(R.string.diag_status_ok), StatusColors.successDot, StatusColors.successContainer(), false)
-        }
-
-        DiagStatusKind.Leak -> {
-            DiagStatus(stringResource(R.string.diag_status_leak), StatusColors.errorDot, StatusColors.errorContainer(), true)
-        }
-
-        DiagStatusKind.NothingToLeak -> {
-            DiagStatus(stringResource(R.string.diag_status_nothing), StatusColors.neutralAccent, StatusColors.successContainer(), false)
-        }
-
-        DiagStatusKind.Selinux -> {
-            DiagStatus(stringResource(R.string.diag_status_selinux), StatusColors.infoAccent, StatusColors.successContainer(), false)
-        }
-
-        DiagStatusKind.NotMeasured -> {
-            DiagStatus(stringResource(R.string.diag_status_nomeasure), StatusColors.neutralAccent, StatusColors.neutralContainer(), false)
-        }
-    }
-
-/** Neutral "out of scope" status for a native leak on a vector the active backend
- * does not own: no active hook covers it on this device, so it is not the backend
- * failing — it is reported calmly (grey dot + word, no alarm, collapsed), never as a
- * red leak, so a working backend never reads as broken over a gap it cannot close. */
-@Composable
-private fun diagStatusUncovered(): DiagStatus =
-    DiagStatus(
-        stringResource(R.string.diag_status_uncovered),
-        StatusColors.neutralAccent,
-        StatusColors.neutralContainer(),
-        false,
-    )
-
-@Composable
-private fun CheckCard(
-    r: DiagCard,
-    index: Int = -1,
-    count: Int = 1,
-) {
-    val status = if (r.uncovered) diagStatusUncovered() else diagStatus(r.outcome)
-    var expanded by remember(r.name) { mutableStateOf(status.expandedByDefault) }
-    val caretRotation by animateFloatAsState(if (expanded) 90f else 0f, label = "caret")
-    GroupedCard(
-        index = index,
-        count = count,
-        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-        color = status.container,
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = diagnosticLabelResource(r.id)?.let { stringResource(it) } ?: r.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f).padding(end = 8.dp),
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Box(modifier = Modifier.size(9.dp).clip(CircleShape).background(status.accent))
-                    Text(
-                        text = status.label,
-                        color = status.accent,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.sp,
-                    )
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp).rotate(caretRotation),
-                    )
-                }
-            }
-            if (expanded) {
-                Spacer(Modifier.height(6.dp))
-                // For native checks the root ground-truth detail is shown next to the
-                // app-view read — it is what the verdict is derived from (e.g. a
-                // SELinux-blocked read reads as "nothing to leak" precisely because
-                // "root: N routes, no VPN"). Java checks have no root diff → plain detail.
-                val detailText =
-                    r.groundTruthDetail?.let { gt -> "app:  ${r.detail}\nroot: $gt" } ?: r.detail
-                Text(
-                    text = detailText,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
-                )
-                if (r.missingHooks.isNotEmpty()) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text =
-                            stringResource(
-                                R.string.diag_check_hook_missing,
-                                r.missingHooks.joinToString(", "),
-                            ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
 }
 
 @Composable

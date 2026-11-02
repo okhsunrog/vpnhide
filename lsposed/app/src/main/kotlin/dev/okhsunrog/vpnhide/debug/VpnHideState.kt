@@ -21,6 +21,7 @@ import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSummaryInfo
 import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
+import dev.okhsunrog.vpnhide.diagnostics.toDiagnosticInfo
 import dev.okhsunrog.vpnhide.displayNativeBackend
 import dev.okhsunrog.vpnhide.kmodLoadStatus
 import dev.okhsunrog.vpnhide.kpmLoadStatus
@@ -61,7 +62,7 @@ import kotlinx.serialization.json.JsonElement
  *    names, which also made them unmovable between packages.
  * 1: initial.
  */
-internal const val VPNHIDE_STATE_SCHEMA: Int = 3
+internal const val VPNHIDE_STATE_SCHEMA: Int = 4
 
 /**
  * What to include in a captured [VpnHideState]. The ONE source of truth for the
@@ -107,6 +108,7 @@ internal data class VpnHideState(
     // evidence sufficiency — the same projection the screens render, so a bundle
     // or an agent read cannot disagree with the UI. Null for the logcat recorder.
     val diagnostics: DiagnosticSummaryInfo? = null,
+    val autonomousDiagnostics: dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticInfo? = null,
     // Verdicts are gate-checked getters on the report (not stored fields), so they
     // would not otherwise serialize — surface them explicitly, computed once here.
     val nativeVerdict: Verdict?,
@@ -161,6 +163,7 @@ internal data class VpnHideState(
 internal data class BeforeCaptureInfo(
     val observedAt: String,
     val diagnostics: DiagnosticSummaryInfo?,
+    val autonomousDiagnostics: dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticInfo? = null,
     val protection: ProtectionCheck?,
     val messages: List<DashboardMessage>,
     val pendingOperationIds: List<Long>,
@@ -280,6 +283,7 @@ internal fun buildVpnHideState(
     checkResults: CheckResults?,
     selfTestRunId: Long? = null,
     diagnostics: DiagnosticSummaryInfo? = null,
+    autonomousSnapshot: dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticSnapshot? = null,
     dmesg: String,
     logcat: String,
     bootLsposedLogcat: String,
@@ -298,9 +302,22 @@ internal fun buildVpnHideState(
     val currentBootId = rootSections["current_boot_id"].orEmpty()
     val nativeBoot = rootSnapshot.nativeBoot
     val kpmLoadStatus = nativeBoot.kpmLoadStatus()
-    val backends = detectNativeBackendStates(rootSections, currentBootId, kpmLoadStatus, rootSnapshot.backend)
+    val observedBackends = detectNativeBackendStates(rootSections, currentBootId, kpmLoadStatus, rootSnapshot.backend)
+    val rootCurrent = autonomousSnapshot == null || autonomousSnapshot.rootJoined
+    val backends =
+        if (rootCurrent) {
+            observedBackends
+        } else {
+            observedBackends.copy(
+                kmod = unverifiedExportRuntime(observedBackends.kmod),
+                kpm = unverifiedExportRuntime(observedBackends.kpm),
+                zygisk = unverifiedExportRuntime(observedBackends.zygisk),
+                builtin = unverifiedExportRuntime(observedBackends.builtin),
+            )
+        }
     val activeBackend = displayNativeBackend(backends)
-    val ports = detectPortsModule(rootSections)
+    val observedPorts = detectPortsModule(rootSections)
+    val ports = if (rootCurrent) observedPorts else unverifiedExportRuntime(observedPorts)
     val kmodLoadStatus = nativeBoot.kmodLoadStatus(currentBootId)
     val installedOptionalHooks = installedNativeOptionalHooks(activeBackend.id, rootSections, currentBootId)
 
@@ -334,6 +351,7 @@ internal fun buildVpnHideState(
         gate = report?.gate,
         selfTestRunId = selfTestRunId,
         diagnostics = diagnostics,
+        autonomousDiagnostics = autonomousSnapshot?.toDiagnosticInfo(),
         nativeVerdict = report?.nativeVerdict,
         javaVerdict = report?.javaVerdict,
         report = report,
@@ -345,8 +363,13 @@ internal fun buildVpnHideState(
         beforeCapture = beforeCapture,
         // Explicit config (the bridge lean call) wins; otherwise derive it from the
         // raw canonical-config section so the file export carries it structured too.
-        config = config ?: parseCanonicalConfigSection(rootSections["canonical_config"]),
-        statistics = statistics,
+        config =
+            if (autonomousSnapshot != null) {
+                autonomousExportCanonical(autonomousSnapshot)
+            } else {
+                config ?: parseCanonicalConfigSection(rootSections["canonical_config"])
+            },
+        statistics = statistics.takeIf { rootCurrent },
         rootShell = RootShellDiag.from(rootSections),
         // Raw sections only in a forensic capture. Forensic (shell) sections on top of
         // the authoritative root sections; root wins on key collisions. The
