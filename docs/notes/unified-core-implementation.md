@@ -306,6 +306,44 @@ No Android process-injection, reboot/fallback, QEMU/KMI or device acceptance was
 run here; GitHub Actions results remain unobserved. RPC13 and kernel control-v2
 are unchanged; the private journal upgrade to schema 5 requires compatible Core.
 
+### Stage 4 continuation: frozen execution and PM readiness
+
+`Prepared` now owns the exact `Plan`; production execution and recovery preflight
+no longer call the selector a second time from diagnostic facts. The test-only
+legacy wrapper still exercises the old decision matrix. A regression test changes
+facts after preparation and proves they cannot replace the prepared decision.
+
+The production boot-apply path publishes an explicit PackageManager wait before
+selection/loading and performs the wait on the boot thread, outside the command
+writer. RPC remains available; waiting does not create a startup attempt or spend
+the load budget. On readiness, startup enters the same journaled writer path.
+A real-process host regression exercises PM failure followed by readiness, reads
+RPC during the wait and verifies the durable selection afterwards. Host fixtures
+without boot apply retain explicit immediate startup. The boot-apply CLI follows
+the same PM-before-selection ordering.
+
+Zygisk's cached snapshot retains only the consumed authorization generation (not a
+second full wire copy). Its app heartbeat emits `authorization_generation`; legacy
+policy leaves it empty. Replacement/revocation cannot relabel an old process as a
+new generation. This field is evidence for the future typed observer, not a new
+claim of healthy hooks or an enabled automatic fallback.
+
+Provider contract review: Magisk's public Zygisk API provides module callbacks and
+an ABI-aware root companion, callable during pre-specialization. ZygiskNext promises
+Zygisk API compatibility, not Magisk internals; NeoZygisk documents the same API
+compatibility. Therefore the next loader proof must use our own module/companion
+handshake rather than infer readiness from manager files or mapping names:
+- <https://github.com/topjohnwu/zygisk-module-sample/blob/master/module/jni/zygisk.hpp>
+- <https://github.com/Dr-TSNG/ZygiskNext/blob/master/README.md>
+- <https://github.com/JingMatrix/NeoZygisk/blob/master/README.md>
+No companion handshake or provider device acceptance has been implemented here.
+Validation: 493 workspace Rust tests pass, with only the two known Zygisk
+self-read ENOSYS failures in this container. Workspace Clippy/all-targets with
+warnings denied, fmt, scaffold/no-su and Core/Zygisk ARM64 + ARMv7 builds pass.
+These are host/cross-build results, not observed CI or Android acceptance.
+Production catalog integration, transition/fallback scheduler and stages 5–7 remain
+unfinished. Bundled autoload remains disabled. RPC13/control-v2/journal5 are unchanged.
+
 ## Related proposals under review
 
 - [RFC 0001: automatic GKI/KMI selection](../rfcs/0001-automatic-gki-kmi-selection.md)

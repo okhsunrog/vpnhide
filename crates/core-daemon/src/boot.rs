@@ -69,6 +69,21 @@ pub const NETD_WAIT: Duration = Duration::from_secs(60);
 /// netd may rebuild its chains once more after the first pass; re-apply after this.
 pub const PORTS_RETRY_DELAY: Duration = Duration::from_secs(30);
 
+/// Production startup waits off the command writer before selecting/loading.
+/// Reads and recovery remain available while PM retries; after readiness startup
+/// enters the existing single-writer/journal path and then applies current intent.
+pub fn run_boot_with_native(
+    state: &CoreState,
+    native: Option<(crate::native_boot::NativeEnv, u64)>,
+) -> BootApplyReport {
+    crate::alog::info("boot: waiting for PackageManager before native selection");
+    vpnhide_activator::wait_for_package_manager();
+    if let Some((env, epoch)) = native {
+        state.start_native_boot(env, epoch);
+    }
+    run_boot_passes(state, false)
+}
+
 /// The full boot sequence the activators used to run, now core's: wait (unbounded) for
 /// PackageManager so uid projection is complete, deliver native config to this boot's
 /// selected backend, then apply Ports once netd's chains exist and again at T+30 s.

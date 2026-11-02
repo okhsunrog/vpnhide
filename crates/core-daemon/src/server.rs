@@ -1098,6 +1098,17 @@ impl CoreState {
         self.submit_edit_opts(op, base, edit, options)
     }
 
+    /// Publish a no-effect startup wait while PackageManager is unavailable.
+    /// This is not an uncertain operation and consumes no load attempt budget.
+    pub fn defer_native_boot(&self, env: crate::native_boot::NativeEnv, epoch: u64) {
+        self.epoch.store(epoch, Ordering::SeqCst);
+        self.install_native_boot(crate::native_boot::NativeBoot::blocked(
+            env,
+            epoch,
+            "waiting for PackageManager before native selection".into(),
+        ));
+    }
+
     /// Serialize initial activation on the command writer and journal intent before
     /// effects. Restore completed decisions; never replay interrupted startup.
     pub fn start_native_boot(&self, env: crate::native_boot::NativeEnv, epoch: u64) {

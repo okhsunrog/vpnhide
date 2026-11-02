@@ -653,6 +653,7 @@ impl NativeBoot {
     }
 
     /// Decide and perform the load / retire for `facts`.
+    #[cfg(test)]
     pub fn decide_and_apply(
         env: NativeEnv,
         epoch: u64,
@@ -662,7 +663,31 @@ impl NativeBoot {
         filesystem_hiding: bool,
         effects: &dyn Effects,
     ) -> Self {
-        let plan = decide(facts);
+        Self::apply_prepared_plan(
+            env,
+            epoch,
+            boot_id,
+            facts,
+            kpm,
+            filesystem_hiding,
+            effects,
+            decide(facts),
+        )
+    }
+
+    /// Execute only the decision that preparation bound to durable intent. Facts
+    /// remain diagnostic evidence and cannot cause a second selection here.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn apply_prepared_plan(
+        env: NativeEnv,
+        epoch: u64,
+        boot_id: &str,
+        facts: &ScanFacts,
+        kpm: Option<CoreKpm>,
+        filesystem_hiding: bool,
+        effects: &dyn Effects,
+        plan: Plan,
+    ) -> Self {
         let mut kmod_report = None;
         let (outcome, selection) = match plan {
             Plan::Stop(outcome) => (outcome, None),

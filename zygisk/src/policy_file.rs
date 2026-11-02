@@ -29,13 +29,24 @@ fn read_at(directory: RawFd, name: &CStr, limit: usize) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-pub fn read_config(directory: RawFd) -> Option<Config> {
-    // Missing boot evidence denies bundled mode; legacy compatibility does not use it.
-    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap_or_default();
-    read_config_for_boot(directory, boot.trim())
+pub struct Snapshot {
+    pub config: Config,
+    /// Absent for explicit legacy recipients; never synthesize a bundled generation.
+    pub authorization: Option<zygisk_activation::Authorization>,
 }
 
+pub fn read_snapshot(directory: RawFd) -> Option<Snapshot> {
+    // Missing boot evidence denies bundled mode; legacy compatibility does not use it.
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap_or_default();
+    read_snapshot_for_boot(directory, boot.trim())
+}
+
+#[cfg(test)]
 fn read_config_for_boot(directory: RawFd, boot: &str) -> Option<Config> {
+    read_snapshot_for_boot(directory, boot).map(|snapshot| snapshot.config)
+}
+
+fn read_snapshot_for_boot(directory: RawFd, boot: &str) -> Option<Snapshot> {
     let manifest = read_at(directory, c"module.prop", 8192).ok()?;
     let manifest = std::str::from_utf8(&manifest).ok()?;
     let (mut id, mut activation, mut control) = (None, None, None);
@@ -65,13 +76,21 @@ fn read_config_for_boot(directory: RawFd, boot: &str) -> Option<Config> {
                 zygisk_activation::MAX_BYTES,
             )
             .ok()?;
-            zygisk_activation::Authorization::decode(&bytes, boot)?.policy(ZYGISK_HOOK_MASK)
+            let authorization = zygisk_activation::Authorization::decode(&bytes, boot)?;
+            let config = authorization.policy(ZYGISK_HOOK_MASK)?;
+            Some(Snapshot {
+                config,
+                authorization: Some(authorization),
+            })
         }
         // Explicit compatibility boundary for separate legacy module installation.
         // A Core module never consumes this file, even if it is left from an old boot.
         (Some("vpnhide_zygisk"), None, Some("2")) => {
             let bytes = read_at(directory, c"targets.txt", zygisk_activation::MAX_BYTES).ok()?;
-            vpnhide_protocol::parse_config(&bytes)
+            Some(Snapshot {
+                config: vpnhide_protocol::parse_config(&bytes)?,
+                authorization: None,
+            })
         }
         _ => None,
     }
@@ -98,6 +117,27 @@ mod tests {
         )
         .unwrap();
     }
+    #[test]
+    fn consumed_generation_does_not_follow_replacement_or_revocation() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = File::open(root.path()).unwrap();
+        fs::write(
+            root.path().join("module.prop"),
+            "id=vpnhide_core\nvpnhideActivation=1\n",
+        )
+        .unwrap();
+        authorized(root.path(), BOOT, 7, WIRE);
+        let old_process = read_snapshot_for_boot(dir.as_raw_fd(), BOOT).unwrap();
+        authorized(root.path(), BOOT, 8, WIRE);
+        let new_process = read_snapshot_for_boot(dir.as_raw_fd(), BOOT).unwrap();
+        assert_eq!(old_process.authorization.as_ref().unwrap().generation, 7);
+        assert_eq!(new_process.authorization.as_ref().unwrap().generation, 8);
+        fs::remove_file(root.path().join(zygisk_activation::FILE_NAME)).unwrap();
+        assert!(read_snapshot_for_boot(dir.as_raw_fd(), BOOT).is_none());
+        assert_eq!(old_process.authorization.unwrap().generation, 7);
+        assert_eq!(new_process.authorization.unwrap().generation, 8);
+    }
+
     #[test]
     fn bundled_mode_requires_current_boot_authorization_never_legacy_targets() {
         let root = tempfile::tempdir().unwrap();

@@ -316,3 +316,75 @@ async fn unqueryable_kernelpatch_without_kpm_candidate_does_not_block_kmod() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn production_boot_waits_for_pm_without_blocking_rpc_or_consuming_load_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("core.sock");
+    let ctl = dir.path().join("ctl");
+    let journal_path = dir.path().join("operations.json");
+    let ready = dir.path().join("pm-ready");
+    let seen = dir.path().join("pm-seen");
+    fs::create_dir(dir.path().join("modules")).unwrap();
+    fs::write(
+        &ctl,
+        "vpnhide 1 status\nbackend 0x4\nkver 0x0\nhooks 0x20003ff\nerror 0x0\n",
+    )
+    .unwrap();
+    let cmd = dir.path().join("cmd");
+    fs::write(&cmd, "#!/bin/sh\n: > \"$VPNHIDE_TEST_PM_SEEN\"\n[ -f \"$VPNHIDE_TEST_PM_READY\" ] || exit 1\nprintf 'package:android uid:1000\\n'\n").unwrap();
+    fs::set_permissions(&cmd, fs::Permissions::from_mode(0o700)).unwrap();
+    let mut child = CoreProcess(
+        common::core_command()
+            .arg(&socket)
+            .env("PATH", dir.path())
+            .env(
+                "VPNHIDE_CONFIG_PATH",
+                dir.path().join("missing-config.json"),
+            )
+            .env("VPNHIDE_JOURNAL_PATH", &journal_path)
+            .env("VPNHIDE_CORE_OWNER_DIR", dir.path().join("owner"))
+            .env("VPNHIDE_KMOD_CTL", &ctl)
+            .env("VPNHIDE_KERNEL_MODULES", dir.path().join("modules"))
+            .env("VPNHIDE_BOOT_APPLY", "1")
+            .env("VPNHIDE_TEST_PM_SEEN", &seen)
+            .env("VPNHIDE_TEST_PM_READY", &ready)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !socket.exists() || !seen.exists() {
+            assert!(child.0.try_wait().unwrap().is_none());
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let client = CoreClient::connect(&socket);
+    let current = tokio::time::timeout(Duration::from_secs(2), client.current())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(current.snapshot.backend.boot.unwrap().outcome, NativeBootOutcome::Unknown { detail } if detail.contains("PackageManager"))
+    );
+    let journal = vpnhide_core_daemon::journal::read(&journal_path).unwrap();
+    assert!(journal.native_startup.is_none());
+    assert!(journal.native_load_budget.is_none());
+    fs::write(&ready, b"ready").unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let journal = vpnhide_core_daemon::journal::read(&journal_path).unwrap();
+            if let Some(result) = journal.native_startup.and_then(|attempt| attempt.completed) {
+                assert_eq!(result.selection.unwrap().backend, NativeBackend::Builtin);
+                break;
+            }
+            assert!(child.0.try_wait().unwrap().is_none());
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}

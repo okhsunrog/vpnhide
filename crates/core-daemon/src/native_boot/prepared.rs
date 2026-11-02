@@ -37,6 +37,7 @@ pub struct Prepared {
     pub intent: TransitionIntent,
     env: NativeEnv,
     facts: ScanFacts,
+    plan: Plan,
     client: Option<CoreKpm>,
     staged: Option<File>,
     retire_target: Option<crate::zygisk::ZygiskTarget>,
@@ -56,11 +57,22 @@ impl Prepared {
         facts: ScanFacts,
         client: Option<CoreKpm>,
     ) -> Result<Self, String> {
+        let plan = decide(&facts);
+        Self::from_plan(env, filesystem_hiding, facts, client, plan)
+    }
+
+    fn from_plan(
+        env: NativeEnv,
+        filesystem_hiding: bool,
+        facts: ScanFacts,
+        client: Option<CoreKpm>,
+        plan: Plan,
+    ) -> Result<Self, String> {
         let boot_id = read_boot_id(&env.boot_id_path);
         if boot_id.is_empty() || boot_id.len() > 128 {
             return Err("kernel boot identity unavailable".into());
         }
-        let action = match decide(&facts) {
+        let action = match plan {
             Plan::Stop(_) => TransitionAction::Observe,
             Plan::Adopt(b) => TransitionAction::Adopt(b),
             Plan::Load(b) => TransitionAction::Load(b),
@@ -114,6 +126,7 @@ impl Prepared {
             },
             env,
             facts,
+            plan,
             client,
             staged,
             retire_target,
@@ -135,7 +148,7 @@ impl Prepared {
                 }
             }
         }
-        if let Plan::Stop(outcome) = decide(&self.facts) {
+        if let Plan::Stop(outcome) = &self.plan {
             if !matches!(outcome, NativeBootOutcome::NoBackend) {
                 return Err(format!("startup recovery preflight refused: {outcome:?}"));
             }
@@ -165,7 +178,7 @@ impl Prepared {
             retire_target: self.retire_target.as_ref(),
         };
         crate::recovery::maybe_crash_for_test("startup-before-effects");
-        let boot = NativeBoot::decide_and_apply(
+        let boot = NativeBoot::apply_prepared_plan(
             self.env,
             epoch,
             &self.intent.boot_id,
@@ -173,6 +186,7 @@ impl Prepared {
             self.client,
             self.intent.filesystem_hiding,
             &effects,
+            self.plan,
         );
         crate::recovery::maybe_crash_for_test("startup-after-effects");
         boot.persist();
@@ -313,6 +327,20 @@ mod tests {
             repair_op: None,
             completed: None,
         }
+    }
+
+    #[test]
+    fn execution_does_not_reselect_from_diagnostic_facts() {
+        let root = tempfile::tempdir().unwrap();
+        let mut prepared = setup(root.path(), "boot-a", Vec::new(), KernelFact::Absent);
+        assert_eq!(prepared.intent.action, TransitionAction::Observe);
+        // Diagnostic inputs are not authority to replace a frozen decision.
+        // This intentional internal mutation would have selected Builtin when
+        // execute() called decide(facts) a second time.
+        prepared.facts.kernel = KernelFact::Builtin;
+        let boot = prepared.execute(1);
+        assert_eq!(boot.selected(), None);
+        assert_eq!(boot.status.outcome, NativeBootOutcome::NoBackend);
     }
 
     #[test]

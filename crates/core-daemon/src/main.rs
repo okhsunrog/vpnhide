@@ -191,14 +191,18 @@ async fn run(path: &str) {
         .own_instance_guard(instance)
         .expect("one instance guard");
     let operational = state.publisher.current().snapshot.startup_error.is_none();
-    // Select the native backend once for this boot before serving: scan every
-    // candidate, load the single one (or nothing on a conflict), retire Zygisk targets
-    // when Zygisk is not it, and publish the typed per-boot status. A restart within
-    // the same boot re-adopts the persisted decision instead of re-selecting.
+    // Production selection waits for PackageManager on the boot thread. Host
+    // fixtures without boot apply retain their explicit immediate startup path.
+    let boot_apply = operational && vpnhide_core_daemon::boot::boot_apply_enabled();
+    let mut deferred_native = None;
     let modules = backend::kernel_modules_from_env();
     match vpnhide_core_daemon::native_boot::NativeEnv::from_env(kmod_ctl_path.clone())
         .filter(|_| operational)
     {
+        Some(env) if boot_apply => {
+            state.defer_native_boot(env.clone(), epoch);
+            deferred_native = Some((env, epoch));
+        }
         Some(env) => state.start_native_boot(env, epoch),
         None => {
             // Native management disabled (dev sandbox): read-only identity only.
@@ -224,10 +228,10 @@ async fn run(path: &str) {
     // bound (uid projection must be complete) and for netd's chains, then re-applies
     // Ports at T+30 s. Serving and observation are not blocked meanwhile; mutations
     // serialize with it on the config lane.
-    if operational && vpnhide_core_daemon::boot::boot_apply_enabled() {
+    if boot_apply {
         let booting = state.clone();
         std::thread::spawn(move || {
-            vpnhide_core_daemon::boot::run_boot_passes(&booting, true);
+            vpnhide_core_daemon::boot::run_boot_with_native(&booting, deferred_native);
         });
     }
 
@@ -335,12 +339,13 @@ fn boot_apply_once() {
     state
         .own_instance_guard(instance)
         .expect("one instance guard");
-    if let Some(env) =
-        vpnhide_core_daemon::native_boot::NativeEnv::from_env(activation::kmod_ctl_path_from_env())
-    {
-        state.start_native_boot(env, epoch);
+    let native =
+        vpnhide_core_daemon::native_boot::NativeEnv::from_env(activation::kmod_ctl_path_from_env());
+    if let Some(env) = &native {
+        state.defer_native_boot(env.clone(), epoch);
     }
-    let report = vpnhide_core_daemon::boot::run_boot_passes(&state, true);
+    let report =
+        vpnhide_core_daemon::boot::run_boot_with_native(&state, native.map(|env| (env, epoch)));
     eprintln!(
         "boot-apply: status={:?} detail={}",
         report.status, report.detail

@@ -187,6 +187,7 @@ pub struct VpnHide {
 struct ZygiskConfig {
     targets: Vec<protocol::Target>,
     debug: bool,
+    authorization_generation: Option<u64>,
 }
 
 static CACHED_CONFIG: OnceLock<ZygiskConfig> = OnceLock::new();
@@ -200,10 +201,13 @@ fn load_config_from_dir_fd(dir_fd: RawFd) -> ZygiskConfig {
     let empty = ZygiskConfig {
         targets: Vec::new(),
         debug: false,
+        authorization_generation: None,
     };
-    match policy_file::read_config(dir_fd) {
-        Some(cfg) => ZygiskConfig {
-            targets: cfg
+    match policy_file::read_snapshot(dir_fd) {
+        Some(snapshot) => ZygiskConfig {
+            authorization_generation: snapshot.authorization.map(|a| a.generation),
+            targets: snapshot
+                .config
                 .targets
                 .iter()
                 .filter_map(|t| {
@@ -214,7 +218,7 @@ fn load_config_from_dir_fd(dir_fd: RawFd) -> ZygiskConfig {
                     })
                 })
                 .collect(),
-            debug: cfg.debug.unwrap_or(false),
+            debug: snapshot.config.debug.unwrap_or(false),
         },
         None => {
             // Rejected whole — bad/missing header, or not the exact control
@@ -355,8 +359,13 @@ fn write_status_file(report: &HookInstallReport) {
         .as_deref()
         .unwrap_or_default()
         .replace(['\n', '\r'], " ");
+    let generation = CACHED_CONFIG
+        .get()
+        .and_then(|cfg| cfg.authorization_generation)
+        .map(|generation| generation.to_string())
+        .unwrap_or_default();
     let content = format!(
-        "version={}\nboot_id={}\npid={}\ntimestamp={}\nrequested_hooks={:x}\ninstalled_hooks={:x}\nfilesystem_error={}\n",
+        "authorization_generation={generation}\nversion={}\nboot_id={}\npid={}\ntimestamp={}\nrequested_hooks={:x}\ninstalled_hooks={:x}\nfilesystem_error={}\n",
         env!("CARGO_PKG_VERSION"),
         boot_id,
         process::id(),
