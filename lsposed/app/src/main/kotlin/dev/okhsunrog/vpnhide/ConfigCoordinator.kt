@@ -159,8 +159,9 @@ internal class ConfigCoordinator(
 
     private fun acceptPublication(update: CoreSessionUpdate) {
         val before = publication.state
+        val wasCurrent = publication.current
         publication = update
-        acceptCoreFacts(before, update)
+        acceptCoreFacts(before, update, wasCurrent)
         publish()
         observeHeldOperation(update)
         startNext()
@@ -169,13 +170,17 @@ internal class ConfigCoordinator(
     private fun acceptCoreFacts(
         before: CoreStateView?,
         update: CoreSessionUpdate,
+        wasCurrent: Boolean,
     ) {
         val after = update.state
         if (update.current && after != null) {
             // Startup owns the first root snapshot and seeds its dependents. An
             // unsolicited initial refresh races that read for core's single root slot.
             if (before != null &&
-                (before.canonical != after.canonical || before.nativeBoot != after.nativeBoot || before.backend != after.backend)
+                (
+                    !wasCurrent || before.canonical != after.canonical || before.nativeBoot != after.nativeBoot ||
+                        before.backend != after.backend
+                )
             ) {
                 invalidateObservations()
                 refreshRequests.trySend(Unit)

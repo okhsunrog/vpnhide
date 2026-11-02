@@ -6,7 +6,6 @@ import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.ConfigCoordinatorMode
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DashboardState
-import dev.okhsunrog.vpnhide.PackageInventorySeed
 import dev.okhsunrog.vpnhide.RootSnapshot
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.SelfTargetFailureKind
@@ -54,18 +53,20 @@ internal sealed interface StartupSelfTargetState {
 internal class StartupCoordinator(
     private val appContext: Context,
     private val appVersionName: String = BuildConfig.VERSION_NAME,
+    private val owner: CoroutineScope = CanonicalConfigRepository.processScope,
+    private val preparationDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+    private val availability: kotlinx.coroutines.flow.Flow<ConfigCoordinatorMode> = CanonicalConfigRepository.state.map { it.mode },
     private val initializeConfig: suspend () -> Unit = { CanonicalConfigRepository.initialize(appContext) },
     private val prepareSelfTargetsCommand: suspend (String) -> SelfTargetPreparation = ::ensureSelfInTargets,
     private val cleanupZygiskStatus: (Context, String?) -> Unit = ::cleanupStaleZygiskStatus,
-    private val seedRootSnapshotInventory: (PackageInventorySeed?) -> Unit = RootSnapshotCache::seedPackageInventory,
-    private val seedRootSnapshot: (Map<String, String>) -> Unit = RootSnapshotCache::seedSnapshot,
+    private val invalidateRootSnapshot: () -> Unit = { RootSnapshotCache.markStale(dev.okhsunrog.vpnhide.ReadReason.Explicit) },
     private val markStartupEvent: (String) -> Unit = StartupTrace::mark,
     private val reconcileAutoHidden: suspend (List<AppAutoHideSignal>) -> Unit =
         { signals -> reconcileAutoHiddenPackages(appContext, signals) },
 ) {
-    private val owner = CanonicalConfigRepository.processScope
     private val prepareMutex = Mutex()
     private var prepareTask: Deferred<Unit>? = null
+    private var processNeedsRestart = false
 
     companion object {
         @Volatile private var instance: StartupCoordinator? = null
@@ -79,10 +80,10 @@ internal class StartupCoordinator(
             }
     }
 
-    private fun observeAvailability() {
+    internal fun observeAvailability() {
         owner.launch {
-            CanonicalConfigRepository.state.map { it.mode }.distinctUntilChanged().collect { mode ->
-                if (mode == ConfigCoordinatorMode.Open) prepareSelfTargets(force = true)
+            availability.distinctUntilChanged().collect { mode ->
+                if (mode == ConfigCoordinatorMode.Open) prepareSelfTargets(force = selfTargetState.value is StartupSelfTargetState.Failed)
             }
         }
     }
@@ -99,7 +100,10 @@ internal class StartupCoordinator(
     suspend fun prepareSelfTargets(force: Boolean = false) {
         val task =
             prepareMutex.withLock {
-                if (force && prepareTask?.isCompleted == true) prepareTask = null
+                if (force && prepareTask?.isCompleted == true) {
+                    invalidateRootSnapshot()
+                    prepareTask = null
+                }
                 prepareTask ?: owner.async { prepareSelfTargetsOnce() }.also { prepareTask = it }
             }
         task.await()
@@ -111,26 +115,17 @@ internal class StartupCoordinator(
         initializeConfig()
         markStartupEvent("config_init_done")
         val preparation =
-            withContext(Dispatchers.IO) {
+            withContext(preparationDispatcher) {
                 val next = prepareSelfTargetsCommand(appContext.packageName)
                 if (next.rootAvailable) {
-                    val inventory =
-                        if (next.pmPackages != null && next.pmUsers != null) {
-                            PackageInventorySeed(next.pmPackages, next.pmUsers)
-                        } else {
-                            null
-                        }
-                    // A read that wrote nothing seeds the whole snapshot (no second
-                    // root shell); after a write only the package inventory survives.
-                    val sections = next.sections
-                    if (sections != null) seedRootSnapshot(sections) else seedRootSnapshotInventory(inventory)
                     cleanupZygiskStatus(appContext, next.currentBootId)
                 }
                 next
             }
         markStartupEvent("self_targets_done")
         if (preparation.rootAvailable) {
-            _selfTargetState.value = StartupSelfTargetState.Ready(preparation.selfNeedsRestart)
+            processNeedsRestart = processNeedsRestart || preparation.selfNeedsRestart
+            _selfTargetState.value = StartupSelfTargetState.Ready(processNeedsRestart)
         } else {
             markStartupEvent("self_targets_failed")
             _selfTargetState.value =

@@ -36,6 +36,19 @@ class CoreRootTest {
     @After fun detach() = CoreRoot.setTransport(null)
 
     @Test
+    fun `transport protocol skew reaches the startup version gate`() =
+        runTest {
+            CoreRoot.setTransport(
+                object : TestCoreRootTransport() {
+                    override suspend fun collectDiagnostics(request: CoreDiagnosticsRequest): CoreDiagnosticsReport =
+                        throw uniffi.vpnhide_core_ffi.CoreException.ProtocolSkew(1uL, 13u, 14u)
+                },
+            )
+            val result = CoreRoot.collect(listOf(CoreDiagnosticProbe.RootSnapshot(true)))
+            assertEquals(SelfTargetFailureKind.CoreVersionMismatch, startupProbeFailure(result)?.first)
+        }
+
+    @Test
     fun `probe commands use generated enums and preserve ordered forensic payloads`() =
         runTest {
             val probes = listOf(CoreDiagnosticProbe.Dmesg, CoreDiagnosticProbe.AppVpnState(10123u))

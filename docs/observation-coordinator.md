@@ -177,13 +177,17 @@ completion/recovery before exposing phase evidence. Its separate refresh worker
 awaits this shared reload. It never waits for Dashboard/diagnostics before accepting
 the next config operation.
 
-Startup self-target preparation runs the same snapshot command as the cache
-(including the runtime probe). When it writes nothing, its validated sections seed
-the cache's next load whole (`seedSnapshot`), so the cold start does not pay a
-second identical root shell; after a config write only the package inventory
-seed survives, and any invalidation or explicit refresh discards both seeds. A
-seeded value is an observation like any other: it gets the request's observation
-ID and generation when consumed.
+Startup self-target preparation joins RootSnapshotCache's process-owned read.
+It never dispatches a competing RootSnapshot RPC. No whole-snapshot or package
+inventory seed is retained: after a real config write, the configuration owner
+invalidates and refreshes the shared observation normally. Explicit startup Retry
+marks that observation stale only when creating a new preparation task, and all
+waiters join it. Delayed initial Open and successful reconnect do not repeat a
+successful preparation. A genuine Core reconnect refreshes a root observation
+that may have failed offline, even if the canonical/backend facts are unchanged.
+Once the current process requires restart, a later preparation cannot clear it.
+Loader failures retain their generation-bound cause; unavailable, protocol-skew,
+truncated and incomplete replies never become successful preparation.
 
 Core owns boot-time Native/Ports delivery. Opening the APK does not force another
 `RepairActivation` after first paint: that redundant operation invalidated root

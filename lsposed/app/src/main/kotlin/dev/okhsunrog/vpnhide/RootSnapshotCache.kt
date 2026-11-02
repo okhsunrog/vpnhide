@@ -19,13 +19,9 @@ internal data class RootSnapshot(
     val backend: CoreBackendView? get() = if (core.current) core.state?.backend else CoreBackendView(current = false)
 }
 
-internal data class PackageInventorySeed(
-    val packages: String,
-    val users: String,
-)
-
 internal class RootSnapshotException(
     message: String,
+    val kind: SelfTargetFailureKind = SelfTargetFailureKind.IncompleteData,
 ) : RuntimeException(message)
 
 private const val ROOT_SNAPSHOT_BEGIN_PREFIX = "__VPNHIDE_ROOT_SECTION_BEGIN__:"
@@ -86,13 +82,6 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
     val snapshot: StateFlow<RootSnapshot?> get() = value
     private val dependents = CopyOnWriteArrayList<() -> Unit>()
     private val inventoryDependents = CopyOnWriteArrayList<() -> Unit>()
-    private val inputLock = Any()
-    private var preloadedPackageInventory: PackageInventorySeed? = null
-
-    // A complete validated snapshot read by startup with the same command; consumed
-    // by the next load instead of a second shell. Any invalidation or explicit
-    // refresh discards it, so a config write after the read can never be masked.
-    private var preloadedSections: Map<String, String>? = null
 
     val dependency =
         object : ObservationDependency {
@@ -121,48 +110,10 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
 
     suspend fun getOrLoad(): RootSnapshot = awaitValue()
 
-    suspend fun refresh(notBefore: Long = Long.MIN_VALUE): RootSnapshot {
-        synchronized(inputLock) {
-            preloadedPackageInventory = null
-            preloadedSections = null
-        }
-        return awaitValue(refresh = true, notBefore = notBefore)
-    }
+    suspend fun refresh(notBefore: Long = Long.MIN_VALUE): RootSnapshot = awaitValue(refresh = true, notBefore = notBefore)
 
-    override fun invalidate() {
-        synchronized(inputLock) {
-            preloadedPackageInventory = null
-            preloadedSections = null
-        }
-        super.invalidate()
-    }
-
-    fun seedPackageInventory(seed: PackageInventorySeed?) {
-        synchronized(inputLock) { preloadedPackageInventory = seed }
-    }
-
-    /** Seed the next load with a complete startup read; a config write invalidates it like any other observation. */
-    fun seedSnapshot(sections: Map<String, String>?) {
-        synchronized(inputLock) { preloadedSections = sections?.toMap() }
-    }
-
-    override suspend fun load(request: ObservationRequest): RootSnapshot {
-        val (seeded, inventory) =
-            synchronized(inputLock) {
-                Pair(preloadedSections, preloadedPackageInventory).also {
-                    preloadedSections = null
-                    preloadedPackageInventory = null
-                }
-            }
-        val sections =
-            if (seeded != null) {
-                StartupTrace.mark("root_snapshot_seeded")
-                seeded.also(::validateRootSnapshotSections)
-            } else {
-                loadRootShellSnapshot(inventory)
-            }
-        return joinRootSnapshot(sections, CoreSessions.updates.value, request.id, request.generation)
-    }
+    override suspend fun load(request: ObservationRequest): RootSnapshot =
+        joinRootSnapshot(loadRootShellSnapshot(), CoreSessions.updates.value, request.id, request.generation)
 
     override fun observationChanged(
         previous: ObservationState<RootSnapshot>,
@@ -178,14 +129,11 @@ internal object RootSnapshotCache : StateCache<RootSnapshot>(
  * (`collect_diagnostics` `RootSnapshot`; core-daemon `device_probes/root_snapshot.rs`), plus
  * core's typed native boot decision from its published state.
  */
-internal fun loadRootShellSnapshot(inventoryOverride: PackageInventorySeed?): Map<String, String> {
-    val result = CoreRoot.collectOneBlocking(CoreProbe.RootSnapshot(packages = inventoryOverride == null))
-    if (!result.ok || result.truncated) throw RootSnapshotException("root snapshot read failed (core exit=${result.exit})")
-    val sections = parseRootShellSnapshot(result.text).toMutableMap()
-    if (inventoryOverride != null) {
-        sections["pm_packages"] = inventoryOverride.packages
-        sections["pm_users"] = inventoryOverride.users
-    }
+internal fun loadRootShellSnapshot(recordMetric: (String, Long) -> Unit = StartupTrace::metric): Map<String, String> {
+    val diagnostics = CoreRoot.collectBlocking(listOf(CoreProbe.RootSnapshot(packages = true)))
+    startupProbeFailure(diagnostics)?.let { (kind, detail) -> throw RootSnapshotException(detail, kind) }
+    val result = diagnostics.results(1).first()
+    val sections = parseRootShellSnapshot(result.text, recordMetric).toMutableMap()
     validateRootSnapshotSections(sections)
     return sections
 }

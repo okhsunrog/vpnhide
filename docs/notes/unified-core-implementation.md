@@ -628,3 +628,26 @@ Final acceptance must specifically cover the reported blocking startup message
 root-read admission, reconnect and Retry. A matching message on the old phone APK
 is not proof of one cause. Run regressions on the final sources; do not turn failed,
 truncated, stale or unavailable data green. Device validation remains pending.
+
+
+### Startup read ownership completed in cloud
+
+The screenshot's exact `core root snapshot probe exit=-1` is a generic failed
+probe result, not a unique diagnosis. Startup now joins the existing root
+observation owner rather than directly competing for Core's one root-probe slot.
+Invalidation drains the physical worker before its successor. Removed obsolete
+whole-snapshot/inventory seeding and redundant post-write caller invalidation.
+Retry creates one fresh generation; delayed Open does not repeat successful
+preparation; reconnect refreshes identical facts after an offline read failure.
+The process's restart requirement is sticky. Typed version failures, bounded
+probe output and truncation survive the shared read boundary without false green.
+
+Validation after review fixes: all 894 JVM tests passed, zero skipped/failures;
+warnings-as-errors Kotlin compilation, ktlint, detekt, CPD and Android lint passed.
+New executable tests cover startup/inventory joining and drain, package changes
+between Retry reads, delayed Open, reconnect, concurrent Retry, protocol mismatch,
+truncated output and retained failure causes. Replaced the historical startup
+whole-snapshot seed test with actual shared-reader/refresh behavior. Phone still
+runs the older APK; cold-start device acceptance is expressly pending. This gate
+must be rerun again after later architecture changes, not considered final beta
+acceptance merely because this checkpoint passed.

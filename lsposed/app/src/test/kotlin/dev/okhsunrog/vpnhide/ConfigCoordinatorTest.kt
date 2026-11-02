@@ -19,6 +19,33 @@ import uniffi.vpnhide_core_ffi.CoreFieldEdit
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConfigCoordinatorTest {
     @Test
+    fun `same state reconnect refreshes a root read that failed while offline`() =
+        runTest {
+            val core = FakeSession()
+            var invalidations = 0
+            var refreshes = 0
+            val owner =
+                ConfigCoordinator(
+                    { core },
+                    backgroundScope,
+                    refresh = { refreshes++ },
+                    invalidateObservations = { invalidations++ },
+                )
+            val init = async { owner.initialize() }
+            runCurrent()
+            init.await()
+            val accepted = core.updates.value
+            core.updates.value = accepted.copy(current = false, sequence = 1)
+            runCurrent()
+            assertEquals(1, invalidations)
+            core.updates.value = accepted.copy(current = true, sequence = 2)
+            runCurrent()
+            assertEquals(2, invalidations)
+            assertEquals(1, refreshes)
+            assertEquals(ConfigCoordinatorMode.Open, owner.view.value.mode)
+        }
+
+    @Test
     fun `initial publication leaves the first root read to startup and later changes refresh it`() =
         runTest {
             val core = FakeSession()

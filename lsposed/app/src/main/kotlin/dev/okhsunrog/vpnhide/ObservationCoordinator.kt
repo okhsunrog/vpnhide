@@ -11,7 +11,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 internal class ObservationReadException(
     val reason: TransitionFailure,
-) : RuntimeException(reason.name)
+    cause: Throwable? = null,
+) : RuntimeException(cause?.message ?: reason.name, cause)
 
 /**
  * The monotonic millisecond base every observation timestamp is expressed in:
@@ -130,7 +131,7 @@ internal class ObservationCoordinator<T>(
         if (failure == null && value != null) {
             waiter.complete(value)
         } else {
-            waiter.completeExceptionally(ObservationReadException(failure ?: TransitionFailure.ReadFailed))
+            waiter.completeExceptionally(ObservationReadException(failure ?: TransitionFailure.ReadFailed, view.errorCause))
         }
     }
 
@@ -163,7 +164,7 @@ internal class ObservationCoordinator<T>(
             if (value != null) {
                 dispatch(ObservationEvent.Loaded(request.id, value, clock()))
             } else {
-                dispatch(ObservationEvent.Failed(request.id, TransitionFailure.ReadFailed, clock()))
+                dispatch(ObservationEvent.Failed(request.id, TransitionFailure.ReadFailed, clock(), cause = result.exceptionOrNull()))
             }
         }
     }

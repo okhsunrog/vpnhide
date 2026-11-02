@@ -158,6 +158,8 @@ internal object CoreRoot {
                     ?: return CoreDiagnostics.Failed("timeout", "")
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: CoreException.ProtocolSkew) {
+                return CoreDiagnostics.Failed("protocol_skew", e.message.orEmpty())
             } catch (e: Throwable) {
                 return CoreDiagnostics.Failed("unreachable", e.message.orEmpty())
             }

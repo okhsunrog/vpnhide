@@ -4,13 +4,18 @@ import android.content.ContextWrapper
 import dev.okhsunrog.vpnhide.startup.StartupCoordinator
 import dev.okhsunrog.vpnhide.startup.StartupSelfTargetState
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class StartupCoordinatorTest {
     @Test
     fun `recreated Activity joins preparation after previous waiter is cancelled`() =
@@ -30,7 +35,6 @@ class StartupCoordinatorTest {
                             SelfTargetPreparation(rootAvailable = true, selfNeedsRestart = false, currentBootId = "boot-1")
                         },
                         cleanupZygiskStatus = { _, _ -> },
-                        seedRootSnapshotInventory = {},
                         markStartupEvent = {},
                     )
                 val previous = async { coordinator.prepareSelfTargets() }
@@ -46,10 +50,9 @@ class StartupCoordinatorTest {
         }
 
     @Test
-    fun `successful self target preparation seeds package list and cleanup boot id`() =
+    fun `successful shared preparation records cleanup boot identity`() =
         runBlocking {
             val markers = mutableListOf<String>()
-            var seededInventory: PackageInventorySeed? = null
             var cleanupBootId: String? = null
             val coordinator =
                 StartupCoordinator(
@@ -61,66 +64,23 @@ class StartupCoordinatorTest {
                             rootAvailable = true,
                             selfNeedsRestart = true,
                             currentBootId = "boot-1",
-                            pmPackages = "package:dev.okhsunrog.vpnhide uid:10123",
-                            pmUsers = "UserInfo{0:Owner:c13}",
                         )
                     },
                     cleanupZygiskStatus = { _, bootId -> cleanupBootId = bootId },
-                    seedRootSnapshotInventory = { seededInventory = it },
                     markStartupEvent = markers::add,
                 )
 
             coordinator.prepareSelfTargets()
 
             assertEquals(StartupSelfTargetState.Ready(selfNeedsRestart = true), coordinator.selfTargetState.value)
-            assertEquals(
-                PackageInventorySeed(
-                    packages = "package:dev.okhsunrog.vpnhide uid:10123",
-                    users = "UserInfo{0:Owner:c13}",
-                ),
-                seededInventory,
-            )
             assertEquals("boot-1", cleanupBootId)
             assertEquals(listOf("self_targets_start", "config_init_done", "self_targets_done"), markers)
-        }
-
-    @Test
-    fun `a preparation that wrote nothing seeds the whole snapshot instead of the inventory`() =
-        runBlocking {
-            var seededInventory: PackageInventorySeed? = null
-            var seededSections: Map<String, String>? = null
-            val sections = mapOf("current_boot_id" to "boot-1", "pm_packages" to "package:a uid:1", "pm_users" to "UserInfo{0:O:c13}")
-            val coordinator =
-                StartupCoordinator(
-                    initializeConfig = {},
-                    appContext = FakeContext("dev.okhsunrog.vpnhide"),
-                    prepareSelfTargetsCommand = {
-                        SelfTargetPreparation(
-                            rootAvailable = true,
-                            selfNeedsRestart = false,
-                            currentBootId = "boot-1",
-                            pmPackages = "package:a uid:1",
-                            pmUsers = "UserInfo{0:O:c13}",
-                            sections = sections,
-                        )
-                    },
-                    cleanupZygiskStatus = { _, _ -> },
-                    seedRootSnapshotInventory = { seededInventory = it },
-                    seedRootSnapshot = { seededSections = it },
-                    markStartupEvent = {},
-                )
-
-            coordinator.prepareSelfTargets()
-
-            assertEquals(sections, seededSections)
-            assertNull(seededInventory)
         }
 
     @Test
     fun `failed self target preparation reports error without seeding or cleanup`() =
         runBlocking {
             val markers = mutableListOf<String>()
-            var seededInventory: PackageInventorySeed? = null
             var cleanupBootId: String? = null
             val coordinator =
                 StartupCoordinator(
@@ -136,7 +96,6 @@ class StartupCoordinatorTest {
                         )
                     },
                     cleanupZygiskStatus = { _, bootId -> cleanupBootId = bootId },
-                    seedRootSnapshotInventory = { seededInventory = it },
                     markStartupEvent = markers::add,
                 )
 
@@ -146,12 +105,87 @@ class StartupCoordinatorTest {
                 StartupSelfTargetState.Failed(SelfTargetFailureKind.RootUnavailable, "exit=-1"),
                 coordinator.selfTargetState.value,
             )
-            assertNull(seededInventory)
             assertNull(cleanupBootId)
             assertEquals(
                 listOf("self_targets_start", "config_init_done", "self_targets_done", "self_targets_failed"),
                 markers,
             )
+        }
+
+    @Test
+    fun `late Open and reconnect reuse successful preparation and cannot clear restart requirement`() =
+        runTest {
+            val availability = MutableStateFlow(ConfigCoordinatorMode.Initializing)
+            var calls = 0
+            var invalidations = 0
+            val coordinator =
+                StartupCoordinator(
+                    appContext = FakeContext("dev.okhsunrog.vpnhide"),
+                    owner = backgroundScope,
+                    preparationDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler),
+                    availability = availability,
+                    initializeConfig = {},
+                    prepareSelfTargetsCommand = {
+                        calls++
+                        SelfTargetPreparation(true, calls == 1, "boot-1")
+                    },
+                    cleanupZygiskStatus = { _, _ -> },
+                    invalidateRootSnapshot = { invalidations++ },
+                    markStartupEvent = {},
+                )
+            coordinator.observeAvailability()
+            coordinator.prepareSelfTargets()
+            availability.value = ConfigCoordinatorMode.Open
+            runCurrent()
+            availability.value = ConfigCoordinatorMode.Unavailable
+            runCurrent()
+            availability.value = ConfigCoordinatorMode.Open
+            runCurrent()
+            assertEquals(1, calls)
+            coordinator.prepareSelfTargets(force = true)
+            assertEquals(2, calls)
+            assertEquals(1, invalidations)
+            assertEquals(StartupSelfTargetState.Ready(true), coordinator.selfTargetState.value)
+        }
+
+    @Test
+    fun `reconnect after failed startup requests one fresh preparation and concurrent Retry joins it`() =
+        runTest {
+            val availability = MutableStateFlow(ConfigCoordinatorMode.Unavailable)
+            val release = CompletableDeferred<Unit>()
+            var calls = 0
+            var invalidations = 0
+            val coordinator =
+                StartupCoordinator(
+                    appContext = FakeContext("dev.okhsunrog.vpnhide"),
+                    owner = backgroundScope,
+                    preparationDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler),
+                    availability = availability,
+                    initializeConfig = {},
+                    prepareSelfTargetsCommand = {
+                        calls++
+                        if (calls == 1) {
+                            SelfTargetPreparation(false, false, null, error = "unreachable")
+                        } else {
+                            release.await()
+                            SelfTargetPreparation(true, false, "boot-1")
+                        }
+                    },
+                    cleanupZygiskStatus = { _, _ -> },
+                    invalidateRootSnapshot = { invalidations++ },
+                    markStartupEvent = {},
+                )
+            coordinator.observeAvailability()
+            coordinator.prepareSelfTargets()
+            availability.value = ConfigCoordinatorMode.Open
+            runCurrent()
+            val retry = async { coordinator.prepareSelfTargets(force = true) }
+            runCurrent()
+            assertEquals(2, calls)
+            assertEquals(1, invalidations)
+            release.complete(Unit)
+            retry.await()
+            assertEquals(StartupSelfTargetState.Ready(false), coordinator.selfTargetState.value)
         }
 
     private class FakeContext(

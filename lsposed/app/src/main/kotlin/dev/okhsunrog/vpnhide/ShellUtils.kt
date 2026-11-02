@@ -137,15 +137,6 @@ internal data class SelfTargetPreparation(
     val rootAvailable: Boolean,
     val selfNeedsRestart: Boolean,
     val currentBootId: String?,
-    val pmPackages: String? = null,
-    val pmUsers: String? = null,
-    /**
-     * The complete validated root snapshot sections the preparation read, when it
-     * wrote nothing afterwards: the same command the snapshot cache runs, so the
-     * cache can be seeded whole and the cold start skips a second identical shell.
-     * Null after a config write (the on-disk state changed after the read).
-     */
-    val sections: Map<String, String>? = null,
     val error: String? = null,
     val failureKind: SelfTargetFailureKind = SelfTargetFailureKind.Unknown,
 )
@@ -200,31 +191,23 @@ internal fun cleanupStaleZygiskStatus(
 internal suspend fun ensureSelfInTargets(selfPkg: String): SelfTargetPreparation {
     val (sections, loadFailure) = loadStartupRootSections()
     if (sections == null) {
-        val failure = loadFailure ?: SelfTargetFailureDetail(SelfTargetFailureKind.Unknown, "snapshot load failed")
-        return selfTargetPreparationFailure(failure.kind, failure.detail)
+        val failure = loadFailure ?: (SelfTargetFailureKind.Unknown to "snapshot load failed")
+        return selfTargetPreparationFailure(failure.first, failure.second)
     }
     val update = buildCanonicalSelfUpdate(sections, selfPkg)
-    var written = false
     if (update.writeRequired &&
         CanonicalConfigRepository.state.value.mode in setOf(ConfigCoordinatorMode.Open, ConfigCoordinatorMode.Missing)
     ) {
         writeStartupCanonical(selfPkg, update.legacyImported)?.let {
             return selfTargetPreparationFailure(SelfTargetFailureKind.ConfigWriteFailed, it)
         }
-        RootSnapshotCache.invalidate()
-        written = true
     }
-    val pmPackages = sections["pm_packages"]?.trimEnd()?.takeIf { it.isNotBlank() }
-    val pmUsers = sections["pm_users"]?.trimEnd()?.takeIf { it.isNotBlank() }
     val currentBootId = sections["current_boot_id"]?.trim()?.takeIf { it.isNotBlank() }
     VpnHideLog.d(TAG, "ensureSelfInTargets: done, selfNeedsRestart=${update.selfNeedsRestart}")
     return SelfTargetPreparation(
         rootAvailable = true,
         selfNeedsRestart = update.selfNeedsRestart,
         currentBootId = currentBootId,
-        pmPackages = pmPackages,
-        pmUsers = pmUsers,
-        sections = sections.takeUnless { written },
     )
 }
 
@@ -235,11 +218,6 @@ private data class CanonicalSelfUpdate(
     /** Non-null when [canonical] already carries a silently imported pre-1.0
      *  config, so the same write must retire the legacy files. */
     val legacyImported: LegacyConfigCandidate? = null,
-)
-
-private data class SelfTargetFailureDetail(
-    val kind: SelfTargetFailureKind,
-    val detail: String,
 )
 
 /**
@@ -262,32 +240,36 @@ internal fun startupProbeFailure(diagnostics: CoreDiagnostics): Pair<SelfTargetF
 
         is CoreDiagnostics.Collected -> {
             val result = diagnostics.results.firstOrNull() ?: CoreProbeResult.Unavailable
-            if (result.ok) null else SelfTargetFailureKind.Unknown to "core root snapshot probe exit=${result.exit}"
+            when {
+                result.truncated -> {
+                    SelfTargetFailureKind.IncompleteData to "core root snapshot probe output truncated"
+                }
+
+                result.ok -> {
+                    null
+                }
+
+                else -> {
+                    SelfTargetFailureKind.Unknown to
+                        listOf("core root snapshot probe exit=${result.exit}", result.text.take(512).trim())
+                            .filter { it.isNotBlank() }
+                            .joinToString(": ")
+                }
+            }
         }
     }
 
-private fun loadStartupRootSections(): Pair<Map<String, String>?, SelfTargetFailureDetail?> {
-    // The same probe as RootSnapshotCache, so the result can seed the cache whole
-    // instead of being read a second time.
-    val diagnostics = CoreRoot.collectBlocking(listOf(CoreProbe.RootSnapshot(packages = true)))
-    startupProbeFailure(diagnostics)?.let { (kind, detail) ->
-        VpnHideLog.w(TAG, "ensureSelfInTargets: core root snapshot failed ($kind: $detail)")
-        return null to SelfTargetFailureDetail(kind, detail)
-    }
-    val result = diagnostics.results(1).first()
-    val out = result.text
-    return try {
-        parseRootShellSnapshot(out).also(::validateRootSnapshotSections) to null
-    } catch (e: RootSnapshotException) {
-        // Root worked, but a required section was missing (incomplete probe — e.g.
-        // a backend's control reply didn't come back). Distinct from no-root.
-        VpnHideLog.w(TAG, "ensureSelfInTargets: snapshot parse failed: ${e.message}")
-        null to SelfTargetFailureDetail(SelfTargetFailureKind.IncompleteData, e.message ?: "incomplete root snapshot")
+internal suspend fun loadStartupRootSections(
+    load: suspend () -> RootSnapshot = RootSnapshotCache::getOrLoad,
+): Pair<Map<String, String>?, Pair<SelfTargetFailureKind, String>?> =
+    try {
+        load().sections to null
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
     } catch (e: Exception) {
-        VpnHideLog.w(TAG, "ensureSelfInTargets: snapshot parse failed: ${e.message}")
-        null to SelfTargetFailureDetail(SelfTargetFailureKind.Unknown, e.message ?: "snapshot parse failed")
+        val rootFailure = (e as? ObservationReadException)?.cause as? RootSnapshotException ?: e as? RootSnapshotException
+        null to ((rootFailure?.kind ?: SelfTargetFailureKind.Unknown) to (e.message ?: "snapshot read failed"))
     }
-}
 
 private fun buildCanonicalSelfUpdate(
     sections: Map<String, String>,

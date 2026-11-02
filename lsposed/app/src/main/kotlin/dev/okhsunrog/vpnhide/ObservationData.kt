@@ -59,6 +59,7 @@ internal data class ObservationState<T>(
     val stale: StaleMark? = null,
     val nextId: Long = 1,
     val error: TransitionFailure? = null,
+    val errorCause: Throwable? = null,
     val attempted: Boolean = false,
     val attemptedGeneration: Long? = null,
     val quarantined: Boolean = false,
@@ -93,6 +94,7 @@ internal sealed interface ObservationEvent<out T> {
         val reason: TransitionFailure,
         val now: Long,
         val quiescent: Boolean = true,
+        val cause: Throwable? = null,
     ) : ObservationEvent<Nothing>
 
     data class ResourceRecovered(
@@ -151,7 +153,7 @@ internal fun <T> reduceObservation(
         }
 
         is ObservationEvent.Failed -> {
-            finishObservation(state, event.id, event.now, null, event.reason, event.quiescent)
+            finishObservation(state, event.id, event.now, null, event.reason, event.quiescent, event.cause)
         }
 
         is ObservationEvent.ResourceRecovered -> {
@@ -219,12 +221,19 @@ private fun <T> finishObservation(
     value: T?,
     error: TransitionFailure?,
     quiescent: Boolean,
+    cause: Throwable? = null,
 ): Transition<ObservationState<T>, ObservationEffect> {
     val active = state.active ?: return Transition(state)
     if (active.id != id) return Transition(state)
     if (!quiescent) {
         return Transition(
-            state.copy(active = null, quarantined = true, quarantineRequestId = id, error = error ?: TransitionFailure.ResourceUnavailable),
+            state.copy(
+                active = null,
+                quarantined = true,
+                quarantineRequestId = id,
+                error = error ?: TransitionFailure.ResourceUnavailable,
+                errorCause = cause,
+            ),
             listOf(ObservationEffect.Finished(id, ObservationCompletion.Failed)),
         )
     }
@@ -234,7 +243,7 @@ private fun <T> finishObservation(
     }
     val observed: ObservedValue<T>? = if (error == null) ObservedValue(requireNotNull(value), active, now) else state.lastGood
     return Transition(
-        state.copy(active = null, lastGood = observed, error = error, stale = null),
+        state.copy(active = null, lastGood = observed, error = error, errorCause = cause, stale = null),
         listOf(ObservationEffect.Finished(id, if (error == null) ObservationCompletion.Published else ObservationCompletion.Failed)),
     )
 }
