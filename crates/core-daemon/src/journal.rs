@@ -39,7 +39,7 @@ pub const DEFAULT_JOURNAL_PATH: &str = "/data/adb/vpnhide/core/operations.json";
 /// Env override so the dev sandbox never touches the production journal.
 pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 
-const JOURNAL_VERSION: u32 = 5;
+const JOURNAL_VERSION: u32 = 6;
 
 /// Default number of terminal receipts to keep, including Unknown.
 pub const DEFAULT_RETAIN_SETTLED: usize = 64;
@@ -209,6 +209,18 @@ impl NativeStartup {
             || (intent.retire_directory_identity.is_some() && intent.retire_zygisk.is_none())
         {
             return false;
+        }
+        if let Some(bundle) = &intent.bundle {
+            if bundle.root.as_os_str().is_empty()
+                || !valid_sha256(&bundle.manifest_sha256)
+                || bundle.source_commit.len() != 40
+                || !bundle.source_commit.bytes().all(|b| b.is_ascii_hexdigit())
+                || bundle.wire.len() > vpnhide_protocol::zygisk_activation::MAX_BYTES
+                || vpnhide_protocol::parse_config(bundle.wire.as_bytes()).is_none()
+                || matches!(intent.action, TransitionAction::Observe)
+            {
+                return false;
+            }
         }
         if let Some(payload) = &intent.payload {
             if !matches!(
@@ -893,7 +905,7 @@ mod tests {
         };
         write_atomic(&path, &journal).unwrap();
         let migrated = read(&path).unwrap();
-        assert_eq!(migrated.version, 5);
+        assert_eq!(migrated.version, 6);
         assert!(migrated.native_startup_uncertain());
         assert_eq!(migrated.native_startup, journal.native_startup);
         journal.version = 4;
@@ -901,6 +913,7 @@ mod tests {
             boot_id: "boot".into(),
             filesystem_hiding: false,
             action: TransitionAction::Load(NativeBackend::Kmod),
+            bundle: None,
             payload: Some(PayloadIdentity {
                 source: "/fixture/module.ko".into(),
                 sha256: "a".repeat(64),
@@ -938,7 +951,7 @@ mod tests {
             );
         }
         journal = original;
-        journal.version = 6;
+        journal.version = 7;
         write_atomic(&path, &journal).unwrap();
         assert!(read(&path).is_err(), "never reset unknown schema");
     }
@@ -994,7 +1007,7 @@ mod tests {
         });
         journal.upsert(entry);
         write_atomic(&path, &journal).unwrap();
-        assert_eq!(read(&path).unwrap().version, 5);
+        assert_eq!(read(&path).unwrap().version, 6);
         journal
             .get_mut(OperationId(7))
             .unwrap()

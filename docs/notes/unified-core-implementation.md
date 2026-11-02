@@ -344,10 +344,10 @@ These are host/cross-build results, not observed CI or Android acceptance.
 Production catalog integration, transition/fallback scheduler and stages 5–7 remain
 unfinished. Bundled autoload remains disabled. RPC13/control-v2/journal5 are unchanged.
 
-## Related proposals under review
+## RFC source documents (status at import)
 
 - [RFC 0001: automatic GKI/KMI selection](../rfcs/0001-automatic-gki-kmi-selection.md)
-  is **Proposed**, not an accepted or implemented extension of this plan. Its
+  retains its original **Proposed** document status. Implementation of its goals was subsequently authorized below; that does not establish prototype correctness. Its
   kernel-loader preflight requires separate review and kernel/device validation;
   importing the RFC does not enable it. Unknown or ambiguous KMI must not resolve
   to an arbitrary first candidate.
@@ -356,3 +356,77 @@ unfinished. Bundled autoload remains disabled. RPC13/control-v2/journal5 are unc
   orchestration/cache are proposals; framework feasibility still needs a prototype.
   Internal decision labels are not evidence of working code or authorization to
   add these experiments to the current implementation.
+
+## Current-cycle scope update (2026-11-02)
+
+The maintainer authorized implementing both RFC goals in this architecture cycle,
+before the first beta, with iterative phone testing once the device environment is
+actually authorized. This is implementation authority, not proof of feasibility,
+passed acceptance or permission for live boot flashing. The imported RFC texts remain
+historical proposals; track corrections and actual evidence here rather than rewrite
+the author's source. No phone/laptop tests have been performed in this cloud checkout.
+
+Continue the same vertical Core selector/lifecycle first, then integrate these work
+items into stages 4–7 and typed diagnostics; do not create competing selectors:
+
+1. Finish verified catalog → complete per-family policy → Prepared → durable execution,
+   own Zygisk loader/process evidence and safe bounded fallback.
+2. RFC 0001: manifest-derived KMI candidates and explicit evidence/ambiguity. Prototype
+   final-artifact preflight only after a hash-bound protocol-capability check; unknown
+   kernel module parameters can be ignored and run a normal init. Verify earliest
+   return, no hooks/proc state and cleanup across representative QEMU kernels before
+   enabling any production experiment. Evaluate whether import/CRC evidence actually
+   distinguishes candidates; never select the first of multiple passing candidates.
+3. RFC 0002: minimal end-to-end native TUN and framework-fixture prototypes, then
+   coverage expansion. Expected checks derive from the requested contract, not the
+   hooks that happened to install. RAW control must be isolated without disabling
+   protection for an entire UID; non-VPN preservation control is mandatory. A fresh
+   diagnostics-worker PASS cannot prove that already-running games consumed new policy.
+   Framework fixture feasibility remains an explicit hypothesis until demonstrated.
+4. Join evidence through the existing Core owner, typed RPC/UI/export and maintenance
+   flow, with cache invalidation by actual boot/config/process generations. Continue
+   migration/repair/update and separate runtime provisioning in this same beta cycle.
+
+Each prototype needs deterministic host failure/crash tests, relevant cross-builds,
+QEMU where applicable and explicit Android acceptance evidence. Missing device access
+blocks only those device checks, not independent code/prototype work. Experimental
+kernel execution, installations, root changes, reboot and flashing on the actual phone
+still require authorization for the concrete action; no automatic flash is implied.
+
+
+## Stage 4 handoff: catalog-bound preparation (2026-11-02)
+
+Production preparation recognizes an active complete Core catalog, projects all
+candidate policies from one package inventory, and freezes the eligible candidate,
+exact payload digest/bytes, manifest digest/source commit and wire policy in the
+startup intent. An ambiguous KMI or insufficient policy coverage holds selection.
+Restart accepts only the same verified active catalog; replacement in the same
+boot requires explicit recovery, never implicit re-selection or load replay.
+First configuration import and explicit Repair can recover an initial no-config
+hold. Journal schema 6 reads older journals; older Core must not be made to run by
+deleting the journal. Preserve state and use a compatible Core for recovery.
+
+This is a checkpoint, not completed stage 4 or a ready universal installation.
+Bundled Zygisk eligibility remains Unknown and its libraries remain passive until
+an own-loader handshake, journaled authorization and typed generation observation
+are connected. Actual post-load coverage validation and controlled fallback remain
+to be completed before declaring selected == healthy. Unknown effects and prior
+Zygisk exposure remain guarded. Stages 5–7 and both RFC implementations remain.
+
+The next writer must also test initial import/recovery against a complete bundle,
+finish generation-aware telemetry consumption, and validate built-in coverage on
+the phone before removing an existing working backend configuration. Host fixture
+payloads establish preparation and hash binding, not kernel loader compatibility.
+
+
+Handoff checks: `cargo test --workspace --no-fail-fast` completed with 497 passing
+and the same two Zygisk self-read failures caused by this host's
+`process_vm_readv` ENOSYS limitation. No tests were weakened or skipped. Workspace
+Clippy (`--all-targets -- -D warnings`), formatting, module scaffold and APK no-root
+execution checks passed. APK/Kotlin and kernel payload sources are unchanged in
+this checkpoint; device acceptance and CI status are unverified.
+
+Core cross-build passed for ARM64 and ARMv7. The resulting local ZIP is a dirty
+validation build, not a clean same-commit full bundle for distribution. Full bundle
+assembly still requires all seven KMI outputs, KPM and both Zygisk ABI artifacts
+from the same clean commit. No actual full-matrix build or device run is claimed.

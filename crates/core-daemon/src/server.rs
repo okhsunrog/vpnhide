@@ -1156,7 +1156,16 @@ impl CoreState {
                     // Pending authentication is retried by the journaled Native phase.
                     self.install_native_boot(
                         NativeBoot {
-                            env,
+                            env: match crate::native_boot::prepared::restore_environment(
+                                env.clone(),
+                                attempt.intent.as_ref(),
+                            ) {
+                                Ok(env) => env,
+                                Err(error) => {
+                                    blocked(error);
+                                    return;
+                                }
+                            },
                             status: result.status.clone(),
                             selection: result.selection,
                         }
@@ -1172,14 +1181,17 @@ impl CoreState {
         };
         let previous = store.clone();
         let filesystem_hiding = self.filesystem_hiding_wanted();
-        let prepared =
-            match crate::native_boot::prepared::Prepared::scan(env.clone(), filesystem_hiding) {
-                Ok(prepared) => prepared,
-                Err(error) => {
-                    blocked(format!("native preparation refused: {error}"));
-                    return;
-                }
-            };
+        let prepared = match crate::native_boot::prepared::Prepared::scan(
+            env.clone(),
+            filesystem_hiding,
+            store.config.as_ref(),
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                blocked(format!("native preparation refused: {error}"));
+                return;
+            }
+        };
         if let Err(error) = store.journal.check_native_attempt(&prepared.intent, false) {
             blocked(error);
             return;
@@ -1689,9 +1701,19 @@ impl CoreState {
             ports,
         );
         runner.native = self.native_handle();
-        runner.recover_startup = store.journal.native_startup.is_some()
+        let bundled = runner.native.as_ref().is_some_and(|n| {
+            let boot = n.lock().expect("native boot");
+            boot.env.modules.as_ref().is_some_and(|m| {
+                m.join("vpnhide_core/payloads/manifest.json")
+                    .symlink_metadata()
+                    .is_ok()
+            })
+        });
+        runner.recover_startup = (store.journal.native_startup.is_some() || bundled)
             && !options.automatic_repair
-            && (repair || matches!(spec.intent, journal::CommandIntent::SetSuperkey { .. }))
+            && (repair
+                || (bundled && store.config.is_none())
+                || matches!(spec.intent, journal::CommandIntent::SetSuperkey { .. }))
             && (store.journal.native_startup_uncertain()
                 || runner
                     .native

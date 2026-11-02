@@ -299,6 +299,7 @@ fn env(root: &Path) -> NativeEnv {
         state_file: root.join("core/native_boot.json"),
         legacy_root: Some(root.join("legacy")),
         apatch_kpms: root.join("ap/kpms"),
+        payload_override: None,
     }
 }
 
@@ -714,6 +715,7 @@ fn restored_kpm_auth_loss_preserves_credential_recovery_without_selection() {
         state_file: root.path().join("native.json"),
         legacy_root: None,
         apatch_kpms: root.path().join("kpms"),
+        payload_override: None,
     };
     let boot = NativeBoot::blocked(env, 1, "fixture".into()).reconcile_restored_facts(
         2,

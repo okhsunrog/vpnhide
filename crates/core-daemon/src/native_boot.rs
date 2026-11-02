@@ -70,6 +70,7 @@ pub struct NativeEnv {
     pub legacy_root: Option<PathBuf>,
     /// APatch's installed-KPM dir: evidence that a VPN Hide KPM may be live.
     pub apatch_kpms: PathBuf,
+    pub(crate) payload_override: Option<PathBuf>,
 }
 
 impl NativeEnv {
@@ -88,6 +89,7 @@ impl NativeEnv {
             state_file: crate::ownership::owner_dir().join(STATE_FILE_NAME),
             legacy_root: production.then(|| PathBuf::from("/")),
             apatch_kpms: APATCH_KPMS_DIR.into(),
+            payload_override: None,
         })
     }
 
@@ -111,6 +113,9 @@ impl NativeEnv {
     }
 
     fn artifact(&self, backend: NativeBackend) -> Option<PathBuf> {
+        if let Some(path) = &self.payload_override {
+            return Some(path.clone());
+        }
         let name = match backend {
             NativeBackend::Kmod => KMOD_ARTIFACT,
             NativeBackend::Kpm => KPM_ARTIFACT,

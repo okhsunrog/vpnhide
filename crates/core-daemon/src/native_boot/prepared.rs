@@ -5,6 +5,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
+mod bundled;
+pub use bundled::{BundleIdentity, restore_environment};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,6 +23,8 @@ pub struct TransitionIntent {
     pub filesystem_hiding: bool,
     pub action: TransitionAction,
     pub payload: Option<PayloadIdentity>,
+    #[serde(default)]
+    pub bundle: Option<BundleIdentity>,
     /// Publication only: this does not claim retirement of already-injected processes.
     pub retire_zygisk: Option<PathBuf>,
     pub retire_directory_identity: Option<(u64, u64)>,
@@ -44,10 +48,24 @@ pub struct Prepared {
 }
 
 impl Prepared {
-    pub fn scan(env: NativeEnv, filesystem_hiding: bool) -> Result<Self, String> {
+    pub fn scan(
+        env: NativeEnv,
+        filesystem_hiding: bool,
+        config: Option<&vpnhide_core_rpc::CanonicalConfig>,
+    ) -> Result<Self, String> {
         let probe = probe_kpm(env.kpm_lock.as_deref());
         let mut facts = gather(&env, probe.fact);
         facts.kpm_filesystem_hiding = probe.filesystem_hiding;
+        if let Some(root) = bundled::active_root(&env)? {
+            return Self::from_bundle(
+                env,
+                filesystem_hiding,
+                facts,
+                probe.client,
+                root,
+                config.ok_or("canonical configuration required before bundled activation")?,
+            );
+        }
         Self::from_facts(env, filesystem_hiding, facts, probe.client)
     }
 
@@ -121,6 +139,7 @@ impl Prepared {
                 filesystem_hiding,
                 action,
                 payload,
+                bundle: None,
                 retire_zygisk,
                 retire_directory_identity,
             },
@@ -154,6 +173,13 @@ impl Prepared {
             }
         }
         Ok(())
+    }
+
+    pub fn environment(&self) -> &NativeEnv {
+        &self.env
+    }
+    pub fn projected_wire(&self) -> Option<&str> {
+        self.intent.bundle.as_ref().map(|b| b.wire.as_str())
     }
 
     pub fn selected(&self) -> Option<NativeBackend> {
@@ -295,6 +321,7 @@ mod tests {
             state_file: root.join("owner/native.json"),
             legacy_root: None,
             apatch_kpms: root.join("kpms"),
+            payload_override: None,
         };
         fs::write(&env.boot_id_path, boot).unwrap();
         Prepared::from_facts(

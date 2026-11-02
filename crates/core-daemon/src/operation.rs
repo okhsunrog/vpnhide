@@ -263,8 +263,11 @@ impl RealPhaseRunner {
             .settings
             .optional_features
             .contains(crate::config_edit::FILESYSTEM_FEATURE);
-        let prepared =
-            crate::native_boot::prepared::Prepared::scan(boot.env.clone(), filesystem_hiding)?;
+        let prepared = crate::native_boot::prepared::Prepared::scan(
+            boot.env.clone(),
+            filesystem_hiding,
+            Some(candidate),
+        )?;
         if let Some(previous) = &journal.native_startup {
             if previous.uncertain() {
                 prepared.permit_recovery(previous)?;
@@ -272,16 +275,19 @@ impl RealPhaseRunner {
         }
         journal.check_native_attempt(&prepared.intent, self.recover_startup)?;
         if let Some(backend) = prepared.selected() {
-            let wire = crate::activation::project_native_wire(candidate, backend)
-                .map_err(|error| error.to_string())?;
-            let authorization =
-                Self::authorization(&boot.env, backend, op, &wire).map_err(|e| e.to_string())?;
+            let wire = match prepared.projected_wire() {
+                Some(wire) => wire.to_owned(),
+                None => crate::activation::project_native_wire(candidate, backend)
+                    .map_err(|error| error.to_string())?,
+            };
+            let authorization = Self::authorization(prepared.environment(), backend, op, &wire)
+                .map_err(|e| e.to_string())?;
             *self.prepared_native.borrow_mut() = Some(Ok(crate::journal::NativeIntent {
                 zygisk_authorization: authorization,
                 backend,
                 wire,
                 zygisk_module: (backend == vpnhide_core_rpc::NativeBackend::Zygisk)
-                    .then(|| boot.env.module_dir(backend))
+                    .then(|| prepared.environment().module_dir(backend))
                     .flatten(),
             }));
         }

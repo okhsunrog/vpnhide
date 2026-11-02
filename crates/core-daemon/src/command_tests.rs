@@ -80,6 +80,7 @@ fn native_none(state: &CoreState, root: &std::path::Path) {
         state_file: root.join("native.json"),
         legacy_root: None,
         apatch_kpms: root.join("apatch"),
+        payload_override: None,
     };
     state.install_native_boot(crate::native_boot::NativeBoot {
         env,
@@ -1024,6 +1025,7 @@ fn explicit_repair_releases_only_covered_resources_and_preserves_old_unknown_rec
         state_file: root.path().join("native.json"),
         legacy_root: None,
         apatch_kpms: root.path().join("apatch"),
+        payload_override: None,
     };
     state.install_native_boot(crate::native_boot::NativeBoot {
         env,
@@ -1368,6 +1370,7 @@ fn startup_env(root: &std::path::Path) -> crate::native_boot::NativeEnv {
         state_file: root.join("native.json"),
         legacy_root: None,
         apatch_kpms: root.join("no-apatch"),
+        payload_override: None,
     }
 }
 
@@ -1596,7 +1599,7 @@ fn startup_hold_survives_receipt_retention_and_schema_two_upgrade() {
     json.as_object_mut().unwrap().remove("native_startup");
     std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
     let mut upgraded = journal::read(&path).unwrap();
-    assert_eq!(upgraded.version, 5);
+    assert_eq!(upgraded.version, 6);
     assert_eq!(upgraded.issued_through, 42);
     assert!(upgraded.native_startup.is_none());
     upgraded.native_startup = Some(journal::NativeStartup {
@@ -1614,7 +1617,7 @@ fn startup_hold_survives_receipt_retention_and_schema_two_upgrade() {
         journal::read(&path).unwrap().held_resources(),
         vec![ConfigPhase::Native]
     );
-    upgraded.version = 6;
+    upgraded.version = 7;
     journal::write_atomic(&path, &upgraded).unwrap();
     assert!(journal::read(&path).is_err());
 }

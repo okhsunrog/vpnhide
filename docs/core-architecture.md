@@ -95,8 +95,9 @@ Canonical replacement applies required ownership, mode and label before rename,
 then fsyncs the containing directory. A failure after rename is Unknown, never a
 claim that no write occurred. The private journal records commands, phase intent,
 actual commit revisions, write sets and exact Native dispatch evidence. Secrets
-and secret-derived verifiers never enter it. Journal schema 5 reads/migrates
-schemas 1, 2, 3 and 4; blank, malformed or unsupported present journals refuse mutations.
+and secret-derived verifiers never enter it. Bundled startup binds the exact
+manifest digest, source commit, payload and projected wire policy. Journal schema
+6 reads/migrates schemas 1, 2, 3, 4 and 5; blank, malformed or unsupported present journals refuse mutations.
 
 Same-ID duplicate commands query the retained result; different commands refuse.
 SuperKey submission always refuses reuse because comparing the secret would
@@ -141,7 +142,7 @@ and failed-payload quarantine survive audit pruning: at most one load per backen
 per boot; unconfirmed payloads require explicit repair. Successful matching load
 clears quarantine. Live adoption does not claim binary-hash verification, so a
 quarantined payload may still require explicit repair on a subsequent boot.
-Schema-2/3/4-only Core cannot read schema 5. Downgrade is not a supported recovery:
+Schema-2/3/4/5-only Core cannot read schema 6. Downgrade is not a supported recovery:
 keep the journal and use a compatible Core, never delete it to bypass holds.
 Bundled Zygisk NativeIntent records the exact boot, operation generation, recipient
 directory identity and wire before publication. Recovery confirms only that exact
