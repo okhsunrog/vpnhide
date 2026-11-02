@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use vpnhide_core_daemon::autonomous::native_fixture::TunFixture;
 use vpnhide_diagnostic_model::{
-    ControlFailure, NativeFixtureSpec, NativeMeasurement, ScopedNativeResult, cleanup_confirmed,
+    BindActor, ControlFailure, NativeFixtureSpec, NativeMeasurement, ScopedNativeResult,
+    cleanup_confirmed,
 };
 
 fn main() {
@@ -103,7 +104,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             &[vpnhide_protocol::Target {
                 uid: 10000,
                 hookmask: vpnhide_protocol::hook_ids::Hook::DevIoctl.bit()
-                    | vpnhide_protocol::hook_ids::Hook::RtnlFillIfinfo.bit(),
+                    | vpnhide_protocol::hook_ids::Hook::RtnlFillIfinfo.bit()
+                    | vpnhide_protocol::hook_ids::Hook::SocketBindInterface.bit(),
             }],
         );
         vpnhide_core_daemon::activation::deliver_native(control, backend, &wire)?;
@@ -141,12 +143,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("FIXTURE_WORKER={}", serde_json::to_string(&observation)?);
     let done = fixture.finish(&observation);
     println!("FIXTURE_RESULT={}", serde_json::to_string(&done.result)?);
+    println!(
+        "FIXTURE_BIND_RESULT={}",
+        serde_json::to_string(&done.binding)?
+    );
+    let bind_expected = if protected {
+        done.binding.complete()
+    } else {
+        done.binding.controls.is_empty()
+            && BindActor::ALL
+                .iter()
+                .all(|a| done.binding.leaked.contains(a))
+    };
     let expected = if protected {
         matches!(&done.result, ScopedNativeResult::Proven { checks } if checks.len() == 4)
     } else {
         matches!(&done.result, ScopedNativeResult::Leaked { checks, incomplete } if checks.len() == 4 && incomplete.is_empty())
     };
-    if !expected || routes()? != before {
+    if !expected || !bind_expected || routes()? != before {
         return Err("native differential/control/cleanup assertion failed".into());
     }
     let duplicated = TunFixture::create(0x0123_4567_89ac)?;

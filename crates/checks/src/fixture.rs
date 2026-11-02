@@ -356,6 +356,7 @@ pub fn observe(name: &str) -> NativeMeasurement {
         Err(e) => Sample::Error(e),
     };
     NativeMeasurement {
+        binding: Some(crate::binding::observe(name)),
         flags: interface_ioctl(name, false),
         mtu: interface_ioctl(name, true),
         ifaddrs: sample(ifaddrs()),

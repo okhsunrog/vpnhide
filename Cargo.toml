@@ -34,9 +34,8 @@ panic = "abort"
 opt-level = 1
 panic = "abort"
 
-# Android app native artifacts must unwind across the thin JNI adapter so it
-# can translate a failed probe into a Java exception instead of aborting the
-# app process. Every APK entry point selects this profile explicitly.
+# Android app native artifacts unwind across the typed FFI so failures can be
+# reported without aborting the app. Every APK entry point selects this profile.
 [profile.app-native]
 inherits = "release"
 opt-level = "z"

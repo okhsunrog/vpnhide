@@ -8,6 +8,16 @@ macro_rules! sample {
             Value { value: $ty },
             Error { error: CoreProbeError },
         }
+        impl From<Sample<$ty>> for $name {
+            fn from(value: Sample<$ty>) -> Self {
+                match value {
+                    Sample::Value(value) => Self::Value { value },
+                    Sample::Error(error) => Self::Error {
+                        error: error.into(),
+                    },
+                }
+            }
+        }
         impl From<$name> for Sample<$ty> {
             fn from(value: $name) -> Self {
                 match value {

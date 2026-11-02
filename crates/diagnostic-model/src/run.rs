@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{NativeCheck, NativeFixtureSpec, NativeMeasurement, ScopedNativeResult};
 
-pub const DIAGNOSTIC_CONTRACT: u32 = 2;
+pub const DIAGNOSTIC_CONTRACT: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -152,6 +152,8 @@ pub enum DiagnosticOutcome {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticRun {
+    #[serde(default)]
+    pub binding: Option<crate::ScopedBindResult>,
     pub session: u64,
     pub fingerprint: DiagnosticFingerprint,
     pub plan: DiagnosticPlan,
@@ -160,6 +162,14 @@ pub struct DiagnosticRun {
     pub stale: bool,
 }
 impl DiagnosticRun {
+    pub fn record_binding(&mut self, binding: crate::ScopedBindResult) {
+        if binding.complete()
+            && let DiagnosticOutcome::Incomplete { missing, .. } = &mut self.outcome
+        {
+            missing.retain(|v| *v != RequiredCheck::BindToDevice);
+        }
+        self.binding = Some(binding);
+    }
     pub fn record_framework(&mut self, framework: crate::framework::ScopedFrameworkResult) {
         if let DiagnosticOutcome::Incomplete { missing, .. } = &mut self.outcome {
             let proven = crate::assessment::framework_checks(&framework.proven, true);
@@ -190,6 +200,9 @@ impl DiagnosticRun {
             })
             .collect();
         self.outcome = DiagnosticOutcome::Incomplete { native, missing };
+        if let Some(binding) = self.binding.take() {
+            self.record_binding(binding);
+        }
     }
 }
 
@@ -199,6 +212,7 @@ mod tests {
     #[test]
     fn four_native_successes_never_replace_the_supported_contract() {
         let mut run = DiagnosticRun {
+            binding: None,
             session: 1,
             framework: None,
             fingerprint: DiagnosticFingerprint {

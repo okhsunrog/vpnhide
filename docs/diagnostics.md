@@ -1,7 +1,7 @@
 # Autonomous diagnostics
 
 Core owns diagnostic admission, required plans, fingerprint/cache, attribution,
-assessment and cleanup. RPC21 publishes the retained run and assessment atomically.
+assessment and cleanup. RPC22 publishes the retained run and assessment atomically.
 Dashboard, Diagnostics, agent state and exports consume that same publication.
 Opening the app, changing tabs, reading state or capturing logs does not run a
 suite. Explicit Retry requests a run; repeated pending taps coalesce in the app
@@ -43,7 +43,12 @@ controls and per-invocation CLOCK_BOOTTIME windows; ordinary duplicates and each
 real invocation's baseline must be preserved. Prepared and revoked controls check
 fixture absence rather than absence of the user's actual networks.
 
-Addresses, routes/rules, remaining proc/sys/bind stimuli and framework active/
+Independent libc and direct-syscall socket binding have root differential, exact
+readback and ordinary loopback controls. Permission errors and missing readback
+remain unverified; a setter error cannot erase an observed binding leak. The
+worker must share the fixture network namespace.
+
+Addresses, routes/rules, remaining proc/sys stimuli and framework active/
 default/callback/PendingIntent controls still need implementation or expansion.
 Android bionic, SELinux, Java callback isolation and old game-process coverage need
 real device acceptance. QEMU/static libc evidence does not replace those gates.

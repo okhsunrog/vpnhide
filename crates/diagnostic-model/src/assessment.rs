@@ -147,6 +147,19 @@ impl DiagnosticRun {
             }
             None => {}
         }
+        if let Some(binding) = &self.binding {
+            if binding.complete() {
+                proven.insert(RequiredCheck::BindToDevice);
+            }
+            if !binding.leaked.is_empty() {
+                leaked.insert(RequiredCheck::BindToDevice);
+            }
+            for control in &binding.controls {
+                if !native_controls.contains(control) {
+                    native_controls.push(*control);
+                }
+            }
+        }
         let framework_controls = if let Some(result) = &self.framework {
             proven.extend(framework_checks(&result.proven, true));
             leaked.extend(framework_checks(&result.leaked, false));
@@ -181,6 +194,7 @@ mod tests {
     use crate::{DiagnosticFingerprint, framework::ScopedFrameworkResult};
     fn run(native: ScopedNativeResult) -> DiagnosticRun {
         DiagnosticRun {
+            binding: None,
             session: 1,
             fingerprint: DiagnosticFingerprint {
                 boot_id: "boot".into(),
@@ -267,5 +281,40 @@ mod tests {
         let a = run.assessment();
         assert_eq!(a.required.len(), 19);
         assert!(a.reuse_blockers.contains(&ReuseBlocker::UnsupportedPlan));
+    }
+    #[test]
+    fn independent_bind_controls_preserve_other_proofs_and_direct_actor_leaks() {
+        let mut run = run(ScopedNativeResult::Proven {
+            checks: vec![
+                NativeCheck::IoctlFlags,
+                NativeCheck::IoctlMtu,
+                NativeCheck::Getifaddrs,
+                NativeCheck::NetlinkGetlink,
+            ],
+        });
+        run.record_binding(crate::ScopedBindResult {
+            proven: vec![crate::BindActor::Libc],
+            leaked: vec![crate::BindActor::Syscall],
+            controls: vec![ControlFailure::OrdinaryObjectsChanged],
+        });
+        let assessment = run.assessment();
+        assert_eq!(assessment.proven.len(), 4);
+        assert_eq!(assessment.leaked, vec![RequiredCheck::BindToDevice]);
+        assert!(
+            assessment
+                .native_controls
+                .contains(&ControlFailure::OrdinaryObjectsChanged)
+        );
+        run.record_binding(crate::ScopedBindResult {
+            proven: crate::BindActor::ALL.to_vec(),
+            leaked: vec![],
+            controls: vec![],
+        });
+        assert!(
+            run.assessment()
+                .proven
+                .contains(&RequiredCheck::BindToDevice)
+        );
+        assert!(run.assessment().unverified.len() >= 14);
     }
 }

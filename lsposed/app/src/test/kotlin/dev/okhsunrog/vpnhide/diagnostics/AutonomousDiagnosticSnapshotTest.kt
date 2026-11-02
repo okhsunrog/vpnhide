@@ -51,11 +51,12 @@ class AutonomousDiagnosticSnapshotTest {
             platformSha256 = null,
             loadedGenerationsSha256 = null,
             loadedGenerationsComplete = false,
-            contract = 2u,
+            contract = 3u,
             required = emptyList(),
             outcome = CoreDiagnosticOutcome.Running,
             framework = null,
             stale = false,
+            binding = null,
         )
 
     private fun update(

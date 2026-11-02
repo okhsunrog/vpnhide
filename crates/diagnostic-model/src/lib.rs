@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+mod binding;
+pub use binding::*;
 mod assessment;
 pub use assessment::*;
 pub mod framework;
@@ -122,6 +124,8 @@ impl NativeFixtureSpec {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeMeasurement {
+    #[serde(default)]
+    pub binding: Option<BindMeasurement>,
     pub flags: Sample<u32>,
     pub mtu: Sample<u32>,
     pub ifaddrs: Sample<Vec<ObservedInterface>>,
@@ -132,22 +136,23 @@ pub struct NativeMeasurement {
 
 impl NativeMeasurement {
     pub fn bounded(&self) -> bool {
-        [&self.ifaddrs, &self.links].into_iter().all(|sample| {
-            sample.value().is_none_or(|entries| {
-                entries.len() <= MAX_INTERFACES
-                    && coherent(entries)
-                    && entries.iter().all(|e| {
-                        !e.name.is_empty()
-                            && e.name.len() <= 15
-                            && e.name.is_ascii()
-                            && !e.name.bytes().any(|b| b.is_ascii_control())
-                            && e.index.is_none_or(|i| i > 0 && i <= i32::MAX as u32)
-                            && e.ifaddrs
-                                .as_ref()
-                                .is_none_or(|m| m.families.len() <= 32 && m.flags.len() <= 8)
-                    })
+        self.binding.as_ref().is_none_or(BindMeasurement::bounded)
+            && [&self.ifaddrs, &self.links].into_iter().all(|sample| {
+                sample.value().is_none_or(|entries| {
+                    entries.len() <= MAX_INTERFACES
+                        && coherent(entries)
+                        && entries.iter().all(|e| {
+                            !e.name.is_empty()
+                                && e.name.len() <= 15
+                                && e.name.is_ascii()
+                                && !e.name.bytes().any(|b| b.is_ascii_control())
+                                && e.index.is_none_or(|i| i > 0 && i <= i32::MAX as u32)
+                                && e.ifaddrs
+                                    .as_ref()
+                                    .is_none_or(|m| m.families.len() <= 32 && m.flags.len() <= 8)
+                        })
+                })
             })
-        })
     }
 }
 
@@ -389,6 +394,7 @@ mod tests {
             entries.push(spec.interface.into());
         }
         NativeMeasurement {
+            binding: None,
             flags: if visible {
                 Sample::Value(spec.flags)
             } else {

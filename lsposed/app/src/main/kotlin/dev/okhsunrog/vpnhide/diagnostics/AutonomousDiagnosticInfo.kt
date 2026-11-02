@@ -45,6 +45,14 @@ internal data class AutonomousRunInfo(
     val contract: Int,
     val stale: Boolean,
     val frameworkAttribution: AutonomousFrameworkAttributionInfo?,
+    val binding: AutonomousBindInfo? = null,
+)
+
+@Serializable
+internal data class AutonomousBindInfo(
+    val provenActors: List<String>,
+    val leakedActors: List<String>,
+    val controls: List<String>,
 )
 
 @Serializable
@@ -88,6 +96,13 @@ internal fun CoreDiagnosticRun.toDiagnosticInfo(): AutonomousRunInfo =
         contract.toInt(),
         stale,
         framework?.attribution?.toDiagnosticInfo(),
+        binding?.let { result ->
+            AutonomousBindInfo(
+                result.proven.map { it.name.lowercase(Locale.ROOT) },
+                result.leaked.map { it.name.lowercase(Locale.ROOT) },
+                result.controls.map { it.name.lowercase(Locale.ROOT) },
+            )
+        },
     )
 
 private fun CoreFrameworkAttribution.toDiagnosticInfo(): AutonomousFrameworkAttributionInfo =

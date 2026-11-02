@@ -23,6 +23,7 @@ struct WorkerIdentity {
     process: ProcessIdentity,
     uid: u32,
     zygote: ProcessIdentity,
+    network_namespace: (u64, u64),
 }
 struct Active {
     session: u64,
@@ -170,6 +171,19 @@ fn plan(snapshot: &vpnhide_core_rpc::StateSnapshot) -> DiagnosticPlan {
         config.apps.values().any(|a| a.ports),
     )
 }
+fn namespace_identity(path: &Path) -> Result<(u64, u64), DiagnosticError> {
+    let metadata = fs::metadata(path).map_err(|_| DiagnosticError::WrongProcess)?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+fn shared_network_namespace(root: &Path, pid: u32) -> Result<(u64, u64), DiagnosticError> {
+    let ours = namespace_identity(&root.join("self/ns/net"))?;
+    let worker = namespace_identity(&root.join(pid.to_string()).join("ns/net"))?;
+    if ours != worker {
+        return Err(DiagnosticError::WrongProcess);
+    }
+    Ok(ours)
+}
+
 fn worker_identity(
     root: &Path,
     dir: &Path,
@@ -195,9 +209,15 @@ fn worker_identity(
         process,
         uid: peer.uid,
         zygote,
+        network_namespace: shared_network_namespace(root, peer.pid)?,
     })
 }
+struct NativeEvidence {
+    native: ScopedNativeResult,
+    binding: ScopedBindResult,
+}
 struct MeasurementFailure {
+    binding: Option<Box<ScopedBindResult>>,
     detail: String,
     native: Option<ScopedNativeResult>,
     cleanup_confirmed: Option<bool>,
@@ -270,6 +290,7 @@ impl Coordinator {
         inner.retry_at = None;
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
         let run = DiagnosticRun {
+            binding: None,
             session: inner.next,
             fingerprint,
             plan,
@@ -316,6 +337,7 @@ impl Coordinator {
         let result = match &worker_lease {
             Ok(_) => self.measure(&state, session),
             Err(detail) => Err(MeasurementFailure {
+                binding: None,
                 detail: detail.clone(),
                 native: None,
                 cleanup_confirmed: Some(true),
@@ -354,8 +376,12 @@ impl Coordinator {
             return;
         };
         match result {
-            Ok(native) => run.record_native(native),
+            Ok(evidence) => {
+                run.record_native(evidence.native);
+                run.record_binding(evidence.binding);
+            }
             Err(failure) => {
+                run.binding = failure.binding.map(|v| *v);
                 run.outcome = DiagnosticOutcome::Infrastructure {
                     detail: failure.detail,
                     native: failure.native,
@@ -384,7 +410,7 @@ impl Coordinator {
         &self,
         state: &CoreState,
         session: u64,
-    ) -> Result<ScopedNativeResult, MeasurementFailure> {
+    ) -> Result<NativeEvidence, MeasurementFailure> {
         let fixture = TunFixture::create_detailed(session).map_err(|failure| {
             let cleaned = failure.cleanup.as_ref().map(|(_, cleaned)| *cleaned);
             let mut inner = self.inner.lock().expect("diagnostic coordinator");
@@ -396,6 +422,7 @@ impl Coordinator {
                 }
             }
             MeasurementFailure {
+                binding: None,
                 detail: format!("native fixture unavailable: {}", failure.error),
                 native: None,
                 cleanup_confirmed: cleaned,
@@ -460,6 +487,7 @@ impl Coordinator {
             }
         })();
         let unavailable = NativeMeasurement {
+            binding: None,
             flags: Sample::Error(ProbeError::Timeout),
             mtu: Sample::Error(ProbeError::Timeout),
             ifaddrs: Sample::Error(ProbeError::Timeout),
@@ -479,13 +507,18 @@ impl Coordinator {
                 .pending_cleanup = Some(spec.clone());
         }
         match report {
-            Ok(_) if cleaned => Ok(completion.result),
+            Ok(_) if cleaned => Ok(NativeEvidence {
+                native: completion.result,
+                binding: completion.binding,
+            }),
             Ok(_) => Err(MeasurementFailure {
+                binding: Some(Box::new(completion.binding)),
                 detail: "native fixture cleanup unconfirmed; diagnostic admission held".into(),
                 native: Some(completion.result),
                 cleanup_confirmed: Some(false),
             }),
             Err(detail) => Err(MeasurementFailure {
+                binding: Some(Box::new(completion.binding)),
                 detail,
                 native: Some(completion.result),
                 cleanup_confirmed: Some(cleaned),
@@ -745,6 +778,7 @@ mod tests {
     }
     fn identity(ticks: u64) -> WorkerIdentity {
         WorkerIdentity {
+            network_namespace: (1, 2),
             process: ProcessIdentity {
                 pid: 456,
                 start_ticks: ticks,
@@ -833,6 +867,7 @@ mod tests {
         coordinator.configure(PathBuf::from("/nonexistent-app"));
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            binding: None,
             session: 3,
             framework: None,
             fingerprint: fingerprint(&state, &snapshot),
@@ -859,6 +894,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            binding: None,
             session: 3,
             framework: None,
             fingerprint: fingerprint(&state, &snapshot),
@@ -891,6 +927,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let run = DiagnosticRun {
+            binding: None,
             session: 9,
             fingerprint: fingerprint(&state, &snapshot),
             plan: plan(&snapshot),
@@ -1036,5 +1073,23 @@ mod tests {
             ),
             Err(DiagnosticError::WrongProcess)
         );
+    }
+    #[test]
+    fn native_worker_must_share_fixture_network_namespace_and_unknown_is_not_equal() {
+        let root = tempfile::tempdir().unwrap();
+        for dir in ["self/ns", "123/ns"] {
+            fs::create_dir_all(root.path().join(dir)).unwrap();
+        }
+        assert!(shared_network_namespace(root.path(), 123).is_err());
+        fs::write(root.path().join("self/ns/net"), "namespace-a").unwrap();
+        fs::write(root.path().join("123/ns/net"), "namespace-b").unwrap();
+        assert!(shared_network_namespace(root.path(), 123).is_err());
+        fs::remove_file(root.path().join("123/ns/net")).unwrap();
+        fs::hard_link(
+            root.path().join("self/ns/net"),
+            root.path().join("123/ns/net"),
+        )
+        .unwrap();
+        assert!(shared_network_namespace(root.path(), 123).is_ok());
     }
 }

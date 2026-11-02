@@ -306,7 +306,7 @@ private fun sampleAutonomousRun() =
         platformSha256 = "e".repeat(64),
         loadedGenerationsSha256 = "f".repeat(64),
         loadedGenerationsComplete = false,
-        contract = 2,
+        contract = 3,
         stale = false,
         frameworkAttribution =
             sampleFrameworkAttribution(),

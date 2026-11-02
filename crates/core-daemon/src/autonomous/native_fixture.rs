@@ -101,6 +101,7 @@ pub struct NativeCompletion {
     pub root_end: NativeMeasurement,
     pub cleanup: NativeMeasurement,
     pub result: ScopedNativeResult,
+    pub binding: vpnhide_diagnostic_model::ScopedBindResult,
 }
 
 impl TunFixture {
@@ -263,10 +264,19 @@ impl TunFixture {
             &root_end,
             &cleanup,
         );
+        let binding = vpnhide_diagnostic_model::evaluate_bind_fixture(
+            &self.spec,
+            &self.negative,
+            &self.root_start,
+            worker,
+            &root_end,
+            &cleanup,
+        );
         NativeCompletion {
             root_end,
             cleanup,
             result,
+            binding,
         }
     }
 

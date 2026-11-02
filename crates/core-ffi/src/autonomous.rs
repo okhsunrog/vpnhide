@@ -175,8 +175,88 @@ impl From<CoreInterfacesSample> for model::Sample<Vec<model::ObservedInterface>>
         }
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CoreBindActor {
+    Libc,
+    Syscall,
+}
+impl From<model::BindActor> for CoreBindActor {
+    fn from(v: model::BindActor) -> Self {
+        match v {
+            model::BindActor::Libc => Self::Libc,
+            model::BindActor::Syscall => Self::Syscall,
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreBindAttempt {
+    pub initial: crate::CoreTextSample,
+    pub set: CoreNumberSample,
+    pub final_device: crate::CoreTextSample,
+}
+impl From<model::BindAttempt> for CoreBindAttempt {
+    fn from(v: model::BindAttempt) -> Self {
+        Self {
+            initial: v.initial.into(),
+            set: v.set.into(),
+            final_device: v.final_device.into(),
+        }
+    }
+}
+impl From<CoreBindAttempt> for model::BindAttempt {
+    fn from(v: CoreBindAttempt) -> Self {
+        Self {
+            initial: v.initial.into(),
+            set: v.set.into(),
+            final_device: v.final_device.into(),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreBindMeasurement {
+    pub libc_fixture: CoreBindAttempt,
+    pub libc_ordinary: CoreBindAttempt,
+    pub syscall_fixture: CoreBindAttempt,
+    pub syscall_ordinary: CoreBindAttempt,
+}
+impl From<model::BindMeasurement> for CoreBindMeasurement {
+    fn from(v: model::BindMeasurement) -> Self {
+        Self {
+            libc_fixture: v.libc_fixture.into(),
+            libc_ordinary: v.libc_ordinary.into(),
+            syscall_fixture: v.syscall_fixture.into(),
+            syscall_ordinary: v.syscall_ordinary.into(),
+        }
+    }
+}
+impl From<CoreBindMeasurement> for model::BindMeasurement {
+    fn from(v: CoreBindMeasurement) -> Self {
+        Self {
+            libc_fixture: v.libc_fixture.into(),
+            libc_ordinary: v.libc_ordinary.into(),
+            syscall_fixture: v.syscall_fixture.into(),
+            syscall_ordinary: v.syscall_ordinary.into(),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreScopedBindResult {
+    pub proven: Vec<CoreBindActor>,
+    pub leaked: Vec<CoreBindActor>,
+    pub controls: Vec<CoreControlFailure>,
+}
+impl From<model::ScopedBindResult> for CoreScopedBindResult {
+    fn from(v: model::ScopedBindResult) -> Self {
+        Self {
+            proven: v.proven.into_iter().map(Into::into).collect(),
+            leaked: v.leaked.into_iter().map(Into::into).collect(),
+            controls: v.controls.into_iter().map(Into::into).collect(),
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreNativeMeasurement {
+    pub binding: Option<CoreBindMeasurement>,
     pub flags: CoreNumberSample,
     pub mtu: CoreNumberSample,
     pub ifaddrs: CoreInterfacesSample,
@@ -187,6 +267,7 @@ pub struct CoreNativeMeasurement {
 impl From<model::NativeMeasurement> for CoreNativeMeasurement {
     fn from(v: model::NativeMeasurement) -> Self {
         Self {
+            binding: v.binding.map(Into::into),
             flags: v.flags.into(),
             mtu: v.mtu.into(),
             ifaddrs: v.ifaddrs.into(),
@@ -199,6 +280,7 @@ impl From<model::NativeMeasurement> for CoreNativeMeasurement {
 impl From<CoreNativeMeasurement> for model::NativeMeasurement {
     fn from(v: CoreNativeMeasurement) -> Self {
         Self {
+            binding: v.binding.map(Into::into),
             flags: v.flags.into(),
             mtu: v.mtu.into(),
             ifaddrs: v.ifaddrs.into(),
@@ -332,6 +414,7 @@ pub struct CoreDiagnosticRun {
     pub outcome: CoreDiagnosticOutcome,
     pub framework: Option<crate::CoreScopedFrameworkResult>,
     pub stale: bool,
+    pub binding: Option<CoreScopedBindResult>,
 }
 impl From<model::DiagnosticRun> for CoreDiagnosticRun {
     fn from(v: model::DiagnosticRun) -> Self {
@@ -365,6 +448,7 @@ impl From<model::DiagnosticRun> for CoreDiagnosticRun {
             contract: v.plan.contract,
             required: v.plan.required.into_iter().map(Into::into).collect(),
             outcome,
+            binding: v.binding.map(Into::into),
             framework: v.framework.map(Into::into),
             stale: v.stale,
         }

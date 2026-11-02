@@ -125,7 +125,7 @@
             "platformSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "loadedGenerationsSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             "loadedGenerationsComplete": false,
-            "contract": 2,
+            "contract": 3,
             "stale": false,
             "frameworkAttribution": {
                 "session": 99,
@@ -138,7 +138,8 @@
                 "systemServerStartTicks": 320,
                 "hookSourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                 "sourceProfileSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-            }
+            },
+            "binding": null
         },
         "assessment": {
             "phase": "incomplete",
@@ -319,7 +320,7 @@
                     "platformSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
                     "loadedGenerationsSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                     "loadedGenerationsComplete": false,
-                    "contract": 2,
+                    "contract": 3,
                     "stale": false,
                     "frameworkAttribution": {
                         "session": 99,
@@ -332,7 +333,8 @@
                         "systemServerStartTicks": 320,
                         "hookSourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                         "sourceProfileSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-                    }
+                    },
+                    "binding": null
                 },
                 "assessment": {
                     "phase": "incomplete",
@@ -437,7 +439,7 @@
                 "platformSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
                 "loadedGenerationsSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                 "loadedGenerationsComplete": false,
-                "contract": 2,
+                "contract": 3,
                 "stale": false,
                 "frameworkAttribution": {
                     "session": 99,
@@ -450,7 +452,8 @@
                     "systemServerStartTicks": 320,
                     "hookSourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                     "sourceProfileSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-                }
+                },
+                "binding": null
             },
             "assessment": {
                 "phase": "incomplete",

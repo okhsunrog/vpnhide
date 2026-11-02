@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide
 
+import dev.okhsunrog.vpnhide.diagnostics.toDiagnosticInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -39,11 +40,12 @@ class CoreStateBindingContractTest {
             null,
             null,
             false,
-            2u,
+            3u,
             emptyList(),
             CoreDiagnosticOutcome.Running,
             null,
             false,
+            null,
         )
     private val assessment =
         CoreDiagnosticAssessment(
@@ -111,5 +113,18 @@ class CoreStateBindingContractTest {
         native.delivery?.wireSha256 = null
         assertEquals(3L, bound.nativeStatus?.requiredHooks)
         assertEquals("a".repeat(64), bound.nativeStatus?.delivery?.wireSha256)
+    }
+
+    @Test
+    fun `bind actor evidence remains immutable and separate from installed hook masks`() {
+        val result =
+            CoreScopedBindResult(listOf(CoreBindActor.LIBC), listOf(CoreBindActor.SYSCALL), listOf(CoreControlFailure.PROBE_UNAVAILABLE))
+        val info = run.copy(binding = result).toDiagnosticInfo()
+        result.proven = emptyList()
+        result.leaked = emptyList()
+        result.controls = emptyList()
+        assertEquals(listOf("libc"), info.binding?.provenActors)
+        assertEquals(listOf("syscall"), info.binding?.leakedActors)
+        assertEquals(listOf("probe_unavailable"), info.binding?.controls)
     }
 }

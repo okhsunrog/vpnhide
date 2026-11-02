@@ -1,3 +1,4 @@
+pub mod binding;
 pub mod fixture;
 mod generated;
 pub mod observation;
@@ -33,6 +34,8 @@ pub enum CheckStatus {
     /// Reported separately so the UI can tell the user to enable network
     /// access before trusting the results.
     NetworkBlocked,
+    /// The operation/readback is incomplete; never a hiding or SELinux claim.
+    Unverified,
 }
 
 #[derive(serde::Serialize, Debug, Clone)]
@@ -327,54 +330,37 @@ fn check_getifaddrs() -> CheckOutput {
 ///   is NOT our hook (capability/SELinux). Report as a permission block, never as a
 ///   backend success or a leak.
 fn check_setsockopt_bindtodevice() -> CheckOutput {
-    unsafe {
-        with_inet_dgram_socket(|fd| {
-            // Include the NUL terminator in optlen, exactly like the RKNHardering
-            // probe (name.size() + 1); the kernel reads optval as a C string.
-            let name = b"tun0\0";
-            let ret = libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_BINDTODEVICE,
-                name.as_ptr().cast(),
-                name.len() as libc::socklen_t,
-            );
-            if ret == 0 {
-                // Confirm the bind actually took, exactly like the RKNHardering
-                // probe: a skip_origin-style hook (zygisk) returns 0 without binding,
-                // which neutralises the vector rather than leaking it. Only a
-                // getsockopt that echoes back tun0 is a real leak.
-                let mut dev = [0u8; libc::IFNAMSIZ];
-                let mut dev_len = dev.len() as libc::socklen_t;
-                let got = libc::getsockopt(
-                    fd,
-                    libc::SOL_SOCKET,
-                    libc::SO_BINDTODEVICE,
-                    dev.as_mut_ptr().cast(),
-                    &mut dev_len,
-                );
-                let bound = got == 0 && cstr_to_str(dev.as_ptr().cast()) == "tun0";
-                return if bound {
-                    CheckOutput::fail(
-                        "setsockopt(tun0, SO_BINDTODEVICE) succeeded and getsockopt confirmed — interface bindable/visible",
-                    )
-                } else {
-                    CheckOutput::pass(
-                        "setsockopt(tun0, SO_BINDTODEVICE) returned 0 but getsockopt shows unbound — bind neutralised",
-                    )
-                };
-            }
-            let err = last_os_errno();
-            match err {
-                libc::ENODEV | libc::ENXIO => CheckOutput::pass(
-                    "setsockopt(tun0, SO_BINDTODEVICE) returned ENODEV — interface not visible",
-                ),
-                _ => CheckOutput::selinux_blocked(format!(
-                    "SO_BINDTODEVICE denied (errno {err}: {}) — capability/SELinux block, not a backend hook",
-                    last_os_error()
-                )),
-            }
-        })
+    // Optional manual root capture retains its historical default. Autonomous
+    // fixtures use binding::observe with the exact Core-issued session name.
+    bind_check_output(
+        "tun0",
+        &binding::attempt("tun0", vpnhide_diagnostic_model::BindActor::Libc),
+    )
+}
+fn bind_check_output(name: &str, attempt: &vpnhide_diagnostic_model::BindAttempt) -> CheckOutput {
+    use vpnhide_diagnostic_model::{ProbeError, Sample};
+    let detail = format!("SO_BINDTODEVICE({name}) {attempt:?}");
+    if [&attempt.initial, &attempt.final_device]
+        .into_iter()
+        .any(|v| v.value().is_some_and(|v| v == name))
+    {
+        return CheckOutput::fail(detail);
+    }
+    let unbound = attempt.initial.value().is_some_and(String::is_empty)
+        && attempt.final_device.value().is_some_and(String::is_empty);
+    if unbound
+        && (attempt.set.value() == Some(&0)
+            || matches!(
+                attempt.set,
+                Sample::Error(ProbeError::Errno(libc::ENODEV | libc::ENXIO))
+            ))
+    {
+        CheckOutput::pass(detail)
+    } else {
+        CheckOutput {
+            status: CheckStatus::Unverified,
+            detail,
+        }
     }
 }
 
@@ -382,8 +368,7 @@ fn check_setsockopt_bindtodevice() -> CheckOutput {
 ///
 /// Interface names are arbitrary bytes, so a `/proc/net` line can legitimately
 /// carry multi-byte UTF-8. Slicing straight at `max_bytes` panics when that byte
-/// lands mid-character. The JNI entry catches the unwind now, but a probe that
-/// panics still loses the whole check run, and the truncation itself is not an
+/// lands mid-character. A probe that panics still loses its manual check run, and the truncation itself is not an
 /// edge case. (Truncation itself is not an edge
 /// case: `/proc/net/route` lines routinely run past 80 bytes.)
 fn truncate_on_char_boundary(line: &str, max_bytes: usize) -> &str {
@@ -1199,5 +1184,35 @@ mod rule_dump_tests {
         done[4..6].copy_from_slice(&(libc::NLMSG_ERROR as u16).to_ne_bytes());
         done[16..20].copy_from_slice(&(-libc::EPERM).to_ne_bytes());
         assert!(validate_rule_dump_chunk(&done, 1).is_err());
+    }
+}
+
+#[cfg(test)]
+mod bind_readback_regressions {
+    use super::*;
+    use vpnhide_diagnostic_model::{BindAttempt, ProbeError, Sample};
+    #[test]
+    fn manual_capture_does_not_confuse_missing_readback_or_permission_with_hiding() {
+        let mut attempt = BindAttempt {
+            initial: Sample::Value(String::new()),
+            set: Sample::Value(0),
+            final_device: Sample::Error(ProbeError::Unsupported),
+        };
+        assert_eq!(
+            bind_check_output("tun0", &attempt).status,
+            CheckStatus::Unverified
+        );
+        attempt.set = Sample::Error(ProbeError::Errno(libc::ENODEV));
+        attempt.final_device = Sample::Value("tun0".into());
+        assert_eq!(
+            bind_check_output("tun0", &attempt).status,
+            CheckStatus::Fail
+        );
+        attempt.set = Sample::Error(ProbeError::Errno(libc::EPERM));
+        attempt.final_device = Sample::Value(String::new());
+        assert_eq!(
+            bind_check_output("tun0", &attempt).status,
+            CheckStatus::Unverified
+        );
     }
 }

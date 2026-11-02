@@ -3,7 +3,7 @@
 Approved design, based on dev-2.x `3493354f` (2026-11-02).
 This is an implementation ledger, not a claim of device acceptance.
 
-Current cloud contract: **RPC21 / journal11 (reads schemas1–10)**. Kernel control2 /
+Current cloud contract: **RPC22 / journal11 (reads schemas1–10)**. Kernel control2 /
 telemetry1 is unchanged: APK/Core contract and private journal upgrades do not
 require rebuilding a compatible user builtin kernel. Stages4–7/RFC2 remain partial;
 the latest entries distinguish remaining code from device/key/publication gates.
@@ -37,7 +37,7 @@ changes create new operations, not retroactive changes to confirmed receipts.
 | 2. Durable backend lifecycle | Implemented for the current selector; bundle integration follows stages 3/4 | Initial effects journaled before dispatch, crash reconciliation, bounded attempts surviving worker restart, no blind replay |
 | 3. Unified ZIP and CI assembly | Implemented passive assembly; real seven-KMI CI/device acceptance unobserved | All seven KMIs, both Zygisk ABIs, manifest/hashes, verified provenance, active/staged separation |
 | 4. Zygisk boot authorization and fallback | In progress: authenticated loader, durable authority and exact process consumption; shared revocation/fallback executor pending | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
-| 5. Typed state/RPC/UI/diagnostics | In progress: RPC21 native/autonomous projections shared by Dashboard/picker/Statistics/agent/export; expanded RFC2 health evidence remains | Paired contract bump, reasons/attempts/coverage, no misleading component health |
+| 5. Typed state/RPC/UI/diagnostics | In progress: RPC22 native/autonomous projections shared by Dashboard/picker/Statistics/agent/export; expanded RFC2 health evidence remains | Paired contract bump, reasons/attempts/coverage, no misleading component health |
 | 6. Shared maintenance plan/executor | In progress: source-bound legacy migration/archive; replacement/manager/reboot vertical pending | Migration/repair/update use the same typed steps, preserve sources, manager-native staging/removal, durable progress/reconciliation |
 | 7. Separate runtime provisioning | In progress: offline evidence/write model and pinned fork patches; concrete adapters pending | Verified fork/tool tuple, actual KALLSYMS=y, validated ALL=n support, durable original backup, plan-bound consent, correct write/readback errors |
 
@@ -1453,7 +1453,7 @@ module-scaffold checks passed. Logs:
 
 ## Cloud continuation: native read model and retirement of VPN gates, RPC21
 
-Implemented code (validation in progress): native selected/applied/observed/displayed
+Implemented code: native selected/applied/observed/displayed
 identity, immutable bundled/source/payload provenance, durable attempts, latest
 Native phase/delivery, independent desired hook coverage, setup and filesystem
 state. Rust owns this projection at every publication boundary. Kotlin Dashboard,
@@ -1510,3 +1510,49 @@ unit tests passed; all61 host Core process regressions passed. Strict host/all-t
 and ARM64/ARMv7 Clippy passed, as did fmt/no-root/module-scaffold checks. Logs:
 `/tmp/vpnhide-cleanup-{rust-tests2,process2,clippy-host2,clippy-arm1}.log` and
 `/tmp/vpnhide-cleanup-android4.log`. No phone acceptance is claimed.
+
+
+## Cloud continuation: independent socket binding actors, RPC22
+
+Implemented: fresh CLOEXEC datagram sockets observe SO_BINDTODEVICE before and
+again after every setter, including a failing setter. libc and direct-syscall
+actors each have independent fixture and ordinary loopback controls. Neither
+permission errors nor missing readback prove hiding; mutation followed by an error
+still retains a positively identified leak. Root negative/start/end and cleanup
+controls bind the exact session interface. Worker and Core network namespaces
+must match by live procfs device/inode identity, in addition to process birth,
+boot, deadline and operation fences. No real VPN, address or route is changed.
+
+Diagnostic contract3 adds typed actor observations and aggregate proof/leak/control
+evidence through Rust RPC22, generated FFI, immutable Kotlin state and schema5
+exports. Journal11 (reads1–10), kernel control2 and telemetry1 remain unchanged.
+Both actors must prove protection before this required vector is discharged;
+missing late cleanup or end evidence cannot erase an already confirmed leak.
+Manual forensic bind checking also stops treating permission/unknown readback as
+PASS or assigning a SELinux cause without evidence. Autonomous runs use their
+actual session interface, not a fixed tun0. Nineteen required vectors are retained.
+
+QEMU evidence: the bounded native-fixture RAW and protected modes both passed on
+Linux6.1.175 with the earlier verified closed-init payload. RAW exposed the exact
+TUN through both bind actors; protected returned ENODEV with empty readback while
+ordinary lo remained bindable. The existing four interface vectors, DOWN fixture
+route preservation, dup-FD/crash and partial setup cleanup controls also passed.
+An earlier invocation used the wrong mode environment variable and instead ran
+the general harness without its optional probe/iproute inputs: its 24 failures
+are preserved and are not counted as a passed general QEMU matrix. This is static
+libc kernel evidence, not Android bionic/SELinux or same-final-commit bundle proof.
+
+Remaining RFC2 code includes address/route/rule/proc/sys stimuli, active/default
+framework and callback/PendingIntent controls, plus loaded game-process coverage.
+Stage6, concrete provisioning adapters, remaining Kotlin domain transfers and
+final complete packaging/startup gates remain implementation work; phone, signing
+key and fork target are separate external gates. Picker Save/Cancel is preserved.
+
+Binding validation: 346 Core + 28 diagnostic-model + 17 checks unit tests passed;
+all61 Core process regressions passed on RPC22. Typed RPC/FFI units passed; strict
+host/all-target, fixture-oracle and ARM64/ARMv7 Clippy passed. The full Android
+unit/ktlint/detekt/CPD/lintDebug gate passed, including immutable actor mapping;
+schema5 golden passed independently without UPDATE_GOLDEN. Read-only review found
+no further concrete bind proof bug. Evidence logs and both bounded QEMU serial
+captures are retained at `/workspace/vpnhide-build-evidence/rfc2/socket-binding`.
+No phone acceptance or final complete kernel/package matrix is claimed.
