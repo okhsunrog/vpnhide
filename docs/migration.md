@@ -3,8 +3,10 @@
 Support direct upgrades from both 0.x and 1.x. Do not remove an adapter merely
 because intermediate releases have existed for a long time.
 
-- `lsposed/.../migration/LegacyConfigImport.kt` owns 0.x source inventory,
-  package-role conversion, profile-aware observer UID mapping and import commands.
+- `crates/migration-policy` owns direct 0.x package-role conversion,
+  profile/shared-UID observer mapping, merge/replace and self-target rules.
+  `core-daemon/src/maintenance.rs` owns fixed source inventory/identity, cleanup
+  eligibility, backups and archive execution. Kotlin owns preview/dialog adapters.
   Its formats come from the restored importer (`a2a389af`), not a new guessed
   schema. Derived Java UID files are cleanup inputs, not a competing source of
   user intent; package lists are authoritative.
@@ -19,7 +21,8 @@ because intermediate releases have existed for a long time.
 Both import routes use ordinary typed core commands and the same candidate
 validator. Persist precedes cleanup. A failed write leaves source files untouched;
 uncertain effects are recovered by operation ID, never blindly repeated. Once a
-successful import removes fully interpreted sources, it is complete. If sources
+successful import archives fully interpreted, unchanged sources, it is complete.
+The verified snapshot and retired inode remain in Core's private maintenance store. If sources
 remain, repeated merge is idempotent. Unresolved observer UIDs, invalid lines, incomplete snapshots or unreadable sources
 prevent automatic deletion; explicit Discard is still available. Missing config
 permits bootstrap; an existing blank, malformed or unsupported file does not.
@@ -30,3 +33,11 @@ restart/deduplication without repeated cleanup. JVM tests cover direct 0.x/1.x t
 current conversion, repeated merge, corrupt/future JSON and retained partial
 sources. These tests do not establish Android filesystem labels or real upgrade
 installation behavior; those remain device acceptance checks.
+
+RPC15 `MigrateLegacy` does not accept a candidate config or client cleanup flag.
+Core derives it from its captured sources. Replace refuses empty or incomplete
+input; bootstrap refuses an existing user-configured setup. Merge may preserve
+partial/unresolved sources for a later complete reconciliation. Ordinary schema-1
+file imports continue to use the strict canonical codec and `Import` command.
+The compatibility `Import(cleanup_legacy=true)` path also independently checks
+Core-read source coverage; caller eligibility alone cannot delete anything.

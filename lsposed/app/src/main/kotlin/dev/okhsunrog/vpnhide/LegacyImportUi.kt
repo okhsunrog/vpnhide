@@ -19,7 +19,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.okhsunrog.vpnhide.migration.LegacyConfigImporter
@@ -93,7 +92,6 @@ internal fun LegacyImportDialog(
     prompt: LegacyImportPrompt,
     onDismiss: () -> Unit,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val checkWrite = LocalConfigWriteAccess.current
     var state by remember { mutableStateOf<LegacyImportUiState>(LegacyImportUiState.Choosing) }
@@ -109,7 +107,7 @@ internal fun LegacyImportDialog(
         }
         state = LegacyImportUiState.Running
         scope.launch {
-            state = LegacyImportUiState.Done(LegacyConfigImporter.run(action, context.packageName))
+            state = LegacyImportUiState.Done(LegacyConfigImporter.run(action))
         }
     }
 

@@ -46,6 +46,10 @@ internal sealed class CoreRootEffect {
         const val MAX_SUPERKEY_BYTES = 4096
     }
 
+    data class MigrateLegacy(
+        val mode: uniffi.vpnhide_core_ffi.CoreLegacyImportMode,
+    ) : CoreRootEffect()
+
     data object DeleteLegacyConfig : CoreRootEffect()
 
     data object FullReset : CoreRootEffect()

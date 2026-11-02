@@ -50,27 +50,10 @@ pub struct Paths {
 
 impl Default for Paths {
     fn default() -> Self {
-        let legacy = [
-            ("legacy_kmod_targets", "/data/adb/vpnhide_kmod/targets.txt"),
-            ("legacy_kpm_targets", "/data/adb/vpnhide_kpm/targets.txt"),
-            (
-                "legacy_zygisk_targets",
-                "/data/adb/vpnhide_zygisk/targets.txt",
-            ),
-            (
-                "legacy_lsposed_targets",
-                "/data/adb/vpnhide_lsposed/targets.txt",
-            ),
-            (
-                "legacy_ports_observers",
-                "/data/adb/vpnhide_ports/observers.txt",
-            ),
-            ("legacy_hidden_pkgs", "/data/system/vpnhide_hidden_pkgs.txt"),
-            (
-                "legacy_observer_uids",
-                "/data/system/vpnhide_observer_uids.txt",
-            ),
-        ];
+        let legacy: Vec<_> = vpnhide_migration_policy::SourceRole::ALL
+            .into_iter()
+            .map(|role| (role.section(), PathBuf::from(format!("/{}", role.path()))))
+            .collect();
         Paths {
             modules: "/data/adb/modules".into(),
             modules_update: "/data/adb/modules_update".into(),
@@ -86,7 +69,7 @@ impl Default for Paths {
             lsposed_state: "/data/system/vpnhide_lsposed_state".into(),
             boot_id: crate::native_boot::BOOT_ID_PATH.into(),
             apatch_dir: "/data/adb/ap".into(),
-            legacy: legacy.iter().map(|(n, p)| (*n, PathBuf::from(p))).collect(),
+            legacy,
             core_exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("vpnhide-core")),
             kpm_observation: None,
         }

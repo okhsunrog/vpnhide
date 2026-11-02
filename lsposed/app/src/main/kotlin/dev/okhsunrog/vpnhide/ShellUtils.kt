@@ -283,7 +283,7 @@ private fun buildCanonicalSelfUpdate(
     // reads as "the update wiped my settings". A config that DOES carry roles is
     // left alone here; the Dashboard offers merge/replace/skip instead.
     val legacy =
-        parseLegacyConfigCandidate(sections, targets.uidToPkg)
+        parseLegacyConfigCandidate(sections, targets.packageUids, targets.nativeInventoryComplete)
             ?.takeIf { !hasUserConfiguredApps(baseCanonical, selfPkg) }
     val imported =
         legacy?.let { applyLegacyImport(baseCanonical, it, LegacyImportMode.Merge, selfPkg) }
@@ -320,22 +320,14 @@ private suspend fun writeStartupCanonical(
                 emptyList(),
                 bootstrap = true,
                 source = OperationSource.System,
-                transform = { fresh ->
-                    require(legacyImported == null || !hasUserConfiguredApps(fresh, selfPkg))
-                    val imported =
-                        if (legacyImported !=
-                            null
-                        ) {
-                            applyLegacyImport(fresh, legacyImported, LegacyImportMode.Merge, selfPkg)
-                        } else {
-                            fresh
-                        }
-                    canonicalConfigWithSelfTarget(imported, selfPkg)
-                },
-                // Same transaction as the config write: the legacy files are only
-                // retired once their contents are safely in the canonical JSON.
+                transform = { fresh -> canonicalConfigWithSelfTarget(fresh, selfPkg) },
                 cleanup = true,
-                coupledEffects = if (legacyImported?.canCleanupSources == true) listOf(CoreRootEffect.DeleteLegacyConfig) else emptyList(),
+                coupledEffects =
+                    if (legacyImported != null) {
+                        listOf(CoreRootEffect.MigrateLegacy(uniffi.vpnhide_core_ffi.CoreLegacyImportMode.BOOTSTRAP))
+                    } else {
+                        emptyList()
+                    },
             ),
         )
     if (result.succeeded) return null

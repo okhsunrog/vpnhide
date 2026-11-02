@@ -173,6 +173,8 @@ pub fn run_plan_hooked(
 pub struct RealPhaseRunner {
     pub effect_paths: Option<crate::effects::EffectPaths>,
     pub effects: Vec<(ConfigPhase, vpnhide_core_rpc::RootEffect)>,
+    pub maintenance: Option<crate::maintenance::MaintenancePlan>,
+    maintenance_report: std::cell::RefCell<Option<crate::maintenance::MaintenanceReport>>,
     pub reset_config: bool,
     pub remember_secret: bool,
     pub epoch: u64,
@@ -221,6 +223,8 @@ impl RealPhaseRunner {
         Self {
             effect_paths: None,
             effects: Vec::new(),
+            maintenance: None,
+            maintenance_report: std::cell::RefCell::new(None),
             reset_config: false,
             remember_secret: true,
             epoch: 0,
@@ -240,6 +244,9 @@ impl RealPhaseRunner {
         }
     }
 
+    pub fn maintenance_report(&self) -> Option<crate::maintenance::MaintenanceReport> {
+        self.maintenance_report.borrow().clone()
+    }
     pub fn selected(&self) -> Option<vpnhide_core_rpc::NativeBackend> {
         self.selected.get()
     }
@@ -544,6 +551,25 @@ impl PhaseRunner for RealPhaseRunner {
                     return PhaseOutcome::NotAttempted;
                 };
                 let result = match effect {
+                    vpnhide_core_rpc::RootEffect::DeleteLegacyConfig => {
+                        let Some(plan) = &self.maintenance else {
+                            return PhaseOutcome::FailedKnown;
+                        };
+                        match plan.execute(&paths.root) {
+                            Ok(report) => {
+                                let outcome = if report.durability_unknown {
+                                    PhaseOutcome::Unknown
+                                } else if report.confirmed() {
+                                    PhaseOutcome::Confirmed
+                                } else {
+                                    PhaseOutcome::FailedKnown
+                                };
+                                *self.maintenance_report.borrow_mut() = Some(report);
+                                return outcome;
+                            }
+                            Err(_) => return PhaseOutcome::FailedKnown,
+                        }
+                    }
                     vpnhide_core_rpc::RootEffect::SetSuperkey { superkey } => {
                         vpnhide_activator::set_session_superkey(Some(superkey.trim().to_owned()));
                         if self.remember_secret {
@@ -560,7 +586,6 @@ impl PhaseRunner for RealPhaseRunner {
                         vpnhide_activator::set_session_superkey(None);
                         crate::effects::apply(paths, effect)
                     }
-                    _ => crate::effects::apply(paths, effect),
                 };
                 if result.is_err() {
                     return PhaseOutcome::Unknown;

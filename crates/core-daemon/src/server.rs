@@ -87,6 +87,7 @@ struct CommandSpec {
     intent: journal::CommandIntent,
     effect: Option<(ConfigPhase, RootEffect)>,
     plan: Option<Vec<ConfigPhase>>,
+    maintenance: Option<crate::maintenance::MaintenancePlan>,
     reset: bool,
     lease: bool,
 }
@@ -98,6 +99,7 @@ impl Default for CommandSpec {
             intent: journal::CommandIntent::Edit,
             effect: None,
             plan: None,
+            maintenance: None,
             reset: false,
             lease: false,
         }
@@ -271,15 +273,85 @@ impl CoreState {
         op: OperationId,
         command: CoreCommand,
     ) -> Result<Accepted, SubmitError> {
-        self.call_writer(move |state| state.execute_command(op, command))?
+        let maintenance = self.prepare_maintenance(op, &command)?;
+        self.call_writer(move |state| {
+            state.execute_command_admitted(op, command, None, maintenance)
+        })?
     }
 
+    /// Capture sources and resolve profiles before entering the single writer.
+    pub(crate) fn prepare_maintenance(
+        &self,
+        op: OperationId,
+        command: &CoreCommand,
+    ) -> Result<Option<crate::maintenance::PreparedMaintenance>, SubmitError> {
+        self.prepare_maintenance_before(
+            op,
+            command,
+            std::time::Instant::now() + vpnhide_core_rpc::CALL_DEADLINE,
+            &CancellationToken::new(),
+        )
+    }
+    fn prepare_maintenance_before(
+        &self,
+        op: OperationId,
+        command: &CoreCommand,
+        deadline: std::time::Instant,
+        cancelled: &CancellationToken,
+    ) -> Result<Option<crate::maintenance::PreparedMaintenance>, SubmitError> {
+        if matches!(command, CoreCommand::MigrateLegacy { .. })
+            && self
+                .engine
+                .store
+                .lock()
+                .expect("config mutex")
+                .journal
+                .get(op)
+                .is_some()
+        {
+            return Ok(None);
+        }
+        let discard = match command {
+            CoreCommand::Import {
+                cleanup_legacy: true,
+                ..
+            }
+            | CoreCommand::MigrateLegacy { .. } => false,
+            CoreCommand::CleanupLegacy => true,
+            _ => return Ok(None),
+        };
+        let paths = self
+            .effect_paths
+            .read()
+            .expect("effect paths")
+            .clone()
+            .ok_or(SubmitError::Unavailable)?;
+        let mut prepared = crate::maintenance::PreparedMaintenance::capture(
+            &paths.root,
+            op,
+            discard,
+            &Default::default(),
+            false,
+        )
+        .map_err(|_| SubmitError::Unavailable)?;
+        if !discard
+            && !prepared.candidate.unresolved_observer_uids.is_empty()
+            && let Ok(packages) = vpnhide_activator::PackageUidMap::from_pm_before(deadline, || {
+                cancelled.is_cancelled()
+            })
+        {
+            prepared.resolve(packages.packages(), true);
+        }
+        Ok(Some(prepared))
+    }
+
+    #[cfg(test)]
     fn execute_command(
         &self,
         op: OperationId,
         command: CoreCommand,
     ) -> Result<Accepted, SubmitError> {
-        self.execute_command_admitted(op, command, None)
+        self.execute_command_admitted(op, command, None, None)
     }
 
     pub(crate) fn execute_command_admitted(
@@ -287,6 +359,7 @@ impl CoreState {
         op: OperationId,
         command: CoreCommand,
         admitted: Option<crate::command_engine::AdmissionReply>,
+        mut maintenance: Option<crate::maintenance::PreparedMaintenance>,
     ) -> Result<Accepted, SubmitError> {
         if self.snapshot().startup_error.is_some() || self.snapshot().storage_fault.is_some() {
             return Err(SubmitError::Unavailable);
@@ -310,6 +383,23 @@ impl CoreState {
             )
         {
             return Ok(Accepted { op });
+        }
+        if let CoreCommand::MigrateLegacy { base, mode } = &command
+            && let Some(entry) = self
+                .engine
+                .store
+                .lock()
+                .expect("config mutex")
+                .journal
+                .get(op)
+        {
+            return if entry.base == *base
+                && entry.command == Some(journal::CommandIntent::MigrateLegacy { mode: *mode })
+            {
+                Ok(Accepted { op })
+            } else {
+                Err(SubmitError::IdReused)
+            };
         }
         let original_base = self
             .engine
@@ -375,6 +465,55 @@ impl CoreState {
                     ..Default::default()
                 },
             ),
+            CoreCommand::MigrateLegacy { base, mode } => {
+                let prepared = maintenance.as_ref().ok_or(SubmitError::Unavailable)?;
+                if prepared.candidate.roles.is_empty() {
+                    return Err(SubmitError::Rejected {
+                        reason: "no interpreted legacy choices remain".into(),
+                    });
+                }
+                if mode == vpnhide_core_rpc::LegacyImportMode::Replace
+                    && !prepared.candidate.fully_interpreted()
+                {
+                    return Err(SubmitError::Rejected {
+                        reason: "incomplete legacy sources cannot replace configured choices"
+                            .into(),
+                    });
+                }
+                let current = self
+                    .engine
+                    .store
+                    .lock()
+                    .expect("config mutex")
+                    .config
+                    .clone()
+                    .unwrap_or_default();
+                if mode == vpnhide_core_rpc::LegacyImportMode::Bootstrap
+                    && vpnhide_migration_policy::has_user_apps(
+                        &current,
+                        vpnhide_migration_policy::APP_PACKAGE,
+                    )
+                {
+                    return Err(SubmitError::Conflict {
+                        field: "legacy bootstrap would overwrite configured choices".into(),
+                    });
+                }
+                let config = vpnhide_migration_policy::apply(
+                    &current,
+                    &prepared.candidate,
+                    mode,
+                    vpnhide_migration_policy::APP_PACKAGE,
+                );
+                (
+                    base,
+                    ConfigEdit::Replace { config },
+                    CommandSpec {
+                        intent: journal::CommandIntent::MigrateLegacy { mode },
+                        effect: Some((ConfigPhase::Cleanup, RootEffect::DeleteLegacyConfig)),
+                        ..Default::default()
+                    },
+                )
+            }
             CoreCommand::CleanupLegacy => (
                 current_base,
                 ConfigEdit::RepairActivation,
@@ -404,6 +543,7 @@ impl CoreState {
                                 .chain(std::iter::once(ConfigPhase::Cleanup))
                                 .collect(),
                         ),
+                        maintenance: None,
                         reset: true,
                         lease: false,
                         admitted: None,
@@ -411,6 +551,12 @@ impl CoreState {
                 )
             }
         };
+        if let Some(prepared) = maintenance.as_mut() {
+            if let ConfigEdit::Replace { config } = &edit {
+                prepared.bind_replacement(config);
+            }
+            spec.maintenance = Some(prepared.plan.clone());
+        }
         if spec.effect.is_some() && self.effect_paths.read().expect("effect paths").is_none() {
             return Err(SubmitError::Rejected {
                 reason: "root effects disabled".into(),
@@ -1721,8 +1867,12 @@ impl CoreState {
         if let Some(forced) = &spec.plan {
             plan = forced.clone();
         } else if let Some((phase, _)) = &spec.effect {
-            let index = usize::from(plan.first() == Some(&ConfigPhase::Persist));
-            plan.insert(index, *phase);
+            if *phase == ConfigPhase::Cleanup {
+                plan.push(*phase);
+            } else {
+                let index = usize::from(plan.first() == Some(&ConfigPhase::Persist));
+                plan.insert(index, *phase);
+            }
         }
         let native_wire = if changed
             && !repair
@@ -1767,6 +1917,7 @@ impl CoreState {
                     .is_some_and(|n| n.lock().expect("native boot").selected().is_none()));
         runner.effect_paths = self.effect_paths.read().expect("effect paths").clone();
         runner.effects = spec.effect.iter().cloned().collect();
+        runner.maintenance = spec.maintenance.clone();
         runner.reset_config = spec.reset;
         runner.remember_secret = !matches!(
             spec.intent,
@@ -1815,6 +1966,8 @@ impl CoreState {
             },
         };
         store.journal.upsert(JournalEntry {
+            maintenance: spec.maintenance.clone(),
+            maintenance_report: None,
             admission: Some(admission.clone()),
             command: Some(spec.intent.clone()),
             superseded_by: None,
@@ -1907,6 +2060,7 @@ impl CoreState {
             && let Some(entry) = store.journal.get_mut(op)
         {
             entry.record = record.clone();
+            entry.maintenance_report = runner.maintenance_report();
         }
 
         let durable_settled = store.journal.clone();
@@ -2140,6 +2294,11 @@ impl PhaseHook for JournalPhaseHook<'_> {
     }
 
     fn after(&mut self, phase: ConfigPhase, outcome: PhaseOutcome) -> Result<(), PhaseOutcome> {
+        if phase == ConfigPhase::Cleanup
+            && let Some(entry) = self.journal.get_mut(self.op)
+        {
+            entry.maintenance_report = self.runner.maintenance_report();
+        }
         self.completed.push((phase, outcome));
         // Mid-plan progress is already covered by the next before() / final settle.
         // Sync after Persist so a crash before Native still sees Persist confirmed.
@@ -2163,6 +2322,8 @@ impl PhaseHook for JournalPhaseHook<'_> {
                 .cloned()
                 .expect("admitted operation");
             let entry = JournalEntry {
+                maintenance: prior.maintenance,
+                maintenance_report: prior.maintenance_report,
                 admission: prior.admission,
                 command: prior.command,
                 superseded_by: prior.superseded_by,
@@ -2347,8 +2508,8 @@ impl VpnhideCore for CoreServer {
             .clone()
             .try_acquire_owned()
             .map_err(|_| SubmitError::Busy)?;
-        let ticket = crate::command_engine::AdmissionTicket::new(ctx.deadline);
-        let _cancel = crate::command_engine::CancelQueued(ticket.clone());
+        let cancelled = CancellationToken::new();
+        let _cancel = crate::command_engine::CancelPreparation(cancelled.clone());
         let state = self.state;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
@@ -2356,7 +2517,14 @@ impl VpnhideCore for CoreServer {
             if state.shutting_down.load(Ordering::SeqCst) {
                 return Err(SubmitError::Unavailable);
             }
-            state.engine.submit(op, command, ticket)
+            let maintenance =
+                state.prepare_maintenance_before(op, &command, ctx.deadline, &cancelled)?;
+            if cancelled.is_cancelled() || std::time::Instant::now() >= ctx.deadline {
+                return Err(SubmitError::Busy);
+            }
+            let ticket =
+                crate::command_engine::AdmissionTicket::after_preparation(ctx.deadline, cancelled);
+            state.engine.submit(op, command, ticket, maintenance)
         })
         .await
         .unwrap_or(Err(SubmitError::Unavailable))
@@ -3433,6 +3601,8 @@ esac
             ..Default::default()
         };
         journal.upsert(JournalEntry {
+            maintenance: None,
+            maintenance_report: None,
             admission: None,
             command: None,
             superseded_by: None,

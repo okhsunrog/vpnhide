@@ -13,6 +13,7 @@ internal fun recoveryAllowed(
         is CoreRootEffect.SetSuperkey -> access.setSuperkey == null
         CoreRootEffect.ClearSuperkey -> access.clearSuperkey == null
         CoreRootEffect.FullReset -> access.fullReset == null
+        is CoreRootEffect.MigrateLegacy -> false
         CoreRootEffect.DeleteLegacyConfig -> mutation.edits.isEmpty() && !mutation.protectAllDrafts && access.cleanup == null
         null -> mutation.forceActivation && access.repair == null
     }

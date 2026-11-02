@@ -180,9 +180,29 @@ pub enum CoreCommand {
         config: CoreCanonicalConfig,
         cleanup_legacy: bool,
     },
+    MigrateLegacy {
+        base_revision: u64,
+        mode: CoreLegacyImportMode,
+    },
     CleanupLegacy,
     FullReset,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CoreLegacyImportMode {
+    Merge,
+    Replace,
+    Bootstrap,
+}
+impl From<CoreLegacyImportMode> for rpc::LegacyImportMode {
+    fn from(value: CoreLegacyImportMode) -> Self {
+        match value {
+            CoreLegacyImportMode::Merge => Self::Merge,
+            CoreLegacyImportMode::Replace => Self::Replace,
+            CoreLegacyImportMode::Bootstrap => Self::Bootstrap,
+        }
+    }
+}
+
 impl From<CoreCommand> for rpc::CoreCommand {
     fn from(value: CoreCommand) -> Self {
         match value {
@@ -221,6 +241,15 @@ impl From<CoreCommand> for rpc::CoreCommand {
                 },
                 config: config.into(),
                 cleanup_legacy,
+            },
+            CoreCommand::MigrateLegacy {
+                base_revision,
+                mode,
+            } => Self::MigrateLegacy {
+                base: rpc::BaseRef {
+                    revision: base_revision,
+                },
+                mode: mode.into(),
             },
             CoreCommand::CleanupLegacy => Self::CleanupLegacy,
             CoreCommand::FullReset => Self::FullReset,

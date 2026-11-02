@@ -41,7 +41,7 @@ pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 
 pub mod preflight;
 
-const JOURNAL_VERSION: u32 = 7;
+const JOURNAL_VERSION: u32 = 8;
 
 /// Default number of terminal receipts to keep, including Unknown.
 pub const DEFAULT_RETAIN_SETTLED: usize = 64;
@@ -67,6 +67,10 @@ pub fn journal_path_from_env() -> PathBuf {
 /// One accepted operation as stored for dedupe and recovery.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JournalEntry {
+    #[serde(default)]
+    pub maintenance: Option<crate::maintenance::MaintenancePlan>,
+    #[serde(default)]
+    pub maintenance_report: Option<crate::maintenance::MaintenanceReport>,
     /// Actual admission revisions and write set, independent of a stale client base.
     #[serde(default)]
     pub admission: Option<Admission>,
@@ -143,9 +147,16 @@ pub struct PendingPersist {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandIntent {
     Edit,
-    SetSuperkey { remember: bool },
+    SetSuperkey {
+        remember: bool,
+    },
     ClearSuperkey,
-    Import { cleanup_legacy: bool },
+    Import {
+        cleanup_legacy: bool,
+    },
+    MigrateLegacy {
+        mode: vpnhide_core_rpc::LegacyImportMode,
+    },
     CleanupLegacy,
     FullReset,
 }
@@ -645,7 +656,15 @@ pub fn read(path: &Path) -> io::Result<Journal> {
         .iter()
         .chain(journal.native_attempts.iter().map(|item| &item.attempt))
         .any(|attempt| !attempt.valid());
-    if invalid_startup || journal.kmod_preflights.as_ref().is_some_and(|l| !l.valid()) {
+    if invalid_startup
+        || journal.kmod_preflights.as_ref().is_some_and(|l| !l.valid())
+        || journal.operations.iter().any(|entry| {
+            entry
+                .maintenance
+                .as_ref()
+                .is_some_and(|p| !p.valid() || p.operation != entry.record.op)
+        })
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid native startup identity",
@@ -848,6 +867,10 @@ pub fn record_phase_running(
     }
     let prior = journal.get(op).cloned();
     journal.upsert(JournalEntry {
+        maintenance: prior.as_ref().and_then(|entry| entry.maintenance.clone()),
+        maintenance_report: prior
+            .as_ref()
+            .and_then(|entry| entry.maintenance_report.clone()),
         admission: prior.as_ref().and_then(|entry| entry.admission.clone()),
         command: prior.as_ref().and_then(|entry| entry.command.clone()),
         superseded_by: prior.and_then(|entry| entry.superseded_by),
@@ -888,6 +911,10 @@ pub fn record_settled(
         .and_then(|entry| entry.native_intent.clone());
     let prior = journal.get(op).cloned();
     journal.upsert(JournalEntry {
+        maintenance: prior.as_ref().and_then(|entry| entry.maintenance.clone()),
+        maintenance_report: prior
+            .as_ref()
+            .and_then(|entry| entry.maintenance_report.clone()),
         admission: prior.as_ref().and_then(|entry| entry.admission.clone()),
         command: prior.as_ref().and_then(|entry| entry.command.clone()),
         superseded_by: prior.and_then(|entry| entry.superseded_by),
@@ -930,7 +957,7 @@ mod tests {
         };
         write_atomic(&path, &journal).unwrap();
         let migrated = read(&path).unwrap();
-        assert_eq!(migrated.version, 7);
+        assert_eq!(migrated.version, 8);
         assert!(migrated.native_startup_uncertain());
         assert_eq!(migrated.native_startup, journal.native_startup);
         journal.version = 4;
@@ -976,7 +1003,7 @@ mod tests {
             );
         }
         journal = original;
-        journal.version = 8;
+        journal.version = 9;
         write_atomic(&path, &journal).unwrap();
         assert!(read(&path).is_err(), "never reset unknown schema");
     }
@@ -990,6 +1017,8 @@ mod tests {
 
     fn confirmed(op: u64) -> JournalEntry {
         JournalEntry {
+            maintenance: None,
+            maintenance_report: None,
             admission: None,
             command: None,
             superseded_by: None,
@@ -1032,7 +1061,7 @@ mod tests {
         });
         journal.upsert(entry);
         write_atomic(&path, &journal).unwrap();
-        assert_eq!(read(&path).unwrap().version, 7);
+        assert_eq!(read(&path).unwrap().version, 8);
         journal
             .get_mut(OperationId(7))
             .unwrap()
@@ -1076,6 +1105,8 @@ mod tests {
     fn fence_turns_running_into_unknown_without_inventing_success() {
         let mut j = Journal::default();
         j.upsert(JournalEntry {
+            maintenance: None,
+            maintenance_report: None,
             admission: None,
             command: None,
             superseded_by: None,
@@ -1126,6 +1157,8 @@ mod tests {
         assert!(j.get(OperationId(3)).is_some());
         // Unknown receipts may expire; resource uncertainty outlives the receipt.
         j.upsert(JournalEntry {
+            maintenance: None,
+            maintenance_report: None,
             admission: None,
             command: None,
             superseded_by: None,

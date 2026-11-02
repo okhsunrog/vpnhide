@@ -1,20 +1,17 @@
 package dev.okhsunrog.vpnhide.migration
 
-import dev.okhsunrog.vpnhide.CanonicalApp
 import dev.okhsunrog.vpnhide.CanonicalConfig
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.CanonicalMutation
 import dev.okhsunrog.vpnhide.DashboardState
 import dev.okhsunrog.vpnhide.LEGACY_HOOK_STATUS_FILE
 import dev.okhsunrog.vpnhide.LogTags
-import dev.okhsunrog.vpnhide.NativeRole
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.VpnHideLog
-import dev.okhsunrog.vpnhide.canonicalConfigWithSelfTarget
 import dev.okhsunrog.vpnhide.core.CoreRootEffect
-import dev.okhsunrog.vpnhide.parseConfigLines
-import dev.okhsunrog.vpnhide.picker.autoHiddenPackagesNeedReconcile
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
+import dev.okhsunrog.vpnhide.toCanonical
+import dev.okhsunrog.vpnhide.toCore
 import kotlinx.serialization.Serializable
 
 // Import of the pre-1.0 on-disk configuration.
@@ -127,139 +124,59 @@ internal data class LegacyConfigCandidate(
 internal fun hasUserConfiguredApps(
     config: CanonicalConfig,
     selfPkg: String,
-): Boolean =
-    config.apps.any { (pkg, app) ->
-        pkg != selfPkg && (app.java || app.native.enabled || app.appHiding || app.ports)
-    }
+): Boolean = uniffi.vpnhide_core_ffi.legacyHasUserApps(config.toCore(), selfPkg)
 
 internal fun parseLegacyConfigCandidate(
     sections: Map<String, String>,
     uidToPkg: Map<Int, String>,
+): LegacyConfigCandidate? =
+    parseLegacyConfigCandidate(sections, uidToPkg.entries.filter { it.key >= 0 }.groupBy({ it.value }, { it.key }), true)
+
+internal fun parseLegacyConfigCandidate(
+    sections: Map<String, String>,
+    packageUids: Map<String, List<Int>>,
+    inventoryComplete: Boolean,
 ): LegacyConfigCandidate? {
-    fun packages(section: String): Set<String> =
-        parseConfigLines(sections[section].orEmpty())
-            .filter { it.isValidPackageName() }
-            .toSet()
-
-    val native =
-        packages("legacy_kmod_targets") +
-            packages("legacy_kpm_targets") +
-            packages("legacy_zygisk_targets")
-    val java = packages("legacy_lsposed_targets")
-    val ports = packages("legacy_ports_observers")
-    val hidden = packages("legacy_hidden_pkgs")
-    val observerUids =
-        parseConfigLines(sections["legacy_observer_uids"].orEmpty())
-            .mapNotNull { it.toIntOrNull() }
-            .toSet()
-    val appHiding = observerUids.mapNotNull { resolveLegacyUid(it, uidToPkg) }.toSet()
-
-    val packages = (native + java + ports + hidden + appHiding).sorted()
-    if (packages.isEmpty()) return null
-    val invalidLines =
-        LEGACY_CONFIG_SECTIONS.keys.sumOf { section ->
-            parseConfigLines(sections[section].orEmpty()).count { line ->
-                if (section == "legacy_observer_uids") line.toIntOrNull()?.let { it >= 0 } != true else !line.isValidPackageName()
-            }
-        }
-    return LegacyConfigCandidate(
-        invalidLines = invalidLines,
-        sourceReadComplete = LEGACY_CONFIG_SECTIONS.keys.all(sections::containsKey),
-        roles =
-            packages.associateWith { pkg ->
-                LegacyRoles(
-                    java = pkg in java,
-                    native = pkg in native,
-                    appHiding = pkg in appHiding,
-                    ports = pkg in ports,
-                    hidden = pkg in hidden,
-                )
+    val packages = packageUids.mapValues { (_, uids) -> uids.filter { it >= 0 }.map(Int::toUInt) }
+    val candidate =
+        uniffi.vpnhide_core_ffi.previewLegacyConfig(
+            sections.filter { (key, value) ->
+                key in LEGACY_CONFIG_SECTIONS &&
+                    value.toByteArray().size <= 64 * 1024
             },
-        unresolvedObserverUids = observerUids.count { resolveLegacyUid(it, uidToPkg) == null },
+            packages,
+            inventoryComplete,
+        )
+    if (candidate.roles.isEmpty()) return null
+    return LegacyConfigCandidate(
+        roles = candidate.roles.associate { it.`package` to LegacyRoles(it.java, it.native, it.appHiding, it.ports, it.hidden) },
+        unresolvedObserverUids = candidate.unresolvedObserverUids.toInt(),
+        invalidLines = candidate.invalidLines.toInt(),
+        sourceReadComplete = candidate.sourceReadComplete,
     )
 }
 
-/**
- * Map a persisted UID back to a package. Falls back to the app id (UID modulo
- * the per-user offset) so an observer picked in a work profile still resolves
- * after the profile was removed or renumbered.
- */
-private fun resolveLegacyUid(
-    uid: Int,
-    uidToPkg: Map<Int, String>,
-): String? {
-    uidToPkg[uid]?.let { return it }
-    val appId = uid % PER_USER_RANGE
-    return uidToPkg.entries.firstOrNull { (known, _) -> known % PER_USER_RANGE == appId }?.value
-}
-
-private const val PER_USER_RANGE = 100_000
-
-// Guards against feeding a truncated/corrupt file's junk into the config. Same
-// shape Android itself accepts for a package name.
-private val PACKAGE_NAME_REGEX = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+")
-
-private fun String.isValidPackageName(): Boolean = PACKAGE_NAME_REGEX.matches(this)
-
-/**
- * Fold [candidate] into [base] and return the config to write. The self package
- * always keeps its full roles, whichever mode ran.
- */
 internal fun applyLegacyImport(
     base: CanonicalConfig,
     candidate: LegacyConfigCandidate,
     mode: LegacyImportMode,
     selfPkg: String,
-): CanonicalConfig {
-    val kept =
-        when (mode) {
-            LegacyImportMode.Merge -> {
-                base.apps
-            }
-
-            // Replace drops the user's app roles, but not the auto-hide marks:
-            // those are derived from VpnService signals and tracked by
-            // settings.autoHiddenPackages, and the reconcile only rewrites when
-            // that SET changes (autoHiddenPackagesNeedReconcile). Dropping the
-            // per-app `hidden` flag while the set still lists the package would
-            // leave the VPN app visible to observers with nothing to fix it.
-            LegacyImportMode.Replace -> {
-                base.apps
-                    .filterKeys { it in base.settings.autoHiddenPackages }
-                    .filterValues { it.hidden }
-                    .mapValues { (_, app) -> CanonicalApp(hidden = app.hidden) }
-            }
-        }
-    val merged = kept.toMutableMap()
-    candidate.roles.forEach { (pkg, roles) ->
-        merged[pkg] = (kept[pkg] ?: CanonicalApp()).withLegacyRoles(roles)
-    }
-    val apps = merged.filterValues { it.hasAnyRole }.toSortedMap()
-    return canonicalConfigWithSelfTarget(base.copy(apps = apps), selfPkg)
-}
-
-/**
- * Union of the current roles and the legacy ones. Legacy files have no
- * hook-level granularity, so a role that is already on keeps its current
- * per-hook selection and a role the import switches on gets every hook.
- */
-private fun CanonicalApp.withLegacyRoles(roles: LegacyRoles): CanonicalApp =
-    copy(
-        java = java || roles.java,
-        javaHooks = javaHooks.takeIf { java },
-        native =
-            if (native.enabled) {
-                native
-            } else if (roles.native) {
-                NativeRole.All
-            } else {
-                NativeRole.Disabled
+): CanonicalConfig =
+    uniffi.vpnhide_core_ffi
+        .applyLegacyConfigPreview(
+            base.toCore(),
+            candidate.roles.map { (pkg, a) ->
+                uniffi.vpnhide_core_ffi.CoreLegacyAppRoles(pkg, a.java, a.native, a.appHiding, a.ports, a.hidden)
             },
-        appHiding = appHiding || roles.appHiding,
-        ports = ports || roles.ports,
-        portPolicy = portPolicy.takeIf { ports },
-        hidden = hidden || roles.hidden,
-    )
+            mode.toCore(),
+            selfPkg,
+        ).toCanonical()
+
+private fun LegacyImportMode.toCore(): uniffi.vpnhide_core_ffi.CoreLegacyImportMode =
+    when (this) {
+        LegacyImportMode.Merge -> uniffi.vpnhide_core_ffi.CoreLegacyImportMode.MERGE
+        LegacyImportMode.Replace -> uniffi.vpnhide_core_ffi.CoreLegacyImportMode.REPLACE
+    }
 
 /**
  * What the Dashboard card and its dialog render: how much a pending import would
@@ -332,16 +249,13 @@ internal sealed interface LegacyImportOutcome {
  * the startup importer) since the card was built.
  */
 internal object LegacyConfigImporter {
-    suspend fun run(
-        action: LegacyImportAction,
-        selfPkg: String,
-    ): LegacyImportOutcome {
+    suspend fun run(action: LegacyImportAction): LegacyImportOutcome {
         val snapshot =
             runCatching { RootSnapshotCache.getOrLoad() }
                 .getOrElse { return LegacyImportOutcome.Failed(it.message ?: "root snapshot failed") }
         val targets = parseTargetsSnapshot(snapshot)
         val candidate =
-            parseLegacyConfigCandidate(snapshot.sections, targets.uidToPkg)
+            parseLegacyConfigCandidate(snapshot.sections, targets.packageUids, targets.nativeInventoryComplete)
                 ?: return LegacyImportOutcome.NothingToImport
         val mode = action.mode ?: return discard()
         val result =
@@ -349,11 +263,8 @@ internal object LegacyConfigImporter {
                 CanonicalMutation(
                     emptyList(),
                     protectAllDrafts = true,
-                    transform = { fresh ->
-                        applyLegacyImport(fresh, candidate, mode, selfPkg)
-                    },
                     cleanup = true,
-                    coupledEffects = if (candidate.canCleanupSources) listOf(CoreRootEffect.DeleteLegacyConfig) else emptyList(),
+                    coupledEffects = listOf(CoreRootEffect.MigrateLegacy(mode.toCore())),
                 ),
             )
         if (!result.succeeded) {

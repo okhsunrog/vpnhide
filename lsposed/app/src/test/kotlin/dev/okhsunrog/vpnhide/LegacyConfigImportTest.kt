@@ -214,15 +214,12 @@ class LegacyConfigImportTest {
     }
 
     @Test
-    fun `both probes read every legacy path`() {
-        // Core's probes (device_probes `Paths::legacy`) emit one section per pair; both the
-        // root and debug snapshots iterate them.
-        listOf("root_snapshot.rs", "debug_snapshot.rs").forEach { name ->
-            assertTrue("$name ignores the legacy sections", coreProbeSource(name).contains("paths.legacy"))
-        }
-        val core = coreProbeSource("mod.rs")
-        LEGACY_CONFIG_SECTIONS.forEach { (section, path) ->
-            assertTrue("$section missing from core", core.contains("\"$section\"") && core.contains("\"$path\""))
-        }
+    fun `shared uid preview retains all packages and incomplete profile status`() {
+        val source = sections("legacy_observer_uids" to "10123\n")
+        val packages = mapOf("com.first.app" to listOf(10123), "com.shared.app" to listOf(10123))
+        val complete = parseLegacyConfigCandidate(source, packages, true)!!
+        assertEquals(setOf("com.first.app", "com.shared.app"), complete.roles.keys)
+        assertTrue(complete.roles.values.all { it.appHiding })
+        assertFalse(parseLegacyConfigCandidate(source, packages, false)!!.canCleanupSources)
     }
 }

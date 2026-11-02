@@ -172,3 +172,5 @@ mod ipc_auth_tests {
 }
 
 mod vpn_networks;
+
+pub mod maintenance;

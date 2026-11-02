@@ -28,6 +28,10 @@ internal fun coreCommand(
             CoreCommand.FullReset
         }
 
+        is CoreRootEffect.MigrateLegacy -> {
+            CoreCommand.MigrateLegacy(revision, effect.mode)
+        }
+
         CoreRootEffect.DeleteLegacyConfig -> {
             if (intent.edits.isEmpty()) CoreCommand.CleanupLegacy else CoreCommand.Import(revision, intent.candidate.toCore(), true)
         }

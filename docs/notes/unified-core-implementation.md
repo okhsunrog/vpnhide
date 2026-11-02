@@ -32,8 +32,8 @@ changes create new operations, not retroactive changes to confirmed receipts.
 | 2. Durable backend lifecycle | Implemented for the current selector; bundle integration follows stages 3/4 | Initial effects journaled before dispatch, crash reconciliation, bounded attempts surviving worker restart, no blind replay |
 | 3. Unified ZIP and CI assembly | Implemented passive assembly; real seven-KMI CI/device acceptance unobserved | All seven KMIs, both Zygisk ABIs, manifest/hashes, verified provenance, active/staged separation |
 | 4. Zygisk boot authorization and fallback | In progress: durable authorization/revocation tested; production selector/fallback unfinished | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
-| 5. Typed state/RPC/UI/diagnostics | Planned | Paired contract bump, reasons/attempts/coverage, no misleading component health |
-| 6. Shared maintenance plan/executor | Planned | Migration/repair/update use the same typed steps, preserve sources, manager-native staging/removal, durable progress/reconciliation |
+| 5. Typed state/RPC/UI/diagnostics | In progress: RPC15, shared run/preview models; full health/UI/export still pending | Paired contract bump, reasons/attempts/coverage, no misleading component health |
+| 6. Shared maintenance plan/executor | In progress: source-bound legacy migration/archive; replacement/manager/reboot vertical pending | Migration/repair/update use the same typed steps, preserve sources, manager-native staging/removal, durable progress/reconciliation |
 | 7. Separate runtime provisioning | Planned | Verified fork/tool tuple, actual KALLSYMS=y, validated ALL=n support, durable original backup, plan-bound consent, correct write/readback errors |
 
 Stages 1 and 2 establish internal primitives before the unified bundle becomes the
@@ -911,3 +911,41 @@ controls; those CI executions have not been observed from this cloud session.
   newly injected post-TUNSETIFF setup failure cleanup, last-dup and crash-owner
   controls. Serial evidence is in the cloud evidence directory under rfc2/rpc14-*.
   These remain static-musl kernel oracles, not Android acceptance or release bundles.
+
+
+### Source-bound maintenance and Kotlin migration — RPC15 / journal8
+
+- Core prepares the fixed 0.x source inventory, identity/hash/read completeness
+  and profile mapping off the command writer. Interactive PM observation is a
+  single bounded pass constrained by the request deadline, not the boot readiness
+  loop. Queue timing starts after preparation; cancelled/expired preparation cannot
+  admit a later writer. Physical RPC permits survive caller cancellation.
+- `MigrateLegacy` carries only mode+base. Rust derives merge/replace/bootstrap,
+  preserves enabled hook overrides, auto-hidden marks and mandatory self roles.
+  Empty/incomplete Replace and bootstrap over existing user choices refuse before
+  Persist. Shared UID observers map to every package; partial profile inventory
+  cannot authorize cleanup. APK previews call the same unprivileged Rust policy
+  with full package->UID inventory. Kotlin no longer owns legacy conversion or
+  privileged cleanup eligibility; the Save/draft UI remains unchanged.
+- The source-bound MaintenancePlan is recorded in journal8 before effects and
+  follows existing writer/admission/phase recovery. Persist precedes runtime work;
+  Cleanup is last. Each unchanged source gets an exclusive/fsynced snapshot and
+  no-replace move of its original inode into persistent Core maintenance storage.
+  No irreversible unlink: late writes through an old legacy FD remain retained.
+  Changed inode/content, unreadable/symlinked source, or redirected archive stays
+  preserved. Uncertain move/durability stops further source actions and holds Cleanup.
+- Stable migration mode+original base recognizes retained receipts before capture
+  or candidate derivation, even after source archival, later edits or Core restart.
+  Different requests cannot reuse the ID. Schema1–7 migration preserves all native
+  load/preflight budgets, quarantine, Zygisk exposure, receipts and resource holds.
+- Domain tests moved to shared Rust; JVM cases now exercise real FFI adapters.
+  Replaced the legacy source.contains guard with executable Core root/debug
+  collector coverage and added shared-UID/incomplete-profile FFI regression.
+- Current checks: 314 Core + 13 RPC + 2 FFI + 1 client + 3 migration-policy library
+  tests and strict host Clippy passed; 894 JVM tests, detekt, CPD, ktlint and
+  lintDebug passed. Strict ARM64/ARMv7 Clippy and all six process-journal crash tests
+  passed too; the schema migration case explicitly covers prior versions 1–7.
+- Stage6 is not complete: verified replacement staging, positive legacy module
+  identity, manager adapter operations, reboot verification and narrow missing-Core
+  bootstrap still need the same maintenance executor. KPatch provisioning remains
+  separate and must not be bundled into Core. No phone/root-manager mutation made.

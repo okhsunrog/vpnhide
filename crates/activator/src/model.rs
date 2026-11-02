@@ -143,8 +143,64 @@ pub struct PackageUidMap {
 }
 
 impl PackageUidMap {
+    pub fn packages(&self) -> &BTreeMap<String, Vec<u32>> {
+        &self.packages
+    }
     pub fn from_pm() -> Result<Self> {
         Self::from_pm_with_wait(PmReadyWait::Bounded(PM_READY_ATTEMPTS))
+    }
+
+    /// One complete multi-user observation with an aggregate request budget.
+    /// No boot-readiness wait belongs on an interactive preparation path.
+    pub fn from_pm_before(
+        deadline: std::time::Instant,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<Self> {
+        let run = |args: &[&str]| -> Result<String> {
+            if cancelled() {
+                return Err("PackageManager observation cancelled".into());
+            }
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .ok_or("PackageManager observation deadline")?;
+            let mut command = crate::package_command();
+            command.args(args);
+            let captured = crate::capture_command(
+                &mut command,
+                None,
+                remaining.min(std::time::Duration::from_secs(2)),
+                4 * 1024 * 1024,
+            )?;
+            if cancelled()
+                || captured.timed_out
+                || captured.truncated
+                || !captured.output.status.success()
+            {
+                return Err("PackageManager inventory incomplete".into());
+            }
+            Ok(String::from_utf8(captured.output.stdout)?)
+        };
+        let users = parse_pm_user_ids(&run(&["list", "users"])?);
+        if users.is_empty() || users.len() > 128 || !users.contains(&0) {
+            return Err("PackageManager user inventory incomplete".into());
+        }
+        let mut packages = BTreeMap::new();
+        for user in users {
+            let text = run(&["list", "packages", "-U", "--user", &user.to_string()])?;
+            let parsed = parse_pm_packages(&text);
+            if parsed.packages.is_empty()
+                || parsed
+                    .packages
+                    .values()
+                    .flatten()
+                    .any(|uid| uid / 100_000 != user)
+                || (user == 0 && !parsed.packages.contains_key(crate::APP_PACKAGE))
+            {
+                return Err("PackageManager profile inventory incomplete".into());
+            }
+            merge_pm_packages(&mut packages, parsed);
+        }
+        Ok(Self { packages })
     }
 
     fn from_pm_with_wait(wait: PmReadyWait) -> Result<Self> {

@@ -133,7 +133,7 @@ Mode `0700`, root-only. Journal, ownership markers, `core.log`, plus:
 
 | File | Format | Writer | Reader | Lifetime |
 |---|---|---|---|---|
-| `operations.json` | journal schema 7: issued-ID counter, expiry floor, retained receipts, revision/write-set evidence, held resources, native startup/load/preflight budgets, Zygisk exposure, debug leases and logging restoration | core writer queue, atomically with directory fsync | startup recovery and receipt queries; schemas 1–6 are migrated, corrupt/unsupported state refuses mutation | preserved by FullReset; 64 terminal receipts plus active/restoration records; expired Unknown receipts retain compact held-resource/Persist evidence |
+| `operations.json` | journal schema 8: issued-ID counter, expiry floor, retained receipts, revision/write-set evidence, held resources, native startup/load/preflight budgets, Zygisk exposure, debug leases and logging restoration | core writer queue, atomically with directory fsync | startup recovery and receipt queries; schemas 1–7 are migrated, corrupt/unsupported state refuses mutation | preserved by FullReset; 64 terminal receipts plus active/restoration records; expired Unknown receipts retain compact held-resource/Persist evidence |
 | `operations.json.lock` | permanent empty regular inode, mode `0600`, exclusive flock | core lifetime owner | another core refuses ownership before load/boot/bind | preserved by FullReset; never unlink a live lockfile |
 | `supervisor.lock` | permanent root-only regular inode and exclusive flock | service supervisor | duplicate service invocation refuses | supervisor lifetime; inode persists |
 | `supervisor_status` | running/restarting/stopped status and retry delay | service supervisor | diagnostics/manual inspection | overwritten as worker lifecycle changes |
@@ -442,3 +442,16 @@ in Core memory; a Core restart creates a new epoch and obtains new evidence.
 The fixed `:diagnostics` Android Service reads the app DE socket and performs
 bounded unprivileged observations; it writes no privileged state. This partial
 run cannot publish complete hook-health PASS.
+
+
+`/data/adb/vpnhide/core/maintenance/<operation-id>/` is private persistent source
+retention outside replaceable module directories. The legacy maintenance executor
+creates exclusive `*.snapshot` files from verified source bytes, fsyncs them, then
+moves the bound original inode to `*.retired` with no-replace rename and verifies
+its identity/content. The retired inode is retained, so a legacy process still
+holding it cannot lose later writes. Source/destination symlinks are refused;
+changed sources are preserved/restored without overwriting a new original path.
+Journal schema 8 stores each source identity/hash, plan and cleanup report before
+claiming completion; it reads schemas 1–7 without resetting native/preflight budgets,
+Zygisk exposure or holds. Interrupted cleanup stays Unknown and is never replayed.
+FullReset preserves this Core state/retention directory alongside the journal.

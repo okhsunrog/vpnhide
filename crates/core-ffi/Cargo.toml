@@ -24,6 +24,7 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
+vpnhide_migration_policy = { path = "../migration-policy" }
 vpnhide_diagnostic_model = { path = "../diagnostic-model" }
 vpnhide_checks = { path = "../checks" }
 uniffi = { version = "0.32", features = ["tokio"] }

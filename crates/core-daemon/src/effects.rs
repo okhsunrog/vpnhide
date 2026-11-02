@@ -84,16 +84,9 @@ pub fn apply(paths: &EffectPaths, effect: &RootEffect) -> Result<(), EffectError
                 .map_err(|e| EffectError::Failed(format!("write superkey: {}", e.kind())))
         }
         RootEffect::ClearSuperkey => remove_file(&paths.at(SUPERKEY_FILE)),
-        RootEffect::DeleteLegacyConfig => {
-            for file in LEGACY_FILES {
-                remove_file(&paths.at(file))?;
-            }
-            for dir in LEGACY_ORPHAN_DIRS {
-                // Only when empty: a non-empty one is left alone on purpose.
-                let _ = fs::remove_dir(paths.at(dir));
-            }
-            Ok(())
-        }
+        RootEffect::DeleteLegacyConfig => Err(EffectError::Invalid(
+            "legacy cleanup requires a source-bound maintenance plan".into(),
+        )),
         RootEffect::FullReset => {
             for file in LEGACY_FILES.iter().chain(RESET_FILES) {
                 remove_file(&paths.at(file))?;
@@ -253,13 +246,33 @@ mod tests {
         }
         touch(&paths, "/data/adb/vpnhide_kmod/load_status");
         touch(&paths, "/data/adb/vpnhide_lsposed/other");
-        apply(&paths, &RootEffect::DeleteLegacyConfig).unwrap();
+        assert!(apply(&paths, &RootEffect::DeleteLegacyConfig).is_err());
+        assert!(LEGACY_FILES.iter().all(|f| paths.at(f).exists()));
+        let prepared = crate::maintenance::PreparedMaintenance::capture(
+            &paths.root,
+            vpnhide_core_rpc::OperationId(7),
+            true,
+            &Default::default(),
+            false,
+        )
+        .unwrap();
+        assert!(prepared.plan.execute(&paths.root).unwrap().confirmed());
         for f in LEGACY_FILES {
             assert!(!paths.at(f).exists(), "{f}");
         }
         assert!(paths.at("/data/adb/vpnhide_kmod/load_status").exists());
         assert!(paths.at("/data/adb/vpnhide_lsposed/other").exists());
-        assert!(!paths.at("/data/adb/vpnhide_zygisk").exists());
+        assert!(paths.at("/data/adb/vpnhide_zygisk").is_dir());
+        assert!(
+            paths
+                .at("/data/adb/vpnhide/core/maintenance/7/zygisk.snapshot")
+                .is_file()
+        );
+        assert!(
+            paths
+                .at("/data/adb/vpnhide/core/maintenance/7/zygisk.retired")
+                .is_file()
+        );
     }
 
     #[test]

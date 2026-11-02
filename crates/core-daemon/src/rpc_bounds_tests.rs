@@ -22,6 +22,10 @@ fn hold_writer(state: &CoreState) -> std::sync::mpsc::Sender<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancelled_and_expired_queued_commands_never_execute() {
     let state = test_state();
+    let effect_root = tempfile::tempdir().unwrap();
+    state.set_effect_paths(Some(crate::effects::EffectPaths {
+        root: effect_root.path().into(),
+    }));
     let id = state.issue_operation_id().unwrap();
     let gate = hold_writer(&state);
     let ticket =
@@ -31,7 +35,7 @@ async fn cancelled_and_expired_queued_commands_never_execute() {
     let task = tokio::task::spawn_blocking(move || {
         worker_state
             .engine
-            .submit(id, CoreCommand::CleanupLegacy, worker_ticket)
+            .submit(id, CoreCommand::CleanupLegacy, worker_ticket, None)
     });
     assert_eq!(task.await.unwrap(), Err(SubmitError::Busy));
     // Exercise actual handler drop, not just the ticket's cancellation method.
@@ -171,6 +175,7 @@ fn cancellation_after_writer_start_cannot_revoke_admission() {
                 },
             },
             ticket.clone(),
+            None,
         )
         .unwrap();
     ticket.cancel();
@@ -216,4 +221,63 @@ async fn saturated_forensics_does_not_consume_root_inventory_slot() {
     assert_eq!(root.outputs[0].exit, 0);
     assert_eq!(state.root_rpc.available_permits(), 1);
     assert_eq!(state.heavy_rpc.available_permits(), 0);
+}
+
+#[test]
+fn preparation_time_does_not_consume_queue_budget_and_cancellation_still_fences_admission() {
+    let state = test_state();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    // Equivalent to a slow source/PM preparation before the actual queue ticket.
+    std::thread::sleep(Duration::from_millis(2100));
+    let cancelled = CancellationToken::new();
+    let ticket = crate::command_engine::AdmissionTicket::after_preparation(deadline, cancelled);
+    let id = state.issue_operation_id().unwrap();
+    assert_eq!(
+        state.engine.submit(
+            id,
+            CoreCommand::Edit {
+                base: BaseRef { revision: 0 },
+                edit: ConfigEdit::Replace {
+                    config: CanonicalConfig::default()
+                }
+            },
+            ticket,
+            None
+        ),
+        Ok(Accepted { op: id })
+    );
+    for expired in [false, true] {
+        let id = state.issue_operation_id().unwrap();
+        let cancelled = CancellationToken::new();
+        if !expired {
+            cancelled.cancel();
+        }
+        let ticket = crate::command_engine::AdmissionTicket::after_preparation(
+            if expired {
+                Instant::now() - Duration::from_millis(1)
+            } else {
+                Instant::now() + Duration::from_secs(2)
+            },
+            cancelled,
+        );
+        assert_eq!(
+            state.engine.submit(
+                id,
+                CoreCommand::Edit {
+                    base: BaseRef {
+                        revision: state.config_revision()
+                    },
+                    edit: ConfigEdit::Toggle {
+                        field: vpnhide_core_rpc::ConfigToggle::DebugSwitch,
+                        enabled: true
+                    }
+                },
+                ticket,
+                None
+            ),
+            Err(SubmitError::Busy)
+        );
+        assert!(state.get_operation_record(id).is_none());
+    }
+    assert!(!state.snapshot().config.unwrap().debug_switch);
 }

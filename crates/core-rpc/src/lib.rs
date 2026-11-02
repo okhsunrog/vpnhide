@@ -61,7 +61,7 @@ pub use vpnhide_diagnostic_model::{
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -126,8 +126,18 @@ pub enum CoreCommand {
         config: CanonicalConfig,
         cleanup_legacy: bool,
     },
+    MigrateLegacy {
+        base: BaseRef,
+        mode: LegacyImportMode,
+    },
     CleanupLegacy,
     FullReset,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum LegacyImportMode {
+    Merge,
+    Replace,
+    Bootstrap,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -1278,6 +1288,18 @@ mod tests {
                     base,
                     config: sample_config(),
                     cleanup_legacy: true,
+                },
+                CoreCommand::MigrateLegacy {
+                    base,
+                    mode: LegacyImportMode::Merge,
+                },
+                CoreCommand::MigrateLegacy {
+                    base,
+                    mode: LegacyImportMode::Replace,
+                },
+                CoreCommand::MigrateLegacy {
+                    base,
+                    mode: LegacyImportMode::Bootstrap,
                 },
                 CoreCommand::CleanupLegacy,
                 CoreCommand::FullReset,

@@ -44,6 +44,8 @@ fn uncertain(
     revision: u64,
 ) -> JournalEntry {
     JournalEntry {
+        maintenance: None,
+        maintenance_report: None,
         admission: Some(journal::Admission {
             from_revision: revision,
             commit_revision: revision,
@@ -131,6 +133,7 @@ fn new_leases_and_credentials_refuse_uncertain_persist_before_capturing_stale_st
     let _env = crate::ports::test_env_lock();
     let root = tempfile::tempdir().unwrap();
     let state = load(root.path(), 1);
+    std::fs::create_dir(root.path().join("root")).unwrap();
     state.set_effect_paths(Some(crate::effects::EffectPaths {
         root: root.path().join("root"),
     }));
@@ -383,6 +386,7 @@ fn cleanup_legacy_is_an_explicit_resource_repair() {
     journal.upsert(original);
     journal::write_atomic(&root.path().join("operations.json"), &journal).unwrap();
     let state = load(root.path(), 1);
+    std::fs::create_dir(root.path().join("root")).unwrap();
     state.set_effect_paths(Some(crate::effects::EffectPaths {
         root: root.path().join("root"),
     }));
@@ -483,6 +487,8 @@ fn persist_crash_restores_actual_admitted_revision_and_overlapping_writes() {
         ..Default::default()
     };
     journal.upsert(JournalEntry {
+        maintenance: None,
+        maintenance_report: None,
         base: BaseRef { revision: 2 },
         edit: ConfigEdit::Toggle {
             field: ConfigToggle::Debug,
@@ -556,6 +562,8 @@ fn terminal_persist_uncertainty_keeps_history_but_readback_restores_commit_ident
         ..Default::default()
     };
     journal.upsert(JournalEntry {
+        maintenance: None,
+        maintenance_report: None,
         base: BaseRef { revision: 2 },
         edit: ConfigEdit::Toggle {
             field: ConfigToggle::Debug,
@@ -688,6 +696,7 @@ fn reader_and_receipts_remain_available_while_the_bounded_writer_is_busy() {
             crate::command_engine::AdmissionTicket::new(
                 std::time::Instant::now() + std::time::Duration::from_secs(1)
             ),
+            None,
         ),
         Err(SubmitError::Busy)
     );
@@ -828,6 +837,8 @@ fn singleton_guard_outlives_the_callers_last_reference_while_writer_runs() {
 #[test]
 fn held_resources_remain_independent_after_partial_repair() {
     let mut entry = JournalEntry {
+        maintenance: None,
+        maintenance_report: None,
         admission: None,
         command: None,
         superseded_by: None,
@@ -994,6 +1005,8 @@ fn explicit_repair_releases_only_covered_resources_and_preserves_old_unknown_rec
         ..Default::default()
     };
     journal.upsert(JournalEntry {
+        maintenance: None,
+        maintenance_report: None,
         base: BaseRef { revision: 1 },
         edit: ConfigEdit::RepairActivation,
         admission: Some(journal::Admission {
@@ -1099,6 +1112,10 @@ fn import_retains_sources_on_persist_failure_and_duplicate_never_replays_cleanup
         "com.bank".into(),
         vpnhide_core_rpc::AppConfig {
             java: true,
+            native: vpnhide_core_rpc::NativeRole {
+                enabled: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
     );
@@ -1602,7 +1619,7 @@ fn startup_hold_survives_receipt_retention_and_schema_two_upgrade() {
     json.as_object_mut().unwrap().remove("native_startup");
     std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
     let mut upgraded = journal::read(&path).unwrap();
-    assert_eq!(upgraded.version, 7);
+    assert_eq!(upgraded.version, 8);
     assert_eq!(upgraded.issued_through, 42);
     assert!(upgraded.native_startup.is_none());
     upgraded.native_startup = Some(journal::NativeStartup {
@@ -1620,7 +1637,7 @@ fn startup_hold_survives_receipt_retention_and_schema_two_upgrade() {
         journal::read(&path).unwrap().held_resources(),
         vec![ConfigPhase::Native]
     );
-    upgraded.version = 8;
+    upgraded.version = 9;
     journal::write_atomic(&path, &upgraded).unwrap();
     assert!(journal::read(&path).is_err());
 }
@@ -1729,4 +1746,120 @@ fn interrupted_startup_without_config_allows_explicit_import_then_repair() {
         Some(config)
     );
     state.shutdown();
+}
+
+#[test]
+fn core_migration_derives_intent_from_sources_and_retained_retry_never_replays() {
+    for mode in [
+        vpnhide_core_rpc::LegacyImportMode::Merge,
+        vpnhide_core_rpc::LegacyImportMode::Replace,
+        vpnhide_core_rpc::LegacyImportMode::Bootstrap,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let state = load(root.path(), 1);
+        bootstrap(&state);
+        let effects = root.path().join("root");
+        let source = effects.join("data/adb/vpnhide_kmod/targets.txt");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(&source, "com.bank.app\n").unwrap();
+        state.set_effect_paths(Some(crate::effects::EffectPaths {
+            root: effects.clone(),
+        }));
+        let op = state.issue_operation_id().unwrap();
+        let request = CoreCommand::MigrateLegacy {
+            base: BaseRef {
+                revision: state.config_revision(),
+            },
+            mode,
+        };
+        state.submit_command(op, request.clone()).unwrap();
+        assert_eq!(
+            state.get_operation_record(op).unwrap().settled,
+            Some(PhaseOutcome::Confirmed)
+        );
+        assert!(
+            state.snapshot().config.unwrap().apps["com.bank.app"]
+                .native
+                .enabled
+        );
+        assert!(!source.exists());
+        let journal = journal::read(&root.path().join("operations.json")).unwrap();
+        assert!(journal.get(op).unwrap().maintenance.is_some());
+        assert!(
+            journal
+                .get(op)
+                .unwrap()
+                .maintenance_report
+                .as_ref()
+                .unwrap()
+                .confirmed()
+        );
+        command(
+            &state,
+            ConfigEdit::Toggle {
+                field: ConfigToggle::DebugSwitch,
+                enabled: true,
+            },
+        );
+        std::fs::write(&source, "com.new.user\n").unwrap();
+        assert_eq!(
+            state.submit_command(op, request.clone()),
+            Ok(Accepted { op })
+        );
+        assert_eq!(std::fs::read_to_string(&source).unwrap(), "com.new.user\n");
+        drop(state);
+        let restarted = load(root.path(), 2);
+        // Retained command recognition does not depend on re-reading sources or
+        // on the privileged effects adapter being enabled in this new instance.
+        assert_eq!(restarted.submit_command(op, request), Ok(Accepted { op }));
+        assert_eq!(std::fs::read_to_string(source).unwrap(), "com.new.user\n");
+    }
+}
+
+#[test]
+fn empty_or_incomplete_replace_does_not_erase_configured_choices() {
+    for contents in ["", "com.imported.app\nmalformed\n"] {
+        let root = tempfile::tempdir().unwrap();
+        let state = load(root.path(), 1);
+        bootstrap(&state);
+        let mut config = CanonicalConfig::default();
+        config.apps.insert(
+            "com.existing.app".into(),
+            vpnhide_core_rpc::AppConfig {
+                java: true,
+                ..Default::default()
+            },
+        );
+        command(
+            &state,
+            ConfigEdit::Replace {
+                config: config.clone(),
+            },
+        );
+        let effects = root.path().join("root");
+        std::fs::create_dir_all(&effects).unwrap();
+        let source = effects.join("data/adb/vpnhide_kmod/targets.txt");
+        if !contents.is_empty() {
+            std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+            std::fs::write(&source, contents).unwrap();
+        }
+        state.set_effect_paths(Some(crate::effects::EffectPaths { root: effects }));
+        let op = state.issue_operation_id().unwrap();
+        assert!(matches!(
+            state.submit_command(
+                op,
+                CoreCommand::MigrateLegacy {
+                    base: BaseRef {
+                        revision: state.config_revision()
+                    },
+                    mode: vpnhide_core_rpc::LegacyImportMode::Replace
+                }
+            ),
+            Err(SubmitError::Rejected { .. })
+        ));
+        assert_eq!(state.snapshot().config, Some(config));
+        if !contents.is_empty() {
+            assert_eq!(std::fs::read_to_string(source).unwrap(), contents);
+        }
+    }
 }

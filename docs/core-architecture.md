@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation on `main`, app/core RPC version 14. The backend
+Current implementation on `main`, app/core RPC version 15. The backend
 control-v2 / telemetry-v1 wire is a separate boundary. This document describes
 the implemented ownership and execution contract.
 
@@ -233,7 +233,7 @@ and IPv6 outcomes remain independent.
 
 See [storage](storage.md), [state](state.md) and
 [module lifecycle](notes/core-2.0-module-lifecycle.md) for paths and boot details.
-RPC skew fails the handshake; update APK and core together for version 14.
+RPC skew fails the handshake; update APK and core together for version 15.
 Host tests/builds do not establish Android DAC/SELinux behavior, root-manager boot,
 ROM parsing or hook coverage; these still require device validation.
 
@@ -384,3 +384,15 @@ Bundled Zygisk authorization is durable publication evidence, not process-health
 proof. The journal retains a per-boot exposure marker independently of bounded
 receipts; revoking the file cannot prove old hooks disappeared. Startup refuses a
 kernel backend transition in that boot, including explicit repair, until a reboot.
+
+
+Legacy merge/replace/bootstrap is a typed `MigrateLegacy` command (RPC15). Core
+captures fixed legacy sources and the complete available profile inventory before
+entering its writer, derives the canonical replacement in shared Rust policy, and
+journals a source-bound maintenance plan. Empty/incomplete replacement cannot erase
+configured choices. Cleanup follows runtime phases and archives only unchanged,
+verified sources into private persistent storage; it never overwrites a backup or
+unlinks the retired inode. Changed/unreadable sources stay preserved. APK previews
+use the same pure Rust policy with the full package-to-UID map and are not cleanup
+authority. Preparation respects the request deadline; the two-second queue budget
+starts after preparation, with cancellation retained through writer admission.

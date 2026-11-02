@@ -1432,7 +1432,12 @@ internal suspend fun deriveDashboardRootFacts(
         appVersion = appVersion,
         installedOptionalHooks = installedOptionalHooks,
         partialHookGap = partialHookGap(modules.nativeBackend, installedOptionalHooks, nativeStatusError),
-        legacyImport = parseLegacyConfigCandidate(sections, targetsSnapshot.uidToPkg)?.toPrompt(),
+        legacyImport =
+            parseLegacyConfigCandidate(
+                sections,
+                targetsSnapshot.packageUids,
+                targetsSnapshot.nativeInventoryComplete,
+            )?.toPrompt(),
         coreUpdate = rootSnapshot.core,
     )
 }

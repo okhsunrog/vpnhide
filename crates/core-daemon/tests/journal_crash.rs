@@ -26,6 +26,8 @@ async fn completed_failure_with_skipped_ports_does_not_block_after_restart() {
         ..Default::default()
     };
     stored.upsert(journal::JournalEntry {
+        maintenance: None,
+        maintenance_report: None,
         admission: None,
         command: None,
         superseded_by: None,

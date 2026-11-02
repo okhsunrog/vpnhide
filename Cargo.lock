@@ -1684,6 +1684,7 @@ dependencies = [
  "vpnhide_core_rpc",
  "vpnhide_diagnostic_model",
  "vpnhide_loader_ipc",
+ "vpnhide_migration_policy",
  "vpnhide_protocol",
 ]
 
@@ -1699,6 +1700,7 @@ dependencies = [
  "vpnhide_core_daemon",
  "vpnhide_core_rpc",
  "vpnhide_diagnostic_model",
+ "vpnhide_migration_policy",
  "vpnhide_native_policy",
 ]
 
@@ -1728,6 +1730,15 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "vpnhide_migration_policy"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "vpnhide_core_rpc",
 ]
 
 [[package]]

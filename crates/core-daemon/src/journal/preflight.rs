@@ -374,7 +374,7 @@ mod tests {
     fn legacy_migration_preserves_all_existing_effect_holds_and_budgets() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("journal.json");
-        for version in 1..=6 {
+        for version in 1..=7 {
             let original = Journal {
                 version,
                 native_startup: Some(NativeStartup {
@@ -402,7 +402,7 @@ mod tests {
             value.as_object_mut().unwrap().remove("kmod_preflights");
             std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
             let migrated = super::super::read(&path).unwrap();
-            assert_eq!(migrated.version, 7);
+            assert_eq!(migrated.version, 8);
             assert_eq!(migrated.native_startup, original.native_startup);
             assert_eq!(migrated.native_load_budget, original.native_load_budget);
             assert_eq!(migrated.native_quarantine, original.native_quarantine);

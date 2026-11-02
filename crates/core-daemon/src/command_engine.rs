@@ -35,16 +35,31 @@ const QUEUE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 pub(crate) struct AdmissionTicket {
     state: Arc<AtomicU8>,
     deadline: std::time::Instant,
+    preparation_cancelled: Option<tokio_util::sync::CancellationToken>,
 }
 impl AdmissionTicket {
     pub(crate) fn new(deadline: std::time::Instant) -> Self {
         Self {
             state: Arc::new(AtomicU8::new(0)),
+            preparation_cancelled: None,
             deadline: deadline.min(std::time::Instant::now() + QUEUE_WAIT),
         }
     }
+    pub(crate) fn after_preparation(
+        deadline: std::time::Instant,
+        cancelled: tokio_util::sync::CancellationToken,
+    ) -> Self {
+        let mut ticket = Self::new(deadline);
+        ticket.preparation_cancelled = Some(cancelled);
+        ticket
+    }
     fn start(&self) -> bool {
-        if std::time::Instant::now() >= self.deadline {
+        if std::time::Instant::now() >= self.deadline
+            || self
+                .preparation_cancelled
+                .as_ref()
+                .is_some_and(|token| token.is_cancelled())
+        {
             self.cancel();
         }
         self.state
@@ -57,8 +72,8 @@ impl AdmissionTicket {
             .compare_exchange(0, 2, Ordering::SeqCst, Ordering::SeqCst);
     }
 }
-pub(crate) struct CancelQueued(pub(crate) AdmissionTicket);
-impl Drop for CancelQueued {
+pub(crate) struct CancelPreparation(pub(crate) tokio_util::sync::CancellationToken);
+impl Drop for CancelPreparation {
     fn drop(&mut self) {
         self.0.cancel();
     }
@@ -69,6 +84,7 @@ enum Message {
     Command {
         op: OperationId,
         command: Box<CoreCommand>,
+        maintenance: Option<Box<crate::maintenance::PreparedMaintenance>>,
         reply: AdmissionReply,
         ticket: AdmissionTicket,
     },
@@ -105,11 +121,17 @@ impl CommandEngine {
                         Ok(Message::Command {
                             op,
                             command,
+                            maintenance,
                             reply,
                             ticket,
                         }) => {
                             let result = if ticket.start() {
-                                state.execute_command_admitted(op, *command, Some(reply.clone()))
+                                state.execute_command_admitted(
+                                    op,
+                                    *command,
+                                    Some(reply.clone()),
+                                    maintenance.map(|p| *p),
+                                )
                             } else {
                                 Err(SubmitError::Busy)
                             };
@@ -201,6 +223,7 @@ impl CommandEngine {
         op: OperationId,
         command: CoreCommand,
         ticket: AdmissionTicket,
+        maintenance: Option<crate::maintenance::PreparedMaintenance>,
     ) -> Result<Accepted, SubmitError> {
         let (reply, receiver) = mpsc::channel();
         {
@@ -209,6 +232,7 @@ impl CommandEngine {
                 Message::Command {
                     op,
                     command: Box::new(command),
+                    maintenance: maintenance.map(Box::new),
                     reply,
                     ticket: ticket.clone(),
                 },

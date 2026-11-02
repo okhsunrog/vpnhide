@@ -386,3 +386,33 @@ fn probe_inputs_decode_is_bounded_and_rejects_invalid_records() {
     );
     assert!(ProbeInputs::read(vec![b' '; PROBE_INPUT_MAX + 1].as_slice()).is_err());
 }
+
+#[test]
+fn every_default_legacy_source_is_measured_by_root_and_debug_collectors() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut paths = tree(dir.path());
+    paths.legacy = Paths::default()
+        .legacy
+        .into_iter()
+        .map(|(section, path)| {
+            let fixture = dir.path().join(path.strip_prefix("/").unwrap());
+            fs::create_dir_all(fixture.parent().unwrap()).unwrap();
+            fs::write(&fixture, format!("evidence_{section}\n")).unwrap();
+            (section, fixture)
+        })
+        .collect();
+    let root = root_snapshot::collect(&paths, false);
+    let debug = debug_snapshot::collect(&paths);
+    for (output, begin, end) in [
+        (&root, prefixes::ROOT_BEGIN, prefixes::ROOT_END),
+        (&debug, prefixes::DEBUG_BEGIN, prefixes::DEBUG_END),
+    ] {
+        let observed = sections(&output.buf, begin, end);
+        for role in vpnhide_migration_policy::SourceRole::ALL {
+            assert_eq!(
+                observed.get(role.section()),
+                Some(&format!("evidence_{}", role.section()))
+            );
+        }
+    }
+}

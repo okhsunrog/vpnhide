@@ -304,6 +304,8 @@ mod tests {
             });
         }
         JournalEntry {
+            maintenance: None,
+            maintenance_report: None,
             admission: None,
             command: None,
             superseded_by: None,

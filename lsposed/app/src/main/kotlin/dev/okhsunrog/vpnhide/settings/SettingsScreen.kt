@@ -538,8 +538,14 @@ private fun ConfigBackupSection() {
     // shared root snapshot TargetsCache already loads — no extra core round-trip.
     val legacyPrompt =
         remember(rootSnapshot, targets) {
-            val uidToPkg = targets?.uidToPkg ?: return@remember null
-            rootSnapshot?.let { parseLegacyConfigCandidate(it.sections, uidToPkg)?.toPrompt() }
+            val inventory = targets ?: return@remember null
+            rootSnapshot?.let {
+                parseLegacyConfigCandidate(
+                    it.sections,
+                    inventory.packageUids,
+                    inventory.nativeInventoryComplete,
+                )?.toPrompt()
+            }
         }
     val exportDone = stringResource(R.string.settings_config_export_done)
     val exportFailed = stringResource(R.string.settings_config_export_failed)
