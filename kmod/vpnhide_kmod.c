@@ -81,10 +81,20 @@
 #endif
 
 #define MODNAME "vpnhide"
-/* Mirror of vpnhide_protocol::MAX_TARGET_UIDS (crates/protocol/src/lib.rs); the
- * activator truncates the projected config to this many targets, so keep both in
- * sync. */
+/* Mirror of vpnhide_protocol::MAX_TARGET_UIDS (crates/protocol/src/lib.rs).
+ * Core rejects oversized projections before persistence; never truncate policy.
+ */
 #define MAX_TARGET_UIDS 160
+
+/* Private loader experiment, protocol 1. Unknown parameters can be ignored by
+ * Linux; userspace must verify this capability in the exact hashed ELF before
+ * dispatch. This is not proof of private ABI compatibility or hook health.
+ */
+static bool preflight_only;
+module_param(preflight_only, bool, 0);
+MODULE_PARM_DESC(preflight_only,
+		 "Loader preflight only; return EUCLEAN before VPNHide effects");
+MODULE_INFO(vpnhide_preflight, "1");
 
 /*
  * Pre-allocated kretprobe instance pool size, applied to every probe.
@@ -2598,6 +2608,12 @@ static int vpnhide_diag_show(struct seq_file *m, void *v)
 static int __init vpnhide_init(void)
 {
 	int i, ret, ok = 0, attempted = 0;
+
+	/* Keep first, including ahead of diagnostic builds. Never leave a successful
+	 * non-unloadable module resident during a preflight.
+	 */
+	if (unlikely(preflight_only))
+		return -EUCLEAN;
 
 #ifdef VPNHIDE_BARE_INIT
 	pr_info(MODNAME

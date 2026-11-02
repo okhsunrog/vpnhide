@@ -688,3 +688,29 @@ This is the baseline, not the final modified-code bundle. DDK VFS copies exceede
 DDK compiler/prepared tree with its generated include path relocated and native
 pahole 1.30 for BTF. No config or validation was disabled. APK signing is still
 blocked by the absent production key, and Actions results remain unobserved.
+
+### RFC1 early-loader experiment (production dispatch remains disabled)
+
+The ordinary final ko now advertises preflight protocol 1 in `.modinfo` and takes
+an immediate `-EUCLEAN` path before every VPNHide effect. The QEMU harness refuses
+to dispatch against legacy/malformed payloads: bounded ELF parsing checks the
+exact capability/boolean parameter and absence of constructors; SHA-256 binds the
+copied initramfs bytes. A direct syscall oracle preserves errno, unlike insmod's
+exit status. CI requires it before real loading; standalone mode needs no network
+fixtures. No userspace production preflight loop is enabled by this change.
+
+Actual isolated QEMU acceptance on the pinned android14-6.1 baked kernel
+(`6.1.175-g3f3ca1c40482-dirty`): return -1, errno 117; no control/diagnostic nodes,
+no resident module, unchanged kprobe list. Summary pass=1/fail=0/panic=0/registered=0.
+This proves this early-return experiment on one kernel, not the full vector suite
+or other KMI/device safety. ARM64 android16-6.12 compile/final-ELF inspection also
+passes; it has no runtime acceptance here. Both artifacts are experimental dirty
+builds, not final source-consistent beta distribution artifacts.
+
+Adjacent baseline ELF import comparison found 45 common imports for 5.10 (one
+left-only, two right-only), and identical 48 imports for 5.15. All four DDK ko
+files have **no classic modversion records**. Missing CRC evidence is not equal
+CRC evidence or private-layout compatibility. Never choose the first successful
+preflight from an ambiguous set. Remaining: manifest-derived resolution,
+durable separate preflight/real-load budgets and crash recovery, the complete
+kernel/device acceptance matrix, then explicitly gated production wiring.

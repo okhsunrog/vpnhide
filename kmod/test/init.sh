@@ -20,6 +20,47 @@ mount -t devtmpfs dev /dev 2>/dev/null
 echo "##### VPNHIDE-QEMU-TEST START #####"
 echo "KREL=$(uname -r)"
 
+# Exact-errno experiment is separate from network-vector setup. The standalone
+# mode needs no package downloads, routes or external network connectivity.
+loader_preflight() {
+if [ -x /preflight-probe ]; then
+	mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
+	if ! sha256sum -c /vpnhide_kmod.sha256 ||
+		[ -e /proc/vpnhide_ctl ] || [ -e /proc/vpnhide_diag ] ||
+		[ -e /sys/module/vpnhide_kmod ] ||
+		! cat /sys/kernel/debug/kprobes/list > /tmp/preflight-kprobes; then
+		echo "RESULT loader_preflight=FAIL (preconditions unavailable)"
+		poweroff -f
+		exit 1
+	fi
+	if /preflight-probe /vpnhide_kmod.ko &&
+		[ ! -e /proc/vpnhide_ctl ] && [ ! -e /proc/vpnhide_diag ] &&
+		[ ! -e /sys/module/vpnhide_kmod ] &&
+		cmp -s /tmp/preflight-kprobes /sys/kernel/debug/kprobes/list; then
+		echo "RESULT loader_preflight=PASS (exact errno and clean postconditions)"
+	else
+		echo "RESULT loader_preflight=FAIL (no real-load dispatch after uncertainty)"
+		poweroff -f
+		exit 1
+	fi
+else
+	echo "RESULT loader_preflight=SKIP (syscall oracle unavailable)"
+fi
+}
+
+if [ -f /vpnhide_preflight_only ]; then
+    if [ ! -x /preflight-probe ]; then
+        echo "RESULT loader_preflight=FAIL (required syscall oracle missing)"
+        echo "SUMMARY pass=0 fail=1 panic=0 registered=0"
+    else
+        loader_preflight
+        echo "SUMMARY pass=1 fail=0 panic=0 registered=0"
+    fi
+    echo "##### VPNHIDE-QEMU-TEST END #####"
+    poweroff -f
+    exit 0
+fi
+
 # --- bring up user-mode networking so apk can fetch iproute2 ----------------
 ip link set eth0 up 2>/dev/null
 ip addr add 10.0.2.15/24 dev eth0 2>/dev/null
@@ -59,6 +100,7 @@ if [ "${VPNHIDE_TEST_BACKEND:-kmod}" = "builtin" ]; then
 	REGISTERED=$([ -e /proc/vpnhide_ctl ] && echo 1 || echo 0)
 	echo "REGISTERED=$REGISTERED"
 else
+	loader_preflight
 	if insmod /vpnhide_kmod.ko filesystem_hiding=1; then echo "INSMOD=ok"; else echo "INSMOD=FAIL"; fi
 	REGISTERED=$(dmesg | grep -c 'vpnhide:.*registered')
 	echo "REGISTERED=$REGISTERED"

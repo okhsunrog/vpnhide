@@ -126,6 +126,22 @@ if [ -z "$IOC" ] && [ -n "${VPNHIDE_IOC_REQUIRED:-}" ]; then
 	exit 2
 fi
 
+# The direct syscall oracle distinguishes the init sentinel from insmod's
+# generic exit status. Missing support is explicit; CI requires this probe.
+PREFLIGHT="${VPNHIDE_PREFLIGHT_BIN:-}"
+if [ ! -x "$PREFLIGHT" ]; then
+	PREFLIGHT_CC="${VPNHIDE_GAI_CC:-${ANDROID_NDK_HOME:-}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang}"
+	PREFLIGHT=""
+	if [ -x "$PREFLIGHT_CC" ]; then
+		PREFLIGHT="$CACHE/preflight-probe"
+		"$PREFLIGHT_CC" -static -O2 -Wall -Wextra -Werror -o "$PREFLIGHT" "$HERE/preflight-probe.c"
+	fi
+fi
+if [ -z "$PREFLIGHT" ] && { [ -n "${VPNHIDE_PREFLIGHT_REQUIRED:-}" ] || [ -n "${VPNHIDE_QEMU_PREFLIGHT_ONLY:-}" ]; }; then
+	echo "ERROR: required direct finit_module preflight probe is missing"
+	exit 2
+fi
+
 WORK="$(mktemp -d)"
 if [ -n "${VPNHIDE_QEMU_KEEP_WORK:-}" ]; then
 	echo "[run] preserving QEMU work directory: $WORK"
@@ -136,6 +152,20 @@ RFS="$WORK/rootfs"
 mkdir -p "$RFS"
 tar xzf "$ALPINE_TAR" -C "$RFS"
 cp "$KO" "$RFS/vpnhide_kmod.ko"
+if [ -n "$PREFLIGHT" ]; then
+	# Inspect the copied final bytes, not a source/version/filename assertion.
+	python3 - "$RFS/vpnhide_kmod.ko" "$HERE/../../scripts" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[2])
+from kmod_elf import inspect
+assert inspect(Path(sys.argv[1]).read_bytes())["preflight_protocol"] == 1, "unverified preflight capability"
+PY
+	( cd "$RFS" && sha256sum vpnhide_kmod.ko > vpnhide_kmod.sha256 )
+	cp "$PREFLIGHT" "$RFS/preflight-probe"
+	chmod +x "$RFS/preflight-probe"
+fi
+[ -z "${VPNHIDE_QEMU_PREFLIGHT_ONLY:-}" ] || touch "$RFS/vpnhide_preflight_only"
 cp "$HERE/init.sh" "$RFS/init"
 chmod +x "$RFS/init"
 [ -n "$GAI" ] && { cp "$GAI" "$RFS/gai"; chmod +x "$RFS/gai"; }
@@ -159,7 +189,7 @@ timeout 300 qemu-system-aarch64 \
 
 echo "------------------------- test output -------------------------"
 if ! sed -n '/VPNHIDE-QEMU-TEST START/,/VPNHIDE-QEMU-TEST END/p' "$LOG" |
-	grep -E 'KREL|IPROUTE2|INSMOD|REGISTERED|RESULT|PANIC|SUMMARY'; then
+	grep -E 'KREL|IPROUTE2|INSMOD|REGISTERED|PREFLIGHT|RESULT|PANIC|SUMMARY'; then
 	echo "ERROR: no test output — kernel did not boot or init failed"
 	echo "--- last 30 serial lines ---"; tail -30 "$LOG"
 	exit 1
