@@ -1143,3 +1143,10 @@ checks passed. Evidence: `/tmp/vpnhide-framework-tests.log`,
 `/tmp/vpnhide-framework-{clippy,arm,android}-verified.log`. No device or production
 signing test was performed. Final startup acceptance must still be repeated after
 the remaining architectural changes.
+
+Stage4 admission correction: the shared journal guard also checks the pending
+intent's own legacy/unknown Zygisk retirement, before persisting it. It cannot
+admit a kernel load/adoption merely because the previous exposure set was empty.
+Observation/retirement remains admissible; explicit Repair cannot override this
+boot fence. Eleven journal tests pass, including builtin/ko/KPM and explicit paths.
+Shared journaled revocation/fallback executor remains subsequent implementation.

@@ -485,7 +485,7 @@ impl Journal {
             }
         }
         if matches!(intent.action, TransitionAction::Load(b) | TransitionAction::Adopt(b) if b != NativeBackend::Zygisk)
-            && self.zygisk_exposed_in(&intent.boot_id)
+            && (self.zygisk_exposed_in(&intent.boot_id) || intent.retire_zygisk.is_some())
         {
             return Err("Zygisk authorization may have been consumed in this boot; reboot before kernel backend activation".into());
         }
@@ -1118,6 +1118,41 @@ mod tests {
         journal.version = 10;
         write_atomic(&path, &journal).unwrap();
         assert!(read(&path).is_err(), "never reset unknown schema");
+    }
+
+    #[test]
+    fn a_kernel_intent_cannot_introduce_its_own_unaccounted_zygisk_exposure() {
+        use crate::native_boot::prepared::{TransitionAction, TransitionIntent};
+        let journal = Journal::default();
+        for action in [
+            TransitionAction::Adopt(NativeBackend::Builtin),
+            TransitionAction::Load(NativeBackend::Kmod),
+            TransitionAction::Load(NativeBackend::Kpm),
+        ] {
+            let mut intent = TransitionIntent {
+                boot_id: "boot".into(),
+                filesystem_hiding: false,
+                action,
+                payload: None,
+                bundle: None,
+                retire_zygisk: None,
+                retire_directory_identity: None,
+            };
+            assert!(journal.check_native_attempt(&intent, false).is_ok());
+            intent.retire_zygisk = Some("/verified/legacy-zygisk".into());
+            intent.retire_directory_identity = Some((1, 2));
+            assert!(journal.check_native_attempt(&intent, false).is_err());
+            assert!(journal.check_native_attempt(&intent, true).is_err());
+            intent.action = TransitionAction::Observe;
+            assert!(
+                journal.check_native_attempt(&intent, true).is_ok(),
+                "retirement itself remains possible"
+            );
+        }
+        assert!(
+            !journal.zygisk_exposed_in("boot"),
+            "admission rejection dispatches no effect and invents no history"
+        );
     }
 
     fn edit_debug(on: bool) -> ConfigEdit {
