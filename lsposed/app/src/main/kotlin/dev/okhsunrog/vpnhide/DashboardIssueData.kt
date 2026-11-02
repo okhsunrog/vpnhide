@@ -46,13 +46,13 @@ internal fun DashboardIssue.toReason(): DashboardIssueReason =
             DashboardIssueReason("lsposed_install_failures", mapOf("detail" to detail))
         }
 
-        is DashboardIssue.ModuleVersionMismatch -> {
+        is DashboardIssue.CoreVersionMismatch -> {
             DashboardIssueReason(
                 "module_version_mismatch",
                 mapOf(
-                    "component" to mismatch.kind.reasonId(),
-                    "moduleVersion" to mismatch.moduleVersion,
-                    "appVersion" to mismatch.appVersion,
+                    "component" to "core",
+                    "moduleVersion" to moduleVersion,
+                    "appVersion" to appVersion,
                 ),
             )
         }

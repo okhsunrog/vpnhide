@@ -312,22 +312,9 @@
     <string name="dashboard_issue_ports_rules_inactive">已为应用启用端口，但 iptables 规则未生效。请重启，或在“隐藏”中点按保存；若仍如此，请收集调试日志，以便包含核心的端口状态和日志。</string>
     <string name="dashboard_issue_ports_apply_failed">已为应用启用端口，但 iptables 规则未生效。上次应用失败：%1$s。请收集调试日志，以便包含核心的端口状态和日志。</string>
     <string name="dashboard_issue_version_mismatch">LSPosed 模块版本不一致：运行中 %1$s，已安装 %2$s。请重启设备以应用更新。</string>
-    <string name="dashboard_issue_update_kmod">内核模块版本 %1$s 低于应用版本 %2$s。请打开 KernelSU/Magisk → 模块进行更新。</string>
-    <string name="dashboard_issue_update_kmod_named">内核模块版本 %1$s 低于应用版本 %2$s。请从最新发行版，通过 KernelSU/Magisk → 模块安装 %3$s 进行更新。</string>
-    <string name="dashboard_issue_update_zygisk">Zygisk 版本 %1$s 低于应用版本 %2$s。请打开 KernelSU/Magisk → 模块进行更新。</string>
-    <string name="dashboard_issue_update_app_for_kmod">内核模块版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
-    <string name="dashboard_issue_update_builtin">内置后端模块版本 %1$s 低于应用版本 %2$s。请打开 KernelSU/Magisk → 模块进行更新。</string>
-    <string name="dashboard_issue_update_app_for_builtin">内置后端模块版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
-    <string name="dashboard_issue_builtin_version_mismatch">内置后端模块版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
-    <string name="dashboard_issue_update_app_for_zygisk">Zygisk 版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
-    <string name="dashboard_issue_kmod_version_mismatch">内核模块版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
-    <string name="dashboard_issue_zygisk_version_mismatch">Zygisk 版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
     <string name="dashboard_issue_update_core">Core 模块版本 %1$s 低于应用版本 %2$s。请打开 KernelSU/Magisk → 模块进行更新。</string>
     <string name="dashboard_issue_update_app_for_core">Core 模块版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
     <string name="dashboard_issue_core_version_mismatch">Core 模块版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
-    <string name="dashboard_issue_update_kpm">KPM 版本 %1$s 低于应用版本 %2$s。请打开 KernelSU/Magisk → 模块进行更新。</string>
-    <string name="dashboard_issue_update_app_for_kpm">KPM 版本 %1$s 高于应用版本 %2$s。请更新 VPN Hide 应用。</string>
-    <string name="dashboard_issue_kpm_version_mismatch">KPM 版本不一致：模块 %1$s，应用 %2$s。请打开 KernelSU/Magisk → 模块来更新模块。</string>
     <string name="dashboard_running_version">运行中的模块版本：%s</string>
 
     <!-- kmod variant / load diagnostics -->

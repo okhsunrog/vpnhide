@@ -525,7 +525,7 @@
                 "reason": {
                     "kind": "module_version_mismatch",
                     "parameters": {
-                        "component": "kmod",
+                        "component": "core",
                         "moduleVersion": "1.2.0",
                         "appVersion": "1.3.0"
                     }

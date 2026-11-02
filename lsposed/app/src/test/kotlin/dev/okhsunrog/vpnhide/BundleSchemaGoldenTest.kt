@@ -207,9 +207,9 @@ private fun sampleBeforeCapture(): BeforeCaptureInfo =
                     "Update module",
                     reason =
                         DashboardIssue
-                            .ModuleVersionMismatch(
-                                ModuleMismatch(FlashableModuleKind.Kmod, "1.2.0", "1.3.0"),
-                                null,
+                            .CoreVersionMismatch(
+                                "1.2.0",
+                                "1.3.0",
                                 null,
                             ).toReason(),
                     presentationLanguage = "en",

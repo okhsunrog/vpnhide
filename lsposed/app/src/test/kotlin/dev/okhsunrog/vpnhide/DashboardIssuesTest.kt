@@ -142,7 +142,7 @@ internal class DashboardIssuesTest : DashboardIssuesFixture() {
                             mismatches = listOf(ModuleMismatch(FlashableModuleKind.Core, "1.2.0", "1.2.5")),
                         ),
                 ),
-            ).filterIsInstance<DashboardIssue.ModuleVersionMismatch>().single()
+            ).filterIsInstance<DashboardIssue.CoreVersionMismatch>().single()
         val newer =
             dashboardIssues(
                 facts(
@@ -151,11 +151,26 @@ internal class DashboardIssuesTest : DashboardIssuesFixture() {
                             mismatches = listOf(ModuleMismatch(FlashableModuleKind.Core, "1.3.0", "1.2.5")),
                         ),
                 ),
-            ).filterIsInstance<DashboardIssue.ModuleVersionMismatch>().single()
+            ).filterIsInstance<DashboardIssue.CoreVersionMismatch>().single()
 
         assertEquals("vpnhide-core.zip", older.downloadArtifact)
         // The app is the lagging side here — re-flashing the module fixes nothing.
         assertEquals(null, newer.downloadArtifact)
+    }
+
+    @Test
+    fun `legacy backend version metadata cannot offer a separate installation`() {
+        val backends = listOf(FlashableModuleKind.Kmod, FlashableModuleKind.Builtin, FlashableModuleKind.Kpm, FlashableModuleKind.Zygisk)
+        val issues =
+            dashboardIssues(
+                facts(
+                    modules =
+                        moduleFacts(
+                            mismatches = backends.map { ModuleMismatch(it, "1.0.0", "2.0.0") },
+                        ),
+                ),
+            )
+        assertFalse(issues.has<DashboardIssue.CoreVersionMismatch>())
     }
 
     @Test
@@ -294,9 +309,9 @@ internal class DashboardIssuesTest : DashboardIssuesFixture() {
 
         // The base versions genuinely differ here (1.2.5 vs 1.3.0), which is why
         // comparing base versions only was never enough to quiet this down.
-        assertTrue(issuesWith(ignore = false).has<DashboardIssue.ModuleVersionMismatch>())
+        assertTrue(issuesWith(ignore = false).has<DashboardIssue.CoreVersionMismatch>())
         assertTrue(issuesWith(ignore = false).has<DashboardIssue.LsposedVersionMismatch>())
-        assertFalse(issuesWith(ignore = true).has<DashboardIssue.ModuleVersionMismatch>())
+        assertFalse(issuesWith(ignore = true).has<DashboardIssue.CoreVersionMismatch>())
         assertFalse(issuesWith(ignore = true).has<DashboardIssue.LsposedVersionMismatch>())
     }
 

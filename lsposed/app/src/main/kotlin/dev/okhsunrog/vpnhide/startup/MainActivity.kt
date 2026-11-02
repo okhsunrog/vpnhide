@@ -50,12 +50,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.AgentControlBridge
 import dev.okhsunrog.vpnhide.AgentUiScenarioHost
 import dev.okhsunrog.vpnhide.BackgroundUpdateChecks
+import dev.okhsunrog.vpnhide.CORE_PACKAGE_ARTIFACT
 import dev.okhsunrog.vpnhide.CanonicalConfigRepository
 import dev.okhsunrog.vpnhide.ConfigFeedbackProvider
 import dev.okhsunrog.vpnhide.DashboardCache
 import dev.okhsunrog.vpnhide.DashboardLoadingState
 import dev.okhsunrog.vpnhide.DashboardScreen
-import dev.okhsunrog.vpnhide.FlashableModuleKind
 import dev.okhsunrog.vpnhide.LocalConfigSnackbarInsets
 import dev.okhsunrog.vpnhide.ModuleDownloadButton
 import dev.okhsunrog.vpnhide.R
@@ -63,7 +63,6 @@ import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.SelfTargetFailureKind
 import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.core.CoreRoot
-import dev.okhsunrog.vpnhide.downloadArtifactFor
 import dev.okhsunrog.vpnhide.help.HelpScreen
 import dev.okhsunrog.vpnhide.picker.AppListCache
 import dev.okhsunrog.vpnhide.picker.ProtectionScreen
@@ -855,6 +854,6 @@ private fun RootDeniedScreen(
         onAction = onRecheck,
         // Core missing, not running or the wrong version: all fixed by flashing the
         // current core zip, linked like every other module download.
-        secondaryAction = { downloadArtifactFor(FlashableModuleKind.Core, null)?.let { ModuleDownloadButton(it) } },
+        secondaryAction = { ModuleDownloadButton(CORE_PACKAGE_ARTIFACT) },
     )
 }

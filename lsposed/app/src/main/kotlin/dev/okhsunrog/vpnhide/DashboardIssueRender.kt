@@ -105,16 +105,14 @@ private fun DashboardIssue.Lsposed.lsposedMessage(
 
 private fun DashboardIssue.Module.moduleMessage(res: Resources): DashboardMessage =
     when (this) {
-        is DashboardIssue.ModuleVersionMismatch -> {
+        is DashboardIssue.CoreVersionMismatch -> {
             // A version gap is a warning: the modules keep working, the user just
             // needs to update the lagging side.
             warn(
-                buildModuleVersionIssue(
+                buildCoreVersionIssue(
                     res = res,
-                    kind = mismatch.kind,
-                    moduleVersion = mismatch.moduleVersion,
-                    appVersion = mismatch.appVersion,
-                    recommendedArtifact = recommendedArtifact,
+                    moduleVersion = moduleVersion,
+                    appVersion = appVersion,
                 ),
                 downloadArtifact = downloadArtifact,
                 helpArticle = HelpArticle.UPDATING,
@@ -232,64 +230,20 @@ private val FlashableModuleKind.displayName: String
 // branch count past the threshold, but the shape is flat dispatch, not tangled
 // control flow.
 @Suppress("CyclomaticComplexMethod")
-private fun buildModuleVersionIssue(
+private fun buildCoreVersionIssue(
     res: Resources,
-    kind: FlashableModuleKind,
     moduleVersion: String,
     appVersion: String,
-    // Only meaningful for FlashableModuleKind.Kmod: the GKI-specific zip the
-    // kernel recommends, so an "update the module" nudge can name the exact
-    // file instead of sending the user back to KernelSU/Magisk to guess
-    // which variant they originally flashed (issue #225).
-    recommendedArtifact: String? = null,
 ): String =
-    when (compareSemver(normalizeVersion(moduleVersion), normalizeVersion(appVersion))) {
-        null, 0 -> {
-            res.getString(
-                when (kind) {
-                    FlashableModuleKind.Kmod -> R.string.dashboard_issue_kmod_version_mismatch
-                    FlashableModuleKind.Builtin -> R.string.dashboard_issue_builtin_version_mismatch
-                    FlashableModuleKind.Kpm -> R.string.dashboard_issue_kpm_version_mismatch
-                    FlashableModuleKind.Zygisk -> R.string.dashboard_issue_zygisk_version_mismatch
-                    FlashableModuleKind.Core -> R.string.dashboard_issue_core_version_mismatch
-                },
-                moduleVersion,
-                appVersion,
-            )
-        }
-
-        in Int.MIN_VALUE..-1 -> {
-            if (kind == FlashableModuleKind.Kmod && recommendedArtifact != null) {
-                res.getString(R.string.dashboard_issue_update_kmod_named, moduleVersion, appVersion, recommendedArtifact)
-            } else {
-                res.getString(
-                    when (kind) {
-                        FlashableModuleKind.Kmod -> R.string.dashboard_issue_update_kmod
-                        FlashableModuleKind.Builtin -> R.string.dashboard_issue_update_builtin
-                        FlashableModuleKind.Kpm -> R.string.dashboard_issue_update_kpm
-                        FlashableModuleKind.Zygisk -> R.string.dashboard_issue_update_zygisk
-                        FlashableModuleKind.Core -> R.string.dashboard_issue_update_core
-                    },
-                    moduleVersion,
-                    appVersion,
-                )
-            }
-        }
-
-        else -> {
-            res.getString(
-                when (kind) {
-                    FlashableModuleKind.Kmod -> R.string.dashboard_issue_update_app_for_kmod
-                    FlashableModuleKind.Builtin -> R.string.dashboard_issue_update_app_for_builtin
-                    FlashableModuleKind.Kpm -> R.string.dashboard_issue_update_app_for_kpm
-                    FlashableModuleKind.Zygisk -> R.string.dashboard_issue_update_app_for_zygisk
-                    FlashableModuleKind.Core -> R.string.dashboard_issue_update_app_for_core
-                },
-                moduleVersion,
-                appVersion,
-            )
-        }
-    }
+    res.getString(
+        when (compareSemver(normalizeVersion(moduleVersion), normalizeVersion(appVersion))) {
+            null, 0 -> R.string.dashboard_issue_core_version_mismatch
+            in Int.MIN_VALUE..-1 -> R.string.dashboard_issue_update_core
+            else -> R.string.dashboard_issue_update_app_for_core
+        },
+        moduleVersion,
+        appVersion,
+    )
 
 /**
  * An LSPosed scope entry (`pkg` or `pkg/user`) as the user would recognise it.

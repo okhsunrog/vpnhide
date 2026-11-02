@@ -322,22 +322,9 @@
     <string name="dashboard_issue_ports_rules_inactive">Ports is enabled for apps, but iptables rules are not active. Reboot or tap Save in Hiding; if it stays this way, collect a debug log so the core\'s Ports status and log are included.</string>
     <string name="dashboard_issue_ports_apply_failed">Ports is enabled for apps, but iptables rules are not active. Last apply failed: %1$s. Collect a debug log so the core\'s Ports status and log are included.</string>
     <string name="dashboard_issue_version_mismatch">LSPosed module version mismatch: running %1$s, installed %2$s. Reboot the device to apply the update.</string>
-    <string name="dashboard_issue_update_kmod">Kernel module version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
-    <string name="dashboard_issue_update_kmod_named">Kernel module version %1$s is older than app version %2$s. Install %3$s from the latest release via KernelSU/Magisk → Modules to update.</string>
-    <string name="dashboard_issue_update_zygisk">Zygisk version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
-    <string name="dashboard_issue_update_app_for_kmod">Kernel module version %1$s is newer than app version %2$s. Update the VPN Hide app.</string>
-    <string name="dashboard_issue_update_builtin">Built-in backend module version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
-    <string name="dashboard_issue_update_app_for_builtin">Built-in backend module version %1$s is newer than app version %2$s. Update the VPN Hide app.</string>
-    <string name="dashboard_issue_builtin_version_mismatch">Built-in backend module version mismatch: module %1$s, app %2$s. Open KernelSU/Magisk → Modules to update the module.</string>
-    <string name="dashboard_issue_update_app_for_zygisk">Zygisk version %1$s is newer than app version %2$s. Update the VPN Hide app.</string>
-    <string name="dashboard_issue_kmod_version_mismatch">Kernel module version mismatch: module %1$s, app %2$s. Open KernelSU/Magisk → Modules to update the module.</string>
-    <string name="dashboard_issue_zygisk_version_mismatch">Zygisk version mismatch: module %1$s, app %2$s. Open KernelSU/Magisk → Modules to update the module.</string>
     <string name="dashboard_issue_update_core">Core module version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
     <string name="dashboard_issue_update_app_for_core">Core module version %1$s is newer than app version %2$s. Update the VPN Hide app.</string>
     <string name="dashboard_issue_core_version_mismatch">Core module version mismatch: module %1$s, app %2$s. Open KernelSU/Magisk → Modules to update the module.</string>
-    <string name="dashboard_issue_update_kpm">KPM version %1$s is older than app version %2$s. Open KernelSU/Magisk → Modules to update.</string>
-    <string name="dashboard_issue_update_app_for_kpm">KPM version %1$s is newer than app version %2$s. Update the VPN Hide app.</string>
-    <string name="dashboard_issue_kpm_version_mismatch">KPM version mismatch: module %1$s, app %2$s. Open KernelSU/Magisk → Modules to update the module.</string>
     <string name="dashboard_running_version">Running module version: %s</string>
 
     <!-- kmod variant / load diagnostics -->

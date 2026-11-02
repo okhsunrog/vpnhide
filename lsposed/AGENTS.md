@@ -16,7 +16,7 @@ model together:
 |---|---|
 | `hook/` | everything LSPosed loads into `system_server` |
 | `picker/` | the Hiding tab: app list, target model, per-app caches |
-| `diagnostics/` | the check suite, the canonical report, the Diagnostics screen |
+| `diagnostics/` | retained Core evidence, Android worker observations and the Diagnostics screen |
 | `migration/` | pre-1.0 package/UID sources and strict 1.x/current JSON import, producing the current typed model |
 | `settings/` | Settings and its sub-screens, plus the UI preference store |
 | `debug/` | the bundle, the logcat recorder, kernel-image export |
@@ -151,15 +151,15 @@ directions, since `internal` is module-wide and the compiler will not.
 
 ## Rules
 
-- **Pure logic goes in top-level functions in `*Data.kt`, with a unit test** —
-  not inside a composable or an orchestrator. `classifyKmodProblem`,
-  `resolveLsposedState`, `buildNativeInstallRecommendation`, `dashboardIssues`
-  are the pattern: data in, data out, no Android deps, tested. The recurring
-  shape is classify-then-render — a pure function returning a decision, and a
-  thin one turning it into strings. There is no Robolectric here, so anything
-  that takes a `Context` or `Resources` is a function no test will ever cover:
-  keep those as small as the wording itself. This is what keeps orchestrators
-  (`loadDashboardState`) from rotting back into god-functions.
+- **Domain policy belongs in shared Rust.** Reuse Core/shared crates for backend
+  selection, limits, UID accounting, validation and diagnostic assessment. Kotlin
+  must not add a parallel classifier or verdict owner. Pure Android presentation
+  and draft transformations belong in top-level `*Data.kt` functions with tests;
+  `resolveLsposedState` and `dashboardIssues` are examples of the remaining UI
+  adapters, not permission to recreate removed backend classifiers. Keep resource
+  rendering thin and retire obsolete branches and all localized strings with the
+  replaced UI path. Current distribution offers only the full Core package;
+  historical backend metadata does not authorize separate backend downloads.
 - **Keep functions short** (detekt fails new non-`@Composable` methods over
   ~60 lines). If an orchestrator grows, extract a pure helper.
 - **Add a unit test** for any new pure function (JUnit, `src/test`).

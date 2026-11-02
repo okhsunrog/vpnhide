@@ -4,6 +4,8 @@ import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.settings.FilesystemHidingState
 import dev.okhsunrog.vpnhide.settings.FilesystemHidingStatus
 
+internal const val CORE_PACKAGE_ARTIFACT = "vpnhide-core.zip"
+
 /**
  * What the dashboard has to say about this device, as data.
  *
@@ -72,11 +74,10 @@ internal sealed interface DashboardIssue {
 
     // ── Module ──
 
-    data class ModuleVersionMismatch(
-        val mismatch: ModuleMismatch,
-        /** The kernel-specific zip to name for kmod; null for the other kinds. */
-        val recommendedArtifact: String?,
-        /** Offered for one-tap download only when the module is the older side. */
+    data class CoreVersionMismatch(
+        val moduleVersion: String,
+        val appVersion: String,
+        /** Offered only when the installed Core package is the older side. */
         val downloadArtifact: String?,
     ) : Module
 
@@ -322,29 +323,11 @@ private fun moduleVersionIssuesFor(facts: DashboardFacts): List<DashboardIssue> 
         // and re-flashing the module would not fix that.
         val moduleOlder =
             (compareSemver(baseVersion(mismatch.moduleVersion), baseVersion(mismatch.appVersion)) ?: 0) < 0
-        DashboardIssue.ModuleVersionMismatch(
-            mismatch = mismatch,
-            recommendedArtifact = null,
-            downloadArtifact = if (moduleOlder) downloadArtifactFor(mismatch.kind, null) else null,
+        DashboardIssue.CoreVersionMismatch(
+            moduleVersion = mismatch.moduleVersion,
+            appVersion = mismatch.appVersion,
+            downloadArtifact = if (moduleOlder) CORE_PACKAGE_ARTIFACT else null,
         )
-    }
-
-internal fun downloadArtifactFor(
-    kind: FlashableModuleKind,
-    recommendedArtifact: String?,
-): String? =
-    when (kind) {
-        FlashableModuleKind.Kmod -> recommendedArtifact
-
-        // The in-tree backend has no downloadable zip that fixes a version skew:
-        // the driver lives in the kernel image.
-        FlashableModuleKind.Builtin -> null
-
-        FlashableModuleKind.Kpm -> "vpnhide-kpm.zip"
-
-        FlashableModuleKind.Zygisk -> "vpnhide-zygisk.zip"
-
-        FlashableModuleKind.Core -> "vpnhide-core.zip"
     }
 
 private fun targetIssues(facts: DashboardFacts): List<DashboardIssue> =
@@ -405,20 +388,9 @@ private fun filesystemHidingIssues(state: FilesystemHidingState): List<Dashboard
  */
 private fun moduleProblemIssues(facts: DashboardFacts): List<DashboardIssue> =
     buildList {
-        val modules = facts.modules
-        val ordered =
-            listOf(
-                FlashableModuleKind.Kmod to modules.kmod,
-                FlashableModuleKind.Builtin to modules.builtin,
-                FlashableModuleKind.Kpm to modules.kpm,
-                FlashableModuleKind.Zygisk to modules.zygisk,
-                FlashableModuleKind.Core to modules.ports,
-            )
-        val applicable = ordered.filter { it.first == FlashableModuleKind.Core }
-        applicable.forEach { (_, module) -> module.problem?.let { add(DashboardIssue.ModuleBroken(it)) } }
-        applicable.forEach { (kind, module) ->
-            if (module.pendingReboot) add(DashboardIssue.ModuleNeedsReboot(kind))
-        }
+        val core = facts.modules.ports
+        core.problem?.let { add(DashboardIssue.ModuleBroken(it)) }
+        if (core.pendingReboot) add(DashboardIssue.ModuleNeedsReboot(FlashableModuleKind.Core))
     }
 
 /**
