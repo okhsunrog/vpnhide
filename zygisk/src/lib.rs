@@ -28,13 +28,13 @@
 //!    `module_entry` symbol gets resolved.
 //! 4. **`on_load`** — first callback we get. Runs in the freshly-forked,
 //!    not-yet-specialised child. We have root privileges here (zygote
-//!    privileges, not yet dropped). The Zygisk API gives us a fd to
-//!    `/data/adb/modules/<id>` via `get_module_dir()` — usable now,
-//!    closed by SELinux later.
+//!    privileges, not yet dropped). Only process-local logging is initialized
+//!    here; module-directory and companion APIs belong to pre-specialization.
 //! 5. **`pre_app_specialize`** — last call before the kernel transitions
 //!    the process to the app's UID and SELinux context. `args.uid` holds the
 //!    UID this fork will become; we match it against the config's target UIDs
-//!    to decide whether to install hooks. For non-targets we set
+//!    to decide whether to install hooks. Read the policy through the public
+//!    `get_module_dir()` API here, before SELinux specialization. For non-targets we set
 //!    `DlCloseModuleLibrary`.
 //! 6. The kernel/zygote applies app specialisation: setuid to the app's
 //!    UID, switch SELinux context, install seccomp filter, drop caps.
@@ -143,7 +143,7 @@ fn init_logger() {
 
 /// Narrow the global `log` filter to the user's debug-logging choice. The flag
 /// is now folded into the config snapshot (`debug` line, §4.3) rather than a
-/// separate file — `on_load` reads it from the same `targets.txt` it reads the
+/// separate file — pre-specialization reads it from the same `targets.txt` as the
 /// target UIDs from. Errors stay on even when disabled: the handful of
 /// `error!` calls (hook-install failures, status-file write failures) fire at
 /// most once per process and are the only signal we have if things go wrong.
@@ -176,7 +176,7 @@ pub struct VpnHide {
 ///
 /// **Lifetime is per app launch, not per zygote boot.** The `.so` is
 /// `dlopen`ed fresh in every forked child, so this `OnceLock` starts empty and
-/// gets initialised by `on_load` on every app launch. That means edits to
+/// gets initialised by `pre_app_specialize` on every app launch. That means edits to
 /// `targets.txt` are picked up on the next force-stop + restart — no zygote
 /// restart, no reboot needed. See the lifecycle block at the top of this file.
 ///
@@ -232,12 +232,20 @@ fn load_config_from_dir_fd(dir_fd: RawFd) -> ZygiskConfig {
 impl ZygiskModule for VpnHide {
     type Api = V2;
 
-    fn on_load(&self, api: ZygiskApi<'_, V2>, _env: JNIEnv<'_>) {
+    fn on_load(&self, _api: ZygiskApi<'_, V2>, _env: JNIEnv<'_>) {
         init_logger();
         // Loading the config happens before we know the user's logging choice.
         // Start from the stealth-safe level so missing/invalid config cannot
         // emit warnings merely because this process loaded the module.
         set_log_level(false);
+    }
+
+    fn pre_app_specialize<'a>(
+        &self,
+        mut api: ZygiskApi<'a, V2>,
+        env: JNIEnv<'a>,
+        args: &'a mut AppSpecializeArgs<'_>,
+    ) {
         // Zygisksu returns a raw fd to /data/adb/modules/<id> that we own.
         // Wrap it in OwnedFd so the drop at the end of this function closes
         // it before this app's code starts running. We are already in the
@@ -269,19 +277,12 @@ impl ZygiskModule for VpnHide {
         // anything below logs. Default Off ⇒ silence on a fresh/empty install.
         set_log_level(cfg.debug);
         debug!(
-            "on_load: {} zygisk targets cached, debug={}",
+            "pre_app_specialize: {} zygisk targets cached, debug={}",
             cfg.targets.len(),
             cfg.debug
         );
-        // dir_fd drops here → closed before any app fork.
-    }
-
-    fn pre_app_specialize<'a>(
-        &self,
-        mut api: ZygiskApi<'a, V2>,
-        env: JNIEnv<'a>,
-        args: &'a mut AppSpecializeArgs<'_>,
-    ) {
+        // No root module-directory descriptor survives into the app sandbox.
+        drop(dir_fd);
         // UID is the targeting key (protocol §4.3). args.uid already holds the
         // UID this child will become, and one UID covers every process of a
         // multi-process app — so no package/sub-process name matching needed.
