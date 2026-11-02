@@ -305,3 +305,16 @@ provenance is intentionally not accepted by the release bundle assembler).
 No Android process-injection, reboot/fallback, QEMU/KMI or device acceptance was
 run here; GitHub Actions results remain unobserved. RPC13 and kernel control-v2
 are unchanged; the private journal upgrade to schema 5 requires compatible Core.
+
+## Related proposals under review
+
+- [RFC 0001: automatic GKI/KMI selection](../rfcs/0001-automatic-gki-kmi-selection.md)
+  is **Proposed**, not an accepted or implemented extension of this plan. Its
+  kernel-loader preflight requires separate review and kernel/device validation;
+  importing the RFC does not enable it. Unknown or ambiguous KMI must not resolve
+  to an arbitrary first candidate.
+- [RFC 0002: autonomous diagnostics](../rfcs/0002-autonomous-diagnostics.md) is
+  **Draft**. Native TUN and framework fixtures, Android background diagnostics and
+  orchestration/cache are proposals; framework feasibility still needs a prototype.
+  Internal decision labels are not evidence of working code or authorization to
+  add these experiments to the current implementation.
