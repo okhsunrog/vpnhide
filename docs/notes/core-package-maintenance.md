@@ -1,7 +1,8 @@
 # Authenticated Core replacement preparation
 
 This describes implemented preparation, not a completed install/update flow.
-RPC22, private journal11 and kernel control2/telemetry1 remain unchanged in this
+The current paired contract is RPC23 with private journal11 and unchanged kernel
+control2/telemetry1. The original package-preparation foundation did not change these in its
 cut. No device manager operation or boot write is performed by these APIs.
 
 The existing app socket authenticates its peer UID and directory ownership. It

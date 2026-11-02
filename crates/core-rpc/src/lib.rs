@@ -637,6 +637,10 @@ pub trait VpnhideCore {
     /// Query an operation's phases and outcome. Survives the submitting client's death,
     /// so a reconnecting app can find out what happened. `None` if the id is unknown.
     async fn get_operation(op: OperationId) -> Option<OperationRecord>;
+    /// A full-reset receipt, attested against the durable command identity.
+    /// Confirmed receipts are returned only while canonical state still equals
+    /// that reset's empty commit; an unrelated edit cannot confirm a reset.
+    async fn get_reset_operation(op: OperationId) -> Option<OperationRecord>;
 
     /// Run a batch of fixed root probes (v5). No caller-chosen command or path exists.
     async fn collect_diagnostics(request: DiagnosticsRequest) -> DiagnosticsReport;

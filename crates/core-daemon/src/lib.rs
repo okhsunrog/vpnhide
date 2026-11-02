@@ -31,6 +31,7 @@ pub mod ports;
 pub mod probe_cli;
 pub mod publisher;
 pub mod recovery;
+pub mod reset_cli;
 pub mod server;
 pub mod service;
 pub mod zygisk;

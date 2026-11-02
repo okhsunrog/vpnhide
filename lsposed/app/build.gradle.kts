@@ -80,22 +80,24 @@ val appNativeCrates =
         "core-ffi",
         "core-client",
         "core-rpc",
+        "build-contract",
         "native-policy",
         "migration-policy",
         "diagnostic-model",
         "activator",
+        "bounded-process",
         "apatch-abi",
         "protocol",
     ).map { repoDir.resolve("crates/$it") }
 val coreFfiCrates =
-    listOf("core-ffi", "core-client", "core-rpc", "native-policy", "protocol", "checks", "diagnostic-model", "migration-policy")
+    listOf("core-ffi", "core-client", "core-rpc", "build-contract", "native-policy", "protocol", "checks", "diagnostic-model", "migration-policy")
         .map { repoDir.resolve("crates/$it") }
 val rustAssetsOut = rustAssetsDir.get().asFile
 
 // Opt-in x86_64 native + APK ABI for running the app on an Android x86_64
 // emulator (arm64 system images don't run on x86 hosts). Enable with
 // `-PvpnhideEmulatorX86` (or `vpnhideEmulatorX86=true` in gradle.properties).
-// Off by default: release and normal dev builds stay arm64-only. Only the
+// Off by default: release and normal dev builds ship both ARM ABIs. Only the
 // `debug` build type honours it. See docs/avd-magisk-testing.md.
 val emulatorX86 = (project.findProperty("vpnhideEmulatorX86") as String?)?.toBoolean() == true
 

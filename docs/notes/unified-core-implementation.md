@@ -3,7 +3,7 @@
 Approved design, based on dev-2.x `3493354f` (2026-11-02).
 This is an implementation ledger, not a claim of device acceptance.
 
-Current cloud contract: **RPC22 / journal11 (reads schemas1–10)**. Kernel control2 /
+Current cloud contract: **RPC23 / journal11 (reads schemas1–10)**. Kernel control2 /
 telemetry1 is unchanged: APK/Core contract and private journal upgrades do not
 require rebuilding a compatible user builtin kernel. Stages4–7/RFC2 remain partial;
 the latest entries distinguish remaining code from device/key/publication gates.
@@ -1710,3 +1710,64 @@ runtime crate. 61 activator tests, five process tests, three CLI tests and actua
 RSA/P256/P384 signing passed, as did strict host and both ARM ABI Clippy and the
 Core no-wrapper guard. This prepares typed QEMU/reset execution; those ports are
 not completed merely by extracting this primitive.
+
+
+## Typed host reset and native writer client (RPC23)
+
+Replaced clean-device.sh's duplicated destructive path lists and journal wipe with
+an offline-plan-by-default Rust host adapter. Execution requires explicit serial
+and private receipt. The Core allocator supplies the operation identity; intent
+is synced before submission, uncertainty resumes queries of that same identity,
+and known failure or missing proof cannot authorize APK removal. Optional APK
+uninstall has its own durable intent and cannot be retried blindly after a lost
+reply. Receipt/lease ownership, mode, symlink, nlink and concurrent-use checks are
+executable tests. Cached pre-uninstall confirmations are refreshed, rather than
+reused after another configuration edit; post-APK-removal completion is explicitly
+historical.
+
+Native maintenance-reset is only a client of the existing authenticated single
+writer, never an offline daemon. It checks expected boot before any RPC and pins
+expected server UID on every connection/reconnect. The host uses correctly quoted
+ADB/su bootstrap and one open executable FD for a read-only capability guard plus
+client execution. Older Core rejects that probe prefix; it never receives an
+unknown bare verb that its old CLI could interpret as a daemon socket. Executable
+joined-argv tests cover the seam, without any ADB server or phone action.
+
+RPC23 adds get_reset_operation: durable intent must be FullReset, and confirmed
+readback is available only while canonical remains the reset's empty commit.
+Generic get_operation stays unchanged. Journal11 and kernel control2/telemetry1
+are unchanged; compatibility still requires a matching new APK/Core, not a user
+builtin rebuild. Kotlin's generated client uses the same RPC constant; native
+Gradle inputs now include the shared build-contract (and moved process owner).
+
+Destructive cold rescue is NOT implemented: unavailable/incompatible Core leads
+to retained journal and an explicit matching-package installation path, not a
+wipe. QEMU init/run/run-kpm port, common maintenance executor/bootstrap, RFC1/2,
+remaining Stage4/7/Kotlin code and final screenshot startup regression remain
+open cloud work except separately identified external gates.
+
+
+Reset validation: 450 RPC/client/Core/FFI unit, process and typed-bridge tests
+passed; four model tests, seven host reset/locking/ADB/bootstrap/freshness tests,
+four executable CLI tests and the actual Java signer matrix also passed. Native
+reset CLI uses a versioned read-only capability probe before its new verb, and
+wrong-schema probes are tested as early read-only refusal. Reviewer findings for
+ADB quoting, wrong-boot dispatch, foreign operation receipts, cached confirmation,
+lock suffix and server peer authentication were corrected before integration.
+All production/app and both ARM ABI Clippy checks remain strict.
+
+Android native libraries were actually rebuilt for arm64-v8a and armeabi-v7a;
+578 JVM tests, detekt, CPD, Android lint and repository ktlint passed with warnings
+as errors. Fixed two explicitly deprecated legacy fixture stimuli at narrow call
+sites and an unused Unit branch; no checks were disabled. Two additional ARM32
+behavior regressions passed: signed post-customize image + executing inode selects
+the ARM32 daemon, and an ARM32 Core with ARM64 kernel KMI conservatively rejects
+ko/KPM while retaining eligible ARM32 Zygisk. Fixed the stale Gradle ARM64-only
+comment. Core ABI is explicitly userspace ABI, not kernel ABI. These are cloud
+build/behavior proofs, not ARM32 device, compat-kernel or loader acceptance.
+
+No fresh production-signed APK, complete same-commit seven-KMI bundle, new Zygisk
+release matrix or Android32 execution was established by this reset slice. Mixed
+64/32 Zygote loader bootstrap remains implementation work: an ordinary diagnostics
+Service does not force Zygote32, and 64-bit evidence cannot satisfy its ABI proof.
+ImageFence remains an unwired maintenance primitive, not a completed update flow.

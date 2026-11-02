@@ -386,7 +386,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC22; journal11 reads schemas1–10. These
+The current paired APK/Core contract is RPC23; journal11 reads schemas1–10. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -488,6 +488,14 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. RPC22 requires a paired new APK/Core; journal11 and the frozen
+forensics remain. RPC23 requires a paired new APK/Core; journal11 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
+
+
+Development reset uses a narrow native RPC client. RPC23 adds a scoped reset
+receipt query that checks durable FullReset identity and the current empty
+canonical commit. It cannot reinterpret a confirmed edit as reset success. The
+native client checks boot identity and server peer UID before mutation; the host
+persists intent before dispatch and recovers unknown outcomes by receipt only.
+This adds no offline writer and does not change journal11 or kernel control2.

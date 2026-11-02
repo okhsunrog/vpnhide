@@ -67,6 +67,7 @@ struct ConnectionState {
 
 pub struct CoreClient {
     socket_path: PathBuf,
+    expected_server_uid: Option<u32>,
     connection: Mutex<ConnectionState>,
 }
 
@@ -84,8 +85,21 @@ macro_rules! call {
 
 impl CoreClient {
     pub fn connect(socket_path: impl Into<PathBuf>) -> Arc<Self> {
+        Self::with_server_uid(socket_path, None)
+    }
+    /// Privileged developer clients must authenticate the server too: an
+    /// APK-owned socket pathname can be replaced by that APK UID. Check every
+    /// newly connected channel before sending even the version handshake.
+    pub fn connect_expected_server_uid(socket_path: impl Into<PathBuf>, uid: u32) -> Arc<Self> {
+        Self::with_server_uid(socket_path, Some(uid))
+    }
+    fn with_server_uid(
+        socket_path: impl Into<PathBuf>,
+        expected_server_uid: Option<u32>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             socket_path: socket_path.into(),
+            expected_server_uid,
             connection: Mutex::default(),
         })
     }
@@ -137,6 +151,10 @@ impl CoreClient {
     }
     call!(
         get_operation(op: OperationId) -> Option<OperationRecord>,
+        CALL_DEADLINE
+    );
+    call!(
+        get_reset_operation(op: OperationId) -> Option<OperationRecord>,
         CALL_DEADLINE
     );
     call!(
@@ -213,6 +231,14 @@ impl CoreClient {
         .await
         .map_err(|error| unavailable(error.to_string()))?
         .map_err(|error| unavailable(error.to_string()))?;
+        if let Some(expected) = self.expected_server_uid {
+            let peer = stream
+                .peer_cred()
+                .map_err(|error| unavailable(error.to_string()))?;
+            if peer.uid() != expected {
+                return Err(unavailable("unexpected Core server UID".into()));
+            }
+        }
         let framed = LengthDelimitedCodec::builder()
             .max_frame_length(MAX_FRAME_BYTES)
             .new_framed(stream);
@@ -279,6 +305,43 @@ fn deadline(timeout: Duration) -> tarpc::context::Context {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn expected_server_uid_is_checked_before_hello_on_every_new_channel() {
+        use std::os::unix::fs::MetadataExt;
+        use tokio::io::AsyncReadExt;
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("fake-core.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let wrong_uid = std::fs::metadata(root.path())
+            .unwrap()
+            .uid()
+            .wrapping_add(1);
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut byte = [0u8; 1];
+                let count = tokio::time::timeout(Duration::from_secs(2), stream.read(&mut byte))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    count, 0,
+                    "unauthenticated server must receive no handshake/request bytes"
+                );
+            }
+        });
+        let client = CoreClient::connect_expected_server_uid(socket, wrong_uid);
+        for generation in 1..=2 {
+            assert_eq!(
+                client.hello().await.unwrap_err(),
+                ClientError::Unavailable {
+                    generation,
+                    detail: "unexpected Core server UID".into()
+                }
+            );
+        }
+        server.await.unwrap();
+    }
 
     #[tokio::test]
     async fn a_late_old_channel_failure_does_not_disconnect_its_replacement() {

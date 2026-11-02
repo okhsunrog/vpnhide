@@ -13,7 +13,7 @@ and the external agent transport remain adapters in their existing languages.
 | `scripts/public_distribution.py` + `test_public_distribution.py` | Replaced by `artifact-model::distribution` and `vpnhide-tooling distribution select`; only the paired APK, full Core ZIP and descriptor are public assets. |
 | `scripts/update-json.sh` generation | Thin bootstrap retained; Rust owns validation and the Core-only update feed. Legacy backend feeds remain frozen compatibility data. |
 | `kmod/test/{init,run,run-kpm}.sh` | Still pending: typed guest/host plans and result evaluation; preserve minimal shell bootstrap and actual bionic probes. Linux/QEMU results cannot replace Android acceptance. |
-| `scripts/clean-device.sh` | Still pending: typed reset/rescue. Ordinary reset must use Core recovery; never delete the private journal to permit a downgrade. Script has not been executed. |
+| `scripts/clean-device.sh` | Replaced by a thin entrypoint to the typed resumable Core reset client. Offline plan by default; explicit serial/boot, native peer-UID check, durable intent/receipt and optional post-confirmation APK removal. No journal deletion or offline writer; destructive cold rescue remains pending. No device execution performed. |
 
 The static host CLI is an internal build artifact consumed by minimal DDK jobs.
 It links portable formats/contracts, not the root daemon or device runtime. CI

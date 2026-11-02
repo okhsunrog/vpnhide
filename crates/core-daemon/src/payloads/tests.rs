@@ -231,6 +231,39 @@ fn zygisk_requires_all_needed_abis_and_rejects_default_mask() {
     );
 }
 #[test]
+fn arm32_core_with_arm64_kernel_kmi_keeps_userspace_backend_and_refuses_kernel_payloads() {
+    let mut d = device();
+    d.abi = Abi::Arm32;
+    d.kernel_release = "6.1.157-android14".into();
+    let m = manifest();
+    let report = assess(&m, &d, policy(), &support()).unwrap();
+    assert_eq!(
+        report.candidates[1].eligibility,
+        Err(Rejection::WrongArchitecture)
+    );
+    assert_eq!(
+        report.candidates[2].eligibility,
+        Err(Rejection::WrongArchitecture)
+    );
+    assert_eq!(report.decision, Decision::Select(B::Zygisk));
+    assert_eq!(report.candidates[3].payload_indices.len(), 1);
+    let index = report.candidates[3].payload_indices[0];
+    assert_eq!(
+        m.payloads[index].implementation,
+        PayloadKind::Zygisk { abi: Abi::Arm32 }
+    );
+    let mut incomplete = m;
+    incomplete
+        .payloads
+        .retain(|p| p.implementation != PayloadKind::Zygisk { abi: Abi::Arm32 });
+    assert_eq!(
+        assess(&incomplete, &d, policy(), &support())
+            .unwrap()
+            .decision,
+        Decision::NoEligibleCandidate
+    );
+}
+#[test]
 fn runtime_and_kmi_uncertainty_are_not_capabilities() {
     let mut d = device();
     d.kernel_release.clear();

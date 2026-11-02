@@ -10,6 +10,15 @@ mod probe;
 /// Dispatch a probe subcommand. `None` when `args` is not one (the caller runs the daemon).
 pub fn run(args: &[String]) -> Option<i32> {
     let code = match args {
+        // Read-only capability guard for host tools. Older binaries reject this
+        // reserved probe prefix, so they never interpret a new verb as a socket.
+        [command, mode, schema]
+            if command == "probe"
+                && mode == "maintenance-reset-ready"
+                && schema.parse::<u32>().ok() == Some(vpnhide_maintenance_model::RESET_SCHEMA) =>
+        {
+            0
+        }
         [command, mode, next]
             if command == "probe"
                 && mode == "native-kpm-inventory"

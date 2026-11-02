@@ -355,3 +355,29 @@ tools/vpnhide-tooling bundle assemble --inputs .artifacts/core-inputs \
 All inputs must be complete, clean and built from that exact commit. A daemon
 base alone is not installable. Existing Android keystore operations use
 `tools/vpnhide-tooling signer public` / `sign`; the Java provider stays unchanged.
+
+## Resumable development reset
+
+`scripts/clean-device.sh` now prints an offline plan by default. To request a
+reset from the existing Core writer, use an explicit device and private host
+receipt; APK uninstall is a separate optional step after confirmed reset:
+
+```sh
+scripts/clean-device.sh --execute --serial SERIAL \
+  --state-file .artifacts/device-reset/receipt.json --uninstall-app
+```
+
+Resume the same command and receipt after interruption. An unknown result queries
+the same operation; it never repeats the reset or deletes the journal. The native
+client verifies the expected boot and Core server UID. A read-only capability
+guard on a pinned executable refuses older CLI binaries before invoking the new
+verb. The scoped RPC23 query attests FullReset and its still-empty canonical
+commit. A cached confirmation is refreshed before a pending APK uninstall;
+completion after APK removal is labelled historical, not a fresh device check.
+
+The receipt directory must be owned and not writable by other users. Core state,
+load budgets/holds and installed modules are retained. If Core is absent or
+incompatible, keep the journal and install a matching Core/APK through the
+manager; this tool does not implement a destructive offline rescue. No device is
+contacted without `--execute`. RPC23 does not require a new compatible builtin
+kernel.

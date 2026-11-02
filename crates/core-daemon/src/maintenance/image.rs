@@ -102,6 +102,8 @@ fn read_file(file: &File, uid: u32, limit: u64, deadline: Instant) -> io::Result
 }
 impl ImageFence {
     pub fn capture_active(root: &Path) -> io::Result<Self> {
+        // Without a replacement descriptor, inspection hashes the actual
+        // running ABI's daemon bytes; the ABI selector is unused in this case.
         Self::inspect(root, None, Abi::Arm64, 0)
     }
     pub fn verify_replacement(

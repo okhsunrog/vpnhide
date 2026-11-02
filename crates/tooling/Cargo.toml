@@ -11,6 +11,8 @@ name = "vpnhide-tooling"
 path = "src/main.rs"
 
 [dependencies]
+vpnhide_maintenance_model = { path = "../maintenance-model" }
+serde = { version = "1", features = ["derive"] }
 vpnhide_bounded_process = { path = "../bounded-process" }
 vpnhide_artifact_model = { path = "../artifact-model", features = ["archives"] }
 clap = { version = "4.6.7", features = ["derive"] }

@@ -116,6 +116,22 @@ fn exact_post_customize_image_accepts_and_live_property_update_is_not_code_chang
     assert_eq!(fence.files.len(), 16); // daemon, manifest, ten payloads, two autoload mirrors, boot entry/policy
 }
 #[test]
+fn arm32_post_customize_image_uses_its_own_signed_daemon_and_running_inode() {
+    let f = fixture();
+    let files = vpnhide_artifact_model::fixtures::bundle_files().unwrap();
+    let path = f.root.path().join("vpnhide-core");
+    fs::write(&path, &files["bin/arm/vpnhide-core"]).unwrap();
+    let fence = ImageFence::inspect(f.root.path(), Some(&f.descriptor), Abi::Arm32, f.uid).unwrap();
+    fence.require_unchanged_owned(f.root.path(), f.uid).unwrap();
+    fence
+        .require_running_owned(&File::open(path).unwrap(), f.uid)
+        .unwrap();
+    assert!(
+        f.inspect().is_err(),
+        "an ARM64 descriptor choice must not accept ARM32 daemon bytes"
+    );
+}
+#[test]
 fn signed_wrong_abi_and_missing_or_mutated_autoload_copy_refuse_staging() {
     let f = fixture();
     assert!(ImageFence::inspect(f.root.path(), Some(&f.descriptor), Abi::Arm32, f.uid).is_err());

@@ -1371,6 +1371,7 @@ version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
+ "bytes",
  "libc",
  "mio",
  "pin-project-lite",
@@ -1747,6 +1748,7 @@ name = "vpnhide_core_client"
 version = "0.1.0"
 dependencies = [
  "tarpc",
+ "tempfile",
  "tokio",
  "tokio-serde",
  "tokio-util",
@@ -1771,12 +1773,14 @@ dependencies = [
  "tokio-util",
  "vpnhide_activator",
  "vpnhide_artifact_model",
+ "vpnhide_bounded_process",
  "vpnhide_build_contract",
  "vpnhide_checks",
  "vpnhide_core_client",
  "vpnhide_core_rpc",
  "vpnhide_diagnostic_model",
  "vpnhide_loader_ipc",
+ "vpnhide_maintenance_model",
  "vpnhide_migration_policy",
  "vpnhide_native_policy",
  "vpnhide_package_trust",
@@ -1826,6 +1830,13 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "vpnhide_maintenance_model"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -1887,10 +1898,12 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "libc",
+ "serde",
  "serde_json",
  "tempfile",
  "vpnhide_artifact_model",
  "vpnhide_bounded_process",
+ "vpnhide_maintenance_model",
  "vpnhide_package_trust",
 ]
 

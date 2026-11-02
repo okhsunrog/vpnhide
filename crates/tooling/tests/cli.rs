@@ -169,3 +169,21 @@ fn unavailable_signing_identity_never_generates_a_key_or_replaces_previous_outpu
     );
     assert!(!r.join("missing.p12").exists());
 }
+#[test]
+fn device_reset_default_is_an_offline_plan_without_adb_or_receipt_writes() {
+    let root = tempfile::tempdir().unwrap();
+    let r = root.path();
+    let output = Command::new(env!("CARGO_BIN_EXE_vpnhide-tooling"))
+        .current_dir(r)
+        .env("PATH", r)
+        .args(["device-reset", "--adb", "missing-adb"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(plan["action"], "core_full_reset");
+    assert_eq!(fs::read_dir(r).unwrap().count(), 0);
+    let no_target = tool(r, &["device-reset", "--execute"]);
+    assert!(!no_target.status.success());
+    assert_eq!(fs::read_dir(r).unwrap().count(), 0);
+}

@@ -274,8 +274,8 @@ jobs:
           key: host-tooling
       - name: Test shared formats and existing Java signing adapter
         run: |
-          cargo clippy -p vpnhide_tooling -p vpnhide_artifact_model -p vpnhide_bounded_process --all-targets -- -D warnings
-          cargo test -p vpnhide_tooling -p vpnhide_artifact_model -p vpnhide_bounded_process --features vpnhide_artifact_model/archives
+          cargo clippy -p vpnhide_tooling -p vpnhide_artifact_model -p vpnhide_bounded_process -p vpnhide_maintenance_model --all-targets -- -D warnings
+          cargo test -p vpnhide_tooling -p vpnhide_artifact_model -p vpnhide_bounded_process -p vpnhide_maintenance_model --features vpnhide_artifact_model/archives
       - name: Build static host executor
         run: |
           tools/build-host-tooling

@@ -5,6 +5,7 @@
 //!     `VPNHIDE_BOOT_APPLY=1` re-applies Native/Ports once after load (module boot).
 //!   - `vpnhide-core boot-apply` — load, fence/reconcile, re-apply, write boot_status, exit.
 //!   - `vpnhide-core dump [socket]` — connect as a client and print the current snapshot.
+//!   - `vpnhide-core maintenance-reset allocate|submit|query ...` — narrow typed reset client.
 //!   - `vpnhide-core project [config.json]` — print control-v2 wire (**read-only**).
 //!   - `vpnhide-core status [ctl]` — print telemetry-v1 status (**read-only**).
 //!   - `vpnhide-core probe …|observe …` — one-shot root probes core runs as its own child.
@@ -52,6 +53,19 @@ async fn daemon_main() {
     let mut args = std::env::args().skip(1);
     let first = args.next().unwrap_or_default();
     match first.as_str() {
+        "maintenance-reset" => {
+            match vpnhide_core_daemon::reset_cli::run(&args.collect::<Vec<_>>()).await {
+                Ok(reply) => println!(
+                    "{}",
+                    serde_json::to_string(&reply).expect("reset reply serialization")
+                ),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(2);
+                }
+            }
+            return;
+        }
         "dump" => {
             dump(&args.next().unwrap_or_else(|| DEFAULT_SOCKET.to_owned())).await;
             return;

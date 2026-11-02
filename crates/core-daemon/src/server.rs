@@ -1745,6 +1745,23 @@ impl CoreState {
             .get(op)
             .map(|entry| entry.record.clone())
     }
+    pub fn get_reset_operation_record(&self, op: OperationId) -> Option<OperationRecord> {
+        let store = self.engine.store.lock().expect("config mutex");
+        let entry = store.journal.get(op)?;
+        if entry.command != Some(journal::CommandIntent::FullReset) {
+            return None;
+        }
+        if entry.record.settled == Some(PhaseOutcome::Confirmed)
+            && (store.config.is_some()
+                || entry
+                    .admission
+                    .as_ref()
+                    .is_none_or(|a| a.commit_revision != store.config_revision))
+        {
+            return None;
+        }
+        Some(entry.record.clone())
+    }
 
     /// Admit a typed edit against current field history and run its phase plan.
     /// Unrelated stale fields merge; overlapping writes reject the whole edit.
@@ -2937,6 +2954,9 @@ impl VpnhideCore for CoreServer {
 
     async fn get_operation(self, _ctx: Context, op: OperationId) -> Option<OperationRecord> {
         self.state.get_operation(op)
+    }
+    async fn get_reset_operation(self, _ctx: Context, op: OperationId) -> Option<OperationRecord> {
+        self.state.get_reset_operation_record(op)
     }
 
     async fn collect_diagnostics(

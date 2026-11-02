@@ -204,7 +204,9 @@ pub fn observe(env: &NativeEnv, facts: &ScanFacts) -> Capabilities {
             .is_some_and(|path| !crate::native_boot::obsolete_modules(path).is_empty()),
     );
     Capabilities {
-        // Bundled kernel payloads are arm64 only. A host build is not Android ARM64.
+        // This is the Core executable/userspace ABI, not uname's kernel ABI.
+        // A 32-bit Core on a 64-bit kernel conservatively cannot select our
+        // ARM64-only ko/KPM payloads; it retains applicable userspace backends.
         abi: if cfg!(target_arch = "aarch64") {
             Abi::Arm64
         } else {
