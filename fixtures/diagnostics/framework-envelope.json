@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "session": 9,
+  "core_epoch": 7,
+  "boot_id": "12345678-1234-1234-1234-123456789abc",
+  "nonce": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "expected_hook_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "worker_uid": 10123,
+  "worker_pid": 444,
+  "worker_start_ticks": 1234,
+  "expires_boot_ms": 25000,
+  "generation": 0,
+  "phase": "prepared",
+  "fixture": {
+    "vpn_net_id": 1610612737,
+    "ordinary_net_id": 1610612738,
+    "interface_name": "tun000000000009",
+    "mtu": 1543,
+    "ordinary_interface_name": "ipsec0000000009",
+    "ordinary_mtu": 1519
+  }
+}

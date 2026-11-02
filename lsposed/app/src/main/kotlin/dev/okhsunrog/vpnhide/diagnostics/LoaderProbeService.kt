@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.Process
 import dev.okhsunrog.vpnhide.core.CorePaths
 import kotlinx.coroutines.CoroutineScope
@@ -14,6 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import uniffi.vpnhide_core_ffi.CoreDiagnosticException
+import uniffi.vpnhide_core_ffi.CoreDiagnosticWorkerTask
 import uniffi.vpnhide_core_ffi.CoreException
 import uniffi.vpnhide_core_ffi.CoreSession
 import uniffi.vpnhide_core_ffi.observeDiagnosticFixture
@@ -46,9 +48,7 @@ class LoaderProbeService : Service() {
                 CoreSession(CorePaths.socket(this@LoaderProbeService)).use { core ->
                     val task = core.joinDiagnosticWorker()
                     if (task != null) {
-                        val observations = observeDiagnosticFixture(task)
-                        core.reportDiagnosticWorker(task, observations)
-                        handler.post(finish)
+                        runDiagnostic(core, task)
                     } else {
                         // Loader selection also starts this worker before any diagnostic run.
                         // Keep it alive briefly for independent specialization observation.
@@ -61,6 +61,27 @@ class LoaderProbeService : Service() {
                 // Core owns timeout, attribution and cleanup; a lost reply cannot
                 // manufacture a successful result or restart the run from this process.
             }
+        }
+    }
+
+    private suspend fun runDiagnostic(
+        core: CoreSession,
+        task: CoreDiagnosticWorkerTask,
+    ) {
+        val power = getSystemService(PowerManager::class.java)
+        val wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VPNHide:Diagnostics")
+        try {
+            wakeLock.acquire(DEADLINE_MS)
+            val observations = observeDiagnosticFixture(task)
+            try {
+                measureFrameworkFixture(this, core, task)
+            } finally {
+                // Framework errors cannot erase native observations.
+                core.reportDiagnosticWorker(task, observations)
+            }
+        } finally {
+            if (wakeLock.isHeld) wakeLock.release()
+            handler.post(finish)
         }
     }
 

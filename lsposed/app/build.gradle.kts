@@ -2,6 +2,7 @@ import org.gradle.api.tasks.Exec
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.io.FileInputStream
 import java.util.Properties
+import java.security.MessageDigest
 
 plugins {
     alias(libs.plugins.android.application)
@@ -285,7 +286,21 @@ android {
             .get()
             .trim()
 
+    // An inlined identity stays with code already loaded in system_server after an APK update.
+    val hookSources = file("src/main/kotlin/dev/okhsunrog/vpnhide")
+    val sharedHookSources = rootProject.file("hook-shared-sources.txt").readLines().filter { it.isNotBlank() }
+    val hookDigest = MessageDigest.getInstance("SHA-256")
+    val fingerprintFiles = (fileTree(hookSources.resolve("hook")) { include("**/*.kt") }.files +
+        fileTree(hookSources.resolve("generated")) { include("**/*.kt") }.files + sharedHookSources.map(hookSources::resolve) +
+        listOf(buildFile, rootProject.buildFile, rootProject.file("gradle/libs.versions.toml"), rootProject.file("gradle.properties"), rootProject.file("settings.gradle.kts")))
+    fingerprintFiles.sortedBy { it.relativeTo(rootProject.projectDir).path }.forEach {
+        hookDigest.update(it.relativeTo(rootProject.projectDir).path.toByteArray())
+        hookDigest.update(0.toByte()); hookDigest.update(it.readBytes()); hookDigest.update(0.toByte())
+    }
+    val hookSourceHash = hookDigest.digest().joinToString("") { "%02x".format(it) }
+
     defaultConfig {
+        buildConfigField("String", "HOOK_SOURCE_SHA256", "\"$hookSourceHash\"")
         applicationId = "dev.okhsunrog.vpnhide"
         minSdk = 28
         targetSdk = 36

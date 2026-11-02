@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{NativeCheck, NativeFixtureSpec, NativeMeasurement, ScopedNativeResult};
 
-pub const DIAGNOSTIC_CONTRACT: u32 = 1;
+pub const DIAGNOSTIC_CONTRACT: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -22,6 +22,7 @@ pub enum RequiredCheck {
     ProcInterfaces,
     SysInterfaces,
     FrameworkNetworks,
+    FrameworkDefaultNetwork,
     FrameworkCapabilities,
     FrameworkLinkProperties,
     FrameworkLegacyInfo,
@@ -56,6 +57,7 @@ impl DiagnosticPlan {
             ProcInterfaces,
             SysInterfaces,
             FrameworkNetworks,
+            FrameworkDefaultNetwork,
             FrameworkCapabilities,
             FrameworkLinkProperties,
             FrameworkLegacyInfo,
@@ -154,9 +156,32 @@ pub struct DiagnosticRun {
     pub fingerprint: DiagnosticFingerprint,
     pub plan: DiagnosticPlan,
     pub outcome: DiagnosticOutcome,
+    pub framework: Option<crate::framework::ScopedFrameworkResult>,
     pub stale: bool,
 }
 impl DiagnosticRun {
+    pub fn record_framework(&mut self, framework: crate::framework::ScopedFrameworkResult) {
+        if let DiagnosticOutcome::Incomplete { missing, .. } = &mut self.outcome {
+            missing.retain(|required| {
+                !framework.proven.iter().any(|check| {
+                    matches!(
+                        (required, check),
+                        (
+                            RequiredCheck::FrameworkNetworks,
+                            crate::framework::FrameworkCheck::Networks
+                        ) | (
+                            RequiredCheck::FrameworkCapabilities,
+                            crate::framework::FrameworkCheck::Capabilities
+                        ) | (
+                            RequiredCheck::FrameworkLinkProperties,
+                            crate::framework::FrameworkCheck::LinkProperties
+                        )
+                    )
+                })
+            });
+        }
+        self.framework = Some(framework);
+    }
     pub fn record_native(&mut self, native: ScopedNativeResult) {
         let proven = match &native {
             ScopedNativeResult::Proven { checks } => checks.as_slice(),
@@ -190,6 +215,7 @@ mod tests {
     fn four_native_successes_never_replace_the_supported_contract() {
         let mut run = DiagnosticRun {
             session: 1,
+            framework: None,
             fingerprint: DiagnosticFingerprint {
                 boot_id: "boot".into(),
                 core_epoch: 9,
@@ -215,7 +241,7 @@ mod tests {
         let DiagnosticOutcome::Incomplete { missing, .. } = run.outcome else {
             panic!("partial run");
         };
-        assert_eq!(missing.len(), 17);
+        assert_eq!(missing.len(), 18);
         assert!(missing.contains(&RequiredCheck::FrameworkCallbacks));
         assert!(missing.contains(&RequiredCheck::BindToDevice));
         assert!(missing.contains(&RequiredCheck::Filesystem));

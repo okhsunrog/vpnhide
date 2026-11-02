@@ -10,8 +10,10 @@ use sha2::{Digest, Sha256};
 use vpnhide_diagnostic_model::*;
 use vpnhide_loader_ipc::image::{self, ProcessIdentity};
 
+use super::framework_run::FrameworkRun;
 use super::native_fixture::TunFixture;
 use crate::{CoreState, auth::PeerCred};
+use vpnhide_diagnostic_model::framework::{FrameworkWorkerRequest, FrameworkWorkerTask};
 
 const WORKER: &str = vpnhide_loader_ipc::WORKER_PROCESS;
 const DEADLINE: Duration = Duration::from_secs(20);
@@ -29,6 +31,7 @@ struct Active {
     worker: Option<WorkerIdentity>,
     report: Option<NativeMeasurement>,
     minimum_birth_ticks: Option<u64>,
+    framework: Option<Arc<Mutex<FrameworkRun>>>,
 }
 #[derive(Default)]
 struct Inner {
@@ -42,6 +45,7 @@ struct Inner {
     retry_at: Option<Instant>,
     pending_cleanup: Option<NativeFixtureSpec>,
     unidentified_cleanup: bool,
+    pending_framework: Option<Arc<Mutex<FrameworkRun>>>,
 }
 type Spawn = fn(Box<dyn FnOnce() + Send>) -> std::io::Result<()>;
 pub struct Coordinator {
@@ -220,6 +224,16 @@ impl Coordinator {
         {
             return Err(DiagnosticError::Busy);
         }
+        #[cfg(target_os = "android")]
+        if self
+            .inner
+            .lock()
+            .expect("diagnostic coordinator")
+            .active
+            .is_none()
+        {
+            FrameworkRun::recover_orphan(state.publisher.epoch())?;
+        }
         let fingerprint = fingerprint(&state, &snapshot);
         let plan = plan(&snapshot);
         let mut inner = self.inner.lock().expect("diagnostic coordinator");
@@ -258,6 +272,7 @@ impl Coordinator {
             fingerprint,
             plan,
             outcome: DiagnosticOutcome::Running,
+            framework: None,
             stale: false,
         };
         inner.active = Some(Active {
@@ -267,6 +282,7 @@ impl Coordinator {
             worker: None,
             report: None,
             minimum_birth_ticks: None,
+            framework: None,
         });
         inner.last = Some(run.clone());
         state
@@ -293,14 +309,41 @@ impl Coordinator {
         Ok(run)
     }
     fn execute(&self, state: Arc<CoreState>, session: u64) {
-        let result = self.measure(&state, session);
+        // Keep the physical worker lease through BOTH fixture cleanup paths.
+        let worker_lease = super::android_worker::lease();
+        let result = match &worker_lease {
+            Ok(_) => self.measure(&state, session),
+            Err(detail) => Err(MeasurementFailure {
+                detail: detail.clone(),
+                native: None,
+                cleanup_confirmed: Some(true),
+            }),
+        };
+        let framework = self
+            .inner
+            .lock()
+            .expect("diagnostic coordinator")
+            .active
+            .as_ref()
+            .and_then(|a| a.framework.clone());
+        let pending_framework = framework.clone();
+        let framework = framework.map(|run| run.lock().expect("framework run").cleanup());
+        if framework.as_ref().is_some_and(|(_, clean)| !clean) {
+            self.inner
+                .lock()
+                .expect("diagnostic coordinator")
+                .pending_framework = pending_framework;
+        }
         let current = fingerprint(&state, &state.snapshot());
         let mut inner = self.inner.lock().expect("diagnostic coordinator");
         if inner.active.as_ref().is_none_or(|a| a.session != session) {
             return;
         }
         inner.active = None;
-        let retryable = matches!(&result, Err(failure) if failure.cleanup_confirmed == Some(true));
+        let retryable = matches!(&result, Err(failure) if failure.cleanup_confirmed == Some(true))
+            || framework
+                .as_ref()
+                .is_some_and(|(result, clean)| *clean && !result.controls.is_empty());
         if retryable && inner.attempts < 3 {
             inner.retry_at =
                 Some(Instant::now() + Duration::from_secs(30 * u64::from(inner.attempts)));
@@ -317,6 +360,9 @@ impl Coordinator {
                     cleanup_confirmed: failure.cleanup_confirmed,
                 }
             }
+        }
+        if let Some((framework, _)) = framework {
+            run.record_framework(framework);
         }
         // Do not reattribute a run if policy, loaded images or platform changed.
         // Retain its evidence as stale rather than rewriting its fingerprint.
@@ -337,12 +383,6 @@ impl Coordinator {
         state: &CoreState,
         session: u64,
     ) -> Result<ScopedNativeResult, MeasurementFailure> {
-        let _worker_lease =
-            super::android_worker::lease().map_err(|detail| MeasurementFailure {
-                detail,
-                native: None,
-                cleanup_confirmed: Some(true),
-            })?;
         let fixture = TunFixture::create_detailed(session).map_err(|failure| {
             let cleaned = failure.cleanup.as_ref().map(|(_, cleaned)| *cleaned);
             let mut inner = self.inner.lock().expect("diagnostic coordinator");
@@ -451,6 +491,26 @@ impl Coordinator {
         }
     }
     fn reconcile_cleanup(&self) -> Result<(), DiagnosticError> {
+        let pending = self
+            .inner
+            .lock()
+            .expect("diagnostic coordinator")
+            .pending_framework
+            .clone();
+        if let Some(run) = pending {
+            let (_, clean) = run.try_lock().map_err(|_| DiagnosticError::Busy)?.cleanup();
+            if !clean {
+                return Err(DiagnosticError::Busy);
+            }
+            let mut inner = self.inner.lock().expect("diagnostic coordinator");
+            if inner
+                .pending_framework
+                .as_ref()
+                .is_some_and(|r| Arc::ptr_eq(r, &run))
+            {
+                inner.pending_framework = None;
+            }
+        }
         let pending = {
             let inner = self.inner.lock().expect("diagnostic coordinator");
             if inner.unidentified_cleanup {
@@ -521,6 +581,64 @@ impl Coordinator {
             return Ok(None);
         };
         active.claim(identity, Instant::now())
+    }
+
+    pub fn framework_step(
+        &self,
+        peer: PeerCred,
+        request: FrameworkWorkerRequest,
+    ) -> Result<Option<FrameworkWorkerTask>, DiagnosticError> {
+        let framework = {
+            let mut inner = self.inner.lock().expect("diagnostic coordinator");
+            let identity = worker_identity(
+                Path::new("/proc"),
+                inner.app_dir.as_ref().ok_or(DiagnosticError::Disabled)?,
+                peer,
+            )?;
+            if inner.cancelled {
+                return Err(DiagnosticError::Expired);
+            }
+            let active = inner.active.as_mut().ok_or(DiagnosticError::StaleSession)?;
+            let task = active.task.as_ref().ok_or(DiagnosticError::StaleSession)?;
+            if active.deadline <= Instant::now() {
+                return Err(DiagnosticError::Expired);
+            }
+            if active.worker != Some(identity) {
+                return Err(DiagnosticError::WrongProcess);
+            }
+            if task.session != request.session
+                || task.core_epoch != request.core_epoch
+                || active.report.is_some()
+            {
+                return Err(DiagnosticError::StaleSession);
+            }
+            if active.framework.is_none() {
+                if request.phase
+                    != vpnhide_diagnostic_model::framework::FrameworkWorkerPhase::Prepared
+                {
+                    return Err(DiagnosticError::StaleSession);
+                }
+                active.framework = Some(Arc::new(Mutex::new(FrameworkRun::new(
+                    task.session,
+                    task.core_epoch,
+                    (
+                        identity.uid,
+                        identity.process.pid,
+                        identity.process.start_ticks,
+                    ),
+                    task.fixture.interface.name.clone(),
+                    task.fixture.mtu,
+                    request.hook_sha256.clone(),
+                )?)));
+            }
+            active
+                .framework
+                .as_ref()
+                .expect("framework reserved")
+                .clone()
+        };
+        let mut framework = framework.try_lock().map_err(|_| DiagnosticError::Busy)?;
+        framework.step(request)
     }
 
     pub fn report(
@@ -653,6 +771,7 @@ mod tests {
             worker: None,
             report: None,
             minimum_birth_ticks: Some(25),
+            framework: None,
         };
         // No claim before fresh-process preparation has completed.
         assert_eq!(active.claim(identity(30), now), Ok(None));
@@ -713,6 +832,7 @@ mod tests {
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
             session: 3,
+            framework: None,
             fingerprint: fingerprint(&state, &snapshot),
             plan: plan(&snapshot),
             stale: false,
@@ -738,6 +858,7 @@ mod tests {
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
             session: 3,
+            framework: None,
             fingerprint: fingerprint(&state, &snapshot),
             plan: plan(&snapshot),
             stale: false,

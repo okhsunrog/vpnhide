@@ -61,9 +61,11 @@ pub use vpnhide_diagnostic_model::{
     DiagnosticError, DiagnosticRun, DiagnosticWorkerReport, DiagnosticWorkerTask,
 };
 
+pub use vpnhide_diagnostic_model::framework::{FrameworkWorkerRequest, FrameworkWorkerTask};
+
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 16;
+pub const PROTOCOL_VERSION: u32 = 17;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -704,6 +706,9 @@ pub trait VpnhideCore {
     /// Core-owned controlled run; reads reuse its result until explicit retry or invalidation.
     async fn request_diagnostic_run(force: bool) -> Result<DiagnosticRun, DiagnosticError>;
     /// Only the live, fixed Zygote worker process may claim/report a session.
+    async fn framework_worker_step(
+        request: FrameworkWorkerRequest,
+    ) -> Result<Option<FrameworkWorkerTask>, DiagnosticError>;
     async fn join_diagnostic_worker() -> Result<Option<DiagnosticWorkerTask>, DiagnosticError>;
     async fn report_diagnostic_worker(
         report: DiagnosticWorkerReport,
@@ -871,6 +876,7 @@ mod tests {
             ] {
                 let run = DiagnosticRun {
                     session: u64::MAX,
+                    framework: None,
                     fingerprint: DiagnosticFingerprint {
                         boot_id: "boot".into(),
                         core_epoch: 1,

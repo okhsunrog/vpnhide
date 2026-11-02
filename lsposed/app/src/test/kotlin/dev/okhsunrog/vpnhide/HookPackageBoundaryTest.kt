@@ -19,17 +19,7 @@ class HookPackageBoundaryTest {
     private val mainSources = File("src/main/kotlin/dev/okhsunrog/vpnhide")
     private val hookSources = File(mainSources, "hook")
 
-    private val sharedFiles =
-        setOf(
-            "CanonicalConfigData.kt",
-            "HookMaskData.kt",
-            "GatedLogger.kt",
-            "LogTags.kt",
-            "LsposedState.kt",
-            "AtomicTelemetryData.kt",
-            "PortPolicyData.kt",
-            "Protocol.kt",
-        )
+    private val sharedFiles = File("../hook-shared-sources.txt").readLines().filter { it.isNotBlank() }.toSet()
 
     private fun kotlinFiles(dir: File): List<File> = dir.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
 

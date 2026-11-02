@@ -52,6 +52,7 @@ import java.lang.reflect.Array as JavaArray
 @Suppress("DEPRECATION", "LargeClass")
 class HookEntry : IXposedHookLoadPackage {
     private val hookInstalled = AtomicBoolean(false)
+    private val frameworkFixture = FrameworkFixtureHooks()
 
     // Guards installing the ConnectivityService callback hook exactly once —
     // it can be triggered from either the direct lookup or the addService catch.
@@ -101,12 +102,21 @@ class HookEntry : IXposedHookLoadPackage {
     private fun isTargetCallerOrUid(
         hook: HookIds.Hook,
         uid: Int? = null,
-    ): Boolean =
-        SystemServerConfigCache.isHookEnabledForUid(effectiveCallerUid(), hook) ||
+    ): Boolean {
+        val caller = effectiveCallerUid()
+        if ((uid == null || uid == caller) && frameworkFixture.rawFor(caller)) return false
+        return SystemServerConfigCache.isHookEnabledForUid(caller, hook) ||
             (uid != null && SystemServerConfigCache.isHookEnabledForUid(uid, hook))
+    }
 
     private fun rememberConnectivityService(instance: Any?) {
-        if (instance != null) connectivityServiceInstance = instance
+        if (instance != null && connectivityServiceInstance !== instance) {
+            connectivityServiceInstance = instance
+            runCatching { frameworkFixture.attach(instance) }.onFailure {
+                // A diagnostic adapter failure must not interrupt production hook attachment/filtering.
+                HookLog.e("VpnHide: framework fixture attach failed: ${it.message}")
+            }
+        }
     }
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -575,7 +585,7 @@ class HookEntry : IXposedHookLoadPackage {
     private fun isTargetUid(
         uid: Int,
         hook: HookIds.Hook,
-    ): Boolean = SystemServerConfigCache.isHookEnabledForUid(uid, hook)
+    ): Boolean = !frameworkFixture.rawFor(uid) && SystemServerConfigCache.isHookEnabledForUid(uid, hook)
 
     // Smoke-check at install time: every private AOSP field/ctor we touch
     // by reflection in the writeToParcel hooks. Returns the keys that
@@ -987,6 +997,7 @@ class HookEntry : IXposedHookLoadPackage {
         // fires, because the live binder dispatches to the child copy (attached,
         // all counts=1, but no connectivity counter ever moves). binder.javaClass
         // IS the live class, so hooking it always intercepts the real calls.
+        rememberConnectivityService(binder)
         val csClass = binder.javaClass
         JavaHookDiagnostics.inspect(
             csClass,
@@ -1252,6 +1263,7 @@ class HookEntry : IXposedHookLoadPackage {
         val cs = param.thisObject ?: return
         val filtered = networks.filterNot { isVpnNetwork(cs, it) }
         if (filtered.size == networks.size) return
+        networks.filter { it !in filtered }.forEach { frameworkFixture.filtered(it, FixtureTransaction.NETWORKS) }
         param.result = filtered.toTypedArray()
         LsposedStats.record(effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_NETWORK)
         HookLog.i(
@@ -1301,6 +1313,14 @@ class HookEntry : IXposedHookLoadPackage {
         if (!isTargetCallerOrUid(HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT, explicitUid)) return false
         val cs = param.thisObject ?: return false
         if (param.result != null && isVpnNetwork(cs, network)) {
+            frameworkFixture.filtered(
+                network,
+                when (method) {
+                    "getNetworkCapabilities" -> FixtureTransaction.CAPABILITIES
+                    "getLinkProperties" -> FixtureTransaction.PROPERTIES
+                    else -> FixtureTransaction.OTHER
+                },
+            )
             param.result = null
             LsposedStats.record(explicitUid ?: effectiveCallerUid(), HookIds.Hook.LSPOSED_CONNECTIVITY_RESULT)
             HookLog.i("VpnHide: nulled $method for a VPN handle, uid=${explicitUid ?: effectiveCallerUid()}")

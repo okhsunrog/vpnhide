@@ -386,7 +386,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC16; journal9 reads schemas1–8. These
+The current paired APK/Core contract is RPC17; journal9 reads schemas1–8. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -405,3 +405,15 @@ unlinks the retired inode. Changed/unreadable sources stay preserved. APK previe
 use the same pure Rust policy with the full package-to-UID map and are not cleanup
 authority. Preparation respects the request deadline; the two-second queue budget
 starts after preparation, with cancellation retained through writer admission.
+
+
+The autonomous framework worker uses a Core-owned phase protocol (RPC17). A
+root-owned, short BOOTTIME lease authorizes only one real worker PID/birth within
+specific ConnectivityService Binder transactions. system_server supplies dirty
+invocation-local Network/NC/LP objects before production filtering; these never
+enter netd, global routes or the user's VPN. Typed scoped evidence requires RAW
+positive, negative and ordinary-object controls and actual production-branch
+observations. Default network, callbacks, legacy and PendingIntent remain separate
+requirements. Full run/generation completeness is still false; a fresh worker
+cannot establish old-game process coverage. The paired APK/Core wire upgrade is
+independent of the kernel wire and private journal.

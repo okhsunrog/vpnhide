@@ -27,6 +27,7 @@ enum_map!(
     ProcInterfaces,
     SysInterfaces,
     FrameworkNetworks,
+    FrameworkDefaultNetwork,
     FrameworkCapabilities,
     FrameworkLinkProperties,
     FrameworkLegacyInfo,
@@ -282,6 +283,7 @@ pub struct CoreDiagnosticRun {
     pub contract: u32,
     pub required: Vec<CoreRequiredCheck>,
     pub outcome: CoreDiagnosticOutcome,
+    pub framework: Option<crate::CoreScopedFrameworkResult>,
     pub stale: bool,
 }
 impl From<model::DiagnosticRun> for CoreDiagnosticRun {
@@ -316,6 +318,7 @@ impl From<model::DiagnosticRun> for CoreDiagnosticRun {
             contract: v.plan.contract,
             required: v.plan.required.into_iter().map(Into::into).collect(),
             outcome,
+            framework: v.framework.map(Into::into),
             stale: v.stale,
         }
     }

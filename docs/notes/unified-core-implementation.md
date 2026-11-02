@@ -3,7 +3,7 @@
 Approved design, based on dev-2.x `3493354f` (2026-11-02).
 This is an implementation ledger, not a claim of device acceptance.
 
-Current cloud contract: **RPC16 / journal9 (reads schemas1–8)**. Kernel control2 /
+Current cloud contract: **RPC17 / journal9 (reads schemas1–8)**. Kernel control2 /
 telemetry1 is unchanged: APK/Core contract and private journal upgrades do not
 require rebuilding a compatible user builtin kernel. Stages4–7/RFC2 remain partial;
 the latest entries distinguish remaining code from device/key/publication gates.
@@ -1079,3 +1079,67 @@ Phone/provider gates remain real injection/Binder/SELinux/background-service and
 old-process acceptance, kernel preflight/private ABI/ALL=n/boot evidence; production
 signing and fork publication target remain external. Save/draft stays unchanged;
 the required final startup regression still runs after the whole architecture work.
+
+## Cloud checkpoint: scoped framework fixture, RPC17
+
+Implemented code (separate from device acceptance):
+
+- Core owns an explicit Prepared → Raw → Protected → Revoked → Finished worker
+  protocol, exact retry semantics, fixed lease, root authorization, bounded ACK
+  waits, system_server PID/birth/UID/name verification, evaluation and cleanup.
+  Source publication is separate from observations and real production filtering.
+- The genuine Zygote `:diagnostics` worker performs public ConnectivityManager
+  calls on actual opaque Network handles returned by system_server. Its bounded
+  partial wake lock covers measurement; framework failure still submits native
+  observations. It never computes a protection verdict.
+- system_server injects identical dirty VPN and ordinary `ipsec*` objects before
+  normal production after-hooks, scoped to the exact authorized outer Binder
+  transaction and worker UID/PID/birth. The RAW exemption also covers parcel
+  backstops, without changing canonical policy or other processes of that UID.
+  Nested untrusted Binder calls clear inherited scope. Inherited onTransact
+  methods are deduplicated and each callback owns its restoration key.
+- Production branches independently record actual enumeration removal and
+  by-handle NC/LP rejection. Clones retain ordinary objects. Prepared/Revoked are
+  negative controls on the same handles; Raw supplies positive controls. Old
+  system_server loaded-source identity cannot silently match a newer worker.
+  The inlined source marker covers hook/generated sources, reviewed shared
+  dependencies and build/dependency configuration; it is not a binary signature.
+- Scoped results and source/process attribution are typed across RPC/UniFFI.
+  Three synchronous framework proofs do not discharge default-network,
+  legacy, callback or PendingIntent requirements. Diagnostic contract2 explicitly
+  retains default-network work; native4 + framework3 is still incomplete.
+- Cleanup terminalizes the run before I/O; an already admitted late step cannot
+  recreate authorization. Known cleanup failures retain a retryable exact run.
+  Android startup reconciles old Core-epoch leases before launching a new worker.
+  Captured, validated leaks survive missing final observations or cleanup errors.
+
+Cleanup confirmation concerns the exact root authorization and matching fixed ACK,
+not every inert staging file after a system_server/Core crash. Atomic ACK staging
+files contain no authorization. Fresh root-file checks and BOOTTIME expiry are
+required for every fixture/RAW decision even if observer delivery is delayed.
+Malformed/unrelated authorities remain preserved and block new admissions.
+
+Not implemented yet (cloud code, not device gates): callback/request/default and
+PendingIntent/legacy fixtures, remaining native address/routes/rules stimuli,
+complete loaded-generation inventory and reusable full-run cache, replacing the
+legacy UI suite/domain with this Core run, unified assessment/export/agent views,
+Stage4 shared revocation/fallback executor, replacement manager/bootstrap vertical,
+and concrete provisioner device adapters. Save/Cancel/footer and picker drafts
+remain unchanged; the cancelled autosave proposal must not be revived.
+
+Requires phone separately: actual Binder attachment/source dispatch and production
+filtering on Android bionic/Connectivity APEX, system_server SELinux channel access,
+negative/shared-UID/process-restart controls, background start/Doze, callbacks and
+cleanup under process death. Host model/channel/JVM tests are not those proofs.
+Requires signing key separately: final signed production APK. No phone was touched.
+RPC17 APK and Core must be paired; private journal9 still reads1–8 and preserves
+holds/budgets. Kernel control2/telemetry1 remain unchanged and do not require a
+compatible builtin kernel rebuild.
+
+Scoped framework checkpoint validation: 331 Core + 12 diagnostic-model + 14 RPC
++ 3 FFI library tests passed; strict host/all-target and Android ARM64/ARMv7 Clippy
+passed. 898 JVM tests, ktlint, detekt, CPD, lintDebug and no-root/scaffold structural
+checks passed. Evidence: `/tmp/vpnhide-framework-tests.log`,
+`/tmp/vpnhide-framework-{clippy,arm,android}-verified.log`. No device or production
+signing test was performed. Final startup acceptance must still be repeated after
+the remaining architectural changes.

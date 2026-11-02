@@ -2461,6 +2461,28 @@ impl VpnhideCore for CoreServer {
         .await
         .unwrap_or(Err(vpnhide_core_rpc::DiagnosticError::Disabled))
     }
+    async fn framework_worker_step(
+        self,
+        _ctx: Context,
+        request: vpnhide_core_rpc::FrameworkWorkerRequest,
+    ) -> Result<Option<vpnhide_core_rpc::FrameworkWorkerTask>, vpnhide_core_rpc::DiagnosticError>
+    {
+        let peer = self
+            .peer
+            .ok_or(vpnhide_core_rpc::DiagnosticError::WrongProcess)?;
+        let permit = self
+            .state
+            .work_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| vpnhide_core_rpc::DiagnosticError::Busy)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            self.state.diagnostics.framework_step(peer, request)
+        })
+        .await
+        .unwrap_or(Err(vpnhide_core_rpc::DiagnosticError::Disabled))
+    }
     async fn join_diagnostic_worker(
         self,
         _ctx: Context,

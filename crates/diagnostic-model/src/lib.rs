@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod framework;
 mod run;
 pub use run::*;
 

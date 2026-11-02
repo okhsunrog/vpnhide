@@ -147,6 +147,12 @@ impl CoreClient {
         request_diagnostic_run(force: bool) -> Result<DiagnosticRun, DiagnosticError>,
         CALL_DEADLINE
     );
+    call!(
+        framework_worker_step(
+            request: FrameworkWorkerRequest,
+        ) -> Result<Option<FrameworkWorkerTask>, DiagnosticError>,
+        CALL_DEADLINE
+    );
     call!(join_diagnostic_worker() -> Result<Option<DiagnosticWorkerTask>, DiagnosticError>, CALL_DEADLINE);
     call!(
         report_diagnostic_worker(report: DiagnosticWorkerReport) -> Result<(), DiagnosticError>,
