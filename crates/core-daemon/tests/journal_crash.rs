@@ -136,6 +136,20 @@ async fn wait_bound(socket: &std::path::Path, child: &mut CoreProcess) {
     .expect("core bound its socket");
 }
 
+async fn wait_revocation_crash(child: &mut CoreProcess) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                assert_eq!(status.code(), Some(97));
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("revocation crash boundary reached");
+}
+
 #[tokio::test]
 async fn crash_after_persist_intent_reconciles_to_failed_without_replay() {
     let dir = tempfile::tempdir().unwrap();
@@ -626,5 +640,168 @@ async fn startup_crash_repair_never_replays_a_load_in_the_same_boot() {
                 format!("{:x}", Sha256::digest(b"second payload"))
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn revocation_crash_windows_recover_exact_grant_without_config_or_backend_publication() {
+    use journal::{
+        NativeIntent, ZygiskAuthorityRecord, ZygiskAuthorizationIntent,
+        revocation::{RevocationState, ZygiskRevocation},
+    };
+    use std::os::unix::fs::MetadataExt;
+    use vpnhide_core_rpc::NativeBackend;
+    use vpnhide_protocol::zygisk_activation::{Authorization, FILE_NAME};
+    for point in [
+        "revocation-admission",
+        "revocation-intent",
+        "revocation-effect",
+        "revocation-completion",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let module = dir.path().join("module");
+        fs::create_dir_all(module.join("zygisk")).unwrap();
+        fs::write(
+            module.join("module.prop"),
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+        )
+        .unwrap();
+        // Metadata-only payload fixture. No loader is enabled or executed here.
+        let mut elf = [0; 64];
+        elf[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+        elf[16..18].copy_from_slice(&3u16.to_le_bytes());
+        elf[18..20].copy_from_slice(&183u16.to_le_bytes());
+        fs::write(module.join("zygisk/arm64-v8a.so"), elf).unwrap();
+        let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id")
+            .unwrap()
+            .trim()
+            .to_owned();
+        let wire = "vpnhide 2 config\ndebug 0\ndefault 0\nend 0\n".to_owned();
+        let auth = Authorization {
+            boot_id: boot.clone(),
+            generation: 42,
+            wire: wire.clone(),
+        };
+        fs::write(module.join(FILE_NAME), auth.encode().unwrap()).unwrap();
+        let meta = fs::metadata(&module).unwrap();
+        let authority = ZygiskAuthorityRecord {
+            operation: OperationId(42),
+            intent: NativeIntent {
+                backend: NativeBackend::Zygisk,
+                wire,
+                zygisk_module: Some(module.clone()),
+                zygisk_authorization: Some(ZygiskAuthorizationIntent {
+                    boot_id: boot.clone(),
+                    generation: 42,
+                    directory_identity: (meta.dev(), meta.ino()),
+                }),
+            },
+        };
+        let stored = journal::Journal {
+            issued_through: 42,
+            config_revision: 9,
+            zygisk_authority: Some(authority.clone()),
+            zygisk_revocation: Some(ZygiskRevocation {
+                operation: Some(OperationId(42)),
+                current_boot: boot,
+                authority: authority.clone(),
+                state: RevocationState::Unknown,
+            }),
+            ..Default::default()
+        };
+        let config = dir.path().join("config.json");
+        let socket = dir.path().join("core.sock");
+        let journal_path = dir.path().join("core_operations.json");
+        journal::write_atomic(&journal_path, &stored).unwrap();
+        let mut child = spawn_core(&socket, &config, Some(point), None);
+        wait_bound(&socket, &mut child).await;
+        let client = CoreClient::connect(&socket);
+        client.hello().await.unwrap();
+        let op = client.allocate_operation_id().await.unwrap().unwrap();
+        assert_eq!(op, OperationId(43));
+        let _uncertain_reply = client
+            .submit_edit(op, BaseRef { revision: 9 }, ConfigEdit::RepairActivation)
+            .await;
+        wait_revocation_crash(&mut child).await;
+        assert_eq!(
+            module.join(FILE_NAME).exists(),
+            matches!(point, "revocation-admission" | "revocation-intent")
+        );
+        fs::remove_file(&socket).ok();
+        let retry_crash = (point != "revocation-completion").then_some("revocation-completion");
+        let mut restarted = spawn_core(&socket, &config, retry_crash, None);
+        wait_bound(&socket, &mut restarted).await;
+        let client = CoreClient::connect(&socket);
+        client.hello().await.unwrap();
+        let receipt = client.get_operation(op).await.unwrap().unwrap();
+        let (client, _final_process) = if point == "revocation-completion" {
+            assert_eq!(receipt.settled, Some(PhaseOutcome::Confirmed));
+            (client, None)
+        } else {
+            assert_eq!(receipt.settled, Some(PhaseOutcome::Unknown));
+            let repair = client.allocate_operation_id().await.unwrap().unwrap();
+            let _uncertain_retry = client
+                .submit_edit(
+                    repair,
+                    BaseRef { revision: 9 },
+                    ConfigEdit::RepairActivation,
+                )
+                .await;
+            wait_revocation_crash(&mut restarted).await;
+            fs::remove_file(&socket).ok();
+            let mut final_process = spawn_core(&socket, &config, None, None);
+            wait_bound(&socket, &mut final_process).await;
+            let replacement = CoreClient::connect(&socket);
+            replacement.hello().await.unwrap();
+            assert_eq!(
+                replacement
+                    .get_operation(repair)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .settled,
+                Some(PhaseOutcome::Confirmed)
+            );
+            assert_eq!(
+                replacement
+                    .get_operation(op)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .settled,
+                Some(PhaseOutcome::Unknown),
+                "historical Unknown is immutable"
+            );
+            (replacement, Some(final_process))
+        };
+        let publication = client.state_since(0, 0).await.unwrap();
+        assert!(publication.snapshot.config.is_none());
+        assert_eq!(publication.snapshot.config_revision, 9);
+        assert_eq!(publication.snapshot.backend.applied, None);
+        assert!(
+            !publication
+                .snapshot
+                .apply_evidence
+                .iter()
+                .any(|e| e.phase == ConfigPhase::Native)
+        );
+        assert!(
+            publication
+                .snapshot
+                .zygisk_revocation
+                .as_ref()
+                .is_some_and(|r| !r.pending())
+        );
+        assert!(!config.exists());
+        assert!(!module.join(FILE_NAME).exists());
+        let stored = journal::read(&journal_path).unwrap();
+        assert_eq!(stored.zygisk_authority, Some(authority));
+        assert!(stored.native_startup.is_none());
+        assert!(stored.native_load_budget.is_none());
+        assert!(stored.kmod_preflights.is_none());
+        assert!(
+            stored.held_resources().is_empty(),
+            "only this exact narrow repair was superseded"
+        );
     }
 }

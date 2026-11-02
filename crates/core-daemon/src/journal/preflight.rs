@@ -204,7 +204,7 @@ impl Journal {
             .is_some_and(PreflightLedger::uncertain)
     }
     pub fn native_lifecycle_uncertain(&self) -> bool {
-        self.native_startup_uncertain() || self.preflight_uncertain()
+        self.native_startup_uncertain() || self.preflight_uncertain() || self.revocation_uncertain()
     }
 
     /// Call only under the writer, then sync the candidate journal BEFORE any
@@ -374,7 +374,7 @@ mod tests {
     fn legacy_migration_preserves_all_existing_effect_holds_and_budgets() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("journal.json");
-        for version in 1..=8 {
+        for version in 1..=9 {
             let original = Journal {
                 version,
                 native_startup: Some(NativeStartup {
@@ -402,7 +402,7 @@ mod tests {
             value.as_object_mut().unwrap().remove("kmod_preflights");
             std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
             let migrated = super::super::read(&path).unwrap();
-            assert_eq!(migrated.version, 9);
+            assert_eq!(migrated.version, 10);
             assert_eq!(migrated.native_startup, original.native_startup);
             assert_eq!(migrated.native_load_budget, original.native_load_budget);
             assert_eq!(migrated.native_quarantine, original.native_quarantine);

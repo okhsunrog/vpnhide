@@ -1,5 +1,6 @@
 //! Command-owner tests use the actual durable queue and receipt store.
 use super::*;
+use std::fs;
 use vpnhide_core_rpc::{ConfigToggle, StateSnapshot};
 
 fn load(root: &std::path::Path, epoch: u64) -> Arc<CoreState> {
@@ -1619,7 +1620,7 @@ fn startup_hold_survives_receipt_retention_and_schema_two_upgrade() {
     json.as_object_mut().unwrap().remove("native_startup");
     std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
     let mut upgraded = journal::read(&path).unwrap();
-    assert_eq!(upgraded.version, 9);
+    assert_eq!(upgraded.version, 10);
     assert_eq!(upgraded.issued_through, 42);
     assert!(upgraded.native_startup.is_none());
     upgraded.native_startup = Some(journal::NativeStartup {
@@ -1637,7 +1638,7 @@ fn startup_hold_survives_receipt_retention_and_schema_two_upgrade() {
         journal::read(&path).unwrap().held_resources(),
         vec![ConfigPhase::Native]
     );
-    upgraded.version = 10;
+    upgraded.version = 11;
     journal::write_atomic(&path, &upgraded).unwrap();
     assert!(journal::read(&path).is_err());
 }
@@ -1862,4 +1863,368 @@ fn empty_or_incomplete_replace_does_not_erase_configured_choices() {
             assert_eq!(std::fs::read_to_string(source).unwrap(), contents);
         }
     }
+}
+
+#[test]
+fn missing_config_repair_revokes_only_exact_pending_grant_and_preserves_other_holds() {
+    use crate::journal::revocation::{RevocationState, ZygiskRevocation};
+    let root = tempfile::tempdir().unwrap();
+    let module = root.path().join("module");
+    let (mut journal, authority, _) = crate::native_boot::transition::test_fixture(&module);
+    journal.config_revision = 17;
+    journal.zygisk_revocation = Some(ZygiskRevocation {
+        operation: Some(OperationId(43)),
+        current_boot: authority.reference().unwrap().boot_id,
+        authority: authority.clone(),
+        state: RevocationState::Unknown,
+    });
+    journal.upsert(uncertain(
+        10,
+        ConfigPhase::Native,
+        CanonicalConfig::default(),
+        17,
+    ));
+    journal.upsert(uncertain(
+        11,
+        ConfigPhase::Cleanup,
+        CanonicalConfig::default(),
+        17,
+    ));
+    journal::write_atomic(&root.path().join("operations.json"), &journal).unwrap();
+    let state = load(root.path(), 2);
+    assert_eq!(
+        vpnhide_core_rpc::recovery::refusal(
+            &state.snapshot(),
+            vpnhide_core_rpc::recovery::RecoveryAction::Repair
+        ),
+        None
+    );
+    let op = command(&state, ConfigEdit::RepairActivation);
+    let receipt = state.get_operation_record(op).unwrap();
+    assert_eq!(receipt.settled, Some(PhaseOutcome::Confirmed));
+    assert!(state.snapshot().config.is_none());
+    assert!(!root.path().join("config.json").exists());
+    assert_eq!(state.config_revision(), 17);
+    let stored = journal::read(&root.path().join("operations.json")).unwrap();
+    assert!(stored.native_startup.is_none());
+    assert_eq!(stored.zygisk_authority, Some(authority));
+    assert!(stored.get(op).unwrap().is_revocation_only_repair());
+    assert!(!state.snapshot().apply_evidence.iter().any(|e| e.op == op));
+    for old in [10, 11] {
+        assert!(
+            stored
+                .get(OperationId(old))
+                .unwrap()
+                .superseded_phases
+                .is_empty()
+        );
+    }
+    assert!(stored.held_resources().contains(&ConfigPhase::Native));
+    assert!(stored.held_resources().contains(&ConfigPhase::Cleanup));
+    assert!(!stored.revocation_uncertain());
+    assert!(
+        !module
+            .join(vpnhide_protocol::zygisk_activation::FILE_NAME)
+            .exists()
+    );
+    let before = fs::read(root.path().join("operations.json")).unwrap();
+    state
+        .submit_command(
+            op,
+            CoreCommand::Edit {
+                base: BaseRef { revision: 17 },
+                edit: ConfigEdit::RepairActivation,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        fs::read(root.path().join("operations.json")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn missing_config_revocation_repair_recovers_a_durable_completion_without_new_policy() {
+    use crate::journal::revocation::{RevocationState, ZygiskRevocation};
+    let root = tempfile::tempdir().unwrap();
+    let module = root.path().join("module");
+    let (mut journal, authority, _) = crate::native_boot::transition::test_fixture(&module);
+    journal.config_revision = 7;
+    journal.zygisk_revocation = Some(ZygiskRevocation {
+        operation: Some(OperationId(43)),
+        current_boot: authority.reference().unwrap().boot_id,
+        authority: authority.clone(),
+        state: RevocationState::Unknown,
+    });
+    journal::write_atomic(&root.path().join("operations.json"), &journal).unwrap();
+    let state = load(root.path(), 1);
+    let op = state.issue_operation_id().unwrap();
+    state
+        .call_writer(move |state| {
+            // Paired admission/intent + revocation completion are durable;
+            // fail only final operation settlement, after the effect's own receipt.
+            journal::fail_write(3, false);
+            state.execute_edit_opts(
+                op,
+                BaseRef { revision: 7 },
+                &ConfigEdit::RepairActivation,
+                SubmitOptions::default(),
+                CommandSpec::default(),
+            )
+        })
+        .unwrap()
+        .unwrap();
+    assert!(state.snapshot().storage_fault.is_some());
+    drop(state);
+    let recovered = load(root.path(), 2);
+    assert_eq!(
+        recovered.get_operation_record(op).unwrap().settled,
+        Some(PhaseOutcome::Confirmed)
+    );
+    assert!(recovered.snapshot().config.is_none());
+    assert_eq!(recovered.config_revision(), 7);
+    assert!(
+        recovered
+            .snapshot()
+            .zygisk_revocation
+            .as_ref()
+            .is_some_and(|r| !r.pending())
+    );
+    assert_eq!(
+        journal::read(&root.path().join("operations.json"))
+            .unwrap()
+            .zygisk_authority,
+        Some(authority)
+    );
+}
+
+#[test]
+fn full_reset_revokes_bundled_grant_and_withdraws_prior_publication_and_applied_state() {
+    use vpnhide_core_rpc::{
+        NativeBackend, NativeBootOutcome, SelectionMode, ZygiskLifecycle, ZygiskPublication,
+        ZygiskTargets,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let module = root.path().join("module");
+    let (mut stored, mut authority, target) = crate::native_boot::transition::test_fixture(&module);
+    let boot =
+        crate::native_boot::read_boot_id(std::path::Path::new(crate::native_boot::BOOT_ID_PATH));
+    authority
+        .intent
+        .zygisk_authorization
+        .as_mut()
+        .unwrap()
+        .boot_id = boot.clone();
+    target
+        .publish_authorized(&vpnhide_protocol::zygisk_activation::Authorization {
+            boot_id: boot.clone(),
+            generation: 42,
+            wire: authority.intent.wire.clone(),
+        })
+        .unwrap();
+    stored.zygisk_authority = Some(authority.clone());
+    stored.config_revision = 3;
+    config_file::write_atomic(
+        &root.path().join("config.json"),
+        &CanonicalConfig::default(),
+    )
+    .unwrap();
+    journal::write_atomic(&root.path().join("operations.json"), &stored).unwrap();
+    let state = CoreState::load_with_journal(
+        Publisher::new(1, StateSnapshot::default()),
+        root.path().join("config.json"),
+        Some(root.path().join("operations.json")),
+        Some(root.path().join("unused-ctl")),
+    )
+    .unwrap();
+    native_none(&state, root.path());
+    fs::write(root.path().join("boot-id"), &boot).unwrap();
+    {
+        let handle = state.native_handle().unwrap();
+        let mut native = handle.lock().unwrap();
+        native.env.zygisk_module = Some(module.clone());
+        native.status.boot_id = boot;
+        native.selection = Some(crate::native_boot::Selection {
+            backend: NativeBackend::Zygisk,
+            mode: SelectionMode::Authorized,
+            filesystem_hiding: None,
+        });
+        native.status.outcome = NativeBootOutcome::Selected {
+            backend: NativeBackend::Zygisk,
+            mode: SelectionMode::Authorized,
+            filesystem_hiding: None,
+        };
+        native.status.zygisk_targets = ZygiskTargets::Published;
+    }
+    state.set_effect_paths(Some(crate::effects::EffectPaths {
+        root: root.path().join("effects"),
+    }));
+    state.publisher.update(|s| {
+        s.backend.applied = Some(NativeBackend::Zygisk);
+        let mut lifecycle = ZygiskLifecycle::pending(authority.reference().unwrap(), 1);
+        lifecycle.publication = ZygiskPublication::Matching;
+        s.zygisk_lifecycle = Some(lifecycle);
+    });
+    let op = state.issue_operation_id().unwrap();
+    state.submit_command(op, CoreCommand::FullReset).unwrap();
+    assert_eq!(
+        state.get_operation_record(op).unwrap().settled,
+        Some(PhaseOutcome::Confirmed)
+    );
+    let snapshot = state.snapshot();
+    assert!(snapshot.config.is_none());
+    assert_eq!(snapshot.backend.applied, None);
+    assert!(
+        !snapshot
+            .apply_evidence
+            .iter()
+            .any(|e| e.phase == ConfigPhase::Native)
+    );
+    assert_eq!(
+        snapshot.backend.boot.unwrap().zygisk_targets,
+        ZygiskTargets::Retired
+    );
+    assert_eq!(
+        snapshot.zygisk_lifecycle.unwrap().publication,
+        ZygiskPublication::NotObserved
+    );
+    assert!(
+        snapshot
+            .zygisk_revocation
+            .as_ref()
+            .is_some_and(|r| !r.pending())
+    );
+    state.refresh_zygisk_lifecycle();
+    assert_eq!(
+        state.snapshot().zygisk_lifecycle.unwrap().publication,
+        ZygiskPublication::Absent
+    );
+    assert!(target.authorization_absent().unwrap());
+    let stored = journal::read(&root.path().join("operations.json")).unwrap();
+    assert_eq!(
+        stored.zygisk_authority.unwrap().operation,
+        op,
+        "empty publication is historical, not current apply"
+    );
+}
+
+#[test]
+fn narrow_repair_first_write_and_completion_faults_leave_no_orphan_hold_even_at_zero_retention() {
+    use crate::journal::revocation::{RevocationState, ZygiskRevocation};
+    for fail in [1, 2] {
+        let root = tempfile::tempdir().unwrap();
+        let module = root.path().join("module");
+        let (mut stored, authority, target) = crate::native_boot::transition::test_fixture(&module);
+        stored.retain_settled = 0;
+        stored.zygisk_revocation = Some(ZygiskRevocation {
+            operation: Some(OperationId(43)),
+            current_boot: authority.reference().unwrap().boot_id,
+            authority,
+            state: RevocationState::Unknown,
+        });
+        journal::write_atomic(&root.path().join("operations.json"), &stored).unwrap();
+        let state = load(root.path(), 1);
+        let op = state.issue_operation_id().unwrap();
+        let result = state
+            .call_writer(move |state| {
+                journal::fail_write(fail, false);
+                state.execute_edit_opts(
+                    op,
+                    BaseRef { revision: 0 },
+                    &ConfigEdit::RepairActivation,
+                    SubmitOptions::default(),
+                    CommandSpec::default(),
+                )
+            })
+            .unwrap();
+        assert_eq!(result.is_ok(), fail == 2);
+        assert_eq!(target.authorization_absent().unwrap(), fail == 2);
+        drop(state);
+        let recovered = load(root.path(), 2);
+        let repair = command(&recovered, ConfigEdit::RepairActivation);
+        assert_eq!(
+            recovered.get_operation_record(repair).unwrap().settled,
+            Some(PhaseOutcome::Confirmed)
+        );
+        let stored = journal::read(&root.path().join("operations.json")).unwrap();
+        assert!(stored.held_resources().is_empty());
+        assert!(stored.expired_holds.is_empty());
+        assert!(stored.native_startup.is_none());
+        assert!(recovered.snapshot().config.is_none());
+        assert!(
+            !recovered
+                .snapshot()
+                .apply_evidence
+                .iter()
+                .any(|e| e.phase == ConfigPhase::Native)
+        );
+        if fail == 2 {
+            assert_eq!(
+                recovered.get_operation_record(op).unwrap().settled,
+                Some(PhaseOutcome::Unknown)
+            );
+        }
+    }
+}
+
+#[test]
+fn old_revoked_zygisk_grant_does_not_withdraw_current_builtin_delivery() {
+    use crate::journal::revocation::{RevocationState, ZygiskRevocation};
+    use vpnhide_core_rpc::{NativeBackend, NativeBootOutcome, SelectionMode};
+    let root = tempfile::tempdir().unwrap();
+    let (mut stored, authority, _) =
+        crate::native_boot::transition::test_fixture(&root.path().join("module"));
+    stored.config_revision = 3;
+    stored.zygisk_revocation = Some(ZygiskRevocation {
+        operation: Some(OperationId(43)),
+        current_boot: "previous-boot".into(),
+        authority,
+        state: RevocationState::Confirmed,
+    });
+    let mut applied = uncertain(50, ConfigPhase::Native, CanonicalConfig::default(), 3);
+    applied.finalized_unknown = false;
+    applied.native_intent = Some(journal::NativeIntent {
+        backend: NativeBackend::Builtin,
+        wire: "vpnhide 2 config\ndebug 0\ndefault 0\nend 0\n".into(),
+        zygisk_module: None,
+        zygisk_authorization: None,
+    });
+    applied.record.phases[0].outcome = PhaseOutcome::Confirmed;
+    applied.record.settled = Some(PhaseOutcome::Confirmed);
+    stored.upsert(applied);
+    config_file::write_atomic(
+        &root.path().join("config.json"),
+        &CanonicalConfig::default(),
+    )
+    .unwrap();
+    journal::write_atomic(&root.path().join("operations.json"), &stored).unwrap();
+    let state = load(root.path(), 2);
+    native_none(&state, root.path());
+    {
+        let handle = state.native_handle().unwrap();
+        let mut boot = handle.lock().unwrap();
+        boot.selection = Some(crate::native_boot::Selection {
+            backend: NativeBackend::Builtin,
+            mode: SelectionMode::Adopted,
+            filesystem_hiding: None,
+        });
+        boot.status.outcome = NativeBootOutcome::Selected {
+            backend: NativeBackend::Builtin,
+            mode: SelectionMode::Adopted,
+            filesystem_hiding: None,
+        };
+    }
+    state.publish_native_boot(Some(NativeBackend::Builtin));
+    let store = state.engine.store.lock().unwrap().clone();
+    state.publish_store(&store);
+    let snapshot = state.snapshot();
+    assert_eq!(snapshot.backend.applied, Some(NativeBackend::Builtin));
+    assert!(
+        snapshot
+            .apply_evidence
+            .iter()
+            .any(|e| e.op == OperationId(50)
+                && e.phase == ConfigPhase::Native
+                && e.outcome == PhaseOutcome::Confirmed)
+    );
 }

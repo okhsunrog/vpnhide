@@ -65,7 +65,7 @@ pub use vpnhide_diagnostic_model::framework::{FrameworkWorkerRequest, FrameworkW
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 18;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -212,6 +212,8 @@ pub struct Published {
 pub struct StateSnapshot {
     #[serde(default)]
     pub zygisk_lifecycle: Option<ZygiskLifecycle>,
+    #[serde(default)]
+    pub zygisk_revocation: Option<ZygiskRevocationStatus>,
     #[serde(default)]
     pub autonomous_diagnostics: Option<DiagnosticRun>,
     #[serde(default)]
@@ -969,6 +971,7 @@ mod tests {
                     revision: 7,
                     snapshot: StateSnapshot {
                         zygisk_lifecycle: None,
+                        zygisk_revocation: None,
                         autonomous_diagnostics: None,
                         config,
                         config_revision: 5,

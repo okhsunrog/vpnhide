@@ -3,7 +3,7 @@
 Approved design, based on dev-2.x `3493354f` (2026-11-02).
 This is an implementation ledger, not a claim of device acceptance.
 
-Current cloud contract: **RPC17 / journal9 (reads schemas1–8)**. Kernel control2 /
+Current cloud contract: **RPC18 / journal10 (reads schemas1–9)**. Kernel control2 /
 telemetry1 is unchanged: APK/Core contract and private journal upgrades do not
 require rebuilding a compatible user builtin kernel. Stages4–7/RFC2 remain partial;
 the latest entries distinguish remaining code from device/key/publication gates.
@@ -1150,3 +1150,56 @@ admit a kernel load/adoption merely because the previous exposure set was empty.
 Observation/retirement remains admissible; explicit Repair cannot override this
 boot fence. Eleven journal tests pass, including builtin/ko/KPM and explicit paths.
 Shared journaled revocation/fallback executor remains subsequent implementation.
+
+## Cloud checkpoint: shared Zygisk revocation, RPC18 / journal10
+
+Implemented: startup retirement, explicit repair and FullReset call one writer-owned
+revocation executor. It pins the retained recipient device/inode, manifest contract
+and exact boot/generation/wire grant. Intent and result each sync independently;
+absence is read back on the same recipient. A different grant/recipient is never
+blindly removed. Disabled/removed modules or missing executable libraries may have
+their exact old grant revoked, while publication remains prohibited. Publication
+eligibility and removal eligibility are deliberately distinct capabilities.
+
+Revocation is independent of receipt retention and retains the original grant and
+boot exposure. Running/Unknown revocation holds Native/preflight and is fenced on
+restart. The new typed RPC/FFI status is shared by recovery admission and consumers.
+Changes invalidate the publication observation atomically; an offwriter sample
+also checks the complete authority/revocation source pair before publication.
+Existing process samples remain separate from file publication and hook health.
+
+FullReset withdraws applied/current delivery proof after revoke instead of claiming
+its preceding temporary empty publication is still applied. A narrow explicit
+Repair is available when config is absent and this exact revocation remains pending:
+no canonical creation/revision update, startup selection, grant publication or
+unrelated hold supersession. Its Native receipt is NOT Native apply evidence.
+An old revoked Zygisk grant cannot withdraw a newer builtin/kernel delivery.
+
+Narrow admission and grant association are one durable write. Repeated repairs
+transfer only the prior narrow receipt's hold for that exact grant to the new
+Running intent in that same write; historical Unknown remains immutable. The
+pending narrow receipt is pinned through pruning, including retention0. Durable
+subeffect completion can resolve a not-yet-finalized narrow receipt after a crash.
+This avoids admission, retry-chain and completion-window orphan holds.
+
+Private schema10 reads1–9 without resetting holds/budgets/grants; unknown schema11
+is rejected with its source preserved. RPC18 APK/Core must be paired. These versions
+remain independent of unchanged kernel control2/telemetry1; compatible builtin
+kernels need no rebuild merely for an app/Core upgrade.
+
+Still unimplemented cloud code: shared whole-attempt/frozen-candidate executor and
+known-no-effect bounded fallback, unified assessment/UI/export/agent integration,
+remaining framework/native diagnostics stimuli, replacement manager/bootstrap and
+concrete provisioning adapters. Those are not device gates. Device acceptance of
+real loader/Java hooks, final same-commit signed APK/bundle, fork publication target
+and actual boot writes retain their separately documented requirements.
+
+Revocation checkpoint validation: 342 Core + 15 RPC + 3 FFI library tests;
+18 actual-process RPC tests across journal crash, kernel, KPM and Zygisk passed.
+The crash scenario includes paired admission, intent, unlink, completion and a
+second completion crash during retry, keeping historical Unknown immutable and
+leaving no orphan Native hold. Unit write-fault recovery also covers retention0.
+Strict host/all-target and ARM64/ARMv7 Clippy passed; 898 JVM tests, ktlint, detekt,
+CPD and lintDebug passed. Logs: `/tmp/vpnhide-revocation-{tests,process-final,
+clippy-verified,arm-verified,android}.log`. These are cloud checks; device loader,
+framework and real background lifecycle acceptance remain unclaimed.

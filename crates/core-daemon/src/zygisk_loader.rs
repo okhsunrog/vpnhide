@@ -385,7 +385,7 @@ impl LoaderRegistry {
         }
         let module = record.intent.zygisk_module.as_ref()?;
         result.publication = (|| {
-            let target = crate::zygisk::ZygiskTarget::open(module).ok()?;
+            let target = crate::zygisk::ZygiskTarget::for_revocation(module).ok()?;
             if target.identity().ok()? != (expected.directory_device, expected.directory_inode) {
                 return None;
             }

@@ -27,6 +27,7 @@ use crate::config_file;
 use crate::journal::{self, Journal, JournalEntry};
 use crate::operation::{self, PhaseHook, PlanKind, RealPhaseRunner};
 use crate::publisher::Publisher;
+mod revocation;
 
 #[cfg(test)]
 #[path = "command_tests.rs"]
@@ -600,7 +601,14 @@ impl CoreState {
     }
 
     pub(crate) fn refresh_zygisk_lifecycle(&self) {
-        let Some(authority) = self.zygisk_authority() else {
+        let (authority, revocation) = {
+            let store = self.engine.store.lock().expect("config mutex");
+            (
+                store.journal.zygisk_authority.clone(),
+                store.journal.zygisk_revocation.clone(),
+            )
+        };
+        let Some(authority) = authority else {
             return;
         };
         let Some(expected) = authority.reference() else {
@@ -609,6 +617,12 @@ impl CoreState {
         let Some(observed) = self.loader.lifecycle(&authority, self.publisher.epoch()) else {
             return;
         };
+        let source = self.engine.store.lock().expect("config mutex");
+        if source.journal.zygisk_authority.as_ref() != Some(&authority)
+            || source.journal.zygisk_revocation != revocation
+        {
+            return;
+        }
         self.publisher.update_if_changed(|snapshot| {
             if snapshot.zygisk_lifecycle.as_ref().map(|s| &s.expected) != Some(&expected)
                 || snapshot.zygisk_lifecycle.as_ref() == Some(&observed)
@@ -619,17 +633,15 @@ impl CoreState {
             true
         });
     }
-    pub(crate) fn zygisk_authority(&self) -> Option<journal::ZygiskAuthorityRecord> {
-        self.engine
-            .store
-            .lock()
-            .expect("config mutex")
-            .journal
-            .zygisk_authority
-            .clone()
-    }
     fn publish_store(&self, store: &ConfigStore) {
         self.publisher.update(|snapshot| {
+            let revocation = store
+                .journal
+                .zygisk_revocation
+                .as_ref()
+                .and_then(|r| r.view());
+            let invalidate_lifecycle = snapshot.zygisk_revocation != revocation;
+            snapshot.zygisk_revocation = revocation;
             let expected = store
                 .journal
                 .zygisk_authority
@@ -638,6 +650,11 @@ impl CoreState {
             if snapshot.zygisk_lifecycle.as_ref().map(|s| &s.expected) != expected.as_ref() {
                 snapshot.zygisk_lifecycle = expected
                     .map(|a| vpnhide_core_rpc::ZygiskLifecycle::pending(a, self.publisher.epoch()));
+            }
+            if invalidate_lifecycle && let Some(lifecycle) = snapshot.zygisk_lifecycle.as_mut() {
+                // Keep the timestamped old process samples; withdraw the previous
+                // publication observation atomically with the revocation receipt.
+                lifecycle.publication = vpnhide_core_rpc::ZygiskPublication::NotObserved;
             }
             snapshot.config = store.config.clone();
             snapshot.debug_leases = store.journal.debug_leases.clone();
@@ -660,6 +677,9 @@ impl CoreState {
                 snapshot.storage_fault.is_some() || store.journal.has_unknown();
             snapshot.held_resources = store.journal.held_resources();
             for entry in &store.journal.operations {
+                if entry.is_revocation_only_repair() {
+                    continue;
+                }
                 let revision = entry
                     .admission
                     .as_ref()
@@ -682,6 +702,47 @@ impl CoreState {
                                 outcome: phase.outcome,
                             });
                     }
+                }
+            }
+            if store
+                .journal
+                .zygisk_revocation
+                .as_ref()
+                .is_some_and(|revocation| {
+                    Some(&revocation.authority) == store.journal.zygisk_authority.as_ref()
+                })
+            {
+                // A revocation attempt withdraws current delivery proof for this
+                // grant; its own Native receipt is never a policy apply.
+                let grant = store
+                    .journal
+                    .zygisk_authority
+                    .as_ref()
+                    .expect("matching revoked grant")
+                    .operation;
+                snapshot.apply_evidence.retain(|e| {
+                    e.phase != ConfigPhase::Native
+                        || (e.op != grant
+                            && !store
+                                .journal
+                                .get(e.op)
+                                .and_then(|entry| entry.native_intent.as_ref())
+                                .is_some_and(|intent| {
+                                    intent.backend == vpnhide_core_rpc::NativeBackend::Zygisk
+                                }))
+                });
+                if snapshot.backend.applied == Some(vpnhide_core_rpc::NativeBackend::Zygisk) {
+                    snapshot.backend.applied = None;
+                }
+                if snapshot.backend.selected == Some(vpnhide_core_rpc::NativeBackend::Zygisk)
+                    && let Some(boot) = snapshot.backend.boot.as_mut()
+                    && store
+                        .journal
+                        .zygisk_revocation
+                        .as_ref()
+                        .is_some_and(|r| !r.uncertain())
+                {
+                    boot.zygisk_targets = vpnhide_core_rpc::ZygiskTargets::Retired;
                 }
             }
         });
@@ -1316,6 +1377,25 @@ impl CoreState {
         }
     }
 
+    fn persist_transition_journal(
+        &self,
+        path: &std::path::Path,
+        journal: &Journal,
+        op: OperationId,
+    ) -> std::io::Result<()> {
+        let previous = self.engine.store.lock().expect("config mutex").clone();
+        match journal::write_atomic(path, journal) {
+            Ok(()) => {
+                self.publish_progress(journal);
+                Ok(())
+            }
+            Err(error) => {
+                self.freeze_storage_fault(&previous, op, &error);
+                Err(error)
+            }
+        }
+    }
+
     fn start_native_boot_direct(&self, env: crate::native_boot::NativeEnv, epoch: u64) {
         use crate::native_boot::NativeBoot;
         self.epoch.store(epoch, Ordering::SeqCst);
@@ -1405,6 +1485,18 @@ impl CoreState {
         *self.engine.store.lock().expect("config mutex") = store.clone();
         self.publish_store(&store);
         crate::recovery::maybe_crash_for_test("startup-intent");
+        if let Err(outcome) = crate::native_boot::transition::retire_prepared(
+            &mut store.journal,
+            &prepared,
+            None,
+            &mut |journal| self.persist_transition_journal(path, journal, OperationId(0)),
+            || true,
+        ) {
+            blocked(format!(
+                "journaled Zygisk retirement did not complete: {outcome:?}"
+            ));
+            return;
+        }
         let boot = prepared.execute(epoch);
         let pending = store.clone();
         store
@@ -1531,9 +1623,30 @@ impl CoreState {
         let selected = boot.selected();
         drop(boot);
         self.publisher.update(|snapshot| {
+            let revoked = selected == Some(vpnhide_core_rpc::NativeBackend::Zygisk)
+                && snapshot.zygisk_revocation.as_ref().is_some_and(|r| {
+                    !r.pending()
+                        && snapshot
+                            .zygisk_lifecycle
+                            .as_ref()
+                            .is_some_and(|l| l.expected == r.authorization)
+                });
+            let mut status = status;
+            if revoked && selected == Some(vpnhide_core_rpc::NativeBackend::Zygisk) {
+                status.zygisk_targets = vpnhide_core_rpc::ZygiskTargets::Retired;
+            }
+            let applied = if revoked { None } else { applied };
             snapshot.backend.selected = selected;
             if applied.is_some() {
                 snapshot.backend.applied = applied;
+            } else if selected == Some(vpnhide_core_rpc::NativeBackend::Zygisk)
+                && matches!(
+                    status.zygisk_targets,
+                    vpnhide_core_rpc::ZygiskTargets::Retired
+                        | vpnhide_core_rpc::ZygiskTargets::RetireFailed { .. }
+                )
+            {
+                snapshot.backend.applied = None;
             }
             snapshot.backend.installed = status.installed.clone();
             // A backend core loaded this boot is live once its load confirmed.
@@ -1749,6 +1862,14 @@ impl CoreState {
         }
         config_edit::validate_edit(edit).map_err(|reason| SubmitError::Rejected { reason })?;
         let repair = matches!(edit, ConfigEdit::RepairActivation);
+        if repair
+            && spec.intent == journal::CommandIntent::Edit
+            && !options.automatic_repair
+            && store.config.is_none()
+            && store.journal.revocation_uncertain()
+        {
+            return self.execute_revocation_repair(op, base, spec.admitted.take(), store);
+        }
         let held_persist = store.journal.expired_holds.contains(&ConfigPhase::Persist)
             || store
                 .journal
@@ -2276,6 +2397,54 @@ struct JournalPhaseHook<'a> {
 
 impl PhaseHook for JournalPhaseHook<'_> {
     fn before(&mut self, phase: ConfigPhase) -> Result<(), PhaseOutcome> {
+        if phase == ConfigPhase::Native && self.journal.revocation_uncertain() {
+            // Journal this command/phase without replacing the authority being reconciled.
+            journal::record_phase_running(
+                &self.path,
+                self.journal,
+                self.op,
+                self.base,
+                self.edit,
+                self.candidate,
+                &self.plan,
+                &self.completed,
+                phase,
+                None,
+            )
+            .map_err(|_| PhaseOutcome::Unknown)?;
+            self.state.publish_progress(self.journal);
+            let pending = self
+                .journal
+                .zygisk_revocation
+                .as_ref()
+                .expect("pending revocation")
+                .clone();
+            let boot = self
+                .runner
+                .native
+                .as_ref()
+                .map(|n| {
+                    crate::native_boot::read_boot_id(
+                        &n.lock().expect("native boot").env.boot_id_path,
+                    )
+                })
+                .unwrap_or_else(|| {
+                    crate::native_boot::read_boot_id(std::path::Path::new(
+                        crate::native_boot::BOOT_ID_PATH,
+                    ))
+                });
+            crate::native_boot::transition::revoke(
+                self.journal,
+                &pending.authority,
+                Some(self.op),
+                &boot,
+                &mut |journal| {
+                    self.state
+                        .persist_transition_journal(&self.path, journal, self.op)
+                },
+                || self.fence.load(Ordering::SeqCst) == self.ticket,
+            )?;
+        }
         let native_intent = if phase == ConfigPhase::Native {
             match self
                 .runner
@@ -2328,6 +2497,48 @@ impl PhaseHook for JournalPhaseHook<'_> {
             return Err(PhaseOutcome::FailedKnown);
         }
         crate::recovery::maybe_crash_for_test(phase_intent_point(phase));
+        if phase == ConfigPhase::Native {
+            self.runner.retire_prepared_startup(
+                self.journal,
+                self.op,
+                &mut |journal| {
+                    self.state
+                        .persist_transition_journal(&self.path, journal, self.op)
+                },
+                || self.fence.load(Ordering::SeqCst) == self.ticket,
+            )?;
+        }
+        if phase == ConfigPhase::Cleanup
+            && self
+                .journal
+                .get(self.op)
+                .is_some_and(|entry| entry.command == Some(journal::CommandIntent::FullReset))
+            && let Some(authority) = self.journal.zygisk_authority.clone()
+        {
+            let boot = self
+                .runner
+                .native
+                .as_ref()
+                .map(|n| n.lock().expect("native boot").status.boot_id.clone())
+                .unwrap_or_else(|| {
+                    crate::native_boot::read_boot_id(std::path::Path::new(
+                        crate::native_boot::BOOT_ID_PATH,
+                    ))
+                });
+            let result = crate::native_boot::transition::revoke(
+                self.journal,
+                &authority,
+                Some(self.op),
+                &boot,
+                &mut |journal| {
+                    self.state
+                        .persist_transition_journal(&self.path, journal, self.op)
+                },
+                || self.fence.load(Ordering::SeqCst) == self.ticket,
+            );
+            self.runner.record_zygisk_revocation(result.is_ok());
+            result?;
+        }
         Ok(())
     }
 

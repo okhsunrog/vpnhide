@@ -35,6 +35,7 @@ internal fun CorePublication.toState(): CoreStateView =
         mutationHeld = mutationHeld,
         autonomousDiagnostics = autonomousDiagnostics,
         zygiskLifecycle = zygiskLifecycle,
+        zygiskRevocation = zygiskRevocation,
         recovery = recovery,
         startupError = startupError,
         storageFault = storageFault,

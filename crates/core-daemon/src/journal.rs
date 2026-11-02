@@ -40,8 +40,9 @@ pub const DEFAULT_JOURNAL_PATH: &str = "/data/adb/vpnhide/core/operations.json";
 pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 
 pub mod preflight;
+pub mod revocation;
 
-const JOURNAL_VERSION: u32 = 9;
+const JOURNAL_VERSION: u32 = 10;
 
 /// Default number of terminal receipts to keep, including Unknown.
 pub const DEFAULT_RETAIN_SETTLED: usize = 64;
@@ -101,6 +102,19 @@ pub struct JournalEntry {
 }
 
 impl JournalEntry {
+    pub(crate) fn is_revocation_only_repair(&self) -> bool {
+        self.command == Some(CommandIntent::Edit)
+            && self.edit == ConfigEdit::RepairActivation
+            && self.candidate.is_none()
+            && self.native_intent.is_none()
+            && self.record.phases.len() == 1
+            && self.record.phases[0].phase == ConfigPhase::Native
+            && self
+                .admission
+                .as_ref()
+                .is_some_and(|a| a.from_revision == a.commit_revision && a.writes.is_empty())
+    }
+
     pub fn held_phases(&self) -> Vec<ConfigPhase> {
         if self.superseded_by.is_some() || self.record.settled != Some(PhaseOutcome::Unknown) {
             return Vec::new();
@@ -338,6 +352,8 @@ pub struct NativeQuarantine {
 pub struct Journal {
     #[serde(default)]
     pub zygisk_authority: Option<ZygiskAuthorityRecord>,
+    #[serde(default)]
+    pub zygisk_revocation: Option<revocation::ZygiskRevocation>,
     pub version: u32,
     #[serde(default)]
     pub kmod_preflights: Option<preflight::PreflightLedger>,
@@ -391,6 +407,7 @@ impl Default for Journal {
         Journal {
             version: JOURNAL_VERSION,
             zygisk_authority: None,
+            zygisk_revocation: None,
             kmod_preflights: None,
             native_startup: None,
             native_attempts: Vec::new(),
@@ -416,7 +433,7 @@ impl Default for Journal {
 }
 
 impl Journal {
-    fn note_zygisk_exposure(&mut self, boot: &str) {
+    pub(crate) fn note_zygisk_exposure(&mut self, boot: &str) {
         self.zygisk_exposure_boot = Some(boot.into());
         if !self.zygisk_exposure_boots.iter().any(|b| b == boot) {
             self.zygisk_exposure_boots.push(boot.into());
@@ -466,6 +483,9 @@ impl Journal {
         explicit: bool,
     ) -> Result<(), String> {
         use crate::native_boot::prepared::TransitionAction;
+        if self.revocation_uncertain() {
+            return Err("Zygisk authorization revocation is unresolved; reconcile it before native activation".into());
+        }
         if self.preflight_uncertain() {
             return Err(
                 "loader preflight outcome is unknown; native activation remains held".into(),
@@ -606,12 +626,19 @@ impl Journal {
     /// Drop old settled/superseded receipts and advance bounded identity/conflict floors.
     pub fn prune(&mut self) {
         let retain = self.retain_settled;
+        let revocation_op = self
+            .zygisk_revocation
+            .as_ref()
+            .filter(|r| r.uncertain())
+            .and_then(|r| r.operation);
         let settled_idxs: Vec<usize> = self
             .operations
             .iter()
             .enumerate()
             .filter(|(_, e)| {
-                e.record.settled.is_some() && Some(e.record.op) != self.debug_restore_op
+                e.record.settled.is_some()
+                    && Some(e.record.op) != self.debug_restore_op
+                    && !(Some(e.record.op) == revocation_op && e.is_revocation_only_repair())
             })
             .map(|(i, _)| i)
             .collect();
@@ -657,6 +684,24 @@ impl Journal {
     /// Effects are never re-dispatched here; [`crate::recovery`] may resolve Unknown
     /// from durable evidence afterward.
     pub fn fence_unresolved(&mut self) {
+        if let Some(record) = &self.zygisk_revocation
+            && record.state == revocation::RevocationState::Confirmed
+            && let Some(operation) = record.operation
+            && let Some(entry) = self.get_mut(operation)
+            && entry.is_revocation_only_repair()
+            && !entry.finalized_unknown
+            && entry.record.settled.is_none()
+        {
+            // The exact subeffect completion is already durable. This does not
+            // rewrite a returned/recovered Unknown or infer a policy publication.
+            entry.record.phases[0].outcome = PhaseOutcome::Confirmed;
+            entry.record.settled = Some(PhaseOutcome::Confirmed);
+        }
+        if let Some(record) = self.zygisk_revocation.as_mut()
+            && record.state == revocation::RevocationState::Running
+        {
+            record.state = revocation::RevocationState::Unknown;
+        }
         if let Some(ledger) = &mut self.kmod_preflights {
             ledger.fence_unresolved();
         }
@@ -719,7 +764,11 @@ pub fn read(path: &Path) -> io::Result<Journal> {
         .any(|attempt| !attempt.valid());
     if journal.zygisk_authority.as_ref().is_some_and(|a| {
         a.reference().is_none() || (journal.version >= 9 && a.operation.0 > journal.issued_through)
-    }) || invalid_startup
+    }) || journal
+        .zygisk_revocation
+        .as_ref()
+        .is_some_and(|r| !r.valid(journal.issued_through))
+        || invalid_startup
         || journal.kmod_preflights.as_ref().is_some_and(|l| !l.valid())
         || journal.operations.iter().any(|entry| {
             entry
@@ -1069,7 +1118,7 @@ mod tests {
         };
         write_atomic(&path, &journal).unwrap();
         let migrated = read(&path).unwrap();
-        assert_eq!(migrated.version, 9);
+        assert_eq!(migrated.version, 10);
         assert!(migrated.native_startup_uncertain());
         assert_eq!(migrated.native_startup, journal.native_startup);
         journal.version = 4;
@@ -1115,7 +1164,7 @@ mod tests {
             );
         }
         journal = original;
-        journal.version = 10;
+        journal.version = 11;
         write_atomic(&path, &journal).unwrap();
         assert!(read(&path).is_err(), "never reset unknown schema");
     }
@@ -1357,7 +1406,7 @@ mod tests {
         });
         journal.upsert(entry);
         write_atomic(&path, &journal).unwrap();
-        assert_eq!(read(&path).unwrap().version, 9);
+        assert_eq!(read(&path).unwrap().version, 10);
         journal
             .get_mut(OperationId(7))
             .unwrap()

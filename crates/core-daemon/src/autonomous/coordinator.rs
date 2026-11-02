@@ -112,6 +112,7 @@ fn context_digests(snapshot: &vpnhide_core_rpc::StateSnapshot) -> (String, Strin
             serde_json::to_vec(&(
                 &snapshot.backend,
                 &snapshot.apply_evidence,
+                &snapshot.zygisk_revocation,
                 &snapshot.held_resources,
                 snapshot.mutation_held,
                 &snapshot.startup_error,

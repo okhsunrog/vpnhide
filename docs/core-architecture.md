@@ -386,7 +386,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC17; journal9 reads schemas1–8. These
+The current paired APK/Core contract is RPC18; journal10 reads schemas1–9. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -417,3 +417,13 @@ observations. Default network, callbacks, legacy and PendingIntent remain separa
 requirements. Full run/generation completeness is still false; a fresh worker
 cannot establish old-game process coverage. The paired APK/Core wire upgrade is
 independent of the kernel wire and private journal.
+
+
+RPC18 additionally publishes independent Zygisk revocation state. Revocation uses
+one writer executor for startup/repair/reset and never means existing processes
+were unloaded. The exact retained grant survives receipt pruning. Missing-config
+Repair can finish only that pending revocation; it creates no policy and its
+receipt is excluded from apply evidence. Inactive or damaged module payloads do
+not prevent removal of the same verified grant, and cannot gain publication
+eligibility through the revocation verifier. Journal10 migrates1–9 while preserving
+other resource holds and load/preflight budgets.

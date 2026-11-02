@@ -35,6 +35,7 @@ use vpnhide_core_rpc::{
 
 use crate::alog;
 pub mod prepared;
+pub(crate) mod transition;
 
 /// Canonical order for every published backend list.
 const ORDER: [NativeBackend; 4] = [
@@ -1076,9 +1077,11 @@ pub fn retire_zygisk(dir: &Path) -> Result<(), String> {
 
 pub(crate) fn retire_zygisk_target(target: &crate::zygisk::ZygiskTarget) -> Result<(), String> {
     if target.is_bundled()? {
-        return target
-            .revoke_authorization()
-            .map_err(|e| format!("bundled authorization revocation: {e:?}"));
+        return if target.authorization_absent()? {
+            Ok(())
+        } else {
+            Err("bundled authorization requires writer-owned journaled revocation".into())
+        };
     }
     let wire = crate::activation::project_native_wire_with_resolver(
         &vpnhide_core_rpc::CanonicalConfig::default(),

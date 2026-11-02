@@ -36,6 +36,7 @@ pub struct StateReply {
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CorePublication {
     pub zygisk_lifecycle: Option<crate::CoreZygiskLifecycle>,
+    pub zygisk_revocation: Option<crate::CoreZygiskRevocationStatus>,
     pub autonomous_diagnostics: Option<crate::CoreDiagnosticRun>,
     pub recovery: CoreRecoveryAccess,
     pub startup_error: Option<String>,
@@ -64,6 +65,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
         let recovery = CoreRecoveryAccess::from(&snapshot);
         let rpc::StateSnapshot {
             zygisk_lifecycle,
+            zygisk_revocation,
             autonomous_diagnostics,
             startup_error,
             storage_fault,
@@ -83,6 +85,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
             connection_generation: reply.generation,
             state: CorePublication {
                 zygisk_lifecycle: zygisk_lifecycle.map(Into::into),
+                zygisk_revocation: zygisk_revocation.map(Into::into),
                 autonomous_diagnostics: autonomous_diagnostics.map(Into::into),
                 recovery,
                 startup_error,

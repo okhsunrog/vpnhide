@@ -313,6 +313,40 @@ impl RealPhaseRunner {
         Ok(Some(attempt))
     }
 
+    pub(crate) fn record_zygisk_revocation(&self, confirmed: bool) {
+        self.selected.set(None);
+        if let Some(handle) = &self.native {
+            let mut boot = handle.lock().expect("native boot");
+            boot.status.zygisk_targets = if confirmed {
+                vpnhide_core_rpc::ZygiskTargets::Retired
+            } else {
+                vpnhide_core_rpc::ZygiskTargets::RetireFailed {
+                    detail: "authorization revocation is unconfirmed".into(),
+                }
+            };
+        }
+    }
+
+    pub(crate) fn retire_prepared_startup(
+        &self,
+        journal: &mut crate::journal::Journal,
+        op: vpnhide_core_rpc::OperationId,
+        persist: &mut impl FnMut(&crate::journal::Journal) -> std::io::Result<()>,
+        can_dispatch: impl Fn() -> bool,
+    ) -> Result<(), PhaseOutcome> {
+        let startup = self.startup.borrow();
+        if let Some(prepared) = startup.as_ref() {
+            crate::native_boot::transition::retire_prepared(
+                journal,
+                prepared,
+                Some(op),
+                persist,
+                can_dispatch,
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn take_startup_result(&self) -> Option<crate::journal::NativeStartupResult> {
         self.startup_result.borrow_mut().take()
     }

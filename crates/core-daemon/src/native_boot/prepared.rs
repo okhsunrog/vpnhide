@@ -55,6 +55,7 @@ pub struct Prepared {
     client: Option<CoreKpm>,
     staged: Option<File>,
     retire_target: Option<crate::zygisk::ZygiskTarget>,
+    retire_bundled: bool,
 }
 
 impl Prepared {
@@ -143,6 +144,9 @@ impl Prepared {
             .as_ref()
             .and_then(|path| crate::zygisk::ZygiskTarget::open(path).ok());
         let retire_directory_identity = retire_target.as_ref().and_then(|t| t.identity().ok());
+        let retire_bundled = retire_target
+            .as_ref()
+            .is_some_and(|t| t.is_bundled().unwrap_or(false));
         Ok(Self {
             intent: TransitionIntent {
                 boot_id,
@@ -159,6 +163,7 @@ impl Prepared {
             client,
             staged,
             retire_target,
+            retire_bundled,
         })
     }
 
@@ -183,6 +188,14 @@ impl Prepared {
             return Err(format!("startup recovery preflight refused: {outcome:?}"));
         }
         Ok(())
+    }
+
+    pub(crate) fn bundled_retirement(&self) -> Option<&Path> {
+        if self.retire_bundled {
+            self.intent.retire_zygisk.as_deref()
+        } else {
+            None
+        }
     }
 
     pub fn environment(&self) -> &NativeEnv {
@@ -212,6 +225,7 @@ impl Prepared {
             staged: staged_path.as_deref(),
             retire_path: self.intent.retire_zygisk.as_deref(),
             retire_target: self.retire_target.as_ref(),
+            retire_bundled: self.retire_bundled,
         };
         crate::recovery::maybe_crash_for_test("startup-before-effects");
         let boot = NativeBoot::apply_prepared_plan(
@@ -266,6 +280,7 @@ struct PinnedEffects<'a> {
     staged: Option<&'a Path>,
     retire_path: Option<&'a Path>,
     retire_target: Option<&'a crate::zygisk::ZygiskTarget>,
+    retire_bundled: bool,
 }
 impl PinnedEffects<'_> {
     fn path(&self, source: &Path) -> Result<&Path, String> {
@@ -289,6 +304,22 @@ impl Effects for PinnedEffects<'_> {
     fn retire_zygisk(&self, dir: &Path) -> Result<(), String> {
         if self.retire_path != Some(dir) {
             return Err("retirement differs from prepared intent".into());
+        }
+        if self.retire_bundled {
+            let target = crate::zygisk::ZygiskTarget::for_revocation(dir)?;
+            if target.identity()?
+                != self
+                    .retire_target
+                    .ok_or("missing pinned recipient")?
+                    .identity()?
+            {
+                return Err("retirement recipient replaced".into());
+            }
+            return if target.authorization_absent()? {
+                Ok(())
+            } else {
+                Err("authorization was not journaled as revoked".into())
+            };
         }
         retire_zygisk_target(
             self.retire_target

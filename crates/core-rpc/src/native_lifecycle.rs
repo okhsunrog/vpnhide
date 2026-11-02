@@ -117,3 +117,23 @@ mod tests {
         }
     }
 }
+
+/// Logical authorization revocation does not unload code from existing processes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ZygiskRevocationState {
+    Running,
+    Confirmed,
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ZygiskRevocationStatus {
+    pub operation: Option<u64>,
+    pub current_boot: String,
+    pub authorization: ZygiskAuthorizationRef,
+    pub state: ZygiskRevocationState,
+}
+impl ZygiskRevocationStatus {
+    pub fn pending(&self) -> bool {
+        self.state != ZygiskRevocationState::Confirmed
+    }
+}

@@ -94,3 +94,28 @@ impl From<rpc::ZygiskLifecycle> for CoreZygiskLifecycle {
         }
     }
 }
+
+mirror_enum!(
+    CoreZygiskRevocationState,
+    ZygiskRevocationState,
+    Running,
+    Confirmed,
+    Unknown
+);
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreZygiskRevocationStatus {
+    pub operation: Option<u64>,
+    pub current_boot: String,
+    pub authorization: CoreZygiskAuthorizationRef,
+    pub state: CoreZygiskRevocationState,
+}
+impl From<rpc::ZygiskRevocationStatus> for CoreZygiskRevocationStatus {
+    fn from(v: rpc::ZygiskRevocationStatus) -> Self {
+        Self {
+            operation: v.operation,
+            current_boot: v.current_boot,
+            authorization: v.authorization.into(),
+            state: v.state.into(),
+        }
+    }
+}

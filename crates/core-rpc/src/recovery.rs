@@ -53,7 +53,11 @@ pub fn refusal(state: &StateSnapshot, action: RecoveryAction) -> Option<&'static
             action,
             RecoveryAction::SetSuperkey | RecoveryAction::ClearSuperkey
         ) || (action == RecoveryAction::Repair
-            && !state.held_resources.contains(&ConfigPhase::Persist)))
+            && !state.held_resources.contains(&ConfigPhase::Persist)
+            && !state
+                .zygisk_revocation
+                .as_ref()
+                .is_some_and(|r| r.pending())))
     {
         return Some("config_missing");
     }
@@ -98,6 +102,59 @@ mod tests {
             for action in [RecoveryAction::SetSuperkey, RecoveryAction::ClearSuperkey] {
                 assert_eq!(refusal(&state, action).is_none(), bits & 1 == 0);
             }
+        }
+    }
+    #[test]
+    fn missing_config_repair_exception_requires_exact_pending_revocation_and_normal_fault_gates() {
+        use crate::{ZygiskAuthorizationRef, ZygiskRevocationState as S, ZygiskRevocationStatus};
+        let mut snapshot = StateSnapshot {
+            held_resources: vec![ConfigPhase::Native],
+            ..Default::default()
+        };
+        assert_eq!(
+            refusal(&snapshot, RecoveryAction::Repair),
+            Some("config_missing")
+        );
+        for state in [S::Running, S::Unknown, S::Confirmed] {
+            snapshot.zygisk_revocation = Some(ZygiskRevocationStatus {
+                operation: Some(43),
+                current_boot: "boot".into(),
+                authorization: ZygiskAuthorizationRef {
+                    operation: 42,
+                    boot_id: "boot".into(),
+                    generation: 42,
+                    policy_sha256: "a".repeat(64),
+                    directory_device: 1,
+                    directory_inode: 2,
+                },
+                state,
+            });
+            assert_eq!(
+                refusal(&snapshot, RecoveryAction::Repair),
+                if state == S::Confirmed {
+                    Some("config_missing")
+                } else {
+                    None
+                }
+            );
+            snapshot.operations_in_flight.push(crate::OperationId(44));
+            assert_eq!(
+                refusal(&snapshot, RecoveryAction::Repair),
+                Some("operation_in_flight")
+            );
+            snapshot.operations_in_flight.clear();
+            snapshot.storage_fault = Some("fault".into());
+            assert_eq!(
+                refusal(&snapshot, RecoveryAction::Repair),
+                Some("storage_fault_restart_required")
+            );
+            snapshot.storage_fault = None;
+            snapshot.startup_error = Some("fault".into());
+            assert_eq!(
+                refusal(&snapshot, RecoveryAction::Repair),
+                Some("startup_fault")
+            );
+            snapshot.startup_error = None;
         }
     }
 }

@@ -25,6 +25,7 @@ enum Recipient {
 pub struct ZygiskTarget {
     path: PathBuf,
     directory: File,
+    revocation_only: bool,
 }
 
 #[derive(Debug)]
@@ -51,9 +52,16 @@ fn entry_exists(path: &Path) -> Result<bool, String> {
 
 impl ZygiskTarget {
     pub fn open(path: &Path) -> Result<Self, String> {
+        Self::open_mode(path, false)
+    }
+    pub(crate) fn for_revocation(path: &Path) -> Result<Self, String> {
+        Self::open_mode(path, true)
+    }
+    fn open_mode(path: &Path, revocation_only: bool) -> Result<Self, String> {
         let target = Self {
             path: path.to_owned(),
             directory: open_directory(path).map_err(|e| e.to_string())?,
+            revocation_only,
         };
         target.verify()?;
         Ok(target)
@@ -85,7 +93,9 @@ impl ZygiskTarget {
             return Err("Zygisk module directory changed during activation".into());
         }
         let root = self.pinned_path();
-        if entry_exists(&root.join("disable"))? || entry_exists(&root.join("remove"))? {
+        if !self.revocation_only
+            && (entry_exists(&root.join("disable"))? || entry_exists(&root.join("remove"))?)
+        {
             return Err("Zygisk module is disabled or scheduled for removal".into());
         }
         let manifest = OpenOptions::new()
@@ -133,6 +143,13 @@ impl ZygiskTarget {
                 );
             }
         };
+        if self.revocation_only {
+            return if recipient == Recipient::Bundled {
+                Ok(recipient)
+            } else {
+                Err("revocation requires bundled authorization contract".into())
+            };
+        }
         let libraries = root.join("zygisk");
         if !fs::symlink_metadata(&libraries)
             .map_err(|e| e.to_string())?
@@ -211,6 +228,62 @@ impl ZygiskTarget {
             .ok_or_else(|| "invalid or stale authorization".into())
     }
 
+    pub(crate) fn authorization_absent(&self) -> Result<bool, String> {
+        self.verify()?;
+        let absent = !entry_exists(
+            &self
+                .pinned_path()
+                .join(vpnhide_protocol::zygisk_activation::FILE_NAME),
+        )?;
+        self.verify()?;
+        Ok(absent)
+    }
+
+    pub(crate) fn check_authorization(
+        &self,
+        expected: &crate::journal::ZygiskAuthorityRecord,
+    ) -> Result<(), String> {
+        let reference = expected
+            .reference()
+            .ok_or("invalid authorization reference")?;
+        if self.revalidate_identity()? != (reference.directory_device, reference.directory_inode) {
+            return Err("authorization directory replaced".into());
+        }
+        if let Some(actual) = self.read_authorized(&reference.boot_id)?
+            && (actual.generation != reference.generation || actual.wire != expected.intent.wire)
+        {
+            return Err("different authorization generation or policy".into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn revoke_expected(
+        &self,
+        expected: &crate::journal::ZygiskAuthorityRecord,
+    ) -> Result<(), PublishError> {
+        self.check_authorization(expected)
+            .map_err(PublishError::BeforeWrite)?;
+        self.revoke_authorization()?;
+        self.check_authorization(expected)
+            .map_err(PublishError::Unknown)?;
+        let boot = &expected
+            .intent
+            .zygisk_authorization
+            .as_ref()
+            .expect("validated reference")
+            .boot_id;
+        if self
+            .read_authorized(boot)
+            .map_err(PublishError::Unknown)?
+            .is_some()
+        {
+            return Err(PublishError::Unknown(
+                "authorization remains present after revocation".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Revoke future process authorization only. Existing hooks are not unloaded.
     /// Caller must durably journal the pinned recipient before this effect.
     pub fn revoke_authorization(&self) -> Result<(), PublishError> {
@@ -259,6 +332,11 @@ impl ZygiskTarget {
         wire: &str,
         authorization: Option<&vpnhide_protocol::zygisk_activation::Authorization>,
     ) -> Result<(), PublishError> {
+        if self.revocation_only {
+            return Err(PublishError::BeforeWrite(
+                "revocation-only recipient cannot publish authorization".into(),
+            ));
+        }
         let encoded = authorization
             .map(|auth| {
                 auth.encode()
