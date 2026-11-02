@@ -141,8 +141,8 @@ directions, since `internal` is module-wide and the compiler will not.
   `parseConfigLines`, `parseKeyValueLines`, `parsePackageUidMap` (no shell
   despite the name). **Never write another `pm list`
   or `key=value` parser** — there used to be four; there is now one of each.
-- **`ConfigChannels`** — the startup reconcile (core `RepairActivation`) and the
-  auto-hidden-package refresh. Delivery to the native backend and Ports is core's
+- **`ConfigChannels`** — the automatic hidden-package refresh. Startup reads core
+  state without forcing `RepairActivation`; repair stays an explicit command. Delivery to the native backend and Ports is core's
   job: it applies each saved config to the one backend it selected this boot.
   **Don't** hand-build per-backend runtime config in Kotlin; core derives each
   backend's wire from the canonical JSON.

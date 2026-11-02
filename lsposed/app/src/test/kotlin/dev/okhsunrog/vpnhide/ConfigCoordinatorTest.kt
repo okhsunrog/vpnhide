@@ -19,6 +19,32 @@ import uniffi.vpnhide_core_ffi.CoreFieldEdit
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConfigCoordinatorTest {
     @Test
+    fun `initial publication leaves the first root read to startup and later changes refresh it`() =
+        runTest {
+            val core = FakeSession()
+            var invalidations = 0
+            var refreshes = 0
+            val owner =
+                ConfigCoordinator(
+                    { core },
+                    backgroundScope,
+                    refresh = { refreshes++ },
+                    invalidateObservations = { invalidations++ },
+                )
+            val init = async { owner.initialize() }
+            runCurrent()
+            assertEquals(ConfigCoordinatorMode.Open, init.await())
+            assertEquals(0, invalidations)
+            assertEquals(0, refreshes)
+
+            core.publish(CanonicalConfig(debugSwitch = true))
+            runCurrent()
+            assertEquals(1, invalidations)
+            assertEquals(1, refreshes)
+            assertTrue(requireNotNull(owner.view.value.confirmed).debugSwitch)
+        }
+
+    @Test
     fun `one typed batch owns the receipt and core publishes confirmed configuration`() =
         runTest {
             val core = FakeSession()

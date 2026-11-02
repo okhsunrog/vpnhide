@@ -430,3 +430,60 @@ Core cross-build passed for ARM64 and ARMv7. The resulting local ZIP is a dirty
 validation build, not a clean same-commit full bundle for distribution. Full bundle
 assembly still requires all seven KMI outputs, KPM and both Zygisk ABI artifacts
 from the same clean commit. No actual full-matrix build or device run is claimed.
+
+
+## Local main and first Android acceptance (2026-11-02)
+
+Development is consolidated in `/home/okhsunrog/code/vpnhide`, branch `main`.
+Commit `045b58a439d62c2a1dbd407321d60a51ce8cb87b` preserves both pre-rebase
+and final development histories; its tree equals cloud checkpoint `161dda99`.
+The redundant `vpnhide2` worktree and local/remote `dev-2.x` branches were removed.
+User IDE files were retained. Future work stays in main.
+
+Pixel 8 Pro: Android 17/API 37, android14-6.1 kernel, KernelSU Next. Same-commit
+signed APK and complete CI Core bundle were installed after checking all ten
+payload hashes/provenance and matching the installed APK certificate. Legacy
+`vpnhide_ports` and `vpnhide_builtin` were removed through ksud; KPatch-Next and
+other modules were untouched. A user-authorized reboot completed and user 0 was
+manually unlocked. Local APK build and 889 JVM tests passed before installation.
+
+Read-only acceptance confirmed RPC 13 handshake, control-v2 projection, journal
+schema 6, completed builtin adoption, matching installed daemon hash and catalog
+source commit, all ordinary kernel hooks, and Ports IPv4/IPv6 delivery. Both actual
+firewall chains contain the OUTPUT jump and 36 UID selectors. Current projected
+Native wire exactly matches the journaled startup wire (47 unique UIDs). Canonical
+schema-1 config (58 package records) remained byte-identical to its pre-install
+backup. No reset or direct privileged config edits were used.
+
+The first logcat was cleared under the existing recording instructions before the
+user's preserve-logs follow-up arrived. The original first-opening APK messages
+cannot be recovered from that buffer. A subsequent cold start reproduced the
+same startup error; Core logs/journal/config and later Retry logs were preserved.
+At 06:55:09 startup preparation competed with the initial config-publication root
+refresh; Core's reserved slot rejected one read. At 07:02:42 Retry completed the
+first diagnostic suite, then the unconditional after-paint RepairActivation caused
+Native/Ports publications, two more root reads and another suite at 07:02:44.
+The daemon epoch stayed unchanged; this evidence does not indicate a daemon
+restart or broken builtin hooks. Remove the competing initial refresh and the
+unconditional startup repair; do not hide invalidations with timers or debounce.
+The fix still needs a separately agreed APK replacement and device re-check.
+
+CI access for this local cycle used host-side authenticated `gh run list`,
+`gh run view` and `gh run download` on nova under approved host execution. It did
+not use the cloud worker's Actions API channel. Subsequent notice of an earlier
+cloud Actions refusal is preserved; no further Actions access is assumed here.
+
+## Additional authorized follow-up
+
+After triaging the startup/flicker defect, pin all project Rust components and
+build/CI tooling to Rust 1.99.1 in a separate commit, verify official availability,
+and fix new Clippy findings semantically. Run fmt, all-targets Clippy, tests and
+relevant Android ARM builds without weakening checks. Do not install another
+system-component build or reboot the phone until the next concrete cycle is agreed.
+
+Continue stages 4–7 and both RFCs in this pre-beta architecture cycle. After
+autonomous diagnostics, move shared export/report orchestration, agent device
+operations/read models, then remaining configuration transforms into Rust. Android
+UI, platform integration and app-context probes remain Kotlin. Root logcat ownership
+already belongs to Core. This transfer is accepted scope, not completed work; do
+not start the broad move while the current startup regression is under diagnosis.

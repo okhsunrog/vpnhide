@@ -23,7 +23,6 @@ import dev.okhsunrog.vpnhide.picker.AppListCache
 import dev.okhsunrog.vpnhide.picker.TargetsCache
 import dev.okhsunrog.vpnhide.picker.toAutoHideSignal
 import dev.okhsunrog.vpnhide.reconcileAutoHiddenPackages
-import dev.okhsunrog.vpnhide.runRuntimeConfigReconcile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -61,7 +60,6 @@ internal class StartupCoordinator(
     private val seedRootSnapshotInventory: (PackageInventorySeed?) -> Unit = RootSnapshotCache::seedPackageInventory,
     private val seedRootSnapshot: (Map<String, String>) -> Unit = RootSnapshotCache::seedSnapshot,
     private val markStartupEvent: (String) -> Unit = StartupTrace::mark,
-    private val reconcileRuntimeConfig: suspend () -> Unit = { runRuntimeConfigReconcile() },
     private val reconcileAutoHidden: suspend (List<AppAutoHideSignal>) -> Unit =
         { signals -> reconcileAutoHiddenPackages(appContext, signals) },
 ) {
@@ -91,13 +89,6 @@ internal class StartupCoordinator(
 
     private val _selfTargetState = MutableStateFlow<StartupSelfTargetState>(StartupSelfTargetState.Preparing)
     val selfTargetState: StateFlow<StartupSelfTargetState> = _selfTargetState.asStateFlow()
-
-    // The runtime channels carry a `vpnhide 2 config` snapshot derived by the
-    // activator from canonical JSON. A once-per-session reconcile is enough
-    // (Save / the debug toggle re-run the activator on their own afterwards).
-    private val reconcileStarted =
-        java.util.concurrent.atomic
-            .AtomicBoolean(false)
 
     // The auto-hide reconcile observer is a single session-long collector; guard
     // against starting a second one if ensureInitialCaches re-runs.
@@ -188,30 +179,12 @@ internal class StartupCoordinator(
         }
     }
 
-    /**
-     * Protection parses the shared root snapshot from memory as soon as it exists.
-     * The runtime reconcile (a forced native activation) waits for [dashboardReady]:
-     * its completion invalidates every root observation, and running it while the
-     * first Dashboard derivation and the diagnostic suite are still in flight put a
-     * second root snapshot plus a repeated derivation on the cold-start critical path
-     * (measured at roughly 1.4 s on Pixel 8 Pro). After first paint the same
-     * refresh happens in the background.
-     */
+    /** Prewarm target facts from the shared root observation; core owns policy application. */
     fun ensureProtectionCacheAfterRootSnapshot(
         selfNeedsRestart: Boolean?,
         rootSnapshot: RootSnapshot?,
-        dashboardReady: Boolean,
     ) {
-        if (selfNeedsRestart != null && rootSnapshot != null) {
-            TargetsCache.ensureLoaded()
-            if (dashboardReady && reconcileStarted.compareAndSet(false, true)) {
-                owner.launch(Dispatchers.IO) { reconcileRuntimeConfigNow() }
-            }
-        }
-    }
-
-    private suspend fun reconcileRuntimeConfigNow() {
-        reconcileRuntimeConfig()
+        if (selfNeedsRestart != null && rootSnapshot != null) TargetsCache.ensureLoaded()
     }
 
     fun ensureUpdateFresh(scope: CoroutineScope) {

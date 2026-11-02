@@ -172,7 +172,11 @@ internal class ConfigCoordinator(
     ) {
         val after = update.state
         if (update.current && after != null) {
-            if (before?.canonical != after.canonical || before.nativeBoot != after.nativeBoot || before.backend != after.backend) {
+            // Startup owns the first root snapshot and seeds its dependents. An
+            // unsolicited initial refresh races that read for core's single root slot.
+            if (before != null &&
+                (before.canonical != after.canonical || before.nativeBoot != after.nativeBoot || before.backend != after.backend)
+            ) {
                 invalidateObservations()
                 refreshRequests.trySend(Unit)
             }

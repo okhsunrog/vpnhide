@@ -5,15 +5,6 @@ import dev.okhsunrog.vpnhide.picker.AppAutoHideSignal
 import dev.okhsunrog.vpnhide.picker.applyAutoHiddenPackages
 
 /**
- * Run the startup runtime-config reconcile: ask core to re-apply Native from its
- * durable config (`RepairActivation`). Blocking — call from a background
- * dispatcher. Best-effort: a failure is logged, not fatal.
- */
-internal suspend fun runRuntimeConfigReconcile() {
-    CanonicalConfigRepository.reconcile()
-}
-
-/**
  * Re-materialize `settings.autoHiddenPackages` for the fresh on-disk config against
  * fresh VpnService [signals], and persist it iff the auto-hidden set changed.
  * This keeps a newly-installed VPN app hidden from observers after a Hiding-tab

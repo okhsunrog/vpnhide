@@ -185,15 +185,13 @@ seed survives, and any invalidation or explicit refresh discards both seeds. A
 seeded value is an observation like any other: it gets the request's observation
 ID and generation when consumed.
 
-The startup runtime reconcile (a forced native activation with no config edit) is
-one such operation. Cold-start traces on Pixel 8 Pro (2026-09-15, VPN up) showed
-its completion invalidating the root snapshot about 430 ms after the first read,
-which restarted the routing gate and the targets/Dashboard derivations while the
-first derivation and the diagnostic suite were still in flight: a second root
-snapshot (about 1.1 s, including package inventory) plus a repeated derivation on
-the critical path, `dashboard_ready` at about 3.9 s instead of 2.4 s. The
-reconcile is therefore started only after the Dashboard has painted; its
-invalidation then refreshes observations in the background.
+Core owns boot-time Native/Ports delivery. Opening the APK does not force another
+`RepairActivation` after first paint: that redundant operation invalidated root
+facts and repeated an already-completed diagnostic suite. Explicit repair and real
+configuration edits still invalidate observations through their normal phase
+receipts. The first Core publication only initializes confirmed state; startup owns
+the first root snapshot, so an unsolicited inventory refresh cannot compete for
+Core's single reserved root-probe slot.
 
 App inventory subscribes to changes in the accepted `pm_packages` / `pm_users`
 sections instead of every root refresh. Config-only or statistics-only changes

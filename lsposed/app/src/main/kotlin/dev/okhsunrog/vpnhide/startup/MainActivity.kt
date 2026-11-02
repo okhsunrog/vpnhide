@@ -391,7 +391,7 @@ private fun MainScreen() {
     val appListLoading by AppListCache.loading.collectAsStateWithLifecycle()
     val targetsLoading by TargetsCache.loading.collectAsStateWithLifecycle()
     // The top-bar indicator follows only reads the user asked for: a background
-    // re-derivation (the startup reconcile, a root dependency) is not news to spin for.
+    // re-derivation (a root dependency) is not news to spin for.
     val dashboardLoading by DashboardCache.refreshing.collectAsStateWithLifecycle()
     val statisticsLoading by StatisticsCache.loading.collectAsStateWithLifecycle()
     val dashboardState by DashboardCache.state.collectAsStateWithLifecycle()
@@ -427,10 +427,9 @@ private fun MainScreen() {
     // dashboard data or a terminal load error. Users see the dashboard loading
     // state in place while this happens.
     val uiReady = startupCoordinator.isUiReady(dashboardState, dashboardError)
-    LaunchedEffect(selfNeedsRestart, rootSnapshot, uiReady) {
+    LaunchedEffect(selfNeedsRestart, rootSnapshot) {
         VpnHideLog.setFromRootSnapshot(rootSnapshot)
-        // The runtime reconcile is deferred past first paint; see the coordinator.
-        startupCoordinator.ensureProtectionCacheAfterRootSnapshot(selfNeedsRestart, rootSnapshot, uiReady)
+        startupCoordinator.ensureProtectionCacheAfterRootSnapshot(selfNeedsRestart, rootSnapshot)
     }
 
     var startupTraceMarked by remember { mutableStateOf(false) }
