@@ -715,13 +715,6 @@ pub fn read(path: &Path) -> io::Result<Journal> {
 }
 
 #[cfg(test)]
-#[cfg_attr(
-    target_os = "android",
-    expect(
-        clippy::missing_const_for_thread_local,
-        reason = "Rust 1.99.1 Android macro fallback flags an already-const TLS initializer"
-    )
-)]
 mod fault_thread_state {
     thread_local! {
         pub(super) static WRITE_FAULT: std::cell::Cell<Option<(usize, bool)>> = const { std::cell::Cell::new(None) };

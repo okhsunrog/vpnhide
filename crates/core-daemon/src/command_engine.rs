@@ -6,14 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak, mpsc};
 use vpnhide_core_rpc::{Accepted, CoreCommand, OperationId, SubmitError};
 
 pub(crate) type AdmissionReply = mpsc::Sender<Result<Accepted, SubmitError>>;
-// See development.md: Rust 1.99.1 Android flags explicit const TLS as non-const.
-#[cfg_attr(
-    target_os = "android",
-    expect(
-        clippy::missing_const_for_thread_local,
-        reason = "Rust 1.99.1 Android macro fallback flags an already-const TLS initializer"
-    )
-)]
+
 mod queue_thread_state {
     thread_local! {
         pub(super) static RPC_QUEUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };

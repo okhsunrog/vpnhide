@@ -65,17 +65,7 @@ struct ifconf {
 // and harmful (returning ENODEV breaks libc's ifaddrs list construction,
 // causing errors like `ioctl(SIOCGIFFLAGS) for "tun0" failed in ifaddrs`
 // and corrupting NFC/HCE payment flows).
-// Rust 1.99.1's Android thread_local! fallback emits this lint even for an
-// explicit const { Cell::new(false) } (confirmed in a standalone reproduction).
-// Keep the expectation confined to these TLS keys; a compiler fix must make it
-// unfulfilled rather than silently leaving a blanket lint exemption behind.
-#[cfg_attr(
-    target_os = "android",
-    expect(
-        clippy::missing_const_for_thread_local,
-        reason = "Rust 1.99.1 Android macro fallback flags already-const TLS initializers"
-    )
-)]
+
 mod thread_state {
     use core::cell::{Cell, RefCell};
 

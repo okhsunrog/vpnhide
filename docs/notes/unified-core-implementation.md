@@ -599,3 +599,32 @@ summary above contains the nonsecret findings needed for cloud implementation.
 Do not retry the earlier denied cloud Actions API via another route. Local host gh
 access in the first install cycle was recorded separately and is not cloud access
 authority. Validate fresh cloud capability normally and report concrete blockers.
+
+
+## Cloud continuation: build recovery and final startup gate
+
+Current cloud source starts at `2e458a26bc3bdfd1cf40e4f80d9ca71f6d11e083`,
+a descendant of the handoff commit with one subsequent Actions dependency update.
+Fresh Rust 1.99.1 release Core (ARM64/ARMv7), both Zygisk ABI packages and KPM
+built. Three baseline KMI packages built; the remaining DDK matrix currently hits
+the 32-GiB executor's VFS image/container duplication limit. Preserve completed
+clean provenance artifacts; this is not a complete bundle or observed CI result.
+Production APK signing is unavailable: no signing key is configured in cloud.
+No temporary production identity and no laptop/device access were used.
+
+The official rustup toolchain makes the earlier Android TLS lint expectations
+unfulfilled. Removed those expectations; strict ARM64/ARMv7 Clippy passes without
+lint exemptions. The baseline workspace has 497 passing tests and the same two
+Zygisk self-read failures (`process_vm_readv` is unavailable in this sandbox),
+with zero ignored tests. This does not invalidate the separate local 499-pass run.
+
+Latest UI decision: the maintainer considered optimistic per-toggle autosave and
+then explicitly cancelled it. Keep picker Save/Cancel and local drafts. Immediate
+capacity prevention remains; use Core-owned accounting/shared local projection.
+No autosave code was applied. Do not revive that superseded proposal.
+
+Final acceptance must specifically cover the reported blocking startup message
+`core root snapshot probe exit=-1`: cold startup, delayed Core readiness, concurrent
+root-read admission, reconnect and Retry. A matching message on the old phone APK
+is not proof of one cause. Run regressions on the final sources; do not turn failed,
+truncated, stale or unavailable data green. Device validation remains pending.

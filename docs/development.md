@@ -327,19 +327,11 @@ still cannot use the production AppOwner socket. Do not enable both copies as
 LSPosed modules when validating the new APK.
 
 
-### Rust 1.99.1 Android Clippy TLS caveat
+### Rust 1.99.1 Android Clippy TLS validation
 
-On Android targets, Clippy 1.99.1 reports `missing_const_for_thread_local` for
-`thread_local! { static FLAG: Cell<bool> = const { Cell::new(false) }; }` even
-though its initializer is already explicitly const. This was reproduced in an
-independent crate with no project dependencies. It does not occur on the Linux
-host target. The affected TLS declarations are isolated in small scopes using
-`expect`, conditional on Android where the same source is also host-built.
-`-D warnings` remains enabled, including `unfulfilled_lint_expectations`, so a
-compiler fix requires removing those expectations. Dynamic scratch buffers retain
-their existing lazy allocation and reuse; no global lint allow was added.
-
-Host integration fixtures keep their isolated executable PATH. Needed coreutils
-are resolved from the host PATH and linked into that fixture directory, rather
-than assuming `/bin/cat` or `/bin/true` exist on NixOS. Payload-copy and recovery
-assertions run unchanged.
+The local NixOS compiler reported `missing_const_for_thread_local` against
+explicitly const TLS initializers. The official cloud rustup toolchain
+`58cf8f9c35b355199727627d07ae34a4e2846d67` does not reproduce it: the scoped
+expectations become unfulfilled. They have been removed after strict ARM64/ARMv7
+checks passed without an exemption. Keep the explicit const initializers and
+warnings-as-errors; do not suppress unfulfilled expectations across environments.
