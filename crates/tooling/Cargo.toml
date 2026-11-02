@@ -11,6 +11,7 @@ name = "vpnhide-tooling"
 path = "src/main.rs"
 
 [dependencies]
+vpnhide_protocol = { path = "../protocol" }
 vpnhide_maintenance_model = { path = "../maintenance-model" }
 serde = { version = "1", features = ["derive"] }
 vpnhide_bounded_process = { path = "../bounded-process" }

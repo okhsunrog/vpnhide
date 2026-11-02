@@ -12,6 +12,8 @@
 use core::iter;
 
 pub mod generated;
+pub mod telemetry;
+pub use telemetry::parse_stats;
 pub mod zygisk_activation;
 
 pub use generated::hook_ids;

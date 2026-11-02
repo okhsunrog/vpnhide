@@ -221,13 +221,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Build native QEMU probes
-        # ifconf + bind-probe feed the kmod/kpm QEMU jobs. iface-ioctl (by-name
-        # SIOCGIFHWADDR/ADDR) and bind-probe-compat (armv7, the pre-5.9
-        # compat_sock_setsockopt path) additionally feed builtin-qemu — the
-        # ddk-qemu image bakes gai/ifconf/bind but not these two.
+        # Build every bionic probe from this checkout, including getifaddrs.
+        # armv7 compat additionally exercises the genuine 32-bit syscall path.
         run: |
           TC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           mkdir -p .artifacts/qemu-native-probes
+          "$TC/aarch64-linux-android24-clang" -static -O2 -Wall -Wextra -Werror \
+            -o .artifacts/qemu-native-probes/gai kmod/test/gai-probe.c
           "$TC/aarch64-linux-android24-clang" -static -O2 -Wall -Wextra -Werror \
             -o .artifacts/qemu-native-probes/ifconf kmod/test/ifconf-probe.c
           "$TC/aarch64-linux-android24-clang" -static -O2 -Wall -Wextra -Werror \
@@ -238,11 +238,17 @@ jobs:
             -o .artifacts/qemu-native-probes/bind-probe-compat kmod/test/bind-probe-compat.c
           "$TC/aarch64-linux-android24-clang" -static -O2 -Wall -Wextra -Werror \
             -o .artifacts/qemu-native-probes/preflight-probe kmod/test/preflight-probe.c
-          "$TC/llvm-strip" .artifacts/qemu-native-probes/ifconf \
+          "$TC/llvm-strip" .artifacts/qemu-native-probes/gai \
+            .artifacts/qemu-native-probes/ifconf \
             .artifacts/qemu-native-probes/bind-probe \
             .artifacts/qemu-native-probes/iface-ioctl \
             .artifacts/qemu-native-probes/bind-probe-compat \
             .artifacts/qemu-native-probes/preflight-probe
+
+      - name: Build static AArch64 QEMU executor
+        run: |
+          tools/build-host-tooling aarch64-unknown-linux-musl
+          cp target/aarch64-unknown-linux-musl/release/vpnhide-tooling .artifacts/qemu-native-probes/vpnhide-tooling
 
       - name: Build static native fixture kernel oracle
         run: scripts/build-native-fixture-oracle.sh
@@ -392,7 +398,7 @@ jobs:
             scripts/clean-device.sh scripts/update-json.sh lsposed/tests/check_no_root_exec.sh \
             kmod/test/run.sh kmod/test/run-signature.sh kmod/test/build-kernel.sh kmod/test/init.sh \
             kmod/test/verify-trim-abi.sh \
-            kmod/test/run-kpm.sh kmod/test/init-kpm.sh kmod/test/build-source-kernel.sh \
+            kmod/test/run-kpm.sh kmod/test/build-source-kernel.sh \
             builtin/test/run.sh builtin/test/build-kernel.sh builtin/test/build-source-kernel.sh
 
       # C (kernel module)
@@ -550,6 +556,9 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     env:
       KMI: ${{ matrix.kmi }}
+      VPNHIDE_QEMU_GUEST_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/vpnhide-tooling
+      VPNHIDE_GAI_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/gai
+      VPNHIDE_GAI_REQUIRED: "1"
       VPNHIDE_IFC_REQUIRED: "1"
       VPNHIDE_IFC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/ifconf
       VPNHIDE_BIND_REQUIRED: "1"
@@ -616,6 +625,9 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     env:
       KMI: ${{ matrix.kmi }}
+      VPNHIDE_QEMU_GUEST_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/vpnhide-tooling
+      VPNHIDE_GAI_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/gai
+      VPNHIDE_GAI_REQUIRED: "1"
       VPNHIDE_IFC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/ifconf
       VPNHIDE_BIND_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/bind-probe
       VPNHIDE_IOC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/iface-ioctl
@@ -643,8 +655,8 @@ jobs:
         # `make kpm` builds the relocatable .kpm against the KernelPatch
         # submodule (no kernel tree needed). run-kpm.sh patches the baked Image
         # with KernelPatch (VPNHIDE_KP_BIN), embeds the .kpm, and boots the A/B.
-        # VPNHIDE_GAI_REQUIRED: the bionic getifaddrs probe is baked into the
-        # image, so a skip means it's missing — fail rather than drop coverage.
+        # VPNHIDE_GAI_REQUIRED: the bionic getifaddrs probe comes from this
+        # checkout; a skip means missing coverage and must fail.
         env:
           VPNHIDE_GAI_REQUIRED: "1"
           VPNHIDE_IFC_REQUIRED: "1"
@@ -675,6 +687,8 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     env:
+      VPNHIDE_QEMU_GUEST_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/vpnhide-tooling
+      VPNHIDE_GAI_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/gai
       VPNHIDE_IFC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/ifconf
       VPNHIDE_BIND_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/bind-probe
       VPNHIDE_IOC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/iface-ioctl
@@ -702,8 +716,8 @@ jobs:
         # plain clang from the legacy image; the baked Image + rootfs + KP tools
         # come from ENV (VPNHIDE_QEMU_ROOTFS / VPNHIDE_KP_BIN). The KMI arg is
         # just a label here — VPNHIDE_QEMU_IMAGE picks the from-source kernel.
-        # VPNHIDE_GAI_REQUIRED: the bionic getifaddrs probe is baked into the
-        # image, so a skip means it's missing — fail rather than drop coverage.
+        # VPNHIDE_GAI_REQUIRED: the bionic getifaddrs probe comes from this
+        # checkout; a skip means missing coverage and must fail.
         env:
           VPNHIDE_GAI_REQUIRED: "1"
           VPNHIDE_IFC_REQUIRED: "1"
@@ -721,8 +735,8 @@ jobs:
   # backend into the baked kernel source tree (VPNHIDE_QEMU_KSRC), CONFIG_VPNHIDE
   # is turned on, and the Image is rebuilt with the PR's patches — that rebuilt
   # kernel is what boots. Reuses the ddk-qemu image (clang + qemu + baked kernel
-  # tree + Alpine rootfs + baked gai/ifconf/bind probes via VPNHIDE_*_BIN ENV);
-  # the by-name-ioctl and armv7 compat-bind probes come from qemu-native-probes.
+  # tree + Alpine rootfs); all native probes and the Rust guest come from
+  # this checkout through qemu-native-probes.
   #
   # Modern non-LTO KMIs only for now (6.1/6.6/6.12 build fast). The full-LTO
   # 5.10/5.15 and the legacy KMIs (a from-source build, like kpm-qemu-legacy) are
@@ -747,15 +761,16 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     env:
       KMI: ${{ matrix.kmi }}
+      VPNHIDE_QEMU_GUEST_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/vpnhide-tooling
+      VPNHIDE_GAI_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/gai
+      VPNHIDE_GAI_REQUIRED: "1"
       # The kernel build is the job's cost (about 13 of its 15 minutes). ccache
       # keyed per KMI turns a rebuild of an unchanged tree into a link.
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
-      # gai/ifconf/bind come from the image (VPNHIDE_GAI_BIN/IFC_BIN/BIND_BIN are
-      # set in the ddk-qemu Dockerfile ENV); the two extra probes come from the
-      # artifact. All five REQUIRED so a missing probe fails rather than silently
-      # dropping a vector.
-      VPNHIDE_GAI_REQUIRED: "1"
+      # All native probes and the Rust guest come from this checkout.
+      VPNHIDE_IFC_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/ifconf
+      VPNHIDE_BIND_BIN: ${{ github.workspace }}/.artifacts/qemu-native-probes/bind-probe
       VPNHIDE_IFC_REQUIRED: "1"
       VPNHIDE_BIND_REQUIRED: "1"
       VPNHIDE_IOC_REQUIRED: "1"

@@ -12,7 +12,7 @@ and the external agent transport remain adapters in their existing languages.
 | `scripts/core_descriptor.py` + `test_core_descriptor.py` | Replaced by shared package formats, typed build compatibility and Rust descriptor/signing orchestration. The Java keystore provider is unchanged. No regex reads of source constants. |
 | `scripts/public_distribution.py` + `test_public_distribution.py` | Replaced by `artifact-model::distribution` and `vpnhide-tooling distribution select`; only the paired APK, full Core ZIP and descriptor are public assets. |
 | `scripts/update-json.sh` generation | Thin bootstrap retained; Rust owns validation and the Core-only update feed. Legacy backend feeds remain frozen compatibility data. |
-| `kmod/test/{init,run,run-kpm}.sh` | Still pending: typed guest/host plans and result evaluation; preserve minimal shell bootstrap and actual bionic probes. Linux/QEMU results cannot replace Android acceptance. |
+| `kmod/test/{init,run,run-kpm}.sh` | Replaced by typed Rust host/guest plans, bounded direct execution, complete reports and RAW/preservation classifiers. Minimal PID1/host shell bootstrap and real bionic C probes remain. KPM uses two independent boot reports. Linux/QEMU results cannot replace Android acceptance. |
 | `scripts/clean-device.sh` | Replaced by a thin entrypoint to the typed resumable Core reset client. Offline plan by default; explicit serial/boot, native peer-UID check, durable intent/receipt and optional post-confirmation APK removal. No journal deletion or offline writer; destructive cold rescue remains pending. No device execution performed. |
 
 The static host CLI is an internal build artifact consumed by minimal DDK jobs.

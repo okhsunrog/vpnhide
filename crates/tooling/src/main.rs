@@ -7,6 +7,7 @@ use std::{
 };
 use vpnhide_artifact_model::{MAX_PAYLOAD_BYTES, elf};
 mod device_reset;
+mod qemu;
 mod signing;
 
 #[derive(Parser)]
@@ -22,6 +23,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     DeviceReset(device_reset::Args),
+    Qemu(qemu::QemuArgs),
     Distribution {
         #[command(subcommand)]
         action: DistributionAction,
@@ -112,6 +114,7 @@ fn read_payload(path: &Path) -> io::Result<Vec<u8>> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = match Cli::parse().command {
         Command::DeviceReset(args) => return device_reset::run(args).map_err(Into::into),
+        Command::Qemu(args) => return qemu::run(args).map_err(Into::into),
         Command::Distribution { action } => {
             match action {
                 DistributionAction::Select {

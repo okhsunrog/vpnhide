@@ -1815,3 +1815,57 @@ an already-running daemon; it is not categorically unable to rescan. Refresh
 failure can be only a warning and rearm may return AlreadyHooked, so successful
 CLI exit is not proof of the intended loaded catalog. No generic safe toggle or
 provider configuration change is inferred from this behavior.
+
+## Typed QEMU harness cutover
+
+The remaining `kmod/test/{init,run,run-kpm}.sh` owners have moved into
+`vpnhide-tooling qemu`: declared backend/mode/probe plans, UID actor execution,
+setup, wire generation through `protocol`, classifiers, bounded QEMU/patch/build
+children and final report verification. `init.sh` only mounts proc/sys/dev and
+execs the static Rust PID1. The duplicated `init-kpm.sh` is deleted and the builtin
+host entrypoint shares this executor. Existing real bionic C probes stay intact;
+CI now builds getifaddrs and the static AArch64 guest from the same checkout too.
+No privileged daemon dependency was added to the host CLI.
+
+A complete typed report and its matching terminal marker are mandatory. Timeout,
+truncated output, nonzero QEMU exit, duplicate/missing/unplanned vectors, panic
+anywhere in serial, failed observations, empty RAW baselines and lost physical
+controls cannot pass. Optional missing probes emit explicit SKIPs; required
+missing probes refuse admission. Pointer/readback errors do not become native
+coverage. Ifindex NA requires symmetric unsupported-option evidence. By-name
+ioctl requires actual RAW success. SIOCGIFCONF requires a positive same-ioctl VPN
+baseline and exact ordinary-address preservation. The ko/builtin size/fill/tail
+contract remains distinct from the existing KPM fill/tail-only vector; the latter
+explicitly reports its known unclosed NULL size-query gap, not full coverage.
+Busybox enumeration may return its exact expected vpn0 missing-device error
+while retaining ordinary output; other errors remain Unknown. Pseudofile reads
+bound actual bytes rather than treating sysfs's synthetic stat size as content.
+
+The shared artifact crate extracts bounded test rootfs inputs and writes newc+gzip
+without shell pipelines. It rejects unsafe archive paths, device/FIFO entries,
+link escapes and attempts to place harness files through archive-supplied links;
+compressed/expanded bytes, entries and members are bounded. The guest checks
+AArch64, PID1, root and its exact per-run kernel command-line nonce before any
+module load, configuration or poweroff. This is an isolated Linux test actor,
+never an Android Zygote/SELinux proof.
+
+Final working-tree verification: 28 artifact,10 protocol,18 tooling unit tests,
+4 CLI tests and the Java publisher integration (all three key types) passed;
+strict all-target host Clippy and Core/FFI Clippy for both Android ABIs passed.
+Both static musl tooling executables built and ran. Shellcheck, structural
+workflow actionlint and formatting passed (full workflow shellcheck separately
+reports existing unrelated SC2129/SC2012 findings; not suppressed globally).
+Actual QEMU Linux6.1.175 runs passed: RAW fixture1, protected fixture2,
+preflight-only1, full ko39/no SKIPs (including actual ARM32 compat bind), KPM35/no
+SKIPs over distinct RAW/protected boots. Evidence is retained outside the repo in
+`/workspace/vpnhide-build-evidence/qemu-rust-cutover`, including plans, input hashes,
+serial, failed earlier runs in /tmp and an exact offline iproute2 compatibility
+patch/source identity. The custom signed test ko and reference kernel are not
+fresh seven-KMI production packages; this does not close that matrix, builtin
+runtime or Android/device gates. The Zygisk self-process_vm_readv host limitation
+recorded above is unchanged.
+
+The approved tooling replacements are now wired to their consumers; destructive
+cold rescue remains an unimplemented feature, not a successful offline reset.
+Continue the original maintenance/bootstrap, RFC1/RFC2, Stage4/7 and Kotlin domain
+work; these are not replaced by the tooling slice or hidden as device gates.

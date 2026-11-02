@@ -10,7 +10,7 @@
  * sk_bound_dev_if; checking errno alone cannot distinguish that from a real
  * pre-mutation denial.
  *
- * Output is deliberately line-oriented for init.sh / init-kpm.sh:
+ * Output is deliberately line-oriented for the typed Rust QEMU guest:
  *
  *   BIND_NAME_RAW_ERRNO=0
  *   BIND_NAME_RAW_STATE=1

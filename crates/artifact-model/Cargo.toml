@@ -9,7 +9,7 @@ publish = false
 [features]
 default = []
 fixtures = []
-archives = ["dep:zip", "dep:flate2", "dep:tempfile", "dep:libc"]
+archives = ["dep:zip", "dep:flate2", "dep:tempfile", "dep:libc", "dep:tar"]
 
 [dependencies]
 vpnhide_build_contract = { path = "../build-contract" }
@@ -23,6 +23,8 @@ zip = { version = "=9.2.2", default-features = false, features = ["deflate-flate
 flate2 = { version = "1", optional = true }
 tempfile = { version = "3", optional = true }
 libc = { version = "0.2", optional = true }
+
+tar = { version = "0.4.46", default-features = false, optional = true }
 
 [dev-dependencies]
 crc32fast = "1"

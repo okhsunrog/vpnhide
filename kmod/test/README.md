@@ -38,7 +38,7 @@ Per kernel version, the harness validates:
   entry-kprobe replacement text intentionally remains resident until reboot,
 - **no kernel panic** across the whole hook set.
 
-Vectors exercised (`init.sh`):
+Vectors exercised by the typed Rust guest (`init.sh` only mounts pseudo-filesystems and execs it):
 
 | Vector | Trigger | Hook |
 |---|---|---|
@@ -77,7 +77,25 @@ kmod/test/build-kernel.sh android12-5.10
 kmod/test/run.sh android12-5.10
 ```
 
-`run.sh` exits 0 when every emitted vector passes and there was no panic.
+`run.sh` exits 0 only after the declared vector plan is complete, backend loading
+is confirmed, the guest emits its matching end marker, QEMU exits successfully
+within its deadline, and the full serial log contains no panic/Oops. A summary
+alone never proves success. Required missing probes fail before boot; optional
+missing probes remain explicit SKIPs in the complete plan.
+
+Build the portable host CLI with `tools/build-host-tooling` and the static guest
+with `tools/build-host-tooling aarch64-unknown-linux-musl`. The guest defaults to
+`target/aarch64-unknown-linux-musl/release/vpnhide-tooling`; override it with
+`VPNHIDE_QEMU_GUEST_BIN`. CI supplies both from this checkout and rebuilds the
+bionic C probes, including getifaddrs, rather than relying on baked copies.
+`VPNHIDE_IPROUTE_BIN` optionally supplies a static AArch64 iproute2 binary for
+offline guests; otherwise prepare iproute2 in the rootfs or let the guest install
+it. Setup/network failure never becomes a zero-count PASS. Evidence directories
+retain plans, input identities, bounded serial and build logs even on failure;
+`VPNHIDE_QEMU_KEEP_WORK=1` also preserves the large successful staging files.
+The executor requires AArch64 PID1, root and the exact per-run kernel boot marker
+before it can load a module or power off. It is not an Android worker or device
+runner.
 Optional probes can be made mandatory with their `*_REQUIRED` variables.
 Artifacts
 (kernels, modules, the Alpine rootfs) are cached under `.cache/` (gitignored).
@@ -122,7 +140,7 @@ setup. The KPM loads at boot (KernelPatch hijacks `paging_init`), so there
 is no insmod and no `/proc` dependency — the same control-v2 snapshot used by
 runtime ctl0 is passed via embedded extra-args (`kptools -A`). The A/B is done across **two boots**
 (no target → app UID 10000 sees `vpn0`; target=10000 → it doesn't), driven by
-`init-kpm.sh`. The 10 enumeration hooks, socket-bind state checks, and optional
+the shared Rust guest with typed per-boot observations. The 10 enumeration hooks, socket-bind state checks, and optional
 sysfs/proc-sys stat/open/readdir checks run with no panic across the CI reference set — 4.4, 4.9, 4.14, 4.19, 5.4, 5.10,
 5.15, 6.1, 6.6, 6.12 (the modern GKI ones via
 the DDK `Image`, the legacy AOSP ones via a from-source `Image` passed with
