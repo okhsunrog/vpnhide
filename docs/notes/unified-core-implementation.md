@@ -487,3 +487,115 @@ operations/read models, then remaining configuration transforms into Rust. Andro
 UI, platform integration and app-context probes remain Kotlin. Root logcat ownership
 already belongs to Core. This transfer is accepted scope, not completed work; do
 not start the broad move while the current startup regression is under diagnosis.
+
+
+The Kotlin-to-Core transfer also moves domain tests with their owner. Evaluate
+and remove redundant or content-free tests only where equivalent useful coverage
+is established; retain Kotlin/Core contracts, Android-specific tests, regression
+cases and migration coverage. Test counts and green runs are not deletion goals.
+The separately requested read-only Kotlin audit supplies the concrete transfer
+matrix; it does not change this checkout or block independent toolchain work.
+
+
+## Kotlin audit integration and updated migration order
+
+The complete [Kotlin/Core ownership audit](kotlin-core-architecture-audit.md) is
+preserved verbatim from Library version 0 (56,822 bytes), pinned to source
+`045b58a439d62c2a1dbd407321d60a51ce8cb87b`. Its measurements and line references
+remain historical. Startup fix `32a35328` already removes the initial competing
+inventory refresh and once-per-APK automatic RepairActivation; it does not yet
+replace DiagnosticsCache.run with autonomous diagnostics. The remaining audit
+items below are planned work, not implementation or device acceptance claims.
+
+Continue the authorized pre-beta cycle as complete vertical slices:
+
+| Order / owner | Work and removal boundary | Required evidence |
+| --- | --- | --- |
+| Stage 4 + RFC1 | Extend the existing verified catalog/Prepared/journal selector with own Zygisk loader handshake, process generation observer and bounded fallback; then hash-capability-bound KMI preflight. Delete the APK manual ZIP/KMI chooser. | No first-passing ambiguity resolution; separate preflight/load budgets; no leftover hooks/proc state; QEMU and explicitly authorized device experiments. |
+| Stage 5 typed health | Publish BackendState, PolicyHealth, DiagnosticState and one locale-independent ProtectionAssessment through existing generated RPC. Move native/feature/module/LSPosed classification and statistics attribution to that owner. | UI, Agent, settings and report agree for one epoch/revision; stale/unknown/partial evidence never becomes healthy. SQLite enabled/scope observation belongs to a bounded Core adapter with consistent DB/WAL/SHM handling. |
+| Stage 5 + RFC2 | Prove Java callback/framework fixtures and real Zygote worker launch alongside bounded native fixtures; implement the Core run manager, report and fingerprint/cache, then remove local diagnostic ownership and external-VPN admission. | RAW positive stimulus, protected differential, non-VPN preservation, complete required plan and cleanup; loaded code, process/system_server and Connectivity APEX generations. Fresh worker PASS does not prove existing target processes consumed policy. |
+| After autonomous diagnostics: common export/report | Move capture/session planning, baseline-before-run, accepted report joining, attachment recommendation and delivery lifecycle from APK orchestration to a shared Rust owner. NetworkViewData.evaluateNetworkView and ExportRecommendationData are pure policy. | One capture ID and report; crash/lease restoration, bounded artifacts, retained delivery/ACK and descriptor-relative file safety. Root logcat ownership already exists and must not be rebuilt. |
+| Next: Agent operations/read models | UI and Agent share typed intentions, validation and the same report/statistics projections. Keep opt-in HTTP gateway unprivileged. | Contract tests for argument semantics, authorization, unknown enums, reply loss and consistent publication. Never add a privileged arbitrary path/command endpoint. |
+| Next: remaining transforms / stage 6 entry | Replace CanonicalEditData.applyCanonicalEdit with the existing Rust reducer; migrate auto-hide/provenance, self-target preparation and complete inventory accounting. Preserve local drafts, pending UI and prevention. | Shared fixtures for partial profiles, shared appId, reserved self and per-family projection. Remove duplicate reducers/parsers only after consumer switch and parity. |
+| Stage 6 maintenance | Plan-bound direct 0.x/1.x import, bootstrap, repair and update using the existing single writer and durable recovery. | Sources survive failed replacement; interruption/reply loss does not replay uncertain effects; journal is never deleted to unblock recovery. Initial absent Core retains a manager/bootstrap adapter. |
+| Stage 7 provisioning | Separate verified runtime/kernel provisioning plans and concrete consent for boot effects. | Fork/tool tuple, KALLSYMS/ALL, backups, slot/OTA/recovery and loaded-code evidence. Missing KPM alone never authorizes flashing. |
+| Hook-local rules within these slices | Share pure Java policy/callback/cover decisions in a local Rust library or derived immutable policy. | Android attachment, Binder objects, callback registrations and telemetry remain Android adapters. No root RPC on every Binder callback. |
+
+### Capacity: immediate UI prevention is retained
+
+The maintainer explicitly requires preventing an over-capacity selection while the
+user is picking applications, rather than discovering it only at Save. Kotlin
+keeps that immediate draft/selection behavior. Core supplies typed limits,
+capabilities and enough generation-bound accounting (unique UIDs, profiles,
+shared-appId contributions, reserved self and wire/profile constraints), or a
+shared local evaluator/draft preview, so no second hardcoded 160/1 authority
+remains. A package count is not a native-slot count. No mandatory RPC per tap.
+Core still validates the complete projected candidate at commit and for Agent
+mutations, including state changes after a preview. An already-over-capacity draft
+must allow reductions. The audit's request to remove the Kotlin capacity mirror
+does not remove local UI prevention.
+
+### Test migration and deletion ledger
+
+Move domain behavior tests with each new authoritative owner; retain Kotlin/Core
+contracts, Android boundary tests, draft/ACK/reconnect fencing and regressions.
+Each removed test records its remaining duplicate, stronger executable
+replacement, new owner/parity vector, or deliberately changed RFC acceptance case.
+Do not delete a failure to obtain a green run or target a percentage reduction.
+
+Concrete audit candidates to assess in their own commits:
+
+- Consolidate the repeated four-case verdict table in NetworkViewCheckTest and
+  the repeated version equality in DetectModuleMismatchesTest; preserve callback
+  history/handle isolation and null/presence cases.
+- Replace HookCheckCoverageTest's empty-set tautology with actual registry
+  validation when exemptions exist; retain every-kernel-hook coverage.
+- Replace DebugShellSnapshotTest/RootSnapshotCacheTest source.contains checks
+  with executable Rust collector/output and command-spy contracts, preserving
+  honest identity and the no-expensive-inventory counter path.
+- Keep golden/discriminator, atomic telemetry, mutable FFI snapshot, lost-reply,
+  migration, PartialHookGap and system_server package-boundary obligations.
+- Replace old manual-KMI and clean-without-RAW expectations with RFC1 ambiguity
+  and RFC2 positive-control/preservation/missing-required-hook acceptance cases.
+
+No large Kotlin migration or test deletion is included in the startup/toolchain
+fixes. The next device cycle can be APK-only: replace the signed APK over user 0,
+cold-start/Retry under preserved logs, and verify one startup root read, no automatic
+RepairActivation and no redundant confirmation loop. Running Core RPC13/control2
+remains compatible; a Core replacement/reboot is not a prerequisite for that test.
+Further device changes still await agreement on that concrete cycle.
+
+
+## Pause for cloud continuation (2026-11-02)
+
+The maintainer is taking the phone and laptop offline. Stop local/device work;
+continue the large architecture task in a fresh cloud checkout of main. Startup
+fix is commit `32a35328`; the separate Rust 1.99.1 upgrade is commit `8a0eb8d7`.
+The toolchain commit includes workspace/Zygisk MSRV, rustup pin, CI image/cache/path
+filters, reviewed Clippy rewrites, and NixOS-portable isolated test fixtures.
+
+Completed locally on the final Rust sources: fmt, host all-targets Clippy with
+warnings denied, all 499 workspace tests (zero failures/ignored), strict ARM64 and
+ARMv7 Android Clippy, and x86_64 app/Core Android Clippy (Zygisk remains ARM-only).
+Three tiny Android TLS scopes use checked expect for the independently reproduced
+Rust 1.99.1 false positive against an already const thread_local initializer;
+unfulfilled expectations remain errors. No global lint suppression or removed
+behavior assertions. Startup APK validation separately passed 890 JVM tests,
+detekt, CPD, ktlint and assembleDebug before the toolchain commit.
+
+Not completed after the Rust upgrade: fresh release ARM packaging, a new signed
+APK build, a full same-commit unified Core bundle, or device acceptance of the
+startup fix. Do not present the earlier signed validation APK or daemon-only base
+ZIP as those final artifacts. No additional phone install/reboot is authorized
+at this pause. The phone still runs the tested `045b58a4` APK/Core; configuration
+was unchanged, builtin and Ports confirmed. Follow-up can be APK-only after an
+explicitly agreed cycle; do not require replacing compatible Core just because
+version strings differ. Keep RPC/control/journal compatibility and exact artifact
+identity checks.
+
+Local signing credentials stay on the laptop and were not copied to cloud or the
+repository. Native runtime evidence and logs are local task artifacts; the tracked
+summary above contains the nonsecret findings needed for cloud implementation.
+Do not retry the earlier denied cloud Actions API via another route. Local host gh
+access in the first install cycle was recorded separately and is not cloud access
+authority. Validate fresh cloud capability normally and report concrete blockers.
