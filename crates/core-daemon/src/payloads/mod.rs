@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub mod device;
+pub mod elf;
+pub mod kmi;
 pub mod projection;
 pub mod selection;
 
@@ -74,6 +76,10 @@ pub struct Payload {
     pub sha256: String,
     pub bytes: u64,
     pub control_version: u32,
+    /// Hash-bound producer capability, rechecked from final ELF before use.
+    /// Old catalogs have no capability and cannot authorize a loader experiment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preflight_protocol: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,6 +121,9 @@ impl Manifest {
                 || payload.control_version != 2
                 || payload.bytes == 0
                 || payload.bytes > MAX_PAYLOAD_BYTES
+                || payload.preflight_protocol.is_some_and(|p| {
+                    p != 1 || !matches!(payload.implementation, PayloadKind::Kmod { .. })
+                })
             {
                 return Err(invalid("invalid payload metadata or control contract"));
             }
@@ -182,6 +191,16 @@ impl Catalog {
                 return Err(invalid("payload digest mismatch"));
             }
             file.rewind()?;
+            if let Some(protocol) = metadata.preflight_protocol {
+                let mut bytes = Vec::with_capacity(metadata.bytes as usize);
+                Read::by_ref(&mut file)
+                    .take(MAX_PAYLOAD_BYTES + 1)
+                    .read_to_end(&mut bytes)?;
+                if elf::preflight_protocol(&bytes)? != Some(protocol) {
+                    return Err(invalid("preflight capability differs from final ELF"));
+                }
+                file.rewind()?;
+            }
             payloads.push(VerifiedPayload {
                 metadata: metadata.clone(),
                 file,

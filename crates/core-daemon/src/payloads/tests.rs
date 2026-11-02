@@ -12,9 +12,10 @@ fn payload(implementation: PayloadKind) -> Payload {
         sha256: format!("{:x}", Sha256::digest(b"payload")),
         bytes: 7,
         control_version: 2,
+        preflight_protocol: None,
     }
 }
-fn manifest() -> Manifest {
+pub(super) fn manifest() -> Manifest {
     let mut payloads: Vec<_> = KMIS
         .iter()
         .map(|kmi| payload(PayloadKind::Kmod { kmi: (*kmi).into() }))
@@ -59,6 +60,41 @@ fn complete_manifest_roundtrip_and_pinned_bytes() {
     let mut bytes = Vec::new();
     file.file.read_to_end(&mut bytes).unwrap();
     assert_eq!(bytes, b"payload");
+}
+
+#[test]
+fn catalog_rechecks_advertised_capability_against_the_exact_hashed_elf() {
+    let root = fixture();
+    let mut manifest = manifest();
+    manifest.payloads[0].preflight_protocol = Some(1);
+    // Digest-valid old payloads still cannot inherit a new advertised protocol.
+    fs::write(
+        root.path().join("payloads/manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    assert!(Catalog::open(root.path()).is_err());
+    let elf = super::elf::tests::fixture(
+        b"vpnhide_preflight=1\0parmtype=preflight_only:bool\0",
+        false,
+    );
+    let payload = &mut manifest.payloads[0];
+    payload.bytes = elf.len() as u64;
+    payload.sha256 = format!("{:x}", Sha256::digest(&elf));
+    fs::write(
+        root.path()
+            .join(payload.implementation.relative_path().unwrap()),
+        elf,
+    )
+    .unwrap();
+    fs::write(
+        root.path().join("payloads/manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    assert!(Catalog::open(root.path()).is_ok());
+    manifest.payloads.last_mut().unwrap().preflight_protocol = Some(1);
+    assert!(manifest.validate().is_err());
 }
 #[test]
 fn invalid_metadata_and_duplicates_fail_closed() {
@@ -145,7 +181,7 @@ fn reject_leaf_parent_and_manifest_symlinks() {
 fn device() -> Capabilities {
     Capabilities {
         abi: Abi::Arm64,
-        kmi: Some(KMIS[0].into()),
+        kernel_release: "6.1.157-android14".into(),
         builtin: Runtime::Absent,
         module_loading: Runtime::Ready,
         kpm: Runtime::Ready,
@@ -274,14 +310,14 @@ fn zygisk_requires_all_needed_abis_and_rejects_default_mask() {
 #[test]
 fn runtime_and_kmi_uncertainty_are_not_capabilities() {
     let mut d = device();
-    d.kmi = None;
+    d.kernel_release.clear();
     d.kpm = Runtime::Unknown;
     d.zygisk = Runtime::AuthenticationRequired;
     let r = assess(&manifest(), &d, policy(), &support()).unwrap();
     assert_eq!(r.decision, Decision::NoEligibleCandidate);
     assert_eq!(r.candidates[1].eligibility, Err(Rejection::UnknownKmi));
     assert_eq!(r.candidates[2].eligibility, Err(Rejection::RuntimeUnknown));
-    d.kmi = Some("unknown".into());
+    d.kernel_release = "6.18.0-android17".into();
     assert_eq!(
         assess(&manifest(), &d, policy(), &support())
             .unwrap()
@@ -289,6 +325,47 @@ fn runtime_and_kmi_uncertainty_are_not_capabilities() {
             .eligibility,
         Err(Rejection::NoMatchingKmi)
     );
+}
+
+#[test]
+fn ambiguous_kmi_is_never_selected_by_uname_hint_or_catalog_order() {
+    let mut device = device();
+    device.kernel_release = "5.15.104-android14-custom".into();
+    for reverse in [false, true] {
+        let mut manifest = manifest();
+        if reverse {
+            manifest.payloads.reverse();
+        }
+        let report = assess(&manifest, &device, policy(), &support()).unwrap();
+        assert_eq!(report.kmi.candidates.len(), 2);
+        assert_eq!(report.candidates[1].payload_indices.len(), 2);
+        assert_eq!(
+            report.candidates[1].eligibility,
+            Err(Rejection::AmbiguousKmi)
+        );
+        assert_eq!(report.decision, Decision::Select(B::Kpm));
+        device.ownership = Ownership::Resident(B::Kmod);
+        let report = assess(&manifest, &device, policy(), &support()).unwrap();
+        assert!(!super::device::resident_eligible(&report, B::Kmod));
+        device.ownership = Ownership::Clear;
+    }
+    device.kernel_release = "6.1.157".into();
+    assert_eq!(
+        assess(&manifest(), &device, policy(), &support())
+            .unwrap()
+            .decision,
+        Decision::Select(B::Kmod)
+    );
+    for release in ["6.1.157-android13", "6.1.157-android14-android14"] {
+        device.kernel_release = release.into();
+        assert_eq!(
+            assess(&manifest(), &device, policy(), &support())
+                .unwrap()
+                .candidates[1]
+                .eligibility,
+            Err(Rejection::ConflictingKmiEvidence)
+        );
+    }
 }
 #[test]
 fn arm32_and_missing_evidence_fail_closed() {

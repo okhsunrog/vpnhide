@@ -53,8 +53,13 @@ class KmodElfTests(unittest.TestCase):
                 inspect(valid[:size])
         bad_offset = bytearray(valid)
         struct.pack_into("<Q", bad_offset, 40, 2**64 - 1)
+        wrong_kind = bytearray(relocatable(b"vpnhide_preflight=1\0parmtype=preflight_only:bool\0"))
+        table = struct.unpack_from("<Q", wrong_kind, 40)[0]
+        struct.pack_into("<I", wrong_kind, table + 2 * 64 + 4, 3)
         for bad in [
             bytes(bad_offset),
+            bytes(wrong_kind),
+            relocatable(extra=[("x" * 257, b"", 1)]),
             relocatable(b"unterminated"),
             relocatable(extra=[(".modinfo", b"again\0", 1)]),
         ]:

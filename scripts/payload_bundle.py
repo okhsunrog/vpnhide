@@ -17,6 +17,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from kmod_elf import inspect as inspect_kmod
+
 KMIS = (
     "android12-5.10",
     "android13-5.10",
@@ -205,6 +207,13 @@ def assemble(inputs: Path, output: Path, commit: str) -> None:
                 artifact = artifacts[component]
                 artifact.copy(source, staging / target, machine)
                 proof = artifact.meta["files"][source]
+                capability = {}
+                if implementation["kind"] == "kmod":
+                    # Inspect exact final copied bytes, never producer version text.
+                    protocol = inspect_kmod((staging / target).read_bytes())["preflight_protocol"]
+                    if protocol != 1:
+                        raise ValueError("unified kmod lacks verified preflight protocol 1")
+                    capability["preflight_protocol"] = protocol
                 if not 0 < proof["bytes"] <= MAX_FILE:
                     raise ValueError("payload exceeds budget")
                 total += proof["bytes"]
@@ -215,6 +224,7 @@ def assemble(inputs: Path, output: Path, commit: str) -> None:
                         "source_commit": commit,
                         **proof,
                         "control_version": 2,
+                        **capability,
                     }
                 )
             if total > MAX_TOTAL:

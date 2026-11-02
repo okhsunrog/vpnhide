@@ -714,3 +714,48 @@ CRC evidence or private-layout compatibility. Never choose the first successful
 preflight from an ambiguous set. Remaining: manifest-derived resolution,
 durable separate preflight/real-load budgets and crash recovery, the complete
 kernel/device acceptance matrix, then explicitly gated production wiring.
+
+Production passive selection now derives every same-LTS candidate from the
+verified manifest, carries bounded/anchored Linux-series and release-hint
+evidence, and refuses ambiguous or contradictory KMI evidence. A release hint
+does not remove the other 5.10/5.15 candidate. Unique catalog series may proceed
+through the existing runtime/ownership/full-policy gates; this is catalog
+uniqueness, not private ABI proof. Candidate order never authorizes a load.
+Resident kmod reconciliation cannot override ambiguous KMI evidence. The full
+same-policy alternative selector may choose KPM when it is actually eligible;
+otherwise the state remains held. Removed the old exact-uname selector and its
+test, replacing it with executable candidate-set/ambiguity/conflict tests.
+
+### RFC1 capability and durable preflight state
+
+Unified assembly now requires protocol-1 capability in every final KMI ELF and
+binds it into that payload's existing size/hash metadata. Core independently
+parses the bounded final ELF after digest verification; a legacy or inconsistent
+ko cannot acquire capability from a producer's version string. Old catalogs
+remain readable without capability and cannot authorize preflight.
+
+Private journal is now **7, reading 1–6**. Migration preserves startup/operation
+holds, real-load budgets, quarantine and Zygisk exposure; never delete it for a
+downgrade. A separate frozen preflight plan binds boot, manifest digest, Linux
+series and exact candidate metadata. Each candidate hash can dispatch once;
+bundle changes in the same boot do not reset the budget. Running becomes Unknown
+on restart. Unknown holds startup, debug capture and explicit native repair, even
+after reboot/receipt pruning. Global loader rejection stops subsequent probes.
+Only a complete unique matching sentinel may pass the ledger's real-kmod check;
+Prepared still supplies the independent policy/runtime/ownership gates. Two
+sentinels are explicitly ambiguous. Early-return success is not private-ABI proof.
+
+The fsync-before-effect/after-result executor is tested with injected effects,
+including failures before and after each rename; intent failure dispatches zero
+syscalls, completion uncertainty retains the Native hold. Production syscall
+wiring remains disabled: only the isolated QEMU oracle has run a real preflight.
+Explicit post-reboot reconciliation for an unresolved experimental attempt and
+the full kernel/device matrix remain required before enabling production probes.
+
+Known conservative recovery boundary: fresh or interrupted 5.10/5.15 selection
+with a live kmod still holds when the catalog is ambiguous. A previously journaled
+payload hash is intended identity, not an attestation of resident kernel bytes;
+this change does not invent that proof from uname or mere residency. Completed
+same-boot selections keep the existing durable restore path. A future recovery
+adapter may use sufficient independently bound generation evidence; never fix
+this by permitting a second load or guessing the branch.

@@ -27,7 +27,7 @@ pub enum Ownership {
 #[derive(Debug, Clone)]
 pub struct Capabilities {
     pub abi: Abi,
-    pub kmi: Option<String>,
+    pub kernel_release: String,
     pub builtin: Runtime,
     pub module_loading: Runtime,
     pub kpm: Runtime,
@@ -63,6 +63,8 @@ pub enum Rejection {
     WrongArchitecture,
     UnknownKmi,
     NoMatchingKmi,
+    AmbiguousKmi,
+    ConflictingKmiEvidence,
     RuntimeAbsent,
     AuthenticationRequired,
     UnsupportedRuntime,
@@ -93,6 +95,7 @@ pub enum Decision {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Assessment {
+    pub kmi: super::kmi::KmiResolution,
     pub candidates: Vec<Candidate>,
     pub decision: Decision,
 }
@@ -128,6 +131,7 @@ pub fn assess_projected(
     support: &[(NativeBackend, Support)],
 ) -> std::io::Result<Assessment> {
     manifest.validate()?;
+    let kmi = super::kmi::resolve(manifest, &device.kernel_release)?;
     let mut candidates = Vec::new();
     for backend in [
         NativeBackend::Builtin,
@@ -135,7 +139,7 @@ pub fn assess_projected(
         NativeBackend::Kpm,
         NativeBackend::Zygisk,
     ] {
-        let (indices, availability) = available(manifest, device, backend);
+        let (indices, availability) = available(manifest, device, &kmi, backend);
         let runtime = match backend {
             NativeBackend::Builtin => device.builtin,
             NativeBackend::Kmod => device.module_loading,
@@ -194,6 +198,7 @@ pub fn assess_projected(
             .unwrap_or(Decision::NoEligibleCandidate),
     };
     Ok(Assessment {
+        kmi,
         candidates,
         decision,
     })
@@ -212,6 +217,7 @@ fn runtime_ready(runtime: Runtime) -> Result<(), Rejection> {
 fn available(
     manifest: &Manifest,
     device: &Capabilities,
+    kmi: &super::kmi::KmiResolution,
     backend: NativeBackend,
 ) -> (Vec<usize>, Result<(), Rejection>) {
     let indices: Vec<_> = manifest
@@ -220,8 +226,8 @@ fn available(
         .enumerate()
         .filter_map(|(index, payload)| {
             let matches = match (&payload.implementation, backend) {
-                (PayloadKind::Kmod { kmi }, NativeBackend::Kmod) => {
-                    device.kmi.as_ref() == Some(kmi)
+                (PayloadKind::Kmod { .. }, NativeBackend::Kmod) => {
+                    kmi.candidates.iter().any(|c| c.payload_index == index)
                 }
                 (PayloadKind::Kpm, NativeBackend::Kpm) => true,
                 (PayloadKind::Zygisk { abi }, NativeBackend::Zygisk) => {
@@ -240,8 +246,16 @@ fn available(
         NativeBackend::Kmod | NativeBackend::Kpm if device.abi != Abi::Arm64 => {
             Err(Rejection::WrongArchitecture)
         }
-        NativeBackend::Kmod if device.kmi.is_none() => Err(Rejection::UnknownKmi),
+        NativeBackend::Kmod if kmi.series.is_none() => Err(Rejection::UnknownKmi),
         NativeBackend::Kmod if indices.is_empty() => Err(Rejection::NoMatchingKmi),
+        NativeBackend::Kmod
+            if kmi.conflicting_hints
+                || (kmi.release_hint.is_some()
+                    && !kmi.candidates.iter().any(|c| c.matches_release_hint)) =>
+        {
+            Err(Rejection::ConflictingKmiEvidence)
+        }
+        NativeBackend::Kmod if indices.len() != 1 => Err(Rejection::AmbiguousKmi),
         NativeBackend::Zygisk
             if indices.len()
                 != if device.abi == Abi::Arm64 && device.needs_arm32_zygisk {

@@ -101,7 +101,7 @@ claim that no write occurred. The private journal records commands, phase intent
 actual commit revisions, write sets and exact Native dispatch evidence. Secrets
 and secret-derived verifiers never enter it. Bundled startup binds the exact
 manifest digest, source commit, payload and projected wire policy. Journal schema
-6 reads/migrates schemas 1, 2, 3, 4 and 5; blank, malformed or unsupported present journals refuse mutations.
+7 reads/migrates schemas 1 through 6; blank, malformed or unsupported present journals refuse mutations.
 
 Same-ID duplicate commands query the retained result; different commands refuse.
 SuperKey submission always refuses reuse because comparing the secret would
@@ -146,11 +146,19 @@ and failed-payload quarantine survive audit pruning: at most one load per backen
 per boot; unconfirmed payloads require explicit repair. Successful matching load
 clears quarantine. Live adoption does not claim binary-hash verification, so a
 quarantined payload may still require explicit repair on a subsequent boot.
-Schema-2/3/4/5-only Core cannot read schema 6. Downgrade is not a supported recovery:
+Schema-1-through-6-only Core cannot read schema 7. Downgrade is not a supported recovery:
 keep the journal and use a compatible Core, never delete it to bypass holds.
 Bundled Zygisk NativeIntent records the exact boot, operation generation, recipient
 directory identity and wire before publication. Recovery confirms only that exact
 publication, never injection or the absence of already-running process hooks.
+
+The experimental KMI loader preflight has a separate frozen manifest/boot/series
+plan and one attempt per exact candidate hash. It never spends or resets the real
+load budget. Running/Unknown preflights hold Native across restart, boot changes,
+repair and receipt pruning; a global loader blocker stops further probes. Intent
+and completion use the same fsync boundary as other effects. Production preflight
+dispatch remains disabled pending final-payload kernel/device acceptance. A
+clean sentinel is loader evidence, never private-layout or hook-health proof.
 
 ## Capture and measurement
 

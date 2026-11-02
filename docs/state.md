@@ -133,7 +133,7 @@ Mode `0700`, root-only. Journal, ownership markers, `core.log`, plus:
 
 | File | Format | Writer | Reader | Lifetime |
 |---|---|---|---|---|
-| `operations.json` | journal schema 2: issued-ID counter, expiry floor, retained receipts, actual revision/write-set evidence, held resources, expiring debug leases and pending logging restoration operation | core writer queue, atomically with directory fsync | startup recovery and receipt queries; schema 1 is migrated, corrupt/unsupported state refuses mutation | preserved by FullReset; 64 terminal receipts plus active/restoration records; expired Unknown receipts retain compact held-resource/Persist evidence |
+| `operations.json` | journal schema 7: issued-ID counter, expiry floor, retained receipts, revision/write-set evidence, held resources, native startup/load/preflight budgets, Zygisk exposure, debug leases and logging restoration | core writer queue, atomically with directory fsync | startup recovery and receipt queries; schemas 1–6 are migrated, corrupt/unsupported state refuses mutation | preserved by FullReset; 64 terminal receipts plus active/restoration records; expired Unknown receipts retain compact held-resource/Persist evidence |
 | `operations.json.lock` | permanent empty regular inode, mode `0600`, exclusive flock | core lifetime owner | another core refuses ownership before load/boot/bind | preserved by FullReset; never unlink a live lockfile |
 | `supervisor.lock` | permanent root-only regular inode and exclusive flock | service supervisor | duplicate service invocation refuses | supervisor lifetime; inode persists |
 | `supervisor_status` | running/restarting/stopped status and retry delay | service supervisor | diagnostics/manual inspection | overwritten as worker lifecycle changes |

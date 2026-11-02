@@ -349,6 +349,7 @@ mod tests {
                     sha256: format!("{:x}", Sha256::digest(b"payload")),
                     bytes: 7,
                     control_version: 2,
+                    preflight_protocol: None,
                 }
             })
             .collect();
@@ -391,7 +392,7 @@ mod tests {
             vpnhide_activator::parse_pm_packages("package:com.example uid:10123,110123\n");
         let caps = Capabilities {
             abi: Abi::Arm64,
-            kmi: Some("android14-6.1".into()),
+            kernel_release: "6.1.157-android14".into(),
             builtin: Runtime::Absent,
             module_loading: Runtime::Ready,
             kpm: Runtime::Absent,
@@ -495,7 +496,7 @@ mod tests {
     #[test]
     fn unknown_kmi_and_missing_policy_coverage_are_not_arbitrary_choices() {
         let (_temp, env, root, config, packages, mut caps) = fixture();
-        caps.kmi = None;
+        caps.kernel_release.clear();
         assert!(
             Prepared::bind_bundle(
                 env.clone(),
@@ -511,7 +512,7 @@ mod tests {
             )
             .is_err()
         );
-        caps.kmi = Some("android14-6.1".into());
+        caps.kernel_release = "6.1.157-android14".into();
         assert!(
             Prepared::bind_bundle(
                 env,

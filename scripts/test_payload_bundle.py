@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path
 
 from payload_bundle import KMIS, PROVENANCE, Artifact, assemble
+from test_kmod_elf import relocatable
 
 COMMIT = "a" * 40
 
@@ -60,7 +61,9 @@ class BundleTests(unittest.TestCase):
                 self.root / f"vpnhide-kmod-{kmi}.zip",
                 f"kmod:{kmi}",
                 {
-                    "vpnhide_kmod.ko": elf(183),
+                    "vpnhide_kmod.ko": relocatable(
+                        b"vpnhide_preflight=1\0parmtype=preflight_only:bool\0"
+                    ),
                     "module.prop": b"id=vpnhide_kmod\n",
                 },
             )
@@ -78,6 +81,19 @@ class BundleTests(unittest.TestCase):
     def build(self):
         assemble(self.root, self.output, COMMIT)
 
+    def test_legacy_or_inconsistent_ko_capability_refuses_before_output_replacement(self):
+        self.build()
+        previous = self.output.read_bytes()
+        for metadata in [b"license=GPL\0", b"vpnhide_preflight=1\0"]:
+            artifact(
+                self.root / f"vpnhide-kmod-{KMIS[0]}.zip",
+                f"kmod:{KMIS[0]}",
+                {"vpnhide_kmod.ko": relocatable(metadata)},
+            )
+            with self.assertRaises(ValueError):
+                self.build()
+            self.assertEqual(self.output.read_bytes(), previous)
+
     def test_complete_passive_bundle_has_exact_hashes_and_no_backend_installers(self):
         self.build()
         with zipfile.ZipFile(self.output) as archive:
@@ -85,6 +101,13 @@ class BundleTests(unittest.TestCase):
             manifest = json.loads(archive.read("payloads/manifest.json"))
             self.assertEqual(len(manifest["payloads"]), 10)
             self.assertEqual(manifest["bundle_commit"], COMMIT)
+            self.assertTrue(
+                all(
+                    p.get("preflight_protocol") == 1
+                    for p in manifest["payloads"]
+                    if p["implementation"]["kind"] == "kmod"
+                )
+            )
             self.assertFalse(any(name.startswith("zygisk/") for name in names))
             self.assertEqual([n for n in names if n.endswith("module.prop")], ["module.prop"])
             self.assertEqual(archive.read("module.prop"), b"id=vpnhide_core\n")

@@ -21,10 +21,10 @@ def region(data: bytes, offset: int, size: int) -> bytes:
     return data[offset : offset + size]
 
 
-def string(data: bytes, offset: int) -> str:
+def string(data: bytes, offset: int, limit: int = 1024) -> str:
     if offset < 0 or offset >= len(data):
         raise ValueError("ELF string outside table")
-    end = data.find(b"\0", offset)
+    end = data.find(b"\0", offset, offset + limit + 1)
     if end < 0:
         raise ValueError("unterminated ELF string")
     return data[offset:end].decode("ascii")
@@ -50,7 +50,7 @@ def inspect(data: bytes) -> dict:
     names = region(data, names_header[4], names_header[5])
     sections = {}
     for header in headers[1:]:
-        name = string(names, header[0])
+        name = string(names, header[0], 256)
         if name in sections:
             raise ValueError("duplicate ELF section")
         sections[name] = header
@@ -66,6 +66,8 @@ def inspect(data: bytes) -> dict:
         return region(data, header[4], header[5])
 
     modinfo = body(".modinfo")
+    if ".modinfo" in sections and (sections[".modinfo"][1] != 1 or len(modinfo) > 64 * 1024):
+        raise ValueError("invalid module metadata section")
     if modinfo and not modinfo.endswith(b"\0"):
         raise ValueError("unterminated module metadata")
     records = [record.decode("ascii") for record in modinfo.split(b"\0") if record]
@@ -84,7 +86,12 @@ def inspect(data: bytes) -> dict:
     symbols = body(".symtab")
     if symbols:
         header = sections[".symtab"]
-        if header[9] != 24 or len(symbols) % 24 or not 0 < header[6] < count:
+        if (
+            header[9] != 24
+            or len(symbols) % 24
+            or len(symbols) // 24 > 262144
+            or not 0 < header[6] < count
+        ):
             raise ValueError("invalid symbol table")
         strings_header = headers[header[6]]
         if strings_header[1] != 3:

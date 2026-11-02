@@ -39,7 +39,9 @@ pub const DEFAULT_JOURNAL_PATH: &str = "/data/adb/vpnhide/core/operations.json";
 /// Env override so the dev sandbox never touches the production journal.
 pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 
-const JOURNAL_VERSION: u32 = 6;
+pub mod preflight;
+
+const JOURNAL_VERSION: u32 = 7;
 
 /// Default number of terminal receipts to keep, including Unknown.
 pub const DEFAULT_RETAIN_SETTLED: usize = 64;
@@ -285,6 +287,8 @@ pub struct NativeQuarantine {
 pub struct Journal {
     pub version: u32,
     #[serde(default)]
+    pub kmod_preflights: Option<preflight::PreflightLedger>,
+    #[serde(default)]
     pub native_startup: Option<NativeStartup>,
     #[serde(default)]
     pub native_attempts: Vec<NativeAttemptHistory>,
@@ -329,6 +333,7 @@ impl Default for Journal {
     fn default() -> Self {
         Journal {
             version: JOURNAL_VERSION,
+            kmod_preflights: None,
             native_startup: None,
             native_attempts: Vec::new(),
             native_load_budget: None,
@@ -367,7 +372,7 @@ impl Journal {
 
     /// True when any stored operation still carries unresolved uncertainty.
     pub fn has_unknown(&self) -> bool {
-        self.native_startup_uncertain()
+        self.native_lifecycle_uncertain()
             || !self.expired_holds.is_empty()
             || self
                 .operations
@@ -387,6 +392,24 @@ impl Journal {
         explicit: bool,
     ) -> Result<(), String> {
         use crate::native_boot::prepared::TransitionAction;
+        if self.preflight_uncertain() {
+            return Err(
+                "loader preflight outcome is unknown; native activation remains held".into(),
+            );
+        }
+        if matches!(intent.action, TransitionAction::Load(NativeBackend::Kmod))
+            && let Some(ledger) = &self.kmod_preflights
+            && ledger.plan.boot_id == intent.boot_id
+        {
+            match ledger.evidence() {
+                preflight::LoaderEvidence::OneSentinel { sha256 }
+                    if intent.payload.as_ref().is_some_and(|p| p.sha256 == sha256) => {}
+                _ => return Err(
+                    "current preflight evidence does not identify one matching real-load payload"
+                        .into(),
+                ),
+            }
+        }
         if matches!(intent.action, TransitionAction::Load(b) | TransitionAction::Adopt(b) if b != NativeBackend::Zygisk)
             && self.zygisk_exposure_boot.as_deref() == Some(intent.boot_id.as_str())
         {
@@ -488,7 +511,7 @@ impl Journal {
             .copied()
             .chain(self.operations.iter().flat_map(JournalEntry::held_phases))
             .collect();
-        if self.native_startup_uncertain() {
+        if self.native_lifecycle_uncertain() {
             held.push(ConfigPhase::Native);
         }
         held.sort_by_key(|phase| *phase as u8);
@@ -562,6 +585,9 @@ impl Journal {
     /// Effects are never re-dispatched here; [`crate::recovery`] may resolve Unknown
     /// from durable evidence afterward.
     pub fn fence_unresolved(&mut self) {
+        if let Some(ledger) = &mut self.kmod_preflights {
+            ledger.fence_unresolved();
+        }
         for entry in &mut self.operations {
             if entry.record.settled == Some(PhaseOutcome::Unknown) {
                 entry.finalized_unknown = true;
@@ -619,7 +645,7 @@ pub fn read(path: &Path) -> io::Result<Journal> {
         .iter()
         .chain(journal.native_attempts.iter().map(|item| &item.attempt))
         .any(|attempt| !attempt.valid());
-    if invalid_startup {
+    if invalid_startup || journal.kmod_preflights.as_ref().is_some_and(|l| !l.valid()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid native startup identity",
@@ -904,7 +930,7 @@ mod tests {
         };
         write_atomic(&path, &journal).unwrap();
         let migrated = read(&path).unwrap();
-        assert_eq!(migrated.version, 6);
+        assert_eq!(migrated.version, 7);
         assert!(migrated.native_startup_uncertain());
         assert_eq!(migrated.native_startup, journal.native_startup);
         journal.version = 4;
@@ -950,7 +976,7 @@ mod tests {
             );
         }
         journal = original;
-        journal.version = 7;
+        journal.version = 8;
         write_atomic(&path, &journal).unwrap();
         assert!(read(&path).is_err(), "never reset unknown schema");
     }
@@ -1006,7 +1032,7 @@ mod tests {
         });
         journal.upsert(entry);
         write_atomic(&path, &journal).unwrap();
-        assert_eq!(read(&path).unwrap().version, 6);
+        assert_eq!(read(&path).unwrap().version, 7);
         journal
             .get_mut(OperationId(7))
             .unwrap()

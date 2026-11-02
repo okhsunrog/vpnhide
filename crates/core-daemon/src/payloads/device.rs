@@ -6,28 +6,10 @@ use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
+use super::Abi;
 use super::selection::{Capabilities, Ownership, Runtime};
-use super::{Abi, KMIS};
 use crate::native_boot::{KernelFact, KpmFact, NativeEnv, ScanFacts};
 use vpnhide_core_rpc::NativeBackend;
-
-pub fn exact_kmi(release: &str) -> Option<String> {
-    let mut parts = release.split('-');
-    let mut version = parts.next()?.split('.');
-    let major = version.next()?.parse::<u32>().ok()?;
-    let minor = version.next()?.parse::<u32>().ok()?;
-    let android: Vec<_> = parts
-        .filter(|s| {
-            s.strip_prefix("android")
-                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-        })
-        .collect();
-    if android.len() != 1 {
-        return None;
-    }
-    let kmi = format!("{}-{major}.{minor}", android[0]);
-    KMIS.contains(&kmi.as_str()).then_some(kmi)
-}
 
 fn option(config: &str, name: &str) -> Option<bool> {
     let values: Vec<_> = config
@@ -187,7 +169,7 @@ pub fn observe(env: &NativeEnv, facts: &ScanFacts) -> Capabilities {
         } else {
             Abi::Arm32
         },
-        kmi: exact_kmi(&release),
+        kernel_release: release,
         builtin: if facts.kernel == KernelFact::Builtin {
             Runtime::Ready
         } else {
@@ -240,22 +222,6 @@ mod tests {
         assert_eq!(zygisk_loader_owned_by(root.path(), owner), Runtime::Unknown);
     }
 
-    #[test]
-    fn kmi_is_exact_and_does_not_guess_unlisted_or_ambiguous_families() {
-        assert_eq!(
-            exact_kmi("6.1.120-android14-11-custom"),
-            Some("android14-6.1".into())
-        );
-        for value in [
-            "6.1.120",
-            "6.1.120-android13",
-            "6.1.120-android14-android15",
-            "6.1.120-android14custom",
-            "6.9.0-android14",
-        ] {
-            assert_eq!(exact_kmi(value), None);
-        }
-    }
     #[test]
     fn required_kernel_configuration_is_not_inferred_from_missing_evidence() {
         let config = "CONFIG_MODULES=y\nCONFIG_KPROBES=y\nCONFIG_KRETPROBES=y\n";

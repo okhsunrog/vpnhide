@@ -523,7 +523,7 @@ impl CoreState {
                     || (state.native_enabled()
                         && matches!(phase, ConfigPhase::Native | ConfigPhase::Secret))
             };
-            if store.journal.native_startup_uncertain()
+            if store.journal.native_lifecycle_uncertain()
                 || store
                     .journal
                     .expired_holds
