@@ -4,6 +4,7 @@ members = [
     "crates/apatch-abi",
     "crates/activator",
     "crates/native-policy",
+    "crates/loader-ipc",
     "crates/checks",
     "crates/checks-jni",
     "crates/core-rpc",

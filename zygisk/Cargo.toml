@@ -20,6 +20,8 @@ libc = "0.2.186"
 log = { version = "0.4.33", default-features = false }
 android_logger = { version = "0.15.1", default-features = false }
 vpnhide_protocol = { path = "../crates/protocol" }
+vpnhide_loader_ipc = { path = "../crates/loader-ipc" }
+sha2 = "0.10"
 
 # Compile-time log level. `log` statically elides any call below the
 # selected ceiling, so disabled levels add zero runtime cost and zero

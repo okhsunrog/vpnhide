@@ -170,7 +170,21 @@ impl Catalog {
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .open(root)?;
-        let manifest_file = open_beneath(&root, "payloads/manifest.json")?;
+        Self::open_pinned(&root)
+    }
+
+    pub(crate) fn open_pinned(root: &File) -> io::Result<Self> {
+        Self::open_pinned_before(root, None)
+    }
+
+    pub(crate) fn open_pinned_before(
+        root: &File,
+        deadline: Option<std::time::Instant>,
+    ) -> io::Result<Self> {
+        if !root.metadata()?.is_dir() {
+            return Err(invalid("catalog root is not a directory"));
+        }
+        let manifest_file = open_beneath(root, "payloads/manifest.json")?;
         let mut bytes = Vec::new();
         manifest_file
             .take(MAX_MANIFEST_BYTES + 1)
@@ -178,15 +192,24 @@ impl Catalog {
         let manifest = Manifest::parse(&bytes)?;
         let mut payloads = Vec::with_capacity(manifest.payloads.len());
         for metadata in &manifest.payloads {
-            let mut file = open_beneath(&root, &metadata.implementation.relative_path()?)?;
+            check_deadline(deadline)?;
+            let mut file = open_beneath(root, &metadata.implementation.relative_path()?)?;
             if file.metadata()?.len() != metadata.bytes {
                 return Err(invalid("payload size mismatch"));
             }
             let mut digest = Sha256::new();
-            let count = io::copy(
-                &mut Read::by_ref(&mut file).take(metadata.bytes + 1),
-                &mut digest,
-            )?;
+            let mut count = 0u64;
+            let mut buffer = [0; 64 * 1024];
+            let mut reader = Read::by_ref(&mut file).take(metadata.bytes + 1);
+            loop {
+                check_deadline(deadline)?;
+                let read = reader.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                count += read as u64;
+                digest.update(&buffer[..read]);
+            }
             if count != metadata.bytes || format!("{:x}", digest.finalize()) != metadata.sha256 {
                 return Err(invalid("payload digest mismatch"));
             }
@@ -208,6 +231,16 @@ impl Catalog {
         }
         Ok(Self { manifest, payloads })
     }
+}
+
+fn check_deadline(deadline: Option<std::time::Instant>) -> io::Result<()> {
+    if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "catalog inspection deadline",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn open_beneath(root: &File, path: &str) -> io::Result<File> {

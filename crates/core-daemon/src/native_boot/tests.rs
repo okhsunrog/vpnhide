@@ -300,6 +300,7 @@ fn env(root: &Path) -> NativeEnv {
         legacy_root: Some(root.join("legacy")),
         apatch_kpms: root.join("ap/kpms"),
         payload_override: None,
+        loader: None,
     }
 }
 
@@ -716,6 +717,7 @@ fn restored_kpm_auth_loss_preserves_credential_recovery_without_selection() {
         legacy_root: None,
         apatch_kpms: root.path().join("kpms"),
         payload_override: None,
+        loader: None,
     };
     let boot = NativeBoot::blocked(env, 1, "fixture".into()).reconcile_restored_facts(
         2,
@@ -731,5 +733,41 @@ fn restored_kpm_auth_loss_preserves_credential_recovery_without_selection() {
     assert!(matches!(
         boot.status.outcome,
         NativeBootOutcome::KpmUnverifiable { .. }
+    ));
+}
+
+#[test]
+fn restored_bundled_zygisk_needs_current_loader_evidence_not_only_library_files() {
+    let root = tempfile::tempdir().unwrap();
+    let bundle = root.path().join("bundle");
+    assert!(
+        std::process::Command::new("python3")
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/test_payload_bundle.py"))
+            .arg("--fixture")
+            .arg(&bundle)
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(crate::zygisk::ZygiskTarget::open(&bundle).is_ok());
+    let mut environment = env(root.path());
+    environment.zygisk_module = Some(bundle);
+    let selected = Selection {
+        backend: Zygisk,
+        mode: SelectionMode::Adopted,
+        filesystem_hiding: None,
+    };
+    let mut previous = NativeBoot::blocked(environment, 1, "fixture".into());
+    previous.selection = Some(selected);
+    previous.status.outcome = selected_outcome(selected);
+    let restored = previous.reconcile_restored_facts(
+        2,
+        Zygisk,
+        &facts(&[], KernelFact::Absent, KpmFact::NoRuntime),
+    );
+    assert_eq!(restored.selected(), None);
+    assert!(matches!(
+        restored.status.outcome,
+        NativeBootOutcome::Unknown { .. }
     ));
 }

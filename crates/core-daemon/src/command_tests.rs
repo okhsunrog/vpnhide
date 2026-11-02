@@ -81,6 +81,7 @@ fn native_none(state: &CoreState, root: &std::path::Path) {
         legacy_root: None,
         apatch_kpms: root.join("apatch"),
         payload_override: None,
+        loader: None,
     };
     state.install_native_boot(crate::native_boot::NativeBoot {
         env,
@@ -1026,6 +1027,7 @@ fn explicit_repair_releases_only_covered_resources_and_preserves_old_unknown_rec
         legacy_root: None,
         apatch_kpms: root.path().join("apatch"),
         payload_override: None,
+        loader: None,
     };
     state.install_native_boot(crate::native_boot::NativeBoot {
         env,
@@ -1371,6 +1373,7 @@ fn startup_env(root: &std::path::Path) -> crate::native_boot::NativeEnv {
         legacy_root: None,
         apatch_kpms: root.join("no-apatch"),
         payload_override: None,
+        loader: None,
     }
 }
 

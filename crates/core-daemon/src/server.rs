@@ -107,6 +107,7 @@ impl Default for CommandSpec {
 /// The core's owned state: the published-state store plus the authoritative config.
 pub struct CoreState {
     pub publisher: Publisher,
+    loader: Arc<crate::zygisk_loader::LoaderRegistry>,
     engine: crate::command_engine::CommandEngine,
     shutting_down: std::sync::atomic::AtomicBool,
     shutdown_gate: Mutex<()>,
@@ -828,6 +829,7 @@ impl CoreState {
     pub fn new(publisher: Publisher) -> Arc<Self> {
         Arc::new(CoreState {
             publisher,
+            loader: Arc::new(crate::zygisk_loader::LoaderRegistry::default()),
             engine: Default::default(),
             shutting_down: std::sync::atomic::AtomicBool::new(false),
             shutdown_gate: Mutex::new(()),
@@ -1002,6 +1004,7 @@ impl CoreState {
         let field_revisions = journal.field_revisions.clone();
         let state = Arc::new(CoreState {
             publisher,
+            loader: Arc::new(crate::zygisk_loader::LoaderRegistry::default()),
             engine: crate::command_engine::CommandEngine::with_store(ConfigStore {
                 config: config.clone(),
                 config_revision,
@@ -1038,6 +1041,10 @@ impl CoreState {
     }
 
     /// True when a control node is configured (native management enabled).
+    pub fn loader(&self) -> &Arc<crate::zygisk_loader::LoaderRegistry> {
+        &self.loader
+    }
+
     pub fn native_enabled(&self) -> bool {
         self.kmod_ctl_path.is_some()
     }
@@ -1095,7 +1102,8 @@ impl CoreState {
 
     /// Publish a no-effect startup wait while PackageManager is unavailable.
     /// This is not an uncertain operation and consumes no load attempt budget.
-    pub fn defer_native_boot(&self, env: crate::native_boot::NativeEnv, epoch: u64) {
+    pub fn defer_native_boot(&self, mut env: crate::native_boot::NativeEnv, epoch: u64) {
+        env.loader = Some(self.loader.clone());
         self.epoch.store(epoch, Ordering::SeqCst);
         self.install_native_boot(crate::native_boot::NativeBoot::blocked(
             env,
@@ -1106,7 +1114,8 @@ impl CoreState {
 
     /// Serialize initial activation on the command writer and journal intent before
     /// effects. Restore completed decisions; never replay interrupted startup.
-    pub fn start_native_boot(&self, env: crate::native_boot::NativeEnv, epoch: u64) {
+    pub fn start_native_boot(&self, mut env: crate::native_boot::NativeEnv, epoch: u64) {
+        env.loader = Some(self.loader.clone());
         let fallback_env = env.clone();
         if let Err(error) =
             self.call_writer(move |state| state.start_native_boot_direct(env, epoch))

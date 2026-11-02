@@ -687,6 +687,7 @@ mod tests {
                 legacy_root: None,
                 apatch_kpms: root.path().join("no-apatch"),
                 payload_override: None,
+                loader: None,
             },
             1,
         );

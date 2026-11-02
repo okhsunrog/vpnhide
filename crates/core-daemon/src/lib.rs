@@ -34,6 +34,7 @@ pub mod routing_compose;
 pub mod server;
 pub mod service;
 pub mod zygisk;
+pub mod zygisk_loader;
 
 pub use listener::{ServerHandle, listen};
 pub use observer::observe;

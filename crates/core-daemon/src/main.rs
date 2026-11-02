@@ -196,6 +196,38 @@ async fn run(path: &str) {
     let boot_apply = operational && vpnhide_core_daemon::boot::boot_apply_enabled();
     let mut deferred_native = None;
     let modules = backend::kernel_modules_from_env();
+    // The private companion listener must exist before boot selection launches
+    // its real Android worker. Host/dev and legacy-only runs have no such endpoint.
+    let loader_handle =
+        if boot_apply && modules.as_deref() == Some(Path::new(backend::MODULES_ROOT)) {
+            modules
+                .as_ref()
+                .map(|m| m.join("vpnhide_core"))
+                .filter(|root| root.join("payloads/manifest.json").is_file())
+                .and_then(|root| {
+                    let boot_id = vpnhide_loader_ipc::image::bounded_text(
+                        Path::new(vpnhide_core_daemon::native_boot::BOOT_ID_PATH),
+                        128,
+                    )
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned();
+                    match vpnhide_core_daemon::zygisk_loader::start(
+                        state.loader().clone(),
+                        root,
+                        boot_id,
+                        epoch,
+                    ) {
+                        Ok(handle) => Some(handle),
+                        Err(error) => {
+                            eprintln!("core: loader listener unavailable: {error}");
+                            None
+                        }
+                    }
+                })
+        } else {
+            None
+        };
     match vpnhide_core_daemon::native_boot::NativeEnv::from_env(kmod_ctl_path.clone())
         .filter(|_| operational)
     {
@@ -294,6 +326,9 @@ async fn run(path: &str) {
         handle.shutdown_and_unlink();
     }
     state.shutdown();
+    if let Some(handle) = loader_handle {
+        handle.shutdown_and_unlink();
+    }
 }
 
 /// One-shot boot path used by the Magisk module before or instead of long-run serve.

@@ -80,6 +80,64 @@ pub fn zygisk_loader(proc_root: &Path) -> Runtime {
     zygisk_loader_owned_by(proc_root, 0)
 }
 
+/// Shipping both libraries does not imply a mixed-ABI runtime. Only a positive
+/// 64-only zygote configuration plus consistent live inventory removes the
+/// 32-bit proof requirement. Missing/conflicting observations stay conservative.
+pub fn needs_arm32_zygisk(proc_root: &Path, zygote_property: Option<&str>) -> bool {
+    needs_arm32_owned_by(proc_root, zygote_property, 0)
+}
+
+fn needs_arm32_owned_by(proc_root: &Path, property: Option<&str>, owner: u32) -> bool {
+    if property != Some("zygote64") {
+        return true;
+    }
+    let Ok(entries) = fs::read_dir(proc_root) else {
+        return true;
+    };
+    let mut seen64 = false;
+    for (count, entry) in entries.enumerate() {
+        if count >= 4096 {
+            return true;
+        }
+        let Ok(entry) = entry else {
+            return true;
+        };
+        if !entry
+            .file_name()
+            .as_encoded_bytes()
+            .iter()
+            .all(u8::is_ascii_digit)
+        {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            return true;
+        };
+        if metadata.uid() != owner || !metadata.is_dir() {
+            continue;
+        }
+        let Ok(file) = File::open(entry.path().join("cmdline")) else {
+            return true;
+        };
+        let mut prefix = Vec::new();
+        if file.take(256).read_to_end(&mut prefix).is_err() {
+            return true;
+        }
+        if prefix.is_empty() {
+            continue;
+        }
+        let Some(end) = prefix.iter().position(|b| *b == 0) else {
+            return true;
+        };
+        match &prefix[..end] {
+            b"zygote64" => seen64 = true,
+            b"zygote" | b"zygote32" => return true,
+            _ => {}
+        }
+    }
+    !seen64
+}
+
 fn zygisk_loader_owned_by(proc_root: &Path, owner: u32) -> Runtime {
     let Ok(entries) = fs::read_dir(proc_root) else {
         return Runtime::Unknown;
@@ -178,8 +236,10 @@ pub fn observe(env: &NativeEnv, facts: &ScanFacts) -> Capabilities {
         module_loading: module_loading(config.as_deref(), disabled.as_deref()),
         kpm,
         zygisk: zygisk_loader(Path::new("/proc")),
-        // Both ABIs ship. Requiring both on arm64 is conservative, including mixed zygotes.
-        needs_arm32_zygisk: true,
+        needs_arm32_zygisk: needs_arm32_zygisk(
+            Path::new("/proc"),
+            vpnhide_activator::sys::property("ro.zygote").as_deref(),
+        ),
         ownership,
     }
 }
@@ -199,6 +259,28 @@ pub fn resident_eligible(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn actual_zygote_layout_controls_required_abis_not_the_shipping_set() {
+        let root = tempfile::tempdir().unwrap();
+        let process = root.path().join("123");
+        fs::create_dir(&process).unwrap();
+        let owner = fs::metadata(&process).unwrap().uid();
+        fs::write(process.join("cmdline"), b"zygote64\0").unwrap();
+        assert!(!needs_arm32_owned_by(root.path(), Some("zygote64"), owner));
+        for property in [
+            None,
+            Some("zygote64_32"),
+            Some("zygote32_64"),
+            Some("unknown"),
+        ] {
+            assert!(needs_arm32_owned_by(root.path(), property, owner));
+        }
+        fs::create_dir(root.path().join("124")).unwrap();
+        fs::write(root.path().join("124/cmdline"), b"zygote32\0").unwrap();
+        assert!(needs_arm32_owned_by(root.path(), Some("zygote64"), owner));
+        fs::remove_file(root.path().join("124/cmdline")).unwrap();
+        assert!(needs_arm32_owned_by(root.path(), Some("zygote64"), owner));
+    }
     #[test]
     fn loader_evidence_requires_owned_zygote_mapping_not_manager_files() {
         let root = tempfile::tempdir().unwrap();

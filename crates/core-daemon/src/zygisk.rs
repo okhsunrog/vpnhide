@@ -64,6 +64,15 @@ impl ZygiskTarget {
         Ok((metadata.dev(), metadata.ino()))
     }
 
+    pub(crate) fn revalidate_identity(&self) -> Result<(u64, u64), String> {
+        self.verify()?;
+        self.identity()
+    }
+
+    pub(crate) fn bundled(&self) -> Result<bool, String> {
+        Ok(matches!(self.verify()?, Recipient::Bundled))
+    }
+
     fn pinned_path(&self) -> PathBuf {
         PathBuf::from(format!("/proc/self/fd/{}", self.directory.as_raw_fd()))
     }

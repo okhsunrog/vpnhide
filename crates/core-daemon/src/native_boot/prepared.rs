@@ -322,6 +322,7 @@ mod tests {
             legacy_root: None,
             apatch_kpms: root.join("kpms"),
             payload_override: None,
+            loader: None,
         };
         fs::write(&env.boot_id_path, boot).unwrap();
         Prepared::from_facts(

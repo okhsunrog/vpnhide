@@ -15,8 +15,9 @@ COMMIT = "a" * 40
 
 
 def elf(machine):
-    header = bytearray(32)
-    header[:6] = b"\x7fELF" + bytes([2 if machine == 183 else 1, 1])
+    header = bytearray(64)
+    header[:7] = b"\x7fELF" + bytes([2 if machine == 183 else 1, 1, 1])
+    header[16:18] = (3).to_bytes(2, "little")
     header[18:20] = machine.to_bytes(2, "little")
     return bytes(header)
 
@@ -94,7 +95,7 @@ class BundleTests(unittest.TestCase):
                 self.build()
             self.assertEqual(self.output.read_bytes(), previous)
 
-    def test_complete_passive_bundle_has_exact_hashes_and_no_backend_installers(self):
+    def test_complete_bundle_has_exact_inert_autoload_bytes_and_no_backend_installers(self):
         self.build()
         with zipfile.ZipFile(self.output) as archive:
             names = archive.namelist()
@@ -108,9 +109,17 @@ class BundleTests(unittest.TestCase):
                     if p["implementation"]["kind"] == "kmod"
                 )
             )
-            self.assertFalse(any(name.startswith("zygisk/") for name in names))
+            for abi in ["arm64-v8a", "armeabi-v7a"]:
+                self.assertEqual(
+                    archive.read(f"zygisk/{abi}.so"), archive.read(f"payloads/zygisk/{abi}.so")
+                )
+            self.assertNotIn("zygisk-activation.txt", names)
+            self.assertNotIn("targets.txt", names)
             self.assertEqual([n for n in names if n.endswith("module.prop")], ["module.prop"])
-            self.assertEqual(archive.read("module.prop"), b"id=vpnhide_core\n")
+            self.assertEqual(
+                archive.read("module.prop"),
+                b"id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+            )
             for payload in manifest["payloads"]:
                 self.assertEqual(payload["source_commit"], COMMIT)
                 self.assertEqual(payload["control_version"], 2)

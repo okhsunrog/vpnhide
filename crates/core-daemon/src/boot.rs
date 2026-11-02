@@ -79,6 +79,11 @@ pub fn run_boot_with_native(
     crate::alog::info("boot: waiting for PackageManager before native selection");
     vpnhide_activator::wait_for_package_manager();
     if let Some((env, epoch)) = native {
+        if state.loader().enabled()
+            && let Err(reason) = state.loader().probe_worker()
+        {
+            crate::alog::info(&format!("boot: loader probe unverified: {reason}"));
+        }
         state.start_native_boot(env, epoch);
     }
     run_boot_passes(state, false)

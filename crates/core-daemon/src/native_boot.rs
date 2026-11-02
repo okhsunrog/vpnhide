@@ -71,6 +71,7 @@ pub struct NativeEnv {
     /// APatch's installed-KPM dir: evidence that a VPN Hide KPM may be live.
     pub apatch_kpms: PathBuf,
     pub(crate) payload_override: Option<PathBuf>,
+    pub(crate) loader: Option<std::sync::Arc<crate::zygisk_loader::LoaderRegistry>>,
 }
 
 impl NativeEnv {
@@ -90,6 +91,7 @@ impl NativeEnv {
             legacy_root: production.then(|| PathBuf::from("/")),
             apatch_kpms: APATCH_KPMS_DIR.into(),
             payload_override: None,
+            loader: None,
         })
     }
 
@@ -624,10 +626,30 @@ impl NativeBoot {
             NativeBackend::Zygisk => {
                 facts.kernel == KernelFact::Absent
                     && kpm_clear
-                    && self
-                        .env
-                        .module_dir(selected)
-                        .is_some_and(|dir| crate::zygisk::ZygiskTarget::open(&dir).is_ok())
+                    && self.env.module_dir(selected).is_some_and(|dir| {
+                        let Ok(target) = crate::zygisk::ZygiskTarget::open(&dir) else {
+                            return false;
+                        };
+                        match target.bundled() {
+                            Ok(false) => true, // explicit separate-module compatibility
+                            Ok(true) => crate::payloads::Catalog::open(&dir).is_ok_and(|catalog| {
+                                let abi = if cfg!(target_arch = "aarch64") {
+                                    crate::payloads::Abi::Arm64
+                                } else {
+                                    crate::payloads::Abi::Arm32
+                                };
+                                let needs32 = crate::payloads::device::needs_arm32_zygisk(
+                                    Path::new("/proc"),
+                                    vpnhide_activator::sys::property("ro.zygote").as_deref(),
+                                );
+                                self.env
+                                    .loader
+                                    .as_ref()
+                                    .is_some_and(|loader| loader.available(&catalog, abi, needs32))
+                            }),
+                            Err(_) => false,
+                        }
+                    })
             }
         };
         if valid {

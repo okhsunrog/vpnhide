@@ -73,6 +73,7 @@
 //! injects it into every forked app process; the `pre_app_specialize`
 //! filter ensures we only actually do work for targeted apps.
 
+mod companion;
 mod filesystem;
 mod filter;
 mod generated;
@@ -188,6 +189,7 @@ struct ZygiskConfig {
     targets: Vec<protocol::Target>,
     debug: bool,
     authorization_generation: Option<u64>,
+    policy_sha256: Option<[u8; 32]>,
 }
 
 static CACHED_CONFIG: OnceLock<ZygiskConfig> = OnceLock::new();
@@ -202,10 +204,15 @@ fn load_config_from_dir_fd(dir_fd: RawFd) -> ZygiskConfig {
         targets: Vec::new(),
         debug: false,
         authorization_generation: None,
+        policy_sha256: None,
     };
     match policy_file::read_snapshot(dir_fd) {
         Some(snapshot) => ZygiskConfig {
-            authorization_generation: snapshot.authorization.map(|a| a.generation),
+            authorization_generation: snapshot.authorization.as_ref().map(|a| a.generation),
+            policy_sha256: snapshot.authorization.as_ref().map(|a| {
+                use sha2::{Digest, Sha256};
+                Sha256::digest(a.wire.as_bytes()).into()
+            }),
             targets: snapshot
                 .config
                 .targets
@@ -281,8 +288,6 @@ impl ZygiskModule for VpnHide {
             cfg.targets.len(),
             cfg.debug
         );
-        // No root module-directory descriptor survives into the app sandbox.
-        drop(dir_fd);
         // UID is the targeting key (protocol §4.3). args.uid already holds the
         // UID this child will become, and one UID covers every process of a
         // multi-process app — so no package/sub-process name matching needed.
@@ -296,6 +301,21 @@ impl ZygiskModule for VpnHide {
         // itself for the status heartbeat — an identity check, not targeting.
         let package = read_jstring(&env, args.nice_name);
         let hookmask = target_hookmask(uid);
+        if let Some(directory) = &dir_fd
+            && (package.as_deref() == Some(vpnhide_loader_ipc::WORKER_PROCESS)
+                || (cfg.authorization_generation.is_some() && hookmask != 0))
+        {
+            let _ = companion::report(
+                &mut api,
+                directory,
+                uid,
+                package.clone().unwrap_or_default(),
+                cfg.authorization_generation,
+                cfg.policy_sha256,
+            );
+        }
+        // No privileged directory, image or companion descriptor survives.
+        drop(dir_fd);
         if hookmask != 0 {
             info!("pre_app_specialize: targeting uid {uid} hooks=0x{hookmask:x}");
             self.target_hookmask.store(hookmask, Ordering::Relaxed);
@@ -907,4 +927,4 @@ register_module!(VpnHide);
 
 // Empty companion — declared so we don't have to recompile the .so if we
 // ever want to add a root-privileged helper later.
-register_companion!(|_| ());
+register_companion!(companion::entry);

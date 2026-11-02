@@ -388,7 +388,7 @@ fn arm32_and_missing_evidence_fail_closed() {
 }
 
 #[test]
-fn python_assembled_bundle_matches_runtime_catalog_without_autoload() {
+fn python_assembled_bundle_matches_runtime_catalog_with_inert_autoload() {
     let root = tempfile::tempdir().unwrap();
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/test_payload_bundle.py");
@@ -402,7 +402,9 @@ fn python_assembled_bundle_matches_runtime_catalog_without_autoload() {
     let catalog = Catalog::open(root.path()).unwrap();
     catalog.manifest.require_complete().unwrap();
     assert_eq!(catalog.payloads.len(), 10);
-    assert!(!root.path().join("zygisk").exists());
+    assert!(crate::zygisk::ZygiskTarget::open(root.path()).is_ok());
+    assert!(!root.path().join("zygisk-activation.txt").exists());
+    assert!(!root.path().join("targets.txt").exists());
     assert_eq!(catalog.manifest.bundle_commit, "a".repeat(40));
 }
 

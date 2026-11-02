@@ -759,3 +759,57 @@ this change does not invent that proof from uname or mere residency. Completed
 same-boot selections keep the existing durable restore path. A future recovery
 adapter may use sufficient independently bound generation evidence; never fix
 this by permitting a second load or guessing the branch.
+
+### Public-API Zygisk loader and real Android process prototype
+
+`loader-ipc` owns the private version-1 bounded companion frames, SCM_RIGHTS
+ownership, request-time SCM_CREDENTIALS and exact executable-image inspection.
+The real V2 `with_companion` handler replaces the empty companion. It duplicates
+the actual mapped backing inode during pre-specialization, sends that descriptor
+and the public module-directory descriptor, and closes all callback-owned fds
+before returning. No dladdr pathname/hash or embedded version is loaded-byte proof.
+Core's private root-only observer challenges the companion, verifies both child
+and companion mappings against the retained image, seals/root-file protection,
+ELF ABI, catalog hash/size, recipient inode, boot and consumed policy generation.
+The catalog is verified once per pinned directory generation; subsequent callbacks
+recheck its bounded manifest. Hash loops and frame completion have deadlines;
+the private Core connect is nonblocking/deadline-bound. The public provider's own
+`with_companion` connect remains a provider/device acceptance gate.
+
+Core owns a bounded registry. A pre callback is not specialization proof: Core
+joins PID/starttime/UID/process name with actual post-specialization kernel facts.
+Availability also requires the original zygote and companion to remain live, the
+companion still mapping the retained image and matching current catalog/recipient.
+Old boot/epoch, PID reuse, companion replacement and directory replacement do not
+reuse a proof. Image inspection uses retained descriptors rather than map_files
+privilege assumptions. Unreadable/closed/unsealed provider images remain Unknown.
+Positive `ro.zygote=zygote64` plus consistent live zygote inventory removes the
+otherwise conservative 32-bit proof requirement. A normal Service cannot select
+Zygote32 with `--abi`; mixed runtimes still need genuine 32-bit evidence.
+
+The APK has an unexported, non-isolated `:diagnostics` LoaderProbeService, started
+by Core through fixed Android commands after PM readiness, off the command writer.
+A short temporary idle allowance is a bounded AOSP launch candidate, not a blanket
+background-limit bypass; it expires without removing another owner's allowance.
+The dedicated worker terminates itself after a bounded lifetime so the next run
+can consume fresh authorization without killing UI. Live workers can be joined.
+Bundle assembly installs exact inert autoload copies and activation metadata;
+missing/revoked/current-boot-invalid authorization installs no hooks. Actual mapped
+image evidence replaces the old forced-Unknown eligibility placeholder.
+
+This is loader availability/consumption plumbing, **not completed stage4 or RFC2**.
+It does not prove hooks installed, policy health, game-process updates or fixture
+results. Still required: unified typed observed-generation consumer and health
+model, lifecycle/fallback completion, full verifier/provider/Android acceptance,
+then the autonomous native/framework fixture session and Core-owned verdict/cache.
+No device operation or controlled 32-bit package installation was performed.
+
+Cloud validation of this checkpoint: 295 Core library tests and 9 loader-IPC
+tests pass, including real sealed memfd mappings, fd cleanup after ancillary
+truncation, a real child sender over a parent-created socketpair, saturated
+connect backlog, cached generation replacement, PID reuse, companion loss,
+required ABI coverage and same-boot restored Zygisk without loader proof.
+894 JVM tests, ktlint, detekt, CPD and Android lint pass. Strict host and both
+ARM ABI Clippy pass. Pure proc fixtures test the post-specialization registry;
+they are not a real Android/provider end-to-end acceptance. Production signing
+and final source-consistent release/bundle rebuilds remain separate gates.

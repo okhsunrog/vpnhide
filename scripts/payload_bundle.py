@@ -1,7 +1,8 @@
 """Build provenance and bounded, passive unified Core assembly (stdlib only).
 
 This verifies consistency within one trusted CI run, not publisher signatures.
-It never extracts paths chosen by an input ZIP or enables Zygisk autoload.
+It never extracts paths chosen by an input ZIP. Bundled Zygisk autoload is inert
+until Core publishes a current-boot authorization through its journal.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -174,6 +176,15 @@ def assemble(inputs: Path, output: Path, commit: str) -> None:
                 if name.startswith(("zygisk/", "payloads/")) or name == "payloads/manifest.json":
                     raise ValueError("base Core contains unexpected payloads")
                 core.copy(name, staging / name)
+            properties = (staging / "module.prop").read_text()
+            if any(
+                line.strip().startswith(("vpnhideControl=", "vpnhideActivation="))
+                for line in properties.splitlines()
+            ):
+                raise ValueError("base Core contains ambiguous activation metadata")
+            (staging / "module.prop").write_text(
+                properties.rstrip("\n") + "\nvpnhideControl=2\nvpnhideActivation=1\n"
+            )
             payloads = []
             for kmi in KMIS:
                 payloads.append(
@@ -206,6 +217,11 @@ def assemble(inputs: Path, output: Path, commit: str) -> None:
             for component, source, target, implementation, machine in payloads:
                 artifact = artifacts[component]
                 artifact.copy(source, staging / target, machine)
+                if implementation["kind"] == "zygisk":
+                    library = staging / "zygisk" / Path(source).name
+                    library.parent.mkdir(exist_ok=True)
+                    shutil.copyfile(staging / target, library)
+                    library.chmod(0o644)
                 proof = artifact.meta["files"][source]
                 capability = {}
                 if implementation["kind"] == "kmod":

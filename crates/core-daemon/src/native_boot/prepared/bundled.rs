@@ -53,9 +53,16 @@ impl Prepared {
         let packages =
             PackageUidMap::from_pm().map_err(|e| format!("package inventory unavailable: {e}"))?;
         let mut capabilities = crate::payloads::device::observe(&env, &facts);
-        // Maps/provider names do not establish that our exact bundled library was
-        // loaded. Only the forthcoming module handshake can promote this evidence.
-        capabilities.zygisk = Runtime::Unknown;
+        // Availability comes from the public-API companion and actual mapped
+        // bytes, followed by real app specialization. Provider names cannot
+        // promote this evidence; hook health remains a separate measurement.
+        capabilities.zygisk = if env.loader.as_ref().is_some_and(|loader| {
+            loader.available(&catalog, capabilities.abi, capabilities.needs_arm32_zygisk)
+        }) {
+            Runtime::Ready
+        } else {
+            Runtime::Unknown
+        };
         let mut support = vec![
             (
                 NativeBackend::Kmod,
@@ -375,6 +382,7 @@ mod tests {
             legacy_root: None,
             apatch_kpms: temp.path().join("kpms"),
             payload_override: None,
+            loader: None,
         };
         let mut config = CanonicalConfig::default();
         config.apps.insert(

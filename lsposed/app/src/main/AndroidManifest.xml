@@ -20,6 +20,12 @@
         tools:ignore="GoogleAppIndexingWarning">
 
         <service
+            android:name=".diagnostics.LoaderProbeService"
+            android:process=":diagnostics"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <service
             android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
             android:enabled="false"
             android:exported="false">
