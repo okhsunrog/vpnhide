@@ -89,12 +89,13 @@ val appNativeCrates =
         "core-ffi",
         "core-client",
         "core-rpc",
+        "native-policy",
         "activator",
         "apatch-abi",
         "protocol",
     ).map { repoDir.resolve("crates/$it") }
 val coreFfiCrates =
-    listOf("core-ffi", "core-client", "core-rpc", "protocol")
+    listOf("core-ffi", "core-client", "core-rpc", "native-policy", "protocol")
         .map { repoDir.resolve("crates/$it") }
 val rustAssetsOut = rustAssetsDir.get().asFile
 
@@ -477,4 +478,10 @@ dependencies {
     testImplementation("org.json:json:20240303")
     // Virtual-clock coroutine tests (runTest): the Situation grace re-emission.
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+}
+
+// Executable local-policy FFI contracts use the same host library as binding generation.
+tasks.withType<Test>().configureEach {
+    dependsOn(buildCoreFfiHost)
+    systemProperty("jna.library.path", repoDir.resolve("target/debug").absolutePath)
 }

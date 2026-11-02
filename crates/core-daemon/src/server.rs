@@ -1267,7 +1267,33 @@ impl CoreState {
             return Ok(None);
         };
         match crate::activation::project_native_wire(next, backend) {
-            Ok(wire) => Ok(Some((backend, wire))),
+            Ok(wire) => {
+                let capacity = match backend {
+                    vpnhide_core_rpc::NativeBackend::Kpm => {
+                        vpnhide_activator::NativeHookFamily::Kpm
+                    }
+                    vpnhide_core_rpc::NativeBackend::Kmod => {
+                        vpnhide_activator::NativeHookFamily::Kmod
+                    }
+                    vpnhide_core_rpc::NativeBackend::Builtin => {
+                        vpnhide_activator::NativeHookFamily::Builtin
+                    }
+                    vpnhide_core_rpc::NativeBackend::Zygisk => {
+                        vpnhide_activator::NativeHookFamily::Zygisk
+                    }
+                }
+                .limits()
+                .wire_bytes;
+                if wire.len() > capacity {
+                    return Err(SubmitError::Rejected {
+                        reason: format!(
+                            "native control payload needs {} bytes; {backend:?} capacity is {capacity}",
+                            wire.len()
+                        ),
+                    });
+                }
+                Ok(Some((backend, wire)))
+            }
             Err(crate::activation::ProjectionError::Capacity(report)) => {
                 crate::alog::info(&format!(
                     "config: refused edit: {} native target uids exceed {backend:?} capacity {}",

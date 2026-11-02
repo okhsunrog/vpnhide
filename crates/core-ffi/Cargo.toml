@@ -27,6 +27,7 @@ bindgen = ["uniffi/cli"]
 uniffi = { version = "0.32", features = ["tokio"] }
 vpnhide_core_client = { version = "0.1.0", path = "../core-client" }
 vpnhide_core_rpc = { path = "../core-rpc" }
+vpnhide_native_policy = { path = "../native-policy" }
 
 [dev-dependencies]
 tempfile = "3"

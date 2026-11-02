@@ -58,11 +58,6 @@ internal data class AppRoleSelection(
     val portPolicy: PortPolicy? = null,
 )
 
-/** Mirror of `vpnhide_protocol::MAX_TARGET_UIDS` and the three kernel backends' `MAX_TARGET_UIDS`. */
-internal const val NATIVE_TARGET_UID_CAPACITY = 160
-internal const val NATIVE_SELF_RESERVED_UID_SLOTS = 1
-internal const val NATIVE_USER_UID_CAPACITY = NATIVE_TARGET_UID_CAPACITY - NATIVE_SELF_RESERVED_UID_SLOTS
-
 private const val ANDROID_UIDS_PER_USER = 100_000
 private const val FIRST_APPLICATION_UID = 10_000
 
@@ -80,48 +75,6 @@ internal fun packagesSharingAppIds(packageUids: Map<String, List<Int>>): Set<Str
         .filter { it.size > 1 }
         .flatten()
         .toSet()
-
-internal data class NativeTargetCapacityUsage(
-    val used: Int,
-    val capacity: Int = NATIVE_TARGET_UID_CAPACITY,
-) {
-    val overflow: Int get() = (used - capacity).coerceAtLeast(0)
-}
-
-/**
- * Count the UID slots core's native projection needs, by core's rules
- * (`vpnhide_activator::native_target_set`), so a selection core would refuse
- * never reaches Save: the distinct app UIDs of every native-selected package
- * across all profiles and clones; platform UIDs below 10000 (sharedUserId
- * packages) skipped; a package with no installed copy contributes nothing; and
- * the app itself one fixed slot for its main-profile copy. Visible picker rows
- * override their saved role; configured packages missing from the current list
- * stay preserved, matching [buildCanonicalConfigForAppPickerSave].
- */
-internal fun nativeTargetCapacityUsage(
-    selfPkg: String,
-    selections: Collection<AppRoleSelection>,
-    existingNativePackages: Set<String>,
-    packageUids: Map<String, List<Int>>,
-): NativeTargetCapacityUsage {
-    val visiblePackages = selections.mapTo(mutableSetOf()) { it.packageName }
-    val selectedPackages =
-        (existingNativePackages - visiblePackages) +
-            selections.filter { it.native }.map { it.packageName }
-    val selectionUids = selections.associate { it.packageName to it.uids }
-    val resolved = mutableSetOf<Int>()
-    (selectedPackages - selfPkg).forEach { pkg ->
-        selectionUids[pkg].orEmpty().ifEmpty { packageUids[pkg].orEmpty() }.filterTo(resolved, ::isApplicationUid)
-    }
-    return NativeTargetCapacityUsage(used = resolved.size + NATIVE_SELF_RESERVED_UID_SLOTS)
-}
-
-internal fun nativeCapacityIncreaseViolation(
-    current: NativeTargetCapacityUsage,
-    candidate: NativeTargetCapacityUsage,
-): NativeTargetCapacityUsage? = candidate.takeIf { it.overflow > 0 && it.used > current.used }
-
-private fun isApplicationUid(uid: Int): Boolean = uid >= 0 && uid % ANDROID_UIDS_PER_USER >= FIRST_APPLICATION_UID
 
 internal fun resolveNativeHookSelection(
     hookNames: List<String>,

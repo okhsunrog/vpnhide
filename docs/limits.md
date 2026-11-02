@@ -56,8 +56,8 @@ whole-payload rejection. See [protocol.md §4.3](protocol.md).
 
 **The cap counts UIDs, not apps.** `resolver.uids_for()` returns every UID a
 package has across profiles, so an app present in a work profile spends two
-slots. The picker allows 159 selected-app UIDs and reserves the final slot for
-VPN Hide's main-profile UID. A user selecting apps present in both the main and
+slots. The picker previews the same native policy as Core, including the actual
+VPN Hide main-profile UID (deduplicated if shared with another package). A user selecting apps present in both the main and
 work profiles therefore reaches the picker limit at around 79 apps.
 
 ## Telemetry — how many apps report counters
@@ -138,9 +138,15 @@ app UIDs of every native-selected package across all profiles and clones,
 platform UIDs below 10000 skipped, uninstalled packages contributing nothing,
 and VPN Hide itself one slot for its main-profile UID.
 
-- **Picker.** `nativeTargetCapacityUsage` (`AppPickerData.kt`) counts by the same
-  rules. A toggle that would push the selection over is refused, and Save is
-  disabled with the reason in the action bar while the selection is over.
+- **Picker.** The generated synchronous `previewNativePolicy` uses the shared
+  `native-policy` Rust projector locally with the accepted complete Core UID
+  inventory and selected backend. Kotlin contains no second 160/1 authority and
+  makes no per-checkbox RPC. UID and exact grouped-wire byte usage both count.
+  Selection increases beyond capacity are refused immediately; genuine protection
+  reductions remain possible even when regrouping increases wire bytes. A partial
+  icon/profile scan cannot replace Core accounting. Without complete inventory,
+  local Rust still permits proven reductions, while Core revalidates Save.
+  Save/Cancel and drafts remain the chosen UX.
 - **Save.** Before any phase runs, core projects the edited config for this boot's
   selected backend. A set over `MAX_TARGET_UIDS` returns
   `SubmitError::NativeCapacityExceeded(NativeCapacityReport{total, capacity,

@@ -84,7 +84,6 @@
     <string name="root_error_recheck">Check again</string>
 
     <!-- Save feedback -->
-    <string name="native_target_capacity_reached">Native limit reached: at most %1$d app UIDs can be selected. Disable Native for another app first.</string>
     <string name="native_target_capacity_over">Native needs %1$d app UIDs, at most %2$d fit. Turn off Native for %3$d more UIDs to save.</string>
     <string name="native_capacity_package">%1$s (%2$d)</string>
     <string name="native_capacity_package_more">%1$s and %2$d more</string>
@@ -723,4 +722,6 @@
     <string name="dashboard_core_installed">Installed version (last observation): %1$s</string>
     <string name="dashboard_core_ports">%1$s · targets: %2$s · %3$s</string>
     <string name="core_ports_held">Rule application paused · recovery required</string>
+    <string name="native_wire_capacity_over">Native policy needs %1$d bytes; this backend accepts %2$d. Reduce the Native selection or hook overrides.</string>
+    <string name="native_capacity_unavailable">Refresh Core inventory before adding Native targets. Existing selections can still be removed.</string>
 </resources>

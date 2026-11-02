@@ -1,150 +1,89 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.picker.AppRoleSelection
-import dev.okhsunrog.vpnhide.picker.NATIVE_TARGET_UID_CAPACITY
-import dev.okhsunrog.vpnhide.picker.NativeTargetCapacityUsage
+import dev.okhsunrog.vpnhide.picker.TargetsSnapshot
 import dev.okhsunrog.vpnhide.picker.nativeCapacityIncreaseViolation
-import dev.okhsunrog.vpnhide.picker.nativeTargetCapacityUsage
+import dev.okhsunrog.vpnhide.picker.nativeCapacityUsage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
+import uniffi.vpnhide_core_ffi.CoreNativeBackend
+import uniffi.vpnhide_core_ffi.CoreNativePolicyUsage
+import uniffi.vpnhide_core_ffi.nativePolicyIsReduction
+import uniffi.vpnhide_core_ffi.previewNativePolicy
 
+/** UID/mask domain cases moved to native-policy; these pin the generated FFI and tap rule. */
 class NativeCapacityDataTest {
-    private val self = "dev.okhsunrog.vpnhide"
+    @Test
+    fun `preview follows selected KPM rather than an unexpected observed builtin and preserves missing rows`() {
+        val capacity = previewNativePolicy(CanonicalConfig().toCore(), CoreNativeBackend.KPM, emptyMap()).targetCapacity.toInt()
+        val config = CanonicalConfig(apps = mapOf("many" to CanonicalApp(native = NativeRole.All)))
+        val snapshot =
+            TargetsSnapshot(
+                false,
+                false,
+                false,
+                emptyMap(),
+                config,
+                activeNativeBackendId = NativeBackendId.Builtin,
+                packageUids = mapOf("many" to (2_010_000 until 2_010_000 + capacity).toList()),
+                nativeInventoryComplete = true,
+                selectedNativeBackendId = NativeBackendId.Kpm,
+            )
+        val usage = requireNotNull(nativeCapacityUsage(emptyList(), snapshot, APP_PACKAGE_NAME))
+        assertEquals(capacity.toULong(), usage.targetUids)
+        org.junit.Assert.assertTrue(usage.wireBytes > usage.wireCapacity)
+        val builtin =
+            requireNotNull(
+                nativeCapacityUsage(emptyList(), snapshot.copy(selectedNativeBackendId = NativeBackendId.Builtin), APP_PACKAGE_NAME),
+            )
+        org.junit.Assert.assertTrue(builtin.wireCapacity > usage.wireCapacity)
+    }
 
     @Test
-    fun `native capacity reserves one self slot before the picker reaches the limit`() {
-        val selected =
-            (0 until NATIVE_TARGET_UID_CAPACITY - 1).map { offset ->
-                AppRoleSelection(
-                    packageName = "com.example.$offset",
-                    uids = listOf(10_000 + offset),
-                    native = true,
-                )
-            }
-        val full = nativeUsage(selected)
-        val overflow =
-            nativeUsage(
-                selected +
-                    AppRoleSelection(
-                        packageName = "com.example.overflow",
-                        uids = listOf(20_000),
-                        native = true,
-                    ),
+    fun `pure local reduction decision allows narrowing with no inventory or selected backend`() {
+        val before = CanonicalConfig(apps = mapOf("target" to CanonicalApp(native = NativeRole.All)))
+        val after =
+            before.copy(
+                apps =
+                    mapOf("target" to CanonicalApp(native = NativeRole(true, NativeHookOverrides(kernel = listOf("dev_ioctl"))))),
             )
+        org.junit.Assert.assertTrue(nativePolicyIsReduction(before.toCore(), after.toCore(), null))
+        org.junit.Assert.assertFalse(nativePolicyIsReduction(after.toCore(), before.toCore(), null))
+    }
 
-        assertEquals(NATIVE_TARGET_UID_CAPACITY, full.used)
-        assertEquals(0, full.overflow)
-        assertEquals(1, overflow.overflow)
+    @Test
+    fun `next selection is refused and removals from an overflowing draft remain possible`() {
+        val full = CoreNativePolicyUsage(4u, 4u, 80u, 100u)
+        val overflow = full.copy(targetUids = 5u, wireBytes = 90u)
         assertEquals(overflow, nativeCapacityIncreaseViolation(full, overflow))
+        assertNull(nativeCapacityIncreaseViolation(overflow, full))
+        assertNull(nativeCapacityIncreaseViolation(overflow.copy(targetUids = 6u), overflow))
     }
 
     @Test
-    fun `multi-profile native app consumes one slot per resolved uid`() {
-        val selected =
-            (0 until NATIVE_TARGET_UID_CAPACITY - 2).map { offset ->
-                AppRoleSelection(
-                    packageName = "com.example.$offset",
-                    uids = listOf(10_000 + offset),
-                    native = true,
-                )
-            }
-        val current = nativeUsage(selected)
-        val candidate =
-            nativeUsage(
-                selected +
-                    AppRoleSelection(
-                        packageName = "com.example.profiled",
-                        uids = listOf(30_000, 1_030_000),
-                        native = true,
-                    ),
-            )
-
-        assertEquals(NATIVE_TARGET_UID_CAPACITY - 1, current.used)
-        assertEquals(NATIVE_TARGET_UID_CAPACITY + 1, candidate.used)
+    fun `independent wire capacity also prevents an increase`() {
+        val current = CoreNativePolicyUsage(3u, 4u, 99u, 100u)
+        val candidate = current.copy(wireBytes = 101u)
         assertEquals(candidate, nativeCapacityIncreaseViolation(current, candidate))
+        assertNull(nativeCapacityIncreaseViolation(candidate, current))
     }
 
     @Test
-    fun `shared native uid is counted once`() {
-        val usage =
-            nativeUsage(
-                listOf(
-                    AppRoleSelection("com.shared.one", uids = listOf(12_345), native = true),
-                    AppRoleSelection("com.shared.two", uids = listOf(12_345), native = true),
-                ),
-            )
-
-        assertEquals(2, usage.used)
-    }
-
-    @Test
-    fun `platform aid does not spend native capacity`() {
-        val usage =
-            nativeUsage(
-                listOf(
-                    AppRoleSelection("android.platform", uids = listOf(1_000), native = true),
-                ),
-            )
-
-        assertEquals(1, usage.used)
-    }
-
-    @Test
-    fun `native packages missing from picker remain in capacity calculation`() {
-        val usage =
-            nativeTargetCapacityUsage(
-                selfPkg = self,
-                selections = listOf(AppRoleSelection("com.visible")),
-                existingNativePackages = setOf("com.visible", "com.preserved"),
-                packageUids =
+    fun `local FFI uses Core family hooks real self uid and deduplicated complete inventory`() {
+        val config =
+            CanonicalConfig(
+                apps =
                     mapOf(
-                        self to listOf(10_100),
-                        "com.preserved" to listOf(12_000, 1_012_000),
+                        APP_PACKAGE_NAME to CanonicalApp(native = NativeRole.All),
+                        "shared" to CanonicalApp(native = NativeRole.All),
+                        "other" to CanonicalApp(native = NativeRole.All),
                     ),
             )
-
-        assertEquals(3, usage.used)
+        val inventory = mapOf(APP_PACKAGE_NAME to listOf(10123u, 110123u), "shared" to listOf(10123u), "other" to listOf(12000u, 112000u))
+        val usage = previewNativePolicy(config.toCore(), CoreNativeBackend.KPM, inventory)
+        assertEquals(3uL, usage.targetUids)
+        val empty = previewNativePolicy(config.toCore(), CoreNativeBackend.KPM, emptyMap())
+        assertEquals(0uL, empty.targetUids)
+        assertEquals(usage.targetCapacity, empty.targetCapacity)
     }
-
-    @Test
-    fun `a selected package with no installed copy spends nothing, as in core`() {
-        val usage =
-            nativeTargetCapacityUsage(
-                selfPkg = self,
-                selections = emptyList(),
-                existingNativePackages = setOf("com.uninstalled"),
-                packageUids = emptyMap(),
-            )
-
-        assertEquals(1, usage.used)
-    }
-
-    @Test
-    fun `self always reserves exactly one slot`() {
-        val usage =
-            nativeTargetCapacityUsage(
-                selfPkg = self,
-                selections = emptyList(),
-                existingNativePackages = emptySet(),
-                packageUids = mapOf(self to listOf(10_100, 1_010_100)),
-            )
-
-        assertEquals(1, usage.used)
-    }
-
-    @Test
-    fun `reducing an already overflowing selection remains allowed`() {
-        val current = NativeTargetCapacityUsage(used = 162)
-        val reduced = NativeTargetCapacityUsage(used = 161)
-
-        assertEquals(null, nativeCapacityIncreaseViolation(current, reduced))
-    }
-
-    private fun nativeUsage(selections: Collection<AppRoleSelection>): NativeTargetCapacityUsage =
-        nativeTargetCapacityUsage(
-            selfPkg = self,
-            selections = selections,
-            existingNativePackages = emptySet(),
-            packageUids = emptyMap(),
-        )
 }

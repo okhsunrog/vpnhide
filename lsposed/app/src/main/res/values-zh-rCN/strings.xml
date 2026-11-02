@@ -77,7 +77,6 @@
     <string name="root_error_recheck">重新检查</string>
 
     <!-- Save feedback -->
-    <string name="native_target_capacity_reached">已达原生上限：最多可选 %1$d 个应用 UID。请先给其他应用关闭原生。</string>
     <string name="native_target_capacity_over">原生需要 %1$d 个应用 UID，最多容纳 %2$d 个。请再为 %3$d 个 UID 关闭原生后保存。</string>
     <string name="native_capacity_package">%1$s（%2$d）</string>
     <string name="native_capacity_package_more">%1$s，另有 %2$d 个</string>
@@ -680,4 +679,6 @@
     <string name="dashboard_core_installed">已安装版本（上次观察）：%1$s</string>
     <string name="dashboard_core_ports">%1$s · 目标：%2$s · %3$s</string>
     <string name="core_ports_held">应用已暂停 · 需要恢复</string>
+    <string name="native_wire_capacity_over">原生策略需要 %1$d 字节，此后端最多接受 %2$d 字节。请减少原生目标或钩子。</string>
+    <string name="native_capacity_unavailable">添加原生目标前请刷新 Core 清单。现有目标仍可关闭。</string>
 </resources>

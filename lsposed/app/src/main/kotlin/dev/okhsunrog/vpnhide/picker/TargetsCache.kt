@@ -50,6 +50,8 @@ internal data class TargetsSnapshot(
      * inventory. The picker uses it to enforce native capacity before Save,
      * including profiles and shared UIDs. */
     val packageUids: Map<String, List<Int>> = emptyMap(),
+    val nativeInventoryComplete: Boolean = false,
+    val selectedNativeBackendId: NativeBackendId? = null,
 ) {
     /** True if any native backend is installed (kmod / built-in / KPM / Zygisk). The
      * picker's "N" toggle is meaningful only when at least one is present. */
@@ -151,6 +153,13 @@ internal fun parseTargetsSnapshot(rootSnapshot: RootSnapshot): TargetsSnapshot {
         canonicalConfig = canonical,
         apatchSuperkeySaved = sections["superkey_saved"]?.trim() == "1",
         activeNativeBackendId = activeNativeBackendId,
+        selectedNativeBackendId =
+            rootSnapshot.backend?.selected ?: when (val outcome = rootSnapshot.nativeBoot?.outcome) {
+                is dev.okhsunrog.vpnhide.NativeBootOutcome.Selected -> outcome.backend
+                is dev.okhsunrog.vpnhide.NativeBootOutcome.AwaitingAuthentication -> NativeBackendId.Kpm
+                else -> null
+            },
         packageUids = pkgToUids,
+        nativeInventoryComplete = parsePackageInventory(sections["pm_packages"].orEmpty(), sections["pm_users"].orEmpty()).complete,
     )
 }

@@ -1,0 +1,12 @@
+[package]
+name = "vpnhide_native_policy"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Pure native policy projection shared by Core and local app previews."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+vpnhide_protocol = { path = "../protocol" }

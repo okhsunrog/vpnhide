@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation on `dev-2.x`, app/core RPC version 13. The backend
+Current implementation on `main`, app/core RPC version 13. The backend
 control-v2 / telemetry-v1 wire is a separate boundary. This document describes
 the implemented ownership and execution contract.
 
@@ -21,7 +21,11 @@ The dependency path is `Kotlin → core-ffi → core-client → core-rpc`. Gener
 UniFFI records, enums and errors carry config, edits, commands, publications,
 refusals, receipts, leases, diagnostics and recording sessions. There is no JSON
 request/reply facade at this boundary. The APK does not link the daemon, activator
-or root probes. JSON remains a storage/import/export format, diagnostic payload
+or root probes. The unprivileged `native-policy` crate owns native mask/UID
+projection and limits; both activator and local generated UniFFI picker preview
+call it. Core supplies the accepted inventory and selected-backend observation.
+A local preview is not an admission receipt; Save and Agent mutations are checked
+again against fresh Core inventory before any effect. JSON remains a storage/import/export format, diagnostic payload
 content, private typed Rust probe inputs and tarpc's internal UDS serialization.
 
 ```mermaid

@@ -651,3 +651,40 @@ whole-snapshot seed test with actual shared-reader/refresh behavior. Phone still
 runs the older APK; cold-start device acceptance is expressly pending. This gate
 must be rerun again after later architecture changes, not considered final beta
 acceptance merely because this checkpoint passed.
+
+
+### Shared native policy and picker prevention
+
+Native selection/mask projection, profile/shared-UID accounting and limits now
+live in unprivileged `crates/native-policy`. Activator delegates to that owner;
+the APK links only its generated local FFI preview, not privileged activator code.
+Accepted Core inventory completeness and **selected** backend supply the preview;
+observed live backend and local icon-scan UIDs are not substituted. Both UID count
+and grouped wire bytes are checked. The local Rust subset predicate permits
+reductions even if regrouping grows an already-overflowing wire, or inventory is
+incomplete. Core additionally refuses oversized native wire before Persist.
+RPC13/kernel control2/journal6 remain unchanged by this additive local FFI API.
+
+Test migration: replaced eight Kotlin native-accounting tests with six direct
+native-policy behavior tests, retained activator parsing/adapter coverage and Core
+no-partial-write process tests, and added five Kotlin interaction/real-generated-FFI
+contracts. Shared UID, profiles, platform UIDs, actual main-user self, self/shared
+identity, uninstalled and missing-picker packages, empty family masks, filesystem
+gates, byte overflow, selected-versus-observed backend and group-growth reductions
+are covered. The old unconditional synthetic self-slot expectation is deliberately
+replaced by actual self UID accounting. No source.contains guard was substituted.
+Full cloud Rust run: 503 pass, two unchanged sandbox process_vm_readv failures,
+zero ignored. Strict host and both ARM ABI Clippy pass. Kotlin final gate rerun
+includes startup acceptance and remains separate from phone acceptance.
+
+### Baseline build gates recovered
+
+A full clean source-consistent baseline bundle was assembled for
+`2e458a26bc3bdfd1cf40e4f80d9ca71f6d11e083`: all seven KMI variants, KPM,
+both Zygisk ABIs and both Core ABIs. All ten payload sizes/hashes verified.
+ZIP SHA-256 `06ef7841f3d67db7c1751aa172b135e17aa10ac180d86ad40d21d892b83f5c18`.
+This is the baseline, not the final modified-code bundle. DDK VFS copies exceeded
+32 GiB; six builds used original/flattened image contents, the last used the exact
+DDK compiler/prepared tree with its generated include path relocated and native
+pahole 1.30 for BTF. No config or validation was disabled. APK signing is still
+blocked by the absent production key, and Actions results remain unobserved.

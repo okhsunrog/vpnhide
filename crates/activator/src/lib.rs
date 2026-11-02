@@ -9,7 +9,7 @@ use std::str;
 use std::thread;
 use std::time::Duration;
 
-use vpnhide_protocol::{MAX_TARGET_UIDS, parse_config};
+use vpnhide_protocol::parse_config;
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -55,7 +55,8 @@ const KPM_SUPPORTED_KERNEL_PAIRS: &[(u32, u32)] = &[
 // The native-target cap is owned by the shared protocol crate (and mirrored by
 // the C backends' `#define MAX_TARGET_UIDS`); alias it here so all three stay in
 // lock-step instead of restating the literal capacity.
-const MAX_NATIVE_TARGETS: usize = MAX_TARGET_UIDS;
+#[cfg(test)]
+const MAX_NATIVE_TARGETS: usize = vpnhide_protocol::MAX_TARGET_UIDS;
 // The control protocol carries a default hookmask for every uid NOT listed as a
 // target, which is the mechanism a whitelist mode would ride on: non-zero flips
 // `targets` from "the apps to act on" into "the apps to leave alone". Nothing

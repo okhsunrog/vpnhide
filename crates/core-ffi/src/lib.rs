@@ -5,8 +5,10 @@ use vpnhide_core_client::CoreClient;
 use vpnhide_core_rpc as rpc;
 uniffi::setup_scaffolding!();
 mod api;
+mod policy;
 mod types;
 pub use api::*;
+pub use policy::*;
 pub use types::*;
 
 #[derive(uniffi::Object)]

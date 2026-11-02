@@ -1625,6 +1625,7 @@ dependencies = [
  "serde",
  "serde_json",
  "vpnhide_apatch_abi",
+ "vpnhide_native_policy",
  "vpnhide_protocol",
 ]
 
@@ -1693,6 +1694,7 @@ dependencies = [
  "vpnhide_core_client",
  "vpnhide_core_daemon",
  "vpnhide_core_rpc",
+ "vpnhide_native_policy",
 ]
 
 [[package]]
@@ -1702,6 +1704,14 @@ dependencies = [
  "serde",
  "serde_json",
  "tarpc",
+]
+
+[[package]]
+name = "vpnhide_native_policy"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "vpnhide_protocol",
 ]
 
 [[package]]

@@ -77,7 +77,6 @@
     <string name="root_error_recheck">Проверить снова</string>
 
     <!-- Save feedback -->
-    <string name="native_target_capacity_reached">Достигнут лимит Native: можно выбрать не более %1$d UID приложений. Сначала отключите Native у другого приложения.</string>
     <string name="native_target_capacity_over">Native нужно %1$d UID приложений, помещается не более %2$d. Чтобы сохранить, отключите Native ещё для %3$d UID.</string>
     <string name="native_capacity_package">%1$s (%2$d)</string>
     <string name="native_capacity_package_more">%1$s и ещё %2$d</string>
@@ -692,4 +691,6 @@
     <string name="dashboard_core_installed">Установленная версия (последнее наблюдение): %1$s</string>
     <string name="dashboard_core_ports">%1$s · целей: %2$s · %3$s</string>
     <string name="core_ports_held">Применение приостановлено · требуется восстановление</string>
+    <string name="native_wire_capacity_over">Политике Native нужно %1$d байт, бэкэнд принимает %2$d. Уменьшите выбор Native или набор хуков.</string>
+    <string name="native_capacity_unavailable">Обновите данные Core перед добавлением целей Native. Существующие цели можно отключать.</string>
 </resources>
