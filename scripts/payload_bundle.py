@@ -226,10 +226,14 @@ def assemble(inputs: Path, output: Path, commit: str) -> None:
                 capability = {}
                 if implementation["kind"] == "kmod":
                     # Inspect exact final copied bytes, never producer version text.
-                    protocol = inspect_kmod((staging / target).read_bytes())["preflight_protocol"]
+                    inspected = inspect_kmod((staging / target).read_bytes())
+                    protocol = inspected["preflight_protocol"]
                     if protocol != 1:
                         raise ValueError("unified kmod lacks verified preflight protocol 1")
                     capability["preflight_protocol"] = protocol
+                    if inspected["init_contract"] != 1:
+                        raise ValueError("unified kmod lacks verified closed init contract 1")
+                    capability["init_contract"] = 1
                 if not 0 < proof["bytes"] <= MAX_FILE:
                     raise ValueError("payload exceeds budget")
                 total += proof["bytes"]

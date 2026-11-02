@@ -386,7 +386,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC18; journal10 reads schemas1–9. These
+The current paired APK/Core contract is RPC18; journal11 reads schemas1–10. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -425,5 +425,30 @@ were unloaded. The exact retained grant survives receipt pruning. Missing-config
 Repair can finish only that pending revocation; it creates no policy and its
 receipt is excluded from apply evidence. Inactive or damaged module payloads do
 not prevent removal of the same verified grant, and cannot gain publication
-eligibility through the revocation verifier. Journal10 migrates1–9 while preserving
+eligibility through the revocation verifier. Journal11 migrates1–10 while preserving
 other resource holds and load/preflight budgets.
+
+
+Native startup and Repair use one bounded attempt executor. One catalog, one UID
+inventory and full policy projections freeze every eligible successor before any
+load. Each exact payload/recipient and policy generation is synced before its
+effect, and its completed result is synced before a successor is admitted. Every
+dispatch rechecks the active catalog directory and live ownership. A possible
+Zygisk exposure still prohibits a kernel transition in the same boot.
+
+Fallback requires a private, boot/hash/manifest-bound no-effect proof, independent
+of diagnostic strings and public signature_rejected flags. Only genuine Android
+finit_module signature errno with a verified closed-init-contract payload, or a
+typed before-dispatch refusal, can supply that proof after fresh clear ownership.
+Host exit126/129, dmesg, unknown init failure, timeout or later Java/Ports health
+cannot. The capability excludes constructors and own parameter callbacks, binds
+standard setters to exact scalar objects, and normalizes module init returns so
+ENOKEY/EKEYREJECTED cannot be returned by module init. It relies on audited build
+provenance; it is not a proof about arbitrary ELF machine code. Preflight remains
+a distinct experimental budget and never picks the first of ambiguous KMIs.
+
+Budgets are never refunded. Restart may skip a spent candidate only with matching
+retained proof for the same generation/policy and fresh ownership; incomplete
+receipts retain holds. Journal11 also retains the exact previously published
+authority when newer Zygisk admission fails before publication, so reset can
+revoke that known grant without accepting an arbitrary stale or newer file.

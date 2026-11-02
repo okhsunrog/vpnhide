@@ -80,6 +80,8 @@ pub struct Payload {
     /// Old catalogs have no capability and cannot authorize a loader experiment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preflight_protocol: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub init_contract: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,6 +123,9 @@ impl Manifest {
                 || payload.control_version != 2
                 || payload.bytes == 0
                 || payload.bytes > MAX_PAYLOAD_BYTES
+                || payload.init_contract.is_some_and(|p| {
+                    p != 1 || !matches!(payload.implementation, PayloadKind::Kmod { .. })
+                })
                 || payload.preflight_protocol.is_some_and(|p| {
                     p != 1 || !matches!(payload.implementation, PayloadKind::Kmod { .. })
                 })
@@ -157,6 +162,7 @@ pub struct VerifiedPayload {
 
 #[derive(Debug)]
 pub struct Catalog {
+    pub root_identity: (u64, u64),
     pub manifest: Manifest,
     pub payloads: Vec<VerifiedPayload>,
 }
@@ -214,13 +220,20 @@ impl Catalog {
                 return Err(invalid("payload digest mismatch"));
             }
             file.rewind()?;
-            if let Some(protocol) = metadata.preflight_protocol {
+            if metadata.preflight_protocol.is_some() || metadata.init_contract.is_some() {
                 let mut bytes = Vec::with_capacity(metadata.bytes as usize);
                 Read::by_ref(&mut file)
                     .take(MAX_PAYLOAD_BYTES + 1)
                     .read_to_end(&mut bytes)?;
-                if elf::preflight_protocol(&bytes)? != Some(protocol) {
-                    return Err(invalid("preflight capability differs from final ELF"));
+                let capabilities = elf::capabilities(&bytes)?;
+                if metadata
+                    .preflight_protocol
+                    .is_some_and(|p| capabilities.preflight_protocol != Some(p))
+                    || metadata
+                        .init_contract
+                        .is_some_and(|p| capabilities.init_contract != Some(p))
+                {
+                    return Err(invalid("capability differs from final ELF"));
                 }
                 file.rewind()?;
             }
@@ -229,7 +242,13 @@ impl Catalog {
                 file,
             });
         }
-        Ok(Self { manifest, payloads })
+        use std::os::unix::fs::MetadataExt;
+        let metadata = root.metadata()?;
+        Ok(Self {
+            root_identity: (metadata.dev(), metadata.ino()),
+            manifest,
+            payloads,
+        })
     }
 }
 

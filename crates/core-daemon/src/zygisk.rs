@@ -385,6 +385,8 @@ impl ZygiskTarget {
 
 #[cfg(test)]
 pub(crate) use tests::fixture as test_fixture;
+#[cfg(test)]
+pub(crate) use tests::library as test_library;
 
 #[cfg(test)]
 mod tests {

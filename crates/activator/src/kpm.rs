@@ -78,6 +78,7 @@ fn apatch_auth_candidates() -> Vec<String> {
     keys
 }
 
+#[derive(Clone)]
 pub(crate) enum KpmClient {
     KpatchCli {
         path: PathBuf,
@@ -217,10 +218,25 @@ impl KpmCtlLock {
 
 /// One authenticated transport selected by core. It owns no policy or canonical
 /// file: artifact/lock/control paths and projected wire come from the caller.
+#[derive(Clone)]
 pub struct CoreKpm {
     client: KpmClient,
     lock_path: PathBuf,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KpmLoadFailure {
+    BeforeDispatch(String),
+    AfterDispatch(String),
+}
+impl std::fmt::Display for KpmLoadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BeforeDispatch(message) | Self::AfterDispatch(message) => f.write_str(message),
+        }
+    }
+}
+impl std::error::Error for KpmLoadFailure {}
 
 #[derive(Debug)]
 pub enum KpmConfigError {
@@ -496,29 +512,39 @@ impl CoreKpm {
         ctl: &Path,
         artifact: &Path,
         filesystem_hiding: bool,
-    ) -> Result<()> {
-        let _lock = KpmCtlLock::acquire_delivery(&self.lock_path)?;
-        require_no_kernel_owner(ctl)?;
-        if self.status_locked()?.is_some() {
-            return Err(
-                "KPM became live after selection; re-evaluate ownership before loading".into(),
-            );
-        }
-        if !crate::running_kernel_supports_kpm()? {
-            return Err(format!(
-                "unsupported KPM kernel; supported families: {}",
-                crate::KPM_SUPPORTED_KERNEL_FAMILIES
-            )
-            .into());
-        }
-        if !artifact.is_file() {
-            return Err("selected KPM artifact is missing".into());
-        }
-        require_no_kernel_owner(ctl)?;
+    ) -> std::result::Result<(), KpmLoadFailure> {
+        let preflight = || -> Result<KpmCtlLock> {
+            let lock = KpmCtlLock::acquire_delivery(&self.lock_path)?;
+            require_no_kernel_owner(ctl)?;
+            if self.status_locked()?.is_some() {
+                return Err(
+                    "KPM became live after selection; re-evaluate ownership before loading".into(),
+                );
+            }
+            if !crate::running_kernel_supports_kpm()? {
+                return Err(format!(
+                    "unsupported KPM kernel; supported families: {}",
+                    crate::KPM_SUPPORTED_KERNEL_FAMILIES
+                )
+                .into());
+            }
+            if !artifact.is_file() {
+                return Err("selected KPM artifact is missing".into());
+            }
+            require_no_kernel_owner(ctl)?;
+            Ok(lock)
+        };
+        let _lock = preflight().map_err(|e| KpmLoadFailure::BeforeDispatch(e.to_string()))?;
         self.client
-            .load_from(artifact, KpmLoadOptions { filesystem_hiding })?;
-        self.status_locked()?
-            .ok_or("KPM load did not produce a compatible runtime identity")?;
+            .load_from(artifact, KpmLoadOptions { filesystem_hiding })
+            .map_err(|e| KpmLoadFailure::AfterDispatch(e.to_string()))?;
+        self.status_locked()
+            .map_err(|e| KpmLoadFailure::AfterDispatch(e.to_string()))?
+            .ok_or_else(|| {
+                KpmLoadFailure::AfterDispatch(
+                    "KPM load did not produce a compatible runtime identity".into(),
+                )
+            })?;
         Ok(())
     }
 

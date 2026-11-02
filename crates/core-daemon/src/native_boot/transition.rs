@@ -22,7 +22,8 @@ pub(crate) fn revoke(
         let reference = expected
             .reference()
             .ok_or("invalid authorization identity")?;
-        if journal.zygisk_authority.as_ref() != Some(expected)
+        if (journal.zygisk_authority.as_ref() != Some(expected)
+            && journal.prior_zygisk_authority.as_ref() != Some(expected))
             || current_boot.is_empty()
             || current_boot.len() > 128
         {
@@ -122,6 +123,34 @@ pub(crate) fn revoke(
     })
 }
 
+/// Select only an exact retained grant matching this recipient. A failed newer
+/// admission may leave an older known grant published; unknown files stay refused.
+pub(crate) fn revocable_authority(
+    journal: &Journal,
+    path: &std::path::Path,
+) -> Result<Option<ZygiskAuthorityRecord>, PhaseOutcome> {
+    let target = ZygiskTarget::for_revocation(path).map_err(|_| PhaseOutcome::FailedKnown)?;
+    for authority in journal
+        .zygisk_authority
+        .iter()
+        .chain(journal.prior_zygisk_authority.iter())
+    {
+        if authority.intent.zygisk_module.as_deref() == Some(path)
+            && target.check_authorization(authority).is_ok()
+        {
+            return Ok(Some(authority.clone()));
+        }
+    }
+    if target
+        .authorization_absent()
+        .map_err(|_| PhaseOutcome::FailedKnown)?
+    {
+        Ok(None)
+    } else {
+        Err(PhaseOutcome::FailedKnown)
+    }
+}
+
 pub(crate) fn retire_prepared(
     journal: &mut Journal,
     prepared: &super::prepared::Prepared,
@@ -133,8 +162,8 @@ pub(crate) fn retire_prepared(
         return Ok(());
     };
     let target = ZygiskTarget::for_revocation(path).map_err(|_| PhaseOutcome::FailedKnown)?;
-    match journal.zygisk_authority.clone() {
-        Some(expected) if expected.intent.zygisk_module.as_deref() == Some(path) => revoke(
+    match revocable_authority(journal, path)? {
+        Some(expected) => revoke(
             journal,
             &expected,
             operation,
@@ -156,6 +185,98 @@ pub(crate) fn retire_prepared(
             }
         }
     }
+}
+
+/// The sole attempt loop for boot and explicit repair. The writer owns every
+/// durable boundary, including a replacement command's exact policy recipient.
+pub(crate) trait AttemptWriter {
+    fn journal(&self) -> &Journal;
+    fn begin(&mut self, prepared: &super::prepared::Prepared) -> Result<(), PhaseOutcome>;
+    fn retire(&mut self, prepared: &super::prepared::Prepared) -> Result<(), PhaseOutcome>;
+    fn complete(&mut self, result: crate::journal::NativeStartupResult)
+    -> Result<(), PhaseOutcome>;
+    fn can_dispatch(&self) -> bool;
+}
+
+pub(crate) fn activate(
+    prepared: super::prepared::Prepared,
+    writer: &mut impl AttemptWriter,
+    epoch: u64,
+    explicit: bool,
+) -> Result<super::NativeBoot, PhaseOutcome> {
+    activate_with(prepared, writer, epoch, explicit, |p, epoch| {
+        p.execute_detailed(epoch)
+    })
+}
+pub(super) fn activate_with(
+    prepared: super::prepared::Prepared,
+    writer: &mut impl AttemptWriter,
+    epoch: u64,
+    explicit: bool,
+    mut execute: impl FnMut(super::prepared::Prepared, u64) -> super::prepared::PreparedExecution,
+) -> Result<super::NativeBoot, PhaseOutcome> {
+    let prepared = prepared
+        .admit(writer.journal(), explicit)
+        .map_err(|_| PhaseOutcome::FailedKnown)?;
+    let mut candidates = prepared.into_candidates();
+    let mut tried = Vec::new();
+    while let Some(prepared) = candidates.pop_front() {
+        if tried.len() >= 4 || prepared.selected().is_some_and(|b| tried.contains(&b)) {
+            return Err(PhaseOutcome::FailedKnown);
+        }
+        prepared.validate_binding().map_err(|error| {
+            crate::alog::info(&format!("prepared generation refused: {error}"));
+            PhaseOutcome::FailedKnown
+        })?;
+        writer
+            .journal()
+            .check_native_attempt(&prepared.intent, explicit)
+            .map_err(|_| PhaseOutcome::FailedKnown)?;
+        if !tried.is_empty()
+            && !super::evidence::ownership_clear(prepared.environment(), &prepared.intent.boot_id)
+        {
+            return Err(PhaseOutcome::Unknown);
+        }
+        if let Some(backend) = prepared.selected() {
+            tried.push(backend);
+        }
+        writer.begin(&prepared)?;
+        crate::recovery::maybe_crash_for_test("startup-intent");
+        writer.retire(&prepared)?;
+        if !writer.can_dispatch() {
+            return Err(PhaseOutcome::Unknown);
+        }
+        prepared
+            .validate_binding()
+            .map_err(|_| PhaseOutcome::Unknown)?;
+        if !prepared.dispatch_ownership_clear() {
+            return Err(PhaseOutcome::Unknown);
+        }
+        let execution = execute(prepared, epoch);
+        let result = crate::journal::NativeStartupResult {
+            status: execution.boot.status.clone(),
+            selection: execution.boot.selection,
+            rejection: execution.rejection,
+        };
+        // The completed proof must be durable BEFORE admitting any successor.
+        writer.complete(result)?;
+        crate::recovery::maybe_crash_for_test("startup-completion");
+        let rejected = writer
+            .journal()
+            .native_startup
+            .as_ref()
+            .is_some_and(|attempt| {
+                attempt
+                    .completed
+                    .as_ref()
+                    .and_then(|r| r.rejection.as_ref())
+                    .is_some_and(|proof| proof.valid_for(attempt))
+            });
+        if !rejected || candidates.is_empty() {
+            return Ok(execution.boot);
+        }
+    }
+    Err(PhaseOutcome::FailedKnown)
 }
 
 #[cfg(test)]
@@ -403,10 +524,51 @@ mod tests {
         let upgraded = journal::read(&path).unwrap();
         assert_eq!(upgraded.zygisk_authority, journal.zygisk_authority);
         assert!(upgraded.zygisk_revocation.is_none());
-        old["version"] = 11.into();
+        old["version"] = 12.into();
         let bytes = serde_json::to_vec(&old).unwrap();
         fs::write(&path, &bytes).unwrap();
         assert!(journal::read(&path).is_err());
         assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+    #[test]
+    fn failed_newer_admissions_preserve_the_exact_old_published_grant_for_revocation() {
+        use vpnhide_core_rpc::{BaseRef, CanonicalConfig, ConfigEdit};
+        let root = tempfile::tempdir().unwrap();
+        let (mut journal, old, _) = setup(root.path());
+        let path = root.path().join("journal");
+        for id in 44..80 {
+            let mut newer = old.intent.clone();
+            newer.zygisk_authorization.as_mut().unwrap().generation = id;
+            journal::record_phase_running(
+                &path,
+                &mut journal,
+                OperationId(id),
+                BaseRef { revision: 0 },
+                &ConfigEdit::RepairActivation,
+                &CanonicalConfig::default(),
+                &[ConfigPhase::Native],
+                &[],
+                ConfigPhase::Native,
+                Some(newer),
+            )
+            .unwrap();
+            journal.operations.clear();
+        }
+        journal::write_atomic(&path, &journal).unwrap();
+        let mut journal = journal::read(&path).unwrap();
+        assert_eq!(journal.prior_zygisk_authority, Some(old.clone()));
+        let expected = revocable_authority(&journal, root.path()).unwrap().unwrap();
+        assert_eq!(expected, old);
+        revoke(
+            &mut journal,
+            &expected,
+            Some(OperationId(79)),
+            BOOT,
+            &mut |j| journal::write_atomic(&path, j),
+            || true,
+        )
+        .unwrap();
+        assert!(!root.path().join(FILE_NAME).exists());
+        assert!(journal.zygisk_exposed_in(BOOT));
     }
 }

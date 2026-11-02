@@ -40,6 +40,7 @@
  * unconditional lifetime invariant.
  */
 
+#include "shared/vpnhide_init_contract.h"
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
@@ -95,6 +96,7 @@ module_param(preflight_only, bool, 0);
 MODULE_PARM_DESC(preflight_only,
 		 "Loader preflight only; return EUCLEAN before VPNHide effects");
 MODULE_INFO(vpnhide_preflight, "1");
+MODULE_INFO(vpnhide_init_contract, VPNHIDE_INIT_CONTRACT_VERSION);
 
 /*
  * Pre-allocated kretprobe instance pool size, applied to every probe.
@@ -2605,7 +2607,7 @@ static int vpnhide_diag_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static int __init vpnhide_init(void)
+static int __init vpnhide_init_impl(void)
 {
 	int i, ret, ok = 0, attempted = 0;
 
@@ -2703,6 +2705,11 @@ static int __init vpnhide_init(void)
 		": loaded — filesystem_hiding=%d; write a config snapshot to /proc/vpnhide_ctl\n",
 		filesystem_hiding ? 1 : 0);
 	return 0;
+}
+
+static int __init vpnhide_init(void)
+{
+	return vpnhide_normalize_init_result(vpnhide_init_impl());
 }
 
 module_init(vpnhide_init);

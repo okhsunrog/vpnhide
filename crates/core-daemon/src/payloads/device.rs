@@ -227,9 +227,10 @@ pub fn observe(env: &NativeEnv, facts: &ScanFacts) -> Capabilities {
     }
 }
 
-fn resident_ownership(facts: &ScanFacts, obsolete: bool) -> Ownership {
+pub(crate) fn resident_ownership(facts: &ScanFacts, obsolete: bool) -> Ownership {
     let live = facts.live();
     if !facts.installed.is_empty()
+        || (facts.kpm_may_be_live && !facts.kpm_live())
         || matches!(
             facts.kernel,
             KernelFact::Foreign(_) | KernelFact::Unreadable(_)
@@ -290,6 +291,18 @@ mod tests {
         assert_eq!(resident_ownership(&facts, false), Ownership::Unknown);
         facts.kpm_may_be_live = false;
         facts.kpm = KpmFact::Broken("positive runtime, LIST failed".into());
+        assert_eq!(resident_ownership(&facts, false), Ownership::Unknown);
+    }
+    #[test]
+    fn positive_kpm_inventory_without_a_driver_is_never_clear_ownership() {
+        let facts = ScanFacts {
+            installed: vec![],
+            staged: vec![],
+            kernel: KernelFact::Absent,
+            kpm: KpmFact::NoRuntime,
+            kpm_may_be_live: true,
+            kpm_filesystem_hiding: None,
+        };
         assert_eq!(resident_ownership(&facts, false), Ownership::Unknown);
     }
     #[test]

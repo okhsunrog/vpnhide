@@ -123,8 +123,8 @@ pub mod sys;
 
 use kpm::*;
 pub use kpm::{
-    CoreKpm, KpmConfigError, KpmInfo, KpmLiveCheck, KpmObserved, KpmRuntimeProbe, MIN_KPM_VERSION,
-    kpm_version_compatible, set_session_superkey,
+    CoreKpm, KpmConfigError, KpmInfo, KpmLiveCheck, KpmLoadFailure, KpmObserved, KpmRuntimeProbe,
+    MIN_KPM_VERSION, kpm_version_compatible, set_session_superkey,
 };
 pub use model::*;
 pub use ownership::{
@@ -171,8 +171,17 @@ pub fn observed_kernel_backend(path: &Path) -> Result<Option<u32>> {
 /// `finit_module(2)` errno (e.g. 129 `EKEYREJECTED`, 126 `ENOKEY`, 8 `ENOEXEC`); 127 means
 /// the artifact is missing and -1 a refusal before dispatch (control node already owned).
 /// Host test builds load through an `insmod` test double and report its exit status.
+/// Provenance is independent of a numeric errno/process status and diagnostic text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum KmodLoadOrigin {
+    NotDispatched,
+    AndroidFinitModuleErrno,
+    HostProcessStatus,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KmodLoadFailure {
+    pub origin: KmodLoadOrigin,
     pub exit: i32,
     pub stderr: String,
 }
@@ -192,6 +201,7 @@ pub fn insmod_selected_kmod(
     filesystem_hiding: bool,
 ) -> std::result::Result<(), KmodLoadFailure> {
     let refused = |e: Box<dyn Error + Send + Sync>| KmodLoadFailure {
+        origin: KmodLoadOrigin::NotDispatched,
         exit: -1,
         stderr: format!("kernel backend preflight refused loading: {e}"),
     };
@@ -208,12 +218,12 @@ pub fn insmod_selected_kmod(
     }
     if !artifact.is_file() {
         return Err(KmodLoadFailure {
+            origin: KmodLoadOrigin::NotDispatched,
             exit: 127,
             stderr: format!("vpnhide_kmod.ko not found at {}", artifact.display()),
         });
     }
     load_kmod::load_kmod_artifact(artifact, filesystem_hiding)
-        .map_err(|(exit, stderr)| KmodLoadFailure { exit, stderr })
 }
 
 /// The running kernel release and whether the KPM has an offset table for its family.

@@ -319,7 +319,7 @@ jobs:
           shellcheck -x -e SC2034,SC3043 \
             core/module/customize.sh core/module/service.sh \
             scripts/clean-device.sh scripts/update-json.sh lsposed/tests/check_no_root_exec.sh \
-            kmod/test/run.sh kmod/test/build-kernel.sh kmod/test/init.sh \
+            kmod/test/run.sh kmod/test/run-signature.sh kmod/test/build-kernel.sh kmod/test/init.sh \
             kmod/test/verify-trim-abi.sh \
             kmod/test/run-kpm.sh kmod/test/init-kpm.sh kmod/test/build-source-kernel.sh \
             builtin/test/run.sh builtin/test/build-kernel.sh builtin/test/build-source-kernel.sh
@@ -336,6 +336,11 @@ jobs:
         run: |
           gcc -O2 -Wall -Wextra -Werror -Wno-unused-parameter -o /tmp/test_socket_bind_index kmod/test_socket_bind_index.c
           /tmp/test_socket_bind_index
+      - name: kmod closed init result contract (host build)
+        run: |
+          gcc -O2 -Wall -Wextra -Werror -o /tmp/test_init_contract kmod/test_init_contract.c
+          /tmp/test_init_contract
+          gcc -O2 -Wall -Wextra -Werror -o /tmp/signature-probe kmod/test/signature-probe.c
       - name: shared-logic + protocol host tests
         run: |
           cd kmod/shared

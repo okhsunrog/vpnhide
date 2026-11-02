@@ -7,6 +7,9 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 mod bundled;
 pub use bundled::{BundleIdentity, restore_environment};
+pub(crate) fn validate_bundle_binding(binding: Option<&BundleIdentity>) -> Result<(), String> {
+    bundled::validate_binding(binding)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -14,6 +17,8 @@ pub struct PayloadIdentity {
     pub source: PathBuf,
     pub sha256: String,
     pub bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub init_contract: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -47,6 +52,11 @@ pub enum TransitionAction {
     Load(NativeBackend),
 }
 
+pub struct PreparedExecution {
+    pub boot: NativeBoot,
+    pub rejection: Option<super::evidence::RejectionProof>,
+}
+
 pub struct Prepared {
     pub intent: TransitionIntent,
     env: NativeEnv,
@@ -56,6 +66,7 @@ pub struct Prepared {
     staged: Option<File>,
     retire_target: Option<crate::zygisk::ZygiskTarget>,
     retire_bundled: bool,
+    alternatives: std::collections::VecDeque<Prepared>,
 }
 
 impl Prepared {
@@ -164,7 +175,89 @@ impl Prepared {
             staged,
             retire_target,
             retire_bundled,
+            alternatives: std::collections::VecDeque::new(),
         })
+    }
+
+    pub(crate) fn into_candidates(mut self) -> std::collections::VecDeque<Self> {
+        let mut candidates = std::mem::take(&mut self.alternatives);
+        candidates.push_front(self);
+        candidates
+    }
+    pub(crate) fn admit(
+        self,
+        journal: &crate::journal::Journal,
+        explicit: bool,
+    ) -> Result<Self, String> {
+        let mut candidates = self.into_candidates();
+        let mut skipped = false;
+        while let Some(mut candidate) = candidates.pop_front() {
+            journal.check_native_safety(&candidate.intent)?;
+            if let TransitionAction::Load(backend) = candidate.intent.action
+                && journal.backend_rejected(&candidate.intent.boot_id, backend)
+            {
+                let retained = journal
+                    .native_startup
+                    .iter()
+                    .chain(journal.native_attempts.iter().map(|h| &h.attempt))
+                    .filter(|a| a.boot_id == candidate.intent.boot_id)
+                    .filter_map(|a| a.intent.as_ref())
+                    .find(|i| i.action == candidate.intent.action);
+                if retained.is_none_or(|i| i.bundle != candidate.intent.bundle) {
+                    return Err("rejected candidate generation or policy changed; reboot before selecting another backend".into());
+                }
+                skipped = true;
+                continue;
+            }
+            journal.check_native_attempt(&candidate.intent, explicit)?;
+            if skipped
+                && !super::evidence::ownership_clear(
+                    candidate.environment(),
+                    &candidate.intent.boot_id,
+                )
+            {
+                return Err(
+                    "ownership changed after the retained rejection; no successor dispatched"
+                        .into(),
+                );
+            }
+            candidate.alternatives = candidates;
+            return Ok(candidate);
+        }
+        Err("all prepared candidates already rejected in this boot".into())
+    }
+    pub(crate) fn dispatch_ownership_clear(&self) -> bool {
+        use crate::payloads::selection::Ownership;
+        if self.intent.action == TransitionAction::Observe {
+            return true;
+        }
+        if read_boot_id(&self.env.boot_id_path) != self.intent.boot_id {
+            return false;
+        }
+        let probe = probe_kpm(self.env.kpm_lock.as_deref());
+        let mut facts = gather(&self.env, probe.fact);
+        if self.intent.bundle.is_none() {
+            // Legacy installed files identify this exact prepared loader. Any
+            // other installation or incompatible resident still blocks dispatch.
+            facts.installed.retain(|b| Some(*b) != self.selected());
+        }
+        let observed = crate::payloads::device::resident_ownership(
+            &facts,
+            self.env
+                .modules
+                .as_deref()
+                .is_some_and(|m| !obsolete_modules(m).is_empty()),
+        );
+        match self.intent.action {
+            TransitionAction::Load(_) | TransitionAction::Adopt(NativeBackend::Zygisk) => {
+                observed == Ownership::Clear && super::evidence::module_absent()
+            }
+            TransitionAction::Adopt(backend) => observed == Ownership::Resident(backend),
+            TransitionAction::Observe => true,
+        }
+    }
+    pub(crate) fn validate_binding(&self) -> Result<(), String> {
+        bundled::validate_binding(self.intent.bundle.as_ref())
     }
 
     pub fn permit_recovery(&self, previous: &crate::journal::NativeStartup) -> Result<(), String> {
@@ -214,6 +307,9 @@ impl Prepared {
 
     /// No re-scan or best-effort persisted selection can redirect this prepared intent.
     pub fn execute(self, epoch: u64) -> NativeBoot {
+        self.execute_detailed(epoch).boot
+    }
+    pub fn execute_detailed(self, epoch: u64) -> PreparedExecution {
         // Anonymous private inode: no crash leftovers, and child loaders access the
         // parent's retained descriptor rather than a replaceable module pathname.
         let staged_path = self
@@ -226,6 +322,7 @@ impl Prepared {
             retire_path: self.intent.retire_zygisk.as_deref(),
             retire_target: self.retire_target.as_ref(),
             retire_bundled: self.retire_bundled,
+            failure: std::cell::RefCell::new(None),
         };
         crate::recovery::maybe_crash_for_test("startup-before-effects");
         let boot = NativeBoot::apply_prepared_plan(
@@ -240,7 +337,8 @@ impl Prepared {
         );
         crate::recovery::maybe_crash_for_test("startup-after-effects");
         boot.persist();
-        boot
+        let rejection = super::evidence::rejection(&self.intent, &boot, *effects.failure.borrow());
+        PreparedExecution { boot, rejection }
     }
 }
 
@@ -272,6 +370,7 @@ fn copy_payload(
         source,
         sha256: format!("{:x}", hash.finalize()),
         bytes,
+        init_contract: None,
     })
 }
 
@@ -281,6 +380,7 @@ struct PinnedEffects<'a> {
     retire_path: Option<&'a Path>,
     retire_target: Option<&'a crate::zygisk::ZygiskTarget>,
     retire_bundled: bool,
+    failure: std::cell::RefCell<Option<super::evidence::CapturedFailure>>,
 }
 impl PinnedEffects<'_> {
     fn path(&self, source: &Path) -> Result<&Path, String> {
@@ -293,13 +393,44 @@ impl PinnedEffects<'_> {
 }
 impl Effects for PinnedEffects<'_> {
     fn insmod(&self, ctl: &Path, artifact: &Path, fs: bool) -> Result<(), KmodLoadFailure> {
-        let artifact = self
+        let result = self
             .path(artifact)
-            .map_err(|stderr| KmodLoadFailure { exit: 127, stderr })?;
-        SystemEffects.insmod(ctl, artifact, fs)
+            .map_err(|stderr| KmodLoadFailure {
+                origin: vpnhide_activator::KmodLoadOrigin::NotDispatched,
+                exit: 127,
+                stderr,
+            })
+            .and_then(|artifact| SystemEffects.insmod(ctl, artifact, fs));
+        if let Err(failure) = &result {
+            *self.failure.borrow_mut() = Some(super::evidence::CapturedFailure::Kmod {
+                origin: failure.origin,
+                code: failure.exit,
+            });
+        }
+        result
     }
-    fn kpm_load(&self, kpm: &CoreKpm, ctl: &Path, artifact: &Path, fs: bool) -> Result<(), String> {
-        SystemEffects.kpm_load(kpm, ctl, self.path(artifact)?, fs)
+    fn kpm_load(
+        &self,
+        kpm: &CoreKpm,
+        ctl: &Path,
+        artifact: &Path,
+        fs: bool,
+    ) -> Result<(), KpmLoadFailure> {
+        let result = self
+            .path(artifact)
+            .map_err(KpmLoadFailure::BeforeDispatch)
+            .and_then(|artifact| SystemEffects.kpm_load(kpm, ctl, artifact, fs));
+        if let Err(failure) = &result {
+            *self.failure.borrow_mut() = Some(match failure {
+                KpmLoadFailure::BeforeDispatch(_) => {
+                    super::evidence::CapturedFailure::KpmBeforeDispatch
+                }
+                KpmLoadFailure::AfterDispatch(_) => {
+                    super::evidence::CapturedFailure::KpmAfterDispatch
+                }
+            });
+        }
+        result
     }
     fn retire_zygisk(&self, dir: &Path) -> Result<(), String> {
         if self.retire_path != Some(dir) {
@@ -363,6 +494,7 @@ mod tests {
             legacy_root: None,
             apatch_kpms: root.join("kpms"),
             payload_override: None,
+            bundle_identity: None,
             loader: None,
         };
         fs::write(&env.boot_id_path, boot).unwrap();

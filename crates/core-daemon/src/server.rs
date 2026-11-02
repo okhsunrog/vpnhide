@@ -1424,6 +1424,10 @@ impl CoreState {
         if let Some(attempt) = &store.journal.native_startup
             && attempt.boot_id == boot_id
             && let Some(result) = &attempt.completed
+            && !result
+                .rejection
+                .as_ref()
+                .is_some_and(|proof| proof.valid_for(attempt))
         {
             // Restore the durable decision, not a best-effort secondary file.
             // Pending authentication is retried by the journaled Native phase.
@@ -1450,7 +1454,6 @@ impl CoreState {
             blocked("native startup requires a durable operation journal".into());
             return;
         };
-        let previous = store.clone();
         let filesystem_hiding = self.filesystem_hiding_wanted();
         let prepared = match crate::native_boot::prepared::Prepared::scan(
             env.clone(),
@@ -1463,58 +1466,17 @@ impl CoreState {
                 return;
             }
         };
-        if let Err(error) = store.journal.check_native_attempt(&prepared.intent, false) {
-            blocked(error);
-            return;
+        let revision = store.config_revision;
+        let mut writer = BootAttemptWriter {
+            state: self,
+            journal: &mut store.journal,
+            path,
+            revision,
+        };
+        match crate::native_boot::transition::activate(prepared, &mut writer, epoch, false) {
+            Ok(boot) => self.install_native_boot(boot),
+            Err(outcome) => blocked(format!("journaled startup did not complete: {outcome:?}")),
         }
-        store
-            .journal
-            .replace_native_startup(journal::NativeStartup {
-                boot_id,
-                config_revision: store.config_revision,
-                filesystem_hiding,
-                intent: Some(prepared.intent.clone()),
-                repair_op: None,
-                completed: None,
-            });
-        if let Err(error) = journal::write_atomic(path, &store.journal) {
-            self.freeze_storage_fault(&previous, OperationId(0), &error);
-            blocked("native startup intent could not be synced; no effect dispatched".into());
-            return;
-        }
-        *self.engine.store.lock().expect("config mutex") = store.clone();
-        self.publish_store(&store);
-        crate::recovery::maybe_crash_for_test("startup-intent");
-        if let Err(outcome) = crate::native_boot::transition::retire_prepared(
-            &mut store.journal,
-            &prepared,
-            None,
-            &mut |journal| self.persist_transition_journal(path, journal, OperationId(0)),
-            || true,
-        ) {
-            blocked(format!(
-                "journaled Zygisk retirement did not complete: {outcome:?}"
-            ));
-            return;
-        }
-        let boot = prepared.execute(epoch);
-        let pending = store.clone();
-        store
-            .journal
-            .complete_native_startup(journal::NativeStartupResult {
-                status: boot.status.clone(),
-                selection: boot.selection,
-            });
-        if let Err(error) = journal::write_atomic(path, &store.journal) {
-            self.freeze_storage_fault(&pending, OperationId(0), &error);
-            blocked(
-                "native startup completion could not be synced; effect remains uncertain".into(),
-            );
-            return;
-        }
-        *self.engine.store.lock().expect("config mutex") = store.clone();
-        self.publish_store(&store);
-        self.install_native_boot(boot);
     }
 
     /// Install an already-made decision (tests, and [`Self::start_native_boot`]).
@@ -2395,6 +2357,123 @@ struct JournalPhaseHook<'a> {
     admitted: Option<crate::command_engine::AdmissionReply>,
 }
 
+struct BootAttemptWriter<'a> {
+    state: &'a CoreState,
+    journal: &'a mut Journal,
+    path: &'a std::path::Path,
+    revision: u64,
+}
+impl crate::native_boot::transition::AttemptWriter for BootAttemptWriter<'_> {
+    fn journal(&self) -> &Journal {
+        self.journal
+    }
+    fn can_dispatch(&self) -> bool {
+        true
+    }
+    fn begin(
+        &mut self,
+        prepared: &crate::native_boot::prepared::Prepared,
+    ) -> Result<(), PhaseOutcome> {
+        self.journal.replace_native_startup(journal::NativeStartup {
+            boot_id: prepared.intent.boot_id.clone(),
+            config_revision: self.revision,
+            filesystem_hiding: prepared.intent.filesystem_hiding,
+            intent: Some(prepared.intent.clone()),
+            repair_op: None,
+            completed: None,
+        });
+        self.state
+            .persist_transition_journal(self.path, self.journal, OperationId(0))
+            .map_err(|_| PhaseOutcome::Unknown)
+    }
+    fn retire(
+        &mut self,
+        prepared: &crate::native_boot::prepared::Prepared,
+    ) -> Result<(), PhaseOutcome> {
+        crate::native_boot::transition::retire_prepared(
+            self.journal,
+            prepared,
+            None,
+            &mut |j| {
+                self.state
+                    .persist_transition_journal(self.path, j, OperationId(0))
+            },
+            || true,
+        )
+    }
+    fn complete(&mut self, result: journal::NativeStartupResult) -> Result<(), PhaseOutcome> {
+        self.journal.complete_native_startup(result);
+        self.state
+            .persist_transition_journal(self.path, self.journal, OperationId(0))
+            .map_err(|_| PhaseOutcome::Unknown)
+    }
+}
+impl crate::native_boot::transition::AttemptWriter for JournalPhaseHook<'_> {
+    fn journal(&self) -> &Journal {
+        self.journal
+    }
+    fn can_dispatch(&self) -> bool {
+        self.fence.load(Ordering::SeqCst) == self.ticket
+    }
+    fn begin(
+        &mut self,
+        prepared: &crate::native_boot::prepared::Prepared,
+    ) -> Result<(), PhaseOutcome> {
+        self.runner
+            .bind_prepared_startup(prepared, self.candidate, self.op)
+            .map_err(|_| PhaseOutcome::FailedKnown)?;
+        let revision = self
+            .journal
+            .get(self.op)
+            .and_then(|entry| entry.admission.as_ref())
+            .map_or(self.journal.config_revision, |a| a.commit_revision);
+        self.journal.replace_native_startup(journal::NativeStartup {
+            boot_id: prepared.intent.boot_id.clone(),
+            config_revision: revision,
+            filesystem_hiding: prepared.intent.filesystem_hiding,
+            intent: Some(prepared.intent.clone()),
+            repair_op: Some(self.op),
+            completed: None,
+        });
+        journal::record_phase_running(
+            &self.path,
+            self.journal,
+            self.op,
+            self.base,
+            self.edit,
+            self.candidate,
+            &self.plan,
+            &self.completed,
+            ConfigPhase::Native,
+            self.runner.native_intent(self.candidate, self.op),
+        )
+        .map_err(|_| PhaseOutcome::Unknown)?;
+        self.state.publish_progress(self.journal);
+        Ok(())
+    }
+    fn retire(
+        &mut self,
+        prepared: &crate::native_boot::prepared::Prepared,
+    ) -> Result<(), PhaseOutcome> {
+        crate::native_boot::transition::retire_prepared(
+            self.journal,
+            prepared,
+            Some(self.op),
+            &mut |j| {
+                self.state
+                    .persist_transition_journal(&self.path, j, self.op)
+            },
+            || self.fence.load(Ordering::SeqCst) == self.ticket,
+        )
+    }
+    fn complete(&mut self, result: journal::NativeStartupResult) -> Result<(), PhaseOutcome> {
+        self.journal.complete_native_startup(result);
+        self.state
+            .persist_transition_journal(&self.path, self.journal, self.op)
+            .map_err(|_| PhaseOutcome::Unknown)
+    }
+}
+
 impl PhaseHook for JournalPhaseHook<'_> {
     fn before(&mut self, phase: ConfigPhase) -> Result<(), PhaseOutcome> {
         if phase == ConfigPhase::Native && self.journal.revocation_uncertain() {
@@ -2450,7 +2529,7 @@ impl PhaseHook for JournalPhaseHook<'_> {
                 .runner
                 .prepare_startup(self.journal, self.candidate, self.op)
             {
-                Ok(Some(attempt)) => self.journal.replace_native_startup(attempt),
+                Ok(Some(_)) => {}
                 Ok(None) => {}
                 Err(error) => {
                     if let Some(handle) = &self.runner.native {
@@ -2497,16 +2576,22 @@ impl PhaseHook for JournalPhaseHook<'_> {
             return Err(PhaseOutcome::FailedKnown);
         }
         crate::recovery::maybe_crash_for_test(phase_intent_point(phase));
-        if phase == ConfigPhase::Native {
-            self.runner.retire_prepared_startup(
-                self.journal,
-                self.op,
-                &mut |journal| {
-                    self.state
-                        .persist_transition_journal(&self.path, journal, self.op)
-                },
-                || self.fence.load(Ordering::SeqCst) == self.ticket,
-            )?;
+        if phase == ConfigPhase::Native
+            && let Some(prepared) = self.runner.take_prepared_startup()
+        {
+            let epoch = self.runner.epoch;
+            let explicit = self.runner.recover_startup;
+            let boot = crate::native_boot::transition::activate(prepared, self, epoch, explicit)?;
+            self.runner.install_startup(boot);
+            // Preserve the final attempt's typed rejection for phase attribution.
+            if let Some(result) = self
+                .journal
+                .native_startup
+                .as_ref()
+                .and_then(|a| a.completed.clone())
+            {
+                self.runner.startup_rejected(result);
+            }
         }
         if phase == ConfigPhase::Cleanup
             && self
@@ -2525,6 +2610,15 @@ impl PhaseHook for JournalPhaseHook<'_> {
                         crate::native_boot::BOOT_ID_PATH,
                     ))
                 });
+            let authority = crate::native_boot::transition::revocable_authority(
+                self.journal,
+                authority
+                    .intent
+                    .zygisk_module
+                    .as_deref()
+                    .ok_or(PhaseOutcome::FailedKnown)?,
+            )?
+            .unwrap_or(authority);
             let result = crate::native_boot::transition::revoke(
                 self.journal,
                 &authority,
@@ -2598,14 +2692,6 @@ impl PhaseHook for JournalPhaseHook<'_> {
             crate::recovery::maybe_crash_for_test("persist");
         }
         if phase == ConfigPhase::Native {
-            if let Some(result) = self.runner.take_startup_result() {
-                self.journal.complete_native_startup(result);
-                if let Err(error) = journal::write_atomic(&self.path, self.journal) {
-                    eprintln!("core: startup recovery completion could not be synced: {error}");
-                    return Err(PhaseOutcome::Unknown);
-                }
-                self.state.publish_progress(self.journal);
-            }
             crate::recovery::maybe_crash_for_test("native");
         }
         Ok(())

@@ -14,6 +14,8 @@ pub struct BundleIdentity {
     pub root: PathBuf,
     pub manifest_sha256: String,
     pub source_commit: String,
+    #[serde(default)]
+    pub root_identity: Option<(u64, u64)>,
     pub wire: String,
 }
 
@@ -128,7 +130,7 @@ impl Prepared {
 
     #[allow(clippy::too_many_arguments)]
     fn bind_bundle(
-        mut env: NativeEnv,
+        env: NativeEnv,
         filesystem_hiding: bool,
         facts: ScanFacts,
         client: Option<CoreKpm>,
@@ -171,11 +173,64 @@ impl Prepared {
                 ));
             }
         };
+        let mut prepared = Self::freeze_candidate(
+            env.clone(),
+            filesystem_hiding,
+            facts.clone(),
+            client.clone(),
+            root.clone(),
+            &catalog,
+            &assessment,
+            &projections,
+            backend,
+            resident,
+        )?;
+        if !resident {
+            let mut after_selected = false;
+            for candidate in &assessment.candidates {
+                if candidate.backend == backend {
+                    after_selected = true;
+                    continue;
+                }
+                if !after_selected || candidate.eligibility.is_err() {
+                    continue;
+                }
+                prepared.alternatives.push_back(Self::freeze_candidate(
+                    env.clone(),
+                    filesystem_hiding,
+                    facts.clone(),
+                    client.clone(),
+                    root.clone(),
+                    &catalog,
+                    &assessment,
+                    &projections,
+                    candidate.backend,
+                    false,
+                )?);
+            }
+        }
+
+        Ok(prepared)
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn freeze_candidate(
+        mut env: NativeEnv,
+        filesystem_hiding: bool,
+        facts: ScanFacts,
+        client: Option<CoreKpm>,
+        root: PathBuf,
+        catalog: &Catalog,
+        assessment: &selection::Assessment,
+        projections: &[(NativeBackend, crate::payloads::projection::Projection)],
+        backend: NativeBackend,
+        resident: bool,
+    ) -> Result<Self, String> {
         let projected = projections
-            .into_iter()
+            .iter()
             .find(|(b, _)| *b == backend)
             .ok_or("selected projection missing")?
-            .1;
+            .1
+            .clone();
         let candidate = assessment
             .candidates
             .iter()
@@ -220,15 +275,39 @@ impl Prepared {
                     "payload changed after catalog verification; no effect dispatched".into(),
                 );
             }
+            prepared
+                .intent
+                .payload
+                .as_mut()
+                .expect("verified payload")
+                .init_contract = expected.init_contract;
         }
         prepared.intent.bundle = Some(BundleIdentity {
             root,
+            root_identity: Some(catalog.root_identity),
             manifest_sha256: manifest_digest(&catalog.manifest),
-            source_commit: catalog.manifest.bundle_commit,
+            source_commit: catalog.manifest.bundle_commit.clone(),
             wire: projected.wire,
         });
+        prepared.env.bundle_identity = prepared.intent.bundle.clone();
         Ok(prepared)
     }
+}
+
+pub(super) fn validate_binding(binding: Option<&BundleIdentity>) -> Result<(), String> {
+    let Some(binding) = binding else {
+        return Ok(());
+    };
+    let catalog = verified_catalog(&binding.root)?;
+    if binding
+        .root_identity
+        .is_some_and(|id| id != catalog.root_identity)
+        || manifest_digest(&catalog.manifest) != binding.manifest_sha256
+        || catalog.manifest.bundle_commit != binding.source_commit
+    {
+        return Err("prepared bundle generation changed; no effect dispatched".into());
+    }
+    Ok(())
 }
 
 fn compiled(hooks: u32, wire_capacity: u32, default_mask: bool) -> Support {
@@ -264,11 +343,15 @@ pub fn restore_environment(
         .manifest
         .require_complete()
         .map_err(|e| e.to_string())?;
-    if manifest_digest(&catalog.manifest) != binding.manifest_sha256
+    if binding
+        .root_identity
+        .is_some_and(|id| id != catalog.root_identity)
+        || manifest_digest(&catalog.manifest) != binding.manifest_sha256
         || catalog.manifest.bundle_commit != binding.source_commit
     {
         return Err("active bundle generation changed in this boot; no startup replayed".into());
     }
+    env.bundle_identity = Some(binding.clone());
     let intent = intent.expect("binding came from intent");
     if let Some(payload) = &intent.payload {
         let matches = catalog.payloads.iter().any(|p| {
@@ -313,7 +396,19 @@ fn verified_catalog(root: &Path) -> Result<Catalog, String> {
     {
         return Err("active Core module identity/eligibility invalid".into());
     }
-    Catalog::open(root).map_err(|e| format!("active catalog: {e}"))
+    let catalog = Catalog::open_pinned(&directory).map_err(|e| format!("active catalog: {e}"))?;
+    use std::os::unix::fs::MetadataExt;
+    let current = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(root)
+        .map_err(|e| e.to_string())?
+        .metadata()
+        .map_err(|e| e.to_string())?;
+    if (current.dev(), current.ino()) != catalog.root_identity {
+        return Err("active bundle directory changed".into());
+    }
+    Ok(catalog)
 }
 
 #[cfg(test)]
@@ -357,6 +452,7 @@ mod tests {
                     bytes: 7,
                     control_version: 2,
                     preflight_protocol: None,
+                    init_contract: None,
                 }
             })
             .collect();
@@ -382,6 +478,7 @@ mod tests {
             legacy_root: None,
             apatch_kpms: temp.path().join("kpms"),
             payload_override: None,
+            bundle_identity: None,
             loader: None,
         };
         let mut config = CanonicalConfig::default();
@@ -574,6 +671,370 @@ mod tests {
                 .err()
                 .unwrap()
                 .contains("generation changed")
+        );
+    }
+    struct Writer {
+        journal: crate::journal::Journal,
+        path: PathBuf,
+        writes: usize,
+        fail_at: usize,
+        policies: Vec<(NativeBackend, String)>,
+        appear_during_begin: Option<PathBuf>,
+    }
+    impl Writer {
+        fn persist(&mut self) -> Result<(), vpnhide_core_rpc::PhaseOutcome> {
+            self.writes += 1;
+            if self.writes == self.fail_at {
+                return Err(vpnhide_core_rpc::PhaseOutcome::Unknown);
+            }
+            crate::journal::write_atomic(&self.path, &self.journal).unwrap();
+            Ok(())
+        }
+    }
+    impl crate::native_boot::transition::AttemptWriter for Writer {
+        fn journal(&self) -> &crate::journal::Journal {
+            &self.journal
+        }
+        fn can_dispatch(&self) -> bool {
+            true
+        }
+        fn retire(&mut self, _: &Prepared) -> Result<(), vpnhide_core_rpc::PhaseOutcome> {
+            Ok(())
+        }
+        fn begin(&mut self, p: &Prepared) -> Result<(), vpnhide_core_rpc::PhaseOutcome> {
+            self.policies.push((
+                p.selected().unwrap(),
+                p.projected_wire().unwrap().to_owned(),
+            ));
+            self.journal
+                .replace_native_startup(crate::journal::NativeStartup {
+                    boot_id: p.intent.boot_id.clone(),
+                    config_revision: 1,
+                    filesystem_hiding: false,
+                    intent: Some(p.intent.clone()),
+                    repair_op: None,
+                    completed: None,
+                });
+            self.persist()?;
+            if let Some(path) = self.appear_during_begin.take() {
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, b"name=vpnhide").unwrap();
+            }
+            Ok(())
+        }
+        fn complete(
+            &mut self,
+            r: crate::journal::NativeStartupResult,
+        ) -> Result<(), vpnhide_core_rpc::PhaseOutcome> {
+            self.journal.complete_native_startup(r);
+            self.persist()
+        }
+    }
+    fn frozen_chain() -> (tempfile::TempDir, Prepared) {
+        let (temp, env, root, config, packages, mut caps) = fixture();
+        caps.kpm = Runtime::Ready;
+        let support = [
+            (NativeBackend::Kmod, compiled(KERNEL_HOOK_MASK, 65536, true)),
+            (NativeBackend::Kpm, compiled(KERNEL_HOOK_MASK, 65536, true)),
+        ];
+        let p = Prepared::bind_bundle(
+            env,
+            false,
+            facts(),
+            None,
+            root.clone(),
+            verified_catalog(&root).unwrap(),
+            &config,
+            &packages,
+            &caps,
+            &support,
+        )
+        .unwrap();
+        assert_eq!(p.alternatives.len(), 1);
+        (temp, p)
+    }
+    fn rejected(p: Prepared, epoch: u64, proven: bool) -> PreparedExecution {
+        let mut boot = NativeBoot::blocked(p.env.clone(), epoch, "test".into());
+        boot.status.boot_id = p.intent.boot_id.clone();
+        let backend = p.selected().unwrap();
+        boot.status.outcome = vpnhide_core_rpc::NativeBootOutcome::LoadFailed {
+            backend,
+            exit: Some(127),
+            stderr: "signature diagnostic text is not authority".into(),
+            dmesg_tail: vec![],
+            kprobes: None,
+            kretprobes: None,
+            signature_rejected: true,
+        };
+        let rejection = proven.then(|| super::super::super::evidence::RejectionProof {
+            boot_id: p.intent.boot_id.clone(),
+            payload: p.intent.payload.clone().unwrap(),
+            manifest_sha256: p.intent.bundle.as_ref().unwrap().manifest_sha256.clone(),
+            source_commit: p.intent.bundle.as_ref().unwrap().source_commit.clone(),
+            ownership_checked_boot_ms: 1,
+            cause: if backend == NativeBackend::Kmod {
+                super::super::super::evidence::RejectionCause::KmodBeforeDispatch { code: 127 }
+            } else {
+                super::super::super::evidence::RejectionCause::KpmBeforeDispatch
+            },
+        });
+        PreparedExecution { boot, rejection }
+    }
+    #[test]
+    fn bounded_successor_requires_durable_proof_and_preserves_every_uid_and_policy() {
+        for fail_at in 0..=4 {
+            let (temp, prepared) = frozen_chain();
+            let mut writer = Writer {
+                journal: Default::default(),
+                path: temp.path().join("journal"),
+                writes: 0,
+                fail_at,
+                policies: vec![],
+                appear_during_begin: None,
+            };
+            let mut effects = 0;
+            let result = crate::native_boot::transition::activate_with(
+                prepared,
+                &mut writer,
+                1,
+                true,
+                |p, e| {
+                    effects += 1;
+                    rejected(p, e, true)
+                },
+            );
+            assert_eq!(effects, [2, 0, 1, 1, 2][fail_at]);
+            assert_eq!(result.is_ok(), fail_at == 0);
+            if fail_at == 0 {
+                assert_eq!(writer.policies.len(), 2);
+                assert_eq!(writer.policies[0].1, writer.policies[1].1);
+                let config =
+                    vpnhide_protocol::parse_config(writer.policies[1].1.as_bytes()).unwrap();
+                assert_eq!(
+                    config.targets.iter().map(|t| t.uid).collect::<Vec<_>>(),
+                    [10123, 110123]
+                );
+                assert!(
+                    writer
+                        .journal
+                        .backend_rejected("boot-a", NativeBackend::Kmod)
+                );
+                assert!(
+                    writer
+                        .journal
+                        .backend_rejected("boot-a", NativeBackend::Kpm)
+                );
+                let restored = crate::journal::read(&writer.path).unwrap();
+                assert!(restored.backend_rejected("boot-a", NativeBackend::Kmod));
+            }
+        }
+    }
+    #[test]
+    fn ambiguous_failure_stops_chain_and_replaced_root_never_dispatches() {
+        let (temp, prepared) = frozen_chain();
+        let mut writer = Writer {
+            journal: Default::default(),
+            path: temp.path().join("journal"),
+            writes: 0,
+            fail_at: 0,
+            policies: vec![],
+            appear_during_begin: None,
+        };
+        let mut effects = 0;
+        let boot = crate::native_boot::transition::activate_with(
+            prepared,
+            &mut writer,
+            1,
+            true,
+            |p, e| {
+                effects += 1;
+                rejected(p, e, false)
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            boot.status.outcome,
+            vpnhide_core_rpc::NativeBootOutcome::LoadFailed { .. }
+        ));
+        assert_eq!(effects, 1);
+        assert!(writer.journal.native_startup_uncertain());
+        let (_, mut prepared) = frozen_chain();
+        prepared.intent.bundle.as_mut().unwrap().root_identity = Some((0, 1));
+        assert!(
+            crate::native_boot::transition::activate_with(
+                prepared,
+                &mut writer,
+                1,
+                true,
+                |_, _| { panic!("changed generation must never execute") }
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn first_load_rechecks_ownership_after_intent_write_before_any_dispatch() {
+        let (temp, prepared) = frozen_chain();
+        let mut writer = Writer {
+            journal: Default::default(),
+            path: temp.path().join("journal"),
+            writes: 0,
+            fail_at: 0,
+            policies: vec![],
+            appear_during_begin: Some(prepared.env.apatch_kpms.join("vpnhide.kpm")),
+        };
+        assert!(
+            crate::native_boot::transition::activate_with(
+                prepared,
+                &mut writer,
+                1,
+                true,
+                |_, _| { panic!("KPM appeared during journal write; kmod must not dispatch") }
+            )
+            .is_err()
+        );
+        assert!(writer.journal.native_startup_uncertain());
+    }
+    #[test]
+    fn boot_and_repair_cannot_recapture_a_replaced_bundled_zygisk_recipient() {
+        let (_temp, mut env, root, config, packages, caps) = fixture();
+        fs::write(&env.boot_id_path, "12345678-1234-1234-1234-123456789abc").unwrap();
+        crate::zygisk::test_fixture(&root);
+        crate::zygisk::test_library(&root.join("zygisk/armeabi-v7a.so"), 1, 40);
+        fs::write(
+            root.join("module.prop"),
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+        )
+        .unwrap();
+        let manifest_path = root.join("payloads/manifest.json");
+        let mut manifest: Manifest =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        for payload in &mut manifest.payloads {
+            let bytes =
+                fs::read(root.join(payload.implementation.relative_path().unwrap())).unwrap();
+            payload.bytes = bytes.len() as u64;
+            payload.sha256 = format!("{:x}", Sha256::digest(&bytes));
+        }
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let prepared = Prepared::bind_bundle(
+            env.clone(),
+            false,
+            facts(),
+            None,
+            root.clone(),
+            verified_catalog(&root).unwrap(),
+            &config,
+            &packages,
+            &caps,
+            &support(),
+        )
+        .unwrap();
+        env.bundle_identity = prepared.intent.bundle.clone();
+        env.zygisk_module = Some(root.clone());
+        let query = |env| {
+            let mut boot = NativeBoot::blocked(env, 1, "test".into());
+            boot.selection = Some(super::super::super::Selection {
+                backend: NativeBackend::Zygisk,
+                mode: vpnhide_core_rpc::SelectionMode::Authorized,
+                filesystem_hiding: None,
+            });
+            let mut runner = crate::operation::RealPhaseRunner::new(None, None);
+            runner.native = Some(std::sync::Arc::new(std::sync::Mutex::new(boot)));
+            runner.native_wire = Some((
+                NativeBackend::Zygisk,
+                prepared.projected_wire().unwrap().to_owned(),
+            ));
+            runner.native_intent(&config, vpnhide_core_rpc::OperationId(1))
+        };
+        assert!(query(env.clone()).is_some());
+        fn copy_tree(source: &Path, destination: &Path) {
+            fs::create_dir_all(destination).unwrap();
+            for entry in fs::read_dir(source).unwrap() {
+                let entry = entry.unwrap();
+                if entry.file_type().unwrap().is_dir() {
+                    copy_tree(&entry.path(), &destination.join(entry.file_name()));
+                } else {
+                    fs::copy(entry.path(), destination.join(entry.file_name())).unwrap();
+                }
+            }
+        }
+        let old = root.with_file_name("old-core");
+        fs::rename(&root, &old).unwrap();
+        copy_tree(&old, &root);
+        assert!(query(env).is_none());
+        assert!(prepared.validate_binding().is_err());
+    }
+    #[test]
+    fn restart_between_rejection_completion_and_successor_resumes_only_same_frozen_policy() {
+        fn copy_prepared(p: &Prepared) -> Prepared {
+            let mut copy = Prepared::from_plan(
+                p.env.clone(),
+                p.intent.filesystem_hiding,
+                p.facts.clone(),
+                None,
+                Plan::Load(p.selected().unwrap()),
+            )
+            .unwrap();
+            copy.intent = p.intent.clone();
+            copy.alternatives = p.alternatives.iter().map(copy_prepared).collect();
+            copy
+        }
+        let (temp, prepared) = frozen_chain();
+        let restart = copy_prepared(&prepared);
+        let mut changed = copy_prepared(&prepared);
+        changed.intent.bundle.as_mut().unwrap().wire = changed
+            .projected_wire()
+            .unwrap()
+            .replace("debug 0", "debug 1");
+        let mut writer = Writer {
+            journal: Default::default(),
+            path: temp.path().join("journal"),
+            writes: 0,
+            fail_at: 3,
+            policies: vec![],
+            appear_during_begin: None,
+        };
+        let mut calls = 0;
+        assert!(
+            crate::native_boot::transition::activate_with(
+                prepared,
+                &mut writer,
+                1,
+                true,
+                |p, e| {
+                    calls += 1;
+                    rejected(p, e, true)
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(calls, 1);
+        writer.journal = crate::journal::read(&writer.path).unwrap();
+        assert!(!writer.journal.native_startup_uncertain());
+        assert!(changed.admit(&writer.journal, true).is_err());
+        writer.fail_at = 0;
+        let boot =
+            crate::native_boot::transition::activate_with(restart, &mut writer, 2, true, |p, e| {
+                assert_eq!(p.selected(), Some(NativeBackend::Kpm));
+                calls += 1;
+                rejected(p, e, true)
+            })
+            .unwrap();
+        assert_eq!(calls, 2);
+        assert!(matches!(
+            boot.status.outcome,
+            vpnhide_core_rpc::NativeBootOutcome::LoadFailed {
+                backend: NativeBackend::Kpm,
+                ..
+            }
+        ));
+        assert_eq!(
+            writer
+                .journal
+                .native_load_budget
+                .as_ref()
+                .unwrap()
+                .attempted,
+            [NativeBackend::Kmod, NativeBackend::Kpm]
         );
     }
 }

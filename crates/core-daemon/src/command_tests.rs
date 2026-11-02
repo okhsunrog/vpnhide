@@ -84,6 +84,7 @@ fn native_none(state: &CoreState, root: &std::path::Path) {
         legacy_root: None,
         apatch_kpms: root.join("apatch"),
         payload_override: None,
+        bundle_identity: None,
         loader: None,
     };
     state.install_native_boot(crate::native_boot::NativeBoot {
@@ -1041,6 +1042,7 @@ fn explicit_repair_releases_only_covered_resources_and_preserves_old_unknown_rec
         legacy_root: None,
         apatch_kpms: root.path().join("apatch"),
         payload_override: None,
+        bundle_identity: None,
         loader: None,
     };
     state.install_native_boot(crate::native_boot::NativeBoot {
@@ -1391,6 +1393,7 @@ fn startup_env(root: &std::path::Path) -> crate::native_boot::NativeEnv {
         legacy_root: None,
         apatch_kpms: root.join("no-apatch"),
         payload_override: None,
+        bundle_identity: None,
         loader: None,
     }
 }
@@ -1579,6 +1582,7 @@ fn durable_native_selection_is_rechecked_against_live_identity() {
             completed: Some(journal::NativeStartupResult {
                 status: boot.status,
                 selection: Some(selection),
+                rejection: None,
             }),
         }),
         ..Journal::default()
@@ -1620,7 +1624,7 @@ fn startup_hold_survives_receipt_retention_and_schema_two_upgrade() {
     json.as_object_mut().unwrap().remove("native_startup");
     std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
     let mut upgraded = journal::read(&path).unwrap();
-    assert_eq!(upgraded.version, 10);
+    assert_eq!(upgraded.version, 11);
     assert_eq!(upgraded.issued_through, 42);
     assert!(upgraded.native_startup.is_none());
     upgraded.native_startup = Some(journal::NativeStartup {
@@ -1638,7 +1642,7 @@ fn startup_hold_survives_receipt_retention_and_schema_two_upgrade() {
         journal::read(&path).unwrap().held_resources(),
         vec![ConfigPhase::Native]
     );
-    upgraded.version = 11;
+    upgraded.version = 12;
     journal::write_atomic(&path, &upgraded).unwrap();
     assert!(journal::read(&path).is_err());
 }

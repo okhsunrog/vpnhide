@@ -280,24 +280,8 @@ impl RealPhaseRunner {
         {
             prepared.permit_recovery(previous)?;
         }
-        journal.check_native_attempt(&prepared.intent, self.recover_startup)?;
-        if let Some(backend) = prepared.selected() {
-            let wire = match prepared.projected_wire() {
-                Some(wire) => wire.to_owned(),
-                None => crate::activation::project_native_wire(candidate, backend)
-                    .map_err(|error| error.to_string())?,
-            };
-            let authorization = Self::authorization(prepared.environment(), backend, op, &wire)
-                .map_err(|e| e.to_string())?;
-            *self.prepared_native.borrow_mut() = Some(Ok(crate::journal::NativeIntent {
-                zygisk_authorization: authorization,
-                backend,
-                wire,
-                zygisk_module: (backend == vpnhide_core_rpc::NativeBackend::Zygisk)
-                    .then(|| prepared.environment().module_dir(backend))
-                    .flatten(),
-            }));
-        }
+        let prepared = prepared.admit(journal, self.recover_startup)?;
+        self.bind_prepared_startup(&prepared, candidate, op)?;
         let attempt = crate::journal::NativeStartup {
             boot_id: prepared.intent.boot_id.clone(),
             config_revision: journal
@@ -327,28 +311,49 @@ impl RealPhaseRunner {
         }
     }
 
-    pub(crate) fn retire_prepared_startup(
+    pub(crate) fn bind_prepared_startup(
         &self,
-        journal: &mut crate::journal::Journal,
+        prepared: &crate::native_boot::prepared::Prepared,
+        candidate: &CanonicalConfig,
         op: vpnhide_core_rpc::OperationId,
-        persist: &mut impl FnMut(&crate::journal::Journal) -> std::io::Result<()>,
-        can_dispatch: impl Fn() -> bool,
-    ) -> Result<(), PhaseOutcome> {
-        let startup = self.startup.borrow();
-        if let Some(prepared) = startup.as_ref() {
-            crate::native_boot::transition::retire_prepared(
-                journal,
-                prepared,
-                Some(op),
-                persist,
-                can_dispatch,
-            )?;
-        }
+    ) -> Result<(), String> {
+        *self.prepared_native.borrow_mut() = match prepared.selected() {
+            Some(backend) => {
+                let wire = match prepared.projected_wire() {
+                    Some(wire) => wire.to_owned(),
+                    None => crate::activation::project_native_wire(candidate, backend)
+                        .map_err(|error| error.to_string())?,
+                };
+                let authorization = Self::authorization(prepared.environment(), backend, op, &wire)
+                    .map_err(|e| e.to_string())?;
+                Some(Ok(crate::journal::NativeIntent {
+                    zygisk_authorization: authorization,
+                    backend,
+                    wire,
+                    zygisk_module: (backend == vpnhide_core_rpc::NativeBackend::Zygisk)
+                        .then(|| prepared.environment().module_dir(backend))
+                        .flatten(),
+                }))
+            }
+            None => None,
+        };
         Ok(())
     }
-
-    pub fn take_startup_result(&self) -> Option<crate::journal::NativeStartupResult> {
-        self.startup_result.borrow_mut().take()
+    pub(crate) fn take_prepared_startup(&self) -> Option<crate::native_boot::prepared::Prepared> {
+        self.startup.borrow_mut().take()
+    }
+    pub(crate) fn install_startup(&self, boot: crate::native_boot::NativeBoot) {
+        *self.startup_result.borrow_mut() = Some(crate::journal::NativeStartupResult {
+            status: boot.status.clone(),
+            selection: boot.selection,
+            rejection: None,
+        });
+        if let Some(handle) = &self.native {
+            *handle.lock().expect("native boot") = boot;
+        }
+    }
+    pub(crate) fn startup_rejected(&self, result: crate::journal::NativeStartupResult) {
+        *self.startup_result.borrow_mut() = Some(result);
     }
 
     /// Freeze the actual recipient and UID-resolved wire before journaling Native
@@ -405,7 +410,17 @@ impl RealPhaseRunner {
         let path = env
             .module_dir(backend)
             .ok_or_else(|| Failed("missing Zygisk recipient".into()))?;
+        crate::native_boot::prepared::validate_bundle_binding(env.bundle_identity.as_ref())
+            .map_err(Failed)?;
         let target = crate::zygisk::ZygiskTarget::open(&path).map_err(Failed)?;
+        if let Some(binding) = &env.bundle_identity
+            && (binding.root != path
+                || binding.root_identity != Some(target.identity().map_err(Failed)?))
+        {
+            return Err(Failed(
+                "Zygisk recipient differs from the frozen catalog generation".into(),
+            ));
+        }
         if !target.is_bundled().map_err(Failed)? {
             return Ok(None);
         }
@@ -478,20 +493,8 @@ impl PhaseRunner for RealPhaseRunner {
                     return PhaseOutcome::NotAttempted;
                 };
                 let mut boot = native.lock().expect("native boot");
-                let attempted_startup = self.startup.borrow_mut().take();
-                let retried_startup = attempted_startup.is_some();
-                if let Some(prepared) = attempted_startup {
-                    *boot = prepared.execute(self.epoch);
-                    *self.startup_result.borrow_mut() = Some(crate::journal::NativeStartupResult {
-                        status: boot.status.clone(),
-                        selection: boot.selection,
-                    });
-                }
-                // Authentication-triggered load is part of Native, whose exact
-                // intent is already durable; Secret owns only key storage.
-                // All authentication-triggered loads also require prepared startup
-                // evidence from JournalPhaseHook. Never bypass it with legacy re-scan.
-                let retried_authentication = retried_startup;
+                // JournalPhaseHook has already completed the shared attempt executor.
+                let retried_authentication = self.startup_result.borrow().is_some();
                 let Some(backend) = boot.selected() else {
                     return match &boot.status.outcome {
                         // Nothing native to configure: the phase is trivially satisfied.
@@ -499,7 +502,16 @@ impl PhaseRunner for RealPhaseRunner {
                         vpnhide_core_rpc::NativeBootOutcome::LoadFailed { .. }
                             if retried_authentication =>
                         {
-                            PhaseOutcome::Unknown
+                            if self
+                                .startup_result
+                                .borrow()
+                                .as_ref()
+                                .is_some_and(|r| r.rejection.is_some())
+                            {
+                                PhaseOutcome::FailedKnown
+                            } else {
+                                PhaseOutcome::Unknown
+                            }
                         }
                         other => {
                             // Scan/auth/list refusals stopped before load or

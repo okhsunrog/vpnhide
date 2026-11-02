@@ -260,7 +260,7 @@ impl Effects for Fake {
             }
         }
     }
-    fn kpm_load(&self, _: &CoreKpm, _: &Path, _: &Path, _: bool) -> Result<(), String> {
+    fn kpm_load(&self, _: &CoreKpm, _: &Path, _: &Path, _: bool) -> Result<(), KpmLoadFailure> {
         panic!("no KPM in host tests")
     }
     fn kpm_kernel(&self) -> Result<(String, bool), String> {
@@ -300,6 +300,7 @@ fn env(root: &Path) -> NativeEnv {
         legacy_root: Some(root.join("legacy")),
         apatch_kpms: root.join("ap/kpms"),
         payload_override: None,
+        bundle_identity: None,
         loader: None,
     }
 }
@@ -409,6 +410,7 @@ fn a_failed_kmod_load_carries_exit_stderr_dmesg_and_signature_verdict() {
     let fx = fake(
         &env,
         Some(KmodLoadFailure {
+            origin: vpnhide_activator::KmodLoadOrigin::HostProcessStatus,
             exit: 1,
             stderr: "insmod: Key was rejected by service".into(),
         }),
@@ -717,6 +719,7 @@ fn restored_kpm_auth_loss_preserves_credential_recovery_without_selection() {
         legacy_root: None,
         apatch_kpms: root.path().join("kpms"),
         payload_override: None,
+        bundle_identity: None,
         loader: None,
     };
     let boot = NativeBoot::blocked(env, 1, "fixture".into()).reconcile_restored_facts(

@@ -42,7 +42,7 @@ pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 pub mod preflight;
 pub mod revocation;
 
-const JOURNAL_VERSION: u32 = 10;
+const JOURNAL_VERSION: u32 = 11;
 
 /// Default number of terminal receipts to keep, including Unknown.
 pub const DEFAULT_RETAIN_SETTLED: usize = 64;
@@ -268,7 +268,10 @@ impl NativeStartup {
             return false;
         }
         let Some(intent) = &self.intent else {
-            return true;
+            return self
+                .completed
+                .as_ref()
+                .is_none_or(|r| r.rejection.is_none());
         }; // schema 3
         if intent.boot_id != self.boot_id
             || intent.filesystem_hiding != self.filesystem_hiding
@@ -278,12 +281,21 @@ impl NativeStartup {
         }
         if let Some(bundle) = &intent.bundle
             && (bundle.root.as_os_str().is_empty()
+                || bundle.root_identity.is_some_and(|(_, inode)| inode == 0)
                 || !valid_sha256(&bundle.manifest_sha256)
                 || bundle.source_commit.len() != 40
                 || !bundle.source_commit.bytes().all(|b| b.is_ascii_hexdigit())
                 || bundle.wire.len() > vpnhide_protocol::zygisk_activation::MAX_BYTES
                 || vpnhide_protocol::parse_config(bundle.wire.as_bytes()).is_none()
                 || matches!(intent.action, TransitionAction::Observe))
+        {
+            return false;
+        }
+        if self
+            .completed
+            .as_ref()
+            .and_then(|r| r.rejection.as_ref())
+            .is_some_and(|proof| !proof.valid_for(self))
         {
             return false;
         }
@@ -294,6 +306,11 @@ impl NativeStartup {
             ) || payload.bytes == 0
                 || payload.bytes > crate::payloads::MAX_PAYLOAD_BYTES
                 || !valid_sha256(&payload.sha256)
+                || payload.init_contract.is_some_and(|contract| {
+                    contract != 1
+                        || intent.bundle.is_none()
+                        || intent.action != TransitionAction::Load(NativeBackend::Kmod)
+                })
                 || payload.source.as_os_str().is_empty())
         {
             return false;
@@ -311,10 +328,14 @@ impl NativeStartup {
                 matches!(
                     result.status.outcome,
                     vpnhide_core_rpc::NativeBootOutcome::LoadFailed { .. }
-                ) || matches!(
-                    result.status.zygisk_targets,
-                    vpnhide_core_rpc::ZygiskTargets::RetireFailed { .. }
-                )
+                ) && !result
+                    .rejection
+                    .as_ref()
+                    .is_some_and(|proof| proof.valid_for(self))
+                    || matches!(
+                        result.status.zygisk_targets,
+                        vpnhide_core_rpc::ZygiskTargets::RetireFailed { .. }
+                    )
             }
         }
     }
@@ -325,6 +346,8 @@ impl NativeStartup {
 pub struct NativeStartupResult {
     pub status: vpnhide_core_rpc::NativeBootStatus,
     pub selection: Option<crate::native_boot::Selection>,
+    #[serde(default)]
+    pub rejection: Option<crate::native_boot::evidence::RejectionProof>,
 }
 
 /// Bounded audit of superseded startup attempts. An unresolved attempt stays in
@@ -352,6 +375,10 @@ pub struct NativeQuarantine {
 pub struct Journal {
     #[serde(default)]
     pub zygisk_authority: Option<ZygiskAuthorityRecord>,
+    /// Last exact grant observed on disk before admitting a replacement. Failed
+    /// publication cannot erase the evidence required to revoke the old grant.
+    #[serde(default)]
+    pub prior_zygisk_authority: Option<ZygiskAuthorityRecord>,
     #[serde(default)]
     pub zygisk_revocation: Option<revocation::ZygiskRevocation>,
     pub version: u32,
@@ -407,6 +434,7 @@ impl Default for Journal {
         Journal {
             version: JOURNAL_VERSION,
             zygisk_authority: None,
+            prior_zygisk_authority: None,
             zygisk_revocation: None,
             kmod_preflights: None,
             native_startup: None,
@@ -477,10 +505,9 @@ impl Journal {
             .is_some_and(NativeStartup::uncertain)
     }
 
-    pub fn check_native_attempt(
+    pub(crate) fn check_native_safety(
         &self,
         intent: &crate::native_boot::prepared::TransitionIntent,
-        explicit: bool,
     ) -> Result<(), String> {
         use crate::native_boot::prepared::TransitionAction;
         if self.revocation_uncertain() {
@@ -509,6 +536,15 @@ impl Journal {
         {
             return Err("Zygisk authorization may have been consumed in this boot; reboot before kernel backend activation".into());
         }
+        Ok(())
+    }
+    pub fn check_native_attempt(
+        &self,
+        intent: &crate::native_boot::prepared::TransitionIntent,
+        explicit: bool,
+    ) -> Result<(), String> {
+        use crate::native_boot::prepared::TransitionAction;
+        self.check_native_safety(intent)?;
         if let TransitionAction::Load(backend) = intent.action {
             if intent.payload.is_none() {
                 return Ok(());
@@ -532,6 +568,43 @@ impl Journal {
             }
         }
         Ok(())
+    }
+
+    /// A consumed budget is never refunded. Its candidate can only be skipped
+    /// when every retained matching attempt proves no effect in this same boot.
+    pub(crate) fn backend_rejected(&self, boot: &str, backend: NativeBackend) -> bool {
+        use crate::native_boot::prepared::TransitionAction;
+        if !self
+            .native_load_budget
+            .as_ref()
+            .is_some_and(|b| b.boot_id == boot && b.attempted.contains(&backend))
+        {
+            return false;
+        }
+        let mut count = 0;
+        for attempt in self
+            .native_attempts
+            .iter()
+            .map(|h| &h.attempt)
+            .chain(self.native_startup.iter())
+            .filter(|a| {
+                a.boot_id == boot
+                    && a.intent.as_ref().is_some_and(|i| {
+                        i.action == TransitionAction::Load(backend) && i.payload.is_some()
+                    })
+            })
+        {
+            count += 1;
+            if !attempt
+                .completed
+                .as_ref()
+                .and_then(|r| r.rejection.as_ref())
+                .is_some_and(|p| p.valid_for(attempt))
+            {
+                return false;
+            }
+        }
+        count > 0
     }
 
     pub fn complete_native_startup(&mut self, result: NativeStartupResult) {
@@ -762,12 +835,18 @@ pub fn read(path: &Path) -> io::Result<Journal> {
         .iter()
         .chain(journal.native_attempts.iter().map(|item| &item.attempt))
         .any(|attempt| !attempt.valid());
-    if journal.zygisk_authority.as_ref().is_some_and(|a| {
-        a.reference().is_none() || (journal.version >= 9 && a.operation.0 > journal.issued_through)
-    }) || journal
-        .zygisk_revocation
-        .as_ref()
-        .is_some_and(|r| !r.valid(journal.issued_through))
+    if journal
+        .zygisk_authority
+        .iter()
+        .chain(journal.prior_zygisk_authority.iter())
+        .any(|a| {
+            a.reference().is_none()
+                || (journal.version >= 9 && a.operation.0 > journal.issued_through)
+        })
+        || journal
+            .zygisk_revocation
+            .as_ref()
+            .is_some_and(|r| !r.valid(journal.issued_through))
         || invalid_startup
         || journal.kmod_preflights.as_ref().is_some_and(|l| !l.valid())
         || journal.operations.iter().any(|entry| {
@@ -1020,6 +1099,22 @@ pub fn record_phase_running(
     {
         journal.note_zygisk_exposure(&authorization.boot_id);
         if running == ConfigPhase::Native {
+            if let Some(previous) = &journal.zygisk_authority
+                && let Some(path) = &previous.intent.zygisk_module
+                && let Ok(target) = crate::zygisk::ZygiskTarget::for_revocation(path)
+                && let Some(reference) = previous.reference()
+                && target.revalidate_identity()
+                    == Ok((reference.directory_device, reference.directory_inode))
+                && target
+                    .read_authorized(&reference.boot_id)
+                    .is_ok_and(|actual| {
+                        actual.is_some_and(|a| {
+                            a.generation == reference.generation && a.wire == previous.intent.wire
+                        })
+                    })
+            {
+                journal.prior_zygisk_authority = Some(previous.clone());
+            }
             journal.zygisk_authority = Some(ZygiskAuthorityRecord {
                 operation: op,
                 intent: native_intent.clone().expect("authorization intent"),
@@ -1118,7 +1213,7 @@ mod tests {
         };
         write_atomic(&path, &journal).unwrap();
         let migrated = read(&path).unwrap();
-        assert_eq!(migrated.version, 10);
+        assert_eq!(migrated.version, 11);
         assert!(migrated.native_startup_uncertain());
         assert_eq!(migrated.native_startup, journal.native_startup);
         journal.version = 4;
@@ -1131,6 +1226,7 @@ mod tests {
                 source: "/fixture/module.ko".into(),
                 sha256: "a".repeat(64),
                 bytes: 42,
+                init_contract: None,
             }),
             retire_zygisk: None,
             retire_directory_identity: None,
@@ -1164,7 +1260,7 @@ mod tests {
             );
         }
         journal = original;
-        journal.version = 11;
+        journal.version = 12;
         write_atomic(&path, &journal).unwrap();
         assert!(read(&path).is_err(), "never reset unknown schema");
     }
@@ -1406,7 +1502,7 @@ mod tests {
         });
         journal.upsert(entry);
         write_atomic(&path, &journal).unwrap();
-        assert_eq!(read(&path).unwrap().version, 10);
+        assert_eq!(read(&path).unwrap().version, 11);
         journal
             .get_mut(OperationId(7))
             .unwrap()

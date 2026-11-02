@@ -30,6 +30,139 @@ def string(data: bytes, offset: int, limit: int = 1024) -> str:
     return data[offset:end].decode("ascii")
 
 
+def standard_parameters(data, sections, headers):
+    """Contract1: exactly three standard scalar setters, no own pre-init callbacks."""
+    try:
+        params = sections["__param"]
+        symbols = sections[".symtab"]
+        relocations = sections[".rela__param"]
+        strings = headers[symbols[6]]
+    except (KeyError, IndexError) as error:
+        raise ValueError("missing scalar parameter evidence") from error
+    params_index = headers.index(params)
+    symbols_index = headers.index(symbols)
+    if (
+        params[1] != 1
+        or params[5] != 120
+        or symbols[1] != 2
+        or symbols[9] != 24
+        or symbols[5] % 24
+        or symbols[5] // 24 > 262144
+        or strings[1] != 3
+        or strings[5] > 16 * 1024 * 1024
+        or relocations[1] != 4
+        or relocations[5] != 12 * 24
+        or relocations[9] != 24
+        or relocations[6] != symbols_index
+        or relocations[7] != params_index
+    ):
+        raise ValueError("unsupported scalar parameter layout")
+    for header in headers:
+        if header[1] in (4, 9) and header != relocations and header[7] == params_index:
+            raise ValueError("multiple parameter relocation sources")
+    raw = region(data, params[4], params[5])
+    symtab = region(data, symbols[4], symbols[5])
+    strtab = region(data, strings[4], strings[5])
+    offsets, names, ops = set(), set(), []
+    rows = {}
+    for at in range(relocations[4], relocations[4] + relocations[5], 24):
+        offset, info, addend = struct.unpack_from("<QQQ", data, at)
+        if (
+            offset >= 120
+            or offset % 40 not in (0, 8, 16, 32)
+            or offset in offsets
+            or info & 0xFFFFFFFF != 257
+            or region(raw, offset, 8) != bytes(8)
+        ):
+            raise ValueError("invalid parameter relocation")
+        offsets.add(offset)
+        symbol = region(symtab, (info >> 32) * 24, 24)
+        name, binding, _, section, value, length = struct.unpack("<IBBHQQ", symbol)
+        name = string(strtab, name, 256)
+        kind = offset % 40
+        row = rows.setdefault(offset // 40, {})
+        if kind == 16:
+            if (
+                section != 0
+                or binding >> 4 != 1
+                or addend
+                or name not in ("param_ops_bool", "param_ops_uint")
+            ):
+                raise ValueError("own or unknown parameter callback")
+            ops.append(name)
+            row["ops"] = name
+        elif kind == 8:
+            if (
+                name != "__this_module"
+                or addend
+                or binding != 17
+                or value
+                or not 0 < section < len(headers)
+                or headers[section] != sections.get(".gnu.linkonce.this_module")
+                or not 0 < length <= headers[section][5]
+            ):
+                raise ValueError("invalid parameter module owner")
+        else:
+            if not 0 < section < len(headers):
+                raise ValueError("invalid parameter target")
+            target = headers[section]
+            start = value + addend
+            if start >= target[5] or target[2] & 4:
+                raise ValueError("parameter outside safe data")
+            if kind == 0:
+                if target[1] == 8:
+                    raise ValueError("parameter name in BSS")
+                name = string(region(data, target[4], target[5]), start, 256)
+                if (
+                    name not in ("preflight_only", "filesystem_hiding", "probe_mask")
+                    or name in names
+                ):
+                    raise ValueError("unexpected parameter name")
+                names.add(name)
+                row["name"] = name
+            else:
+                if (
+                    target[1] not in (1, 8)
+                    or not target[2] & 1
+                    or target not in (sections.get(".data"), sections.get(".bss"))
+                ):
+                    raise ValueError("parameter argument is not writable scalar storage")
+                row["argument"] = (section, start)
+    if sorted(ops) != ["param_ops_bool", "param_ops_bool", "param_ops_uint"] or len(names) != 3:
+        raise ValueError("incomplete scalar parameters")
+    scalars = []
+    for row in rows.values():
+        name = row["name"]
+        size = 4 if name == "probe_mask" else 1
+        if row["ops"] != ("param_ops_uint" if size == 4 else "param_ops_bool"):
+            raise ValueError("mismatched scalar setter")
+        section, start = row["argument"]
+        if start % size or start + size > headers[section][5]:
+            raise ValueError("scalar crosses storage boundary")
+        matches = []
+        for at in range(0, len(symtab), 24):
+            sn, info, _, ss, value, length = struct.unpack_from("<IBBHQQ", symtab, at)
+            if string(strtab, sn, 256) == name:
+                matches.append((info, ss, value, length))
+        if matches != [(1, section, start, size)]:
+            raise ValueError("parameter argument differs from its exact local scalar")
+        if any(
+            ss == section and start < other + length and other < start + size
+            for ss, other, length in scalars
+        ):
+            raise ValueError("overlapping scalar storage")
+        scalars.append((section, start, size))
+        for header in headers:
+            if header[1] in (4, 9) and header[7] == section:
+                stride = 24 if header[1] == 4 else 16
+                if header[9] != stride or header[5] % stride:
+                    raise ValueError("invalid scalar storage relocation")
+                for at in range(header[4], header[4] + header[5], stride):
+                    offset = struct.unpack_from("<Q", data, at)[0]
+                    if offset < start + size and offset + 16 > start:
+                        raise ValueError("relocation overlaps parameter scalar")
+
+
 def inspect(data: bytes) -> dict:
     if (
         len(data) < 64
@@ -68,19 +201,42 @@ def inspect(data: bytes) -> dict:
     modinfo = body(".modinfo")
     if ".modinfo" in sections and (sections[".modinfo"][1] != 1 or len(modinfo) > 64 * 1024):
         raise ValueError("invalid module metadata section")
-    if modinfo and not modinfo.endswith(b"\0"):
+    if ".modinfo" in sections and (not modinfo or not modinfo.endswith(b"\0")):
         raise ValueError("unterminated module metadata")
     records = [record.decode("ascii") for record in modinfo.split(b"\0") if record]
     protocol = [
         record.split("=", 1)[1] for record in records if record.startswith("vpnhide_preflight=")
     ]
     parameter = [record for record in records if record.startswith("parmtype=preflight_only:")]
-    constructors = any(body(name) for name in (".init_array", ".ctors", ".preinit_array"))
+    constructors = any(
+        header[5] and (name in (".init_array", ".ctors", ".preinit_array") or header[1] in (14, 16))
+        for name, header in sections.items()
+    )
     capability = None
     if protocol:
         if protocol != ["1"] or parameter != ["parmtype=preflight_only:bool"] or constructors:
             raise ValueError("unsupported or inconsistent preflight capability")
         capability = 1
+
+    init = [
+        record.split("=", 1)[1] for record in records if record.startswith("vpnhide_init_contract=")
+    ]
+    init_contract = None
+    if init:
+        parameters = sorted(record for record in records if record.startswith("parmtype="))
+        if (
+            init != ["1"]
+            or constructors
+            or parameters
+            != [
+                "parmtype=filesystem_hiding:bool",
+                "parmtype=preflight_only:bool",
+                "parmtype=probe_mask:uint",
+            ]
+        ):
+            raise ValueError("unverified closed init contract")
+        standard_parameters(data, sections, headers)
+        init_contract = 1
 
     imports = set()
     symbols = body(".symtab")
@@ -115,6 +271,7 @@ def inspect(data: bytes) -> dict:
         "sha256": hashlib.sha256(data).hexdigest(),
         "bytes": len(data),
         "preflight_protocol": capability,
+        "init_contract": init_contract,
         "constructors": constructors,
         "imports": sorted(imports),
         "versions": dict(sorted(versions.items())),

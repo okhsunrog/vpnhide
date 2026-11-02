@@ -1203,3 +1203,65 @@ Strict host/all-target and ARM64/ARMv7 Clippy passed; 898 JVM tests, ktlint, det
 CPD and lintDebug passed. Logs: `/tmp/vpnhide-revocation-{tests,process-final,
 clippy-verified,arm-verified,android}.log`. These are cloud checks; device loader,
 framework and real background lifecycle acceptance remain unclaimed.
+
+
+## Cloud checkpoint in progress: frozen attempts and no-effect fallback
+
+Implemented cloud code: startup and Repair now share the writer-owned bounded
+attempt executor. One verified catalog and one UID inventory freeze full candidate
+projections and anonymous payload descriptors before dispatch. Every candidate
+gets a durable startup intent, and Repair updates its exact Native recipient/wire
+in the same write. Completion/proof must sync before any successor. Unknown,
+timeout, resident partial health and Java/Ports failures never advance the chain.
+Fresh ownership and pinned directory/catalog generation are checked again after
+intent/retirement, before every dispatch. A KPM appearing during intent persistence
+prevents the first ko syscall too. Frozen Zygisk recipient identity survives direct
+boot selection, restore and the later policy authorization, including root replacement.
+
+No-effect evidence is private and separate from the public signature diagnostic.
+Actual Android finit_module errno126/129 requires final hash-bound init_contract1;
+host process statuses/text never qualify. Audited init normalizes all other returns
+away from those signature errors. ELF validation rejects constructors, own setters,
+metadata aliases, swapped bool/uint operations, scalar OOB/misalignment and other
+objects. Rust/Python share valid and five malformed binary fixtures. Typed KPM
+before-dispatch failure is distinct from every ambiguous post-dispatch result.
+Proof binds boot, payload hash/size/capability, manifest/source and fresh ownership.
+Budgets are never refunded. Restart can skip a spent candidate only with retained
+valid proof for the same generation/policy and fresh ownership; unknown holds remain.
+
+An independently retained prior exact Zygisk grant survives repeated newer admitted
+but unpublished generations. Reset/retirement can revoke that known old grant;
+unknown or unexpected newer files remain refused. Exposure is retained, never
+interpreted as hook unload. Save/Cancel/footer/draft UX stays unchanged.
+
+Current compatibility: RPC18 unchanged; private journal11 reads1–10. Older Core
+must reject schema11, preserving the file. Kernel control2/telemetry1 unchanged;
+no builtin rebuild is required merely because private/RPC versions changed.
+
+Validation: 352 Core library tests and all process RPC tests passed; strict host
+and ARM64/ARMv7 Clippy passed. 15 Python ELF/bundle tests, Ruff, C exhaustive
+return-normalization test, shellcheck/actionlint and formatting passed. New fault
+tests cover every per-attempt intent/completion boundary, no successor after
+Unknown, same-policy restart after rejection, first-load ownership races, frozen
+Zygisk recipient replacement and retained prior-grant revocation after 36 failed
+admissions. A real QEMU6.1 ko
+with preflight1/init_contract1 passed both ELF inspectors after rebuilding; unsigned
+SHA0643eb4b74bf198f60dd3b45a9ff05b0a23a8530de881347f48c097f003d165c.
+Separate signature-enforced Linux6.1.175 QEMU experiment PASSED: exact errno129
+for unsigned and modified-signed copies; no proc nodes/module or changed kprobes
+after either rejection. The exact same unsigned ELF plus a test-kernel signature
+returned117 for preflight without effects, then its single real load returned0
+with hooks0x20003ff/error0. Reproducible harness: `kmod/test/run-signature.sh` and
+`signature-probe.c`. Evidence: `/workspace/vpnhide-build-evidence/fallback-init-contract/
+signature-evidence.json`, `signature-qemu/{serial.log,payloads.sha256,kernel.sha256}`.
+The locally generated key belongs solely to that isolated test kernel and is not
+published or used for APK/production signing. This is not an Android/device or
+all-kernel proof.
+Seven final KMI builds, final paired APK/full bundle and device acceptance remain
+open. Production signing key is unavailable. No phone/boot writes were attempted.
+
+Still unimplemented cloud code: unified assessment/UI/export/agent integration,
+remaining framework/native stimuli, replacing the legacy app-triggered diagnostic
+suite with accepted Core runs, replacement manager/bootstrap, concrete provisioner
+adapters. These remain implementation work, not device gates. Final startup
+regression for `core root snapshot probe exit=-1` must follow those remaining edits.

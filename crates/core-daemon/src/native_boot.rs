@@ -27,13 +27,14 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use vpnhide_activator::{CoreKpm, KmodLoadFailure, KpmLiveCheck, KpmRuntimeProbe};
+use vpnhide_activator::{CoreKpm, KmodLoadFailure, KpmLiveCheck, KpmLoadFailure, KpmRuntimeProbe};
 use vpnhide_core_rpc::{
     KmodBootReport, MAX_DMESG_TAIL, NativeBackend, NativeBootOutcome, NativeBootStatus,
     PortsStatus, SelectionMode, ZygiskTargets,
 };
 
 use crate::alog;
+pub mod evidence;
 pub mod prepared;
 pub(crate) mod transition;
 
@@ -72,6 +73,8 @@ pub struct NativeEnv {
     /// APatch's installed-KPM dir: evidence that a VPN Hide KPM may be live.
     pub apatch_kpms: PathBuf,
     pub(crate) payload_override: Option<PathBuf>,
+    /// Frozen catalog recipient retained through boot selection and later policy apply.
+    pub(crate) bundle_identity: Option<prepared::BundleIdentity>,
     pub(crate) loader: Option<std::sync::Arc<crate::zygisk_loader::LoaderRegistry>>,
 }
 
@@ -92,6 +95,7 @@ impl NativeEnv {
             legacy_root: production.then(|| PathBuf::from("/")),
             apatch_kpms: APATCH_KPMS_DIR.into(),
             payload_override: None,
+            bundle_identity: None,
             loader: None,
         })
     }
@@ -303,7 +307,13 @@ struct Persisted {
 /// The side effects of a boot scan, injectable for tests.
 pub trait Effects {
     fn insmod(&self, ctl: &Path, artifact: &Path, fs: bool) -> Result<(), KmodLoadFailure>;
-    fn kpm_load(&self, kpm: &CoreKpm, ctl: &Path, artifact: &Path, fs: bool) -> Result<(), String>;
+    fn kpm_load(
+        &self,
+        kpm: &CoreKpm,
+        ctl: &Path,
+        artifact: &Path,
+        fs: bool,
+    ) -> Result<(), KpmLoadFailure>;
     /// `(uname -r, the KPM supports it)`.
     fn kpm_kernel(&self) -> Result<(String, bool), String>;
     fn kprobes(&self) -> (Option<bool>, Option<bool>);
@@ -322,9 +332,14 @@ impl Effects for SystemEffects {
         vpnhide_activator::insmod_selected_kmod(ctl, artifact, fs)
     }
 
-    fn kpm_load(&self, kpm: &CoreKpm, ctl: &Path, artifact: &Path, fs: bool) -> Result<(), String> {
+    fn kpm_load(
+        &self,
+        kpm: &CoreKpm,
+        ctl: &Path,
+        artifact: &Path,
+        fs: bool,
+    ) -> Result<(), KpmLoadFailure> {
         kpm.load_selected(ctl, artifact, fs)
-            .map_err(|e| e.to_string())
     }
 
     fn kpm_kernel(&self) -> Result<(String, bool), String> {
@@ -1065,7 +1080,7 @@ fn load_kpm(
             };
             (selected_outcome(selection), Some(selection))
         }
-        Err(e) => (load_failed(e), None),
+        Err(e) => (load_failed(e.to_string()), None),
     }
 }
 

@@ -166,10 +166,25 @@ pub fn selinux_label(path: &Path) -> Option<String> {
 
 /// Load a kernel module from `artifact` with `params` (`insmod`), via `finit_module(2)`.
 /// The error carries the errno, e.g. `EKEYREJECTED` for a signature the kernel refused.
-pub fn finit_module(artifact: &Path, params: &str) -> io::Result<()> {
-    let file = std::fs::File::open(artifact)?;
-    let params =
-        CString::new(params).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+#[derive(Debug)]
+pub enum FinitModuleError {
+    BeforeDispatch(io::Error),
+    Syscall(io::Error),
+}
+impl std::fmt::Display for FinitModuleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BeforeDispatch(e) | Self::Syscall(e) => std::fmt::Display::fmt(e, f),
+        }
+    }
+}
+impl std::error::Error for FinitModuleError {}
+
+pub fn finit_module(artifact: &Path, params: &str) -> Result<(), FinitModuleError> {
+    let file = std::fs::File::open(artifact).map_err(FinitModuleError::BeforeDispatch)?;
+    let params = CString::new(params).map_err(|e| {
+        FinitModuleError::BeforeDispatch(io::Error::new(io::ErrorKind::InvalidInput, e))
+    })?;
     // SAFETY: a valid open fd and a NUL-terminated parameter string; flags 0.
     let rc = unsafe {
         libc::syscall(
@@ -180,7 +195,7 @@ pub fn finit_module(artifact: &Path, params: &str) -> io::Result<()> {
         )
     };
     if rc != 0 {
-        return Err(io::Error::last_os_error());
+        return Err(FinitModuleError::Syscall(io::Error::last_os_error()));
     }
     Ok(())
 }
@@ -236,7 +251,9 @@ mod tests {
     #[test]
     fn finit_module_reports_a_missing_artifact() {
         let err = finit_module(Path::new("/nonexistent/vpnhide_kmod.ko"), "").unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(
+            matches!(err, FinitModuleError::BeforeDispatch(e) if e.kind() == io::ErrorKind::NotFound)
+        );
     }
 
     #[test]

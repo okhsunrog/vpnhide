@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 
 from payload_bundle import KMIS, PROVENANCE, Artifact, assemble
-from test_kmod_elf import relocatable
+from test_kmod_elf import init_contract_payload, relocatable
 
 COMMIT = "a" * 40
 
@@ -62,9 +62,7 @@ class BundleTests(unittest.TestCase):
                 self.root / f"vpnhide-kmod-{kmi}.zip",
                 f"kmod:{kmi}",
                 {
-                    "vpnhide_kmod.ko": relocatable(
-                        b"vpnhide_preflight=1\0parmtype=preflight_only:bool\0"
-                    ),
+                    "vpnhide_kmod.ko": init_contract_payload(),
                     "module.prop": b"id=vpnhide_kmod\n",
                 },
             )

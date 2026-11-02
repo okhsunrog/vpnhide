@@ -13,6 +13,7 @@ fn payload(implementation: PayloadKind) -> Payload {
         bytes: 7,
         control_version: 2,
         preflight_protocol: None,
+        init_contract: None,
     }
 }
 pub(super) fn manifest() -> Manifest {
