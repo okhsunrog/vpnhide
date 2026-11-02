@@ -4,7 +4,7 @@ A third native backend alongside the kretprobe `.ko`. Same job — hide VPN
 interfaces from selected UIDs at the kernel level — for the kernels the
 `.ko` **can't** serve.
 
-> **Just using the app?** See **[Install the KPM backend](../../docs/help/en/kpm-install.md)** (or the in-app **Help & guide**) for the KernelPatch-runtime and SuperKey steps. This README is for building and understanding the module.
+> **Using VPN Hide?** Install the matching APK and unified Core ZIP from [the main guide](../../README.en.md#install). The KPM payload is already bundled; a compatible authenticated KernelPatch runtime is a separate prerequisite, not a second VPN Hide ZIP.
 
 ## Why a KPM at all
 
@@ -92,69 +92,33 @@ To test against a different KernelPatch checkout, override `KP_DIR`:
 make -C kmod kpm KP_DIR=/path/to/KernelPatch
 ```
 
-The flashable module zip is built by:
+The internal assembly input is built by:
 
 ```sh
 python3 kmod/kpm/build.py
 ```
 
-That script builds `vpnhide.kpm`, stages `kmod/kpm/module/` (just
-`module.prop` and the `.kpm` — no scripts, no activator), stamps `module.prop`,
-and writes `vpnhide-kpm.zip` at the repo root. Loading and configuring it is the
-job of the **VPN Hide Core** module (`vpnhide-core.zip`), which must be installed
-too. CI uses the same submodule-backed build.
+The resulting `vpnhide-kpm.zip` contains the producer payload/provenance and
+manager metadata used by the assembly tool. It is not a public standalone
+installation. CI assembles it into the complete Core ZIP.
 
-## Deploy
+## Runtime and ownership
 
-A KPM runs on **inline hooks**, which physically require the KernelPatch
-runtime (`kpimg`) to be embedded in the kernel — there is **no** "KPM on a
-stock kernel". The `boot.img` always gets patched; the only question is which
-root solution drives that patch. The `.kpm` itself is the same binary
-everywhere (target the upstream `kpm.h` ABI).
+KPM requires an actual compatible KernelPatch engine; an installed directory or
+manager name is insufficient. Provisioning that engine is a separate component
+and is not bundled into Core. Its offline tooling and remaining acceptance work
+are described in [provisioning](../../provisioning/kpatch-next/README.md).
 
-Supported runtimes — pick whichever matches the device's root:
+Core selects, authenticates and launches its bundled full-policy KPM when it is
+applicable. It delivers control-v2 over the authenticated transport and checks
+runtime evidence. Payload files for other backends are alternatives, not conflicts.
+A preexisting or independently loaded KPM is recovery evidence: it does not stand
+in for a Core launch receipt, and an unknown load never authorizes a second load.
+Loaded kernel hooks can remain until reboot; removing files is not unloading them.
 
-- **APatch / FolkPatch** — KernelPatch is built in; the flashable zip installs
-  as an APatch/APM module, and VPN Hide Core loads/configures `vpnhide.kpm`
-  through direct KernelPatch supercalls with the saved APatch SuperKey or the
-  runtime's trusted `su` supercall token when available.
-- **KernelSU-Next** — flash **KPatch-Next** (one module, no switch to APatch).
-- **Magisk or stock KernelSU** — flash the standalone
-  [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module).
-  It bundles `kpimg` + `kptools` + `magiskboot`, patches `boot.img` from its
-  WebUI to embed KernelPatch, then (`service.sh`) auto-loads every
-  `/data/adb/kp-next/kpm/*.kpm` on each boot via `kpatch kpm load`. So plain
-  Magisk / KernelSU users get KPM support without changing root solution —
-  the kernel is still patched, it's just automated. (Conflicts with APatch,
-  which already ships KernelPatch.)
-
-Persistence: a one-shot runtime `sc_kpm_load` is **lost on reboot**. The
-vpnhide KPM module therefore ships only `vpnhide.kpm`, and VPN Hide Core loads
-it again on every boot, once, after checking that the KPM is the only native
-backend (another backend module, a built-in kernel backend or a live kmod is a
-conflict, and nothing is loaded). A `vpnhide.kpm` loaded outside core (APatch's
-KPM screen, KPatch-Next, embedded in the boot image, by hand) is a supported
-install: core adopts the live KPM after checking its `KPM_INFO` version (at least
-1.2.0) and status handshake, reads its `filesystem_hiding=` load argument back,
-and configures it over `KPM_CTL0`. With the zip installed as well, the live copy
-is adopted and the artifact is not loaded a second time. On KPatch-Next core
-uses the runtime's `kpatch` CLI; on APatch/FolkPatch it uses the saved SuperKey
-or the trusted `su` supercall token. If KernelPatch cannot be authenticated, the
-KPM stays unloaded and the app asks for the SuperKey. Before either load path
-invokes KernelPatch, core validates the leading `major.minor` family
-from `uname -r` against 4.4, 4.9, 4.14, 4.19, 5.4, 5.10, 5.15, 6.1, 6.6, and 6.12.
-The KPM repeats that check from KernelPatch's numeric `kver` at init, which is
-the authoritative safety boundary; userspace preflight provides an actionable
-`unsupported_kernel` status to the app.
-
-Targeting / control plane: our target-UID set is delivered via the module's
-own `KPM_CTL0` supercall. The QEMU harness passes the same control-v2 snapshot
-as load args because it has no userspace ctl0 client during early bring-up —
-this is independent of KPatch-Next's generic `package_config` →
-`kpatch exclude_set <uid>` mechanism. The app stores package roles in
-`/data/system/vpnhide_config.json`; core resolves that canonical
-config and pushes the same text wire through APatch/FolkPatch direct supercalls
-or KPatch-Next `kpatch kpm ctl0`.
+The runtime numeric kernel version and actual feature coverage remain safety
+boundaries. Unsupported or unknown layouts stay rejected; installation of a
+package alone does not establish runtime support.
 
 ### Optional filesystem hook loader contract
 

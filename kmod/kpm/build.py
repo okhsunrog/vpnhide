@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Build the vpnhide KPM and package it as an installable KernelSU/Magisk
-module zip — single entry point for CI and local builds.
+"""Build the vpnhide KPM as an internal unified-Core assembly input.
+
+Single entry point for CI and local builds; users install the complete Core ZIP.
 
 The `.kpm` is one cross-version relocatable object with reference layouts for
 the explicitly supported Android kernel families (4.9, 4.14, 4.19, 5.4, 5.10,

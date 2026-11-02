@@ -6,7 +6,9 @@
 
 <p align="center">对选定应用隐藏活动的 Android VPN 连接。</p>
 
-> **VPN Hide 2.0：**必须安装 **`vpnhide-core.zip`** 模块。只有它负责加载原生后端、写入配置并应用 Ports；应用通过本地套接字与它通信，自身不调用 `su`。1.x 的激活器、`vpnhide-ports.zip` 和 `vpnhide-builtin.zip` 已移除：请卸载旧的 **VPN Hide (Ports)** / **VPN Hide (Built-in kernel)** 模块。后端 zip（kmod/KPM/Zygisk）只包含产物，不含脚本。参见 [docs/notes/core-2.0-activator-cutover.md](docs/notes/core-2.0-activator-cutover.md)。
+> **VPN Hide 2.0：**安装同一次构建的 **`vpnhide.apk`** 和一个 **`vpnhide-core.zip`**。Core 已包含 kmod/KPM payload 和两种 Zygisk ABI，负责选择并启动适用后端、写入配置和应用 Ports。应用仅使用本地套接字，不调用 `su`。无需单独安装后端 ZIP。
+
+> **main 状态：**2.0 重构仍在进行。自动维护、扩展自主诊断和设备验收尚未完成，实际进度见 [implementation ledger](docs/notes/unified-core-implementation.md)。
 
 
 <p align="center">
@@ -50,50 +52,24 @@ vpnhide 对选定应用隐藏三样东西，全部通过四个 **J / N / A / P**
 
 ## 我需要哪些模块？
 
-你始终需要 **VPN Hide 应用**（`vpnhide.apk`）+ **VPN Hide Core** 模块（`vpnhide-core.zip`）+ 用于 Java 层的 LSPosed/Vector + 恰好一个用于原生隐藏的原生后端。本地回环端口拦截（Ports）已内置于核心模块：
+VPN Hide 需要 **APK + 一个统一 Core ZIP**。Java 层另需 LSPosed/Vector，并将 VPN Hide 的作用域设为 **System Framework**。Ports 已包含在 Core 中。
 
-- **`kmod`**（稳定默认）—— 完全在进程外，对防篡改不可见。需要受支持的 GKI 内核：5.10、5.15、6.1、6.6 或 6.12。
-- **`KPM`** —— 用于 4.14 / 4.19 / 5.4 以及 `.ko` 不适配的其他情况的内核级后端。需要 APatch 或 [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)。
-- **`Zygisk`** —— 当 kmod/KPM 不可用，或你不想安装 KernelPatch 运行时时的回退方案。
+Core 按适用性检查：兼容的内置驱动、合适的 bundled `.ko`、经过认证的 KPM runtime、合适的 Zygisk loader。Core 中的多个 payload 是备选实现，不是安装冲突，也不需要用户选择。兼容性或加载状态未知时，会保留明确的拒绝原因。
 
-请只安装一个原生后端。核心在每次启动时决定一次：若发现多于一个（已安装的 kmod/KPM/Zygisk 模块、内置 VPN Hide 的内核，或正在运行的 VPN Hide KPM），它**一个也不加载**，并在概览中指出冲突——卸载多余的模块后重启。自行加载 `vpnhide.kpm`（APatch/FolkPatch 的 KPM 界面、KPatch-Next、内嵌 KPM）是 `vpnhide-kpm.zip` 之外受支持的安装方式：核心会检查其版本并像模块一样配置它；若同时安装了 ZIP，核心使用已在运行的那份，不再加载第二份。
-
-分步说明见[安装](#安装)。
+所选路径需要时，KernelPatch runtime 和 Zygisk loader 是独立的系统依赖；它们不是单独的 VPN Hide 后端 ZIP。[内置驱动](builtin/README.md)也不需要配套后端模块，但仍需要 Core。
 
 ## 安装
 
-从 [Releases](https://github.com/okhsunrog/vpnhide/releases) 下载最新发行版。
+本说明针对 2.0。APK 与完整 Core ZIP 必须来自同一次 CI 构建或同一对应发行版，不要混用旧安装模型的包。
 
-简而言之——应用的**概览**标签页会带你逐步完成，并告诉你该装哪个模块。完整说明在内置指南里（下面的链接在 GitHub 和应用内都能打开）。
+1. 安装 `vpnhide.apk`，再通过 Magisk / KernelSU / APatch 安装完整的 `vpnhide-core.zip`。
+2. 使用 Java 层时，在 LSPosed/Vector 启用 VPN Hide，将 **System Framework** 加入作用域，然后重启设备。
+3. 打开**概览**，由 Core 报告后端选择、启动状态和缺少的依赖。无需手选 GKI，也无需下载单独的 kmod/KPM/Zygisk ZIP。
+4. 在**隐藏**中为目标应用分配 **J / N / A / P** 角色并保存。使用 Zygisk 时重启已经运行的目标应用；新诊断进程的结果不能证明旧进程已更新 hooks。
 
-1. **应用 + 核心 + LSPosed。**安装 `vpnhide.apk`，通过 root 管理器（Magisk / KernelSU / APatch）安装同一版本的 `vpnhide-core.zip`，在 LSPosed 中启用 **VPN Hide** 模块，把 **“系统框架”** 加入其作用域，然后重启。应用本身不需要 Root 授权；没有核心模块时，它会显示 **“VPN Hide Core 未运行”** 界面。→ [首次安装](docs/help/zh/first-install.md)
-2. **一个 Native 后端。**概览会检测你的内核并给出文件名——kmod、KPM 或 Zygisk。通过 root 管理器安装并重启。如果你自己编译内核，还有第四种选择：[内核内置后端](builtin/README.md)，它完全不需要模块（由核心接管）。→ [该选哪个 Native 后端](docs/help/zh/choosing-native.md) · [kmod](docs/help/zh/kmod-install.md) · [KPM](docs/help/zh/kpm-install.md) · [Zygisk](docs/help/zh/zygisk-install.md)
-3. **可选 —— Ports。**要拦截本地回环端口，给应用分配 **P** 角色即可；规则由核心模块应用，无需额外安装。→ [隐藏 localhost 端口](docs/help/zh/ports.md)
-4. **设置隐藏。**在**隐藏**标签页，把 **J / N / A / P** 角色赋给你要对其隐藏 VPN 的应用（银行、政务）——而不是 VPN 客户端本身。→ [设置隐藏](docs/help/zh/configure-hiding.md)
+旧独立模块只作为迁移和恢复的清单。先准备并验证完整 replacement，再清理旧安装；共同的自动维护流程仍在实现中。
 
-完整的离线指南已内置于应用（**设置 → 帮助与指南**），也在仓库里：[docs/help/zh](docs/help/zh/) —— 安装、配置、诊断、更新与移除、限制。
-
-<details>
-<summary><b>Shell 配置（进阶）</b></summary>
-
-用户管理的配置位于 `/data/system/vpnhide_config.json`，但在 2.0 中**只有核心会写入它**：请通过应用（或调试用 agent bridge）修改，而不要直接编辑文件。手动编辑在核心于下次启动重新读取之前不会下发到原生后端和 Ports，并可能在下次保存时被覆盖。已不再有需要运行的激活器程序。
-
-旧的 `/data/adb/vpnhide_*` `targets.txt` 文件是 1.0 之前版本的配置。它们不再是用户配置：应用会将其一次性导入该 JSON，由核心删除。
-
-</details>
-
-<details>
-<summary><b>手动查询 GKI（若你想自行挑选 kmod 文件）</b></summary>
-
-1. 在手机上进入 **设置 → 关于手机**，找到 **内核版本** 一行。它形如 `6.1.75-android14-11-g...`
-2. 你需要从该字符串中取两部分：内核版本（`6.1`）和 android 代号（`android14`）。二者合起来构成你的 GKI 代号：`android14-6.1`
-3. 从发行版下载匹配的文件：`vpnhide-kmod-android14-6.1.zip`
-
-或者运行 `adb shell uname -r` 查看内核版本字符串。
-
-> **重要：** 内核字符串中的 `android14` 并不是你的 Android 版本，而是内核代号。例如，从 Pixel 6 到 9a 全都使用 `android14-6.1` 内核，无论它们运行 Android 14 还是 15。
-
-</details>
+只有 Core 通过应用/agent 的类型化命令写入 `/data/system/vpnhide_config.json`。0.x/1.x 来源由隔离适配器读取，在确认迁移/归档前保留。
 
 ## 截图
 
@@ -182,6 +158,8 @@ KPM 实现与 `.ko` 相同的 11 个逻辑内核钩子，而完整的向量图�
 完整的向量图 —— 按层细分、SELinux 注意事项和已知缺口 —— 位于 [docs/detection-vectors.md](docs/detection-vectors.md)。
 
 ## 从源码构建
+
+组件脚本只生成内部组装输入。`core/build.py` 仅生成 daemon base，即使本地文件名为 `vpnhide-core.zip`。完整安装包由 `scripts/payload_bundle.py` 将 base、七种 KMI、KPM 和两种 Zygisk ABI 组装而成。公开发行资产仅包含完整 Core、APK 和签名包描述。
 
 - **core**：`python3 core/build.py` —— 用 cargo-ndk 为 arm64 + armv7 交叉编译 `vpnhide-core`，输出 `core/target/vpnhide-core.zip`。
 - **kmod**：`./kmod/build.py --kmi android14-6.1`（或 `--all`）—— 通过 podman/docker 自动拉起 DDK 容器。完整指南：[kmod/BUILDING.md](kmod/BUILDING.md)。

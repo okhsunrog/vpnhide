@@ -1,10 +1,7 @@
-> **2.0:** there is no module for this backend. The 1.x companion module
-> (`vpnhide-builtin.zip`, id `vpnhide_builtin`) and its activator were removed —
-> uninstall it if it is still installed (the app shows an error while it is).
-> Install the required **VPN Hide Core** module (`vpnhide-core.zip`): core adopts
-> the built-in driver when `/proc/vpnhide_ctl` reports backend `0x4` and delivers
-> the config to it. Core treats it as a native backend like any other: with a
-> kmod, KPM or Zygisk module also installed it loads nothing (conflict).
+> **2.0:** use the matching APK and unified Core ZIP. A compatible builtin driver
+> is adopted by Core; no builtin companion module is required. Bundled ko/KPM/
+> Zygisk alternatives are not conflicts. Old standalone module inventory is kept
+> only for safe migration/recovery, after a verified replacement is ready.
 
 # builtin — in-tree (compile-time) native backend
 

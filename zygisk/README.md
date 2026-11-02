@@ -2,7 +2,7 @@
 
 Native-layer VPN interface hiding via inline libc hooks. Part of [vpnhide](../README.md).
 
-> **Just using the app?** See **[Install the Zygisk module](../docs/help/en/zygisk-install.md)** (or the in-app **Help & guide**), including why banking/payment apps may detect Zygisk. This README is for building and understanding the module.
+> **Using VPN Hide?** Install the matching APK and unified Core ZIP from [the main guide](../README.en.md#install). Both Zygisk ABI payloads are bundled in Core; no separate VPN Hide Zygisk ZIP is required.
 
 ## What it hooks
 
@@ -114,14 +114,17 @@ cargo ndk -t arm64-v8a build --release \
   --no-default-features --features log-debug
 ```
 
-## Install
+## Delivery inside Core
 
-1. `adb push target/vpnhide-zygisk.zip /sdcard/Download/`
-2. KernelSU/Magisk manager -> Modules -> Install from storage -> pick the zip.
-3. Reboot.
-4. Pick target apps in the VPN Hide app (the [lsposed](../lsposed/) APK); the shell equivalent is in the collapsible **For developers / advanced usage** section at the end of this file.
-5. Force-stop target apps: `adb shell am force-stop <pkg>`
-6. Verify: `adb logcat | grep vpnhide-zygisk`
+Install the unified Core package and provide a compatible Zygisk loader when
+needed. Core verifies loader evidence, selects this backend and publishes its
+current-boot authorization before launching the controlled worker. Bundled loader
+libraries alone are not authorization to install hooks. Existing target processes
+retain their consumed generation until they restart.
+
+`target/vpnhide-zygisk.zip` is an internal assembly input. Do not install it as a
+second backend module alongside Core. Device/ABI acceptance remains separate from
+successful compilation; see the [implementation ledger](../docs/notes/unified-core-implementation.md).
 
 ## Filter logic
 
@@ -156,8 +159,7 @@ VPN interface prefixes: `tun`, `ppp`, `tap`, `wg`, `ipsec`, `xfrm`, `utun`, `l2t
 <summary><strong>For developers / advanced usage</strong></summary>
 
 You do not need this to use the module — the VPN Hide app saves the config
-through VPN Hide Core, which rewrites the module-dir `targets.txt` for you (there
-is no activator binary in 2.0). After a Save, force-stop the target so it
+through VPN Hide Core, which publishes the selected authenticated policy. After a Save, force-stop the target so it
 re-forks with the new config:
 
 ```sh
@@ -168,19 +170,15 @@ adb shell am force-stop <pkg>
 
 ## Core delivery (2.0)
 
-The module ships `module.prop` and `zygisk/<abi>.so` only — no boot scripts.
-**VPN Hide Core** (`vpnhide-core.zip`, required) is the only writer of this
-module's control-v2 `targets.txt`. The package declares `vpnhideControl=2` in
-`module.prop`; core verifies the recipient and library ABI before publication,
-and publishes only when Zygisk is the one native backend selected for this boot.
-When core finds a conflict (another native backend installed or live), it
-retires the targets instead so Zygisk hooks nothing. The file is read afresh when
-each target process launches; a running target keeps its cached policy until it
-restarts.
+The complete Core ZIP carries both manager-discoverable Zygisk libraries and
+verified payload copies. Core owns the selected full policy, durable grant/revoke
+lifecycle and exact process-generation observations. A published authorization
+or fresh worker heartbeat does not prove every existing game has consumed it.
+Revocation does not unload hooks already resident in those processes, so safe
+transitions account for possible exposure and may require reboot.
 
-Core reports its selection separately from observed runtime activity. A published
-file does not confirm injection into every app; the app-context hook checks
-remain separate. See the [2.0 architecture](../docs/core-architecture.md).
+Old module-dir readers are isolated recovery/compatibility adapters, not the
+normal installation model. See the [Core architecture](../docs/core-architecture.md).
 
 ## License
 

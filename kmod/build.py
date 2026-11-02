@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Build the vpnhide kernel module zip — single entry point for both CI
-and local builds.
+"""Build an internal kernel payload ZIP for unified Core assembly.
+
+Single entry point for CI and local builds; not a separate user installation.
 
 Two modes, picked automatically:
 

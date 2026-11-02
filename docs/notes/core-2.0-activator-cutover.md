@@ -1,4 +1,11 @@
-# core-2.0 activator cutover (hard pivot)
+# Historical: removal of standalone activators
+
+This note records an earlier transition, before the unified Core bundle. It is
+**not the current installation guide**. Current distribution is one complete
+`vpnhide-core.zip` plus its matching APK; Core contains and selects the backend
+payloads. Individual backend ZIPs below are internal assembly inputs, not public
+installation alternatives. See [current architecture](../core-architecture.md)
+and the [implementation ledger](unified-core-implementation.md) for remaining work.
 
 ## What was deleted
 
@@ -9,7 +16,7 @@
 - Companion Magisk module `builtin/module/` and `builtin/build.py` (`vpnhide-builtin.zip`)
 - Entire `portshide/` packaging (`vpnhide-ports.zip`) — Ports apply lives in core-daemon
 
-## What remains
+## Intermediate layout at that checkpoint
 
 | Surface | Role |
 |---------|------|
@@ -20,15 +27,17 @@
 | `crates/activator` **lib** | Projection/delivery linked by core-daemon (not a process) |
 | `builtin/` C + `scripts/integrate.py` | In-tree kernel driver sources (no Magisk companion) |
 
-## Upgrade
+## Superseded installation instructions
 
-1. Uninstall old activator-based modules (`vpnhide_builtin`, `vpnhide_ports`, and
-   any kmod/kpm/zygisk module that still contains an `activator` binary).
-2. Install **`vpnhide_core`** first.
-3. Reinstall artifact zips from this release (artifact-only packages).
-4. Reboot.
+The old instruction to reinstall separate artifact modules is withdrawn. Prepare
+and verify a complete replacement before retiring positively identified legacy
+modules through the root manager. Preserve configuration and account for loaded
+hooks until reboot. Automated maintenance is still being implemented; its absence
+does not make separate backend installation the normal 2.0 workflow.
 
-Do **not** run parallel activator + core. Dual-writer is unsupported.
+The retained `crates/activator` name refers only to a Rust library linked into
+Core. It has no standalone binary or boot service. Backend producer inputs may
+contain manager/recovery metadata and installer shims; “no scripts” was too broad.
 
 ## APK follow-up
 

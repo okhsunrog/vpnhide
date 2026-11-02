@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Build the native library for aarch64 Android and package it into an
-installable KernelSU/Magisk module zip.
+"""Build both Android Zygisk ABIs as an internal unified-Core assembly input.
+
+The output ZIP is not a separate user installation; both ABIs ship in Core.
 
 Requirements:
   - rustup target aarch64-linux-android (already installed)

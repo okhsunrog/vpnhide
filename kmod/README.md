@@ -2,7 +2,7 @@
 
 Kernel-probe module that hides VPN interfaces from selected apps. Part of [vpnhide](../README.md).
 
-> **Just using the app?** The Dashboard names the exact zip for your kernel and walks you through installing it — see **[Install the kernel module](../docs/help/en/kmod-install.md)** (or the in-app **Help & guide**). This README is for building and understanding the module.
+> **Using VPN Hide?** Install the matching APK and unified Core ZIP from [the main guide](../README.en.md#install). This directory builds an internal kernel payload input; users do not install a separate kmod ZIP.
 
 The module does not modify the target app's process: there are no userspace
 function patches, injected framework classes, or module-owned anonymous memory
@@ -75,29 +75,18 @@ See [BUILDING.md](BUILDING.md) for the full guide (DDK Docker build, kernel sour
 ./kmod/build.py --kmi android14-6.1
 ```
 
-## Install
+## Delivery inside Core
 
-1. `adb push vpnhide-kmod-<kmi>.zip /sdcard/Download/` (download the zip matching your device's GKI generation, e.g. `vpnhide-kmod-android14-6.1.zip`)
-2. KernelSU-Next manager -> Modules -> Install from storage
-3. Reboot
+The `.ko` is included in the unified Core bundle. The kmod build ZIP is an internal
+producer input, not a public installation choice. Core verifies its manifest,
+applicability and ownership before loading the pinned payload with `finit_module`;
+then it projects the canonical package policy into the control-v2 wire.
 
-The loaded `.ko` intentionally remains resident until reboot. Disable, update,
-or remove it through the root module manager and reboot to apply that change;
-ordinary `rmmod` is not supported.
-
-On boot:
-
-- The `vpnhide_kmod` module ships only `module.prop` and `vpnhide_kmod.ko` —
-  no boot scripts. The **VPN Hide Core** module (`vpnhide-core.zip`, required)
-  does everything at late start, once per boot: it checks that the kmod is the
-  only native backend (another installed kmod/KPM/Zygisk module, a built-in
-  kernel backend or a foreign KPM is a conflict, and then nothing is loaded),
-  loads the `.ko` with `finit_module(2)` and the reboot-gated setting, and
-  records the result in its native boot status.
-- Core then reads `/data/system/vpnhide_config.json`, enumerates Android users,
-  resolves package names for each user separately, and writes a
-  `vpnhide 2 config` snapshot ([protocol](../docs/protocol.md)) to
-  `/proc/vpnhide_ctl`.
+Bundled KPM/Zygisk alternatives are not conflicts. A compatible builtin driver
+has priority; a conflicting live/unknown owner is a different condition and
+cannot be resolved by blindly loading another module. Unknown loads remain held.
+The loaded `.ko` stays resident until reboot; ordinary `rmmod` is unsupported.
+Legacy standalone module inventory remains for migration/recovery only.
 
 ### Target management
 

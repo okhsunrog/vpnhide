@@ -104,6 +104,8 @@ jobs:
               - 'scripts/CoreDescriptorSigner.java'
               - 'scripts/core_descriptor.py'
               - 'scripts/test_core_descriptor.py'
+              - 'scripts/public_distribution.py'
+              - 'scripts/test_public_distribution.py'
             # No negation here: in paths-filter a lone `!kmod/kpm/**` matches every
             # path outside kmod/kpm, which made a docs-only change run the kmod jobs.
             # kmod/shared, kmod/test and kmod/generated are `shared` above;
@@ -307,6 +309,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_ci_android_keystore.py -v
           python3 -m unittest discover -s scripts -p test_payload_bundle.py -v
           python3 -m unittest discover -s scripts -p test_core_descriptor.py -v
+          python3 -m unittest discover -s scripts -p test_public_distribution.py -v
           python3 -m unittest discover -s scripts -p test_kmod_elf.py -v
       - name: Verify generated files are up to date (iface lists + hook registry + help index)
         run: |
@@ -814,7 +817,7 @@ jobs:
           path: /tmp/vpnhide-review
           if-no-files-found: warn
 
-  # The KPM ships as ONE cross-version flashable module (Magisk/KSU format,
+  # The KPM producer emits ONE cross-version internal assembly input (ZIP,
   # APatch reads it too), not a raw .kpm: `make kpm` builds the relocatable
   # object, kmod/kpm/build.py stages the .kpm artifact + stamps module.prop.
   # The kpm-qemu / kpm-qemu-legacy jobs above are the runtime *test* gate; this
@@ -1134,6 +1137,10 @@ jobs:
           echo "=== release-notes.md ==="
           cat release-notes.md
 
+      - name: Select public app and unified Core distribution
+        id: public_assets
+        run: python3 scripts/public_distribution.py --root dist --github-output "$GITHUB_OUTPUT"
+
       - name: Create draft release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
@@ -1141,13 +1148,7 @@ jobs:
           body_path: release-notes.md
           generate_release_notes: true
           draft: true
-          files: |
-            dist/vpnhide-core.zip
-            dist/vpnhide-core.descriptor.json
-            dist/vpnhide-kmod-*.zip
-            dist/vpnhide-kpm.zip
-            dist/vpnhide-zygisk.zip
-            dist/*.apk
+          files: ${{ steps.public_assets.outputs.files }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

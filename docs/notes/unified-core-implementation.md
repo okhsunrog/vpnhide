@@ -1596,3 +1596,21 @@ graph parses without missing jobs/cycles; live Actions success is unobserved and
 the forbidden API was not retried. Evidence is retained in
 `/workspace/vpnhide-build-evidence/maintenance-preparation`. No new APK/Core RPC or
 journal format was introduced by this internal preparation cut.
+
+
+## README and public distribution correction
+
+User review found real stale distribution policy as well as stale prose: all
+three top-level READMEs still required separate backend modules/manual GKI, and
+release.files still exposed producer ZIPs. The standalone activator executables
+and their backend boot/uninstall scripts were already removed; crates/activator
+is a Core-linked library, not an independently launched process. Backend inputs
+can contain installer/recovery shims, so the old blanket "no scripts" was wrong.
+
+Corrected RU/EN/ZH installation and source-build descriptions, component README
+install sections, and marked the cutover note historical with its old separate-ZIP
+upgrade checklist withdrawn. Public distribution now uses one executable explicit
+allowlist: matching APK, complete Core ZIP and signed descriptor. Backend ZIPs,
+daemon-base and arbitrary extra APKs remain internal, including when present in
+the same artifact directory. CI runs its behavior tests. No tag or release was
+created, and incomplete maintenance/RFC/device acceptance is not presented as done.
