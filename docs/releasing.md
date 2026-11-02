@@ -25,8 +25,8 @@
    git push
    git push origin v0.6.2
    ```
-4. Wait for CI to finish the build. CI creates a **draft** GitHub release with all artifacts attached and release notes extracted from `CHANGELOG.md` — review it on the Releases page and click **Publish release** when you're happy.
-5. Generate update-json files pointing at the new release assets:
+4. Wait for CI to finish the build. CI creates a **draft** GitHub release with only the public APK, unified Core ZIP and signed descriptor attached and release notes extracted from `CHANGELOG.md` — review it on the Releases page and click **Publish release** when you're happy.
+5. Generate the Core-only update feed pointing at the published unified ZIP:
    ```sh
    ./scripts/update-json.sh
    ```
@@ -67,3 +67,16 @@ This string goes into:
 The committed `module.prop` files are **not** modified — `kmod/build.py` and `zygisk/build.py` stage a copy, patch the version there, and zip. `lsposed/app/build.gradle.kts` evaluates `build-version.py` at configure time and sets `versionName` dynamically.
 
 `versionCode` stays at the value baked in by the last `release.py` run (monotonically increasing integer required by Android/Magisk).
+
+
+## Unified distribution and legacy feeds
+
+`scripts/public_distribution.py` is the release allowlist: APK, complete Core ZIP
+and signed descriptor. Component/base ZIPs are internal assembly inputs. Their
+producer metadata has no independent updateJson channel.
+
+`scripts/update-json.sh` updates only `update-core.json` after publication. Existing
+`update-kmod-*`, `update-kpm` and `update-zygisk` files are frozen compatibility data
+for old installations and must not be rewritten to nonexistent 2.0 assets or
+redirected to a different module identity. Do not publish an update feed for a
+draft release or use it as a substitute for paired APK/Core compatibility.

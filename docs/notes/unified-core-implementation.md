@@ -1614,3 +1614,23 @@ allowlist: matching APK, complete Core ZIP and signed descriptor. Backend ZIPs,
 daemon-base and arbitrary extra APKs remain internal, including when present in
 the same artifact directory. CI runs its behavior tests. No tag or release was
 created, and incomplete maintenance/RFC/device acceptance is not presented as done.
+
+
+## Core-only update feeds and host-tooling audit
+
+Follow-up distribution audit found another live producer policy: update-json.sh
+still generated new-version URLs for unpublished standalone backend ZIPs, kmod
+stamped an unconditional legacy feed, and KPM/Zygisk inherited UPDATE_JSON_URL.
+The generator now emits only update-core.json. Existing legacy JSON files remain
+frozen compatibility data for their old installed identities, without redirection
+to Core or updates to nonexistent 2.0 assets. Internal producer packaging strips
+old updateJson template fields and ignores that retired env input; CI no longer
+passes it. Maintainer release docs and update-json/README state this explicitly.
+Three behavior tests run the shell generator in an isolated fixture and actual
+producer ZIP packaging with compiler commands stubbed; they verify the frozen
+feeds and generated public asset, and all three producer metadata results.
+
+The user separately requested only an audit of shell/Python/dev candidates for
+Rust. [Host tooling audit](host-tooling-audit.md) records candidates and boundaries;
+no broad tool rewrite or device cleanup was performed. Previously approved Core
+runtime/provisioner work remains independent of these new audit recommendations.

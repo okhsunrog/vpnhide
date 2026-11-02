@@ -78,15 +78,10 @@ def main() -> int:
     module_prop = staging / "module.prop"
     content = module_prop.read_text(encoding="utf-8")
     content = re.sub(r"^version=.*", f"version=v{build_version}", content, flags=re.MULTILINE)
+    # Only the complete Core distribution has an update channel.
+    content = re.sub(r"^updateJson=.*\n?", "", content, flags=re.MULTILINE)
     module_prop.write_text(content, encoding="utf-8")
     print(f"stamped module.prop version=v{build_version}")
-
-    # CI sets UPDATE_JSON_URL so Magisk/KSU knows where to check for updates;
-    # local dev builds leave it unset and ship without updateJson.
-    update_json_url = os.environ.get("UPDATE_JSON_URL")
-    if update_json_url:
-        with module_prop.open("a", encoding="utf-8") as f:
-            f.write(f"updateJson={update_json_url}\n")
 
     out_zip = args.out if args.out else repo_root / "vpnhide-kpm.zip"
     if out_zip.exists():

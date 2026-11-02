@@ -310,6 +310,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_payload_bundle.py -v
           python3 -m unittest discover -s scripts -p test_core_descriptor.py -v
           python3 -m unittest discover -s scripts -p test_public_distribution.py -v
+          python3 -m unittest discover -s scripts -p test_update_distribution.py -v
           python3 -m unittest discover -s scripts -p test_kmod_elf.py -v
       - name: Verify generated files are up to date (iface lists + hook registry + help index)
         run: |
@@ -843,8 +844,6 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Build KPM module zip
-        env:
-          UPDATE_JSON_URL: https://raw.githubusercontent.com/okhsunrog/vpnhide/main/update-json/update-kpm.json
         run: |
           # clang + lld are needed for the freestanding `-r` link. Bake them
           # into the ci image to drop this fallback (one-job apt, same pattern
@@ -890,8 +889,6 @@ jobs:
         run: rustup target add armv7-linux-androideabi
 
       - name: Build module zip
-        env:
-          UPDATE_JSON_URL: https://raw.githubusercontent.com/okhsunrog/vpnhide/main/update-json/update-zygisk.json
         run: |
           cd zygisk
           python3 ./build.py
