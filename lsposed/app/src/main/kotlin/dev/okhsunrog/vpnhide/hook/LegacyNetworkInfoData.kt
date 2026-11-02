@@ -17,3 +17,17 @@ internal fun <T> normalizeLegacyVpnInfo(
     if (type == 17 && isInactive(original)) return original
     return absentInfo()
 }
+
+/** Observe the replaced element itself; a changed neighboring array item is not evidence. */
+internal fun <T> normalizeLegacyVpnInfoObserved(
+    original: T?,
+    requestedType: Int?,
+    typeOf: (T) -> Int,
+    isInactive: (T) -> Boolean,
+    normalized: (T) -> Unit,
+    absentInfo: () -> T,
+): T? {
+    val result = normalizeLegacyVpnInfo(original, requestedType, typeOf, isInactive, absentInfo)
+    if (original != null && result !== original) normalized(original)
+    return result
+}

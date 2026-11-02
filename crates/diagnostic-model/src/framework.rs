@@ -1,8 +1,11 @@
 //! Scoped framework fixture protocol. Source objects are deliberately dirty in
 //! both phases; only the production hiding path may change protected observations.
-use crate::{ProbeError, Sample};
+use crate::{
+    ProbeError, Sample,
+    framework_legacy::{LegacyObservation, LegacySourceEvidence},
+};
 use serde::{Deserialize, Serialize};
-pub const FRAMEWORK_PROTOCOL: u32 = 1;
+pub const FRAMEWORK_PROTOCOL: u32 = 2;
 pub const FRAMEWORK_LEASE_MS: u64 = 25_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -145,10 +148,12 @@ pub struct FrameworkAcknowledgement {
     pub networks_filtered: bool,
     pub capabilities_filtered: bool,
     pub properties_filtered: bool,
+    pub legacy: LegacySourceEvidence,
 }
 impl FrameworkAcknowledgement {
     pub fn matches(&self, envelope: &FrameworkEnvelope) -> bool {
         envelope.valid()
+            && self.legacy.bounded()
             && self.version == FRAMEWORK_PROTOCOL
             && self.session == envelope.session
             && self.core_epoch == envelope.core_epoch
@@ -183,25 +188,29 @@ pub struct FrameworkObservation {
     pub vpn_interface: Sample<Option<String>>,
     pub ordinary_capabilities_sha256: Sample<String>,
     pub ordinary_properties_sha256: Sample<String>,
+    pub legacy: LegacyObservation,
 }
 impl FrameworkObservation {
     pub fn bounded(&self) -> bool {
-        self.networks.value().is_none_or(|v| {
-            v.len() <= 256
-                && v.iter().all(|&h| h != 0)
-                && v.iter().collect::<std::collections::BTreeSet<_>>().len() == v.len()
-        }) && self.vpn_interface.value().is_none_or(|n| {
-            n.as_ref()
-                .is_none_or(|n| n.len() <= 64 && !n.chars().any(char::is_control))
-        }) && [
-            &self.ordinary_capabilities_sha256,
-            &self.ordinary_properties_sha256,
-        ]
-        .into_iter()
-        .all(|v| {
-            v.value()
-                .is_none_or(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-        })
+        self.legacy.bounded()
+            && self.networks.value().is_none_or(|v| {
+                v.len() <= 256
+                    && v.iter().all(|&h| h != 0)
+                    && v.iter().collect::<std::collections::BTreeSet<_>>().len() == v.len()
+            })
+            && self.vpn_interface.value().is_none_or(|n| {
+                n.as_ref()
+                    .is_none_or(|n| n.len() <= 64 && !n.chars().any(char::is_control))
+            })
+            && [
+                &self.ordinary_capabilities_sha256,
+                &self.ordinary_properties_sha256,
+            ]
+            .into_iter()
+            .all(|v| {
+                v.value()
+                    .is_none_or(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+            })
     }
     pub fn unavailable() -> Self {
         Self {
@@ -212,6 +221,7 @@ impl FrameworkObservation {
             vpn_interface: Sample::Error(ProbeError::Unsupported),
             ordinary_capabilities_sha256: Sample::Error(ProbeError::Unsupported),
             ordinary_properties_sha256: Sample::Error(ProbeError::Unsupported),
+            legacy: LegacyObservation::unavailable(),
         }
     }
 }
@@ -222,6 +232,8 @@ pub enum FrameworkCheck {
     Networks,
     Capabilities,
     LinkProperties,
+    LegacyTypeVpn,
+    LegacyEnumeration,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -340,10 +352,11 @@ fn observed_leaks(phases: &[FrameworkPhaseEvidence]) -> Vec<FrameworkCheck> {
     {
         leaked.push(FrameworkCheck::LinkProperties);
     }
+    leaked.extend(crate::framework_legacy::observed_leaks(raw, protected));
     leaked
 }
-/// The three synchronous scenarios cannot discharge default/request/callback,
-/// legacy or PendingIntent requirements. Confirmed leaks survive cleanup failure.
+/// Synchronous handle and legacy type/enumeration scenarios cannot discharge
+/// default/request/callback or PendingIntent requirements. Leaks survive cleanup failure.
 pub fn evaluate_framework(
     phases: &[FrameworkPhaseEvidence],
     cleanup: bool,
@@ -505,6 +518,14 @@ pub fn evaluate_framework(
     if !result.controls.is_empty() {
         result.proven.clear();
     }
+    let legacy = crate::framework_legacy::evaluate_legacy(phases, cleanup);
+    result.proven.extend(legacy.proven);
+    result.leaked.extend(legacy.leaked);
+    result.controls.extend(legacy.controls);
+    result.leaked.sort();
+    result.leaked.dedup();
+    result.controls.sort();
+    result.controls.dedup();
     result
 }
 
@@ -513,7 +534,7 @@ mod tests {
     use super::*;
     fn envelope() -> FrameworkEnvelope {
         FrameworkEnvelope {
-            version: 1,
+            version: FRAMEWORK_PROTOCOL,
             session: 9,
             core_epoch: 7,
             boot_id: "12345678-1234-1234-1234-123456789abc".into(),
@@ -556,7 +577,7 @@ mod tests {
             FrameworkPhaseEvidence {
                 envelope: base.for_phase(phase),
                 acknowledgement: FrameworkAcknowledgement {
-                    version: 1,
+                    version: FRAMEWORK_PROTOCOL,
                     session: 9,
                     core_epoch: 7,
                     nonce: base.nonce.clone(),
@@ -576,6 +597,7 @@ mod tests {
                     networks_filtered: protected,
                     capabilities_filtered: protected,
                     properties_filtered: protected,
+                    legacy: LegacySourceEvidence::default(),
                 },
                 observation: FrameworkObservation {
                     networks: Sample::Value(if raw {
@@ -591,10 +613,263 @@ mod tests {
                     vpn_interface: Sample::Value(raw.then(|| base.fixture.interface_name.clone())),
                     ordinary_capabilities_sha256: Sample::Value("1".repeat(64)),
                     ordinary_properties_sha256: Sample::Value("2".repeat(64)),
+                    legacy: LegacyObservation::unavailable(),
                 },
             }
         })
         .collect()
+    }
+    fn legacy_phases() -> Vec<FrameworkPhaseEvidence> {
+        use crate::framework_legacy::{LegacyNetworkInfo, LegacyOrdinary};
+        let mut phases = phases();
+        for (index, phase) in phases.iter_mut().enumerate() {
+            let active = matches!(index, 1 | 2);
+            let raw = index == 1;
+            let info = LegacyNetworkInfo {
+                network_type: 17,
+                state: if raw { "CONNECTED" } else { "DISCONNECTED" }.into(),
+                detailed_state: if raw { "CONNECTED" } else { "DISCONNECTED" }.into(),
+                fixture: raw,
+            };
+            let ordinary = LegacyOrdinary {
+                count: u32::from(active),
+                sha256: format!("{index:064x}"),
+                fixture_present: active,
+            };
+            phase.acknowledgement.legacy = LegacySourceEvidence {
+                type_calls: 1,
+                enumeration_calls: 1,
+                type_started_boot_ns: 1000,
+                enumeration_started_boot_ns: 2000,
+                type_source: active,
+                enumeration_source: active,
+                type_normalized: index == 2,
+                enumeration_normalized: index == 2,
+                enumeration_count: active.then_some(2),
+                ordinary: active.then_some(ordinary.clone()),
+            };
+            phase.observation.legacy = LegacyObservation {
+                type_window: Some(crate::framework_legacy::LegacyCallWindow {
+                    started_boot_ns: 900,
+                    finished_boot_ns: 1100,
+                }),
+                enumeration_window: Some(crate::framework_legacy::LegacyCallWindow {
+                    started_boot_ns: 1900,
+                    finished_boot_ns: 2100,
+                }),
+                type_info: Sample::Value(active.then_some(info.clone())),
+                enumeration: Sample::Value(if active {
+                    vec![
+                        info,
+                        LegacyNetworkInfo {
+                            network_type: 1,
+                            state: "CONNECTED".into(),
+                            detailed_state: "CONNECTED".into(),
+                            fixture: false,
+                        },
+                    ]
+                } else {
+                    vec![]
+                }),
+                ordinary: Sample::Value(ordinary),
+            };
+        }
+        phases
+    }
+    #[test]
+    fn legacy_apis_require_both_production_paths_and_per_invocation_preservation() {
+        use FrameworkCheck as V;
+        let phases = legacy_phases();
+        let result = evaluate_framework(&phases, true);
+        assert!(result.controls.is_empty());
+        assert_eq!(
+            result.proven,
+            vec![
+                V::Networks,
+                V::Capabilities,
+                V::LinkProperties,
+                V::LegacyTypeVpn,
+                V::LegacyEnumeration
+            ]
+        );
+        assert!(crate::assessment::framework_checks(&[V::LegacyTypeVpn], true).is_empty());
+        assert!(crate::assessment::framework_checks(&[V::LegacyEnumeration], true).is_empty());
+        assert_eq!(
+            crate::assessment::framework_checks(&result.proven, true).len(),
+            4
+        );
+        for edit in 0..8 {
+            let mut bad = phases.clone();
+            match edit {
+                0 => bad[1].acknowledgement.legacy.type_source = false,
+                1 => bad[2].acknowledgement.legacy.type_normalized = false,
+                2 => bad[2].observation.legacy.type_info = Sample::Value(None),
+                3 => {
+                    if let Sample::Value(Some(info)) = &mut bad[2].observation.legacy.type_info {
+                        info.network_type = 1;
+                    }
+                }
+                4 => bad[2].acknowledgement.legacy.enumeration_source = false,
+                5 => bad[2].acknowledgement.legacy.enumeration_normalized = false,
+                6 => bad[2].acknowledgement.legacy.enumeration_count = Some(3),
+                _ => {
+                    if let Sample::Value(ordinary) = &mut bad[2].observation.legacy.ordinary {
+                        ordinary.sha256 = "f".repeat(64);
+                    }
+                }
+            }
+            let result = evaluate_framework(&bad, true);
+            assert!(!result.controls.is_empty(), "edit={edit}");
+            assert!(
+                !crate::assessment::framework_checks(&result.proven, true)
+                    .contains(&crate::RequiredCheck::FrameworkLegacyInfo)
+            );
+            assert!(result.proven.contains(&if edit < 4 {
+                V::LegacyEnumeration
+            } else {
+                V::LegacyTypeVpn
+            }));
+        }
+    }
+    #[test]
+    fn legacy_negative_controls_are_marker_scoped_and_leaks_survive_lost_cleanup() {
+        use FrameworkCheck as V;
+        let mut phases = legacy_phases();
+        // A real VPN at the negative baseline is allowed; fixture markers are not.
+        let mut real = phases[1].observation.legacy.type_info.clone();
+        if let Sample::Value(Some(info)) = &mut real {
+            info.fixture = false;
+        }
+        phases[0].observation.legacy.type_info = real;
+        assert!(
+            evaluate_framework(&phases, true)
+                .proven
+                .contains(&V::LegacyTypeVpn)
+        );
+        phases[2].observation.legacy.type_info = phases[1].observation.legacy.type_info.clone();
+        phases[2].observation.legacy.enumeration = phases[1].observation.legacy.enumeration.clone();
+        for complete in [true, false] {
+            let result = evaluate_framework(if complete { &phases } else { &phases[..3] }, false);
+            assert!(result.proven.is_empty());
+            assert!(result.leaked.contains(&V::LegacyTypeVpn));
+            assert!(result.leaked.contains(&V::LegacyEnumeration));
+        }
+        phases[2].acknowledgement.worker_pid += 1;
+        assert!(evaluate_framework(&phases, true).leaked.is_empty());
+    }
+    #[test]
+    fn inactive_legacy_state_with_retained_vpn_marker_is_still_a_leak() {
+        let mut evidence = legacy_phases();
+        if let Sample::Value(Some(info)) = &mut evidence[2].observation.legacy.type_info {
+            info.fixture = true;
+        }
+        if let Sample::Value(infos) = &mut evidence[2].observation.legacy.enumeration {
+            infos[0].fixture = true;
+        }
+        let result = evaluate_framework(&evidence, true);
+        assert!(result.leaked.contains(&FrameworkCheck::LegacyTypeVpn));
+        assert!(result.leaked.contains(&FrameworkCheck::LegacyEnumeration));
+        assert!(!result.proven.contains(&FrameworkCheck::LegacyTypeVpn));
+        assert!(!result.proven.contains(&FrameworkCheck::LegacyEnumeration));
+    }
+    #[test]
+    fn repeated_or_unobserved_legacy_binder_calls_cannot_borrow_older_normalization() {
+        for count in [0, 2] {
+            let mut phases = legacy_phases();
+            phases[2].acknowledgement.legacy.type_calls = count;
+            phases[2].acknowledgement.legacy.enumeration_calls = count;
+            let result = evaluate_framework(&phases, true);
+            assert!(!result.proven.contains(&FrameworkCheck::LegacyTypeVpn));
+            assert!(!result.proven.contains(&FrameworkCheck::LegacyEnumeration));
+            assert!(
+                result
+                    .controls
+                    .contains(&FrameworkControlFailure::MissingPositiveControl)
+            );
+        }
+    }
+    #[test]
+    fn old_ack_and_malformed_call_windows_cannot_prove_a_new_worker_query() {
+        for edit in 0..5 {
+            let mut phases = legacy_phases();
+            match edit {
+                0 => phases[2].acknowledgement.legacy.type_started_boot_ns = 899,
+                1 => phases[2].acknowledgement.legacy.type_started_boot_ns = 1101,
+                2 => phases[2].observation.legacy.type_window = None,
+                3 => {
+                    phases[2]
+                        .observation
+                        .legacy
+                        .type_window
+                        .as_mut()
+                        .unwrap()
+                        .finished_boot_ns = 899
+                }
+                _ => {
+                    phases[2]
+                        .observation
+                        .legacy
+                        .type_window
+                        .as_mut()
+                        .unwrap()
+                        .finished_boot_ns = u64::MAX
+                }
+            }
+            let result = evaluate_framework(&phases, true);
+            assert!(
+                !result.proven.contains(&FrameworkCheck::LegacyTypeVpn),
+                "edit={edit}"
+            );
+        }
+    }
+    #[test]
+    fn negative_legacy_windows_cannot_borrow_an_ack_from_another_invocation() {
+        for phase in [0, 3] {
+            for api in [0, 1] {
+                for missing in [true, false] {
+                    let mut phases = legacy_phases();
+                    let value = &mut phases[phase];
+                    match (api, missing) {
+                        (0, true) => value.observation.legacy.type_window = None,
+                        (0, false) => value.acknowledgement.legacy.type_started_boot_ns = 899,
+                        (1, true) => value.observation.legacy.enumeration_window = None,
+                        _ => value.acknowledgement.legacy.enumeration_started_boot_ns = 1899,
+                    }
+                    let result = evaluate_framework(&phases, true);
+                    let (failed, other) = if api == 0 {
+                        (
+                            FrameworkCheck::LegacyTypeVpn,
+                            FrameworkCheck::LegacyEnumeration,
+                        )
+                    } else {
+                        (
+                            FrameworkCheck::LegacyEnumeration,
+                            FrameworkCheck::LegacyTypeVpn,
+                        )
+                    };
+                    assert!(!result.proven.contains(&failed));
+                    assert!(result.proven.contains(&other));
+                    assert!(
+                        result
+                            .controls
+                            .contains(&FrameworkControlFailure::MissingNegativeControl)
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn timed_positive_legacy_leaks_survive_an_ambiguous_duplicate_call_count() {
+        let mut phases = legacy_phases();
+        phases[2].acknowledgement.legacy.type_calls = 2;
+        phases[2].acknowledgement.legacy.enumeration_calls = 2;
+        phases[2].observation.legacy.type_info = phases[1].observation.legacy.type_info.clone();
+        phases[2].observation.legacy.enumeration = phases[1].observation.legacy.enumeration.clone();
+        let result = evaluate_framework(&phases, true);
+        assert!(result.leaked.contains(&FrameworkCheck::LegacyTypeVpn));
+        assert!(result.leaked.contains(&FrameworkCheck::LegacyEnumeration));
+        assert!(!result.proven.contains(&FrameworkCheck::LegacyTypeVpn));
+        assert!(!result.proven.contains(&FrameworkCheck::LegacyEnumeration));
     }
     #[test]
     fn authority_is_exact_process_boot_and_bounded_boottime() {
@@ -626,7 +901,10 @@ mod tests {
             ]
         );
         assert!(result.leaked.is_empty());
-        assert!(result.controls.is_empty());
+        assert_eq!(
+            result.controls,
+            vec![FrameworkControlFailure::MissingNegativeControl]
+        );
         let plan = crate::DiagnosticPlan::supported(false, false, false);
         for missing in [
             crate::RequiredCheck::FrameworkCallbacks,
@@ -753,4 +1031,6 @@ pub struct FrameworkWorkerTask {
     pub phase: FrameworkWorkerPhase,
     pub vpn_handle: u64,
     pub ordinary_handle: u64,
+    pub vpn_marker: String,
+    pub ordinary_marker: String,
 }

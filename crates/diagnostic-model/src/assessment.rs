@@ -49,12 +49,37 @@ fn native(check: NativeCheck) -> RequiredCheck {
         NativeCheck::NetlinkGetlink => RequiredCheck::NetlinkLinks,
     }
 }
-fn framework(check: FrameworkCheck) -> RequiredCheck {
-    match check {
-        FrameworkCheck::Networks => RequiredCheck::FrameworkNetworks,
-        FrameworkCheck::Capabilities => RequiredCheck::FrameworkCapabilities,
-        FrameworkCheck::LinkProperties => RequiredCheck::FrameworkLinkProperties,
+pub(crate) fn framework_checks(
+    checks: &[FrameworkCheck],
+    require_both_legacy: bool,
+) -> BTreeSet<RequiredCheck> {
+    let mut result = BTreeSet::new();
+    for check in checks {
+        match check {
+            FrameworkCheck::Networks => {
+                result.insert(RequiredCheck::FrameworkNetworks);
+            }
+            FrameworkCheck::Capabilities => {
+                result.insert(RequiredCheck::FrameworkCapabilities);
+            }
+            FrameworkCheck::LinkProperties => {
+                result.insert(RequiredCheck::FrameworkLinkProperties);
+            }
+            FrameworkCheck::LegacyTypeVpn | FrameworkCheck::LegacyEnumeration => {
+                if !require_both_legacy
+                    || [
+                        FrameworkCheck::LegacyTypeVpn,
+                        FrameworkCheck::LegacyEnumeration,
+                    ]
+                    .iter()
+                    .all(|c| checks.contains(c))
+                {
+                    result.insert(RequiredCheck::FrameworkLegacyInfo);
+                }
+            }
+        }
     }
+    result
 }
 impl DiagnosticRun {
     pub fn assessment(&self) -> DiagnosticAssessment {
@@ -123,8 +148,8 @@ impl DiagnosticRun {
             None => {}
         }
         let framework_controls = if let Some(result) = &self.framework {
-            proven.extend(result.proven.iter().copied().map(framework));
-            leaked.extend(result.leaked.iter().copied().map(framework));
+            proven.extend(framework_checks(&result.proven, true));
+            leaked.extend(framework_checks(&result.leaked, false));
             result.controls.clone()
         } else {
             Vec::new()

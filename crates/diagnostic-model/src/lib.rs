@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 mod assessment;
 pub use assessment::*;
 pub mod framework;
+pub mod framework_legacy;
 mod run;
 pub use run::*;
 

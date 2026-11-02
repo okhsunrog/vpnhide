@@ -1340,7 +1340,13 @@ class HookEntry : IXposedHookLoadPackage {
         val uid = effectiveCallerUid()
         try {
             fun normalize(info: NetworkInfo?): NetworkInfo? =
-                normalizeLegacyVpnInfo(info, requestedType, NetworkInfo::getType, ::isInactiveVpnInfo) {
+                normalizeLegacyVpnInfoObserved(
+                    info,
+                    requestedType,
+                    NetworkInfo::getType,
+                    ::isInactiveVpnInfo,
+                    normalized = { original -> frameworkFixture.legacyNormalized(method, original) },
+                ) {
                     withConnectivitySanitizeBypassed { disconnectedVpnInfo(param.thisObject, uid) }
                 }
             val original = param.result

@@ -162,23 +162,8 @@ pub struct DiagnosticRun {
 impl DiagnosticRun {
     pub fn record_framework(&mut self, framework: crate::framework::ScopedFrameworkResult) {
         if let DiagnosticOutcome::Incomplete { missing, .. } = &mut self.outcome {
-            missing.retain(|required| {
-                !framework.proven.iter().any(|check| {
-                    matches!(
-                        (required, check),
-                        (
-                            RequiredCheck::FrameworkNetworks,
-                            crate::framework::FrameworkCheck::Networks
-                        ) | (
-                            RequiredCheck::FrameworkCapabilities,
-                            crate::framework::FrameworkCheck::Capabilities
-                        ) | (
-                            RequiredCheck::FrameworkLinkProperties,
-                            crate::framework::FrameworkCheck::LinkProperties
-                        )
-                    )
-                })
-            });
+            let proven = crate::assessment::framework_checks(&framework.proven, true);
+            missing.retain(|required| !proven.contains(required));
         }
         self.framework = Some(framework);
     }

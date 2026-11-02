@@ -23,6 +23,102 @@ sample!(CoreHandlesSample, Vec<u64>);
 sample!(CoreTextSample, String);
 sample!(CoreOptionalTextSample, Option<String>);
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreLegacyCallWindow {
+    pub started_boot_ns: u64,
+    pub finished_boot_ns: u64,
+}
+impl From<CoreLegacyCallWindow> for vpnhide_diagnostic_model::framework_legacy::LegacyCallWindow {
+    fn from(v: CoreLegacyCallWindow) -> Self {
+        Self {
+            started_boot_ns: v.started_boot_ns,
+            finished_boot_ns: v.finished_boot_ns,
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreLegacyNetworkInfo {
+    pub network_type: i32,
+    pub state: String,
+    pub detailed_state: String,
+    pub fixture: bool,
+}
+impl From<CoreLegacyNetworkInfo> for vpnhide_diagnostic_model::framework_legacy::LegacyNetworkInfo {
+    fn from(v: CoreLegacyNetworkInfo) -> Self {
+        Self {
+            network_type: v.network_type,
+            state: v.state,
+            detailed_state: v.detailed_state,
+            fixture: v.fixture,
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreLegacyOrdinary {
+    pub count: u32,
+    pub sha256: String,
+    pub fixture_present: bool,
+}
+impl From<CoreLegacyOrdinary> for vpnhide_diagnostic_model::framework_legacy::LegacyOrdinary {
+    fn from(v: CoreLegacyOrdinary) -> Self {
+        Self {
+            count: v.count,
+            sha256: v.sha256,
+            fixture_present: v.fixture_present,
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum CoreLegacyInfoSample {
+    Value {
+        value: Option<CoreLegacyNetworkInfo>,
+    },
+    Error {
+        error: CoreProbeError,
+    },
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum CoreLegacyInfosSample {
+    Value { value: Vec<CoreLegacyNetworkInfo> },
+    Error { error: CoreProbeError },
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum CoreLegacyOrdinarySample {
+    Value { value: CoreLegacyOrdinary },
+    Error { error: CoreProbeError },
+}
+impl From<CoreLegacyInfoSample>
+    for Sample<Option<vpnhide_diagnostic_model::framework_legacy::LegacyNetworkInfo>>
+{
+    fn from(v: CoreLegacyInfoSample) -> Self {
+        match v {
+            CoreLegacyInfoSample::Value { value } => Self::Value(value.map(Into::into)),
+            CoreLegacyInfoSample::Error { error } => Self::Error(error.into()),
+        }
+    }
+}
+impl From<CoreLegacyInfosSample>
+    for Sample<Vec<vpnhide_diagnostic_model::framework_legacy::LegacyNetworkInfo>>
+{
+    fn from(v: CoreLegacyInfosSample) -> Self {
+        match v {
+            CoreLegacyInfosSample::Value { value } => {
+                Self::Value(value.into_iter().map(Into::into).collect())
+            }
+            CoreLegacyInfosSample::Error { error } => Self::Error(error.into()),
+        }
+    }
+}
+impl From<CoreLegacyOrdinarySample>
+    for Sample<vpnhide_diagnostic_model::framework_legacy::LegacyOrdinary>
+{
+    fn from(v: CoreLegacyOrdinarySample) -> Self {
+        match v {
+            CoreLegacyOrdinarySample::Value { value } => Self::Value(value.into()),
+            CoreLegacyOrdinarySample::Error { error } => Self::Error(error.into()),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreFrameworkObservation {
     pub networks: CoreHandlesSample,
     pub vpn_capabilities_present: CoreBooleanSample,
@@ -31,6 +127,11 @@ pub struct CoreFrameworkObservation {
     pub vpn_interface: CoreOptionalTextSample,
     pub ordinary_capabilities_sha256: CoreTextSample,
     pub ordinary_properties_sha256: CoreTextSample,
+    pub legacy_type_window: Option<CoreLegacyCallWindow>,
+    pub legacy_enumeration_window: Option<CoreLegacyCallWindow>,
+    pub legacy_type: CoreLegacyInfoSample,
+    pub legacy_enumeration: CoreLegacyInfosSample,
+    pub legacy_ordinary: CoreLegacyOrdinarySample,
 }
 impl From<CoreFrameworkObservation> for model::FrameworkObservation {
     fn from(v: CoreFrameworkObservation) -> Self {
@@ -42,6 +143,13 @@ impl From<CoreFrameworkObservation> for model::FrameworkObservation {
             vpn_interface: v.vpn_interface.into(),
             ordinary_capabilities_sha256: v.ordinary_capabilities_sha256.into(),
             ordinary_properties_sha256: v.ordinary_properties_sha256.into(),
+            legacy: vpnhide_diagnostic_model::framework_legacy::LegacyObservation {
+                type_window: v.legacy_type_window.map(Into::into),
+                enumeration_window: v.legacy_enumeration_window.map(Into::into),
+                type_info: v.legacy_type.into(),
+                enumeration: v.legacy_enumeration.into(),
+                ordinary: v.legacy_ordinary.into(),
+            },
         }
     }
 }
@@ -67,7 +175,9 @@ simple_enum!(
     FrameworkCheck,
     Networks,
     Capabilities,
-    LinkProperties
+    LinkProperties,
+    LegacyTypeVpn,
+    LegacyEnumeration
 );
 simple_enum!(
     CoreFrameworkControlFailure,
@@ -87,6 +197,8 @@ pub struct CoreFrameworkTask {
     pub phase: CoreFrameworkPhase,
     pub vpn_handle: u64,
     pub ordinary_handle: u64,
+    pub vpn_marker: String,
+    pub ordinary_marker: String,
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreFrameworkAttribution {
@@ -157,6 +269,8 @@ impl CoreSession {
                     phase: v.phase.into(),
                     vpn_handle: v.vpn_handle,
                     ordinary_handle: v.ordinary_handle,
+                    vpn_marker: v.vpn_marker,
+                    ordinary_marker: v.ordinary_marker,
                 })
             })
             .map_err(Into::into)
@@ -169,6 +283,15 @@ mod tests {
     #[test]
     fn typed_worker_samples_keep_null_distinct_from_error_and_preserve_bounds() {
         let value = CoreFrameworkObservation {
+            legacy_type_window: None,
+            legacy_enumeration_window: None,
+            legacy_type: CoreLegacyInfoSample::Value { value: None },
+            legacy_enumeration: CoreLegacyInfosSample::Error {
+                error: CoreProbeError::Unsupported,
+            },
+            legacy_ordinary: CoreLegacyOrdinarySample::Error {
+                error: CoreProbeError::Unsupported,
+            },
             networks: CoreHandlesSample::Value {
                 value: (1..=257).collect(),
             },

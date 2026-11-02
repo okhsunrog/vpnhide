@@ -386,7 +386,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC19; journal11 reads schemas1–10. These
+The current paired APK/Core contract is RPC20; journal11 reads schemas1–10. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -463,3 +463,14 @@ coverage is not a condition change or complete protection. The read-only Kotlin
 snapshot owner joins accepted Core/config/root provenance and exposes retained
 history as unavailable after disconnection. Production consumer cutover remains
 a separate implementation step; the legacy suite is still wired until that step.
+
+RPC20 extends the scoped framework worker protocol to version2. Legacy
+`getNetworkInfo(TYPE_VPN)` and `getAllNetworkInfo` have independent dirty source,
+RAW/negative controls and production element-normalization telemetry. The
+aggregate legacy type/enumeration requirement needs both proofs. Expected
+ordinary-object digests and enumeration counts belong to each actual Binder
+invocation; getter projections avoid measuring the parcel sanitizer as their own
+baseline. A disconnected answer retaining the fixture VPN marker is a leak.
+This implements more scenarios but does not establish Android device acceptance,
+callback/default/active-network coverage or complete loaded-game generations.
+Private journal11 (reads1–10) and kernel control2/telemetry1 are unchanged.

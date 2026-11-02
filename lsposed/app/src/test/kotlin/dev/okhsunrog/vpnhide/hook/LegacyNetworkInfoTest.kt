@@ -28,6 +28,29 @@ class LegacyNetworkInfoTest {
         )
 
     @Test
+    fun `normalizing another VPN element cannot credit an unchanged tagged fixture`() {
+        val tagged = Info(17, "CONNECTED")
+        val other = Info(17, "CONNECTED")
+        val normalized = mutableListOf<Info>()
+        val result =
+            listOf(tagged, other).map { info ->
+                normalizeLegacyVpnInfoObserved(
+                    info,
+                    null,
+                    Info::type,
+                    isInactive = { it === tagged },
+                    normalized = { normalized += it },
+                ) { Info(17, "DISCONNECTED") }
+            }
+        assertSame(tagged, result[0])
+        assertEquals(1, normalized.size)
+        assertSame(other, normalized.single())
+        // A later parcel-stage cleanup is a distinct route and cannot change this evidence.
+        assertEquals("DISCONNECTED", normalize(tagged)?.state)
+        assertSame(other, normalized.single())
+    }
+
+    @Test
     fun `both legacy detectors accept a hidden active VPN without renaming its type`() {
         for (type in listOf(0, 1, 17)) {
             for (state in listOf("CONNECTING", "CONNECTED", "SUSPENDED", "DISCONNECTING")) {

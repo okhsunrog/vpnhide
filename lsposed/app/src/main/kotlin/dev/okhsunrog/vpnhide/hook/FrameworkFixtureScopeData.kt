@@ -1,5 +1,6 @@
 package dev.okhsunrog.vpnhide.hook
 
+import dev.okhsunrog.vpnhide.LegacyOrdinaryInfo
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -7,7 +8,7 @@ import kotlinx.serialization.json.jsonObject
 
 internal enum class FixturePhase { PREPARED, RAW, PROTECTED, REVOKED }
 
-internal enum class FixtureTransaction { NETWORKS, CAPABILITIES, PROPERTIES, OTHER }
+internal enum class FixtureTransaction { NETWORKS, CAPABILITIES, PROPERTIES, LEGACY_TYPE, LEGACY_ENUM, OTHER }
 
 internal data class FixtureWorker(
     val uid: Int,
@@ -66,7 +67,7 @@ internal fun parseFixtureAuthority(bytes: String): FixtureAuthority? =
         root.exact(
             "version session core_epoch boot_id nonce expected_hook_sha256 worker_uid worker_pid worker_start_ticks expires_boot_ms generation phase fixture",
         )
-        require(root.number("version") == 1L)
+        require(root.number("version") == 2L)
         val phase = FixturePhase.valueOf(root.text("phase").uppercase())
         require(root.number("generation") == phase.ordinal.toLong())
         val fixture = root.getValue("fixture").jsonObject
@@ -129,4 +130,76 @@ internal class FixtureDispatchRegistry {
     private val methods = mutableSetOf<java.lang.reflect.Method>()
 
     fun claim(method: java.lang.reflect.Method): Boolean = methods.add(method)
+}
+
+internal data class FixtureLegacyBaseline(
+    val ordinary: LegacyOrdinaryInfo,
+    val count: Int,
+)
+
+internal data class FixtureEvidenceSnapshot(
+    val flags: Set<String>,
+    val legacyBaseline: FixtureLegacyBaseline?,
+    val legacyTypeCalls: Int,
+    val legacyEnumerationCalls: Int,
+    val legacyTypeStartedNs: Long,
+    val legacyEnumerationStartedNs: Long,
+)
+
+/** Repeated invocations publish their own baseline even when a flag already exists. */
+internal class FixtureEvidenceLedger {
+    private val recorded = mutableSetOf<String>()
+    val flags: Set<String> get() = recorded.toSet()
+    private var legacyTypeStartedNs: Long = 0
+    private var legacyEnumerationStartedNs: Long = 0
+    var legacyTypeCalls: Int = 0
+        private set
+    var legacyEnumerationCalls: Int = 0
+        private set
+    var legacyBaseline: FixtureLegacyBaseline? = null
+        private set
+
+    fun snapshot() =
+        FixtureEvidenceSnapshot(
+            flags,
+            legacyBaseline,
+            legacyTypeCalls,
+            legacyEnumerationCalls,
+            legacyTypeStartedNs,
+            legacyEnumerationStartedNs,
+        )
+
+    fun begin(
+        kind: FixtureTransaction,
+        bootNanos: Long,
+    ) {
+        require(bootNanos > 0)
+        when (kind) {
+            FixtureTransaction.LEGACY_TYPE -> {
+                legacyTypeStartedNs = bootNanos
+                legacyTypeCalls = (legacyTypeCalls + 1).coerceAtMost(2)
+                recorded.removeAll(setOf("legacy_type_source", "legacy_type_normalized"))
+            }
+
+            FixtureTransaction.LEGACY_ENUM -> {
+                legacyEnumerationStartedNs = bootNanos
+                legacyEnumerationCalls = (legacyEnumerationCalls + 1).coerceAtMost(2)
+                recorded.removeAll(setOf("legacy_enumeration_source", "legacy_enumeration_normalized"))
+                legacyBaseline = null
+            }
+
+            else -> {
+                Unit
+            }
+        }
+    }
+
+    fun record(
+        flag: String,
+        baseline: FixtureLegacyBaseline? = null,
+    ): Boolean {
+        val added = recorded.add(flag)
+        if (baseline != null) legacyBaseline = baseline
+        return added || baseline != null
+    }
 }

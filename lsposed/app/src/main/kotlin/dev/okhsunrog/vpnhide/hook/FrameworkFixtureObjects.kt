@@ -1,10 +1,15 @@
 package dev.okhsunrog.vpnhide.hook
 
+import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkInfo
 import android.os.Parcel
 import de.robv.android.xposed.XposedHelpers
+import dev.okhsunrog.vpnhide.legacyInfoFields
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.security.MessageDigest
 
 /** Private invocation objects; none are registered with netd or routed. */
@@ -38,12 +43,43 @@ internal class FrameworkFixtureObjects(
     private val vpnProperties = sourceProperties(spec.interfaceName, spec.mtu)
     private val ordinaryProperties = sourceProperties(spec.ordinaryInterfaceName, spec.ordinaryMtu)
 
+    @Suppress("DEPRECATION")
+    private fun connectedInfo(
+        type: Int,
+        marker: String,
+    ): NetworkInfo =
+        (
+            XposedHelpers.newInstance(
+                NetworkInfo::class.java,
+                type,
+                0,
+                if (type ==
+                    ConnectivityManager.TYPE_VPN
+                ) {
+                    "VPN"
+                } else {
+                    "WIFI"
+                },
+                "",
+            ) as NetworkInfo
+        ).also {
+            XposedHelpers.callMethod(it, "setDetailedState", NetworkInfo.DetailedState.CONNECTED, null, marker)
+            XposedHelpers.setBooleanField(it, "mIsAvailable", true)
+        }
+
+    val vpnInfo = connectedInfo(ConnectivityManager.TYPE_VPN, spec.interfaceName)
+    val ordinaryInfo = connectedInfo(ConnectivityManager.TYPE_WIFI, spec.ordinaryInterfaceName)
+
+    @Suppress("DEPRECATION")
+    fun copyInfo(info: NetworkInfo): NetworkInfo = XposedHelpers.newInstance(NetworkInfo::class.java, info) as NetworkInfo
+
     // Constructed and hashed on the fixture observer, outside any worker Binder scope.
     val profileHash: String =
         MessageDigest
             .getInstance("SHA-256")
             .digest(
-                bytes(vpnCapabilities) + bytes(vpnProperties) + bytes(ordinaryCapabilities) + bytes(ordinaryProperties),
+                bytes(vpnCapabilities) + bytes(vpnProperties) + bytes(ordinaryCapabilities) + bytes(ordinaryProperties) +
+                    Json.encodeToString(listOf(legacyInfoFields(vpnInfo), legacyInfoFields(ordinaryInfo))).toByteArray(),
             ).joinToString("") { "%02x".format(it) }
 
     fun capabilities(network: Network): NetworkCapabilities? =

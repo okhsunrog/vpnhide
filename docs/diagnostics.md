@@ -1,6 +1,6 @@
 # Diagnostics — how VPN Hide self-tests hiding and attributes the result
 
-> Current v2 ownership (RPC19): Core owns autonomous runs, required plans,
+> Current v2 ownership (RPC20): Core owns autonomous runs, required plans,
 > attribution, cleanup and cache. Dashboard, Diagnostics, agent and exports read
 > the same retained publication; opening the APK or a capture does not launch a
 > suite. Explicit Retry requests a run. Current implementation reports scoped

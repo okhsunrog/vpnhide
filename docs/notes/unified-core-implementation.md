@@ -3,7 +3,7 @@
 Approved design, based on dev-2.x `3493354f` (2026-11-02).
 This is an implementation ledger, not a claim of device acceptance.
 
-Current cloud contract: **RPC19 / journal11 (reads schemas1–10)**. Kernel control2 /
+Current cloud contract: **RPC20 / journal11 (reads schemas1–10)**. Kernel control2 /
 telemetry1 is unchanged: APK/Core contract and private journal upgrades do not
 require rebuilding a compatible user builtin kernel. Stages4–7/RFC2 remain partial;
 the latest entries distinguish remaining code from device/key/publication gates.
@@ -1392,3 +1392,60 @@ one root-projection regression moved); ktlint/detekt/CPD/lintDebug passed on the
 final cut. Verification log: `/tmp/vpnhide-retire-local-diagnostics-verified.log`.
 No user-visible behavior beyond the preceding consumer cutover; internal removal
 needs no additional changelog fragment. RPC19/journal11/kernel2 unchanged.
+
+
+## Cloud continuation: legacy framework sources and observations, RPC20
+
+Implemented: two distinct authorized Binder scenarios for legacy TYPE_VPN and
+NetworkInfo enumeration. System-server fixture sources inject connected, tagged
+VPN clones in both RAW/protected phases; enumeration retains original objects
+and appends a tagged ordinary sentinel. It does not synthesize a disconnected
+answer or replace the platform factory/filter. The worker performs real public
+ConnectivityManager calls. Each field reports bounded observations/errors;
+Rust owns controls, proof, leaks and the aggregate required plan.
+
+Ordinary preservation uses a bounded canonical getter-field multiset hash/count
+from each invocation before production sanitization and from the worker's reply.
+Duplicates and ordinary sentinel are retained; real network churn between RAW
+and protected is allowed when each invocation preserves its own baseline.
+Hashing the expected ordinary objects never invokes their parcel sanitizer.
+Source evidence republishes the latest invocation baseline even when its source
+flag already exists. Production telemetry records replacement of the tagged
+*element*, so normalizing a neighboring VPN or only a later parcel backstop
+cannot impersonate that result-hook path.
+
+Prepared/revoked controls require fixture markers absent, not absence of a real
+VPN. RAW requires the connected tagged source. Protected requires preserved VPN
+type with platform DISCONNECTED/BLOCKED state and no fixture marker. Null, Wi-Fi
+replacement, missing source/normalization or mutated ordinary objects cannot
+prove success. Disconnected replies retaining the tun marker are still leaks.
+Both legacy scenario proofs are required to discharge the legacy type/enumeration
+family; either scenario's leak is retained under incomplete cleanup/worker death.
+By-handle/default/active/callback/PendingIntent scenarios remain separate and open.
+
+Wire changes are synchronized at RPC20 / framework fixture protocol2. Private
+journal11 and kernel control2/telemetry1 remain independent; no compatible builtin
+kernel rebuild is required for the APK/Core change. Shared legacy observation
+adapters are in the reviewed common source layer and included in loaded hook
+source fingerprints. A mismatching old system-server build cannot prove the new
+fixture. No phone, production signing key, boot write or fork publication used.
+
+Invocation freshness was tightened during review: the fixture records one Binder
+entry per legacy API and phase, clears that API's old normalization/baseline before
+it runs, and publishes immutable snapshots. Duplicate calls saturate to ambiguous
+and cannot prove protection. Each worker call carries its own CLOCK_BOOTTIME
+nanosecond window; server entry time must fall inside it in Prepared, RAW,
+protected and Revoked. Missing/mismatched windows cannot borrow an older ACK.
+Publication/authority failure at entry becomes an error for the exact diagnostic
+worker rather than silently retaining a normalized ACK. Independently attributed
+positive leaks survive duplicate-call ambiguity, cleanup failure and worker death.
+Regressions cover each negative phase/API independently, retained tun markers,
+null/Wi-Fi answers, missing production branches, ordinary mutation/cardinality,
+repeated baselines, neighboring-VPN normalization and duplicate ordinary entries.
+
+Legacy validation so far: 353 Core + 21 diagnostic-model + 15 RPC + 3 FFI unit
+tests; host/all-target and ARM64/ARMv7 strict Clippy; 888 JVM tests, ktlint, detekt,
+CPD and lintDebug passed. All61 host process RPC regressions also passed on the final code. No-root and
+module-scaffold checks passed. Logs:
+`/tmp/vpnhide-legacy-{rust,clippy,arm,process}-final-v2.log` and
+`/tmp/vpnhide-legacy-android-final-v3.log`. No phone acceptance is claimed.

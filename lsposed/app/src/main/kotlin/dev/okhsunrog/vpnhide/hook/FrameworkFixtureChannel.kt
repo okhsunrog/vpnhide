@@ -5,6 +5,7 @@ import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
 import dev.okhsunrog.vpnhide.BuildConfig
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
@@ -64,10 +65,10 @@ internal class FrameworkFixtureChannel {
     fun acknowledge(
         authority: FixtureAuthority,
         objects: FrameworkFixtureObjects,
-        flags: Set<String>,
+        evidence: FixtureEvidenceSnapshot,
     ) {
-        if (read() != authority) return
-        val json = encode(authority, objects, flags)
+        check(read() == authority) { "fixture authority unavailable" }
+        val json = encode(authority, objects, evidence)
         require(json.size <= 4096)
         val temporary = "$FRAMEWORK_DIRECTORY/.vpnhide-framework-${UUID.randomUUID()}"
         val fd =
@@ -82,33 +83,57 @@ internal class FrameworkFixtureChannel {
                 it.flush()
                 it.fd.sync()
             }
-            if (read() == authority) {
-                Os.rename(temporary, "$FRAMEWORK_DIRECTORY/$FRAMEWORK_ACK_FILE")
-                val directory =
-                    Os.open(
-                        FRAMEWORK_DIRECTORY,
-                        OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,
-                        0,
-                    )
-                try {
-                    require(OsConstants.S_ISDIR(Os.fstat(directory).st_mode))
-                    Os.fsync(directory)
-                } finally {
-                    Os.close(directory)
-                }
+            check(read() == authority) { "fixture authority changed" }
+            Os.rename(temporary, "$FRAMEWORK_DIRECTORY/$FRAMEWORK_ACK_FILE")
+            val directory =
+                Os.open(
+                    FRAMEWORK_DIRECTORY,
+                    OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,
+                    0,
+                )
+            try {
+                require(OsConstants.S_ISDIR(Os.fstat(directory).st_mode))
+                Os.fsync(directory)
+            } finally {
+                Os.close(directory)
             }
         } finally {
             runCatching { Os.remove(temporary) }
         }
     }
 
+    private fun encodeLegacy(evidence: FixtureEvidenceSnapshot) =
+        buildJsonObject {
+            val flags = evidence.flags
+            put("type_calls", evidence.legacyTypeCalls)
+            put("enumeration_calls", evidence.legacyEnumerationCalls)
+            put("type_started_boot_ns", evidence.legacyTypeStartedNs)
+            put("enumeration_started_boot_ns", evidence.legacyEnumerationStartedNs)
+            put("type_source", "legacy_type_source" in flags)
+            put("enumeration_source", "legacy_enumeration_source" in flags)
+            put("type_normalized", "legacy_type_normalized" in flags)
+            put("enumeration_normalized", "legacy_enumeration_normalized" in flags)
+            put("enumeration_count", evidence.legacyBaseline?.count)
+            put(
+                "ordinary",
+                evidence.legacyBaseline?.ordinary?.let { ordinary ->
+                    buildJsonObject {
+                        put("count", ordinary.count)
+                        put("sha256", ordinary.sha256)
+                        put("fixture_present", ordinary.fixturePresent)
+                    }
+                } ?: JsonNull,
+            )
+        }
+
     private fun encode(
         authority: FixtureAuthority,
         objects: FrameworkFixtureObjects,
-        flags: Set<String>,
+        evidence: FixtureEvidenceSnapshot,
     ): ByteArray =
         buildJsonObject {
-            put("version", 1)
+            val flags = evidence.flags
+            put("version", 2)
             put("session", authority.session)
             put("core_epoch", authority.epoch)
             put("nonce", authority.nonce)
@@ -140,6 +165,7 @@ internal class FrameworkFixtureChannel {
                     put("ordinary_mtu", spec.ordinaryMtu)
                 },
             )
+            put("legacy", encodeLegacy(evidence))
             for (name in listOf(
                 "networks_source",
                 "capabilities_source",

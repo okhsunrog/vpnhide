@@ -177,6 +177,8 @@ impl FrameworkRun {
             phase: request.phase,
             vpn_handle: ack.sources.vpn_handle,
             ordinary_handle: ack.sources.ordinary_handle,
+            vpn_marker: self.envelope.fixture.interface_name.clone(),
+            ordinary_marker: self.envelope.fixture.ordinary_interface_name.clone(),
         }))
     }
     fn advance(
@@ -286,7 +288,7 @@ mod tests {
     }
     fn ack(envelope: &FrameworkEnvelope) -> FrameworkAcknowledgement {
         FrameworkAcknowledgement {
-            version: 1,
+            version: vpnhide_diagnostic_model::framework::FRAMEWORK_PROTOCOL,
             session: envelope.session,
             core_epoch: envelope.core_epoch,
             nonce: envelope.nonce.clone(),
@@ -310,6 +312,7 @@ mod tests {
             networks_filtered: false,
             capabilities_filtered: false,
             properties_filtered: false,
+            legacy: Default::default(),
         }
     }
     #[test]

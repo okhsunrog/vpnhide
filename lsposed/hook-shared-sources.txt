@@ -6,3 +6,4 @@ LsposedState.kt
 AtomicTelemetryData.kt
 PortPolicyData.kt
 Protocol.kt
+LegacyFixtureData.kt

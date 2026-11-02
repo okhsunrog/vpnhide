@@ -1,6 +1,8 @@
 package dev.okhsunrog.vpnhide.hook
 
+import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkInfo
 import android.os.Binder
 import android.os.FileObserver
 import android.os.Handler
@@ -11,6 +13,8 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import dev.okhsunrog.vpnhide.BuildConfig
+import dev.okhsunrog.vpnhide.appendLegacyFixture
+import dev.okhsunrog.vpnhide.legacyInfoFields
 import java.util.Collections
 import java.util.IdentityHashMap
 
@@ -19,8 +23,12 @@ internal class FrameworkFixtureHooks {
     private data class State(
         val authority: FixtureAuthority,
         val objects: FrameworkFixtureObjects,
-        val flags: MutableSet<String>,
-    )
+        val evidence: FixtureEvidenceLedger = FixtureEvidenceLedger(),
+    ) {
+        val flags get() = evidence.flags
+        val legacyOrdinary get() = evidence.legacyBaseline?.ordinary
+        val legacyCount get() = evidence.legacyBaseline?.count
+    }
 
     private val channel = FrameworkFixtureChannel()
     private val scope = FixtureInvocationScope()
@@ -60,7 +68,7 @@ internal class FrameworkFixtureHooks {
         if (dispatches.claim(dispatch)) {
             XposedBridge.hookMethod(dispatch, transactionHook(instance.javaClass))
         }
-        listOf("getAllNetworks", "getNetworkCapabilities", "getLinkProperties").forEach { name ->
+        listOf("getAllNetworks", "getNetworkCapabilities", "getLinkProperties", "getNetworkInfo", "getAllNetworkInfo").forEach { name ->
             XposedBridge.hookAllMethods(instance.javaClass, name, sourceHook(name))
         }
     }
@@ -78,9 +86,9 @@ internal class FrameworkFixtureHooks {
                 val objects =
                     old?.takeIf { it.authority.objects == authority.objects && it.authority.nonce == authority.nonce }?.objects
                         ?: FrameworkFixtureObjects(authority.objects)
-                val next = State(authority, objects, mutableSetOf())
+                val next = State(authority, objects)
                 state = next
-                channel.acknowledge(authority, objects, next.flags)
+                channel.acknowledge(authority, objects, next.evidence.snapshot())
             }.onFailure { state = null }
         }
     }
@@ -90,6 +98,21 @@ internal class FrameworkFixtureHooks {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val next = if (state == null) null else trustedInvocation(param.thisObject, transaction(type, param.args[0] as Int))
                 param.setObjectExtra(scopeKey, scope.enter(next))
+                if (next?.transaction in setOf(FixtureTransaction.LEGACY_TYPE, FixtureTransaction.LEGACY_ENUM)) {
+                    synchronized(guard) {
+                        val active = current()
+                        if (active == null) {
+                            param.throwable = IllegalStateException("fixture invocation unavailable")
+                            return
+                        }
+                        active.evidence.begin(requireNotNull(next).transaction, SystemClock.elapsedRealtimeNanos())
+                        // An unpublished invocation must never inherit an old normalized ACK.
+                        runCatching { acknowledge(active) }.onFailure {
+                            param.throwable =
+                                IllegalStateException("fixture invocation unavailable")
+                        }
+                    }
+                }
             }
 
             override fun afterHookedMethod(param: MethodHookParam) {
@@ -125,6 +148,8 @@ internal class FrameworkFixtureHooks {
         val names =
             mapOf(
                 "getAllNetworks" to FixtureTransaction.NETWORKS,
+                "getNetworkInfo" to FixtureTransaction.LEGACY_TYPE,
+                "getAllNetworkInfo" to FixtureTransaction.LEGACY_ENUM,
                 "getNetworkCapabilities" to FixtureTransaction.CAPABILITIES,
                 "getLinkProperties" to FixtureTransaction.PROPERTIES,
             )
@@ -155,6 +180,14 @@ internal class FrameworkFixtureHooks {
                 val active = current() ?: return
                 if (active.authority.phase !in setOf(FixturePhase.RAW, FixturePhase.PROTECTED)) return
                 when (name) {
+                    "getNetworkInfo" -> {
+                        injectLegacyType(param, active)
+                    }
+
+                    "getAllNetworkInfo" -> {
+                        injectLegacyEnumeration(param, active)
+                    }
+
                     "getAllNetworks" -> {
                         injectNetworks(param, active)
                     }
@@ -175,6 +208,61 @@ internal class FrameworkFixtureHooks {
                 }
             }
         }
+
+    @Suppress("DEPRECATION")
+    private fun injectLegacyType(
+        param: XC_MethodHook.MethodHookParam,
+        active: State,
+    ) {
+        if (scope.get()?.transaction != FixtureTransaction.LEGACY_TYPE || param.args.firstOrNull() != ConnectivityManager.TYPE_VPN) return
+        if (param.result != null && param.result !is NetworkInfo) return
+        param.result = active.objects.copyInfo(active.objects.vpnInfo)
+        record("legacy_type_source", FixtureTransaction.LEGACY_TYPE)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun injectLegacyEnumeration(
+        param: XC_MethodHook.MethodHookParam,
+        active: State,
+    ) {
+        if (scope.get()?.transaction != FixtureTransaction.LEGACY_ENUM) return
+        val original = param.result as? Array<*> ?: return
+        if (original.javaClass.componentType != NetworkInfo::class.java || original.size > 254 ||
+            original.any { it !is NetworkInfo }
+        ) {
+            return
+        }
+        val next =
+            appendLegacyFixture(
+                original.filterIsInstance<NetworkInfo>(),
+                active.objects.copyInfo(active.objects.vpnInfo),
+                active.objects.copyInfo(active.objects.ordinaryInfo),
+                active.authority.objects.interfaceName,
+                active.authority.objects.ordinaryInterfaceName,
+                ::legacyInfoFields,
+            ) ?: return
+        synchronized(guard) {
+            if (current() !== active) return
+            param.result = next.infos.toTypedArray()
+            record("legacy_enumeration_source", FixtureTransaction.LEGACY_ENUM, FixtureLegacyBaseline(next.ordinary, next.infos.size))
+        }
+    }
+
+    /** Instrument the real result hook; a parcel-only cleanup cannot impersonate it. */
+    @Suppress("DEPRECATION")
+    fun legacyNormalized(
+        method: String,
+        original: NetworkInfo,
+    ) {
+        val active = current() ?: return
+        if (active.authority.phase != FixturePhase.PROTECTED) return
+        val tagged = original.type == ConnectivityManager.TYPE_VPN && original.extraInfo == active.authority.objects.interfaceName
+        if (!tagged) return
+        when (method) {
+            "getNetworkInfo" -> record("legacy_type_normalized", FixtureTransaction.LEGACY_TYPE)
+            "getAllNetworkInfo" -> record("legacy_enumeration_normalized", FixtureTransaction.LEGACY_ENUM)
+        }
+    }
 
     private fun injectNetworks(
         param: XC_MethodHook.MethodHookParam,
@@ -199,21 +287,30 @@ internal class FrameworkFixtureHooks {
                     FixtureTransaction.NETWORKS -> "networks_filtered"
                     FixtureTransaction.CAPABILITIES -> "capabilities_filtered"
                     FixtureTransaction.PROPERTIES -> "properties_filtered"
-                    FixtureTransaction.OTHER -> return
+                    FixtureTransaction.LEGACY_TYPE, FixtureTransaction.LEGACY_ENUM, FixtureTransaction.OTHER -> return
                 },
                 kind,
             )
         }
     }
 
+    private fun acknowledge(active: State) {
+        channel.acknowledge(active.authority, active.objects, active.evidence.snapshot())
+    }
+
     private fun record(
         flag: String,
         kind: FixtureTransaction,
+        baseline: FixtureLegacyBaseline? = null,
     ) {
         if (scope.get()?.transaction != kind) return
         synchronized(guard) {
             val active = current() ?: return
-            if (active.flags.add(flag)) runCatching { channel.acknowledge(active.authority, active.objects, active.flags) }
+            if (active.evidence.record(flag, baseline)) {
+                runCatching {
+                    acknowledge(active)
+                }
+            }
         }
     }
 
