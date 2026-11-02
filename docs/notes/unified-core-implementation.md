@@ -1784,3 +1784,34 @@ The full host Zygisk suite has 50 passes and two existing safe-copy failures:
 this sandbox returns ENOSYS for self `process_vm_readv` (independently reproduced).
 Tests and production pointer-safety behavior were not weakened to manufacture a
 pass. APK/Core contracts and library publication layout are unchanged.
+
+## Confirmed Magisk service-catalog blocker — publication design pending
+
+Read-only review of Magisk commit
+`33bfff7ce750c27f157ddb4580e36bf842d6d95b` confirms a real incompatibility in the
+current permanent top-level `zygisk/` layout. In
+[`native/src/core/module.rs`](https://github.com/topjohnwu/Magisk/blob/33bfff7ce750c27f157ddb4580e36bf842d6d95b/native/src/core/module.rs#L726),
+`collect_modules` identifies a Zygisk module by directory presence. With global
+Zygisk disabled it returns before adding that entire module (lines768–774),
+including the `open_zygisk=false` scan. `handle_modules` stores this filtered list
+(lines828–835), and
+[`bootstages.rs`](https://github.com/topjohnwu/Magisk/blob/33bfff7ce750c27f157ddb4580e36bf842d6d95b/native/src/core/bootstages.rs#L172)
+runs module service scripts from the same list. Therefore our Core service can
+be omitted entirely; inert hook authorization does not fix manager enumeration.
+Earlier packaging statements about inert autoload are not a claim of Magisk
+compatibility with global Zygisk off.
+
+No provider settings, device state, layout or activation design changed during
+this investigation. The user requested comparison before choosing publication
+architecture. That decision is pending. Required implementation regression after
+selection: install/update the unified Core on this manager contract with global
+Zygisk off and prove Core service admission and kernel-backend availability;
+then prove Zygisk discovery/recovery under supported provider lifecycle. This
+regression is not implemented/passed merely by documenting the branch, and the
+installed device manager version remains unobserved.
+
+NeoZygisk research correction: ordinary `ctl rearm` can request RefreshModules of
+an already-running daemon; it is not categorically unable to rescan. Refresh
+failure can be only a warning and rearm may return AlreadyHooked, so successful
+CLI exit is not proof of the intended loaded catalog. No generic safe toggle or
+provider configuration change is inferred from this behavior.
