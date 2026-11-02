@@ -1556,3 +1556,43 @@ schema5 golden passed independently without UPDATE_GOLDEN. Read-only review foun
 no further concrete bind proof bug. Evidence logs and both bounded QEMU serial
 captures are retained at `/workspace/vpnhide-build-evidence/rfc2/socket-binding`.
 No phone acceptance or final complete kernel/package matrix is claimed.
+
+
+## Cloud continuation: publisher-bound replacement preparation
+
+Implemented preparation API, not yet exposed over RPC: a shared package-trust
+library verifies exact domain-separated descriptors with the existing Android
+key's compiled public identity. Positive compiled CI sequence and persistent
+accepted floor are required; unsigned/self-declared identities, modified bytes,
+wrong target, incompatible journal/RPC and rollback fail closed. Descriptor binds
+post-customize daemon hashes and payload manifest, not manager-mutated module.prop.
+CI now orders public export → Core compilation → complete bundle → detached
+signature → signed APK target asset. PRs get an explicitly unconfigured trust
+store without secrets. The signed descriptor is included beside the ZIP artifact
+and in the future release asset list; no release was run. The nonexistent Core
+updateJson URL was removed. No production key was read or generated in cloud.
+
+Root preparation copies only a hash-named fixed app input into private storage
+beside the journal, outside the running module. Exclusive cross-instance lease,
+nonblocking/no-follow/regular-file/owner/link checks, source identity fencing,
+rename-NOREPLACE, synced private readback and retained CLOEXEC FD are implemented.
+Two final packages bound storage; only inert interrupted copy files are recovered.
+No manager action, active replacement, old-module removal or boot write occurs.
+
+Read-only review identified missing release sidecar and a partially configured
+public pin without compiled sequence; both were fixed before integration. The
+[package preparation note](core-package-maintenance.md) describes this boundary.
+Next code remains common durable maintenance state/floor, manager lifecycle,
+reboot-before-startup reconciliation and app/bootstrap flow. These are not device
+gates. Expanded RFC2, provisioning adapters, Kotlin domain moves, final complete
+packaging matrix and exact startup screenshot regression also remain open.
+
+Preparation validation: all355 Core unit tests (nine real filesystem/lease/budget/
+crash-copy regressions), four signature/admission units, actual Java-keystore→Rust
+verification for RSA/P256/P384, five metadata negative tests and five signing
+failure tests passed. Strict host/all-target/fixture-oracle and both Android ARM
+ABI Clippy, fmt, ruff, no-root and module-scaffold checks passed. CI YAML dependency
+graph parses without missing jobs/cycles; live Actions success is unobserved and
+the forbidden API was not retried. Evidence is retained in
+`/workspace/vpnhide-build-evidence/maintenance-preparation`. No new APK/Core RPC or
+journal format was introduced by this internal preparation cut.

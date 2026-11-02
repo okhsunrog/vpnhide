@@ -26,6 +26,7 @@ required-features = ["fixture-oracle"]
 fixture-oracle = []
 
 [dependencies]
+vpnhide_package_trust = { path = "../package-trust" }
 vpnhide_native_policy = { path = "../native-policy" }
 vpnhide_migration_policy = { path = "../migration-policy" }
 vpnhide_core_rpc = { path = "../core-rpc" }
@@ -49,4 +50,5 @@ vpnhide_core_client = { version = "0.1.0", path = "../core-client" }
 tempfile = "3"
 
 [dev-dependencies]
+ring = "0.17.14"
 tokio = { version = "1", features = ["test-util"] }

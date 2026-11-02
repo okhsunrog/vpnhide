@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, dev-2.x]
+    branches: [main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
   # and the app-native crates, so every area packages, but no QEMU kernel runs
   # it). An `area:*`
   # label forces that area and `ci:full` forces everything, whatever the diff;
-  # a change under .github runs everything; pushes to main/dev-2.x, tags and manual
+  # a change under .github runs everything; pushes to main, tags and manual
   # dispatches always run everything. A skipped job counts as passing for
   # `ci-ok`, the one check branch protection requires.
   changes:
@@ -101,6 +101,9 @@ jobs:
               - '.github/**'
               - 'scripts/ci_android_keystore.py'
               - 'scripts/test_ci_android_keystore.py'
+              - 'scripts/CoreDescriptorSigner.java'
+              - 'scripts/core_descriptor.py'
+              - 'scripts/test_core_descriptor.py'
             # No negation here: in paths-filter a lone `!kmod/kpm/**` matches every
             # path outside kmod/kpm, which made a docs-only change run the kmod jobs.
             # kmod/shared, kmod/test and kmod/generated are `shared` above;
@@ -253,6 +256,36 @@ jobs:
           path: .artifacts/qemu-native-probes
           if-no-files-found: error
 
+  # Only the public existing Android signing identity crosses into build jobs.
+  # PRs export an explicitly unconfigured trust store and receive no secrets.
+  release-trust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Export existing public signing identity
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          python3 scripts/ci_android_keystore.py
+          python3 scripts/core_descriptor.py public --keystore lsposed/release.jks --output .artifacts/core-trust.json
+      - name: Explicit unconfigured PR trust
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p .artifacts
+          python3 -c 'import json; from pathlib import Path; Path(".artifacts/core-trust.json").write_text(json.dumps({"schema":1,"keys":[]}))'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: vpnhide-release-trust
+          path: .artifacts/core-trust.json
+          if-no-files-found: error
+      - name: Remove runner signing files
+        if: always() && github.event_name != 'pull_request'
+        run: rm -f "$GITHUB_WORKSPACE/lsposed/release.jks" "$GITHUB_WORKSPACE/lsposed/keystore.properties"
+
   # Python style and generated files: seconds on a plain runner, no container.
   lint-python:
     runs-on: ubuntu-latest
@@ -273,6 +306,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts -p test_ci_android_keystore.py -v
           python3 -m unittest discover -s scripts -p test_payload_bundle.py -v
+          python3 -m unittest discover -s scripts -p test_core_descriptor.py -v
           python3 -m unittest discover -s scripts -p test_kmod_elf.py -v
       - name: Verify generated files are up to date (iface lists + hook registry + help index)
         run: |
@@ -375,7 +409,7 @@ jobs:
       - name: rustfmt
         run: cargo fmt --check
       - name: clippy (protocol + activator + core)
-        run: cargo clippy -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_native_policy -p vpnhide_migration_policy -p vpnhide_provisioning -p vpnhide_loader_ipc -p vpnhide_diagnostic_model -p vpnhide_core_rpc -p vpnhide_core_client -p vpnhide_core_daemon -p vpnhide_core_ffi --all-targets --features vpnhide_core_daemon/fixture-oracle -- -D warnings
+        run: cargo clippy -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_native_policy -p vpnhide_migration_policy -p vpnhide_provisioning -p vpnhide_package_trust -p vpnhide_loader_ipc -p vpnhide_diagnostic_model -p vpnhide_core_rpc -p vpnhide_core_client -p vpnhide_core_daemon -p vpnhide_core_ffi --all-targets --features vpnhide_core_daemon/fixture-oracle -- -D warnings
       - name: rustup target add armv7 (zygisk 32-bit)
         run: rustup target add armv7-linux-androideabi
       - name: clippy (zygisk)
@@ -383,7 +417,7 @@ jobs:
       - name: clippy (app native)
         run: cargo ndk -t arm64-v8a -t armeabi-v7a clippy -p vpnhide_checks --tests -- -D warnings
       - name: cargo test (workspace)
-        run: cargo test -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_native_policy -p vpnhide_migration_policy -p vpnhide_provisioning -p vpnhide_loader_ipc -p vpnhide_diagnostic_model -p vpnhide_zygisk -p vpnhide_checks -p vpnhide_core_rpc -p vpnhide_core_client -p vpnhide_core_daemon -p vpnhide_core_ffi
+        run: cargo test -p vpnhide_protocol -p vpnhide_protocol_diff -p vpnhide_activator -p vpnhide_native_policy -p vpnhide_migration_policy -p vpnhide_provisioning -p vpnhide_package_trust -p vpnhide_loader_ipc -p vpnhide_diagnostic_model -p vpnhide_zygisk -p vpnhide_checks -p vpnhide_core_rpc -p vpnhide_core_client -p vpnhide_core_daemon -p vpnhide_core_ffi
 
 
   provisioning-offline:
@@ -869,7 +903,7 @@ jobs:
   # The required vpnhide_core module (daemon + boot lifecycle): the sole writer
   # of the canonical config, /proc/vpnhide_ctl, Zygisk targets and Ports rules.
   core-binary:
-    needs: [setup, changes]
+    needs: [setup, changes, release-trust]
     if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -898,10 +932,15 @@ jobs:
       - name: Module scaffold check
         run: bash core/tests/check_module_scaffold.sh
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vpnhide-release-trust
+          path: .artifacts/release-trust
       - name: Build module zip
         env:
-          UPDATE_JSON_URL: https://raw.githubusercontent.com/okhsunrog/vpnhide/main/update-json/update-core.json
+          VPNHIDE_CORE_TRUST_FILE: ${{ github.workspace }}/.artifacts/release-trust/core-trust.json
         run: |
+          export VPNHIDE_BUILD_SEQUENCE="$((GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT))"
           python3 core/build.py
           mv core/target/vpnhide-core.zip core/target/vpnhide-core-base.zip
 
@@ -913,7 +952,7 @@ jobs:
           if-no-files-found: error
 
   # Assemble only artifacts from this workflow run and verify their checkout/hash
-  # provenance. Zygisk stays passive until boot authorization is implemented.
+  # provenance. Bundled Zygisk hooks still require current-boot authorization.
   core:
     needs: [changes, core-binary, kmod, kpm, zygisk]
     if: needs.changes.outputs.core == 'true'
@@ -930,18 +969,41 @@ jobs:
         run: >-
           python3 scripts/payload_bundle.py --inputs .artifacts/core-inputs
           --output dist/vpnhide-core.zip --commit "$GITHUB_SHA"
+      - name: Sign exact unified package with existing Android key
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          python3 scripts/ci_android_keystore.py
+          test "$GITHUB_RUN_ATTEMPT" -lt 1000
+          python3 scripts/core_descriptor.py sign --keystore lsposed/release.jks \
+            --trust .artifacts/core-inputs/core-trust.json --package dist/vpnhide-core.zip \
+            --commit "$GITHUB_SHA" --sequence "$((GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT))" \
+            --output dist/vpnhide-core.descriptor.json
+      - name: Remove runner signing files
+        if: always() && github.event_name != 'pull_request'
+        run: rm -f "$GITHUB_WORKSPACE/lsposed/release.jks" "$GITHUB_WORKSPACE/lsposed/keystore.properties"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: vpnhide-core
-          path: dist/vpnhide-core.zip
+          path: |
+            dist/vpnhide-core.zip
+            dist/vpnhide-core.descriptor.json
           if-no-files-found: error
 
   # Android checks run on PRs; trusted pushes/tags/manual runs also sign an APK.
   android:
-    needs: [setup, changes]
-    if: needs.changes.outputs.lsposed == 'true'
+    needs: [setup, changes, core, release-trust]
+    if: >-
+      always() && needs.setup.result == 'success' && needs.release-trust.result == 'success' &&
+      needs.changes.outputs.lsposed == 'true' &&
+      (needs.core.result == 'success' || (github.event_name == 'pull_request' && needs.core.result == 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      VPNHIDE_CORE_TRUST_FILE: ${{ github.workspace }}/.artifacts/release-trust/core-trust.json
     container:
       image: ${{ needs.setup.outputs.image }}
       credentials:
@@ -964,6 +1026,21 @@ jobs:
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vpnhide-release-trust
+          path: .artifacts/release-trust
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: github.event_name != 'pull_request'
+        with:
+          name: vpnhide-core
+          path: .artifacts/core
+      - name: Embed exact signed Core target in APK
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p lsposed/app/src/main/assets/maintenance
+          cp .artifacts/core/vpnhide-core.descriptor.json lsposed/app/src/main/assets/maintenance/core-target.json
+          echo "VPNHIDE_BUILD_SEQUENCE=$((GITHUB_RUN_NUMBER * 1000 + GITHUB_RUN_ATTEMPT))" >> "$GITHUB_ENV"
       - name: No root process in the app
         run: sh lsposed/tests/check_no_root_exec.sh
 
@@ -1066,6 +1143,7 @@ jobs:
           draft: true
           files: |
             dist/vpnhide-core.zip
+            dist/vpnhide-core.descriptor.json
             dist/vpnhide-kmod-*.zip
             dist/vpnhide-kpm.zip
             dist/vpnhide-zygisk.zip
@@ -1079,6 +1157,7 @@ jobs:
   ci-ok:
     needs:
       - changes
+      - release-trust
       - builtin-integrator
       - qemu-native-probes
       - lint-python
