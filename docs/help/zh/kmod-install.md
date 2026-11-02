@@ -1,49 +1,30 @@
 # 安装内核模块
 
-内核模块（即 `.ko`，仪表盘上显示为 **Kmod**）是 GKI 内核上的默认 Native 后端。
-它挂钩在内核空间，不向目标进程注入 libc 钩子。这避免了这种进程内检测面，但不隐藏 root，
-也不保证所有应用都能正常运行。请先确认
-它适合你的设备——见[该选哪个 Native 后端](choosing-native.md)。
+内核模块后端在内核空间运行。它的 payload 已包含在完整 Core ZIP 中；按
+[统一 Core 安装步骤](first-install.md)操作。
 
 ## 匹配 GKI 版本
 
-`.ko` 按 **GKI 代次**分别构建。你要安装与内核 KMI（Kernel Module Interface）标签
-匹配的 ZIP——例如 `android14-6.1`。该标签是内核版本字符串的一部分，标识的是内核
-对模块的二进制接口，**不是**你的 Android 系统版本，所以标签里的“android14”并不
-表示你在用 Android 14。
-
-**仪表盘**会读取你的内核并指出要下载的确切文件（例如
-`vpnhide-kmod-android14-6.1.zip`）。若无法从版本字符串区分你的 GKI 分支，它会先
-给出一个“先试这个”，再给一个备选——万一第一个加载不了就用备选。
+Core 根据经过验证的 payload 目录和内核证据判断兼容候选。`android14-6.1` 之类的
+KMI 表示内核模块接口，而不是手机的 Android 系统版本。无需手动选择 GKI 或试装不同 ZIP。
+有歧义或不受支持的内核不会被当作兼容。
 
 ## 步骤
 
-1. 下载仪表盘指定的 ZIP。
-2. 在你的 root 管理器（Magisk / KernelSU / APatch）中打开 **Modules → Install
-   from storage**，选择该 ZIP。
-3. **重启**——模块在开机时加载。
-4. 打开**仪表盘**；Native 后端应显示 **Active**。
+1. 安装同一发布/构建的 APK 和完整 `vpnhide-core.zip`。
+2. 重启并解锁设备。
+3. 查看仪表盘，选择应用角色并点击**保存**。
 
-目标应用在 VPN Hide 应用里选择，无需手动改任何文件。
+Core 加载并配置选中的后端。如果选择未完成，按其恢复或重启提示操作。
 
 ## 更新或移除
 
-已加载的 `.ko` 会驻留到重启为止。要更新或移除它，请在 root 管理器的 **Modules**
-界面操作（更新 ZIP 或停用模块）并**重启**以生效。不支持普通的 `rmmod`。
+更新配套的 APK/Core。已加载的 `.ko` 会驻留到重启；不支持普通 `rmmod` 卸载。
+移除 Core 会影响整个服务。在替代安装验证完成前保留可用安装。
 
 ## 如果加载不了
 
-仪表盘会告诉你具体属于哪种情况：
-
-- **Installed, wrong GKI variant**——你刷了另一代次的 ZIP。安装仪表盘指定的
-  那个。
-- **Installed, did not load — try the other GKI variant**——GKI 分支不明确；安装
-  仪表盘建议的备选版本。
-- **Installed, kernel not supported** / **kernel has no kprobes**——此内核无法
-  加载 `.ko`。若你的内核家族受支持，改用 [KPM 后端](kpm-install.md)，否则用
-  [Zygisk 模块](zygisk-install.md)。
-- **Installed, kernel rejects unsigned modules**——启用了模块签名校验，`.ko`
-  无法插入。使用 KPM（通过 KernelPatch 加载，而非模块加载器）或 Zygisk。
-
-若模块已加载但仪表盘显示只装上了部分挂钩，说明在这台设备的内核上，此后端有几个
-检测面没有覆盖；重装也不会改变。见[模块已安装但未生效](module-not-active.md)。
+模块签名强制、缺少内核设施、兼容性歧义或钩子不完整都可能阻止该后端提供保护。
+Core 会报告原因，并在不缩减策略的前提下评估适用候选。加载失败或结果未知时，不要自行
+尝试其他 payload。见[KPM](kpm-install.md)、[Zygisk](zygisk-install.md)及
+[收集报告](collect-report.md)。

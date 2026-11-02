@@ -10,16 +10,21 @@ if you want to restore your selection later.
 
 ## Remove the installation and leftover files
 
-1. Export your config if you may need it later.
-2. Remove VPN Hide's native backend module (kernel module, KPM or Zygisk) in the
-   root manager. **Keep the VPN Hide Core module** for now: it performs the cleanup.
-3. Disable VPN Hide in LSPosed, then **reboot**.
-4. Open **Settings → Remove leftover files**. Resolve any listed blockers first.
-5. Run cleanup, then uninstall the **VPN Hide Core** module in the root manager,
-   use the offered action to remove the APK, and reboot.
+1. Export your configuration if you may need it later.
+2. Clear roles and Save while Core is still available. Disable VPN Hide in LSPosed.
+3. Open **Settings → Remove leftover files** and inspect the blockers before
+   removing Core. Loaded kernel or process hooks may require a user-chosen reboot
+   or a kernel without VPN Hide. Removing a file does not unload them.
+4. Run cleanup only when Core reports that it is safe. If this beta cannot reach
+   that state, keep the configuration and Core and collect a report; do not wipe
+   the journal or bypass an unknown-effect hold.
+5. After completed cleanup, remove **VPN Hide Core** through the root manager and
+   uninstall the APK. Follow the manager's reboot instructions.
 
-Cleanup deletes configuration and other persistent VPN Hide files outside module
-folders; it cannot be undone. Uninstalling just the APK does not perform this cleanup.
+The unified installation has no separate backend ZIP to uninstall. Legacy modules
+from an older installation require the explicit migration/recovery path. Cleanup
+removes persistent configuration irreversibly; uninstalling the APK alone does
+not perform it.
 
 ## Self-built Built-in kernels
 

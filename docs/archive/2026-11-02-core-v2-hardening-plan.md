@@ -1,3 +1,6 @@
+> Archived 2026-11-02. Historical evidence/proposals; do not treat old status or gates as current.
+> Current status: [ROADMAP](../../ROADMAP.md). [Original document snapshot](https://github.com/okhsunrog/vpnhide/blob/3493354f29040b897a65af4604dc3f1db84f8360/docs/notes/core-v2-hardening-plan.md).
+
 # План улучшения архитектуры VPNHide v2
 
 Дата: 2026-10-29. База ревью: `dev-2.x`, коммит `bab2ee37`.
@@ -61,10 +64,10 @@ P1 означает первый этап исправлений; P2 — сле�
 ### A1. P1: закрыть перенаправление root-экспорта
 
 Исходная проблема (до первого исправления): подтверждена исходниками и локальным воспроизведением копирования через symlink.
-В [diagnostics.rs](../../crates/core-daemon/src/diagnostics.rs) каталог передавался
+В [diagnostics.rs](https://github.com/okhsunrog/vpnhide/blob/3493354f29040b897a65af4604dc3f1db84f8360/crates/core-daemon/src/diagnostics.rs) каталог передавался
 app UID до запуска root child. Далее
-[lsposed.rs](../../crates/core-daemon/src/device_probes/lsposed.rs) и
-[kernel.rs](../../crates/core-daemon/src/device_probes/kernel.rs) открывали
+[lsposed.rs](https://github.com/okhsunrog/vpnhide/blob/3493354f29040b897a65af4604dc3f1db84f8360/crates/core-daemon/src/device_probes/lsposed.rs) и
+[kernel.rs](https://github.com/okhsunrog/vpnhide/blob/3493354f29040b897a65af4604dc3f1db84f8360/crates/core-daemon/src/device_probes/kernel.rs) открывали
 назначения обычными файловыми операциями, следующими по symlink.
 Уже авторизованный UID приложения мог перенаправить root-запись за пределы
 назначенного экспорта. Это не утверждение о доступе произвольного другого APK.
@@ -81,7 +84,7 @@ app UID до запуска root child. Далее
 ### A2. P1: сделать recovery доступным из приложения
 
 Исходная проблема (до первого исправления): подтверждена трассировкой исходников.
-[ConfigCoordinator.kt](../../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/ConfigCoordinator.kt)
+[ConfigCoordinator.kt](https://github.com/okhsunrog/vpnhide/blob/3493354f29040b897a65af4604dc3f1db84f8360/lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/ConfigCoordinator.kt)
 при mutationHeld запрещал почти все команды, а canRepair был разрешён лишь для
 Native/Ports. Поэтому восстановительные команды для Secret/Cleanup/Persist,
 которые core мог безопасно принять, оставались недоступными через UI.
@@ -101,7 +104,7 @@ Native/Ports. Поэтому восстановительные команды �
 
 ### A3. P2: строго проверять canonical при загрузке
 
-Исходное воспроизведение (исправлено): [config_file.rs](../../crates/core-daemon/src/config_file.rs)
+Исходное воспроизведение (исправлено): [config_file.rs](https://github.com/okhsunrog/vpnhide/blob/3493354f29040b897a65af4604dc3f1db84f8360/crates/core-daemon/src/config_file.rs)
 принимал `null`, `[]`, `{"apps":[]}` как Present с пустым apps. Значение
 `{"version":4294967297}` сужалось до версии 1. Boot apply мог применить пустую
 политику вместо перехода в явно неисправное состояние.
@@ -118,7 +121,7 @@ Native/Ports. Поэтому восстановительные команды �
 
 Исходное воспроизведение (исправлено) при отказе journal temp write после Persist: get_operation
 возвращает settled Unknown, а после рестарта тот же ID становится Confirmed.
-В [server.rs](../../crates/core-daemon/src/server.rs) старый fallback менял результат
+В [server.rs](https://github.com/okhsunrog/vpnhide/blob/3493354f29040b897a65af4604dc3f1db84f8360/crates/core-daemon/src/server.rs) старый fallback менял результат
 только в памяти, тогда как на диске остаётся предшествующая запись.
 
 - [x] Определить отдельную семантику storage fault и недоступного terminal receipt.
@@ -288,9 +291,9 @@ RPC protocol 12, миграции 0.x/1.x и durable admission/receipts не и�
 - [ ] Хранить текущее наблюдение отдельно от условий выполненного измерения.
 
 Исходники:
-[LogcatRecorder.kt](../../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/LogcatRecorder.kt),
-[DebugExportData.kt](../../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/DebugExportData.kt),
-[VpnHideState.kt](../../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/VpnHideState.kt).
+[LogcatRecorder.kt](https://github.com/okhsunrog/vpnhide/blob/3493354f29040b897a65af4604dc3f1db84f8360/lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/LogcatRecorder.kt),
+[DebugExportData.kt](https://github.com/okhsunrog/vpnhide/blob/bab2ee378d328a14c1748aff796a89ea80fe17b2/lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/DebugExportData.kt),
+[VpnHideState.kt](https://github.com/okhsunrog/vpnhide/blob/3493354f29040b897a65af4604dc3f1db84f8360/lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/VpnHideState.kt).
 
 Готово, когда logcat bundle сохраняет boot/load ошибки, а смена backend между suite
 и export не меняет атрибуцию завершённого измерения.
@@ -309,7 +312,7 @@ RPC protocol 12, миграции 0.x/1.x и durable admission/receipts не и�
 
 ### C3. P2: отвязать measurement identity от истории команд
 
-[DesiredDeliveryData.kt](../../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/DesiredDeliveryData.kt)
+[DesiredDeliveryData.kt](https://github.com/okhsunrog/vpnhide/blob/bab2ee378d328a14c1748aff796a89ea80fe17b2/lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/DesiredDeliveryData.kt)
 включает глобальные operation ID/revision в identity. Нерелевантные изменения
 debug или чужих приложений могут вызвать новый suite; debug lease самого capture
 способна создать лишнюю диагностику в его counter window.

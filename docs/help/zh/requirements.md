@@ -18,7 +18,7 @@ VPN Hide 的核心模块需要 **root**（应用本身不需要 Root 授权）�
 
 ## 安装什么
 
-从[首次安装](first-install.md)和[选择一个 Native 后端](choosing-native.md)开始。
+从[首次安装](first-install.md)和[了解 Core 如何选择 Native 后端](choosing-native.md)开始。
 内核钩子不向目标进程注入 libc 钩子，但不能承诺躲过所有反篡改或 root 检测。
 VPN Hide 不隐藏 root，也不提供 Play Integrity 认证。
 

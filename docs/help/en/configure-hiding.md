@@ -42,8 +42,8 @@ localhost port; you can limit it to specific ranges in the per-app settings.
 
 A game accelerator is itself a VPN, so VPN Hide treats it like any other — hide
 its VPN from the apps that object, and hide the accelerator from package scans.
-See **[Game accelerators](game-accelerators.md)** for the details, including why
-the self-test can't run while the accelerator is on.
+See **[Game accelerators](game-accelerators.md)** for routing guidance and the
+independent diagnostic worker.
 
 ### When do my changes take effect?
 
@@ -55,11 +55,11 @@ again.
 
 ### Everything is set, but the VPN is still detected
 
-Open [Diagnostics](vpnhide://diagnostics) and run the checks. They test VPN
-Hide's own hiding, not the specific behaviour of the other app, so a passing
-result means the layers are working — the app may still refuse for its own
-reasons (server-side checks, an installed-app scan you haven't covered, a cached
-result).
+Open [Diagnostics](vpnhide://diagnostics) to read Core's retained evidence.
+Use **Retry** to request a new run. Check the measured scope, missing proof and
+loaded generations: a fresh worker does not prove that an already-running app
+has received new hooks. The app may also refuse because of server-side checks,
+an uncovered package scan or a cached result.
 
 If an app still won't cooperate, work through this in order:
 

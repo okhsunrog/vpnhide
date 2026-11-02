@@ -1,132 +1,53 @@
 # Install the KPM backend
 
-KPM is a kernel-level native backend for the kernels the loadable `.ko` **can't**
-serve — old or non-GKI kernels (e.g. 4.9, 4.14), vendor kernels with no source,
-or kernels that reject unsigned modules. It hides at the kernel level just like
-the `.ko`, without injecting libc hooks into the target process. This does not
-guarantee invisibility to all anti-tamper or root checks. It's a **single universal
-module** — there's no GKI variant to match. See
-[Which native backend to use](choosing-native.md) first.
+KPM is a kernel backend bundled inside the full Core ZIP. It requires a separate
+KernelPatch runtime. Install [the paired APK and Core](first-install.md).
 
 ## It needs a KernelPatch runtime
 
-KPM uses inline kernel hooks, which require the KernelPatch runtime to be present
-in your kernel. Pick the path that matches your root:
-
-- **APatch / FolkPatch** — KernelPatch is already built in. Install the
-  module ZIP; a saved **SuperKey** is needed only if trusted-token activation
-  is unavailable (see [SuperKey storage](#superkey-storage)).
-- **Magisk / KernelSU / KernelSU-Next** — use [**KPatch-Next-Module**](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest) and the
-  setup steps below, or integrate KPatch-Next into a self-built
-  kernel. Installing VPN Hide alone does not provide this runtime.
-
-If the runtime isn't present, the Dashboard says *"the kernel is not patched with
-a KernelPatch runtime."*
+Core must confirm an applicable runtime and authenticate it. A root-manager name
+or a directory alone does not establish readiness. Core does not include or flash
+a KernelPatch engine. Runtime provisioning is a separate installation operation.
 
 ## Steps
 
-1. Make sure a KernelPatch runtime is present (above).
-2. Download `vpnhide-kpm.zip` (the Dashboard names it).
-3. Install the **whole ZIP** through your root manager's **Modules** screen, as
-   an APM/Magisk-compatible module. The VPN Hide Core module (required) loads the
-   KPM from the installed module at every boot and delivers its config.
+1. Confirm that your kernel and runtime are supported and ready.
+2. Install the full Core ZIP and matching APK.
+3. Supply a SuperKey only if Core requests it and trusted-token access is unavailable.
+4. Reboot when required, unlock and review Core's result.
 
-   Loading `vpnhide.kpm` yourself is also supported: through APatch/FolkPatch's
-   KPM screen (load or install it there), KPatch-Next, or embedded in a patched
-   boot image. Core finds the running KPM, checks its version and sends it your
-   config, just as with the module. A KPM loaded once by hand is gone after a
-   reboot, unless your KernelPatch manager loads it at boot. If you also install
-   the ZIP, core uses the copy that is already running and doesn't load a second
-   one.
-4. On APatch / FolkPatch, save your **SuperKey** only if requested; see
-   [SuperKey storage](#superkey-storage).
-5. **Reboot**, then open the **Dashboard** — the Native backend should read
-   **Active**.
+Core owns KPM loading and configuration. Do not extract/load an inner payload or
+install a separate VPN Hide KPM ZIP alongside Core.
 
 ## SuperKey storage
 
-Save a SuperKey only if APatch/FolkPatch cannot activate KPM with its trusted
-`su` token and the Dashboard asks for a key. In **Settings → Security**, use the
-key you set in APatch/FolkPatch. Saving stores it in a root-only file that survives
-app and device restarts; it is not limited to this session. Clear removes the
-saved copy. A later activation may need the key again if trusted-token access
-is unavailable. See [Security and privacy](security-and-privacy.md#saved-credentials).
+If authentication needs your APatch/FolkPatch SuperKey, use **Settings → Security**.
+The saved copy is root-only; clearing it removes that copy. Never include the key
+in a report. See [Security and privacy](security-and-privacy.md#saved-credentials).
 
 ## Supported kernels
 
-KPM validates your kernel family at load time. Supported families are 4.4, 4.9, 4.14,
-4.19, 5.4, 5.10, 5.15, 6.1, 6.6, and 6.12. Other families are refused rather than
-guessed. If the Dashboard shows *"kernel not supported … no validated offset
-table,"* use the [Zygisk backend](zygisk-install.md) instead.
+Support depends on validated kernel layouts and the actual runtime, not only a
+version label. Unknown compatibility remains unverified. Core reports applicability
+for your device and does not assume that all non-GKI kernels work.
 
 ## Why it shows 10 hooks on some kernels
 
-With optional filesystem hiding off, a complete KPM installation reports
-**OK · hooks: 10** on kernels older than 5.3 and **OK · hooks: 11** from 5.3 up.
-The older kernels already require a privilege ordinary apps do not have to bind
-a socket to an interface, so KPM does not install its socket-bind hook there.
-
-The counter counts installed logical hook IDs/groups, not physical interception
-points. If **Hide VPN filesystem paths** is enabled and its group installs after
-a reboot, it adds one: the counts become **11** and **12**, respectively. One
-group can use several interception points. The count also differs from the
-number of Diagnostics checks — see
-[What the self-test checks](what-the-check-proves.md).
+An installed-hook count describes setup, not complete diagnostic coverage.
+Different kernels expose different paths. Missing or unverified required checks
+remain visible even when some hooks are installed.
 
 ## If it's installed but inactive
 
-The Dashboard names the cause:
-
-- **Awaiting / needs SuperKey** — APatch/FolkPatch couldn't load it with the
-  trusted `su` token. Save your SuperKey in **Settings → Security** and reboot
-  (or tap Refresh). Reinstalling the ZIP does not help.
-- **Needs a runtime** — no KernelPatch runtime in the kernel; install one (above).
-- **KPM too old or not recognised** — a VPN Hide KPM is running, but it is
-  older than core supports (1.2.0) or didn't answer core's status check. Core
-  doesn't configure it and doesn't load a second copy. Replace it with the
-  current version (install the ZIP, or load the current `vpnhide.kpm`) and reboot.
-- **Conflict with the kernel module** — the `.ko` and KPM are both installed or
-  running (a hand-loaded KPM counts too);
-  they hook the same functions and can hard-freeze the device, so KPM stands
-  down. Uninstall one of them. **Never run both.**
-
-For a load failure, use **Settings → Debugging → Collect debug log** to attach
-the boot-time output to a report — see [Collect a debug report](collect-report.md).
+Check runtime authentication, kernel applicability and Core's pending/error state.
+Repeated installation of the same payload does not fix unsupported offsets.
+See [Installed but not active](module-not-active.md) or
+[collect a report](collect-report.md).
 
 ## Where to download and how to install KPatch-Next-Module
 
-For Magisk / KernelSU / KernelSU-Next:
-
-**Warning:** patching the boot partition can leave the device unable to boot.
-Prepare a way to recover your device beforehand.
-
-1. Download [KPatch-Next-Module.zip](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest/download/KPatch-Next-Module.zip)
-   from the [official releases](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest).
-   KPatch-Next-Module lets you install the KernelPatch runtime in the kernel; `vpnhide-kpm.zip` provides
-   the VPN Hide backend that runs in it. You need both modules.
-2. Install the ZIP through your root manager's **Modules** screen, then open
-   the KPatch-Next module's WebUI — its setup interface. In KernelSU / KernelSU-Next,
-   open the WebUI from the module card. In Magisk, tap **Action** on the
-   KPatch-Next card: it opens the interface through the
-   [KsuWebUIStandalone](https://github.com/KOWX712/KsuWebUIStandalone) app.
-   If the app isn't installed, **Action** opens its releases page. Install the
-   app, grant it root access when prompted, and tap **Action** again.
-3. In the WebUI, open the **Patch** tab and tap **Start**. With the default
-   settings, the module detects the boot partition, patches it, and writes the
-   changes to the device automatically. You don't need to find or download
-   `boot.img`. Wait for a success message.
-4. After successful patching, **reboot**, reopen the WebUI, and check for
-   **Working**. This means the KernelPatch runtime is running.
-5. Install `vpnhide-kpm.zip` using the steps above, reboot, and check that the
-   Native backend reads **Active** on the VPN Hide **Dashboard**. If the ZIP is
-   already installed, open VPN Hide and refresh its status.
-
-APatch / FolkPatch normally need no separate KPatch-Next-Module: their patched
-kernel includes the runtime. If VPN Hide still reports a missing runtime,
-check its status in your root manager and collect a
-[debug report](collect-report.md). A screenshot alone cannot distinguish a
-missing runtime from a failure to detect it.
-
-If patching is unavailable or unsuitable for your device, use
-[Zygisk](zygisk-install.md) instead of KPM. For a self-built kernel, see the
-[KPatch-Next project](https://github.com/KernelSU-Next/KPatch-Next).
+KernelPatch provisioning is separate from VPN Hide's universal installer. Use a
+supported runtime installation path for your actual root/kernel combination and
+retain a recoverable original boot image. A package name alone does not establish
+compatibility. Core's KPM payload is not an engine installer; do not apply an old
+unverified boot-patching recipe to resolve a Core status error.

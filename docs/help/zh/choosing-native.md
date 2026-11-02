@@ -1,40 +1,30 @@
 # 该选哪个 Native 后端
 
-**Native** 后端负责对 Java 框架以下的代码隐藏 VPN——直接系统调用、
-`getifaddrs()`、netlink、`/proc/net`。完成同一件事的实现有几种，你只需安装
-**其中一个**；仪表盘会为你的设备推荐合适的那个，并给出要下载的文件名。
+Native 隐藏 Java framework 以下的 VPN 特征，包括 libc、直接系统调用、netlink 和
+`/proc/net`。安装**同一构建**的应用和**完整 `vpnhide-core.zip`**。Core 包含后端
+payload，并自动选择兼容的实现。
 
 ## 可选项
 
-- **内核模块（Kmod）**——默认且经过最充分测试的后端。挂钩在内核空间，因此读取
-  应用自身内存的反篡改检测看不到它。需要 GKI 内核，并安装与内核 GKI 版本匹配的
-  ZIP。见[安装内核模块](kmod-install.md)。
-- **KPM**——为 `.ko` **无法**支持的内核提供同样的内核级隐藏：老旧或非 GKI 内核、
-  无源码的厂商内核、拒绝未签名模块的内核。它是单一通用模块，但需要 KernelPatch
-  运行时。见[安装 KPM 后端](kpm-install.md)。
-- **Zygisk**——用户空间的后备方案：在**每个目标应用进程内部**挂钩 libc。无需兼容
-  内核即可工作，但更弱：原始 `svc` 系统调用能绕过它，银行与支付类应用可能察觉到
-  其进程内挂钩。当没有内核后端适配你的设备时才用它。见
-  [安装 Zygisk 模块](zygisk-install.md)。
-- **内置（Built-in，自行编译内核的高级选项）**——供使用项目补丁编译自己内核的人集成。
-  目前不提供受支持的预编译内核分发方案，也不是给普通内核增加支持的 ZIP。
-  见[开发者集成指南](https://github.com/okhsunrog/vpnhide/tree/main/builtin)。
-  它不需要模块：VPN Hide Core 会在启动时接管内置驱动并下发配置。检测到驱动不等于配置已应用——请查看仪表盘。
+- **内置驱动：**Core 使用已经集成到内核中的兼容 VPN Hide 驱动。安装 Core 不会给普通
+  内核添加该驱动。
+- **Kmod：**Core 根据内核证据选择随包提供的兼容 `.ko`。见[内核模块](kmod-install.md)。
+- **KPM：**随包提供的内核后端，需要可用且通过认证的 KernelPatch 运行时。
+  见[KPM 要求](kpm-install.md)。
+- **Zygisk：**随包提供的用户空间后端，需要兼容的 Zygisk 提供程序。直接系统调用可能绕过
+  libc 钩子。见[Zygisk 要求](zygisk-install.md)。
+
+Java/LSPosed 和 Native 覆盖不同路径。Apps 角色需要 Java/LSPosed；Ports 已包含在 Core 中。
+见[检测向量](detection-vectors.md)。
 
 ## 只保留一个原生后端
 
-只安装一个 Native 后端。VPN Hide Core 每次启动只决定一次：若发现多于一个——已安装的 kmod、
-KPM 或 Zygisk 模块、内置 VPN Hide 的内核，或不是由它加载的 VPN Hide KPM——它**一个也不加载**，
-清空 Zygisk 的目标列表，并在仪表盘列出所有相关后端。移除多余的后重启；核心不会替你挑选。
-
-切勿强制同时运行 `.ko` 和 KPM，它们挂钩相同内核函数，可能使设备死机。
-自行编译的 Built-in 内核不应再加载 `.ko` 或 KPM。
-
-**Java** 和 **Native** 覆盖不同的检测路径。推荐两者搭配以获得更完整的覆盖，也可
-仅使用一层，但覆盖范围会减少。Apps 角色需要 Java/LSPosed。见[检测向量](detection-vectors.md)。
+Core 确保运行中的原生后端互斥。通用 Core ZIP 中的所有候选实现本来就应一起提供，
+文件同时存在不构成冲突。旧的独立 VPN Hide 模块或自行加载的后端可能需要迁移。
+按 Core 的恢复提示操作，在替代安装准备并验证完成前保留配置和可用安装。
+不要手动加载内核 payload。
 
 ## 让仪表盘替你选
 
-不必手动判断。打开**仪表盘**：它会识别你的内核，推荐 kmod、KPM 或 Zygisk，并给出
-要从发布页下载的确切文件名。若推荐的后端无法加载，仪表盘会说明原因并建议改用
-什么。
+Core 负责选择，仪表盘显示选择、应用结果和保留的诊断证据。兼容性未知或覆盖不完整
+会如实显示。存在后端文件不代表保护有效。见[模块未生效](module-not-active.md)。

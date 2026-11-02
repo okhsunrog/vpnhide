@@ -1,10 +1,13 @@
+> Archived 2026-11-02. Historical evidence/proposals; do not treat old status or gates as current.
+> Current status: [ROADMAP](../../ROADMAP.md). [Original document snapshot](https://github.com/okhsunrog/vpnhide/blob/ae2cbbbd34f1aa8d1dbe2f851acc05b60726843d/docs/notes/app-state-transitions-history.md).
+
 # App state: implementation history of the transition contract
 
 (1.x history. In 2.0 the root side of these coordinators is VPN Hide Core; the
 transport, helper and `su` stages recorded here no longer exist.)
 
 The stage-by-stage implementation log of the
-[transition contract](app-state-transitions.md), split out on 2026-09-17 so the
+[transition contract](2026-11-02-app-state-transitions.md), split out on 2026-09-17 so the
 contract itself reads as the current specification. Sections keep the numbers
 they had in the contract (§13–§22); references elsewhere that cite those numbers
 mean this file. Each section records what a stage implemented, its exact
@@ -99,7 +102,7 @@ No APK/device or Android lifecycle validation was performed for this stage.
 The next stage implements `vhmutate` plus a bounded Kotlin process runner,
 versioned binary staging and typed receipt/readback adapters. Its protocol,
 quiescence proof, limits, device evidence and exact migration boundary are in
-[root mutation transport](https://github.com/okhsunrog/vpnhide/blob/main/docs/root-mutation-transport.md). The transport is packaged
+[root mutation transport](https://github.com/okhsunrog/vpnhide/blob/d5ed6296470121b07e1f650543b589979fbfffd3/docs/root-mutation-transport.md). The transport is packaged
 but existing app writers are not connected yet.
 
 Recovery can consume a still-undispatched sequence in transport metadata. This
@@ -392,7 +395,7 @@ routed-transition refresh keys on the presentation's latest attempt not being
 ## 22. Situation and read reasons
 
 Implemented 2026-09-16 after the design review in
-[ui-state-presentation-review.md](ui-state-presentation-review.md), which found
+[ui-state-presentation-review.md](2026-11-02-ui-state-presentation-review.md), which found
 that §21's decomposition (cached tiles overlaid with the current eligibility,
 qualified by a note) let the hero claim "VPN hidden" while the VPN state was the
 very thing being re-read, and let the hero and the Diagnostics banner keep two

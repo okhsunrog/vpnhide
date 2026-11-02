@@ -28,7 +28,7 @@ How to build vpnhide from source.
 - **`zip`** — packaging module zips.
 - **`adb`** — installing builds on a device.
 
-The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNative` Gradle `Exec` task in `lsposed/app/build.gradle.kts` (wired into `preBuild`). It bundles `libvpnhide_checks.so` and the core-ffi client `libvpnhide_core_ffi.so` into the APK's `jniLibs/`. The APK ships no executable and runs no root process: root probes and effects run in core (`vpnhide-core`), see [core-2.0-ipc-auth](notes/core-2.0-ipc-auth.md). The task tracks every app-native path dependency, manifest, lockfile and build script, so changing a shared crate invalidates the APK native build. There is no extra Gradle plugin; no manual `cargo` invocation is needed for the APK build.
+The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNative` Gradle `Exec` task in `lsposed/app/build.gradle.kts` (wired into `preBuild`). It bundles the core-ffi client and shared native checks together in `libvpnhide_core_ffi.so` for both APK ABIs. The APK ships no executable and runs no root process: root probes and effects run in core (`vpnhide-core`), see [core-2.0-ipc-auth](core-ipc-auth.md). The task tracks every app-native path dependency, manifest, lockfile and build script, so changing a shared crate invalidates the APK native build. There is no extra Gradle plugin; no manual `cargo` invocation is needed for the APK build.
 
 ## Repository layout
 
@@ -300,7 +300,7 @@ The socket defaults to the current effective UID and `0600`. Tests use
 add fixture settings. `service`/`service-worker` always select production paths and
 are not fixture entry points. Host process tests retain crash/delay hooks; Android
 binaries compile those hooks out. These choices do not isolate arbitrary host OS access.
-See [IPC authorization](notes/core-2.0-ipc-auth.md) for validation and preparation rules.
+See [IPC authorization](core-ipc-auth.md) for validation and preparation rules.
 
 ## Android application identity
 

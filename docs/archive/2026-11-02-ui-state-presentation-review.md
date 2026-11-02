@@ -1,3 +1,6 @@
+> Archived 2026-11-02. Historical evidence/proposals; do not treat old status or gates as current.
+> Current status: [ROADMAP](../../ROADMAP.md). [Original document snapshot](https://github.com/okhsunrog/vpnhide/blob/ad9a94187627c095ad58a6ab7a2ae19cc17ebe77/docs/notes/ui-state-presentation-review.md).
+
 # UI state presentation: design review
 
 Status: review of branch `refactor/app-state-cleanup` (PR #338) as of commit

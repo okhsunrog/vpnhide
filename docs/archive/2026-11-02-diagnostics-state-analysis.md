@@ -1,26 +1,29 @@
+> Archived 2026-11-02. Historical evidence/proposals; do not treat old status or gates as current.
+> Current status: [ROADMAP](../../ROADMAP.md). [Original document snapshot](https://github.com/okhsunrog/vpnhide/blob/0ce1eae24fa4f6bec5d25d8af9c97df7541902ae/docs/notes/diagnostics-state-analysis.md).
+
 # Diagnostics: meaning, state and history
 
 Status: source and history analysis, with design questions. No runtime change or
 new freshness/rerun policy is approved by this document.
 
-The subsequent [transition contract](app-state-transitions.md) specifies the new
+The subsequent [transition contract](2026-11-02-app-state-transitions.md) specifies the new
 design direction. This analysis remains a record of the baseline behavior and
 questions that motivated it; its open questions are historical inputs to that
 contract, not competing runtime rules. The code it describes (the
 `DiagnosticsCache.State` projection, caller-scoped runs, `retry` aliasing `run`)
 has since been replaced; read the contract §7–§8 for what runs today, and its
-[implementation history](app-state-transitions-history.md) for the stages.
+[implementation history](2026-11-02-app-state-transitions-history.md) for the stages.
 
 Baseline: `3818954e1615697427664a6bbcff6d9d6483f0c4`, inspected on 2026-09-15 in
 `../vpnhide_state`. Complements [diagnostics](../diagnostics.md),
-[debug bundles](../debug-bundle.md) and the [app state proposal](app-state-design.md).
+[debug bundles](../debug-bundle.md) and the [app state proposal](2026-11-02-app-state-design.md).
 Claims about reachable behavior below come from source inspection, not a new
 device reproduction. Historical device results in commit messages are historical
 evidence, not validation of this checkout.
 
 ## 1. What “diagnostics” currently means
 
-The [Kotlin glossary](../../lsposed/AGENTS.md) already identifies seven uses. They
+The [Kotlin glossary](https://github.com/okhsunrog/vpnhide/blob/0ce1eae24fa4f6bec5d25d8af9c97df7541902ae/lsposed/AGENTS.md) already identifies seven uses. They
 answer different questions and have different lifetimes:
 
 | Meaning | Concrete owner / data | What it can answer |

@@ -1,107 +1,46 @@
 # 安装 KPM 后端
 
-KPM 是面向可加载 `.ko` **无法**支持的内核的内核级 Native 后端——老旧或非 GKI
-内核（如 4.9、4.14）、无源码的厂商内核、拒绝未签名模块的内核。它像 `.ko` 一样在
-内核级别隐藏，不向目标进程注入 libc 钩子，但不保证躲过所有反篡改或 root 检测。它是**单一通用模块**——无需匹配 GKI 版本。请先
-阅读[该选哪个 Native 后端](choosing-native.md)。
+KPM 是完整 Core ZIP 中的内核后端，需要独立的 KernelPatch 运行时。安装
+[配套 APK 和 Core](first-install.md)。
 
 ## 它需要 KernelPatch 运行时
 
-KPM 使用内核 inline 挂钩，这要求内核中已存在 KernelPatch 运行时。按你的 root
-选择路径：
-
-- **APatch / FolkPatch**——已内置 KernelPatch。安装模块 ZIP。只有无法通过受信任令牌激活时，
-  才需要保存 **SuperKey**，见 [SuperKey 存储](#superkey-存储)。
-- **Magisk / KernelSU / KernelSU-Next**——使用 [**KPatch-Next-Module**](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest) 并按下方步骤
-  修补内核，或在自行编译内核时集成 KPatch-Next。只安装 VPN Hide 不会提供此运行时。
-
-若运行时不存在，仪表盘会提示*“内核未打入 KernelPatch 运行时”*。
+Core 必须确认运行时适用并完成认证。root 管理器的名称或某个目录的存在本身并不能
+证明就绪。Core 不包含也不刷入 KernelPatch engine，运行时部署是独立安装操作。
 
 ## 步骤
 
-1. 确认已存在 KernelPatch 运行时（见上）。
-2. 下载 `vpnhide-kpm.zip`（仪表盘会指明文件）。
-3. 通过 root 管理器的 **Modules** 界面，把**整个 ZIP** 作为 APM/Magisk 兼容模块
-   安装。VPN Hide Core 模块（必需）在每次启动时从已安装的模块加载 KPM 并下发配置。
+1. 确认内核和运行时受支持且已就绪。
+2. 安装完整 Core ZIP 和配套 APK。
+3. 仅在 Core 请求且 trusted-token 访问不可用时提供 SuperKey。
+4. 按要求重启、解锁并查看 Core 结果。
 
-   也支持自行加载 `vpnhide.kpm`：在 APatch/FolkPatch 的 KPM 界面加载或安装、通过
-   KPatch-Next 加载，或嵌入已修补的 boot 镜像。Core 会找到正在运行的 KPM、检查其
-   版本并像模块安装一样下发配置。只手动加载一次的 KPM 重启后会消失，除非你的
-   KernelPatch 管理器在开机时加载它。若同时安装了 ZIP，core 会使用已在运行的那份，
-   不会再加载第二份。
-4. 在 APatch / FolkPatch 上，仅在应用要求时保存 **SuperKey**，
-   见 [SuperKey 存储](#superkey-存储)。
-5. **重启**，然后打开**仪表盘**——Native 后端应显示 **Active**。
+Core 负责加载和配置 KPM。不要提取并手动加载内部 payload，也不要在 Core 旁另装
+独立 VPN Hide KPM ZIP。
 
 ## SuperKey 存储
 
-仅当 APatch/FolkPatch 无法通过受信任的 `su` 令牌激活 KPM，且仪表盘要求密钥时，
-才保存 SuperKey。在 **Settings → Security** 中输入你在 APatch/FolkPatch 设置的密钥。
-保存会把密钥写入仅 root 可读的文件，应用退出或设备重启后仍保留，并非仅限当前会话。
-清除会删除保存的副本。如果无法使用受信任的令牌，以后激活时可能再次需要密钥。
-见[安全与隐私](security-and-privacy.md#保存的密钥)。
+认证需要 APatch/FolkPatch SuperKey 时，使用**设置 → 安全**。保存的副本仅供 root
+访问；清除操作移除该副本。不要把密钥加入报告。见
+[安全与隐私](security-and-privacy.md#保存的密钥)。
 
 ## 受支持的内核
 
-KPM 在加载时校验你的内核家族。受支持的家族为 4.4、4.9、4.14、4.19、5.4、5.10、5.15、
-6.1、6.6、6.12。其他家族会被拒绝而非猜测。若仪表盘显示*“内核不受支持……没有已
-验证的偏移表”*，请改用 [Zygisk 后端](zygisk-install.md)。
+支持取决于经过验证的内核布局和实际运行时，而不只是版本标签。兼容性未知时会保持
+未验证。Core 根据设备判断适用性，不会假定所有非 GKI 内核都能工作。
 
 ## 为什么某些内核上显示 10 个钩子
 
-关闭可选的文件系统路径隐藏时，完整安装的 KPM 在低于 5.3 的内核上显示
-**OK · hooks: 10**，从 5.3 起显示 **OK · hooks: 11**。旧内核已要求普通应用
-不具备的权限才能把套接字绑定到接口，因此 KPM 不会在这些内核上安装套接字绑定钩子。
-
-这个数字统计已安装的逻辑钩子 ID 或钩子组，而不是实际拦截点的数量。启用
-**隐藏 VPN 文件系统路径**并在重启后成功安装该组时，计数增加一，分别变为
-**11** 和 **12**。一个组可以使用多个拦截点。诊断检查的数量另行统计，参见
-[自检检查了什么](what-the-check-proves.md)。
+已安装钩子的数量表示配置情况，不等于完整诊断覆盖。不同内核提供的路径不同。
+即使部分钩子已安装，缺失或未验证的必需检查仍会显示。
 
 ## 如果已安装但未生效
 
-仪表盘会说明原因：
-
-- **需要 SuperKey**——APatch/FolkPatch 无法用受信任的 `su` 令牌加载它。把
-  SuperKey 保存到 **Settings → Security** 并重启（或点 Refresh）。重装 ZIP 无济
-  于事。
-- **需要运行时**——内核里没有 KernelPatch 运行时；安装一个（见上）。
-- **KPM 过旧或无法识别**——VPN Hide 的 KPM 正在运行，但版本低于 core 支持的
-  1.2.0，或未通过 core 的状态检查。Core 不会配置它，也不会加载第二份。请换成当前
-  版本（安装 ZIP 或加载当前的 `vpnhide.kpm`）并重启。
-- **与内核模块冲突**——`.ko` 和 KPM 都已安装或正在运行（手动加载的 KPM 也算）；它们挂钩相同函数、可能使设备死机，
-  因此 KPM 主动退让。卸载其中之一。**切勿同时保留两者生效。**
-
-若加载失败，用 **Settings → Debugging → Collect debug log** 把开机时的输出附到
-报告中——见[收集调试报告](collect-report.md)。
+检查运行时认证、内核适用性及 Core 的等待/错误状态。重复安装相同 payload 无法修复
+不受支持的偏移。见[模块未生效](module-not-active.md)或[收集报告](collect-report.md)。
 
 ## 下载并安装 KPatch-Next-Module
 
-适用于 Magisk / KernelSU / KernelSU-Next：
-
-**警告：**修补启动分区可能导致设备无法启动。请提前准备好恢复设备的方法。
-
-1. 从[官方发布页](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)
-   下载 [KPatch-Next-Module.zip](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest/download/KPatch-Next-Module.zip)。
-   KPatch-Next-Module 可让你将 KernelPatch 运行时安装到内核中，`vpnhide-kpm.zip` 则提供在该运行时中
-   工作的 VPN Hide 后端。两个模块都需要安装。
-2. 在 root 管理器的**模块**页面安装 ZIP，然后打开 KPatch-Next 模块的 WebUI。
-   WebUI 就是模块的设置界面。在 KernelSU / KernelSU-Next 中，从模块卡片打开 WebUI。
-   在 Magisk 中，点击 KPatch-Next 卡片上的 **Action**，通过
-   [KsuWebUIStandalone](https://github.com/KOWX712/KsuWebUIStandalone) 应用打开界面。
-   如果尚未安装该应用，**Action** 会打开其发布页。安装应用，按提示授予 root 权限，
-   然后再次点击 **Action**。
-3. 在 WebUI 中打开 **Patch** 标签页并点击 **Start**。使用默认设置时，模块会自动
-   识别启动分区、修补并将更改写入设备。无需查找或下载 `boot.img`。
-   等待操作成功的提示。
-4. 修补成功后**重启**，重新打开 WebUI 并确认状态为 **Working**，表示 KernelPatch
-   运行时已在工作。
-5. 按上面的步骤安装 `vpnhide-kpm.zip`，重启后在 VPN Hide **仪表盘**确认 Native 后端
-   显示 **Active**。如果 ZIP 已经安装，请打开 VPN Hide 并刷新状态。
-
-APatch / FolkPatch 通常无需另装 KPatch-Next-Module：其修补后的内核已包含运行时。
-如果 VPN Hide 仍提示缺少运行时，请在 root 管理器中检查状态并
-[收集调试报告](collect-report.md)。仅凭截图无法区分运行时缺失和检测失败。
-
-如果设备无法或不适合修补，请改用 [Zygisk](zygisk-install.md)。自行编译内核时，
-请参阅 [KPatch-Next 项目](https://github.com/KernelSU-Next/KPatch-Next)。
+KernelPatch 部署独立于 VPN Hide 通用安装包。使用适用于实际 root/内核组合的受支持
+安装流程，并保留可恢复的原始 boot image。包名本身不能证明兼容性。Core 中的 KPM
+payload 不是 engine 安装器；不要为了修复 Core 状态错误套用旧的未验证 boot 刷写步骤。

@@ -1,12 +1,15 @@
+> Archived 2026-11-02. Historical evidence/proposals; do not treat old status or gates as current.
+> Current status: [ROADMAP](../../ROADMAP.md). [Original document snapshot](https://github.com/okhsunrog/vpnhide/blob/ae2cbbbd34f1aa8d1dbe2f851acc05b60726843d/docs/notes/app-state-design.md).
+
 # App state and synchronization redesign
 
 Status: historical design proposal, superseded (and in 2.0 the root side moved to
 VPN Hide Core; the `su`/helper mechanics discussed here no longer exist). The direction it argued for was
-formalized in the [transition contract](app-state-transitions.md) and implemented
+formalized in the [transition contract](2026-11-02-app-state-transitions.md) and implemented
 in stages; the current runtime is documented in
 [config coordinator](../config-coordinator.md),
 [observation coordinator](../observation-coordinator.md) and
-[root mutation transport](https://github.com/okhsunrog/vpnhide/blob/main/docs/root-mutation-transport.md). Read this file for the
+[root mutation transport](https://github.com/okhsunrog/vpnhide/blob/d5ed6296470121b07e1f650543b589979fbfffd3/docs/root-mutation-transport.md). Read this file for the
 reasoning behind the design, not for current behavior.
 
 Baseline: `3818954e1615697427664a6bbcff6d9d6483f0c4` (2026-09-15).
@@ -24,7 +27,7 @@ position and progress; drafts survive Activity recreation but need not survive
 process death; overlapping UI edits take priority over bridge mutations; an
 indeterminate root operation gets one automatic read-only recheck before mutations
 are paused. The subsequent diagnostic investigation and agreed design direction
-are formalized in the [transition contract](app-state-transitions.md): independent
+are formalized in the [transition contract](2026-11-02-app-state-transitions.md): independent
 execution, applicability and evidence states; explicit repeat runs; shared
 presentation for UI and bridge. That contract specifies the new transitions;
 this document explains the migration and original constraints.
@@ -296,8 +299,8 @@ unsaved drafts across process death is out of scope for the first implementation
 
 ### Diagnostics
 
-The [diagnostics state analysis](diagnostics-state-analysis.md) documents existing
-semantics and history. The subsequent [transition contract](app-state-transitions.md)
+The [diagnostics state analysis](2026-11-02-diagnostics-state-analysis.md) documents existing
+semantics and history. The subsequent [transition contract](2026-11-02-app-state-transitions.md)
 specifies the replacement: process-owned identified runs, immutable evidence,
 separate current eligibility and historical applicability, and one presentation
 projection for consumers. One automatic startup suite remains; completed-test

@@ -1,3 +1,6 @@
+> Archived 2026-11-02. Historical evidence/proposals; do not treat old status or gates as current.
+> Current status: [ROADMAP](../../ROADMAP.md). [Original document snapshot](https://github.com/okhsunrog/vpnhide/blob/6a75c0e3d84c2bdea8b82a32559c21daf377a522/docs/notes/host-tooling-audit.md).
+
 # Host tooling ownership and approved migration
 
 The user approved the 13-file migration below after the original read-only

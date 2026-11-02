@@ -8,7 +8,7 @@
 
 > **VPN Hide 2.0：**安装同一次构建的 **`vpnhide.apk`** 和一个 **`vpnhide-core.zip`**。Core 已包含 kmod/KPM payload 和两种 Zygisk ABI，负责选择并启动适用后端、写入配置和应用 Ports。应用仅使用本地套接字，不调用 `su`。无需单独安装后端 ZIP。
 
-> **main 状态：**2.0 重构仍在进行。自动维护、扩展自主诊断和设备验收尚未完成，实际进度见 [implementation ledger](docs/notes/unified-core-implementation.md)。
+> **main 状态：**2.0 重构仍在进行。自动维护、扩展自主诊断和设备验收尚未完成，实际进度见 [roadmap](ROADMAP.md)。
 
 
 <p align="center">

@@ -1,3 +1,6 @@
+> Archived 2026-11-02. Historical evidence/proposals; do not treat old status or gates as current.
+> Current status: [ROADMAP](../../ROADMAP.md). [Original document snapshot](https://github.com/okhsunrog/vpnhide/blob/779caec3d75dda84ce8e8d93ca7de4649dd4e61f/docs/notes/app-state-transitions.md).
+
 # App state: transition contract
 
 Current 2.0 contract for app observation, diagnostic runs, presentation and
@@ -637,7 +640,7 @@ lint for code changes, then validate on devices what only devices show: root
 timeouts and late effects, real VPN transitions (off/on, split-tunnel membership
 changes, a re-established tunnel while the app is backgrounded), Activity
 recreation during a run, process restarts and capture cleanup. Device records
-are kept in [vpn-poll-device-validation.md](vpn-poll-device-validation.md) and
+are kept in [vpn-poll-device-validation.md](2026-11-02-vpn-poll-device-validation.md) and
 the pull requests that shipped each stage.
 
 Known gaps, deliberately open:

@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation on `main`, app/core RPC version 15. The backend
+Current implementation on `main`, app/core RPC23 and journal11 (reads1–10). The backend
 control-v2 / telemetry-v1 wire is a separate boundary. This document describes
 the implemented ownership and execution contract.
 
@@ -15,7 +15,9 @@ the implemented ownership and execution contract.
 
 Core is the ordinary privileged writer. It accepts fixed commands and bounded
 probes, never arbitrary shell text. The APK has no root executable or `su` path.
-Backend packages contain artifacts only; `activator` is a core-side library.
+The full Core ZIP contains passive backend payloads. Producer archives may have
+installer shims, but no independent runtime activator; `activator` is a Core-side
+library. Zygisk publication policy remains reopened under RFC0003.
 
 The dependency path is `Kotlin → core-ffi → core-client → core-rpc`. Generated
 UniFFI records, enums and errors carry config, edits, commands, publications,
@@ -57,7 +59,7 @@ last-good display data may remain. Reconnection retries reads, never mutations.
 Config revision changes with canonical state; publication revision also covers
 observations and progress. Observations therefore do not create editor conflicts.
 Heavy root snapshots provide explicit inventory/counters/forensic details; config,
-boot selection and routing come from the shared typed publication.
+boot selection and runtime read models come from the shared typed publication.
 
 Root and config inputs join only after the app coordinator accepted at least the
 root snapshot's core sequence, with matching core epoch and config revision. A
@@ -65,7 +67,7 @@ new epoch reusing a config revision cannot silently borrow old config provenance
 
 The production socket is in the release app's user-0 device-encrypted data dir.
 DAC, its SELinux label and peer credentials restrict access to root and the
-current directory owner. See [IPC authorization](notes/core-2.0-ipc-auth.md).
+current directory owner. See [IPC authorization](core-ipc-auth.md).
 
 ## Commands, admission and execution
 
@@ -101,7 +103,8 @@ claim that no write occurred. The private journal records commands, phase intent
 actual commit revisions, write sets and exact Native dispatch evidence. Secrets
 and secret-derived verifiers never enter it. Bundled startup binds the exact
 manifest digest, source commit, payload and projected wire policy. Journal schema
-7 reads/migrates schemas 1 through 6; blank, malformed or unsupported present journals refuse mutations.
+11 reads/migrates schemas 1 through 10; blank, malformed or unsupported present
+journals refuse mutations.
 
 Same-ID duplicate commands query the retained result; different commands refuse.
 SuperKey submission always refuses reuse because comparing the secret would
@@ -146,7 +149,7 @@ and failed-payload quarantine survive audit pruning: at most one load per backen
 per boot; unconfirmed payloads require explicit repair. Successful matching load
 clears quarantine. Live adoption does not claim binary-hash verification, so a
 quarantined payload may still require explicit repair on a subsequent boot.
-Schema-1-through-6-only Core cannot read schema 7. Downgrade is not a supported recovery:
+An older Core cannot read a newer unsupported journal. Downgrade is not a supported recovery:
 keep the journal and use a compatible Core, never delete it to bypass holds.
 Bundled Zygisk NativeIntent records the exact boot, operation generation, recipient
 directory identity and wire before publication. Recovery confirms only that exact
@@ -181,15 +184,12 @@ establish that the desired revision was applied or produce current success.
 
 ## Observations and resource bounds
 
-Core listens for link, IPv4/IPv6 route and rule notifications. Bursts debounce
-for 250 ms; two delayed samples catch late framework registration. Lost events
-withdraw current evidence and trigger bounded resync; failed sources reopen.
-Framework classification and main-app UID membership share one bounded
-`dumpsys connectivity` read. Network IDs distinguish VPN replacement on `tun0`;
-unmanaged membership retains separate provenance. UID ownership is checked every
-five seconds, and full framework fallback runs every 30 seconds while idle.
-Unchanged evidence does not advance routing generation. Runtime backend refresh
-updates liveness/freshness without overwriting boot selection or delivery facts.
+The backend observer samples current liveness and runtime outside the async
+executor. It preserves selected/delivered/observed identities separately and does
+not start another activation attempt. The removed foreign-VPN observer, route/rule
+listener and APK UID-in-tunnel poller no longer gate Dashboard or diagnostics.
+Real network observations remain in controlled fixtures and manual forensics.
+See [observations](observation-coordinator.md) and [diagnostics](diagnostics.md).
 
 Diagnostics reserve one collection for a standalone Dashboard/inventory RootSnapshot,
 independently of at most two forensic collections, with 32 probes per request and
@@ -220,20 +220,28 @@ before exposing the selection. Missing completion holds Native across worker res
 reboot and receipt retention; there is no blind startup replay. Same-boot completed
 selection is restored from the journal and rechecks runtime identity without loading.
 Persist/Native/Secret uncertainty gates initial activation as well as boot delivery.
-This is the first lifecycle hardening step, not the complete unified selector: exact
-payload intents, candidate attempt history and checked startup-hold recovery remain
-in [the implementation plan](notes/unified-core-implementation.md). Old schema-2-only
-core refuses the newer journal; a file rollback is not a supported downgrade.
+Verified catalog preparation freezes payload identities, UID inventory and full
+policy projections before effects. Bundled alternatives do not conflict merely
+because their artifacts coexist. Eligible candidates use the current fixed
+priority; safe progression requires durable no-effect proof and clear ownership.
+A resident incompatible backend or an unknown load cannot be bypassed by loading
+another backend over it. Installed legacy discovery is an isolated compatibility
+path, not the unified selection policy.
 
-Native selection remains strict and fixed per boot: zero candidates, one selected
-candidate, or Conflict. Save and Repair deliver to that selection; KPM credentials
-have an explicit authentication path. Ports resolves the complete package/UID map
-before touching firewall rules, preserving old rules on resolution failure. IPv4
-and IPv6 outcomes remain independent.
+Save and Repair use the writer's prepared selection and retained attempt budgets.
+Possible same-boot Zygisk hook consumption blocks a kernel transition even after
+revocation. Diagnostic failure does not initiate fallback. The reopened lifecycle
+and feature-granular health review does not authorize new Auto/Manual, previous-
+backend hints, projection staging or reboot policy. See [ROADMAP](../ROADMAP.md).
+Core never reboots the phone automatically.
+
+Ports resolves the complete package/UID map before touching firewall rules,
+preserving old rules on resolution failure. IPv4 and IPv6 outcomes remain independent.
 
 See [storage](storage.md), [state](state.md) and
-[module lifecycle](notes/core-2.0-module-lifecycle.md) for paths and boot details.
-RPC skew fails the handshake; update APK and core together for version 15.
+[module lifecycle](core-module-lifecycle.md) for paths and boot details.
+RPC skew fails the handshake; use compatible paired APK/Core artifacts. Kernel
+control/telemetry compatibility is a separate boundary.
 Host tests/builds do not establish Android DAC/SELinux behavior, root-manager boot,
 ROM parsing or hook coverage; these still require device validation.
 
@@ -355,7 +363,7 @@ Service uses AppOwner (derived app path/owner/0600, dynamic UID lookup per accep
 plain launch defaults to current UID/0600 with strict explicit overrides. Mandatory
 endpoint preparation completes before handlers start. Failures retry only the app
 endpoint, preserving core/receipt lifecycle. This small configuration type introduces
-no new runtime profile, wire DTO or transport; see [IPC authorization](notes/core-2.0-ipc-auth.md).
+no new runtime profile, wire DTO or transport; see [IPC authorization](core-ipc-auth.md).
 
 ### Dashboard component health
 

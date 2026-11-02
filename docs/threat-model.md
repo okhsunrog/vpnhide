@@ -110,7 +110,7 @@ Therefore, hiding success must not be interpreted as proof of tunnel retention.
 Split tunneling is the usual setup when the target should use the physical
 connection; it intentionally exposes that connection's public IP to the service.
 A VPN-preserving concealment mode remains a separate design direction in the
-[roadmap](notes/ROADMAP.md). VPN routing and lockdown policies require their own
+[roadmap](../ROADMAP.md). VPN routing and lockdown policies require their own
 verification; local concealment does not override or certify them. The network
 substitution is implemented in
 [HookEntry.kt](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/hook/HookEntry.kt),

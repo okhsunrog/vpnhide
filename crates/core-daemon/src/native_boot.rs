@@ -2,19 +2,13 @@
 //! backend modules never load themselves, and the installed set only changes
 //! across a reboot (new installs sit in `modules_update`).
 //!
-//! At startup core scans every native candidate: an installed kmod, KPM or Zygisk
-//! module (`module.prop`, no `disable`, no `remove`), the always-live built-in
-//! kernel (the control node reports 0x4), a live kmod, and a live KPM core did not
-//! load (APatch autoload, or a `.kpm` the user loaded by hand — a supported install
-//! method, adopted like any other live backend once its version is verified). Native
-//! backends are mutually exclusive:
-//!
-//! - more than one candidate: load nothing, deliver no config to anything, retire
-//!   Zygisk's targets, publish [`NativeBootOutcome::Conflict`];
-//! - exactly one: load it (or adopt it when it is already live). An installed
-//!   `vpnhide_kpm` module whose KPM is already live is one candidate, not two: core
-//!   adopts the live copy and never loads a second one;
-//! - none: [`NativeBootOutcome::NoBackend`].
+//! Production bundle preparation verifies one catalog and UID inventory, projects
+//! the full policy and freezes eligible candidates before effects. Coexisting
+//! bundled payloads are alternatives, not resident-backend conflicts. The bounded
+//! executor progresses only after durable no-effect proof and clear ownership.
+//! The installed-module resolver below remains a legacy/recovery compatibility
+//! adapter: more than one independently installed/live candidate is a conflict.
+//! Possible Zygisk hook exposure and unknown load effects prohibit unsafe overlap.
 //!
 //! CommandEngine journals prepared payload/transition intent before effects. Completed
 //! same-boot selections are revalidated on restart. Interrupted or ambiguous loads

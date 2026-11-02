@@ -72,7 +72,7 @@ Hard requirements:
 
 - arm64 / `aarch64-linux-android` only -- `build.rs` hard-fails on other targets.
 - A Zygisk implementation that exposes API >= v1.
-- [LSPosed/Vector](../lsposed/) for the Java-side companion.
+- [LSPosed/Vector](../lsposed) for the Java-side companion.
 
 ## Build
 
@@ -124,15 +124,15 @@ retain their consumed generation until they restart.
 
 `target/vpnhide-zygisk.zip` is an internal assembly input. Do not install it as a
 second backend module alongside Core. Device/ABI acceptance remains separate from
-successful compilation; see the [implementation ledger](../docs/notes/unified-core-implementation.md).
+successful compilation; see the [implementation ledger](../ROADMAP.md).
 
 ## Filter logic
 
-VPN interface prefixes: `tun`, `ppp`, `tap`, `wg`, `ipsec`, `xfrm`, `utun`, `l2tp`, `gre`, `tailscale`, `zt`, `he-ipv6`, plus anything containing the substring `vpn`, plus `if<N>` renamed/anonymous netdevs. Matches the list in the [LSPosed companion](../lsposed/).
+VPN interface prefixes: `tun`, `ppp`, `tap`, `wg`, `ipsec`, `xfrm`, `utun`, `l2tp`, `gre`, `tailscale`, `zt`, `he-ipv6`, plus anything containing the substring `vpn`, plus `if<N>` renamed/anonymous netdevs. Matches the list in the [LSPosed companion](../lsposed).
 
 ## Known limitations
 
-- **Direct `svc #0` syscalls bypass the hook.** Apps issuing raw syscalls skip libc entirely, including the best-effort `setsockopt` protection. Use a kernel-level backend, [vpnhide-kmod](../kmod/) or [KPM](../kmod/kpm/), for these apps.
+- **Direct `svc #0` syscalls bypass the hook.** Apps issuing raw syscalls skip libc entirely, including the best-effort `setsockopt` protection. Use a kernel-level backend, [vpnhide-kmod](../kmod) or [KPM](../kmod/kpm), for these apps.
 - **Filesystem hiding is best-effort.** The optional group handles canonical
   and relative libc paths, but raw `openat`/`getdents64` syscalls, unhooked libc
   aliases, bind mounts, and paths reached through unrelated symlink aliases can

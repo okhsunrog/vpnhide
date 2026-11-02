@@ -1,5 +1,12 @@
 # RFC: Автоматическое определение GKI/KMI и безопасный подбор kmod в VPNHide 2.x
 
+> Decision update: **Accepted for implementation** in the current v2 cycle by the
+> maintainer. The original imported proposal and its Proposed/Draft metadata below
+> are preserved as historical text. Approval does not enable experimental kernel
+> admission or certify device fixtures. Current implementation/gates are tracked
+> in [ROADMAP](../../ROADMAP.md). Zygisk lifecycle policy is separately reopened
+> under RFC0003; this decision does not resolve that review.
+
 **Идентификатор:** `RFC-AUTO-GKI-KMOD-001`  
 **Статус:** Proposed / требует реализации и проверки на устройствах  
 **Дата:** 2026-11-02  

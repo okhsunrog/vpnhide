@@ -1,5 +1,12 @@
 # RFC: Автономная, воспроизводимая и фоновая диагностика VPN Hide 2.x
 
+> Decision update: **Accepted for implementation** in the current v2 cycle by the
+> maintainer. The original imported proposal and its Proposed/Draft metadata below
+> are preserved as historical text. Approval does not enable experimental kernel
+> admission or certify device fixtures. Current implementation/gates are tracked
+> in [ROADMAP](../../ROADMAP.md). Zygisk lifecycle policy is separately reopened
+> under RFC0003; this decision does not resolve that review.
+
 > **Статус:** Draft / архитектурное предложение для обсуждения и прототипирования  
 > **Дата:** 2026-11-02  
 > **Целевая ветка:** [`okhsunrog/vpnhide`, `dev-2.x`](https://github.com/okhsunrog/vpnhide/tree/dev-2.x)  

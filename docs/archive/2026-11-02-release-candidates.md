@@ -1,3 +1,6 @@
+> Archived 2026-11-02. Historical evidence/proposals; do not treat old status or gates as current.
+> Current status: [ROADMAP](../../ROADMAP.md). [Original document snapshot](https://github.com/okhsunrog/vpnhide/blob/1c12d88aff1cd487eabebf6f230a91ad5c41902a/docs/notes/release-candidates.md).
+
 # TODO: release-candidate builds (`vX.Y.Z-rc.N`)
 
 Status: **not started**. Written 2026-09-17 after v1.3.0 shipped as a GitHub

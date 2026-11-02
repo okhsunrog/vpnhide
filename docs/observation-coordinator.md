@@ -172,3 +172,17 @@ allowance. Forensic captures cannot consume the standalone RootSnapshot slot.
 State and receipts remain readable while PackageManager/metadata collection waits.
 Virtual-time regressions cover valid slow collections, deadline quarantine and
 rejection of late results. Final startup acceptance is recorded separately.
+
+## Core backend observations
+
+Core publishes installed candidates,selected implementation,confirmed delivery and
+observed runtime separately. The backend observer refreshes outside the async
+executor; a later boot/config/delivery transition supersedes an earlier sample.
+Unknown observation withdraws current readiness rather than promoting last-good
+history. Zygisk mapping/publication is not proof of hook effectiveness or complete
+old-process coverage.
+
+The previous Core routing/UID observer contract is preserved only in the
+[dated archive](archive/2026-11-02-core-2.0-observations.md). Its VPN-session poller,
+route/rule listeners and APK split-tunnel eligibility are removed production
+paths. They must not be reintroduced as a diagnostic prerequisite.

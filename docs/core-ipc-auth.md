@@ -1,4 +1,4 @@
-# core-2.0 IPC authorization
+# Core IPC authorization
 
 The app runs no root process. It reaches core with the in-process UniFFI client
 (`crates/core-ffi`, loaded through JNA) over a path socket that core binds **inside the app's
@@ -26,6 +26,11 @@ canonical config, `/proc/vpnhide_ctl`, Zygisk `targets.txt` and the Ports rules.
 3. **SO_PEERCRED**: `Allowlist::AppOwner` admits root and the uid that owns the app data dir,
    re-resolved on every accept (a reinstall's new uid is followed automatically). Nothing is
    written by the app; there is no uid file.
+
+The Rust client also validates the server's peer UID before sending the hello,
+including on reconnect. Android expects the privileged Core peer; the app-owned
+pathname alone is not server authentication. Host fixtures bind an explicit
+same-user contract. Protocol compatibility is checked on each new transport.
 
 Plain runs (no `VPNHIDE_APP_DATA_DIR`) default to the effective UID and socket mode
 `0600`. `VPNHIDE_CORE_ALLOW_UIDS` accepts a nonempty comma/whitespace-separated list
@@ -66,7 +71,7 @@ Other read/write errors propagate. Peer authorization remains required in every 
 | RPC writer queue wait | 2 seconds before start; expired/cancelled commands cannot execute later |
 | Diagnostic collections | 2 forensic + 1 reserved standalone RootSnapshot; at most 32 probes and 4 workers each |
 
-## APK connection and save path (protocol 16)
+## APK connection and save path
 
 - One process-retained UniFFI `CoreSession` owns a shared multiplexed connection.
   `awaitState(epoch, revision)` long-polls core publications; reads and commands use
@@ -85,8 +90,8 @@ Other read/write errors propagate. Peer authorization remains required in every 
   No uncertain command is replayed automatically.
 - Editor drafts, UI preferences and app-context measurements remain in Kotlin.
 
-See [current core architecture](../core-architecture.md) and
-[app configuration intents](../config-coordinator.md).
+See [current core architecture](core-architecture.md) and
+[app configuration intents](config-coordinator.md).
 
 ## Device validation still required
 
@@ -103,7 +108,7 @@ same peercred-authenticated socket:
 - `collect_diagnostics(DiagnosticsRequest { probes, clear_dmesg })` runs a fixed probe
   set (`DiagnosticProbe`: root/debug snapshots, hook counters, dmesg, logcat by app tags /
   LSPosed boot / since a validated timestamp, kernel partitions and images, the LSPosed
-  modules db, ground-truth checks, per-uid VPN state). Probes are Rust in
+  modules db and ground-truth forensic checks). Probes are Rust in
   core (`crates/core-daemon/src/device_probes`, run as core's own bounded
   `vpnhide-core probe …` child; no shell); there is no way to pass a command. The kernel log is cleared (`klogctl`) only when `clear_dmesg` is set. Output up to 64 KiB is inline;
   larger output and artifacts are written to `<app data dir>/vpnhide-core-export/`, owned

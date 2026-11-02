@@ -21,14 +21,11 @@ different things, and VPN Hide has a role for each: **Java**, **Native**,
   isn't what this tool does.
 - **Work without root.** Root is required for the VPN Hide Core module. Java/Apps
   need LSPosed; Native needs a native backend; Ports comes with the core module. You can use fewer layers, with less coverage.
-- **Give Native to an unlimited number of apps.** The native backend protects up
-  to **159 app UIDs** (it counts UIDs, not apps, and reserves one slot for VPN
-  Hide itself). The picker counts the way the backend does and disables Save while
-  the selection is over its UID budget. If more profile or clone copies of selected
-  apps appear later, VPN Hide does not protect a partial set: it sends nothing,
-  keeps the previous Native targets and lists the apps to turn Native off for. An app cloned into a work profile or Second Space counts
-  twice — see [Work profiles](work-profiles.md). The Java and Apps roles aren't
-  capped this way.
+- **Give Native to an unlimited number of apps.** Core supplies the applicable
+  capacity and UID inventory. The picker prevents excessive selection immediately;
+  Save is still required and Core validates it again. A shared UID is counted once,
+  while profile/clone copies may add UIDs. Incomplete inventory or an exceeded
+  budget cannot silently truncate protection. See [Work profiles](work-profiles.md).
 - **Defeat a game's own anti-cheat.** Hiding a VPN from the very game you're
   playing to get past its checks is a different matter, and not something VPN
   Hide promises — see [Game accelerators](game-accelerators.md).

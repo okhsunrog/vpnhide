@@ -62,7 +62,7 @@ GKI release, so it does not cover vendor patches. (The trim switches off
 subsystems no vector reaches — storage stacks, on-disk filesystems, debug info
 — and never anything that moves a structure the backends read;
 `verify-trim-abi.sh` proves that by diffing `pahole` layouts both ways. See
-[docs/notes/ci-kernel-config-trim.md](../../docs/notes/ci-kernel-config-trim.md).) A device smoke-test is still the final word — but the
+[docs/ci-kernel-config-trim.md](../../docs/ci-kernel-config-trim.md).) A device smoke-test is still the final word — but the
 gate is far tighter than "it compiled".
 
 ## Usage
@@ -132,7 +132,7 @@ Building a virtio GKI kernel takes ~15-40 min, so it must not run per-PR:
 
 ## KPM backend harness (`run-kpm.sh`)
 
-`run-kpm.sh` is the sibling for the [KPM backend](../kpm/): instead of
+`run-kpm.sh` is the sibling for the [KPM backend](../kpm): instead of
 `insmod`-ing a `.ko`, it patches a bootable `Image` with KernelPatch
 (`kptools-linux` + `kpimg-linux`, fetched from the KernelPatch releases),
 embeds `vpnhide.kpm`, and boots the patched kernel under the same QEMU/TCG
@@ -220,7 +220,7 @@ back into a regression.
    `regs[3]` held `table_id`, not the `rtable*`). Route *enumeration* (what
    detection apps use) goes through the global `fib_dump_info`; single lookups
    respect the caller's routing, which is physical under split-tunnel. See
-   `docs/notes/ROADMAP.md` for the `rtnl_unicast`-based alternative if ever needed.
+   `ROADMAP.md` for the `rtnl_unicast`-based alternative if ever needed.
 
 7. **iproute2 over QEMU user-net.** `init.sh` apk-adds iproute2 at boot (the
    runner has internet via QEMU's slirp NAT). Prebaking it into the rootfs is a

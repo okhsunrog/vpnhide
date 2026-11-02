@@ -69,7 +69,8 @@ leftover `app-state/` with the rest of `/data/adb/vpnhide/` except `core/`.
 Nothing writes these; up to 0.7.1 they *were* the user's config. 1.0.0 folded
 them into the canonical JSON on first launch, 1.2.0 dropped that fold (and the
 cleanup with it), so a device upgrading 0.7.x → 1.2.x kept the files and lost
-the settings. `migration/LegacyConfigImport.kt` reads them again:
+the settings. Core maintenance captures these fixed sources; shared Rust
+migration policy derives the import and Kotlin supplies previews/dialogs:
 
 - `/data/adb/vpnhide_kmod/targets.txt`, `…_kpm/targets.txt`,
   `…_zygisk/targets.txt` — native role, package names.
@@ -81,19 +82,13 @@ the settings. `migration/LegacyConfigImport.kt` reads them again:
 - `/data/system/vpnhide_uids.txt` — derived from the LSPosed list by the old
   `service.sh`; deleted with the rest, never read back.
 
-The import runs silently at startup when the canonical config holds no
-user-configured app. When it does hold one, a Dashboard banner and a Settings →
-Configuration entry offer three actions: merge, replace, or **delete without
-importing** (for the user who has already reconfigured by hand and only wants
-the leftovers gone — nothing else on the device removes them). Successful complete imports and explicit discard delete
-every file above and `rmdir` `/data/adb/vpnhide_zygisk` and
-`/data/adb/vpnhide_lsposed`, which hold nothing else; merge and replace do it in
-the same root transaction as the config write, delete runs on its own (no config
-write, no backend apply — the running config does not change).
-
-Imports with unresolved UIDs or malformed source lines keep the source files for
-a later retry; explicit discard remains available. A Persist failure never starts
-cleanup. See [migration boundary](migration.md).
+Bootstrap, merge, replace and explicit discard use typed Core commands. Core
+captures complete available profile/UID inventory and binds sources by identity
+and content. Persist precedes archive cleanup. Unresolved UIDs, malformed lines,
+changed or unreadable inputs remain preserved. Successful complete import retains
+a private verified snapshot and retired original inode; it does not erase evidence.
+No missing source or old app-supplied eligibility flag authorizes deletion.
+See [migration boundary](migration.md).
 
 Absence of the files is the "already imported" marker. The banner's *Hide*
 button only sets `legacyImportDismissed` in the app's `ui_settings` DataStore:
@@ -105,20 +100,20 @@ files stay, and the Settings entry keeps every action reachable.
 
 ## 2. Module Install Dirs
 
-Module dirs under `/data/adb/modules/` are replaced by Magisk/KSU/APatch on
-module reinstall. They hold artifacts, not user-managed config. **No shell logic
-runs on the device** at boot: `vpnhide-core` (in `vpnhide_core`) is the only
-loader and writer, its `service.sh` is a single `exec`, and the backend modules
-ship no script at all (the core zip's install-time `customize.sh` only moves the
-ABI binary into place). See
-[notes/core-2.0-module-lifecycle.md](notes/core-2.0-module-lifecycle.md).
+Module directories are manager-owned installation state, replaced/staged by
+Magisk/KernelSU/APatch. Users install one full Core ZIP. Its `service.sh` directly
+execs the Rust service; `customize.sh` selects the daemon ABI at install time.
+Installer/recovery shims are not runtime activators. See
+[module lifecycle](core-module-lifecycle.md).
 
-| Module | Contents |
-|---|---|
-| `vpnhide_core` | `module.prop`, `vpnhide-core` (device ABI, kept by the 3-line `customize.sh`), `service.sh` (`exec "${0%/*}/vpnhide-core" service`), `sepolicy.rule` |
-| `vpnhide_kmod` | `module.prop` (stamped `gkiVariant=`), `vpnhide_kmod.ko` — core loads it with `finit_module(2)` |
-| `vpnhide_kpm` | `module.prop`, `vpnhide.kpm` — core loads it through KernelPatch |
-| `vpnhide_zygisk` | `module.prop`, `zygisk/<abi>.so`, `targets.txt` (runtime `vpnhide 2 config` snapshot core writes; not user config) |
+| Module/layout | Contents and current scope |
+| --- | --- |
+| `vpnhide_core` | Daemon, service/policy/module metadata, manifest, seven ko candidates, KPM and passive Zygisk ABI pair |
+| Core `payloads/zygisk/` | One passive pair; no main-Core top-level `zygisk/` discovery directory |
+| Legacy `vpnhide_kmod`, `vpnhide_kpm`, `vpnhide_zygisk` | Explicit inventory/migration/recovery compatibility; not required separate installs for the unified bundle |
+
+Managed Zygisk discovery is still incomplete and its lifecycle policy is reopened;
+no projected module or automatic next-boot executor is established by these paths.
 
 The in-tree (`CONFIG_VPNHIDE=y`) backend has no module: core adopts it when
 `/proc/vpnhide_ctl` reports backend `0x4`.
@@ -133,11 +128,11 @@ Mode `0700`, root-only. Journal, ownership markers, `core.log`, plus:
 
 | File | Format | Writer | Reader | Lifetime |
 |---|---|---|---|---|
-| `operations.json` | journal schema 8: issued-ID counter, expiry floor, retained receipts, revision/write-set evidence, held resources, native startup/load/preflight budgets, Zygisk exposure, debug leases and logging restoration | core writer queue, atomically with directory fsync | startup recovery and receipt queries; schemas 1–7 are migrated, corrupt/unsupported state refuses mutation | preserved by FullReset; 64 terminal receipts plus active/restoration records; expired Unknown receipts retain compact held-resource/Persist evidence |
+| `operations.json` | journal schema 11: issued-ID counter, expiry floor, retained receipts, revision/write-set evidence, held resources, native startup/load/preflight budgets, Zygisk exposure, debug leases and logging restoration | core writer queue, atomically with directory fsync | startup recovery and receipt queries; schemas 1–10 are migrated, corrupt/unsupported state refuses mutation | preserved by FullReset; 64 terminal receipts plus active/restoration records; expired Unknown receipts retain compact held-resource/Persist evidence |
 | `operations.json.lock` | permanent empty regular inode, mode `0600`, exclusive flock | core lifetime owner | another core refuses ownership before load/boot/bind | preserved by FullReset; never unlink a live lockfile |
 | `supervisor.lock` | permanent root-only regular inode and exclusive flock | service supervisor | duplicate service invocation refuses | supervisor lifetime; inode persists |
 | `supervisor_status` | running/restarting/stopped status and retry delay | service supervisor | diagnostics/manual inspection | overwritten as worker lifecycle changes |
-| `native_boot.json` | serde JSON of `core-rpc` `NativeBootStatus`, keyed by `boot_id` | core, once per boot (updated by deliveries and Ports applies) | core (re-adopts on restart in the same boot); debug export. The app reads the same status over RPC (`backend.boot`). | replaced on the next boot's scan |
+| `native_boot.json` | serde JSON of `core-rpc` `NativeBootStatus`, keyed by `boot_id` | core, after journaled boot/delivery outcomes | debug export only; re-adoption authority is the private journal. The app reads the same status over RPC (`backend.boot`). | replaced on the next boot's scan |
 | `export-staging/vpnhide-probe-*` | private 0700 directories with captured artifacts | root probe children only | root publication through pinned descriptors | removed on completion/error/timeout; interrupted directories removed at daemon startup under lifetime state locks |
 | `boot_status` | `key=value` boot pass report | core boot passes | debug export | overwritten each boot |
 | `boot_phase` | `boot_phase=service` | `vpnhide-core service` | debug export | overwritten each boot |
@@ -225,9 +220,11 @@ ctl0 request/response channel.
 
 ### Zygisk Module-Dir `targets.txt`
 
-`/data/adb/modules/vpnhide_zygisk/targets.txt` is the runtime text wire consumed
-through Zygisk's module-dir fd. It survives until module reinstall or the next
-core write, but it is derived state, not user storage.
+Legacy `/data/adb/modules/vpnhide_zygisk/targets.txt` is derived compatibility
+state. The bundled contract uses a verified recipient and boot/operation/
+generation-bound authorization, with journaled publication/revocation. Removing
+authorization does not unload existing process hooks. New passive-package
+discovery remains incomplete pending RFC0003 review.
 
 ---
 
@@ -377,44 +374,37 @@ deleted after use.
 | `/proc/sys/kernel/random/boot_id` | kernel | Freshness checks for per-boot records |
 | `/proc/version`, `/proc/modules`, `/proc/config.gz` | kernel | kmod diagnostics |
 | `/proc/net/{route,ipv6_route,if_inet6,tcp,tcp6,udp,udp6,dev,fib_trie}` | kernel | diagnostics and native hiding vectors |
-| `/sys/class/net/`, `/sys/class/net/<iface>/operstate` | kernel | VPN-active detection |
+| `/sys/class/net/`, `/sys/class/net/<iface>/operstate` | kernel | native fixtures/hook vectors and explicit forensic observations; no Dashboard VPN gate |
 
 ---
 
 ## 10. Boot-Time Sequence
 
 ```text
-service (late start):
-  vpnhide_core service.sh
-    -> exec vpnhide-core service (persist dir, boot_phase, fork + setsid)
-    -> load journal, fence/reconcile
-    -> native selection, once per boot_id (native_boot.json):
-       candidates = installed kmod/KPM/Zygisk modules (no disable/remove)
-                    + live built-in (ctl 0x4) + a live KPM core did not load
-       >1 candidate -> Conflict: load nothing, deliver nothing, retire Zygisk targets
-       1 candidate  -> load (kmod finit_module, KPM via KernelPatch) or adopt
-       0            -> NoBackend
-    -> boot passes thread: wait for PackageManager, deliver config to the
-       selection only, wait for netd bw_OUTPUT (<= 60 s), apply Ports,
-       re-apply Ports at T+30 s
-    -> serve the app socket
+Core service:
+  establish production paths and lifetime locks
+  load/reconcile canonical policy and private journal
+  serve app socket independently of slow PackageManager readiness
+  prepare verified catalog + UID inventory + full policy outside writer
+  writer syncs exact attempt intent before any effect
+  execute/reconcile bounded attempt; Unknown retains holds
+  confirm terminal evidence before publishing readiness
+  apply independent Ports work after its own readiness
+  monitor backend facts and own bounded autonomous diagnostics
 
 system_server:
-  HookEntry.handleLoadPackage
-    -> install hooks
-    -> write /data/system/vpnhide_lsposed_state
-    -> watch canonical JSON
+  install LSPosed hooks and report actual installed scope
+  self-read canonical JSON + packages.list without PackageManager re-entry
 
-zygote app fork:
-  zygisk on_load
-    -> read module-dir targets.txt text wire
-  zygisk post_app_specialize
-    -> if target: install selected libc hooks; filesystem_iface_paths is
-       projected only when the canonical optional feature is enabled
-    -> install the optional filesystem aliases atomically; omit bit 27 from
-       installed_hooks on failure without disabling the base network hooks
-    -> if target process is VPN Hide app: write filesDir/vpnhide_zygisk_active
+Zygisk (when a supported discovery/authorization path exists):
+  authenticate mapped payload + recipient through public loader API
+  verify exact current boot/operation/policy authorization before target hooks
+  non-target and server callbacks retire the library
+  report actual consumed generation; old hooks may outlive revoked authority
+
+New passive-package discovery/transition policy remains under RFC0003 review.
 ```
+
 
 ---
 
@@ -426,9 +416,9 @@ zygote app fork:
 | Per boot / last apply files | `/data/adb/vpnhide/core/native_boot.json`, `/data/adb/vpnhide/core/boot_status`, `/data/system/vpnhide_lsposed_state` |
 | Per app launch | `filesDir/vpnhide_zygisk_active` |
 | Persistent root-managed | `/data/system/vpnhide_config.json`, `/data/adb/vpnhide/superkey` |
-| Module-dir derived state | `/data/adb/modules/vpnhide_zygisk/targets.txt` |
-| Cleaned by core's next boot scan | a removed backend module's leftover state (e.g. `/data/adb/vpnhide_kpm/`) |
-| Removed on pre-1.0 config import (or Full Reset) | the import inputs in section 1, plus `/data/adb/vpnhide_zygisk/`, `/data/adb/vpnhide_lsposed/` |
+| Module-dir derived state | Bound Zygisk authorization; legacy targets file only in compatibility layouts |
+| Compatibility leftovers | Only explicit verified cleanup; no speculative next-boot deletion of a removed module's state |
+| Source-bound import cleanup | Inputs in section1 are archived with verified identity; incomplete/changed sources remain. FullReset preserves Core journal/retention |
 | Wiped on module reinstall | files under `/data/adb/modules/vpnhide_*/` |
 | Wiped on app reinstall | app SharedPreferences (except Vector redirects the physical path under `/data/misc/<uuid>/prefs/`) and the `ui_settings` DataStore |
 
@@ -451,7 +441,7 @@ moves the bound original inode to `*.retired` with no-replace rename and verifie
 its identity/content. The retired inode is retained, so a legacy process still
 holding it cannot lose later writes. Source/destination symlinks are refused;
 changed sources are preserved/restored without overwriting a new original path.
-Journal schema 8 stores each source identity/hash, plan and cleanup report before
-claiming completion; it reads schemas 1–7 without resetting native/preflight budgets,
+Journal schema11 stores each source identity/hash, plan and cleanup report before
+claiming completion; it reads schemas1–10 without resetting native/preflight budgets,
 Zygisk exposure or holds. Interrupted cleanup stays Unknown and is never replayed.
 FullReset preserves this Core state/retention directory alongside the journal.

@@ -47,9 +47,10 @@ Android 版本和目标应用验证路由，包括 VPN 重连后的情况。在�
 
 ## 让 VPN Hide 自身走隧道
 
-内置自检要求 **VPN Hide 自身走隧道**。如果无法把它加入隧道，就无法进行完整自检。
+Core 诊断使用受控测试对象与独立 Android 工作进程。
+VPN Hide 可以不在 VPN 客户端的隧道中，VPN 也可以关闭；这都不会阻止仪表盘或诊断。
 目标应用正常工作是兼容性的参考，但不能证明完全隐藏或流量始终留在隧道内。
-见[自检检查什么](what-the-check-proves.md)。
+见[诊断检查什么](what-the-check-proves.md)。
 
 ## “无 VPN 时阻断连接”的断网保护（kill-switch）
 

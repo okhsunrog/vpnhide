@@ -3,21 +3,21 @@
 Implemented 2026-09-17 (the research behind it is from 2026-09-16). This note is
 the record of what the trim does, what it deliberately does **not** do, and the
 measurements and dead ends behind both. Read it before adding a line to
-[`kmod/test/qemu-trim.config`](../../kmod/test/qemu-trim.config).
+[`kmod/test/qemu-trim.config`](../kmod/test/qemu-trim.config).
 
 ## What is built
 
 Every QEMU test kernel is `gki_defconfig` of its branch plus
-[`kmod/test/qemu.config`](../../kmod/test/qemu.config) (virtio-net, PL011
+[`kmod/test/qemu.config`](../kmod/test/qemu.config) (virtio-net, PL011
 console, initramfs, dummy netdev, software PAN, unsigned modules) and now
-[`kmod/test/qemu-trim.config`](../../kmod/test/qemu-trim.config), merged second.
+[`kmod/test/qemu-trim.config`](../kmod/test/qemu-trim.config), merged second.
 The two stay separate on purpose: `qemu.config` is what QEMU needs to boot, the
 trim is what the tests do not need, so a boot regression and a build-time
 experiment are never the same diff.
 
 Three producers share the recipe, and all three merge both fragments:
 
-- the `ddk-qemu` image bake ([`.github/docker/ddk-qemu/Dockerfile`](../../.github/docker/ddk-qemu/Dockerfile)),
+- the `ddk-qemu` image bake ([`.github/docker/ddk-qemu/Dockerfile`](../.github/docker/ddk-qemu/Dockerfile)),
   which also runs the ABI check below before building;
 - `kmod/test/build-kernel.sh` and `builtin/test/build-kernel.sh` for local runs;
 - the `builtin-qemu` CI job, which re-merges the trim onto the baked tree's

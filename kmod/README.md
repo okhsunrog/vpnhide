@@ -90,7 +90,7 @@ Legacy standalone module inventory remains for migration/recovery only.
 
 ### Target management
 
-**VPN Hide app (recommended):** open the VPN Hide app (the [lsposed](../lsposed/) APK). It lists all installed apps with icons, search, and checkboxes. Saves through VPN Hide Core, which writes the canonical JSON config and delivers it to the selected native backend immediately. Works on KernelSU, Magisk, and APatch. Managing targets this way is all a normal setup needs; the shell equivalents are in the collapsible **For developers / advanced usage** section at the end of this file.
+**VPN Hide app (recommended):** open the VPN Hide app (the [lsposed](../lsposed) APK). It lists all installed apps with icons, search, and checkboxes. Saves through VPN Hide Core, which writes the canonical JSON config and delivers it to the selected native backend immediately. Works on KernelSU, Magisk, and APatch. Managing targets this way is all a normal setup needs; the shell equivalents are in the collapsible **For developers / advanced usage** section at the end of this file.
 
 Core writes `/data/system/vpnhide_config.json`, the persistent package-keyed
 desired state, and derives the `/proc/vpnhide_ctl` snapshot from it; LSPosed
@@ -102,7 +102,7 @@ Covering both native and Java API detection paths requires two layers, without
 placing vpnhide hooks in the target app's process:
 
 - **vpnhide-kmod** (this module) covers the native side: `ioctl`, `getifaddrs()` (netlink), `/proc/net/route`, `/proc/net/ipv6_route`, netlink address/route/rule dumps, pre-mutation `SO_BINDTODEVICE` / `SO_BINDTOIFINDEX` denial, and optional sysfs/proc-sys interface-path concealment.
-- **[lsposed](../lsposed/)** hooks `writeToParcel()` on `NetworkCapabilities`, `NetworkInfo`, `LinkProperties` inside `system_server` -- stripping VPN data before Binder serialization reaches the app.
+- **[lsposed](../lsposed)** hooks `writeToParcel()` on `NetworkCapabilities`, `NetworkInfo`, `LinkProperties` inside `system_server` -- stripping VPN data before Binder serialization reaches the app.
 
 Together they cover the detection paths documented in
 [`docs/detection-vectors.md`](../docs/detection-vectors.md). That document also
@@ -115,7 +115,7 @@ LSPosed for Java APIs.
 ### Setup
 
 1. Install **vpnhide-kmod** as a KSU module (this module).
-2. Install **[lsposed](../lsposed/)** as an LSPosed/Vector module and add **"System Framework"** to its scope (no other apps in scope).
+2. Install **[lsposed](../lsposed)** as an LSPosed/Vector module and add **"System Framework"** to its scope (no other apps in scope).
 3. Pick target apps in the VPN Hide app -- it manages targets for both the kernel module and the system_server hooks.
 
 ## Architecture notes

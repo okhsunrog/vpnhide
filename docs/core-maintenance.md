@@ -1,9 +1,9 @@
 # Authenticated Core replacement preparation
 
 This describes implemented preparation, not a completed install/update flow.
-The current paired contract is RPC23 with private journal11 and unchanged kernel
-control2/telemetry1. The original package-preparation foundation did not change these in its
-cut. No device manager operation or boot write is performed by these APIs.
+Compatibility versions are owned by [build-contract](../crates/build-contract/src/lib.rs)
+and the shared protocol crate. APK/Core IPC and journal compatibility do not
+require rebuilding an otherwise compatible user builtin kernel. No device manager operation or boot write is performed by these APIs.
 
 The existing app socket authenticates its peer UID and directory ownership. It
 does not verify APK signing certificates. An app-supplied ZIP hash or an unsigned
@@ -79,7 +79,10 @@ be recorded with the implementation, rather than assuming all forks match.
 The shared Rust host tooling now forms descriptor schema2 from the exact final
 package bytes and typed compatibility constants. It includes service, sepolicy
 and module.prop identities. Core's post-customize image fence checks the selected
-ABI daemon, manifest, complete payloads, mirror bytes and execution identity;
+ABI daemon, manifest, complete passive payloads and execution identity;
 manager staging markers cannot be accepted as a running replacement. Schema1
 install descriptors are rejected without changing the public trust-store format.
-Common durable maintenance/manager/reboot orchestration is still pending.
+New signed replacements must have no main-Core autoload directory; old-source
+mirror files remain fenced for migration. Final Zygisk placement/activation is
+under renewed review in RFC0003. Common durable maintenance/manager/reboot
+orchestration is still pending.

@@ -1,3 +1,6 @@
+> Archived 2026-11-02. Historical evidence/proposals; do not treat old status or gates as current.
+> Current status: [ROADMAP](../../ROADMAP.md). [Original document snapshot](https://github.com/okhsunrog/vpnhide/blob/ae2cbbbd34f1aa8d1dbe2f851acc05b60726843d/docs/notes/setup-wizard-design.md).
+
 # Setup wizard — design (help-UX phase 4)
 
 A design proposal for the first-run setup wizard — **not yet implemented**, to be

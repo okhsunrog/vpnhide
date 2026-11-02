@@ -19,11 +19,11 @@ is off the tunnel anyway — hiding the VPN from it doesn't change its networkin
 
 ## Why the self-test can't run
 
-Accelerators usually route a fixed game list, not arbitrary apps, so they often
-won't let you add VPN Hide to their tunnel. When that's the case, the Overview
-self-test can't run — it reports that VPN Hide isn't routed through the VPN. That
-is expected, not a failure: judge hiding by whether your target app works. If your
-accelerator has a global mode, it routes VPN Hide too and the self-test runs.
+Accelerators may allow only a fixed game list. Core diagnostics does not require
+adding VPN Hide to that list: it uses its own bounded fixtures, independently
+of the accelerator's routing or whether its VPN is active. Read the recorded
+scope and missing evidence in [Diagnostics](vpnhide://diagnostics). A fresh worker
+result does not prove that a running game has consumed the same configuration.
 
 ## What this is not
 

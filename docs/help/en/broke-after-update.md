@@ -1,24 +1,21 @@
 # It stopped working after an update
 
-An Android update, a root-manager update, or a VPN Hide update can leave the
-pieces out of step for one reboot.
+An Android, root-manager or VPN Hide update can change compatibility and loaded
+versions. Check the actual reported state before changing the installation.
 
 ## Check these
 
-- **Version mismatch.** The Dashboard shows the app version and the *running
-  module version*. After installing matching components, **reboot** so the new
-  code loads. If the warning remains, check which component still needs updating;
-  a version mismatch does not always mean only a reboot is missing.
-- **Kernel changed.** A system update can change the kernel. A kernel module
-  built for the old kernel may fail to load ("Unknown symbol", "not active").
-  Reinstall the native backend that matches the new kernel, or switch to one the
-  Dashboard now recommends.
-- **LSPosed scope dropped.** Some updates reset module scopes. Re-check that
-  **System Framework** is still in VPN Hide's scope.
-- **A target app updated.** The app may have added a new detection method. Open
-  it, and if it complains again, re-check its roles — you may need **Native** or
-  **Apps** where **Java** alone used to be enough.
+- **Version mismatch:** check compatible APK/Core artifacts and the actual
+  running generation. A staged Core replacement needs its lifecycle boundary;
+  a compatible client/UI-only APK update does not imply a Core reinstall.
+- **Kernel changed:** Core derives candidates from the verified bundled catalog.
+  Keep the compatibility/load error. Do not manually choose a GKI ZIP or install
+  a separate backend archive.
+- **LSPosed scope changed:** verify that **System Framework** remains in VPN Hide's
+  scope. A newly installed APK may differ from code already loaded there.
+- **Target app updated:** review roles and restart that app after Save; it may
+  have added a detection method.
 
-After a reboot the Dashboard should read all modules **Active** again. If a
-backend won't load on the new kernel, see
+Rebooting does not guarantee that every backend becomes active. Read the specific
+setup, delivery and measured-coverage status. See
 [A module is installed but not active](module-not-active.md).

@@ -1,3 +1,6 @@
+> Archived 2026-11-02. Historical evidence/proposals; do not treat old status or gates as current.
+> Current status: [ROADMAP](../../ROADMAP.md). [Original document snapshot](https://github.com/okhsunrog/vpnhide/blob/045b58a439d62c2a1dbd407321d60a51ce8cb87b/docs/notes/kotlin-core-architecture-audit.md).
+
 # Kotlin → Rust/Core: аудит владения логикой и план удаления дублирования
 
 **Репозиторий:** okhsunrog/vpnhide. **Срез:** `045b58a439d62c2a1dbd407321d60a51ce8cb87b`, 2 ноября 2026. Только чтение исходников; без изменений проекта, запуска сборок, операций на телефоне и оценки незакоммиченной работы другого исполнителя.

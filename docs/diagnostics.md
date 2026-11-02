@@ -1,7 +1,7 @@
 # Autonomous diagnostics
 
 Core owns diagnostic admission, required plans, fingerprint/cache, attribution,
-assessment and cleanup. RPC22 publishes the retained run and assessment atomically.
+assessment and cleanup. The current RPC contract publishes the retained run and assessment atomically.
 Dashboard, Diagnostics, agent state and exports consume that same publication.
 Opening the app, changing tabs, reading state or capturing logs does not run a
 suite. Explicit Retry requests a run; repeated pending taps coalesce in the app
@@ -52,7 +52,7 @@ Addresses, routes/rules, remaining proc/sys stimuli and framework active/
 default/callback/PendingIntent controls still need implementation or expansion.
 Android bionic, SELinux, Java callback isolation and old game-process coverage need
 real device acceptance. QEMU/static libc evidence does not replace those gates.
-The [implementation ledger](notes/unified-core-implementation.md) separates these
+The [roadmap](../ROADMAP.md) separates these
 open code tasks from device/signing/publication requirements. See
 [RFC2](rfcs/0002-autonomous-diagnostics.md) for the full contract.
 

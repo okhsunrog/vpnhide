@@ -58,10 +58,11 @@ actual behavior; VPN Hide does not add routing controls to it.
 
 ## Keep VPN Hide itself in the tunnel
 
-**VPN Hide itself must be routed through the tunnel** for its self-test. If you
-cannot include it, a full self-test is unavailable. A working target app is
+Core diagnostics uses controlled fixtures and a dedicated Android worker.
+VPN Hide may be outside your VPN client's tunnel, and the VPN may be off.
+Neither condition blocks the Dashboard or diagnostics. A working target app is
 useful compatibility evidence, but does not prove complete hiding or tunnel
-retention. See [What the self-test checks](what-the-check-proves.md).
+retention. See [What diagnostics checks](what-the-check-proves.md).
 
 ## A "block connections without VPN" kill-switch
 

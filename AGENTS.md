@@ -28,7 +28,7 @@ These short files cover everything specific to this repo. Skipping them leads to
 - [docs/limits.md](docs/limits.md) — every target/config/stats capacity ceiling, what binds first, and the cost of raising it. Read before changing target caps, wire density, or backend buffers.
 - [docs/config-coordinator.md](docs/config-coordinator.md) — who owns app configuration writes: the process-owned coordinator, typed edits, drafts, phase outcomes and recovery. Read before adding any code path that writes config or applies it.
 - [docs/observation-coordinator.md](docs/observation-coordinator.md) — how root/app observations are read, invalidated, joined and quarantined, and the Dashboard/diagnostics refresh rules. Read before adding a cache or a refresh trigger.
-- [docs/notes/core-2.0-ipc-auth.md](docs/notes/core-2.0-ipc-auth.md) — the app socket, peercred auth, typed config edits, diagnostics probes and root effects. Read before touching anything privileged: the app runs no `su` (CI: `lsposed/tests/check_no_root_exec.sh`).
+- [docs/core-ipc-auth.md](docs/core-ipc-auth.md) — the app socket, peercred auth, typed config edits, diagnostics probes and root effects. Read before touching anything privileged: the app runs no `su` (CI: `lsposed/tests/check_no_root_exec.sh`).
 - [docs/detection-vectors.md](docs/detection-vectors.md) — what an app can probe to detect the VPN (or a hidden package), which component (kmod / built-in / KPM / zygisk / lsposed / SELinux) covers each vector, how it manifests. Read before adding or changing a hook.
 - [docs/diagnostics.md](docs/diagnostics.md) — Core-owned autonomous workers, controlled RAW/protected fixtures, evidence attribution, cleanup and Dashboard read models without a foreign-VPN gate. Read before touching the diagnostics/dashboard.
 - [docs/debug-bundle.md](docs/debug-bundle.md) — how to read the diagnostic bundle a bug report ships (`vpnhide_debug_*.zip` → `state.json` + raw `sections`): what every field/section means, where each is produced in code, and triage playbooks. Read when diagnosing from a user's bundle.
@@ -83,6 +83,26 @@ These short files cover everything specific to this repo. Skipping them leads to
   fixture runners and manager-owned installer shims are separate from Android
   runtime orchestration.
 
+## Documentation maintenance
+
+- Keep [ROADMAP.md](ROADMAP.md) as the sole current feature/work index, with bounded
+  status, next steps and links to decisions. Separate remaining code from actual
+  device, signing or publication gates; a helper/model/test is not a completed flow.
+- Update the relevant current contract in `docs/` with its implementation change.
+  Trace production callsites before describing behavior as current. Do not retain
+  deleted owners, gates, commands or UI instructions in active architecture docs.
+- User instructions live in `docs/help/{en, ru, zh}` and ship in the APK. Change all
+  affected locales together, preserve article IDs/deep links, and regenerate the
+  help README with `scripts/gen-help-index.py` rather than editing it by hand.
+- Record explicit decisions and reopened/paused scope in `docs/rfcs`. Preserve an
+  imported proposal's historical text and distinguish its original status from
+  later implementation approval. A newer pause overrides an older acceptance.
+- Archive chronological ledgers, audits and old experiments under dated
+  `docs/archive` paths, with source pins and historical warnings. Preserve evidence
+  and anchors; do not create another active status ledger under `notes/`.
+- Validate moved local links/anchors and generated indexes. Do not manufacture
+  completion by rewriting docs around missing code or weakening behavior tests.
+
 ## Build entry points
 
 Single-command builds for both CI and local — the same scripts run in both places.
@@ -93,7 +113,7 @@ Single-command builds for both CI and local — the same scripts run in both pla
 - **core** (required `vpnhide_core` module): `python3 core/build.py` — cargo-ndk build of the `vpnhide-core` daemon (arm64 + armv7), packaged as `core/target/vpnhide-core.zip`; same script in CI.
 - **lsposed APK**: `cd lsposed && ./gradlew :app:assembleRelease`.
 
-The Zygisk build (`zygisk/build.rs`) passes `-Wl,-z,max-page-size=16384`. Preserve it and verify ELF segment alignment for both Zygisk and the Core FFI APK library on 16 KiB-page Android devices.
+The Zygisk build (`zygisk/build.rs`) passes `-Wl,-z, max-page-size=16384`. Preserve it and verify ELF segment alignment for both Zygisk and the Core FFI APK library on 16 KiB-page Android devices.
 
 ## Reading device diagnostics from logcat
 

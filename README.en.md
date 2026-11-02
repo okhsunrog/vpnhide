@@ -8,7 +8,7 @@
 
 > **VPN Hide 2.0:** install **`vpnhide.apk`** and one **`vpnhide-core.zip`** from the same build. Core contains the kmod/KPM payloads and both Zygisk ABIs, selects and starts the applicable backend, writes configuration and applies Ports. The app uses a local socket and runs no `su`. No separate backend ZIP installation is required.
 
-> **Main branch status:** the 2.0 refactor is ongoing. Automated maintenance, expanded autonomous diagnostics and device acceptance remain incomplete; see the [implementation ledger](docs/notes/unified-core-implementation.md).
+> **Main branch status:** the 2.0 refactor is ongoing. Automated maintenance, expanded autonomous diagnostics and device acceptance remain incomplete; see the [roadmap](ROADMAP.md).
 
 
 <p align="center">

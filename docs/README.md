@@ -1,66 +1,44 @@
-# vpnhide documentation
+# VPN Hide documentation
 
-Docs here are split by **audience**. Pick the row that matches what you're doing.
+[ROADMAP.md](../ROADMAP.md) is the single current work index. It distinguishes
+implemented code, remaining implementation, decisions under review and device gates.
 
-## For users — the offline guide
+## User guide
 
-End-user documentation lives in **[`help/`](help/)** as localized Markdown
-(EN/RU/ZH). This is the single source: the same articles are synced into the app
-(**Settings → Help & guide**) and browsable here on GitHub. Start at the
-**[guide index](help/README.md)**.
+[`help/`](help/README.md) contains the current EN/RU/ZH user instructions. These same
+article IDs are shipped in the APK by `syncHelpAssets`. Start with
+[first installation](help/en/first-install.md) and [configuration](help/en/configure-hiding.md).
+Users install one full Core ZIP with a compatible APK; separate producer backend
+ZIPs and daemon-only base archives are internal build inputs.
 
-Covers install, choosing and installing a native backend, setting up hiding,
-understanding the self-test results, statistics, updating/back-up/removal, limits,
-and a glossary. The project **[README](../README.md)** is the short entry point
-that links into it.
+## Current architecture and reference
 
-## For contributors — architecture & reference
+| Contract | Scope |
+| --- | --- |
+| [Core architecture](core-architecture.md) | Ownership, single writer, typed commands, read replicas and recovery |
+| [IPC authorization](core-ipc-auth.md) | Socket identity, client/server peer credentials, resource bounds |
+| [Module lifecycle](core-module-lifecycle.md) | Actual service/startup, disable/update/removal and unimplemented boundaries |
+| [Maintenance](core-maintenance.md) | Implemented authenticated preparation/image fences; executor work still pending |
+| [App transitions](app-state-transitions.md) | Current Core-session, draft, diagnostic and export transitions |
+| [Config coordinator](config-coordinator.md) | App intents, drafts, Save and operation reconciliation |
+| [Observation coordinator](observation-coordinator.md) | Current/retained evidence, source joins and invalidation |
+| [Diagnostics](diagnostics.md) | Core-owned autonomous runs, fixtures, assessment and real remaining scope |
+| [Storage](storage.md), [persistent state](state.md) | Files, wire policy, resources and lifetime |
+| [Protocol](protocol.md), [limits](limits.md) | Shared control/telemetry and authoritative capacity contracts |
+| [Detection vectors](detection-vectors.md), [threat model](threat-model.md) | Coverage, known gaps and evidence limits |
+| [Debug bundles](debug-bundle.md), [LSPosed debugging](lsposed-hook-debugging.md) | Retained read models, exports and hook investigation |
+| [Development](development.md), [ADB root debugging](adb-root-debugging.md) | Build/validation and controlled device investigation |
+| [Kernel test configuration](ci-kernel-config-trim.md) | Reference-kernel trim and independent ABI guards |
+| [Migration](migration.md) | Isolated legacy readers and source preservation |
+| [Changelog](changelog.md), [releasing](releasing.md) | Release tooling; running a release requires separate authorization |
 
-Stable references for anyone changing the code. Read the relevant one before a PR.
+## Decisions and historical evidence
 
-| Doc | What it covers |
-|---|---|
-| [core-architecture.md](core-architecture.md) | Current core/app ownership, persistent session, typed edits, observations and recovery |
-| [notes/core-2.0-ipc-auth.md](notes/core-2.0-ipc-auth.md) | Production socket, access control and bounded RPC surface |
-| [notes/core-2.0-module-lifecycle.md](notes/core-2.0-module-lifecycle.md) | Core boot, disable, uninstall and upgrade behavior |
-| [development.md](development.md) | Prereqs, per-module build quickstart, device install, CI lints |
-| [protocol.md](protocol.md) | The frozen control/telemetry wire between core, app and backends |
-| [storage.md](storage.md) | Storage & activation design: the JSON canonical, core and the backends, strict single native backend, SELinux |
-| [state.md](state.md) | Every persistent path / proc entry / iptables chain the project touches |
-| [threat-model.md](threat-model.md) | Attacker capabilities, trusted components, security boundaries and limits of hiding/diagnostic claims |
-| [detection-vectors.md](detection-vectors.md) | What an app can probe and which component covers each vector |
-| [diagnostics.md](diagnostics.md) | How the app self-tests hiding and attributes the result |
-| [debug-bundle.md](debug-bundle.md) | How to read a user's `vpnhide_debug_*.zip` bundle |
-| [limits.md](limits.md) | Every target/config/stats capacity ceiling and what binds first |
-| [lsposed-hook-debugging.md](lsposed-hook-debugging.md) | Diagnosing why a Java-layer hook didn't attach on a ROM |
-| [adb-root-debugging.md](adb-root-debugging.md) | Making `adb shell su` useful on KernelSU/APatch/Magisk test devices |
-| [avd-magisk-testing.md](avd-magisk-testing.md) | Testing on a rooted x86_64 AVD (Magisk + Zygisk + LSPosed) |
-| [changelog.md](changelog.md) | Changelog storage (`changelog.d/` fragments) and `scripts/changelog.py` |
-| [releasing.md](releasing.md) | `scripts/release.py` usage and the version-bump flow |
-| [config-coordinator.md](config-coordinator.md) | How app configuration writes are owned: the process-owned coordinator, typed edits, drafts, phase outcomes and recovery |
-| [observation-coordinator.md](observation-coordinator.md) | How root/app observations are read, invalidated, joined and quarantined; Dashboard/diagnostics refresh rules |
+[`rfcs/`](rfcs/README.md) records proposals and explicit decisions. Accepted means
+approved implementation, not a completed feature or device proof. Reopened means
+renewed review; consult the latest scope before changing policy.
 
-Module-specific developer docs live next to their code:
-[kmod/BUILDING.md](../kmod/BUILDING.md), [kmod/kpm/README.md](../kmod/kpm/README.md),
-[builtin/README.md](../builtin/README.md) (the in-tree kernel backend),
-[lsposed/AGENTS.md](../lsposed/AGENTS.md), and each module's `README.md`.
-Repo conventions and the PR/changelog process are in
-[CONTRIBUTING.md](../CONTRIBUTING.md) and [AGENTS.md](../AGENTS.md).
-
-## Roadmap, plans & working notes
-
-Forward-looking, non-reference material — directions, plans and TODOs that aren't
-a release commitment — lives in **[`notes/`](notes/)**:
-
-- [notes/ROADMAP.md](notes/ROADMAP.md) — larger product directions
-- [notes/core-v2-hardening-plan.md](notes/core-v2-hardening-plan.md) — prioritized v2 architecture review plan: privileged boundaries, recovery, RPC bounds, diagnostics, runtime ownership and legacy removal
-- [notes/setup-wizard-design.md](notes/setup-wizard-design.md) — design proposal for the first-run setup wizard (not yet implemented)
-- [notes/app-state-transitions.md](notes/app-state-transitions.md) — the app state transition contract as implemented: machines, invariants, scenario traces, the recorded deviations and the known gaps
-- [notes/app-state-transitions-history.md](notes/app-state-transitions-history.md) — the stage-by-stage implementation log of that contract (§13–§22) with each stage's boundaries and validation
-- [notes/diagnostics-state-analysis.md](notes/diagnostics-state-analysis.md) — historical analysis of what "diagnostics" meant before the refactor and why
-- [notes/app-state-design.md](notes/app-state-design.md) — the original state redesign proposal (superseded by the contract)
-- [notes/ci-kernel-config-trim.md](notes/ci-kernel-config-trim.md) — the QEMU test-kernel trim: what it switches off and what it measures, the ABI guard that keeps it from moving a struct offset, and the options that look trimmable but are not
-- [notes/builtin-app-integration-audit.md](notes/builtin-app-integration-audit.md) — audit of how the app integrates the built-in kernel backend (picker, statistics, diagnostics, capture, reset)
-- [notes/ui-state-presentation-review.md](notes/ui-state-presentation-review.md) — design review that led to the Situation classifier; decisions recorded, two since superseded
-- [notes/vpn-poll-device-validation.md](notes/vpn-poll-device-validation.md) — device acceptance evidence for the foreground app-VPN poller and the network callback lifecycle
-- [notes/release-candidates.md](notes/release-candidates.md) — TODO: `vX.Y.Z-rc.N` pre-release tags; what already works, what blocks it (versionCode scheme, `release.py` rotation, CI notes extraction)
+[`archive/`](archive/README.md) preserves dated audits, old plans, device evidence
+and implementation history. Old VPN-dependent state machines and activator
+instructions there are historical. Do not promote their checkboxes or test counts
+into current status. `notes/` retains compatibility links for older work indexes.

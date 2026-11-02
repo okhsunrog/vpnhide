@@ -1,3 +1,6 @@
+> Archived 2026-11-02. Historical evidence/proposals; do not treat old status or gates as current.
+> Current status: [ROADMAP](../../ROADMAP.md). [Original document snapshot](https://github.com/okhsunrog/vpnhide/blob/15e0e2e0a4e747efaf9d447785bb62b5ff7dcf9a/docs/notes/vpn-poll-device-validation.md).
+
 # Foreground VPN polling and callback lifecycle validation
 
 2026-09-17, `refactor/ui-situation`, based on `54bd755e` plus the working-tree

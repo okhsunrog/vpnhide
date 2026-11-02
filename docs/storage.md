@@ -8,8 +8,8 @@ defines the single on-disk source of truth those bytes are derived from.
 App-side state ownership (config operations, observations, diagnostic runs) is
 documented in [config coordinator](config-coordinator.md),
 [observation coordinator](observation-coordinator.md) and the
-[transition contract](notes/app-state-transitions.md); the original proposal is
-kept in [notes/app-state-design.md](notes/app-state-design.md). The storage and
+[transition contract](archive/2026-11-02-app-state-transitions.md); the original proposal is
+kept in [notes/app-state-design.md](archive/2026-11-02-app-state-design.md). The storage and
 activation behavior below describes the current on-disk implementation.
 
 > **Status (2.0).** One canonical JSON desired-state file, written only by the
@@ -76,13 +76,12 @@ shared canonical file nor consume extra native target slots.
 - **Import / export = copy this one file.** It contains no device-specific secret,
   so it is safe to back up / move / share. (This is *why* the superkey is **not**
   stored here — §6.)
-- **Pre-1.0 configs are imported into it, not read alongside it.** Installs older
-  than 1.0.0 kept per-component `targets.txt`/observer files; the app folds them
-  into this JSON and deletes them (silently at startup when nothing is configured
-  yet, otherwise via a Dashboard banner offering merge / replace). Paths and
-  exact behaviour: [state.md §1](state.md), code in `migration/LegacyConfigImport.kt`. Incomplete inputs are retained; see
-  [migration boundary](migration.md).
-  Nothing outside that importer reads them — no backend has a legacy read path.
+- **Pre-1.0 configs are explicit migration inputs.** Shared Rust migration policy
+  derives the canonical replacement from Core-captured fixed sources and complete
+  UID/profile inventory. Core persists before source-bound archive cleanup;
+  incomplete/changed inputs are preserved. Kotlin owns previews and dialogs.
+  See [state paths](state.md) and [migration boundary](migration.md). Ordinary
+  backend operation does not read those files as another configuration owner.
 
 ### 2.1 Canonical JSON schema
 
@@ -271,33 +270,27 @@ does not: the hook self-reads the canonical JSON and resolves UIDs in-process.
 
 ## 4. Core and the backends (native + ports)
 
-In 2.0 a single root daemon, **VPN Hide Core** (`vpnhide-core.zip`, module id
-`vpnhide_core`, crate `crates/core-daemon`), owns every privileged step: it writes
-the canonical config, selects and loads the native backend, delivers the wire to
-it and applies the Ports iptables rules. The backend modules carry only their
-payload (`.ko`, `.kpm`, Zygisk `.so`) and no scripts; the 1.x per-module
-activators, the Ports module and the built-in companion module are gone. The app
-reaches core over its socket and never runs `su`. The design record is
-[core-architecture.md](core-architecture.md).
+In 2.0 one root daemon, **VPN Hide Core** (`vpnhide-core.zip`, module ID
+`vpnhide_core`, crate `crates/core-daemon`), owns canonical writes, native selection
+and delivery, and Ports rules. The user installs one full Core package. Backend
+producer ZIPs are internal assembly inputs; installer shims do not make them
+runtime activators. The APK uses the local socket and never runs `su`.
 
-The native backends are **strictly mutually exclusive**, enforced once per boot
-(`crates/core-daemon/src/native_boot.rs`). The candidates are every installed
-kmod, KPM or Zygisk module (`module.prop` present, no `disable`, no `remove`), the
-built-in driver when `/proc/vpnhide_ctl` reports backend `0x4`, a live kmod, and a
-live KPM core did not load (APatch autoload, a hand-loaded `.kpm`). An installed
-module and its own live payload count as one candidate.
+The verified bundled catalog and complete UID inventory freeze backend/payload/
+policy projections before journaled effects. Builtin and bundled alternatives
+are assessed for actual applicability; coexisting payload files are not a conflict.
+Actual incompatible residents or unknown load effects stop unsafe progression.
+Fallback requires bounded durable no-effect evidence, not a diagnostic failure.
+Save/Repair preserve attempt identity and delivery evidence. `native_boot.json`
+is diagnostic output; the private journal is authority. See
+[Core architecture](core-architecture.md) and [module lifecycle](core-module-lifecycle.md).
 
-- **More than one candidate:** core loads nothing, delivers config to nothing,
-  retires Zygisk's targets and publishes `Conflict`. The Dashboard asks the user
-  to keep one backend and reboot.
-- **Exactly one:** core loads it (or adopts it when it is already live).
-- **None:** `NoBackend`; only LSPosed and Ports protect.
-
-The decision is persisted with the kernel `boot_id` (`native_boot.json`) and is
-fixed for the whole boot. A later Save or `RepairActivation` delivers config only
-to the selected backend; a core restart in the same boot re-adopts it. The one
-exception is a KPM waiting for authentication, which core retries once the
-SuperKey is saved.
+The main Core package now contains one passive Zygisk pair and no top-level
+`zygisk/` directory. A complete discovery runtime has not been implemented;
+publication/transition and partial-health policy remain under
+[reopened review](rfcs/0003-conditional-zygisk-publication.md). Legacy module-dir
+readers remain scoped to compatibility/recovery. Existing possible-hook-exposure
+guards prohibit same-boot kernel transitions after Zygisk consumption.
 
 ### 4.1 Workspace layout
 
@@ -561,7 +554,7 @@ optional.
 | `/data/system/vpnhide_config.json` | **the** canonical config (managed, exported) | persistent |
 | `/proc/vpnhide_ctl` | kmod runtime channel (node, not a file) | per-boot, in-kernel |
 | KPM ctl0 supercall | KPM runtime channel (supercall, no file) | per-boot, in-kernel |
-| `/data/adb/modules/vpnhide_zygisk/targets.txt` | Zygisk runtime channel (derived copy) | regenerated |
+| Verified Zygisk recipient authorization | Boot/operation/generation-bound derived policy; legacy `vpnhide_zygisk/targets.txt` is compatibility-only | journaled publication/revocation; hooks may outlive it |
 | `/data/system/vpnhide_lsposed_state` | LSPosed status + stats (hook → dashboard) | per-boot |
 | `/data/adb/vpnhide/superkey` | APatch superkey (optional, flag-gated) | persistent, root-only |
 | `/data/adb/vpnhide/core/` | core's journal, boot decision and logs ([state.md](state.md)) | persistent, root-only |

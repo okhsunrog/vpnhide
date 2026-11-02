@@ -19,7 +19,7 @@ by itself supply the Zygisk implementation needed by that backend.
 
 ## What to install
 
-Start with [First install](first-install.md), then [choose one native backend](choosing-native.md).
+Start with [First install](first-install.md), then [read how Core selects a native backend](choosing-native.md).
 Kernel hooks avoid injecting libc hooks into the target process, but do not promise
 invisibility to every anti-tamper or root check. VPN Hide does not hide root or
 provide Play Integrity attestation.

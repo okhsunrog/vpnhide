@@ -1,8 +1,55 @@
 # RFC 0003: conditional Zygisk discovery owned by Core
 
-Status: **Accepted** (maintainer approval, 2026-11-02). Implementation and device
-acceptance are separate; see the implementation ledger. This supersedes the
-permanent autoload mirrors introduced during the unified bundle cutover.
+Status: **Reopened for lifecycle review** (2026-11-02). The maintainer first
+approved implementation, then explicitly paused new conditional publication and
+boot-bound activation policy pending a full lifecycle matrix. ZIP deduplication
+remains required; final placement and activation policy are under review. The
+package-only implementation already committed is preserved, not declared a
+completed Zygisk runtime. See [the current roadmap](../../ROADMAP.md).
+
+The sections below preserve the previously approved proposal and its constraints;
+they are not authority to continue the paused activation redesign. Review covers
+fresh install,1.x migration,APK-only and Core patch/minor updates,kernel changes,
+builtin appearance,fallback and boot failures, including multi-week uptime and
+avoiding unnecessary repeated reboots. A remembered successful backend is a
+proposal, not authorization or proof of current applicability. Mapping and
+installed hooks remain separate; safe coexistence cannot be assumed.
+
+## Reopened review notes
+
+The following are proposals, not approval to implement new transition policy:
+stick with a healthy backend during uptime; validate a previous successful backend
+as a next-boot hint; combine migration/update preparation with an already needed
+boot; offer Auto and an exact Manual backend without hidden fallback. Partial
+useful coverage and confirmed total failure need different product decisions.
+Kernel-to-kernel transitions may require a reboot; that does not authorize an
+automatic reboot or a chain of automatic attempts.
+
+The default UX must minimize cognitive load: routine partial coverage must not
+produce a backend-choice popup. Advanced Manual control is under discussion;
+automatic recovery still needs a complete safe decision table. Evaluate missing
+hooks against desired features and demonstrated compatible benefit, not merely a
+nonzero status. No blind trials or unknown hook overlap follow from this principle.
+
+**Confirmed invariant: Core never reboots the phone automatically.** Preparation
+and the user's decision to reboot are separate. No reboot timer is allowed.
+
+Current selection uses fixed-priority eligible candidates and frozen plans.
+Automatic progression requires durable no-effect evidence and clear ownership;
+unknown load effects stop it. Diagnostic failure does not initiate fallback.
+No Auto/Manual setting, previous-backend hint or projection executor exists.
+
+The health review must separate load, config delivery, required hook coverage and
+behavioral proof. Current resident admission in
+[`bundled.rs`](../../crates/core-daemon/src/native_boot/prepared/bundled.rs)
+collapses a nonzero status error into an empty hook mask, while KPM configuration
+can accept PartialHooks and the read model presents a warning. This inconsistency
+is unresolved; neither blanket nonzero-error fallback nor silently accepting any
+partial mask is an approved fix. Missing process-coverage proof is separate again.
+
+The earlier proposal below is preserved for review, including constraints now
+being reconsidered. Its boot-bound descriptions are not new implementation
+permission.
 
 ## Decision and scope
 
