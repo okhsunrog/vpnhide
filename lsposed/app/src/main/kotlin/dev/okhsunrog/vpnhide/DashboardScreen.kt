@@ -142,7 +142,10 @@ fun DashboardScreen(
     }
 
     if (state == null && loadError == null) {
-        DashboardLoadingState(modifier = modifier)
+        Column(modifier = modifier.padding(16.dp)) {
+            CoreComponentCard(display.core, index = 0, count = 1)
+            DashboardLoadingState()
+        }
         return
     }
 
@@ -192,7 +195,10 @@ fun DashboardScreen(
                 onRetry = { DashboardCache.refresh(context, selfNeedsRestart) },
             )
             Spacer(Modifier.height(12.dp))
-            if (s == null) return@Column
+            if (s == null) {
+                CoreComponentCard(display.core, index = 0, count = 1)
+                return@Column
+            }
         }
         val loadedState = s ?: return@Column
 
@@ -236,7 +242,7 @@ fun DashboardScreen(
         // Module status cards — one grouped block (byIndex corners).
         SectionHeader(stringResource(R.string.dashboard_modules))
         Spacer(Modifier.height(8.dp))
-        // Java, one native backend (docs/storage.md §4.3), and the separate ports feature.
+        // Three components; Ports is a subordinate Core function.
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             JavaBackendCard(loadedState.lsposed, index = 0, count = 3)
             NativeBackendCard(
@@ -247,7 +253,7 @@ fun DashboardScreen(
                 index = 1,
                 count = 3,
             )
-            ModuleCard(stringResource(R.string.dashboard_ports), "P", loadedState.ports, loadedState.portsTargetCount, index = 2, count = 3)
+            CoreComponentCard(loadedState.core)
         }
         loadedState.nativeInstallRecommendation?.let { recommendation ->
             Spacer(Modifier.height(8.dp))
@@ -923,46 +929,6 @@ private fun installedVisual(
     )
 }
 
-@Composable
-private fun ModuleCard(
-    name: String,
-    badgeText: String,
-    state: ModuleState,
-    targetCount: Int,
-    selfNeedsRestart: Boolean = false,
-    index: Int = -1,
-    count: Int = 1,
-) {
-    when (state) {
-        is ModuleState.NotInstalled -> {
-            ModuleCardShell(
-                name = name,
-                badgeText = badgeText,
-                index = index,
-                count = count,
-                version = null,
-                subtitle = stringResource(R.string.dashboard_not_installed),
-                accentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                accentContainerColor = AppColors.neutralAccentContainer,
-            )
-        }
-
-        is ModuleState.Installed -> {
-            val v = installedVisual(state, targetCount, selfNeedsRestart)
-            ModuleCardShell(
-                name = name,
-                badgeText = badgeText,
-                index = index,
-                count = count,
-                version = state.version,
-                subtitle = v.subtitle,
-                accentColor = v.accentColor,
-                accentContainerColor = v.accentContainerColor,
-            )
-        }
-    }
-}
-
 /** The always-on Java backend (LSPosed). Badge "J"; subtitle is "LSPosed · …". */
 @Composable
 private fun JavaBackendCard(
@@ -1080,6 +1046,58 @@ private fun NativeBackendCard(
         subtitle = stringResource(R.string.dashboard_backend_line, backendName, v.subtitle),
         accentColor = v.accentColor,
         accentContainerColor = v.accentContainerColor,
+    )
+}
+
+@Composable
+private fun CoreComponentCard(
+    core: CoreDashboardData,
+    index: Int = 2,
+    count: Int = 3,
+) {
+    val ready = core.health == CoreHealth.Ready
+    val failed =
+        core.health in
+            setOf(
+                CoreHealth.Unavailable,
+                CoreHealth.ProtocolMismatch,
+                CoreHealth.PermissionDenied,
+                CoreHealth.StartupFault,
+                CoreHealth.StorageFault,
+            )
+    val subtitle =
+        buildString {
+            append(stringResource(coreHealthResource(core.health)))
+            core.detail?.let { append("\n").append(it) }
+            append("\n").append(stringResource(R.string.dashboard_core_installed, core.installedVersion ?: "—"))
+            append("\n").append(
+                stringResource(
+                    R.string.dashboard_core_ports,
+                    stringResource(R.string.dashboard_ports),
+                    core.portsTargets?.toString() ?: "—",
+                    stringResource(corePortsResource(core.ports)),
+                ),
+            )
+        }
+    ModuleCardShell(
+        name = "VPN Hide Core",
+        badgeText = "C",
+        version = null,
+        subtitle = subtitle,
+        accentColor =
+            when {
+                ready -> StatusColors.successDot
+                failed -> StatusColors.errorDot
+                else -> StatusColors.warningAccent
+            },
+        accentContainerColor =
+            when {
+                ready -> StatusColors.successContainer()
+                failed -> StatusColors.errorContainer()
+                else -> StatusColors.warningContainer()
+            },
+        index = index,
+        count = count,
     )
 }
 

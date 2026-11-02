@@ -193,7 +193,14 @@
         "nativePartialHooks": false,
         "messages": [],
         "installedOptionalHooks": [],
-        "legacyImport": null
+        "legacyImport": null,
+        "core": {
+            "health": "Connecting",
+            "installedVersion": null,
+            "detail": null,
+            "ports": "Unknown",
+            "portsTargets": null
+        }
     },
     "beforeCapture": {
         "observedAt": "2026-08-22T11:59:59+0300",

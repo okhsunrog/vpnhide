@@ -705,4 +705,22 @@
     <string name="export_reason_java_attach">recommended — this boot reports missing methods or hook installation errors.</string>
     <string name="export_reason_configuration">not recommended — resolve backend configuration or authentication first; logs are included.</string>
     <string name="debug_export_actual">Collected: %1$d kernel images, %2$d framework files. Java files skipped: %3$d. Collection reports in the archive explain missing items.</string>
+    <string name="core_health_connecting">Checking connection…</string>
+    <string name="core_health_unavailable">Core unavailable</string>
+    <string name="core_health_stale">Connection lost; previous state is stale</string>
+    <string name="core_health_protocolmismatch">Incompatible core protocol</string>
+    <string name="core_health_permissiondenied">Permission denied connecting to core</string>
+    <string name="core_health_ready">Connected · ready</string>
+    <string name="core_health_startupfault">Connected · startup recovery required</string>
+    <string name="core_health_storagefault">Connected · storage error</string>
+    <string name="core_health_paused">Connected · changes paused</string>
+    <string name="core_health_configurationrequired">Connected · configuration required</string>
+    <string name="core_ports_unknown">Rule application unverified</string>
+    <string name="core_ports_disabled">Disabled · removal confirmed</string>
+    <string name="core_ports_applied">Rules applied</string>
+    <string name="core_ports_pending">Applying rules</string>
+    <string name="core_ports_failed">Applying rules failed</string>
+    <string name="dashboard_core_installed">Installed version (last observation): %1$s</string>
+    <string name="dashboard_core_ports">%1$s · targets: %2$s · %3$s</string>
+    <string name="core_ports_held">Rule application paused · recovery required</string>
 </resources>

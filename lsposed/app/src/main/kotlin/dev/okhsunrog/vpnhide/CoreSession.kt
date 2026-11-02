@@ -23,6 +23,7 @@ internal data class CoreSessionUpdate(
     val protocolSkew: Boolean = false,
     val sequence: Long = 0,
     val connectionGeneration: Long = 0,
+    val failureDetail: String? = null,
 )
 
 /** Commands and an authoritative publication stream; no app-side root phase executor. */
@@ -148,7 +149,7 @@ internal class FfiCoreSessionClient(
             }
         if (generation != null) {
             synchronized(publicationLock) {
-                order = failCorePublication(order, generation, request, error is CoreException.ProtocolSkew)
+                order = failCorePublication(order, generation, request, error is CoreException.ProtocolSkew, error.message?.take(512))
                 mutableUpdates.value = order.update
             }
         }

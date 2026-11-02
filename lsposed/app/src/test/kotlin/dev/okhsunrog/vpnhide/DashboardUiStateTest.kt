@@ -62,6 +62,10 @@ class DashboardUiStateTest {
         // Native layer counts once (kmod active); +LSPosed = 2 of the 3 layers.
         assertEquals(2, activeModuleCount(state))
         assertEquals("2/3", moduleSummaryText(state))
+        val ready = state.copy(core = CoreDashboardData(health = CoreHealth.Ready))
+        assertEquals("3/3", moduleSummaryText(ready))
+        assertEquals(3, activeModuleCount(ready.copy(ports = ModuleState.NotInstalled)))
+        assertEquals(2, activeModuleCount(state.copy(ports = ModuleState.Installed(version = "stale", active = true))))
     }
 
     @Test

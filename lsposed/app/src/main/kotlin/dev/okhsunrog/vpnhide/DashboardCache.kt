@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 internal data class DashboardPresentation(
     val diagnostics: DiagnosticSnapshot,
     val state: DashboardState?,
+    val core: CoreDashboardData = CoreDashboardData(),
 )
 
 /**
@@ -51,17 +52,36 @@ internal object DashboardCache : ContextStateCache<RootProjection<DashboardRootF
         // are app-local settings, and a DataStore write invalidates no
         // observation, so a toggle would otherwise not show until the next
         // refresh. See [DeveloperFlagsCache].
-        combine(value, DiagnosticsCache.snapshot, DeveloperFlagsCache.flags, AppLanguageContext.context) { facts, snapshot, developer, _ ->
+        combine(
+            value,
+            DiagnosticsCache.snapshot,
+            DeveloperFlagsCache.flags,
+            AppLanguageContext.context,
+            CoreSessions.updates,
+        ) { facts, snapshot, developer, _, core ->
             val context = inputs?.context
             val state =
                 if (facts?.belongsTo(snapshot.rootSnapshot) == true && context != null && snapshot.presentation.lastAttempt != null &&
                     developer != null
                 ) {
-                    assembleDashboardState(context, facts.value, snapshot.presentation, developer)
+                    assembleDashboardState(context, facts.value, snapshot.presentation, developer, core)
                 } else {
                     null
                 }
-            DashboardPresentation(snapshot, state)
+            DashboardPresentation(
+                snapshot,
+                state,
+                coreDashboardData(
+                    core,
+                    (
+                        facts
+                            ?.value
+                            ?.modules
+                            ?.ports
+                            ?.state as? ModuleState.Installed
+                    )?.version,
+                ),
+            )
         }.stateIn(ObservationRuntime.scope, SharingStarted.Eagerly, DashboardPresentation(DiagnosticsCache.snapshot.value, null))
     }
 

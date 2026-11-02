@@ -624,3 +624,14 @@ counters and the measured app view. RPC 13 requires a matching APK/core pair and
 rebooting system_server to run updated LSPosed instrumentation. Device acceptance
 must verify real APEX/classloader origins, SELinux reads, missing-core fallback,
 manual overrides and real archive size/time on the target ROM.
+
+### Core component status (additive schema 3 field)
+
+`dashboard.core` records the same component health shown on the Dashboard:
+`health`, bounded failure `detail`, `installedVersion` (last observed module.prop,
+not the running daemon version), `portsTargets` (current desired entries) and
+`ports` (current-revision delivery: Unknown/Disabled/Applied/Pending/Failed/Held).
+The old `ports` ModuleState still records root-observed chain presence for
+troubleshooting; it is no longer the source of Core health or the x/3 count.
+Core status follows the live session even when root-derived facts are retained.
+Connection/operational readiness is separate from VPN-hiding test results.

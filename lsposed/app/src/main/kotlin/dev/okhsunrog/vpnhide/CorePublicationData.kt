@@ -39,6 +39,7 @@ internal fun failCorePublication(
     connectionGeneration: Long,
     request: Long,
     protocolSkew: Boolean,
+    failureDetail: String? = null,
 ): CorePublicationData {
     if (connectionGeneration < order.update.connectionGeneration ||
         (connectionGeneration == order.successfulStateGeneration && request < order.latestSuccessfulRequest) ||
@@ -51,6 +52,7 @@ internal fun failCorePublication(
             order.update.copy(
                 current = false,
                 protocolSkew = protocolSkew,
+                failureDetail = failureDetail,
                 sequence = order.update.sequence + 1,
                 connectionGeneration = connectionGeneration,
             ),

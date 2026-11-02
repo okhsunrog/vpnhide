@@ -568,3 +568,23 @@ Core arm64/armv7 packaging and both module-boundary scripts passed. The local AP
 uses the temporary validation key, not the project's installation key. GitHub
 Actions status remains unverified because previously denied access was not retried.
 No device acceptance or deployment was performed.
+
+### Dashboard Core card (2026-11-02)
+
+Replaced the legacy Ports component card/count with live Core health, retaining
+Ports as a subordinate function with desired targets and typed delivery evidence.
+Connection failure detail is retained through the existing publication ordering
+fence and cleared on successful reconnect. Startup/protocol/storage/permission,
+stale state and recovery holds are surfaced without treating iptables as Core
+liveness. Installed metadata is explicitly distinct from the live process.
+Existing recovery controls, RPC 13, backend protocol and migrations are unchanged.
+Small-screen rendering and real device disconnect/recovery remain device checks.
+
+Validation: 889 JVM tests passed, including Core state transitions, publication
+failure fencing, current-revision Ports delivery and component counts. ktlint,
+detekt, CPD, lintDebug, the no-root-exec boundary check and R8 Debug APK build
+passed. The additive `dashboard.core` schema golden was regenerated, reviewed and
+then verified separately without regeneration. Rust/core sources were unchanged;
+Rust tests were not rerun for this UI-only iteration. The local APK uses the
+validation signing key. Device checks and GitHub Actions status remain unverified;
+previously forbidden Actions access was not retried.

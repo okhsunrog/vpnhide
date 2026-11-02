@@ -305,3 +305,26 @@ plain launch defaults to current UID/0600 with strict explicit overrides. Mandat
 endpoint preparation completes before handlers start. Failures retry only the app
 endpoint, preserving core/receipt lifecycle. This small configuration type introduces
 no new runtime profile, wire DTO or transport; see [IPC authorization](notes/core-2.0-ipc-auth.md).
+
+### Dashboard component health
+
+The three component cards and x/3 summary represent Java, Native and Core. Ports
+is a Core function, not a third executable. Core health follows the accepted
+`CoreSessions` publication directly, independently of slow root inventory. A live
+connection is necessary but not sufficient for Ready: startup/storage faults,
+mutation/recovery holds and missing canonical configuration remain explicit.
+Offline publications cannot reuse a last-good state as healthy. Existing startup
+errors and configuration recovery controls remain the action paths; no new probe
+or recovery engine is introduced. The Core card is also available while root
+inventory is loading or has failed.
+
+The module.prop version is labelled as installed metadata from the last root
+observation. The app's publication does not expose the running daemon's release
+version, so this value is never presented as a live RPC version. Protocol skew is
+reported separately. A missing version does not imply a missing live daemon.
+
+The subordinate Ports line separates desired target count from delivery. Applied
+(or confirmed removal when no targets remain) requires typed Ports evidence for
+the current config revision. Running, failed, held and unverified delivery have
+separate labels. Old chains or an earlier revision cannot confirm the new policy.
+Core Ready and the component count do not prove that VPN hiding checks passed.

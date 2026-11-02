@@ -319,6 +319,7 @@ internal data class DashboardState(
     // A pre-1.0 config still on disk next to a config that already has roles —
     // the startup importer leaves that case to the user (LegacyConfigImport).
     val legacyImport: LegacyImportPrompt? = null,
+    val core: CoreDashboardData = CoreDashboardData(),
 )
 
 internal fun protectionFullyPassed(protection: ProtectionCheck): Boolean =
@@ -328,13 +329,13 @@ internal fun protectionFullyPassed(protection: ProtectionCheck): Boolean =
 
 internal fun moduleSummaryText(state: DashboardState): String = "${activeModuleCount(state)}/3"
 
-// Three logical layers now: Java (LSPosed), Native (the one active backend),
-// and Ports. The native layer counts once regardless of which backend serves it.
+// Three components: Java (LSPosed), Native (the one active backend),
+// and Core. Ports policy does not determine Core availability.
 internal fun activeModuleCount(state: DashboardState): Int =
     listOf(
         state.lsposed is LsposedState.Active,
         moduleActive(state.nativeBackend.state),
-        moduleActive(state.ports),
+        state.core.health == CoreHealth.Ready,
     ).count { it }
 
 internal fun moduleActive(state: ModuleState): Boolean = (state as? ModuleState.Installed)?.active == true
@@ -1288,6 +1289,7 @@ internal data class DashboardRootFacts(
     val installedOptionalHooks: Set<HookIds.Hook>,
     val partialHookGap: PartialHookGap?,
     val legacyImport: LegacyImportPrompt?,
+    val coreUpdate: CoreSessionUpdate = CoreSessionUpdate(),
 )
 
 /**
@@ -1361,7 +1363,7 @@ internal suspend fun loadDashboardState(
 ): DashboardState {
     val facts = deriveDashboardRootFacts(context, selfNeedsRestart, rootSnapshot)
     val developer = SettingsRepository(context.applicationContext).settings.first().toDeveloperFlags()
-    return assembleDashboardState(context, facts, diagnostics, developer)
+    return assembleDashboardState(context, facts, diagnostics, developer, CoreSessions.updates.value)
 }
 
 /**
@@ -1431,6 +1433,7 @@ internal suspend fun deriveDashboardRootFacts(
         installedOptionalHooks = installedOptionalHooks,
         partialHookGap = partialHookGap(modules.nativeBackend, installedOptionalHooks, nativeStatusError),
         legacyImport = parseLegacyConfigCandidate(sections, targetsSnapshot.uidToPkg)?.toPrompt(),
+        coreUpdate = rootSnapshot.core,
     )
 }
 
@@ -1445,6 +1448,7 @@ internal fun assembleDashboardState(
     facts: DashboardRootFacts,
     diagnostics: DiagnosticPresentation,
     developer: DeveloperFlags,
+    coreUpdate: CoreSessionUpdate = facts.coreUpdate,
 ): DashboardState {
     val localized = AppLanguageContext.localized(context)
     val protection = resolveProtectionFacts(facts, diagnostics)
@@ -1469,5 +1473,7 @@ internal fun assembleDashboardState(
             )
         }
     VpnHideLog.i(TAG, "protection=${protection.check} messages=$messages")
-    return dashboardFacts.toDashboardState(messages = messages, legacyImport = facts.legacyImport)
+    return dashboardFacts.toDashboardState(messages = messages, legacyImport = facts.legacyImport).copy(
+        core = coreDashboardData(coreUpdate, (facts.modules.ports.state as? ModuleState.Installed)?.version),
+    )
 }

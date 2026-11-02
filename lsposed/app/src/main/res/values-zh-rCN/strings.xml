@@ -662,4 +662,22 @@
     <string name="export_reason_java_attach">建议包含：本次启动报告了方法缺失或钩子安装错误。</string>
     <string name="export_reason_configuration">不建议包含：应先检查后端配置或授权；日志已包含。</string>
     <string name="debug_export_actual">已收集：%1$d 个内核镜像、%2$d 个框架文件。跳过 %3$d 个 Java 文件。归档中的收集报告说明了缺失项。</string>
+    <string name="core_health_connecting">正在检查连接…</string>
+    <string name="core_health_unavailable">Core 不可用</string>
+    <string name="core_health_stale">连接丢失；之前的状态已过期</string>
+    <string name="core_health_protocolmismatch">Core 协议不兼容</string>
+    <string name="core_health_permissiondenied">没有连接 Core 的权限</string>
+    <string name="core_health_ready">已连接 · 就绪</string>
+    <string name="core_health_startupfault">已连接 · 需要启动恢复</string>
+    <string name="core_health_storagefault">已连接 · 存储错误</string>
+    <string name="core_health_paused">已连接 · 更改已暂停</string>
+    <string name="core_health_configurationrequired">已连接 · 需要配置</string>
+    <string name="core_ports_unknown">规则应用未确认</string>
+    <string name="core_ports_disabled">已关闭 · 已确认移除规则</string>
+    <string name="core_ports_applied">规则已应用</string>
+    <string name="core_ports_pending">正在应用规则</string>
+    <string name="core_ports_failed">应用规则失败</string>
+    <string name="dashboard_core_installed">已安装版本（上次观察）：%1$s</string>
+    <string name="dashboard_core_ports">%1$s · 目标：%2$s · %3$s</string>
+    <string name="core_ports_held">应用已暂停 · 需要恢复</string>
 </resources>
