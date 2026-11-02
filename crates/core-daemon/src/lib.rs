@@ -25,6 +25,7 @@ pub mod native_boot;
 pub mod observer;
 pub mod operation;
 pub mod ownership;
+pub mod payloads;
 pub mod ports;
 pub mod probe_cli;
 pub mod publisher;
