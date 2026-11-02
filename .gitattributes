@@ -4,3 +4,5 @@
 # even per pair of identical slugs — `union` is belt-and-suspenders for
 # the astronomically rare filename clash.
 changelog.d/*.md merge=union
+# Patch context/removal lines retain upstream whitespace for exact application.
+provisioning/kpatch-next/patches/*.patch whitespace=-blank-at-eol

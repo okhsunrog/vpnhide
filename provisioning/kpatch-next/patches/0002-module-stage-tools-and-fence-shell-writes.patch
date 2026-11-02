@@ -1,0 +1,682 @@
+diff --git a/build.sh b/build.sh
+index b36b210..aef9003 100644
+--- a/build.sh
++++ b/build.sh
+@@ -1,78 +1,4 @@
+-#!/bin/bash
+-
+-if [[ $1 == "clean" ]]; then
+-    rm -rf out module/bin module/webroot
+-    exit 0
+-fi
+-
+-mkdir -p out module/bin module/webroot
+-
+-# Build WebUI
+-cd webui
+-pnpm build || pnpm install && pnpm build
+-cd ..
+-
+-# Read versions from version.properties
+-get_ver() {
+-    [ -f version.properties ] && grep "^$1[[:space:]]*=" version.properties | cut -d'=' -f2 | xargs | sed 's/^"//;s/"$//'
+-}
+-
+-download_assets() {
+-    local repo="$1"
+-    local tag="$2"
+-    shift 2
+-    local patterns=("$@")
+-
+-    local url="https://api.github.com/repos/$repo/releases"
+-    if [[ "$tag" == "latest" ]]; then
+-        url="$url/latest"
+-    else
+-        url="$url/tags/$tag"
+-    fi
+-
+-    local release_json=$(curl -s "$url")
+-    
+-    for pattern in "${patterns[@]}"; do
+-        local regex="${pattern//\*/.*}"
+-        local asset_data=$(echo "$release_json" | jq -r ".assets[] | select(.name | test(\"$regex\")) | .name + \"\t\" + .browser_download_url" | head -n 1)
+-        if [[ -z "$asset_data" ]]; then
+-            echo "Error: Could not find asset matching $pattern in $repo $tag"
+-            continue
+-        fi
+-        local asset_name=$(echo "$asset_data" | cut -f1)
+-        local download_url=$(echo "$asset_data" | cut -f2)
+-        echo "Downloading $asset_name from $download_url"
+-        curl -L "$download_url" -o "module/bin/$asset_name"
+-    done
+-}
+-
+-VERSION_KPATCH_NEXT=$(get_ver "kpatch-next")
+-VERSION_KPATCH_NEXT="${VERSION_KPATCH_NEXT:-latest}"
+-VERSION_MAGISKBOOT=$(get_ver "magiskboot")
+-VERSION_MAGISKBOOT="${VERSION_MAGISKBOOT:-latest}"
+-
+-# Fetch KPatch-Next binaries
+-if [[ ! -f "module/bin/kpatch" || ! -f "module/bin/kpimg" || ! -f "module/bin/kptools" ]]; then
+-    download_assets "KernelSU-Next/KPatch-Next" "$VERSION_KPATCH_NEXT" "kpatch-android" "kpimg-linux" "kptools-android"
+-
+-    mv module/bin/kpatch-android module/bin/kpatch
+-    mv module/bin/kptools-android module/bin/kptools
+-    mv module/bin/kpimg-linux module/bin/kpimg
+-fi
+-
+-# Fetch magiskboot
+-if [[ ! -f "module/bin/magiskboot" ]]; then
+-    download_assets "topjohnwu/Magisk" "$VERSION_MAGISKBOOT" "Magisk*.apk"
+-
+-    APK=$(ls module/bin/Magisk*.apk | head -n 1)
+-    unzip -p "$APK" 'lib/arm64-v8a/libmagiskboot.so' > "module/bin/magiskboot"
+-    rm "$APK"
+-fi
+-
+-# zip module
+-commit_number=$(git rev-list --count HEAD)
+-commit_hash=$(git rev-parse --short HEAD)
+-
+-cd module
+-zip -r ../out/KPatch-Next-${commit_number}-${commit_hash}.zip .
+-cd ..
++#!/bin/sh
++set -eu
++# No release API, latest tag, wildcard assets or executable downloads.
++exec python3 "${0%/*}/build_offline.py" --source "${0%/*}" "$@"
+diff --git a/build_offline.py b/build_offline.py
+new file mode 100644
+index 0000000..3aaf6e2
+--- /dev/null
++++ b/build_offline.py
+@@ -0,0 +1,131 @@
++#!/usr/bin/env python3
++"""Package a pinned fork from locally supplied, hash-bound tools. No downloads."""
++
++import argparse
++import hashlib
++import json
++import stat
++import subprocess
++import zipfile
++from pathlib import Path
++
++MODULE_COMMIT = "b5612adf4d4085a253cb0be30fa1be36e11d09db"
++ENGINE_COMMIT = "456744b29efb9989445463ab29e368fa59a103c4"
++SAFETY_FILES = {
++    "action.sh": "4350f1fd449a1b481a841fc2eec32a3d45d70b29862e7cb485f8200da9aacc92",
++    "banner.png": "40f0086d36e73a4f5ee56f90ade4216b218d7327f1304f2c82a212fa255e0c52",
++    "customize.sh": "4146cbf29a2fe6a7a53fec97a2eb3af2ba3ced8490563a0c88cda6a2d8260452",
++    "module.prop": "bbfe17e5061bae2fbf98b0b6377cf2a1de8f8df20159ef4cb103f0e61d245864",
++    "patch/boot_extract.sh": "7aa762c11c6c43c2dc1d51b2cfdb411efcbc06a829612e9b712963079756c6f6",
++    "patch/boot_patch.sh": "522af7469fb48fa68af5bcb09f17e86992221c3ebb5fd03217d760506f39b5f3",
++    "patch/boot_unpatch.sh": "ea8a4d6d84cfbb46ca0101de3671aefc22577d725631be16644d4a081737c47a",
++    "patch/util_functions.sh": "62e4f6d2129c4dee6839bfb2aed80b7b7e01cca900c70daf5a01caa88041584f",
++    "post-fs-data.sh": "02a84efa14db03d7acfd9f33957c426f1c4a1e027331e5594c1db076c95aee51",
++    "service.sh": "dcd82443f2588cb187536ce0343cd1882f11156d0f21185dae89c662bd595ab1",
++    "status.sh": "bb2add0b0beca56c36cf44b83142c5981dee078ee5ca22d0807126c36c5b1571",
++    "uninstall.sh": "a9634318d29a87df790a3a8b7ec99c1e9a5d6273bf2d98cefb98b80ba1c2a291",
++}
++TOOLS = ("kpimg", "kptools", "kpatch", "magiskboot")
++
++
++def read_regular(path, limit):
++    info = path.lstat()
++    if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= limit:
++        raise ValueError(f"not a bounded regular input: {path}")
++    data = path.read_bytes()
++    after = path.lstat()
++    if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (
++        after.st_dev,
++        after.st_ino,
++        after.st_size,
++        after.st_mtime_ns,
++        after.st_ctime_ns,
++    ):
++        raise ValueError(f"input changed while reading: {path}")
++    return data
++
++
++def prepare(source, tools, manifest):
++    commit = subprocess.check_output(
++        ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
++    ).strip()
++    if (
++        commit != MODULE_COMMIT
++        or manifest.get("module_commit") != MODULE_COMMIT
++        or manifest.get("engine_commit") != ENGINE_COMMIT
++    ):
++        raise ValueError("source commits do not match the reviewed fork bases")
++    if set(manifest.get("tools", {})) != set(TOOLS):
++        raise ValueError("all four pinned tools are required")
++    for name, expected in SAFETY_FILES.items():
++        if (
++            hashlib.sha256(read_regular(source / "module" / name, 1024 * 1024)).hexdigest()
++            != expected
++        ):
++            raise ValueError(f"required reviewed module patch is missing or changed: {name}")
++    files = {}
++    for name in TOOLS:
++        record = manifest["tools"][name]
++        data = read_regular(tools / name, 64 * 1024 * 1024)
++        if (
++            record.get("bytes") != len(data)
++            or record.get("sha256") != hashlib.sha256(data).hexdigest()
++        ):
++            raise ValueError(f"tool hash/size mismatch: {name}")
++        origin = record.get("source_commit", "")
++        if len(origin) != 40 or any(c not in "0123456789abcdef" for c in origin):
++            raise ValueError(f"tool source is not an immutable commit: {name}")
++        if name != "magiskboot" and origin != ENGINE_COMMIT:
++            raise ValueError(f"engine/tool source tuple mismatch: {name}")
++        if name == "kpimg":
++            if not data.startswith(b"KP2026"):
++                raise ValueError("engine is not the reviewed Next payload family")
++        elif (
++            len(data) < 64
++            or data[:6] != b"\x7fELF\x02\x01"
++            or int.from_bytes(data[18:20], "little") != 183
++        ):
++            raise ValueError(f"tool is not ARM64 little-endian ELF: {name}")
++        files[f"bin/{name}"] = (data, 0o755)
++    for path in sorted((source / "module").rglob("*")):
++        if path.is_dir() and not path.is_symlink():
++            continue
++        name = path.relative_to(source / "module").as_posix()
++        if name.startswith(("bin/", "webroot/")):
++            continue
++        if name not in SAFETY_FILES:
++            raise ValueError(f"unexpected module payload: {name}")
++        data = read_regular(path, 4 * 1024 * 1024)
++        files[name] = (data, 0o755 if name.endswith(".sh") else 0o644)
++    files["provenance.json"] = (
++        json.dumps(manifest, sort_keys=True, indent=2).encode() + b"\n",
++        0o644,
++    )
++    return files
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--source", type=Path, required=True)
++    parser.add_argument("--tools", type=Path, required=True)
++    parser.add_argument("--manifest", type=Path, required=True)
++    parser.add_argument("--output", type=Path, required=True)
++    args = parser.parse_args()
++    manifest = json.loads(read_regular(args.manifest, 64 * 1024))
++    files = prepare(args.source, args.tools, manifest)
++    # Exclusive output: a failed build cannot replace an accepted artifact.
++    with (
++        args.output.open("xb") as output,
++        zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as package,
++    ):
++        for name, (data, mode) in sorted(files.items()):
++            entry = zipfile.ZipInfo(name, (1980, 1, 1, 0, 0, 0))
++            entry.create_system = 3
++            entry.external_attr = (stat.S_IFREG | mode) << 16
++            entry.compress_type = zipfile.ZIP_DEFLATED
++            package.writestr(entry, data)
++    print(hashlib.sha256(args.output.read_bytes()).hexdigest())
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/module/action.sh b/module/action.sh
+index f8cfadf..b9c3513 100644
+--- a/module/action.sh
++++ b/module/action.sh
+@@ -1,11 +1,2 @@
+-#!/bin/sh
+-
+-if pm path io.github.a13e300.ksuwebui >/dev/null 2>&1; then
+-    echo "- Launching WebUI in KSUWebUIStandalone..."
+-    am start -n "io.github.a13e300.ksuwebui/.WebUIActivity" -e id "KPatch-Next"
+-    echo "- WebUI launched successfully."
+-else
+-    echo "! No WebUI app found"
+-    sleep 2
+-    am start -a android.intent.action.VIEW -d "https://github.com/KOWX712/KsuWebUIStandalone/releases"
+-fi
++#!/system/bin/sh
++echo "Use the separate verified provisioner; legacy WebUI boot writes are disabled."
+diff --git a/module/customize.sh b/module/customize.sh
+index fadbfe0..5beb771 100644
+--- a/module/customize.sh
++++ b/module/customize.sh
+@@ -1,29 +1,6 @@
+-MODDIR="/data/adb/modules/KPatch-Next"
+-
+-# Conflict with APatch
+-if [ "$APATCH" ]; then
+-    abort "! APatch is unsupported"
+-fi
+-
+-# We only support arm64
+-if [ "$ARCH" != "arm64" ]; then
+-    abort "! Only arm64 is supported"
+-fi
+-
++# Stage only. Runtime/engine eligibility belongs to the separate provisioner.
++[ "$ARCH" = "arm64" ] || abort "! Only arm64 is supported"
++[ -s "$MODPATH/provenance.json" ] || abort "! Missing pinned tool provenance"
+ set_perm_recursive "$MODPATH/bin" 0 2000 0755 0755
+-
+-mkdir -p /data/adb/kp-next
+-
+-# try get package_config from APatch
+-if [ -f "/data/adb/ap/package_config" ] && [ ! -f "/data/adb/kp-next/package_config" ]; then
+-    cp "/data/adb/ap/package_config" /data/adb/kp-next/package_config
+-fi
+-
+-# backup module.prop
+-cp "$MODPATH/module.prop" "$MODPATH/module.prop.bak"
+-
+-# Hot update webui, patch scripts and binaries
+-rm -rf "$MODDIR/webroot"/* "$MODDIR/bin"/* "$MODDIR/patch"/*
+-cp -Lrf "$MODPATH/webroot"/* "$MODDIR/webroot"
+-cp -Lrf "$MODPATH/bin"/* "$MODDIR/bin"
+-cp -Lrf "$MODPATH/patch"/* "$MODDIR/patch"
++# Never hot-delete or copy over the active module while replacement is staged.
++cp "$MODPATH/module.prop" "$MODPATH/module.prop.bak" || abort "! Cannot stage metadata"
+diff --git a/module/patch/boot_extract.sh b/module/patch/boot_extract.sh
+index 69950cc..5460d8c 100644
+--- a/module/patch/boot_extract.sh
++++ b/module/patch/boot_extract.sh
+@@ -3,23 +3,6 @@
+ #######################################################################################
+ # Imported from https://github.com/bmax121/APatch/blob/main/app/src/main/assets/boot_extract.sh
+ #######################################################################################
+-
+-MODPATH=${0%/*}
+-ARCH=$(getprop ro.product.cpu.abi)
+-
+-IS_INSTALL_NEXT_SLOT=$1
+-
+-# Load utility functions
+-. $MODPATH/util_functions.sh
+-
+-if [ "$IS_INSTALL_NEXT_SLOT" = "true" ]; then
+-  get_next_slot
+-else
+-  get_current_slot
+-fi
+-
+-find_boot_image
+-
+-[ -e "$BOOTIMAGE" ] || { >&2 echo "- can't find boot.img!"; exit 1; }
+-
+-true
++# Slot/partition resolution belongs to the verified provisioner.
++echo "! Legacy partition guessing disabled; verified provisioner required." >&2
++exit 1
+diff --git a/module/patch/boot_patch.sh b/module/patch/boot_patch.sh
+index 07fd16e..35e69e5 100644
+--- a/module/patch/boot_patch.sh
++++ b/module/patch/boot_patch.sh
+@@ -3,104 +3,7 @@
+ # APatch Boot Image Patcher
+ # Imported from https://github.com/bmax121/APatch/blob/main/app/src/main/assets/boot_patch.sh
+ #######################################################################################
+-#
+-# Usage: boot_patch.sh <superkey> <bootimage> [ARGS_PASS_TO_KPTOOLS]
+-#
+-# This script should be placed in a directory with the following files:
+-#
+-# File name          Type          Description
+-#
+-# boot_patch.sh      script        A script to patch boot image for APatch.
+-#                  (this file)      The script will use files in its same
+-#                                  directory to complete the patching process.
+-# bootimg            binary        The target boot image
+-# kpimg              binary        KernelPatch core Image
+-# kptools            executable    The KernelPatch tools binary to inject kpimg to kernel Image
+-# magiskboot         executable    Magisk tool to unpack boot.img.
+-#
+-#######################################################################################
+-
+-MODPATH=${0%/*}
+-ARCH=$(getprop ro.product.cpu.abi)
+-
+-# Load utility functions
+-. "$MODPATH/util_functions.sh"
+-
+-BOOTIMAGE=$1
+-FLASH_TO_DEVICE=$2
+-shift 2
+-
+-[ -e "$BOOTIMAGE" ] || { >&2 echo "! $BOOTIMAGE does not exist"; exit 1; }
+-
+-# Check for dependencies
+-command -v magiskboot >/dev/null 2>&1 || { >&2 echo "! Command magiskboot not found"; exit 1; }
+-command -v kptools >/dev/null 2>&1 || { >&2 echo "! Command kptools not found"; exit 1; }
+-
+-if [ ! -f kernel ]; then
+-echo "- Unpacking boot image"
+-magiskboot unpack "$BOOTIMAGE" >/dev/null 2>&1
+-  if [ $? -ne 0 ]; then
+-    >&2 echo "! Unpack error: $?"
+-    exit 1
+-  fi
+-fi
+-
+-if kptools -i kernel -f | grep -q "CONFIG_KPM=y"; then
+-	echo "! Patcher has Aborted."
+-	echo "! Detected built-in KPM (CONFIG_KPM=y)."
+-	echo "! KPatch-Next is not compatible alongside built-in KPM."
+-	exit 1
+-fi
+-
+-if [ ! $(kptools -i kernel -f | grep CONFIG_KALLSYMS_ALL=y) ]; then
+-	echo "! Patcher has Aborted."
+-	echo "! KPatch-Next requires CONFIG_KALLSYMS_ALL to be Enabled."
+-	echo "! But your kernel seems NOT enabled it."
+-	exit 1
+-fi
+-
+-if [  $(kptools -i kernel -l | grep patched=false) ]; then
+-	echo "- Backing boot.img "
+-  cp "$BOOTIMAGE" "ori.img" >/dev/null 2>&1
+-fi
+-
+-mv kernel kernel.ori
+-
+-echo "- Patching kernel"
+-
+-set -x
+-kptools -p -i kernel.ori -k kpimg -o kernel "$@"
+-patch_rc=$?
+-set +x
+-
+-if [ $patch_rc -ne 0 ]; then
+-  >&2 echo "! Patch kernel error: $patch_rc"
+-  exit 1
+-fi
+-
+-echo "- Repacking boot image"
+-magiskboot repack "$BOOTIMAGE" >/dev/null 2>&1
+-
+-if [ $? -ne 0 ]; then
+-  >&2 echo "! Repack error: $?"
+-  exit 1
+-fi
+-
+-if [ "$FLASH_TO_DEVICE" = "true" ]; then
+-  # flash
+-  if [ -b "$BOOTIMAGE" ] || [ -c "$BOOTIMAGE" ] && [ -f "new-boot.img" ]; then
+-    echo "- Flashing new boot image"
+-    flash_image new-boot.img "$BOOTIMAGE"
+-    if [ $? -ne 0 ]; then
+-      >&2 echo "! Flash error: $?"
+-      save_image_to_storage "new-boot.img"
+-      exit 1
+-    fi
+-  fi
+-
+-  echo "- Successfully Flashed!"
+-else
+-  save_image_to_storage "new-boot.img"
+-  echo "- Successfully Patched!"
+-fi
+-
++# Legacy WebUI shell writes cannot bind slot/OTA/backup/readback/consent evidence.
++# The separate provisioner prepares offline images and owns the device write gate.
++echo "! Legacy boot patch/flash entry point disabled; use the verified provisioner." >&2
++exit 1
+diff --git a/module/patch/boot_unpatch.sh b/module/patch/boot_unpatch.sh
+index 8b6ccd2..585e2f7 100644
+--- a/module/patch/boot_unpatch.sh
++++ b/module/patch/boot_unpatch.sh
+@@ -3,69 +3,7 @@
+ # APatch Boot Image Unpatcher
+ # Imported from https://github.com/bmax121/APatch/blob/main/app/src/main/assets/boot_unpatch.sh
+ #######################################################################################
+-
+-MODPATH=${0%/*}
+-ARCH=$(getprop ro.product.cpu.abi)
+-
+-# Load utility functions
+-. "$MODPATH/util_functions.sh"
+-
+-BOOTIMAGE=$1
+-
+-[ -e "$BOOTIMAGE" ] || { echo "- $BOOTIMAGE does not exist!"; exit 1; }
+-
+-echo "- Target image: $BOOTIMAGE"
+-
+-  # Check for dependencies
+-command -v magiskboot >/dev/null 2>&1 || { echo "- Command magiskboot not found!"; exit 1; }
+-command -v kptools >/dev/null 2>&1 || { echo "- Command kptools not found!"; exit 1; }
+-
+-if [ ! -f kernel ]; then
+-echo "- Unpacking boot image"
+-magiskboot unpack "$BOOTIMAGE" >/dev/null 2>&1
+-if [ $? -ne 0 ]; then
+-    >&2 echo "! Unpack error: $?"
+-    exit 1
+-  fi
+-fi
+-
+-if [ ! $(kptools -i kernel -l | grep patched=false) ]; then
+-	echo "- kernel has been patched "
+-  if [ -f "new-boot.img" ]; then
+-    echo "- found backup boot.img ,use it for recovery"
+-  else
+-    mv kernel kernel.ori
+-    echo "- Unpatching kernel"
+-    kptools -u --image kernel.ori --out kernel
+-    if [ $? -ne 0 ]; then
+-      >&2 echo "! Unpatch error: $?"
+-      exit 1
+-    fi
+-    echo "- Repacking boot image"
+-    magiskboot repack "$BOOTIMAGE" >/dev/null 2>&1
+-    if [ $? -ne 0 ]; then
+-      >&2 echo "! Repack error: $?"
+-      exit 1
+-    fi
+-  fi
+-
+-else
+-  echo "- no need unpatch"
+-  exit 1
+-fi
+-
+-if [ -f "new-boot.img" ]; then
+-  echo "- Flashing boot image"
+-  flash_image new-boot.img "$BOOTIMAGE"
+-
+-  if [ $? -ne 0 ]; then
+-    >&2 echo "! Flash error: $?"
+-    save_image_to_storage "new-boot.img"
+-    exit 1
+-  fi
+-fi
+-
+-echo "- Flash successful"
+-
+-# Reset any error code
+-true
++# Legacy WebUI shell writes cannot bind slot/OTA/backup/readback/consent evidence.
++# The separate provisioner prepares offline images and owns the device write gate.
++echo "! Legacy boot patch/flash entry point disabled; use the verified provisioner." >&2
++exit 1
+diff --git a/module/patch/util_functions.sh b/module/patch/util_functions.sh
+index d241ee0..cad57d9 100644
+--- a/module/patch/util_functions.sh
++++ b/module/patch/util_functions.sh
+@@ -253,29 +253,8 @@ find_boot_image() {
+ }
+ 
+ flash_image() {
+-  local CMD1
+-  case "$1" in
+-    *.gz) CMD1="gzip -d < '$1' 2>/dev/null";;
+-    *)    CMD1="cat '$1'";;
+-  esac
+-  if [ -b "$2" ]; then {
+-      local img_sz=$(stat -c '%s' "$1")
+-      local blk_sz=$(blockdev --getsize64 "$2")
+-      local blk_bs=$(blockdev --getbsz "$2")
+-      [ "$img_sz" -gt "$blk_sz" ] && return 1
+-      blockdev --setrw "$2"
+-      local blk_ro=$(blockdev --getro "$2")
+-      [ "$blk_ro" -eq 1 ] && return 2
+-      eval "$CMD1" | dd of="$2" bs="$blk_bs" iflag=fullblock conv=notrunc,fsync 2>/dev/null
+-      sync
+-  } elif [ -c "$2" ]; then {
+-      flash_eraseall "$2" >&2
+-      eval "$CMD1" | nandwrite -p "$2" - >&2
+-  } else {
+-      echo "- Not block or char device, storing image"
+-      eval "$CMD1" > "$2" 2>/dev/null
+-  } fi
+-  return 0
++  echo "! Direct shell flashing is disabled; verified provisioner required." >&2
++  return 1
+ }
+ 
+ save_image_to_storage() {
+diff --git a/module/post-fs-data.sh b/module/post-fs-data.sh
+index cb8051e..ea5aaa5 100644
+--- a/module/post-fs-data.sh
++++ b/module/post-fs-data.sh
+@@ -1,9 +1,3 @@
+ #!/system/bin/sh
+-
+-MODDIR=${0%/*}
+-SERVICE_D="/data/adb/service.d"
+-STATUS_SH="$SERVICE_D/kp-next.sh"
+-
+-mkdir -p "$SERVICE_D"
+-cp "$MODDIR/status.sh" "$STATUS_SH"
+-chmod 755 "$STATUS_SH"
++# No out-of-module service.d copy. Status is an on-demand read-only observation.
++exit 0
+diff --git a/module/service.sh b/module/service.sh
+index 077a486..85442d0 100644
+--- a/module/service.sh
++++ b/module/service.sh
+@@ -1,41 +1,4 @@
+-#!/bin/sh
+-
+-MODDIR=${0%/*}
+-KPNDIR="/data/adb/kp-next"
+-PATH="$MODDIR/bin:$PATH"
+-CONFIG="$KPNDIR/package_config"
+-REHOOK="$(cat $KPNDIR/rehook)"
+-
+-if [ -z "$(kpatch hello)" ]; then
+-    touch "$MODDIR/unresolved"
+-    exit 0
+-fi
+-
+-for kpm in $KPNDIR/kpm/*.kpm; do
+-    [ -s "$kpm" ] || continue
+-    kpatch kpm load "$kpm" || rm -f "$kpm"
+-done
+-
+-if [ -n "$REHOOK" ]; then
+-    if [ "$REHOOK" = "enable" ] || [ "$REHOOK" = "disable" ]; then
+-        kpatch rehook $REHOOK
+-    else
+-        rm -f "$KPNDIR/rehook"
+-    fi
+-fi
+-
+-until [ "$(getprop sys.boot_completed)" = "1" ]; do
+-    sleep 1
+-done
+-
+-[ -f "$CONFIG" ] || exit 0
+-
+-tail -n +2 "$CONFIG" | while IFS=, read -r pkg exclude allow uid; do
+-    if [ "$exclude" = "1" ]; then
+-        # priotize uid if exists
+-        UID=$(grep "^$pkg $uid" /data/system/packages.list | cut -d' ' -f2)
+-        # fallback to package name based
+-        [ -z "$UID" ] && UID=$(grep "^$pkg " /data/system/packages.list | cut -d' ' -f2)
+-        [ -n "$UID" ] && kpatch exclude_set "$UID" 1
+-    fi
+-done
++#!/system/bin/sh
++# This component provides an engine/tool tuple. Core alone owns VPN Hide backend
++# loading. Do not autoload, delete failing KPMs, or rewrite package exclusions here.
++exit 0
+diff --git a/module/status.sh b/module/status.sh
+index e53124c..cd72c2f 100644
+--- a/module/status.sh
++++ b/module/status.sh
+@@ -1,56 +1,6 @@
+-#!/bin/sh
+-
+-MODDIR="/data/adb/modules/KPatch-Next"
+-KPNDIR="/data/adb/kp-next"
+-PATH="$MODDIR/bin:$PATH"
+-
+-PROP_FILE="$MODDIR/module.prop"
+-PROP_BAK="$PROP_FILE.bak"
+-
+-set_prop() {
+-    local prop="$1"
+-    local value="$2"
+-    local file="$3"
+-
+-    if ! grep -q "^$prop=" "$file"; then
+-        echo "$prop=$value" >> "$file"
+-        return
+-    fi
+-    sed "s/^$prop=.*/$prop=$value/" "$file" > "$file.tmp"
+-    cat "$file.tmp" > "$file"
+-    rm -f "$file.tmp"
+-}
+-
+-restore_prop_if_needed() {
+-    grep -q "^id=" "$PROP_FILE" && return
+-    [ -f "$PROP_BAK" ] && cat "$PROP_BAK" > "$PROP_FILE"
+-}
+-
+-# self cleanup if module removed improperly
+-if [ ! -d "$MODDIR" ]; then
+-    rm -f "$(realpath "$0")"
+-    exit 0
+-fi
+-
+-active="Status: active 😊"
+-inactive="Status: inactive 😕"
+-info="info: kernel not patched yet ❌"
+-string="$inactive | $info"
+-
+-until [ "$(getprop sys.boot_completed)" = "1" ]; do
+-    sleep 1
+-done
+-
+-if [ -n "$(kpatch hello)" ]; then
+-    KPM_COUNT="$(kpatch kpm num 2>/dev/null || echo 0)"
+-    [ -z "$KPM_COUNT" ] && KPM_COUNT=0
+-
+-    REHOOK_MODE="$(kpatch rehook_status 2>/dev/null | awk '{print $NF}')"
+-    [ -z "$REHOOK_MODE" ] && REHOOK_MODE="enabled"
+-
+-    string="$active | kpmodule: $KPM_COUNT 💉 | rehook: $REHOOK_MODE 🪝"
+-fi
+-
+-restore_prop_if_needed
+-
+-set_prop "description" "$string" "$PROP_FILE"
++#!/system/bin/sh
++# Read-only actual handshake; a nonempty usage/error string is not readiness.
++MODDIR=${0%/*}
++hello=$("$MODDIR/bin/kpatch" hello 2>/dev/null) || exit 1
++[ "$hello" = "hello2026" ] || exit 1
++"$MODDIR/bin/kpatch" kpm num
+diff --git a/module/uninstall.sh b/module/uninstall.sh
+index e8cb476..fd75ce6 100644
+--- a/module/uninstall.sh
++++ b/module/uninstall.sh
+@@ -1 +1,4 @@
+-rm -rf /data/adb/kp-next /data/adb/service.d/kp-next.sh
++#!/system/bin/sh
++# Preserve persistent recovery artifacts and previous KPM/config data. Removing
++# this manager module does not undo a patched boot image or loaded kernel hooks.
++exit 0

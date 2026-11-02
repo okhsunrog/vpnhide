@@ -978,3 +978,48 @@ controls; those CI executions have not been observed from this cloud session.
 - This is an internal observation change: APK/Core remains RPC15, journal8;
   kernel control2 / telemetry1 is unchanged. A user builtin kernel does not need
   rebuilding because of these APK/Core protocol or journal schema numbers.
+
+### Separate provisioner: offline evidence, fork patches and write model
+
+Implemented:
+
+- Separate `vpnhide_provisioning` workspace package, not a Core dependency or ZIP
+  payload. The executable exposes only bounded regular-file Image inspection.
+  Exact extracted ARM64 bytes/config are hash-bound; gzip CRC/end/size/ambiguity
+  checks, explicit KALLSYMS and ALL state, real lowercase Kconfig symbols and
+  ARM64 memory-size semantics are covered. Evidence is constructed from bytes,
+  not deserialized into execution authority.
+- Runtime Absent/Present/Unknown and engine-hash-bound ALL=n qualification are
+  distinct. Tool bytes/hash/source commit form a checked tuple. The injected
+  write executor requires full-partition backup, bound slot/OTA/snapshot/AVB facts,
+  fresh consent, durable intent, post-fsync recheck and independent readback;
+  operation reuse and uncertain completion cannot replay a write. BootPlan is
+  private/validated and cannot be deserialized into authority.
+- Reviewed patches against Module b5612adf4d4085a253cb0be30fa1be36e11d09db and
+  Engine 456744b29efb9989445463ab29e368fa59a103c4. Engine config extraction no longer
+  follows temp.gz, underflows reversed markers, ignores gzip failure, emits an
+  invalid prefix or discards its error result. Module stages only, preserves
+  active data, removes legacy autoload/deletion, and fences every legacy direct
+  flash/unpatch/partition-guessing entry. An offline builder accepts local
+  hash-bound/pinned tools and an exact reviewed module allowlist; no latest/API
+  downloads and no production hashes or qualification proofs fabricated.
+- Eight Rust tests and strict Clippy passed. Five executable fork tests apply
+  patches to pinned source, compile/run the real C parser, exercise invalid gzip,
+  temp symlink, tool/allowlist refusal, staging and legacy write refusal. Real
+  QEMU Image c0472bd87ccc82dfa5e7d0a18a0333258d39ca1d2b425b8536a754a232cdd3f0
+  produced the same 190887-byte config in patched C and Rust (SHA256
+  13c82843ae116c94641205624ce17c8f4d75c398959d2b09850f16c25bbdbd30).
+  Ruff/actionlint passed; CI includes the new Rust package and pinned fork tests.
+
+Not implemented yet (code, not phone gates): actual provisioner runtime adapter,
+trusted tool/qualification record ingestion, fresh boot extraction and offline
+patch/repack executor, pinned partition/update exclusion adapter, durable backup
+and receipt store, Android consent/progress wiring. The pure write model cannot
+flash and does not substitute for these components. Stage7 is partial.
+
+Needs external target/device/key: fork publication namespace/repository/branch
+for Module and Engine; actual ALL=n/private ABI/boot qualification and separately
+approved real boot writes/readback; production signing key. No repository was
+created or published, no boot/phone access and no new permission request blocks
+other cloud work. Continue Stage4/RFC2/Kotlin implementation after this slice;
+Save/draft remains and final startup/upgrade/downgrade regression is still required.

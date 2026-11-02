@@ -1,0 +1,131 @@
+diff --git a/tools/kallsym.c b/tools/kallsym.c
+index ccbc7e0..7b663f7 100644
+--- a/tools/kallsym.c
++++ b/tools/kallsym.c
+@@ -1003,66 +1003,53 @@ int dump_all_symbols(kallsym_t *info, char *img)
+     }
+     return 0;
+ }
+-int decompress_data(const unsigned char *compressed_data, size_t compressed_size)
+-{
+-    FILE *temp = fopen("temp.gz", "wb");
+-    if (!temp) {
+-        fprintf(stderr, "Failed to create temp file\n");
+-        return -1;
+-    }
+-
+-    fwrite(compressed_data, 1, compressed_size, temp);
+-    fclose(temp);
+-
+-    gzFile gz = gzopen("temp.gz", "rb");
+-    if (!gz) {
+-        fprintf(stderr, "Failed to open temp file for decompression\n");
+-        return -1;
+-    }
+-
+-    char buffer[1024];
+-    int bytes_read;
+-    while ((bytes_read = gzread(gz, buffer, sizeof(buffer))) > 0) {
+-        fwrite(buffer, 1, bytes_read, stdout);
+-    }
+-
+-    gzclose(gz);
+-    return 0;
+-}
+-
++/* Validate the entire gzip member and adjacent end marker before emitting bytes.
++ * Never use a predictable temporary file or let an error expose a valid prefix. */
+ int dump_all_ikconfig(char *img, int32_t imglen)
+ {
+-    char *pos_start = memmem(img, imglen, IKCFG_ST, strlen(IKCFG_ST));
+-    if (pos_start == NULL) {
+-        fprintf(stderr, "Cannot find kernel config start (IKCFG_ST).\n");
+-        return 1;
+-    }
+-    size_t kcfg_start = pos_start - img + 8;
+-
+-    // 查找 "IKCFG_ED"
+-    char *pos_end = memmem(img, imglen, IKCFG_ED, strlen(IKCFG_ED));
+-    if (pos_end == NULL) {
+-        fprintf(stderr, "Cannot find kernel config end (IKCFG_ED).\n");
+-        return 1;
+-    }
+-    size_t kcfg_end = pos_end - img - 1;
+-    size_t kcfg_bytes = kcfg_end - kcfg_start + 1;
+-
+-    printf("Kernel config start: %zu, end: %zu, bytes: %zu\n", kcfg_start, kcfg_end, kcfg_bytes);
+-
+-    unsigned char *extracted_data = (unsigned char *)malloc(kcfg_bytes);
+-    if (!extracted_data) {
+-        fprintf(stderr, "Memory allocation for extracted data failed.\n");
+-        return 1;
++    const size_t limit = 2 * 1024 * 1024;
++    unsigned char *config = NULL;
++    size_t config_len = 0;
++    unsigned int markers = 0;
++    int ret = 1;
++    if (!img || imglen < 16 || imglen > 256 * 1024 * 1024) return 1;
++    for (size_t pos = 0; pos + 8 <= (size_t)imglen; ++pos) {
++        if (memcmp(img + pos, IKCFG_ST, 8)) continue;
++        if (++markers > 16) goto out;
++        size_t start = pos + 8;
++        if (start + 3 > (size_t)imglen || memcmp(img + start, "\x1f\x8b\x08", 3)) continue;
++        if (config) goto out; /* Ambiguous evidence is not a first-match choice. */
++        unsigned char *decoded = malloc(limit + 1);
++        if (!decoded) goto out;
++        z_stream stream = { 0 };
++        stream.next_in = (Bytef *)img + start;
++        stream.avail_in = (uInt)((size_t)imglen - start);
++        stream.next_out = decoded;
++        stream.avail_out = (uInt)(limit + 1);
++        if (inflateInit2(&stream, 16 + MAX_WBITS) != Z_OK) {
++            free(decoded);
++            goto out;
++        }
++        int status = inflate(&stream, Z_FINISH);
++        size_t end = start + stream.total_in;
++        size_t length = stream.total_out;
++        inflateEnd(&stream);
++        if (status != Z_STREAM_END || length == 0 || length > limit
++            || end + 8 > (size_t)imglen || memcmp(img + end, IKCFG_ED, 8)
++            || decoded[length - 1] != '\n' || memchr(decoded, 0, length)) {
++            free(decoded);
++            goto out;
++        }
++        config = decoded;
++        config_len = length;
+     }
+-
+-    memcpy(extracted_data, img + kcfg_start, kcfg_bytes);
+-
+-    int ret = decompress_data(extracted_data, kcfg_bytes);
+-
+-    free(extracted_data);
+-
+-    return 0;
++    if (!config) goto out;
++    if (fwrite(config, 1, config_len, stdout) != config_len || fflush(stdout) || ferror(stdout)) goto out;
++    ret = 0;
++out:
++    free(config);
++    if (ret) fprintf(stderr, "Kernel config is missing, ambiguous, oversized or invalid.\n");
++    return ret;
+ }
+ 
+ int on_each_symbol(kallsym_t *info, char *img, void *userdata,
+diff --git a/tools/patch.c b/tools/patch.c
+index 0ccbdf5..358e1f6 100644
+--- a/tools/patch.c
++++ b/tools/patch.c
+@@ -689,8 +689,8 @@ int dump_ikconfig(const char *kimg_path)
+     read_kernel_file(kimg_path, &kernel_file);
+ 
+     
+-    dump_all_ikconfig(kernel_file.kimg,kernel_file.kimg_len);
++    int ret = dump_all_ikconfig(kernel_file.kimg, kernel_file.kimg_len);
+     set_log_enable(false);
+     free_kernel_file(&kernel_file);
+-    return 0;
++    return ret;
+ }
+\ No newline at end of file
