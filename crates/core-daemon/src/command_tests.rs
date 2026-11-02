@@ -1356,3 +1356,259 @@ fn restart_retires_both_lease_owners_and_restores_the_original_baseline() {
             .is_none()
     );
 }
+
+fn startup_env(root: &std::path::Path) -> crate::native_boot::NativeEnv {
+    std::fs::write(root.join("boot-id"), "test-boot").unwrap();
+    crate::native_boot::NativeEnv {
+        ctl: root.join("ctl"),
+        modules: None,
+        kpm_lock: None,
+        zygisk_module: None,
+        boot_id_path: root.join("boot-id"),
+        state_file: root.join("native.json"),
+        legacy_root: None,
+        apatch_kpms: root.join("no-apatch"),
+    }
+}
+
+#[test]
+fn native_startup_is_durable_and_not_repeated_on_worker_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let env = startup_env(root.path());
+    let state = load(root.path(), 1);
+    state.start_native_boot(env.clone(), 1);
+    assert!(matches!(
+        state.native_boot_status().unwrap().outcome,
+        vpnhide_core_rpc::NativeBootOutcome::NoBackend
+    ));
+    let saved = journal::read(&root.path().join("operations.json")).unwrap();
+    assert!(saved.native_startup.unwrap().completed.is_some());
+    state.shutdown();
+    // A corrupt best-effort file cannot redirect a durable same-boot decision.
+    std::fs::write(&env.state_file, "corrupt").unwrap();
+    let state = load(root.path(), 2);
+    state.start_native_boot(env.clone(), 2);
+    assert!(matches!(
+        state.native_boot_status().unwrap().outcome,
+        vpnhide_core_rpc::NativeBootOutcome::NoBackend
+    ));
+    assert_eq!(std::fs::read_to_string(env.state_file).unwrap(), "corrupt");
+    state.shutdown();
+}
+
+#[test]
+fn native_startup_crash_intent_blocks_replay_even_after_reboot() {
+    for previous_boot in ["test-boot", "previous-boot"] {
+        let root = tempfile::tempdir().unwrap();
+        let env = startup_env(root.path());
+        let j = Journal {
+            native_startup: Some(journal::NativeStartup {
+                boot_id: previous_boot.into(),
+                config_revision: 0,
+                filesystem_hiding: false,
+                completed: None,
+            }),
+            ..Journal::default()
+        };
+        journal::write_atomic(&root.path().join("operations.json"), &j).unwrap();
+        let state = load(root.path(), 1);
+        state.start_native_boot(env.clone(), 1);
+        assert!(matches!(
+            state.native_boot_status().unwrap().outcome,
+            vpnhide_core_rpc::NativeBootOutcome::Unknown { .. }
+        ));
+        assert!(
+            state
+                .snapshot()
+                .held_resources
+                .contains(&ConfigPhase::Native)
+        );
+        assert!(!env.state_file.exists(), "no scan/effect/persist replay");
+        assert!(
+            journal::read(&root.path().join("operations.json"))
+                .unwrap()
+                .native_startup_uncertain()
+        );
+        state.shutdown();
+    }
+}
+
+#[test]
+fn native_startup_intent_storage_failures_never_dispatch() {
+    for after_rename in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let env = startup_env(root.path());
+        let state = load(root.path(), 1);
+        let worker_env = env.clone();
+        state
+            .call_writer(move |state| {
+                journal::fail_write(1, after_rename);
+                state.start_native_boot_direct(worker_env, 1);
+            })
+            .unwrap();
+        assert!(state.snapshot().storage_fault.is_some());
+        assert!(!env.state_file.exists());
+        assert!(matches!(
+            state.native_boot_status().unwrap().outcome,
+            vpnhide_core_rpc::NativeBootOutcome::Unknown { .. }
+        ));
+        state.shutdown();
+    }
+}
+
+#[test]
+fn native_startup_completion_storage_failure_preserves_uncertainty() {
+    for after_rename in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let env = startup_env(root.path());
+        let state = load(root.path(), 1);
+        state
+            .call_writer(move |state| {
+                journal::fail_write(2, after_rename);
+                state.start_native_boot_direct(env, 1);
+            })
+            .unwrap();
+        assert!(state.snapshot().storage_fault.is_some());
+        assert!(
+            state
+                .snapshot()
+                .held_resources
+                .contains(&ConfigPhase::Native)
+        );
+        let disk = journal::read(&root.path().join("operations.json")).unwrap();
+        assert_eq!(disk.native_startup_uncertain(), !after_rename);
+        state.shutdown();
+    }
+}
+
+#[test]
+fn native_startup_respects_existing_persist_native_and_secret_holds() {
+    for phase in [
+        ConfigPhase::Persist,
+        ConfigPhase::Native,
+        ConfigPhase::Secret,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let env = startup_env(root.path());
+        let j = Journal {
+            expired_holds: vec![phase],
+            ..Journal::default()
+        };
+        journal::write_atomic(&root.path().join("operations.json"), &j).unwrap();
+        let state = load(root.path(), 1);
+        state.start_native_boot(env.clone(), 1);
+        assert!(!env.state_file.exists());
+        assert!(
+            journal::read(&root.path().join("operations.json"))
+                .unwrap()
+                .native_startup
+                .is_none()
+        );
+        state.shutdown();
+    }
+}
+
+#[test]
+fn native_startup_without_durable_journal_or_boot_identity_refuses_effects() {
+    let root = tempfile::tempdir().unwrap();
+    let mut env = startup_env(root.path());
+    let state = CoreState::load(
+        Publisher::new(1, StateSnapshot::default()),
+        root.path().join("config.json"),
+        None,
+    )
+    .unwrap();
+    state.start_native_boot(env.clone(), 1);
+    assert!(!env.state_file.exists());
+    state.shutdown();
+    let state = load(root.path(), 2);
+    env.boot_id_path = root.path().join("missing-boot-id");
+    state.start_native_boot(env.clone(), 2);
+    assert!(!env.state_file.exists());
+    state.shutdown();
+}
+
+#[test]
+fn durable_native_selection_is_rechecked_against_live_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let env = startup_env(root.path());
+    let mut boot = crate::native_boot::NativeBoot::blocked(env.clone(), 1, "fixture".into());
+    let selection = crate::native_boot::Selection {
+        backend: vpnhide_core_rpc::NativeBackend::Builtin,
+        mode: vpnhide_core_rpc::SelectionMode::Adopted,
+        filesystem_hiding: None,
+    };
+    boot.status.outcome = vpnhide_core_rpc::NativeBootOutcome::Selected {
+        backend: selection.backend,
+        mode: selection.mode,
+        filesystem_hiding: None,
+    };
+    let j = Journal {
+        native_startup: Some(journal::NativeStartup {
+            boot_id: "test-boot".into(),
+            config_revision: 0,
+            filesystem_hiding: false,
+            completed: Some(journal::NativeStartupResult {
+                status: boot.status,
+                selection: Some(selection),
+            }),
+        }),
+        ..Journal::default()
+    };
+    journal::write_atomic(&root.path().join("operations.json"), &j).unwrap();
+    std::fs::write(
+        &env.ctl,
+        "vpnhide 1 status\nbackend 0x4\nkver 0x0\nhooks 0x0\nerror 0x0\n",
+    )
+    .unwrap();
+    let state = load(root.path(), 2);
+    state.start_native_boot(env.clone(), 2);
+    assert!(matches!(
+        state.native_boot_status().unwrap().outcome,
+        vpnhide_core_rpc::NativeBootOutcome::Selected { .. }
+    ));
+    state.shutdown();
+    std::fs::remove_file(&env.ctl).unwrap();
+    let state = load(root.path(), 3);
+    state.start_native_boot(env.clone(), 3);
+    assert!(matches!(
+        state.native_boot_status().unwrap().outcome,
+        vpnhide_core_rpc::NativeBootOutcome::Unknown { .. }
+    ));
+    assert!(!env.state_file.exists());
+    state.shutdown();
+}
+
+#[test]
+fn startup_hold_survives_receipt_retention_and_schema_two_upgrade() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("operations.json");
+    let old = Journal {
+        version: 2,
+        issued_through: 42,
+        ..Journal::default()
+    };
+    let mut json = serde_json::to_value(old).unwrap();
+    json.as_object_mut().unwrap().remove("native_startup");
+    std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+    let mut upgraded = journal::read(&path).unwrap();
+    assert_eq!(upgraded.version, 3);
+    assert_eq!(upgraded.issued_through, 42);
+    assert!(upgraded.native_startup.is_none());
+    upgraded.native_startup = Some(journal::NativeStartup {
+        boot_id: "old-boot".into(),
+        config_revision: 0,
+        filesystem_hiding: false,
+        completed: None,
+    });
+    upgraded.retain_settled = 0;
+    upgraded.prune();
+    journal::write_atomic(&path, &upgraded).unwrap();
+    assert_eq!(
+        journal::read(&path).unwrap().held_resources(),
+        vec![ConfigPhase::Native]
+    );
+    upgraded.version = 4;
+    journal::write_atomic(&path, &upgraded).unwrap();
+    assert!(journal::read(&path).is_err());
+}

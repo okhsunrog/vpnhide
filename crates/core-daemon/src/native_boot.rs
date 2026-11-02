@@ -387,7 +387,7 @@ fn eligible(dir: &Path) -> bool {
         && !dir.join("remove").exists()
 }
 
-fn read_boot_id(path: &Path) -> String {
+pub(crate) fn read_boot_id(path: &Path) -> String {
     fs::read_to_string(path)
         .map(|s| s.trim().to_owned())
         .unwrap_or_default()
@@ -551,6 +551,88 @@ pub struct NativeBoot {
 }
 
 impl NativeBoot {
+    /// Publish an activation hold without scanning, loading, retiring or cleaning.
+    pub(crate) fn blocked(env: NativeEnv, epoch: u64, detail: String) -> Self {
+        let now = now_ms();
+        Self {
+            status: NativeBootStatus {
+                boot_id: read_boot_id(&env.boot_id_path),
+                decided_epoch: epoch,
+                decided_at_ms: now,
+                updated_at_ms: now,
+                outcome: NativeBootOutcome::Unknown { detail },
+                installed: Vec::new(),
+                live: Vec::new(),
+                staged: Vec::new(),
+                kmod: None,
+                zygisk_targets: ZygiskTargets::Pending,
+                ports: None,
+                obsolete_modules: Vec::new(),
+            },
+            env,
+            selection: None,
+        }
+    }
+
+    /// Recheck residual ownership without loading, configuring or retiring anything.
+    /// A durable selection is not proof that its runtime still exists.
+    pub(crate) fn revalidate_restored(self, epoch: u64) -> Self {
+        let Some(selected) = self.selected() else {
+            return self;
+        };
+        let probe = probe_kpm(self.env.kpm_lock.as_deref());
+        let facts = gather(&self.env, probe.fact);
+        self.reconcile_restored_facts(epoch, selected, &facts)
+    }
+
+    fn reconcile_restored_facts(
+        self,
+        epoch: u64,
+        selected: NativeBackend,
+        facts: &ScanFacts,
+    ) -> Self {
+        if selected == NativeBackend::Kpm {
+            if let KpmFact::AuthFailed(detail) = &facts.kpm {
+                let mut boot = Self::blocked(self.env, epoch, detail.clone());
+                // Preserve the existing credential recovery path. This is evidence
+                // of a previously selected KPM, never permission to load an alternative.
+                boot.status.outcome = NativeBootOutcome::KpmUnverifiable {
+                    detail: detail.clone(),
+                };
+                return boot;
+            }
+        }
+        let kpm_clear = matches!(
+            facts.kpm,
+            KpmFact::NotManaged | KpmFact::NoRuntime | KpmFact::Absent
+        ) || (!facts.kpm_may_be_live
+            && matches!(facts.kpm, KpmFact::AuthFailed(_)));
+        let valid = match selected {
+            NativeBackend::Builtin => facts.kernel == KernelFact::Builtin && kpm_clear,
+            NativeBackend::Kmod => facts.kernel == KernelFact::Kmod && kpm_clear,
+            NativeBackend::Kpm => facts.kernel == KernelFact::Absent && facts.kpm == KpmFact::Live,
+            NativeBackend::Zygisk => {
+                facts.kernel == KernelFact::Absent
+                    && kpm_clear
+                    && self
+                        .env
+                        .module_dir(selected)
+                        .is_some_and(|dir| crate::zygisk::ZygiskTarget::open(&dir).is_ok())
+            }
+        };
+        if valid {
+            self
+        } else {
+            Self::blocked(
+                self.env,
+                epoch,
+                format!(
+                    "durable {selected:?} selection cannot be reconciled with current runtime ownership; no load replayed"
+                ),
+            )
+        }
+    }
+
     /// The selected backend for config delivery, if this boot has one.
     pub fn selected(&self) -> Option<NativeBackend> {
         self.selection.map(|s| s.backend)

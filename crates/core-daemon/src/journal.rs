@@ -39,7 +39,7 @@ pub const DEFAULT_JOURNAL_PATH: &str = "/data/adb/vpnhide/core/operations.json";
 /// Env override so the dev sandbox never touches the production journal.
 pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 
-const JOURNAL_VERSION: u32 = 2;
+const JOURNAL_VERSION: u32 = 3;
 
 /// Default number of terminal receipts to keep, including Unknown.
 pub const DEFAULT_RETAIN_SETTLED: usize = 64;
@@ -157,9 +157,30 @@ pub struct NativeIntent {
 }
 
 /// On-disk journal document.
+/// Initial activation is not an app command, but has the same before-effect
+/// durability requirement. Missing completion means uncertainty, across worker
+/// restarts AND reboots. Never infer completion from native_boot.json.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeStartup {
+    pub boot_id: String,
+    pub config_revision: u64,
+    pub filesystem_hiding: bool,
+    pub completed: Option<NativeStartupResult>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeStartupResult {
+    pub status: vpnhide_core_rpc::NativeBootStatus,
+    pub selection: Option<crate::native_boot::Selection>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
     pub version: u32,
+    #[serde(default)]
+    pub native_startup: Option<NativeStartup>,
     /// Durable config-revision counter — continues across restarts.
     pub config_revision: u64,
     pub retain_settled: usize,
@@ -193,6 +214,7 @@ impl Default for Journal {
     fn default() -> Self {
         Journal {
             version: JOURNAL_VERSION,
+            native_startup: None,
             config_revision: 0,
             retain_settled: DEFAULT_RETAIN_SETTLED,
             operations: Vec::new(),
@@ -226,11 +248,34 @@ impl Journal {
 
     /// True when any stored operation still carries unresolved uncertainty.
     pub fn has_unknown(&self) -> bool {
-        !self.expired_holds.is_empty()
+        self.native_startup_uncertain()
+            || !self.expired_holds.is_empty()
             || self
                 .operations
                 .iter()
                 .any(|entry| !entry.held_phases().is_empty())
+    }
+
+    pub fn native_startup_uncertain(&self) -> bool {
+        self.native_startup
+            .as_ref()
+            .is_some_and(|attempt| attempt.completed.is_none())
+    }
+
+    /// All durable resource holds, including startup work without an app receipt.
+    pub fn held_resources(&self) -> Vec<ConfigPhase> {
+        let mut held: Vec<_> = self
+            .expired_holds
+            .iter()
+            .copied()
+            .chain(self.operations.iter().flat_map(JournalEntry::held_phases))
+            .collect();
+        if self.native_startup_uncertain() {
+            held.push(ConfigPhase::Native);
+        }
+        held.sort_by_key(|phase| *phase as u8);
+        held.dedup();
+        held
     }
 
     /// Insert or replace one entry, then apply retention.
@@ -349,6 +394,19 @@ pub fn read(path: &Path) -> io::Result<Journal> {
                 "journal version {} newer than supported {}",
                 journal.version, JOURNAL_VERSION
             ),
+        ));
+    }
+    if journal.native_startup.as_ref().is_some_and(|attempt| {
+        attempt.boot_id.is_empty()
+            || attempt.boot_id.len() > 128
+            || attempt
+                .completed
+                .as_ref()
+                .is_some_and(|result| result.status.boot_id != attempt.boot_id)
+    }) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid native startup identity",
         ));
     }
     let mut journal = journal;

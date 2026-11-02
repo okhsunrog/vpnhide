@@ -796,3 +796,33 @@ fn installed_obsolete_1x_modules_are_recorded_in_the_boot_status() {
     );
     assert_eq!(boot.status.outcome, NativeBootOutcome::NoBackend);
 }
+
+#[test]
+fn restored_kpm_auth_loss_preserves_credential_recovery_without_selection() {
+    let root = tempfile::tempdir().unwrap();
+    let env = NativeEnv {
+        ctl: root.path().join("ctl"),
+        modules: None,
+        kpm_lock: None,
+        zygisk_module: None,
+        boot_id_path: root.path().join("boot"),
+        state_file: root.path().join("native.json"),
+        legacy_root: None,
+        apatch_kpms: root.path().join("kpms"),
+    };
+    let boot = NativeBoot::blocked(env, 1, "fixture".into()).reconcile_restored_facts(
+        2,
+        Kpm,
+        &facts(
+            &[],
+            KernelFact::Absent,
+            KpmFact::AuthFailed("key unavailable".into()),
+        ),
+    );
+    assert!(boot.pending_authentication());
+    assert!(boot.selected().is_none());
+    assert!(matches!(
+        boot.status.outcome,
+        NativeBootOutcome::KpmUnverifiable { .. }
+    ));
+}

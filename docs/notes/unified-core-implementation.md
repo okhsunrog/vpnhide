@@ -29,7 +29,7 @@ changes create new operations, not retroactive changes to confirmed receipts.
 | Stage | Status | Acceptance |
 | --- | --- | --- |
 | 1. Payload catalog and pure selection | Implemented as internal API; production integration follows stages 2–4 | Strict bounded manifest, pinned file verification, deterministic eligible candidates, unknown/owner guards, policy/capacity tests |
-| 2. Durable backend lifecycle | Planned | Initial effects journaled before dispatch, crash reconciliation, bounded attempts surviving worker restart, no blind replay |
+| 2. Durable backend lifecycle | In progress: initial activation is journaled on the command writer | Initial effects journaled before dispatch, crash reconciliation, bounded attempts surviving worker restart, no blind replay |
 | 3. Unified ZIP and CI assembly | Planned | All seven KMIs, both Zygisk ABIs, manifest/hashes, verified provenance, active/staged separation |
 | 4. Zygisk boot authorization and fallback | Planned | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
 | 5. Typed state/RPC/UI/diagnostics | Planned | Paired contract bump, reasons/attempts/coverage, no misleading component health |
@@ -83,3 +83,28 @@ Workspace tests: 456 passed, two existing Zygisk self-read tests failed in this
 environment (`process_vm_readv` returns ENOSYS). No tests were weakened or skipped.
 The production selector, RPC13 and backend wire remain unchanged in this stage.
 No Android/device validation or observed GitHub CI result is claimed.
+
+## Stage 2 checkpoint (not complete)
+
+Initial activation now runs on CommandEngine, with synced intent before startup
+side effects and synced completion in the existing private journal (schema 3,
+reads schema 1/2). Interrupted startup survives worker restart, reboot and receipt
+retention as a Native resource hold; storage failure prevents new dispatch.
+Completed same-boot decisions come from the journal and recheck runtime identity,
+not the best-effort native_boot.json file. Existing Persist/Native/Secret holds
+also gate initial startup. RPC13 and backend control-v2 remain unchanged.
+
+Still required before stage 2 is complete: exact prepared payload/transition intent,
+per-candidate attempt evidence and safe recovery of interrupted startup. The initial
+checkpoint deliberately refuses replay, including across reboot; it does not yet
+provide an automatic way to resolve every startup hold. Do not delete the journal
+as a recovery mechanism. Later lifecycle/recovery work must reconcile or supersede
+this evidence through a checked operation. Unified selection and automatic fallback
+are not enabled by this checkpoint. Downgrading to schema-2-only core is refused.
+
+Stage 2 initial-startup checkpoint validation: nine new startup/reconciliation tests
+pass, including schema-2 upgrade, retention, live-identity mismatch and KPM auth-loss
+recovery. Final workspace run: 465 passed, two unchanged Zygisk self-read failures
+(ENOSYS environment limitation). Workspace Clippy/all-targets, fmt, diff and module
+scaffold/no-su checks pass. Core ZIP builds for arm64 and armv7. No Kotlin/C changes;
+JVM and device checks were not rerun. No observed CI outcome is claimed.

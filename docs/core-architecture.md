@@ -95,8 +95,8 @@ Canonical replacement applies required ownership, mode and label before rename,
 then fsyncs the containing directory. A failure after rename is Unknown, never a
 claim that no write occurred. The private journal records commands, phase intent,
 actual commit revisions, write sets and exact Native dispatch evidence. Secrets
-and secret-derived verifiers never enter it. Journal schema 2 reads/migrates
-schema 1; blank, malformed or unsupported present journals refuse mutations.
+and secret-derived verifiers never enter it. Journal schema 3 reads/migrates
+schemas 1 and 2; blank, malformed or unsupported present journals refuse mutations.
 
 Same-ID duplicate commands query the retained result; different commands refuse.
 SuperKey submission always refuses reuse because comparing the secret would
@@ -173,6 +173,17 @@ entry supervises its worker with bounded restart backoff; duplicate ownership
 exits rather than creating a restart fight. Module disable/removal stops restart.
 A corrupt durable state exposes `startup_error` and read-only observations/probes
 while refusing mutation; it is never silently replaced with defaults.
+
+Initial native activation now runs on CommandEngine and syncs startup intent in the
+same private journal before scanning/loading/retirement effects. Completion is synced
+before exposing the selection. Missing completion holds Native across worker restart,
+reboot and receipt retention; there is no blind startup replay. Same-boot completed
+selection is restored from the journal and rechecks runtime identity without loading.
+Persist/Native/Secret uncertainty gates initial activation as well as boot delivery.
+This is the first lifecycle hardening step, not the complete unified selector: exact
+payload intents, candidate attempt history and checked startup-hold recovery remain
+in [the implementation plan](notes/unified-core-implementation.md). Old schema-2-only
+core refuses the newer journal; a file rollback is not a supported downgrade.
 
 Native selection remains strict and fixed per boot: zero candidates, one selected
 candidate, or Conflict. Save and Repair deliver to that selection; KPM credentials

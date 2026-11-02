@@ -474,21 +474,7 @@ impl CoreState {
                 .collect();
             snapshot.mutation_held =
                 snapshot.storage_fault.is_some() || store.journal.has_unknown();
-            snapshot.held_resources = store
-                .journal
-                .expired_holds
-                .iter()
-                .copied()
-                .chain(
-                    store
-                        .journal
-                        .operations
-                        .iter()
-                        .flat_map(JournalEntry::held_phases),
-                )
-                .collect();
-            snapshot.held_resources.sort_by_key(|phase| *phase as u8);
-            snapshot.held_resources.dedup();
+            snapshot.held_resources = store.journal.held_resources();
             for entry in &store.journal.operations {
                 let revision = entry
                     .admission
@@ -540,12 +526,13 @@ impl CoreState {
                     || (state.native_enabled()
                         && matches!(phase, ConfigPhase::Native | ConfigPhase::Secret))
             };
-            if store
-                .journal
-                .expired_holds
-                .iter()
-                .copied()
-                .any(relevant_hold)
+            if store.journal.native_startup_uncertain()
+                || store
+                    .journal
+                    .expired_holds
+                    .iter()
+                    .copied()
+                    .any(relevant_hold)
                 || store
                     .journal
                     .operations
@@ -1111,12 +1098,102 @@ impl CoreState {
         self.submit_edit_opts(op, base, edit, options)
     }
 
-    /// Make this boot's native decision (once per run, before serving). Reuses a
-    /// decision persisted earlier in the same boot; otherwise scans, loads and retires.
+    /// Serialize initial activation on the command writer and journal intent before
+    /// effects. Restore completed decisions; never replay interrupted startup.
     pub fn start_native_boot(&self, env: crate::native_boot::NativeEnv, epoch: u64) {
+        let fallback_env = env.clone();
+        if let Err(error) =
+            self.call_writer(move |state| state.start_native_boot_direct(env, epoch))
+        {
+            self.install_native_boot(crate::native_boot::NativeBoot::blocked(
+                fallback_env,
+                epoch,
+                format!("native startup writer unavailable: {error:?}"),
+            ));
+        }
+    }
+
+    fn start_native_boot_direct(&self, env: crate::native_boot::NativeEnv, epoch: u64) {
+        use crate::native_boot::NativeBoot;
         self.epoch.store(epoch, Ordering::SeqCst);
+        let mut store = self.engine.store.lock().expect("config mutex").clone();
+        let blocked = |reason: String| {
+            self.install_native_boot(NativeBoot::blocked(env.clone(), epoch, reason))
+        };
+        if self.snapshot().startup_error.is_some() || self.snapshot().storage_fault.is_some() {
+            blocked("native startup refused while durable storage is unavailable".into());
+            return;
+        }
+        let boot_id = crate::native_boot::read_boot_id(&env.boot_id_path);
+        if boot_id.is_empty() || boot_id.len() > 128 {
+            blocked("native startup requires a valid kernel boot identity".into());
+            return;
+        }
+        if !vpnhide_core_rpc::recovery::permits_boot_phase(
+            ConfigPhase::Native,
+            &store.journal.held_resources(),
+        ) {
+            blocked(
+                "native startup held by unresolved durable effects; no load was replayed".into(),
+            );
+            return;
+        }
+        if let Some(attempt) = &store.journal.native_startup {
+            if attempt.boot_id == boot_id {
+                if let Some(result) = &attempt.completed {
+                    // Restore the durable decision, not a best-effort secondary file.
+                    // Pending authentication is retried by the journaled Native phase.
+                    self.install_native_boot(
+                        NativeBoot {
+                            env,
+                            status: result.status.clone(),
+                            selection: result.selection,
+                        }
+                        .revalidate_restored(epoch),
+                    );
+                    return;
+                }
+            }
+        }
+        let Some(path) = &self.journal_path else {
+            blocked("native startup requires a durable operation journal".into());
+            return;
+        };
+        let previous = store.clone();
         let filesystem_hiding = self.filesystem_hiding_wanted();
-        let boot = crate::native_boot::NativeBoot::start(env, epoch, filesystem_hiding);
+        store.journal.native_startup = Some(journal::NativeStartup {
+            boot_id,
+            config_revision: store.config_revision,
+            filesystem_hiding,
+            completed: None,
+        });
+        if let Err(error) = journal::write_atomic(path, &store.journal) {
+            self.freeze_storage_fault(&previous, OperationId(0), &error);
+            blocked("native startup intent could not be synced; no effect dispatched".into());
+            return;
+        }
+        *self.engine.store.lock().expect("config mutex") = store.clone();
+        self.publish_store(&store);
+        let boot = NativeBoot::start(env.clone(), epoch, filesystem_hiding);
+        let pending = store.clone();
+        store
+            .journal
+            .native_startup
+            .as_mut()
+            .expect("startup intent")
+            .completed = Some(journal::NativeStartupResult {
+            status: boot.status.clone(),
+            selection: boot.selection,
+        });
+        if let Err(error) = journal::write_atomic(path, &store.journal) {
+            self.freeze_storage_fault(&pending, OperationId(0), &error);
+            blocked(
+                "native startup completion could not be synced; effect remains uncertain".into(),
+            );
+            return;
+        }
+        *self.engine.store.lock().expect("config mutex") = store.clone();
+        self.publish_store(&store);
         self.install_native_boot(boot);
     }
 
@@ -1440,19 +1517,7 @@ impl CoreState {
         if options.automatic_repair {
             // This runs inside the writer, against the current journal: a hold
             // created while boot queued cannot slip past a snapshot-only check.
-            let held: Vec<_> = store
-                .journal
-                .expired_holds
-                .iter()
-                .copied()
-                .chain(
-                    store
-                        .journal
-                        .operations
-                        .iter()
-                        .flat_map(JournalEntry::held_phases),
-                )
-                .collect();
+            let held = store.journal.held_resources();
             let kind =
                 options
                     .plan
