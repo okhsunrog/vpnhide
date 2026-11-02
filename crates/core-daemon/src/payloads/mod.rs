@@ -52,7 +52,7 @@ impl PayloadKind {
             Self::Kmod { .. } => Err(invalid("unsupported bundle KMI")),
             Self::Kpm => Ok("payloads/kpm/arm64/vpnhide.kpm".into()),
             Self::Zygisk { abi } => Ok(format!(
-                "zygisk/{}.so",
+                "payloads/zygisk/{}.so",
                 match abi {
                     Abi::Arm64 => "arm64-v8a",
                     Abi::Arm32 => "armeabi-v7a",

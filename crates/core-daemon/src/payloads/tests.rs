@@ -309,3 +309,22 @@ fn arm32_and_missing_evidence_fail_closed() {
         Decision::NoEligibleCandidate
     );
 }
+
+#[test]
+fn python_assembled_bundle_matches_runtime_catalog_without_autoload() {
+    let root = tempfile::tempdir().unwrap();
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/test_payload_bundle.py");
+    let status = std::process::Command::new("python3")
+        .arg(fixture)
+        .arg("--fixture")
+        .arg(root.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let catalog = Catalog::open(root.path()).unwrap();
+    catalog.manifest.require_complete().unwrap();
+    assert_eq!(catalog.payloads.len(), 10);
+    assert!(!root.path().join("zygisk").exists());
+    assert_eq!(catalog.manifest.bundle_commit, "a".repeat(40));
+}

@@ -85,6 +85,8 @@ jobs:
               # Shared producer/consumer vectors: run both Rust and Android tests.
               - 'fixtures/app-helper/**'
               - 'scripts/build_lib.py'
+              - 'scripts/payload_bundle.py'
+              - 'scripts/test_payload_bundle.py'
               - 'scripts/build-version.py'
             ci:
               - '.github/**'
@@ -143,6 +145,14 @@ jobs:
             return 0
           }
           echo "event=$EVENT full=$full shared=${F_SHARED:-n/a} shared_rust=${F_SHARED_RUST:-n/a} labels='$LABELS'"
+          # A unified Core package requires every payload from this exact checkout.
+          # Packaging dependencies do not themselves force every QEMU runtime matrix.
+          if [ "$F_KMOD" = true ] || [ "$F_KPM" = true ] || [ "$F_ZYGISK" = true ] || [ "$F_CORE" = true ]; then
+            F_SHARED_RUST=true
+          fi
+          case " $LABELS " in
+            *" area:kmod "*|*" area:kpm "*|*" area:zygisk "*|*" area:core "*) F_SHARED_RUST=true ;;
+          esac
           area kmod "$F_KMOD"
           area kpm "$F_KPM"
           area builtin "$F_BUILTIN"
@@ -244,8 +254,10 @@ jobs:
         with:
           version: ${{ env.RUFF_VERSION }}
           args: check
-      - name: Signing setup failure tests (no credentials)
-        run: python3 -m unittest discover -s scripts -p test_ci_android_keystore.py -v
+      - name: Signing failure and payload assembly tests (no credentials)
+        run: |
+          python3 -m unittest discover -s scripts -p test_ci_android_keystore.py -v
+          python3 -m unittest discover -s scripts -p test_payload_bundle.py -v
       - name: Verify generated files are up to date (iface lists + hook registry + help index)
         run: |
           python3 scripts/codegen-interfaces.py
@@ -384,7 +396,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Build and package kernel module
-        run: python3 kmod/build.py --kmi $KMI --inside-container
+        run: python3 kmod/build.py --kmi "$KMI" --inside-container
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -804,7 +816,7 @@ jobs:
 
   # The required vpnhide_core module (daemon + boot lifecycle): the sole writer
   # of the canonical config, /proc/vpnhide_ctl, Zygisk targets and Ports rules.
-  core:
+  core-binary:
     needs: [setup, changes]
     if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
@@ -837,13 +849,39 @@ jobs:
       - name: Build module zip
         env:
           UPDATE_JSON_URL: https://raw.githubusercontent.com/okhsunrog/vpnhide/main/update-json/update-core.json
-        run: python3 core/build.py
+        run: |
+          python3 core/build.py
+          mv core/target/vpnhide-core.zip core/target/vpnhide-core-base.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          name: vpnhide-core-base
+          path: core/target/vpnhide-core-base.zip
+          if-no-files-found: error
+
+  # Assemble only artifacts from this workflow run and verify their checkout/hash
+  # provenance. Zygisk stays passive until boot authorization is implemented.
+  core:
+    needs: [changes, core-binary, kmod, kpm, zygisk]
+    if: needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: vpnhide-*
+          path: .artifacts/core-inputs
+          merge-multiple: true
+      - name: Assemble verified unified Core ZIP
+        run: >-
+          python3 scripts/payload_bundle.py --inputs .artifacts/core-inputs
+          --output dist/vpnhide-core.zip --commit "$GITHUB_SHA"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
           name: vpnhide-core
-          path: core/target/vpnhide-core.zip
+          path: dist/vpnhide-core.zip
           if-no-files-found: error
 
   # Android checks run on PRs; trusted pushes/tags/manual runs also sign an APK.
@@ -911,13 +949,26 @@ jobs:
           esac
           ./gradlew -PvpnhideWarningsAsErrors=true "assemble$variant"
           cp "app/build/outputs/apk/$out" "$GITHUB_WORKSPACE/vpnhide.apk"
+          python3 - <<'PYAPK'
+          import hashlib, json, os
+          from pathlib import Path
+          apk = Path(os.environ["GITHUB_WORKSPACE"]) / "vpnhide.apk"
+          with apk.open("rb") as file:
+              digest = hashlib.file_digest(file, "sha256").hexdigest()
+          apk.with_suffix(".provenance.json").write_text(json.dumps({
+              "source_commit": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"], "sha256": digest,
+          }) + "\n")
+          PYAPK
 
       - name: Upload signed APK
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vpnhide-apk
-          path: vpnhide.apk
+          path: |
+            vpnhide.apk
+            vpnhide.provenance.json
           if-no-files-found: error
 
       - name: Remove runner signing files
@@ -962,7 +1013,10 @@ jobs:
           generate_release_notes: true
           draft: true
           files: |
-            dist/*.zip
+            dist/vpnhide-core.zip
+            dist/vpnhide-kmod-*.zip
+            dist/vpnhide-kpm.zip
+            dist/vpnhide-zygisk.zip
             dist/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -985,6 +1039,7 @@ jobs:
       - builtin-qemu
       - kpm
       - zygisk
+      - core-binary
       - core
       - android
     if: always()

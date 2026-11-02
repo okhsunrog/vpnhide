@@ -23,6 +23,7 @@ from build_lib import (  # type: ignore[import-not-found]
     get_build_version,
     make_zip,
 )
+from payload_bundle import stamp
 
 
 def main() -> int:
@@ -121,6 +122,7 @@ def main() -> int:
     if out_zip.exists():
         out_zip.unlink()
 
+    stamp(staging, script_dir.parent, "zygisk", build_version)
     make_zip(staging, out_zip)
 
     print()

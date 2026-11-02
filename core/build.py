@@ -7,7 +7,9 @@ Requirements:
   - cargo-ndk
   - Android NDK at $ANDROID_NDK_HOME or auto-detected from $HOME/Android/Sdk/ndk/*
 
-Output: core/target/vpnhide-core.zip. The zip ships one daemon binary per ABI under
+Output: core/target/vpnhide-core.zip is the daemon-only assembly input. CI names
+it vpnhide-core-base.zip, then scripts/payload_bundle.py adds verified payloads
+to the final unified ZIP. The base ships one daemon binary per ABI under
 `bin/<manager $ARCH>/vpnhide-core`; customize.sh (three unconditional lines) keeps
 the one the manager names for the device. All boot logic is the binary's own
 `vpnhide-core service`; `service.sh` is a single exec of it.
@@ -28,6 +30,7 @@ from build_lib import (  # type: ignore[import-not-found]
     get_build_version,
     make_zip,
 )
+from payload_bundle import stamp
 
 # Android API level the daemon links against; matches the app's minSdk.
 API_LEVEL = "28"
@@ -105,6 +108,7 @@ def main() -> int:
     out_zip = script_dir / "target" / "vpnhide-core.zip"
     if out_zip.exists():
         out_zip.unlink()
+    stamp(staging, repo_root, "core", build_version)
     make_zip(staging, out_zip)
 
     size_kb = out_zip.stat().st_size / 1024

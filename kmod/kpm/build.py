@@ -32,6 +32,7 @@ from build_lib import (  # type: ignore[import-not-found]
     get_build_version,
     make_zip,
 )
+from payload_bundle import stamp
 
 KPM_FILE = "vpnhide.kpm"
 
@@ -89,6 +90,7 @@ def main() -> int:
     out_zip = args.out if args.out else repo_root / "vpnhide-kpm.zip"
     if out_zip.exists():
         out_zip.unlink()
+    stamp(staging, repo_root, "kpm", build_version)
     make_zip(staging, out_zip)
     shutil.rmtree(staging)
 

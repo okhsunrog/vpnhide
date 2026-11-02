@@ -30,7 +30,7 @@ changes create new operations, not retroactive changes to confirmed receipts.
 | --- | --- | --- |
 | 1. Payload catalog and pure selection | Implemented as internal API; production integration follows stages 2–4 | Strict bounded manifest, pinned file verification, deterministic eligible candidates, unknown/owner guards, policy/capacity tests |
 | 2. Durable backend lifecycle | Implemented for the current selector; bundle integration follows stages 3/4 | Initial effects journaled before dispatch, crash reconciliation, bounded attempts surviving worker restart, no blind replay |
-| 3. Unified ZIP and CI assembly | Planned | All seven KMIs, both Zygisk ABIs, manifest/hashes, verified provenance, active/staged separation |
+| 3. Unified ZIP and CI assembly | Implemented passive assembly; real seven-KMI CI/device acceptance unobserved | All seven KMIs, both Zygisk ABIs, manifest/hashes, verified provenance, active/staged separation |
 | 4. Zygisk boot authorization and fallback | Planned | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
 | 5. Typed state/RPC/UI/diagnostics | Planned | Paired contract bump, reasons/attempts/coverage, no misleading component health |
 | 6. Shared maintenance plan/executor | Planned | Migration/repair/update use the same typed steps, preserve sources, manager-native staging/removal, durable progress/reconciliation |
@@ -146,3 +146,56 @@ No APK/Kotlin contract changes; JVM/device tests were not run for this stage.
 No GitHub CI status is observable through the previously denied Actions API.
 
 Core ZIP cross-build passed for arm64 and armv7 against the final stage-2 runtime.
+
+## Stage 3: unified assembly (runtime integration remains stage 4)
+
+Each producer stamps `build-provenance.json` with its actual checkout commit,
+tracked dirty state and exact staged-file hashes. `scripts/payload_bundle.py`
+requires clean same-commit artifacts for seven KMIs, KPM, both Core ABIs and both
+Zygisk ABIs. It validates hashes, size budgets, module identity and ELF machine;
+rejects duplicate/unsafe/symlink members; streams explicit members into a private
+staging tree and replaces the output only after success. This is trusted-build
+provenance, not a publisher signature or a kernel ABI compatibility guarantee.
+
+The unified ZIP has only `id=vpnhide_core`. Its `payloads/manifest.json` is consumed
+by the stage-1 catalog. Zygisk remains under `payloads/zygisk`, outside manager
+autoload: no injection is enabled before stage-4 authorization. Backend scripts,
+module identities and update URLs are not copied into the Core bundle. Existing
+legacy installed-backend runtime selection still runs until stage 4 is wired;
+this packaging step does not claim automatic activation or fallback. Active versus
+manager-staged generation must be resolved by lifecycle integration, not by reading
+`modules_update` payloads as active.
+
+CI builds all bundle dependencies when any bundled component changes. The Core
+assembly job consumes only this run's artifacts and validates the exact checkout
+SHA; its output remains `vpnhide-core.zip`. `vpnhide-core-base` is an intermediate,
+not the complete distribution, and is excluded from release assets. The existing
+signed-APK artifact gains a commit/run/hash sidecar; signing rules are unchanged.
+No separate kernel runtime or KPatch-Next is bundled. Existing separately packaged
+backend artifacts remain available during the transition and are not declared active
+merely because their payload bytes exist.
+
+Local command after producing clean component ZIPs from the same checkout:
+
+```sh
+python3 scripts/payload_bundle.py --inputs dist-inputs --output dist/vpnhide-core.zip --commit "$(git rev-parse HEAD)"
+```
+
+Inputs: `vpnhide-core-base.zip` (rename core/build.py's daemon-only output),
+`vpnhide-kmod-<kmi>.zip` for all seven supported KMIs, `vpnhide-kpm.zip`, and
+`vpnhide-zygisk.zip`. Dirty/mixed-source inputs are intentionally refused.
+Eight Python assembly tests and twelve Rust catalog/selection tests (including
+Python-produced ZIP→Rust reader interoperability) pass. Actionlint structure and
+repository Ruff checks pass. Full actionlint with shellcheck also reports pre-existing
+SC2129/SC2012 warnings in untouched setup/QEMU scripts; baseline comparison confirms
+they are not introduced here. The KMI argument quoting warning was fixed. Full real seven-KMI assembly is not locally verified: this
+workspace has no DDK images/payload builds. CI results remain unobserved because
+Actions API access was previously denied. Device/manager acceptance is not claimed.
+
+Final stage-3 local gates: 472 Rust tests passed; the same two Zygisk self-read
+ENOSYS failures remain. Clippy/all-targets, fmt, scaffold/no-su and diff checks pass.
+Core and Zygisk cross-builds passed for arm64/armv7; KPM cross-build passed after
+initializing its pinned KernelPatch submodule. Their metadata correctly marks
+these working-tree validation artifacts dirty, so they cannot accidentally enter
+the clean CI bundle. No kernel source or submodule revisions were changed.
+Signing failure-path tests: 5 passed; no signing credentials were accessed.

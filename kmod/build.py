@@ -50,6 +50,7 @@ from build_lib import (  # type: ignore[import-not-found]
     make_zip,
     version_sort_key,
 )
+from payload_bundle import stamp
 
 # Module file name on disk after `make`.
 KMOD_KO = "vpnhide_kmod.ko"
@@ -149,6 +150,7 @@ def native_build_one(
     out_zip = out if out else kmod_dir.parent / f"vpnhide-kmod-{kmi}.zip"
     if out_zip.exists():
         out_zip.unlink()
+    stamp(staging, kmod_dir.parent, f"kmod:{kmi}", build_version)
     make_zip(staging, out_zip)
     shutil.rmtree(staging)
 
