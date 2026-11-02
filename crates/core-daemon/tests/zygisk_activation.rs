@@ -448,3 +448,158 @@ async fn zygisk_publication_selection_and_refusals_over_rpc() {
         exercise(case).await;
     }
 }
+
+#[tokio::test]
+async fn bundled_authorization_crash_recovery_never_confirms_an_old_generation() {
+    use vpnhide_core_daemon::{config_file, journal};
+    use vpnhide_protocol::zygisk_activation::{Authorization, FILE_NAME};
+    for point in ["native-intent", "native"] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let module = root.join("recipient");
+        fs::create_dir_all(module.join("zygisk")).unwrap();
+        fs::write(
+            module.join("module.prop"),
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+        )
+        .unwrap();
+        artifact(&module.join("zygisk/arm64-v8a.so"), 2, 183);
+        executable(&root.join("cmd"), PM);
+        let config_path = root.join("config.json");
+        config_file::write_atomic(&config_path, &CanonicalConfig::default()).unwrap();
+        let socket = root.join("core.sock");
+        let spawn = |crash: Option<&str>| {
+            let mut command = common::core_command();
+            command
+                .arg(&socket)
+                .env("PATH", root)
+                .env("VPNHIDE_CONFIG_PATH", &config_path)
+                .env("VPNHIDE_CORE_OWNER_DIR", root.join("owner"))
+                .env("VPNHIDE_KMOD_CTL", root.join("ctl"))
+                .env("VPNHIDE_ZYGISK_MODULE", &module)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            if let Some(crash) = crash {
+                command.env("VPNHIDE_TEST_CRASH_AFTER", crash);
+            }
+            Process(command.spawn().unwrap())
+        };
+        let wait = |mut process: Process| async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !socket.exists() {
+                    assert!(process.0.try_wait().unwrap().is_none());
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            process
+        };
+        let first = wait(spawn(None)).await;
+        let client = CoreClient::connect(&socket);
+        common::reserve_operation_ids(&client, 1).await;
+        client
+            .submit_edit(
+                OperationId(1),
+                BaseRef { revision: 1 },
+                ConfigEdit::RepairActivation,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            common::settled(&client, OperationId(1)).await.settled,
+            Some(PhaseOutcome::Confirmed)
+        );
+        let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+        let before = fs::read(module.join(FILE_NAME)).unwrap();
+        assert_eq!(
+            Authorization::decode(&before, boot.trim())
+                .unwrap()
+                .generation,
+            1
+        );
+        drop(client);
+        drop(first);
+        let _ = fs::remove_file(&socket);
+        let mut failing = wait(spawn(Some(point))).await;
+        let client = CoreClient::connect(&socket);
+        common::reserve_operation_ids(&client, 2).await;
+        let _ = client
+            .submit_edit(
+                OperationId(2),
+                BaseRef { revision: 1 },
+                ConfigEdit::RepairActivation,
+            )
+            .await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(status) = failing.0.try_wait().unwrap() {
+                    assert_eq!(status.code(), Some(97));
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let stored = journal::read(&root.join("core_operations.json")).unwrap();
+        let intent = stored
+            .get(OperationId(2))
+            .unwrap()
+            .native_intent
+            .as_ref()
+            .unwrap();
+        assert_eq!(intent.zygisk_authorization.as_ref().unwrap().generation, 2);
+        let interrupted = fs::read(module.join(FILE_NAME)).unwrap();
+        drop(client);
+        drop(failing);
+        let _ = fs::remove_file(&socket);
+        let _restarted = wait(spawn(None)).await;
+        let client = CoreClient::connect(&socket);
+        let expected = if point == "native" {
+            PhaseOutcome::Confirmed
+        } else {
+            PhaseOutcome::Unknown
+        };
+        assert_eq!(
+            common::settled(&client, OperationId(2)).await.settled,
+            Some(expected)
+        );
+        assert_eq!(
+            fs::read(module.join(FILE_NAME)).unwrap(),
+            interrupted,
+            "restart must not republish"
+        );
+        if point == "native-intent" {
+            assert_eq!(
+                interrupted, before,
+                "the old authorization can still authorize old processes"
+            );
+            common::reserve_operation_ids(&client, 3).await;
+            client
+                .submit_edit(
+                    OperationId(3),
+                    BaseRef { revision: 1 },
+                    ConfigEdit::RepairActivation,
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                common::settled(&client, OperationId(3)).await.settled,
+                Some(PhaseOutcome::Confirmed)
+            );
+            assert_eq!(
+                common::settled(&client, OperationId(2)).await.settled,
+                Some(PhaseOutcome::Unknown)
+            );
+            assert_eq!(
+                Authorization::decode(&fs::read(module.join(FILE_NAME)).unwrap(), boot.trim())
+                    .unwrap()
+                    .generation,
+                3
+            );
+        }
+    }
+}

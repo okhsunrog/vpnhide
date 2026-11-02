@@ -12,6 +12,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub mod device;
+pub mod projection;
 pub mod selection;
 
 pub const MANIFEST_VERSION: u32 = 1;

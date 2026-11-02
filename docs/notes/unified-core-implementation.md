@@ -31,7 +31,7 @@ changes create new operations, not retroactive changes to confirmed receipts.
 | 1. Payload catalog and pure selection | Implemented as internal API; production integration follows stages 2–4 | Strict bounded manifest, pinned file verification, deterministic eligible candidates, unknown/owner guards, policy/capacity tests |
 | 2. Durable backend lifecycle | Implemented for the current selector; bundle integration follows stages 3/4 | Initial effects journaled before dispatch, crash reconciliation, bounded attempts surviving worker restart, no blind replay |
 | 3. Unified ZIP and CI assembly | Implemented passive assembly; real seven-KMI CI/device acceptance unobserved | All seven KMIs, both Zygisk ABIs, manifest/hashes, verified provenance, active/staged separation |
-| 4. Zygisk boot authorization and fallback | In progress: tested reader/publisher boundary; writer/selector/fallback not connected | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
+| 4. Zygisk boot authorization and fallback | In progress: durable authorization/revocation tested; production selector/fallback unfinished | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
 | 5. Typed state/RPC/UI/diagnostics | Planned | Paired contract bump, reasons/attempts/coverage, no misleading component health |
 | 6. Shared maintenance plan/executor | Planned | Migration/repair/update use the same typed steps, preserve sources, manager-native staging/removal, durable progress/reconciliation |
 | 7. Separate runtime provisioning | Planned | Verified fork/tool tuple, actual KALLSYMS=y, validated ALL=n support, durable original backup, plan-bound consent, correct write/readback errors |
@@ -242,3 +242,66 @@ Production selector integration must derive each candidate's policy from its
 existing kernel/Zygisk projection: their hook IDs are different. Do not apply one
 kernel hook mask to all candidates or equate different interception coverage.
 Full target/default-mask/capacity checks remain mandatory for each candidate.
+
+### Stage 4 continuation: durable authorization and revocation
+
+The command writer now derives authorization from the admitted operation ID and
+current boot, pins recipient identity in NativeIntent, and syncs that intent before
+publishing. Delivery refuses a changed directory. Reconciliation confirms only
+same-boot, same-directory, exact generation+wire publication. Old/new generation,
+missing file, incompatible recipient or reboot leave Unknown; they do not prove
+that no process consumed an authorization. A legacy raw-wire intent cannot confirm
+bundled publication. Explicit repair publishes a fresh generation and preserves
+the historical Unknown receipt.
+
+Journal schema 5 preserves earlier journals and validates that authorization
+belongs to its operation. Schema-4-only Core refuses this journal; keep evidence
+and restore a compatible Core rather than deleting the journal for downgrade.
+The shared retirement path now removes bundled authorization through the verified
+pinned directory and syncs it; legacy recipients retain empty-wire publication.
+This revokes future authorization only. It does not establish process quiescence,
+and cannot by itself authorize starting a competing backend.
+
+The pure selector now accepts full per-candidate projections, preserving distinct
+kernel/libc hook ID spaces. Missing/duplicate projections fail closed, as do
+unsupported defaults and capacities. Read-only capability adapters and real family
+projection adapters now exist, but production selection,
+transition scheduling and safe fallback remain **unfinished**; bundled autoload
+is still disabled. No fresh/stale diagnostic oracle has been added here.
+
+Tests include real-process crashes before/after Native publication, old-generation
+readback, subsequent repair, directory/boot/wire mismatch, operation-generation
+validation, revocation while an old reader retains its file and per-candidate
+projection gaps. Host fixtures do not establish Android injection or hot-unload.
+
+The independent `zygisk_exposure_boot` journal marker outlives receipt/attempt
+pruning. Same-boot kernel load/adoption is refused after possible Zygisk exposure,
+including explicit repair. Revocation does not clear this marker; a new kernel
+boot identity is the reset boundary. Legacy retained Zygisk startup evidence is
+imported into the marker while upgrading the journal.
+
+Capability evidence is conservative: exact known Android KMI, required module/
+kprobe config and module-loading sysctl, actual authenticated KPM facts, and a
+named `libzygisk.so` mapping in a root-owned zygote. The last probe is deliberately
+narrow: hidden/anonymous mappings and unrecognized providers are Unknown, not
+proof of absence. This is not a universal Zygisk adapter or a health measurement.
+No manager-name heuristic, implicit runtime installation or load is added.
+Family projections use one caller-supplied package/profile snapshot. The optional
+filesystem bit carried by ko/KPM wire is not required coverage when its load-time
+gate is explicitly off; the wire and every other requested bit remain intact.
+
+Remaining stage-4 gates: connect verified active catalog and prepared selector to
+startup/recovery; obtain useful loader-generation evidence across supported Zygisk
+providers; journal safe transition ordering and bounded fallback; prevent stale
+process telemetry from confirming new generations. Autoload remains disabled until
+these contracts are completed. Stages 5–7 have not been implemented by this checkpoint.
+
+Checkpoint validation: 490 workspace Rust tests pass; the two existing Zygisk
+self-read tests fail in this container (`process_vm_readv(self)` returns ENOSYS,
+confirmed directly). No tests were ignored or weakened. Workspace Clippy with
+all targets and warnings denied, fmt, diff and module scaffold/no-su checks pass.
+Core cross-builds pass for ARM64 and ARMv7 (validation ZIP only; dirty-build
+provenance is intentionally not accepted by the release bundle assembler).
+No Android process-injection, reboot/fallback, QEMU/KMI or device acceptance was
+run here; GitHub Actions results remain unobserved. RPC13 and kernel control-v2
+are unchanged; the private journal upgrade to schema 5 requires compatible Core.

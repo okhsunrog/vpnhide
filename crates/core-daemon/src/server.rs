@@ -2023,7 +2023,7 @@ impl PhaseHook for JournalPhaseHook<'_> {
                     return Err(PhaseOutcome::FailedKnown);
                 }
             }
-            self.runner.native_intent(self.candidate)
+            self.runner.native_intent(self.candidate, self.op)
         } else {
             None
         };

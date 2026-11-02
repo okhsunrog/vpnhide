@@ -391,6 +391,47 @@ mod tests {
     }
 
     #[test]
+    fn zygisk_exposure_survives_history_pruning_and_requires_a_new_boot() {
+        let root = tempfile::tempdir().unwrap();
+        let mut journal = Journal::default();
+        let zygisk = setup(
+            root.path(),
+            "boot-a",
+            vec![NativeBackend::Zygisk],
+            KernelFact::Absent,
+        );
+        journal.replace_native_startup(attempt(zygisk.intent));
+        for _ in 0..32 {
+            let observed = setup(root.path(), "boot-a", Vec::new(), KernelFact::Absent);
+            journal.replace_native_startup(attempt(observed.intent));
+        }
+        let path = root.path().join("journal.json");
+        crate::journal::write_atomic(&path, &journal).unwrap();
+        let restored = crate::journal::read(&path).unwrap();
+        assert_eq!(restored.zygisk_exposure_boot.as_deref(), Some("boot-a"));
+        let kernel = setup(root.path(), "boot-a", Vec::new(), KernelFact::Builtin);
+        assert!(
+            restored
+                .check_native_attempt(&kernel.intent, false)
+                .is_err()
+        );
+        assert!(restored.check_native_attempt(&kernel.intent, true).is_err());
+        let after_reboot = setup(root.path(), "boot-b", Vec::new(), KernelFact::Builtin);
+        assert!(
+            restored
+                .check_native_attempt(&after_reboot.intent, false)
+                .is_ok()
+        );
+        let zygisk = setup(
+            root.path(),
+            "boot-a",
+            vec![NativeBackend::Zygisk],
+            KernelFact::Absent,
+        );
+        assert!(restored.check_native_attempt(&zygisk.intent, true).is_ok());
+    }
+
+    #[test]
     fn load_budget_and_quarantine_outlive_bounded_attempt_history() {
         let root = tempfile::tempdir().unwrap();
         artifact(root.path());

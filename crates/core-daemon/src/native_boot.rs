@@ -965,6 +965,11 @@ pub fn retire_zygisk(dir: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn retire_zygisk_target(target: &crate::zygisk::ZygiskTarget) -> Result<(), String> {
+    if target.is_bundled()? {
+        return target
+            .revoke_authorization()
+            .map_err(|e| format!("bundled authorization revocation: {e:?}"));
+    }
     let wire = crate::activation::project_native_wire_with_resolver(
         &vpnhide_core_rpc::CanonicalConfig::default(),
         NativeBackend::Zygisk,

@@ -274,7 +274,10 @@ impl RealPhaseRunner {
         if let Some(backend) = prepared.selected() {
             let wire = crate::activation::project_native_wire(candidate, backend)
                 .map_err(|error| error.to_string())?;
+            let authorization =
+                Self::authorization(&boot.env, backend, op, &wire).map_err(|e| e.to_string())?;
             *self.prepared_native.borrow_mut() = Some(Ok(crate::journal::NativeIntent {
+                zygisk_authorization: authorization,
                 backend,
                 wire,
                 zygisk_module: (backend == vpnhide_core_rpc::NativeBackend::Zygisk)
@@ -306,6 +309,7 @@ impl RealPhaseRunner {
     pub fn native_intent(
         &self,
         candidate: &CanonicalConfig,
+        op: vpnhide_core_rpc::OperationId,
     ) -> Option<crate::journal::NativeIntent> {
         if let Some(intent) = self.prepared_native.borrow().as_ref() {
             return intent.clone().ok();
@@ -325,15 +329,55 @@ impl RealPhaseRunner {
             Some((for_backend, wire)) if *for_backend == backend => Ok(wire.clone()),
             _ => crate::activation::project_native_wire(candidate, backend),
         };
-        let intent = wire.map(|wire| crate::journal::NativeIntent {
-            backend,
-            wire,
-            zygisk_module: (backend == vpnhide_core_rpc::NativeBackend::Zygisk)
-                .then(|| boot.env.module_dir(backend))
-                .flatten(),
+        let intent = wire.and_then(|wire| {
+            let authorization = Self::authorization(&boot.env, backend, op, &wire)?;
+            Ok(crate::journal::NativeIntent {
+                zygisk_authorization: authorization,
+                backend,
+                wire,
+                zygisk_module: (backend == vpnhide_core_rpc::NativeBackend::Zygisk)
+                    .then(|| boot.env.module_dir(backend))
+                    .flatten(),
+            })
         });
         *self.prepared_native.borrow_mut() = Some(intent.clone());
         intent.ok()
+    }
+
+    fn authorization(
+        env: &crate::native_boot::NativeEnv,
+        backend: vpnhide_core_rpc::NativeBackend,
+        op: vpnhide_core_rpc::OperationId,
+        wire: &str,
+    ) -> Result<Option<crate::journal::ZygiskAuthorizationIntent>, crate::activation::ProjectionError>
+    {
+        use crate::activation::ProjectionError::Failed;
+        if backend != vpnhide_core_rpc::NativeBackend::Zygisk {
+            return Ok(None);
+        }
+        let path = env
+            .module_dir(backend)
+            .ok_or_else(|| Failed("missing Zygisk recipient".into()))?;
+        let target = crate::zygisk::ZygiskTarget::open(&path).map_err(Failed)?;
+        if !target.is_bundled().map_err(Failed)? {
+            return Ok(None);
+        }
+        let boot_id = crate::native_boot::read_boot_id(&env.boot_id_path);
+        let encoded = vpnhide_protocol::zygisk_activation::Authorization {
+            boot_id: boot_id.clone(),
+            generation: op.0,
+            wire: wire.into(),
+        };
+        if encoded.encode().is_none() {
+            return Err(Failed(
+                "invalid boot/generation/policy authorization".into(),
+            ));
+        }
+        Ok(Some(crate::journal::ZygiskAuthorizationIntent {
+            boot_id,
+            generation: op.0,
+            directory_identity: target.identity().map_err(Failed)?,
+        }))
     }
 
     pub fn take_ports_report(&self) -> Option<vpnhide_core_rpc::PortsFamilyReport> {
@@ -434,8 +478,15 @@ impl PhaseRunner for RealPhaseRunner {
                         if let Err(e) = crate::ownership::claim_before_native(backend) {
                             eprintln!("core: native ownership claim failed: {e}");
                         }
-                        let (outcome, result) =
-                            crate::activation::deliver_to_selected(&boot.env, backend, &wire);
+                        let (outcome, result) = crate::activation::deliver_with_authorization(
+                            &boot.env,
+                            backend,
+                            &wire,
+                            prepared
+                                .as_ref()
+                                .and_then(|result| result.as_ref().ok())
+                                .and_then(|intent| intent.zygisk_authorization.as_ref()),
+                        );
                         boot.record_delivery(result);
                         outcome
                     }

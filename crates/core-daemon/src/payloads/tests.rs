@@ -328,3 +328,55 @@ fn python_assembled_bundle_matches_runtime_catalog_without_autoload() {
     assert!(!root.path().join("zygisk").exists());
     assert_eq!(catalog.manifest.bundle_commit, "a".repeat(40));
 }
+
+#[test]
+fn candidate_specific_projections_preserve_distinct_hook_spaces_and_refuse_gaps() {
+    let mut device = device();
+    device.module_loading = Runtime::Unsupported;
+    device.kpm = Runtime::Absent;
+    let mut zygisk = policy();
+    zygisk.required_hooks = vpnhide_protocol::hook_ids::Hook::ZygiskIoctl.bit();
+    let mut support = support();
+    support
+        .iter_mut()
+        .find(|(b, _)| *b == B::Zygisk)
+        .unwrap()
+        .1
+        .hooks = zygisk.required_hooks;
+    let mut projections = vec![(B::Kmod, policy()), (B::Zygisk, zygisk)];
+    assert_eq!(
+        assess_projected(&manifest(), &device, &projections, &support)
+            .unwrap()
+            .decision,
+        Decision::Select(B::Zygisk)
+    );
+    assert_eq!(
+        assess(&manifest(), &device, policy(), &support)
+            .unwrap()
+            .decision,
+        Decision::NoEligibleCandidate
+    );
+    projections.push((B::Zygisk, zygisk));
+    let duplicate = assess_projected(&manifest(), &device, &projections, &support).unwrap();
+    assert_eq!(
+        duplicate.candidates[3].eligibility,
+        Err(Rejection::PolicyUnresolved)
+    );
+    projections.pop();
+    projections[1].1.default_mask = zygisk.required_hooks;
+    assert_eq!(
+        assess_projected(&manifest(), &device, &projections, &support)
+            .unwrap()
+            .candidates[3]
+            .eligibility,
+        Err(Rejection::DefaultMaskUnsupported)
+    );
+    projections.pop();
+    assert_eq!(
+        assess_projected(&manifest(), &device, &projections, &support)
+            .unwrap()
+            .candidates[3]
+            .eligibility,
+        Err(Rejection::PolicyUnresolved)
+    );
+}

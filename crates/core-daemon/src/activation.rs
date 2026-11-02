@@ -38,8 +38,20 @@ pub fn deliver_to_selected(
     backend: NativeBackend,
     wire: &str,
 ) -> (vpnhide_core_rpc::PhaseOutcome, Result<(), String>) {
+    deliver_with_authorization(env, backend, wire, None)
+}
+
+pub fn deliver_with_authorization(
+    env: &crate::native_boot::NativeEnv,
+    backend: NativeBackend,
+    wire: &str,
+    authorization: Option<&crate::journal::ZygiskAuthorizationIntent>,
+) -> (vpnhide_core_rpc::PhaseOutcome, Result<(), String>) {
     use vpnhide_core_rpc::PhaseOutcome;
     let failed = |e: String| (PhaseOutcome::FailedKnown, Err(e));
+    if authorization.is_some() && backend != NativeBackend::Zygisk {
+        return failed("Zygisk authorization cannot accompany another backend".into());
+    }
     match backend {
         NativeBackend::Kmod | NativeBackend::Builtin => {
             match deliver_native(&env.ctl, backend, wire) {
@@ -83,7 +95,19 @@ pub fn deliver_to_selected(
             if let Err(e) = crate::backend::check_zygisk_dispatch(&env.ctl) {
                 return failed(e);
             }
-            match target.publish(wire) {
+            let result = if let Some(authorization) = authorization {
+                if target.identity().ok() != Some(authorization.directory_identity) {
+                    return failed("Zygisk recipient changed after durable admission".into());
+                }
+                target.publish_authorized(&vpnhide_protocol::zygisk_activation::Authorization {
+                    boot_id: authorization.boot_id.clone(),
+                    generation: authorization.generation,
+                    wire: wire.into(),
+                })
+            } else {
+                target.publish(wire)
+            };
+            match result {
                 Ok(()) => (PhaseOutcome::Confirmed, Ok(())),
                 Err(crate::zygisk::PublishError::BeforeWrite(e)) => failed(e),
                 Err(crate::zygisk::PublishError::Unknown(e)) => {

@@ -143,11 +143,42 @@ fn reconcile_native(intent: Option<&NativeIntent>) -> PhaseOutcome {
         let Some(module) = intent.zygisk_module.as_deref() else {
             return PhaseOutcome::Unknown;
         };
+        if let Some(authorization) = &intent.zygisk_authorization {
+            return reconcile_bundled_publication(module, &intent.wire, authorization);
+        }
+        // An invalid/changed recipient cannot fall back to raw targets evidence.
+        // In particular, damaged bundled metadata must not revive an old intent.
+        if crate::zygisk::ZygiskTarget::open(module).and_then(|t| t.is_bundled()) != Ok(false) {
+            return PhaseOutcome::Unknown;
+        }
         return reconcile_zygisk_publication(module, &intent.wire);
     }
     // Kernel / KPM: telemetry proves liveness, not that this candidate’s wire
     // was applied. Refusing to invent Confirmed leaves the op Held.
     PhaseOutcome::Unknown
+}
+
+fn reconcile_bundled_publication(
+    module: &Path,
+    wire: &str,
+    intent: &crate::journal::ZygiskAuthorizationIntent,
+) -> PhaseOutcome {
+    let boot = crate::native_boot::read_boot_id(Path::new(crate::native_boot::BOOT_ID_PATH));
+    if boot != intent.boot_id {
+        return PhaseOutcome::Unknown;
+    }
+    let Ok(target) = crate::zygisk::ZygiskTarget::open(module) else {
+        return PhaseOutcome::Unknown;
+    };
+    if target.identity().ok() != Some(intent.directory_identity) {
+        return PhaseOutcome::Unknown;
+    }
+    match target.read_authorized(&boot) {
+        Ok(Some(current)) if current.matches(intent.generation, wire) => PhaseOutcome::Confirmed,
+        // Neither an old/new generation nor absence proves that a publication did
+        // not happen. Existing processes may already have consumed the intended file.
+        _ => PhaseOutcome::Unknown,
+    }
 }
 
 fn reconcile_zygisk_publication(module: &Path, expected_wire: &str) -> PhaseOutcome {
@@ -295,6 +326,91 @@ mod tests {
     }
 
     #[test]
+    fn bundled_reconciliation_requires_exact_boot_generation_policy_and_directory() {
+        let root = tempfile::tempdir().unwrap();
+        crate::zygisk::test_fixture(root.path());
+        fs::write(
+            root.path().join("module.prop"),
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+        )
+        .unwrap();
+        let target = crate::zygisk::ZygiskTarget::open(root.path()).unwrap();
+        let boot = crate::native_boot::read_boot_id(Path::new(crate::native_boot::BOOT_ID_PATH));
+        let wire = "vpnhide 2 config\ndebug 0\ndefault 0\nend 0\n";
+        let intent = crate::journal::ZygiskAuthorizationIntent {
+            boot_id: boot.clone(),
+            generation: 42,
+            directory_identity: target.identity().unwrap(),
+        };
+        let mut authorization = vpnhide_protocol::zygisk_activation::Authorization {
+            boot_id: boot,
+            generation: 41,
+            wire: wire.into(),
+        };
+        target.publish_authorized(&authorization).unwrap();
+        assert_eq!(
+            reconcile_bundled_publication(root.path(), wire, &intent),
+            PhaseOutcome::Unknown
+        );
+        fs::write(root.path().join("targets.txt"), wire).unwrap();
+        let legacy_intent = NativeIntent {
+            backend: NativeBackend::Zygisk,
+            wire: wire.into(),
+            zygisk_module: Some(root.path().into()),
+            zygisk_authorization: None,
+        };
+        assert_eq!(
+            reconcile_native(Some(&legacy_intent)),
+            PhaseOutcome::Unknown
+        );
+        fs::write(root.path().join("module.prop"), "id=vpnhide_core\n").unwrap();
+        assert_eq!(
+            reconcile_native(Some(&legacy_intent)),
+            PhaseOutcome::Unknown
+        );
+        fs::write(
+            root.path().join("module.prop"),
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+        )
+        .unwrap();
+        authorization.generation = 42;
+        target.publish_authorized(&authorization).unwrap();
+        assert_eq!(
+            reconcile_bundled_publication(root.path(), wire, &intent),
+            PhaseOutcome::Confirmed
+        );
+        assert_eq!(
+            reconcile_bundled_publication(
+                root.path(),
+                &wire.replace("debug 0", "debug 1"),
+                &intent
+            ),
+            PhaseOutcome::Unknown
+        );
+        let mut next_boot = intent.clone();
+        next_boot.boot_id = "other-boot".into();
+        assert_eq!(
+            reconcile_bundled_publication(root.path(), wire, &next_boot),
+            PhaseOutcome::Unknown
+        );
+        let mut replaced = intent.clone();
+        replaced.directory_identity.1 += 1;
+        assert_eq!(
+            reconcile_bundled_publication(root.path(), wire, &replaced),
+            PhaseOutcome::Unknown
+        );
+        fs::remove_file(
+            root.path()
+                .join(vpnhide_protocol::zygisk_activation::FILE_NAME),
+        )
+        .unwrap();
+        assert_eq!(
+            reconcile_bundled_publication(root.path(), wire, &intent),
+            PhaseOutcome::Unknown
+        );
+    }
+
+    #[test]
     fn persist_unknown_confirms_when_file_matches_candidate() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("vpnhide_config.json");
@@ -348,6 +464,7 @@ mod tests {
             candidate,
         );
         e.native_intent = Some(NativeIntent {
+            zygisk_authorization: None,
             backend: NativeBackend::Builtin,
             wire: "vpnhide 2 config\ndebug 1\nend 0\n".into(),
             // A production Zygisk path exists in the profile for every backend;
@@ -370,7 +487,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let module = dir.path().join("module");
         fs::create_dir_all(&module).unwrap();
-        fs::write(module.join("module.prop"), "id=vpnhide_zygisk\n").unwrap();
+        crate::zygisk::test_fixture(&module);
         let mut candidate = CanonicalConfig::default();
         candidate.apps.insert(
             "com.example.app".into(),
@@ -400,6 +517,7 @@ mod tests {
             candidate,
         );
         e.native_intent = Some(NativeIntent {
+            zygisk_authorization: None,
             backend: NativeBackend::Zygisk,
             wire,
             zygisk_module: Some(module.clone()),

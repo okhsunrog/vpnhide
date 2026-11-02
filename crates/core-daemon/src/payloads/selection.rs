@@ -106,6 +106,27 @@ pub fn assess(
     policy: Policy,
     support: &[(NativeBackend, Support)],
 ) -> std::io::Result<Assessment> {
+    let requirements: Vec<_> = [
+        NativeBackend::Builtin,
+        NativeBackend::Kmod,
+        NativeBackend::Kpm,
+        NativeBackend::Zygisk,
+    ]
+    .into_iter()
+    .map(|backend| (backend, policy))
+    .collect();
+    assess_projected(manifest, device, &requirements, support)
+}
+
+/// Candidate requirements must come from complete backend-specific projections of
+/// the same canonical configuration and package inventory. Kernel and libc hook
+/// IDs are different; absence or duplicate projections are not an empty policy.
+pub fn assess_projected(
+    manifest: &Manifest,
+    device: &Capabilities,
+    requirements: &[(NativeBackend, Policy)],
+    support: &[(NativeBackend, Support)],
+) -> std::io::Result<Assessment> {
     manifest.validate()?;
     let mut candidates = Vec::new();
     for backend in [
@@ -121,9 +142,15 @@ pub fn assess(
             NativeBackend::Kpm => device.kpm,
             NativeBackend::Zygisk => device.zygisk,
         };
+        let mut projected = requirements.iter().filter(|(b, _)| *b == backend);
+        let policy = projected
+            .next()
+            .map(|(_, policy)| policy)
+            .filter(|_| projected.next().is_none());
         let eligibility = availability
             .and_then(|()| runtime_ready(runtime))
             .and_then(|()| {
+                let policy = policy.ok_or(Rejection::PolicyUnresolved)?;
                 if !policy.resolved {
                     return Err(Rejection::PolicyUnresolved);
                 }

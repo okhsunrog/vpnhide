@@ -169,6 +169,69 @@ impl ZygiskTarget {
         Ok(recipient)
     }
 
+    pub fn is_bundled(&self) -> Result<bool, String> {
+        Ok(self.verify()? == Recipient::Bundled)
+    }
+
+    pub fn read_authorized(
+        &self,
+        boot: &str,
+    ) -> Result<Option<vpnhide_protocol::zygisk_activation::Authorization>, String> {
+        use vpnhide_protocol::zygisk_activation::{Authorization, FILE_NAME, MAX_BYTES};
+        if !self.is_bundled()? {
+            return Err("not a bundled recipient".into());
+        }
+        let file = match OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(self.pinned_path().join(FILE_NAME))
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.to_string()),
+        };
+        if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+            return Err("authorization is not regular".into());
+        }
+        let mut bytes = Vec::new();
+        file.take(MAX_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        Authorization::decode(&bytes, boot)
+            .map(Some)
+            .ok_or_else(|| "invalid or stale authorization".into())
+    }
+
+    /// Revoke future process authorization only. Existing hooks are not unloaded.
+    /// Caller must durably journal the pinned recipient before this effect.
+    pub fn revoke_authorization(&self) -> Result<(), PublishError> {
+        let preflight = || -> Result<PathBuf, String> {
+            if !self.is_bundled()? {
+                return Err("not a bundled recipient".into());
+            }
+            let path = self
+                .pinned_path()
+                .join(vpnhide_protocol::zygisk_activation::FILE_NAME);
+            if entry_exists(&path)?
+                && !fs::symlink_metadata(&path)
+                    .map_err(|e| e.to_string())?
+                    .is_file()
+            {
+                return Err("authorization destination is not regular".into());
+            }
+            Ok(path)
+        };
+        let path = preflight().map_err(PublishError::BeforeWrite)?;
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(PublishError::Unknown(e.to_string())),
+        }
+        self.directory
+            .sync_all()
+            .map_err(|e| PublishError::Unknown(e.to_string()))
+    }
+
     pub fn publish(&self, wire: &str) -> Result<(), PublishError> {
         self.publish_impl(wire, None)
     }
@@ -264,6 +327,42 @@ mod tests {
         .unwrap();
         library(&path.join("zygisk/arm64-v8a.so"), 2, 183);
         fs::write(path.join("targets.txt"), OLD).unwrap();
+    }
+
+    #[test]
+    fn revocation_removes_future_authority_not_an_already_consumed_generation() {
+        use vpnhide_protocol::zygisk_activation::{Authorization, FILE_NAME};
+        let root = tempfile::tempdir().unwrap();
+        fixture(root.path());
+        fs::write(
+            root.path().join("module.prop"),
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+        )
+        .unwrap();
+        let target = ZygiskTarget::open(root.path()).unwrap();
+        let boot = "12345678-1234-1234-1234-123456789abc";
+        let authorization = Authorization {
+            boot_id: boot.into(),
+            generation: 42,
+            wire: WIRE.into(),
+        };
+        target.publish_authorized(&authorization).unwrap();
+        let mut already_open = File::open(root.path().join(FILE_NAME)).unwrap();
+        target.revoke_authorization().unwrap();
+        assert!(target.read_authorized(boot).unwrap().is_none());
+        let mut prior = Vec::new();
+        already_open.read_to_end(&mut prior).unwrap();
+        assert_eq!(Authorization::decode(&prior, boot).unwrap(), authorization);
+        target.revoke_authorization().unwrap(); // explicit repeated removal is idempotent
+        symlink(root.path().join("targets.txt"), root.path().join(FILE_NAME)).unwrap();
+        assert!(matches!(
+            target.revoke_authorization(),
+            Err(PublishError::BeforeWrite(_))
+        ));
+        assert_eq!(
+            fs::read_to_string(root.path().join("targets.txt")).unwrap(),
+            OLD
+        );
     }
 
     #[test]
