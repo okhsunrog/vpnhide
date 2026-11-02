@@ -9,6 +9,7 @@ members = [
     "crates/package-trust",
     "crates/artifact-model",
     "crates/build-contract",
+    "crates/bounded-process",
     "crates/tooling",
     "crates/loader-ipc",
     "crates/diagnostic-model",

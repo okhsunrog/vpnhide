@@ -11,6 +11,7 @@ use vpnhide_artifact_model::{
     archive,
     package::{Envelope, MAX_ENVELOPE_BYTES},
 };
+use vpnhide_bounded_process::capture_command;
 
 #[derive(Clone, ValueEnum)]
 enum Mode {
@@ -44,16 +45,20 @@ fn provider(
 ) -> io::Result<()> {
     let failure =
         || io::Error::other("existing Android signing identity is unavailable or unsupported");
-    let result = Command::new("java")
-        .arg(signer)
-        .arg(mode)
-        .arg(keystore)
-        .arg(source)
-        .arg(destination)
-        .output()
-        .map_err(|_| failure())?;
+    let result = capture_command(
+        Command::new("java")
+            .arg(signer)
+            .arg(mode)
+            .arg(keystore)
+            .arg(source)
+            .arg(destination),
+        None,
+        std::time::Duration::from_secs(30),
+        64 * 1024,
+    )
+    .map_err(|_| failure())?;
     // Provider output may contain aliases or sensitive paths. Never echo it.
-    if !result.status.success() {
+    if result.timed_out || result.truncated || !result.output.status.success() {
         return Err(failure());
     }
     Ok(())

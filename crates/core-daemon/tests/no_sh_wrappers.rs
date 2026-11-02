@@ -40,7 +40,13 @@ fn scan(dir: &Path, hits: &mut Vec<String>) {
 fn core_spawns_no_sh_wrapper() {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut hits = Vec::new();
-    for krate in ["core-daemon/src", "activator/src", "core-rpc/src"] {
+    for krate in [
+        "core-daemon/src",
+        "activator/src",
+        "core-rpc/src",
+        "bounded-process/src",
+        "artifact-model/src",
+    ] {
         scan(&crates.join(krate), &mut hits);
     }
     assert!(

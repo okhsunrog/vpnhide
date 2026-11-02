@@ -1695,3 +1695,18 @@ regression passed. The static musl executor builds/runs and returns the seven-KM
 catalog; all twelve CI consumers depend on its same-checkout job, and the 22-job
 graph has no missing dependencies/cycles. Live Actions, production-key signature,
 fresh complete ARM/kernel bundle and phone acceptance remain unobserved/open.
+
+
+## Shared bounded subprocess owner
+
+Extracted the existing process-group/deadline/output primitive from activator into
+the portable Linux/Android `bounded-process` crate. Backend/Core callers keep a
+reexport, not a second implementation. Host Git identity capture and Java signing
+now use the same bounded primitive, with no provider output echoed on errors.
+All five executable process tests moved with the owner: pipe backpressure, shared
+stdout/stderr budget, deadline, orphan descendants and child fixture. CI executes
+them in the tooling job, and the production no-shell guard includes the moved
+runtime crate. 61 activator tests, five process tests, three CLI tests and actual
+RSA/P256/P384 signing passed, as did strict host and both ARM ABI Clippy and the
+Core no-wrapper guard. This prepares typed QEMU/reset execution; those ports are
+not completed merely by extracting this primitive.

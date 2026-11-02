@@ -141,14 +141,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 version,
             } => {
                 fn git(repo: &Path, args: &[&str]) -> io::Result<String> {
-                    let output = std::process::Command::new("git")
-                        .args(args)
-                        .current_dir(repo)
-                        .output()?;
-                    if !output.status.success() || output.stdout.len() > 1024 * 1024 {
+                    let captured = vpnhide_bounded_process::capture_command(
+                        std::process::Command::new("git")
+                            .args(args)
+                            .current_dir(repo),
+                        None,
+                        std::time::Duration::from_secs(10),
+                        1024 * 1024,
+                    )?;
+                    if captured.timed_out || captured.truncated || !captured.output.status.success()
+                    {
                         return Err(io::Error::other("git identity unavailable"));
                     }
-                    String::from_utf8(output.stdout).map_err(io::Error::other)
+                    String::from_utf8(captured.output.stdout).map_err(io::Error::other)
                 }
                 let commit = git(&repo, &["rev-parse", "HEAD"])?;
                 let dirty = !git(&repo, &["status", "--porcelain", "--untracked-files=no"])?

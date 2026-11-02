@@ -11,6 +11,7 @@ name = "vpnhide-tooling"
 path = "src/main.rs"
 
 [dependencies]
+vpnhide_bounded_process = { path = "../bounded-process" }
 vpnhide_artifact_model = { path = "../artifact-model", features = ["archives"] }
 clap = { version = "4.6.7", features = ["derive"] }
 serde_json = "1"
