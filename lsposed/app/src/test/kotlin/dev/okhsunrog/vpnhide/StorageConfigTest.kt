@@ -559,9 +559,6 @@ class StorageConfigTest {
     fun `snapshot builder preserves roles while rebuilding canonical config`() {
         val snapshot =
             TargetsSnapshot(
-                kmodModuleInstalled = true,
-                kpmModuleInstalled = false,
-                zygiskModuleInstalled = false,
                 uidToPkg = mapOf(10123 to "com.observer"),
                 canonicalConfig =
                     CanonicalConfig(

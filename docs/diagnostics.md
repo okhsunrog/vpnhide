@@ -1,355 +1,72 @@
-# Diagnostics — how VPN Hide self-tests hiding and attributes the result
+# Autonomous diagnostics
 
-> Current v2 ownership (RPC20): Core owns autonomous runs, required plans,
-> attribution, cleanup and cache. Dashboard, Diagnostics, agent and exports read
-> the same retained publication; opening the APK or a capture does not launch a
-> suite. Explicit Retry requests a run. Current implementation reports scoped
-> incomplete/infrastructure/leak evidence and has no full-success variant.
-> Foreign VPN presence and the main app's split-tunnel membership are not
-> prerequisites. See [the implementation ledger](notes/unified-core-implementation.md)
-> and [schema 4](debug-bundle.md#22-autonomous-evidence-schema-4) for current source
-> identities and coverage limitations. The local main-app orchestration described
-> below is historical and disconnected; do not restore it as production authority.
+Core owns diagnostic admission, required plans, fingerprint/cache, attribution,
+assessment and cleanup. RPC21 publishes the retained run and assessment atomically.
+Dashboard, Diagnostics, agent state and exports consume that same publication.
+Opening the app, changing tabs, reading state or capturing logs does not run a
+suite. Explicit Retry requests a run; repeated pending taps coalesce in the app
+process, and RPC replies never become a competing result source.
 
+A foreign VPN and the APK's membership in its split-tunnel list are irrelevant to
+admission and Dashboard state. The former app-VPN root probe, periodic framework
+classification, route/rule listener, Kotlin gate and main-process JNI suite are
+removed. Real Connectivity APIs inside the diagnostic worker, system-server
+fixtures, production hooks and explicitly requested manual forensics remain.
 
-This is the **self-diagnosis** model: how the app checks that hiding actually
-works for its own process and honestly reports *who* hid the VPN on each vector.
-For the hiding side (which backend covers which detection vector) see
-[detection-vectors.md](detection-vectors.md); for the app↔backend wire see
-[protocol.md](protocol.md).
+## Evidence and ownership
 
-For the baseline execution states, screen/export dependencies, historical decisions
-and the semantic questions that motivated the redesign, see the
-[diagnostics state analysis](notes/diagnostics-state-analysis.md). The replacement is
-specified in the [app state transition contract](notes/app-state-transitions.md):
-diagnostic execution and operation impacts (§7), the presentation, the Situation
-and the Dashboard projection (§8) and capture through the run coordinator (§9)
-are implemented; only the §9 capture machine (reservation, cancellation,
-packaging) is not. How each stage got there is in the
-[contract's implementation history](notes/app-state-transitions-history.md).
+The required plan comes from the supported contract and enabled features, not
+from the installed hook mask. Every required vector must have positive RAW
+stimulus, a protected observation, attribution and ordinary-object preservation
+controls. Empty enumerations and clean Java replies alone cannot prove hiding.
+A leak remains evidence under incomplete controls, worker death or cleanup failure.
 
-The [observation coordinator](observation-coordinator.md) owns cache refreshes,
-and a process-owned `DiagnosticRunCoordinator` behind `DiagnosticsCache` owns
-suite execution: each run is an identified, immutable attempt that survives
-screen changes and Activity recreation, a retry is a new run, and a run records
-its measurement context (process, self configuration, VPN routing, coverage) at
-start and end. The Dashboard's tiles are projected from the same presentation the
-hero classifies, on every change of it, so they cannot lag behind a run. A user
-retry (`retryDiagnosticsAndDashboard`, the one explicit entry point) refreshes
-the app-VPN observation, queues one explicit diagnostic run and re-reads the
-Dashboard's root facts; no cache refresh requests a run on its own. Measurement
-classification and the completed-run retention policy below are unchanged.
+The real `:diagnostics` Android worker is a Zygote-created app process. Core
+orchestrates its bounded execution; Kotlin reports bounded observations rather
+than declaring PASS. Native fixtures are owned TUN resources with session/boot/
+identity and deadline cleanup. Framework fixtures exercise actual public APIs,
+Binder, source transformations and production normalization. RAW grants are
+scoped to the exact test process and never turn off protection for the whole UID.
 
-Devices this was validated on: Pixel 4a (sunfish, Magisk, 4.14, kmod/KPM/Zygisk),
-Pixel 8 Pro (husky, KernelSU-Next, GKI 6.1, KPM), and an Android 13 Zygisk device.
+Required/proven/leaked/unverified, infrastructure failures and cleanup are separate.
+A worker's fresh result does not prove that already-running games consumed a new
+Zygisk generation. Cache identity includes policy, runtime/platform evidence and
+loaded-generation coverage. Missing required proof remains unverified. The
+current partial implementation has no full-success assessment variant.
 
-## 1. The problem it solves
+## Implemented scope and remaining implementation
 
-A check result used to be a single tri-state boolean that conflated three unrelated
-meanings of "pass": (a) the backend hid the VPN, (b) SELinux denied the probe
-(EACCES), (c) there was nothing to leak on that surface. Counting all "passes" as
-backend wins made an *installed-but-inactive* backend read as "Partial" (its
-SELinux-blocked reads counted as passes) and a mostly-working Java layer read as
-"Not working" (any one failing probe painted the whole layer red).
+The base required plan has nineteen vectors. Native interface-only TUN stimuli
+and attributed framework capability/link plus two legacy NetworkInfo scenarios
+have executable cloud coverage. Legacy TYPE_VPN and enumeration require separate
+controls and per-invocation CLOCK_BOOTTIME windows; ordinary duplicates and each
+real invocation's baseline must be preserved. Prepared and revoked controls check
+fixture absence rather than absence of the user's actual networks.
 
-## 2. Root-differential — the reliable classifier
+Addresses, routes/rules, remaining proc/sys/bind stimuli and framework active/
+default/callback/PendingIntent controls still need implementation or expansion.
+Android bionic, SELinux, Java callback isolation and old game-process coverage need
+real device acceptance. QEMU/static libc evidence does not replace those gates.
+The [implementation ledger](notes/unified-core-implementation.md) separates these
+open code tasks from device/signing/publication requirements. See
+[RFC2](rfcs/0002-autonomous-diagnostics.md) for the full contract.
 
-A clean probe result is ambiguous on its own: hook-suppressed and nothing-to-leak
-look identical. Root (uid 0) is **not** a hook target, so a privileged read is the
-ground truth for "what is actually on this surface". The app runs each native probe
-twice — **in-process** (its own uid + SELinux domain + hooks) and **as root** — and
-diffs them:
+## Read models and captures
 
-| root sees | app read | → outcome |
-|---|---|---|
-| nothing | — | **NothingToLeak** (empty ground truth wins, even over EACCES) |
-| VPN | EACCES | **HiddenBySelinux** |
-| VPN | ok, clean | **HiddenByBackend** |
-| — | app saw VPN | **Leak** |
+`AutonomousDiagnosticSnapshotOwner` combines accepted Core/config/root identities
+without RPC admission. Canonical equality, config revision and Core epoch qualify
+diagnostic config acceptance; unrelated publication sequence changes do not
+withdraw an unchanged configuration. Heavy root metadata has its own source join.
+Retained evidence is visible with its currentness, connection and source identity.
 
-Priority: an empty ground truth is checked **before** EACCES — if root sees nothing,
-the SELinux block is moot, it is simply nothing-to-leak.
+Core's native read model separately reports selected implementation/provenance,
+attempts, delivery, observed runtime, required/installed/missing hooks, setup and
+filesystem state. Setup readiness is not a diagnostic result. A receipt whose
+preparation failed cannot reuse an older delivery at the same revision. Observed
+runtime alone cannot borrow an old bundled payload hash or global Zygisk coverage.
 
-**Ground truth is the same Rust checks library run as root**, not shell `ip`/`cat`.
-`GroundTruthProbe` asks core for its `GroundTruthChecks` probe; core runs
-`vpnhide-core probe checks` as its own root child. It emits the same JSON as the
-in-process JNI path (`run_all_json`), so the two views are directly comparable
-per check id. The app ships no root helper and runs no `su`.
-
-A runtime-loaded `vpnhide` KPM is no longer detected by listing KPMs. Core's
-once-per-boot selection queries KernelPatch for the `vpnhide` module directly
-(`KPM_INFO`, then the status handshake). A KPM loaded by hand is a supported
-installation (see [storage.md](storage.md) §4). The debug snapshot still records
-`kpatch kpm list` output for forensics. APatch authentication uses the saved
-root-only SuperKey or its trusted `su` token, and no probe prints either
-credential.
-
-### Probe observation envelope
-
-Core's probe modes and the JNI library share a small response contract. Every
-observation is one JSON object with `version: 1`, a `kind` (`checks`,
-`app_vpn_state` or legacy `routing`) and a `status` (`ok` or
-`error`). Successful responses carry a
-typed `data` value:
-
-```json
-{"version":1,"kind":"checks","status":"ok","data":[{"id":"...","status":"pass","detail":"..."}]}
-{"version":1,"kind":"app_vpn_state","status":"ok","data":{"uid":10042,"state":"routed","session":"framework:143:tun0","interfaces":["tun0"],"method":"uid_rule","detail":"uid_in_vpn_table"}}
-{"version":1,"kind":"routing","status":"ok","data":{"uid":10042,"routed":null,"detail":"netlink unavailable"}}
-```
-
-The envelope also defines an error form (`"status":"error"` with a closed
-`error` code). No current producer emits it, and the app still classifies it as an
-unusable observation.
-The app treats malformed/truncated JSON, an unsupported version, a wrong kind
-and unknown status/error codes as unusable observations; none can become a
-clean check or a false routing result. Credentials and tool diagnostics never
-enter this stdout envelope.
-
-## 3. Per-check outcome (`CheckOutcome`)
-
-`Leak` · `HiddenByBackend` · `HiddenBySelinux` · `NothingToLeak` ·
-`NotMeasured(reason)`. Wire/log tokens: `leak`, `hidden_backend`, `hidden_selinux`,
-`nothing_to_leak`, `not_measured_no_network`, `not_measured_no_ground_truth`,
-`not_measured_unknown_native_status`.
-
-The Rust probe reports `Pass` / `Fail` / `SelinuxBlocked` (EACCES/EPERM, no longer
-folded into `Pass`) / `NetworkBlocked` (ECONNREFUSED from `socket()` — no network
-permission). Native checks classify via the root differential above. **Java** checks
-have no root differential (framework IPC), so they are binary — clean ⟹
-`HiddenByBackend`, dirty ⟹ `Leak` — which is honest only because the self-in-tunnel
-gate (§5) guarantees a VPN artifact was present to hide.
-
-## 4. Layer status & verdict (dashboard tiles)
-
-The tiles are one input to the hero, not the hero: its colour, title, subtitle and
-the prompt under it are decided from the one `Situation` every surface renders
-(`situation()` in `diagnostics/SituationData.kt`, worded by `heroVisual`; see the
-transition contract §8). A `LayerStatus` only ranks a `Measured` situation.
-
-Each dashboard tile is a `LayerStatus`: `Absent` (no module installed) · `Inactive`
-(installed, not loaded this boot) · `Active(hidden, leaks)`. Presence is decided
-**before** the checks, so an unloaded backend can never render a verdict — it just
-reads "not active" (this is the type-level fix for the old "Partial"). An `Active`
-tile's verdict:
-
-- `leaks == 0` → **Ok**
-- `hidden > 0 && leaks > 0` → **Partial** (hides some, an owned vector still leaks)
-- `hidden == 0 && leaks > 0` → **Broken** (loaded but suppressed nothing)
-
-`hidden` must be a *measurement* (the root differential), never inferred from a clean
-probe — otherwise Partial and Broken are indistinguishable. The native tile is judged
-**only on vectors the active backend owns** (has a hook for): a leak on a not-owned
-vector (e.g. `/proc/net/dev` under a kernel backend — no kernel hook exists) does not
-turn the tile red. Such an **unowned leak is a surface no active backend can close on
-this device**, so it also does **not** raise a dashboard warning or the "Issues" count
-— alarming about a gap the user cannot act on is just noise (and support churn).
-Instead it is shown neutrally ("not covered") in a separate group of the per-check
-breakdown, so the residual surface stays honest without reading as a failure. The
-only thing that raises the hero to *attention* is an **owned** leak — a vector the
-active backend should hide but didn't (the user can act: report the device / switch
-backend) — or a genuine module/version problem. So the **tile** answers "is this
-module doing its job", and the dashboard stays clean whenever the active backend
-hides everything it *can*. The Java tile uses the same rollup; LSPosed owns every Java
-check, so all its leaks count.
-
-## 5. Self-in-tunnel gate
-
-Diagnostics are meaningless if VPN Hide itself is not routed through the VPN:
-split-tunnelled out, there is no VPN artifact for its own probes to be hidden
-*from*, so every check would read misleadingly clean. `RoutingGateCache` therefore
-consumes the shared core session's per-main-app UID observation. Core's
-continuous observer and explicit `AppVpnState` probe share the framework parser
-and membership implementation. The published app-scoped state contains: `vpn_off`, `excluded`,
-`routed`, or `unknown`, plus a VPN-session identity and candidate interfaces.
-
-The probe reads only current `NetworkAgentInfo` records from root `dumpsys
-connectivity`; requests, history and idle VPN-manager objects do not count.
-Transport `VPN` establishes a framework VPN and `NOT_VPN` excludes carrier
-IMS/IWLAN interfaces such as `ipsec*`. An up/unknown tunnel-named sysfs interface
-is the fallback for an unmanaged root tunnel. The probe does not dump global
-route tables or use their text as a change fingerprint.
-
-For candidate interfaces it performs the narrow netlink policy-rule check for
-both address families: first learn the VPN egress table id(s) from rules with
-`oif tun*`, then check whether a `uidrange` rule steers this UID into exactly that
-table. This is stricter than the broad `netlink_getrule` diagnostic predicate —
-every online UID sits in some per-network table, so membership must be pinned to
-the VPN table. Table identifiers are scoped by address family and an
-output-interface-only rule is not UID membership. Any unavailable or malformed
-framework/rule observation becomes `unknown`, never `vpn_off` or `excluded`.
-
-Core publishes observations on link/route/rule changes and bounded periodic
-reconciliation. The APK has no foreground VPN polling loop. `routed` publishes
-immediately; negative facts settle for 750 ms against the shared current source.
-Disconnect and Unknown withdraw readiness instead of becoming VPN-off. The
-confirmation suite is owed by the presentation (`owedConfirmation`): one automatic
-run per measurement key (routing identity, coverage, self
-configuration, change epoch and delivery identity) that no measurement and no attempt covers, so a
-re-established tunnel, an excluded → routed return or a coverage change each get
-exactly one run, whether the app was in the foreground for the edge or not.
-Repeated samples of one routed session reveal no new key and rerun nothing. User
-Retry uses the same cache and queues an explicit suite behind any automatic run
-already in progress, so the click cannot be absorbed by that run.
-
-Desired config revision, delivery evidence and measured behavior are separate
-identities. `MeasurementContext` captures `desiredRevision`, `deliveryIdentity`
-and `desiredDeliveryConfirmed`. An app-context probe may still run while delivery
-is uncertain and its measured results remain visible, but `DeliveryUnconfirmed`
-renders an application warning and cannot produce `currentSuccess`. The bundle's
-diagnostic summary and measurement snapshot expose those same identities; a
-passing measurement does not prove the desired revision reached every resource.
-
-## 6. Empirical facts that shape the checks
-
-- **SELinux can carry part of "protection", and it is invisible without the
-  differential.** `/proc/net/if_inet6` and `/proc/net/dev` still have no kernel
-  backend hook. `/sys/class/net` and the per-interface `/proc/sys/net` trees are
-  covered by a kernel backend only when the optional filesystem feature was
-  enabled before reboot; Zygisk provides a weaker libc-routed version after the
-  target process restarts. When SELinux denies a path first, the
-  differential attributes that result to SELinux rather than overstating backend
-  coverage. This is also why permissive devices need an explicit warning.
-- **The VPN lives in protected sockets + per-UID policy tables, not the main route
-  table.** A split-tunnel VPN app marks its sockets and installs `ip rule … uidrange
-  <uid> lookup tun0`; it does *not* put a default route in the main table. So
-  `/proc/net/route` (main table only) shows no VPN for the target and resolves to
-  `NothingToLeak` — while **RTM_GETRULE** (policy rules) is the real routing detection
-  vector, added as a probe mirroring the `fib_nl_fill_rule` kernel filter.
-- **Some checks never fire** on any config: both `/proc/net/route` reads (native +
-  Java) and the removed system-proxy check. They only added false confidence; the
-  route reads are kept because the differential now labels them `NothingToLeak`
-  honestly, the proxy check was dropped.
-- **Suppression counters can distinguish "hook not loaded" from "hook not working"**
-  (a per-hook Δ>0 during a probe is proof the hook did real work). They are **not**
-  used by diagnostics — the root differential already gives the full 4-way + `hidden`
-  without them — and stay only in the Statistics tab.
-
-## 6a. Hook count vs check count — why they differ
-
-Two numbers describe the same backend and they are deliberately not equal, which
-reads as a contradiction if you assume they should match:
-
-- **Statistics → "hooks: N"** counts the *installed logical hook IDs/groups* —
-  the set bits of the backend's `hooks` mask (protocol §4.3), not the number of
-  physical interception points. By default a complete kernel backend reports
-  11; KPM below 5.3 reports 10 because it leaves the bind vector to CAP_NET_RAW
-  (see §5.1 and the protocol note on the per-kernel requested set). Enabling and
-  successfully installing `filesystem_iface_paths` adds one logical group,
-  giving 12 or 11 respectively, although that group uses several interception
-  points. LSPosed likewise counts the attached logical hook IDs.
-- **Detailed diagnostics → the per-check list** counts the *detection vectors the
-  self-test probes* — 15 under the native layer, 13 under the Java layer. Each is
-  a distinct way an app could notice the VPN, run and classified independently
-  (§2, §3).
-
-They are different denominators, not the same one miscounted, because the
-hook↔check relation is many-to-many:
-
-- **One hook covers several checks.** `dev_ioctl` backs both `ioctl_flags`
-  (`SIOCGIFFLAGS`) and `ioctl_mtu` (`SIOCGIFMTU`); one installed hook, two probed
-  vectors.
-- **One check is covered by several hooks, often across backends.** `proc_route`
-  lists `fib_route_seq_show` *and* `zygisk_openat`: whichever active backend
-  closes the vector counts, so a check's `expectedHooks` spans the kernel and
-  Zygisk id spaces even though a given device runs only one of them.
-- **Some checks map to no installed hook and still pass.** `proc_dev` /
-  `proc_if_inet6` have no kernel `seq_show` hook — SELinux or the optional Zygisk
-  `openat` group closes them; and on a pre-5.3 kernel `so_bindtodevice` maps to
-  `socket_bind_interface`, which is intentionally not installed, yet the check
-  passes via the native CAP_NET_RAW gate.
-
-So "KPM OK · hooks: 10" next to "15 KPM checks" can be correct: ten
-logical hook IDs, with some vectors additionally blocked by SELinux or the
-kernel's own gates. This example assumes the optional filesystem group is off;
-it does not mean every vector is necessarily hidden on every device. The
-self-test measures *outcomes per vector*, not one probe
-per hook, which is the whole point of the root-differential (§2) — it asks "is
-this surface hidden", not "did hook N fire".
-
-## 7. Native check → owning hook, verified on Pixel 4a
-
-The native backend hooks map to the diagnostic checks below. The kernel backends
-(`.ko`, built-in and KPM: the first two are one driver, loaded versus compiled
-in) provide the strongest coverage; the optional Zygisk filesystem group covers
-ordinary libc-routed probes but not raw syscalls or aliases. Full hiding matrix in
-[detection-vectors.md](detection-vectors.md).
-
-| check id | probes | kernel hook | notes |
-|---|---|---|---|
-| `ioctl_flags`, `ioctl_mtu` | `SIOCGIF*` by name | `dev_ioctl` | ENODEV for tun0 |
-| `ioctl_conf` | `SIOCGIFCONF` | `sock_ioctl` | tun0 absent from ifconf |
-| `getifaddrs`, `netlink_getlink` | RTM_GETLINK / getifaddrs | `rtnl_fill_ifinfo`, `inet*_fill_ifaddr` | |
-| `so_bindtodevice` | `setsockopt(SO_BINDTODEVICE, tun0)` | `socket_bind_interface` | ENODEV = hidden; a bind that succeeds *and* `getsockopt` echoes `tun0` = leak |
-| `netlink_getroute` | RTM_GETROUTE v4/v6 | `fib_dump_info`, `rt6_fill_node` | |
-| `netlink_getrule` | RTM_GETRULE policy rules | `fib_nl_fill_rule` | v4+v6; kernel-only vector |
-| `proc_route` | `/proc/net/route` | `fib_route_seq_show` | main table — empty for split-tunnel VPN |
-| `proc_ipv6_route` | `/proc/net/ipv6_route` | `ipv6_route_seq_show` | |
-| `proc_if_inet6` | `/proc/net/if_inet6` | **(none)** | no kernel seq_show hook — zygisk `openat` or SELinux only |
-| `proc_dev` | `/proc/net/dev` | **(none)** | zygisk `openat` or SELinux only |
-| `sys_class_net` | `/sys/class/net` | `filesystem_iface_paths` (`.ko`/KPM/Zygisk, optional) | kernel: resolved-dentry and reboot-gated; Zygisk: best-effort libc and restart-gated |
-| `proc_sys_net` | `/proc/sys/net/*/{conf,neigh}` | `filesystem_iface_paths` (`.ko`/KPM/Zygisk, optional) | kernel: resolved-dentry and reboot-gated; Zygisk: best-effort libc and restart-gated |
-
-The `so_bindtodevice` check probes this vector from the app process —
-`setsockopt(SO_BINDTODEVICE, "tun0")`, classified by the same root differential.
-To avoid blessing a broken return-only implementation on errno alone, a bind is a
-leak **only** when it takes: `getsockopt` must echo `tun0` back (so a hook that
-returns 0 without binding — or the kernel's own capability block — is not a false
-positive), while `ENODEV` is the backend's pre-mutation denial. This catches the
-common failure (a bindable VPN interface), but a single process cannot verify the
-*pre-mutation* property itself — that the socket was never bound before `ENODEV`.
-The QEMU `bind-probe` still performs that full state-level test with a raw syscall
-and a second, non-target UID inspecting the inherited socket. Runtime deny hits
-also appear in Statistics. Zygisk has its own libc-routed `zygisk_setsockopt` hook
-but does not claim this vector in its owned-hook mask (so a leak here reads as an
-unowned surface under Zygisk, not a tile failure) and emits no per-hook statistics
-yet.
-
-Java-level checks (LSPosed) cover the framework side — `hasTransport(VPN)`,
-`NET_CAPABILITY_NOT_VPN`, `VpnTransportInfo`, `getAllNetworks`, `LinkProperties`,
-`getNetworkForType(TYPE_VPN)`, the push `NetworkCallback` (issue #70), and the legacy
-`getActiveNetworkInfo` / `getNetworkInfo(TYPE_VPN)` APIs.
-
-The `network_view` check is cross-vector rather than single-surface: it captures
-the app's synchronous network model — every handle and the capabilities, link
-properties and `NetworkInfo` each answers, the legacy type answers and a blind
-netId scan — and asserts it holds together. The active handle must be listed by
-`getAllNetworks()`, a listed network must carry a transport, a connected one an
-interface, its `NetworkInfo` type must name a transport it has, no VPN handle may
-answer outside the enumeration, and (under the gate) no VPN transport, handle or
-active-VPN legacy state may appear anywhere. It catches an *incoherence* the
-per-surface checks miss — a handle whose facts describe a different network. The
-same invariants are what the debug bundle's `networkView` and the external
-`scripts/network-view-probe.py` evaluate. The push-callback coherence half —
-that a pushed handle's link properties name the interface `getLinkProperties`
-returns for it — is folded into the `network_callback` check, which now fails a
-callback that is clean in capabilities but carries a mismatched interface.
-
-Network enumeration failure is distinct from an empty successful enumeration:
-checks depending on that list are not applicable until it can be read. Failed
-netId scan reads are recorded as errors rather than proof of no phantom networks.
-The capture rechecks the active handle and enumeration at the end; an observed
-change makes cross-call consistency comparisons inconclusive. This is a stability
-check, not an atomic framework snapshot. Direct observations of VPN transport or
-active VPN legacy state still fail even when unrelated reads failed. Only
-violations whose prerequisites were observed take precedence over capture errors.
-
-The callback probe publishes a complete pair for one handle atomically and
-retains any observed VPN capabilities, even if no LinkProperties event arrives.
-Registration/read failures without a VPN observation are not measured. These
-results use the existing CheckOutcome and measurement completeness rollup; the
-additional forensic snapshot remains a separate point-in-time capture.
-
-The `network_info_vpn` check compares the app-side `getNetworkInfo(TYPE_VPN)`
-reply with VPN entries in `getAllNetworkInfo()`, after Binder unmarshalling.
-Both paths must retain type 17 with state `DISCONNECTED` and detailed state
-`DISCONNECTED` or policy `BLOCKED`. A disconnected Wi-Fi/mobile substitution,
-an active/transitional VPN state, or a missing/duplicate enumeration entry is
-a failure. Separate calls may straddle a UID-policy change, so a difference
-between `DISCONNECTED` and `BLOCKED` alone is not a failure. Availability is
-included in the detail for inspection, not treated as connection status.
-A direct `null` is inconclusive (`NotMeasured`), unless enumeration already
-proves a failure: null is allowed by Android but cannot verify correct legacy
-type semantics. In particular, the old nulling hook no longer earns a green
-pass. This check measures the current VPN-on run; it does not replace comparing
-VPN-off baselines with hiding enabled and disabled on a test device.
+Schema5 exports both read models and source identities. Historical gate/report/
+verdict fields are null; their old Kotlin domain owners are removed. Capture time
+is not measurement time. Manual `NetworkViewCapture`, hook counter baselines,
+unsigned delta/reset handling and root forensic sections remain available for
+investigation. See [debug bundles](debug-bundle.md).

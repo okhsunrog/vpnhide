@@ -173,7 +173,7 @@ internal class FfiCoreSessionClient(
     }
 }
 
-/** Shared by config, root probes, logger, backend status and routing projections. */
+/** Shared by config, root probes, logger, backend status and diagnostic projections. */
 internal object CoreSessions {
     @Volatile private var attached: FfiCoreSessionClient? = null
     private val mutableUpdates = MutableStateFlow(CoreSessionUpdate())

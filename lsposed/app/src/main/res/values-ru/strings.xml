@@ -81,7 +81,6 @@
     <string name="native_capacity_package">%1$s (%2$d)</string>
     <string name="native_capacity_package_more">%1$s и ещё %2$d</string>
     <string name="save_native_capacity_refused">Не сохранено: для этого выбора нужно %1$d UID приложений, а Native вмещает не более %2$d. Отключите Native у приложений, у которых в сумме не меньше %3$d UID (в скобках — число UID у приложения): %4$s. Прежние настройки продолжают действовать.</string>
-    <string name="dashboard_issue_native_capacity_exceeded">Настройки Native не обновлены: сохранённому выбору теперь нужно %1$d UID приложений, а Native вмещает не более %2$d (например, появились копии выбранных приложений в рабочем профиле или клонах). Ничего не отправлено, Native сохраняет прежние цели. Отключите Native у приложений, у которых в сумме не меньше %3$d UID (в скобках — число UID у приложения): %4$s.</string>
 
     <!-- Dashboard -->
     <string name="dashboard_modules">Модули</string>
@@ -104,27 +103,12 @@
     <string name="dashboard_backend_kpm">KPM</string>
     <string name="dashboard_backend_zygisk">Zygisk</string>
     <string name="dashboard_backend_line">%1$s · %2$s</string>
-    <string name="dashboard_backend_partial_hooks">хуки частично</string>
     <string name="dashboard_not_installed">Не установлен</string>
     <string name="dashboard_installed_inactive">Установлен, неактивен</string>
-    <string name="dashboard_installed_not_verified">Установлен, статус не проверен</string>
-    <string name="dashboard_installed_restart_app">Установлен, перезапустите VPN Hide</string>
-    <string name="dashboard_module_installed_reboot_needed">Установлен, нужна перезагрузка</string>
-    <string name="dashboard_kmod_broken_wrong_variant">Установлен, неподходящий вариант GKI</string>
-    <string name="dashboard_kmod_broken_unsupported_kernel">Установлен, ядро не поддерживается</string>
-    <string name="dashboard_kmod_broken_no_kprobes">Установлен, ядро без kprobes</string>
-    <string name="dashboard_kmod_broken_unknown_variant">Установлен, не загрузился</string>
-    <string name="dashboard_kmod_broken_ambiguous">Установлен, не загрузился — попробуйте второй GKI-вариант</string>
-    <string name="dashboard_kmod_broken_signature_enforced">Установлен, ядро отклоняет неподписанные модули</string>
-    <string name="dashboard_module_broken_artifact_missing">Установлен, нет полезной нагрузки</string>
     <string name="dashboard_active_targets">Активен · целей: %d</string>
     <string name="dashboard_reboot_needed">Требуется перезагрузка устройства</string>
     <string name="dashboard_protection_not_verified">Не проверено</string>
-    <string name="vpn_off_prompt">VPN не активен. Включите его и нажмите «Повторить», чтобы проверить скрытие.</string>
-    <string name="self_not_routed_prompt">VPN активен, но VPN Hide через него не идёт — этим проверкам нечего измерять. С обычным VPN-клиентом добавьте VPN Hide в туннель (не исключайте его сплит-туннелем) и нажмите «Повторить». Некоторые VPN пропускают только выбранные приложения и не дают добавить VPN Hide — тогда самопроверка просто не запускается, это ожидаемо, а не сбой; судите по тому, работает ли нужное приложение.</string>
-    <string name="self_not_routed_accelerators">Пользуетесь игровым акселератором?</string>
-    <string name="vpn_off_retry">Повторить</string>
-    <string name="diag_failed_prompt">Не удалось выполнить проверку скрытия — VPN Hide Core не ответил или проверка завершилась с ошибкой. Нажмите «Повторить». Обычно это временно.</string>
+    <string name="retry">Повторить</string>
 
     <!-- Statistics -->
     <string name="statistics_title">Счётчики перехватов</string>
@@ -216,19 +200,7 @@
     <string name="surface_native">Нативные</string>
     <string name="surface_package">Пакеты</string>
 
-    <string name="dashboard_install_recommendation_title">Рекомендация по установке</string>
-    <string name="dashboard_install_recommendation_device">Ваше устройство: %1$s, ядро %2$s</string>
-    <string name="dashboard_install_recommendation_kmi_note">«%1$s» в версии ядра — это GKI Kernel Module Interface, обозначающий бинарный интерфейс ядра для модулей, а не версию Android на устройстве.</string>
-    <string name="dashboard_install_recommendation_kmod">Рекомендуется модуль ядра. Скачайте %1$s.</string>
-    <string name="dashboard_install_recommendation_kmod_ambiguous">Рекомендуется модуль ядра. GKI-ветку вашего ядра не удаётся определить из uname -r, поэтому сначала попробуйте %1$s; если после перезагрузки он не загрузится в ядро — установите %2$s.</string>
-    <string name="dashboard_install_recommendation_zygisk">Для вашего устройства модуль ядра не поддерживается. Установите %1$s.</string>
-    <string name="dashboard_install_recommendation_zygisk_warning">Банковские и платёжные приложения могут обнаруживать Zygisk-хуки, если для них включён Native. Для таких приложений оставьте Native выключенным и полагайтесь на LSPosed (Java-уровень).</string>
-    <string name="dashboard_install_recommendation_kpm">Для вашего ядра рекомендуется KPM — единый универсальный модуль, скрывающий VPN на уровне ядра, невидимый для анти-тампер проверок. Скачайте %1$s.</string>
-    <string name="dashboard_install_recommendation_kpm_needs_runtime">Для вашего ядра рекомендуется KPM — скрытие на уровне ядра, невидимое для анти-тампер проверок. Сначала нужно установить KPatch-Next-Module. Если не хотите его ставить — используйте vpnhide-zygisk.zip. Файл KPM: %1$s.</string>
-    <string name="dashboard_install_recommendation_kmod_kpm_alt">Модуль ядра — стабильное и наиболее протестированное решение. KPM — альтернатива: один универсальный модуль без привязки к GKI-варианту; полезен, если модуль ядра не загружается в ваше ядро (неподходящий вариант или ядро требует подписанные модули).</string>
     <string name="dashboard_install_recommendation_download">Скачать %1$s</string>
-    <string name="dashboard_install_recommendation_all_releases">Все релизы</string>
-    <string name="dashboard_issue_kpm_capable_but_zygisk">Ваше ядро поддерживает более скрытный KPM, но установлен только Zygisk. Банковские и платёжные приложения могут обнаруживать Zygisk; KPM скрывает VPN на уровне ядра. Стоит установить %1$s.</string>
     <!-- Community / contact modal -->
     <string name="contact_title">Сообщество и обратная связь</string>
     <string name="contact_body">Вопросы, сообщения об ошибках или обратная связь? Свяжитесь с автором.</string>
@@ -255,9 +227,6 @@
     <string name="donate_btc">BTC</string>
     <string name="donate_copied">Адрес скопирован</string>
     <string name="donate_close">Закрыть</string>
-    <string name="donate_banner">VPN Hide бесплатный и без рекламы. Если он вам полезен — можно поддержать разработку.</string>
-    <string name="donate_banner_support">Поддержать</string>
-    <string name="donate_banner_hide">Скрыть</string>
 
     <!-- Перенос настроек, оставшихся от версий до 1.0 -->
     <string name="legacy_import_banner">На устройстве найдены настройки от версии до 1.0. Приложений в них: %1$d. Сейчас у вас уже есть настроенные приложения, поэтому автоматически ничего не переносилось.</string>
@@ -298,33 +267,15 @@
     <string name="dashboard_issues">Ошибки (%d)</string>
     <string name="dashboard_warnings">Предупреждения (%d)</string>
     <string name="dashboard_info">Информация (%d)</string>
-    <string name="dashboard_issue_checks_failed">Не все проверки скрытия пройдены.</string>
     <string name="dashboard_action_details">Подробности</string>
     <string name="dashboard_action_learn_more">Подробнее</string>
-    <string name="dashboard_issue_kmod_capable_but_zygisk">Ваше ядро поддерживает модуль ядра — он работает в пространстве ядра и невидим для анти-тампер проверок. Zygisk тоже работает, но банковские и платёжные приложения могут обнаружить его хуки, если для них включён Native. Установите %1$s и удалите Zygisk-модуль.</string>
-    <string name="dashboard_issue_native_conflict_kernel">Бэкенд ядра (.ko или встроенный) и KPM активны одновременно. Они перехватывают одни и те же функции ядра и могут вызвать зависание устройства. Оставьте один бэкенд ядра; при встроенном бэкенде удалите KPM.</string>
-    <string name="dashboard_issue_native_backends_conflict">Установлено несколько нативных бэкендов: %1$s. Оставьте ровно один. В этой загрузке VPN Hide не загрузил ни один из них, поэтому нативное скрытие выключено, пока вы не удалите лишние и не перезагрузитесь.</string>
-    <string name="dashboard_issue_native_backends_staged_conflict">После перезагрузки будут установлены нативные бэкенды: %1$s. Оставьте ровно один, иначе VPN Hide не загрузит ни один из них.</string>
-    <string name="dashboard_issue_kpm_unverifiable">Не удаётся опросить KernelPatch, поэтому VPN Hide не может проверить, работает ли уже KPM VPN Hide (установленный через vpnhide-kpm.zip, автозагруженный APatch или загруженный вручную). Чтобы никогда не запускать два нативных бэкенда, ничего другого не загружено. Сохраните SuperKey в Настройки → Безопасность, чтобы VPN Hide смог его проверить. Подробности: %1$s</string>
-    <string name="dashboard_issue_native_boot_failed">Не удалось настроить нативный бэкенд в этой загрузке: %1$s</string>
-    <string name="dashboard_issue_zygisk_retire_failed">Zygisk не выбран бэкендом, но его старый список целей не удалось очистить, поэтому он может по-прежнему перехватывать ранее выбранные приложения. Удалите модуль Zygisk. Подробности: %1$s</string>
     <string name="dashboard_issue_obsolete_modules">Всё ещё установлен устаревший модуль VPN Hide 1.x: %1$s. В 2.0 его заменил VPN Hide Core, а старые загрузочные скрипты модуля конфликтуют с core. Удалите его в менеджере root и перезагрузитесь.</string>
-    <string name="dashboard_issue_kpm_awaiting_superkey">KPM пока не активен: KernelPatch отклонил аутентификацию, и VPN Hide не смог его загрузить или проверить. Сохраните SuperKey в Настройки → Безопасность — VPN Hide подхватит его сразу, без перезагрузки.</string>
-    <string name="dashboard_issue_kpm_incompatible">KPM VPN Hide работает, но VPN Hide Core не может им управлять (версия: %1$s, нужна %2$s или новее), поэтому настройки ему не отправлены и вторая копия не загружена. Замените его актуальной версией — установите vpnhide-kpm.zip или загрузите актуальный vpnhide.kpm в APatch/KPatch-Next — и перезагрузите устройство. Подробности: %3$s</string>
-    <string name="dashboard_issue_kpm_version_unreported">не сообщается</string>
     <string name="dashboard_issue_module_reboot_to_activate">Модуль %1$s установлен, но ещё не активен — перезагрузите устройство, чтобы он заработал.</string>
     <string name="dashboard_issue_module_artifact_missing">Установка модуля %1$s повреждена: отсутствует %2$s, и ядру VPN Hide нечего загружать. Переустановите ZIP модуля из последнего релиза.</string>
-    <string name="dashboard_issue_kpm_unsupported_kernel">KPM установлен, но не может загрузиться на ядре %1$s: для этого семейства ядра нет проверенной таблицы смещений. Используйте Zygisk.</string>
-    <string name="dashboard_issue_kpm_needs_superkey">KPM установлен, runtime KernelPatch отвечает, но управляющий вызов отклонён — SuperKey в VPN Hide не сохранён, и авторизоваться удалось только доверенным su-токеном. Сохраните SuperKey в Настройки → Безопасность (тот же, что задан в APatch/FolkPatch) и нажмите «Обновить». Переустановка zip не поможет.</string>
-    <string name="dashboard_issue_kpm_needs_runtime">KPM установлен, но ядро не пропатчено runtime\'ом KernelPatch, чтобы его загрузить. Установите KPatch-Next-Module и пропатчьте ядро из его интерфейса (работает и на Magisk, и на KernelSU). Если не получится — используйте APatch или FolkPatch.</string>
-    <string name="dashboard_issue_native_partial_hooks">Нативный бэкенд загрузился, но на этом ядре встало только %1$d хуков из %2$d — не удалось найти: %3$s. Проверки, которые они закрывают, этим бэкендом не защищены; их может закрывать другой слой. Переустановка не поможет: в этой сборке ядра нужные функции названы иначе или отсутствуют.</string>
-    <string name="dashboard_issue_kpm_load_failed">KPM установлен, но не загрузился: %1$s. Чтобы приложить полный лог загрузки к отчёту об ошибке, нажмите Настройки → Отладка → Собрать отладочный лог, либо переустановите vpnhide-kpm.zip из последнего релиза.</string>
-    <string name="dashboard_issue_multiple_native">Установлено больше одного Native-бэкенда. Активным может быть только один (приоритет: модуль ядра, затем KPM, затем Zygisk), остальные простаивают. Удалите неиспользуемые, чтобы не засорять систему.</string>
     <string name="dashboard_issue_debug_logging_on">Отладочные логи включены. VPN Hide пишет подробные строки в logcat, которые может прочитать любой с root-доступом. Выключите переключатель в Настройки → Для разработчиков после сбора отчёта об ошибке.</string>
     <string name="dashboard_issue_agent_bridge_on">Agent control включён. VPN Hide запускает локальный отладочный мост; по открытому порту другие приложения на устройстве могут обнаружить VPN Hide. Выключите его в Настройки → Для разработчиков, когда закончите.</string>
     <string name="dashboard_issue_selinux_permissive">SELinux в режиме Permissive. Шесть векторов обнаружения, которые VPN Hide рассчитывает блокировать на уровне ядра (RTM_GETROUTE, /proc/net/{tcp,udp,dev,fib_trie}, /sys/class/net), стали доступны выбранным приложениям. Выполните `setenforce 1` и проверьте, что перевело SELinux в этот режим.</string>
     <string name="dashboard_issue_self_multi_profile">VPN Hide установлен в %1$d профилях. Рабочая копия — в основном профиле: LSPosed перехватывает system_server, а он запущен только в основном профиле; экран выбора там уже видит приложения из всех профилей и применяет фильтры ко всем. Копии в дополнительных профилях избыточны и могут одновременно записывать общий конфиг. Удалите VPN Hide из рабочего профиля / Second Space / других дополнительных профилей.</string>
-    <string name="dashboard_issue_no_native">Native-бэкенд не установлен. Установите рекомендованный Native-бэкенд для полного скрытия.</string>
     <string name="dashboard_issue_lsposed_not_installed">LSPosed/Vector не установлен. Установите его и включите модуль VPN Hide для System Framework.</string>
     <string name="dashboard_issue_reboot">LSPosed настроен правильно, но его хуки ещё не активны. Перезагрузите устройство, чтобы активировать их.</string>
     <string name="dashboard_issue_lsposed_config_unreadable">Не удалось прочитать конфигурацию LSPosed/Vector. Откройте LSPosed/Vector, проверьте что VPN Hide там включён, затем снова откройте VPN Hide.</string>
@@ -356,13 +307,6 @@
     <string name="dashboard_running_version">Версия запущенного модуля: %s</string>
 
     <!-- kmod variant / load diagnostics -->
-    <string name="dashboard_issue_kmod_wrong_variant">Неправильный вариант модуля ядра: установлен %1$s, вашему ядру нужен %2$s. Удалите текущий kmod и установите %3$s из последнего релиза.</string>
-    <string name="dashboard_issue_kmod_unknown_variant">Модуль ядра установлен, но не загружается, и в zip не указано, под какой GKI-вариант он собран. Переустановите %1$s из последнего релиза, чтобы убедиться, что он подходит вашему ядру.</string>
-    <string name="dashboard_issue_kmod_ambiguous_try_alternative">Модуль ядра %1$s не загрузился при текущей загрузке. GKI-ветку вашего ядра не удаётся определить из uname -r — установите %2$s вместо него.</string>
-    <string name="dashboard_issue_kmod_load_failed">Модуль ядра не загрузился. Ошибка insmod: %1$s. Чтобы приложить полный вывод insmod к отчёту об ошибке, нажмите Настройки → Отладка → Собрать отладочный лог.</string>
-    <string name="dashboard_issue_kmod_signature_enforced">Ваше ядро требует подписанные модули, поэтому неподписанный модуль ядра не загружается (insmod вернул EKEYREJECTED — \"Key was rejected by service\"). Magisk это не отключает. Перейдите на KernelSU Next в режиме GKI — он снимает проверку подписи, и kmod загрузится. На GKI-ядрах правильный инструмент — именно модуль ядра; не откатывайтесь на Zygisk: банковские и платёжные приложения легко обнаруживают его хуки внутри процесса.</string>
-    <string name="dashboard_issue_kmod_not_supported_kernel">Для вашего ядра (%1$s) нет подходящего варианта vpnhide-kmod. Удалите модуль kmod и установите вместо него %2$s.</string>
-    <string name="dashboard_issue_kprobes_missing">Ваше ядро собрано без CONFIG_KRETPROBES. Модуль ядра VPN Hide не может работать на таком ядре. Удалите kmod и используйте vpnhide-zygisk.zip.</string>
 
     <!-- Update -->
     <string name="update_available_title">Доступно обновление</string>
@@ -452,7 +396,6 @@
     <string name="settings_experimental_protection">Экспериментальная защита</string>
     <string name="settings_filesystem_hiding">Скрывать VPN-пути в файловой системе</string>
     <string name="settings_filesystem_hiding_sub">Экспериментальная функция: ядерные бэкенды перехватывают глобальные VFS-пути, а Zygisk выполняет best-effort фильтрацию libc внутри выбранных приложений. Сейчас неизвестны реальные приложения, использующие этот вектор; обычной Native-защиты, как правило, достаточно.</string>
-    <string name="settings_filesystem_hiding_unavailable">Требуется Native-бэкенд kmod, KPM или Zygisk.</string>
     <string name="settings_filesystem_hiding_disabled">Выключено — рекомендуется обычная Native-защита.</string>
     <string name="settings_filesystem_hiding_active">Активно для выбранных Native-целей.</string>
     <string name="settings_filesystem_hiding_pending_enable">Включится после перезагрузки.</string>
@@ -574,7 +517,6 @@
     <string name="config_capture_logging">Отладочные логи остаются включены, пока идёт сбор данных.</string>
     <string name="config_changes_unavailable">Изменение конфигурации недоступно</string>
     <string name="config_close">Закрыть</string>
-    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide встроен в работающее ядро. Удалите лишний модуль kmod: core загружает только один нативный бэкенд и не загружает ни одного, пока установлены оба.</string>
     <string name="debug_export_complete">Отчёт собран полностью.</string>
     <string name="debug_export_partial">Собран частичный отчёт. Его можно сохранить или отправить.\n%1$s</string>
     <string name="debug_export_failed">Не удалось собрать отчёт: %1$s</string>
@@ -659,4 +601,18 @@
     <string name="autonomous_vector_ports">Защита портов</string>
     <string name="autonomous_vector_filesystem">Защита файловой системы</string>
     <string name="autonomous_metadata_pending">Сведения об устройстве обновляются; результат Core показан выше.</string>
+
+    <string name="native_status_unavailable">Статус Core недоступен</string>
+    <string name="native_status_no_selection">Native backend не выбран</string>
+    <string name="native_status_awaiting_runtime">Ожидается подтверждение запуска</string>
+    <string name="native_status_conflict">Конфликт native backend</string>
+    <string name="native_status_pending">Применяется конфигурация</string>
+    <string name="native_status_failed">Нужна проверка настройки</string>
+    <string name="native_status_unknown">Применение не подтверждено</string>
+    <string name="native_status_partial">Часть настроенных hooks недоступна</string>
+    <string name="native_status_ready">Backend готов</string>
+    <string name="native_status_processes">Ожидается подтверждение целевых процессов</string>
+    <string name="native_status_bundled">В составе Core</string>
+    <string name="native_status_builtin">Встроен в ядро</string>
+    <string name="native_status_legacy">Отдельный модуль</string>
 </resources>

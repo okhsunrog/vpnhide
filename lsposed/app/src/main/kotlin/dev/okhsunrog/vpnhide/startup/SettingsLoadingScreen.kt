@@ -21,7 +21,7 @@ internal fun SettingsLoadingScreen(
             StartupBlockingScreen(
                 title = stringResource(R.string.settings_load_failed_title),
                 body = stringResource(R.string.settings_load_failed_body),
-                actionLabel = stringResource(R.string.vpn_off_retry),
+                actionLabel = stringResource(R.string.retry),
                 onAction = retry,
             )
         } else {

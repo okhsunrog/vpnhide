@@ -1,6 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject

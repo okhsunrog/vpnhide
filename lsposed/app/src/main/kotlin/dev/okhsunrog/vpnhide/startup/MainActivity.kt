@@ -63,7 +63,6 @@ import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.SelfTargetFailureKind
 import dev.okhsunrog.vpnhide.VpnHideLog
 import dev.okhsunrog.vpnhide.core.CoreRoot
-import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.downloadArtifactFor
 import dev.okhsunrog.vpnhide.help.HelpScreen
 import dev.okhsunrog.vpnhide.picker.AppListCache
@@ -449,9 +448,6 @@ private fun MainScreen() {
             LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
                     startupCoordinator.ensureUpdateFresh(scope)
-                    // Fresh routing evidence on foreground return, independently of
-                    // callbacks hidden by our own Java backend.
-                    RoutingGateCache.refreshOnResume()
                 }
             }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -841,7 +837,7 @@ private fun RootPreparationErrorScreen(
             title = stringResource(R.string.self_targets_error_title),
             body = stringResource(selfTargetErrorBodyRes(kind)),
             detail = detail.takeIf { it.isNotBlank() },
-            actionLabel = stringResource(R.string.vpn_off_retry),
+            actionLabel = stringResource(R.string.retry),
             onAction = onRetry,
         )
     }

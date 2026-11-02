@@ -109,7 +109,7 @@ class AutonomousDiagnosticSnapshotTest {
     @Test
     fun `config actor acceptance and freshness are independent of scoped coverage`() {
         val core = update()
-        val sources = AutonomousDiagnosticSources(core, ObservationState(), config(core).copy(coreSequence = 2))
+        val sources = AutonomousDiagnosticSources(core, ObservationState(), config(core).copy(desiredRevision = 1))
         assertEquals(AutonomousAvailability.ConfigUnjoined, autonomousDiagnosticSnapshot(sources, 0, 0).availability)
         val accepted = autonomousDiagnosticSnapshot(sources.copy(config = config(core)), 1, 0)
         assertTrue(accepted.current)
@@ -120,6 +120,15 @@ class AutonomousDiagnosticSnapshotTest {
         assertFalse(unavailable.current)
         val stale = core.copy(state = core.state?.copy(autonomousDiagnostics = run(7).copy(stale = true)))
         assertFalse(autonomousDiagnosticSnapshot(sources.copy(core = stale, config = config(core)), 2, 0).current)
+    }
+
+    @Test
+    fun `same revision does not join different accepted canonical contents`() {
+        val core = update()
+        val different = config(core).copy(confirmed = dev.okhsunrog.vpnhide.CanonicalConfig(debug = true))
+        val snapshot = autonomousDiagnosticSnapshot(AutonomousDiagnosticSources(core, ObservationState(), different), 0, 0)
+        assertEquals(AutonomousAvailability.ConfigUnjoined, snapshot.availability)
+        assertFalse(snapshot.current)
     }
 
     @Test
@@ -152,7 +161,7 @@ class AutonomousDiagnosticSnapshotTest {
     }
 
     @Test
-    fun `routing and receipt updates do not invalidate unrelated heavy root metadata`() {
+    fun `receipt updates do not invalidate unrelated heavy root metadata`() {
         val initial = update()
         val root = RootSnapshot(emptyMap(), observationId = 1, core = initial)
         val changed =
@@ -162,11 +171,34 @@ class AutonomousDiagnosticSnapshotTest {
                     initial.state?.copy(
                         revision = 2,
                         operationsInFlight = listOf(17),
-                        routing = dev.okhsunrog.vpnhide.CoreRoutingView(true, 2, 10041, null, listOf("tun0")),
                         activeCaptures = 1,
                     ),
             )
         assertTrue(autonomousDiagnosticSnapshot(AutonomousDiagnosticSources(changed, observed(root), config(changed)), 1, 0).rootJoined)
+    }
+
+    @Test
+    fun `foreign VPN state and split tunnel membership cannot gate retained diagnostics`() {
+        val initial = update()
+        val root = RootSnapshot(emptyMap(), observationId = 1, core = initial)
+        val accepted = config(initial)
+        val before = autonomousDiagnosticSnapshot(AutonomousDiagnosticSources(initial, observed(root), accepted), 0, 0)
+        for ((vpn, included) in listOf(false to false, true to false, true to true, false to true)) {
+            // Raw forensic data may change; neither value is a diagnostic prerequisite.
+            val sections = mapOf("vpn_present" to vpn.toString(), "apk_in_vpn" to included.toString())
+            val changed = initial.copy(sequence = initial.sequence + 1)
+            val after =
+                autonomousDiagnosticSnapshot(
+                    AutonomousDiagnosticSources(changed, observed(root.copy(sections = sections)), accepted),
+                    1,
+                    0,
+                )
+            assertTrue(after.current)
+            assertTrue(after.rootJoined)
+            assertEquals(before.run, after.run)
+            assertEquals(before.assessment, after.assessment)
+            assertEquals(before.availability, after.availability)
+        }
     }
 
     @Test

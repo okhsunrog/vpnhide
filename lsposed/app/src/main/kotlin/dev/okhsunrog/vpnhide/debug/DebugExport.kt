@@ -16,11 +16,9 @@ import dev.okhsunrog.vpnhide.collectHookCounterSnapshot
 import dev.okhsunrog.vpnhide.core.CoreDiagnostics
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticSnapshot
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.buildHookDiagnosticsText
 import dev.okhsunrog.vpnhide.diagnostics.toDiagnosticInfo
-import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.loadDashboardState
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.readLsposedConfig
@@ -170,8 +168,6 @@ private suspend fun buildDebugState(
             selfNeedsRestart = selfNeedsRestart,
             rootSnapshot = rootSnapshot,
             shellSnapshot = shellSnapshot,
-            gate = null,
-            checkResults = null,
             autonomousSnapshot = diagnosticSnapshot,
             dashboard = dashboard,
             beforeCapture = beforeCapture,

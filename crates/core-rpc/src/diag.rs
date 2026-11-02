@@ -33,8 +33,6 @@ pub enum DiagnosticProbe {
     LsposedModulesDb,
     /// Root-side ground truth for the app's checks (`vpnhide_checks`, unhooked).
     GroundTruthChecks,
-    /// Hook-inert root observation of VPN presence and `uid`'s routing.
-    AppVpnState { uid: u32 },
 }
 
 /// A batch of probes, run concurrently by core.

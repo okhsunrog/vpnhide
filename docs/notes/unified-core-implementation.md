@@ -3,7 +3,7 @@
 Approved design, based on dev-2.x `3493354f` (2026-11-02).
 This is an implementation ledger, not a claim of device acceptance.
 
-Current cloud contract: **RPC20 / journal11 (reads schemas1–10)**. Kernel control2 /
+Current cloud contract: **RPC21 / journal11 (reads schemas1–10)**. Kernel control2 /
 telemetry1 is unchanged: APK/Core contract and private journal upgrades do not
 require rebuilding a compatible user builtin kernel. Stages4–7/RFC2 remain partial;
 the latest entries distinguish remaining code from device/key/publication gates.
@@ -37,7 +37,7 @@ changes create new operations, not retroactive changes to confirmed receipts.
 | 2. Durable backend lifecycle | Implemented for the current selector; bundle integration follows stages 3/4 | Initial effects journaled before dispatch, crash reconciliation, bounded attempts surviving worker restart, no blind replay |
 | 3. Unified ZIP and CI assembly | Implemented passive assembly; real seven-KMI CI/device acceptance unobserved | All seven KMIs, both Zygisk ABIs, manifest/hashes, verified provenance, active/staged separation |
 | 4. Zygisk boot authorization and fallback | In progress: authenticated loader, durable authority and exact process consumption; shared revocation/fallback executor pending | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
-| 5. Typed state/RPC/UI/diagnostics | In progress: RPC16, typed generation/run/preview models; full health/UI/export still pending | Paired contract bump, reasons/attempts/coverage, no misleading component health |
+| 5. Typed state/RPC/UI/diagnostics | In progress: RPC21 native/autonomous projections shared by Dashboard/picker/Statistics/agent/export; expanded RFC2 health evidence remains | Paired contract bump, reasons/attempts/coverage, no misleading component health |
 | 6. Shared maintenance plan/executor | In progress: source-bound legacy migration/archive; replacement/manager/reboot vertical pending | Migration/repair/update use the same typed steps, preserve sources, manager-native staging/removal, durable progress/reconciliation |
 | 7. Separate runtime provisioning | In progress: offline evidence/write model and pinned fork patches; concrete adapters pending | Verified fork/tool tuple, actual KALLSYMS=y, validated ALL=n support, durable original backup, plan-bound consent, correct write/readback errors |
 
@@ -1449,3 +1449,64 @@ CPD and lintDebug passed. All61 host process RPC regressions also passed on the 
 module-scaffold checks passed. Logs:
 `/tmp/vpnhide-legacy-{rust,clippy,arm,process}-final-v2.log` and
 `/tmp/vpnhide-legacy-android-final-v3.log`. No phone acceptance is claimed.
+
+
+## Cloud continuation: native read model and retirement of VPN gates, RPC21
+
+Implemented code (validation in progress): native selected/applied/observed/displayed
+identity, immutable bundled/source/payload provenance, durable attempts, latest
+Native phase/delivery, independent desired hook coverage, setup and filesystem
+state. Rust owns this projection at every publication boundary. Kotlin Dashboard,
+picker, filesystem settings, Statistics, agent and schema5 exports consume it.
+Historical raw counter captures retain their identity and unsigned delta/reset
+semantics; current rows require Core epoch/config/connection plus boot, implementation,
+delivery/runtime identity. Java currentness also requires a current-boot heartbeat.
+No global Zygisk process coverage is asserted.
+
+Read-only review found and code/tests corrected: observed-only runtime borrowing
+an old bundled hash; failed same-revision preparation reviving an older Confirmed
+delivery; stale Java/current counter marks; kernel+KPM coexistence being reported
+as unavailable; valid inventory-only KPM absence losing builtin observations.
+Delivery now retains the newest attempted phase even without an intent, with
+unknown backend/wire identity. Typed runtime conflict survives publication.
+
+Removed code: RoutingGateCache; GroundTruthProbe/JavaChecks/main-process NativeProbe;
+DiagnosticGate/DiagnosticEligibility/Context/Presentation/Report/LayerStatus/
+CheckOutcome/Situation and obsolete run/confirmation/impact/summary classifiers;
+ProtectionVerdict, HeroVisual, VpnOffPrompt and unreachable automatic DonatePrompt;
+checks-jni crate and packaging/CI/release entries; Core framework_vpn/routing_compose/
+vpn_networks and app-vpn/routing probe dispatch; route/rule listener, framework VPN
+polling, UID membership classifier and routing RPC/FFI/app models. Removed native
+Kotlin directory-priority selection, manual alternative-KMI recommendation and
+Kmod/KPM load classifiers, old JSON boot codec and filesystem classifier.
+Core boot DTO mapping, production hooks, real worker APIs, explicit manual
+NetworkViewCapture and forensic hook/counter adapters remain.
+
+User acceptance: preserve picker Save/Cancel/footer and drafts. Remove foreign
+VPN-active/APK-in-tunnel admission, prompts and listeners entirely, including dead
+resources in all locales. Generic Retry is renamed from vpn_off_retry to retry.
+Built-in help documents autonomous evidence rather than directing the user to
+turn on VPN or add the APK to a tunnel. Actual device gates are still open.
+
+Remaining cloud implementation is not a device gate: expanded RFC2 stimuli and
+callbacks; common maintenance staging/verification/bootstrap/UI; concrete offline
+provisioner adapter; remaining config import/auto-hide/capture/agent domain moves;
+full final kernel/Core/bundle matrix and final startup regression. Existing
+0.x/1.x import adapters and journal schemas1–10 are intentional migration readers.
+Production APK key, fork publication target and real phone acceptance are separate
+external requirements. Do not stop at this cleanup checkpoint.
+
+Validation of this cleanup: 577 JVM tests, ktlint, detekt, CPD and lintDebug passed.
+72 unused base resource names and all existing translations removed (58 in each
+localized file); generic Retry is renamed, not removed.
+The reduction from 888 previous JVM tests accompanies deletion of the retired
+VPN-gated report/context/presentation and native-selection owners, not relaxed
+assertions or quality thresholds. LSPosed/Ports/environment/migration/counter
+regressions were preserved; new tests cover native transport binding/immutability,
+same-revision delivery identity, stale Java statistics, config content equality
+and Dashboard/autonomous independence of external VPN and split-tunnel state.
+Rust validation: 345 Core + 66 activator + 14 checks + 15 RPC + 3 FFI + 7 native-policy
+unit tests passed; all61 host Core process regressions passed. Strict host/all-target
+and ARM64/ARMv7 Clippy passed, as did fmt/no-root/module-scaffold checks. Logs:
+`/tmp/vpnhide-cleanup-{rust-tests2,process2,clippy-host2,clippy-arm1}.log` and
+`/tmp/vpnhide-cleanup-android4.log`. No phone acceptance is claimed.

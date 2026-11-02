@@ -1,52 +1,32 @@
-# What the self-test checks
+# What diagnostics checks
 
-The **Diagnostics** screen runs VPN Hide's own checks: for each detection vector
-it compares what a target app would see against the real, root-observed state.
-If the app-side view no longer shows the VPN while root still does, that vector
-is **hidden**.
+Core owns background diagnostic runs and retains their evidence. Opening the app,
+Dashboard, Diagnostics or an export reads that evidence; it does not start a suite.
+Use **Retry** to request a new run explicitly.
 
-## What a pass means
+Diagnostics uses its own bounded test fixtures and a dedicated Android worker.
+Your VPN can be off, and VPN Hide can be excluded from your VPN client's tunnel.
+Neither condition blocks the Dashboard or diagnostics.
 
-A passing run means the hiding layers are actually working on your device, for
-the vectors tested. Because the checks measure the same hooks that hide the VPN
-from your target apps — the same code path, not a weaker stand-in — a pass is a
-real signal that hiding works, which is exactly why the Dashboard can say
-"VPN hidden".
+## What evidence proves
 
-## What it needs to run
+A vector is proven only with a visible RAW test signal, the protected observation,
+and controls showing that ordinary network objects were preserved. An empty
+response alone is not proof. A leak remains a leak when another check fails.
+Required vectors come from the supported contract and enabled features, rather
+than just the hooks that happened to install.
 
-- A **VPN must be up** — otherwise there's nothing to hide, and the checks have
-  nothing to measure.
-- **VPN Hide must be routed through that VPN.** If it isn't (some app-specific
-  VPNs and game accelerators only route selected apps), the app-side probe
-  wouldn't see the VPN even without hiding, so the check can't run. The screen
-  says so; it's a state to fix, not a failure.
+## Scope and limits
 
-## What it does not prove
+Evidence describes the recorded worker, policy and loaded generations. A fresh
+worker does not prove that an already-running game has consumed new hooks or
+configuration. After Save, restart the target app and check its actual behavior.
+Network transitions and callback registrations need their own controls.
 
-A pass doesn't guarantee a *specific* third-party app will accept you. An app can
-still refuse for other reasons — a server-side check on your exit
-IP, an installed-app scan you haven't covered, or a result it cached before you
-saved. See [A third-party tester still finds the VPN](tester-finds-vpn.md).
+This beta still has unverified vectors and device acceptance gates. Missing proof
+is shown explicitly; installation or successful config delivery is not a measured
+protection result. See [Result meanings](check-result-meanings.md).
 
-## Scope of the evidence
-
-The probes run as VPN Hide, not inside your bank or detector. Per-app hook settings,
-UID/profile routing, API choice and callback timing can differ. Passing does not
-rule out a bug affecting another app. Test that app after Save and force-stop,
-and include its reproduction steps in a report if it still detects the VPN.
-
-A steady-state callback probe also cannot certify every Wi-Fi/mobile/offline
-transition or every combination of callback registrations. Those require separate
-transition tests. For current, retained and interrupted results, see
-[Result meanings](check-result-meanings.md).
-
-## Why the check count isn't the hook count
-
-The Diagnostics list has more entries than the backend has hooks (for example
-15 native checks against 10–11 logical kernel hook IDs with the optional
-filesystem group disabled). That's expected: a check is a *way
-an app could detect the VPN*, and one hook often covers several of them, while
-some checks are covered by the kernel or SELinux with no hook at all. The
-self-test measures each vector's outcome, not one probe per hook. The hook count
-lives on the [Statistics](statistics.md) screen.
+A third-party app can also refuse because of server-side IP checks, cached state
+or a different detection vector. Include reproduction steps and the app version
+in a [debug report](collect-report.md).

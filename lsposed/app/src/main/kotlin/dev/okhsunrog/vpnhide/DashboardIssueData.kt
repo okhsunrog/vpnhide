@@ -14,68 +14,6 @@ internal data class DashboardIssueReason(
 @Suppress("CyclomaticComplexMethod", "LongMethod")
 internal fun DashboardIssue.toReason(): DashboardIssueReason =
     when (this) {
-        DashboardIssue.NoNativeBackend -> {
-            DashboardIssueReason("no_native_backend")
-        }
-
-        is DashboardIssue.BetterBackendAvailable -> {
-            DashboardIssueReason("better_backend_available", mapOf("artifact" to artifact))
-        }
-
-        DashboardIssue.NativeConflictKernel -> {
-            DashboardIssueReason("native_conflict_kernel")
-        }
-
-        DashboardIssue.RedundantKmodWithBuiltin -> {
-            DashboardIssueReason("redundant_kmod_with_builtin")
-        }
-
-        DashboardIssue.MultipleNativeActive -> {
-            DashboardIssueReason("multiple_native_active")
-        }
-
-        is DashboardIssue.NativeBackendsConflict -> {
-            DashboardIssueReason("native_backends_conflict", mapOf("backends" to backends.joinToString(",") { it.name }))
-        }
-
-        is DashboardIssue.NativeBackendsStagedConflict -> {
-            DashboardIssueReason("native_backends_staged_conflict", mapOf("backends" to backends.joinToString(",") { it.name }))
-        }
-
-        is DashboardIssue.KpmUnverifiable -> {
-            DashboardIssueReason("kpm_unverifiable", mapOf("detail" to detail))
-        }
-
-        is DashboardIssue.KpmIncompatible -> {
-            DashboardIssueReason(
-                "kpm_incompatible",
-                mapOf("found" to found.orEmpty(), "minimum" to minimum, "detail" to detail),
-            )
-        }
-
-        is DashboardIssue.NativeCapacityExceeded -> {
-            DashboardIssueReason(
-                "native_capacity_exceeded",
-                mapOf(
-                    "total" to report.total.toString(),
-                    "capacity" to report.capacity.toString(),
-                    "packages" to report.packages.joinToString(",") { "${it.packageName}:${it.uids.size}" },
-                ),
-            )
-        }
-
-        is DashboardIssue.NativeBootFailed -> {
-            DashboardIssueReason("native_boot_failed", mapOf("detail" to detail))
-        }
-
-        is DashboardIssue.ZygiskRetireFailed -> {
-            DashboardIssueReason("zygisk_retire_failed", mapOf("detail" to detail))
-        }
-
-        DashboardIssue.KpmAwaitingSuperkey -> {
-            DashboardIssueReason("kpm_awaiting_superkey")
-        }
-
         DashboardIssue.LsposedNotInstalled -> {
             DashboardIssueReason("lsposed_not_installed")
         }
@@ -169,17 +107,6 @@ internal fun DashboardIssue.toReason(): DashboardIssueReason =
             )
         }
 
-        is DashboardIssue.PartialHooks -> {
-            DashboardIssueReason(
-                "partial_hooks",
-                mapOf(
-                    "installed" to installed.toString(),
-                    "expected" to expected.toString(),
-                    "missing" to missing.joinToString(",") { it.hookName },
-                ),
-            )
-        }
-
         is DashboardIssue.LsposedVersionMismatch -> {
             DashboardIssueReason(
                 "lsposed_version_mismatch",
@@ -190,10 +117,6 @@ internal fun DashboardIssue.toReason(): DashboardIssueReason =
                     "degraded" to degraded.toString(),
                 ),
             )
-        }
-
-        DashboardIssue.ChecksFailed -> {
-            DashboardIssueReason("checks_failed")
         }
     }
 

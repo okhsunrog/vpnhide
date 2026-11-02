@@ -1,27 +1,8 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.diagnostics.KpmProblemKind
-
 /** Typed production diagnoses; never strings that imitate the production banners. */
 internal val agentUiIssues: Map<String, DashboardIssue> =
     linkedMapOf(
-        "kpm-runtime-missing" to DashboardIssue.ModuleBroken(ModuleProblem.Kpm(KpmProblemKind.NoKernelPatchRuntime)),
-        "kpm-superkey-missing" to DashboardIssue.ModuleBroken(ModuleProblem.Kpm(KpmProblemKind.NeedsSuperkey)),
-        "kpm-load-failed" to DashboardIssue.ModuleBroken(ModuleProblem.Kpm(KpmProblemKind.LoadFailed("Fixture: load failed"))),
-        "kpm-unsupported-kernel" to DashboardIssue.ModuleBroken(ModuleProblem.Kpm(KpmProblemKind.UnsupportedKernel("4.4.0-fixture"))),
-        "kmod-kprobes-missing" to DashboardIssue.ModuleBroken(ModuleProblem.Kmod(KmodProblemKind.KprobesMissing)),
-        "kmod-signature-enforced" to DashboardIssue.ModuleBroken(ModuleProblem.Kmod(KmodProblemKind.SignatureEnforced)),
-        "native-conflict" to DashboardIssue.NativeConflictKernel,
-        "native-missing" to DashboardIssue.NoNativeBackend,
-        "kpm-incompatible" to DashboardIssue.KpmIncompatible("1.1.1", "1.2.0", "Fixture: the loaded vpnhide KPM is version 1.1.1"),
-        "native-capacity-exceeded" to
-            DashboardIssue.NativeCapacityExceeded(
-                NativeCapacityRefusal(
-                    total = 162,
-                    capacity = 160,
-                    packages = listOf(NativeCapacityPackage("org.example.cloned", listOf(10123, 1010123, 1110123))),
-                ),
-            ),
         "lsposed-missing" to DashboardIssue.LsposedNotInstalled,
         "lsposed-reboot" to DashboardIssue.LsposedNeedsReboot,
         "lsposed-disabled" to DashboardIssue.LsposedNotEnabled,

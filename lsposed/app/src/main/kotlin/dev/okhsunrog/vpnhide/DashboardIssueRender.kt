@@ -17,7 +17,6 @@ internal fun DashboardIssue.toMessage(
     res: Resources,
 ): DashboardMessage =
     when (this) {
-        is DashboardIssue.Native -> nativeMessage(res)
         is DashboardIssue.Lsposed -> lsposedMessage(context, res)
         is DashboardIssue.Module -> moduleMessage(res)
         is DashboardIssue.Target -> targetMessage(res)
@@ -59,110 +58,6 @@ private object HelpArticle {
     const val CHECK_RESULT_MEANINGS = "check-result-meanings"
     const val COLLECT_REPORT = "collect-report"
 }
-
-@Suppress("LongMethod") // One exhaustive branch per native issue.
-private fun DashboardIssue.Native.nativeMessage(res: Resources): DashboardMessage =
-    when (this) {
-        DashboardIssue.NoNativeBackend -> {
-            err(res.getString(R.string.dashboard_issue_no_native), helpArticle = HelpArticle.CHOOSING_NATIVE)
-        }
-
-        is DashboardIssue.BetterBackendAvailable -> {
-            info(
-                res.getString(
-                    when (backend) {
-                        SuggestedBackend.Kmod -> R.string.dashboard_issue_kmod_capable_but_zygisk
-                        SuggestedBackend.Kpm -> R.string.dashboard_issue_kpm_capable_but_zygisk
-                    },
-                    artifact,
-                ),
-                helpArticle = HelpArticle.CHOOSING_NATIVE,
-            )
-        }
-
-        DashboardIssue.NativeConflictKernel -> {
-            err(res.getString(R.string.dashboard_issue_native_conflict_kernel), helpArticle = HelpArticle.CHOOSING_NATIVE)
-        }
-
-        DashboardIssue.RedundantKmodWithBuiltin -> {
-            warn(res.getString(R.string.dashboard_issue_redundant_kmod_builtin), helpArticle = HelpArticle.CHOOSING_NATIVE)
-        }
-
-        DashboardIssue.MultipleNativeActive -> {
-            warn(res.getString(R.string.dashboard_issue_multiple_native), helpArticle = HelpArticle.CHOOSING_NATIVE)
-        }
-
-        is DashboardIssue.NativeBackendsConflict -> {
-            err(
-                res.getString(R.string.dashboard_issue_native_backends_conflict, backendNames(res, backends)),
-                helpArticle = HelpArticle.CHOOSING_NATIVE,
-            )
-        }
-
-        is DashboardIssue.NativeBackendsStagedConflict -> {
-            warn(
-                res.getString(R.string.dashboard_issue_native_backends_staged_conflict, backendNames(res, backends)),
-                helpArticle = HelpArticle.CHOOSING_NATIVE,
-            )
-        }
-
-        is DashboardIssue.KpmUnverifiable -> {
-            err(res.getString(R.string.dashboard_issue_kpm_unverifiable, detail), helpArticle = HelpArticle.KPM_INSTALL)
-        }
-
-        is DashboardIssue.KpmIncompatible -> {
-            err(
-                res.getString(
-                    R.string.dashboard_issue_kpm_incompatible,
-                    found ?: res.getString(R.string.dashboard_issue_kpm_version_unreported),
-                    minimum,
-                    detail,
-                ),
-                "vpnhide-kpm.zip",
-                helpArticle = HelpArticle.KPM_INSTALL,
-            )
-        }
-
-        is DashboardIssue.NativeCapacityExceeded -> {
-            err(
-                res.getString(
-                    R.string.dashboard_issue_native_capacity_exceeded,
-                    report.total,
-                    report.capacity,
-                    report.overflow,
-                    report.packageList(res),
-                ),
-                helpArticle = HelpArticle.WORK_PROFILES,
-            )
-        }
-
-        is DashboardIssue.NativeBootFailed -> {
-            err(res.getString(R.string.dashboard_issue_native_boot_failed, detail), helpArticle = HelpArticle.COLLECT_REPORT)
-        }
-
-        is DashboardIssue.ZygiskRetireFailed -> {
-            warn(res.getString(R.string.dashboard_issue_zygisk_retire_failed, detail), helpArticle = HelpArticle.CHOOSING_NATIVE)
-        }
-
-        DashboardIssue.KpmAwaitingSuperkey -> {
-            warn(res.getString(R.string.dashboard_issue_kpm_awaiting_superkey), helpArticle = HelpArticle.KPM_INSTALL)
-        }
-    }
-
-private fun backendNames(
-    res: Resources,
-    backends: List<NativeBackendId>,
-): String =
-    backends.joinToString(", ") {
-        res.getString(
-            when (it) {
-                NativeBackendId.Kmod -> R.string.dashboard_backend_kmod
-                NativeBackendId.Builtin -> R.string.dashboard_backend_builtin
-                NativeBackendId.Kpm -> R.string.dashboard_backend_kpm
-                NativeBackendId.Zygisk -> R.string.dashboard_backend_zygisk
-            },
-        )
-    }
 
 private fun DashboardIssue.Lsposed.lsposedMessage(
     context: Context,
@@ -236,7 +131,7 @@ private fun DashboardIssue.Module.moduleMessage(res: Resources): DashboardMessag
                     res.getString(id, *args)
                 },
                 problem.downloadArtifact,
-                helpArticle = problem.helpArticle(res.configuration.locales[0].language),
+                helpArticle = HelpArticle.MODULE_NOT_ACTIVE,
             )
         }
 
@@ -315,31 +210,9 @@ private fun DashboardIssue.Environment.environmentMessage(res: Resources): Dashb
 
 private fun DashboardIssue.Protection.protectionMessage(res: Resources): DashboardMessage =
     when (this) {
-        is DashboardIssue.PartialHooks -> {
-            // No reinstall fixes a kernel that renamed or dropped a function, so
-            // this is a warning rather than an error.
-            warn(
-                res.getString(
-                    R.string.dashboard_issue_native_partial_hooks,
-                    installed,
-                    expected,
-                    missing.joinToString(", ") { it.hookName },
-                ),
-                helpArticle = HelpArticle.DETECTION_VECTORS,
-            )
-        }
-
         is DashboardIssue.LsposedVersionMismatch -> {
             val text = res.getString(R.string.dashboard_issue_version_mismatch, runningVersion, appVersion)
             if (degraded) warn(text, helpArticle = HelpArticle.UPDATING) else info(text, helpArticle = HelpArticle.UPDATING)
-        }
-
-        DashboardIssue.ChecksFailed -> {
-            DashboardMessage(
-                DashboardMessageSeverity.WARNING,
-                res.getString(R.string.dashboard_issue_checks_failed),
-                DashboardMessageAction.OpenDiagnostics,
-            )
         }
     }
 

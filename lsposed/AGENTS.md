@@ -21,33 +21,21 @@ model together:
 | `settings/` | Settings and its sub-screens, plus the UI preference store |
 | `debug/` | the bundle, the logcat recorder, kernel-image export |
 | `statistics/`, `startup/` | the Statistics tab; MainActivity and startup wiring |
-| `ui/`, `checks/`, `generated/` | design system, the JNI probe binding, codegen |
+| `ui/`, `generated/` | design system and codegen |
 
 What stays in the root package is the shared vocabulary both sides use —
 `CanonicalConfigData`, `StorageConfig`, `ShellUtils`, `RootSnapshotCache`, `HookMaskData`, `HookRegistry`,
 `DashboardData`, the agent bridge. Moving those buys import churn and nothing
 else; they belong to no single feature.
 
-## "Diagnostic" names seven different things
+## Diagnostic ownership
 
-The word got attached to every layer that answers "what is going on", so the
-name alone will not tell you which one you are looking at. Nothing here is
-misplaced — they genuinely are all diagnostics — but know which is which before
-you add to any of them:
-
-| name | what it actually is |
-|---|---|
-| `DiagnosticsScreen`, *Detailed diagnostics* | the user-facing check suite |
-| `DiagnosticsCache`, `DiagnosticDomain`, `DiagnosticRunCoordinator` | the **run state** of that suite: identified, process-owned runs (`DiagnosticRunView`) folded with the observations into one `DiagnosticPresentation`, classified once into a `Situation` |
-| `DiagnosticReport`, `buildDiagnosticReport`, `DiagnosticCheck` | the **canonical model** the screen and the bundle both render — see `docs/diagnostics.md` |
-| `DiagnosticGate`, `RoutingGateCache`, `resolveDiagnosticGate` | the **precondition** for a meaningful run (VPN up, this app routed) — not a check |
-| `HookDiagnostics`, `ConnectivityAttachDiagnostics`, `KpmDiagnostics` | attach/telemetry for the hooks themselves; **not part of the suite** |
-| `writeDiagnosticZip`, `debug/` | the export — the artifact is the *debug bundle* (`docs/debug-bundle.md`) |
-| `app_scan_diagnostics`, `kmod_diag` | section names inside that bundle |
-
-The pair worth keeping straight: `DiagnosticsCache` holds a **run**,
-`RoutingGateCache` holds a **precondition**, and only the second is derived from
-the canonical config (so only the second is refreshed after a write).
+Core owns autonomous execution and assessment. `DiagnosticsCache` and
+`AutonomousDiagnosticSnapshotOwner` expose retained accepted evidence to screens,
+agent and exports; reads never admit a run. `FrameworkFixtureWorker` performs
+bounded real Android observations. `HookDiagnostics` and `NetworkViewCapture` are
+manual forensic adapters, not verdict owners. No foreign-VPN/split-tunnel gate or
+main-process diagnostic executor remains. See `docs/diagnostics.md`.
 
 ## Two processes, one APK
 
@@ -65,7 +53,7 @@ directions, since `internal` is module-wide and the compiler will not.
 ## Data flow
 
 - **Read path:** one persistent process `CoreSession` publishes confirmed config,
-  debug lease, native boot decision and per-main-app routing. Heavy batched core
+  debug lease, autonomous diagnostics and the native read model. Heavy batched core
   `RootSnapshot` probes supply inventory/counters/forensic details to typed snapshots
   (`DashboardState`, `TargetsSnapshot`) derived in pure functions → Compose.
   Root-derived projections carry the source observation ID and the accepted typed
@@ -106,13 +94,11 @@ directions, since `internal` is module-wide and the compiler will not.
   currentness and root-join qualifications. Missing proof is unverified, never
   green. The old local DiagnosticDomain/coordinator is removed; do not restore it or use foreign-VPN routing as a prerequisite.
 - **`RootSnapshotCache`** — the batched heavy root read (core's `RootSnapshot`
-  probe). CoreSession owns current config, native selection and routing; do not
+  probe). CoreSession owns current config, native selection and diagnostic evidence; do not
   derive a competing authority from a retained root snapshot. Need new detail on the Dashboard/Hiding path? Add a section to
   core's root snapshot (`crates/core-daemon/src/device_probes/root_snapshot.rs`);
   don't add another root read that races the snapshot. The app runs no `su`
-  (CI: `tests/check_no_root_exec.sh`). The deliberate exception is
-  `RoutingGateCache`: it consumes the session's per-main-app UID routing publication
-  independently of the heavy root snapshot. There is no foreground polling timer.
+  (CI: `tests/check_no_root_exec.sh`). No foreign-VPN readiness listener remains.
 - **`core/CoreRoot`** — bounded generated `CoreDiagnosticProbe` reads, logcat
   commands and debug leases over the shared core session. Privileged mutations
   use generated `CoreCommand` through the config coordinator. A new root read is
@@ -146,9 +132,10 @@ directions, since `internal` is module-wide and the compiler will not.
   `MaterialTheme.colorScheme.errorContainer` etc. for status; Material You
   remixes them off-meaning), `StatusBanner`, `FileSaveShareRow`,
   `shareFileViaProvider`.
-- **`NativeChecks`** — `NATIVE_CHECKS` is the single probe list (Dashboard
-  summary + Diagnostics share it); `CheckStatus.toPassed()` is the single
-  tri-state mapping.
+- **`NativeStatusSnapshot`** — immutable copies of Core's native selection,
+  attempts/provenance, delivery, runtime and setup projection. Do not restore a
+  Kotlin backend selector or derive policy requirements from installed hooks.
+- **`NativeChecks`** — forensic vector/registry metadata only, no local suite or verdict.
 - **`DashboardIssue` / `dashboardIssues`** — every dashboard banner is decided
   here, purely, from a `DashboardFacts`; `toMessage` (in
   `DashboardIssueRender.kt`) is the only half that words it. A new banner is a
@@ -156,14 +143,6 @@ directions, since `internal` is module-wide and the compiler will not.
   `res.getString` inside `loadDashboardState`, which is what made the guard list
   untestable for a year. Emission order in `dashboardIssues` is what the user
   sees; `DashboardIssuesTest` pins it.
-- **`Situation` / `situation()`** (`diagnostics/SituationData.kt`) — what the
-  user is looking at, classified once from the `DiagnosticPresentation` in one
-  precedence; the Dashboard hero (`heroVisual`) and the Diagnostics banner
-  (`diagnosticScreenDecision`) are wording maps over it and decide nothing.
-  A new state is a new `Situation` case plus its branch in both maps — never a
-  second precedence in a screen, and never a `res.getString` in the classifier.
-  `SituationDataTest` pins the scenario table of
-  `docs/notes/ui-state-presentation-review.md`.
 - **`watchSystemDataDir`** — the shared `/data/system` FileObserver factory for
   the three system_server watchers (HookEntry / PackageVisibilityHooks /
   HookLog).

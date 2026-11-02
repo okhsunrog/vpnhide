@@ -1,8 +1,8 @@
 import org.gradle.api.tasks.Exec
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.io.FileInputStream
-import java.util.Properties
 import java.security.MessageDigest
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -48,15 +48,6 @@ tasks.register<Exec>("ktlintCheck") {
     commandLine("ktlint", "$projectDir/src/**/*.kt")
 }
 
-// The native check probes ship from the shared `crates/checks` crate as
-// libvpnhide_checks.so — a cdylib loaded in-process (System.loadLibrary) for the
-// app-view probe (real uid + SELinux domain + zygisk/kernel hooks). The root view of
-// the same probes runs in core (`vpnhide-core probe checks`, via collect_diagnostics);
-// the app ships no executable and runs no root process.
-// Built with cargo-ndk (the same toolchain the zygisk module already uses).
-// This replaces the gobley/UniFFI plugin (and its AGP-9 fork): the whole native
-// surface is now one JSON-returning function, so codegen bindings aren't worth
-// the dependency. -P 29 matches minSdk (getifaddrs needs API >= 24).
 val rustJniLibsDir = layout.buildDirectory.dir("rustNative/jniLibs")
 val rustAssetsDir = layout.buildDirectory.dir("rustNative/assets")
 
@@ -86,7 +77,6 @@ val isWindowsHost = System.getProperty("os.name").lowercase().contains("windows"
 val appNativeCrates =
     listOf(
         "checks",
-        "checks-jni",
         "core-ffi",
         "core-client",
         "core-rpc",
@@ -112,7 +102,7 @@ val emulatorX86 = (project.findProperty("vpnhideEmulatorX86") as String?)?.toBoo
 val buildAppNative =
     tasks.register<Exec>("buildAppNative") {
         group = "build"
-        description = "Builds the checks JNI library and the core-ffi client library via cargo-ndk."
+        description = "Builds the core-ffi client library via cargo-ndk."
         workingDir = repoDir
         environment("ANDROID_NDK_HOME", rustNdkDir)
         environment("NDK_HOME", rustNdkDir)
@@ -148,8 +138,6 @@ val buildAppNative =
                 add("build")
                 add("--profile")
                 add("app-native")
-                add("--package")
-                add("vpnhide_checks_jni")
                 // The in-process core client (UniFFI cdylib, loaded by JNA): the app's
                 // only path to config mutations. Shipped in every build type.
                 add("--package")
@@ -158,10 +146,12 @@ val buildAppNative =
             },
         )
         val obsoleteAssets = rustAssetsOut.resolve("bin")
+        val obsoleteJniRoot = rustJniLibsDir.get().asFile
         doFirst {
             // The app ships no executables (core is the only root process): drop helper
             // binaries an older build left in this disposable generated dir.
             obsoleteAssets.deleteRecursively()
+            obsoleteJniRoot.walkTopDown().filter { it.name == "libvpnhide_checks.so" }.forEach { it.delete() }
         }
     }
 
@@ -290,12 +280,22 @@ android {
     val hookSources = file("src/main/kotlin/dev/okhsunrog/vpnhide")
     val sharedHookSources = rootProject.file("hook-shared-sources.txt").readLines().filter { it.isNotBlank() }
     val hookDigest = MessageDigest.getInstance("SHA-256")
-    val fingerprintFiles = (fileTree(hookSources.resolve("hook")) { include("**/*.kt") }.files +
-        fileTree(hookSources.resolve("generated")) { include("**/*.kt") }.files + sharedHookSources.map(hookSources::resolve) +
-        listOf(buildFile, rootProject.buildFile, rootProject.file("gradle/libs.versions.toml"), rootProject.file("gradle.properties"), rootProject.file("settings.gradle.kts")))
+    val fingerprintFiles = (
+        fileTree(hookSources.resolve("hook")) { include("**/*.kt") }.files +
+            fileTree(hookSources.resolve("generated")) { include("**/*.kt") }.files + sharedHookSources.map(hookSources::resolve) +
+            listOf(
+                buildFile,
+                rootProject.buildFile,
+                rootProject.file("gradle/libs.versions.toml"),
+                rootProject.file("gradle.properties"),
+                rootProject.file("settings.gradle.kts"),
+            )
+    )
     fingerprintFiles.sortedBy { it.relativeTo(rootProject.projectDir).path }.forEach {
         hookDigest.update(it.relativeTo(rootProject.projectDir).path.toByteArray())
-        hookDigest.update(0.toByte()); hookDigest.update(it.readBytes()); hookDigest.update(0.toByte())
+        hookDigest.update(0.toByte())
+        hookDigest.update(it.readBytes())
+        hookDigest.update(0.toByte())
     }
     val hookSourceHash = hookDigest.digest().joinToString("") { "%02x".format(it) }
 

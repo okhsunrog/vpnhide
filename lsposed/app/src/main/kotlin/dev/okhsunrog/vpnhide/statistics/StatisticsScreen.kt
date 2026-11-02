@@ -351,7 +351,7 @@ private fun StatisticsLoadErrorCard(
             )
             Spacer(Modifier.height(12.dp))
             EnhancedButton(onClick = onRetry) {
-                Text(stringResource(R.string.vpn_off_retry))
+                Text(stringResource(R.string.retry))
             }
         }
     }
@@ -1033,6 +1033,7 @@ private fun backendHealth(backend: BackendStatistics): BackendHealth {
     val status = backend.status
     return when {
         backend.unavailableReason != null -> BackendHealth.Unavailable
+        !backend.current -> BackendHealth.Unavailable
         status == null && backend.rows.isEmpty() -> BackendHealth.NoData
         status == null -> BackendHealth.Partial
         status.statusError == HookIds.StatusError.OK -> BackendHealth.Ok

@@ -307,7 +307,7 @@ internal fun toggleAllProtection(
     return app.copy(
         java = selected,
         javaHooks = null,
-        native = targets.anyNativeInstalled && selected,
+        native = targets.nativeAvailable && selected,
         nativeOverrides = NativeHookOverrides(),
         appHiding = selected,
         ports = selected,

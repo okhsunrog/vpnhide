@@ -5,13 +5,13 @@ problem, or a recording for a problem that happens while using another app.
 
 ## Snapshot: what is happening now
 
-1. If possible, turn on your VPN and route VPN Hide through it so the self-test can run.
+1. Review the retained Diagnostics result; use **Retry** only if you want a new run.
 2. Open **Debug export** and leave **Verbose logs** enabled for a diagnostic report.
 3. Leave the installed-app list and kernel image off unless requested.
 4. Export, then save or share the ZIP.
 
-You can still export when the VPN is off or the self-test cannot run. The bundle
-records that limitation; it can still help diagnose installation and root problems.
+Export reads the retained Core evidence, including incomplete runs and infrastructure
+errors. It works independently of your VPN and split-tunnel settings.
 
 ## Recording: reproduce a problem in another app
 
@@ -21,9 +21,9 @@ records that limitation; it can still help diagnose installation and root proble
 4. In the report, describe the expected and actual behavior, the target app/version,
    the approximate time of the failure, and whether that app was inside the VPN tunnel.
 
-A debug export temporarily enables logging for its own capture and runs self-tests.
+A debug export temporarily enables logging for its own capture and retains the existing diagnostic evidence.
 It cannot recover detailed logs that were disabled when your target app failed.
-It also clears the kernel log buffer before collecting a fresh self-test window;
+It also clears the kernel log buffer before its capture window;
 a later snapshot is not a replacement for a recording of the failure.
 
 **Debug logging** in **Settings → For developers** is useful when continuous logging

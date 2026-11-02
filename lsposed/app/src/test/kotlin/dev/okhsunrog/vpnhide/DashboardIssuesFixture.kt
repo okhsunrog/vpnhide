@@ -1,6 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.settings.FilesystemHidingState
 import dev.okhsunrog.vpnhide.settings.FilesystemHidingStatus
 
@@ -21,7 +20,6 @@ internal abstract class DashboardIssuesFixture {
         builtin: ModuleState = ModuleState.NotInstalled,
         kmodProblem: ModuleProblem? = null,
         pendingReboot: Set<FlashableModuleKind> = emptySet(),
-        kpmLoadStatus: KpmLoadStatus = kpmStatus(),
         mismatches: List<ModuleMismatch> = emptyList(),
         nativeBoot: NativeBootStatus? = null,
     ): ModuleFacts {
@@ -33,9 +31,7 @@ internal abstract class DashboardIssuesFixture {
             zygisk = ModuleFact(zygisk, null, FlashableModuleKind.Zygisk in pendingReboot),
             ports = ModuleFact(ports, null, FlashableModuleKind.Core in pendingReboot),
             backends = backends,
-            nativeBackend = displayNativeBackend(backends),
-            kpmLoadStatus = kpmLoadStatus,
-            kmodLoadStatus = null,
+            nativeBackend = DisplayNativeBackend(null, ModuleState.NotInstalled),
             currentBootId = bootId,
             mismatches = mismatches,
             nativeBoot = nativeBoot,
@@ -61,21 +57,6 @@ internal abstract class DashboardIssuesFixture {
         ports = null,
     )
 
-    protected fun kpmStatus(
-        reason: KpmFailureReason = KpmFailureReason.Ok,
-        loaded: Boolean? = true,
-        boot: String? = bootId,
-    ) = KpmLoadStatus(
-        timestamp = null,
-        bootId = boot,
-        unameR = null,
-        runtime = KpmRuntime.Apatch,
-        loaded = loaded,
-        filesystemHiding = null,
-        reason = reason,
-        detail = null,
-    )
-
     protected fun facts(
         modules: ModuleFacts = moduleFacts(),
         lsposed: LsposedState = LsposedState.Active(version = "1.2.5", targetCount = 3),
@@ -86,7 +67,6 @@ internal abstract class DashboardIssuesFixture {
         targets: TargetCounts = TargetCounts(lsposed = 3, native = 3, ports = 0),
         environment: EnvironmentFacts = environment(),
         protection: ProtectionFacts = protection(),
-        kernelRecommendation: NativeInstallRecommendation? = null,
         appVersion: String = "1.2.5",
         developer: DeveloperFlags = DeveloperFlags(),
     ) = DashboardFacts(
@@ -103,7 +83,6 @@ internal abstract class DashboardIssuesFixture {
         targets = targets,
         environment = environment,
         protection = protection,
-        kernelRecommendation = kernelRecommendation,
         appVersion = appVersion,
         developer = developer,
     )
@@ -124,31 +103,7 @@ internal abstract class DashboardIssuesFixture {
         obsoleteModules = obsoleteModules,
     )
 
-    protected fun protection(
-        check: ProtectionCheck = ProtectionCheck.Checked(clean, clean),
-        gap: PartialHookGap? = null,
-    ) = ProtectionFacts(
-        check = check,
-        report = null,
-        partialHookGap = gap,
-        installedOptionalHooks = emptySet(),
-    )
-
-    protected fun recommendation(
-        backend: NativeBackendId,
-        kpatchRuntime: Boolean = false,
-    ) = NativeInstallRecommendation(
-        androidVersion = "Android 15",
-        kernelVersion = "6.1.0",
-        kernelBranch = "android14",
-        recommended = backend,
-        recommendedArtifact = "vpnhide-kmod-android14-6.1.zip",
-        recommendedGkiVariant = "android14-6.1",
-        kpatchRuntimeAvailable = kpatchRuntime,
-    )
-
-    protected val clean = LayerStatus.Active(hidden = 6, leaks = 0)
-    protected val leaking = LayerStatus.Active(hidden = 4, leaks = 2)
+    protected fun protection() = ProtectionFacts(ProtectionCheck.Autonomous(sampleAutonomousDiagnosticInfo()))
 
     protected inline fun <reified T : DashboardIssue> List<DashboardIssue>.has(): Boolean = any { it is T }
 }

@@ -1146,48 +1146,6 @@ pub fn run_all_json() -> String {
     observation::checks(&run_all())
 }
 
-#[derive(serde::Serialize)]
-struct SelfRouted {
-    uid: u32,
-    routed: Option<bool>,
-    detail: String,
-}
-
-/// The self-in-tunnel gate: is `uid` routed through the VPN? Run as root (not a
-/// hook target) so the answer is the unfiltered ground truth. Serialized as
-/// `{uid, routed, detail}`.
-///
-/// This is NOT the diagnostic predicate (`check_netlink_getrule`, which mirrors
-/// the kernel hook's broad "any non-standard table > 100" rule). Policy routing
-/// steers every UID into *some* per-network table (wlan0, rmnet, tun0 — all
-/// non-standard), so the broad predicate would call any online UID "routed".
-/// The gate must pin the VPN table specifically: first learn which table id a
-/// rule egresses to the VPN interface (`oif tun0`), then ask whether a uidrange
-/// rule steers this UID into exactly that table.
-pub fn self_routed_json(uid: u32) -> String {
-    self_routed_for_interfaces_json(uid, None)
-}
-
-pub fn self_routed_for_interfaces_json(uid: u32, interfaces: Option<&[String]>) -> String {
-    let (routed, detail) = self_routed_for_interfaces(uid, interfaces);
-    let sr = SelfRouted {
-        uid,
-        routed,
-        detail,
-    };
-    observation::routing(&sr)
-}
-
-/// Classify one UID against an explicit set of VPN interfaces without adding a
-/// transport envelope. The root helper uses this to combine VPN presence and
-/// membership into one atomic observation.
-pub fn self_routed_for_interfaces(
-    uid: u32,
-    interfaces: Option<&[String]>,
-) -> (Option<bool>, String) {
-    uid_routed_through_vpn(uid, interfaces)
-}
-
 #[cfg(test)]
 mod observation_fixture_tests {
     use super::*;
@@ -1220,138 +1178,10 @@ mod observation_fixture_tests {
             ))
         );
     }
-
-    #[test]
-    fn real_routing_payload_matches_shared_fixture() {
-        assert_eq!(
-            produced(observation::routing(&SelfRouted {
-                uid: 10042,
-                routed: None,
-                detail: "netlink unavailable".to_owned(),
-            })),
-            fixture(include_str!(
-                "../../../fixtures/core-probes/routing-null.json"
-            ))
-        );
-    }
-}
-
-struct GateRule {
-    family: u8,
-    table: u32,
-    uid_lo: u32,
-    uid_hi: u32,
-    has_uidrange: bool,
-    oif_vpn: bool,
-}
-
-fn uid_routed_through_vpn(myuid: u32, interfaces: Option<&[String]>) -> (Option<bool>, String) {
-    const FRA_TABLE: u16 = 15;
-    const FRA_OIFNAME: u16 = 17;
-    const FRA_UID_RANGE: u16 = 20;
-
-    let fd = match open_netlink() {
-        Ok(fd) => fd,
-        Err(out) => return (None, out.detail),
-    };
-
-    let mut rules: Vec<GateRule> = Vec::new();
-
-    unsafe {
-        let mut buf = AlignedBytes::<32768>::zeroed();
-        let hdr_plus_rtmsg = mem::size_of::<libc::nlmsghdr>() + mem::size_of::<Rtmsg>();
-
-        let mut on_rule = |b: &[u8], offset: usize, msg_len: usize| {
-            let mut r = GateRule {
-                family: b[offset + mem::size_of::<libc::nlmsghdr>()],
-                table: rtmsg_table(b, offset).unwrap_or(0),
-                uid_lo: 0,
-                uid_hi: 0,
-                has_uidrange: false,
-                oif_vpn: false,
-            };
-            for_each_rtattr(
-                b,
-                offset + hdr_plus_rtmsg,
-                offset + msg_len,
-                |rta_type, payload| match rta_type {
-                    FRA_OIFNAME if !payload.is_empty() => {
-                        let name = nul_terminated_bytes_to_string(payload);
-                        if interfaces
-                            .map_or_else(|| is_vpn_iface(&name), |names| names.contains(&name))
-                        {
-                            r.oif_vpn = true;
-                        }
-                    }
-                    FRA_TABLE if payload.len() >= 4 => {
-                        r.table = read_u32_ne(payload, 0).unwrap_or(r.table);
-                    }
-                    FRA_UID_RANGE if payload.len() >= 8 => {
-                        if let (Some(lo), Some(hi)) =
-                            (read_u32_ne(payload, 0), read_u32_ne(payload, 4))
-                        {
-                            r.uid_lo = lo;
-                            r.uid_hi = hi;
-                            r.has_uidrange = true;
-                        }
-                    }
-                    _ => {}
-                },
-            );
-            rules.push(r);
-        };
-
-        // v4 + v6: a VPN steers the uid into a tun table for both families; either
-        // membership means routed, so merge both dumps before deciding.
-        for (i, family) in RULE_FAMILIES.into_iter().enumerate() {
-            if let Err(e) = dump_fib_rules(
-                fd.as_raw_fd(),
-                family,
-                (i + 1) as u32,
-                &mut buf.0,
-                &mut on_rule,
-            ) {
-                return (None, format!("routing probe failed: {e}"));
-            }
-        }
-    }
-
-    let (routed, vpn_tables) = classify_uid_vpn_rules(&rules, myuid);
-
-    let detail = if vpn_tables.is_empty() {
-        format!("no VPN egress rule found for uid {myuid}")
-    } else if routed {
-        format!("uid {myuid} routed into VPN table(s) {vpn_tables:?}")
-    } else {
-        format!("uid {myuid} not in any VPN table(s) {vpn_tables:?}")
-    };
-    (Some(routed), detail)
-}
-
-fn classify_uid_vpn_rules(rules: &[GateRule], myuid: u32) -> (bool, Vec<(u8, u32)>) {
-    // Pass 1: the VPN egress table id(s) — tables a rule routes out via `oif tun0`.
-    let vpn_tables: Vec<(u8, u32)> = rules
-        .iter()
-        .filter(|r| r.oif_vpn)
-        .map(|r| (r.family, r.table))
-        .collect();
-
-    // Pass 2: is this UID steered into exactly a VPN table by a uidrange rule?
-    // Exclude the universal 0..u32::MAX catch-all (not a per-app membership rule).
-    let routed = rules.iter().any(|r| {
-        r.has_uidrange
-            && r.uid_lo <= myuid
-            && myuid <= r.uid_hi
-            && !(r.uid_lo == 0 && r.uid_hi == u32::MAX)
-            && !r.oif_vpn
-            && vpn_tables.contains(&(r.family, r.table))
-    });
-
-    (routed, vpn_tables)
 }
 
 #[cfg(test)]
-mod routing_gate_tests {
+mod rule_dump_tests {
     use super::*;
 
     #[test]
@@ -1369,34 +1199,5 @@ mod routing_gate_tests {
         done[4..6].copy_from_slice(&(libc::NLMSG_ERROR as u16).to_ne_bytes());
         done[16..20].copy_from_slice(&(-libc::EPERM).to_ne_bytes());
         assert!(validate_rule_dump_chunk(&done, 1).is_err());
-    }
-
-    fn rule(family: u8, table: u32, oif_vpn: bool, lo: u32, hi: u32) -> GateRule {
-        GateRule {
-            family,
-            table,
-            oif_vpn,
-            uid_lo: lo,
-            uid_hi: hi,
-            has_uidrange: true,
-        }
-    }
-
-    #[test]
-    fn table_ids_do_not_cross_address_families() {
-        let rules = [rule(2, 100, true, 0, 0), rule(10, 100, false, 10000, 19999)];
-        assert!(!classify_uid_vpn_rules(&rules, 10402).0);
-    }
-
-    #[test]
-    fn root_oif_rule_is_not_app_vpn_membership() {
-        assert!(!classify_uid_vpn_rules(&[rule(2, 100, true, 0, 0)], 10402).0);
-    }
-
-    #[test]
-    fn split_tunnel_membership_is_uid_specific() {
-        let rules = [rule(2, 100, true, 0, 0), rule(2, 100, false, 10402, 10402)];
-        assert!(classify_uid_vpn_rules(&rules, 10402).0);
-        assert!(!classify_uid_vpn_rules(&rules, 10403).0);
     }
 }

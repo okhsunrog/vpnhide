@@ -34,9 +34,20 @@ data class AgentDebugZipExport(
     val entries: List<String>,
 )
 
+@Serializable
+data class AgentStatisticsSource(
+    val current: Boolean,
+    val epoch: Long?,
+    val configRevision: Long?,
+    val connectionGeneration: Long,
+    val rootObservationId: Long?,
+    val rootGeneration: Long?,
+)
+
 /** Statistics tab state. */
 @Serializable
 data class AgentStatisticsState(
+    val source: AgentStatisticsSource? = null,
     /** True when at least one backend has status or counters. */
     val hasAnyData: Boolean,
     /** Active backend cards shown by the Statistics tab. */

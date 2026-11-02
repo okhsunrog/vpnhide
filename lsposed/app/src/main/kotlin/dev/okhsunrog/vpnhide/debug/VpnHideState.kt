@@ -7,26 +7,18 @@ import dev.okhsunrog.vpnhide.DashboardMessage
 import dev.okhsunrog.vpnhide.DashboardState
 import dev.okhsunrog.vpnhide.DebugShellSnapshot
 import dev.okhsunrog.vpnhide.DisplayNativeBackend
-import dev.okhsunrog.vpnhide.KmodLoadStatus
 import dev.okhsunrog.vpnhide.LsposedState
 import dev.okhsunrog.vpnhide.ModuleState
 import dev.okhsunrog.vpnhide.NativeBackendStates
 import dev.okhsunrog.vpnhide.ProtectionCheck
 import dev.okhsunrog.vpnhide.RootSnapshot
-import dev.okhsunrog.vpnhide.detectNativeBackendStates
+import dev.okhsunrog.vpnhide.coreDisplayNativeBackend
 import dev.okhsunrog.vpnhide.detectPortsModule
-import dev.okhsunrog.vpnhide.diagnostics.CheckResults
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSummaryInfo
-import dev.okhsunrog.vpnhide.diagnostics.Verdict
-import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import dev.okhsunrog.vpnhide.diagnostics.toDiagnosticInfo
-import dev.okhsunrog.vpnhide.displayNativeBackend
-import dev.okhsunrog.vpnhide.kmodLoadStatus
-import dev.okhsunrog.vpnhide.kpmLoadStatus
+import dev.okhsunrog.vpnhide.hooksInMask
 import dev.okhsunrog.vpnhide.lsposedHooksActiveThisBoot
-import dev.okhsunrog.vpnhide.settings.installedNativeOptionalHooks
+import dev.okhsunrog.vpnhide.nativeLegacyInventory
+import dev.okhsunrog.vpnhide.nativeStatusSnapshot
 import dev.okhsunrog.vpnhide.snapshotRuntimeCheckable
 import dev.okhsunrog.vpnhide.snapshotShellUid
 import kotlinx.serialization.Serializable
@@ -62,7 +54,7 @@ import kotlinx.serialization.json.JsonElement
  *    names, which also made them unmovable between packages.
  * 1: initial.
  */
-internal const val VPNHIDE_STATE_SCHEMA: Int = 4
+internal const val VPNHIDE_STATE_SCHEMA: Int = 5
 
 /**
  * What to include in a captured [VpnHideState]. The ONE source of truth for the
@@ -98,7 +90,7 @@ internal data class VpnHideState(
     val selfNeedsRestart: Boolean,
     // The measured diagnostics run. Null when the capture did not run checks
     // (e.g. the full-logcat recorder just bundles state, no probe run).
-    val gate: DiagnosticGate?,
+    val gate: JsonElement?,
     // The identified diagnostic run this capture took its evidence from. Null when
     // the capture ran no suite, or when no run was admitted at all (the reason is
     // then in [errors]). Lets a bundle be matched against the run's own attempt.
@@ -107,18 +99,19 @@ internal data class VpnHideState(
     // latest attempt, latest complete measurement with its applicability and
     // evidence sufficiency — the same projection the screens render, so a bundle
     // or an agent read cannot disagree with the UI. Null for the logcat recorder.
-    val diagnostics: DiagnosticSummaryInfo? = null,
+    val diagnostics: JsonElement? = null,
+    val nativeStatus: dev.okhsunrog.vpnhide.NativeStatusSnapshot? = null,
     val autonomousDiagnostics: dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticInfo? = null,
     // Verdicts are gate-checked getters on the report (not stored fields), so they
     // would not otherwise serialize — surface them explicitly, computed once here.
-    val nativeVerdict: Verdict?,
-    val javaVerdict: Verdict?,
-    val report: DiagnosticReport?,
+    val nativeVerdict: JsonElement?,
+    val javaVerdict: JsonElement?,
+    val report: JsonElement?,
     // Per-module state, exactly as the detectors compute it for the dashboard.
     val backends: NativeBackendStates,
     val activeBackend: DisplayNativeBackend,
     val ports: ModuleState,
-    val kmodLoadStatus: KmodLoadStatus?,
+    val kmodLoadStatus: JsonElement? = null,
     // Dashboard derived from the same root snapshot and diagnostic presentation.
     // Null if assembly failed (errors explains why), or for captures that omit it.
     val dashboard: DashboardState? = null,
@@ -162,7 +155,7 @@ internal data class VpnHideState(
 @Serializable
 internal data class BeforeCaptureInfo(
     val observedAt: String,
-    val diagnostics: DiagnosticSummaryInfo?,
+    val diagnostics: JsonElement?,
     val autonomousDiagnostics: dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticInfo? = null,
     val protection: ProtectionCheck?,
     val messages: List<DashboardMessage>,
@@ -254,10 +247,6 @@ private val REDACTED_SECTIONS = setOf("pm_packages", "pm_users")
 /** Drop user-identifying sections from a dumped section map. */
 internal fun redactSections(sections: Map<String, String>): Map<String, String> = sections - REDACTED_SECTIONS
 
-/** Parse the raw canonical-config section into structured JSON, or null if absent/unparseable. */
-private fun parseCanonicalConfigSection(raw: String?): JsonElement? =
-    raw?.takeIf { it.isNotBlank() }?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() }
-
 /**
  * Fold one capture into the canonical [VpnHideState]. The module/liveness state is
  * derived from [rootSnapshot] — the SAME snapshot the live dashboard uses — so the
@@ -279,11 +268,7 @@ internal fun buildVpnHideState(
     selfNeedsRestart: Boolean,
     rootSnapshot: RootSnapshot,
     shellSnapshot: DebugShellSnapshot?,
-    gate: DiagnosticGate?,
-    checkResults: CheckResults?,
-    selfTestRunId: Long? = null,
-    diagnostics: DiagnosticSummaryInfo? = null,
-    autonomousSnapshot: dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticSnapshot? = null,
+    autonomousSnapshot: dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticSnapshot,
     dmesg: String,
     logcat: String,
     bootLsposedLogcat: String,
@@ -294,47 +279,27 @@ internal fun buildVpnHideState(
     networkView: NetworkViewSnapshot? = null,
     dashboard: DashboardState? = null,
     beforeCapture: BeforeCaptureInfo? = null,
-    config: JsonElement? = null,
     statistics: AgentStatisticsState? = null,
     options: StateContentOptions = StateContentOptions(),
 ): VpnHideState {
     val rootSections = rootSnapshot.sections
-    val currentBootId = rootSections["current_boot_id"].orEmpty()
-    val nativeBoot = rootSnapshot.nativeBoot
-    val kpmLoadStatus = nativeBoot.kpmLoadStatus()
-    val observedBackends = detectNativeBackendStates(rootSections, currentBootId, kpmLoadStatus, rootSnapshot.backend)
-    val rootCurrent = autonomousSnapshot == null || autonomousSnapshot.rootJoined
+    val nativeStatus = autonomousSnapshot.sources.core.nativeStatusSnapshot()
+    val rootCurrent = autonomousSnapshot.rootJoined
+    val observedBackends = nativeLegacyInventory(rootSections)
     val backends =
         if (rootCurrent) {
             observedBackends
         } else {
             observedBackends.copy(
                 kmod = unverifiedExportRuntime(observedBackends.kmod),
+                builtin = unverifiedExportRuntime(observedBackends.builtin),
                 kpm = unverifiedExportRuntime(observedBackends.kpm),
                 zygisk = unverifiedExportRuntime(observedBackends.zygisk),
-                builtin = unverifiedExportRuntime(observedBackends.builtin),
             )
         }
-    val activeBackend = displayNativeBackend(backends)
+    val activeBackend = coreDisplayNativeBackend(backends, nativeStatus)
     val observedPorts = detectPortsModule(rootSections)
     val ports = if (rootCurrent) observedPorts else unverifiedExportRuntime(observedPorts)
-    val kmodLoadStatus = nativeBoot.kmodLoadStatus(currentBootId)
-    val installedOptionalHooks = installedNativeOptionalHooks(activeBackend.id, rootSections, currentBootId)
-
-    val report =
-        if (gate != null && checkResults != null) {
-            buildDiagnosticReport(
-                gate = gate,
-                results = checkResults,
-                backend = activeBackend,
-                lsposedActive = lsposedHooksActiveThisBoot(rootSections["lsposed_state"].orEmpty(), currentBootId),
-                complete = true,
-                installedOptionalHooks = installedOptionalHooks,
-            )
-        } else {
-            null
-        }
-
     return VpnHideState(
         generatedAt = generatedAt,
         captureKind = captureKind,
@@ -348,27 +313,22 @@ internal fun buildVpnHideState(
                 abis = Build.SUPPORTED_ABIS.orEmpty().toList(),
             ),
         selfNeedsRestart = selfNeedsRestart,
-        gate = report?.gate,
-        selfTestRunId = selfTestRunId,
-        diagnostics = diagnostics,
-        autonomousDiagnostics = autonomousSnapshot?.toDiagnosticInfo(),
-        nativeVerdict = report?.nativeVerdict,
-        javaVerdict = report?.javaVerdict,
-        report = report,
+        gate = null,
+        selfTestRunId = null,
+        diagnostics = null,
+        autonomousDiagnostics = autonomousSnapshot.toDiagnosticInfo(),
+        nativeStatus = nativeStatus,
+        nativeVerdict = null,
+        javaVerdict = null,
+        report = null,
         backends = backends,
         activeBackend = activeBackend,
         ports = ports,
-        kmodLoadStatus = kmodLoadStatus,
         dashboard = dashboard,
         beforeCapture = beforeCapture,
         // Explicit config (the bridge lean call) wins; otherwise derive it from the
         // raw canonical-config section so the file export carries it structured too.
-        config =
-            if (autonomousSnapshot != null) {
-                autonomousExportCanonical(autonomousSnapshot)
-            } else {
-                config ?: parseCanonicalConfigSection(rootSections["canonical_config"])
-            },
+        config = autonomousExportCanonical(autonomousSnapshot),
         statistics = statistics.takeIf { rootCurrent },
         rootShell = RootShellDiag.from(rootSections),
         // Raw sections only in a forensic capture. Forensic (shell) sections on top of

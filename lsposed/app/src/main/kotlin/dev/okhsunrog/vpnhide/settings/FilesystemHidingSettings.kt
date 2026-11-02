@@ -25,13 +25,14 @@ import dev.okhsunrog.vpnhide.CanonicalEdit
 import dev.okhsunrog.vpnhide.CanonicalMutation
 import dev.okhsunrog.vpnhide.CanonicalToggle
 import dev.okhsunrog.vpnhide.ConfigCoordinatorMode
+import dev.okhsunrog.vpnhide.CoreSessions
 import dev.okhsunrog.vpnhide.LocalConfigWriteAccess
 import dev.okhsunrog.vpnhide.NativeBackendId
 import dev.okhsunrog.vpnhide.OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS
 import dev.okhsunrog.vpnhide.R
-import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.StatusBanner
 import dev.okhsunrog.vpnhide.StatusColors
+import dev.okhsunrog.vpnhide.nativeStatusSnapshot
 import dev.okhsunrog.vpnhide.picker.TargetsCache
 import dev.okhsunrog.vpnhide.ui.components.PreferenceRowSwitch
 import dev.okhsunrog.vpnhide.ui.components.SectionHeader
@@ -43,7 +44,7 @@ import kotlinx.coroutines.withContext
 internal fun FilesystemHidingSettingsSection() {
     val scope = rememberCoroutineScope()
     val checkWrite = LocalConfigWriteAccess.current
-    val rootSnapshot by RootSnapshotCache.snapshot.collectAsStateWithLifecycle()
+    val coreUpdate by CoreSessions.updates.collectAsStateWithLifecycle()
     var saving by remember { mutableStateOf(false) }
     var confirmationOpen by remember { mutableStateOf(false) }
     var saveStatus by remember { mutableStateOf<String?>(null) }
@@ -58,14 +59,7 @@ internal fun FilesystemHidingSettingsSection() {
                     ?.optionalFeatures
                     .orEmpty()
         )
-    val runtimeState =
-        remember(enabled, rootSnapshot) {
-            resolveFilesystemHidingState(
-                desiredEnabled = enabled,
-                sections = rootSnapshot?.sections.orEmpty(),
-                nativeBoot = rootSnapshot?.nativeBoot,
-            )
-        }
+    val runtimeState = remember(coreUpdate) { resolveFilesystemHidingState(coreUpdate.nativeStatusSnapshot()) }
     val savedMessage =
         stringResource(
             if (runtimeState.backend == NativeBackendId.Zygisk) {
@@ -138,7 +132,7 @@ internal fun FilesystemHidingSettingsSection() {
             title = stringResource(R.string.settings_filesystem_hiding),
             subtitle =
                 if (repository.confirmed == null ||
-                    rootSnapshot == null
+                    coreUpdate.state == null
                 ) {
                     stringResource(R.string.settings_loading)
                 } else {
@@ -180,8 +174,12 @@ internal fun FilesystemHidingSettingsSection() {
 @Composable
 private fun filesystemHidingStatusText(state: FilesystemHidingState): String =
     when (state.status) {
+        FilesystemHidingStatus.Unknown -> {
+            stringResource(R.string.native_status_unknown)
+        }
+
         FilesystemHidingStatus.Unavailable -> {
-            stringResource(R.string.settings_filesystem_hiding_unavailable)
+            stringResource(R.string.native_status_no_selection)
         }
 
         FilesystemHidingStatus.Disabled -> {

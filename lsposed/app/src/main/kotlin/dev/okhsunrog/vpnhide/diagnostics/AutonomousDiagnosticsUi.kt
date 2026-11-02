@@ -67,7 +67,7 @@ internal fun AutonomousDiagnosticStatusCard(
             }
             Spacer(Modifier.height(12.dp))
             EnhancedButton(onClick = onRetry, enabled = !running && !retry.pending) {
-                Text(stringResource(R.string.vpn_off_retry))
+                Text(stringResource(R.string.retry))
             }
         }
     }

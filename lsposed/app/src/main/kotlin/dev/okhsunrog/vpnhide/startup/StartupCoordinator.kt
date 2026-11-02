@@ -13,7 +13,6 @@ import dev.okhsunrog.vpnhide.SelfTargetPreparation
 import dev.okhsunrog.vpnhide.UpdateCheckCache
 import dev.okhsunrog.vpnhide.cleanupStaleZygiskStatus
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
-import dev.okhsunrog.vpnhide.diagnostics.RoutingGateCache
 import dev.okhsunrog.vpnhide.diagnostics.retryDiagnosticsAndDashboard
 import dev.okhsunrog.vpnhide.ensureSelfInTargets
 import dev.okhsunrog.vpnhide.next
@@ -143,10 +142,6 @@ internal class StartupCoordinator(
     fun ensureInitialCaches(selfNeedsRestart: Boolean) {
         AppListCache.ensureLoaded(appContext)
         DashboardCache.ensureLoaded(appContext, selfNeedsRestart)
-        // Seed the shared routing gate as early as selfNeedsRestart is known — this is
-        // also the earliest point the process-scoped VPN transport watcher (Phase 3)
-        // can find inputs to refresh against.
-        RoutingGateCache.ensureLoaded(appContext, selfNeedsRestart)
         // Subscribe only. Core owns autonomous admission and cached evidence.
         DiagnosticsCache.snapshot
         startAutoHideReconcile()

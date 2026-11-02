@@ -1,5 +1,5 @@
 {
-    "schema": 4,
+    "schema": 5,
     "generatedAt": "2026-08-22T12:00:00+0300",
     "captureKind": "debug",
     "app": {
@@ -19,6 +19,83 @@
     "gate": null,
     "selfTestRunId": null,
     "diagnostics": null,
+    "nativeStatus": {
+        "current": true,
+        "epoch": 7,
+        "sourceSequence": 3,
+        "connectionGeneration": 1,
+        "configRevision": 0,
+        "model": {
+            "boot": {
+                "bootId": "boot-1",
+                "decidedAtMs": 1,
+                "outcome": {
+                    "kind": "selected",
+                    "backend": "Builtin",
+                    "mode": "Adopted",
+                    "filesystemHiding": false
+                },
+                "installed": [],
+                "live": [
+                    "Builtin"
+                ],
+                "staged": [],
+                "kmod": null,
+                "zygiskTargets": {
+                    "kind": "not_installed"
+                },
+                "ports": {
+                    "source": "Boot",
+                    "ipv4": "Confirmed",
+                    "ipv6": "Confirmed",
+                    "targetCount": 0,
+                    "netdReady": true,
+                    "detail": "",
+                    "atMs": 1
+                },
+                "obsoleteModules": []
+            },
+            "selected": {
+                "backend": "Builtin",
+                "source": "builtin",
+                "manifestSha256": null,
+                "sourceCommit": null,
+                "payloadSha256": null
+            },
+            "applied": "Builtin",
+            "observed": "Builtin",
+            "displayed": {
+                "backend": "Builtin",
+                "source": "builtin",
+                "manifestSha256": null,
+                "sourceCommit": null,
+                "payloadSha256": null
+            },
+            "observation": "current",
+            "runtime": {
+                "backend": "Builtin",
+                "kernelVersion": 0,
+                "installedHooks": 33555455,
+                "statusError": 0
+            },
+            "observationError": null,
+            "attempts": [],
+            "delivery": {
+                "backend": "Builtin",
+                "operation": 1,
+                "configRevision": 0,
+                "outcome": "confirmed",
+                "wireSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "requiredHooks": 33555455,
+            "installedHooks": 33555455,
+            "missingHooks": 0,
+            "setup": "setup_ready",
+            "filesystem": "disabled",
+            "processCoverageComplete": false,
+            "legacyInstalled": []
+        }
+    },
     "autonomousDiagnostics": {
         "availability": "published",
         "current": true,
@@ -211,8 +288,6 @@
                 "runtimeCheckable": true
             }
         },
-        "nativeInstallRecommendation": null,
-        "kmodLoadStatus": null,
         "protection": {
             "kind": "autonomous",
             "evidence": {
@@ -319,9 +394,7 @@
                 }
             }
         },
-        "nativePartialHooks": false,
         "messages": [],
-        "installedOptionalHooks": [],
         "legacyImport": null,
         "core": {
             "health": "Connecting",
@@ -329,7 +402,8 @@
             "detail": null,
             "ports": "Unknown",
             "portsTargets": null
-        }
+        },
+        "nativeStatus": null
     },
     "beforeCapture": {
         "observedAt": "2026-08-22T11:59:59+0300",

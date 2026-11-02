@@ -14,6 +14,8 @@ pub use native_lifecycle::*;
 mod migration;
 mod policy;
 pub use migration::*;
+mod native_status;
+pub use native_status::*;
 mod types;
 pub use api::*;
 pub use policy::*;

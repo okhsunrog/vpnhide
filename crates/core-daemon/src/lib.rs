@@ -16,13 +16,13 @@ pub mod device_probes;
 pub mod diagnostics;
 pub mod effects;
 mod export;
-pub mod framework_vpn;
 pub mod instance;
 pub mod ipc_config;
 pub mod journal;
 pub mod listener;
 pub mod logcat_session;
 pub mod native_boot;
+mod native_status;
 pub mod observer;
 pub mod operation;
 pub mod ownership;
@@ -31,14 +31,12 @@ pub mod ports;
 pub mod probe_cli;
 pub mod publisher;
 pub mod recovery;
-pub mod routing_compose;
 pub mod server;
 pub mod service;
 pub mod zygisk;
 pub mod zygisk_loader;
 
 pub use listener::{ServerHandle, listen};
-pub use observer::observe;
 pub use publisher::Publisher;
 pub use server::{CORE_BUILD, CoreServer, CoreState, serve_connection};
 
@@ -170,7 +168,5 @@ mod ipc_auth_tests {
         assert_eq!(epoch, 1);
     }
 }
-
-mod vpn_networks;
 
 pub mod maintenance;

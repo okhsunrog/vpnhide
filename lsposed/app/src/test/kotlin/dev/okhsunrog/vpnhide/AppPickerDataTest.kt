@@ -675,10 +675,8 @@ class AppPickerDataTest {
         settings: CanonicalSettings = CanonicalSettings(),
     ): TargetsSnapshot =
         TargetsSnapshot(
-            kmodModuleInstalled = true,
-            kpmModuleInstalled = false,
-            zygiskModuleInstalled = false,
             uidToPkg = emptyMap(),
             canonicalConfig = CanonicalConfig(apps = apps.toMap(), settings = settings),
+            nativeStatus = sampleNativeStatus(),
         )
 }

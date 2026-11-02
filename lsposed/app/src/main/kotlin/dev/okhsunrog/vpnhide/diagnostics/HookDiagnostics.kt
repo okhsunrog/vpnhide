@@ -5,15 +5,14 @@ import dev.okhsunrog.vpnhide.DebugShellSnapshot
 import dev.okhsunrog.vpnhide.Protocol
 import dev.okhsunrog.vpnhide.RootSnapshot
 import dev.okhsunrog.vpnhide.backendId
-import dev.okhsunrog.vpnhide.expectedInstalledHooks
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.hasHook
 import dev.okhsunrog.vpnhide.hooksInMask
 import dev.okhsunrog.vpnhide.ownedHooks
 import dev.okhsunrog.vpnhide.parseLsposedStateMetadata
 import dev.okhsunrog.vpnhide.statistics.StatisticsState
-import dev.okhsunrog.vpnhide.statistics.buildStatisticsState
 import dev.okhsunrog.vpnhide.statistics.formatStatCount
+import dev.okhsunrog.vpnhide.statistics.parseCounterState
 import dev.okhsunrog.vpnhide.statistics.parseProtocolStatusBlock
 import dev.okhsunrog.vpnhide.statusError
 
@@ -39,11 +38,9 @@ internal fun buildHookDiagnosticsText(
     context: Context,
     shellSnapshot: DebugShellSnapshot,
     counterBaseline: DebugShellSnapshot? = null,
-    report: DiagnosticReport? = null,
 ): String {
-    val rootSnapshot = RootSnapshot(shellSnapshot.sections)
-    val currentState = buildStatisticsState(rootSnapshot)
-    val baselineState = counterBaseline?.let { buildStatisticsState(RootSnapshot(it.sections)) }
+    val currentState = parseCounterState(shellSnapshot.sections)
+    val baselineState = counterBaseline?.let { parseCounterState(it.sections) }
     val baselineCounters = baselineState?.toCounterMap().orEmpty()
     val currentCounters = currentState.toCounterMap()
     // Whether a baseline was actually captured — NOT whether it had counter rows.
@@ -52,12 +49,6 @@ internal fun buildHookDiagnosticsText(
     // every delta as n/a, defeating the before/after report.
     val hasBaseline = counterBaseline != null
     val statusByBackend = statusByBackend(shellSnapshot)
-    val nativeChecksById =
-        report
-            ?.native
-            ?.checks
-            ?.associateBy { it.id }
-            .orEmpty()
 
     return buildString {
         appendLine("Hook diagnostics")
@@ -79,7 +70,6 @@ internal fun buildHookDiagnosticsText(
         appendLine("=== Native diagnostic checks and expected hooks ===")
         appendNativeChecks(
             context = context,
-            checksById = nativeChecksById,
             statusByBackend = statusByBackend,
             counters = currentCounters,
             baselineCounters = baselineCounters,
@@ -128,16 +118,16 @@ private fun StringBuilder.appendInstalledHooks(
     installedMask: Long,
 ) {
     val installed = ownedHooks(backend).intersect(hooksInMask(installedMask))
-    val expected = expectedInstalledHooks(backend, installed)
+    val expected = ownedHooks(backend)
     val missing = expected - installed
-    appendLine("  installed hooks (${installed.size}/${expected.size} expected):")
+    appendLine("  installed hooks (${installed.size}/${expected.size} registry entries):")
     if (installed.isEmpty()) {
         appendLine("    (none)")
     } else {
         installed.forEach { appendLine("    ${formatHook(it)}") }
     }
     if (missing.isNotEmpty()) {
-        appendLine("  missing owned hooks:")
+        appendLine("  unreported registry hooks:")
         missing.forEach { appendLine("    ${formatHook(it)}") }
     }
 }
@@ -171,18 +161,13 @@ private fun StringBuilder.appendCounterDelta(
 
 private fun StringBuilder.appendNativeChecks(
     context: Context,
-    checksById: Map<String, DiagnosticCheck>,
     statusByBackend: Map<HookIds.Backend, Protocol.Status?>,
     counters: Map<CounterKey, Long>,
     baselineCounters: Map<CounterKey, Long>,
     hasBaseline: Boolean,
 ) {
     for (spec in NATIVE_CHECKS) {
-        val check = checksById[spec.id]
-        appendLine("${spec.id}: ${check?.label ?: context.getString(spec.labelRes)}")
-        appendLine("  result=${check?.outcome?.token() ?: "(not run)"}")
-        check?.appDetail?.takeIf { it.isNotBlank() }?.let { appendLine("  detail=$it") }
-        check?.groundTruthDetail?.let { appendLine("  root=$it") }
+        appendLine("${spec.id}: ${context.getString(spec.labelRes)}")
         if (spec.expectedHooks.isEmpty()) {
             appendLine("  expected hooks: none registered; this probe is covered outside the hook registry")
         } else {

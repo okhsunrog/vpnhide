@@ -433,8 +433,6 @@ internal object LogcatRecorder {
                             ("logcat_recording" to buildRecordingText(recording, session, stopMs)),
                 ),
             shellSnapshot = shellSnapshot,
-            gate = null,
-            checkResults = null,
             autonomousSnapshot = diagnostics,
             dmesg = dmesg,
             logcat = filterVpnHideLogcat(rawLogFile),

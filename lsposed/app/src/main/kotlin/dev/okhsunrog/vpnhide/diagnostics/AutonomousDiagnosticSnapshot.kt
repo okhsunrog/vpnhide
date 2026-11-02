@@ -62,22 +62,12 @@ internal fun autonomousDiagnosticSnapshot(
     val availability =
         when {
             update.protocolSkew -> AutonomousAvailability.ProtocolSkew
-
             !update.current && state == null && update.sequence == 0L && update.failureDetail == null -> AutonomousAvailability.Initializing
-
             !update.current || state == null -> AutonomousAvailability.Offline
-
-            !coreInputsJoined(
-                update,
-                sources.config,
-            ) || sources.config.coreSequence != update.sequence -> AutonomousAvailability.ConfigUnjoined
-
+            !diagnosticConfigJoined(update, sources.config) -> AutonomousAvailability.ConfigUnjoined
             run == null -> AutonomousAvailability.NoRun
-
             run.coreEpoch.toLong() != state.epoch -> AutonomousAvailability.EpochMismatch
-
             state.autonomousAssessment == null -> AutonomousAvailability.IncompletePublication
-
             else -> AutonomousAvailability.Published
         }
     return AutonomousDiagnosticSnapshot(
@@ -89,6 +79,24 @@ internal fun autonomousDiagnosticSnapshot(
         state?.autonomousAssessment?.toDiagnosticInfo(),
         currentRootJoined(sources),
     )
+}
+
+/** Config identity is independent of unrelated routing/publication cursor changes. */
+private fun diagnosticConfigJoined(
+    update: CoreSessionUpdate,
+    config: ConfigCoordinatorView,
+): Boolean {
+    val state = update.state ?: return false
+    if (!update.current || !config.coreCurrent || state.epoch != config.coreEpoch ||
+        state.configRevision != config.desiredRevision
+    ) {
+        return false
+    }
+    return when (val canonical = state.canonical) {
+        is dev.okhsunrog.vpnhide.RootCanonicalRead.Available -> canonical.config == config.confirmed
+        dev.okhsunrog.vpnhide.RootCanonicalRead.Missing -> config.confirmed == null
+        else -> false
+    }
 }
 
 private fun currentRootJoined(sources: AutonomousDiagnosticSources): Boolean {

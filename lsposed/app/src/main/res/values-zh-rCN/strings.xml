@@ -81,7 +81,6 @@
     <string name="native_capacity_package">%1$s（%2$d）</string>
     <string name="native_capacity_package_more">%1$s，另有 %2$d 个</string>
     <string name="save_native_capacity_refused">未保存：此选择需要 %1$d 个应用 UID，但原生最多容纳 %2$d 个。请为合计至少 %3$d 个 UID 的应用关闭原生（括号内为每个应用的 UID 数）：%4$s。之前的设置仍然有效。</string>
-    <string name="dashboard_issue_native_capacity_exceeded">原生设置未更新：已保存的选择现在需要 %1$d 个应用 UID，但原生最多容纳 %2$d 个（例如所选应用在工作资料或分身中出现了新副本）。未发送任何内容，原生保留之前的目标。请为合计至少 %3$d 个 UID 的应用关闭原生（括号内为每个应用的 UID 数）：%4$s。</string>
 
     <!-- Diagnostics -->
     <string name="btn_export_debug">收集调试日志</string>
@@ -140,27 +139,12 @@
     <string name="dashboard_backend_kpm">KPM</string>
     <string name="dashboard_backend_zygisk">Zygisk</string>
     <string name="dashboard_backend_line">%1$s · %2$s</string>
-    <string name="dashboard_backend_partial_hooks">部分钩子</string>
     <string name="dashboard_not_installed">未安装</string>
     <string name="dashboard_installed_inactive">已安装，未启用</string>
-    <string name="dashboard_installed_not_verified">已安装，状态未验证</string>
-    <string name="dashboard_installed_restart_app">已安装，重启 VPN Hide 后生效</string>
-    <string name="dashboard_module_installed_reboot_needed">已安装，需要重启</string>
-    <string name="dashboard_kmod_broken_wrong_variant">已安装，GKI 变体不匹配</string>
-    <string name="dashboard_kmod_broken_unsupported_kernel">已安装，内核不受支持</string>
-    <string name="dashboard_kmod_broken_no_kprobes">已安装，内核不支持 kprobes</string>
-    <string name="dashboard_kmod_broken_unknown_variant">已安装，未加载</string>
-    <string name="dashboard_kmod_broken_ambiguous">已安装，未加载——请换另一个 GKI 变体试试</string>
-    <string name="dashboard_kmod_broken_signature_enforced">已安装，内核拒绝未签名模块</string>
-    <string name="dashboard_module_broken_artifact_missing">已安装，缺少载荷文件</string>
     <string name="dashboard_active_targets">生效中 · %d 个目标应用</string>
     <string name="dashboard_reboot_needed">需要重启设备</string>
     <string name="dashboard_protection_not_verified">未验证</string>
-    <string name="vpn_off_prompt">当前没有已开启的 VPN。请先开启 VPN，再点按“重试”运行隐藏检查。</string>
-    <string name="self_not_routed_prompt">VPN 已开启，但 VPN Hide 的流量没有走这条 VPN，这些检查没有可测量的内容。若使用通用 VPN 客户端，请把 VPN Hide 加入 VPN 隧道（不要用分应用代理把它排除）再点按“重试”。有些 VPN 只代理选定的应用、无法加入 VPN Hide——那么这项自检就无法运行，这是正常现象，并非失败；请以目标应用是否正常来判断隐藏效果。</string>
-    <string name="self_not_routed_accelerators">在用游戏加速器？</string>
-    <string name="vpn_off_retry">重试</string>
-    <string name="diag_failed_prompt">隐藏检查未能运行——VPN Hide Core 没有响应，或某项检查失败。请点按“重试”，这通常是暂时的。</string>
+    <string name="retry">重试</string>
 
     <!-- Statistics -->
     <string name="statistics_title">拦截计数</string>
@@ -240,19 +224,7 @@
     <string name="surface_native">原生</string>
     <string name="surface_package">软件包</string>
 
-    <string name="dashboard_install_recommendation_title">安装建议</string>
-    <string name="dashboard_install_recommendation_device">当前设备：%1$s，内核 %2$s</string>
-    <string name="dashboard_install_recommendation_kmi_note">内核版本里的“%1$s”是 GKI 内核模块接口（KMI）标签——它标识内核对模块的二进制接口，而不是 Android 系统版本。</string>
-    <string name="dashboard_install_recommendation_kmod">推荐使用内核模块，请下载 %1$s。</string>
-    <string name="dashboard_install_recommendation_kmod_ambiguous">推荐使用内核模块。无法从 uname -r 判断内核的 GKI 分支，因此请先试 %1$s；若重启后仍未加载进内核，再改装 %2$s。</string>
-    <string name="dashboard_install_recommendation_zygisk">当前设备不支持内核模块，请安装 %1$s。</string>
-    <string name="dashboard_install_recommendation_zygisk_warning">为银行和支付类应用开启原生时，它们可能会察觉到 Zygisk 钩子。对这类应用请关闭原生，依赖 LSPosed（Java 层）隐藏。</string>
-    <string name="dashboard_install_recommendation_kpm">针对当前内核，推荐使用 KPM——单个通用模块，在内核级隐藏，对防篡改检测不可见。请下载 %1$s。</string>
-    <string name="dashboard_install_recommendation_kpm_needs_runtime">针对当前内核，推荐使用 KPM——内核级隐藏，对防篡改检测不可见。它需要先装好 KPatch-Next-Module。若不想装，可改用 vpnhide-zygisk.zip。KPM 文件：%1$s。</string>
-    <string name="dashboard_install_recommendation_kmod_kpm_alt">内核模块是最稳定、测试最充分的选择。KPM 是备选方案——单个通用模块，不用去匹配 GKI 变体——当内核模块加载不进内核时（变体不匹配，或内核强制模块签名）会很有用。</string>
     <string name="dashboard_install_recommendation_download">下载 %1$s</string>
-    <string name="dashboard_install_recommendation_all_releases">全部发行版</string>
-    <string name="dashboard_issue_kpm_capable_but_zygisk">当前内核支持更隐蔽的 KPM，但目前只装了 Zygisk。Zygisk 会被银行/支付类应用检测到；KPM 则在内核级隐藏。可考虑安装 %1$s。</string>
     <!-- Community / contact modal -->
     <string name="contact_title">社区与反馈</string>
     <string name="contact_body">有疑问、Bug 反馈或建议？可在此联系作者。</string>
@@ -279,9 +251,6 @@
     <string name="donate_btc">BTC</string>
     <string name="donate_copied">地址已复制到剪贴板</string>
     <string name="donate_close">关闭</string>
-    <string name="donate_banner">VPN Hide 免费且无广告。如果它对你有用，可以支持它的开发。</string>
-    <string name="donate_banner_support">支持</string>
-    <string name="donate_banner_hide">隐藏</string>
 
     <!-- 导入 1.0 之前版本遗留在设备上的配置 -->
     <string name="legacy_import_banner">在设备上找到了 1.0 之前版本的配置，其中包含 %1$d 个应用。当前配置中已有设置好的应用，因此没有自动导入。</string>
@@ -322,33 +291,15 @@
     <string name="dashboard_issues">错误（%d）</string>
     <string name="dashboard_warnings">警告（%d）</string>
     <string name="dashboard_info">信息（%d）</string>
-    <string name="dashboard_issue_checks_failed">并非所有隐藏检查都已通过。</string>
     <string name="dashboard_action_details">详情</string>
     <string name="dashboard_action_learn_more">了解更多</string>
-    <string name="dashboard_issue_kmod_capable_but_zygisk">当前内核支持内核模块——它在内核空间挂钩，对防篡改检测不可见。Zygisk 也能用，但为其开启原生时，银行和支付类应用可能会检测到它的钩子。请安装 %1$s 并卸载 Zygisk 模块，以获得更干净的覆盖。</string>
-    <string name="dashboard_issue_native_conflict_kernel">内核后端（.ko 或内置）与 KPM 同时处于活动状态。它们挂钩相同的内核函数，可能导致设备冻结。请只保留一个内核后端；使用内置后端时请移除 KPM。</string>
-    <string name="dashboard_issue_native_backends_conflict">已安装多个原生后端：%1$s。请只保留一个。本次开机 VPN Hide 未加载其中任何一个，在您卸载其余后端并重启之前，原生隐藏处于关闭状态。</string>
-    <string name="dashboard_issue_native_backends_staged_conflict">下次重启后将安装以下原生后端：%1$s。请只保留一个，否则 VPN Hide 将不会加载其中任何一个。</string>
-    <string name="dashboard_issue_kpm_unverifiable">无法查询 KernelPatch，因此 VPN Hide 无法确认 VPN Hide 的 KPM 是否已在运行（通过 vpnhide-kpm.zip 安装、由 APatch 自动加载或手动加载）。为避免同时运行两个原生后端，未加载其他后端。请在“设置 → 安全”中保存 SuperKey，以便 VPN Hide 进行检查。详情：%1$s</string>
-    <string name="dashboard_issue_native_boot_failed">本次开机未能设置原生后端：%1$s</string>
-    <string name="dashboard_issue_zygisk_retire_failed">Zygisk 不是所选后端，但其旧目标列表无法清除，因此它可能仍在挂钩之前选择的应用。请卸载 Zygisk 模块。详情：%1$s</string>
     <string name="dashboard_issue_obsolete_modules">仍安装着已废弃的 VPN Hide 1.x 模块：%1$s。2.0 中它已被 VPN Hide Core 取代，其旧的开机脚本会与核心冲突。请在 Root 管理器中卸载它并重启。</string>
-    <string name="dashboard_issue_kpm_awaiting_superkey">KPM 尚未生效：KernelPatch 拒绝了认证，VPN Hide 无法加载或验证它。请在“设置 → 安全”中保存 SuperKey，VPN Hide 会立即接管，无需重启。</string>
-    <string name="dashboard_issue_kpm_incompatible">VPN Hide 的 KPM 正在运行，但 VPN Hide Core 无法使用它（报告版本：%1$s，需要 %2$s 或更新），因此未向其下发配置，也未加载第二份副本。请换成当前版本——安装 vpnhide-kpm.zip，或在 APatch/KPatch-Next 中加载当前的 vpnhide.kpm——然后重启。详情：%3$s</string>
-    <string name="dashboard_issue_kpm_version_unreported">未报告</string>
     <string name="dashboard_issue_module_reboot_to_activate">%1$s 模块已安装，但尚未启用 — 重启设备后生效。</string>
     <string name="dashboard_issue_module_artifact_missing">%1$s 模块安装已损坏：缺少 %2$s，core 无可加载的内容。请从最新发行版重新安装该模块 ZIP。</string>
-    <string name="dashboard_issue_kpm_unsupported_kernel">KPM 已安装，但无法在内核 %1$s 上加载，因为这一内核家族没有经过验证的偏移表。请改用 Zygisk 后端。</string>
-    <string name="dashboard_issue_kpm_needs_superkey">KPM 已安装，KernelPatch 运行时也有响应，但模块控制调用被拒绝——VPN Hide 没有保存 SuperKey，只能用受信任的 su 令牌认证。请在“设置 → 安全”中保存 SuperKey（与 APatch/FolkPatch 里设置的相同），然后点按“刷新”。重装 zip 没有用。</string>
-    <string name="dashboard_issue_kpm_needs_runtime">KPM 已安装，但内核尚未通过 KernelPatch 运行时打补丁来加载它。请安装 KPatch-Next-Module 并在其界面中为内核打补丁（在 Magisk 和 KernelSU 上均可用）。若不行，请改用 APatch 或 FolkPatch。</string>
-    <string name="dashboard_issue_native_partial_hooks">原生后端已加载，但在此内核上只装上了 %2$d 个内核钩子中的 %1$d 个——未能解析：%3$s。它们负责的检测面不由该后端覆盖，可能仍有其他层将其关闭。重新安装没有用：在这个内核版本里，这些函数的名字不同或根本不存在。</string>
-    <string name="dashboard_issue_kpm_load_failed">KPM 已安装但加载失败：%1$s。请用“设置 → 调试 → 收集调试日志”，把完整的开机输出附到 Bug 报告里，或从最新发行版重新安装 vpnhide-kpm.zip。</string>
-    <string name="dashboard_issue_multiple_native">装了多个原生后端。同一时间只能有一个生效（优先级：内核模块，其次 KPM，再次 Zygisk），其余会闲置。请卸载用不到的，保持整洁。</string>
     <string name="dashboard_issue_debug_logging_on">调试日志已开启。VPN Hide 正在往 logcat 写详细日志，任何有 Root 的人都能读到。收集完 Bug 报告后，请在“设置 → 开发者”中把它关掉。</string>
     <string name="dashboard_issue_agent_bridge_on">Agent 控制已开启。VPN Hide 正在运行一个本地调试桥，它开放的端口会让设备上的其他应用检测到 VPN Hide。用完后请在“设置 → 开发者”中把它关掉。</string>
     <string name="dashboard_issue_selinux_permissive">SELinux 处于宽容（Permissive）模式。VPN Hide 依赖内核拦截的六个检测向量（RTM_GETROUTE、/proc/net/{tcp,udp,dev,fib_trie}、/sys/class/net）此时选定应用都能访问到。请执行 `setenforce 1`，并排查是什么把它关掉了。</string>
     <string name="dashboard_issue_self_multi_profile">VPN Hide 装在了 %1$d 个用户资料里。真正起作用的是主资料里的那个——LSPosed 挂钩 system_server，而它只在主资料中运行，那里的选择器已经能看到所有资料的应用，并对它们统一过滤。次要资料里的额外副本是多余的，还会互相争抢对共享配置的写入。请从工作资料 / 分身空间 / 其他次要资料中卸载。</string>
-    <string name="dashboard_issue_no_native">未安装原生后端。请安装推荐的原生后端，才能完整隐藏。</string>
     <string name="dashboard_issue_lsposed_not_installed">未安装 LSPosed/Vector。请安装它，并为“系统框架”启用 VPN Hide 模块。</string>
     <string name="dashboard_issue_reboot">LSPosed 配置正确，但它的钩子还没生效。请重启设备来启用它们。</string>
     <string name="dashboard_issue_lsposed_config_unreadable">无法读取 LSPosed/Vector 配置。请重新打开 LSPosed/Vector，确认其中已启用 VPN Hide，然后重新打开 VPN Hide。</string>
@@ -380,13 +331,6 @@
     <string name="dashboard_running_version">运行中的模块版本：%s</string>
 
     <!-- kmod variant / load diagnostics -->
-    <string name="dashboard_issue_kmod_wrong_variant">内核模块变体不对：已安装 %1$s，当前内核需要 %2$s。请卸载当前 kmod，并从最新发行版安装 %3$s。</string>
-    <string name="dashboard_issue_kmod_unknown_variant">内核模块已安装但没有加载，而且 zip 未标明它是为哪个 GKI 变体构建的。请从最新发行版重新安装 %1$s，以确保与当前内核匹配。</string>
-    <string name="dashboard_issue_kmod_ambiguous_try_alternative">内核模块 %1$s 本次开机加载失败。无法从 uname -r 判断内核的 GKI 分支，因此请改装 %2$s。</string>
-    <string name="dashboard_issue_kmod_load_failed">内核模块加载失败。insmod 报错：%1$s。请用“设置 → 调试 → 收集调试日志”，把完整的开机 insmod 输出附到 Bug 报告里。</string>
-    <string name="dashboard_issue_kmod_signature_enforced">当前内核强制校验模块签名，因此未签名的内核模块无法加载（insmod 失败，返回 EKEYREJECTED——“Key was rejected by service”）。Magisk 关不掉这一点。请切换到 GKI 模式的 KernelSU Next——它会解除该强制，kmod 就能加载。在 GKI 内核上，内核模块才是正确的工具；不要回退到 Zygisk，它的进程内钩子很容易被银行和反欺诈应用检测到。</string>
-    <string name="dashboard_issue_kmod_not_supported_kernel">当前内核（%1$s）没有匹配的 vpnhide-kmod 变体。请卸载 kmod 模块并改装 %2$s。</string>
-    <string name="dashboard_issue_kprobes_missing">当前内核在构建时没有开启 CONFIG_KRETPROBES。VPN Hide 内核模块无法在这一内核上工作。请卸载 kmod，改用 vpnhide-zygisk.zip。</string>
 
     <!-- Update -->
     <string name="update_available_title">有可用更新</string>
@@ -440,7 +384,6 @@
     <string name="settings_experimental_protection">实验性保护</string>
     <string name="settings_filesystem_hiding">隐藏 VPN 文件系统路径</string>
     <string name="settings_filesystem_hiding_sub">实验性功能：内核后端拦截全局 VFS 路径，Zygisk 则在指定应用内部尽力提供 libc 过滤。目前没有已知的真实应用依赖这一检测向量，通常标准的原生保护就够了。</string>
-    <string name="settings_filesystem_hiding_unavailable">需要 kmod、KPM 或 Zygisk 原生后端。</string>
     <string name="settings_filesystem_hiding_disabled">已关闭——推荐使用标准原生保护。</string>
     <string name="settings_filesystem_hiding_active">已对选定的原生目标应用生效。</string>
     <string name="settings_filesystem_hiding_pending_enable">将在重启后开启。</string>
@@ -562,7 +505,6 @@
     <string name="config_capture_logging">采集进行期间，调试日志保持开启。</string>
     <string name="config_changes_unavailable">暂时无法更改配置</string>
     <string name="config_close">关闭</string>
-    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide 已内置于当前内核。请移除多余的 kmod 模块：核心只加载一个原生后端，两者同时存在时一个也不加载。</string>
     <string name="debug_export_complete">报告已完整收集。</string>
     <string name="debug_export_partial">已收集部分报告，仍可保存或分享。\n%1$s</string>
     <string name="debug_export_failed">报告收集失败：%1$s</string>
@@ -647,4 +589,18 @@
     <string name="autonomous_vector_ports">端口保护</string>
     <string name="autonomous_vector_filesystem">文件系统保护</string>
     <string name="autonomous_metadata_pending">正在刷新设备信息；Core 保护结果显示在上方。</string>
+
+    <string name="native_status_unavailable">Core 状态不可用</string>
+    <string name="native_status_no_selection">尚未选择原生后端</string>
+    <string name="native_status_awaiting_runtime">等待运行确认</string>
+    <string name="native_status_conflict">原生后端冲突</string>
+    <string name="native_status_pending">正在应用配置</string>
+    <string name="native_status_failed">需要检查设置</string>
+    <string name="native_status_unknown">尚未确认应用状态</string>
+    <string name="native_status_partial">部分配置的挂钩不可用</string>
+    <string name="native_status_ready">后端已就绪</string>
+    <string name="native_status_processes">等待目标进程确认</string>
+    <string name="native_status_bundled">包含在 Core 中</string>
+    <string name="native_status_builtin">内核内置</string>
+    <string name="native_status_legacy">独立模块</string>
 </resources>

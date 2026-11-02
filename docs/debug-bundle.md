@@ -135,11 +135,12 @@ Everything below is a `state.json` field unless noted.
 ### 2.1 Schema versions
 
 `state.json → schema` says which shape the bundle was written in. **This doc
-describes schema 4.** One number covers the whole bundle; there is no per-object
+describes schema 5.** One number covers the whole bundle; there is no per-object
 version.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
+| 5 | main (unreleased) | Core-owned `nativeStatus` records chosen/bundled provenance, attempts, delivery, observed runtime, desired hook coverage and setup separately. Old Kotlin backend priority/classifiers and VPN-dependent report/gate owners are removed. Dashboard omits native install recommendation/partial-hook/installed-optional projections; statistics carry source identity/currentness. Legacy nullable output slots stay null. |
 | 4 | main (unreleased) | Dashboard, Diagnostics, agent and captures consume retained autonomous Core evidence. `autonomousDiagnostics` identifies the accepted Core/config/root sources, required/proven/leaked/unverified vectors, controls, cleanup and reuse blockers. Legacy gate/report/diagnostics/verdict fields remain nullable for old readers; new captures do not fabricate an app-process self-test. |
 | 3 | dev-2.x (unreleased) | Measurement summaries and snapshots separate desired config revision, delivery identity and whether delivery was confirmed. An observed passing suite under uncertain delivery cannot establish current success; the UI shows application uncertainty while retaining its measured results. |
 | 2 | 1.3.0 | Sealed `kind` discriminators are compact snake_case everywhere. Previously `dashboard.lsposed` and `dashboard.protection` carried fully-qualified class names (`dev.okhsunrog.vpnhide.LsposedState.Active`) instead of `active`/`blocked`. The separate `report.schema` field is gone — the top-level one is the only version. |
@@ -195,6 +196,23 @@ Legacy `gate`, `report`, `diagnostics`, `selfTestRunId`, `nativeVerdict` and
 `beforeCapture`; exports preserve cached evidence rather than claiming a new
 post-logging baseline. Sections below describing those legacy fields apply to
 schemas 1–3 or explicitly legacy data.
+
+### Native setup and statistics (schema 5)
+
+`nativeStatus` is the accepted Core RPC21 read model, with its epoch, sequence,
+connection generation, config revision and currentness. `model` separates chosen,
+applied and observed backend, implementation source/hash, attempts, delivery,
+required/installed/missing hooks, filesystem state and setup health. Setup readiness
+never replaces autonomous diagnostic proof. `processCoverageComplete` is false
+until real loaded-process evidence proves it. Bundled alternatives are not legacy
+installation conflicts. A missing receipt/provenance is unknown, never guessed
+from module directories or historical telemetry. Same-revision failed Repair
+cannot revive an older delivery confirmation.
+
+Counter captures retain each raw family's identity and unsigned baselines. Live
+statistics qualify current rows against Core epoch/config/connection plus the
+native boot, implementation, delivery and runtime identity. LSPosed also requires
+its current-boot metadata; disconnect and source mismatches withdraw active marks.
 
 ---
 
@@ -252,13 +270,10 @@ revision and publication sequence; last-good data never fills that join silently
 `report` contains the measured per-vector results. Dashboard, Diagnostics and
 this bundle use the shared diagnostic presentation to decide whether those
 results apply now; `diagnostics.currentSuccess` is the current positive claim.
-The report is *computed in
-[`DiagnosticReport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/DiagnosticReport.kt)
-(`buildDiagnosticReport`); outcome classification in
-[`CheckOutcome.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/CheckOutcome.kt)
-+ [`GroundTruthProbe.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/GroundTruthProbe.kt);
-the per-vector spec + hook coverage in
-[`NativeChecks.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/NativeChecks.kt).*
+These report/classifier names describe schemas1–3 and their historical code;
+those Kotlin owners and the main-process suite are removed in RPC21/schema5.
+Current runs and assessments are computed in `crates/diagnostic-model` and
+`crates/core-daemon/src/autonomous`; the APK renders retained evidence.
 
 ### `gate` gates everything
 
@@ -513,14 +528,14 @@ the bundle. All paths are under
 |---|---|---|
 | The whole `state.json` model + how a capture is folded together | `VpnHideState.kt` (`buildVpnHideState`) | every field's meaning, provenance, and the redaction rules |
 | Zip packaging, forensics/appList gating, dmesg/logcat capture | `DebugExport.kt` (`exportDebug`/`buildDebugState`) | how the bundle is assembled and what "forensics" actually turns on |
-| `report`, `gate`, layers, checks, verdicts | `DiagnosticReport.kt` (`buildDiagnosticReport`) | how the verdict is computed **once** and rendered everywhere |
-| `CheckOutcome.kind` (leak/hidden_backend/hidden_selinux/…) | `CheckOutcome.kt` + `GroundTruthProbe.kt` | how the root-differential decides who hid the VPN |
-| `LayerStatus` + `Verdict` (Ok/Partial/Broken) | `LayerStatus.kt` | presence-before-checks, and the exact verdict rules |
+| `autonomousDiagnostics` | `AutonomousDiagnosticSnapshot.kt` / Core autonomous coordinator and diagnostic-model | retained evidence, source identity and assessment |
+
+
 | Native check specs (ids, `expectedHooks`, coverage) | `NativeChecks.kt` (`NATIVE_CHECKS`) | what each `report.native.checks[].id` probes and which hooks own it |
-| Running the probes (native + app-side + Java) | `checks/NativeProbe.kt`, `JavaChecks.kt` (`runAllChecks`) | how `appDetail` / observations are produced |
-| `backends`, `activeBackend` (detection + kmod>KPM>zygisk priority) | `NativeBackendData.kt` | how installed/active/broken/pendingReboot is decided per module |
-| `ports`, `kmodLoadStatus` | `DashboardData.kt` (`detectPortsModule`), `NativeBootStatus.kt` (`kmodLoadStatus`) | how Ports state + core's boot `.ko` load result are parsed |
-| Optional native hooks (filesystem-hiding coverage) | `FilesystemHidingData.kt` | which optional hooks the active backend installed |
+| Running native/framework fixtures | Core autonomous coordinator, `FrameworkFixtureWorker.kt`, production `hook/FrameworkFixture*` | bounded stimuli, real Android observations and Core-owned verdicts |
+| `backends`, `activeBackend` | `NativeBackendData.kt` | legacy installation metadata and Core-chosen export identity; never a Kotlin priority selector |
+| `ports`, `nativeStatus` | `DashboardData.kt`, `NativeStatusData.kt`, Core native read projection | Ports observation and chosen/delivery/observed/setup evidence; old `kmodLoadStatus` slot is null |
+| Filesystem setup | Core native read projection / `FilesystemHidingData.kt` wording adapter | desired policy and observed setup independent of diagnostic proof |
 | `statistics` (per-uid / per-method counters) | `StatisticsData.kt` (`buildStatisticsState`) | how the hook-counter totals are built |
 | `hookReport` | `HookDiagnostics.kt` | installed-hook mask + counter deltas across the run |
 | `networkView` (post-Binder network model + invariants) | `NetworkViewCapture.kt` (capture) + `NetworkViewData.kt` (shape, invariants) | what a target uid actually receives and which consistency rule a leak breaks; `NetworkViewProbeMain.kt` runs the same capture as any uid via `scripts/network-view-probe.py` |

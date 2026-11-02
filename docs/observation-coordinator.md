@@ -1,7 +1,7 @@
 # Observation coordinator
 
 Status: connected to the app through `StateCache`, including the shared batched
-root reader, Dashboard, targets, statistics, routing readiness and app inventory.
+root reader, Dashboard, targets, statistics and app inventory.
 Confirmed configuration is a read replica of core, delivered through the shared
 process `CoreSession`. The app coordinator owns local intent and drafts; observation
 caches never become a second canonical writer. See [core architecture](core-architecture.md).
@@ -23,117 +23,26 @@ once when rendering an app-list response.
 
 `value` retains the last successful observation while loading and after failure.
 It is useful display history, not evidence of current readiness. `current` is null
-while loading, stale, failed or quarantined. `RoutingGateCache.gate` uses `current`.
-Core's shared routing publication supplies the main app UID, VPN session identity,
-interfaces and membership. Disconnect, Unknown or an unexpected UID withdraws
-readiness while retaining last-good display history. There is no foreground
-`AppVpnStatePoller` or second per-app root probe. Link, route and rule events plus
-bounded periodic reconciliation belong to core.
+while loading, stale, failed or quarantined.
 
-A changed routing fact invalidates the process observation. Routed results publish
-immediately; negative facts settle for 750 ms against the current shared source.
-An unchanged core sample does not invalidate a measurement or enter Checking.
-Explicit Retry and ON_RESUME re-evaluate the shared current source.
-For eligibility, an invalidated observation awaiting recomputation is Checking;
-a failed/unavailable source is Unknown. Presentation retains its existing
-Verifying/grace semantics and does not relabel a historical measurement as current.
+Core owns autonomous diagnostic admission and the retained run/assessment. No
+foreign-VPN presence, split-tunnel membership, app-VPN observer, confirmation timer
+or local suite executor participates in readiness. Opening a screen, state read,
+export or foreground return does not start a diagnostic run. Explicit Retry
+coalesces pending process-owned requests; results arrive only by publication.
+Real worker and manual forensic callback registrations measure hooks, not readiness.
 
-The confirmation suite has one owner too, and it is not an edge detector.
-`DiagnosticsCache` runs `confirmMeasurements` over its own presentation: whenever
-`owedConfirmation` finds this app eligible with a current measurement key
-(subject, self configuration, routing identity, coverage, change epoch) that
-nothing covers, it requests one automatic run for that key. "Covers" means the
-presented measurement was taken under that key, or the latest non-blocked attempt
-was (whatever its outcome: a failure is answered by Retry, never by a loop), or
-the owner already asked for it. A run in flight or a quarantined probe owes
-nothing. Whether a confirmation is pending is itself a field of the presentation
-(`confirmationPending`, computed from the key the owner last claimed), so the
-Situation words that window as the run it becomes (`Checking`) instead of as a
-stale result asking for a manual re-check, and the owner and the surfaces read
-one fact. The request waits a 300 ms settle window, restarted by every newer
-presentation so the separate emissions of one change produce one run, and keeps
-at least five seconds from the previous automatic request so a flapping VPN
-cannot keep the suite busy. Because the rule reads state rather than transitions, a cold
-start already routed, a foreground return after the tunnel was re-established
-(the excluded → included split-tunnel case: a new framework network id is a new
-routing identity) and a session change published by core all take the same path,
-and none of them can be lost to a missing baseline. A publication that reveals no new key
-reruns nothing; the negative confirmation in `RoutingGateCache` still suppresses
-the brief false exclusion seen during tunnel setup.
+Dashboard root facts contain inventory, LSPosed, target and environment metadata.
+The screen combines them with live Core native/autonomous read models, accepted
+config and developer preferences. Source joins qualify root facts; the diagnostic
+card remains visible when heavy metadata is unavailable. Native setup/delivery is
+not measured hook health. Statistics qualify current marks against full native
+source identity and Java boot evidence while forensic counter captures remain raw.
 
-The Dashboard's screen state is a projection, not a cache. `DashboardCache` caches
-only `DashboardRootFacts`, the half that costs root shells and changes with the
-root snapshot (modules, LSPosed, targets, environment, installed optional hooks);
-`DashboardCache.state` combines those facts with the live presentation and
-assembles the protection tiles, the banners and the screen state on every change
-of either (`assembleDashboardState`, pure apart from wording).
-
-App-language configuration is also a presentation input: changing it rewords
-Dashboard messages without invalidating facts or rerunning diagnostic probes.
-Module load and integrity problems remain structured in the root facts; their
-messages are rendered with the current language only when building the dashboard.
-The language context is copied from application resources with the Activity
-configuration; the process never retains the Activity itself.
-
-UI preferences have their own process-owned `SettingsStateOwner` in
-`SettingsRepository.forProcess`. Its eager DataStore subscription retains the last
-loaded snapshot across Activity recreation; a new screen must collect that state
-without supplying an `AppSettings()` fallback. Before the first read, or after a
-read failure, the app shows a loading/retry gate. Preference-dependent effects
-(agent bridge and update scheduling) run only with a real snapshot. UI preference
-writes use the same process lifetime, so a locale change cannot cancel an accepted
-edit. This owner stores application context only; it does not own root observations.
-
-Another source joins that combine: `DeveloperFlagsCache`, the app-local switches
-on Settings → For developers that change what the Dashboard says (the agent-bridge
-note, the version-mismatch notices). They are preferences, not observations — a
-DataStore write invalidates nothing — so holding them inside the cached facts meant
-a toggle did nothing until the next refresh. As a source of the projection they
-reach the banners immediately and cost no root read. The developer projection
-uses the same retained preference owner and stays unknown until it has a snapshot. The canonical config's
-`debugSwitch` is not one of them: that one genuinely is read off the device and
-stays in the environment facts. The tiles and the
-hero therefore always describe the same instant: nothing follows the suite, nothing
-compares attempt ids, and a fresh measurement can never sit beside the previous
-tiles. The state stays null until the root facts exist and the suite has a first
-terminal attempt, so the Dashboard appears with its first verdict, as before.
-
-There is no ConnectivityManager listener for VPN-state auto-refresh. The app's own
-Java backend intentionally hides VPN lifecycle changes when its visible network
-is unchanged, so those callbacks cannot be a reliable trigger. Diagnostic callback
-registrations remain: they measure hiding rather than drive readiness refresh.
-Device validation on 2026-09-17 is recorded in
-[the polling/callback report](notes/vpn-poll-device-validation.md).
-
-The bridge's one-shot state read still joins or reads the terminal attempt
-(`DiagnosticsCache.awaitTerminal`) and assembles the same Dashboard state from it
-(`loadDashboardState`), so its tiles and the screen's cannot diverge. Refreshing a
-cache re-reads that cache's own source and nothing else: `ContextStateCache` has
-no hook that starts work in another domain, and `DashboardCache.refresh` never
-requests a diagnostic run. The explicit run has one entry point,
-`retryDiagnosticsAndDashboard` (Retry on both screens, pull-to-refresh, the
-post-reset re-check): it refreshes the app-VPN observation, queues one explicit
-diagnostic run and re-reads the Dashboard's root facts. An explicit retry never
-joins an already-running automatic suite; it waits as the single pending
-successor, so the user's click cannot disappear. The startup intent
-(`DiagnosticsCache.run`: the first suite of the process, a join or a read
-afterwards), the owed confirmation above and the explicit retry are the only
-ways a suite starts. Admission never refuses an automatic request at rest;
-whether one is owed is decided from the presentation.
-Completed-result retention and measurement classification are unchanged.
-Screen retry triggers observe known routing transitions: a temporary unknown value
-during refresh does not count as VPN returning. A terminal failure leaves the
-Dashboard loading placeholder and remains available for manual retry.
-
-Diagnostic runs are now owned by the process-lived `DiagnosticRunCoordinator`
-behind `DiagnosticsCache` (transition contract §7). Its eligibility read at
-Checking and its end-context read at Verifying reuse a current app-VPN
-observation, join an in-flight read, and force the dedicated helper observation
-only when it is stale, failed or absent. The app-VPN observation's session,
-interfaces and UID verdict form the measurement routing identity; backend
-coverage and boot identity still come from `RootSnapshotCache`. Dashboard
-derivation joins the diagnostic run through its own handle and reads its finished
-attempt without starting another suite.
+`SettingsStateOwner` retains DataStore state across Activity recreation. No default
+preferences substitute for an unknown read. `DeveloperFlagsCache` projects those
+preferences immediately without invalidating root data. Canonical debug intent
+remains Core-owned. Language changes reword messages without running probes.
 
 Invalidation advances the generation synchronously. A result from an older
 generation cannot publish either a value or an error. Its completion starts one
@@ -145,8 +54,7 @@ An ordinary Ensure does not retry a failed attempt in the same generation.
 Every re-read states why it happens. `ReadReason` is `Background` (our own process
 invalidated the observation — a root dependency after a config phase or the startup
 reconcile, or the foreground-return safety net), `Transition` (an external signal that
-the observed fact may have changed: the foreground app-VPN poller found a changed
-or recoverable fact) or
+the observed fact may have changed: an external source reported changed facts) or
 `Explicit` (the user asked: Retry, refresh, pull-to-refresh, a manual re-check). An
 observation that is owed a re-read carries a `StaleMark(reason, since)`: set by an
 invalidation and by a refresh that requests a newer generation, kept while that re-read
@@ -246,29 +154,21 @@ the final combined Gradle run.
 
 ## Diagnostic publication boundary
 
-`DiagnosticDomain` publishes one immutable `DiagnosticSnapshot`: the accepted
-root/routing observations, config view, operation impact and run view, together
-with their `DiagnosticPresentation` and `Situation`. Source acceptance and run
-transitions share a short lock; no I/O runs under that lock. A terminal transition
-publishes the snapshot before completing the run handle. Config impact and its
-run interruption publish together.
+`AutonomousDiagnosticSnapshotOwner` publishes one immutable accepted packet of
+Core/config/root source identities and retained run/assessment evidence. Config
+joining uses canonical contents, epoch and desired revision rather than a global
+publication cursor, so unrelated state publications do not withdraw an unchanged
+configuration. Root metadata has a separate join against the fields it consumed.
 
-The screens consume that packet. Dashboard publishes its hero and tiles together
-and only joins root facts with the same observation ID and generation; while new
-facts are pending it does not attach old tiles to a new diagnostic root. Root
-invalidation retains historical facts but removes current measurement validation.
-The background-routing grace timer can update Situation only for its captured
-revision, and never starts a run or a read.
+Bridge/export `awaitSnapshot` waits for a requested root checkpoint or a newer one
+and returns an existing owner publication. It does not reconstruct a context from
+independent flow reads or admit a measurement. Disconnect releases waiters with
+retained evidence explicitly unavailable. This is coherent accepted knowledge,
+not simultaneous physical sampling. See [diagnostics](diagnostics.md).
 
-Bridge/export `awaitSnapshot` waits for a requested root checkpoint (or a newer
-one) and acceptance of already-published source events. It returns an existing
-owner publication, rather than rebuilding a context from independent flow reads.
-This is coherent accepted knowledge, not simultaneous physical device sampling.
-
-B3 aligns the root observation budget with core's existing bounded collection:
-225 seconds in RootSnapshotCache, beyond the 210-second RPC / 200-second collector.
-Root-dependent caches add this source budget before their projection allowance,
-so a valid slow source is not quarantined by an earlier dependent timer. Forensic
-collections cannot consume the standalone RootSnapshot slot. Fast current state
-and receipts remain on the publication path. Virtual-time tests cover a valid
-45-second collection, actual deadline quarantine and rejection of late results.
+The root observation budget is 225 seconds, beyond the 210-second RPC and 200-second
+collector. Root-dependent projections add this source budget before their own
+allowance. Forensic captures cannot consume the standalone RootSnapshot slot.
+State and receipts remain readable while PackageManager/metadata collection waits.
+Virtual-time regressions cover valid slow collections, deadline quarantine and
+rejection of late results. Final startup acceptance is recorded separately.

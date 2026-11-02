@@ -1,23 +1,25 @@
 package dev.okhsunrog.vpnhide.picker
 
 import dev.okhsunrog.vpnhide.CanonicalConfig
+import dev.okhsunrog.vpnhide.CoreSessions
 import dev.okhsunrog.vpnhide.LogTags
 import dev.okhsunrog.vpnhide.NativeBackendId
 import dev.okhsunrog.vpnhide.NativeHookFamily
 import dev.okhsunrog.vpnhide.ObservationRequest
+import dev.okhsunrog.vpnhide.ObservationRuntime
 import dev.okhsunrog.vpnhide.ProjectedStateFlow
 import dev.okhsunrog.vpnhide.RootProjection
 import dev.okhsunrog.vpnhide.RootSnapshot
 import dev.okhsunrog.vpnhide.RootSnapshotCache
 import dev.okhsunrog.vpnhide.StateCache
-import dev.okhsunrog.vpnhide.activeNativeBackendId
-import dev.okhsunrog.vpnhide.builtinKernelPresent
-import dev.okhsunrog.vpnhide.detectNativeBackendStates
-import dev.okhsunrog.vpnhide.kpmLoadStatus
 import dev.okhsunrog.vpnhide.nativeHookFamilyFor
+import dev.okhsunrog.vpnhide.nativeStatusSnapshot
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.parsePackageUidMap
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 
 /**
  * Per-screen protection state from root-owned files and package
@@ -37,37 +39,21 @@ import kotlinx.coroutines.flow.StateFlow
  * - The user taps the top-bar Refresh button on Protection.
  */
 internal data class TargetsSnapshot(
-    val kmodModuleInstalled: Boolean,
-    val kpmModuleInstalled: Boolean,
-    val zygiskModuleInstalled: Boolean,
     val uidToPkg: Map<Int, String>,
     val canonicalConfig: CanonicalConfig?,
     val apatchSuperkeySaved: Boolean = false,
-    val activeNativeBackendId: NativeBackendId? = null,
-    /** The in-tree driver owns /proc/vpnhide_ctl (it has no module to install). */
-    val builtinModuleInstalled: Boolean = false,
     /** Exact package → UID projection from the shared per-user package
      * inventory. The picker uses it to enforce native capacity before Save,
      * including profiles and shared UIDs. */
     val packageUids: Map<String, List<Int>> = emptyMap(),
     val nativeInventoryComplete: Boolean = false,
-    val selectedNativeBackendId: NativeBackendId? = null,
+    val nativeStatus: dev.okhsunrog.vpnhide.NativeStatusSnapshot? = null,
 ) {
-    /** True if any native backend is installed (kmod / built-in / KPM / Zygisk). The
-     * picker's "N" toggle is meaningful only when at least one is present. */
-    val anyNativeInstalled: Boolean
-        get() = kmodModuleInstalled || builtinModuleInstalled || kpmModuleInstalled || zygiskModuleInstalled
-
-    val displayNativeBackendId: NativeBackendId?
-        get() =
-            activeNativeBackendId
-                ?: when {
-                    kmodModuleInstalled -> NativeBackendId.Kmod
-                    builtinModuleInstalled -> NativeBackendId.Builtin
-                    kpmModuleInstalled -> NativeBackendId.Kpm
-                    zygiskModuleInstalled -> NativeBackendId.Zygisk
-                    else -> null
-                }
+    /** Draft capabilities come from the retained Core selection, never module directories. */
+    val nativeAvailable: Boolean get() = selectedNativeBackendId != null
+    val selectedNativeBackendId: NativeBackendId? get() = nativeStatus?.model?.selected?.backend
+    val activeNativeBackendId: NativeBackendId? get() = nativeStatus?.takeIf { it.current }?.model?.observed
+    val displayNativeBackendId: NativeBackendId? get() = nativeStatus?.model?.displayed?.backend
 
     val nativeHookFamily: NativeHookFamily
         get() = nativeHookFamilyFor(displayNativeBackendId)
@@ -104,7 +90,9 @@ internal object TargetsCache : StateCache<RootProjection<TargetsSnapshot>>(
     logTag = LogTags.TARGETS,
     source = RootSnapshotCache.dependency,
 ) {
-    val snapshot: StateFlow<TargetsSnapshot?> = ProjectedStateFlow(value) { it?.value }
+    val snapshot: StateFlow<TargetsSnapshot?> =
+        combine(value, CoreSessions.updates) { cached, core -> cached?.value?.copy(nativeStatus = core.nativeStatusSnapshot()) }
+            .stateIn(ObservationRuntime.scope, SharingStarted.Eagerly, null)
 
     // The snapshot is parsed entirely from the shared RootSnapshotCache, so
     // neither entry point needs a context.
@@ -135,30 +123,13 @@ internal fun parseTargetsSnapshot(rootSnapshot: RootSnapshot): TargetsSnapshot {
     pkgToUids.forEach { (pkg, uids) ->
         uids.forEach { uidToPkg[it] = pkg }
     }
-    val activeNativeBackendId =
-        detectNativeBackendStates(
-            sections,
-            kpmLoadStatus = rootSnapshot.nativeBoot.kpmLoadStatus(),
-            published = rootSnapshot.backend,
-        ).activeId
-
     // Per-role sets are projections of the config (see TargetsSnapshot), not
     // fields — there is nothing to fill in here beyond the config itself.
     return TargetsSnapshot(
-        kmodModuleInstalled = sections["kmod_module_dir"]?.trim() == "1",
-        builtinModuleInstalled = builtinKernelPresent(sections),
-        kpmModuleInstalled = sections["kpm_module_dir"]?.trim() == "1",
-        zygiskModuleInstalled = sections["zygisk_module_dir"]?.trim() == "1",
         uidToPkg = uidToPkg,
         canonicalConfig = canonical,
         apatchSuperkeySaved = sections["superkey_saved"]?.trim() == "1",
-        activeNativeBackendId = activeNativeBackendId,
-        selectedNativeBackendId =
-            rootSnapshot.backend?.selected ?: when (val outcome = rootSnapshot.nativeBoot?.outcome) {
-                is dev.okhsunrog.vpnhide.NativeBootOutcome.Selected -> outcome.backend
-                is dev.okhsunrog.vpnhide.NativeBootOutcome.AwaitingAuthentication -> NativeBackendId.Kpm
-                else -> null
-            },
+        nativeStatus = rootSnapshot.core.nativeStatusSnapshot(),
         packageUids = pkgToUids,
         nativeInventoryComplete = parsePackageInventory(sections["pm_packages"].orEmpty(), sections["pm_users"].orEmpty()).complete,
     )

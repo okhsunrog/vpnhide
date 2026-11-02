@@ -41,6 +41,8 @@ mod config;
 mod diag;
 mod edit;
 mod logcat;
+mod native_status;
+pub use native_status::*;
 mod native_lifecycle;
 pub use native_lifecycle::*;
 
@@ -65,7 +67,7 @@ pub use vpnhide_diagnostic_model::framework::{FrameworkWorkerRequest, FrameworkW
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 20;
+pub const PROTOCOL_VERSION: u32 = 21;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -211,6 +213,8 @@ pub struct Published {
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct StateSnapshot {
     #[serde(default)]
+    pub native_view: NativeReadModel,
+    #[serde(default)]
     pub zygisk_lifecycle: Option<ZygiskLifecycle>,
     #[serde(default)]
     pub zygisk_revocation: Option<ZygiskRevocationStatus>,
@@ -235,8 +239,6 @@ pub struct StateSnapshot {
     /// Admission is held by an unresolved effect, including durable uncertainty after restart.
     #[serde(default)]
     pub mutation_held: bool,
-    /// What the root observation loop currently sees of real routing.
-    pub routing: RoutingObservation,
     /// Which native backend core observes as active/installed. Centralizing this — one
     /// detected identity instead of each activator probing for itself — is the point of core
     /// owning all state: the family to project for, and what the app shows, come from here.
@@ -261,87 +263,13 @@ pub struct StateSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservationFreshness {
-    /// No successful observation yet (never-yet ≠ empty VPN).
+    /// No successful observation yet.
     #[default]
     Never,
-    /// Authoritative evidence is current; [`RoutingObservation::vpn_interfaces`] may be trusted.
+    /// Authoritative observation is current.
     Current,
     /// Stale or unavailable evidence; do **not** present last-good as current.
     Unknown,
-}
-
-/// Framework `TRANSPORT_VPN` classification channel (not netlink name-match).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FrameworkVpnStatus {
-    #[default]
-    Never,
-    /// Parsed VPN interface set from framework (dumpsys / hook / test stub).
-    Classified,
-    /// Framework signal not obtainable (host, SELinux, parse miss).
-    Unavailable,
-    /// Attempted and failed.
-    Failed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub struct FrameworkVpnEvidence {
-    pub status: FrameworkVpnStatus,
-    #[serde(default)]
-    pub interfaces: Vec<String>,
-    #[serde(default)]
-    pub detail: String,
-}
-
-/// Per-UID VPN membership once framework VPN ifaces are known.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UidVpnRouteState {
-    VpnOff,
-    Excluded,
-    Routed,
-    Unknown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct UidRoutingObservation {
-    pub uid: u32,
-    pub state: UidVpnRouteState,
-    pub detail: String,
-    /// Framework VPN session identity, retained independently of interface reuse.
-    #[serde(default)]
-    pub session: Option<String>,
-    /// Interfaces used for this UID's routing evidence (including unmanaged tunnels).
-    #[serde(default)]
-    pub interfaces: Vec<String>,
-}
-
-/// The core's own view of real routing. Netlink triggers/membership; framework
-/// classifies VPN. Independent of the app's filterable callbacks.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub struct RoutingObservation {
-    pub freshness: ObservationFreshness,
-    /// Bumps on each publish (Current or Unknown).
-    pub generation: u64,
-    /// Authoritative VPN interfaces when `freshness == Current`; empty otherwise.
-    pub vpn_interfaces: Vec<String>,
-    /// Retained for display when `freshness == Unknown` — never claimed current.
-    #[serde(default)]
-    pub last_good_vpn_interfaces: Vec<String>,
-    /// Netlink name-match candidates currently up (IMS `ipsec` may appear here).
-    #[serde(default)]
-    pub netlink_candidates: Vec<String>,
-    #[serde(default)]
-    pub framework: FrameworkVpnEvidence,
-    #[serde(default)]
-    pub uid: Option<UidRoutingObservation>,
-}
-
-impl RoutingObservation {
-    /// Convenience: ever obtained any evidence (Current or Unknown).
-    pub fn has_evidence(&self) -> bool {
-        !matches!(self.freshness, ObservationFreshness::Never)
-    }
 }
 
 /// A native backend family. The natives are mutually exclusive — at most one is `active` at a
@@ -362,7 +290,13 @@ pub enum NativeBackend {
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct NativeBackendStatus {
     #[serde(default)]
+    pub runtime_conflict: bool,
+    #[serde(default)]
     pub observed_freshness: ObservationFreshness,
+    #[serde(default)]
+    pub runtime_status: Option<NativeRuntimeStatus>,
+    #[serde(default)]
+    pub observation_error: Option<String>,
     /// Last backend selected by this core instance for an apply attempt.
     /// Distinct from [`Self::applied`]: selection/publication attempt ≠ confirmed apply.
     /// Zygisk file publication is not proof of per-process hooks.
@@ -981,26 +915,11 @@ mod tests {
                         config_revision: 5,
                         operations_in_flight: vec![OperationId(1), OperationId(u64::MAX)],
                         mutation_held: true,
-                        routing: RoutingObservation {
-                            freshness: ObservationFreshness::Current,
-                            generation: 3,
-                            vpn_interfaces: vec!["tun0".into(), "wg0".into()],
-                            last_good_vpn_interfaces: vec!["tun0".into()],
-                            netlink_candidates: vec!["tun0".into(), "ipsec20".into()],
-                            framework: FrameworkVpnEvidence {
-                                status: FrameworkVpnStatus::Classified,
-                                interfaces: vec!["tun0".into()],
-                                detail: "stub".into(),
-                            },
-                            uid: Some(UidRoutingObservation {
-                                uid: 10123,
-                                state: UidVpnRouteState::Excluded,
-                                detail: "uid_not_in_vpn_table".into(),
-                                session: Some("vpn:7".into()),
-                                interfaces: vec!["tun0".into()],
-                            }),
-                        },
+                        native_view: Default::default(),
                         backend: NativeBackendStatus {
+                            runtime_conflict: false,
+                            runtime_status: None,
+                            observation_error: None,
                             observed_freshness: ObservationFreshness::Current,
                             selected: Some(NativeBackend::Zygisk),
                             applied: Some(NativeBackend::Builtin),
@@ -1250,7 +1169,6 @@ mod tests {
                 },
                 DiagnosticProbe::LsposedModulesDb,
                 DiagnosticProbe::GroundTruthChecks,
-                DiagnosticProbe::AppVpnState { uid: 10123 },
             ];
             let request = DiagnosticsRequest {
                 probes: probes.clone(),

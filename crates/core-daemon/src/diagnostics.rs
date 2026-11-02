@@ -305,13 +305,6 @@ fn run_probe(
             core(&["probe", "lsposed-db", &dir], Duration::from_secs(15))
         }),
         DiagnosticProbe::GroundTruthChecks => core(&["probe", "checks"], Duration::from_secs(20)),
-        DiagnosticProbe::AppVpnState { uid } => {
-            let uid = uid.to_string();
-            core(
-                &["observe", "app-vpn-state", "--uid", &uid],
-                Duration::from_secs(20),
-            )
-        }
     };
     if result.stdout.len() > limit {
         result.stdout.truncate(limit);
@@ -499,7 +492,6 @@ fn probe_slug(probe: &DiagnosticProbe) -> &'static str {
         DiagnosticProbe::JavaHookArtifacts { .. } => "java-hooks",
         DiagnosticProbe::LsposedModulesDb => "lsposed-db",
         DiagnosticProbe::GroundTruthChecks => "checks",
-        DiagnosticProbe::AppVpnState { .. } => "app-vpn-state",
     }
 }
 

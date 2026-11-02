@@ -57,8 +57,6 @@ class TargetsCacheTest {
 
         val targets = parseTargetsSnapshot(rootSnapshot.withPublication())
 
-        assertTrue(targets.kmodModuleInstalled)
-        assertFalse(targets.zygiskModuleInstalled)
         assertEquals(setOf("dev.okhsunrog.vpnhide", "com.bank.app", "com.chat.app"), targets.nativeTargets)
         assertEquals(setOf("system"), targets.lsposedTargets)
         assertEquals(setOf("com.hidden.one", "com.hidden.two"), targets.hiddenPkgs)
@@ -176,7 +174,7 @@ class TargetsCacheTest {
                     1,
                     RootCanonicalRead.Missing,
                     emptyList(),
-                    backend = CoreBackendView(true, active = NativeBackendId.Zygisk),
+                    nativeStatus = sampleNativeStatus(selected = NativeBackendId.Zygisk).model,
                 ),
                 true,
             )

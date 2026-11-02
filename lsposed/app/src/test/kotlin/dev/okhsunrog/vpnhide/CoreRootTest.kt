@@ -51,7 +51,7 @@ class CoreRootTest {
     @Test
     fun `probe commands use generated enums and preserve ordered forensic payloads`() =
         runTest {
-            val probes = listOf(CoreDiagnosticProbe.Dmesg, CoreDiagnosticProbe.AppVpnState(10123u))
+            val probes = listOf(CoreDiagnosticProbe.Dmesg, CoreDiagnosticProbe.HookCounters)
             CoreRoot.setTransport(
                 object : TestCoreRootTransport() {
                     override suspend fun collectDiagnostics(request: CoreDiagnosticsRequest): CoreDiagnosticsReport {

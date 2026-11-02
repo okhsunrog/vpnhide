@@ -390,12 +390,21 @@ impl CoreKpm {
 
     /// None is definite runtime absence. Authentication/probe errors stay errors.
     pub fn connect(lock_path: &Path) -> Result<Option<Self>> {
-        match Self::probe(lock_path)? {
-            KpmRuntimeProbe::NoRuntime => Ok(None),
+        Self::connected(Self::probe(lock_path)?)
+    }
+
+    fn connected(probe: KpmRuntimeProbe) -> Result<Option<Self>> {
+        match probe {
+            KpmRuntimeProbe::NoRuntime | KpmRuntimeProbe::InventoryOnly { loaded: false, .. } => {
+                Ok(None)
+            }
             KpmRuntimeProbe::Ready(client) => Ok(Some(client)),
             KpmRuntimeProbe::AwaitingAuthentication(detail)
             | KpmRuntimeProbe::Unrecognized(detail)
-            | KpmRuntimeProbe::InventoryOnly { detail, .. } => Err(detail.into()),
+            | KpmRuntimeProbe::InventoryOnly {
+                loaded: true,
+                detail,
+            } => Err(detail.into()),
         }
     }
 
@@ -1444,6 +1453,28 @@ mod inventory_contract_tests {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
         path
     }
+    #[test]
+    fn inventory_only_absence_preserves_observation_without_inventing_a_management_adapter() {
+        assert!(
+            CoreKpm::connected(KpmRuntimeProbe::InventoryOnly {
+                loaded: false,
+                detail: "read-only inventory".into()
+            })
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            CoreKpm::connected(KpmRuntimeProbe::InventoryOnly {
+                loaded: true,
+                detail: "unmanaged live KPM".into()
+            })
+            .is_err()
+        );
+        assert!(
+            CoreKpm::connected(KpmRuntimeProbe::Unrecognized("unknown inventory".into())).is_err()
+        );
+    }
+
     #[test]
     fn hello_requires_the_actual_protocol_echo_even_when_cli_exits_zero() {
         for echo in [

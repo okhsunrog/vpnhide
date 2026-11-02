@@ -6,12 +6,6 @@ import dev.okhsunrog.vpnhide.debug.RootShellDiag
 import dev.okhsunrog.vpnhide.debug.VpnHideState
 import dev.okhsunrog.vpnhide.debug.redactSections
 import dev.okhsunrog.vpnhide.debug.toJson
-import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
-import dev.okhsunrog.vpnhide.diagnostics.CheckResults
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
-import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
-import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -31,26 +25,18 @@ class VpnHideStateTest {
     private fun sampleState(kmod: ModuleState): VpnHideState {
         val backends =
             NativeBackendStates(kmod = kmod, kpm = ModuleState.NotInstalled, zygisk = ModuleState.NotInstalled)
-        val report =
-            buildDiagnosticReport(
-                gate = DiagnosticGate.ROUTED,
-                results = CheckResults(native = emptyList()),
-                backend = displayNativeBackend(backends),
-                lsposedActive = true,
-                complete = true,
-            )
         return VpnHideState(
             generatedAt = "2026-08-19T13:00:00+0300",
             captureKind = "debug",
             app = AppInfo("dev.okhsunrog.vpnhide", "1.2.4 (10204)"),
             device = DeviceInfo("Google", "Pixel 8 Pro", "17", 36, listOf("arm64-v8a")),
             selfNeedsRestart = false,
-            gate = report.gate,
-            nativeVerdict = report.nativeVerdict,
-            javaVerdict = report.javaVerdict,
-            report = report,
+            gate = null,
+            nativeVerdict = null,
+            javaVerdict = null,
+            report = null,
             backends = backends,
-            activeBackend = displayNativeBackend(backends),
+            activeBackend = DisplayNativeBackend(null, ModuleState.NotInstalled),
             ports = installed(active = true),
             kmodLoadStatus = null,
             rootShell =

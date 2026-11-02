@@ -403,155 +403,6 @@ impl From<CoreObservationFreshness> for rpc::ObservationFreshness {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
-pub enum CoreFrameworkVpnStatus {
-    Never,
-    Classified,
-    Unavailable,
-    Failed,
-}
-impl From<rpc::FrameworkVpnStatus> for CoreFrameworkVpnStatus {
-    fn from(value: rpc::FrameworkVpnStatus) -> Self {
-        match value {
-            rpc::FrameworkVpnStatus::Never => Self::Never,
-            rpc::FrameworkVpnStatus::Classified => Self::Classified,
-            rpc::FrameworkVpnStatus::Unavailable => Self::Unavailable,
-            rpc::FrameworkVpnStatus::Failed => Self::Failed,
-        }
-    }
-}
-impl From<CoreFrameworkVpnStatus> for rpc::FrameworkVpnStatus {
-    fn from(value: CoreFrameworkVpnStatus) -> Self {
-        match value {
-            CoreFrameworkVpnStatus::Never => Self::Never,
-            CoreFrameworkVpnStatus::Classified => Self::Classified,
-            CoreFrameworkVpnStatus::Unavailable => Self::Unavailable,
-            CoreFrameworkVpnStatus::Failed => Self::Failed,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct CoreFrameworkVpnEvidence {
-    pub status: CoreFrameworkVpnStatus,
-    pub interfaces: Vec<String>,
-    pub detail: String,
-}
-impl From<rpc::FrameworkVpnEvidence> for CoreFrameworkVpnEvidence {
-    fn from(value: rpc::FrameworkVpnEvidence) -> Self {
-        Self {
-            status: value.status.into(),
-            interfaces: value.interfaces,
-            detail: value.detail,
-        }
-    }
-}
-impl From<CoreFrameworkVpnEvidence> for rpc::FrameworkVpnEvidence {
-    fn from(value: CoreFrameworkVpnEvidence) -> Self {
-        Self {
-            status: value.status.into(),
-            interfaces: value.interfaces,
-            detail: value.detail,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
-pub enum CoreUidVpnRouteState {
-    VpnOff,
-    Excluded,
-    Routed,
-    Unknown,
-}
-impl From<rpc::UidVpnRouteState> for CoreUidVpnRouteState {
-    fn from(value: rpc::UidVpnRouteState) -> Self {
-        match value {
-            rpc::UidVpnRouteState::VpnOff => Self::VpnOff,
-            rpc::UidVpnRouteState::Excluded => Self::Excluded,
-            rpc::UidVpnRouteState::Routed => Self::Routed,
-            rpc::UidVpnRouteState::Unknown => Self::Unknown,
-        }
-    }
-}
-impl From<CoreUidVpnRouteState> for rpc::UidVpnRouteState {
-    fn from(value: CoreUidVpnRouteState) -> Self {
-        match value {
-            CoreUidVpnRouteState::VpnOff => Self::VpnOff,
-            CoreUidVpnRouteState::Excluded => Self::Excluded,
-            CoreUidVpnRouteState::Routed => Self::Routed,
-            CoreUidVpnRouteState::Unknown => Self::Unknown,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct CoreUidRoutingObservation {
-    pub uid: u32,
-    pub state: CoreUidVpnRouteState,
-    pub detail: String,
-    pub session: Option<String>,
-    pub interfaces: Vec<String>,
-}
-impl From<rpc::UidRoutingObservation> for CoreUidRoutingObservation {
-    fn from(value: rpc::UidRoutingObservation) -> Self {
-        Self {
-            uid: value.uid,
-            state: value.state.into(),
-            detail: value.detail,
-            session: value.session,
-            interfaces: value.interfaces,
-        }
-    }
-}
-impl From<CoreUidRoutingObservation> for rpc::UidRoutingObservation {
-    fn from(value: CoreUidRoutingObservation) -> Self {
-        Self {
-            uid: value.uid,
-            state: value.state.into(),
-            detail: value.detail,
-            session: value.session,
-            interfaces: value.interfaces,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct CoreRoutingObservation {
-    pub freshness: CoreObservationFreshness,
-    pub generation: u64,
-    pub vpn_interfaces: Vec<String>,
-    pub last_good_vpn_interfaces: Vec<String>,
-    pub netlink_candidates: Vec<String>,
-    pub framework: CoreFrameworkVpnEvidence,
-    pub uid: Option<CoreUidRoutingObservation>,
-}
-impl From<rpc::RoutingObservation> for CoreRoutingObservation {
-    fn from(value: rpc::RoutingObservation) -> Self {
-        Self {
-            freshness: value.freshness.into(),
-            generation: value.generation,
-            vpn_interfaces: value.vpn_interfaces,
-            last_good_vpn_interfaces: value.last_good_vpn_interfaces,
-            netlink_candidates: value.netlink_candidates,
-            framework: value.framework.into(),
-            uid: value.uid.map(|value| value.into()),
-        }
-    }
-}
-impl From<CoreRoutingObservation> for rpc::RoutingObservation {
-    fn from(value: CoreRoutingObservation) -> Self {
-        Self {
-            freshness: value.freshness.into(),
-            generation: value.generation,
-            vpn_interfaces: value.vpn_interfaces,
-            last_good_vpn_interfaces: value.last_good_vpn_interfaces,
-            netlink_candidates: value.netlink_candidates,
-            framework: value.framework.into(),
-            uid: value.uid.map(|value| value.into()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum CoreNativeBackend {
     Kmod,
     Builtin,
@@ -581,7 +432,10 @@ impl From<CoreNativeBackend> for rpc::NativeBackend {
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreNativeBackendStatus {
+    pub runtime_conflict: bool,
     pub observed_freshness: CoreObservationFreshness,
+    pub runtime_status: Option<crate::CoreNativeRuntimeStatus>,
+    pub observation_error: Option<String>,
     pub selected: Option<CoreNativeBackend>,
     pub applied: Option<CoreNativeBackend>,
     pub active: Option<CoreNativeBackend>,
@@ -591,7 +445,10 @@ pub struct CoreNativeBackendStatus {
 impl From<rpc::NativeBackendStatus> for CoreNativeBackendStatus {
     fn from(value: rpc::NativeBackendStatus) -> Self {
         Self {
+            runtime_conflict: value.runtime_conflict,
             observed_freshness: value.observed_freshness.into(),
+            runtime_status: value.runtime_status.map(Into::into),
+            observation_error: value.observation_error,
             selected: value.selected.map(|value| value.into()),
             applied: value.applied.map(|value| value.into()),
             active: value.active.map(|value| value.into()),
@@ -607,7 +464,10 @@ impl From<rpc::NativeBackendStatus> for CoreNativeBackendStatus {
 impl From<CoreNativeBackendStatus> for rpc::NativeBackendStatus {
     fn from(value: CoreNativeBackendStatus) -> Self {
         Self {
+            runtime_conflict: value.runtime_conflict,
             observed_freshness: value.observed_freshness.into(),
+            runtime_status: value.runtime_status.map(Into::into),
+            observation_error: value.observation_error,
             selected: value.selected.map(|value| value.into()),
             applied: value.applied.map(|value| value.into()),
             active: value.active.map(|value| value.into()),
@@ -1279,7 +1139,6 @@ pub enum CoreDiagnosticProbe {
     JavaHookArtifacts { include_files: bool },
     LsposedModulesDb,
     GroundTruthChecks,
-    AppVpnState { uid: u32 },
 }
 impl From<rpc::DiagnosticProbe> for CoreDiagnosticProbe {
     fn from(value: rpc::DiagnosticProbe) -> Self {
@@ -1297,7 +1156,6 @@ impl From<rpc::DiagnosticProbe> for CoreDiagnosticProbe {
             }
             rpc::DiagnosticProbe::LsposedModulesDb => Self::LsposedModulesDb,
             rpc::DiagnosticProbe::GroundTruthChecks => Self::GroundTruthChecks,
-            rpc::DiagnosticProbe::AppVpnState { uid } => Self::AppVpnState { uid },
         }
     }
 }
@@ -1317,7 +1175,6 @@ impl From<CoreDiagnosticProbe> for rpc::DiagnosticProbe {
             }
             CoreDiagnosticProbe::LsposedModulesDb => Self::LsposedModulesDb,
             CoreDiagnosticProbe::GroundTruthChecks => Self::GroundTruthChecks,
-            CoreDiagnosticProbe::AppVpnState { uid } => Self::AppVpnState { uid },
         }
     }
 }

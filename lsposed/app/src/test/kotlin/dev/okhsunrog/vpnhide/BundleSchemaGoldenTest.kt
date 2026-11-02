@@ -19,21 +19,6 @@ import dev.okhsunrog.vpnhide.debug.RootShellDiag
 import dev.okhsunrog.vpnhide.debug.VPNHIDE_STATE_SCHEMA
 import dev.okhsunrog.vpnhide.debug.VpnHideState
 import dev.okhsunrog.vpnhide.debug.toJson
-import dev.okhsunrog.vpnhide.diagnostics.CheckResults
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticAttemptInfo
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticEligibility
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticMeasurementInfo
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSnapshotInfo
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticStage
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticSummaryInfo
-import dev.okhsunrog.vpnhide.diagnostics.EvidenceConclusion
-import dev.okhsunrog.vpnhide.diagnostics.MeasurementApplicability
-import dev.okhsunrog.vpnhide.diagnostics.MeasurementEvidence
-import dev.okhsunrog.vpnhide.diagnostics.RoutingReadInfo
-import dev.okhsunrog.vpnhide.diagnostics.RunOutcome
-import dev.okhsunrog.vpnhide.diagnostics.SelfRouting
-import dev.okhsunrog.vpnhide.diagnostics.buildDiagnosticReport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -125,11 +110,12 @@ internal fun sampleBundleState(): VpnHideState {
         selfTestRunId = null,
         diagnostics = null,
         autonomousDiagnostics = sampleAutonomousDiagnosticInfo(),
+        nativeStatus = sampleNativeStatus(boot = sampleBoot()),
         nativeVerdict = null,
         javaVerdict = null,
         report = null,
         backends = backends,
-        activeBackend = displayNativeBackend(backends),
+        activeBackend = DisplayNativeBackend(NativeBackendId.Kmod, kmod),
         ports = ModuleState.NotInstalled,
         kmodLoadStatus = null,
         dashboard = sampleDashboard(kmod, backends),
@@ -203,9 +189,7 @@ private fun sampleDashboard(
         ports = ModuleState.NotInstalled,
         nativeTargetCount = 3,
         portsTargetCount = 0,
-        nativeBackend = displayNativeBackend(backends),
-        nativeInstallRecommendation = null,
-        kmodLoadStatus = null,
+        nativeBackend = DisplayNativeBackend(NativeBackendId.Kmod, kmod),
         protection = ProtectionCheck.Autonomous(sampleAutonomousDiagnosticInfo()),
         messages = emptyList(),
     )
@@ -326,4 +310,17 @@ private fun sampleAutonomousRun() =
         stale = false,
         frameworkAttribution =
             sampleFrameworkAttribution(),
+    )
+
+private fun sampleBoot() =
+    NativeBootStatus(
+        bootId = "boot-1",
+        decidedAtMs = 1,
+        outcome = NativeBootOutcome.Selected(NativeBackendId.Builtin, NativeSelectionMode.Adopted, false),
+        installed = emptyList(),
+        live = listOf(NativeBackendId.Builtin),
+        staged = emptyList(),
+        kmod = null,
+        zygiskTargets = ZygiskTargetsState.NotInstalled,
+        ports = PortsBootStatus(PortsBootSource.Boot, FamilyOutcome.Confirmed, FamilyOutcome.Confirmed, 0, true, "", 1),
     )

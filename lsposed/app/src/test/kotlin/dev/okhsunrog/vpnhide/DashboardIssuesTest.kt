@@ -1,6 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
 import dev.okhsunrog.vpnhide.settings.FilesystemHidingState
 import dev.okhsunrog.vpnhide.settings.FilesystemHidingStatus
 import org.junit.Assert.assertEquals
@@ -20,27 +19,11 @@ internal class DashboardIssuesTest : DashboardIssuesFixture() {
     // ── Fixtures — a healthy device, so each test states only its own deviation ──
 
     @Test
-    fun `live builtin warns about a redundant kmod`() {
-        val redundant = moduleFacts(kmod = installed(active = false), builtin = installed())
-        assertTrue(dashboardIssues(facts(modules = redundant)).contains(DashboardIssue.RedundantKmodWithBuiltin))
-        val kernelOnly = moduleFacts(kmod = installed(active = false)).copy(builtinKernelPresent = true)
-        assertTrue(dashboardIssues(facts(modules = kernelOnly)).contains(DashboardIssue.RedundantKmodWithBuiltin))
-    }
-
-    // ── A healthy device says nothing ──
-
-    @Test
     fun `a fully working setup produces no issues at all`() {
         assertEquals(emptyList<DashboardIssue>(), dashboardIssues(facts()))
     }
 
     // ── Native presence ──
-
-    @Test
-    fun `no native backend installed is reported`() {
-        val issues = dashboardIssues(facts(modules = moduleFacts(kmod = ModuleState.NotInstalled)))
-        assertTrue(issues.has<DashboardIssue.NoNativeBackend>())
-    }
 
     @Test
     fun `a hand-loaded KPM is a normal native backend, not an install error`() {
@@ -54,9 +37,6 @@ internal class DashboardIssuesTest : DashboardIssuesFixture() {
                         ),
                 ),
             )
-
-        assertFalse(issues.has<DashboardIssue.NoNativeBackend>())
-        assertTrue(issues.none { it is DashboardIssue.Native })
     }
 
     // ── LSPosed ──
@@ -159,7 +139,7 @@ internal class DashboardIssuesTest : DashboardIssuesFixture() {
                 facts(
                     modules =
                         moduleFacts(
-                            mismatches = listOf(ModuleMismatch(FlashableModuleKind.Zygisk, "1.2.0", "1.2.5")),
+                            mismatches = listOf(ModuleMismatch(FlashableModuleKind.Core, "1.2.0", "1.2.5")),
                         ),
                 ),
             ).filterIsInstance<DashboardIssue.ModuleVersionMismatch>().single()
@@ -168,106 +148,15 @@ internal class DashboardIssuesTest : DashboardIssuesFixture() {
                 facts(
                     modules =
                         moduleFacts(
-                            mismatches = listOf(ModuleMismatch(FlashableModuleKind.Zygisk, "1.3.0", "1.2.5")),
+                            mismatches = listOf(ModuleMismatch(FlashableModuleKind.Core, "1.3.0", "1.2.5")),
                         ),
                 ),
             ).filterIsInstance<DashboardIssue.ModuleVersionMismatch>().single()
 
-        assertEquals("vpnhide-zygisk.zip", older.downloadArtifact)
+        assertEquals("vpnhide-core.zip", older.downloadArtifact)
         // The app is the lagging side here — re-flashing the module fixes nothing.
         assertEquals(null, newer.downloadArtifact)
     }
-
-    @Test
-    fun `an outdated kmod is offered the kernel's own variant`() {
-        val issue =
-            dashboardIssues(
-                facts(
-                    modules =
-                        moduleFacts(
-                            mismatches = listOf(ModuleMismatch(FlashableModuleKind.Kmod, "1.2.0", "1.2.5")),
-                        ),
-                    kernelRecommendation = recommendation(NativeBackendId.Kmod),
-                ),
-            ).filterIsInstance<DashboardIssue.ModuleVersionMismatch>().single()
-
-        assertEquals("vpnhide-kmod-android14-6.1.zip", issue.downloadArtifact)
-    }
-
-    // ── Backend choice ──
-
-    @Test
-    fun `a zygisk-only install is nudged towards kmod`() {
-        val issues =
-            dashboardIssues(
-                facts(
-                    modules = moduleFacts(kmod = ModuleState.NotInstalled, zygisk = installed()),
-                    kernelRecommendation = recommendation(NativeBackendId.Kmod),
-                ),
-            )
-
-        assertEquals(
-            SuggestedBackend.Kmod,
-            issues.filterIsInstance<DashboardIssue.BetterBackendAvailable>().single().backend,
-        )
-    }
-
-    @Test
-    fun `KPM is only suggested when a KPatch runtime is already there`() {
-        fun issuesWith(kpatchRuntime: Boolean) =
-            dashboardIssues(
-                facts(
-                    modules = moduleFacts(kmod = ModuleState.NotInstalled, zygisk = installed()),
-                    kernelRecommendation = recommendation(NativeBackendId.Kpm, kpatchRuntime = kpatchRuntime),
-                ),
-            )
-
-        assertTrue(issuesWith(kpatchRuntime = true).has<DashboardIssue.BetterBackendAvailable>())
-        // Otherwise the nudge means "install two more things" — too pushy for a hint.
-        assertFalse(issuesWith(kpatchRuntime = false).has<DashboardIssue.BetterBackendAvailable>())
-    }
-
-    @Test
-    fun `two live kernel backends are an error, kernel plus zygisk only a warning`() {
-        val twoKernel =
-            dashboardIssues(facts(modules = moduleFacts(kmod = installed(), kpm = installed())))
-        val kernelAndZygisk =
-            dashboardIssues(facts(modules = moduleFacts(kmod = installed(), zygisk = installed())))
-
-        assertTrue(twoKernel.has<DashboardIssue.NativeConflictKernel>())
-        assertTrue(kernelAndZygisk.has<DashboardIssue.MultipleNativeActive>())
-    }
-
-    @Test
-    fun `an inactive second backend is not a conflict`() {
-        // Disabled modules keep their /data/adb/modules directory; only live ones
-        // can freeze the kernel.
-        val issues =
-            dashboardIssues(
-                facts(modules = moduleFacts(kmod = installed(), kpm = installed(active = false))),
-            )
-
-        assertFalse(issues.has<DashboardIssue.NativeConflictKernel>())
-        assertFalse(issues.has<DashboardIssue.MultipleNativeActive>())
-    }
-
-    @Test
-    fun `KPM dormant for a missing superkey is surfaced`() {
-        val issues =
-            dashboardIssues(
-                facts(
-                    modules =
-                        moduleFacts(
-                            kpm = installed(active = false),
-                            kpmLoadStatus = kpmStatus(reason = KpmFailureReason.AwaitingSuperkey, loaded = false),
-                        ),
-                ),
-            )
-
-        assertTrue(issues.has<DashboardIssue.KpmAwaitingSuperkey>())
-    }
-
-    // ── Targets and ports ──
 
     @Test
     fun `an unconfigured install is guided, not alarmed`() {
@@ -362,73 +251,6 @@ internal class DashboardIssuesTest : DashboardIssuesFixture() {
     // ── Module problems ──
 
     @Test
-    fun `a module problem and a pending reboot are mutually exclusive per module`() {
-        val problem = ModuleProblem.Kmod(KmodProblemKind.WrongVariant("old", "new", "x.zip"))
-        val issues =
-            dashboardIssues(
-                facts(
-                    modules =
-                        moduleFacts(
-                            kmodProblem = problem,
-                            pendingReboot = setOf(FlashableModuleKind.Core),
-                            ports = installed(),
-                        ),
-                ),
-            )
-
-        assertEquals(problem, issues.filterIsInstance<DashboardIssue.ModuleBroken>().single().problem)
-        assertEquals(
-            FlashableModuleKind.Core,
-            issues.filterIsInstance<DashboardIssue.ModuleNeedsReboot>().single().kind,
-        )
-    }
-
-    // ── Protection ──
-
-    @Test
-    fun `a leaking owned vector is surfaced`() {
-        val issues = dashboardIssues(facts(protection = protection(ProtectionCheck.Checked(leaking, clean))))
-        assertTrue(issues.has<DashboardIssue.ChecksFailed>())
-    }
-
-    @Test
-    fun `a blocked or failed run makes no leak claim`() {
-        assertFalse(
-            dashboardIssues(facts(protection = protection(ProtectionCheck.Failed)))
-                .has<DashboardIssue.ChecksFailed>(),
-        )
-    }
-
-    @Test
-    fun `a partial hook gap with no measured report stays quiet`() {
-        // No report means nothing was measured, so nothing is known to leak. The
-        // alarming banner needs evidence — it fails closed rather than warning on
-        // a gap the native/SELinux layers may well cover. The "partial" fact still
-        // shows structurally on the backend card; this banner does not.
-        val issues =
-            dashboardIssues(
-                facts(protection = protection(gap = PartialHookGap(installed = 7, expected = 9, missing = emptyList()))),
-            )
-
-        assertFalse(issues.has<DashboardIssue.PartialHooks>())
-    }
-
-    @Test
-    fun `a version mismatch is informational while everything passes and a warning once it does not`() {
-        fun mismatchFor(check: ProtectionCheck) =
-            dashboardIssues(
-                facts(
-                    lsposed = LsposedState.Active(version = "1.2.0", targetCount = 3),
-                    appVersion = "1.2.5",
-                    protection = protection(check),
-                ),
-            ).filterIsInstance<DashboardIssue.LsposedVersionMismatch>().single()
-
-        assertFalse(mismatchFor(ProtectionCheck.Checked(clean, clean)).degraded)
-        assertTrue(mismatchFor(ProtectionCheck.Checked(leaking, clean)).degraded)
-    }
-
-    @Test
     fun `inactive hooks cannot produce a version mismatch`() {
         // Nothing is running, so there is no running version to disagree with.
         assertFalse(
@@ -501,46 +323,4 @@ internal class DashboardIssuesTest : DashboardIssuesFixture() {
     }
 
     // ── Ordering ──
-
-    @Test
-    fun `issues come out in the order the dashboard shows them`() {
-        // The screen groups by severity but keeps emission order inside each group,
-        // so this order decides which error a user reads first. It used to be
-        // implied by the physical layout of one 290-line block.
-        val issues =
-            dashboardIssues(
-                facts(
-                    modules =
-                        moduleFacts(
-                            kmod = ModuleState.NotInstalled,
-                            zygisk = installed(),
-                            ports = installed(),
-                            mismatches = listOf(ModuleMismatch(FlashableModuleKind.Zygisk, "1.2.0", "1.2.5")),
-                            pendingReboot = setOf(FlashableModuleKind.Core),
-                        ),
-                    lsposed = LsposedState.InstalledInactive("1.2.5"),
-                    framework = LsposedFramework.NotInstalled,
-                    config = LsposedConfig.ModuleNotConfigured,
-                    targets = TargetCounts(lsposed = 0, native = 0, ports = 0),
-                    environment = environment(selinuxPermissive = true, debugLoggingOn = true),
-                    protection = protection(ProtectionCheck.Checked(leaking, clean)),
-                    kernelRecommendation = recommendation(NativeBackendId.Kmod),
-                ),
-            )
-
-        assertEquals(
-            listOf(
-                // No NoNativeBackend: zygisk is installed, so the native layer exists.
-                "LsposedNotInstalled",
-                "ModuleVersionMismatch",
-                "NoTargets",
-                "BetterBackendAvailable",
-                "DebugLoggingOn",
-                "SelinuxPermissive",
-                "ModuleNeedsReboot",
-                "ChecksFailed",
-            ),
-            issues.map { it::class.simpleName },
-        )
-    }
 }

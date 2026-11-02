@@ -4,7 +4,7 @@ import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.picker.AppEntry
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import dev.okhsunrog.vpnhide.picker.toggleAllProtection
-import dev.okhsunrog.vpnhide.statistics.buildStatisticsState
+import dev.okhsunrog.vpnhide.statistics.parseCounterState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -23,17 +23,10 @@ class BuiltinAppIntegrationTest {
                 1,
                 RootCanonicalRead.Missing,
                 emptyList(),
-                backend = CoreBackendView(current = true, active = NativeBackendId.Builtin, installed = setOf(NativeBackendId.Builtin)),
+                nativeStatus = sampleNativeStatus().model,
             ),
             current = true,
         )
-
-    @Test
-    fun `builtin participates in native conflict classification`() {
-        assertEquals(MultiNativeSeverity.None, classifyMultiNative(false, false, false, builtinActive = true))
-        assertEquals(MultiNativeSeverity.Warning, classifyMultiNative(false, false, true, builtinActive = true))
-        assertEquals(MultiNativeSeverity.Error, classifyMultiNative(false, true, false, builtinActive = true))
-    }
 
     @Test
     fun `whole row toggle includes builtin native and can clear it again`() {
@@ -47,8 +40,7 @@ class BuiltinAppIntegrationTest {
     @Test
     fun `builtin exposes native picker role and kernel hook configuration`() {
         val targets = parseTargetsSnapshot(joinRootSnapshot(builtinSections, builtinPublication))
-        assertTrue(targets.anyNativeInstalled)
-        assertFalse(targets.kmodModuleInstalled)
+        assertTrue(targets.nativeAvailable)
         assertEquals(NativeBackendId.Builtin, targets.activeNativeBackendId)
         assertEquals(NativeBackendId.Builtin, targets.displayNativeBackendId)
         assertEquals(NativeHookFamily.Kmod, targets.nativeHookFamily)
@@ -58,7 +50,7 @@ class BuiltinAppIntegrationTest {
     fun `no live built-in node means no built-in backend`() {
         // The driver has no module: without its control node there is nothing to configure.
         val targets = parseTargetsSnapshot(RootSnapshot(builtinSections - "kmod_state" - "proc_exists"))
-        assertFalse(targets.anyNativeInstalled)
+        assertFalse(targets.nativeAvailable)
         assertEquals(null, targets.displayNativeBackendId)
     }
 
@@ -66,20 +58,11 @@ class BuiltinAppIntegrationTest {
     fun `builtin statistics exist before first interception and keep their identity afterwards`() {
         for (stats in listOf("", "vpnhide 1 stats\n0x28ad 0x3:0x2\n")) {
             val state =
-                buildStatisticsState(
-                    RootSnapshot(builtinSections + ("kmod_state" to (builtinSections.getValue("kmod_state") + stats))),
-                )
+                parseCounterState(builtinSections + ("kmod_state" to (builtinSections.getValue("kmod_state") + stats)))
             val native = state.backends.first()
             assertEquals(HookIds.Backend.BUILTIN, native.backend)
             assertEquals(if (stats.isEmpty()) 0uL else 2uL, native.totalCount)
         }
-    }
-
-    @Test
-    fun `optional builtin hooks are expected only when installed`() {
-        assertEquals(KERNEL_HOOKS, expectedInstalledHooks(HookIds.Backend.BUILTIN, KERNEL_HOOKS))
-        val withFilesystem = KERNEL_HOOKS + HookIds.Hook.FILESYSTEM_IFACE_PATHS
-        assertEquals(withFilesystem, expectedInstalledHooks(HookIds.Backend.BUILTIN, withFilesystem))
     }
 
     @Test

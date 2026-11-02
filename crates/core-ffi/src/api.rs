@@ -48,8 +48,8 @@ pub struct CorePublication {
     pub config: Option<CoreCanonicalConfig>,
     pub operations_in_flight: Vec<u64>,
     pub mutation_held: bool,
-    pub routing: CoreRoutingObservation,
     pub backend: CoreNativeBackendStatus,
+    pub native_view: crate::CoreNativeReadModel,
     pub debug_lease: bool,
     pub debug_leases: Vec<CoreDebugLease>,
     pub operations: Vec<CoreOperationRecord>,
@@ -65,6 +65,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
         } = reply.value;
         let recovery = CoreRecoveryAccess::from(&snapshot);
         let rpc::StateSnapshot {
+            native_view,
             zygisk_lifecycle,
             zygisk_revocation,
             autonomous_diagnostics,
@@ -75,7 +76,6 @@ impl From<ClientReply<rpc::Published>> for StateReply {
             config_revision,
             operations_in_flight,
             mutation_held,
-            routing,
             backend,
             debug_lease,
             debug_leases,
@@ -99,8 +99,8 @@ impl From<ClientReply<rpc::Published>> for StateReply {
                 config: config.map(Into::into),
                 operations_in_flight: operations_in_flight.into_iter().map(|op| op.0).collect(),
                 mutation_held,
-                routing: routing.into(),
                 backend: backend.into(),
+                native_view: native_view.into(),
                 debug_lease,
                 debug_leases: debug_leases.into_iter().map(Into::into).collect(),
                 operations: operations.into_iter().map(Into::into).collect(),

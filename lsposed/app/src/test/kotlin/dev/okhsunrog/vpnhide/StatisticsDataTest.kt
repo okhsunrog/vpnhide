@@ -3,9 +3,9 @@ package dev.okhsunrog.vpnhide
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.statistics.StatisticsRow
 import dev.okhsunrog.vpnhide.statistics.StatisticsUnavailableReason
-import dev.okhsunrog.vpnhide.statistics.buildStatisticsState
 import dev.okhsunrog.vpnhide.statistics.extractProtocolBlock
 import dev.okhsunrog.vpnhide.statistics.formatStatCount
+import dev.okhsunrog.vpnhide.statistics.parseCounterState
 import dev.okhsunrog.vpnhide.statistics.parseProtocolStatsBlock
 import dev.okhsunrog.vpnhide.statistics.parseProtocolStatusBlock
 import org.junit.Assert.assertEquals
@@ -14,6 +14,8 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class StatisticsDataTest {
+    private fun parseFixtureCounters(root: RootSnapshot) = parseCounterState(root.sections)
+
     @Test
     fun `extracts status and stats blocks from combined runtime state`() {
         val raw =
@@ -61,7 +63,7 @@ class StatisticsDataTest {
 
     @Test
     fun `builds backend rows with uid package names and hook registry data`() {
-        val state = buildStatisticsState(statisticsFixtureSnapshot())
+        val state = parseFixtureCounters(statisticsFixtureSnapshot())
 
         val kmod = state.backends.single { it.backend == HookIds.Backend.KMOD }
         assertEquals(2, kmod.rows.size)
@@ -71,7 +73,7 @@ class StatisticsDataTest {
         assertEquals(99L, kmod.rows[1].hookId)
         assertNull(kmod.rows[1].hook)
 
-        assertFalse(state.backends.any { it.backend == HookIds.Backend.KPM })
+        org.junit.Assert.assertTrue(state.backends.any { it.backend == HookIds.Backend.KPM })
 
         val lsposed = state.backends.single { it.backend == HookIds.Backend.LSPOSED }
         assertEquals("1.2.3", lsposed.metadata["version"])
@@ -81,14 +83,14 @@ class StatisticsDataTest {
     @Test
     fun `shows kpm native statistics when kmod is not active`() {
         val state =
-            buildStatisticsState(
+            parseFixtureCounters(
                 RootSnapshot(
                     statisticsFixtureSnapshot()
                         .sections + ("kmod_state" to ""),
                 ),
             )
 
-        assertFalse(state.backends.any { it.backend == HookIds.Backend.KMOD })
+        assertFalse(state.backends.single { it.backend == HookIds.Backend.KMOD }.hasData)
         val kpm = state.backends.single { it.backend == HookIds.Backend.KPM }
         assertEquals(
             HookIds.Backend.KPM.id
@@ -108,7 +110,7 @@ class StatisticsDataTest {
     fun `marks truncated kpm counters unavailable instead of totaling a partial prefix`() {
         val base = statisticsFixtureSnapshot()
         val state =
-            buildStatisticsState(
+            parseFixtureCounters(
                 RootSnapshot(
                     base.sections +
                         mapOf(
@@ -128,34 +130,6 @@ class StatisticsDataTest {
                 .toLong(),
             kpm.status?.backend,
         )
-    }
-
-    @Test
-    fun `shows zygisk native statistics as unavailable when zygisk is active`() {
-        val state =
-            buildStatisticsState(
-                RootSnapshot(
-                    statisticsFixtureSnapshot().sections +
-                        mapOf(
-                            "kmod_module_dir" to "0",
-                            "kpm_module_dir" to "0",
-                            "zygisk_module_dir" to "1",
-                            "kmod_state" to "",
-                            "kpm_state" to "",
-                            "proc_exists" to "0",
-                            "current_boot_id" to "boot-1",
-                            "zygisk_status" to "boot_id=boot-1",
-                            "zygisk_prop" to "version=1.0",
-                        ),
-                ),
-            )
-
-        assertFalse(state.backends.any { it.backend == HookIds.Backend.KMOD })
-        assertFalse(state.backends.any { it.backend == HookIds.Backend.KPM })
-        val zygisk = state.backends.single { it.backend == HookIds.Backend.ZYGISK }
-        assertEquals(StatisticsUnavailableReason.ZygiskNativeStats, zygisk.unavailableReason)
-        assertEquals(emptyList<StatisticsRow>(), zygisk.rows)
-        assertEquals(2, state.activeBackendCount)
     }
 
     @Test

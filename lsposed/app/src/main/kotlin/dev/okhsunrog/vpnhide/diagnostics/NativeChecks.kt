@@ -1,29 +1,16 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
 import dev.okhsunrog.vpnhide.R
-import dev.okhsunrog.vpnhide.checks.CheckStatus
-import dev.okhsunrog.vpnhide.checks.NativeProbe
 import dev.okhsunrog.vpnhide.generated.HookIds
 
-/**
- * One native (kmod / KPM / zygisk-covered) detection probe. [id] is the stable,
- * non-localized key that matches the Rust probe registry (`run_all` in
- * crates/checks) — the app joins probe results to these specs by id. [labelRes]
- * is the user-facing localized name shown on the Diagnostics screen;
- * [expectedHooks] are the hooks that should cover this vector.
- */
+/** Static vector labels and hook registry links for manual forensic reports. */
 internal data class NativeCheckSpec(
     val id: String,
     val labelRes: Int,
     val expectedHooks: Set<HookIds.Hook> = emptySet(),
 )
 
-/**
- * The native probe suite, in display order. The probes themselves run in Rust
- * (one JSON call via [dev.okhsunrog.vpnhide.checks.NativeProbe]); these specs
- * carry the display label and the expected-hook coverage, joined to the probe
- * results by [NativeCheckSpec.id].
- */
+/** Registry metadata only; Core owns required plans, execution and assessment. */
 internal val NATIVE_CHECKS: List<NativeCheckSpec> =
     listOf(
         NativeCheckSpec(

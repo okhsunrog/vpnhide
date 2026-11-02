@@ -26,6 +26,7 @@ required-features = ["fixture-oracle"]
 fixture-oracle = []
 
 [dependencies]
+vpnhide_native_policy = { path = "../native-policy" }
 vpnhide_migration_policy = { path = "../migration-policy" }
 vpnhide_core_rpc = { path = "../core-rpc" }
 vpnhide_checks = { path = "../checks" }

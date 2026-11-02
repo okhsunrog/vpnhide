@@ -41,10 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.okhsunrog.vpnhide.diagnostics.LayerStatus
-import dev.okhsunrog.vpnhide.diagnostics.Verdict
 import dev.okhsunrog.vpnhide.diagnostics.retryDiagnosticsAndDashboard
-import dev.okhsunrog.vpnhide.diagnostics.verdict
 import dev.okhsunrog.vpnhide.migration.LegacyImportPrompt
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
@@ -86,7 +83,6 @@ fun DashboardScreen(
     var showChangelog by remember { mutableStateOf(false) }
     var changelogData by remember { mutableStateOf<ChangelogData?>(null) }
     var showContact by remember { mutableStateOf(false) }
-    var showDonate by remember { mutableStateOf(false) }
     // Captured when the banner is tapped, not read live: a successful import
     // refreshes the dashboard (prompt → null) while the dialog is still showing
     // its result.
@@ -94,9 +90,6 @@ fun DashboardScreen(
 
     if (showContact) {
         ContactModal(onDismiss = { showContact = false })
-    }
-    if (showDonate) {
-        DonateModal(onDismiss = { showDonate = false })
     }
     legacyImportDialog?.let { prompt ->
         LegacyImportDialog(prompt = prompt, onDismiss = { legacyImportDialog = null })
@@ -151,6 +144,11 @@ fun DashboardScreen(
             retryDiagnosticsAndDashboard(context, selfNeedsRestart)
         }
         Spacer(Modifier.height(12.dp))
+        NativeCoreStatusCard(
+            display.diagnostics.sources.core
+                .nativeStatusSnapshot(),
+        )
+        Spacer(Modifier.height(12.dp))
 
         // Pinned status palette — shared by the Protection status banners
         // (NeedsRestart) and the Errors / Warnings issue banners below.
@@ -200,7 +198,7 @@ fun DashboardScreen(
             Spacer(Modifier.height(12.dp))
             Text(stringResource(R.string.autonomous_metadata_pending))
             EnhancedButton(onClick = { DashboardCache.refresh(context, selfNeedsRestart) }) {
-                Text(stringResource(R.string.vpn_off_retry))
+                Text(stringResource(R.string.retry))
             }
             return@Column
         }
@@ -221,20 +219,8 @@ fun DashboardScreen(
         Spacer(Modifier.height(8.dp))
         // Three components; Ports is a subordinate Core function.
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            JavaBackendCard(loadedState.lsposed, index = 0, count = 3)
-            NativeBackendCard(
-                loadedState.nativeBackend,
-                loadedState.nativeTargetCount,
-                selfNeedsRestart,
-                partialHooks = loadedState.nativePartialHooks,
-                index = 1,
-                count = 3,
-            )
-            CoreComponentCard(loadedState.core)
-        }
-        loadedState.nativeInstallRecommendation?.let { recommendation ->
-            Spacer(Modifier.height(8.dp))
-            NativeInstallRecommendationCard(recommendation)
+            JavaBackendCard(loadedState.lsposed, index = 0, count = 2)
+            CoreComponentCard(loadedState.core, index = 1, count = 2)
         }
         updateInfo?.let { info ->
             Spacer(Modifier.height(8.dp))
@@ -269,30 +255,6 @@ fun DashboardScreen(
             onOpenHelp,
         )
         MessageSection(infos, R.string.dashboard_info, infoHeader, infoBg, onBannerColor, onOpenDiagnostics, onContact, onOpenHelp)
-
-        // Asks for support only on a setup that provably works, and only once —
-        // see shouldShowDonatePrompt for the full gate.
-        val now = remember { System.currentTimeMillis() }
-        if (shouldShowDonatePrompt(
-                dismissed = LocalSettingsState.current.donatePromptDismissed,
-                installedAtMillis = remember { appInstalledAtMillis(context, now) },
-                nowMillis = now,
-                protection = loadedState.protection,
-                hasIssues = errors.isNotEmpty() || warnings.isNotEmpty(),
-            )
-        ) {
-            val interactor = LocalSettingsInteractor.current
-            Spacer(Modifier.height(20.dp))
-            DonatePromptBanner(
-                containerColor = infoBg,
-                contentColor = onBannerColor,
-                onDonate = {
-                    interactor.setDonatePromptDismissed(true)
-                    showDonate = true
-                },
-                onHide = { interactor.setDonatePromptDismissed(true) },
-            )
-        }
 
         Spacer(Modifier.height(20.dp))
         HelpGuideEntry(onClick = { onOpenHelp(null) })
@@ -588,81 +550,6 @@ private fun SectionHeader(
     SharedSectionHeader(text = text, color = color, emphasized = true)
 }
 
-private data class InstalledVisual(
-    val subtitle: String,
-    val accentColor: Color,
-    val accentContainerColor: Color,
-)
-
-/**
- * Status subtitle + colors for an installed flashable module. Shared by the
- * Ports and Native cards so broken / active / inactive rendering stays shared.
- */
-@Composable
-private fun installedVisual(
-    state: ModuleState.Installed,
-    targetCount: Int,
-    selfNeedsRestart: Boolean,
-    // Active, but the backend reports PARTIAL_HOOKS. Colours the dot the same
-    // warning yellow the Statistics card uses, so the two screens agree instead
-    // of one showing green and the other yellow for the same state. Only the
-    // native backend passes true; the other module cards keep the default.
-    partialHooks: Boolean = false,
-): InstalledVisual {
-    val active = state.active
-    val broken = state.brokenReason
-    val activePartial = active && partialHooks
-    val brokenSubtitleRes =
-        when (broken) {
-            ModuleBrokenReason.WrongVariant -> R.string.dashboard_kmod_broken_wrong_variant
-            ModuleBrokenReason.UnsupportedKernel -> R.string.dashboard_kmod_broken_unsupported_kernel
-            ModuleBrokenReason.MissingKprobes -> R.string.dashboard_kmod_broken_no_kprobes
-            ModuleBrokenReason.UnknownVariantInactive -> R.string.dashboard_kmod_broken_unknown_variant
-            ModuleBrokenReason.AmbiguousLoadFailed -> R.string.dashboard_kmod_broken_ambiguous
-            ModuleBrokenReason.SignatureEnforced -> R.string.dashboard_kmod_broken_signature_enforced
-            ModuleBrokenReason.ArtifactMissing -> R.string.dashboard_module_broken_artifact_missing
-            null -> null
-        }
-    // Stamped GKI variant (kmod builds from v0.6.3+ only — see ModuleState.gkiVariant),
-    // appended so the card itself answers "which zip did I install", without
-    // sending the user hunting through KernelSU/Magisk's module list (which
-    // shows only the generic module name, not the GKI variant — issue #225).
-    val variantSuffix = state.gkiVariant?.let { " · $it" }.orEmpty()
-    val partialSuffix =
-        if (activePartial) " · " + stringResource(R.string.dashboard_backend_partial_hooks) else ""
-    // `!runtimeCheckable` guards against a false "inactive": a liveness read from a
-    // non-root snapshot shell (0600 ctl / iptables) is untrustworthy, so show "status
-    // not verified" instead of claiming the module is off.
-    return InstalledVisual(
-        subtitle =
-            when {
-                state.pendingReboot -> stringResource(R.string.dashboard_module_installed_reboot_needed)
-                brokenSubtitleRes != null -> stringResource(brokenSubtitleRes)
-                active -> stringResource(R.string.dashboard_active_targets, targetCount) + variantSuffix + partialSuffix
-                !state.runtimeCheckable -> stringResource(R.string.dashboard_installed_not_verified) + variantSuffix
-                selfNeedsRestart -> stringResource(R.string.dashboard_installed_restart_app)
-                else -> stringResource(R.string.dashboard_installed_inactive) + variantSuffix
-            },
-        accentColor =
-            when {
-                state.pendingReboot -> StatusColors.warningAccent
-                broken != null -> StatusColors.errorDot
-                activePartial -> StatusColors.warningAccent
-                active -> StatusColors.successDot
-                else -> StatusColors.warningAccent
-            },
-        accentContainerColor =
-            when {
-                state.pendingReboot -> StatusColors.warningContainer()
-                broken != null -> StatusColors.errorContainer()
-                activePartial -> StatusColors.warningContainer()
-                active -> StatusColors.successContainer()
-                else -> StatusColors.warningContainer()
-            },
-    )
-}
-
-/** The always-on Java backend (LSPosed). Badge "J"; subtitle is "LSPosed · …". */
 @Composable
 private fun JavaBackendCard(
     state: LsposedState,
@@ -722,63 +609,6 @@ private fun JavaBackendCard(
         subtitle = subtitle,
         accentColor = accentColor,
         accentContainerColor = accentContainerColor,
-    )
-}
-
-/**
- * The native backend surfaced on Dashboard. It is the active backend when one
- * exists, otherwise the highest-priority installed backend so inactive installs
- * stay visible. The restart-app hint only applies to Zygisk.
- */
-@Composable
-private fun NativeBackendCard(
-    backend: DisplayNativeBackend,
-    targetCount: Int,
-    selfNeedsRestart: Boolean,
-    partialHooks: Boolean = false,
-    index: Int = -1,
-    count: Int = 1,
-) {
-    val name = stringResource(R.string.dashboard_native_backend)
-    val state = backend.state
-    if (backend.id == null || state !is ModuleState.Installed) {
-        ModuleCardShell(
-            name = name,
-            badgeText = "N",
-            index = index,
-            count = count,
-            version = null,
-            subtitle = stringResource(R.string.dashboard_not_installed),
-            accentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-            accentContainerColor = AppColors.neutralAccentContainer,
-        )
-        return
-    }
-    val backendName =
-        stringResource(
-            when (backend.id) {
-                NativeBackendId.Kmod -> R.string.dashboard_backend_kmod
-                NativeBackendId.Builtin -> R.string.dashboard_backend_builtin
-                NativeBackendId.Kpm -> R.string.dashboard_backend_kpm
-                NativeBackendId.Zygisk -> R.string.dashboard_backend_zygisk
-            },
-        )
-    val v =
-        installedVisual(
-            state,
-            targetCount,
-            selfNeedsRestart && backend.id == NativeBackendId.Zygisk,
-            partialHooks = partialHooks,
-        )
-    ModuleCardShell(
-        name = name,
-        badgeText = "N",
-        index = index,
-        count = count,
-        version = state.version,
-        subtitle = stringResource(R.string.dashboard_backend_line, backendName, v.subtitle),
-        accentColor = v.accentColor,
-        accentContainerColor = v.accentContainerColor,
     )
 }
 
@@ -908,10 +738,6 @@ private const val GITHUB_RELEASES_PAGE = "https://github.com/okhsunrog/vpnhide/r
  * latest published release (§ releasing.md). */
 private fun releaseAssetUrl(artifact: String): String = "$GITHUB_RELEASES_PAGE/latest/download/$artifact"
 
-private fun Context.openUrl(url: String) {
-    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-}
-
 /** Compact "download this zip" button for a module-problem banner (wrong variant,
  * outdated version, …) — grabs the exact named artifact from the latest release. */
 @Composable
@@ -919,148 +745,6 @@ internal fun ModuleDownloadButton(artifact: String) {
     val uriHandler = LocalUriHandler.current
     EnhancedOutlinedButton(onClick = { runCatching { uriHandler.openUri(releaseAssetUrl(artifact)) } }) {
         Text(stringResource(R.string.dashboard_install_recommendation_download, artifact))
-    }
-}
-
-@Composable
-private fun NativeInstallRecommendationCard(recommendation: NativeInstallRecommendation) {
-    val containerColor =
-        if (recommendation.recommended == NativeBackendId.Zygisk) {
-            StatusColors.zygiskRecommendContainer()
-        } else {
-            StatusColors.infoContainer()
-        }
-
-    EnhancedCard(
-        modifier = Modifier.fillMaxWidth(),
-        color = containerColor,
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = stringResource(R.string.dashboard_install_recommendation_title),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text =
-                    stringResource(
-                        R.string.dashboard_install_recommendation_device,
-                        recommendation.androidVersion,
-                        recommendation.kernelVersion,
-                    ),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            // Disambiguate the GKI KMI tag baked into uname -r (e.g.
-            // "android12-5.10") from the device's Android OS release on
-            // devices where they differ — common on old Pixels still on
-            // an android12 KMI kernel under an Android 14/15 ROM. Hide
-            // the note when both match (would just be noise) or when
-            // uname -r carries no KMI tag at all.
-            val kmiBranch = recommendation.kernelBranch
-            if (kmiBranch != null && kmiBranch != recommendation.androidVersion) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text =
-                        stringResource(
-                            R.string.dashboard_install_recommendation_kmi_note,
-                            kmiBranch.replace(" ", "").lowercase(),
-                        ),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontStyle = FontStyle.Italic,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            val alternative = recommendation.alternativeArtifact
-            Text(
-                text =
-                    when (recommendation.recommended) {
-                        NativeBackendId.Zygisk -> {
-                            stringResource(
-                                R.string.dashboard_install_recommendation_zygisk,
-                                recommendation.recommendedArtifact,
-                            )
-                        }
-
-                        NativeBackendId.Kpm -> {
-                            if (recommendation.kpatchRuntimeAvailable) {
-                                stringResource(
-                                    R.string.dashboard_install_recommendation_kpm,
-                                    recommendation.recommendedArtifact,
-                                )
-                            } else {
-                                stringResource(
-                                    R.string.dashboard_install_recommendation_kpm_needs_runtime,
-                                    recommendation.recommendedArtifact,
-                                )
-                            }
-                        }
-
-                        NativeBackendId.Kmod -> {
-                            if (recommendation.variantAmbiguous && alternative != null) {
-                                stringResource(
-                                    R.string.dashboard_install_recommendation_kmod_ambiguous,
-                                    recommendation.recommendedArtifact,
-                                    alternative,
-                                )
-                            } else {
-                                stringResource(
-                                    R.string.dashboard_install_recommendation_kmod,
-                                    recommendation.recommendedArtifact,
-                                )
-                            }
-                        }
-
-                        // The in-tree backend is never produced by
-                        // buildNativeInstallRecommendation — it is a build-time
-                        // kernel property, not something the user installs.
-                        NativeBackendId.Builtin -> {
-                            error("built-in backend is never a native install recommendation")
-                        }
-                    },
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-            )
-            // Trailing note per backend: zygisk's detectability caveat, or kmod's
-            // "stable; KPM is a universal alternative" mention. KPM itself needs
-            // no caveat note.
-            val note =
-                when (recommendation.recommended) {
-                    NativeBackendId.Zygisk -> R.string.dashboard_install_recommendation_zygisk_warning
-
-                    NativeBackendId.Kmod -> R.string.dashboard_install_recommendation_kmod_kpm_alt
-
-                    // Builtin is never recommended (see the text branch above); no note.
-                    NativeBackendId.Kpm, NativeBackendId.Builtin -> null
-                }
-            if (note != null) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = stringResource(note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
-                )
-            }
-            // Bright primary: one-tap download of the exact recommended zip.
-            // Plain secondary: the full releases page, for the ambiguous-variant
-            // case (grab the alternative) or picking anything else.
-            Spacer(Modifier.height(12.dp))
-            val context = LocalContext.current
-            EnhancedButton(
-                onClick = { context.openUrl(releaseAssetUrl(recommendation.recommendedArtifact)) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.dashboard_install_recommendation_download, recommendation.recommendedArtifact))
-            }
-            Spacer(Modifier.height(6.dp))
-            EnhancedOutlinedButton(
-                onClick = { context.openUrl(GITHUB_RELEASES_PAGE) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.dashboard_install_recommendation_all_releases))
-            }
-        }
     }
 }
 
@@ -1093,7 +777,7 @@ private fun DashboardLoadErrorCard(
             )
             Spacer(Modifier.height(12.dp))
             EnhancedButton(onClick = onRetry) {
-                Text(stringResource(R.string.vpn_off_retry))
+                Text(stringResource(R.string.retry))
             }
         }
     }

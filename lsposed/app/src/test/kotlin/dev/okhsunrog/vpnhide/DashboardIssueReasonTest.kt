@@ -23,6 +23,5 @@ class DashboardIssueReasonTest {
     fun `hook and profile reasons retain structured counts`() {
         assertEquals(mapOf("count" to "3"), DashboardIssue.InstalledInMultipleProfiles(3).toReason().parameters)
         assertEquals("lsposed_config_unreadable", DashboardIssue.LsposedConfigUnreadable.toReason().kind)
-        assertEquals("checks_failed", DashboardIssue.ChecksFailed.toReason().kind)
     }
 }

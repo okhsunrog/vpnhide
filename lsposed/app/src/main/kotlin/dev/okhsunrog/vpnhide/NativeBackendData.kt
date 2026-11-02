@@ -1,8 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.diagnostics.CheckOutcome
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticReport
-import dev.okhsunrog.vpnhide.generated.HookIds
 import kotlinx.serialization.Serializable
 
 // The native layer is exactly one of these at runtime (docs/storage.md §4.3).
@@ -19,166 +16,55 @@ internal data class NativeBackendStates(
     val kpm: ModuleState,
     val zygisk: ModuleState,
     val builtin: ModuleState = ModuleState.NotInstalled,
-) {
-    val activeId: NativeBackendId?
-        get() = activeNativeBackendId(this)
-}
+)
 
-// Single source of truth for "is anything installed at all" — reused by both
-// the install-recommendation gate (noneInstalled) and the missing-native
-// error (anyInstalled) so the two checks can't independently drift out of
-// sync the way two hand-written `kmod is X || kpm is X || zygisk is X`
-// expressions could.
-internal val NativeBackendStates.anyInstalled: Boolean
-    get() =
-        kmod is ModuleState.Installed ||
-            builtin is ModuleState.Installed ||
-            kpm is ModuleState.Installed ||
-            zygisk is ModuleState.Installed
-
-internal val NativeBackendStates.noneInstalled: Boolean
-    get() = !anyInstalled
-
-/**
- * The one native backend to surface on the dashboard. This is display state:
- * an active backend wins, otherwise the highest-priority installed backend is
- * shown so the user can see what is installed but not active yet.
- */
+/** Compatibility export identity plus legacy installation metadata; Core owns runtime/setup. */
 @Serializable
 internal data class DisplayNativeBackend(
     val id: NativeBackendId?,
     val state: ModuleState,
 )
 
-private val NATIVE_BACKEND_PRIORITY =
-    listOf(
-        // Kmod and Builtin are the two top-tier, mutually-exclusive kernel
-        // backends; Builtin sits directly after Kmod so the display/active
-        // resolution treats them as one kernel tier above KPM and Zygisk.
-        NativeBackendId.Kmod,
-        NativeBackendId.Builtin,
-        NativeBackendId.Kpm,
-        NativeBackendId.Zygisk,
-    )
-
-internal fun detectNativeBackendStates(
-    sections: Map<String, String>,
-    currentBootId: String = sections["current_boot_id"].orEmpty(),
-    kpmLoadStatus: KpmLoadStatus = KPM_STATUS_NONE,
-    published: CoreBackendView? = null,
-): NativeBackendStates =
-    NativeBackendStates(
-        kmod = detectKmodModule(sections),
-        builtin = detectBuiltinModule(sections),
-        kpm = detectKpmModule(sections, kpmLoadStatus, currentBootId),
-        zygisk =
-            detectZygiskModule(
-                sections = sections,
-                zygiskStatusRaw = sections["zygisk_status"].orEmpty(),
-                currentBootId = currentBootId,
-            ),
-    ).let { if (published == null) it else joinNativeBackendStates(it, published) }
-
-/** A boot plan cannot stand in for a current observed identity. */
-internal fun joinNativeBackendStates(
-    raw: NativeBackendStates,
-    published: CoreBackendView,
-): NativeBackendStates {
-    fun state(
-        id: NativeBackendId,
-        value: ModuleState,
-    ): ModuleState {
-        val installed = value as? ModuleState.Installed
-        return if (installed != null || id in published.installed || published.active == id) {
-            (installed ?: ModuleState.Installed(null, false)).copy(
-                active = published.current && published.active == id,
-                runtimeCheckable = published.current,
+/** Only standalone module metadata, never a liveness or backend-selection oracle. */
+internal fun nativeLegacyInventory(sections: Map<String, String>): NativeBackendStates {
+    fun installed(key: String): ModuleState {
+        val prop = parseModuleProp(sections[key].orEmpty())
+        return if (prop.installed) {
+            ModuleState.Installed(
+                prop.version,
+                active = false,
+                gkiVariant = prop.gkiVariant,
+                runtimeCheckable = false,
             )
         } else {
-            value
+            ModuleState.NotInstalled
         }
     }
     return NativeBackendStates(
-        state(NativeBackendId.Kmod, raw.kmod),
-        state(NativeBackendId.Kpm, raw.kpm),
-        state(NativeBackendId.Zygisk, raw.zygisk),
-        state(NativeBackendId.Builtin, raw.builtin),
+        kmod = installed("kmod_prop"),
+        kpm = installed("kpm_prop"),
+        zygisk = installed("zygisk_prop"),
+        builtin = installed("builtin_prop"),
     )
 }
 
-internal fun activeNativeBackendId(states: NativeBackendStates): NativeBackendId? =
-    prioritizedNativeBackends(states).firstOrNull { moduleActive(it.second) }?.first
-
-internal fun displayNativeBackend(states: NativeBackendStates): DisplayNativeBackend {
-    val ordered = prioritizedNativeBackends(states)
-    val installed = ordered.filter { it.second is ModuleState.Installed }
-    if (installed.isEmpty()) return DisplayNativeBackend(null, ModuleState.NotInstalled)
-    val displayed = installed.firstOrNull { moduleActive(it.second) } ?: installed.first()
-    return DisplayNativeBackend(displayed.first, displayed.second)
-}
-
-private fun prioritizedNativeBackends(states: NativeBackendStates): List<Pair<NativeBackendId, ModuleState>> =
-    NATIVE_BACKEND_PRIORITY.map { id ->
-        id to
-            when (id) {
-                NativeBackendId.Kmod -> states.kmod
-                NativeBackendId.Builtin -> states.builtin
-                NativeBackendId.Kpm -> states.kpm
-                NativeBackendId.Zygisk -> states.zygisk
-            }
-    }
-
-/**
- * An active kernel backend that did not install every hook it owns.
- *
- * The backend resolves each target by name when it loads, so a function a
- * vendor kernel renamed (Clang CFI/LTO manglings) or never exported is skipped
- * — the module reports `PARTIAL_HOOKS` and the vectors behind those hooks stay
- * visible. Without this the dashboard shows a plain green "active" card next to
- * a red leak in Diagnostics, which reads as the app contradicting itself.
- *
- * Null unless there is something to say: a non-kernel/inactive backend, an
- * unread status ([reportedHooks] empty), or a complete install all return null.
- */
-internal data class PartialHookGap(
-    val installed: Int,
-    val expected: Int,
-    val missing: List<HookIds.Hook>,
-) {
-    /**
-     * Is any vector actually leaking because one of [missing] never installed?
-     *
-     * A hook the kernel does not expose is only worth telling the user about when
-     * it costs something here: on old kernels the same surface is usually closed
-     * by SELinux or a capability check, and warning there would be noise. A
-     * measured leak on a check whose expected hooks are all missing is the case
-     * that needs the explanation.
-     */
-    fun costsAnyVector(report: DiagnosticReport): Boolean =
-        report.native.checks.any { check ->
-            check.outcome is CheckOutcome.Leak && check.missingHooks.isNotEmpty()
+/** The selected Core implementation may be bundled and have no legacy module. */
+internal fun coreDisplayNativeBackend(
+    legacy: NativeBackendStates,
+    snapshot: NativeStatusSnapshot,
+): DisplayNativeBackend {
+    val backend =
+        snapshot.model
+            ?.displayed
+            ?.backend
+            .takeIf { snapshot.current }
+    val metadata =
+        when (backend) {
+            NativeBackendId.Kmod -> legacy.kmod
+            NativeBackendId.Builtin -> legacy.builtin
+            NativeBackendId.Kpm -> legacy.kpm
+            NativeBackendId.Zygisk -> legacy.zygisk
+            null -> ModuleState.NotInstalled
         }
-}
-
-internal fun partialHookGap(
-    backend: DisplayNativeBackend,
-    reportedHooks: Set<HookIds.Hook>,
-    statusError: HookIds.StatusError?,
-): PartialHookGap? {
-    if (!moduleActive(backend.state)) return null
-    // Trust the module's own verdict, not a diff against the universal kernel
-    // hook set: whether a hook is EXPECTED is per-kernel (the KPM leaves the
-    // bind hook to the native CAP_NET_RAW gate below 5.3), and the module is the
-    // only place that knows — it probes symbols at load. It reports PARTIAL_HOOKS
-    // exactly when a hook it needed on THIS kernel is missing. On OK there is no
-    // gap even if the universal diff would find one; on the refusal codes the
-    // module is not running with hooks at all, handled elsewhere.
-    if (statusError != HookIds.StatusError.PARTIAL_HOOKS) return null
-    val missing = missingBackendHooks(backend.id, reportedHooks)
-    if (missing.isEmpty()) return null
-    return PartialHookGap(
-        installed = KERNEL_HOOKS.size - missing.size,
-        expected = KERNEL_HOOKS.size,
-        missing = missing.sortedBy { it.id },
-    )
+    return DisplayNativeBackend(backend, metadata)
 }

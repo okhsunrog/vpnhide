@@ -6,7 +6,7 @@ How to build vpnhide from source.
 
 - **JDK 17 or later** — what the CI image installs (`openjdk-17-jdk-headless`); local builds with JDK 21 also work. The `lsposed/app` Gradle build sets `sourceCompatibility = 17` and `jvmTarget = "17"`.
 - **Android SDK** — install `platforms;android-35`, `build-tools;35.0.0`, `platform-tools` (via Android Studio or `cmdline-tools`). Export `ANDROID_HOME`.
-- **Android NDK r28 or later** — export `ANDROID_NDK_HOME` (or drop it in `$ANDROID_HOME/ndk/<version>/`, the scripts auto-detect). The `lsposed/app` `buildAppNative` task reads `ANDROID_NDK_HOME` (falling back to `ANDROID_NDK_ROOT`, then the SDK-managed `ndk/<version>`) and passes it to cargo-ndk. r27c builds compile, but the resulting cdylibs trigger an Android 16 KiB-page-size compatibility warning at app start on Pixel 8 Pro / future hardware (`сегмент LOAD не выровнен`); r28+ aligns LOAD segments on 16 KiB by default. (`crates/checks-jni/build.rs` and `zygisk/build.rs` also pass `-Wl,-z,max-page-size=16384` explicitly so older NDKs stay compatible — defence in depth.)
+- **Android NDK r28 or later** — export `ANDROID_NDK_HOME` (or drop it in `$ANDROID_HOME/ndk/<version>/`, the scripts auto-detect). The `lsposed/app` `buildAppNative` task reads `ANDROID_NDK_HOME` (falling back to `ANDROID_NDK_ROOT`, then the SDK-managed `ndk/<version>`) and passes it to cargo-ndk. r27c builds compile, but the resulting cdylibs trigger an Android 16 KiB-page-size compatibility warning at app start on Pixel 8 Pro / future hardware (`сегмент LOAD не выровнен`); r28+ aligns LOAD segments on 16 KiB by default. (`zygisk/build.rs` also passes `-Wl,-z,max-page-size=16384` explicitly so older NDKs stay compatible — defence in depth.)
 - **Rust 1.99.1**, pinned by `rust-toolchain.toml` for every workspace member,
   including Zygisk. The pin installs rustfmt, Clippy and ARM64/ARMv7/x86_64
   Android standard libraries automatically through rustup. CI uses the same
@@ -38,7 +38,7 @@ The app-native crates under `crates/` are built via cargo-ndk by the `buildAppNa
 | `lsposed/` | LSPosed module + target-picker Android app (Kotlin, Compose) |
 | `kmod/` | Kernel-level native backends: GKI `.ko` (C, kretprobes) and KPM (KernelPatch inline hooks) |
 | `builtin/` | The in-tree kernel backend (`CONFIG_VPNHIDE=y`): the driver, `scripts/integrate.py` that vendors it into a kernel tree, QEMU tests (no module: core adopts the driver) |
-| `crates/` | The Rust workspace: `protocol` (backend wire), `activator` (core-side projection, loaders, Ports), `checks` / `checks-jni` (app-native probes), `core-rpc` (shared types), `core-client` (transport), `core-ffi` (typed generated UniFFI API), `core-daemon` (privileged engine) |
+| `crates/` | The Rust workspace: `protocol` (backend wire), `activator` (core-side projection, loaders, Ports), `checks` (shared native probes), `core-rpc` (shared types), `core-client` (transport), `core-ffi` (typed generated UniFFI API), `core-daemon` (privileged engine) |
 | `core/` | The required VPN Hide Core Magisk module (`build.py` → `core/target/vpnhide-core.zip`) |
 | `scripts/` | Release & changelog tooling |
 | `update-json/` | Magisk/KSU update metadata |
@@ -252,9 +252,9 @@ uvx ruff check
 
 # Rust
 cd zygisk && cargo fmt --check && cargo ndk -t arm64-v8a clippy -- -D warnings
-cd .. && cargo fmt --check && cargo ndk -t arm64-v8a clippy -p vpnhide_checks -p vpnhide_checks_jni --tests -- -D warnings
+cd .. && cargo fmt --check && cargo ndk -t arm64-v8a clippy -p vpnhide_checks --tests -- -D warnings
 cd ../zygisk && cargo test
-cargo test -p vpnhide_checks -p vpnhide_checks_jni
+cargo test -p vpnhide_checks
 
 # C (kernel module + built-in driver)
 scripts/clang-format-c.sh --check

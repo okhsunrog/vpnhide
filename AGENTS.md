@@ -12,7 +12,7 @@ Monorepo for hiding VPN interfaces from selected Android apps. Runtime component
 - `zygisk/` — Rust Zygisk module, inline `libc` hooks via shadowhook
 - `lsposed/` — LSPosed module + Compose target-picker app
 - `core/` — the required `vpnhide_core` module (`core/build.py` → `vpnhide-core.zip`): `module.prop`, a one-line `service.sh` exec stub, `sepolicy.rule`, the install-time `customize.sh` and the `vpnhide-core` binary. No other shell runs on the device (CI: `core/tests/check_module_scaffold.sh`)
-- `crates/` — the Rust workspace: backend wire `protocol`, core-side `activator` library (loading/delivery and Ports), app-native `checks`/`checks-jni`, and core's shared types (`core-rpc`), transport (`core-client`), generated typed UniFFI API (`core-ffi`) and privileged engine (`core-daemon`). The APK never links the engine.
+- `crates/` — the Rust workspace: backend wire `protocol`, core-side `activator` library (loading/delivery and Ports), shared native `checks`, and core's shared types (`core-rpc`), transport (`core-client`), generated typed UniFFI API (`core-ffi`) and privileged engine (`core-daemon`). The APK never links the engine.
 
 ## Read before touching code
 
@@ -62,13 +62,16 @@ Single-command builds for both CI and local — the same scripts run in both pla
 - **core** (required `vpnhide_core` module): `python3 core/build.py` — cargo-ndk build of the `vpnhide-core` daemon (arm64 + armv7), packaged as `core/target/vpnhide-core.zip`; same script in CI.
 - **lsposed APK**: `cd lsposed && ./gradlew :app:assembleRelease`.
 
-Both Rust cdylibs (`zygisk/build.rs`, `crates/checks-jni/build.rs`) pass `-Wl,-z,max-page-size=16384` so the resulting `.so` files load cleanly on 16 KiB-page Android devices (Pixel 8 Pro on Android 16, future hardware). Don't strip that flag.
+The Zygisk build (`zygisk/build.rs`) passes `-Wl,-z,max-page-size=16384`. Preserve it and verify ELF segment alignment for both Zygisk and the Core FFI APK library on 16 KiB-page Android devices.
 
 ## Reading device diagnostics from logcat
 
-The Core owns autonomous diagnostic runs; the picker app reads retained evidence without launching a suite at cold start. Historical main-app probe logs (native probes + Java VPN-presence checks, each PASS/FAIL with detail) and logs every result to logcat under tag `VPNHideTest` — you do **not** need to open the Diagnostics screen to read them. But the app logger (`VpnHideLog`) is gated by the **Debug logging** toggle, which is off by default (stealth-first) and stored as `debugSwitch` in the canonical JSON (`/data/system/vpnhide_config.json`, see `docs/state.md`) — writing it from `adb`/`su` bypasses the app's config coordinator, so don't.
-
-So when you need diagnostics in the logs and Debug logging is off: **stop and ask the user to turn it on** (Settings → For developers → Debug logging). Do not drive the GUI to read check results, and do not try to enable the flag by editing the JSON via su. Once it's on (it persists across launches), capture is: `adb logcat -c` → cold-start the app (`am force-stop` + relaunch — checks run once per process and need an active VPN) → read the `VPNHideTest` / `VpnHide-Startup` lines.
+Core owns autonomous diagnostic runs and retained evidence. Opening the APK does
+not run checks and needs no foreign VPN. Use the explicit diagnostic Retry for a
+new run. Production logging remains gated by the canonical Debug logging setting;
+ask the user to enable it when device logs are needed. Do not edit canonical JSON
+through su. Explicit debug captures use Core-owned bounded logging leases and
+preserve existing measurements rather than claiming a post-logging self-test.
 
 ## Design notes
 

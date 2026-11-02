@@ -17,6 +17,7 @@ pub struct Publisher {
 impl Publisher {
     /// Start an epoch at revision 1 with an initial snapshot.
     pub fn new(epoch: u64, mut initial: StateSnapshot) -> Self {
+        crate::native_status::refresh(&mut initial);
         crate::autonomous::coordinator::invalidate_published(&mut initial, epoch);
         let (tx, _rx) = watch::channel(Published {
             epoch,
@@ -37,6 +38,7 @@ impl Publisher {
     /// Publish a new snapshot, bumping the revision. Republishing an identical snapshot
     /// still bumps — callers that want to avoid a spurious wake should compare first.
     pub fn publish(&self, mut snapshot: StateSnapshot) {
+        crate::native_status::refresh(&mut snapshot);
         crate::autonomous::coordinator::invalidate_published(&mut snapshot, self.epoch);
         self.tx.send_modify(|p| {
             p.revision += 1;
@@ -51,6 +53,7 @@ impl Publisher {
         self.tx.send_modify(|p| {
             p.revision += 1;
             edit(&mut p.snapshot);
+            crate::native_status::refresh(&mut p.snapshot);
             crate::autonomous::coordinator::invalidate_published(&mut p.snapshot, self.epoch);
         });
     }
@@ -60,6 +63,7 @@ impl Publisher {
     pub fn update_if_changed(&self, edit: impl FnOnce(&mut StateSnapshot) -> bool) {
         self.tx.send_if_modified(|published| {
             if edit(&mut published.snapshot) {
+                crate::native_status::refresh(&mut published.snapshot);
                 crate::autonomous::coordinator::invalidate_published(
                     &mut published.snapshot,
                     self.epoch,

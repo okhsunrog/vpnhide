@@ -3,17 +3,19 @@ package dev.okhsunrog.vpnhide.statistics
 import dev.okhsunrog.vpnhide.NativeBackendId
 import dev.okhsunrog.vpnhide.Protocol
 import dev.okhsunrog.vpnhide.RootSnapshot
-import dev.okhsunrog.vpnhide.activeNativeBackendId
 import dev.okhsunrog.vpnhide.backendId
-import dev.okhsunrog.vpnhide.detectNativeBackendStates
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.indicatesActive
+import dev.okhsunrog.vpnhide.nativeStatusSnapshot
 import dev.okhsunrog.vpnhide.parseLsposedStateMetadata
 import dev.okhsunrog.vpnhide.parsePackageUidMap
 import dev.okhsunrog.vpnhide.statusError
 
 internal data class StatisticsState(
     val backends: List<BackendStatistics>,
+    val nativeSource: dev.okhsunrog.vpnhide.NativeStatusSnapshot? = null,
+    val rootObservationId: Long? = null,
+    val rootGeneration: Long? = null,
 ) {
     val hasAnyData: Boolean = backends.any { it.hasData }
     val activeBackendCount: Int = backends.count { it.isActive }
@@ -32,9 +34,10 @@ internal data class BackendStatistics(
     val metadata: Map<String, String> = emptyMap(),
     val rows: List<StatisticsRow>,
     val unavailableReason: StatisticsUnavailableReason? = null,
+    val current: Boolean = false,
 ) {
     val hasData: Boolean = status != null || rows.isNotEmpty()
-    val isActive: Boolean = hasData || unavailableReason != null
+    val isActive: Boolean = current
     val totalCount: ULong = rows.fold(0uL) { acc, row -> acc + row.count.toULong() }
     val hookedCount: Int = status?.hooks?.let { java.lang.Long.bitCount(it) } ?: 0
 }
@@ -51,14 +54,13 @@ private val PROTOCOL_KINDS = setOf("config", "stats", "status")
 private val HOOKS_BY_ID = HookIds.Hook.entries.associateBy { it.id.toLong() }
 private const val KPM_TRUNCATION_MARKER = "# vpnhide truncated"
 
-internal fun buildStatisticsState(snapshot: RootSnapshot): StatisticsState {
-    val uidPackages = uidPackages(snapshot.sections["pm_packages"].orEmpty())
-    val kmodRaw = snapshot.sections["kmod_state"].orEmpty()
+internal fun parseCounterState(sections: Map<String, String>): StatisticsState {
+    val uidPackages = uidPackages(sections["pm_packages"].orEmpty())
+    val kmodRaw = sections["kmod_state"].orEmpty()
     val kernelStatus = parseProtocolStatusBlock(kmodRaw)
-    val kpmRaw = snapshot.sections["kpm_state"].orEmpty()
-    val lsposedRaw = snapshot.sections["lsposed_state"].orEmpty()
+    val kpmRaw = sections["kpm_state"].orEmpty()
+    val lsposedRaw = sections["lsposed_state"].orEmpty()
     val kpmStatsTruncated = kpmRaw.lineSequence().any { it.trim() == KPM_TRUNCATION_MARKER }
-    val activeNativeBackendId = detectNativeBackendStates(snapshot.sections).activeId
     val nativeBackends =
         listOf(
             buildBackendStatistics(
@@ -85,12 +87,7 @@ internal fun buildStatisticsState(snapshot: RootSnapshot): StatisticsState {
             uidPackages = uidPackages,
         )
 
-    return StatisticsState(
-        listOfNotNull(
-            selectActiveNativeStatisticsBackend(nativeBackends, activeNativeBackendId),
-            lsposed,
-        ),
-    )
+    return StatisticsState(nativeBackends + lsposed)
 }
 
 internal fun parseProtocolStatusBlock(raw: String): Protocol.Status? =
@@ -139,28 +136,6 @@ private fun buildBackendStatistics(
         rows = buildStatisticsRows(stats, uidPackages),
         unavailableReason = unavailableReason,
     )
-
-private fun selectActiveNativeStatisticsBackend(
-    backends: List<BackendStatistics>,
-    activeNativeBackendId: NativeBackendId?,
-): BackendStatistics? =
-    backends.firstOrNull(BackendStatistics::isActiveNativeStatisticsBackend)
-        ?: activeNativeBackendId
-            ?.takeIf { it == NativeBackendId.Zygisk }
-            ?.let {
-                BackendStatistics(
-                    backend = HookIds.Backend.ZYGISK,
-                    status = null,
-                    rows = emptyList(),
-                    unavailableReason = StatisticsUnavailableReason.ZygiskNativeStats,
-                )
-            }
-
-private fun BackendStatistics.isActiveNativeStatisticsBackend(): Boolean {
-    if (rows.isNotEmpty()) return true
-    val status = status ?: return false
-    return status.backendId == backend && status.statusError?.indicatesActive == true
-}
 
 private fun buildStatisticsRows(
     stats: List<Protocol.StatEntry>,
@@ -211,3 +186,85 @@ private fun protocolKindOfLine(line: String): Protocol.Kind? {
         else -> null
     }
 }
+
+/** Historical counter identity stays with its own proc snapshot. */
+internal data class CounterTelemetry(
+    val counters: StatisticsState,
+    val nativeSource: dev.okhsunrog.vpnhide.NativeStatusSnapshot,
+    val rootObservationId: Long,
+    val rootGeneration: Long,
+    val javaBootCurrent: Boolean = false,
+)
+
+internal fun counterTelemetry(root: RootSnapshot) =
+    CounterTelemetry(
+        parseCounterState(root.sections),
+        root.core.nativeStatusSnapshot(),
+        root.observationId,
+        root.generation,
+        dev.okhsunrog.vpnhide.lsposedHooksActiveThisBoot(
+            root.sections["lsposed_state"].orEmpty(),
+            root.sections["current_boot_id"].orEmpty(),
+        ),
+    )
+
+internal fun buildStatisticsState(
+    root: RootSnapshot,
+    core: dev.okhsunrog.vpnhide.CoreSessionUpdate = root.core,
+): StatisticsState = qualifyStatistics(counterTelemetry(root), core.nativeStatusSnapshot())
+
+/** Select current presentation by Core identity, never by stale rows or module order. */
+internal fun qualifyStatistics(
+    telemetry: CounterTelemetry,
+    source: dev.okhsunrog.vpnhide.NativeStatusSnapshot,
+): StatisticsState {
+    val paired = statisticsSourcesJoined(telemetry, source)
+    val native = source.model?.observed.takeIf { paired }
+    val backend =
+        when (native) {
+            NativeBackendId.Kmod -> HookIds.Backend.KMOD
+            NativeBackendId.Builtin -> HookIds.Backend.BUILTIN
+            NativeBackendId.Kpm -> HookIds.Backend.KPM
+            NativeBackendId.Zygisk -> HookIds.Backend.ZYGISK
+            null -> null
+        }
+    val currentNative =
+        telemetry.counters.backends.firstOrNull { it.backend == backend }?.let { counters ->
+            val runtime = source.model?.runtime
+            val sameStatus =
+                runtime != null && counters.status?.let { status ->
+                    status.backendId == backend && status.kver == runtime.kernelVersion && status.hooks == runtime.installedHooks &&
+                        status.error == runtime.statusError
+                } == true
+            counters.copy(current = sameStatus)
+        }
+    val zygisk =
+        if (paired && source.model?.selected?.backend == NativeBackendId.Zygisk && currentNative == null) {
+            BackendStatistics(
+                HookIds.Backend.ZYGISK,
+                null,
+                rows = emptyList(),
+                unavailableReason = StatisticsUnavailableReason.ZygiskNativeStats,
+            )
+        } else {
+            null
+        }
+    val java =
+        telemetry.counters.backends.firstOrNull { it.backend == HookIds.Backend.LSPOSED }?.let { counters ->
+            counters.copy(current = paired && telemetry.javaBootCurrent && counters.status?.statusError?.indicatesActive == true)
+        }
+    return StatisticsState(listOfNotNull(currentNative, zygisk, java), source, telemetry.rootObservationId, telemetry.rootGeneration)
+}
+
+private fun statisticsSourcesJoined(
+    telemetry: CounterTelemetry,
+    source: dev.okhsunrog.vpnhide.NativeStatusSnapshot,
+): Boolean =
+    source.current && telemetry.nativeSource.current && source.epoch == telemetry.nativeSource.epoch &&
+        source.connectionGeneration == telemetry.nativeSource.connectionGeneration &&
+        source.configRevision == telemetry.nativeSource.configRevision &&
+        source.model?.boot == telemetry.nativeSource.model?.boot &&
+        source.model?.selected == telemetry.nativeSource.model?.selected &&
+        source.model?.delivery == telemetry.nativeSource.model?.delivery &&
+        source.model?.observed == telemetry.nativeSource.model?.observed &&
+        source.model?.runtime == telemetry.nativeSource.model?.runtime

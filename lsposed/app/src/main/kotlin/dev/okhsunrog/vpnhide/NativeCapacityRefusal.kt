@@ -1,9 +1,12 @@
 package dev.okhsunrog.vpnhide
 
 import android.content.res.Resources
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import org.json.JSONObject
 
 /** One native-selected package and the app UIDs (every profile and clone) it adds. */
+@Serializable
 internal data class NativeCapacityPackage(
     val packageName: String,
     val uids: List<Int>,
@@ -14,6 +17,7 @@ internal data class NativeCapacityPackage(
  * on the wire). Nothing was saved or applied; the previous config stays in effect. At
  * least [overflow] UIDs must be deselected. [packages] lists most UIDs first.
  */
+@Serializable
 internal data class NativeCapacityRefusal(
     val total: Int,
     val capacity: Int,

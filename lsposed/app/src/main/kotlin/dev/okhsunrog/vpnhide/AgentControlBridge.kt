@@ -2,7 +2,6 @@ package dev.okhsunrog.vpnhide
 
 import android.content.Context
 import android.util.Log
-import dev.okhsunrog.vpnhide.diagnostics.token
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext

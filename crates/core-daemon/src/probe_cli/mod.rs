@@ -18,19 +18,13 @@ pub fn run(args: &[String]) -> Option<i32> {
             vpnhide_activator::kpm_inventory::child(next == "next")
         }
         [command, mode] if command == "probe" && mode == "checks" => probe::checks(&[]),
-        [command, mode, rest @ ..] if command == "probe" && mode == "routing" => {
-            probe::routing(rest)
-        }
-        [command, mode, rest @ ..] if command == "observe" && mode == "app-vpn-state" => {
-            probe::app_vpn_state(rest)
-        }
         [command, mode] if command == "observe" && mode == "kpm-state" => observations::kpm_state(),
         [command, mode, rest @ ..] if command == "probe" && is_device_probe(mode) => {
             device_probe(mode, rest)
         }
         [command, ..] if command == "probe" || command == "observe" => {
             eprintln!(
-                "usage: vpnhide-core probe checks | probe root-snapshot [--packages] | probe debug-snapshot | probe hook-counters | probe kernel-partitions | probe kernel-images <dir> | probe java-hooks <dir> [--files] | probe lsposed-db <dir> | probe logcat-lsposed | probe routing --uid <uid> [--vpn-ifaces <list>] | observe app-vpn-state --uid <uid> | observe kpm-state"
+                "usage: vpnhide-core probe checks | probe root-snapshot [--packages] | probe debug-snapshot | probe hook-counters | probe kernel-partitions | probe kernel-images <dir> | probe java-hooks <dir> [--files] | probe lsposed-db <dir> | probe logcat-lsposed | observe kpm-state"
             );
             2
         }

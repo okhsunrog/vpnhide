@@ -260,6 +260,25 @@ fn effective_hooks(
     (!hooks.is_empty()).then_some(hooks)
 }
 
+/// Required installation coverage for every desired role. It intentionally does
+/// not consult inventory or an installed mask: unresolved UIDs cannot shrink it.
+/// Loader-gated filesystem bits are not required when that feature is disabled.
+pub fn required_hooks(
+    selections: &BTreeMap<String, NativeSelection>,
+    family: NativeHookFamily,
+    filesystem_enabled: bool,
+) -> u32 {
+    let mask = selections
+        .values()
+        .filter_map(|selection| effective_hooks(selection, family, filesystem_enabled))
+        .fold(0, |mask, hooks| mask | hooks.bits());
+    if filesystem_enabled {
+        mask
+    } else {
+        mask & !Hook::FilesystemIfacePaths.bit()
+    }
+}
+
 /// Removing/narrowing protection remains possible even if grouped wire encoding
 /// grows, or the inventory is incomplete. This compares policy, not UI row counts.
 pub fn is_reduction(

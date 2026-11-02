@@ -1,20 +1,18 @@
 package dev.okhsunrog.vpnhide.settings
 
-import dev.okhsunrog.vpnhide.KmodLoadStatus
 import dev.okhsunrog.vpnhide.NativeBackendId
 import dev.okhsunrog.vpnhide.NativeBootStatus
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.hasHook
 import dev.okhsunrog.vpnhide.hooksInMask
 import dev.okhsunrog.vpnhide.installedHooks
-import dev.okhsunrog.vpnhide.kmodLoadStatus
-import dev.okhsunrog.vpnhide.kpmLoadStatus
 import dev.okhsunrog.vpnhide.parseKeyValueLines
 import dev.okhsunrog.vpnhide.statistics.parseProtocolStatusBlock
 import dev.okhsunrog.vpnhide.statusError
 
 internal enum class FilesystemHidingStatus {
     Unavailable,
+    Unknown,
     Disabled,
     Active,
     PendingEnable,
@@ -31,246 +29,20 @@ internal data class FilesystemHidingState(
         get() = status != FilesystemHidingStatus.Unavailable
 }
 
-private data class FilesystemNativeBackend(
-    val id: NativeBackendId,
-    val statusRaw: String,
-)
-
-private fun filesystemNativeBackend(sections: Map<String, String>): FilesystemNativeBackend? {
-    val kmodRaw = sections["kmod_state"].orEmpty()
-    val kpmRaw = sections["kpm_state"].orEmpty()
-    val zygiskRaw = sections["zygisk_status"].orEmpty()
-    val kmodStatus = parseProtocolStatusBlock(kmodRaw)
-    val kpmStatus = parseProtocolStatusBlock(kpmRaw)
-    val zygiskActive =
-        parseKeyValueLines(zygiskRaw)["boot_id"] ==
-            sections["current_boot_id"].orEmpty().trim() &&
-            sections["current_boot_id"].orEmpty().isNotBlank()
-    return when {
-        kmodStatus?.backend ==
-            HookIds.Backend.KMOD.id
-                .toLong() -> {
-            FilesystemNativeBackend(NativeBackendId.Kmod, kmodRaw)
+/** Core owns backend choice and runtime setup. Drafts do not reconstruct it. */
+internal fun resolveFilesystemHidingState(snapshot: dev.okhsunrog.vpnhide.NativeStatusSnapshot): FilesystemHidingState {
+    val model = snapshot.model
+    val backend = model?.displayed?.backend
+    if (!snapshot.current) return FilesystemHidingState(FilesystemHidingStatus.Unknown, backend)
+    val status =
+        when (model?.filesystem) {
+            "unavailable" -> FilesystemHidingStatus.Unavailable
+            "disabled" -> FilesystemHidingStatus.Disabled
+            "enabled" -> FilesystemHidingStatus.Active
+            "pending_enable" -> FilesystemHidingStatus.PendingEnable
+            "pending_disable" -> FilesystemHidingStatus.PendingDisable
+            "setup_error" -> FilesystemHidingStatus.HookSetupError
+            else -> FilesystemHidingStatus.Unknown
         }
-
-        // The in-tree driver shares /proc/vpnhide_ctl (the kmod_state section)
-        // with the .ko and is told apart only by the backend id it reports (0x4).
-        kmodStatus?.backend ==
-            HookIds.Backend.BUILTIN.id
-                .toLong() -> {
-            FilesystemNativeBackend(NativeBackendId.Builtin, kmodRaw)
-        }
-
-        kpmStatus?.backend ==
-            HookIds.Backend.KPM.id
-                .toLong() -> {
-            FilesystemNativeBackend(NativeBackendId.Kpm, kpmRaw)
-        }
-
-        zygiskActive -> {
-            FilesystemNativeBackend(NativeBackendId.Zygisk, zygiskRaw)
-        }
-
-        sections["kmod_module_dir"]?.trim() == "1" -> {
-            FilesystemNativeBackend(NativeBackendId.Kmod, kmodRaw)
-        }
-
-        sections["builtin_module_dir"]?.trim() == "1" -> {
-            FilesystemNativeBackend(NativeBackendId.Builtin, kmodRaw)
-        }
-
-        sections["kpm_module_dir"]?.trim() == "1" -> {
-            FilesystemNativeBackend(NativeBackendId.Kpm, kpmRaw)
-        }
-
-        sections["zygisk_module_dir"]?.trim() == "1" -> {
-            FilesystemNativeBackend(NativeBackendId.Zygisk, zygiskRaw)
-        }
-
-        else -> {
-            null
-        }
-    }
-}
-
-private fun currentKmodLoadStatus(
-    backend: FilesystemNativeBackend,
-    sections: Map<String, String>,
-    nativeBoot: NativeBootStatus?,
-): KmodLoadStatus? =
-    if (backend.id == NativeBackendId.Kmod) {
-        nativeBoot.kmodLoadStatus(sections["current_boot_id"].orEmpty())?.takeIf { it.freshForCurrentBoot }
-    } else {
-        null
-    }
-
-private fun filesystemHookSetupFailed(
-    backend: FilesystemNativeBackend,
-    load: KmodLoadStatus?,
-    sections: Map<String, String>,
-    nativeBoot: NativeBootStatus?,
-): Boolean =
-    when (backend.id) {
-        // Core adopts the in-tree backend without load args, so its boot status
-        // carries no filesystem-hiding choice: no setup-failure signal to read,
-        // the same fail-open as an unavailable one.
-        NativeBackendId.Kmod, NativeBackendId.Builtin -> {
-            load?.let { it.loaded == true && it.filesystemHiding == true } == true
-        }
-
-        NativeBackendId.Kpm -> {
-            val kpmLoad = nativeBoot.kpmLoadStatus()
-            kpmLoad.loaded == true &&
-                kpmLoad.filesystemHiding == true &&
-                kpmLoad.isFreshFor(sections["current_boot_id"].orEmpty()) &&
-                parseProtocolStatusBlock(backend.statusRaw)?.statusError == HookIds.StatusError.PARTIAL_HOOKS
-        }
-
-        NativeBackendId.Zygisk -> {
-            val status = currentZygiskHookStatus(backend.statusRaw, sections["current_boot_id"].orEmpty())
-            status != null &&
-                status.requested.hasHook(HookIds.Hook.FILESYSTEM_IFACE_PATHS) &&
-                !status.installed.hasHook(HookIds.Hook.FILESYSTEM_IFACE_PATHS) &&
-                status.filesystemError.isNotBlank()
-        }
-    }
-
-private data class ZygiskHookStatus(
-    val requested: Long,
-    val installed: Long,
-    val filesystemError: String,
-)
-
-private fun currentZygiskHookStatus(
-    raw: String,
-    currentBootId: String,
-): ZygiskHookStatus? {
-    val values = parseKeyValueLines(raw)
-    if (values["boot_id"] != currentBootId.trim() || currentBootId.isBlank()) return null
-    return ZygiskHookStatus(
-        requested = values["requested_hooks"]?.toLongOrNull(16) ?: 0,
-        installed = values["installed_hooks"]?.toLongOrNull(16) ?: 0,
-        filesystemError = values["filesystem_error"].orEmpty(),
-    )
-}
-
-internal fun installedZygiskOptionalHooks(
-    raw: String,
-    currentBootId: String,
-): Set<HookIds.Hook> =
-    currentZygiskHookStatus(raw, currentBootId)
-        ?.installed
-        ?.let(::hooksInMask)
-        ?.intersect(setOf(HookIds.Hook.FILESYSTEM_IFACE_PATHS))
-        .orEmpty()
-
-internal fun installedNativeOptionalHooks(
-    backend: NativeBackendId?,
-    sections: Map<String, String>,
-    currentBootId: String,
-): Set<HookIds.Hook> =
-    when (backend) {
-        // Builtin shares /proc/vpnhide_ctl with the .ko, so its installed-hook
-        // mask is the same kmod_state section.
-        NativeBackendId.Kmod, NativeBackendId.Builtin -> {
-            installedHooks(sections["kmod_state"].orEmpty())
-        }
-
-        NativeBackendId.Kpm -> {
-            installedHooks(sections["kpm_state"].orEmpty())
-        }
-
-        NativeBackendId.Zygisk -> {
-            installedZygiskOptionalHooks(
-                sections["zygisk_status"].orEmpty(),
-                currentBootId,
-            )
-        }
-
-        null -> {
-            emptySet()
-        }
-    }
-
-/**
- * The kernel backend's own health verdict (`error` field of its `status`), so
- * the app can trust the module's per-kernel judgement of "complete" rather than
- * diffing against the universal hook set. Null for Zygisk (no such status) and
- * when the status was unread.
- */
-internal fun nativeBackendStatusError(
-    backend: NativeBackendId?,
-    sections: Map<String, String>,
-): HookIds.StatusError? =
-    when (backend) {
-        NativeBackendId.Kmod, NativeBackendId.Builtin -> {
-            parseProtocolStatusBlock(sections["kmod_state"].orEmpty())?.statusError
-        }
-
-        NativeBackendId.Kpm -> {
-            parseProtocolStatusBlock(sections["kpm_state"].orEmpty())?.statusError
-        }
-
-        NativeBackendId.Zygisk, null -> {
-            null
-        }
-    }
-
-/**
- * Compare the canonical choice with the hook set actually reported by the
- * active native backend. Kernel backends apply it at boot; Zygisk applies it
- * per target-process launch and reports the installed subset in its heartbeat.
- */
-internal fun resolveFilesystemHidingState(
-    desiredEnabled: Boolean,
-    sections: Map<String, String>,
-    nativeBoot: NativeBootStatus? = null,
-): FilesystemHidingState {
-    val backend =
-        filesystemNativeBackend(sections)
-            ?: return FilesystemHidingState(FilesystemHidingStatus.Unavailable)
-    val hookInstalled =
-        when (backend.id) {
-            NativeBackendId.Kmod, NativeBackendId.Builtin, NativeBackendId.Kpm -> {
-                HookIds.Hook.FILESYSTEM_IFACE_PATHS in installedHooks(backend.statusRaw)
-            }
-
-            NativeBackendId.Zygisk -> {
-                HookIds.Hook.FILESYSTEM_IFACE_PATHS in
-                    installedZygiskOptionalHooks(
-                        backend.statusRaw,
-                        sections["current_boot_id"].orEmpty(),
-                    )
-            }
-        }
-    val load = currentKmodLoadStatus(backend, sections, nativeBoot)
-
-    return when {
-        desiredEnabled && hookInstalled -> {
-            FilesystemHidingState(FilesystemHidingStatus.Active, backend.id)
-        }
-
-        !desiredEnabled && hookInstalled -> {
-            FilesystemHidingState(FilesystemHidingStatus.PendingDisable, backend.id)
-        }
-
-        desiredEnabled && filesystemHookSetupFailed(backend, load, sections, nativeBoot) -> {
-            FilesystemHidingState(
-                FilesystemHidingStatus.HookSetupError,
-                backend.id,
-                currentZygiskHookStatus(
-                    backend.statusRaw,
-                    sections["current_boot_id"].orEmpty(),
-                )?.filesystemError,
-            )
-        }
-
-        desiredEnabled -> {
-            FilesystemHidingState(FilesystemHidingStatus.PendingEnable, backend.id)
-        }
-
-        else -> {
-            FilesystemHidingState(FilesystemHidingStatus.Disabled, backend.id)
-        }
-    }
+    return FilesystemHidingState(status, backend, model?.observationError)
 }

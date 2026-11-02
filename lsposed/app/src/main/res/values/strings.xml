@@ -88,7 +88,6 @@
     <string name="native_capacity_package">%1$s (%2$d)</string>
     <string name="native_capacity_package_more">%1$s and %2$d more</string>
     <string name="save_native_capacity_refused">Not saved: this selection needs %1$d app UIDs, but Native holds at most %2$d. Turn off Native for apps covering at least %3$d UIDs (UIDs per app in brackets): %4$s. Your previous settings stay in effect.</string>
-    <string name="dashboard_issue_native_capacity_exceeded">Native settings were not updated: the saved selection now needs %1$d app UIDs, but Native holds at most %2$d (for example, new work-profile or clone copies of selected apps appeared). Nothing was sent; Native keeps its previous targets. Turn off Native for apps covering at least %3$d UIDs (UIDs per app in brackets): %4$s.</string>
 
     <!-- Diagnostics -->
     <string name="btn_export_debug">Collect debug log</string>
@@ -147,27 +146,12 @@
     <string name="dashboard_backend_kpm">KPM</string>
     <string name="dashboard_backend_zygisk">Zygisk</string>
     <string name="dashboard_backend_line">%1$s · %2$s</string>
-    <string name="dashboard_backend_partial_hooks">partial hooks</string>
     <string name="dashboard_not_installed">Not installed</string>
     <string name="dashboard_installed_inactive">Installed, inactive</string>
-    <string name="dashboard_installed_not_verified">Installed, status not verified</string>
-    <string name="dashboard_installed_restart_app">Installed, restart VPN Hide to activate</string>
-    <string name="dashboard_module_installed_reboot_needed">Installed, reboot needed</string>
-    <string name="dashboard_kmod_broken_wrong_variant">Installed, wrong GKI variant</string>
-    <string name="dashboard_kmod_broken_unsupported_kernel">Installed, kernel not supported</string>
-    <string name="dashboard_kmod_broken_no_kprobes">Installed, kernel has no kprobes</string>
-    <string name="dashboard_kmod_broken_unknown_variant">Installed, did not load</string>
-    <string name="dashboard_kmod_broken_ambiguous">Installed, did not load — try the other GKI variant</string>
-    <string name="dashboard_kmod_broken_signature_enforced">Installed, kernel rejects unsigned modules</string>
-    <string name="dashboard_module_broken_artifact_missing">Installed, payload missing</string>
     <string name="dashboard_active_targets">Active · %d target(s)</string>
     <string name="dashboard_reboot_needed">Device reboot needed</string>
     <string name="dashboard_protection_not_verified">Not verified</string>
-    <string name="vpn_off_prompt">No active VPN. Turn it on, then tap Retry to run the hiding checks.</string>
-    <string name="self_not_routed_prompt">A VPN is active, but VPN Hide isn\'t routed through it, so there is nothing for these checks to measure. If you use a general VPN client, add VPN Hide to the tunnel (don\'t split-tunnel it out) and tap Retry. Some VPNs route only selected apps and won\'t let you add VPN Hide — then this self-test can\'t run, which is expected, not a failure; judge hiding by whether your target app works.</string>
-    <string name="self_not_routed_accelerators">Using a game accelerator?</string>
-    <string name="vpn_off_retry">Retry</string>
-    <string name="diag_failed_prompt">The hiding checks couldn\'t run — VPN Hide Core did not answer or a check failed. Tap Retry. This is usually transient.</string>
+    <string name="retry">Retry</string>
 
     <!-- Statistics -->
     <string name="statistics_title">Interception counters</string>
@@ -250,19 +234,7 @@
     <string name="surface_native">Native</string>
     <string name="surface_package">Packages</string>
 
-    <string name="dashboard_install_recommendation_title">Installation recommendation</string>
-    <string name="dashboard_install_recommendation_device">Your device: %1$s, kernel %2$s</string>
-    <string name="dashboard_install_recommendation_kmi_note">\"%1$s\" in the kernel version is the GKI Kernel Module Interface tag — it identifies the kernel\'s binary interface to modules, not your Android OS release.</string>
-    <string name="dashboard_install_recommendation_kmod">Kernel module is recommended. Download %1$s.</string>
-    <string name="dashboard_install_recommendation_kmod_ambiguous">Kernel module is recommended. Your kernel\'s GKI branch isn\'t identifiable from uname -r, so try %1$s first; if it doesn\'t load into the kernel after reboot, install %2$s instead.</string>
-    <string name="dashboard_install_recommendation_zygisk">Kernel module is not supported for your device. Install %1$s.</string>
-    <string name="dashboard_install_recommendation_zygisk_warning">Banking and payment apps may detect Zygisk hooks when Native is enabled for them. Leave Native off for those apps and rely on LSPosed (Java-level) hiding.</string>
-    <string name="dashboard_install_recommendation_kpm">KPM is recommended for your kernel — a single universal module that hides at the kernel level, invisible to anti-tamper. Download %1$s.</string>
-    <string name="dashboard_install_recommendation_kpm_needs_runtime">KPM is recommended for your kernel — kernel-level hiding, invisible to anti-tamper. It needs the KPatch-Next-Module installed first. If you\'d rather not install that, use vpnhide-zygisk.zip instead. KPM artifact: %1$s.</string>
-    <string name="dashboard_install_recommendation_kmod_kpm_alt">The kernel module is the stable, most-tested choice. KPM is an alternative — one universal module, no GKI variant to match — useful if the kernel module won\'t load into your kernel (wrong variant, or the kernel enforces module signatures).</string>
     <string name="dashboard_install_recommendation_download">Download %1$s</string>
-    <string name="dashboard_install_recommendation_all_releases">All releases</string>
-    <string name="dashboard_issue_kpm_capable_but_zygisk">Your kernel supports the stealthier KPM, but only Zygisk is installed. Zygisk is detectable by banking/payment apps; KPM hides at the kernel level. Consider installing %1$s.</string>
     <!-- Community / contact modal -->
     <string name="contact_title">Community &amp; feedback</string>
     <string name="contact_body">Questions, bug reports, or feedback? Reach the author here.</string>
@@ -289,9 +261,6 @@
     <string name="donate_btc">BTC</string>
     <string name="donate_copied">Address copied to clipboard</string>
     <string name="donate_close">Close</string>
-    <string name="donate_banner">VPN Hide is free and has no ads. If it is useful to you, you can support its development.</string>
-    <string name="donate_banner_support">Support</string>
-    <string name="donate_banner_hide">Hide</string>
 
     <!-- Import of a pre-1.0 configuration left on disk -->
     <string name="legacy_import_banner">A configuration from a version before 1.0 was found on this device: %1$d apps. Your current setup already has apps configured, so it was not imported automatically.</string>
@@ -332,33 +301,15 @@
     <string name="dashboard_issues">Errors (%d)</string>
     <string name="dashboard_warnings">Warnings (%d)</string>
     <string name="dashboard_info">Info (%d)</string>
-    <string name="dashboard_issue_checks_failed">Not all hiding checks passed.</string>
     <string name="dashboard_action_details">Details</string>
     <string name="dashboard_action_learn_more">Learn more</string>
-    <string name="dashboard_issue_kmod_capable_but_zygisk">Your kernel supports the kernel module — it hooks in kernel space and is invisible to anti-tamper checks. Zygisk works too, but banking and payment apps may detect its hooks when Native is enabled for them. Install %1$s and uninstall the Zygisk module for cleaner coverage.</string>
-    <string name="dashboard_issue_native_conflict_kernel">A kernel backend (.ko or built-in) and KPM are both active. They hook the same kernel functions and can freeze the device. Keep only one kernel backend; with a built-in kernel, remove KPM.</string>
-    <string name="dashboard_issue_native_backends_conflict">Native backends installed: %1$s. Keep exactly one. VPN Hide loaded none of them this boot, so native hiding is off until you uninstall the others and reboot.</string>
-    <string name="dashboard_issue_native_backends_staged_conflict">After the next reboot these native backends will be installed: %1$s. Keep exactly one, or VPN Hide will load none of them.</string>
-    <string name="dashboard_issue_kpm_unverifiable">KernelPatch can\'t be queried, so VPN Hide can\'t check whether a VPN Hide KPM is already running (installed with vpnhide-kpm.zip, autoloaded by APatch or loaded by hand). To never run two native backends, nothing else was loaded. Save your SuperKey in Settings → Security so VPN Hide can check it. Detail: %1$s</string>
-    <string name="dashboard_issue_native_boot_failed">The native backend could not be set up this boot: %1$s</string>
-    <string name="dashboard_issue_zygisk_retire_failed">Zygisk is not the selected backend, but its old target list could not be cleared, so it may still hook previously selected apps. Uninstall the Zygisk module. Detail: %1$s</string>
     <string name="dashboard_issue_obsolete_modules">An obsolete VPN Hide 1.x module is still installed: %1$s. VPN Hide Core replaced it in 2.0, and its old boot scripts fight the core. Uninstall it in your root manager and reboot.</string>
-    <string name="dashboard_issue_kpm_awaiting_superkey">The KPM is not active yet: KernelPatch refused authentication, so VPN Hide could not load or verify it. Save your SuperKey in Settings → Security and VPN Hide picks it up right away, no reboot needed.</string>
-    <string name="dashboard_issue_kpm_incompatible">A VPN Hide KPM is running, but VPN Hide Core can\'t use it (reported version: %1$s, needs %2$s or newer), so it sent the KPM no settings and did not load a second copy. Replace it with the current version — install vpnhide-kpm.zip, or load the current vpnhide.kpm in APatch/KPatch-Next — and reboot. Detail: %3$s</string>
-    <string name="dashboard_issue_kpm_version_unreported">not reported</string>
     <string name="dashboard_issue_module_reboot_to_activate">The %1$s module is installed but not active yet — reboot the device to activate it.</string>
     <string name="dashboard_issue_module_artifact_missing">The %1$s module installation is corrupted: %2$s is missing, so core has nothing to load. Reinstall the module ZIP from the latest release.</string>
-    <string name="dashboard_issue_kpm_unsupported_kernel">KPM is installed but cannot load on kernel %1$s because this kernel family has no validated offset table. Use the Zygisk backend instead.</string>
-    <string name="dashboard_issue_kpm_needs_superkey">KPM is installed and the KernelPatch runtime answered, but it refused the module control call — VPN Hide has no SuperKey saved, so it could only authenticate with the trusted su token. Save your SuperKey in Settings → Security (the same one you set in APatch/FolkPatch) and tap Refresh. Reinstalling the zip does not help.</string>
-    <string name="dashboard_issue_kpm_needs_runtime">KPM is installed, but the kernel is not patched with a KernelPatch runtime to load it. Install the KPatch-Next-Module and patch your kernel from its interface (it works on both Magisk and KernelSU). If that does not work, use APatch or FolkPatch instead.</string>
-    <string name="dashboard_issue_native_partial_hooks">The native backend loaded, but only %1$d of %2$d kernel hooks installed on this kernel — it could not resolve: %3$s. The detection surfaces behind them are not covered by this backend; another layer may still close them. Reinstalling does not help: the functions are named differently (or absent) in this kernel build.</string>
-    <string name="dashboard_issue_kpm_load_failed">KPM installed but failed to load: %1$s. Use Settings → Debugging → Collect debug log to attach the full boot-time output to a bug report, or reinstall vpnhide-kpm.zip from the latest release.</string>
-    <string name="dashboard_issue_multiple_native">More than one native backend is installed. Only one can be active at a time (priority: kernel module, then KPM, then Zygisk); the others sit idle. Uninstall the ones you don\'t use to keep things clean.</string>
     <string name="dashboard_issue_debug_logging_on">Debug logging is enabled. VPN Hide is writing verbose lines to logcat that anyone with root can read. Turn it off in Settings → For developers after you\'ve finished collecting a bug report.</string>
     <string name="dashboard_issue_agent_bridge_on">Agent control is enabled. VPN Hide is running a local debug bridge whose open port lets other apps on this device detect VPN Hide. Turn it off in Settings → For developers when you\'re done.</string>
     <string name="dashboard_issue_selinux_permissive">SELinux is Permissive. Six detection vectors VPN Hide relies on the kernel to block (RTM_GETROUTE, /proc/net/{tcp,udp,dev,fib_trie}, /sys/class/net) are reachable to selected apps. Run `setenforce 1` and investigate what disabled it.</string>
     <string name="dashboard_issue_self_multi_profile">VPN Hide is installed in %1$d profiles. The main-profile copy is the one that matters — LSPosed hooks system_server, which runs in the main profile only, and the picker there already sees apps from every profile and applies filters to all of them. Extra copies in secondary profiles are redundant and race each other\'s Saves to the shared config. Uninstall from work profile / Second Space / other secondary profiles.</string>
-    <string name="dashboard_issue_no_native">No Native backend installed. Install the recommended Native backend for full hiding.</string>
     <string name="dashboard_issue_lsposed_not_installed">LSPosed/Vector is not installed. Install it and enable the VPN Hide module for System Framework.</string>
     <string name="dashboard_issue_reboot">LSPosed is configured correctly, but its hooks are not active yet. Reboot the device to activate them.</string>
     <string name="dashboard_issue_lsposed_config_unreadable">Failed to read LSPosed/Vector configuration. Reopen LSPosed/Vector, verify that VPN Hide is enabled there, and then reopen VPN Hide.</string>
@@ -390,13 +341,6 @@
     <string name="dashboard_running_version">Running module version: %s</string>
 
     <!-- kmod variant / load diagnostics -->
-    <string name="dashboard_issue_kmod_wrong_variant">Wrong kernel module variant: installed %1$s, your kernel needs %2$s. Uninstall the current kmod and install %3$s from the latest release.</string>
-    <string name="dashboard_issue_kmod_unknown_variant">Kernel module is installed but not loading, and the zip doesn\'t identify which GKI variant it was built for. Reinstall %1$s from the latest release to make sure it matches your kernel.</string>
-    <string name="dashboard_issue_kmod_ambiguous_try_alternative">Kernel module %1$s failed to load this boot. Your kernel\'s GKI branch isn\'t identifiable from uname -r, so install %2$s instead.</string>
-    <string name="dashboard_issue_kmod_load_failed">Kernel module failed to load. insmod error: %1$s. Use Settings → Debugging → Collect debug log to attach the full boot-time insmod output to a bug report.</string>
-    <string name="dashboard_issue_kmod_signature_enforced">Your kernel enforces module signature verification, so the unsigned kernel module can\'t load (insmod failed with EKEYREJECTED — \"Key was rejected by service\"). Magisk can\'t disable this. Switch to KernelSU Next in GKI mode — it removes the enforcement and the kmod loads. On GKI kernels the kernel module is the right tool; don\'t fall back to Zygisk, whose in-process hooks are easily detected by banking and anti-fraud apps.</string>
-    <string name="dashboard_issue_kmod_not_supported_kernel">Your kernel (%1$s) has no matching vpnhide-kmod variant. Uninstall the kmod module and install %2$s instead.</string>
-    <string name="dashboard_issue_kprobes_missing">Your kernel was built without CONFIG_KRETPROBES. The VPN Hide kernel module cannot work on this kernel. Uninstall kmod and use vpnhide-zygisk.zip instead.</string>
 
     <!-- Update -->
     <string name="update_available_title">Update available</string>
@@ -436,22 +380,8 @@
     <string name="check_proc_dev" translatable="false">/proc/net/dev</string>
     <string name="check_sys_class_net" translatable="false">/sys/class/net</string>
     <string name="check_proc_sys_net" translatable="false">/proc/sys/net/*/{conf,neigh}</string>
-    <string name="check_net_iface_enum" translatable="false">NetworkInterface enum</string>
 
     <!-- Java/LSPosed check names (technical, not translatable) -->
-    <string name="check_has_transport_vpn" translatable="false">hasTransport(VPN)</string>
-    <string name="check_has_capability_not_vpn" translatable="false">hasCapability(NOT_VPN)</string>
-    <string name="check_transport_info" translatable="false">getTransportInfo()</string>
-    <string name="check_all_networks_vpn" translatable="false">getAllNetworks() VPN scan</string>
-    <string name="check_network_for_type_vpn" translatable="false">getNetworkForType(TYPE_VPN)</string>
-    <string name="check_active_network_handle" translatable="false">ActiveNetwork handle</string>
-    <string name="check_all_networks_handles" translatable="false">getAllNetworks() handles</string>
-    <string name="check_active_network_vpn" translatable="false">ActiveNetwork transports</string>
-    <string name="check_network_callback" translatable="false">NetworkCallback (push)</string>
-    <string name="check_link_properties" translatable="false">LinkProperties ifname</string>
-    <string name="check_link_properties_routes" translatable="false">LinkProperties routes</string>
-    <string name="check_network_info_vpn" translatable="false">getNetworkInfo(TYPE_VPN)</string>
-    <string name="check_network_view" translatable="false">Network model coherence</string>
 
     <!-- Settings screen -->
     <string name="settings_title">Settings</string>
@@ -482,7 +412,6 @@
     <string name="settings_experimental_protection">Experimental protection</string>
     <string name="settings_filesystem_hiding">Hide VPN filesystem paths</string>
     <string name="settings_filesystem_hiding_sub">Experimental: kernel backends intercept global VFS paths, while Zygisk provides best-effort libc filtering inside selected apps. No known real-world apps currently rely on this detection vector; standard Native protection should normally be sufficient.</string>
-    <string name="settings_filesystem_hiding_unavailable">Requires a kmod, KPM, or Zygisk native backend.</string>
     <string name="settings_filesystem_hiding_disabled">Off — standard Native protection is recommended.</string>
     <string name="settings_filesystem_hiding_active">Active for selected Native targets.</string>
     <string name="settings_filesystem_hiding_pending_enable">Will be enabled after reboot.</string>
@@ -604,7 +533,6 @@
     <string name="config_capture_logging">Debug logging remains active while a capture is running.</string>
     <string name="config_changes_unavailable">Configuration changes are unavailable</string>
     <string name="config_close">Close</string>
-    <string name="dashboard_issue_redundant_kmod_builtin">VPN Hide is built into the running kernel. Remove the unnecessary kmod module: the core loads only one native backend and loads none while both are present.</string>
     <string name="debug_export_complete">Report collected successfully.</string>
     <string name="debug_export_partial">A partial report was collected. You can save or share it.\n%1$s</string>
     <string name="debug_export_failed">Report collection failed: %1$s</string>
@@ -689,4 +617,18 @@
     <string name="autonomous_vector_ports">Ports protection</string>
     <string name="autonomous_vector_filesystem">Filesystem protection</string>
     <string name="autonomous_metadata_pending">Device metadata is being refreshed; Core protection evidence is shown above.</string>
+
+    <string name="native_status_unavailable">Core status unavailable</string>
+    <string name="native_status_no_selection">No native backend selected</string>
+    <string name="native_status_awaiting_runtime">Waiting for runtime confirmation</string>
+    <string name="native_status_conflict">Conflicting native backends</string>
+    <string name="native_status_pending">Applying configuration</string>
+    <string name="native_status_failed">Setup needs attention</string>
+    <string name="native_status_unknown">Application is not confirmed</string>
+    <string name="native_status_partial">Some configured hooks are unavailable</string>
+    <string name="native_status_ready">Backend ready</string>
+    <string name="native_status_processes">Waiting for target process confirmation</string>
+    <string name="native_status_bundled">Included in Core</string>
+    <string name="native_status_builtin">Built into the kernel</string>
+    <string name="native_status_legacy">Standalone module</string>
 </resources>

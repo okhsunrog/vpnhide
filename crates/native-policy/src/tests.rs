@@ -184,3 +184,23 @@ fn a_real_policy_reduction_can_increase_grouped_bytes_and_must_remain_allowed() 
         NativeHookFamily::Kpm
     ));
 }
+
+#[test]
+fn required_installation_hooks_come_from_desired_roles_without_inventory_or_observed_mask() {
+    let mut roles = BTreeMap::new();
+    roles.insert("unresolved.app".into(), NativeSelection::Enabled(true));
+    for family in [
+        NativeHookFamily::Builtin,
+        NativeHookFamily::Kmod,
+        NativeHookFamily::Kpm,
+        NativeHookFamily::Zygisk,
+    ] {
+        let off = required_hooks(&roles, family, false);
+        let on = required_hooks(&roles, family, true);
+        assert_ne!(off, 0);
+        assert_eq!(off & Hook::FilesystemIfacePaths.bit(), 0);
+        assert_ne!(on & Hook::FilesystemIfacePaths.bit(), 0);
+    }
+    roles.insert("unresolved.app".into(), NativeSelection::Enabled(false));
+    assert_eq!(required_hooks(&roles, NativeHookFamily::Builtin, true), 0);
+}

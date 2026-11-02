@@ -23,15 +23,7 @@ internal fun CorePublication.toState(): CoreStateView =
         revision = revision.toLong(),
         nativeBoot = backend.boot?.toBootStatus(),
         activeCaptures = debugLeases.size + if (debugLease && debugLeases.isEmpty()) 1 else 0,
-        routing =
-            CoreRoutingView(
-                routing.freshness == CoreObservationFreshness.CURRENT,
-                routing.generation.toLong(),
-                routing.uid?.uid?.toInt(),
-                routing.uid?.state,
-                (routing.uid?.interfaces ?: routing.vpnInterfaces).distinct().sorted(),
-                routing.uid?.session,
-            ),
+        nativeStatus = nativeView.toNativeStatusInfo(),
         mutationHeld = mutationHeld,
         autonomousDiagnostics = autonomousDiagnostics,
         autonomousAssessment = autonomousAssessment,

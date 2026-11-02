@@ -16,7 +16,6 @@ import dev.okhsunrog.vpnhide.debug.setDebugLoggingEnabled
 import dev.okhsunrog.vpnhide.diagnostics.AppProbeStats
 import dev.okhsunrog.vpnhide.diagnostics.CaptureDiff
 import dev.okhsunrog.vpnhide.diagnostics.DetectionMethod
-import dev.okhsunrog.vpnhide.diagnostics.DiagnosticGate
 import dev.okhsunrog.vpnhide.diagnostics.DiagnosticsCache
 import dev.okhsunrog.vpnhide.diagnostics.MethodSurface
 import dev.okhsunrog.vpnhide.diagnostics.buildAppProbeStats
@@ -113,8 +112,6 @@ internal object AgentControl {
                 selfNeedsRestart = false,
                 rootSnapshot = rootSnapshot,
                 shellSnapshot = shellSnapshot,
-                gate = null,
-                checkResults = null,
                 autonomousSnapshot = snapshot,
                 dmesg = if (options.forensics) captureDmesg() else "",
                 logcat = "",
@@ -207,7 +204,10 @@ internal object AgentControl {
         refresh: Boolean? = null,
     ): AgentStatisticsCaptureBaseline =
         withAppContext(context) {
-            snapshotCounters(buildStatisticsState(rootSnapshot(refresh == true))).toAgentStatisticsCaptureBaseline()
+            snapshotCounters(
+                dev.okhsunrog.vpnhide.statistics
+                    .parseCounterState(rootSnapshot(refresh == true).sections),
+            ).toAgentStatisticsCaptureBaseline()
         }
 
     /**
@@ -224,7 +224,9 @@ internal object AgentControl {
         withAppContext(context) { context ->
             diffCapture(
                 baseline = baseline.toCounterMap(),
-                current = buildStatisticsState(rootSnapshot(refresh == true)),
+                current =
+                    dev.okhsunrog.vpnhide.statistics
+                        .parseCounterState(rootSnapshot(refresh == true).sections),
                 selfPackage = context.packageName,
             ).toAgentStatisticsCaptureDiff()
         }
@@ -599,6 +601,10 @@ private fun buildProtectionState(snapshot: TargetsSnapshot): AgentProtectionStat
 internal fun StatisticsState.toAgentStatisticsState(selfPackage: String? = null): AgentStatisticsState {
     val apps = buildAppProbeStats(this, selfPackage)
     return AgentStatisticsState(
+        source =
+            nativeSource?.let {
+                AgentStatisticsSource(it.current, it.epoch, it.configRevision, it.connectionGeneration, rootObservationId, rootGeneration)
+            },
         hasAnyData = hasAnyData,
         activeBackendCount = activeBackendCount,
         totalRows = totalRows,
@@ -638,6 +644,7 @@ private fun BackendStatistics.toAgentBackendStatistics(): AgentBackendStatistics
 private fun BackendStatistics.statisticsStatusName(): String =
     when {
         unavailableReason != null -> "unavailable"
+        !current -> "unverified"
         status == null -> "no_data"
         status.statusError == HookIds.StatusError.OK -> "ok"
         status.statusError == HookIds.StatusError.PARTIAL_HOOKS -> "partial"

@@ -36,20 +36,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.DashboardCache
-import dev.okhsunrog.vpnhide.DiagnosticsFailedPrompt
-import dev.okhsunrog.vpnhide.DiagnosticsRetryPrompt
 import dev.okhsunrog.vpnhide.FileSaveShareRow
+import dev.okhsunrog.vpnhide.NativeCoreStatusCard
 import dev.okhsunrog.vpnhide.R
-import dev.okhsunrog.vpnhide.SelfNotRoutedPrompt
 import dev.okhsunrog.vpnhide.StatusBanner
 import dev.okhsunrog.vpnhide.StatusColors
-import dev.okhsunrog.vpnhide.VpnOffPrompt
 import dev.okhsunrog.vpnhide.core.LogcatAutoStop
 import dev.okhsunrog.vpnhide.debug.DebugExportOutcome
 import dev.okhsunrog.vpnhide.debug.LogcatRecorder
 import dev.okhsunrog.vpnhide.debug.exportDebug
 import dev.okhsunrog.vpnhide.generated.IfaceLists
 import dev.okhsunrog.vpnhide.hook.HookLog
+import dev.okhsunrog.vpnhide.nativeStatusSnapshot
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.shareFileViaProvider
 import dev.okhsunrog.vpnhide.startup.StartupCoordinator
@@ -86,6 +84,8 @@ fun DiagnosticsScreen(
     Column(modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(8.dp))
         AutonomousDiagnosticStatusCard(snapshot) { retryDiagnosticsAndDashboard(context, selfNeedsRestart) }
+        Spacer(Modifier.height(12.dp))
+        NativeCoreStatusCard(snapshot.sources.core.nativeStatusSnapshot())
         Spacer(Modifier.height(12.dp))
         AutonomousDiagnosticRows(snapshot)
         Spacer(Modifier.height(16.dp))

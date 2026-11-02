@@ -1,6 +1,5 @@
 package dev.okhsunrog.vpnhide
 
-import dev.okhsunrog.vpnhide.diagnostics.KpmProblemKind
 import dev.okhsunrog.vpnhide.help.headingSlug
 import dev.okhsunrog.vpnhide.help.parseHelpDestination
 import dev.okhsunrog.vpnhide.help.resolveHelpLocale
@@ -26,51 +25,10 @@ class ModuleProblemDataTest {
         }
     }
 
-    @Test
-    fun diagnosisAndDownloadSurviveLanguageChanges() {
-        val cached = ModuleProblem.Kmod(KmodProblemKind.WrongVariant("old-kmi", "new-kmi", "module.zip"))
-        listOf("values", "values-ru", "values-zh-rCN").forEach { directory ->
-            val text = cached.renderText(resourceStrings(directory, Locale.ROOT))
-            listOf("old-kmi", "new-kmi", "module.zip").forEach { assertTrue(text, it in text) }
-            assertEquals(ModuleBrokenReason.WrongVariant, cached.reason)
-            assertEquals("module.zip", cached.downloadArtifact)
-        }
-    }
-
-    @Test
-    fun missingRuntimeHelpTargetsExistingLocalizedInstallationHeading() {
-        val problem = ModuleProblem.Kpm(KpmProblemKind.NoKernelPatchRuntime)
-        listOf("en", "ru", "zh", "zh-CN", "de").forEach { language ->
-            val destination = parseHelpDestination(problem.helpArticle(language))
-            assertEquals("kpm-install", destination.articleId)
-            val guide = File("../../docs/help/${resolveHelpLocale(language)}/kpm-install.md")
-            val headings = guide.readLines().filter { it.startsWith("## ") }.map { headingSlug(it.removePrefix("## ")) }
-            assertTrue("$language: ${destination.anchor}", destination.anchor in headings)
-        }
-        problems().filter { it != problem }.forEach {
-            assertEquals("module-not-active", it.helpArticle("ru"))
-        }
-    }
-
     private fun problems(): List<ModuleProblem> =
-        listOf(
-            KmodProblemKind.KprobesMissing,
-            KmodProblemKind.SignatureEnforced,
-            KmodProblemKind.UnsupportedKernel("4.14", "module.zip"),
-            KmodProblemKind.WrongVariant("old", "new", "module.zip"),
-            KmodProblemKind.UnknownVariant("module.zip"),
-            KmodProblemKind.AmbiguousLoadFailed("old", "module.zip"),
-            KmodProblemKind.LoadFailed("raw error"),
-        ).map { ModuleProblem.Kmod(it) } +
-            listOf(
-                KpmProblemKind.UnsupportedKernel("4.14"),
-                KpmProblemKind.NoKernelPatchRuntime,
-                KpmProblemKind.NeedsSuperkey,
-                KpmProblemKind.LoadFailed("raw error"),
-            ).map { ModuleProblem.Kpm(it) } +
-            FlashableModuleKind.entries.map { kind ->
-                ModuleProblem.Integrity(ModuleIntegrityProblem(kind, "/data/adb/modules/x/payload"))
-            }
+        FlashableModuleKind.entries.map { kind ->
+            ModuleProblem.Integrity(ModuleIntegrityProblem(kind, "/data/adb/modules/x/payload"))
+        }
 
     // Exercise the production renderer with actual translations, without Android Resources.
     private fun resourceStrings(

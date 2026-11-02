@@ -386,7 +386,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC20; journal11 reads schemas1–10. These
+The current paired APK/Core contract is RPC21; journal11 reads schemas1–10. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -474,3 +474,20 @@ baseline. A disconnected answer retaining the fixture VPN marker is a leak.
 This implements more scenarios but does not establish Android device acceptance,
 callback/default/active-network coverage or complete loaded-game generations.
 Private journal11 (reads1–10) and kernel control2/telemetry1 are unchanged.
+
+
+## Native read projection and removed routing gate (RPC21)
+
+Core publishes one native view: selected/bundled implementation provenance,
+retained attempts, last Native phase with optional frozen wire identity, observed
+runtime, desired required mask and setup/filesystem state. Receipt pruning or
+failed preparation cannot reuse old success. Observed-only runtime has no inferred
+payload provenance. Setup readiness is separate from autonomous hook evidence;
+Zygisk authorization cannot claim global process coverage.
+
+The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
+Dashboard/diagnostics consume Core evidence independently of external VPN presence
+and split-tunnel membership. Real fixture/hook API observations and manual network
+forensics remain. RPC21 requires a paired new APK/Core; journal11 and the frozen
+kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
+need rebuilding merely because the app protocol changed.

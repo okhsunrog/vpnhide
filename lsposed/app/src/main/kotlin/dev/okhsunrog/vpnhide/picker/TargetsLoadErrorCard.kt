@@ -59,7 +59,7 @@ internal fun TargetsLoadErrorCard(
                     onClick = onRetry,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(stringResource(R.string.vpn_off_retry))
+                    Text(stringResource(R.string.retry))
                 }
             }
         }

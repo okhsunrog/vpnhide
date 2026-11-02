@@ -57,7 +57,6 @@ import dev.okhsunrog.vpnhide.PortPolicyMode
 import dev.okhsunrog.vpnhide.PortPolicyUiMode
 import dev.okhsunrog.vpnhide.PortRule
 import dev.okhsunrog.vpnhide.R
-import dev.okhsunrog.vpnhide.activeNativeBackendId
 import dev.okhsunrog.vpnhide.buildCanonicalConfigFromTargetsSnapshot
 import dev.okhsunrog.vpnhide.nativeHookEntriesFor
 import dev.okhsunrog.vpnhide.next
@@ -195,7 +194,7 @@ internal fun AppPickerScreen(
         AppRow(
             app = app,
             userNames = userNames,
-            anyNativeInstalled = targets.anyNativeInstalled,
+            anyNativeInstalled = targets.nativeAvailable,
             nativeBackendId = targets.displayNativeBackendId,
             nativeHookFamily = nativeHookFamily,
             filesystemHidingEnabled =

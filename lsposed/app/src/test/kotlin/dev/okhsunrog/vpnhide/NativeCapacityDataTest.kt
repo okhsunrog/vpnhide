@@ -19,22 +19,18 @@ class NativeCapacityDataTest {
         val config = CanonicalConfig(apps = mapOf("many" to CanonicalApp(native = NativeRole.All)))
         val snapshot =
             TargetsSnapshot(
-                false,
-                false,
-                false,
                 emptyMap(),
                 config,
-                activeNativeBackendId = NativeBackendId.Builtin,
+                nativeStatus = sampleNativeStatus(selected = NativeBackendId.Kpm, observed = NativeBackendId.Builtin),
                 packageUids = mapOf("many" to (2_010_000 until 2_010_000 + capacity).toList()),
                 nativeInventoryComplete = true,
-                selectedNativeBackendId = NativeBackendId.Kpm,
             )
         val usage = requireNotNull(nativeCapacityUsage(emptyList(), snapshot, APP_PACKAGE_NAME))
         assertEquals(capacity.toULong(), usage.targetUids)
         org.junit.Assert.assertTrue(usage.wireBytes > usage.wireCapacity)
         val builtin =
             requireNotNull(
-                nativeCapacityUsage(emptyList(), snapshot.copy(selectedNativeBackendId = NativeBackendId.Builtin), APP_PACKAGE_NAME),
+                nativeCapacityUsage(emptyList(), snapshot.copy(nativeStatus = sampleNativeStatus()), APP_PACKAGE_NAME),
             )
         org.junit.Assert.assertTrue(builtin.wireCapacity > usage.wireCapacity)
     }

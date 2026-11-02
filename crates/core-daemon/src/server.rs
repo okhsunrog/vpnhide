@@ -635,6 +635,7 @@ impl CoreState {
     }
     fn publish_store(&self, store: &ConfigStore) {
         self.publisher.update(|snapshot| {
+            crate::native_status::publish_journal(&mut snapshot.native_view, &store.journal);
             let revocation = store
                 .journal
                 .zygisk_revocation

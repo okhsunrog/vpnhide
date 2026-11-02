@@ -19,7 +19,7 @@ class AgentUiSessionTest {
     @Test
     fun `invalid requests leave current preview intact`() {
         val session = AgentUiSession()
-        val before = session.start(AgentUiStartArgs("kpm-runtime-missing"))
+        val before = session.start(AgentUiStartArgs("lsposed-missing"))
         assertThrows(IllegalArgumentException::class.java) { session.start(AgentUiStartArgs("typo")) }
         assertThrows(IllegalArgumentException::class.java) {
             session.start(AgentUiStartArgs("targets-empty", "first-setup"))
@@ -35,7 +35,7 @@ class AgentUiSessionTest {
     @Test
     fun `repeated anchor navigation creates new composition and back restores scenario`() {
         val session = AgentUiSession()
-        val id = session.start(AgentUiStartArgs("kpm-runtime-missing")).sessionId
+        val id = session.start(AgentUiStartArgs("lsposed-missing")).sessionId
         val args = AgentUiNavigationArgs(id, "kpm-install#где-скачать")
         val first = session.navigate(args)
         session.observe(id, first.revision, destination = args.destination)
@@ -47,7 +47,7 @@ class AgentUiSessionTest {
         session.observe(id, first.revision, action = "stale")
         assertNull(session.state.value.lastAction)
         val back = session.back(id)
-        assertEquals("kpm-runtime-missing", back.scenario)
+        assertEquals("lsposed-missing", back.scenario)
         assertFalse(back.helpOpen)
         assertNull(session.back(id).scenario)
     }
@@ -55,7 +55,7 @@ class AgentUiSessionTest {
     @Test
     fun `old clients and late UI callbacks cannot change replacement or stopped sessions`() {
         val session = AgentUiSession()
-        val old = session.start(AgentUiStartArgs("kpm-runtime-missing"))
+        val old = session.start(AgentUiStartArgs("lsposed-missing"))
         val current = session.start(AgentUiStartArgs("help", "first-setup"))
         assertNotEquals(old.sessionId, current.sessionId)
         assertThrows(IllegalArgumentException::class.java) { session.stop(old.sessionId) }

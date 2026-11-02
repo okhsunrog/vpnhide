@@ -9,7 +9,6 @@ members = [
     "crates/loader-ipc",
     "crates/diagnostic-model",
     "crates/checks",
-    "crates/checks-jni",
     "crates/core-rpc",
     "crates/core-daemon",
     "crates/core-ffi",

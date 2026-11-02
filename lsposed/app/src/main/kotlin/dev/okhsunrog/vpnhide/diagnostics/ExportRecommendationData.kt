@@ -33,54 +33,6 @@ internal data class ExportOverrides(
         (kernel ?: recommendation.kernel) to (java ?: recommendation.java)
 }
 
-internal fun recommendExport(
-    coreAvailable: Boolean,
-    report: DiagnosticReport?,
-    boot: NativeBootOutcome?,
-    javaAttachFailure: Boolean,
-): ExportRecommendation {
-    if (!coreAvailable) return ExportRecommendation(kernelReason = ExportReason.CoreUnavailable, javaReason = ExportReason.CoreUnavailable)
-    val measured = report?.takeIf { it.complete && it.gate == DiagnosticGate.ROUTED }
-    val kernelBackend =
-        measured?.native?.status is LayerStatus.Active &&
-            measured.native.backend in setOf(NativeBackendId.Kmod, NativeBackendId.Builtin, NativeBackendId.Kpm)
-    val kernelLeak =
-        kernelBackend &&
-            measured
-                .native
-                .checks
-                .orEmpty()
-                .any { it.owned && it.outcome == CheckOutcome.Leak }
-    val javaLeak =
-        measured
-            ?.java
-            ?.takeIf { it.status is LayerStatus.Active }
-            ?.checks
-            .orEmpty()
-            .any { it.owned && it.outcome == CheckOutcome.Leak }
-    val kernelCompatibility = kernelCompatibilityEvidence(boot)
-    val configuration = configurationOnlyFailure(boot)
-    return ExportRecommendation(
-        kernel = !configuration && (kernelLeak || kernelCompatibility),
-        java = javaLeak || javaAttachFailure,
-        kernelReason =
-            when {
-                configuration -> ExportReason.Configuration
-                kernelCompatibility -> ExportReason.KernelCompatibility
-                kernelLeak -> ExportReason.KernelHooks
-                measured == null -> ExportReason.Incomplete
-                else -> ExportReason.NoCause
-            },
-        javaReason =
-            when {
-                javaAttachFailure -> ExportReason.JavaAttach
-                javaLeak -> ExportReason.JavaHooks
-                measured == null -> ExportReason.Incomplete
-                else -> ExportReason.NoCause
-            },
-    )
-}
-
 /** Recommendations consume the same accepted Core facts as UI/export/agent. */
 internal fun exportRecommendation(snapshot: AutonomousDiagnosticSnapshot): ExportRecommendation {
     val core = snapshot.sources.core
@@ -133,9 +85,3 @@ private fun kernelCompatibilityEvidence(boot: NativeBootOutcome?): Boolean =
 private fun configurationOnlyFailure(boot: NativeBootOutcome?): Boolean =
     boot is NativeBootOutcome.Conflict || boot is NativeBootOutcome.AwaitingAuthentication ||
         boot is NativeBootOutcome.MissingArtifact || boot is NativeBootOutcome.CapacityExceeded
-
-internal fun exportMeasurementIsCurrent(presentation: DiagnosticPresentation): Boolean =
-    presentation.applicability == MeasurementApplicability.MatchesLastObservation &&
-        presentation.eligibility == DiagnosticEligibility.Eligible && presentation.desiredDeliveryConfirmed &&
-        !presentation.probeUnavailable && presentation.measurement?.completed == true &&
-        presentation.measurement.interrupted == false && presentation.measurementResults != null

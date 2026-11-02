@@ -33,12 +33,12 @@ internal data class CoreStateView(
     val storageFault: String? = null,
     val heldResources: Set<ConfigPhase> = emptySet(),
     val backend: CoreBackendView? = null,
-    val routing: CoreRoutingView? = null,
     val mutationHeld: Boolean = false,
     val zygiskLifecycle: uniffi.vpnhide_core_ffi.CoreZygiskLifecycle? = null,
     val zygiskRevocation: uniffi.vpnhide_core_ffi.CoreZygiskRevocationStatus? = null,
     val autonomousDiagnostics: uniffi.vpnhide_core_ffi.CoreDiagnosticRun? = null,
     val autonomousAssessment: uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment? = null,
+    val nativeStatus: NativeStatusInfo? = null,
 )
 
 /** A core operation receipt: phase outcomes as core executed them, and the settled result. */
@@ -91,16 +91,6 @@ internal object CoreOperationIds {
         }
     }
 }
-
-/** Root-observed UID membership; absent/unknown evidence is never VPN-off. */
-internal data class CoreRoutingView(
-    val current: Boolean,
-    val generation: Long,
-    val uid: Int?,
-    val state: uniffi.vpnhide_core_ffi.CoreUidVpnRouteState?,
-    val interfaces: List<String>,
-    val session: String? = null,
-)
 
 /** Effective debug is published by core, including recording leases and FullReset. */
 internal fun corePublishedDebug(update: CoreSessionUpdate): Boolean? =
