@@ -1640,6 +1640,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "vpnhide_diagnostic_model",
 ]
 
 [[package]]
@@ -1681,6 +1682,7 @@ dependencies = [
  "vpnhide_checks",
  "vpnhide_core_client",
  "vpnhide_core_rpc",
+ "vpnhide_diagnostic_model",
  "vpnhide_loader_ipc",
  "vpnhide_protocol",
 ]
@@ -1705,6 +1707,13 @@ dependencies = [
  "serde",
  "serde_json",
  "tarpc",
+]
+
+[[package]]
+name = "vpnhide_diagnostic_model"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

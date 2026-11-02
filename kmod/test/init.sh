@@ -48,6 +48,34 @@ else
 fi
 }
 
+if [ -f /vpnhide_native_fixture_only ]; then
+    fixture_mode="$(cat /vpnhide_native_fixture_only)"
+    fixture_ok=0
+    if [ "$fixture_mode" = protected ]; then
+        loader_preflight
+        if insmod /vpnhide_kmod.ko filesystem_hiding=1; then
+            echo "INSMOD=ok"
+        else
+            echo "INSMOD=FAIL"
+            echo "SUMMARY pass=0 fail=1 panic=0 registered=0"
+            echo "##### VPNHIDE-QEMU-TEST END #####"
+            poweroff -f
+            exit 1
+        fi
+    fi
+    if /native-fixture-oracle "$fixture_mode"; then fixture_ok=1; fi
+    if [ "$fixture_ok" = 1 ]; then
+        echo "RESULT native_fixture=PASS"
+        echo "SUMMARY pass=1 fail=0 panic=0 registered=0"
+    else
+        echo "RESULT native_fixture=FAIL"
+        echo "SUMMARY pass=0 fail=1 panic=0 registered=0"
+    fi
+    echo "##### VPNHIDE-QEMU-TEST END #####"
+    poweroff -f
+    exit 0
+fi
+
 if [ -f /vpnhide_preflight_only ]; then
     if [ ! -x /preflight-probe ]; then
         echo "RESULT loader_preflight=FAIL (required syscall oracle missing)"

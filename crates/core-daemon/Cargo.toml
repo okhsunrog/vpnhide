@@ -17,6 +17,14 @@ path = "src/lib.rs"
 name = "vpnhide-core"
 path = "src/main.rs"
 
+[[bin]]
+name = "vpnhide-fixture-oracle"
+path = "src/bin/fixture-oracle.rs"
+required-features = ["fixture-oracle"]
+
+[features]
+fixture-oracle = []
+
 [dependencies]
 vpnhide_core_rpc = { path = "../core-rpc" }
 vpnhide_checks = { path = "../checks" }
@@ -33,6 +41,7 @@ serde = { version = "1", features = ["derive"] }
 vpnhide_activator = { version = "1.2.5", path = "../activator" }
 vpnhide_protocol = { version = "1.2.5", path = "../protocol" }
 vpnhide_loader_ipc = { path = "../loader-ipc" }
+vpnhide_diagnostic_model = { path = "../diagnostic-model" }
 vpnhide_core_client = { version = "0.1.0", path = "../core-client" }
 
 tempfile = "3"

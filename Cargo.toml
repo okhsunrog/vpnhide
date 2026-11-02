@@ -5,6 +5,7 @@ members = [
     "crates/activator",
     "crates/native-policy",
     "crates/loader-ipc",
+    "crates/diagnostic-model",
     "crates/checks",
     "crates/checks-jni",
     "crates/core-rpc",

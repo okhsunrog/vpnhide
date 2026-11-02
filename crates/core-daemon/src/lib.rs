@@ -6,6 +6,7 @@ pub mod activation;
 pub mod alog;
 pub mod app_socket;
 pub mod auth;
+pub mod autonomous;
 pub mod backend;
 pub mod boot;
 mod command_engine;

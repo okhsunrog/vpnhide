@@ -151,6 +151,9 @@ fi
 RFS="$WORK/rootfs"
 mkdir -p "$RFS"
 tar xzf "$ALPINE_TAR" -C "$RFS"
+# The lowered test UID must traverse /. A restrictive developer umask must not
+# silently turn the entire initramfs or oracle into root-only executables.
+chmod 0755 "$RFS"
 cp "$KO" "$RFS/vpnhide_kmod.ko"
 if [ -n "$PREFLIGHT" ]; then
 	# Inspect the copied final bytes, not a source/version/filename assertion.
@@ -166,6 +169,14 @@ PY
 	chmod +x "$RFS/preflight-probe"
 fi
 [ -z "${VPNHIDE_QEMU_PREFLIGHT_ONLY:-}" ] || touch "$RFS/vpnhide_preflight_only"
+FIXTURE_MODE="${VPNHIDE_QEMU_NATIVE_FIXTURE_MODE:-}"
+if [ -n "$FIXTURE_MODE" ]; then
+	case "$FIXTURE_MODE" in raw|protected) ;; *) echo "ERROR: fixture mode must be raw or protected"; exit 2 ;; esac
+	[ -x "${VPNHIDE_NATIVE_FIXTURE_BIN:-}" ] || { echo "ERROR: static native fixture oracle missing"; exit 2; }
+	cp "$VPNHIDE_NATIVE_FIXTURE_BIN" "$RFS/native-fixture-oracle"
+	chmod 0755 "$RFS/native-fixture-oracle"
+	printf '%s\n' "$FIXTURE_MODE" > "$RFS/vpnhide_native_fixture_only"
+fi
 cp "$HERE/init.sh" "$RFS/init"
 chmod +x "$RFS/init"
 [ -n "$GAI" ] && { cp "$GAI" "$RFS/gai"; chmod +x "$RFS/gai"; }
@@ -183,13 +194,13 @@ timeout 300 qemu-system-aarch64 \
 	-machine virt -cpu max -accel tcg,thread=multi,tb-size=1024 \
 	-smp 4 -m 2G \
 	-kernel "$IMAGE" -initrd "$WORK/initramfs.cpio.gz" \
-	-append "console=ttyAMA0 panic=-1 rdinit=/init" \
+	-append "console=ttyAMA0 panic=-1 rdinit=/init ${FIXTURE_MODE:+vpnhide_fixture_oracle=1}" \
 	-netdev user,id=n0 -device virtio-net-pci,netdev=n0,romfile= \
 	-display none -no-reboot -serial "file:$LOG" >/dev/null 2>&1 || true
 
 echo "------------------------- test output -------------------------"
 if ! sed -n '/VPNHIDE-QEMU-TEST START/,/VPNHIDE-QEMU-TEST END/p' "$LOG" |
-	grep -E 'KREL|IPROUTE2|INSMOD|REGISTERED|PREFLIGHT|RESULT|PANIC|SUMMARY'; then
+	grep -E 'KREL|IPROUTE2|INSMOD|REGISTERED|PREFLIGHT|FIXTURE_|RESULT|PANIC|SUMMARY'; then
 	echo "ERROR: no test output — kernel did not boot or init failed"
 	echo "--- last 30 serial lines ---"; tail -30 "$LOG"
 	exit 1

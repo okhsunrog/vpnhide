@@ -90,6 +90,7 @@ val appNativeCrates =
         "core-client",
         "core-rpc",
         "native-policy",
+        "diagnostic-model",
         "activator",
         "apatch-abi",
         "protocol",

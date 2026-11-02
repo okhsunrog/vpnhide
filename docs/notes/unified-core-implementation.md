@@ -813,3 +813,42 @@ required ABI coverage and same-boot restored Zygisk without loader proof.
 ARM ABI Clippy pass. Pure proc fixtures test the post-specialization registry;
 they are not a real Android/provider end-to-end acceptance. Production signing
 and final source-consistent release/bundle rebuilds remain separate gates.
+
+### RFC2 native fixture checkpoint — 2026-11-02 08:15 UTC
+
+Implemented a real exclusive, nonpersistent TUN controller and shared bounded
+native observations/evaluation. The fixture stays DOWN, has a Core-derived name,
+kernel ifindex and explicit MTU, and installs no addresses/routes/rules/traffic.
+Negative control, exact raw root stimulus at both ends, protected observations,
+ordinary loopback flags/MTU/enumeration preservation and post-close absence are
+required. A permission failure or empty enumeration is not successful hiding.
+Known leaks survive later probe/cleanup failures; malformed/conflicting dumps,
+trailing data after DONE and unknown indices cannot yield proof. Netlink routing
+observation now retains ifindex and handles rename/stale deletion by identity.
+No broad diagnostic-name prefix is excluded from real VPN observations.
+
+Actual local android14-6.1 QEMU results: RAW sees the addressless DOWN fixture on
+flags, MTU, getifaddrs and GETLINK; protected UID10000 under the same final ko
+sees ENODEV for both ioctls and omits only the fixture from both enumerations.
+Root stimulus remains exact, loopback is preserved, address/route controls are
+unchanged and final cleanup is confirmed. Both modes also pass CLOEXEC child-fd,
+last-duplicate and abrupt-owner-exit cleanup controls. Complete serial evidence
+is retained outside the repo under `vpnhide-build-evidence/rfc2/`.
+
+The experiment caught two real harness/probe defects before passing: the new
+getifaddrs collector had discarded non-AF_PACKET/null-address entries; it now
+preserves every nonempty name and captures family/flags/null-address metadata.
+The raw TUN record is index15, flags4240, families=[], null_address=true. The
+restrictive host umask had also made initramfs / and the oracle executable 0700,
+blocking UID10000 exec; test paths now have explicit 0755 permissions. The
+protected oracle uses generated backend/hook IDs, not guessed backend numbers.
+
+This is **four interface vectors only**, using static musl syscalls and a test
+setuid actor for kernel filtering. It is not Android bionic, Zygote, SELinux,
+Zygisk hook health, framework/Binder, address/route/rule/SIOCGIFCONF/SO_BINDTODEVICE
+coverage, every ordinary network object, or old-game-process acceptance. The
+required full plan must not be reduced to this fixture's current reach. Core's
+real worker session, complete required plan, cache/fingerprint and unified verdict
+remain next; no autonomous suite is claimed ready. The dedicated test oracle is
+feature-gated and absent from Core/APK ZIPs. CI wiring adds raw/protected QEMU
+controls; those CI executions have not been observed from this cloud session.

@@ -1,3 +1,4 @@
+pub mod fixture;
 mod generated;
 pub mod observation;
 

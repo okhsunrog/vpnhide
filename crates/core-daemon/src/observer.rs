@@ -8,7 +8,7 @@
 //! Unknown then resync. Backend identity is refreshed on a bounded interval (not only at
 //! startup/apply).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::Arc;
@@ -100,10 +100,12 @@ fn find_attr(payload: &[u8], body_offset: usize, want: u16) -> Option<&[u8]> {
     None
 }
 
-/// (name, administratively up) from an RTM_*LINK message. The index is not tracked here —
-/// presence keys on the name, which is what the VPN-candidate set is expressed in.
-fn parse_link(payload: &[u8]) -> Option<(String, bool)> {
+/// Preserve kernel identity so an owned fixture can be distinguished from an
+/// unrelated/replaced interface with the same name.
+fn parse_link(payload: &[u8]) -> Option<(u32, String, bool)> {
     // struct ifinfomsg { u8 family; u8 pad; u16 type; i32 index; u32 flags; u32 change; }
+    let index = read_unaligned::<i32>(payload.get(4..8)?)?;
+    let index = u32::try_from(index).ok().filter(|v| *v > 0)?;
     let flags = read_unaligned::<u32>(payload.get(8..12)?)?;
     let name_bytes = find_attr(payload, 16, IFLA_IFNAME)?;
     let name = name_bytes
@@ -111,7 +113,7 @@ fn parse_link(payload: &[u8]) -> Option<(String, bool)> {
         .next()
         .and_then(|b| std::str::from_utf8(b).ok())?
         .to_owned();
-    (!name.is_empty()).then_some((name, flags & IFF_UP != 0))
+    (!name.is_empty()).then_some((index, name, flags & IFF_UP != 0))
 }
 
 /// A raw `NETLINK_ROUTE` socket subscribed to link, route and UID-rule events.
@@ -204,18 +206,19 @@ impl Drop for NetlinkRoute {
 /// The set of VPN-candidate interfaces currently up.
 #[derive(Default)]
 struct RouteState {
-    up: BTreeSet<String>,
+    up: BTreeMap<u32, String>,
 }
 
 impl RouteState {
-    fn apply(&mut self, msg_type: u16, name: String, up: bool) {
-        if !is_vpn_interface_name(&name) {
-            return;
-        }
-        if msg_type == RTM_DELLINK || !up {
-            self.up.remove(&name);
+    fn apply(&mut self, msg_type: u16, index: u32, name: String, up: bool) {
+        if msg_type == RTM_DELLINK {
+            if self.up.get(&index) == Some(&name) {
+                self.up.remove(&index);
+            }
+        } else if !is_vpn_interface_name(&name) || !up {
+            self.up.remove(&index);
         } else {
-            self.up.insert(name);
+            self.up.insert(index, name);
         }
     }
 }
@@ -231,9 +234,9 @@ fn consume(batch: &[u8], state: &mut RouteState) -> bool {
             RTM_NEWROUTE | RTM_DELROUTE | RTM_NEWRULE | RTM_DELRULE
         );
         if (msg_type == RTM_NEWLINK || msg_type == RTM_DELLINK)
-            && let Some((name, up)) = parse_link(payload)
+            && let Some((index, name, up)) = parse_link(payload)
         {
-            state.apply(msg_type, name, up);
+            state.apply(msg_type, index, name, up);
         }
     });
     routing_changed || state.up != before
@@ -253,7 +256,7 @@ fn next_generation(state: &Arc<CoreState>) -> u64 {
 async fn publish(state: &Arc<CoreState>, route: &RouteState) {
     let previous = state.publisher.current().snapshot.routing.clone();
     let last = previous.clone();
-    let up = route.up.clone();
+    let up: BTreeSet<_> = route.up.values().cloned().collect();
     // One observation worker at a time; blocking framework/netlink reads never run on
     // the async socket server's executor. No replacement worker races an overdue one.
     let result = tokio::task::spawn_blocking(move || {
@@ -369,8 +372,8 @@ fn consume_dump(batch: &[u8], state: &mut RouteState) -> io::Result<bool> {
         }
         match kind {
             RTM_NEWLINK | RTM_DELLINK => {
-                if let Some((name, up)) = parse_link(payload) {
-                    state.apply(kind, name, up);
+                if let Some((index, name, up)) = parse_link(payload) {
+                    state.apply(kind, index, name, up);
                 }
             }
             NLMSG_DONE if sequence == 1 => done = true,
@@ -563,7 +566,12 @@ mod tests {
     }
 
     fn link_body(name: &str, up: bool) -> Vec<u8> {
+        link_body_at(name, 1, up)
+    }
+
+    fn link_body_at(name: &str, index: u32, up: bool) -> Vec<u8> {
         let mut b = vec![0u8; 16];
+        b[4..8].copy_from_slice(&index.to_ne_bytes());
         b[8..12].copy_from_slice(&(if up { IFF_UP } else { 0 }).to_ne_bytes());
         let rta_len = (4 + name.len() + 1) as u16;
         b.extend_from_slice(&rta_len.to_ne_bytes());
@@ -583,10 +591,10 @@ mod tests {
             &nlmsg(RTM_NEWLINK, &link_body("tun0", true)),
             &mut state
         ));
-        assert_eq!(state.up.iter().cloned().collect::<Vec<_>>(), vec!["tun0"]);
+        assert_eq!(state.up.values().cloned().collect::<Vec<_>>(), vec!["tun0"]);
         // Routes leave link presence unchanged but must trigger a membership read.
         assert!(consume(&nlmsg(RTM_NEWROUTE, &[0u8; 12]), &mut state));
-        assert_eq!(state.up.iter().cloned().collect::<Vec<_>>(), vec!["tun0"]);
+        assert_eq!(state.up.values().cloned().collect::<Vec<_>>(), vec!["tun0"]);
         assert!(consume(
             &nlmsg(RTM_DELLINK, &link_body("tun0", true)),
             &mut state
@@ -605,6 +613,39 @@ mod tests {
     }
 
     #[test]
+    fn rename_and_old_deletion_preserve_exact_interface_identity() {
+        let mut state = RouteState::default();
+        consume(
+            &nlmsg(RTM_NEWLINK, &link_body_at("tun0", 15, true)),
+            &mut state,
+        );
+        consume(
+            &nlmsg(RTM_NEWLINK, &link_body_at("wlan0", 15, true)),
+            &mut state,
+        );
+        assert!(state.up.is_empty());
+        consume(
+            &nlmsg(RTM_NEWLINK, &link_body_at("tun0", 16, true)),
+            &mut state,
+        );
+        consume(
+            &nlmsg(RTM_DELLINK, &link_body_at("tun0", 15, true)),
+            &mut state,
+        );
+        assert_eq!(state.up.get(&16).map(String::as_str), Some("tun0"));
+        consume(
+            &nlmsg(RTM_NEWLINK, &link_body_at("tun1", 16, true)),
+            &mut state,
+        );
+        consume(
+            &nlmsg(RTM_DELLINK, &link_body_at("tun0", 16, true)),
+            &mut state,
+        );
+        assert_eq!(state.up.get(&16).map(String::as_str), Some("tun1"));
+        assert!(parse_link(&link_body_at("tun0", 0, true)).is_none());
+    }
+
+    #[test]
     fn rule_only_changes_trigger_uid_membership_without_a_link_transition() {
         let mut state = RouteState::default();
         for kind in [RTM_NEWROUTE, RTM_DELROUTE, RTM_NEWRULE, RTM_DELRULE] {
@@ -616,7 +657,7 @@ mod tests {
     #[test]
     fn dump_keeps_deletions_and_rejects_interrupted_or_foreign_completion() {
         let mut state = RouteState::default();
-        state.apply(RTM_NEWLINK, "tun0".into(), true);
+        state.apply(RTM_NEWLINK, 1, "tun0".into(), true);
         assert!(!consume_dump(&nlmsg(RTM_DELLINK, &link_body("tun0", false)), &mut state).unwrap());
         assert!(state.up.is_empty());
         assert!(!consume_dump(&nlmsg(NLMSG_DONE, &[]), &mut state).unwrap());

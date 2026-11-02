@@ -59,3 +59,6 @@ kmod/kpm/module-staging/
 
 # Core module (vpnhide_core)
 core/target/
+
+# Generated local/CI probe binaries and linker wrappers
+/.artifacts/
