@@ -67,7 +67,11 @@ internal class FrameworkFixtureObjects(
             XposedHelpers.setBooleanField(it, "mIsAvailable", true)
         }
 
+    // These deprecated transport types are the explicit legacy-hook stimuli.
+    @Suppress("DEPRECATION")
     val vpnInfo = connectedInfo(ConnectivityManager.TYPE_VPN, spec.interfaceName)
+
+    @Suppress("DEPRECATION")
     val ordinaryInfo = connectedInfo(ConnectivityManager.TYPE_WIFI, spec.ordinaryInterfaceName)
 
     @Suppress("DEPRECATION")

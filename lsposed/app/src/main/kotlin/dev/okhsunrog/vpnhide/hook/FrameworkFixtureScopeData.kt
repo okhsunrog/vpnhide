@@ -189,7 +189,7 @@ internal class FixtureEvidenceLedger {
             }
 
             else -> {
-                Unit
+                return
             }
         }
     }
