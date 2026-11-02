@@ -31,7 +31,7 @@ changes create new operations, not retroactive changes to confirmed receipts.
 | 1. Payload catalog and pure selection | Implemented as internal API; production integration follows stages 2–4 | Strict bounded manifest, pinned file verification, deterministic eligible candidates, unknown/owner guards, policy/capacity tests |
 | 2. Durable backend lifecycle | Implemented for the current selector; bundle integration follows stages 3/4 | Initial effects journaled before dispatch, crash reconciliation, bounded attempts surviving worker restart, no blind replay |
 | 3. Unified ZIP and CI assembly | Implemented passive assembly; real seven-KMI CI/device acceptance unobserved | All seven KMIs, both Zygisk ABIs, manifest/hashes, verified provenance, active/staged separation |
-| 4. Zygisk boot authorization and fallback | Planned | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
+| 4. Zygisk boot authorization and fallback | In progress: tested reader/publisher boundary; writer/selector/fallback not connected | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
 | 5. Typed state/RPC/UI/diagnostics | Planned | Paired contract bump, reasons/attempts/coverage, no misleading component health |
 | 6. Shared maintenance plan/executor | Planned | Migration/repair/update use the same typed steps, preserve sources, manager-native staging/removal, durable progress/reconciliation |
 | 7. Separate runtime provisioning | Planned | Verified fork/tool tuple, actual KALLSYMS=y, validated ALL=n support, durable original backup, plan-bound consent, correct write/readback errors |
@@ -199,3 +199,46 @@ initializing its pinned KernelPatch submodule. Their metadata correctly marks
 these working-tree validation artifacts dirty, so they cannot accidentally enter
 the clean CI bundle. No kernel source or submodule revisions were changed.
 Signing failure-path tests: 5 passed; no signing credentials were accessed.
+
+## Stage 4 checkpoint: authorization boundary (not complete)
+
+`protocol::zygisk_activation` defines a bounded private envelope containing a
+kernel boot UUID, nonzero durable generation and exact control-v2 wire. This is
+not a kernel protocol change. Decode rejects stale boot, malformed/future version,
+noncanonical generation and invalid/oversized policy. Bundled policy rejects a
+nonzero default or unsupported hook bits rather than masking them into eligibility.
+Exact generation+wire comparison is available for journal readback.
+
+The Zygisk reader explicitly distinguishes `vpnhide_core` with activation contract
+1 from the separate legacy `vpnhide_zygisk` control-v2 recipient. Bundled mode never
+falls back to legacy `targets.txt`; reads are bounded, descriptor-relative,
+no-follow and regular-file-only. Core's publisher similarly refuses a raw wire
+for the bundled recipient, and refuses a bundled envelope for the legacy recipient.
+The envelope is atomically published as `zygisk-activation.txt` through the pinned
+recipient directory. A single authoritative file avoids mixing header and policy
+from separate writes. Authorization is root-owned state, not a cryptographic claim.
+
+This checkpoint does **not** enable bundled autoload, publish authorization from
+CommandEngine, wire production selection or implement fallback. Before those are
+enabled, the writer must journal the exact generation/boot/wire tuple, reconcile
+that tuple after crash, and durably revoke/supersede authorization before any
+conflicting effects. The consumer treats the current file as authority; generation
+validation against durable expected state belongs to the writer/reconciler. It
+cannot independently detect a root actor replaying an older same-boot file.
+Processes that already consumed authorization remain outside revocation guarantees:
+no claim of hot-unload, atomic handoff or draining in-flight hooks is made.
+
+Next stage-4 work remains production capability adapters + selector integration,
+journaled authorization/revocation and process-aware transition/fallback gating.
+Keep passive packaging until these gates pass. Stages 5–7 are still outstanding.
+
+Authorization checkpoint validation: seven new regression tests; workspace 479
+passed, with the same two pre-existing Zygisk process_vm_readv ENOSYS failures.
+Final targeted policy tests, workspace Clippy/all-targets, fmt, diff and module
+scaffold/no-su pass. Core and Zygisk cross-builds pass for arm64 and armv7.
+No RPC13/kernel control-v2 change, no APK/device test or observed CI claim.
+
+Production selector integration must derive each candidate's policy from its
+existing kernel/Zygisk projection: their hook IDs are different. Do not apply one
+kernel hook mask to all candidates or equate different interception coverage.
+Full target/default-mask/capacity checks remain mandatory for each candidate.

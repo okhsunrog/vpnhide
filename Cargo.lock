@@ -1725,6 +1725,7 @@ dependencies = [
  "cmake",
  "libc",
  "log",
+ "tempfile",
  "vpnhide_protocol",
  "zygisk-api",
 ]

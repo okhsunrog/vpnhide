@@ -706,3 +706,17 @@ Recorded so they are not re-litigated.
   §4.1), so it costs nothing structurally and exposes the grammar +
   replace-whole semantics in a single `cat` (§2). All seven OPEN items are
   now resolved; both protocols (control v2, telemetry v1) are frozen.
+
+### Bundled Zygisk activation envelope (implementation in progress)
+
+Bundled Zygisk has a private outer `vpnhide zygisk-activation 1` envelope containing
+`boot <UUID>`, `generation <durable operation identity>`, then the exact existing
+control-v2 policy. It is bounded to 64 KiB and published atomically in
+`zygisk-activation.txt`. This does not alter kernel control-v2 or telemetry-v1 and
+does not require rebuilding an existing compatible built-in kernel. Missing or
+stale-boot authorization fails closed for bundled mode. Separate legacy module
+compatibility remains explicit; Core recipients never fall back to `targets.txt`.
+
+The reader/publisher boundary is implemented, but production lifecycle wiring and
+autoload remain disabled pending journaled transition checks. An authorization
+only governs new process launches; it does not remove hooks from existing processes.

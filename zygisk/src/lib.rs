@@ -119,17 +119,11 @@ use crate::hooks::{
     set_real_setsockopt_ptr,
 };
 
+mod policy_file;
+
 const LOG_TAG: &str = "vpnhide-zygisk";
 const APP_PACKAGE: &str = "dev.okhsunrog.vpnhide";
 const APP_STATUS_FILE: &str = "/data/user/0/dev.okhsunrog.vpnhide/files/vpnhide_zygisk_active";
-/// Config-snapshot filename within the module directory. Carries a
-/// `vpnhide 2 config` payload (docs/protocol.md): the target UIDs this module
-/// hides for, plus the folded `debug` flag — the same wire format every
-/// backend speaks. Package→UID resolution is the producer's job (the app on
-/// Save, the activator's boot-service phase at boot). Read once per app launch via the module
-/// dir-fd.
-const TARGETS_FILENAME: &str = "targets.txt";
-
 /// Initialize `android_logger` exactly once. Cheap to call from every
 /// forked process — subsequent calls are no-ops. The compile-time log
 /// filter is controlled by the `log` crate's `release_max_level_*`
@@ -197,7 +191,7 @@ struct ZygiskConfig {
 
 static CACHED_CONFIG: OnceLock<ZygiskConfig> = OnceLock::new();
 
-/// Read + parse the `vpnhide 2 config` snapshot from targets.txt via the module
+/// Read the current-boot bundled authorization or explicit legacy policy via the module
 /// directory fd Zygisk provides. This fd is opened by Zygisk with root
 /// privileges, bypassing the SELinux restrictions that block direct file
 /// access on Magisk. A missing/unreadable/invalid file fails closed: no
@@ -207,27 +201,7 @@ fn load_config_from_dir_fd(dir_fd: RawFd) -> ZygiskConfig {
         targets: Vec::new(),
         debug: false,
     };
-    let fd = unsafe {
-        libc::openat(
-            dir_fd,
-            c"targets.txt".as_ptr(),
-            libc::O_RDONLY | libc::O_CLOEXEC,
-        )
-    };
-    if fd < 0 {
-        log::warn!(
-            "can't open {TARGETS_FILENAME} via module dir fd: {}",
-            io::Error::last_os_error()
-        );
-        return empty;
-    }
-    let mut file = unsafe { fs::File::from_raw_fd(fd) };
-    let mut content = Vec::new();
-    if let Err(e) = file.read_to_end(&mut content) {
-        log::warn!("can't read {TARGETS_FILENAME}: {e}");
-        return empty;
-    }
-    match protocol::parse_config(&content) {
+    match policy_file::read_config(dir_fd) {
         Some(cfg) => ZygiskConfig {
             targets: cfg
                 .targets
@@ -245,7 +219,7 @@ fn load_config_from_dir_fd(dir_fd: RawFd) -> ZygiskConfig {
         None => {
             // Rejected whole — bad/missing header, or not the exact control
             // version this build implements (§3 version fuse). Fail closed.
-            log::warn!("{TARGETS_FILENAME}: not a valid config snapshot; ignoring");
+            log::warn!("policy missing, incompatible or unauthorized; ignoring");
             empty
         }
     }

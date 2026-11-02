@@ -16,6 +16,12 @@ pub fn module_from_env() -> Option<PathBuf> {
         .map(Into::into)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Recipient {
+    Legacy,
+    Bundled,
+}
+
 pub struct ZygiskTarget {
     path: PathBuf,
     directory: File,
@@ -62,7 +68,7 @@ impl ZygiskTarget {
         PathBuf::from(format!("/proc/self/fd/{}", self.directory.as_raw_fd()))
     }
 
-    fn verify(&self) -> Result<(), String> {
+    fn verify(&self) -> Result<Recipient, String> {
         let current = open_directory(&self.path).map_err(|e| e.to_string())?;
         let old = self.directory.metadata().map_err(|e| e.to_string())?;
         let new = current.metadata().map_err(|e| e.to_string())?;
@@ -91,6 +97,7 @@ impl ZygiskTarget {
         }
         let mut id = None;
         let mut version = None;
+        let mut activation = None;
         for line in text
             .lines()
             .map(str::trim)
@@ -100,6 +107,7 @@ impl ZygiskTarget {
                 let slot = match key {
                     "id" => &mut id,
                     "vpnhideControl" => &mut version,
+                    "vpnhideActivation" => &mut activation,
                     _ => continue,
                 };
                 if slot.replace(value).is_some() {
@@ -107,9 +115,15 @@ impl ZygiskTarget {
                 }
             }
         }
-        if id != Some("vpnhide_zygisk") || version != Some("2") {
-            return Err("Zygisk recipient identity or control protocol is incompatible".into());
-        }
+        let recipient = match (id, version, activation) {
+            (Some("vpnhide_zygisk"), Some("2"), None) => Recipient::Legacy,
+            (Some("vpnhide_core"), Some("2"), Some("1")) => Recipient::Bundled,
+            _ => {
+                return Err(
+                    "Zygisk recipient identity or activation contract is incompatible".into(),
+                );
+            }
+        };
         let libraries = root.join("zygisk");
         if !fs::symlink_metadata(&libraries)
             .map_err(|e| e.to_string())?
@@ -152,14 +166,45 @@ impl ZygiskTarget {
         if !found {
             return Err("Zygisk module has no supported library artifact".into());
         }
-        Ok(())
+        Ok(recipient)
     }
 
     pub fn publish(&self, wire: &str) -> Result<(), PublishError> {
+        self.publish_impl(wire, None)
+    }
+
+    /// Caller must journal this exact boot/generation/wire tuple before publication.
+    /// Publication only authorizes future processes; it cannot remove existing hooks.
+    pub fn publish_authorized(
+        &self,
+        authorization: &vpnhide_protocol::zygisk_activation::Authorization,
+    ) -> Result<(), PublishError> {
+        self.publish_impl(&authorization.wire, Some(authorization))
+    }
+
+    fn publish_impl(
+        &self,
+        wire: &str,
+        authorization: Option<&vpnhide_protocol::zygisk_activation::Authorization>,
+    ) -> Result<(), PublishError> {
+        let encoded = authorization
+            .map(|auth| {
+                auth.encode()
+                    .ok_or_else(|| PublishError::BeforeWrite("invalid Zygisk authorization".into()))
+            })
+            .transpose()?;
         let preflight = || -> Result<PathBuf, String> {
             vpnhide_activator::validate_zygisk_config_wire(wire).map_err(|e| e.to_string())?;
-            self.verify()?;
-            let path = self.pinned_path().join("targets.txt");
+            let recipient = self.verify()?;
+            if (recipient == Recipient::Bundled) != authorization.is_some() {
+                return Err("recipient requires its exact activation contract".into());
+            }
+            let filename = if authorization.is_some() {
+                vpnhide_protocol::zygisk_activation::FILE_NAME
+            } else {
+                "targets.txt"
+            };
+            let path = self.pinned_path().join(filename);
             if entry_exists(&path)?
                 && !fs::symlink_metadata(&path)
                     .map_err(|e| e.to_string())?
@@ -182,7 +227,7 @@ impl ZygiskTarget {
             Ok(path)
         };
         let path = preflight().map_err(PublishError::BeforeWrite)?;
-        vpnhide_activator::write_atomic(&path, wire.as_bytes(), 0o644)
+        vpnhide_activator::write_atomic(&path, encoded.as_deref().unwrap_or(wire).as_bytes(), 0o644)
             .and_then(|()| Ok(self.directory.sync_all()?))
             .map_err(|e| PublishError::Unknown(e.to_string()))
     }
@@ -219,6 +264,57 @@ mod tests {
         .unwrap();
         library(&path.join("zygisk/arm64-v8a.so"), 2, 183);
         fs::write(path.join("targets.txt"), OLD).unwrap();
+    }
+
+    #[test]
+    fn bundled_recipient_requires_explicit_boot_generation_and_exact_wire() {
+        use vpnhide_protocol::zygisk_activation::{Authorization, FILE_NAME};
+        let root = tempfile::tempdir().unwrap();
+        fixture(root.path());
+        let boot = "12345678-1234-1234-1234-123456789abc";
+        let authorization = Authorization {
+            boot_id: boot.into(),
+            generation: 10,
+            wire: WIRE.into(),
+        };
+        let legacy = ZygiskTarget::open(root.path()).unwrap();
+        assert!(matches!(
+            legacy.publish_authorized(&authorization),
+            Err(PublishError::BeforeWrite(_))
+        ));
+        fs::write(
+            root.path().join("module.prop"),
+            "id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n",
+        )
+        .unwrap();
+        let target = ZygiskTarget::open(root.path()).unwrap();
+        assert!(matches!(
+            target.publish(WIRE),
+            Err(PublishError::BeforeWrite(_))
+        ));
+        assert!(!root.path().join(FILE_NAME).exists());
+        target.publish_authorized(&authorization).unwrap();
+        let bytes = fs::read(root.path().join(FILE_NAME)).unwrap();
+        let parsed = Authorization::decode(&bytes, boot).unwrap();
+        assert!(parsed.matches(10, WIRE));
+        assert!(!parsed.matches(9, WIRE));
+        assert_eq!(
+            fs::read_to_string(root.path().join("targets.txt")).unwrap(),
+            OLD
+        );
+        let mut replacement = authorization;
+        replacement.generation = 11;
+        replacement.wire = WIRE.replace("debug 0", "debug 1");
+        target.publish_authorized(&replacement).unwrap();
+        assert_eq!(
+            Authorization::decode(&fs::read(root.path().join(FILE_NAME)).unwrap(), boot).unwrap(),
+            replacement
+        );
+        assert!(
+            !Authorization::decode(&bytes, boot)
+                .unwrap()
+                .matches(11, &replacement.wire)
+        );
     }
 
     #[test]

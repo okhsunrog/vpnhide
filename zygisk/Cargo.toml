@@ -37,3 +37,6 @@ log-trace = ["log/release_max_level_trace"]
 
 [build-dependencies]
 cmake = "0.1.58"
+
+[dev-dependencies]
+tempfile = "3"
