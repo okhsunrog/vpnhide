@@ -949,3 +949,32 @@ controls; those CI executions have not been observed from this cloud session.
   identity, manager adapter operations, reboot verification and narrow missing-Core
   bootstrap still need the same maintenance executor. KPatch provisioning remains
   separate and must not be bundled into Core. No phone/root-manager mutation made.
+
+### Native KPM inventory and competing dispatch
+
+- Removed the APatch-directory/Next-CLI shortcut that treated native SukiSU KPM
+  as absent. The daemon now runs a bounded, early single-threaded inventory child:
+  real KSU driver discovery/GET_INFO, extension ABI2 enumeration and read-only
+  VERSION/NUM/LIST; separately, null-key Next HELLO/version/NUM/LIST where no
+  managed transport is installed. No load/unload/control is used by this probe.
+- Native SukiSU's control ABI has no VPN Hide ctl0 output buffer. An observed
+  resident module is incompatible/unmanaged, never a Ready transport. A positively
+  identified but unenumerable runtime blocks competing native loads and Zygisk
+  publication even without APatch files. CLI inventory requires stable NUM/LIST
+  counts, distinct complete names and the exact HELLO echo, not an exit-zero
+  negative count, empty output or help text.
+- Unknown KSU extension ABI remains Unrecognized, not absent or proven broken KPM.
+  It permits retaining only an already observed builtin with no installed/suspected
+  KPM; fresh loads and Zygisk publication stay fenced. Restored selection preserves
+  this distinction; device capability ownership never becomes Clear from it, and
+  ordinary runtime observations stay incomplete. Current Next LIST returns the
+  copied buffer extent (4096), while the pinned Suki bridge returns string length;
+  those readback checks intentionally differ.
+- Checks: 65 activator and 317 Core library tests passed; strict host/ARM64/ARMv7
+  Clippy passed. The native driver/syscall adapter is cross-compiled but has no
+  Android device acceptance. Generic/old KSU ABI handling is conservative and is
+  not proof of universal manager compatibility. Existing keyed APatch transport
+  isolation is still a separate implementation concern, not a passed device gate.
+- This is an internal observation change: APK/Core remains RPC15, journal8;
+  kernel control2 / telemetry1 is unchanged. A user builtin kernel does not need
+  rebuilding because of these APK/Core protocol or journal schema numbers.

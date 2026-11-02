@@ -83,10 +83,10 @@ pub fn check_zygisk_dispatch(ctl: &Path) -> Result<(), String> {
     if observe_kernel(ctl)?.is_some() {
         return Err("kernel backend became active before Zygisk publication".into());
     }
-    // Only a definitely live KPM blocks: the boot decision already settled
-    // KernelPatch, and an unauthenticated runtime must not block Zygisk.
-    if matches!(vpnhide_activator::observed_kpm_loaded(), Ok(true)) {
-        return Err("KPM became active before Zygisk publication".into());
+    match vpnhide_activator::observed_kpm_loaded() {
+        Ok(false) => {}
+        Ok(true) => return Err("KPM became active before Zygisk publication".into()),
+        Err(error) => return Err(format!("KPM ownership could not be rechecked: {error}")),
     }
     Ok(())
 }

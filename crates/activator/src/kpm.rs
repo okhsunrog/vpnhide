@@ -241,8 +241,12 @@ impl std::error::Error for KpmConfigError {}
 
 /// What core learns about KernelPatch before deciding the boot's native backend.
 pub enum KpmRuntimeProbe {
-    /// No APatch/FolkPatch directory and no KPatch-Next CLI.
+    /// Recognized native channels and managed transports report no runtime.
     NoRuntime,
+    /// Native inventory is available, but this channel has no ctl0 reply ABI.
+    InventoryOnly { loaded: bool, detail: String },
+    /// A KSU driver exists, but no supported KPM inventory ABI was established.
+    Unrecognized(String),
     /// An authenticated management channel.
     Ready(CoreKpm),
     /// APatch/FolkPatch is present but neither the saved superkey nor a trusted `su`
@@ -334,8 +338,28 @@ impl CoreKpm {
     /// Like [`Self::connect`], but keeps an authentication refusal distinct from other
     /// probe failures so core can tell "awaiting the superkey" from "broken runtime".
     pub fn probe(lock_path: &Path) -> Result<KpmRuntimeProbe> {
-        if !Path::new(APATCH_DIR).is_dir() && find_kpatch().is_none() {
-            return Ok(KpmRuntimeProbe::NoRuntime);
+        let managed = Path::new(APATCH_DIR).is_dir() || find_kpatch().is_some();
+        let native = crate::kpm_inventory::observe(!managed)?;
+        if native.vpnhide_loaded {
+            return Ok(KpmRuntimeProbe::InventoryOnly {
+                loaded: native.vpnhide_loaded,
+                detail: "native KPM runtime has no supported VPN Hide ctl0 readback adapter".into(),
+            });
+        }
+        if native.driver_unrecognized {
+            return Ok(KpmRuntimeProbe::Unrecognized(
+                "KSU driver has no recognized native KPM inventory ABI".into(),
+            ));
+        }
+        if !managed {
+            return Ok(if native.runtime_present {
+                KpmRuntimeProbe::InventoryOnly {
+                    loaded: false,
+                    detail: "native KPM management is unavailable".into(),
+                }
+            } else {
+                KpmRuntimeProbe::NoRuntime
+            });
         }
         Ok(match KpmClient::detect_outcome()? {
             KpmClientDetection::Ready(client) => KpmRuntimeProbe::Ready(Self {
@@ -350,13 +374,13 @@ impl CoreKpm {
 
     /// None is definite runtime absence. Authentication/probe errors stay errors.
     pub fn connect(lock_path: &Path) -> Result<Option<Self>> {
-        if !Path::new(APATCH_DIR).is_dir() && find_kpatch().is_none() {
-            return Ok(None);
+        match Self::probe(lock_path)? {
+            KpmRuntimeProbe::NoRuntime => Ok(None),
+            KpmRuntimeProbe::Ready(client) => Ok(Some(client)),
+            KpmRuntimeProbe::AwaitingAuthentication(detail)
+            | KpmRuntimeProbe::Unrecognized(detail)
+            | KpmRuntimeProbe::InventoryOnly { detail, .. } => Err(detail.into()),
         }
-        Ok(Some(Self {
-            client: KpmClient::detect()?,
-            lock_path: lock_path.to_owned(),
-        }))
     }
 
     /// Read-only `kpm_state` text for diagnostics: the status reply followed by the
@@ -538,14 +562,46 @@ fn require_no_kernel_owner(ctl: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Read-only ownership result; an unsupported driver never proves absence.
+pub enum KpmObserved {
+    Clear,
+    Loaded,
+    Unrecognized(String),
+}
+impl CoreKpm {
+    pub fn observe_loaded() -> Result<KpmObserved> {
+        KpmClient::observe_loaded_outcome()
+    }
+}
 impl KpmClient {
     /// No runtime is different from a runtime whose loaded modules cannot be
     /// observed. The latter must prevent a conflicting kmod load.
     pub(crate) fn observe_loaded() -> Result<bool> {
-        if !Path::new(APATCH_DIR).is_dir() && find_kpatch().is_none() {
-            return Ok(false);
+        match Self::observe_loaded_outcome()? {
+            KpmObserved::Clear => Ok(false),
+            KpmObserved::Loaded => Ok(true),
+            KpmObserved::Unrecognized(detail) => Err(detail.into()),
         }
-        Self::detect()?.list_contains()
+    }
+    fn observe_loaded_outcome() -> Result<KpmObserved> {
+        let managed = Path::new(APATCH_DIR).is_dir() || find_kpatch().is_some();
+        let native = crate::kpm_inventory::observe(!managed)?;
+        if native.vpnhide_loaded {
+            return Ok(KpmObserved::Loaded);
+        }
+        if native.driver_unrecognized {
+            return Ok(KpmObserved::Unrecognized(
+                "KSU KPM inventory ABI is unrecognized".into(),
+            ));
+        }
+        if !managed {
+            return Ok(KpmObserved::Clear);
+        }
+        Ok(if Self::detect()?.list_contains()? {
+            KpmObserved::Loaded
+        } else {
+            KpmObserved::Clear
+        })
     }
 
     pub(crate) fn detect() -> Result<Self> {
@@ -680,15 +736,26 @@ pub(crate) fn validate_kpm_config_wire(wire: &str) -> Result<()> {
     Ok(())
 }
 
+fn kpatch_count(kpatch: &Path) -> Result<i64> {
+    let out = output_with_timeout(
+        Command::new(kpatch).args(["kpm", "num"]),
+        CHILD_COMMAND_TIMEOUT,
+    )?;
+    if !out.status.success() || out.stdout.len() > 32 {
+        return Err("kpatch NUM failed".into());
+    }
+    Ok(std::str::from_utf8(&out.stdout)?.trim().parse()?)
+}
 fn kpatch_kpm_list_contains(kpatch: &Path) -> Result<bool> {
-    let mut cmd = Command::new(kpatch);
-    cmd.args(["kpm", "list"]);
-    let out = output_with_timeout(&mut cmd, CHILD_COMMAND_TIMEOUT)?;
+    let before = kpatch_count(kpatch)?;
+    let out = output_with_timeout(
+        Command::new(kpatch).args(["kpm", "list"]),
+        CHILD_COMMAND_TIMEOUT,
+    )?;
     if !out.status.success() {
         return Err(format!("kpatch kpm list failed with status {}", out.status).into());
     }
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    Ok(stdout.split_whitespace().any(|token| token == KPM_NAME))
+    crate::kpm_inventory::contains(before, kpatch_count(kpatch)?, &out.stdout)
 }
 
 fn kpatch_kpm_info(kpatch: &Path) -> Result<String> {
@@ -708,7 +775,12 @@ fn kpatch_hello(kpatch: &Path) -> Result<()> {
     let mut cmd = Command::new(kpatch);
     cmd.arg("hello");
     let out = output_with_timeout(&mut cmd, CHILD_COMMAND_TIMEOUT)?;
-    if out.status.success() && !String::from_utf8_lossy(&out.stdout).trim().is_empty() {
+    if out.status.success()
+        && matches!(
+            std::str::from_utf8(&out.stdout).map(str::trim),
+            Ok("hello2026" | "hello1158")
+        )
+    {
         Ok(())
     } else {
         Err(format!(
@@ -1182,6 +1254,7 @@ mod identity_tests {
             &program,
             r#"#!/bin/sh
 case "$1 $2" in
+  "kpm num") printf '1\n' ;;
   "kpm list")
     : > "${0%/*}/observing"
     while [ ! -f "${0%/*}/release" ]; do sleep 0.01; done
@@ -1256,6 +1329,7 @@ esac
             &program,
             r#"#!/bin/sh
 case "$1 $2" in
+  "kpm num") printf '1\n' ;;
   "kpm list") printf 'vpnhide\n' ;;
   "kpm ctl0") printf 'vpnhide 1 status\nbackend 0x1\nkver 0x60100\nhooks 0x3ff\nerror 0x0\n' ;;
   "kpm load") printf 'load\n' > "${0%/*}/dispatched" ;;
@@ -1292,6 +1366,7 @@ esac
         let program = root.join("kpatch");
         std::fs::write(&program, r#"#!/bin/sh
 case "$1 $2" in
+  "kpm num") printf '1\n' ;;
   "kpm list") printf 'vpnhide\n' ;;
   "kpm ctl0") case "$4" in
     "vpnhide 1 status") printf 'vpnhide 1 status\nbackend 0x1\nkver 0x60100\nhooks 0x3ff\nerror 0x0\n' ;;
@@ -1319,5 +1394,59 @@ esac
             "page\n"
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod inventory_contract_tests {
+    use super::*;
+    fn fixture(body: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "vpnhide-kpm-inventory-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("kpatch");
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
+    #[test]
+    fn hello_requires_the_actual_protocol_echo_even_when_cli_exits_zero() {
+        for echo in [
+            "",
+            "inactive",
+            "usage: kpatch hello",
+            "hello2026",
+            "hello1158",
+        ] {
+            let path = fixture(&format!("printf '%s\\n' '{echo}'"));
+            assert_eq!(
+                kpatch_hello(&path).is_ok(),
+                matches!(echo, "hello2026" | "hello1158")
+            );
+            fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
+    }
+    #[test]
+    fn cli_zero_exit_is_not_a_successful_inventory_when_num_is_negative_or_list_is_partial() {
+        for (count, list, expected) in [
+            ("0", "", Some(false)),
+            ("1", "vpnhide", Some(true)),
+            ("1", "other", Some(false)),
+            ("-95", "", None),
+            ("1", "", None),
+            ("2", "vpnhide", None),
+        ] {
+            let path = fixture(&format!(
+                "case \"$1 $2\" in\n'kpm num') printf '%s\\n' '{count}';;\n'kpm list') printf '%s' '{list}';;\nesac"
+            ));
+            assert_eq!(kpatch_kpm_list_contains(&path).ok(), expected);
+            fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
     }
 }

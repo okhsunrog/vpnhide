@@ -109,6 +109,7 @@ enum PmReadyWait {
 
 mod kernel_control;
 mod kpm;
+pub mod kpm_inventory;
 mod load_kmod;
 pub(crate) use load_kmod::CHILD_COMMAND_TIMEOUT;
 pub use process::{
@@ -122,7 +123,7 @@ pub mod sys;
 
 use kpm::*;
 pub use kpm::{
-    CoreKpm, KpmConfigError, KpmInfo, KpmLiveCheck, KpmRuntimeProbe, MIN_KPM_VERSION,
+    CoreKpm, KpmConfigError, KpmInfo, KpmLiveCheck, KpmObserved, KpmRuntimeProbe, MIN_KPM_VERSION,
     kpm_version_compatible, set_session_superkey,
 };
 pub use model::*;

@@ -195,31 +195,14 @@ pub fn observe(env: &NativeEnv, facts: &ScanFacts) -> Capabilities {
         KpmFact::NoRuntime | KpmFact::NotManaged => Runtime::Absent,
         KpmFact::AuthFailed(_) => Runtime::AuthenticationRequired,
         KpmFact::Incompatible { .. } => Runtime::Unsupported,
-        KpmFact::Broken(_) => Runtime::Unknown,
+        KpmFact::Broken(_) | KpmFact::Unrecognized(_) => Runtime::Unknown,
     };
-    let live = facts.live();
-    let ownership = if !facts.installed.is_empty()
-        || matches!(
-            facts.kernel,
-            KernelFact::Foreign(_) | KernelFact::Unreadable(_)
-        )
-        || matches!(
-            facts.kpm,
-            KpmFact::AuthFailed(_) | KpmFact::Broken(_) | KpmFact::Incompatible { .. }
-        )
-        || env
-            .modules
+    let ownership = resident_ownership(
+        facts,
+        env.modules
             .as_deref()
-            .is_some_and(|path| !crate::native_boot::obsolete_modules(path).is_empty())
-    {
-        Ownership::Unknown
-    } else {
-        match live.as_slice() {
-            [] => Ownership::Clear,
-            [backend] => Ownership::Resident(*backend),
-            _ => Ownership::Unknown,
-        }
-    };
+            .is_some_and(|path| !crate::native_boot::obsolete_modules(path).is_empty()),
+    );
     Capabilities {
         // Bundled kernel payloads are arm64 only. A host build is not Android ARM64.
         abi: if cfg!(target_arch = "aarch64") {
@@ -244,6 +227,31 @@ pub fn observe(env: &NativeEnv, facts: &ScanFacts) -> Capabilities {
     }
 }
 
+fn resident_ownership(facts: &ScanFacts, obsolete: bool) -> Ownership {
+    let live = facts.live();
+    if !facts.installed.is_empty()
+        || matches!(
+            facts.kernel,
+            KernelFact::Foreign(_) | KernelFact::Unreadable(_)
+        )
+        || matches!(
+            facts.kpm,
+            KpmFact::AuthFailed(_) | KpmFact::Broken(_) | KpmFact::Incompatible { .. }
+        )
+        || (matches!(facts.kpm, KpmFact::Unrecognized(_))
+            && (facts.kernel != KernelFact::Builtin || facts.kpm_may_be_live))
+        || obsolete
+    {
+        Ownership::Unknown
+    } else {
+        match live.as_slice() {
+            [] => Ownership::Clear,
+            [backend] => Ownership::Resident(*backend),
+            _ => Ownership::Unknown,
+        }
+    }
+}
+
 /// A resident backend must still pass its own complete projection and coverage
 /// checks; residency alone never overrides rejection or permits a second backend.
 pub fn resident_eligible(
@@ -259,6 +267,31 @@ pub fn resident_eligible(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unsupported_driver_retains_only_verified_builtin_residency_without_claiming_clear() {
+        let mut facts = ScanFacts {
+            installed: vec![],
+            staged: vec![],
+            kernel: KernelFact::Builtin,
+            kpm: KpmFact::Unrecognized("driver ABI".into()),
+            kpm_may_be_live: false,
+            kpm_filesystem_hiding: None,
+        };
+        assert_eq!(
+            resident_ownership(&facts, false),
+            Ownership::Resident(NativeBackend::Builtin)
+        );
+        for kernel in [KernelFact::Absent, KernelFact::Kmod] {
+            facts.kernel = kernel;
+            assert_eq!(resident_ownership(&facts, false), Ownership::Unknown);
+        }
+        facts.kernel = KernelFact::Builtin;
+        facts.kpm_may_be_live = true;
+        assert_eq!(resident_ownership(&facts, false), Ownership::Unknown);
+        facts.kpm_may_be_live = false;
+        facts.kpm = KpmFact::Broken("positive runtime, LIST failed".into());
+        assert_eq!(resident_ownership(&facts, false), Ownership::Unknown);
+    }
     #[test]
     fn actual_zygote_layout_controls_required_abis_not_the_shipping_set() {
         let root = tempfile::tempdir().unwrap();

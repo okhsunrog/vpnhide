@@ -10,6 +10,13 @@ mod probe;
 /// Dispatch a probe subcommand. `None` when `args` is not one (the caller runs the daemon).
 pub fn run(args: &[String]) -> Option<i32> {
     let code = match args {
+        [command, mode, next]
+            if command == "probe"
+                && mode == "native-kpm-inventory"
+                && matches!(next.as_str(), "next" | "no-next") =>
+        {
+            vpnhide_activator::kpm_inventory::child(next == "next")
+        }
         [command, mode] if command == "probe" && mode == "checks" => probe::checks(&[]),
         [command, mode, rest @ ..] if command == "probe" && mode == "routing" => {
             probe::routing(rest)

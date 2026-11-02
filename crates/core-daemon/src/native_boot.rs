@@ -159,6 +159,8 @@ pub enum KpmFact {
     AuthFailed(String),
     /// The runtime is present but could not be enumerated.
     Broken(String),
+    /// Driver exists without a recognized KPM inventory ABI; no positive KPM evidence.
+    Unrecognized(String),
 }
 
 /// The scan's inputs to [`decide`]; pure data so the selection matrix is unit-tested.
@@ -240,6 +242,18 @@ pub fn decide(facts: &ScanFacts) -> Plan {
             detail: detail.clone(),
         });
     }
+    if let KpmFact::Unrecognized(detail) = &facts.kpm {
+        // Retaining an already-live built-in does not load or expose another hook set.
+        // Unknown drivers never authorize a new backend or prove ownership clear.
+        if facts.kernel != KernelFact::Builtin
+            || facts.kpm_may_be_live
+            || candidates.as_slice() != [NativeBackend::Builtin]
+        {
+            return Plan::Stop(NativeBootOutcome::KpmUnverifiable {
+                detail: detail.clone(),
+            });
+        }
+    }
     let unverifiable = match &facts.kpm {
         KpmFact::AuthFailed(detail) => Some((true, detail.clone())),
         KpmFact::Broken(detail) => Some((false, detail.clone())),
@@ -255,7 +269,7 @@ pub fn decide(facts: &ScanFacts) -> Plan {
                 NativeBootOutcome::KpmUnverifiable { detail }
             });
         }
-        if facts.kpm_may_be_live {
+        if facts.kpm_may_be_live || !auth {
             return Plan::Stop(NativeBootOutcome::KpmUnverifiable { detail });
         }
         // No KPM candidate and no sign of a VPN Hide KPM: an unauthenticated
@@ -439,14 +453,32 @@ pub fn probe_kpm(lock: Option<&Path>) -> KpmProbe {
 fn probe_kpm_parts(lock: Option<&Path>) -> (KpmFact, Option<CoreKpm>, Option<bool>) {
     let Some(lock) = lock else {
         // Unmanaged KPM is never loaded or configured, but a live one still counts.
-        return match vpnhide_activator::observed_kpm_loaded() {
-            Ok(true) => (KpmFact::Live, None, None),
-            Ok(false) => (KpmFact::NotManaged, None, None),
+        return match CoreKpm::observe_loaded() {
+            Ok(vpnhide_activator::KpmObserved::Loaded) => (KpmFact::Live, None, None),
+            Ok(vpnhide_activator::KpmObserved::Clear) => (KpmFact::NotManaged, None, None),
+            Ok(vpnhide_activator::KpmObserved::Unrecognized(detail)) => {
+                (KpmFact::Unrecognized(detail), None, None)
+            }
             Err(e) => (KpmFact::Broken(e.to_string()), None, None),
         };
     };
     match CoreKpm::probe(lock) {
         Ok(KpmRuntimeProbe::NoRuntime) => (KpmFact::NoRuntime, None, None),
+        Ok(KpmRuntimeProbe::Unrecognized(detail)) => (KpmFact::Unrecognized(detail), None, None),
+        Ok(KpmRuntimeProbe::InventoryOnly {
+            loaded: true,
+            detail,
+        }) => (
+            KpmFact::Incompatible {
+                found: None,
+                detail,
+            },
+            None,
+            None,
+        ),
+        Ok(KpmRuntimeProbe::InventoryOnly { loaded: false, .. }) => {
+            (KpmFact::NotManaged, None, None)
+        }
         Ok(KpmRuntimeProbe::AwaitingAuthentication(detail)) => {
             (KpmFact::AuthFailed(detail), None, None)
         }
@@ -620,7 +652,13 @@ impl NativeBoot {
         ) || (!facts.kpm_may_be_live
             && matches!(facts.kpm, KpmFact::AuthFailed(_)));
         let valid = match selected {
-            NativeBackend::Builtin => facts.kernel == KernelFact::Builtin && kpm_clear,
+            NativeBackend::Builtin => {
+                facts.kernel == KernelFact::Builtin
+                    && (kpm_clear
+                        || (matches!(facts.kpm, KpmFact::Unrecognized(_))
+                            && !facts.kpm_may_be_live
+                            && facts.installed.is_empty()))
+            }
             NativeBackend::Kmod => facts.kernel == KernelFact::Kmod && kpm_clear,
             NativeBackend::Kpm => facts.kernel == KernelFact::Absent && facts.kpm == KpmFact::Live,
             NativeBackend::Zygisk => {

@@ -771,3 +771,63 @@ fn restored_bundled_zygisk_needs_current_loader_evidence_not_only_library_files(
         NativeBootOutcome::Unknown { .. }
     ));
 }
+
+#[test]
+fn an_unenumerable_native_kpm_blocks_competing_backends_without_apatch_files() {
+    for (installed, kernel) in [
+        (vec![Kmod], KernelFact::Absent),
+        (vec![], KernelFact::Builtin),
+        (vec![Zygisk], KernelFact::Absent),
+    ] {
+        assert_eq!(
+            decide(&facts(
+                &installed,
+                kernel,
+                KpmFact::Broken("native KPM LIST failed".into())
+            )),
+            Plan::Stop(NativeBootOutcome::KpmUnverifiable {
+                detail: "native KPM LIST failed".into()
+            })
+        );
+    }
+}
+
+#[test]
+fn unrecognized_driver_retains_only_an_existing_builtin_without_kpm_evidence() {
+    let unknown = || KpmFact::Unrecognized("unsupported driver ABI".into());
+    let existing = facts(&[], KernelFact::Builtin, unknown());
+    assert_eq!(decide(&existing), Plan::Adopt(Builtin));
+    for (installed, kernel) in [
+        (vec![Kmod], KernelFact::Absent),
+        (vec![], KernelFact::Kmod),
+        (vec![Zygisk], KernelFact::Absent),
+        (vec![], KernelFact::Absent),
+    ] {
+        assert!(matches!(
+            decide(&facts(&installed, kernel, unknown())),
+            Plan::Stop(NativeBootOutcome::KpmUnverifiable { .. })
+        ));
+    }
+    let mut suspect = existing.clone();
+    suspect.kpm_may_be_live = true;
+    assert!(matches!(
+        decide(&suspect),
+        Plan::Stop(NativeBootOutcome::KpmUnverifiable { .. })
+    ));
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let mut previous = NativeBoot::blocked(env(root), 1, "fixture".into());
+    let selected = Selection {
+        backend: Builtin,
+        mode: SelectionMode::Adopted,
+        filesystem_hiding: None,
+    };
+    previous.selection = Some(selected);
+    previous.status.outcome = selected_outcome(selected);
+    assert_eq!(
+        previous
+            .reconcile_restored_facts(2, Builtin, &existing)
+            .selected(),
+        Some(Builtin)
+    );
+}
