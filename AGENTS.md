@@ -52,6 +52,37 @@ These short files cover everything specific to this repo. Skipping them leads to
 - **Open regular PRs by default.** Use draft PRs only when the maintainer explicitly asks for a draft.
 - **Do not mention Codex in PR titles, PR descriptions, commit messages, or changelog entries.**
 
+## Runtime and tooling ownership
+
+- **One Rust implementation owns each format, protocol, validation rule and domain
+  policy.** Before adding a tool, inspect the existing workspace crates and reuse
+  or extract a portable shared library. Host packaging, maintenance and test
+  tools must consume those types and behavior, not create a second implementation
+  in Python or shell. Do not regex-parse Rust source to obtain version constants,
+  capacities, supported KMIs or compatibility rules; expose them through a typed
+  shared API or the common host CLI.
+- **Shell is bootstrap/process/environment glue.** Complex plans, recovery,
+  structured results and PASS/verdict evaluation belong in a testable typed tool.
+  Keep only the minimal shell required to enter a QEMU guest, invoke a toolchain,
+  or hand control to the compiled executor. Python remains appropriate for host
+  adapters, generators and build orchestration that do not duplicate domain
+  policy. This is not a blanket language ban.
+- **A replacement includes its consumers and retirement.** Move callsites to the
+  shared owner and delete the replaced classifiers/parsers/executors and obsolete
+  expectations in the same completed slice. Do not keep a parallel legacy owner
+  as a fallback; retain only explicitly scoped migration/compatibility readers.
+- **Keep independent verification.** Preserve adversarial fixtures, golden wire
+  contracts and independently constructed invalid inputs. Sharing a parser must
+  not turn all tests into producer-to-consumer agreement. Runtime always checks
+  the real bytes, identity and postconditions; a host report or publisher label
+  cannot replace those checks.
+- **Keep host and privileged dependencies separate.** The common host CLI may
+  depend on portable contract/format libraries, not the root daemon or the whole
+  device runtime. Do not weaken the production no-shell/no-su boundaries,
+  module-scaffold checks or authorization to make host tests convenient. Host
+  fixture runners and manager-owned installer shims are separate from Android
+  runtime orchestration.
+
 ## Build entry points
 
 Single-command builds for both CI and local — the same scripts run in both places.
