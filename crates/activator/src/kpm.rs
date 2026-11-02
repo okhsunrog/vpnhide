@@ -476,7 +476,9 @@ impl CoreKpm {
         let _lock = KpmCtlLock::acquire_delivery(&self.lock_path)?;
         require_no_kernel_owner(ctl)?;
         if self.status_locked()?.is_some() {
-            return Ok(());
+            return Err(
+                "KPM became live after selection; re-evaluate ownership before loading".into(),
+            );
         }
         if !crate::running_kernel_supports_kpm()? {
             return Err(format!(
@@ -1233,6 +1235,44 @@ esac
             std::fs::read_to_string(root.join("dispatched")).unwrap(),
             "config\n"
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn selected_load_refuses_a_backend_that_became_live_before_dispatch() {
+        use super::{CoreKpm, KpmClient};
+        use std::os::unix::fs::PermissionsExt;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "vpnhide-kpm-load-race-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let program = root.join("kpatch");
+        std::fs::write(
+            &program,
+            r#"#!/bin/sh
+case "$1 $2" in
+  "kpm list") printf 'vpnhide\n' ;;
+  "kpm ctl0") printf 'vpnhide 1 status\nbackend 0x1\nkver 0x60100\nhooks 0x3ff\nerror 0x0\n' ;;
+  "kpm load") printf 'load\n' > "${0%/*}/dispatched" ;;
+esac
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let client = CoreKpm {
+            client: KpmClient::KpatchCli { path: program },
+            lock_path: root.join("control.lock"),
+        };
+        let error = client
+            .load_selected(&root.join("ctl"), &root.join("not-loaded.kpm"), false)
+            .unwrap_err();
+        assert!(error.to_string().contains("became live after selection"));
+        assert!(!root.join("dispatched").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 

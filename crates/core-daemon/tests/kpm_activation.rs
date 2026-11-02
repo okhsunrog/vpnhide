@@ -24,6 +24,7 @@ case "$1 $2" in
     [ -f "$VH_ROOT/loaded" ] && printf 'vpnhide\n'
     exit 0 ;;
   "kpm load")
+    /bin/cat "$3" > "$VH_ROOT/loaded-payload" || exit 1
     printf '%s\n' "$@" >> "$VH_ROOT/load-args"
     [ "$VH_CASE" = load-fails ] && exit 1
     [ "$VH_CASE" = load-no-identity ] && exit 0
@@ -226,11 +227,43 @@ async fn exercise(case: &str) {
     let edit = ConfigEdit::Replace {
         config: candidate.clone(),
     };
-    client
+    let admission = client
         .submit_edit(OperationId(1), BaseRef { revision: 1 }, edit.clone())
         .await
-        .unwrap()
         .unwrap();
+    if matches!(case, "load-fails" | "load-no-identity" | "wrong-load") {
+        assert_eq!(
+            admission,
+            Err(vpnhide_core_rpc::SubmitError::Unavailable),
+            "{case}"
+        );
+        assert_eq!(
+            config_file::read(&canonical).unwrap(),
+            Some(initial),
+            "{case}"
+        );
+        let snapshot = client.current().await.unwrap().snapshot;
+        assert!(
+            snapshot
+                .held_resources
+                .contains(&vpnhide_core_rpc::ConfigPhase::Native)
+        );
+        assert!(matches!(
+            snapshot.backend.boot.unwrap().outcome,
+            NativeBootOutcome::LoadFailed { .. }
+        ));
+        assert!(!root.join("wire").exists());
+        assert!(root.join("load-args").exists());
+        assert!(
+            client
+                .get_operation(OperationId(1))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        return;
+    }
+    admission.unwrap();
     let record = common::settled(&client, OperationId(1)).await;
     let succeeds = matches!(
         case,
@@ -364,20 +397,24 @@ async fn exercise(case: &str) {
         "{case}: loading policy"
     );
     if loaded.exists() {
+        let args = fs::read_to_string(loaded).unwrap();
+        let lines: Vec<_> = args.lines().collect();
+        assert_eq!(&lines[..2], &["kpm", "load"]);
+        assert!(lines[2].starts_with(&format!("/proc/{}/fd/", process.0.id())));
         assert_eq!(
-            fs::read_to_string(loaded).unwrap(),
-            format!(
-                "kpm\nload\n{}\n{}",
-                modules.join("vpnhide_kpm/vpnhide.kpm").display(),
-                if case == "load-default" {
-                    ""
-                } else {
-                    "filesystem_hiding=1\n"
-                }
-            ),
-            "{case}"
+            &lines[3..],
+            if case == "load-default" {
+                &[][..]
+            } else {
+                &["filesystem_hiding=1"][..]
+            }
+        );
+        assert_eq!(
+            fs::read(root.join("loaded-payload")).unwrap(),
+            b"fake artifact"
         );
     }
+
     assert!(
         !root.join("insmod-calls").exists(),
         "{case}: no conflicting/fallback load"

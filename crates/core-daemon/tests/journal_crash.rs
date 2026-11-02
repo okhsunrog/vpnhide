@@ -437,3 +437,191 @@ async fn durable_admission_precedes_slow_effect_and_survives_disconnect() {
         1
     );
 }
+
+/// Exercise real process death, not a synthetic journal alone. The fake loader
+/// exposes identity but cannot establish actual kernel/Android compatibility.
+#[tokio::test]
+async fn startup_crash_repair_never_replays_a_load_in_the_same_boot() {
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::PermissionsExt;
+    for point in [
+        "startup-intent",
+        "startup-before-effects",
+        "startup-after-effects",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let socket = root.join("core.sock");
+        let config_path = root.join("config.json");
+        let journal_path = root.join("core_operations.json");
+        let ctl = root.join("ctl");
+        let module = root.join("modules/vpnhide_kmod");
+        fs::create_dir_all(&module).unwrap();
+        fs::write(module.join("module.prop"), "id=vpnhide_kmod\n").unwrap();
+        let artifact = module.join("vpnhide_kmod.ko");
+        fs::write(&artifact, b"first payload").unwrap();
+        let config = CanonicalConfig::default();
+        config_file::write_atomic(&config_path, &config).unwrap();
+        let loader = root.join("insmod");
+        fs::write(&loader, "#!/bin/sh\n/bin/cat \"$1\" > \"$VH_ROOT/loaded\" || exit 1\nprintf 'load\\n' >> \"$VH_ROOT/loads\"\nprintf 'vpnhide 1 status\\nbackend 0x0\\nkver 0x0\\nhooks 0x0\\nerror 0x0\\n' > \"$VPNHIDE_KMOD_CTL\"\n").unwrap();
+        fs::set_permissions(&loader, fs::Permissions::from_mode(0o700)).unwrap();
+        let spawn = |crash: Option<&str>| {
+            let mut command = common::core_command();
+            command
+                .arg(&socket)
+                .env("PATH", root)
+                .env("VH_ROOT", root)
+                .env("VPNHIDE_CONFIG_PATH", &config_path)
+                .env("VPNHIDE_CORE_OWNER_DIR", root.join("owner"))
+                .env("VPNHIDE_KMOD_CTL", &ctl)
+                .env("VPNHIDE_KERNEL_MODULES", root.join("modules"))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            if let Some(crash) = crash {
+                command.env("VPNHIDE_TEST_CRASH_AFTER", crash);
+            }
+            CoreProcess(command.spawn().unwrap())
+        };
+        let mut crashed = spawn(Some(point));
+        let exit = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(exit) = crashed.0.try_wait().unwrap() {
+                    break exit;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(exit.code(), Some(97), "{point}");
+        let interrupted = journal::read(&journal_path).unwrap();
+        let attempt = interrupted.native_startup.clone().unwrap();
+        assert!(attempt.completed.is_none());
+        assert_eq!(
+            attempt
+                .intent
+                .as_ref()
+                .unwrap()
+                .payload
+                .as_ref()
+                .unwrap()
+                .sha256,
+            format!("{:x}", Sha256::digest(b"first payload"))
+        );
+        let after = point == "startup-after-effects";
+        assert_eq!(root.join("loads").exists(), after);
+        // Replacing a source never alters the interrupted intent or authorizes replay.
+        fs::write(&artifact, b"second payload").unwrap();
+        let mut restarted = spawn(None);
+        wait_bound(&socket, &mut restarted).await;
+        let client = CoreClient::connect(&socket);
+        common::reserve_operation_ids(&client, 1).await;
+        assert!(
+            client
+                .current()
+                .await
+                .unwrap()
+                .snapshot
+                .held_resources
+                .contains(&ConfigPhase::Native)
+        );
+        client
+            .submit_edit(
+                OperationId(1),
+                BaseRef { revision: 1 },
+                ConfigEdit::RepairActivation,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let repaired = common::settled(&client, OperationId(1)).await;
+        assert_eq!(
+            repaired.settled,
+            Some(if after {
+                PhaseOutcome::Confirmed
+            } else {
+                PhaseOutcome::FailedKnown
+            }),
+            "{point}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("loads")).unwrap_or_default(),
+            if after { "load\n" } else { "" }
+        );
+        assert_eq!(
+            config_file::read(&config_path).unwrap(),
+            Some(config.clone())
+        );
+        let stored = journal::read(&journal_path).unwrap();
+        if after {
+            assert!(!stored.native_startup_uncertain());
+            assert_eq!(stored.native_attempts.last().unwrap().attempt, attempt);
+            assert_eq!(
+                stored.native_attempts.last().unwrap().superseded_by,
+                Some(OperationId(1))
+            );
+            assert_eq!(fs::read(root.join("loaded")).unwrap(), b"first payload");
+        } else {
+            assert!(stored.native_startup_uncertain());
+            drop(client);
+            drop(restarted);
+            // Simulate only the boot-generation boundary in this host fixture.
+            // A real phone must reboot; no runtime API can mutate its boot ID.
+            let mut rebooted = stored;
+            rebooted.native_startup.as_mut().unwrap().boot_id = "prior-boot".into();
+            rebooted
+                .native_startup
+                .as_mut()
+                .unwrap()
+                .intent
+                .as_mut()
+                .unwrap()
+                .boot_id = "prior-boot".into();
+            rebooted.native_load_budget.as_mut().unwrap().boot_id = "prior-boot".into();
+            journal::write_atomic(&journal_path, &rebooted).unwrap();
+            let _ = fs::remove_file(&socket);
+            let mut restarted = spawn(None);
+            wait_bound(&socket, &mut restarted).await;
+            let client = CoreClient::connect(&socket);
+            common::reserve_operation_ids(&client, 2).await;
+            assert!(!root.join("loads").exists(), "reboot alone must not retry");
+            client
+                .submit_edit(
+                    OperationId(2),
+                    BaseRef { revision: 1 },
+                    ConfigEdit::RepairActivation,
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                common::settled(&client, OperationId(2)).await.settled,
+                Some(PhaseOutcome::Confirmed)
+            );
+            assert_eq!(fs::read(root.join("loaded")).unwrap(), b"second payload");
+            assert_eq!(fs::read_to_string(root.join("loads")).unwrap(), "load\n");
+            let stored = journal::read(&journal_path).unwrap();
+            assert!(!stored.native_startup_uncertain());
+            assert!(
+                stored
+                    .native_attempts
+                    .last()
+                    .unwrap()
+                    .attempt
+                    .completed
+                    .is_none()
+            );
+            assert_eq!(
+                stored
+                    .native_startup
+                    .unwrap()
+                    .intent
+                    .unwrap()
+                    .payload
+                    .unwrap()
+                    .sha256,
+                format!("{:x}", Sha256::digest(b"second payload"))
+            );
+        }
+    }
+}

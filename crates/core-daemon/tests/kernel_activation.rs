@@ -63,7 +63,7 @@ async fn exercise(case: Case, check: impl FnOnce(&NativeBootOutcome)) {
         .insert("filesystem_iface_paths".into());
     config_file::write_atomic(&config_path, &initial).unwrap();
     let insmod = dir.path().join("insmod");
-    fs::write(&insmod, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$VPNHIDE_TEST_LOAD_ARGS\"\nprintf 'vpnhide 1 status\\nbackend 0x%s\\nkver 0x0\\nhooks 0x0\\nerror 0x0\\n' \"$VPNHIDE_TEST_OWNER\" > \"$VPNHIDE_KMOD_CTL\"\n").unwrap();
+    fs::write(&insmod, "#!/bin/sh\n/bin/cat \"$1\" > \"$VPNHIDE_TEST_LOAD_ARGS.payload\" || exit 1\nprintf '%s\\n' \"$@\" > \"$VPNHIDE_TEST_LOAD_ARGS\"\nprintf 'vpnhide 1 status\\nbackend 0x%s\\nkver 0x0\\nhooks 0x0\\nerror 0x0\\n' \"$VPNHIDE_TEST_OWNER\" > \"$VPNHIDE_KMOD_CTL\"\n").unwrap();
     fs::set_permissions(&insmod, fs::Permissions::from_mode(0o700)).unwrap();
     if case.kpm.is_some() {
         let kpatch = dir.path().join("kpatch");
@@ -103,12 +103,14 @@ async fn exercise(case: Case, check: impl FnOnce(&NativeBootOutcome)) {
     .expect("core bound its socket");
     // Selection and loading happened at startup, before any edit.
     if case.expect_insmod {
+        let args = fs::read_to_string(&args_path).unwrap();
+        let lines: Vec<_> = args.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].starts_with(&format!("/proc/{}/fd/", child.0.id())));
+        assert_eq!(lines[1], "filesystem_hiding=1");
         assert_eq!(
-            fs::read_to_string(&args_path).unwrap(),
-            format!(
-                "{}\nfilesystem_hiding=1\n",
-                module.join("vpnhide_kmod.ko").display()
-            )
+            fs::read(args_path.with_file_name("load-args.payload")).unwrap(),
+            b"fake artifact"
         );
     } else {
         assert!(!args_path.exists(), "core must not insmod");
@@ -118,7 +120,7 @@ async fn exercise(case: Case, check: impl FnOnce(&NativeBootOutcome)) {
     client.hello().await.unwrap();
     let mut candidate = initial.clone();
     candidate.debug = true;
-    client
+    let admission = client
         .submit_edit(
             OperationId(1),
             BaseRef { revision: 1 },
@@ -127,8 +129,29 @@ async fn exercise(case: Case, check: impl FnOnce(&NativeBootOutcome)) {
             },
         )
         .await
-        .unwrap()
         .unwrap();
+    let uncertain_load = case.expect_insmod && case.loaded_owner != 0;
+    if uncertain_load {
+        assert_eq!(admission, Err(vpnhide_core_rpc::SubmitError::Unavailable));
+        assert_eq!(config_file::read(&config_path).unwrap(), Some(initial));
+        let snapshot = client.current().await.unwrap().snapshot;
+        assert!(snapshot.held_resources.contains(&ConfigPhase::Native));
+        check(&snapshot.backend.boot.unwrap().outcome);
+        assert!(
+            fs::read_to_string(&ctl)
+                .unwrap()
+                .starts_with("vpnhide 1 status\n")
+        );
+        assert!(
+            client
+                .get_operation(OperationId(1))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        return;
+    }
+    admission.unwrap();
     let record = common::settled(&client, OperationId(1)).await;
     assert_eq!(record.settled, Some(case.expected));
     assert_eq!(record.phases[0].phase, ConfigPhase::Persist);

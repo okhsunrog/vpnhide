@@ -184,6 +184,9 @@ pub struct RealPhaseRunner {
     pub ports_enabled: bool,
     /// This boot's fixed native decision. `None` = native management disabled.
     pub native: Option<NativeBootHandle>,
+    pub recover_startup: bool,
+    startup: std::cell::RefCell<Option<crate::native_boot::prepared::Prepared>>,
+    startup_result: std::cell::RefCell<Option<crate::journal::NativeStartupResult>>,
     /// Where a Ports pass came from (boot passes set this; edits default to `Edit`).
     pub ports_source: vpnhide_core_rpc::PortsSource,
     /// Whether netd's chains existed before a boot Ports pass.
@@ -225,6 +228,9 @@ impl RealPhaseRunner {
             kmod_ctl_path,
             ports_enabled,
             native: None,
+            recover_startup: false,
+            startup: std::cell::RefCell::new(None),
+            startup_result: std::cell::RefCell::new(None),
             ports_source: vpnhide_core_rpc::PortsSource::Edit,
             ports_netd_ready: None,
             native_wire: None,
@@ -238,6 +244,63 @@ impl RealPhaseRunner {
         self.selected.get()
     }
 
+    /// Preparation is read-only with respect to runtime effects and runs immediately
+    /// before the Native intent write, after a possible Secret phase has completed.
+    pub fn prepare_startup(
+        &self,
+        journal: &crate::journal::Journal,
+        candidate: &CanonicalConfig,
+        op: vpnhide_core_rpc::OperationId,
+    ) -> Result<Option<crate::journal::NativeStartup>, String> {
+        let Some(handle) = &self.native else {
+            return Ok(None);
+        };
+        let boot = handle.lock().expect("native boot");
+        if !self.recover_startup && !boot.pending_authentication() {
+            return Ok(None);
+        }
+        let filesystem_hiding = candidate
+            .settings
+            .optional_features
+            .contains(crate::config_edit::FILESYSTEM_FEATURE);
+        let prepared =
+            crate::native_boot::prepared::Prepared::scan(boot.env.clone(), filesystem_hiding)?;
+        if let Some(previous) = &journal.native_startup {
+            if previous.uncertain() {
+                prepared.permit_recovery(previous)?;
+            }
+        }
+        journal.check_native_attempt(&prepared.intent, self.recover_startup)?;
+        if let Some(backend) = prepared.selected() {
+            let wire = crate::activation::project_native_wire(candidate, backend)
+                .map_err(|error| error.to_string())?;
+            *self.prepared_native.borrow_mut() = Some(Ok(crate::journal::NativeIntent {
+                backend,
+                wire,
+                zygisk_module: (backend == vpnhide_core_rpc::NativeBackend::Zygisk)
+                    .then(|| boot.env.module_dir(backend))
+                    .flatten(),
+            }));
+        }
+        let attempt = crate::journal::NativeStartup {
+            boot_id: prepared.intent.boot_id.clone(),
+            config_revision: journal
+                .get(op)
+                .and_then(|entry| entry.admission.as_ref())
+                .map_or(journal.config_revision, |a| a.commit_revision),
+            filesystem_hiding,
+            intent: Some(prepared.intent.clone()),
+            repair_op: Some(op),
+            completed: None,
+        };
+        *self.startup.borrow_mut() = Some(prepared);
+        Ok(Some(attempt))
+    }
+
+    pub fn take_startup_result(&self) -> Option<crate::journal::NativeStartupResult> {
+        self.startup_result.borrow_mut().take()
+    }
+
     /// Freeze the actual recipient and UID-resolved wire before journaling Native
     /// intent. The runner then dispatches these exact bytes, even if packages change.
     pub fn native_intent(
@@ -248,10 +311,16 @@ impl RealPhaseRunner {
             return intent.clone().ok();
         }
         let boot = self.native.as_ref()?.lock().expect("native boot");
-        let backend = boot.selected().or_else(|| {
-            boot.pending_authentication()
-                .then_some(vpnhide_core_rpc::NativeBackend::Kpm)
-        })?;
+        let backend = self
+            .startup
+            .borrow()
+            .as_ref()
+            .and_then(|p| p.selected())
+            .or_else(|| boot.selected())
+            .or_else(|| {
+                boot.pending_authentication()
+                    .then_some(vpnhide_core_rpc::NativeBackend::Kpm)
+            })?;
         let wire = match &self.native_wire {
             Some((for_backend, wire)) if *for_backend == backend => Ok(wire.clone()),
             _ => crate::activation::project_native_wire(candidate, backend),
@@ -309,8 +378,8 @@ impl PhaseRunner for RealPhaseRunner {
                 None => PhaseOutcome::Confirmed,
             },
             ConfigPhase::Native => {
-                // Selection happened once at boot; never re-select here. Deliver only
-                // to that backend, or report why there is none.
+                // Ordinary edits use the selected backend. Explicit recovery may
+                // execute only the transition already prepared and journaled.
                 if self.kmod_ctl_path.is_none() {
                     return PhaseOutcome::NotAttempted;
                 }
@@ -318,18 +387,20 @@ impl PhaseRunner for RealPhaseRunner {
                     return PhaseOutcome::NotAttempted;
                 };
                 let mut boot = native.lock().expect("native boot");
+                let attempted_startup = self.startup.borrow_mut().take();
+                let retried_startup = attempted_startup.is_some();
+                if let Some(prepared) = attempted_startup {
+                    *boot = prepared.execute(self.epoch);
+                    *self.startup_result.borrow_mut() = Some(crate::journal::NativeStartupResult {
+                        status: boot.status.clone(),
+                        selection: boot.selection,
+                    });
+                }
                 // Authentication-triggered load is part of Native, whose exact
                 // intent is already durable; Secret owns only key storage.
-                let retried_authentication = boot.pending_authentication();
-                if retried_authentication {
-                    boot.retry_authentication(
-                        self.epoch,
-                        candidate
-                            .settings
-                            .optional_features
-                            .contains(crate::config_edit::FILESYSTEM_FEATURE),
-                    );
-                }
+                // All authentication-triggered loads also require prepared startup
+                // evidence from JournalPhaseHook. Never bypass it with legacy re-scan.
+                let retried_authentication = retried_startup;
                 let Some(backend) = boot.selected() else {
                     return match &boot.status.outcome {
                         // Nothing native to configure: the phase is trivially satisfied.

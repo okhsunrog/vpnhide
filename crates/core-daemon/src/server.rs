@@ -1161,12 +1161,28 @@ impl CoreState {
         };
         let previous = store.clone();
         let filesystem_hiding = self.filesystem_hiding_wanted();
-        store.journal.native_startup = Some(journal::NativeStartup {
-            boot_id,
-            config_revision: store.config_revision,
-            filesystem_hiding,
-            completed: None,
-        });
+        let prepared =
+            match crate::native_boot::prepared::Prepared::scan(env.clone(), filesystem_hiding) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    blocked(format!("native preparation refused: {error}"));
+                    return;
+                }
+            };
+        if let Err(error) = store.journal.check_native_attempt(&prepared.intent, false) {
+            blocked(error);
+            return;
+        }
+        store
+            .journal
+            .replace_native_startup(journal::NativeStartup {
+                boot_id,
+                config_revision: store.config_revision,
+                filesystem_hiding,
+                intent: Some(prepared.intent.clone()),
+                repair_op: None,
+                completed: None,
+            });
         if let Err(error) = journal::write_atomic(path, &store.journal) {
             self.freeze_storage_fault(&previous, OperationId(0), &error);
             blocked("native startup intent could not be synced; no effect dispatched".into());
@@ -1174,17 +1190,15 @@ impl CoreState {
         }
         *self.engine.store.lock().expect("config mutex") = store.clone();
         self.publish_store(&store);
-        let boot = NativeBoot::start(env.clone(), epoch, filesystem_hiding);
+        crate::recovery::maybe_crash_for_test("startup-intent");
+        let boot = prepared.execute(epoch);
         let pending = store.clone();
         store
             .journal
-            .native_startup
-            .as_mut()
-            .expect("startup intent")
-            .completed = Some(journal::NativeStartupResult {
-            status: boot.status.clone(),
-            selection: boot.selection,
-        });
+            .complete_native_startup(journal::NativeStartupResult {
+                status: boot.status.clone(),
+                selection: boot.selection,
+            });
         if let Err(error) = journal::write_atomic(path, &store.journal) {
             self.freeze_storage_fault(&pending, OperationId(0), &error);
             blocked(
@@ -1540,7 +1554,25 @@ impl CoreState {
         } else {
             false
         };
-        if store.journal.has_unknown() && !spec.lease && !repair && recovery_action.is_none() {
+        // A missing canonical file may still be explicitly imported/bootstrapped
+        // while the only hold is interrupted initial activation. Persist intent is
+        // safe; Native remains held until checked RepairActivation. Never permit
+        // this for an uncertain Persist or any other operation's held effect.
+        let bootstrap_with_startup_hold = store.config.is_none()
+            && matches!(edit, ConfigEdit::Replace { .. })
+            && store.journal.native_startup_uncertain()
+            && store.journal.expired_holds.is_empty()
+            && store
+                .journal
+                .operations
+                .iter()
+                .all(|entry| entry.held_phases().is_empty());
+        if store.journal.has_unknown()
+            && !spec.lease
+            && !repair
+            && recovery_action.is_none()
+            && !bootstrap_with_startup_hold
+        {
             return Err(SubmitError::Unavailable);
         }
         if base.revision < store.journal.conflict_floor && !repair && !spec.lease && !spec.reset {
@@ -1646,6 +1678,14 @@ impl CoreState {
             ports,
         );
         runner.native = self.native_handle();
+        runner.recover_startup = store.journal.native_startup.is_some()
+            && !options.automatic_repair
+            && (repair || matches!(spec.intent, journal::CommandIntent::SetSuperkey { .. }))
+            && (store.journal.native_startup_uncertain()
+                || runner
+                    .native
+                    .as_ref()
+                    .is_some_and(|n| n.lock().expect("native boot").selected().is_none()));
         runner.effect_paths = self.effect_paths.read().expect("effect paths").clone();
         runner.effects = spec.effect.iter().cloned().collect();
         runner.reset_config = spec.reset;
@@ -1966,6 +2006,23 @@ struct JournalPhaseHook<'a> {
 impl PhaseHook for JournalPhaseHook<'_> {
     fn before(&mut self, phase: ConfigPhase) -> Result<(), PhaseOutcome> {
         let native_intent = if phase == ConfigPhase::Native {
+            match self
+                .runner
+                .prepare_startup(self.journal, self.candidate, self.op)
+            {
+                Ok(Some(attempt)) => self.journal.replace_native_startup(attempt),
+                Ok(None) => {}
+                Err(error) => {
+                    if let Some(handle) = &self.runner.native {
+                        let mut boot = handle.lock().expect("native boot");
+                        boot.status.outcome = vpnhide_core_rpc::NativeBootOutcome::Unknown {
+                            detail: error.clone(),
+                        };
+                    }
+                    eprintln!("core: startup recovery preparation refused: {error}");
+                    return Err(PhaseOutcome::FailedKnown);
+                }
+            }
             self.runner.native_intent(self.candidate)
         } else {
             None
@@ -2052,6 +2109,14 @@ impl PhaseHook for JournalPhaseHook<'_> {
             crate::recovery::maybe_crash_for_test("persist");
         }
         if phase == ConfigPhase::Native {
+            if let Some(result) = self.runner.take_startup_result() {
+                self.journal.complete_native_startup(result);
+                if let Err(error) = journal::write_atomic(&self.path, self.journal) {
+                    eprintln!("core: startup recovery completion could not be synced: {error}");
+                    return Err(PhaseOutcome::Unknown);
+                }
+                self.state.publish_progress(self.journal);
+            }
             crate::recovery::maybe_crash_for_test("native");
         }
         Ok(())

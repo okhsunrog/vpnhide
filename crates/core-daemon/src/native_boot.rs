@@ -16,10 +16,11 @@
 //!   adopts the live copy and never loads a second one;
 //! - none: [`NativeBootOutcome::NoBackend`].
 //!
-//! The decision is persisted with the kernel `boot_id` and stays fixed for the whole
-//! boot: a later Save / RepairActivation only delivers config to the selected
-//! backend, and a core restart in the same boot re-adopts it. The one exception is a
-//! pending KPM authentication, which core re-tries after the superkey is saved.
+//! CommandEngine journals prepared payload/transition intent before effects. Completed
+//! same-boot selections are revalidated on restart. Interrupted or ambiguous loads
+//! remain held until explicit RepairActivation can safely adopt a compatible live
+//! backend or prepare a new attempt after reboot. KPM credential recovery uses that
+//! same durable path; native_boot.json is diagnostic output, never activation authority.
 
 use std::fs;
 use std::io::Read;
@@ -33,6 +34,7 @@ use vpnhide_core_rpc::{
 };
 
 use crate::alog;
+pub mod prepared;
 
 /// Canonical order for every published backend list.
 const ORDER: [NativeBackend; 4] = [
@@ -64,7 +66,7 @@ pub struct NativeEnv {
     pub boot_id_path: PathBuf,
     /// Where the boot decision is persisted (core's owner dir).
     pub state_file: PathBuf,
-    /// Root under which legacy per-backend state (`/data/adb/vpnhide_*`) is cleaned.
+    /// Legacy inventory root for migration/repair; startup never deletes from it.
     pub legacy_root: Option<PathBuf>,
     /// APatch's installed-KPM dir: evidence that a VPN Hide KPM may be live.
     pub apatch_kpms: PathBuf,
@@ -285,6 +287,9 @@ pub trait Effects {
     fn kprobes(&self) -> (Option<bool>, Option<bool>);
     fn dmesg_tail(&self) -> Vec<String>;
     fn uname(&self) -> String;
+    fn retire_zygisk(&self, dir: &Path) -> Result<(), String> {
+        retire_zygisk(dir)
+    }
 }
 
 /// The device.
@@ -647,71 +652,6 @@ impl NativeBoot {
         )
     }
 
-    /// Start-of-run decision: reuse this boot's persisted decision (a core restart),
-    /// otherwise scan, load and retire.
-    pub fn start(env: NativeEnv, epoch: u64, filesystem_hiding: bool) -> Self {
-        let boot_id = read_boot_id(&env.boot_id_path);
-        if let Some(prior) = read_persisted(&env.state_file)
-            .filter(|p| !boot_id.is_empty() && p.status.boot_id == boot_id)
-        {
-            let boot = NativeBoot {
-                env: env.clone(),
-                status: prior.status,
-                selection: prior.selection,
-            };
-            if !boot.pending_authentication() {
-                alog::info(&format!(
-                    "native: re-adopting this boot's decision {:?}",
-                    boot.status.outcome
-                ));
-                return boot;
-            }
-        }
-        let probe = probe_kpm(env.kpm_lock.as_deref());
-        let client = probe.client;
-        let mut facts = gather(&env, probe.fact);
-        facts.kpm_filesystem_hiding = probe.filesystem_hiding;
-        let boot = Self::decide_and_apply(
-            env,
-            epoch,
-            &boot_id,
-            &facts,
-            client,
-            filesystem_hiding,
-            &SystemEffects,
-        );
-        boot.cleanup_legacy(&facts);
-        boot.persist();
-        boot
-    }
-
-    /// Re-decide after a superkey change, only while authentication is pending.
-    /// Returns true when the decision changed.
-    pub fn retry_authentication(&mut self, epoch: u64, filesystem_hiding: bool) -> bool {
-        if !self.pending_authentication() {
-            return false;
-        }
-        let probe = probe_kpm(self.env.kpm_lock.as_deref());
-        let client = probe.client;
-        let mut facts = gather(&self.env, probe.fact);
-        facts.kpm_filesystem_hiding = probe.filesystem_hiding;
-        let next = Self::decide_and_apply(
-            self.env.clone(),
-            epoch,
-            &self.status.boot_id.clone(),
-            &facts,
-            client,
-            filesystem_hiding,
-            &SystemEffects,
-        );
-        let changed = next.status.outcome != self.status.outcome;
-        let ports = self.status.ports.clone();
-        *self = next;
-        self.status.ports = ports;
-        self.persist();
-        changed
-    }
-
     /// Decide and perform the load / retire for `facts`.
     pub fn decide_and_apply(
         env: NativeEnv,
@@ -774,7 +714,7 @@ impl NativeBoot {
             selection,
             env,
         };
-        boot.status.zygisk_targets = boot.settle_zygisk(facts);
+        boot.status.zygisk_targets = boot.settle_zygisk(facts, effects);
         if !boot.status.obsolete_modules.is_empty() {
             alog::info(&format!(
                 "native: obsolete 1.x modules installed: {}; their boot scripts still run beside core (iptables, /proc/vpnhide_ctl). Uninstall them and reboot",
@@ -795,7 +735,7 @@ impl NativeBoot {
     /// Zygisk keeps hooking whatever `targets.txt` lists. When it is not this boot's
     /// backend, replace that with an empty snapshot so it cannot act as a hidden second
     /// backend.
-    fn settle_zygisk(&self, facts: &ScanFacts) -> ZygiskTargets {
+    fn settle_zygisk(&self, facts: &ScanFacts, effects: &dyn Effects) -> ZygiskTargets {
         if !facts.installed.contains(&NativeBackend::Zygisk) {
             return ZygiskTargets::NotInstalled;
         }
@@ -805,7 +745,7 @@ impl NativeBoot {
         let Some(dir) = self.env.module_dir(NativeBackend::Zygisk) else {
             return ZygiskTargets::NotInstalled;
         };
-        match retire_zygisk(&dir) {
+        match effects.retire_zygisk(&dir) {
             Ok(()) => ZygiskTargets::Retired,
             Err(detail) => {
                 alog::info(&format!("native: retiring Zygisk targets failed: {detail}"));
@@ -885,41 +825,6 @@ impl NativeBoot {
             eprintln!("core: native boot state not persisted");
         }
     }
-
-    /// The per-backend activators' state is gone with them: drop their legacy
-    /// `load_status` files (Ports' `load_log` too), and a removed KPM's lock, on the
-    /// boot scan. A dir is removed only when empty (an unimported 1.x `observers.txt`
-    /// keeps `vpnhide_ports`).
-    fn cleanup_legacy(&self, facts: &ScanFacts) {
-        let Some(root) = &self.env.legacy_root else {
-            return;
-        };
-        let at = |p: &str| root.join(p.trim_start_matches('/'));
-        for file in [
-            "/data/adb/vpnhide_kmod/load_status",
-            "/data/adb/vpnhide_kmod/load_dmesg",
-            "/data/adb/vpnhide_builtin/load_status",
-            "/data/adb/vpnhide_kpm/load_status",
-            "/data/adb/vpnhide_ports/load_status",
-            "/data/adb/vpnhide_ports/load_log",
-        ] {
-            let _ = fs::remove_file(at(file));
-        }
-        let kpm_present = facts.installed.contains(&NativeBackend::Kpm)
-            || facts.staged.contains(&NativeBackend::Kpm)
-            || facts.kpm_live();
-        if !kpm_present {
-            let _ = fs::remove_file(at("/data/adb/vpnhide_kpm/ctl.lock"));
-        }
-        for dir in [
-            "/data/adb/vpnhide_kmod",
-            "/data/adb/vpnhide_builtin",
-            "/data/adb/vpnhide_kpm",
-            "/data/adb/vpnhide_ports",
-        ] {
-            let _ = fs::remove_dir(at(dir));
-        }
-    }
 }
 
 fn selected_outcome(selection: Selection) -> NativeBootOutcome {
@@ -928,10 +833,6 @@ fn selected_outcome(selection: Selection) -> NativeBootOutcome {
         mode: selection.mode,
         filesystem_hiding: selection.filesystem_hiding,
     }
-}
-
-fn read_persisted(path: &Path) -> Option<Persisted> {
-    serde_json::from_slice(&fs::read(path).ok()?).ok()
 }
 
 fn load_kmod(
@@ -1060,6 +961,10 @@ fn load_kpm(
 /// Replace Zygisk's targets with an empty snapshot.
 pub fn retire_zygisk(dir: &Path) -> Result<(), String> {
     let target = crate::zygisk::ZygiskTarget::open(dir)?;
+    retire_zygisk_target(&target)
+}
+
+pub(crate) fn retire_zygisk_target(target: &crate::zygisk::ZygiskTarget) -> Result<(), String> {
     let wire = crate::activation::project_native_wire_with_resolver(
         &vpnhide_core_rpc::CanonicalConfig::default(),
         NativeBackend::Zygisk,

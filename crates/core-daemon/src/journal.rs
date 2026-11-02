@@ -39,7 +39,7 @@ pub const DEFAULT_JOURNAL_PATH: &str = "/data/adb/vpnhide/core/operations.json";
 /// Env override so the dev sandbox never touches the production journal.
 pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 
-const JOURNAL_VERSION: u32 = 3;
+const JOURNAL_VERSION: u32 = 4;
 
 /// Default number of terminal receipts to keep, including Unknown.
 pub const DEFAULT_RETAIN_SETTLED: usize = 64;
@@ -166,7 +166,73 @@ pub struct NativeStartup {
     pub boot_id: String,
     pub config_revision: u64,
     pub filesystem_hiding: bool,
+    #[serde(default)]
+    pub intent: Option<crate::native_boot::prepared::TransitionIntent>,
+    #[serde(default)]
+    pub repair_op: Option<OperationId>,
     pub completed: Option<NativeStartupResult>,
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
+impl NativeStartup {
+    fn valid(&self) -> bool {
+        use crate::native_boot::prepared::TransitionAction;
+        if self.boot_id.is_empty()
+            || self.boot_id.len() > 128
+            || self
+                .completed
+                .as_ref()
+                .is_some_and(|r| r.status.boot_id != self.boot_id)
+        {
+            return false;
+        }
+        let Some(intent) = &self.intent else {
+            return true;
+        }; // schema 3
+        if intent.boot_id != self.boot_id
+            || intent.filesystem_hiding != self.filesystem_hiding
+            || (intent.retire_directory_identity.is_some() && intent.retire_zygisk.is_none())
+        {
+            return false;
+        }
+        if let Some(payload) = &intent.payload {
+            if !matches!(
+                intent.action,
+                TransitionAction::Load(NativeBackend::Kmod | NativeBackend::Kpm)
+            ) || payload.bytes == 0
+                || payload.bytes > crate::payloads::MAX_PAYLOAD_BYTES
+                || !valid_sha256(&payload.sha256)
+                || payload.source.as_os_str().is_empty()
+            {
+                return false;
+            }
+        }
+        !matches!(
+            intent.action,
+            TransitionAction::Load(NativeBackend::Builtin | NativeBackend::Zygisk)
+        )
+    }
+
+    pub fn uncertain(&self) -> bool {
+        match &self.completed {
+            None => true,
+            Some(result) => {
+                matches!(
+                    result.status.outcome,
+                    vpnhide_core_rpc::NativeBootOutcome::LoadFailed { .. }
+                ) || matches!(
+                    result.status.zygisk_targets,
+                    vpnhide_core_rpc::ZygiskTargets::RetireFailed { .. }
+                )
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,11 +242,37 @@ pub struct NativeStartupResult {
     pub selection: Option<crate::native_boot::Selection>,
 }
 
+/// Bounded audit of superseded startup attempts. An unresolved attempt stays in
+/// native_startup until explicit repair establishes a safe replacement boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeAttemptHistory {
+    pub attempt: NativeStartup,
+    pub superseded_by: Option<OperationId>,
+}
+pub const MAX_NATIVE_ATTEMPTS: usize = 16;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeLoadBudget {
+    pub boot_id: String,
+    pub attempted: Vec<vpnhide_core_rpc::NativeBackend>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeQuarantine {
+    pub backend: vpnhide_core_rpc::NativeBackend,
+    pub sha256: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
     pub version: u32,
     #[serde(default)]
     pub native_startup: Option<NativeStartup>,
+    #[serde(default)]
+    pub native_attempts: Vec<NativeAttemptHistory>,
+    #[serde(default)]
+    pub native_load_budget: Option<NativeLoadBudget>,
+    #[serde(default)]
+    pub native_quarantine: Vec<NativeQuarantine>,
     /// Durable config-revision counter — continues across restarts.
     pub config_revision: u64,
     pub retain_settled: usize,
@@ -215,6 +307,9 @@ impl Default for Journal {
         Journal {
             version: JOURNAL_VERSION,
             native_startup: None,
+            native_attempts: Vec::new(),
+            native_load_budget: None,
+            native_quarantine: Vec::new(),
             config_revision: 0,
             retain_settled: DEFAULT_RETAIN_SETTLED,
             operations: Vec::new(),
@@ -259,7 +354,95 @@ impl Journal {
     pub fn native_startup_uncertain(&self) -> bool {
         self.native_startup
             .as_ref()
-            .is_some_and(|attempt| attempt.completed.is_none())
+            .is_some_and(NativeStartup::uncertain)
+    }
+
+    pub fn check_native_attempt(
+        &self,
+        intent: &crate::native_boot::prepared::TransitionIntent,
+        explicit: bool,
+    ) -> Result<(), String> {
+        use crate::native_boot::prepared::TransitionAction;
+        if let TransitionAction::Load(backend) = intent.action {
+            if intent.payload.is_none() {
+                return Ok(());
+            }
+            if self.native_load_budget.as_ref().is_some_and(|budget| {
+                budget.boot_id == intent.boot_id && budget.attempted.contains(&backend)
+            }) {
+                return Err(
+                    "this backend was already attempted in this boot; reboot before retrying"
+                        .into(),
+                );
+            }
+            if !explicit
+                && intent.payload.as_ref().is_some_and(|payload| {
+                    self.native_quarantine
+                        .iter()
+                        .any(|q| q.backend == backend && q.sha256 == payload.sha256)
+                })
+            {
+                return Err("previous payload activation was not confirmed; explicit RepairActivation is required".into());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn complete_native_startup(&mut self, result: NativeStartupResult) {
+        use crate::native_boot::prepared::TransitionAction;
+        if let Some(attempt) = &mut self.native_startup {
+            if let Some(intent) = &attempt.intent {
+                if let TransitionAction::Load(backend) = intent.action {
+                    if result
+                        .selection
+                        .is_some_and(|selected| selected.backend == backend)
+                    {
+                        self.native_quarantine.retain(|q| q.backend != backend);
+                    }
+                }
+            }
+            attempt.completed = Some(result);
+        }
+    }
+
+    pub fn replace_native_startup(&mut self, attempt: NativeStartup) {
+        if let Some(intent) = &attempt.intent {
+            if let (crate::native_boot::prepared::TransitionAction::Load(backend), Some(payload)) =
+                (intent.action, &intent.payload)
+            {
+                if self
+                    .native_load_budget
+                    .as_ref()
+                    .is_none_or(|budget| budget.boot_id != intent.boot_id)
+                {
+                    self.native_load_budget = Some(NativeLoadBudget {
+                        boot_id: intent.boot_id.clone(),
+                        attempted: Vec::new(),
+                    });
+                }
+                let budget = self.native_load_budget.as_mut().expect("load budget");
+                if !budget.attempted.contains(&backend) {
+                    budget.attempted.push(backend);
+                }
+                self.native_quarantine.retain(|q| q.backend != backend);
+                self.native_quarantine.push(NativeQuarantine {
+                    backend,
+                    sha256: payload.sha256.clone(),
+                });
+            }
+        }
+
+        if let Some(previous) = self.native_startup.replace(attempt.clone()) {
+            self.native_attempts.push(NativeAttemptHistory {
+                attempt: previous,
+                superseded_by: attempt.repair_op,
+            });
+            let overflow = self
+                .native_attempts
+                .len()
+                .saturating_sub(MAX_NATIVE_ATTEMPTS);
+            self.native_attempts.drain(..overflow);
+        }
     }
 
     /// All durable resource holds, including startup work without an app receipt.
@@ -387,26 +570,40 @@ pub fn read(path: &Path) -> io::Result<Journal> {
     }
     let journal: Journal = serde_json::from_str(&raw)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("journal parse: {e}")))?;
-    if journal.version > JOURNAL_VERSION {
+    if journal.version == 0 || journal.version > JOURNAL_VERSION {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "journal version {} newer than supported {}",
+                "journal version {} unsupported (maximum {})",
                 journal.version, JOURNAL_VERSION
             ),
         ));
     }
-    if journal.native_startup.as_ref().is_some_and(|attempt| {
-        attempt.boot_id.is_empty()
-            || attempt.boot_id.len() > 128
-            || attempt
-                .completed
-                .as_ref()
-                .is_some_and(|result| result.status.boot_id != attempt.boot_id)
-    }) {
+    let invalid_startup = journal
+        .native_startup
+        .iter()
+        .chain(journal.native_attempts.iter().map(|item| &item.attempt))
+        .any(|attempt| !attempt.valid());
+    if invalid_startup {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid native startup identity",
+        ));
+    }
+    if journal.native_attempts.len() > MAX_NATIVE_ATTEMPTS
+        || journal.native_quarantine.len() > 4
+        || journal
+            .native_quarantine
+            .iter()
+            .any(|q| !valid_sha256(&q.sha256))
+        || journal
+            .native_load_budget
+            .as_ref()
+            .is_some_and(|b| b.attempted.len() > 4 || b.boot_id.is_empty() || b.boot_id.len() > 128)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "native lifecycle budget exceeded",
         ));
     }
     let mut journal = journal;
@@ -592,6 +789,76 @@ pub fn record_settled(
 mod tests {
     use super::*;
     use vpnhide_core_rpc::{CanonicalConfig, ConfigToggle};
+
+    #[test]
+    fn startup_schema_upgrade_preserves_hold_and_rejects_corrupt_intent() {
+        use crate::native_boot::prepared::{PayloadIdentity, TransitionAction, TransitionIntent};
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("journal.json");
+        let startup = NativeStartup {
+            boot_id: "boot".into(),
+            config_revision: 9,
+            filesystem_hiding: false,
+            intent: None,
+            repair_op: None,
+            completed: None,
+        };
+        let mut journal = Journal {
+            version: 3,
+            native_startup: Some(startup),
+            ..Journal::default()
+        };
+        write_atomic(&path, &journal).unwrap();
+        let migrated = read(&path).unwrap();
+        assert_eq!(migrated.version, 4);
+        assert!(migrated.native_startup_uncertain());
+        assert_eq!(migrated.native_startup, journal.native_startup);
+        journal.version = 4;
+        journal.native_startup.as_mut().unwrap().intent = Some(TransitionIntent {
+            boot_id: "boot".into(),
+            filesystem_hiding: false,
+            action: TransitionAction::Load(NativeBackend::Kmod),
+            payload: Some(PayloadIdentity {
+                source: "/fixture/module.ko".into(),
+                sha256: "a".repeat(64),
+                bytes: 42,
+            }),
+            retire_zygisk: None,
+            retire_directory_identity: None,
+        });
+        write_atomic(&path, &journal).unwrap();
+        assert!(read(&path).unwrap().native_startup_uncertain());
+        let original = journal.clone();
+        for change in 0..5 {
+            journal = original.clone();
+            let intent = journal
+                .native_startup
+                .as_mut()
+                .unwrap()
+                .intent
+                .as_mut()
+                .unwrap();
+            match change {
+                0 => intent.boot_id = "other".into(),
+                1 => intent.filesystem_hiding = true,
+                2 => intent.payload.as_mut().unwrap().sha256 = "bad".into(),
+                3 => intent.payload.as_mut().unwrap().bytes = 0,
+                _ => intent.action = TransitionAction::Observe,
+            }
+            write_atomic(&path, &journal).unwrap();
+            let bytes = fs::read(&path).unwrap();
+            assert!(read(&path).is_err());
+            assert_eq!(
+                fs::read(&path).unwrap(),
+                bytes,
+                "invalid source must be preserved"
+            );
+        }
+        journal = original;
+        journal.version = 5;
+        write_atomic(&path, &journal).unwrap();
+        assert!(read(&path).is_err(), "never reset unknown schema");
+    }
 
     fn edit_debug(on: bool) -> ConfigEdit {
         ConfigEdit::Toggle {

@@ -29,7 +29,7 @@ changes create new operations, not retroactive changes to confirmed receipts.
 | Stage | Status | Acceptance |
 | --- | --- | --- |
 | 1. Payload catalog and pure selection | Implemented as internal API; production integration follows stages 2–4 | Strict bounded manifest, pinned file verification, deterministic eligible candidates, unknown/owner guards, policy/capacity tests |
-| 2. Durable backend lifecycle | In progress: initial activation is journaled on the command writer | Initial effects journaled before dispatch, crash reconciliation, bounded attempts surviving worker restart, no blind replay |
+| 2. Durable backend lifecycle | Implemented for the current selector; bundle integration follows stages 3/4 | Initial effects journaled before dispatch, crash reconciliation, bounded attempts surviving worker restart, no blind replay |
 | 3. Unified ZIP and CI assembly | Planned | All seven KMIs, both Zygisk ABIs, manifest/hashes, verified provenance, active/staged separation |
 | 4. Zygisk boot authorization and fallback | Planned | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
 | 5. Typed state/RPC/UI/diagnostics | Planned | Paired contract bump, reasons/attempts/coverage, no misleading component health |
@@ -84,7 +84,7 @@ environment (`process_vm_readv` returns ENOSYS). No tests were weakened or skipp
 The production selector, RPC13 and backend wire remain unchanged in this stage.
 No Android/device validation or observed GitHub CI result is claimed.
 
-## Stage 2 checkpoint (not complete)
+## Stage 2 initial checkpoint (historical: 54cb4940)
 
 Initial activation now runs on CommandEngine, with synced intent before startup
 side effects and synced completion in the existing private journal (schema 3,
@@ -94,7 +94,7 @@ Completed same-boot decisions come from the journal and recheck runtime identity
 not the best-effort native_boot.json file. Existing Persist/Native/Secret holds
 also gate initial startup. RPC13 and backend control-v2 remain unchanged.
 
-Still required before stage 2 is complete: exact prepared payload/transition intent,
+At that checkpoint, remaining stage-2 work was exact prepared payload/transition intent,
 per-candidate attempt evidence and safe recovery of interrupted startup. The initial
 checkpoint deliberately refuses replay, including across reboot; it does not yet
 provide an automatic way to resolve every startup hold. Do not delete the journal
@@ -108,3 +108,41 @@ recovery. Final workspace run: 465 passed, two unchanged Zygisk self-read failur
 (ENOSYS environment limitation). Workspace Clippy/all-targets, fmt, diff and module
 scaffold/no-su checks pass. Core ZIP builds for arm64 and armv7. No Kotlin/C changes;
 JVM and device checks were not rerun. No observed CI outcome is claimed.
+
+## Stage 2 continuation: prepared transitions and recovery
+
+Implemented: schema 4 records exact prepared payload
+SHA-256/size/source and transition, boot/config generation, load-time feature,
+and pinned Zygisk retirement directory. Anonymous private payload snapshots keep
+loader bytes independent of subsequent module-path replacement. Load and credential
+recovery both pass through CommandEngine's durable Native phase boundary.
+
+Bounded history retains 16 superseded attempts; independent per-boot load budget
+and payload quarantine prevent history pruning or restart from permitting replay.
+A failed load can have effects and remains held. Existing explicit RepairActivation
+can adopt a compatible live backend without a second load, or load after reboot;
+reboot alone does not retry. Unknown historical receipts/attempts stay historical.
+Missing settings can still be explicitly imported while only startup is held.
+Legacy source cleanup and best-effort-file restoration were removed from startup.
+
+Schema 1/2/3 journals upgrade without discarding holds; unsupported/corrupt journals
+remain untouched and block mutations. Schema-2/3-only Core cannot downgrade-read
+schema 4. Restore a compatible Core, not an empty journal. RPC13, canonical schema1
+and backend control-v2 are unchanged. Kernel binary identity is not observable via
+control-v2: live adoption establishes compatible ownership, not an exact binary hash.
+Host FD-loader tests do not validate Android SELinux access to the retained FD.
+Unified bundle selection and automatic fallback remain stages 3/4, not implemented
+by these lifecycle primitives.
+
+Stage 2 final host validation: 471 Rust tests passed; the two unchanged Zygisk
+self-read tests fail because this environment returns ENOSYS for process_vm_readv.
+Regressions cover exact payload bytes after source replacement, symlink rejection,
+three real process crash boundaries, same-boot live adoption without reload,
+reboot plus explicit recovery with a changed payload, absent-config bootstrap,
+history pruning versus independent load budgets, schema-3 hold preservation,
+corrupt/future schema refusal, and KPM appearing between selection and dispatch.
+Workspace Clippy/all-targets, fmt, diff, no-su and module scaffold checks passed.
+No APK/Kotlin contract changes; JVM/device tests were not run for this stage.
+No GitHub CI status is observable through the previously denied Actions API.
+
+Core ZIP cross-build passed for arm64 and armv7 against the final stage-2 runtime.

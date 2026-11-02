@@ -189,7 +189,7 @@ impl Catalog {
     }
 }
 
-fn open_beneath(root: &File, path: &str) -> io::Result<File> {
+pub(crate) fn open_beneath(root: &File, path: &str) -> io::Result<File> {
     let mut dir = root.try_clone()?;
     let parts: Vec<_> = path.split('/').collect();
     for (index, part) in parts.iter().enumerate() {

@@ -95,8 +95,8 @@ Canonical replacement applies required ownership, mode and label before rename,
 then fsyncs the containing directory. A failure after rename is Unknown, never a
 claim that no write occurred. The private journal records commands, phase intent,
 actual commit revisions, write sets and exact Native dispatch evidence. Secrets
-and secret-derived verifiers never enter it. Journal schema 3 reads/migrates
-schemas 1 and 2; blank, malformed or unsupported present journals refuse mutations.
+and secret-derived verifiers never enter it. Journal schema 4 reads/migrates
+schemas 1, 2 and 3; blank, malformed or unsupported present journals refuse mutations.
 
 Same-ID duplicate commands query the retained result; different commands refuse.
 SuperKey submission always refuses reuse because comparing the secret would
@@ -119,6 +119,30 @@ Held Persist uncertainty blocks new capture leases and credential config edits
 until explicit repair reads back the actual canonical state. Baseline restoration
 also adopts fresh durable state before choosing the user's logging intent, so a
 landed rename cannot be overwritten from an older in-memory config.
+
+Initial Native activation uses the same writer and journal. Before effects, Core
+pins payload bytes in an anonymous private file and records their SHA-256/size,
+source, boot identity, config revision, load-time feature and transition. Zygisk
+retirement pins its directory identity. Secondary `native_boot.json` is diagnostic
+output only; startup does not delete legacy settings or installed modules.
+
+An interrupted load or a failed load with ambiguous effects keeps Native held.
+Restart and reboot do not replay it. Existing **RepairActivation** can adopt a
+compatible live backend in the same boot without loading again; it cannot attest
+the resident binary hash, drain in-flight hooks or hot-unload a kernel backend.
+If effects cannot be reconciled, reboot then explicitly repair. The repair prepares
+current desired settings and current payload bytes as a new journaled attempt,
+leaving historical uncertainty intact. KPM credential recovery uses this same path.
+A missing canonical can be explicitly imported while only startup is held; an
+uncertain Persist or corrupt canonical still blocks replacement.
+
+The audit retains 16 superseded attempts. A separate per-boot backend load budget
+and failed-payload quarantine survive audit pruning: at most one load per backend
+per boot; unconfirmed payloads require explicit repair. Successful matching load
+clears quarantine. Live adoption does not claim binary-hash verification, so a
+quarantined payload may still require explicit repair on a subsequent boot.
+Schema-2/3-only Core cannot read schema 4. Downgrade is not a supported recovery:
+keep the journal and use a compatible Core, never delete it to bypass holds.
 
 ## Capture and measurement
 

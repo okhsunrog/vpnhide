@@ -1403,6 +1403,8 @@ fn native_startup_crash_intent_blocks_replay_even_after_reboot() {
         let env = startup_env(root.path());
         let j = Journal {
             native_startup: Some(journal::NativeStartup {
+                intent: None,
+                repair_op: None,
                 boot_id: previous_boot.into(),
                 config_revision: 0,
                 filesystem_hiding: false,
@@ -1545,6 +1547,8 @@ fn durable_native_selection_is_rechecked_against_live_identity() {
     };
     let j = Journal {
         native_startup: Some(journal::NativeStartup {
+            intent: None,
+            repair_op: None,
             boot_id: "test-boot".into(),
             config_revision: 0,
             filesystem_hiding: false,
@@ -1592,10 +1596,12 @@ fn startup_hold_survives_receipt_retention_and_schema_two_upgrade() {
     json.as_object_mut().unwrap().remove("native_startup");
     std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
     let mut upgraded = journal::read(&path).unwrap();
-    assert_eq!(upgraded.version, 3);
+    assert_eq!(upgraded.version, 4);
     assert_eq!(upgraded.issued_through, 42);
     assert!(upgraded.native_startup.is_none());
     upgraded.native_startup = Some(journal::NativeStartup {
+        intent: None,
+        repair_op: None,
         boot_id: "old-boot".into(),
         config_revision: 0,
         filesystem_hiding: false,
@@ -1608,7 +1614,113 @@ fn startup_hold_survives_receipt_retention_and_schema_two_upgrade() {
         journal::read(&path).unwrap().held_resources(),
         vec![ConfigPhase::Native]
     );
-    upgraded.version = 4;
+    upgraded.version = 5;
     journal::write_atomic(&path, &upgraded).unwrap();
     assert!(journal::read(&path).is_err());
+}
+
+#[test]
+fn explicit_startup_repair_after_reboot_preserves_unknown_history_and_current_config() {
+    let root = tempfile::tempdir().unwrap();
+    let env = startup_env(root.path());
+    let config = CanonicalConfig {
+        debug: true,
+        ..CanonicalConfig::default()
+    };
+    config_file::write_atomic(&root.path().join("config.json"), &config).unwrap();
+    let j = Journal {
+        native_startup: Some(journal::NativeStartup {
+            boot_id: "previous-boot".into(),
+            config_revision: 1,
+            filesystem_hiding: false,
+            intent: None,
+            repair_op: None,
+            completed: None,
+        }),
+        ..Journal::default()
+    };
+    journal::write_atomic(&root.path().join("operations.json"), &j).unwrap();
+    let state = CoreState::load_with_journal(
+        Publisher::new(2, StateSnapshot::default()),
+        root.path().join("config.json"),
+        Some(root.path().join("operations.json")),
+        Some(env.ctl.clone()),
+    )
+    .unwrap();
+    state.start_native_boot(env, 2);
+    assert!(state.has_unknown_hold());
+    let op = command(&state, ConfigEdit::RepairActivation);
+    assert_eq!(
+        state.get_operation_record(op).unwrap().settled,
+        Some(PhaseOutcome::Confirmed)
+    );
+    assert!(!state.has_unknown_hold());
+    assert_eq!(
+        config_file::read(&root.path().join("config.json")).unwrap(),
+        Some(config)
+    );
+    let disk = journal::read(&root.path().join("operations.json")).unwrap();
+    assert_eq!(disk.native_attempts.len(), 1);
+    assert!(
+        disk.native_attempts[0].attempt.completed.is_none(),
+        "old uncertainty is not rewritten as success"
+    );
+    assert_eq!(disk.native_attempts[0].superseded_by, Some(op));
+    assert_eq!(disk.native_startup.unwrap().repair_op, Some(op));
+    state.shutdown();
+}
+
+#[test]
+fn interrupted_startup_without_config_allows_explicit_import_then_repair() {
+    let root = tempfile::tempdir().unwrap();
+    let env = startup_env(root.path());
+    let j = Journal {
+        native_startup: Some(journal::NativeStartup {
+            boot_id: "previous-boot".into(),
+            config_revision: 0,
+            filesystem_hiding: false,
+            intent: None,
+            repair_op: None,
+            completed: None,
+        }),
+        ..Journal::default()
+    };
+    journal::write_atomic(&root.path().join("operations.json"), &j).unwrap();
+    let state = CoreState::load_with_journal(
+        Publisher::new(2, StateSnapshot::default()),
+        root.path().join("config.json"),
+        Some(root.path().join("operations.json")),
+        Some(env.ctl.clone()),
+    )
+    .unwrap();
+    state.start_native_boot(env, 2);
+    let config = CanonicalConfig {
+        debug_switch: true,
+        ..CanonicalConfig::default()
+    };
+    let import = command(
+        &state,
+        ConfigEdit::Replace {
+            config: config.clone(),
+        },
+    );
+    assert_eq!(
+        state.get_operation_record(import).unwrap().phases[0].outcome,
+        PhaseOutcome::Confirmed
+    );
+    assert!(
+        state.has_unknown_hold(),
+        "import does not invent startup completion"
+    );
+    let repair = command(&state, ConfigEdit::RepairActivation);
+    assert_eq!(
+        state.get_operation_record(repair).unwrap().settled,
+        Some(PhaseOutcome::Confirmed)
+    );
+    assert!(!state.has_unknown_hold());
+    assert_eq!(
+        config_file::read(&root.path().join("config.json")).unwrap(),
+        Some(config)
+    );
+    state.shutdown();
 }

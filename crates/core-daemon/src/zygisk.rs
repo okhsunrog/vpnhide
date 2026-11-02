@@ -53,6 +53,11 @@ impl ZygiskTarget {
         Ok(target)
     }
 
+    pub(crate) fn identity(&self) -> Result<(u64, u64), String> {
+        let metadata = self.directory.metadata().map_err(|e| e.to_string())?;
+        Ok((metadata.dev(), metadata.ino()))
+    }
+
     fn pinned_path(&self) -> PathBuf {
         PathBuf::from(format!("/proc/self/fd/{}", self.directory.as_raw_fd()))
     }

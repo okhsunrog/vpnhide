@@ -560,131 +560,36 @@ fn delivery_failures_are_published_and_cleared_by_the_next_success() {
 }
 
 #[test]
-fn a_core_restart_in_the_same_boot_re_adopts_the_persisted_decision() {
+fn prepared_startup_ignores_secondary_state_and_preserves_legacy_sources() {
     let dir = tempfile::tempdir().unwrap();
     let env = env(dir.path());
-    install(dir.path(), "vpnhide_kmod", Some(KMOD_ARTIFACT));
-    let fx = fake(&env, None);
-    let f = gather(&env, KpmFact::NoRuntime);
-    let boot = NativeBoot::decide_and_apply(env.clone(), 3, "boot-1", &f, None, true, &fx);
-    boot.persist();
-    assert_eq!(fx.insmods.get(), 1);
-
-    // The restarted core sees the kmod it loaded live; it re-adopts the decision
-    // (including the load-time filesystem_hiding) without scanning or loading.
-    let again = NativeBoot::start(env.clone(), 9, false);
-    assert_eq!(again.status.outcome, boot.status.outcome);
-    assert_eq!(again.status.decided_epoch, 3);
-    assert_eq!(again.selected(), Some(Kmod));
-
-    // A new boot id rescans: now the live kmod plus its module is one backend, adopted.
-    fs::write(&env.boot_id_path, "boot-2\n").unwrap();
-    let next = NativeBoot::start(env, 10, false);
-    assert_eq!(next.status.boot_id, "boot-2");
+    write_ctl(&env.ctl, "4");
+    fs::create_dir_all(env.state_file.parent().unwrap()).unwrap();
+    fs::write(&env.state_file, "corrupt old observation").unwrap();
+    let legacy = dir.path().join("legacy/data/adb/vpnhide_ports");
+    fs::create_dir_all(&legacy).unwrap();
+    fs::write(legacy.join("observers.txt"), "com.example\n").unwrap();
+    fs::write(legacy.join("load_log"), "old log").unwrap();
+    let prepared = prepared::Prepared::from_facts(
+        env,
+        false,
+        facts(&[], KernelFact::Builtin, KpmFact::NoRuntime),
+        None,
+    )
+    .unwrap();
     assert_eq!(
-        next.status.outcome,
-        NativeBootOutcome::Selected {
-            backend: Kmod,
-            mode: SelectionMode::Adopted,
-            filesystem_hiding: None,
-        }
+        prepared.intent.action,
+        prepared::TransitionAction::Adopt(Builtin)
     );
-}
-
-#[test]
-fn a_restart_keeps_a_conflict_for_the_whole_boot() {
-    let dir = tempfile::tempdir().unwrap();
-    let env = env_with_zygisk(dir.path());
-    write_ctl(&env.ctl, "4");
-    let first = NativeBoot::start(env.clone(), 1, false);
-    assert!(matches!(
-        first.status.outcome,
-        NativeBootOutcome::Conflict { .. }
-    ));
-    // Even if the user removes Zygisk mid-boot, the decision stands until reboot.
-    fs::write(dir.path().join("modules/vpnhide_zygisk/remove"), "").unwrap();
-    let again = NativeBoot::start(env, 2, false);
-    assert_eq!(again.status.outcome, first.status.outcome);
-    assert_eq!(again.selected(), None);
-}
-
-#[test]
-fn a_pending_authentication_is_rescanned_after_restart() {
-    let dir = tempfile::tempdir().unwrap();
-    let env = env(dir.path());
-    write_ctl(&env.ctl, "4");
-    let pending = NativeBoot {
-        env: env.clone(),
-        status: NativeBootStatus {
-            boot_id: "boot-1".into(),
-            decided_epoch: 1,
-            decided_at_ms: 0,
-            updated_at_ms: 0,
-            outcome: NativeBootOutcome::AwaitingAuthentication { detail: "x".into() },
-            installed: vec![Kpm],
-            live: vec![],
-            staged: vec![],
-            kmod: None,
-            zygisk_targets: ZygiskTargets::NotInstalled,
-            ports: None,
-            obsolete_modules: vec![],
-        },
-        selection: None,
-    };
-    assert!(pending.pending_authentication());
-    pending.persist();
-    let again = NativeBoot::start(env, 2, false);
+    assert_eq!(prepared.execute(2).selected(), Some(Builtin));
     assert_eq!(
-        again.selected(),
-        Some(Builtin),
-        "re-decided from current facts"
+        fs::read_to_string(legacy.join("observers.txt")).unwrap(),
+        "com.example\n"
     );
-}
-
-#[test]
-fn the_boot_scan_cleans_legacy_activator_state() {
-    let dir = tempfile::tempdir().unwrap();
-    let env = env(dir.path());
-    let legacy = dir.path().join("legacy/data/adb");
-    for f in [
-        "vpnhide_kmod/load_status",
-        "vpnhide_kmod/load_dmesg",
-        "vpnhide_builtin/load_status",
-        "vpnhide_kpm/load_status",
-        "vpnhide_kpm/ctl.lock",
-        "vpnhide_ports/load_status",
-        "vpnhide_ports/load_log",
-    ] {
-        fs::create_dir_all(legacy.join(f).parent().unwrap()).unwrap();
-        fs::write(legacy.join(f), "x").unwrap();
-    }
-    write_ctl(&env.ctl, "4");
-    NativeBoot::start(env.clone(), 1, false);
-    for d in [
-        "vpnhide_kmod",
-        "vpnhide_builtin",
-        "vpnhide_kpm",
-        "vpnhide_ports",
-    ] {
-        assert!(
-            !legacy.join(d).exists(),
-            "{d} removed with its legacy state"
-        );
-    }
-
-    // An installed KPM keeps its control lock.
-    fs::create_dir_all(legacy.join("vpnhide_kpm")).unwrap();
-    fs::write(legacy.join("vpnhide_kpm/ctl.lock"), "").unwrap();
-    // An unimported 1.x Ports observer list keeps its dir; the status files still go.
-    fs::create_dir_all(legacy.join("vpnhide_ports")).unwrap();
-    fs::write(legacy.join("vpnhide_ports/observers.txt"), "com.example\n").unwrap();
-    fs::write(legacy.join("vpnhide_ports/load_log"), "x").unwrap();
-    install(dir.path(), "vpnhide_kpm", Some(KPM_ARTIFACT));
-    fs::write(&env.boot_id_path, "boot-2\n").unwrap();
-    NativeBoot::start(env, 2, false);
-    assert!(legacy.join("vpnhide_kpm/ctl.lock").exists());
-    assert!(legacy.join("vpnhide_ports/observers.txt").exists());
-    assert!(!legacy.join("vpnhide_ports/load_log").exists());
+    assert_eq!(
+        fs::read_to_string(legacy.join("load_log")).unwrap(),
+        "old log"
+    );
 }
 
 #[test]
