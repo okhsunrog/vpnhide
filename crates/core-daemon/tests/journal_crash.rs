@@ -462,8 +462,9 @@ async fn startup_crash_repair_never_replays_a_load_in_the_same_boot() {
         fs::write(&artifact, b"first payload").unwrap();
         let config = CanonicalConfig::default();
         config_file::write_atomic(&config_path, &config).unwrap();
+        common::link_host_tool(root, "cat");
         let loader = root.join("insmod");
-        fs::write(&loader, "#!/bin/sh\n/bin/cat \"$1\" > \"$VH_ROOT/loaded\" || exit 1\nprintf 'load\\n' >> \"$VH_ROOT/loads\"\nprintf 'vpnhide 1 status\\nbackend 0x0\\nkver 0x0\\nhooks 0x0\\nerror 0x0\\n' > \"$VPNHIDE_KMOD_CTL\"\n").unwrap();
+        fs::write(&loader, "#!/bin/sh\ncat \"$1\" > \"$VH_ROOT/loaded\" || exit 1\nprintf 'load\\n' >> \"$VH_ROOT/loads\"\nprintf 'vpnhide 1 status\\nbackend 0x0\\nkver 0x0\\nhooks 0x0\\nerror 0x0\\n' > \"$VPNHIDE_KMOD_CTL\"\n").unwrap();
         fs::set_permissions(&loader, fs::Permissions::from_mode(0o700)).unwrap();
         let spawn = |crash: Option<&str>| {
             let mut command = common::core_command();

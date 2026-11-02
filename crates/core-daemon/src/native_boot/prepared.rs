@@ -167,10 +167,10 @@ impl Prepared {
                 }
             }
         }
-        if let Plan::Stop(outcome) = &self.plan {
-            if !matches!(outcome, NativeBootOutcome::NoBackend) {
-                return Err(format!("startup recovery preflight refused: {outcome:?}"));
-            }
+        if let Plan::Stop(outcome) = &self.plan
+            && !matches!(outcome, NativeBootOutcome::NoBackend)
+        {
+            return Err(format!("startup recovery preflight refused: {outcome:?}"));
         }
         Ok(())
     }

@@ -22,7 +22,7 @@
 //! * If anything fails inside a hook, we fall back to calling the
 //!   original. Panicking would abort the entire process.
 
-use core::cell::{Cell, RefCell};
+use core::cell::RefCell;
 use core::ffi::{CStr, c_int, c_void};
 use core::sync::atomic::{AtomicI32, AtomicPtr, AtomicU8, AtomicU32, Ordering};
 use core::{mem, ptr, slice};
@@ -65,16 +65,28 @@ struct ifconf {
 // and harmful (returning ENODEV breaks libc's ifaddrs list construction,
 // causing errors like `ioctl(SIOCGIFFLAGS) for "tun0" failed in ifaddrs`
 // and corrupting NFC/HCE payment flows).
-thread_local! {
-    static IN_GETIFADDRS: Cell<bool> = const { Cell::new(false) };
+// Rust 1.99.1's Android thread_local! fallback emits this lint even for an
+// explicit const { Cell::new(false) } (confirmed in a standalone reproduction).
+// Keep the expectation confined to these TLS keys; a compiler fix must make it
+// unfulfilled rather than silently leaving a blanket lint exemption behind.
+#[cfg_attr(
+    target_os = "android",
+    expect(
+        clippy::missing_const_for_thread_local,
+        reason = "Rust 1.99.1 Android macro fallback flags already-const TLS initializers"
+    )
+)]
+mod thread_state {
+    use core::cell::{Cell, RefCell};
 
-    /// Reusable contiguous view for scatter/gather netlink recvmsg payloads.
-    /// Most callers use one iovec and stay on the allocation-free fast path;
-    /// split payloads borrow this buffer only long enough to gather, filter,
-    /// and scatter the compacted bytes back.
-    #[allow(clippy::missing_const_for_thread_local)]
-    static NETLINK_IOV_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(65536));
+    thread_local! {
+        pub(super) static IN_GETIFADDRS: Cell<bool> = const { Cell::new(false) };
+
+        /// Reusable view for gathering, filtering and scattering split netlink payloads.
+        pub(super) static NETLINK_IOV_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(65536));
+    }
 }
+use thread_state::{IN_GETIFADDRS, NETLINK_IOV_BUF};
 
 /// Run one libc operation without letting the ioctl hook filter nested calls.
 /// Preserve the previous value so nested guarded operations remain correct.

@@ -251,12 +251,12 @@ impl CoreState {
             .issued_through
             .checked_add(1)
             .ok_or(SubmitError::Unavailable)?;
-        if let Some(path) = &self.journal_path {
-            if let Err(error) = journal::write_atomic(path, &store.journal) {
-                let previous = self.engine.store.lock().expect("config mutex").clone();
-                self.freeze_storage_fault(&previous, OperationId(0), &error);
-                return Err(SubmitError::Unavailable);
-            }
+        if let Some(path) = &self.journal_path
+            && let Err(error) = journal::write_atomic(path, &store.journal)
+        {
+            let previous = self.engine.store.lock().expect("config mutex").clone();
+            self.freeze_storage_fault(&previous, OperationId(0), &error);
+            return Err(SubmitError::Unavailable);
         }
         let id = OperationId(store.journal.issued_through);
         *self.engine.store.lock().expect("config mutex") = store;
@@ -295,8 +295,7 @@ impl CoreState {
             .expect("config mutex")
             .journal
             .get(op)
-        {
-            if matches!(
+            && matches!(
                 (&command, &entry.command),
                 (
                     CoreCommand::FullReset,
@@ -305,9 +304,9 @@ impl CoreState {
                     CoreCommand::CleanupLegacy,
                     Some(journal::CommandIntent::CleanupLegacy)
                 )
-            ) {
-                return Ok(Accepted { op });
-            }
+            )
+        {
+            return Ok(Accepted { op });
         }
         let original_base = self
             .engine
@@ -424,17 +423,15 @@ impl CoreState {
         for entry in &journal.operations {
             if entry.record.phases.iter().any(|phase| {
                 phase.phase == ConfigPhase::Persist && phase.outcome == PhaseOutcome::Confirmed
-            }) {
-                if let Some(admission) = &entry.admission {
-                    if admission.commit_revision > store.config_revision {
-                        store.config = if entry.command == Some(journal::CommandIntent::FullReset) {
-                            None
-                        } else {
-                            entry.candidate.clone()
-                        };
-                        store.config_revision = admission.commit_revision;
-                    }
-                }
+            }) && let Some(admission) = &entry.admission
+                && admission.commit_revision > store.config_revision
+            {
+                store.config = if entry.command == Some(journal::CommandIntent::FullReset) {
+                    None
+                } else {
+                    entry.candidate.clone()
+                };
+                store.config_revision = admission.commit_revision;
             }
         }
         self.publish_store(&store);
@@ -698,25 +695,24 @@ impl CoreState {
             self.persist_store(&store)?;
         }
         let mut retrying_apply = false;
-        if let Some(op) = store.journal.debug_restore_op {
-            if let Some(entry) = store.journal.get(op) {
-                if entry.record.settled == Some(PhaseOutcome::Confirmed) {
-                    store.journal.debug_restore = None;
-                    store.journal.debug_restore_op = None;
-                    return self.persist_store(&store);
-                }
-                if entry.superseded_by.is_some()
-                    || (entry.record.settled == Some(PhaseOutcome::FailedKnown)
-                        && retry_known_failure)
-                {
-                    // A superseding repair does not prove this baseline target.
-                    // Recompute it below and create new desired-state evidence.
-                    retrying_apply = true;
-                    store.journal.debug_restore_op = None;
-                    self.persist_store(&store)?;
-                } else {
-                    return Err(SubmitError::Unavailable);
-                }
+        if let Some(op) = store.journal.debug_restore_op
+            && let Some(entry) = store.journal.get(op)
+        {
+            if entry.record.settled == Some(PhaseOutcome::Confirmed) {
+                store.journal.debug_restore = None;
+                store.journal.debug_restore_op = None;
+                return self.persist_store(&store);
+            }
+            if entry.superseded_by.is_some()
+                || (entry.record.settled == Some(PhaseOutcome::FailedKnown) && retry_known_failure)
+            {
+                // A superseding repair does not prove this baseline target.
+                // Recompute it below and create new desired-state evidence.
+                retrying_apply = true;
+                store.journal.debug_restore_op = None;
+                self.persist_store(&store)?;
+            } else {
+                return Err(SubmitError::Unavailable);
             }
         }
         let Some(config) = &store.config else {
@@ -781,12 +777,12 @@ impl CoreState {
         if self.snapshot().storage_fault.is_some() {
             return Err(SubmitError::Unavailable);
         }
-        if let Some(path) = &self.journal_path {
-            if let Err(error) = journal::write_atomic(path, &store.journal) {
-                let previous = self.engine.store.lock().expect("config mutex").clone();
-                self.freeze_storage_fault(&previous, OperationId(0), &error);
-                return Err(SubmitError::Unavailable);
-            }
+        if let Some(path) = &self.journal_path
+            && let Err(error) = journal::write_atomic(path, &store.journal)
+        {
+            let previous = self.engine.store.lock().expect("config mutex").clone();
+            self.freeze_storage_fault(&previous, OperationId(0), &error);
+            return Err(SubmitError::Unavailable);
         }
         *self.engine.store.lock().expect("config mutex") = store.clone();
         self.publish_store(store);
@@ -953,29 +949,28 @@ impl CoreState {
                 journal_dirty = true;
             }
         }
-        if let Some(proof) = &journal.pending_persist {
-            if crate::recovery::pending_persist_matches(proof, &file_config) {
-                if let Some(admission) = &proof.admission {
-                    config_revision_from_journal =
-                        config_revision_from_journal.max(admission.commit_revision);
-                    config_edit::note_writes(
-                        &mut journal.field_revisions,
-                        &admission.writes,
-                        admission.commit_revision,
-                    );
-                }
-            }
+        if let Some(proof) = &journal.pending_persist
+            && crate::recovery::pending_persist_matches(proof, &file_config)
+            && let Some(admission) = &proof.admission
+        {
+            config_revision_from_journal =
+                config_revision_from_journal.max(admission.commit_revision);
+            config_edit::note_writes(
+                &mut journal.field_revisions,
+                &admission.writes,
+                admission.commit_revision,
+            );
         }
         journal.config_revision = config_revision_from_journal;
         for entry in &journal.operations {
-            if crate::recovery::persist_commit_observed(entry, &file_config) {
-                if let Some(admission) = &entry.admission {
-                    config_edit::note_writes(
-                        &mut journal.field_revisions,
-                        &admission.writes,
-                        admission.commit_revision,
-                    );
-                }
+            if crate::recovery::persist_commit_observed(entry, &file_config)
+                && let Some(admission) = &entry.admission
+            {
+                config_edit::note_writes(
+                    &mut journal.field_revisions,
+                    &admission.writes,
+                    admission.commit_revision,
+                );
             }
         }
 
@@ -1149,31 +1144,30 @@ impl CoreState {
             );
             return;
         }
-        if let Some(attempt) = &store.journal.native_startup {
-            if attempt.boot_id == boot_id {
-                if let Some(result) = &attempt.completed {
-                    // Restore the durable decision, not a best-effort secondary file.
-                    // Pending authentication is retried by the journaled Native phase.
-                    self.install_native_boot(
-                        NativeBoot {
-                            env: match crate::native_boot::prepared::restore_environment(
-                                env.clone(),
-                                attempt.intent.as_ref(),
-                            ) {
-                                Ok(env) => env,
-                                Err(error) => {
-                                    blocked(error);
-                                    return;
-                                }
-                            },
-                            status: result.status.clone(),
-                            selection: result.selection,
+        if let Some(attempt) = &store.journal.native_startup
+            && attempt.boot_id == boot_id
+            && let Some(result) = &attempt.completed
+        {
+            // Restore the durable decision, not a best-effort secondary file.
+            // Pending authentication is retried by the journaled Native phase.
+            self.install_native_boot(
+                NativeBoot {
+                    env: match crate::native_boot::prepared::restore_environment(
+                        env.clone(),
+                        attempt.intent.as_ref(),
+                    ) {
+                        Ok(env) => env,
+                        Err(error) => {
+                            blocked(error);
+                            return;
                         }
-                        .revalidate_restored(epoch),
-                    );
-                    return;
+                    },
+                    status: result.status.clone(),
+                    selection: result.selection,
                 }
-            }
+                .revalidate_restored(epoch),
+            );
+            return;
         }
         let Some(path) = &self.journal_path else {
             blocked("native startup requires a durable operation journal".into());
@@ -1857,10 +1851,10 @@ impl CoreState {
                 return Err(SubmitError::Unavailable);
             }
         }
-        if self.journal_path.is_none() {
-            if let Some(entry) = store.journal.get_mut(op) {
-                entry.record = record.clone();
-            }
+        if self.journal_path.is_none()
+            && let Some(entry) = store.journal.get_mut(op)
+        {
+            entry.record = record.clone();
         }
 
         let durable_settled = store.journal.clone();
@@ -1919,14 +1913,14 @@ impl CoreState {
         }
         store.journal.prune();
         store.field_revisions = store.journal.field_revisions.clone();
-        if let Some(path) = &self.journal_path {
-            if let Err(error) = journal::write_atomic(path, &store.journal) {
-                // Settlement already synced. A failed retention/repair-metadata
-                // update must never rewrite that terminal receipt as Unknown.
-                store.journal = durable_settled;
-                self.freeze_storage_fault(&store, op, &error);
-                return Ok(Accepted { op });
-            }
+        if let Some(path) = &self.journal_path
+            && let Err(error) = journal::write_atomic(path, &store.journal)
+        {
+            // Settlement already synced. A failed retention/repair-metadata
+            // update must never rewrite that terminal receipt as Unknown.
+            store.journal = durable_settled;
+            self.freeze_storage_fault(&store, op, &error);
+            return Ok(Accepted { op });
         }
 
         *self.engine.store.lock().expect("config mutex") = store.clone();

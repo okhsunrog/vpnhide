@@ -106,13 +106,12 @@ pub fn apply_detailed(rules: &PortsRuleset) -> (PhaseOutcome, PortsFamilyReport,
     let result = apply_ports_rules_families(rules);
     // Claim ownership even on partial success so legacy uninstall cannot wipe
     // remnants core is responsible for.
-    if result.ipv4 == PortsFamilyResult::Confirmed
+    if (result.ipv4 == PortsFamilyResult::Confirmed
         || result.ipv6 == PortsFamilyResult::Confirmed
-        || result.overall() == PortsFamilyResult::Unknown
+        || result.overall() == PortsFamilyResult::Unknown)
+        && let Err(err) = write_ports_core_owner_marker()
     {
-        if let Err(err) = write_ports_core_owner_marker() {
-            eprintln!("core: failed to write ports owner marker: {err}");
-        }
+        eprintln!("core: failed to write ports owner marker: {err}");
     }
     let report = to_family_report(&result);
     // The result is published typed (`PortsApply` in the native boot status / receipts);

@@ -24,6 +24,6 @@ runs:
           /usr/local/cargo/registry
           /usr/local/cargo/git
           ${{ inputs.targets }}
-        # One workspace lockfile feeds every native and host build.
-        key: cargo-${{ runner.os }}-${{ inputs.key }}-${{ hashFiles('Cargo.lock') }}
+        # One pinned compiler and workspace lockfile feed every native and host build.
+        key: cargo-${{ runner.os }}-${{ inputs.key }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
         restore-keys: cargo-${{ runner.os }}-${{ inputs.key }}-

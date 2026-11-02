@@ -24,7 +24,7 @@ case "$1 $2" in
     [ -f "$VH_ROOT/loaded" ] && printf 'vpnhide\n'
     exit 0 ;;
   "kpm load")
-    /bin/cat "$3" > "$VH_ROOT/loaded-payload" || exit 1
+    cat "$3" > "$VH_ROOT/loaded-payload" || exit 1
     printf '%s\n' "$@" >> "$VH_ROOT/load-args"
     [ "$VH_CASE" = load-fails ] && exit 1
     [ "$VH_CASE" = load-no-identity ] && exit 0
@@ -138,6 +138,7 @@ async fn exercise(case: &str) {
         )
         .unwrap();
     }
+    common::link_host_tool(root, "cat");
     executable(&root.join("kpatch"), KPATCH);
     executable(&root.join("cmd"), PM);
     executable(

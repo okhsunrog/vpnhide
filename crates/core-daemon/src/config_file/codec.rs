@@ -327,10 +327,10 @@ fn app_to_disk(app: &AppConfig) -> Value {
     o.insert("native".into(), native_role_value(&app.native));
     o.insert("appHiding".into(), Value::Bool(app.app_hiding));
     o.insert("ports".into(), Value::Bool(app.ports));
-    if app.ports {
-        if let Some(policy) = &app.port_policy {
-            o.insert("portPolicy".into(), port_policy_value(policy));
-        }
+    if app.ports
+        && let Some(policy) = &app.port_policy
+    {
+        o.insert("portPolicy".into(), port_policy_value(policy));
     }
     // `hidden` is written only when true (its absence parses back to false).
     if app.hidden {
@@ -368,10 +368,10 @@ fn native_role_value(native: &NativeRole) -> Value {
 fn port_policy_value(policy: &PortPolicy) -> Value {
     let mut o = Map::new();
     o.insert("mode".into(), Value::String(policy.mode.clone()));
-    if let Some(p) = &policy.preset {
-        if !p.is_empty() {
-            o.insert("preset".into(), Value::String(p.clone()));
-        }
+    if let Some(p) = &policy.preset
+        && !p.is_empty()
+    {
+        o.insert("preset".into(), Value::String(p.clone()));
     }
     let rules: Vec<Value> = policy.rules.iter().map(port_rule_value).collect();
     o.insert("rules".into(), Value::Array(rules));

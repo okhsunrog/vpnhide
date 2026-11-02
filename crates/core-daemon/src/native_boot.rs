@@ -601,16 +601,16 @@ impl NativeBoot {
         selected: NativeBackend,
         facts: &ScanFacts,
     ) -> Self {
-        if selected == NativeBackend::Kpm {
-            if let KpmFact::AuthFailed(detail) = &facts.kpm {
-                let mut boot = Self::blocked(self.env, epoch, detail.clone());
-                // Preserve the existing credential recovery path. This is evidence
-                // of a previously selected KPM, never permission to load an alternative.
-                boot.status.outcome = NativeBootOutcome::KpmUnverifiable {
-                    detail: detail.clone(),
-                };
-                return boot;
-            }
+        if selected == NativeBackend::Kpm
+            && let KpmFact::AuthFailed(detail) = &facts.kpm
+        {
+            let mut boot = Self::blocked(self.env, epoch, detail.clone());
+            // Preserve the existing credential recovery path. This is evidence
+            // of a previously selected KPM, never permission to load an alternative.
+            boot.status.outcome = NativeBootOutcome::KpmUnverifiable {
+                detail: detail.clone(),
+            };
+            return boot;
         }
         let kpm_clear = matches!(
             facts.kpm,

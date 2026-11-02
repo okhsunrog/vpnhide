@@ -67,10 +67,10 @@ fn apatch_auth_candidates() -> Vec<String> {
     if let Some(key) = SESSION_SUPERKEY.lock().expect("session superkey").clone() {
         keys.push(key);
     }
-    if let Ok(key) = read_superkey() {
-        if !keys.contains(&key) {
-            keys.push(key);
-        }
+    if let Ok(key) = read_superkey()
+        && !keys.contains(&key)
+    {
+        keys.push(key);
     }
     if !keys.iter().any(|key| key == APATCH_TRUSTED_SU_KEY) {
         keys.push(APATCH_TRUSTED_SU_KEY.to_owned());

@@ -51,12 +51,12 @@ RUN mkdir -p "${ANDROID_HOME}/cmdline-tools" && \
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
-    RUST_VERSION=1.96.0 \
+    RUST_VERSION=1.99.1 \
     CARGO_NDK_VERSION=4.1.2
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
         sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal --no-modify-path && \
-    rustup target add aarch64-linux-android armv7-linux-androideabi && \
+    rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android && \
     rustup component add rustfmt clippy && \
     cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked && \
     chmod -R a+w /usr/local/rustup /usr/local/cargo

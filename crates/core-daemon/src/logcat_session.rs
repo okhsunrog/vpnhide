@@ -188,10 +188,10 @@ impl Shared {
     fn update(&self, change: impl FnOnce(&mut SessionRecord)) {
         let mut record = self.record();
         change(&mut record);
-        if !self.discarded.load(Ordering::SeqCst) {
-            if let Err(error) = write_record(&self.record_path, &record) {
-                crate::alog::info(&format!("logcat: session record write failed: {error}"));
-            }
+        if !self.discarded.load(Ordering::SeqCst)
+            && let Err(error) = write_record(&self.record_path, &record)
+        {
+            crate::alog::info(&format!("logcat: session record write failed: {error}"));
         }
         drop(record);
         self.cv.notify_all();
@@ -303,10 +303,10 @@ impl Session {
 
     /// Ask the supervisor to stop and wait for the flushed end.
     fn stop(&self) -> bool {
-        if self.shared.running() {
-            if let Some(events) = &self.events {
-                let _ = events.send(Event::Stop);
-            }
+        if self.shared.running()
+            && let Some(events) = &self.events
+        {
+            let _ = events.send(Event::Stop);
         }
         self.shared.wait_ended(STOP_WAIT)
     }
@@ -407,16 +407,16 @@ impl Recorder {
                 record.session
             ));
         }
-        if let Some(lease) = record.debug.as_mut() {
-            if matches!(
+        if let Some(lease) = record.debug.as_mut()
+            && matches!(
                 lease.restore,
                 LogcatDebugRestore::Held | LogcatDebugRestore::Pending
-            ) {
-                lease.restore = match self.debug_control() {
-                    Some(control) => control.release(lease),
-                    None => LogcatDebugRestore::Pending,
-                };
-            }
+            )
+        {
+            lease.restore = match self.debug_control() {
+                Some(control) => control.release(lease),
+                None => LogcatDebugRestore::Pending,
+            };
         }
         // Keep only this session's two files.
         if let Ok(entries) = fs::read_dir(&config.dir) {

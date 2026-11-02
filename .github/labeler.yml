@@ -38,4 +38,5 @@
   - changed-files:
       - any-glob-to-any-file:
           - '.github/**'
+          - 'rust-toolchain.toml'
           - 'scripts/**'

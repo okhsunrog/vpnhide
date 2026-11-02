@@ -59,10 +59,10 @@ fn candidates(telemetry: &str, root: &Path) -> Vec<PathBuf> {
         .lines()
         .filter(|l| l.starts_with("meta java_origin_"))
     {
-        if let Some(path) = line.splitn(3, ' ').nth(2) {
-            if paths.len() < 32 {
-                paths.insert(PathBuf::from(path));
-            }
+        if let Some(path) = line.splitn(3, ' ').nth(2)
+            && paths.len() < 32
+        {
+            paths.insert(PathBuf::from(path));
         }
     }
     for path in [

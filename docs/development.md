@@ -7,10 +7,13 @@ How to build vpnhide from source.
 - **JDK 17 or later** — what the CI image installs (`openjdk-17-jdk-headless`); local builds with JDK 21 also work. The `lsposed/app` Gradle build sets `sourceCompatibility = 17` and `jvmTarget = "17"`.
 - **Android SDK** — install `platforms;android-35`, `build-tools;35.0.0`, `platform-tools` (via Android Studio or `cmdline-tools`). Export `ANDROID_HOME`.
 - **Android NDK r28 or later** — export `ANDROID_NDK_HOME` (or drop it in `$ANDROID_HOME/ndk/<version>/`, the scripts auto-detect). The `lsposed/app` `buildAppNative` task reads `ANDROID_NDK_HOME` (falling back to `ANDROID_NDK_ROOT`, then the SDK-managed `ndk/<version>`) and passes it to cargo-ndk. r27c builds compile, but the resulting cdylibs trigger an Android 16 KiB-page-size compatibility warning at app start on Pixel 8 Pro / future hardware (`сегмент LOAD не выровнен`); r28+ aligns LOAD segments on 16 KiB by default. (`crates/checks-jni/build.rs` and `zygisk/build.rs` also pass `-Wl,-z,max-page-size=16384` explicitly so older NDKs stay compatible — defence in depth.)
-- **Rust** (latest stable) with the Android target:
+- **Rust 1.99.1**, pinned by `rust-toolchain.toml` for every workspace member,
+  including Zygisk. The pin installs rustfmt, Clippy and ARM64/ARMv7/x86_64
+  Android standard libraries automatically through rustup. CI uses the same
+  compiler version. Install the toolchain and cargo-ndk with:
   ```sh
-  rustup target add aarch64-linux-android
-  cargo install cargo-ndk
+  rustup show
+  cargo install cargo-ndk --version 4.1.2 --locked
   ```
 - **clang-format 18.x** — kernel-side C formatting (kmod and the built-in
   driver) is pinned because clang-format versions disagree on kernel-style C
@@ -322,3 +325,21 @@ settings and isolated 0.x/1.x import behavior are retained. No old package,
 sandbox or canonical entries are deleted by this change. The old `.dev` package
 still cannot use the production AppOwner socket. Do not enable both copies as
 LSPosed modules when validating the new APK.
+
+
+### Rust 1.99.1 Android Clippy TLS caveat
+
+On Android targets, Clippy 1.99.1 reports `missing_const_for_thread_local` for
+`thread_local! { static FLAG: Cell<bool> = const { Cell::new(false) }; }` even
+though its initializer is already explicitly const. This was reproduced in an
+independent crate with no project dependencies. It does not occur on the Linux
+host target. The affected TLS declarations are isolated in small scopes using
+`expect`, conditional on Android where the same source is also host-built.
+`-D warnings` remains enabled, including `unfulfilled_lint_expectations`, so a
+compiler fix requires removing those expectations. Dynamic scratch buffers retain
+their existing lazy allocation and reuse; no global lint allow was added.
+
+Host integration fixtures keep their isolated executable PATH. Needed coreutils
+are resolved from the host PATH and linked into that fixture directory, rather
+than assuming `/bin/cat` or `/bin/true` exist on NixOS. Payload-copy and recovery
+assertions run unchanged.

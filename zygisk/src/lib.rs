@@ -374,11 +374,11 @@ fn write_status_file(report: &HookInstallReport) {
         report.installed_mask,
         filesystem_error,
     );
-    if let Some(parent) = Path::new(APP_STATUS_FILE).parent() {
-        if let Err(err) = fs::create_dir_all(parent) {
-            error!("failed to create status dir {}: {err}", parent.display());
-            return;
-        }
+    if let Some(parent) = Path::new(APP_STATUS_FILE).parent()
+        && let Err(err) = fs::create_dir_all(parent)
+    {
+        error!("failed to create status dir {}: {err}", parent.display());
+        return;
     }
     match fs::write(APP_STATUS_FILE, content) {
         Ok(()) => info!("wrote zygisk status heartbeat to {APP_STATUS_FILE}"),
@@ -656,10 +656,8 @@ fn install_hooks(hookmask: u32) -> Result<HookInstallReport, String> {
                 Ok(stub) => filesystem_stubs.push(stub),
                 Err(err) => {
                     rollback_hooks(&mut filesystem_stubs);
-                    if !proc_open_requested {
-                        if let Some(stub) = shared_openat_stub.take() {
-                            rollback_hook(stub);
-                        }
+                    if !proc_open_requested && let Some(stub) = shared_openat_stub.take() {
+                        rollback_hook(stub);
                     }
                     filesystem_error = Some(err);
                     break;
@@ -670,14 +668,14 @@ fn install_hooks(hookmask: u32) -> Result<HookInstallReport, String> {
         // versions do not export it as a dynamic symbol, and its absence must NOT
         // tear down the whole filesystem feature (readdir/open/stat still hide the
         // paths). So hook it outside the fatal loop and ignore a resolution failure.
-        if filesystem_error.is_none() {
-            if let Ok(stub) = hook_libc_sym(
+        if filesystem_error.is_none()
+            && let Ok(stub) = hook_libc_sym(
                 c"getdents64",
                 hooked_getdents64 as *mut _,
                 set_real_getdents64_ptr,
-            ) {
-                filesystem_stubs.push(stub);
-            }
+            )
+        {
+            filesystem_stubs.push(stub);
         }
     }
 

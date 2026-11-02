@@ -190,10 +190,10 @@ fn filter_tcp_addr<Addr: PartialEq>(
         // Find ": " separator, then parse hex address after it.
         if let Some(colon_pos) = find_colon_space(line) {
             let addr_start = colon_pos + 2;
-            if addr_start + hex_len <= line.len() {
-                if let Some(addr) = parse(&line[addr_start..addr_start + hex_len]) {
-                    return vpn_addrs.contains(&addr);
-                }
+            if addr_start + hex_len <= line.len()
+                && let Some(addr) = parse(&line[addr_start..addr_start + hex_len])
+            {
+                return vpn_addrs.contains(&addr);
             }
         }
         false
@@ -767,7 +767,7 @@ tun0:  300    3    0    0\n"
         attrs.extend_from_slice(&(rta_len as u16).to_ne_bytes());
         attrs.extend_from_slice(&rta_type.to_ne_bytes());
         attrs.extend_from_slice(payload);
-        while attrs.len() % RTA_ALIGNTO != 0 {
+        while !attrs.len().is_multiple_of(RTA_ALIGNTO) {
             attrs.push(0);
         }
     }

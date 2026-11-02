@@ -115,10 +115,10 @@ pub(crate) fn listen_prepared(
 }
 
 fn remove_socket(path: &Path) {
-    if let Err(e) = std::fs::remove_file(path) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            eprintln!("core: could not remove socket {}: {e}", path.display());
-        }
+    if let Err(e) = std::fs::remove_file(path)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!("core: could not remove socket {}: {e}", path.display());
     }
 }
 

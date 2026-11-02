@@ -188,7 +188,7 @@ async fn saturated_forensics_does_not_consume_root_inventory_slot() {
     use vpnhide_core_rpc::DiagnosticProbe;
     let state = test_state();
     state.set_probe_env(crate::diagnostics::ProbeEnv {
-        core_exe: "/bin/true".into(),
+        core_exe: "true".into(),
         app_dir: None,
     });
     let _forensic = state.heavy_rpc.clone().acquire_many_owned(2).await.unwrap();

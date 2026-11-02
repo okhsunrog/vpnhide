@@ -81,6 +81,7 @@ jobs:
             shared_rust:
               - 'Cargo.toml'
               - 'Cargo.lock'
+              - 'rust-toolchain.toml'
               - 'crates/**'
               # Shared producer/consumer vectors: run both Rust and Android tests.
               - 'fixtures/app-helper/**'

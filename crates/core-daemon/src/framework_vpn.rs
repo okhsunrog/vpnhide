@@ -115,17 +115,17 @@ fn membership(
         .cloned()
         .collect::<BTreeSet<_>>();
     let mut unmanaged = false;
-    if interfaces.is_empty() {
-        if let Some(networks) = networks {
-            match unmanaged_vpn_interfaces(&networks.non_vpn_interfaces) {
-                Ok((found, is_unmanaged)) => {
-                    interfaces = found;
-                    unmanaged = is_unmanaged;
-                }
-                Err(()) => {
-                    observation.detail = "interfaces_unavailable".into();
-                    return observation;
-                }
+    if interfaces.is_empty()
+        && let Some(networks) = networks
+    {
+        match unmanaged_vpn_interfaces(&networks.non_vpn_interfaces) {
+            Ok((found, is_unmanaged)) => {
+                interfaces = found;
+                unmanaged = is_unmanaged;
+            }
+            Err(()) => {
+                observation.detail = "interfaces_unavailable".into();
+                return observation;
             }
         }
     }

@@ -248,10 +248,10 @@ pub(crate) fn apply_private_socket_permissions(
     owner: Option<u32>,
 ) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    if let Some(uid) = owner {
-        if unsafe { libc::chown(path_cstr(path)?.as_ptr(), uid, uid) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
+    if let Some(uid) = owner
+        && unsafe { libc::chown(path_cstr(path)?.as_ptr(), uid, uid) } < 0
+    {
+        return Err(io::Error::last_os_error());
     }
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
 }

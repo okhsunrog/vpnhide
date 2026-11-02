@@ -511,10 +511,10 @@ pub fn sections(raw: &str, begin: &str, end: &str) -> BTreeMap<String, String> {
         if let Some(name) = line.strip_prefix(begin) {
             current = Some((name.to_owned(), Vec::new()));
         } else if let Some(name) = line.strip_prefix(end) {
-            if let Some((open, body)) = current.take() {
-                if open == name {
-                    out.insert(open, body.join("\n"));
-                }
+            if let Some((open, body)) = current.take()
+                && open == name
+            {
+                out.insert(open, body.join("\n"));
             }
         } else if let Some((_, body)) = current.as_mut() {
             body.push(line);

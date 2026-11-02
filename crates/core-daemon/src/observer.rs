@@ -230,10 +230,10 @@ fn consume(batch: &[u8], state: &mut RouteState) -> bool {
             msg_type,
             RTM_NEWROUTE | RTM_DELROUTE | RTM_NEWRULE | RTM_DELRULE
         );
-        if msg_type == RTM_NEWLINK || msg_type == RTM_DELLINK {
-            if let Some((name, up)) = parse_link(payload) {
-                state.apply(msg_type, name, up);
-            }
+        if (msg_type == RTM_NEWLINK || msg_type == RTM_DELLINK)
+            && let Some((name, up)) = parse_link(payload)
+        {
+            state.apply(msg_type, name, up);
         }
     });
     routing_changed || state.up != before
@@ -570,7 +570,7 @@ mod tests {
         b.extend_from_slice(&IFLA_IFNAME.to_ne_bytes());
         b.extend_from_slice(name.as_bytes());
         b.push(0);
-        while b.len() % RTA_ALIGNTO != 0 {
+        while !b.len().is_multiple_of(RTA_ALIGNTO) {
             b.push(0);
         }
         b

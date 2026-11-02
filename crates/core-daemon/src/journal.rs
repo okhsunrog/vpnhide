@@ -210,29 +210,27 @@ impl NativeStartup {
         {
             return false;
         }
-        if let Some(bundle) = &intent.bundle {
-            if bundle.root.as_os_str().is_empty()
+        if let Some(bundle) = &intent.bundle
+            && (bundle.root.as_os_str().is_empty()
                 || !valid_sha256(&bundle.manifest_sha256)
                 || bundle.source_commit.len() != 40
                 || !bundle.source_commit.bytes().all(|b| b.is_ascii_hexdigit())
                 || bundle.wire.len() > vpnhide_protocol::zygisk_activation::MAX_BYTES
                 || vpnhide_protocol::parse_config(bundle.wire.as_bytes()).is_none()
-                || matches!(intent.action, TransitionAction::Observe)
-            {
-                return false;
-            }
+                || matches!(intent.action, TransitionAction::Observe))
+        {
+            return false;
         }
-        if let Some(payload) = &intent.payload {
-            if !matches!(
+        if let Some(payload) = &intent.payload
+            && (!matches!(
                 intent.action,
                 TransitionAction::Load(NativeBackend::Kmod | NativeBackend::Kpm)
             ) || payload.bytes == 0
                 || payload.bytes > crate::payloads::MAX_PAYLOAD_BYTES
                 || !valid_sha256(&payload.sha256)
-                || payload.source.as_os_str().is_empty()
-            {
-                return false;
-            }
+                || payload.source.as_os_str().is_empty())
+        {
+            return false;
         }
         !matches!(
             intent.action,
@@ -422,15 +420,13 @@ impl Journal {
     pub fn complete_native_startup(&mut self, result: NativeStartupResult) {
         use crate::native_boot::prepared::TransitionAction;
         if let Some(attempt) = &mut self.native_startup {
-            if let Some(intent) = &attempt.intent {
-                if let TransitionAction::Load(backend) = intent.action {
-                    if result
-                        .selection
-                        .is_some_and(|selected| selected.backend == backend)
-                    {
-                        self.native_quarantine.retain(|q| q.backend != backend);
-                    }
-                }
+            if let Some(intent) = &attempt.intent
+                && let TransitionAction::Load(backend) = intent.action
+                && result
+                    .selection
+                    .is_some_and(|selected| selected.backend == backend)
+            {
+                self.native_quarantine.retain(|q| q.backend != backend);
             }
             attempt.completed = Some(result);
         }
@@ -446,30 +442,29 @@ impl Journal {
         }) {
             self.zygisk_exposure_boot = Some(attempt.boot_id.clone());
         }
-        if let Some(intent) = &attempt.intent {
-            if let (crate::native_boot::prepared::TransitionAction::Load(backend), Some(payload)) =
+        if let Some(intent) = &attempt.intent
+            && let (crate::native_boot::prepared::TransitionAction::Load(backend), Some(payload)) =
                 (intent.action, &intent.payload)
+        {
+            if self
+                .native_load_budget
+                .as_ref()
+                .is_none_or(|budget| budget.boot_id != intent.boot_id)
             {
-                if self
-                    .native_load_budget
-                    .as_ref()
-                    .is_none_or(|budget| budget.boot_id != intent.boot_id)
-                {
-                    self.native_load_budget = Some(NativeLoadBudget {
-                        boot_id: intent.boot_id.clone(),
-                        attempted: Vec::new(),
-                    });
-                }
-                let budget = self.native_load_budget.as_mut().expect("load budget");
-                if !budget.attempted.contains(&backend) {
-                    budget.attempted.push(backend);
-                }
-                self.native_quarantine.retain(|q| q.backend != backend);
-                self.native_quarantine.push(NativeQuarantine {
-                    backend,
-                    sha256: payload.sha256.clone(),
+                self.native_load_budget = Some(NativeLoadBudget {
+                    boot_id: intent.boot_id.clone(),
+                    attempted: Vec::new(),
                 });
             }
+            let budget = self.native_load_budget.as_mut().expect("load budget");
+            if !budget.attempted.contains(&backend) {
+                budget.attempted.push(backend);
+            }
+            self.native_quarantine.retain(|q| q.backend != backend);
+            self.native_quarantine.push(NativeQuarantine {
+                backend,
+                sha256: payload.sha256.clone(),
+            });
         }
 
         if let Some(previous) = self.native_startup.replace(attempt.clone()) {
@@ -651,23 +646,23 @@ pub fn read(path: &Path) -> io::Result<Journal> {
         ));
     }
     for entry in &journal.operations {
-        if let Some(intent) = &entry.native_intent {
-            if let Some(authorization) = &intent.zygisk_authorization {
-                let envelope = vpnhide_protocol::zygisk_activation::Authorization {
-                    boot_id: authorization.boot_id.clone(),
-                    generation: authorization.generation,
-                    wire: intent.wire.clone(),
-                };
-                if intent.backend != NativeBackend::Zygisk
-                    || intent.zygisk_module.is_none()
-                    || authorization.generation != entry.record.op.0
-                    || envelope.encode().is_none()
-                {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "invalid journaled Zygisk authorization",
-                    ));
-                }
+        if let Some(intent) = &entry.native_intent
+            && let Some(authorization) = &intent.zygisk_authorization
+        {
+            let envelope = vpnhide_protocol::zygisk_activation::Authorization {
+                boot_id: authorization.boot_id.clone(),
+                generation: authorization.generation,
+                wire: intent.wire.clone(),
+            };
+            if intent.backend != NativeBackend::Zygisk
+                || intent.zygisk_module.is_none()
+                || authorization.generation != entry.record.op.0
+                || envelope.encode().is_none()
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid journaled Zygisk authorization",
+                ));
             }
         }
     }
@@ -720,9 +715,20 @@ pub fn read(path: &Path) -> io::Result<Journal> {
 }
 
 #[cfg(test)]
-thread_local! {
-    static WRITE_FAULT: std::cell::Cell<Option<(usize, bool)>> = const { std::cell::Cell::new(None) };
+#[cfg_attr(
+    target_os = "android",
+    expect(
+        clippy::missing_const_for_thread_local,
+        reason = "Rust 1.99.1 Android macro fallback flags an already-const TLS initializer"
+    )
+)]
+mod fault_thread_state {
+    thread_local! {
+        pub(super) static WRITE_FAULT: std::cell::Cell<Option<(usize, bool)>> = const { std::cell::Cell::new(None) };
+    }
 }
+#[cfg(test)]
+use fault_thread_state::WRITE_FAULT;
 
 /// Writer-thread-local injection; never enabled in production builds.
 #[cfg(test)]

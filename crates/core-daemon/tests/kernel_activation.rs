@@ -62,8 +62,9 @@ async fn exercise(case: Case, check: impl FnOnce(&NativeBootOutcome)) {
         .optional_features
         .insert("filesystem_iface_paths".into());
     config_file::write_atomic(&config_path, &initial).unwrap();
+    common::link_host_tool(dir.path(), "cat");
     let insmod = dir.path().join("insmod");
-    fs::write(&insmod, "#!/bin/sh\n/bin/cat \"$1\" > \"$VPNHIDE_TEST_LOAD_ARGS.payload\" || exit 1\nprintf '%s\\n' \"$@\" > \"$VPNHIDE_TEST_LOAD_ARGS\"\nprintf 'vpnhide 1 status\\nbackend 0x%s\\nkver 0x0\\nhooks 0x0\\nerror 0x0\\n' \"$VPNHIDE_TEST_OWNER\" > \"$VPNHIDE_KMOD_CTL\"\n").unwrap();
+    fs::write(&insmod, "#!/bin/sh\ncat \"$1\" > \"$VPNHIDE_TEST_LOAD_ARGS.payload\" || exit 1\nprintf '%s\\n' \"$@\" > \"$VPNHIDE_TEST_LOAD_ARGS\"\nprintf 'vpnhide 1 status\\nbackend 0x%s\\nkver 0x0\\nhooks 0x0\\nerror 0x0\\n' \"$VPNHIDE_TEST_OWNER\" > \"$VPNHIDE_KMOD_CTL\"\n").unwrap();
     fs::set_permissions(&insmod, fs::Permissions::from_mode(0o700)).unwrap();
     if case.kpm.is_some() {
         let kpatch = dir.path().join("kpatch");

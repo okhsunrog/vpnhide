@@ -78,8 +78,8 @@ Hard requirements:
 
 Requirements:
 
-- Rust >= 1.85 (edition 2024)
-- `rustup target add aarch64-linux-android`
+- Rust 1.99.1 (edition 2024), pinned by the workspace `rust-toolchain.toml`
+- `rustup show` (installs the pinned toolchain and Android targets)
 - `cargo install cargo-ndk`
 - Android NDK (auto-detected under `~/Android/Sdk/ndk/`; any recent NDK that ships `libclang_rt.builtins-aarch64-android.a` works)
 - CMake >= 3.22, Ninja

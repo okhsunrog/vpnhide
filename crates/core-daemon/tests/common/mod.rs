@@ -21,10 +21,10 @@ pub async fn settled(
 ) -> vpnhide_core_rpc::OperationRecord {
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
-            if let Some(record) = client.get_operation(op).await.expect("receipt transport") {
-                if record.settled.is_some() {
-                    return record;
-                }
+            if let Some(record) = client.get_operation(op).await.expect("receipt transport")
+                && record.settled.is_some()
+            {
+                return record;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
@@ -42,4 +42,19 @@ pub fn core_command() -> std::process::Command {
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default());
     command
+}
+
+/// Keep fixture PATH isolated while locating host coreutils on FHS and NixOS.
+#[allow(dead_code)]
+pub fn link_host_tool(directory: &std::path::Path, name: &str) {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let path = std::env::var_os("PATH").expect("host PATH");
+    let executable = std::env::split_paths(&path)
+        .map(|directory| directory.join(name))
+        .find(|path| {
+            path.metadata()
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        })
+        .unwrap_or_else(|| panic!("host tool {name} is required by this fixture"));
+    symlink(executable, directory.join(name)).expect("fixture host-tool link");
 }

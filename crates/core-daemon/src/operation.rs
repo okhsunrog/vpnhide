@@ -120,10 +120,10 @@ pub fn run_plan_hooked(
                 Some(fail) => fail,
                 None => {
                     let mut outcome = runner.run(phase, candidate);
-                    if let Some(h) = hook.as_mut() {
-                        if let Err(uncertain) = h.after(phase, outcome) {
-                            outcome = uncertain;
-                        }
+                    if let Some(h) = hook.as_mut()
+                        && let Err(uncertain) = h.after(phase, outcome)
+                    {
+                        outcome = uncertain;
                     }
                     outcome
                 }
@@ -268,10 +268,10 @@ impl RealPhaseRunner {
             filesystem_hiding,
             Some(candidate),
         )?;
-        if let Some(previous) = &journal.native_startup {
-            if previous.uncertain() {
-                prepared.permit_recovery(previous)?;
-            }
+        if let Some(previous) = &journal.native_startup
+            && previous.uncertain()
+        {
+            prepared.permit_recovery(previous)?;
         }
         journal.check_native_attempt(&prepared.intent, self.recover_startup)?;
         if let Some(backend) = prepared.selected() {
