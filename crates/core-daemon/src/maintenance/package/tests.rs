@@ -36,7 +36,7 @@ fn fixture() -> Fixture {
         }],
     };
     let descriptor = serde_json::to_string(&Descriptor {
-        schema: 1,
+        schema: 2,
         module_id: "vpnhide_core".into(),
         source_commit: "a".repeat(40),
         build_sequence: 1001,
@@ -240,6 +240,9 @@ fn vpnhide_package_trust_runtime() -> vpnhide_package_trust::RuntimeIdentity {
     vpnhide_package_trust::RuntimeIdentity {
         daemon_arm64: item.clone(),
         daemon_arm: item.clone(),
-        payload_manifest: item,
+        payload_manifest: item.clone(),
+        service: item.clone(),
+        sepolicy: item.clone(),
+        module_prop: item,
     }
 }

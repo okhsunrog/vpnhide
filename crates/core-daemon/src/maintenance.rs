@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use vpnhide_core_rpc::{CanonicalConfig, OperationId};
 use vpnhide_migration_policy::{LegacyCandidate, SourceRole};
 
+pub mod image;
 pub mod package;
 
 const MAX_SOURCE_BYTES: u64 = 64 * 1024;

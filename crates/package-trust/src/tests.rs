@@ -3,6 +3,7 @@ use ring::{
     rand::SystemRandom,
     signature::{ECDSA_P256_SHA256_ASN1_SIGNING, EcdsaKeyPair, KeyPair},
 };
+use sha2::{Digest, Sha256};
 
 fn fixture() -> (TrustStore, EcdsaKeyPair, Descriptor) {
     let rng = SystemRandom::new();
@@ -16,7 +17,7 @@ fn fixture() -> (TrustStore, EcdsaKeyPair, Descriptor) {
         }],
     };
     let descriptor = Descriptor {
-        schema: 1,
+        schema: 2,
         module_id: "vpnhide_core".into(),
         source_commit: "a".repeat(40),
         build_sequence: 42,
@@ -188,6 +189,12 @@ fn bounded_strict_parse_and_signed_invalid_metadata_fail_closed() {
         trust.authenticate(&signed(&pair, duplicate)),
         Err(TrustError::Malformed)
     ));
+    let mut older = d;
+    older.schema = 1;
+    assert!(matches!(
+        trust.authenticate(&envelope(&pair, &older)),
+        Err(TrustError::Malformed)
+    ));
 }
 
 fn vpnhide_package_trust_runtime() -> RuntimeIdentity {
@@ -198,6 +205,9 @@ fn vpnhide_package_trust_runtime() -> RuntimeIdentity {
     RuntimeIdentity {
         daemon_arm64: item.clone(),
         daemon_arm: item.clone(),
-        payload_manifest: item,
+        payload_manifest: item.clone(),
+        service: item.clone(),
+        sepolicy: item.clone(),
+        module_prop: item,
     }
 }

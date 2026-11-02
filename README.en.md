@@ -158,7 +158,7 @@ The full vector map — per-layer breakdown, SELinux caveats, and known gaps —
 
 ## Building from source
 
-Component scripts produce internal assembly inputs. `core/build.py` produces only the daemon base, despite its local `vpnhide-core.zip` filename. `scripts/payload_bundle.py` assembles the installable package from that base, all seven KMIs, KPM and both Zygisk ABIs. Public release assets are only the complete Core, APK and signed package descriptor.
+Component scripts produce internal assembly inputs. `core/build.py` produces only the daemon base, despite its local `vpnhide-core.zip` filename. `tools/vpnhide-tooling bundle assemble` assembles the installable package from that base, all seven KMIs, KPM and both Zygisk ABIs. Public release assets are only the complete Core, APK and signed package descriptor.
 
 - **core**: `python3 core/build.py` — cross-compiles `vpnhide-core` for arm64 + armv7 (cargo-ndk) into `core/target/vpnhide-core.zip`.
 - **kmod**: `./kmod/build.py --kmi android14-6.1` (or `--all`) — auto-spawns the DDK container via podman/docker. Full guide: [kmod/BUILDING.md](kmod/BUILDING.md).

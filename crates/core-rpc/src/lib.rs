@@ -67,7 +67,7 @@ pub use vpnhide_diagnostic_model::framework::{FrameworkWorkerRequest, FrameworkW
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 22;
+pub const PROTOCOL_VERSION: u32 = vpnhide_build_contract::RPC_VERSION;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.

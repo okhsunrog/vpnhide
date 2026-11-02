@@ -1,0 +1,29 @@
+[package]
+name = "vpnhide_artifact_model"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = []
+fixtures = []
+archives = ["dep:zip", "dep:flate2", "dep:tempfile", "dep:libc"]
+
+[dependencies]
+vpnhide_build_contract = { path = "../build-contract" }
+vpnhide_protocol = { path = "../protocol" }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+serde_json = "1"
+# ZipIterable avoids indexing attacker-selected entry counts before our bound.
+# That API is unstable and requires an exact pin, including patch version.
+zip = { version = "=9.2.2", default-features = false, features = ["deflate-flate2"], optional = true }
+flate2 = { version = "1", optional = true }
+tempfile = { version = "3", optional = true }
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+crc32fast = "1"
+tempfile = "3"

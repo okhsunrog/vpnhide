@@ -1,0 +1,8 @@
+#!/bin/sh
+# Bootstrap only. All plans, validation and result evaluation live in Rust.
+set -eu
+if [ -n "${VPNHIDE_TOOLING:-}" ]; then
+    exec "$VPNHIDE_TOOLING" "$@"
+fi
+tooling_repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+exec cargo run --quiet --locked --manifest-path "$tooling_repo/Cargo.toml" -p vpnhide_tooling -- "$@"

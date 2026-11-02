@@ -1634,3 +1634,64 @@ The user separately requested only an audit of shell/Python/dev candidates for
 Rust. [Host tooling audit](host-tooling-audit.md) records candidates and boundaries;
 no broad tool rewrite or device cleanup was performed. Previously approved Core
 runtime/provisioner work remains independent of these new audit recommendations.
+
+
+## Approved host tooling implementation (supersedes audit-only scope)
+
+After the read-only audit the user explicitly approved all thirteen files and
+requested the AGENTS ownership rule. Rule committed first in
+`bad3792039dc18c65fe2c95f196e8bb4ae4b2dbd`. This is implementation authorization;
+the previous audit-only paragraph is historical, not a reason to stop the port.
+
+Implemented the packaging/format slice: portable `artifact-model` now owns the
+manifest/KMI catalog, bounded final-ELF verification, package descriptor/runtime
+identities, producer provenance, full ZIP assembly and public distribution/update
+feed policy. `build-contract` owns current RPC/journal build compatibility; kernel
+wire versions still come from `protocol`. `tooling` consumes these libraries and
+does not link the daemon/device runtime. Python build scripts retain only transport
+and compiler orchestration. Removed the three Python format/assembly/descriptor
+owners, public allowlist owner and all four replaced Python test files. Converted
+Core test consumers to independently preserved golden bundle bytes, retaining
+raw adversarial ELF/ZIP encoders. Java keystore provider remains unchanged.
+
+CI builds a statically linked same-checkout Linux CLI once, injects it into all
+producer/signing/distribution consumers, and derives the kmod matrix from the
+shared KMI catalog. Local DDK container entry mounts the corresponding portable
+tool. The update-json shell entrypoint is now bootstrap only; Rust writes only the
+Core feed and leaves legacy feeds frozen. No release or key was created.
+
+This slice also finishes the already-started maintenance image fence: descriptor
+schema2 binds service, sepolicy and module.prop in addition to both daemon ABIs
+and the exact payload-manifest bytes. Old schema1 install descriptors fail closed;
+trust-store schema1 and signature domain remain unchanged. The post-customize
+image verifier requires root-owned immutable regular files, complete payload and
+autoload mirrors, exact executing inode/bytes, no disable/remove/hot-install
+markers, and rechecks identities after reads. Live module.prop is excluded from
+the running-image fence because root managers can replace it before reboot; the
+signed staged replacement still includes it. This is a tested primitive, not a
+claim that the common maintenance executor or APK bootstrap is implemented.
+
+Independent review found and corrected aggregate retained-input memory accounting
+and basename-output parent handling. ZIP input uses bounded iteration before any
+entry index allocation, with exact dependency pin and header/name/size checks.
+Tests exercise small injected aggregate budgets and actual basename CLI output;
+validation failure leaves the previous output intact.
+
+Still NOT implemented in the approved tooling list: typed QEMU guest/host plans
+and PASS evaluation for init/run/run-kpm, and typed reset/rescue replacing
+clean-device.sh. Those remain code work, not device gates. The script has not been
+executed. Other remaining runtime/RFC/Kotlin/provisioner work and the final startup
+screenshot regression remain open; the Save/draft picker decision is unchanged.
+
+
+Validation for this slice: 358 Core library tests, 26 shared artifact/manifest/
+distribution tests, four trust tests, three executable CLI regressions and actual
+Java-to-Rust signatures for RSA/P256/P384 passed. Core's count is lower because
+two ELF tests and two pure manifest tests moved to their shared owners, not because
+coverage was dropped. Strict host/all-target/fixture-oracle and both Android ARM
+ABI Clippy, fmt, repository-wide ruff, shellcheck on changed entries, scaffold/
+no-root checks, five signing-setup failure tests and the real producer-adapter
+regression passed. The static musl executor builds/runs and returns the seven-KMI
+catalog; all twelve CI consumers depend on its same-checkout job, and the 22-job
+graph has no missing dependencies/cycles. Live Actions, production-key signature,
+fresh complete ARM/kernel bundle and phone acceptance remain unobserved/open.

@@ -1,6 +1,6 @@
 # Building vpnhide-kmod
 
-Most users should download pre-built modules from [Releases](https://github.com/okhsunrog/vpnhide/releases) — builds are provided for all supported GKI generations. This guide is for contributors or users who need to build from source.
+Users install the complete Core ZIP and its matching APK from [Releases](https://github.com/okhsunrog/vpnhide/releases). Core selects from the bundled backends automatically. This contributor guide builds internal payload inputs for full Core assembly; its component ZIPs are not separate user installations.
 
 ## Quick build
 
@@ -13,9 +13,9 @@ One command — same script CI runs, no container invocation to memorize:
 
 The script auto-detects whether to build natively (you're already inside the DDK image, or you've pointed `--kdir` at a kernel source tree) or to spawn a `ghcr.io/ylarod/ddk-min:<kmi>-<TAG>` container via Docker or podman. Docker is preferred when both are installed, matching CI and device-test workflows. On rootless podman (Fedora etc) it adds `--userns=keep-id` and `:Z` automatically. The output is `vpnhide-kmod-<kmi>.zip` at the repo root.
 
-Requires `docker` or `podman`. The container image weighs ~1 GB per GKI variant on first pull.
+Requires `docker` or `podman` and the pinned Rust toolchain for shared artifact validation/provenance. The wrapper prepares a static Linux `vpnhide-tooling` executor and mounts it into the minimal DDK image. CI supplies the same-checkout prebuilt executor through `VPNHIDE_TOOLING`; a direct minimal-container invocation must supply it too. See [shared host tooling](../docs/development.md#shared-host-tooling).
 
-### Identifying your GKI generation
+### Identifying the source-build KMI
 
 ```bash
 adb shell uname -r
@@ -23,7 +23,7 @@ adb shell uname -r
 
 The output looks like `6.1.75-android14-11-g...` — the generation is `android14-6.1`.
 
-> **Note:** the `android14` part is NOT your Android version — it's the kernel generation. All Pixels from 6 to 9a share the same `android14-6.1` kernel. Pixel 10 series moves to `android16-6.12`.
+The `android14` component identifies the kernel generation, independently of the installed Android version. This table is for contributor build inputs; the app does not require a manual GKI choice.
 
 | `uname -r` pattern | GKI generation |
 |---|---|

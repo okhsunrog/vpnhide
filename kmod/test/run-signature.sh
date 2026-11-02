@@ -22,19 +22,16 @@ tar xzf "$VPNHIDE_SIGNATURE_ROOTFS" -C "$RFS"
 chmod 0755 "$RFS"
 cp "$VPNHIDE_SIGNATURE_UNSIGNED" "$RFS/unsigned.ko"
 cp "$VPNHIDE_SIGNATURE_SIGNED" "$RFS/signed.ko"
-python3 - "$REPO/scripts" "$RFS" <<'PY'
+"$REPO/tools/vpnhide-tooling" elf require-contract "$RFS/unsigned.ko" > "$WORK/unsigned-elf.json"
+"$REPO/tools/vpnhide-tooling" elf require-contract "$RFS/signed.ko" > "$WORK/signed-elf.json"
+python3 - "$RFS" <<'PY'
 import sys
 from pathlib import Path
-sys.path.insert(0, sys.argv[1])
-from kmod_elf import inspect
-root = Path(sys.argv[2])
+root = Path(sys.argv[1])
 unsigned = root.joinpath("unsigned.ko").read_bytes()
 signed = root.joinpath("signed.ko").read_bytes()
 assert signed.startswith(unsigned), "signed input must preserve the exact unsigned ELF"
 assert signed.endswith(b"~Module signature appended~\n"), "missing kernel signature trailer"
-for data in (unsigned, signed):
-    evidence = inspect(data)
-    assert evidence["init_contract"] == evidence["preflight_protocol"] == 1
 # Change harmless description text while retaining signature framing and ELF.
 bad = bytearray(signed)
 at = bad.index(b"description=") + len(b"description=")

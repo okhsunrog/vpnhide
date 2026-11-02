@@ -32,8 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"
 from build_lib import (  # type: ignore[import-not-found]
     get_build_version,
     make_zip,
+    stamp,
 )
-from payload_bundle import stamp
 
 KPM_FILE = "vpnhide.kpm"
 

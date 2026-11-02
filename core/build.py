@@ -8,7 +8,7 @@ Requirements:
   - Android NDK at $ANDROID_NDK_HOME or auto-detected from $HOME/Android/Sdk/ndk/*
 
 Output: core/target/vpnhide-core.zip is the daemon-only assembly input. CI names
-it vpnhide-core-base.zip, then scripts/payload_bundle.py adds verified payloads
+it vpnhide-core-base.zip, then the shared Rust host tool adds verified payloads
 to the final unified ZIP. The base ships one daemon binary per ABI under
 `bin/<manager $ARCH>/vpnhide-core`; customize.sh (three unconditional lines) keeps
 the one the manager names for the device. All boot logic is the binary's own
@@ -29,8 +29,8 @@ from build_lib import (  # type: ignore[import-not-found]
     detect_android_ndk,
     get_build_version,
     make_zip,
+    stamp,
 )
-from payload_bundle import stamp
 
 # Android API level the daemon links against; matches the app's minSdk.
 API_LEVEL = "28"

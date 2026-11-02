@@ -18,6 +18,43 @@ import zipfile
 from pathlib import Path
 
 
+def tooling_command() -> list[str]:
+    """Host adapter only. Domain formats and decisions belong to the Rust tool."""
+    binary = os.environ.get("VPNHIDE_TOOLING")
+    return (
+        [binary]
+        if binary
+        else [str(Path(__file__).resolve().parent.parent / "tools/vpnhide-tooling")]
+    )
+
+
+def supported_kmis() -> tuple[str, ...]:
+    """Transport adapter; the shared manifest owns the supported KMI catalog."""
+    import json
+
+    return tuple(json.loads(subprocess.check_output([*tooling_command(), "bundle", "kmis"])))
+
+
+def stamp(staging: Path, repo: Path, component: str, version: str) -> None:
+    """Producer adapter to the shared portable Rust provenance implementation."""
+    subprocess.run(
+        [
+            *tooling_command(),
+            "bundle",
+            "stamp",
+            "--staging",
+            str(staging),
+            "--repo",
+            str(repo),
+            "--component",
+            component,
+            "--version",
+            version,
+        ],
+        check=True,
+    )
+
+
 def make_zip(source_dir: Path, output_zip: Path) -> None:
     """Create a zip archive from source_dir contents."""
     with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:

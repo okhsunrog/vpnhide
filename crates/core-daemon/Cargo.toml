@@ -26,6 +26,8 @@ required-features = ["fixture-oracle"]
 fixture-oracle = []
 
 [dependencies]
+vpnhide_build_contract = { path = "../build-contract" }
+vpnhide_artifact_model = { path = "../artifact-model" }
 vpnhide_package_trust = { path = "../package-trust" }
 vpnhide_native_policy = { path = "../native-policy" }
 vpnhide_migration_policy = { path = "../migration-policy" }
@@ -50,5 +52,6 @@ vpnhide_core_client = { version = "0.1.0", path = "../core-client" }
 tempfile = "3"
 
 [dev-dependencies]
+vpnhide_artifact_model = { path = "../artifact-model", features = ["fixtures"] }
 ring = "0.17.14"
 tokio = { version = "1", features = ["test-util"] }

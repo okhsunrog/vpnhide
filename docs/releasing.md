@@ -71,7 +71,7 @@ The committed `module.prop` files are **not** modified — `kmod/build.py` and `
 
 ## Unified distribution and legacy feeds
 
-`scripts/public_distribution.py` is the release allowlist: APK, complete Core ZIP
+`tools/vpnhide-tooling distribution select` is the release allowlist: APK, complete Core ZIP
 and signed descriptor. Component/base ZIPs are internal assembly inputs. Their
 producer metadata has no independent updateJson channel.
 

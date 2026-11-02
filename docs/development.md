@@ -335,3 +335,23 @@ explicitly const TLS initializers. The official cloud rustup toolchain
 expectations become unfulfilled. They have been removed after strict ARM64/ARMv7
 checks passed without an exemption. Keep the explicit const initializers and
 warnings-as-errors; do not suppress unfulfilled expectations across environments.
+
+## Shared host tooling
+
+`tools/vpnhide-tooling` bootstraps the portable Rust CLI through Cargo. Set
+`VPNHIDE_TOOLING` to a prebuilt executor to skip Cargo in minimal build images.
+`tools/build-host-tooling` builds the static x86_64 Linux executor used by DDK
+containers and CI; its bootstrap requires the pinned Rust toolchain and musl
+standard-library target. The host CLI does not link the Core daemon.
+
+Component build scripts produce internal inputs and invoke `bundle stamp`.
+Assemble a complete installation package with:
+
+```sh
+tools/vpnhide-tooling bundle assemble --inputs .artifacts/core-inputs \
+  --output dist/vpnhide-core.zip --commit "$(git rev-parse HEAD)"
+```
+
+All inputs must be complete, clean and built from that exact commit. A daemon
+base alone is not installable. Existing Android keystore operations use
+`tools/vpnhide-tooling signer public` / `sign`; the Java provider stays unchanged.

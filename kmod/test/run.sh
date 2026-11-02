@@ -157,13 +157,7 @@ chmod 0755 "$RFS"
 cp "$KO" "$RFS/vpnhide_kmod.ko"
 if [ -n "$PREFLIGHT" ]; then
 	# Inspect the copied final bytes, not a source/version/filename assertion.
-	python3 - "$RFS/vpnhide_kmod.ko" "$HERE/../../scripts" <<'PY'
-import sys
-from pathlib import Path
-sys.path.insert(0, sys.argv[2])
-from kmod_elf import inspect
-assert inspect(Path(sys.argv[1]).read_bytes())["preflight_protocol"] == 1, "unverified preflight capability"
-PY
+	"$HERE/../../tools/vpnhide-tooling" elf require-contract "$RFS/vpnhide_kmod.ko" > "$WORK/kmod-capabilities.json"
 	( cd "$RFS" && sha256sum vpnhide_kmod.ko > vpnhide_kmod.sha256 )
 	cp "$PREFLIGHT" "$RFS/preflight-probe"
 	chmod +x "$RFS/preflight-probe"

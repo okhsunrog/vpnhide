@@ -23,8 +23,8 @@ from build_lib import (  # type: ignore[import-not-found]
     detect_android_ndk,
     get_build_version,
     make_zip,
+    stamp,
 )
-from payload_bundle import stamp
 
 
 def main() -> int:

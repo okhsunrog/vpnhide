@@ -42,7 +42,7 @@ pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 pub mod preflight;
 pub mod revocation;
 
-const JOURNAL_VERSION: u32 = 11;
+const JOURNAL_VERSION: u32 = vpnhide_build_contract::JOURNAL_VERSION;
 
 /// Default number of terminal receipts to keep, including Unknown.
 pub const DEFAULT_RETAIN_SETTLED: usize = 64;

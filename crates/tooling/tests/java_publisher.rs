@@ -16,10 +16,11 @@ fn existing_android_key_types_sign_exact_unified_package_for_rust() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let temp = tempfile::tempdir().unwrap();
     let package = temp.path().join("core.zip");
-    run(Command::new("python3").current_dir(repo.join("scripts")).args([
-        "-c",
-        "from test_payload_bundle import BundleTests; import shutil,sys; c=BundleTests(); c.setUp(); c.build(); shutil.copyfile(c.output,sys.argv[1]); c.doCleanups()",
-    ]).arg(&package));
+    vpnhide_artifact_model::archive::write_archive(
+        &package,
+        &vpnhide_artifact_model::fixtures::bundle_files().unwrap(),
+    )
+    .unwrap();
     for (index, algorithm) in ["RSA", "secp256r1", "secp384r1"].into_iter().enumerate() {
         let keystore = temp.path().join(format!("test-only-{index}.p12"));
         let public = temp.path().join(format!("trust-{index}.json"));
@@ -51,9 +52,10 @@ fn existing_android_key_types_sign_exact_unified_package_for_rust() {
         }
         run(&mut generate);
         let signer = || {
-            let mut command = Command::new("python3");
+            let mut command = Command::new(env!("CARGO_BIN_EXE_vpnhide-tooling"));
             command
-                .arg(repo.join("scripts/core_descriptor.py"))
+                .current_dir(&repo)
+                .arg("signer")
                 .env("KEYSTORE_PASSWORD", "fixture-only-password")
                 .env("KEY_ALIAS", "fixture");
             command

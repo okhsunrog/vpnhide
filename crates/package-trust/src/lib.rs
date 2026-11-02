@@ -3,32 +3,13 @@
 //! a trust anchor. An unconfigured build fails closed for package installation.
 use ring::signature;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::io::Read;
 
 include!(concat!(env!("OUT_DIR"), "/trust.rs"));
-pub const DOMAIN: &[u8] = b"VPNHIDE-CORE-REPLACEMENT-v1\n";
-pub const MAX_PACKAGE_BYTES: u64 = 256 * 1024 * 1024;
-pub const MAX_ENVELOPE_BYTES: usize = 16 * 1024;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrustError {
-    Unconfigured,
-    Malformed,
-    Signature,
-    Compatibility,
-    Rollback,
-    WrongTarget,
-    PackageSize,
-    PackageHash,
-    Read,
-}
-impl std::fmt::Display for TrustError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-impl std::error::Error for TrustError {}
+pub use vpnhide_artifact_model::package::{
+    DOMAIN, Descriptor, Envelope, FileIdentity, MAX_ENVELOPE_BYTES, MAX_PACKAGE_BYTES,
+    RuntimeIdentity, TrustError,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "algorithm", rename_all = "snake_case", deny_unknown_fields)]
@@ -126,96 +107,6 @@ impl TrustStore {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Envelope {
-    pub descriptor: String,
-    pub signature: String,
-}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Descriptor {
-    pub schema: u32,
-    pub module_id: String,
-    pub source_commit: String,
-    /// Monotonic sequence in the pinned publisher's CI workflow, not versionCode.
-    pub build_sequence: u64,
-    pub package_sha256: String,
-    pub package_bytes: u64,
-    pub rpc: u32,
-    pub journal_min: u32,
-    pub journal_max: u32,
-    pub kernel_control: u32,
-    pub runtime: RuntimeIdentity,
-}
-/// Post-customize identities. Root managers may replace the live module.prop
-/// during staging; its version string cannot establish the installed generation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RuntimeIdentity {
-    pub daemon_arm64: FileIdentity,
-    pub daemon_arm: FileIdentity,
-    pub payload_manifest: FileIdentity,
-}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FileIdentity {
-    pub bytes: u64,
-    pub sha256: String,
-}
-impl FileIdentity {
-    fn valid(&self, limit: u64) -> bool {
-        self.bytes > 0 && self.bytes <= limit && hex_digest(&self.sha256, 64)
-    }
-    pub fn verify(&self, mut input: impl Read) -> Result<(), TrustError> {
-        if !self.valid(MAX_PACKAGE_BYTES) {
-            return Err(TrustError::Malformed);
-        }
-        let mut hash = Sha256::new();
-        let mut total = 0_u64;
-        let mut block = [0_u8; 64 * 1024];
-        loop {
-            let n = input.read(&mut block).map_err(|_| TrustError::Read)?;
-            if n == 0 {
-                break;
-            }
-            total += n as u64;
-            if total > self.bytes {
-                return Err(TrustError::PackageSize);
-            }
-            hash.update(&block[..n]);
-        }
-        if total != self.bytes {
-            return Err(TrustError::PackageSize);
-        }
-        if format!("{:x}", hash.finalize()) != self.sha256 {
-            return Err(TrustError::PackageHash);
-        }
-        Ok(())
-    }
-}
-impl Descriptor {
-    fn validate(&self) -> Result<(), TrustError> {
-        if self.schema != 1
-            || self.module_id != "vpnhide_core"
-            || !hex_digest(&self.source_commit, 40)
-            || !hex_digest(&self.package_sha256, 64)
-            || self.build_sequence == 0
-            || self.package_bytes == 0
-            || self.package_bytes > MAX_PACKAGE_BYTES
-            || self.rpc == 0
-            || self.journal_min == 0
-            || self.journal_min > self.journal_max
-            || self.kernel_control != 2
-            || !self.runtime.daemon_arm64.valid(128 * 1024 * 1024)
-            || !self.runtime.daemon_arm.valid(128 * 1024 * 1024)
-            || !self.runtime.payload_manifest.valid(64 * 1024)
-        {
-            return Err(TrustError::Malformed);
-        }
-        Ok(())
-    }
-}
 /// Constructible only after signature verification; deserialize cannot create it.
 #[derive(Debug, Clone)]
 pub struct VerifiedDescriptor(Descriptor);

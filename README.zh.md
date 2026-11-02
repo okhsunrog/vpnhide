@@ -159,7 +159,7 @@ KPM 实现与 `.ko` 相同的 11 个逻辑内核钩子，而完整的向量图�
 
 ## 从源码构建
 
-组件脚本只生成内部组装输入。`core/build.py` 仅生成 daemon base，即使本地文件名为 `vpnhide-core.zip`。完整安装包由 `scripts/payload_bundle.py` 将 base、七种 KMI、KPM 和两种 Zygisk ABI 组装而成。公开发行资产仅包含完整 Core、APK 和签名包描述。
+组件脚本只生成内部组装输入。`core/build.py` 仅生成 daemon base，即使本地文件名为 `vpnhide-core.zip`。完整安装包由 `tools/vpnhide-tooling bundle assemble` 将 base、七种 KMI、KPM 和两种 Zygisk ABI 组装而成。公开发行资产仅包含完整 Core、APK 和签名包描述。
 
 - **core**：`python3 core/build.py` —— 用 cargo-ndk 为 arm64 + armv7 交叉编译 `vpnhide-core`，输出 `core/target/vpnhide-core.zip`。
 - **kmod**：`./kmod/build.py --kmi android14-6.1`（或 `--all`）—— 通过 podman/docker 自动拉起 DDK 容器。完整指南：[kmod/BUILDING.md](kmod/BUILDING.md)。

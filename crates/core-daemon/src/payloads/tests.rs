@@ -4,34 +4,7 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use vpnhide_core_rpc::NativeBackend as B;
 
-fn payload(implementation: PayloadKind) -> Payload {
-    Payload {
-        implementation,
-        version: "test".into(),
-        source_commit: "a".repeat(40),
-        sha256: format!("{:x}", Sha256::digest(b"payload")),
-        bytes: 7,
-        control_version: 2,
-        preflight_protocol: None,
-        init_contract: None,
-    }
-}
-pub(super) fn manifest() -> Manifest {
-    let mut payloads: Vec<_> = KMIS
-        .iter()
-        .map(|kmi| payload(PayloadKind::Kmod { kmi: (*kmi).into() }))
-        .collect();
-    payloads.extend([
-        payload(PayloadKind::Kpm),
-        payload(PayloadKind::Zygisk { abi: Abi::Arm64 }),
-        payload(PayloadKind::Zygisk { abi: Abi::Arm32 }),
-    ]);
-    Manifest {
-        schema: 1,
-        bundle_commit: "b".repeat(40),
-        payloads,
-    }
-}
+pub(super) use vpnhide_artifact_model::fixtures::manifest;
 fn fixture() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     let manifest = manifest();
@@ -75,10 +48,7 @@ fn catalog_rechecks_advertised_capability_against_the_exact_hashed_elf() {
     )
     .unwrap();
     assert!(Catalog::open(root.path()).is_err());
-    let elf = super::elf::tests::fixture(
-        b"vpnhide_preflight=1\0parmtype=preflight_only:bool\0",
-        false,
-    );
+    let elf = include_bytes!("../../../../fixtures/payloads/init-contract.elf").to_vec();
     let payload = &mut manifest.payloads[0];
     payload.bytes = elf.len() as u64;
     payload.sha256 = format!("{:x}", Sha256::digest(&elf));
@@ -96,54 +66,6 @@ fn catalog_rechecks_advertised_capability_against_the_exact_hashed_elf() {
     assert!(Catalog::open(root.path()).is_ok());
     manifest.payloads.last_mut().unwrap().preflight_protocol = Some(1);
     assert!(manifest.validate().is_err());
-}
-#[test]
-fn invalid_metadata_and_duplicates_fail_closed() {
-    let valid = manifest();
-    let mut cases = Vec::new();
-    let mut m = valid.clone();
-    m.schema = 2;
-    cases.push(m);
-    let mut m = valid.clone();
-    m.payloads.push(m.payloads[0].clone());
-    cases.push(m);
-    let mut m = valid.clone();
-    m.payloads[0].bytes = u64::MAX;
-    cases.push(m);
-    let mut m = valid.clone();
-    m.payloads[0].sha256 = "no".into();
-    cases.push(m);
-    let mut m = valid.clone();
-    m.payloads[0].control_version = 3;
-    cases.push(m);
-    let mut m = valid.clone();
-    m.payloads[0].source_commit.clear();
-    cases.push(m);
-    let mut m = valid.clone();
-    m.payloads[0].implementation = PayloadKind::Kmod {
-        kmi: "../../outside".into(),
-    };
-    cases.push(m);
-    for m in cases {
-        assert!(m.validate().is_err(), "{m:?}");
-    }
-    let mut m = valid;
-    m.payloads.pop();
-    assert!(m.require_complete().is_err());
-    assert!(Manifest::parse(&vec![b' '; MAX_MANIFEST_BYTES as usize + 1]).is_err());
-    let json = serde_json::to_string(&manifest()).unwrap();
-    assert!(Manifest::parse(json.replacen('{', "{\"unknown\":true,", 1).as_bytes()).is_err());
-    assert!(Manifest::parse(json.replacen('{', "{\"schema\":1,", 1).as_bytes()).is_err());
-}
-#[test]
-fn bounded_total_and_empty_files() {
-    let mut m = manifest();
-    m.payloads[0].bytes = 0;
-    assert!(m.validate().is_err());
-    for p in &mut m.payloads {
-        p.bytes = MAX_PAYLOAD_BYTES;
-    }
-    assert!(m.validate().is_err());
 }
 #[test]
 fn reject_corruption_missing_and_nonregular_payloads() {
@@ -389,17 +311,9 @@ fn arm32_and_missing_evidence_fail_closed() {
 }
 
 #[test]
-fn python_assembled_bundle_matches_runtime_catalog_with_inert_autoload() {
+fn independent_golden_bundle_matches_runtime_catalog_with_inert_autoload() {
     let root = tempfile::tempdir().unwrap();
-    let fixture =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/test_payload_bundle.py");
-    let status = std::process::Command::new("python3")
-        .arg(fixture)
-        .arg("--fixture")
-        .arg(root.path())
-        .status()
-        .unwrap();
-    assert!(status.success());
+    vpnhide_artifact_model::fixtures::write_bundle_tree(root.path()).unwrap();
     let catalog = Catalog::open(root.path()).unwrap();
     catalog.manifest.require_complete().unwrap();
     assert_eq!(catalog.payloads.len(), 10);

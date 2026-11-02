@@ -857,18 +857,9 @@ mod tests {
     }
 
     fn bundle(root: &Path) {
-        let script =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/test_payload_bundle.py");
-        assert!(
-            std::process::Command::new("python3")
-                .arg(script)
-                .arg("--fixture")
-                .arg(root)
-                .status()
-                .unwrap()
-                .success()
-        );
+        vpnhide_artifact_model::fixtures::write_bundle_tree(root).unwrap();
     }
+
     fn process(root: &Path, pid: u32, ticks: u64, name: &str) {
         let path = root.join(pid.to_string());
         fs::create_dir_all(&path).unwrap();

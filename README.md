@@ -159,7 +159,7 @@ KPM реализует те же 11 логических kernel-хуков, чт
 
 ## Сборка из исходников
 
-Скрипты отдельных компонентов создают внутренние входы сборки. `core/build.py` даёт только daemon-base, даже если его локальный файл называется `vpnhide-core.zip`. Полный устанавливаемый пакет собирает `scripts/payload_bundle.py` из Core base, всех семи KMI, KPM и двух Zygisk ABI; CI публикует пользователю только полный Core, APK и подписанное описание пакета.
+Скрипты отдельных компонентов создают внутренние входы сборки. `core/build.py` даёт только daemon-base, даже если его локальный файл называется `vpnhide-core.zip`. Полный устанавливаемый пакет собирает `tools/vpnhide-tooling bundle assemble` из Core base, всех семи KMI, KPM и двух Zygisk ABI; CI публикует пользователю только полный Core, APK и подписанное описание пакета.
 
 - **core**: `python3 core/build.py` — собирает `vpnhide-core` для arm64 + armv7 (cargo-ndk) в `core/target/vpnhide-core.zip`.
 - **kmod**: `./kmod/build.py --kmi android14-6.1` (или `--all`) — авто-запускает DDK-контейнер через podman/docker. Подробнее: [kmod/BUILDING.md](kmod/BUILDING.md).

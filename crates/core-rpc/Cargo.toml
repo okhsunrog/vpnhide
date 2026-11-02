@@ -11,6 +11,7 @@ publish = false
 description = "Shared app<->core IPC contract (tarpc service + wire types) for vpnhide 2.0."
 
 [dependencies]
+vpnhide_build_contract = { path = "../build-contract" }
 vpnhide_diagnostic_model = { path = "../diagnostic-model" }
 serde = { version = "1", features = ["derive"] }
 tarpc = { version = "0.38", features = ["serde-transport", "tokio1", "unix"] }

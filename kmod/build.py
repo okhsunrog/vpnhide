@@ -49,9 +49,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from build_lib import (  # type: ignore[import-not-found]
     get_build_version,
     make_zip,
+    stamp,
+    supported_kmis,
     version_sort_key,
 )
-from payload_bundle import stamp
 
 # Module file name on disk after `make`.
 KMOD_KO = "vpnhide_kmod.ko"
@@ -62,15 +63,7 @@ KMOD_KO = "vpnhide_kmod.ko"
 DDK_IMAGE_TAG = "20260313"
 
 # Every GKI variant we publish a kmod for. Order matches the CI matrix.
-GKI_VARIANTS = (
-    "android12-5.10",
-    "android13-5.10",
-    "android13-5.15",
-    "android14-5.15",
-    "android14-6.1",
-    "android15-6.6",
-    "android16-6.12",
-)
+GKI_VARIANTS = supported_kmis()
 
 DEFAULT_KMI = "android14-6.1"
 
@@ -216,6 +209,18 @@ def container_build_one(runtime: str, is_podman: bool, repo_root: Path, kmi: str
     image = f"ghcr.io/ylarod/ddk-min:{kmi}-{DDK_IMAGE_TAG}"
     mount_spec = f"{repo_root}:/work"
     build_version = get_build_version(repo_root)
+    # The minimal DDK image has no Rust. Mount a portable executor from this
+    # checkout instead of reintroducing Python copies of artifact policy.
+    supplied_tooling = os.environ.get("VPNHIDE_TOOLING")
+    if supplied_tooling:
+        tooling_source = Path(supplied_tooling).resolve()
+    else:
+        subprocess.run([str(repo_root / "tools/build-host-tooling")], check=True)
+        tooling_source = repo_root / "target/x86_64-unknown-linux-musl/release/vpnhide-tooling"
+    tooling_destination = repo_root / ".artifacts/host-tooling/vpnhide-tooling"
+    tooling_destination.parent.mkdir(parents=True, exist_ok=True)
+    if tooling_source != tooling_destination.resolve():
+        shutil.copy2(tooling_source, tooling_destination)
     cmd = [runtime, "run", "--rm"]
     if is_podman:
         # Rootless podman + Fedora SELinux: keep host UID inside so the
@@ -226,6 +231,8 @@ def container_build_one(runtime: str, is_podman: bool, repo_root: Path, kmi: str
     cmd += [
         "-e",
         f"VPNHIDE_BUILD_VERSION={build_version}",
+        "-e",
+        "VPNHIDE_TOOLING=/work/.artifacts/host-tooling/vpnhide-tooling",
         "-v",
         mount_spec,
         "-w",

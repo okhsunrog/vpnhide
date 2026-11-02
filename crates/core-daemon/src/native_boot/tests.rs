@@ -743,15 +743,7 @@ fn restored_kpm_auth_loss_preserves_credential_recovery_without_selection() {
 fn restored_bundled_zygisk_needs_current_loader_evidence_not_only_library_files() {
     let root = tempfile::tempdir().unwrap();
     let bundle = root.path().join("bundle");
-    assert!(
-        std::process::Command::new("python3")
-            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/test_payload_bundle.py"))
-            .arg("--fixture")
-            .arg(&bundle)
-            .status()
-            .unwrap()
-            .success()
-    );
+    vpnhide_artifact_model::fixtures::write_bundle_tree(&bundle).unwrap();
     assert!(crate::zygisk::ZygiskTarget::open(&bundle).is_ok());
     let mut environment = env(root.path());
     environment.zygisk_module = Some(bundle);

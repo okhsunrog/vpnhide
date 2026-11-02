@@ -37,7 +37,7 @@ fn string(data: &[u8], offset: u64) -> io::Result<&str> {
     Ok(value)
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct KmodCapabilities {
     pub preflight_protocol: Option<u32>,
     pub init_contract: Option<u32>,
@@ -303,6 +303,9 @@ fn standard_parameters(sections: &BTreeMap<&str, Section<'_>>) -> io::Result<()>
 }
 pub fn capabilities(data: &[u8]) -> io::Result<KmodCapabilities> {
     let sections = sections(data)?;
+    capabilities_in(&sections)
+}
+fn capabilities_in(sections: &BTreeMap<&str, Section<'_>>) -> io::Result<KmodCapabilities> {
     let mut preflight = Vec::new();
     let mut init = Vec::new();
     let mut parameters = Vec::new();
@@ -363,7 +366,7 @@ pub fn capabilities(data: &[u8]) -> io::Result<KmodCapabilities> {
         {
             return Err(invalid("unverified closed init contract"));
         }
-        standard_parameters(&sections)?;
+        standard_parameters(sections)?;
         result.init_contract = Some(1);
     }
     Ok(result)
@@ -372,9 +375,340 @@ pub fn preflight_protocol(data: &[u8]) -> io::Result<Option<u32>> {
     capabilities(data).map(|c| c.preflight_protocol)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KmodInspection {
+    pub sha256: String,
+    pub bytes: u64,
+    pub preflight_protocol: Option<u32>,
+    pub init_contract: Option<u32>,
+    pub constructors: bool,
+    pub imports: std::collections::BTreeSet<String>,
+    pub versions: BTreeMap<String, String>,
+    pub extended_versions: bool,
+}
+fn content<'a>(sections: &'a BTreeMap<&str, Section<'a>>, name: &str) -> io::Result<&'a [u8]> {
+    match sections.get(name) {
+        None => Ok(&[]),
+        Some(section) if section.kind != 8 => Ok(section.content),
+        Some(_) => Err(invalid("metadata cannot use SHT_NOBITS")),
+    }
+}
+/// Imports/CRC are research evidence, not proof of private kernel structure ABI.
+/// Uses the same bounded ELF parser and capability checks as the device reader.
+pub fn inspect(data: &[u8]) -> io::Result<KmodInspection> {
+    use sha2::{Digest, Sha256};
+    let sections = sections(data)?;
+    let capability = capabilities_in(&sections)?;
+    let mut imports = std::collections::BTreeSet::new();
+    let symbols = content(&sections, ".symtab")?;
+    if !symbols.is_empty() {
+        let header = &sections[".symtab"];
+        if header.kind != 2
+            || number(header.header, 56, 8)? != 24
+            || !symbols.len().is_multiple_of(24)
+            || symbols.len() / 24 > 262_144
+        {
+            return Err(invalid("invalid symbol table"));
+        }
+        let strings = header_index(&sections, number(header.header, 40, 4)?)?;
+        if strings.kind != 3 || strings.size > 16 * 1024 * 1024 {
+            return Err(invalid("invalid symbol strings"));
+        }
+        for symbol in symbols.as_chunks::<24>().0 {
+            let name = number(symbol, 0, 4)?;
+            if number(symbol, 6, 2)? == 0
+                && name != 0
+                && matches!(number(symbol, 4, 1)? >> 4, 1 | 2)
+            {
+                imports.insert(string(strings.content, name)?.to_owned());
+            }
+        }
+    }
+    let mut versions = BTreeMap::new();
+    let raw = content(&sections, "__versions")?;
+    if !raw.len().is_multiple_of(64) {
+        return Err(invalid("unsupported modversion record size"));
+    }
+    for row in raw.as_chunks::<64>().0 {
+        let crc = number(row, 0, 8)?;
+        let name = string(&row[8..], 0)?;
+        if name.is_empty()
+            || crc > u64::from(u32::MAX)
+            || versions
+                .insert(name.to_owned(), format!("{crc:08x}"))
+                .is_some()
+        {
+            return Err(invalid("invalid or duplicate modversion"));
+        }
+    }
+    Ok(KmodInspection {
+        sha256: format!("{:x}", Sha256::digest(data)),
+        bytes: data.len() as u64,
+        preflight_protocol: capability.preflight_protocol,
+        init_contract: capability.init_contract,
+        constructors: sections.iter().any(|(name, s)| {
+            s.size != 0
+                && (matches!(*name, ".ctors" | ".init_array" | ".preinit_array")
+                    || matches!(s.kind, 14 | 16))
+        }),
+        imports,
+        versions,
+        extended_versions: !content(&sections, "__version_ext_names")?.is_empty()
+            || !content(&sections, "__version_ext_crcs")?.is_empty(),
+    })
+}
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct KmodComparison {
+    pub left_sha256: String,
+    pub right_sha256: String,
+    pub common_imports: Vec<String>,
+    pub crc_evidence_available: bool,
+    pub common_version_records: usize,
+    pub left_only_imports: Vec<String>,
+    pub right_only_imports: Vec<String>,
+    pub changed_crcs: BTreeMap<String, [String; 2]>,
+    pub left_only_versions: Vec<String>,
+    pub right_only_versions: Vec<String>,
+    pub missing_import_crcs: BTreeMap<String, Vec<String>>,
+    pub private_abi_proven: bool,
+}
+pub fn compare(left: &KmodInspection, right: &KmodInspection) -> KmodComparison {
+    use std::collections::BTreeSet;
+    let a: BTreeSet<_> = left.versions.keys().cloned().collect();
+    let b: BTreeSet<_> = right.versions.keys().cloned().collect();
+    let common: BTreeSet<_> = a.intersection(&b).cloned().collect();
+    KmodComparison {
+        left_sha256: left.sha256.clone(),
+        right_sha256: right.sha256.clone(),
+        common_imports: left.imports.intersection(&right.imports).cloned().collect(),
+        crc_evidence_available: !left.versions.is_empty() && !right.versions.is_empty(),
+        common_version_records: common.len(),
+        left_only_imports: left.imports.difference(&right.imports).cloned().collect(),
+        right_only_imports: right.imports.difference(&left.imports).cloned().collect(),
+        changed_crcs: common
+            .iter()
+            .filter(|n| left.versions[*n] != right.versions[*n])
+            .map(|n| {
+                (
+                    n.clone(),
+                    [left.versions[n].clone(), right.versions[n].clone()],
+                )
+            })
+            .collect(),
+        left_only_versions: a.difference(&b).cloned().collect(),
+        right_only_versions: b.difference(&a).cloned().collect(),
+        missing_import_crcs: BTreeMap::from([
+            (
+                "left".into(),
+                left.imports.difference(&a).cloned().collect(),
+            ),
+            (
+                "right".into(),
+                right.imports.difference(&b).cloned().collect(),
+            ),
+        ]),
+        private_abi_proven: false,
+    }
+}
+
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use crate::fixtures::{Section as RawSection, init_contract_payload, relocatable};
+
+    #[test]
+    fn legacy_and_arbitrary_text_are_not_capability_evidence() {
+        for bytes in [
+            relocatable(b"license=GPL\0", &[]),
+            relocatable(
+                b"license=GPL\0",
+                &[RawSection::new(
+                    ".text",
+                    b"vpnhide_preflight=1\0".as_slice(),
+                    1,
+                )],
+            ),
+        ] {
+            assert_eq!(inspect(&bytes).unwrap().preflight_protocol, None);
+        }
+    }
+    #[test]
+    fn host_inspection_preserves_strict_metadata_and_constructor_guards() {
+        let marker = b"vpnhide_preflight=1\0parmtype=preflight_only:bool\0";
+        assert_eq!(
+            inspect(&relocatable(marker, &[]))
+                .unwrap()
+                .preflight_protocol,
+            Some(1)
+        );
+        for bad in [
+            b"vpnhide_preflight=1\0".as_slice(),
+            b"vpnhide_preflight=2\0parmtype=preflight_only:bool\0",
+            b"vpnhide_preflight=1\0parmtype=preflight_only:bool\0vpnhide_preflight=1\0",
+            b"vpnhide_preflight=1\0parmtype=preflight_only:bool\0parmtype=preflight_only:uint\0",
+        ] {
+            assert!(inspect(&relocatable(bad, &[])).is_err());
+        }
+        assert!(
+            inspect(&relocatable(
+                marker,
+                &[RawSection::new(".init_array", b"constructor".as_slice(), 1)]
+            ))
+            .is_err()
+        );
+    }
+    #[test]
+    fn malformed_section_extents_names_and_duplicate_metadata_refuse_inspection() {
+        let valid = relocatable(b"license=GPL\0", &[]);
+        for size in [0, 7, 63, valid.len() - 1] {
+            assert!(inspect(&valid[..size]).is_err());
+        }
+        let mut overflow = valid.clone();
+        overflow[40..48].copy_from_slice(&u64::MAX.to_le_bytes());
+        for bad in [
+            overflow,
+            relocatable(b"unterminated", &[]),
+            relocatable(
+                b"license=GPL\0",
+                &[RawSection::new(".modinfo", b"again\0".as_slice(), 1)],
+            ),
+            relocatable(
+                b"license=GPL\0",
+                &[RawSection::new(&"x".repeat(257), Vec::new(), 1)],
+            ),
+        ] {
+            assert!(inspect(&bad).is_err());
+        }
+    }
+    #[test]
+    fn independently_encoded_contract_matches_preserved_golden_and_exact_scalar_failures() {
+        let golden = include_bytes!("../../../fixtures/payloads/init-contract.elf");
+        let valid = init_contract_payload(true);
+        assert_eq!(valid.as_slice(), golden);
+        assert_eq!(inspect(&valid).unwrap().init_contract, Some(1));
+        let no_preflight = inspect(&init_contract_payload(false)).unwrap();
+        assert_eq!(no_preflight.init_contract, Some(1));
+        assert_eq!(no_preflight.preflight_protocol, None);
+        let table = u64::from_le_bytes(valid[40..48].try_into().unwrap()) as usize;
+        let relocation = u64::from_le_bytes(
+            valid[table + 6 * 64 + 24..table + 6 * 64 + 32]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        type Mutations<'a> = (&'a [u8], &'a [(u64, u64, u64)]);
+        for (expected, changes) in [
+            (
+                include_bytes!("../../../fixtures/payloads/invalid-module-alias.elf").as_slice(),
+                &[(32, 3, 0)][..],
+            ),
+            (
+                include_bytes!("../../../fixtures/payloads/invalid-swapped-setters.elf").as_slice(),
+                &[(56, 2, 0), (96, 1, 0)][..],
+            ),
+            (
+                include_bytes!("../../../fixtures/payloads/invalid-scalar-overrun.elf").as_slice(),
+                &[(112, 5, 7)][..],
+            ),
+            (
+                include_bytes!("../../../fixtures/payloads/invalid-scalar-misaligned.elf")
+                    .as_slice(),
+                &[(112, 5, 3)][..],
+            ),
+            (
+                include_bytes!("../../../fixtures/payloads/invalid-other-scalar.elf").as_slice(),
+                &[(32, 5, 1)][..],
+            ),
+        ] as [Mutations<'_>; 5]
+        {
+            let mut bad = valid.clone();
+            for &(offset, symbol, addend) in changes {
+                let kind = [0, 8, 16, 32]
+                    .iter()
+                    .position(|v| *v == offset % 40)
+                    .unwrap();
+                let at = relocation + (offset as usize / 40 * 4 + kind) * 24;
+                bad[at..at + 8].copy_from_slice(&offset.to_le_bytes());
+                bad[at + 8..at + 16].copy_from_slice(&(symbol << 32 | 257).to_le_bytes());
+                bad[at + 16..at + 24].copy_from_slice(&addend.to_le_bytes());
+            }
+            assert_eq!(bad, expected);
+            assert!(inspect(&bad).is_err());
+        }
+        let mut wrong = valid.clone();
+        wrong[table + 6 * 64 + 44..table + 6 * 64 + 48].copy_from_slice(&2u32.to_le_bytes());
+        assert!(inspect(&wrong).is_err());
+        wrong = valid;
+        wrong[table + 8 * 64 + 8..table + 8 * 64 + 16].copy_from_slice(&7u64.to_le_bytes());
+        assert!(inspect(&wrong).is_err());
+    }
+    fn version(name: &str, crc: u64) -> Vec<u8> {
+        let mut bytes = vec![0; 64];
+        bytes[..8].copy_from_slice(&crc.to_le_bytes());
+        bytes[8..8 + name.len()].copy_from_slice(name.as_bytes());
+        bytes
+    }
+    #[test]
+    fn crc_differences_missing_evidence_and_duplicate_records_remain_explicit() {
+        let record = |n| {
+            inspect(&relocatable(
+                b"license=GPL\0",
+                &[RawSection::new("__versions", version("symbol", n), 1)],
+            ))
+            .unwrap()
+        };
+        let report = compare(&record(1), &record(2));
+        assert_eq!(
+            report.changed_crcs,
+            BTreeMap::from([("symbol".into(), ["00000001".into(), "00000002".into()])])
+        );
+        assert!(!report.private_abi_proven);
+        let empty = inspect(&relocatable(b"license=GPL\0", &[])).unwrap();
+        assert!(empty.versions.is_empty());
+        assert!(!compare(&empty, &empty).crc_evidence_available);
+        let duplicate = [version("symbol", 1), version("symbol", 2)].concat();
+        assert!(
+            inspect(&relocatable(
+                b"license=GPL\0",
+                &[RawSection::new("__versions", duplicate, 1)]
+            ))
+            .is_err()
+        );
+        assert!(
+            inspect(&relocatable(
+                b"license=GPL\0",
+                &[RawSection::new(
+                    "__versions",
+                    version("symbol", u64::MAX),
+                    1
+                )]
+            ))
+            .is_err()
+        );
+    }
+    #[test]
+    fn undefined_imports_without_crcs_and_extended_records_do_not_prove_private_abi() {
+        let mut symbols = vec![0; 48];
+        symbols[24..28].copy_from_slice(&1u32.to_le_bytes());
+        symbols[28] = 16;
+        let mut symtab = RawSection::new(".symtab", symbols, 2);
+        symtab.link = 4;
+        symtab.entry_size = 24;
+        let report = inspect(&relocatable(
+            b"license=GPL\0",
+            &[
+                symtab,
+                RawSection::new(".strtab", b"\0missing\0".as_slice(), 3),
+                RawSection::new("__version_ext_names", b"missing\0".as_slice(), 1),
+            ],
+        ))
+        .unwrap();
+        assert!(report.imports.contains("missing"));
+        assert!(report.extended_versions);
+        let compared = compare(&report, &report);
+        assert_eq!(compared.missing_import_crcs["left"], ["missing"]);
+        assert!(!compared.private_abi_proven);
+    }
 
     pub(crate) fn fixture(modinfo: &[u8], constructor: bool) -> Vec<u8> {
         let names = b"\0.shstrtab\0.modinfo\0.init_array\0";
@@ -451,7 +785,7 @@ pub(super) mod tests {
     }
     #[test]
     fn closed_init_contract_uses_shared_final_elf_and_rejects_owned_parameter_callbacks() {
-        let valid = include_bytes!("../../../../fixtures/payloads/init-contract.elf");
+        let valid = include_bytes!("../../../fixtures/payloads/init-contract.elf");
         assert_eq!(
             capabilities(valid).unwrap(),
             KmodCapabilities {
@@ -460,12 +794,11 @@ pub(super) mod tests {
             }
         );
         for bad in [
-            include_bytes!("../../../../fixtures/payloads/invalid-module-alias.elf").as_slice(),
-            include_bytes!("../../../../fixtures/payloads/invalid-swapped-setters.elf").as_slice(),
-            include_bytes!("../../../../fixtures/payloads/invalid-scalar-overrun.elf").as_slice(),
-            include_bytes!("../../../../fixtures/payloads/invalid-scalar-misaligned.elf")
-                .as_slice(),
-            include_bytes!("../../../../fixtures/payloads/invalid-other-scalar.elf").as_slice(),
+            include_bytes!("../../../fixtures/payloads/invalid-module-alias.elf").as_slice(),
+            include_bytes!("../../../fixtures/payloads/invalid-swapped-setters.elf").as_slice(),
+            include_bytes!("../../../fixtures/payloads/invalid-scalar-overrun.elf").as_slice(),
+            include_bytes!("../../../fixtures/payloads/invalid-scalar-misaligned.elf").as_slice(),
+            include_bytes!("../../../fixtures/payloads/invalid-other-scalar.elf").as_slice(),
         ] {
             assert!(capabilities(bad).is_err());
         }

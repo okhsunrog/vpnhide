@@ -3,18 +3,12 @@
 import contextlib
 import importlib.util
 import io
-import json
 import os
-import shutil
-import subprocess
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
-from urllib.parse import urlsplit
-
-from public_distribution import PUBLIC_ASSETS
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -27,50 +21,6 @@ def load(relative: str):
 
 
 class UpdateDistributionTests(unittest.TestCase):
-    def test_post_release_generator_updates_only_public_core_and_freezes_legacy(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "scripts").mkdir()
-            shutil.copyfile(REPO / "scripts/update-json.sh", root / "scripts/update-json.sh")
-            (root / "VERSION").write_text("2.0.0\n")
-            feeds = root / "update-json"
-            feeds.mkdir()
-            old = {
-                name: f"frozen old {name}\n"
-                for name in (
-                    "update-kmod-android14-6.1.json",
-                    "update-kpm.json",
-                    "update-zygisk.json",
-                )
-            }
-            for name, body in old.items():
-                (feeds / name).write_text(body)
-            result = subprocess.run(
-                ["bash", str(root / "scripts/update-json.sh")], capture_output=True
-            )
-            self.assertEqual(result.returncode, 0, result.stderr.decode())
-            for name, body in old.items():
-                self.assertEqual((feeds / name).read_text(), body)
-            self.assertEqual({p.name for p in feeds.iterdir()} - old.keys(), {"update-core.json"})
-            core = json.loads((feeds / "update-core.json").read_text())
-            self.assertEqual(core["version"], "v2.0.0")
-            self.assertEqual(core["versionCode"], 20000)
-            asset = Path(urlsplit(core["zipUrl"]).path).name
-            self.assertEqual(asset, "vpnhide-core.zip")
-            self.assertIn(asset, PUBLIC_ASSETS)
-
-    def test_invalid_version_writes_no_feed(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "scripts").mkdir()
-            shutil.copyfile(REPO / "scripts/update-json.sh", root / "scripts/update-json.sh")
-            (root / "VERSION").write_text("not-a-version\n")
-            result = subprocess.run(
-                ["bash", str(root / "scripts/update-json.sh")], capture_output=True
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertFalse((root / "update-json").exists())
-
     def test_internal_backend_producers_remove_retired_update_feeds(self):
         for relative in ("kmod/build.py", "kmod/kpm/build.py", "zygisk/build.py"):
             with self.subTest(producer=relative), tempfile.TemporaryDirectory() as directory:

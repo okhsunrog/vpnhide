@@ -73,3 +73,12 @@ and effective third-party metamodule installers, and independently verify the
 staged daemon/catalog before legacy removals. Magisk's global remove-modules CLI
 must never be used for per-module cleanup. Source pins and adapter details will
 be recorded with the implementation, rather than assuming all forks match.
+
+
+The shared Rust host tooling now forms descriptor schema2 from the exact final
+package bytes and typed compatibility constants. It includes service, sepolicy
+and module.prop identities. Core's post-customize image fence checks the selected
+ABI daemon, manifest, complete payloads, mirror bytes and execution identity;
+manager staging markers cannot be accepted as a running replacement. Schema1
+install descriptors are rejected without changing the public trust-store format.
+Common durable maintenance/manager/reboot orchestration is still pending.

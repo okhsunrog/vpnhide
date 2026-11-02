@@ -1,0 +1,10 @@
+#!/bin/sh
+# Bootstrap only: produce a portable Linux executor for minimal DDK containers.
+set -eu
+tooling_repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+tooling_target=x86_64-unknown-linux-musl
+rustup target add "$tooling_target"
+tooling_sysroot=$(rustc --print sysroot)
+tooling_host=$(rustc -vV | sed -n 's/^host: //p')
+export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="$tooling_sysroot/lib/rustlib/$tooling_host/bin/rust-lld"
+exec cargo build --locked --manifest-path "$tooling_repo/Cargo.toml" --target-dir "$tooling_repo/target" -p vpnhide_tooling --target "$tooling_target" --release

@@ -1,0 +1,13 @@
+name: Shared Rust host tooling
+description: Use the statically linked tool built from this exact workflow checkout
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: host-tooling
+        path: .artifacts/host-tooling
+    - shell: sh
+      run: |
+        chmod +x "$GITHUB_WORKSPACE/.artifacts/host-tooling/vpnhide-tooling"
+        echo "VPNHIDE_TOOLING=$GITHUB_WORKSPACE/.artifacts/host-tooling/vpnhide-tooling" >> "$GITHUB_ENV"

@@ -71,7 +71,7 @@ VPNHide 2.x должен **самостоятельно** определить �
 | `DashboardData.kt` / `classifyKmodProblem()` | `AmbiguousLoadFailed` предлагает другой вариант даже без доказательства, что ошибка вызвана KMI | Заменить typed diagnostic outcome от Core |
 | `crates/core-daemon/src/payloads/mod.rs` | Закрытый перечень 7 KMI, manifest, hash/size validation, безопасное открытие, pinned descriptors | Оставить; использовать как authoritative source доступных бинарников |
 | `crates/core-daemon/src/payloads/selection.rs` | `Capabilities.kmi: Option<String>`; `Kmod` допускается только при **точном** совпадении с manifest; `None => UnknownKmi` | Поддержать **упорядоченный список KMI-кандидатов и evidence**, а не только exact string |
-| `scripts/payload_bundle.py` | Объединяет 7 kmod ZIP, KPM, Zygisk и Core в единый проверяемый ZIP | Дополнить release/manifest metadata при необходимости; не создавать отдельные пользовательские ZIP |
+| `tools/vpnhide-tooling bundle assemble` | Объединяет 7 kmod ZIP, KPM, Zygisk и Core в единый проверяемый ZIP | Дополнить release/manifest metadata при необходимости; не создавать отдельные пользовательские ZIP |
 | `crates/activator/src/load_kmod.rs` | Android вызывает `finit_module(2)`, host-тесты используют `insmod` double | Добавить контролируемый `preflight`, сохранив передаваемый `errno` |
 | `crates/core-daemon/src/native_boot.rs` | Один native backend per boot, `load_kmod()` грузит один `.ko`, затем проверяет `/proc/vpnhide_ctl` | Разделить подготовку выбора, preflight и единственный real load |
 | `crates/core-daemon/src/native_boot/prepared.rs` | Staging приватного snapshot бинарника, prepared intent, reload/recovery gate | Зафиксировать **несколько candidate payloads** и протокол попыток |
