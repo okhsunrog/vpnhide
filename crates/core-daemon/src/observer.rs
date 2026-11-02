@@ -294,6 +294,7 @@ async fn refresh_backend(state: &Arc<CoreState>) {
     // Only this source owns live/installed evidence. Boot decision and delivery
     // receipts remain with their owner. A busy KPM read becomes Unknown rather
     // than preserving an old active identity as current forever.
+    refresh_zygisk_lifecycle(state).await;
     let before = state.publisher.current().snapshot.backend;
     let ctl = activation::kmod_ctl_path_from_env()
         .unwrap_or_else(|| Path::new("/proc/vpnhide_ctl").to_path_buf());
@@ -322,6 +323,11 @@ async fn refresh_backend(state: &Arc<CoreState>) {
         }
         merge_backend_observation(&mut snapshot.backend, observed)
     });
+}
+
+async fn refresh_zygisk_lifecycle(state: &Arc<CoreState>) {
+    let state = state.clone();
+    let _ = tokio::task::spawn_blocking(move || state.refresh_zygisk_lifecycle()).await;
 }
 
 fn merge_backend_observation(

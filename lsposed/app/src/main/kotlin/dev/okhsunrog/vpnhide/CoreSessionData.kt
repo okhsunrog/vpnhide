@@ -35,6 +35,7 @@ internal data class CoreStateView(
     val backend: CoreBackendView? = null,
     val routing: CoreRoutingView? = null,
     val mutationHeld: Boolean = false,
+    val zygiskLifecycle: uniffi.vpnhide_core_ffi.CoreZygiskLifecycle? = null,
     val autonomousDiagnostics: uniffi.vpnhide_core_ffi.CoreDiagnosticRun? = null,
 )
 

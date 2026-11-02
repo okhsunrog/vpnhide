@@ -41,6 +41,8 @@ mod config;
 mod diag;
 mod edit;
 mod logcat;
+mod native_lifecycle;
+pub use native_lifecycle::*;
 
 pub use config::{
     AppConfig, CanonicalConfig, NativeRole, PortPolicy, PortProtocol, PortRule, Settings,
@@ -61,7 +63,7 @@ pub use vpnhide_diagnostic_model::{
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 16;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -206,6 +208,8 @@ pub struct Published {
 /// and are joined with these facts at its observation boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct StateSnapshot {
+    #[serde(default)]
+    pub zygisk_lifecycle: Option<ZygiskLifecycle>,
     #[serde(default)]
     pub autonomous_diagnostics: Option<DiagnosticRun>,
     #[serde(default)]
@@ -381,6 +385,9 @@ pub enum SelectionMode {
     Adopted,
     /// Core loaded it during this boot's scan.
     Loaded,
+    /// Core selected the bundled loader; authorization/publication and live
+    /// consumption are reported separately, never called pre-existing adoption.
+    Authorized,
 }
 
 /// One selected package's share of an over-capacity native target set (v7).
@@ -955,6 +962,7 @@ mod tests {
                     epoch: u64::MAX,
                     revision: 7,
                     snapshot: StateSnapshot {
+                        zygisk_lifecycle: None,
                         autonomous_diagnostics: None,
                         config,
                         config_revision: 5,
@@ -1067,6 +1075,11 @@ mod tests {
                 NativeBootOutcome::ForeignOwner { id: 0x99 },
                 NativeBootOutcome::NoBackend,
                 NativeBootOutcome::Unknown { detail: "e".into() },
+                NativeBootOutcome::Selected {
+                    backend: NativeBackend::Zygisk,
+                    mode: SelectionMode::Authorized,
+                    filesystem_hiding: None,
+                },
             ]
         }
 

@@ -127,6 +127,7 @@ private fun CoreSelectionMode.toMode(): NativeSelectionMode =
     when (this) {
         CoreSelectionMode.ADOPTED -> NativeSelectionMode.Adopted
         CoreSelectionMode.LOADED -> NativeSelectionMode.Loaded
+        CoreSelectionMode.AUTHORIZED -> NativeSelectionMode.Authorized
     }
 
 private fun CorePortsSource.toSource(): PortsBootSource =

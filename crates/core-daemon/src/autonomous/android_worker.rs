@@ -6,6 +6,13 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use vpnhide_loader_ipc::{WORKER_PROCESS, image};
 
+static OWNER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) fn lease() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+    OWNER
+        .try_lock()
+        .map_err(|_| "dedicated Android worker is owned by another run".into())
+}
+
 const COMPONENT: &str = "dev.okhsunrog.vpnhide/.diagnostics.LoaderProbeService";
 
 fn run(args: &[&str]) -> Result<(), String> {

@@ -46,7 +46,7 @@ internal data class NativeBootStatus(
         }
 }
 
-internal enum class NativeSelectionMode { Adopted, Loaded }
+internal enum class NativeSelectionMode { Adopted, Loaded, Authorized }
 
 internal sealed interface NativeBootOutcome {
     data class Selected(

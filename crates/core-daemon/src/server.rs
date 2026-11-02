@@ -599,8 +599,46 @@ impl CoreState {
         });
     }
 
+    pub(crate) fn refresh_zygisk_lifecycle(&self) {
+        let Some(authority) = self.zygisk_authority() else {
+            return;
+        };
+        let Some(expected) = authority.reference() else {
+            return;
+        };
+        let Some(observed) = self.loader.lifecycle(&authority, self.publisher.epoch()) else {
+            return;
+        };
+        self.publisher.update_if_changed(|snapshot| {
+            if snapshot.zygisk_lifecycle.as_ref().map(|s| &s.expected) != Some(&expected)
+                || snapshot.zygisk_lifecycle.as_ref() == Some(&observed)
+            {
+                return false;
+            }
+            snapshot.zygisk_lifecycle = Some(observed);
+            true
+        });
+    }
+    pub(crate) fn zygisk_authority(&self) -> Option<journal::ZygiskAuthorityRecord> {
+        self.engine
+            .store
+            .lock()
+            .expect("config mutex")
+            .journal
+            .zygisk_authority
+            .clone()
+    }
     fn publish_store(&self, store: &ConfigStore) {
         self.publisher.update(|snapshot| {
+            let expected = store
+                .journal
+                .zygisk_authority
+                .as_ref()
+                .and_then(|a| a.reference());
+            if snapshot.zygisk_lifecycle.as_ref().map(|s| &s.expected) != expected.as_ref() {
+                snapshot.zygisk_lifecycle = expected
+                    .map(|a| vpnhide_core_rpc::ZygiskLifecycle::pending(a, self.publisher.epoch()));
+            }
             snapshot.config = store.config.clone();
             snapshot.debug_leases = store.journal.debug_leases.clone();
             snapshot.debug_lease = !snapshot.debug_leases.is_empty();
@@ -2439,7 +2477,11 @@ impl VpnhideCore for CoreServer {
             .map_err(|_| vpnhide_core_rpc::DiagnosticError::Busy)?;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            self.state.diagnostics.join(peer)
+            let result = self.state.diagnostics.join(peer);
+            if result.is_ok() {
+                self.state.refresh_zygisk_lifecycle();
+            }
+            result
         })
         .await
         .unwrap_or(Err(vpnhide_core_rpc::DiagnosticError::Disabled))
@@ -2460,7 +2502,11 @@ impl VpnhideCore for CoreServer {
             .map_err(|_| vpnhide_core_rpc::DiagnosticError::Busy)?;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            self.state.diagnostics.report(peer, report)
+            let result = self.state.diagnostics.report(peer, report);
+            if result.is_ok() {
+                self.state.refresh_zygisk_lifecycle();
+            }
+            result
         })
         .await
         .unwrap_or(Err(vpnhide_core_rpc::DiagnosticError::Disabled))
@@ -2906,7 +2952,7 @@ mod tests {
             .await;
         assert!(matches!(ok, Handshake::Compatible { epoch: 1, .. }));
 
-        for protocol in [1, PROTOCOL_VERSION + 1] {
+        for protocol in [1, 15, PROTOCOL_VERSION + 1] {
             let skewed = server()
                 .hello(tarpc::context::current(), hello(protocol))
                 .await;

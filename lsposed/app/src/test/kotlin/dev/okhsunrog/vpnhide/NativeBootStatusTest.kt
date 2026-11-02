@@ -25,10 +25,14 @@ class NativeBootStatusTest {
         val statuses = List(fixture.length()) { entry(it) }
         val kinds = statuses.map { it.outcome::class }.toSet()
 
-        assertEquals(16, statuses.size)
+        assertEquals(17, statuses.size)
         assertEquals(13, kinds.size)
         assertEquals(NativeBootOutcome.Selected(NativeBackendId.Kmod, NativeSelectionMode.Loaded, true), statuses[0].outcome)
         assertEquals(NativeBootOutcome.Selected(NativeBackendId.Builtin, NativeSelectionMode.Adopted, null), statuses[1].outcome)
+        assertEquals(
+            NativeBootOutcome.Selected(NativeBackendId.Zygisk, NativeSelectionMode.Authorized, null),
+            statuses.map { it.outcome }.filterIsInstance<NativeBootOutcome.Selected>().single { it.mode == NativeSelectionMode.Authorized },
+        )
         val first = statuses[0]
         assertEquals("b-1", first.bootId)
         assertEquals(listOf(NativeBackendId.Kmod), first.installed)

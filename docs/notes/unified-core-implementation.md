@@ -3,6 +3,11 @@
 Approved design, based on dev-2.x `3493354f` (2026-11-02).
 This is an implementation ledger, not a claim of device acceptance.
 
+Current cloud contract: **RPC16 / journal9 (reads schemas1–8)**. Kernel control2 /
+telemetry1 is unchanged: APK/Core contract and private journal upgrades do not
+require rebuilding a compatible user builtin kernel. Stages4–7/RFC2 remain partial;
+the latest entries distinguish remaining code from device/key/publication gates.
+
 ## Invariants
 
 Core owns capability assessment, selection, activation and validation. Bundled
@@ -31,10 +36,10 @@ changes create new operations, not retroactive changes to confirmed receipts.
 | 1. Payload catalog and pure selection | Implemented as internal API; production integration follows stages 2–4 | Strict bounded manifest, pinned file verification, deterministic eligible candidates, unknown/owner guards, policy/capacity tests |
 | 2. Durable backend lifecycle | Implemented for the current selector; bundle integration follows stages 3/4 | Initial effects journaled before dispatch, crash reconciliation, bounded attempts surviving worker restart, no blind replay |
 | 3. Unified ZIP and CI assembly | Implemented passive assembly; real seven-KMI CI/device acceptance unobserved | All seven KMIs, both Zygisk ABIs, manifest/hashes, verified provenance, active/staged separation |
-| 4. Zygisk boot authorization and fallback | In progress: durable authorization/revocation tested; production selector/fallback unfinished | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
-| 5. Typed state/RPC/UI/diagnostics | In progress: RPC15, shared run/preview models; full health/UI/export still pending | Paired contract bump, reasons/attempts/coverage, no misleading component health |
+| 4. Zygisk boot authorization and fallback | In progress: authenticated loader, durable authority and exact process consumption; shared revocation/fallback executor pending | Stale boot authorization denied, existing process effects accounted for, only safe transitions |
+| 5. Typed state/RPC/UI/diagnostics | In progress: RPC16, typed generation/run/preview models; full health/UI/export still pending | Paired contract bump, reasons/attempts/coverage, no misleading component health |
 | 6. Shared maintenance plan/executor | In progress: source-bound legacy migration/archive; replacement/manager/reboot vertical pending | Migration/repair/update use the same typed steps, preserve sources, manager-native staging/removal, durable progress/reconciliation |
-| 7. Separate runtime provisioning | Planned | Verified fork/tool tuple, actual KALLSYMS=y, validated ALL=n support, durable original backup, plan-bound consent, correct write/readback errors |
+| 7. Separate runtime provisioning | In progress: offline evidence/write model and pinned fork patches; concrete adapters pending | Verified fork/tool tuple, actual KALLSYMS=y, validated ALL=n support, durable original backup, plan-bound consent, correct write/readback errors |
 
 Stages 1 and 2 establish internal primitives before the unified bundle becomes the
 production selector. The existing separate-package path must remain truthful until
@@ -1023,3 +1028,54 @@ approved real boot writes/readback; production signing key. No repository was
 created or published, no boot/phone access and no new permission request blocks
 other cloud work. Continue Stage4/RFC2/Kotlin implementation after this slice;
 Save/draft remains and final startup/upgrade/downgrade regression is still required.
+
+### Durable authorization and observed process consumption — RPC16 / journal9
+
+Implemented:
+
+- Current Zygisk authority is retained outside the bounded receipt ring. It is the
+  latest admitted operation/generation/boot/recipient/wire, not a publication or
+  health claim. Schema1–8 migration uses retained execution/admission order, never
+  numerical ID order (reserved IDs can execute out of order). Future schema10
+  refuses without deleting/resetting the source. Holds, preflight/load budgets,
+  quarantine, maintenance and existing exposure evidence survive migration.
+- Native lifecycle now retains a bounded exposure boot set. Retiring unknown legacy
+  Zygisk is possible exposure too; removing targets is not unloading old hooks.
+  Migration unions retained retirement/history/authority evidence even when the
+  old marker already names a different boot. Sameboot kernel repair/preflight stays
+  blocked after either authorization or possible legacy exposure.
+- Typed RPC16/UniFFI/Kotlin read model separates exact authorization readback from
+  Current/Stale/Unattributed process consumption, sampled BOOTTIME, incomplete
+  process inventory and unmeasured hook health. Bundled startup selection is
+  Authorized, including verified restore normalization; explicit legacy module
+  compatibility remains Adopted. Snapshot publication fences the exact expected
+  authority, so an off-writer old sample cannot replace a newer Save's tuple.
+- Consumption revalidates boot/epoch/catalog/recipient, retained image hash, child
+  and companion mappings, UID/name, real zygote parent and kernel PID/starttime.
+  Identities are rechecked after hashing, with an injected PID-reuse-during-read
+  regression. Exited workers can support loader availability, never live coverage.
+  Fresh worker consumption never proves that old games updated or hooks installed.
+- Loader/diagnostic runs share one dedicated-worker lease. Reuse requires the exact
+  expected generation/hash, and fresh-start success must belong to the matching
+  new PID/starttime. Fixed stop-service/observed-exit/launch adapters replace the
+  separate stale-worker launch path. No privileged descriptors survive app
+  specialization. Diagnostic join/report refreshes observed consumption while
+  the real worker is alive. Per-process coverage stays outside the heavy-run key.
+- Process fixtures now speak actual CLI HELLO and stable NUM/LIST. Prior tests that
+  allowed an unenumerable positive KPM to authorize a competing backend were
+  corrected to require refusal, with real Core-process/RPC regressions.
+
+Checks: 65 activator +324 Core +14 RPC +2 FFI +1 client library tests; 17 process tests across
+journal crash, kernel, KPM and Zygisk publication; strict host/ARM64/ARMv7 Clippy;
+894 JVM tests, detekt, CPD, ktlint and lintDebug passed. Disk exhaustion during the
+first FFI link was recovered by cleaning reproducible dev outputs and rerunning
+with debug data disabled; source and QEMU evidence were preserved. No phone test.
+
+Still code: shared journaled revocation executor and actual bounded fallback,
+complete typed attempts/health/coverage consumers, framework fixture and remaining
+native stimuli, export/capture/agent ownership transfer, replacement/root-manager
+maintenance/bootstrap, concrete provisioner adapters. These are not device gates.
+Phone/provider gates remain real injection/Binder/SELinux/background-service and
+old-process acceptance, kernel preflight/private ABI/ALL=n/boot evidence; production
+signing and fork publication target remain external. Save/draft stays unchanged;
+the required final startup regression still runs after the whole architecture work.

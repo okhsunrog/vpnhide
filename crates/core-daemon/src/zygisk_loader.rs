@@ -22,8 +22,11 @@ use crate::payloads::{Abi, Catalog, MAX_MANIFEST_BYTES, Manifest, PayloadKind};
 pub struct LoaderObservation {
     pub process: ProcessIdentity,
     pub zygote: ProcessIdentity,
+    zygote_owner: u32,
     pub companion: ProcessIdentity,
     pub companion_anchor: u64,
+    child_anchor: u64,
+    child_mapping: image::Mapping,
     image: Arc<File>,
     mapping: image::Mapping,
     pub target_uid: u32,
@@ -126,6 +129,13 @@ pub(crate) fn parent_zygote(
     proc_root: &Path,
     child: ProcessIdentity,
 ) -> io::Result<ProcessIdentity> {
+    parent_zygote_owned(proc_root, child, 0)
+}
+fn parent_zygote_owned(
+    proc_root: &Path,
+    child: ProcessIdentity,
+    owner: u32,
+) -> io::Result<ProcessIdentity> {
     let stat = image::bounded_text(&proc_root.join(child.pid.to_string()).join("stat"), 8192)?;
     let (_, fields) = stat
         .rsplit_once(") ")
@@ -137,7 +147,7 @@ pub(crate) fn parent_zygote(
         .parse()
         .map_err(|_| invalid("invalid zygote parent"))?;
     let path = proc_root.join(parent.to_string());
-    if fs::metadata(&path)?.uid() != 0 {
+    if fs::metadata(&path)?.uid() != owner {
         return Err(invalid("parent is not root zygote"));
     }
     let cmdline = image::bounded_text(&path.join("cmdline"), 256)?;
@@ -250,8 +260,11 @@ fn verify_report(
     Ok(LoaderObservation {
         process: child,
         zygote,
+        zygote_owner: 0,
         companion,
         companion_anchor: report.companion_anchor,
+        child_anchor: callback.anchor,
+        child_mapping: child_map,
         image: Arc::new(image_file.try_clone()?),
         mapping: companion_map,
         target_uid: callback.target_uid,
@@ -267,6 +280,21 @@ fn verify_report(
         policy_sha256: callback.policy_sha256,
         specialized: false,
     })
+}
+
+fn live_identity(o: &LoaderObservation, root: &Path, child_mapping: bool) -> bool {
+    let identity = |p: ProcessIdentity| image::process_identity(root, p.pid).ok() == Some(p);
+    identity(o.process) && identity(o.zygote) && identity(o.companion)
+        && fs::metadata(root.join(o.process.pid.to_string())).is_ok_and(|m|m.uid()==o.target_uid)
+        && fs::metadata(root.join(o.zygote.pid.to_string())).is_ok_and(|m|m.uid()==o.zygote_owner)
+        && fs::metadata(root.join(o.companion.pid.to_string())).is_ok_and(|m|m.uid()==o.zygote_owner)
+        && image::bounded_text(&root.join(o.process.pid.to_string()).join("cmdline"),512)
+            .is_ok_and(|s|s.split('\0').next()==Some(o.process_name.as_str()))
+        && parent_zygote_owned(root,o.process,o.zygote_owner).ok()==Some(o.zygote)
+        && image::mapping(root,o.companion.pid,o.companion_anchor).is_ok_and(|m|m==o.mapping)
+        && (!child_mapping || image::mapping(root,o.process.pid,o.child_anchor).is_ok_and(|m|m==o.child_mapping))
+        // Proc paths can be reused while the preceding fields are read.
+        && identity(o.process) && identity(o.zygote) && identity(o.companion)
 }
 
 impl LoaderRegistry {
@@ -332,6 +360,149 @@ impl LoaderRegistry {
             "{:x}",
             Sha256::digest(serde_json::to_vec(&material).ok()?)
         ))
+    }
+
+    /// Readback confirms only future-process authority. Samples prove exactly
+    /// which policy live authenticated processes consumed, never installed hooks.
+    pub fn lifecycle(
+        &self,
+        record: &crate::journal::ZygiskAuthorityRecord,
+        epoch: u64,
+    ) -> Option<vpnhide_core_rpc::ZygiskLifecycle> {
+        use vpnhide_core_rpc::ZygiskPublication as P;
+        let expected = record.reference()?;
+        let mut result = vpnhide_core_rpc::ZygiskLifecycle::pending(expected.clone(), epoch);
+        let mut time: libc::timespec = unsafe { std::mem::zeroed() };
+        if unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut time) } == 0 && time.tv_sec >= 0
+        {
+            result.observed_at_boot_ms =
+                Some((time.tv_sec as u64).saturating_mul(1000) + (time.tv_nsec as u64) / 1_000_000);
+        }
+        let boot = crate::native_boot::read_boot_id(Path::new(crate::native_boot::BOOT_ID_PATH));
+        if boot != expected.boot_id {
+            result.publication = P::PriorBoot;
+            return Some(result);
+        }
+        let module = record.intent.zygisk_module.as_ref()?;
+        result.publication = (|| {
+            let target = crate::zygisk::ZygiskTarget::open(module).ok()?;
+            if target.identity().ok()? != (expected.directory_device, expected.directory_inode) {
+                return None;
+            }
+            match target.read_authorized(&boot).ok()? {
+                None => Some(P::Absent),
+                Some(a) if a.matches(expected.generation, &record.intent.wire) => Some(P::Matching),
+                Some(_) => Some(P::Different),
+            }
+        })()
+        .unwrap_or(P::Unknown);
+        result.processes = self.consumption_at(&expected, epoch, Path::new("/proc"));
+        Some(result)
+    }
+
+    fn consumption_at(
+        &self,
+        expected: &vpnhide_core_rpc::ZygiskAuthorizationRef,
+        epoch: u64,
+        proc_root: &Path,
+    ) -> Vec<vpnhide_core_rpc::ZygiskProcessConsumption> {
+        self.consumption_at_injected(expected, epoch, proc_root, |_| {})
+    }
+    fn consumption_at_injected(
+        &self,
+        expected: &vpnhide_core_rpc::ZygiskAuthorizationRef,
+        epoch: u64,
+        proc_root: &Path,
+        mut before_finish: impl FnMut(&LoaderObservation),
+    ) -> Vec<vpnhide_core_rpc::ZygiskProcessConsumption> {
+        use vpnhide_core_rpc::{ZygiskConsumption as C, ZygiskProcessConsumption};
+        self.reconcile(proc_root);
+        let Some(context) = self.context.lock().expect("loader context").clone() else {
+            return vec![];
+        };
+        if context.boot_id != expected.boot_id || context.epoch != epoch {
+            return vec![];
+        }
+        let Ok(directory) = File::open(&context.root) else {
+            return vec![];
+        };
+        let Ok(metadata) = directory.metadata() else {
+            return vec![];
+        };
+        if (metadata.dev(), metadata.ino()) != (expected.directory_device, expected.directory_inode)
+        {
+            return vec![];
+        }
+        let deadline = Instant::now() + Duration::from_millis(200);
+        let Ok(catalog) = pinned_generation(&context, &directory, deadline) else {
+            return vec![];
+        };
+        let records = self.observations.lock().expect("loader observations");
+        let mut verified = std::collections::BTreeMap::new();
+        let mut result = vec![];
+        for o in records.iter().take(64) {
+            if !o.specialized
+                || o.boot_id != context.boot_id
+                || o.epoch != epoch
+                || o.directory_identity != (metadata.dev(), metadata.ino())
+                || o.manifest_sha256 != catalog.sha256
+                || !live_identity(o, proc_root, true)
+            {
+                continue;
+            }
+            let key = (
+                o.mapping.device_major,
+                o.mapping.device_minor,
+                o.mapping.inode,
+                o.payload_sha256.clone(),
+            );
+            if !*verified.entry(key).or_insert_with(|| {
+                image::inspect_before(&o.image, Some(deadline)).is_ok_and(|id| {
+                    id.abi == o.abi
+                        && id.bytes == o.payload_bytes
+                        && id
+                            .sha256
+                            .iter()
+                            .map(|b| format!("{b:02x}"))
+                            .collect::<String>()
+                            == o.payload_sha256
+                })
+            }) {
+                continue;
+            }
+            before_finish(o);
+            if !live_identity(o, proc_root, true) {
+                continue;
+            }
+            let policy = o
+                .policy_sha256
+                .map(|hash| hash.iter().map(|b| format!("{b:02x}")).collect::<String>());
+            let consumption = match (o.generation, policy.as_ref()) {
+                (Some(generation), Some(hash))
+                    if generation == expected.generation && *hash == expected.policy_sha256 =>
+                {
+                    C::Current
+                }
+                (Some(_), Some(_)) => C::Stale,
+                _ => C::Unattributed,
+            };
+            result.push(ZygiskProcessConsumption {
+                pid: o.process.pid,
+                start_ticks: o.process.start_ticks,
+                uid: o.target_uid,
+                process: o.process_name.clone(),
+                abi: match o.abi {
+                    ImageAbi::Arm64 => "arm64",
+                    ImageAbi::Arm32 => "arm32",
+                }
+                .into(),
+                generation: o.generation,
+                policy_sha256: policy,
+                consumption,
+            });
+        }
+        result.sort_by_key(|p| (p.pid, p.start_ticks));
+        result
     }
 
     pub fn available(&self, catalog: &Catalog, abi: Abi, needs_arm32: bool) -> bool {
@@ -464,11 +635,13 @@ impl LoaderRegistry {
             .expect("loader context")
             .clone()
             .ok_or("loader listener unavailable")?;
+        let _worker_lease = crate::autonomous::android_worker::lease()?;
+        let target = crate::zygisk::ZygiskTarget::open(&context.root)?;
+        let expected = target.read_authorized(&context.boot_id)?;
         self.reconcile(Path::new("/proc"));
-        if self.live_worker_at(&context, Path::new("/proc")) {
+        if self.live_worker_for_at(&context, Path::new("/proc"), expected.as_ref()) {
             return Ok(());
         }
-        let start = Instant::now();
         let previous: Vec<_> = self
             .observations
             .lock()
@@ -476,54 +649,22 @@ impl LoaderRegistry {
             .iter()
             .map(|o| o.process)
             .collect();
-        let run = |arguments: &[&str]| -> Result<(), String> {
-            let mut command = std::process::Command::new("/system/bin/cmd");
-            command.args(arguments);
-            let output =
-                vpnhide_activator::output_with_timeout(&mut command, Duration::from_secs(2))
-                    .map_err(|e| e.to_string())?;
-            if !output.status.success() {
-                return Err(format!(
-                    "Android worker launch refused: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                        .chars()
-                        .take(256)
-                        .collect::<String>()
-                ));
-            }
-            Ok(())
-        };
-        run(&[
-            "deviceidle",
-            "tempwhitelist",
-            "-u",
-            "0",
-            "-d",
-            "5000",
-            "dev.okhsunrog.vpnhide",
-        ])?;
-        run(&[
-            "activity",
-            "start-service",
-            "--user",
-            "0",
-            "-n",
-            "dev.okhsunrog.vpnhide/.diagnostics.LoaderProbeService",
-        ])?;
+        crate::autonomous::android_worker::prepare_fresh(Path::new(crate::service::APP_DATA_DIR))?;
+        crate::autonomous::android_worker::launch()?;
+        let start = Instant::now();
         while start.elapsed() < Duration::from_secs(5) {
             self.reconcile(Path::new("/proc"));
-            if self
-                .observations
-                .lock()
-                .expect("loader observations")
-                .iter()
-                .any(|o| {
-                    o.specialized
-                        && o.process_name == WORKER_PROCESS
-                        && o.boot_id == context.boot_id
-                        && !previous.contains(&o.process)
-                })
-            {
+            // The selected generation may change while Android dispatches. Do not
+            // accept a stale callback merely because a new process appeared.
+            if target.read_authorized(&context.boot_id)? != expected {
+                return Err("authorization changed during loader probe".into());
+            }
+            if self.live_worker_for_at_filtered(
+                &context,
+                Path::new("/proc"),
+                expected.as_ref(),
+                &previous,
+            ) {
                 return Ok(());
             }
             std::thread::sleep(Duration::from_millis(25));
@@ -531,7 +672,25 @@ impl LoaderRegistry {
         Err("fresh Android loader worker did not produce verified specialization evidence".into())
     }
 
+    #[cfg(test)]
     fn live_worker_at(&self, context: &LoaderContext, proc_root: &Path) -> bool {
+        self.live_worker_for_at(context, proc_root, None)
+    }
+    fn live_worker_for_at(
+        &self,
+        context: &LoaderContext,
+        proc_root: &Path,
+        expected: Option<&vpnhide_protocol::zygisk_activation::Authorization>,
+    ) -> bool {
+        self.live_worker_for_at_filtered(context, proc_root, expected, &[])
+    }
+    fn live_worker_for_at_filtered(
+        &self,
+        context: &LoaderContext,
+        proc_root: &Path,
+        expected: Option<&vpnhide_protocol::zygisk_activation::Authorization>,
+        excluded: &[ProcessIdentity],
+    ) -> bool {
         let Ok(directory) = fs::metadata(&context.root) else {
             return false;
         };
@@ -548,22 +707,23 @@ impl LoaderRegistry {
         let records = self.observations.lock().expect("loader observations");
         let deadline = Instant::now() + Duration::from_millis(200);
         records.iter().any(|o| {
-            o.specialized
+            !excluded.contains(&o.process)
+                && o.specialized
+                && match expected {
+                    Some(a) => {
+                        image::mapping(proc_root, o.process.pid, o.child_anchor)
+                            .is_ok_and(|m| m == o.child_mapping)
+                            && o.generation == Some(a.generation)
+                            && o.policy_sha256 == Some(Sha256::digest(a.wire.as_bytes()).into())
+                    }
+                    None => o.generation.is_none() && o.policy_sha256.is_none(),
+                }
                 && o.process_name == WORKER_PROCESS
                 && o.boot_id == context.boot_id
                 && o.epoch == context.epoch
                 && o.directory_identity == (directory.dev(), directory.ino())
                 && o.manifest_sha256 == catalog.sha256
-                && image::process_identity(proc_root, o.process.pid).ok() == Some(o.process)
-                && image::bounded_text(
-                    &proc_root.join(o.process.pid.to_string()).join("cmdline"),
-                    512,
-                )
-                .is_ok_and(|s| s.split('\0').next() == Some(WORKER_PROCESS))
-                && image::process_identity(proc_root, o.companion.pid).ok() == Some(o.companion)
-                && image::process_identity(proc_root, o.zygote.pid).ok() == Some(o.zygote)
-                && image::mapping(proc_root, o.companion.pid, o.companion_anchor)
-                    .is_ok_and(|m| m == o.mapping)
+                && live_identity(o, proc_root, expected.is_some())
                 && image::inspect_before(&o.image, Some(deadline)).is_ok_and(|identity| {
                     identity
                         .sha256
@@ -572,6 +732,7 @@ impl LoaderRegistry {
                         .collect::<String>()
                         == o.payload_sha256
                 })
+                && live_identity(o, proc_root, expected.is_some())
         })
     }
 }
@@ -810,11 +971,14 @@ mod tests {
                 pid: 2,
                 start_ticks: 20,
             },
+            zygote_owner: unsafe { libc::geteuid() },
             companion: ProcessIdentity {
                 pid: 3,
                 start_ticks: 30,
             },
             companion_anchor: address as usize as u64,
+            child_anchor: address as usize as u64,
+            child_mapping: mapping,
             image: Arc::new(image_file),
             mapping,
             target_uid: unsafe { libc::geteuid() },
@@ -838,6 +1002,137 @@ mod tests {
             catalog,
             observation,
         }
+    }
+
+    #[test]
+    fn consumption_is_exact_live_process_evidence_not_a_fresh_worker_health_claim() {
+        use vpnhide_core_rpc::ZygiskConsumption as C;
+        let f = fixture();
+        let registry = LoaderRegistry::default();
+        *registry.context.lock().unwrap() = Some(f.context.clone());
+        process(&f.proc_root, 4, 40, WORKER_PROCESS);
+        let maps = fs::read(f.proc_root.join("3/maps")).unwrap();
+        fs::write(f.proc_root.join("4/maps"), &maps).unwrap();
+        let mut current = f.observation.clone();
+        current.generation = Some(8);
+        current.policy_sha256 = Some([3; 32]);
+        let mut old = current.clone();
+        old.process = ProcessIdentity {
+            pid: 5,
+            start_ticks: 50,
+        };
+        old.process_name = "game.old".into();
+        old.generation = Some(7);
+        old.policy_sha256 = Some([2; 32]);
+        process(&f.proc_root, 5, 50, "game.old");
+        fs::write(f.proc_root.join("5/maps"), &maps).unwrap();
+        registry.observations.lock().unwrap().extend([current, old]);
+        let expected = vpnhide_core_rpc::ZygiskAuthorizationRef {
+            operation: 8,
+            boot_id: "boot".into(),
+            generation: 8,
+            policy_sha256: "03".repeat(32),
+            directory_device: f.observation.directory_identity.0,
+            directory_inode: f.observation.directory_identity.1,
+        };
+        let observed = registry.consumption_at(&expected, 7, &f.proc_root);
+        assert_eq!(
+            observed.iter().map(|p| p.consumption).collect::<Vec<_>>(),
+            vec![C::Current, C::Stale]
+        );
+        let mut wrong = expected.clone();
+        wrong.boot_id = "other boot".into();
+        assert!(registry.consumption_at(&wrong, 7, &f.proc_root).is_empty());
+        wrong = expected.clone();
+        wrong.directory_inode += 1;
+        assert!(registry.consumption_at(&wrong, 7, &f.proc_root).is_empty());
+        assert!(
+            registry
+                .consumption_at(&expected, 8, &f.proc_root)
+                .is_empty()
+        );
+        fs::remove_file(f.proc_root.join("4/maps")).unwrap();
+        assert_eq!(
+            registry.consumption_at(&expected, 7, &f.proc_root).len(),
+            1,
+            "an unmapped child is not current coverage"
+        );
+        fs::write(f.proc_root.join("4/maps"), &maps).unwrap();
+        process(&f.proc_root, 4, 41, WORKER_PROCESS);
+        assert_eq!(
+            registry.consumption_at(&expected, 7, &f.proc_root).len(),
+            1,
+            "PID reuse cannot retain current coverage"
+        );
+        process(&f.proc_root, 3, 31, "companion");
+        assert!(
+            registry
+                .consumption_at(&expected, 7, &f.proc_root)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_pid_reused_during_image_validation_cannot_inherit_the_previous_generation() {
+        let f = fixture();
+        let registry = LoaderRegistry::default();
+        *registry.context.lock().unwrap() = Some(f.context.clone());
+        process(&f.proc_root, 4, 40, WORKER_PROCESS);
+        fs::write(
+            f.proc_root.join("4/maps"),
+            fs::read(f.proc_root.join("3/maps")).unwrap(),
+        )
+        .unwrap();
+        let mut record = f.observation.clone();
+        record.generation = Some(8);
+        record.policy_sha256 = Some([3; 32]);
+        registry.observations.lock().unwrap().push(record);
+        let expected = vpnhide_core_rpc::ZygiskAuthorizationRef {
+            operation: 8,
+            boot_id: "boot".into(),
+            generation: 8,
+            policy_sha256: "03".repeat(32),
+            directory_device: f.observation.directory_identity.0,
+            directory_inode: f.observation.directory_identity.1,
+        };
+        assert_eq!(registry.consumption_at(&expected, 7, &f.proc_root).len(), 1);
+        let result = registry.consumption_at_injected(&expected, 7, &f.proc_root, |_| {
+            process(&f.proc_root, 4, 41, WORKER_PROCESS)
+        });
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn live_worker_join_requires_exact_consumed_generation_and_policy() {
+        use vpnhide_protocol::zygisk_activation::Authorization;
+        let f = fixture();
+        let registry = LoaderRegistry::default();
+        process(&f.proc_root, 4, 40, WORKER_PROCESS);
+        fs::write(
+            f.proc_root.join("4/maps"),
+            fs::read(f.proc_root.join("3/maps")).unwrap(),
+        )
+        .unwrap();
+        let mut record = f.observation.clone();
+        record.specialized = true;
+        record.generation = Some(7);
+        let mut auth = Authorization {
+            boot_id: "boot".into(),
+            generation: 7,
+            wire: "vpnhide 2 config\ndebug 0\nend 0\n".into(),
+        };
+        record.policy_sha256 = Some(Sha256::digest(auth.wire.as_bytes()).into());
+        registry.observations.lock().unwrap().push(record);
+        assert!(registry.live_worker_for_at(&f.context, &f.proc_root, Some(&auth)));
+        assert!(
+            !registry.live_worker_at(&f.context, &f.proc_root),
+            "an authorized worker is not an inert loader probe"
+        );
+        auth.generation = 8;
+        assert!(!registry.live_worker_for_at(&f.context, &f.proc_root, Some(&auth)));
+        auth.generation = 7;
+        auth.wire.push(' ');
+        assert!(!registry.live_worker_for_at(&f.context, &f.proc_root, Some(&auth)));
     }
 
     #[test]

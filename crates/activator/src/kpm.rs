@@ -613,6 +613,9 @@ impl KpmClient {
 
     pub(crate) fn detect_outcome() -> Result<KpmClientDetection> {
         if Path::new(APATCH_DIR).is_dir() {
+            if !cfg!(all(target_os = "android", target_arch = "aarch64")) {
+                return Err("keyed APatch syscall transport requires Android ARM64".into());
+            }
             let mut failures = Vec::new();
             for key in apatch_auth_candidates() {
                 match apatch_probe(&key) {

@@ -18,7 +18,8 @@ use vpnhide_core_rpc::{
 
 const KPATCH: &str = r#"#!/bin/sh
 case "$1 $2" in
-  "hello ") printf 'hello\n'; exit 0 ;;
+  "hello ") printf 'hello2026\n'; exit 0 ;;
+  "kpm num") if [ -f "$VH_ROOT/loaded" ]; then printf '1\n'; else printf '0\n'; fi; exit 0 ;;
   "kpm list")
     [ "$VH_CASE" = list-fails ] && exit 1
     [ -f "$VH_ROOT/loaded" ] && printf 'vpnhide\n'

@@ -625,12 +625,14 @@ impl From<CoreNativeBackendStatus> for rpc::NativeBackendStatus {
 pub enum CoreSelectionMode {
     Adopted,
     Loaded,
+    Authorized,
 }
 impl From<rpc::SelectionMode> for CoreSelectionMode {
     fn from(value: rpc::SelectionMode) -> Self {
         match value {
             rpc::SelectionMode::Adopted => Self::Adopted,
             rpc::SelectionMode::Loaded => Self::Loaded,
+            rpc::SelectionMode::Authorized => Self::Authorized,
         }
     }
 }
@@ -639,6 +641,7 @@ impl From<CoreSelectionMode> for rpc::SelectionMode {
         match value {
             CoreSelectionMode::Adopted => Self::Adopted,
             CoreSelectionMode::Loaded => Self::Loaded,
+            CoreSelectionMode::Authorized => Self::Authorized,
         }
     }
 }

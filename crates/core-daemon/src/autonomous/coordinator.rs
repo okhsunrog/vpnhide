@@ -337,6 +337,12 @@ impl Coordinator {
         state: &CoreState,
         session: u64,
     ) -> Result<ScopedNativeResult, MeasurementFailure> {
+        let _worker_lease =
+            super::android_worker::lease().map_err(|detail| MeasurementFailure {
+                detail,
+                native: None,
+                cleanup_confirmed: Some(true),
+            })?;
         let fixture = TunFixture::create_detailed(session).map_err(|failure| {
             let cleaned = failure.cleanup.as_ref().map(|(_, cleaned)| *cleaned);
             let mut inner = self.inner.lock().expect("diagnostic coordinator");
@@ -755,6 +761,40 @@ mod tests {
         assert!(!state.snapshot().autonomous_diagnostics.unwrap().stale);
         state.publisher.update(|s| s.backend.applied = None);
         assert!(state.snapshot().autonomous_diagnostics.unwrap().stale);
+    }
+    #[test]
+    fn live_process_consumption_churn_does_not_restart_the_heavy_suite() {
+        let state = state();
+        let snapshot = state.snapshot();
+        let before = context_digests(&snapshot);
+        state.publisher.update(|s| {
+            s.zygisk_lifecycle = Some(vpnhide_core_rpc::ZygiskLifecycle::pending(
+                vpnhide_core_rpc::ZygiskAuthorizationRef {
+                    operation: 8,
+                    boot_id: "boot".into(),
+                    generation: 8,
+                    policy_sha256: "a".repeat(64),
+                    directory_device: 1,
+                    directory_inode: 2,
+                },
+                7,
+            ))
+        });
+        state.publisher.update(|s| {
+            s.zygisk_lifecycle.as_mut().unwrap().processes.push(
+                vpnhide_core_rpc::ZygiskProcessConsumption {
+                    pid: 5,
+                    start_ticks: 50,
+                    uid: 10123,
+                    process: "game".into(),
+                    abi: "arm64".into(),
+                    generation: Some(7),
+                    policy_sha256: Some("b".repeat(64)),
+                    consumption: vpnhide_core_rpc::ZygiskConsumption::Stale,
+                },
+            )
+        });
+        assert_eq!(context_digests(&state.snapshot()), before);
     }
     #[test]
     fn uncertain_cleanup_holds_force_and_changed_context_admission() {

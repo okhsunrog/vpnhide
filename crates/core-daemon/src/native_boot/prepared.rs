@@ -30,6 +30,16 @@ pub struct TransitionIntent {
     pub retire_directory_identity: Option<(u64, u64)>,
 }
 
+impl TransitionIntent {
+    pub fn possible_zygisk_exposure(&self) -> bool {
+        matches!(
+            self.action,
+            TransitionAction::Adopt(NativeBackend::Zygisk)
+                | TransitionAction::Load(NativeBackend::Zygisk)
+        ) || self.retire_zygisk.is_some()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TransitionAction {
     Observe,
@@ -444,6 +454,39 @@ mod tests {
         assert!(absent.permit_recovery(&old).is_err());
         let absent_after_boot = setup(root.path(), "boot-b", Vec::new(), KernelFact::Absent);
         assert!(absent_after_boot.permit_recovery(&old).is_ok());
+    }
+
+    #[test]
+    fn retiring_an_unknown_legacy_zygisk_also_fences_kernel_activation_for_the_boot() {
+        let root = tempfile::tempdir().unwrap();
+        let mut journal = Journal::default();
+        let conflict = setup(
+            root.path(),
+            "boot-a",
+            vec![NativeBackend::Zygisk, NativeBackend::Kpm],
+            KernelFact::Absent,
+        );
+        assert!(matches!(conflict.intent.action, TransitionAction::Observe));
+        assert!(conflict.intent.retire_zygisk.is_some());
+        journal.replace_native_startup(attempt(conflict.intent));
+        let kernel = setup(root.path(), "boot-a", vec![], KernelFact::Builtin);
+        assert!(journal.check_native_attempt(&kernel.intent, true).is_err());
+        let mut old = serde_json::to_value(&journal).unwrap();
+        old["version"] = 8.into();
+        old["zygisk_exposure_boot"] = "prior-boot".into();
+        old.as_object_mut().unwrap().remove("zygisk_exposure_boots");
+        let path = root.path().join("journal.json");
+        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        let migrated = crate::journal::read(&path).unwrap();
+        assert_eq!(migrated.zygisk_exposure_boot.as_deref(), Some("prior-boot"));
+        assert!(migrated.zygisk_exposed_in("boot-a"));
+        assert!(
+            migrated
+                .check_native_attempt(&kernel.intent, false)
+                .is_err()
+        );
+        let reboot = setup(root.path(), "boot-b", vec![], KernelFact::Builtin);
+        assert!(migrated.check_native_attempt(&reboot.intent, true).is_ok());
     }
 
     #[test]

@@ -7,6 +7,8 @@ uniffi::setup_scaffolding!();
 mod api;
 mod autonomous;
 pub use autonomous::*;
+mod native_lifecycle;
+pub use native_lifecycle::*;
 mod migration;
 mod policy;
 pub use migration::*;

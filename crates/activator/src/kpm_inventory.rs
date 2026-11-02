@@ -12,6 +12,14 @@ pub struct Inventory {
 }
 
 pub(crate) fn observe(next: bool) -> crate::Result<Inventory> {
+    if cfg!(target_os = "android") && !cfg!(target_arch = "aarch64") {
+        // A compat userspace syscall45 is not the ARM64 KernelPatch syscall.
+        // This cannot establish absence of a resident ARM64 KPM runtime.
+        return Ok(Inventory {
+            driver_unrecognized: true,
+            ..Default::default()
+        });
+    }
     if !cfg!(all(target_os = "android", target_arch = "aarch64")) {
         // Host/test engines cannot probe Android syscall numbers.
         return Ok(Inventory::default());

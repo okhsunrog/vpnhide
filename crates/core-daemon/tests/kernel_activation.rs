@@ -68,7 +68,19 @@ async fn exercise(case: Case, check: impl FnOnce(&NativeBootOutcome)) {
     fs::set_permissions(&insmod, fs::Permissions::from_mode(0o700)).unwrap();
     if case.kpm.is_some() {
         let kpatch = dir.path().join("kpatch");
-        fs::write(&kpatch, "#!/bin/sh\nif [ \"$1\" = hello ]; then printf 'hello\\n'; exit 0; fi\nif [ \"$VPNHIDE_TEST_KPM\" = error ]; then exit 1; fi\nprintf '%s\\n' \"$VPNHIDE_TEST_KPM\"\n").unwrap();
+        fs::write(
+            &kpatch,
+            r#"#!/bin/sh
+if [ "$1" = hello ]; then printf 'hello2026\n'; exit 0; fi
+if [ "$VPNHIDE_TEST_KPM" = error ]; then exit 1; fi
+if [ "$2" = num ]; then
+  if [ -n "$VPNHIDE_TEST_KPM" ]; then printf '1\n'; else printf '0\n'; fi
+  exit 0
+fi
+printf '%s\n' "$VPNHIDE_TEST_KPM"
+"#,
+        )
+        .unwrap();
         fs::set_permissions(&kpatch, fs::Permissions::from_mode(0o700)).unwrap();
     }
 
@@ -297,23 +309,17 @@ async fn a_live_kpm_next_to_a_kmod_module_is_a_conflict() {
 }
 
 #[tokio::test]
-async fn unqueryable_kernelpatch_without_kpm_candidate_does_not_block_kmod() {
+async fn positively_identified_unqueryable_kernelpatch_blocks_a_competing_kmod() {
     let case = Case {
         initial_owner: None,
         loaded_owner: 0,
         kmod_module: true,
         kpm: Some("error"),
-        expected: PhaseOutcome::Confirmed,
-        expect_insmod: true,
+        expected: PhaseOutcome::FailedKnown,
+        expect_insmod: false,
     };
     exercise(case, |outcome| {
-        assert!(matches!(
-            outcome,
-            NativeBootOutcome::Selected {
-                backend: NativeBackend::Kmod,
-                ..
-            }
-        ));
+        assert!(matches!(outcome, NativeBootOutcome::KpmUnverifiable { .. }));
     })
     .await;
 }

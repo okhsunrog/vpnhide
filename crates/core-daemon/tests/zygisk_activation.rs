@@ -34,7 +34,11 @@ fi
 "#;
 
 const KPATCH: &str = r#"#!/bin/sh
-[ "$1" = hello ] && { printf 'hello\n'; exit 0; }
+[ "$1" = hello ] && { printf 'hello2026\n'; exit 0; }
+if [ "$2" = num ]; then
+  if [ "$VH_CASE" = kpm-race ] && [ ! -f "$VH_ROOT/kpm-now" ]; then printf '0\n'; else printf '1\n'; fi
+  exit 0
+fi
 if [ "$2" = list ]; then
   [ "$VH_CASE" = unknown-kpm ] && exit 1
   if [ "$VH_CASE" = kpm-race ] && [ ! -f "$VH_ROOT/kpm-now" ]; then exit 0; fi
@@ -397,8 +401,10 @@ fn expectation(case: &str) -> Expected {
         policy: Policy::Retired,
     };
     match case {
-        // Unauthenticated/unqueryable KernelPatch with no KPM candidate does not block.
-        "publish" | "arm32" | "first-publish" | "opt-out" | "unknown-kpm" => ok(Policy::Published),
+        "publish" | "arm32" | "first-publish" | "opt-out" => ok(Policy::Published),
+        "unknown-kpm" => stopped(NativeBootOutcome::KpmUnverifiable {
+            detail: String::new(),
+        }),
         "disable" | "remove" => Expected {
             settled: PhaseOutcome::Confirmed,
             selected: None,

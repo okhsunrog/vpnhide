@@ -386,7 +386,16 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-Legacy merge/replace/bootstrap is a typed `MigrateLegacy` command (RPC15). Core
+The current paired APK/Core contract is RPC16; journal9 reads schemas1–8. These
+versions are independent of kernel control2/telemetry1 and do not require a
+compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
+publication and sampled current/stale/unattributed process consumption are separate
+from measured hooks and complete process coverage. The latest authority survives
+receipt pruning. A bounded boot exposure set preserves retirement evidence even
+when an older single marker names a previous boot. Process churn updates this
+read model without restarting the heavy diagnostic suite.
+
+Legacy merge/replace/bootstrap is a typed `MigrateLegacy` command (introduced RPC15). Core
 captures fixed legacy sources and the complete available profile inventory before
 entering its writer, derives the canonical replacement in shared Rust policy, and
 journals a source-bound maintenance plan. Empty/incomplete replacement cannot erase

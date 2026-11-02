@@ -41,7 +41,7 @@ pub const JOURNAL_PATH_ENV: &str = "VPNHIDE_JOURNAL_PATH";
 
 pub mod preflight;
 
-const JOURNAL_VERSION: u32 = 8;
+const JOURNAL_VERSION: u32 = 9;
 
 /// Default number of terminal receipts to keep, including Unknown.
 pub const DEFAULT_RETAIN_SETTLED: usize = 64;
@@ -178,6 +178,45 @@ pub struct NativeIntent {
     pub zygisk_authorization: Option<ZygiskAuthorizationIntent>,
 }
 
+/// Independent of receipt-ring retention. This is the latest admitted authority,
+/// not evidence that publication, consumption or hook installation succeeded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ZygiskAuthorityRecord {
+    pub operation: OperationId,
+    pub intent: NativeIntent,
+}
+impl ZygiskAuthorityRecord {
+    pub fn reference(&self) -> Option<vpnhide_core_rpc::ZygiskAuthorizationRef> {
+        use sha2::{Digest, Sha256};
+        let a = self.intent.zygisk_authorization.as_ref()?;
+        let envelope = vpnhide_protocol::zygisk_activation::Authorization {
+            boot_id: a.boot_id.clone(),
+            generation: a.generation,
+            wire: self.intent.wire.clone(),
+        };
+        if self.intent.backend != NativeBackend::Zygisk
+            || !self
+                .intent
+                .zygisk_module
+                .as_ref()
+                .is_some_and(|p| p.is_absolute())
+            || a.directory_identity.1 == 0
+            || self.operation.0 != a.generation
+            || envelope.encode().is_none()
+        {
+            return None;
+        }
+        Some(vpnhide_core_rpc::ZygiskAuthorizationRef {
+            operation: self.operation.0,
+            boot_id: a.boot_id.clone(),
+            generation: a.generation,
+            policy_sha256: format!("{:x}", Sha256::digest(self.intent.wire.as_bytes())),
+            directory_device: a.directory_identity.0,
+            directory_inode: a.directory_identity.1,
+        })
+    }
+}
+
 /// On-disk journal document.
 /// Initial activation is not an app command, but has the same before-effect
 /// durability requirement. Missing completion means uncertainty, across worker
@@ -282,6 +321,7 @@ pub struct NativeAttemptHistory {
     pub superseded_by: Option<OperationId>,
 }
 pub const MAX_NATIVE_ATTEMPTS: usize = 16;
+const MAX_ZYGISK_EXPOSURE_BOOTS: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NativeLoadBudget {
@@ -296,6 +336,8 @@ pub struct NativeQuarantine {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
+    #[serde(default)]
+    pub zygisk_authority: Option<ZygiskAuthorityRecord>,
     pub version: u32,
     #[serde(default)]
     pub kmod_preflights: Option<preflight::PreflightLedger>,
@@ -311,6 +353,10 @@ pub struct Journal {
     /// Receipt pruning and revocation cannot prove that those processes exited.
     #[serde(default)]
     pub zygisk_exposure_boot: Option<String>,
+    /// Migration can discover multiple boot identities in retained evidence.
+    /// Never let an older single marker erase a later possible exposure.
+    #[serde(default)]
+    pub zygisk_exposure_boots: Vec<String>,
     /// Durable config-revision counter — continues across restarts.
     pub config_revision: u64,
     pub retain_settled: usize,
@@ -344,12 +390,14 @@ impl Default for Journal {
     fn default() -> Self {
         Journal {
             version: JOURNAL_VERSION,
+            zygisk_authority: None,
             kmod_preflights: None,
             native_startup: None,
             native_attempts: Vec::new(),
             native_load_budget: None,
             native_quarantine: Vec::new(),
             zygisk_exposure_boot: None,
+            zygisk_exposure_boots: vec![],
             config_revision: 0,
             retain_settled: DEFAULT_RETAIN_SETTLED,
             operations: Vec::new(),
@@ -368,6 +416,21 @@ impl Default for Journal {
 }
 
 impl Journal {
+    fn note_zygisk_exposure(&mut self, boot: &str) {
+        self.zygisk_exposure_boot = Some(boot.into());
+        if !self.zygisk_exposure_boots.iter().any(|b| b == boot) {
+            self.zygisk_exposure_boots.push(boot.into());
+            let extra = self
+                .zygisk_exposure_boots
+                .len()
+                .saturating_sub(MAX_ZYGISK_EXPOSURE_BOOTS);
+            self.zygisk_exposure_boots.drain(..extra);
+        }
+    }
+    pub(crate) fn zygisk_exposed_in(&self, boot: &str) -> bool {
+        self.zygisk_exposure_boot.as_deref() == Some(boot)
+            || self.zygisk_exposure_boots.iter().any(|b| b == boot)
+    }
     /// Lookup by operation id.
     pub fn get(&self, op: OperationId) -> Option<&JournalEntry> {
         self.operations.iter().find(|e| e.record.op == op)
@@ -422,7 +485,7 @@ impl Journal {
             }
         }
         if matches!(intent.action, TransitionAction::Load(b) | TransitionAction::Adopt(b) if b != NativeBackend::Zygisk)
-            && self.zygisk_exposure_boot.as_deref() == Some(intent.boot_id.as_str())
+            && self.zygisk_exposed_in(&intent.boot_id)
         {
             return Err("Zygisk authorization may have been consumed in this boot; reboot before kernel backend activation".into());
         }
@@ -467,14 +530,12 @@ impl Journal {
     }
 
     pub fn replace_native_startup(&mut self, attempt: NativeStartup) {
-        if attempt.intent.as_ref().is_some_and(|intent| {
-            matches!(
-                intent.action,
-                crate::native_boot::prepared::TransitionAction::Adopt(NativeBackend::Zygisk)
-                    | crate::native_boot::prepared::TransitionAction::Load(NativeBackend::Zygisk)
-            )
-        }) {
-            self.zygisk_exposure_boot = Some(attempt.boot_id.clone());
+        if attempt
+            .intent
+            .as_ref()
+            .is_some_and(|intent| intent.possible_zygisk_exposure())
+        {
+            self.note_zygisk_exposure(&attempt.boot_id);
         }
         if let Some(intent) = &attempt.intent
             && let (crate::native_boot::prepared::TransitionAction::Load(backend), Some(payload)) =
@@ -656,7 +717,9 @@ pub fn read(path: &Path) -> io::Result<Journal> {
         .iter()
         .chain(journal.native_attempts.iter().map(|item| &item.attempt))
         .any(|attempt| !attempt.valid());
-    if invalid_startup
+    if journal.zygisk_authority.as_ref().is_some_and(|a| {
+        a.reference().is_none() || (journal.version >= 9 && a.operation.0 > journal.issued_through)
+    }) || invalid_startup
         || journal.kmod_preflights.as_ref().is_some_and(|l| !l.valid())
         || journal.operations.iter().any(|entry| {
             entry
@@ -674,6 +737,11 @@ pub fn read(path: &Path) -> io::Result<Journal> {
         .zygisk_exposure_boot
         .as_ref()
         .is_some_and(|boot| boot.is_empty() || boot.len() > 128)
+        || journal.zygisk_exposure_boots.len() > MAX_ZYGISK_EXPOSURE_BOOTS
+        || journal
+            .zygisk_exposure_boots
+            .iter()
+            .any(|b| b.is_empty() || b.len() > 128)
         || journal.native_attempts.len() > MAX_NATIVE_ATTEMPTS
         || journal.native_quarantine.len() > 4
         || journal
@@ -712,30 +780,68 @@ pub fn read(path: &Path) -> io::Result<Journal> {
         }
     }
     let mut journal = journal;
+    if journal.zygisk_authority.is_none() {
+        journal.zygisk_authority = journal
+            .operations
+            .iter()
+            .filter(|e| {
+                e.record.phases.iter().any(|p| {
+                    p.phase == ConfigPhase::Native && p.outcome != PhaseOutcome::NotAttempted
+                })
+            })
+            .filter_map(|e| {
+                e.native_intent.clone().map(|intent| ZygiskAuthorityRecord {
+                    operation: e.record.op,
+                    intent,
+                })
+            })
+            .rfind(|a| a.reference().is_some());
+    }
     // Older journals have no independent exposure marker. Preserve the retained
     // startup evidence before pruning; a restart is not a process-generation reset.
-    if journal.zygisk_exposure_boot.is_none() {
-        journal.zygisk_exposure_boot = journal
-            .native_startup
-            .as_ref()
-            .filter(|attempt| {
-                attempt.intent.as_ref().is_some_and(|intent| {
-                    matches!(
-                        intent.action,
-                        crate::native_boot::prepared::TransitionAction::Adopt(
-                            NativeBackend::Zygisk
-                        ) | crate::native_boot::prepared::TransitionAction::Load(
-                            NativeBackend::Zygisk
-                        )
-                    )
-                }) || attempt
-                    .completed
-                    .as_ref()
-                    .and_then(|r| r.selection)
-                    .is_some_and(|s| s.backend == NativeBackend::Zygisk)
-            })
-            .map(|attempt| attempt.boot_id.clone());
+    let mut discovered = Vec::new();
+    if let Some(boot) = journal.zygisk_exposure_boot.clone() {
+        discovered.push(boot);
     }
+    for attempt in journal
+        .native_attempts
+        .iter()
+        .map(|i| &i.attempt)
+        .chain(journal.native_startup.iter())
+    {
+        if attempt
+            .intent
+            .as_ref()
+            .is_some_and(|i| i.possible_zygisk_exposure())
+            || attempt
+                .completed
+                .as_ref()
+                .and_then(|r| r.selection)
+                .is_some_and(|s| s.backend == NativeBackend::Zygisk)
+        {
+            discovered.push(attempt.boot_id.clone());
+        }
+    }
+    if let Some(a) = journal
+        .zygisk_authority
+        .as_ref()
+        .and_then(|a| a.intent.zygisk_authorization.as_ref())
+    {
+        discovered.push(a.boot_id.clone());
+    }
+    for boot in discovered {
+        if !journal.zygisk_exposure_boots.contains(&boot) {
+            journal.zygisk_exposure_boots.push(boot);
+        }
+    }
+    if journal.zygisk_exposure_boot.is_none() {
+        journal.zygisk_exposure_boot = journal.zygisk_exposure_boots.last().cloned();
+    }
+    let extra = journal
+        .zygisk_exposure_boots
+        .len()
+        .saturating_sub(MAX_ZYGISK_EXPOSURE_BOOTS);
+    journal.zygisk_exposure_boots.drain(..extra);
     journal.conflict_floor = journal.conflict_floor.min(journal.config_revision);
     journal.version = JOURNAL_VERSION;
     journal.retain_settled = journal.retain_settled.min(DEFAULT_RETAIN_SETTLED);
@@ -863,7 +969,13 @@ pub fn record_phase_running(
         .as_ref()
         .and_then(|i| i.zygisk_authorization.as_ref())
     {
-        journal.zygisk_exposure_boot = Some(authorization.boot_id.clone());
+        journal.note_zygisk_exposure(&authorization.boot_id);
+        if running == ConfigPhase::Native {
+            journal.zygisk_authority = Some(ZygiskAuthorityRecord {
+                operation: op,
+                intent: native_intent.clone().expect("authorization intent"),
+            });
+        }
     }
     let prior = journal.get(op).cloned();
     journal.upsert(JournalEntry {
@@ -957,7 +1069,7 @@ mod tests {
         };
         write_atomic(&path, &journal).unwrap();
         let migrated = read(&path).unwrap();
-        assert_eq!(migrated.version, 8);
+        assert_eq!(migrated.version, 9);
         assert!(migrated.native_startup_uncertain());
         assert_eq!(migrated.native_startup, journal.native_startup);
         journal.version = 4;
@@ -1003,7 +1115,7 @@ mod tests {
             );
         }
         journal = original;
-        journal.version = 9;
+        journal.version = 10;
         write_atomic(&path, &journal).unwrap();
         assert!(read(&path).is_err(), "never reset unknown schema");
     }
@@ -1044,6 +1156,155 @@ mod tests {
     }
 
     #[test]
+    fn authority_migration_uses_execution_order_instead_of_reserved_id_order() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("journal.json");
+        let mut journal = Journal::default();
+        for id in [8, 7] {
+            let intent = NativeIntent {
+                backend: NativeBackend::Zygisk,
+                wire: "vpnhide 2 config\ndebug 0\ndefault 0\nend 0\n".into(),
+                zygisk_module: Some(root.path().join("module")),
+                zygisk_authorization: Some(ZygiskAuthorizationIntent {
+                    boot_id: "12345678-1234-1234-1234-123456789abc".into(),
+                    generation: id,
+                    directory_identity: (1, 2),
+                }),
+            };
+            record_phase_running(
+                &path,
+                &mut journal,
+                OperationId(id),
+                BaseRef { revision: 0 },
+                &edit_debug(true),
+                &CanonicalConfig::default(),
+                &[ConfigPhase::Native],
+                &[],
+                ConfigPhase::Native,
+                Some(intent),
+            )
+            .unwrap();
+            record_settled(
+                &path,
+                &mut journal,
+                OperationId(id),
+                BaseRef { revision: 0 },
+                &edit_debug(true),
+                &CanonicalConfig::default(),
+                OperationRecord {
+                    op: OperationId(id),
+                    phases: vec![PhaseRecord {
+                        phase: ConfigPhase::Native,
+                        outcome: PhaseOutcome::Confirmed,
+                    }],
+                    settled: Some(PhaseOutcome::Confirmed),
+                    ports: None,
+                },
+                0,
+            )
+            .unwrap();
+        }
+        let mut old = serde_json::to_value(&journal).unwrap();
+        old["version"] = 8.into();
+        old.as_object_mut().unwrap().remove("zygisk_authority");
+        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        assert_eq!(
+            read(&path).unwrap().zygisk_authority.unwrap().operation,
+            OperationId(7)
+        );
+    }
+
+    #[test]
+    fn authority_survives_receipt_pruning_and_migrates_schema_eight_without_losing_exposure() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("journal.json");
+        let intent = NativeIntent {
+            backend: NativeBackend::Zygisk,
+            wire: "vpnhide 2 config\ndebug 0\ndefault 0\nend 0\n".into(),
+            zygisk_module: Some(root.path().join("module")),
+            zygisk_authorization: Some(ZygiskAuthorizationIntent {
+                boot_id: "12345678-1234-1234-1234-123456789abc".into(),
+                generation: 7,
+                directory_identity: (1, 2),
+            }),
+        };
+        let mut journal = Journal::default();
+        record_phase_running(
+            &path,
+            &mut journal,
+            OperationId(7),
+            BaseRef { revision: 0 },
+            &edit_debug(true),
+            &CanonicalConfig::default(),
+            &[ConfigPhase::Native],
+            &[],
+            ConfigPhase::Native,
+            Some(intent.clone()),
+        )
+        .unwrap();
+        let authority = journal.zygisk_authority.clone().unwrap();
+        assert!(authority.reference().is_some());
+        assert_eq!(
+            read(&path).unwrap().zygisk_authority,
+            Some(authority.clone())
+        );
+        let mut old = serde_json::to_value(&journal).unwrap();
+        old["version"] = 8.into();
+        old.as_object_mut().unwrap().remove("zygisk_authority");
+        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        let upgraded = read(&path).unwrap();
+        assert_eq!(upgraded.zygisk_authority, Some(authority.clone()));
+        assert_eq!(upgraded.zygisk_exposure_boot, journal.zygisk_exposure_boot);
+        journal.retain_settled = 0;
+        record_settled(
+            &path,
+            &mut journal,
+            OperationId(7),
+            BaseRef { revision: 0 },
+            &edit_debug(true),
+            &CanonicalConfig::default(),
+            OperationRecord {
+                op: OperationId(7),
+                phases: vec![PhaseRecord {
+                    phase: ConfigPhase::Native,
+                    outcome: PhaseOutcome::Confirmed,
+                }],
+                settled: Some(PhaseOutcome::Confirmed),
+                ports: None,
+            },
+            0,
+        )
+        .unwrap();
+        journal.prune();
+        assert!(journal.operations.is_empty());
+        write_atomic(&path, &journal).unwrap();
+        assert_eq!(read(&path).unwrap().zygisk_authority, Some(authority));
+        assert!(read(&path).unwrap().zygisk_exposure_boot.is_some());
+        journal.zygisk_authority.as_mut().unwrap().operation = OperationId(8);
+        journal
+            .zygisk_authority
+            .as_mut()
+            .unwrap()
+            .intent
+            .zygisk_authorization
+            .as_mut()
+            .unwrap()
+            .generation = 8;
+        assert!(
+            journal
+                .zygisk_authority
+                .as_ref()
+                .unwrap()
+                .reference()
+                .is_some()
+        );
+        write_atomic(&path, &journal).unwrap();
+        let bytes = fs::read(&path).unwrap();
+        assert!(read(&path).is_err());
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+
+    #[test]
     fn authorization_generation_must_belong_to_its_durable_operation() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("journal.json");
@@ -1061,7 +1322,7 @@ mod tests {
         });
         journal.upsert(entry);
         write_atomic(&path, &journal).unwrap();
-        assert_eq!(read(&path).unwrap().version, 8);
+        assert_eq!(read(&path).unwrap().version, 9);
         journal
             .get_mut(OperationId(7))
             .unwrap()

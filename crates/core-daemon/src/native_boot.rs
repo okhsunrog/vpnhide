@@ -630,7 +630,7 @@ impl NativeBoot {
     }
 
     fn reconcile_restored_facts(
-        self,
+        mut self,
         epoch: u64,
         selected: NativeBackend,
         facts: &ScanFacts,
@@ -691,6 +691,18 @@ impl NativeBoot {
             }
         };
         if valid {
+            if selected == NativeBackend::Zygisk
+                && self.env.module_dir(selected).is_some_and(|dir| {
+                    crate::zygisk::ZygiskTarget::open(&dir).and_then(|t| t.is_bundled()) == Ok(true)
+                })
+            {
+                if let Some(selection) = self.selection.as_mut() {
+                    selection.mode = SelectionMode::Authorized;
+                }
+                if let NativeBootOutcome::Selected { mode, .. } = &mut self.status.outcome {
+                    *mode = SelectionMode::Authorized;
+                }
+            }
             self
         } else {
             Self::blocked(
@@ -759,7 +771,15 @@ impl NativeBoot {
             Plan::Adopt(backend) => {
                 let selection = Selection {
                     backend,
-                    mode: SelectionMode::Adopted,
+                    mode: if backend == NativeBackend::Zygisk
+                        && env.module_dir(backend).is_some_and(|dir| {
+                            crate::zygisk::ZygiskTarget::open(&dir).and_then(|t| t.is_bundled())
+                                == Ok(true)
+                        }) {
+                        SelectionMode::Authorized
+                    } else {
+                        SelectionMode::Adopted
+                    },
                     filesystem_hiding: (backend == NativeBackend::Kpm)
                         .then_some(facts.kpm_filesystem_hiding)
                         .flatten(),
