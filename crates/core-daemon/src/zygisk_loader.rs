@@ -122,7 +122,10 @@ pub fn manifest_sha256(catalog: &Catalog) -> String {
     )
 }
 
-fn parent_zygote(proc_root: &Path, child: ProcessIdentity) -> io::Result<ProcessIdentity> {
+pub(crate) fn parent_zygote(
+    proc_root: &Path,
+    child: ProcessIdentity,
+) -> io::Result<ProcessIdentity> {
     let stat = image::bounded_text(&proc_root.join(child.pid.to_string()).join("stat"), 8192)?;
     let (_, fields) = stat
         .rsplit_once(") ")
@@ -292,6 +295,45 @@ impl LoaderRegistry {
         }
     }
 
+    /// Loaded code identity in the live companion/zygote generations. Child
+    /// PID membership belongs to policy coverage, not the heavy-run cache key:
+    /// opening the UI or starting a game must not restart the fixture suite.
+    pub fn generation_fingerprint(&self) -> Option<String> {
+        self.generation_fingerprint_at(Path::new("/proc"))
+    }
+    fn generation_fingerprint_at(&self, proc_root: &Path) -> Option<String> {
+        let context = self.context.lock().expect("loader context").clone()?;
+        let observations = self.observations.lock().expect("loader observations");
+        let material: std::collections::BTreeSet<_> = observations
+            .iter()
+            .filter(|o| {
+                o.boot_id == context.boot_id
+                    && o.epoch == context.epoch
+                    && image::process_identity(proc_root, o.zygote.pid).ok() == Some(o.zygote)
+                    && image::process_identity(proc_root, o.companion.pid).ok() == Some(o.companion)
+                    && image::mapping(proc_root, o.companion.pid, o.companion_anchor)
+                        .is_ok_and(|m| m == o.mapping)
+            })
+            .map(|o| {
+                (
+                    o.zygote.pid,
+                    o.zygote.start_ticks,
+                    o.companion.pid,
+                    o.companion.start_ticks,
+                    o.payload_sha256.clone(),
+                    o.manifest_sha256.clone(),
+                )
+            })
+            .collect();
+        if material.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&material).ok()?)
+        ))
+    }
+
     pub fn available(&self, catalog: &Catalog, abi: Abi, needs_arm32: bool) -> bool {
         self.available_at(catalog, abi, needs_arm32, Path::new("/proc"))
     }
@@ -387,7 +429,23 @@ impl LoaderRegistry {
             records.remove(0);
         }
         if records.len() >= 64 {
-            records.remove(0);
+            // Retain one authenticated record per loaded image generation even
+            // after the short-lived worker exits. Normal child churn must not
+            // evict the sole other ABI's code identity and trigger a heavy run.
+            let duplicate = records
+                .iter()
+                .enumerate()
+                .position(|(index, record)| {
+                    records.iter().enumerate().any(|(other, candidate)| {
+                        index != other
+                            && candidate.zygote == record.zygote
+                            && candidate.companion == record.companion
+                            && candidate.payload_sha256 == record.payload_sha256
+                            && candidate.manifest_sha256 == record.manifest_sha256
+                    })
+                })
+                .unwrap_or(0);
+            records.remove(duplicate);
         }
         records.push(observation);
     }
@@ -780,6 +838,40 @@ mod tests {
             catalog,
             observation,
         }
+    }
+
+    #[test]
+    fn code_fingerprint_ignores_child_churn_but_fences_companion_restarts() {
+        let f = fixture();
+        let registry = LoaderRegistry::default();
+        *registry.context.lock().unwrap() = Some(f.context.clone());
+        assert!(registry.generation_fingerprint_at(&f.proc_root).is_none());
+        registry
+            .observations
+            .lock()
+            .unwrap()
+            .push(f.observation.clone());
+        let original = registry.generation_fingerprint_at(&f.proc_root).unwrap();
+        let mut game = f.observation.clone();
+        game.process_name = "example.game".into();
+        game.process = ProcessIdentity {
+            pid: 88,
+            start_ticks: 900,
+        };
+        game.generation = Some(4);
+        registry.observations.lock().unwrap().push(game);
+        process(&f.proc_root, 4, 41, "dev.okhsunrog.vpnhide");
+        assert_eq!(
+            registry.generation_fingerprint_at(&f.proc_root),
+            Some(original.clone())
+        );
+        fs::remove_dir_all(f.proc_root.join("4")).unwrap();
+        assert_eq!(
+            registry.generation_fingerprint_at(&f.proc_root),
+            Some(original)
+        );
+        process(&f.proc_root, 3, 31, "companion");
+        assert!(registry.generation_fingerprint_at(&f.proc_root).is_none());
     }
 
     #[test]

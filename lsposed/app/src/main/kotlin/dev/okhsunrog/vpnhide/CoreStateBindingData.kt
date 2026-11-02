@@ -33,6 +33,7 @@ internal fun CorePublication.toState(): CoreStateView =
                 routing.uid?.session,
             ),
         mutationHeld = mutationHeld,
+        autonomousDiagnostics = autonomousDiagnostics,
         recovery = recovery,
         startupError = startupError,
         storageFault = storageFault,

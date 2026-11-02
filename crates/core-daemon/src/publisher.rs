@@ -35,7 +35,8 @@ impl Publisher {
 
     /// Publish a new snapshot, bumping the revision. Republishing an identical snapshot
     /// still bumps — callers that want to avoid a spurious wake should compare first.
-    pub fn publish(&self, snapshot: StateSnapshot) {
+    pub fn publish(&self, mut snapshot: StateSnapshot) {
+        crate::autonomous::coordinator::invalidate_published(&mut snapshot);
         self.tx.send_modify(|p| {
             p.revision += 1;
             p.snapshot = snapshot;
@@ -49,6 +50,7 @@ impl Publisher {
         self.tx.send_modify(|p| {
             p.revision += 1;
             edit(&mut p.snapshot);
+            crate::autonomous::coordinator::invalidate_published(&mut p.snapshot);
         });
     }
 
@@ -57,6 +59,7 @@ impl Publisher {
     pub fn update_if_changed(&self, edit: impl FnOnce(&mut StateSnapshot) -> bool) {
         self.tx.send_if_modified(|published| {
             if edit(&mut published.snapshot) {
+                crate::autonomous::coordinator::invalidate_published(&mut published.snapshot);
                 published.revision += 1;
                 true
             } else {

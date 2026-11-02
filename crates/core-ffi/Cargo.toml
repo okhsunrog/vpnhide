@@ -24,6 +24,8 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
+vpnhide_diagnostic_model = { path = "../diagnostic-model" }
+vpnhide_checks = { path = "../checks" }
 uniffi = { version = "0.32", features = ["tokio"] }
 vpnhide_core_client = { version = "0.1.0", path = "../core-client" }
 vpnhide_core_rpc = { path = "../core-rpc" }

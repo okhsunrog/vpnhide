@@ -35,6 +35,7 @@ internal data class CoreStateView(
     val backend: CoreBackendView? = null,
     val routing: CoreRoutingView? = null,
     val mutationHeld: Boolean = false,
+    val autonomousDiagnostics: uniffi.vpnhide_core_ffi.CoreDiagnosticRun? = null,
 )
 
 /** A core operation receipt: phase outcomes as core executed them, and the settled result. */

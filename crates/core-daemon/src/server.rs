@@ -108,6 +108,7 @@ impl Default for CommandSpec {
 pub struct CoreState {
     pub publisher: Publisher,
     loader: Arc<crate::zygisk_loader::LoaderRegistry>,
+    diagnostics: Arc<crate::autonomous::coordinator::Coordinator>,
     engine: crate::command_engine::CommandEngine,
     shutting_down: std::sync::atomic::AtomicBool,
     shutdown_gate: Mutex<()>,
@@ -208,6 +209,7 @@ impl CoreState {
             },
             true,
         );
+        self.diagnostics.cancel();
         self.engine.close();
     }
 
@@ -830,6 +832,7 @@ impl CoreState {
         Arc::new(CoreState {
             publisher,
             loader: Arc::new(crate::zygisk_loader::LoaderRegistry::default()),
+            diagnostics: Arc::new(crate::autonomous::coordinator::Coordinator::default()),
             engine: Default::default(),
             shutting_down: std::sync::atomic::AtomicBool::new(false),
             shutdown_gate: Mutex::new(()),
@@ -1005,6 +1008,7 @@ impl CoreState {
         let state = Arc::new(CoreState {
             publisher,
             loader: Arc::new(crate::zygisk_loader::LoaderRegistry::default()),
+            diagnostics: Arc::new(crate::autonomous::coordinator::Coordinator::default()),
             engine: crate::command_engine::CommandEngine::with_store(ConfigStore {
                 config: config.clone(),
                 config_revision,
@@ -1427,6 +1431,19 @@ impl CoreState {
         }
         let env = self.probe_env.read().expect("probe env").clone();
         self.logcat.discard(session, &env)
+    }
+
+    pub fn configure_autonomous_diagnostics(&self, app_dir: PathBuf) {
+        self.diagnostics.configure(app_dir);
+    }
+    pub fn start_autonomous_diagnostics(self: &Arc<Self>) {
+        self.diagnostics.monitor(self);
+    }
+    pub fn request_diagnostic_run(
+        self: &Arc<Self>,
+        force: bool,
+    ) -> Result<vpnhide_core_rpc::DiagnosticRun, vpnhide_core_rpc::DiagnosticError> {
+        self.diagnostics.request(self.clone(), force)
     }
 
     /// The currently published snapshot (tests and diagnostics).
@@ -2191,6 +2208,7 @@ pub struct CoreServer {
     state: Arc<CoreState>,
     polls: Arc<tokio::sync::Semaphore>,
     status_permit: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
+    peer: Option<crate::auth::PeerCred>,
 }
 
 impl CoreServer {
@@ -2199,6 +2217,7 @@ impl CoreServer {
             state,
             polls: Arc::new(tokio::sync::Semaphore::new(2)),
             status_permit: None,
+            peer: None,
         }
     }
 }
@@ -2223,6 +2242,67 @@ impl VpnhideCore for CoreServer {
             return crate::publisher::bounded_response(self.state.publisher.current());
         };
         crate::publisher::bounded_response(self.state.publisher.state_since(epoch, revision).await)
+    }
+
+    async fn request_diagnostic_run(
+        self,
+        _ctx: Context,
+        force: bool,
+    ) -> Result<vpnhide_core_rpc::DiagnosticRun, vpnhide_core_rpc::DiagnosticError> {
+        let permit = self
+            .state
+            .work_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| vpnhide_core_rpc::DiagnosticError::Busy)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            self.state.request_diagnostic_run(force)
+        })
+        .await
+        .unwrap_or(Err(vpnhide_core_rpc::DiagnosticError::Disabled))
+    }
+    async fn join_diagnostic_worker(
+        self,
+        _ctx: Context,
+    ) -> Result<Option<vpnhide_core_rpc::DiagnosticWorkerTask>, vpnhide_core_rpc::DiagnosticError>
+    {
+        let peer = self
+            .peer
+            .ok_or(vpnhide_core_rpc::DiagnosticError::WrongProcess)?;
+        let permit = self
+            .state
+            .work_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| vpnhide_core_rpc::DiagnosticError::Busy)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            self.state.diagnostics.join(peer)
+        })
+        .await
+        .unwrap_or(Err(vpnhide_core_rpc::DiagnosticError::Disabled))
+    }
+    async fn report_diagnostic_worker(
+        self,
+        _ctx: Context,
+        report: vpnhide_core_rpc::DiagnosticWorkerReport,
+    ) -> Result<(), vpnhide_core_rpc::DiagnosticError> {
+        let peer = self
+            .peer
+            .ok_or(vpnhide_core_rpc::DiagnosticError::WrongProcess)?;
+        let permit = self
+            .state
+            .work_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| vpnhide_core_rpc::DiagnosticError::Busy)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            self.state.diagnostics.report(peer, report)
+        })
+        .await
+        .unwrap_or(Err(vpnhide_core_rpc::DiagnosticError::Disabled))
     }
 
     async fn allocate_operation_id(self, _ctx: Context) -> Result<OperationId, SubmitError> {
@@ -2540,11 +2620,13 @@ pub async fn serve_connection(
     state: Arc<CoreState>,
     cancel: CancellationToken,
 ) {
+    let peer = crate::auth::peer_cred(&stream).ok();
     let framed = LengthDelimitedCodec::builder()
         .max_frame_length(vpnhide_core_rpc::MAX_FRAME_BYTES)
         .new_framed(stream);
     let transport = tarpc::serde_transport::new(framed, tokio_serde::formats::Json::default());
-    let server = CoreServer::new(state);
+    let mut server = CoreServer::new(state);
+    server.peer = peer;
     let serve = BaseChannel::new(
         tarpc::server::Config {
             pending_response_buffer: 1,

@@ -431,3 +431,14 @@ zygote app fork:
 | Removed on pre-1.0 config import (or Full Reset) | the import inputs in section 1, plus `/data/adb/vpnhide_zygisk/`, `/data/adb/vpnhide_lsposed/` |
 | Wiped on module reinstall | files under `/data/adb/modules/vpnhide_*/` |
 | Wiped on app reinstall | app SharedPreferences (except Vector redirects the physical path under `/data/misc/<uuid>/prefs/`) and the `ui_settings` DataStore |
+
+The autonomous diagnostic prototype (RPC14) owns one nonpersistent, DOWN TUN via
+an exclusive CLOEXEC descriptor in Core. Its `tun<12 hex>` name is bound to the
+Core session and root-observed ifindex; no address/route/rule is added by the
+interface-only fixture. It is closed and disappearance is read back on completion,
+worker timeout, cancellation and launch failure. No cleanup path deletes an
+interface by name. Run/cache/fingerprint and one previous scoped completion live
+in Core memory; a Core restart creates a new epoch and obtains new evidence.
+The fixed `:diagnostics` Android Service reads the app DE socket and performs
+bounded unprivileged observations; it writes no privileged state. This partial
+run cannot publish complete hook-health PASS.

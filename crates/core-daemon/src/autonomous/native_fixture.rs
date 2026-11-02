@@ -77,6 +77,19 @@ fn value(sample: &Sample<u32>) -> io::Result<u32> {
         .ok_or_else(|| invalid(format!("native control unavailable: {sample:?}")))
 }
 
+/// Setup can fail after allocation. Preserve enough identity to verify cleanup
+/// after local FDs have dropped; unknown identity holds the diagnostic resource.
+#[derive(Default)]
+struct SetupOwnership {
+    created: bool,
+    spec: Option<NativeFixtureSpec>,
+}
+pub struct FixtureCreateFailure {
+    pub error: io::Error,
+    pub resource_created: bool,
+    pub cleanup: Option<(NativeFixtureSpec, bool)>,
+}
+
 pub struct TunFixture {
     tun: Option<File>,
     pub spec: NativeFixtureSpec,
@@ -92,6 +105,41 @@ pub struct NativeCompletion {
 
 impl TunFixture {
     pub fn create(session: u64) -> io::Result<Self> {
+        Self::create_detailed(session).map_err(|failure| failure.error)
+    }
+    pub fn create_detailed(session: u64) -> Result<Self, FixtureCreateFailure> {
+        Self::create_detailed_inner(session, false)
+    }
+    fn create_detailed_inner(
+        session: u64,
+        inject_failure: bool,
+    ) -> Result<Self, FixtureCreateFailure> {
+        let mut ownership = SetupOwnership::default();
+        Self::create_owned(session, &mut ownership, inject_failure).map_err(|error| {
+            let cleanup = ownership.spec.map(|spec| {
+                let observed = fixture::observe(&spec.interface.name);
+                let cleaned = vpnhide_diagnostic_model::cleanup_confirmed(&spec, &observed);
+                (spec, cleaned)
+            });
+            FixtureCreateFailure {
+                error,
+                resource_created: ownership.created,
+                cleanup,
+            }
+        })
+    }
+    #[cfg(feature = "fixture-oracle")]
+    pub fn failed_setup_for_oracle(session: u64) -> FixtureCreateFailure {
+        match Self::create_detailed_inner(session, true) {
+            Err(failure) => failure,
+            Ok(_) => panic!("setup fault did not fire"),
+        }
+    }
+    fn create_owned(
+        session: u64,
+        ownership: &mut SetupOwnership,
+        inject_failure: bool,
+    ) -> io::Result<Self> {
         let name = fixture_name(session)?;
         let negative = fixture::observe(&name);
         let absent = |v: &Sample<u32>| {
@@ -128,6 +176,24 @@ impl TunFixture {
         allocation.ifr_ifru.ifru_flags = i16::from_ne_bytes(TUN_FLAGS.to_ne_bytes());
         if unsafe { libc::ioctl(tun.as_raw_fd(), TUNSETIFF as _, &mut allocation) } != 0 {
             return Err(io::Error::last_os_error());
+        }
+        ownership.created = true;
+        // Record ifindex before later MTU/positive-control setup can fail.
+        // Cleanup tests use absence, not these placeholder fixture attributes.
+        let allocated_index = fixture::index(&name)
+            .map_err(|e| invalid(format!("allocated fixture identity unavailable: {e:?}")))?;
+        ownership.spec = Some(NativeFixtureSpec {
+            session,
+            interface: InterfaceId {
+                name: name.clone(),
+                index: allocated_index,
+            },
+            flags: 0,
+            mtu: FIXTURE_MTU as u32,
+            ordinary: ordinary.clone(),
+        });
+        if inject_failure {
+            return Err(invalid("injected post-allocation setup failure"));
         }
         let actual_name: Vec<_> = allocation
             .ifr_name

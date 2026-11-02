@@ -182,6 +182,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("process-exit cleanup/control failed".into());
     }
     println!("FIXTURE_CRASH_CONTROL=PASS");
+    let failed = TunFixture::failed_setup_for_oracle(0x0123_4567_89ae);
+    if !failed.resource_created || !failed.cleanup.is_some_and(|(_, cleaned)| cleaned) {
+        return Err("partial-setup cleanup was not positively confirmed".into());
+    }
+    println!("FIXTURE_SETUP_FAILURE_CONTROL=PASS");
     println!(
         "FIXTURE_ORACLE=PASS mode={} down=1 routes_unchanged=1",
         if protected { "protected" } else { "raw" }

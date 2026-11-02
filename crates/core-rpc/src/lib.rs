@@ -55,10 +55,13 @@ pub use logcat::{
 };
 
 pub mod recovery;
+pub use vpnhide_diagnostic_model::{
+    DiagnosticError, DiagnosticRun, DiagnosticWorkerReport, DiagnosticWorkerTask,
+};
 
 /// Monotonic IPC protocol version. Bump on any change to the method set or wire types.
 /// The client checks it in [`VpnhideCore::hello`] before any other call.
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 /// Filesystem path of the core's UDS socket. A path socket (never abstract): its
 /// SELinux label + owner are what gate access. Kept in sync with the app-side constant.
@@ -193,6 +196,8 @@ pub struct Published {
 /// and are joined with these facts at its observation boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct StateSnapshot {
+    #[serde(default)]
+    pub autonomous_diagnostics: Option<DiagnosticRun>,
     #[serde(default)]
     pub startup_error: Option<String>,
     /// Runtime journal failure: terminal receipt may be unavailable until restart.
@@ -679,6 +684,14 @@ pub trait VpnhideCore {
     /// Run a batch of fixed root probes (v5). No caller-chosen command or path exists.
     async fn collect_diagnostics(request: DiagnosticsRequest) -> DiagnosticsReport;
 
+    /// Core-owned controlled run; reads reuse its result until explicit retry or invalidation.
+    async fn request_diagnostic_run(force: bool) -> Result<DiagnosticRun, DiagnosticError>;
+    /// Only the live, fixed Zygote worker process may claim/report a session.
+    async fn join_diagnostic_worker() -> Result<Option<DiagnosticWorkerTask>, DiagnosticError>;
+    async fn report_diagnostic_worker(
+        report: DiagnosticWorkerReport,
+    ) -> Result<(), DiagnosticError>;
+
     /// Start core's full-system logcat recording (v8). Idempotent per `session`: the same
     /// id while it records (or after it ended) returns its status; a different id while
     /// one records is [`LogcatRecordingError::Busy`]. Core stops it on its own caps.
@@ -745,6 +758,123 @@ mod tests {
     mod wire_coverage {
         use super::*;
         use std::collections::{BTreeMap, BTreeSet};
+
+        #[test]
+        fn autonomous_arguments_results_and_refusals() {
+            use vpnhide_diagnostic_model::*;
+            let measurement = NativeMeasurement {
+                flags: Sample::Error(ProbeError::Errno(19)),
+                mtu: Sample::Error(ProbeError::Timeout),
+                ifaddrs: Sample::Value(vec![ObservedInterface {
+                    name: "lo".into(),
+                    index: Some(1),
+                    ifaddrs: Some(IfaddrMetadata {
+                        families: vec![2, 10],
+                        flags: vec![73],
+                        has_null_address: false,
+                    }),
+                }]),
+                links: Sample::Error(ProbeError::Unsupported),
+                ordinary_flags: Sample::Value(73),
+                ordinary_mtu: Sample::Value(65536),
+            };
+            let task = DiagnosticWorkerTask {
+                session: 7,
+                core_epoch: 9,
+                fixture: NativeFixtureSpec {
+                    session: 7,
+                    interface: InterfaceId {
+                        name: "tun000000000007".into(),
+                        index: 15,
+                    },
+                    flags: 4240,
+                    mtu: 1543,
+                    ordinary: OrdinaryControl {
+                        interface: InterfaceId {
+                            name: "lo".into(),
+                            index: 1,
+                        },
+                        flags: 73,
+                        mtu: 65536,
+                    },
+                },
+            };
+            let report = DiagnosticWorkerReport {
+                session: 7,
+                core_epoch: 9,
+                native: measurement,
+            };
+            assert_eq!(survives("worker report", &report), report);
+            for task in [None, Some(task)] {
+                assert_eq!(survives("worker task", &task), task);
+            }
+            assert!(survives("force", &true));
+            assert_eq!(
+                survives("report acknowledgement", &Ok::<(), DiagnosticError>(())),
+                Ok(())
+            );
+            for error in [
+                DiagnosticError::Disabled,
+                DiagnosticError::Busy,
+                DiagnosticError::WrongProcess,
+                DiagnosticError::Expired,
+                DiagnosticError::StaleSession,
+                DiagnosticError::Malformed,
+            ] {
+                let refusal: Result<DiagnosticRun, _> = Err(error);
+                assert_eq!(survives("diagnostic refusal", &refusal), refusal);
+            }
+            for outcome in [
+                DiagnosticOutcome::Running,
+                DiagnosticOutcome::Infrastructure {
+                    detail: "fixture unavailable".into(),
+                    native: None,
+                    cleanup_confirmed: None,
+                },
+                DiagnosticOutcome::Incomplete {
+                    native: ScopedNativeResult::Leaked {
+                        checks: vec![NativeCheck::IoctlFlags],
+                        incomplete: vec![ControlFailure::CleanupUnconfirmed],
+                    },
+                    missing: DiagnosticPlan::supported(true, true, true).required.clone(),
+                },
+                DiagnosticOutcome::Incomplete {
+                    native: ScopedNativeResult::Unverified {
+                        reason: ControlFailure::MissingPositiveControl,
+                        observed_leaks: vec![NativeCheck::Getifaddrs],
+                    },
+                    missing: vec![],
+                },
+                DiagnosticOutcome::Incomplete {
+                    native: ScopedNativeResult::Proven {
+                        checks: vec![NativeCheck::IoctlMtu],
+                    },
+                    missing: vec![],
+                },
+            ] {
+                let run = DiagnosticRun {
+                    session: u64::MAX,
+                    fingerprint: DiagnosticFingerprint {
+                        boot_id: "boot".into(),
+                        core_epoch: 1,
+                        policy_sha256: "a".repeat(64),
+                        runtime_sha256: "b".repeat(64),
+                        platform_sha256: Some("c".repeat(64)),
+                        loaded_generations_sha256: None,
+                        loaded_generations_complete: false,
+                    },
+                    plan: DiagnosticPlan::supported(true, true, true),
+                    outcome,
+                    stale: true,
+                };
+                assert_eq!(survives("diagnostic run", &run), run);
+                let snapshot = StateSnapshot {
+                    autonomous_diagnostics: Some(run),
+                    ..Default::default()
+                };
+                assert_eq!(survives("diagnostic publication", &snapshot), snapshot);
+            }
+        }
 
         #[test]
         fn hello_arguments_and_result() {
@@ -815,6 +945,7 @@ mod tests {
                     epoch: u64::MAX,
                     revision: 7,
                     snapshot: StateSnapshot {
+                        autonomous_diagnostics: None,
                         config,
                         config_revision: 5,
                         operations_in_flight: vec![OperationId(1), OperationId(u64::MAX)],

@@ -96,7 +96,7 @@ val appNativeCrates =
         "protocol",
     ).map { repoDir.resolve("crates/$it") }
 val coreFfiCrates =
-    listOf("core-ffi", "core-client", "core-rpc", "native-policy", "protocol")
+    listOf("core-ffi", "core-client", "core-rpc", "native-policy", "protocol", "checks", "diagnostic-model")
         .map { repoDir.resolve("crates/$it") }
 val rustAssetsOut = rustAssetsDir.get().asFile
 

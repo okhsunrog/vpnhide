@@ -35,6 +35,7 @@ pub struct StateReply {
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CorePublication {
+    pub autonomous_diagnostics: Option<crate::CoreDiagnosticRun>,
     pub recovery: CoreRecoveryAccess,
     pub startup_error: Option<String>,
     pub storage_fault: Option<String>,
@@ -61,6 +62,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
         } = reply.value;
         let recovery = CoreRecoveryAccess::from(&snapshot);
         let rpc::StateSnapshot {
+            autonomous_diagnostics,
             startup_error,
             storage_fault,
             config,
@@ -78,6 +80,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
         Self {
             connection_generation: reply.generation,
             state: CorePublication {
+                autonomous_diagnostics: autonomous_diagnostics.map(Into::into),
                 recovery,
                 startup_error,
                 storage_fault,

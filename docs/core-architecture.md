@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation on `main`, app/core RPC version 13. The backend
+Current implementation on `main`, app/core RPC version 14. The backend
 control-v2 / telemetry-v1 wire is a separate boundary. This document describes
 the implemented ownership and execution contract.
 
@@ -233,7 +233,7 @@ and IPv6 outcomes remain independent.
 
 See [storage](storage.md), [state](state.md) and
 [module lifecycle](notes/core-2.0-module-lifecycle.md) for paths and boot details.
-RPC skew fails the handshake; update APK and core together for version 13.
+RPC skew fails the handshake; update APK and core together for version 14.
 Host tests/builds do not establish Android DAC/SELinux behavior, root-manager boot,
 ROM parsing or hook coverage; these still require device validation.
 

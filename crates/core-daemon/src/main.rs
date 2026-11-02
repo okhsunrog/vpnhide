@@ -261,9 +261,16 @@ async fn run(path: &str) {
     // Ports at T+30 s. Serving and observation are not blocked meanwhile; mutations
     // serialize with it on the config lane.
     if boot_apply {
+        if let Some(dir) = endpoint.app_dir() {
+            state.configure_autonomous_diagnostics(dir.to_path_buf());
+        }
         let booting = state.clone();
         std::thread::spawn(move || {
-            vpnhide_core_daemon::boot::run_boot_with_native(&booting, deferred_native);
+            let report = vpnhide_core_daemon::boot::run_boot_with_native(&booting, deferred_native);
+            if report.is_applied_ok() {
+                let _ = booting.request_diagnostic_run(false);
+            }
+            booting.start_autonomous_diagnostics();
         });
     }
 

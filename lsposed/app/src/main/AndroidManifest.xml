@@ -21,6 +21,7 @@
 
         <service
             android:name=".diagnostics.LoaderProbeService"
+            android:directBootAware="true"
             android:process=":diagnostics"
             android:exported="false"
             android:stopWithTask="false" />

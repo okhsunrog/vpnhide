@@ -852,3 +852,62 @@ real worker session, complete required plan, cache/fingerprint and unified verdi
 remain next; no autonomous suite is claimed ready. The dedicated test oracle is
 feature-gated and absent from Core/APK ZIPs. CI wiring adds raw/protected QEMU
 controls; those CI executions have not been observed from this cloud session.
+
+### RFC2 Core/Android session checkpoint — 2026-11-02, RPC14
+
+- Added the Core-owned bounded run, full supported diagnostic contract + enabled
+  optional features, typed session/task/report/refusals, and typed UniFFI/publication
+  adapters. The genuine non-isolated `:diagnostics` Service now joins through its
+  device-protected app socket, executes in-process native observations and reports
+  them. No Activity/foreign VPN/split-tunnel prerequisite or APK root execution.
+- Core keeps actual connection `SO_PEERCRED`, re-resolves app owner, PID starttime,
+  exact process name and live root Zygote parent at claim and report. Session,
+  epoch, owner, deadline and duplicate-report gates do not trust worker-supplied
+  process identity. Work permits remain with physical blocking work after caller
+  cancellation. Tests exercise replay/epoch/PID reuse/deadline and typed evidence.
+- A diagnostic task is published only after the previous dedicated worker is
+  stopped through ActivityManager and its process has disappeared. The Service
+  terminates only its own named process on destruction; no whole-APK force-stop
+  or arbitrary numeric-PID kill. This prevents reuse of an old Zygisk policy.
+- The interface-only fixture is now connected to this real worker adapter. All
+  post-creation exits (launch failure, timeout, cancellation and report) finalize
+  the owned FD and read back cleanup. Infrastructure records retain scoped native
+  evidence and explicit cleanup status; automatic retries require confirmed cleanup
+  and are bounded to three attempts per fingerprint. No cleanup uncertainty replay.
+- Boot starts a Core supervisor after policy passes. It observes effective state
+  changes and bounded transient retries independently of APK opens. The dedicated
+  Service is direct-boot aware and uses DE storage; actual OEM/background-start,
+  JNA/bionic, SELinux and user-lock acceptance remain device gates.
+- Fingerprints include boot/Core epoch, canonical policy, selected/applied runtime,
+  delivery/holds/errors, build+Connectivity APEX manifest and actually observed live
+  loaded companion/zygote code generations. Child PID/starttime membership is kept
+  out of the heavy-run key: UI/game churn does not recreate the fixture. The bounded
+  loader history is NOT a complete
+  game-process inventory: `loaded_generations_complete=false`; absent platform or
+  generation evidence cannot support current reusable proof. Stable partial/error
+  receipts are retained stale to avoid repeated work on reads. Successful fresh
+  workers do not establish old-game process health. Publication changes atomically
+  invalidate relevant earlier evidence; external VPN routing is not a run trigger.
+- The only implemented controlled worker slice remains four interface vectors.
+  A complete supported plan stays required (addresses, binding/readback, routes,
+  rules, proc/sys, framework getters/parcels/callbacks/PendingIntent and optional
+  features). Four successes produce `Incomplete`, with the remaining vector list;
+  there is no full-PASS path in this partial implementation. Previous completed
+  scoped evidence remains retained separately inside Core while the next attempt runs.
+- Still partial: real framework fixture/RAW context/recipient callback isolation,
+  broader native stimuli, worker loaded-generation attribution, authoritative complete
+  process coverage, replacement of the old UI-owned suite and unified UX/export
+  consumers. Do not declare RFC2/stage5 finished from this checkpoint.
+
+- Reviewed follow-ups: a pre-specialization child must have a proc birth tick at/after
+  this launch barrier; post-allocation setup failures also close/read back cleanup;
+  unknown/failed cleanup holds **every** new admission, including force/context
+  changes, until exact resource reconciliation (unidentified allocation stays held).
+  The fixed stop-service adapter trusts observed process exit even when AOSP's
+  stop-success branch returns nonzero. Monitor spawn failure resets its admission flag.
+- Final slice checks: 305 Core + 13 RPC + 2 FFI + 1 client + 5 model library tests;
+  strict host/ARM64/ARMv7 Clippy and feature-oracle Clippy; 894 JVM tests, ktlint,
+  detekt, CPD, lintDebug passed. Fresh QEMU raw/protected runs both passed, including
+  newly injected post-TUNSETIFF setup failure cleanup, last-dup and crash-owner
+  controls. Serial evidence is in the cloud evidence directory under rfc2/rpc14-*.
+  These remain static-musl kernel oracles, not Android acceptance or release bundles.

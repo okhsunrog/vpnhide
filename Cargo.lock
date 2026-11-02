@@ -1694,9 +1694,11 @@ dependencies = [
  "tempfile",
  "tokio",
  "uniffi",
+ "vpnhide_checks",
  "vpnhide_core_client",
  "vpnhide_core_daemon",
  "vpnhide_core_rpc",
+ "vpnhide_diagnostic_model",
  "vpnhide_native_policy",
 ]
 
@@ -1707,6 +1709,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tarpc",
+ "vpnhide_diagnostic_model",
 ]
 
 [[package]]

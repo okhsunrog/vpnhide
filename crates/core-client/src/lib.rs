@@ -143,6 +143,15 @@ impl CoreClient {
         collect_diagnostics(request: DiagnosticsRequest) -> DiagnosticsReport,
         DIAGNOSTICS_DEADLINE
     );
+    call!(
+        request_diagnostic_run(force: bool) -> Result<DiagnosticRun, DiagnosticError>,
+        CALL_DEADLINE
+    );
+    call!(join_diagnostic_worker() -> Result<Option<DiagnosticWorkerTask>, DiagnosticError>, CALL_DEADLINE);
+    call!(
+        report_diagnostic_worker(report: DiagnosticWorkerReport) -> Result<(), DiagnosticError>,
+        CALL_DEADLINE
+    );
     call!(allocate_operation_id() -> Result<OperationId, SubmitError>, CALL_DEADLINE);
     call!(
         submit_command(op: OperationId, command: CoreCommand) -> Result<Accepted, SubmitError>,
