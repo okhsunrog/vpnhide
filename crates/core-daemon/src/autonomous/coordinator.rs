@@ -124,14 +124,17 @@ fn context_digests(snapshot: &vpnhide_core_rpc::StateSnapshot) -> (String, Strin
 }
 /// Runs inside the same publication mutation as a policy/runtime change.
 /// Read-only consumers cannot see a later Save with earlier evidence still current.
-pub(crate) fn invalidate_published(snapshot: &mut vpnhide_core_rpc::StateSnapshot) {
+pub(crate) fn invalidate_published(snapshot: &mut vpnhide_core_rpc::StateSnapshot, epoch: u64) {
     if snapshot.autonomous_diagnostics.is_none() {
+        snapshot.autonomous_assessment = None;
         return;
     }
     let (policy, runtime) = context_digests(snapshot);
     if let Some(run) = snapshot.autonomous_diagnostics.as_mut() {
-        run.stale |=
-            run.fingerprint.policy_sha256 != policy || run.fingerprint.runtime_sha256 != runtime;
+        run.stale |= run.fingerprint.core_epoch != epoch
+            || run.fingerprint.policy_sha256 != policy
+            || run.fingerprint.runtime_sha256 != runtime;
+        snapshot.autonomous_assessment = Some(run.assessment());
     }
 }
 
@@ -251,11 +254,9 @@ impl Coordinator {
             }
             if !force && last.fingerprint == fingerprint && last.plan == plan {
                 // Retain a bounded partial/infrastructure receipt even without
-                // complete generation evidence. It is stale evidence, never reusable
-                // current proof; a read does not restart heavy work indefinitely.
-                let mut retained = last.clone();
-                retained.stale |= !retained.fingerprint.reusable();
-                return Ok(retained);
+                // complete generation evidence. Cache eligibility is distinct from
+                // actual condition changes; neither turns a partial run into PASS.
+                return Ok(last.clone());
             }
         }
         if inner
@@ -367,7 +368,7 @@ impl Coordinator {
         }
         // Do not reattribute a run if policy, loaded images or platform changed.
         // Retain its evidence as stale rather than rewriting its fingerprint.
-        if run.fingerprint != current || !run.fingerprint.reusable() {
+        if run.fingerprint != current {
             run.stale = true;
         }
         let run = run.clone();
@@ -847,7 +848,7 @@ mod tests {
         coordinator.inner.lock().unwrap().last = Some(last.clone());
         let retained = coordinator.request(state.clone(), false).unwrap();
         assert_eq!(retained.session, 3);
-        assert!(retained.stale);
+        assert!(!retained.stale);
         assert!(coordinator.inner.lock().unwrap().active.is_none());
         // A concurrent mutation/unknown effect prohibits even explicit force.
         state.publisher.update(|s| s.mutation_held = true);
@@ -884,6 +885,50 @@ mod tests {
         state.publisher.update(|s| s.backend.applied = None);
         assert!(state.snapshot().autonomous_diagnostics.unwrap().stale);
     }
+    #[test]
+    fn assessment_is_core_owned_and_changes_atomically_with_its_source_run() {
+        use vpnhide_diagnostic_model::ReuseBlocker;
+        let state = state();
+        let snapshot = state.snapshot();
+        let run = DiagnosticRun {
+            session: 9,
+            fingerprint: fingerprint(&state, &snapshot),
+            plan: plan(&snapshot),
+            outcome: DiagnosticOutcome::Running,
+            framework: None,
+            stale: false,
+        };
+        state
+            .publisher
+            .update(|s| s.autonomous_diagnostics = Some(run.clone()));
+        let published = state.snapshot();
+        assert_eq!(published.autonomous_assessment, Some(run.assessment()));
+        assert!(
+            !published
+                .autonomous_assessment
+                .unwrap()
+                .reuse_blockers
+                .contains(&ReuseBlocker::ConditionsChanged)
+        );
+        state
+            .publisher
+            .update(|s| s.config.as_mut().unwrap().debug = true);
+        let published = state.snapshot();
+        assert!(published.autonomous_diagnostics.as_ref().unwrap().stale);
+        assert_eq!(
+            published.autonomous_assessment,
+            Some(
+                published
+                    .autonomous_diagnostics
+                    .as_ref()
+                    .unwrap()
+                    .assessment()
+            )
+        );
+        state.publisher.update(|s| s.autonomous_diagnostics = None);
+        assert!(state.snapshot().autonomous_assessment.is_none());
+    }
+
     #[test]
     fn live_process_consumption_churn_does_not_restart_the_heavy_suite() {
         let state = state();

@@ -126,15 +126,10 @@ internal class FfiCoreSessionClient(
     }
 
     /** Every privileged surface uses the same generation-aware failure owner. */
-    suspend fun <T> rootRequest(block: suspend () -> T): T {
-        val request = requests.incrementAndGet()
-        return try {
-            block()
-        } catch (e: CoreException) {
-            failed(request, e)
-            throw e
-        }
-    }
+    suspend fun <T> rootRequest(block: suspend () -> T): T = coreRootRequest(requests.incrementAndGet(), ::failed, block)
+
+    suspend fun requestDiagnosticRun(force: Boolean): uniffi.vpnhide_core_ffi.CoreDiagnosticRun =
+        rootRequest { native.requestDiagnosticRun(force) }
 
     private fun failed(
         request: Long,

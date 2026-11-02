@@ -386,7 +386,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC18; journal11 reads schemas1–10. These
+The current paired APK/Core contract is RPC19; journal11 reads schemas1–10. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -452,3 +452,14 @@ retained proof for the same generation/policy and fresh ownership; incomplete
 receipts retain holds. Journal11 also retains the exact previously published
 authority when newer Zygisk admission fails before publication, so reset can
 revoke that known grant without accepting an arbitrary stale or newer file.
+
+
+RPC19 adds `autonomous_assessment` next to its source `autonomous_diagnostics`.
+Core's publisher computes both in one publication, including context/epoch
+invalidation; APK code cannot promote reply data into a second authority. The
+shared Rust projection separates execution phase, scoped proof, retained leaks,
+unverified required checks, controls and reuse blockers. Incomplete loaded-process
+coverage is not a condition change or complete protection. The read-only Kotlin
+snapshot owner joins accepted Core/config/root provenance and exposes retained
+history as unavailable after disconnection. Production consumer cutover remains
+a separate implementation step; the legacy suite is still wired until that step.

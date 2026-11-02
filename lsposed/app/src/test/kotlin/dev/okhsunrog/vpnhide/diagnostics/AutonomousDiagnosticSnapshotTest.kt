@@ -1,0 +1,180 @@
+package dev.okhsunrog.vpnhide.diagnostics
+
+import dev.okhsunrog.vpnhide.ConfigCoordinatorView
+import dev.okhsunrog.vpnhide.CoreSessionUpdate
+import dev.okhsunrog.vpnhide.CoreStateView
+import dev.okhsunrog.vpnhide.ObservationRequest
+import dev.okhsunrog.vpnhide.ObservationState
+import dev.okhsunrog.vpnhide.ObservedValue
+import dev.okhsunrog.vpnhide.ReadReason
+import dev.okhsunrog.vpnhide.RootCanonicalRead
+import dev.okhsunrog.vpnhide.RootSnapshot
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import uniffi.vpnhide_core_ffi.CoreAssessmentPhase
+import uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment
+import uniffi.vpnhide_core_ffi.CoreDiagnosticOutcome
+import uniffi.vpnhide_core_ffi.CoreDiagnosticRun
+
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+class AutonomousDiagnosticSnapshotTest {
+    private fun assessment() =
+        CoreDiagnosticAssessment(
+            CoreAssessmentPhase.RUNNING,
+            emptyList(),
+            emptyList(),
+            emptyList(),
+            emptyList(),
+            emptyList(),
+            emptyList(),
+            emptyList(),
+            null,
+            null,
+        )
+
+    private fun run(epoch: Long) =
+        CoreDiagnosticRun(
+            session = 1uL,
+            coreEpoch = epoch.toULong(),
+            bootId = "boot",
+            policySha256 = "a".repeat(64),
+            runtimeSha256 = "b".repeat(64),
+            platformSha256 = null,
+            loadedGenerationsSha256 = null,
+            loadedGenerationsComplete = false,
+            contract = 2u,
+            required = emptyList(),
+            outcome = CoreDiagnosticOutcome.Running,
+            framework = null,
+            stale = false,
+        )
+
+    private fun update(
+        epoch: Long = 7,
+        sequence: Long = 3,
+    ) = CoreSessionUpdate(
+        CoreStateView(
+            epoch,
+            0,
+            RootCanonicalRead.Missing,
+            emptyList(),
+            autonomousDiagnostics = run(epoch),
+            autonomousAssessment = assessment(),
+        ),
+        current = true,
+        sequence = sequence,
+        connectionGeneration = 1,
+    )
+
+    private fun config(core: CoreSessionUpdate) =
+        ConfigCoordinatorView(coreCurrent = true, coreEpoch = core.state?.epoch, desiredRevision = 0, coreSequence = core.sequence)
+
+    private fun observed(root: RootSnapshot) =
+        ObservationState(lastGood = ObservedValue(root, ObservationRequest(root.observationId, 0, 0, ReadReason.Background), 0))
+
+    @Test
+    fun `new Core epoch cannot borrow old root facts or old worker run`() {
+        val old = update()
+        val newer = update(epoch = 8, sequence = 4)
+        val root = RootSnapshot(emptyMap(), observationId = 1, core = old)
+        val sources = AutonomousDiagnosticSources(newer, observed(root), config(newer))
+        val snapshot = autonomousDiagnosticSnapshot(sources, 1, 0)
+        assertTrue(snapshot.current)
+        assertFalse(snapshot.rootJoined)
+        val wrongRun = newer.copy(state = newer.state?.copy(autonomousDiagnostics = run(7)))
+        val mismatched = autonomousDiagnosticSnapshot(sources.copy(core = wrongRun), 2, 0)
+        assertEquals(AutonomousAvailability.EpochMismatch, mismatched.availability)
+        assertFalse(mismatched.current)
+    }
+
+    @Test
+    fun `config actor acceptance and freshness are independent of scoped coverage`() {
+        val core = update()
+        val sources = AutonomousDiagnosticSources(core, ObservationState(), config(core).copy(coreSequence = 2))
+        assertEquals(AutonomousAvailability.ConfigUnjoined, autonomousDiagnosticSnapshot(sources, 0, 0).availability)
+        val accepted = autonomousDiagnosticSnapshot(sources.copy(config = config(core)), 1, 0)
+        assertTrue(accepted.current)
+        assertFalse(requireNotNull(accepted.run).loadedGenerationsComplete)
+        val unpaired = core.copy(state = core.state?.copy(autonomousAssessment = null))
+        val unavailable = autonomousDiagnosticSnapshot(sources.copy(core = unpaired, config = config(core)), 2, 0)
+        assertEquals(AutonomousAvailability.IncompletePublication, unavailable.availability)
+        assertFalse(unavailable.current)
+        val stale = core.copy(state = core.state?.copy(autonomousDiagnostics = run(7).copy(stale = true)))
+        assertFalse(autonomousDiagnosticSnapshot(sources.copy(core = stale, config = config(core)), 2, 0).current)
+    }
+
+    @Test
+    fun `same config revision cannot join changed runtime with older root facts`() {
+        val initial = update()
+        val root = RootSnapshot(emptyMap(), observationId = 1, core = initial)
+        val changed =
+            initial.copy(
+                state =
+                    initial.state?.copy(
+                        revision = 2,
+                        backend =
+                            dev.okhsunrog.vpnhide.CoreBackendView(
+                                current = true,
+                                selected = dev.okhsunrog.vpnhide.NativeBackendId.Kmod,
+                                applied = dev.okhsunrog.vpnhide.NativeBackendId.Kmod,
+                            ),
+                    ),
+                sequence = 4,
+            )
+        val snapshot = autonomousDiagnosticSnapshot(AutonomousDiagnosticSources(changed, observed(root), config(changed)), 1, 0)
+        assertFalse(snapshot.rootJoined)
+        // A diagnostic publication alone does not invalidate unchanged root facts.
+        val newRun =
+            initial.copy(
+                state = initial.state?.copy(revision = 3, autonomousDiagnostics = run(7).copy(session = 2uL)),
+                sequence = 5,
+            )
+        assertTrue(autonomousDiagnosticSnapshot(AutonomousDiagnosticSources(newRun, observed(root), config(newRun)), 2, 0).rootJoined)
+    }
+
+    @Test
+    fun `disconnect releases root waiter with retained evidence qualified unavailable`() =
+        runTest {
+            val initial = update()
+            val core = MutableStateFlow(initial)
+            val root = MutableStateFlow<ObservationState<RootSnapshot>>(ObservationState())
+            val config = MutableStateFlow(config(initial))
+            val owner = AutonomousDiagnosticSnapshotOwner(backgroundScope, core, root, config) { 0 }
+            val waiter = async(start = CoroutineStart.UNDISPATCHED) { owner.awaitSnapshot(RootSnapshot(emptyMap(), observationId = 5)) }
+            runCurrent()
+            assertFalse(waiter.isCompleted)
+            core.value = initial.copy(current = false, sequence = 4, failureDetail = "disconnected")
+            runCurrent()
+            val unavailable = waiter.await()
+            assertEquals(AutonomousAvailability.Offline, unavailable.availability)
+            assertFalse(unavailable.current)
+            assertSame(initial.state?.autonomousDiagnostics, unavailable.run)
+        }
+
+    @Test
+    fun `cancelled reader does not cancel owner and accepted newer root satisfies checkpoint`() =
+        runTest {
+            val initial = update()
+            val core = MutableStateFlow(initial)
+            val root = MutableStateFlow<ObservationState<RootSnapshot>>(ObservationState())
+            val config = MutableStateFlow(config(initial))
+            val owner = AutonomousDiagnosticSnapshotOwner(backgroundScope, core, root, config) { 0 }
+            val abandoned = async { owner.awaitSnapshot(RootSnapshot(emptyMap(), observationId = 4)) }
+            runCurrent()
+            abandoned.cancel()
+            val published = RootSnapshot(emptyMap(), observationId = 6, core = initial)
+            root.value = observed(published)
+            runCurrent()
+            val accepted = owner.awaitSnapshot(RootSnapshot(emptyMap(), observationId = 5))
+            assertSame(published, accepted.rootSnapshot)
+            assertTrue(accepted.rootJoined)
+        }
+}

@@ -38,6 +38,7 @@ internal data class CoreStateView(
     val zygiskLifecycle: uniffi.vpnhide_core_ffi.CoreZygiskLifecycle? = null,
     val zygiskRevocation: uniffi.vpnhide_core_ffi.CoreZygiskRevocationStatus? = null,
     val autonomousDiagnostics: uniffi.vpnhide_core_ffi.CoreDiagnosticRun? = null,
+    val autonomousAssessment: uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment? = null,
 )
 
 /** A core operation receipt: phase outcomes as core executed them, and the settled result. */

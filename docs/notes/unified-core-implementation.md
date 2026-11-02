@@ -3,7 +3,7 @@
 Approved design, based on dev-2.x `3493354f` (2026-11-02).
 This is an implementation ledger, not a claim of device acceptance.
 
-Current cloud contract: **RPC18 / journal10 (reads schemas1–9)**. Kernel control2 /
+Current cloud contract: **RPC19 / journal11 (reads schemas1–10)**. Kernel control2 /
 telemetry1 is unchanged: APK/Core contract and private journal upgrades do not
 require rebuilding a compatible user builtin kernel. Stages4–7/RFC2 remain partial;
 the latest entries distinguish remaining code from device/key/publication gates.
@@ -1265,3 +1265,52 @@ remaining framework/native stimuli, replacing the legacy app-triggered diagnosti
 suite with accepted Core runs, replacement manager/bootstrap, concrete provisioner
 adapters. These remain implementation work, not device gates. Final startup
 regression for `core root snapshot probe exit=-1` must follow those remaining edits.
+
+
+## Cloud checkpoint: Core-owned autonomous assessment foundation, RPC19
+
+Implemented (not yet production consumer cutover): one Rust `DiagnosticRun::assessment`
+projects supported required checks, scoped proven/leaked/unverified checks, native
+and framework controls, execution phase and reuse blockers. It preserves nested
+native leaks even under Unverified/Infrastructure/cleanup failure, and framework
+leaks even with invalid controls. There is deliberately no full-success variant.
+Seven implemented scoped vectors cannot shrink the nineteen-vector base contract.
+Core computes and publishes this exact assessment atomically with its retained run,
+including staleness/invalidation updates; UniFFI/Kotlin only transport it. RPC19
+adds this paired read model. Private journal11/kernel control2 remain unchanged.
+Kotlin does not reconstruct a verdict from counters or clean Java values.
+
+Core's `stale` now means actual fingerprint/context change. Unknown platform or
+incomplete loaded-game generations remain explicit reuse blockers, not invented
+condition changes. Retaining partial/infrastructure results still launches no
+heavy suite on reads. Diagnostic RPC transport wrappers now use the same
+connection-generation failure owner as probes/commands; refusal and waiter
+cancellation leave that connection intact, and late failures cannot invalidate a
+newer connection. The explicit Core request reply remains a session handle,
+not a competing UI publication authority.
+
+A new read-only snapshot owner accepts Core publications, config actor acceptance
+and root observations in one immutable packet. It checks epoch, exact accepted
+sequence and matching root connection/runtime state, while ignoring only the run
+publication cursor when joining root facts. A same-config backend/apply change
+cannot borrow older root facts. Disconnect releases a pending root checkpoint
+with qualified unavailable retained evidence; a reader cancelling does not cancel
+the owner. Construction and reads contain no diagnostic admission path.
+
+Still not implemented: replacing production DiagnosticsCache/DiagnosticDomain,
+Dashboard/DiagnosticsScreen, agent and export together. The old local suite is
+STILL wired in production at this checkpoint. This foundation must not be reported
+as completed ownership migration. Preserve Save/Cancel/footer/drafts. Remaining
+native/framework stimuli, full-generation proof, maintenance/bootstrap and concrete
+provisioner adapters also remain cloud implementation work. Final screenshot startup
+regression and device acceptance are still outstanding after that work.
+
+
+Foundation validation: 353 Core + 14 diagnostic-model + 15 RPC + 3 FFI library
+tests and all61 process RPC tests passed on RPC19. Strict host/all-target and
+ARM64/ARMv7 Clippy passed. 907 JVM tests plus ktlint/detekt/CPD/lintDebug passed;
+the final nullability cleanup was rechecked with all9 new snapshot/transport tests
+and Kotlin quality gates. No-root/module-scaffold checks passed. Logs:
+`/tmp/vpnhide-autonomous-rpc19-{tests,clippy,arm,process,android,android-cleanup}.log`.
+RPC19 APK/Core must be paired; private journal11 reads1–10 and kernel control2 /
+telemetry1 do not change. Old phone APK/Core045b58a remain untouched.

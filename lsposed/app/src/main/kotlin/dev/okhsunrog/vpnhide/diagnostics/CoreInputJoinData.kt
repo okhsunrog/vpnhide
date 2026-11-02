@@ -7,8 +7,12 @@ import dev.okhsunrog.vpnhide.RootSnapshot
 internal fun coreInputsJoined(
     root: RootSnapshot?,
     config: ConfigCoordinatorView,
+): Boolean = root?.core?.let { coreInputsJoined(it, config) } ?: false
+
+internal fun coreInputsJoined(
+    publication: dev.okhsunrog.vpnhide.CoreSessionUpdate,
+    config: ConfigCoordinatorView,
 ): Boolean {
-    val publication = root?.core ?: return false
     val state = publication.state ?: return false
     return publication.current && config.coreCurrent && state.epoch == config.coreEpoch &&
         state.configRevision == config.desiredRevision && publication.sequence <= config.coreSequence

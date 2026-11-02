@@ -270,6 +270,53 @@ pub enum CoreDiagnosticOutcome {
         cleanup_confirmed: Option<bool>,
     },
 }
+enum_map!(
+    CoreAssessmentPhase,
+    AssessmentPhase,
+    Running,
+    Incomplete,
+    Infrastructure
+);
+enum_map!(
+    CoreReuseBlocker,
+    ReuseBlocker,
+    ConditionsChanged,
+    LoadedGenerationsIncomplete,
+    PlatformUnknown,
+    LoadedGenerationsUnknown,
+    InvalidFingerprint,
+    UnsupportedPlan
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CoreDiagnosticAssessment {
+    pub phase: CoreAssessmentPhase,
+    pub required: Vec<CoreRequiredCheck>,
+    pub proven: Vec<CoreRequiredCheck>,
+    pub leaked: Vec<CoreRequiredCheck>,
+    pub unverified: Vec<CoreRequiredCheck>,
+    pub native_controls: Vec<CoreControlFailure>,
+    pub framework_controls: Vec<crate::CoreFrameworkControlFailure>,
+    pub reuse_blockers: Vec<CoreReuseBlocker>,
+    pub infrastructure_detail: Option<String>,
+    pub cleanup_confirmed: Option<bool>,
+}
+impl From<model::DiagnosticAssessment> for CoreDiagnosticAssessment {
+    fn from(v: model::DiagnosticAssessment) -> Self {
+        Self {
+            phase: v.phase.into(),
+            required: v.required.into_iter().map(Into::into).collect(),
+            proven: v.proven.into_iter().map(Into::into).collect(),
+            leaked: v.leaked.into_iter().map(Into::into).collect(),
+            unverified: v.unverified.into_iter().map(Into::into).collect(),
+            native_controls: v.native_controls.into_iter().map(Into::into).collect(),
+            framework_controls: v.framework_controls.into_iter().map(Into::into).collect(),
+            reuse_blockers: v.reuse_blockers.into_iter().map(Into::into).collect(),
+            infrastructure_detail: v.infrastructure_detail,
+            cleanup_confirmed: v.cleanup_confirmed,
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreDiagnosticRun {
     pub session: u64,
