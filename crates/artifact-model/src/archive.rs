@@ -293,7 +293,7 @@ fn assemble_with_budget(
     core.member("bin/arm/vpnhide-core", 40)?;
     let mut files = BTreeMap::new();
     for (name, bytes) in &core.files {
-        if name.starts_with("zygisk/") || name.starts_with("payloads/") {
+        if name == "zygisk" || name.starts_with("zygisk/") || name.starts_with("payloads/") {
             return Err(invalid("base Core contains payloads"));
         }
         if name != PROVENANCE {
@@ -318,11 +318,7 @@ fn assemble_with_budget(
     }
     files.insert(
         "module.prop".into(),
-        format!(
-            "{}\nvpnhideControl=2\nvpnhideActivation=1\n",
-            properties.trim_end_matches('\n')
-        )
-        .into_bytes(),
+        format!("{}\nvpnhideControl=2\n", properties.trim_end_matches('\n')).into_bytes(),
     );
     let mut identities: Vec<PayloadKind> = KMIS
         .iter()
@@ -370,9 +366,6 @@ fn assemble_with_budget(
                 (None, None)
             };
         let proof = FileIdentity::of(&bytes);
-        if matches!(implementation, PayloadKind::Zygisk { .. }) {
-            files.insert(source, bytes.clone());
-        }
         files.insert(implementation.relative_path()?, bytes);
         manifest.payloads.push(Payload {
             implementation,
@@ -418,6 +411,14 @@ pub fn descriptor(
     }
     let package = read_regular(path, MAX_BUNDLE_BYTES)?;
     let files = read_archive_bytes(&package, 128)?;
+    if files
+        .keys()
+        .any(|name| name == "zygisk" || name.starts_with("zygisk/"))
+    {
+        return Err(invalid(
+            "Core package must not publish Zygisk discovery entries",
+        ));
+    }
     let manifest: Manifest = metadata(&files, "payloads/manifest.json")?;
     manifest.require_complete()?;
     let provenance: BundleProvenance = metadata(&files, "bundle-provenance.json")?;
@@ -470,19 +471,6 @@ pub fn descriptor(
                 || caps.init_contract != payload.init_contract
             {
                 return Err(invalid("payload capability differs from final ELF"));
-            }
-        }
-        if let PayloadKind::Zygisk { abi } = payload.implementation {
-            let source = format!(
-                "zygisk/{}.so",
-                if abi == Abi::Arm64 {
-                    "arm64-v8a"
-                } else {
-                    "armeabi-v7a"
-                }
-            );
-            if files.get(&source) != Some(bytes) {
-                return Err(invalid("autoload mirror differs from verified payload"));
             }
         }
     }

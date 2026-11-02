@@ -141,23 +141,23 @@ impl Bundle {
     }
 }
 #[test]
-fn complete_bundle_retains_exact_golden_payloads_with_inert_autoload_and_no_backend_scripts() {
+fn complete_bundle_retains_one_passive_pair_and_keeps_core_out_of_zygisk_catalogs() {
     let b = Bundle::new();
     b.build().unwrap();
     let files = read_archive(&b.path("unified.zip"), 128).unwrap();
     let m: Manifest = metadata(&files, "payloads/manifest.json").unwrap();
     m.require_complete().unwrap();
     assert_eq!(m.bundle_commit, COMMIT);
-    assert_eq!(
-        files["module.prop"],
-        b"id=vpnhide_core\nvpnhideControl=2\nvpnhideActivation=1\n"
+    assert_eq!(files["module.prop"], b"id=vpnhide_core\nvpnhideControl=2\n");
+    assert!(
+        !files
+            .keys()
+            .any(|name| name == "zygisk" || name.starts_with("zygisk/"))
     );
-    for abi in ["arm64-v8a", "armeabi-v7a"] {
-        assert_eq!(
-            files[&format!("zygisk/{abi}.so")],
-            files[&format!("payloads/zygisk/{abi}.so")]
-        );
-    }
+    assert_eq!(files.keys().filter(|name| name.ends_with(".so")).count(), 2);
+    // Magisk33bfff7c filters an entire module by top-level directory presence
+    // before its service list is created, even with global Zygisk disabled.
+    // This actual archive cannot acquire that disqualifying directory.
     assert!(!files.contains_key("zygisk-activation.txt"));
     assert!(!files.contains_key("targets.txt"));
     assert_eq!(
@@ -346,7 +346,7 @@ fn descriptor_binds_exact_package_runtime_and_typed_compatibility() {
     assert!(descriptor(&b.path("vpnhide-core-base.zip"), COMMIT, 1001).is_err());
 }
 #[test]
-fn descriptor_refuses_incomplete_duplicate_forged_payload_and_runtime_mirrors() {
+fn descriptor_refuses_incomplete_payload_and_any_core_discovery_entry() {
     let b = Bundle::new();
     b.build().unwrap();
     let original = read_archive(&b.path("unified.zip"), 128).unwrap();
@@ -354,7 +354,8 @@ fn descriptor_refuses_incomplete_duplicate_forged_payload_and_runtime_mirrors() 
         "missing",
         "duplicate",
         "bytes",
-        "mirror",
+        "discovery-copy",
+        "discovery-file",
         "source",
         "runtime",
         "module-id",
@@ -374,7 +375,10 @@ fn descriptor_refuses_incomplete_duplicate_forged_payload_and_runtime_mirrors() 
                     b"different".to_vec(),
                 );
             }
-            "mirror" => {
+            "discovery-file" => {
+                files.insert("zygisk".into(), b"not even a directory".to_vec());
+            }
+            "discovery-copy" => {
                 files.insert("zygisk/armeabi-v7a.so".into(), b"different".to_vec());
             }
             "source" => m["payloads"][0]["source_commit"] = json!("b".repeat(40)),

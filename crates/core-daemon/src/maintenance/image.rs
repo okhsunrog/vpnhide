@@ -37,6 +37,27 @@ fn invalid() -> io::Error {
         "Core image generation is incomplete or changed",
     )
 }
+fn entry_exists(directory: &File, name: &std::ffi::CStr) -> io::Result<bool> {
+    use std::os::fd::AsRawFd;
+    let mut meta = std::mem::MaybeUninit::<libc::stat>::uninit();
+    let rc = unsafe {
+        libc::fstatat(
+            directory.as_raw_fd(),
+            name.as_ptr(),
+            meta.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if rc == 0 {
+        return Ok(true);
+    }
+    let error = io::Error::last_os_error();
+    if error.kind() == io::ErrorKind::NotFound {
+        Ok(false)
+    } else {
+        Err(error)
+    }
+}
 fn read_file(file: &File, uid: u32, limit: u64, deadline: Instant) -> io::Result<ImageFile> {
     let before = file.metadata()?;
     if !before.is_file()
@@ -156,22 +177,15 @@ impl ImageFence {
             return Err(invalid());
         }
         if descriptor.is_some() {
-            for marker in [c"remove", c"disable", c".ksu_hot_install"] {
-                let mut meta = std::mem::MaybeUninit::<libc::stat>::uninit();
-                use std::os::fd::AsRawFd;
-                let rc = unsafe {
-                    libc::fstatat(
-                        dir.as_raw_fd(),
-                        marker.as_ptr(),
-                        meta.as_mut_ptr(),
-                        libc::AT_SYMLINK_NOFOLLOW,
-                    )
-                };
-                if rc == 0 || io::Error::last_os_error().kind() != io::ErrorKind::NotFound {
+            for marker in [c"remove", c"disable", c".ksu_hot_install", c"zygisk"] {
+                if entry_exists(&dir, marker)? {
                     return Err(invalid());
                 }
             }
         }
+        // Existing old-layout source generations must remain fenced during
+        // migration; only a signed replacement is required to have no autoload.
+        let legacy_source = descriptor.is_none() && entry_exists(&dir, c"zygisk")?;
         // This internal parser verifies passive staging bytes. The resulting
         // catalog never enters backend selection or becomes active evidence.
         let catalog = Catalog::open_pinned_before(&dir, Some(deadline))?;
@@ -211,17 +225,12 @@ impl ImageFence {
                 payload.metadata.implementation.relative_path()?,
                 Some(identity.clone()),
             );
-            if let PayloadKind::Zygisk { abi } = payload.metadata.implementation {
-                paths.insert(
-                    format!(
-                        "zygisk/{}.so",
-                        match abi {
-                            Abi::Arm64 => "arm64-v8a",
-                            Abi::Arm32 => "armeabi-v7a",
-                        }
-                    ),
-                    Some(identity),
-                );
+            if legacy_source && let PayloadKind::Zygisk { abi } = payload.metadata.implementation {
+                let name = match abi {
+                    Abi::Arm64 => "arm64-v8a",
+                    Abi::Arm32 => "armeabi-v7a",
+                };
+                paths.insert(format!("zygisk/{name}.so"), Some(identity));
             }
         }
         let mut files = BTreeMap::new();

@@ -24,7 +24,7 @@ fn identity(path: &Path) -> FileIdentity {
 }
 fn fixture() -> Fixture {
     let root = tempfile::tempdir().unwrap();
-    vpnhide_artifact_model::fixtures::write_bundle_tree(root.path()).unwrap();
+    vpnhide_artifact_model::fixtures::write_passive_bundle_tree(root.path()).unwrap();
     let runtime = RuntimeIdentity {
         daemon_arm64: identity(&root.path().join("bin/arm64/vpnhide-core")),
         daemon_arm: identity(&root.path().join("bin/arm/vpnhide-core")),
@@ -113,7 +113,7 @@ fn exact_post_customize_image_accepts_and_live_property_update_is_not_code_chang
     .unwrap();
     fs::write(f.root.path().join("update"), b"").unwrap();
     fence.require_unchanged_owned(f.root.path(), f.uid).unwrap();
-    assert_eq!(fence.files.len(), 16); // daemon, manifest, ten payloads, two autoload mirrors, boot entry/policy
+    assert_eq!(fence.files.len(), 14); // daemon, manifest, ten passive payloads, boot entry/policy
 }
 #[test]
 fn arm32_post_customize_image_uses_its_own_signed_daemon_and_running_inode() {
@@ -132,13 +132,24 @@ fn arm32_post_customize_image_uses_its_own_signed_daemon_and_running_inode() {
     );
 }
 #[test]
-fn signed_wrong_abi_and_missing_or_mutated_autoload_copy_refuse_staging() {
+fn signed_wrong_abi_missing_payload_and_any_discovery_entry_refuse_staging() {
     let f = fixture();
     assert!(ImageFence::inspect(f.root.path(), Some(&f.descriptor), Abi::Arm32, f.uid).is_err());
-    let mirror = f.root.path().join("zygisk/armeabi-v7a.so");
-    fs::write(&mirror, b"different library").unwrap();
+    let payload = f.root.path().join("payloads/zygisk/armeabi-v7a.so");
+    let original = fs::read(&payload).unwrap();
+    fs::write(&payload, b"different library").unwrap();
     assert!(f.inspect().is_err());
-    fs::remove_file(mirror).unwrap();
+    fs::remove_file(&payload).unwrap();
+    assert!(f.inspect().is_err());
+    fs::write(&payload, original).unwrap();
+    let directory = f.root.path().join("zygisk");
+    fs::create_dir(&directory).unwrap();
+    assert!(
+        f.inspect().is_err(),
+        "even an empty discovery directory suppresses Core on Magisk with Zygisk off"
+    );
+    fs::remove_dir(&directory).unwrap();
+    symlink("missing", &directory).unwrap();
     assert!(f.inspect().is_err());
 }
 #[test]
@@ -200,4 +211,33 @@ fn disabled_removed_or_hot_install_staging_is_not_a_ready_replacement() {
         fs::write(f.root.path().join(marker), b"").unwrap();
         assert!(f.inspect().is_err());
     }
+}
+
+#[test]
+fn old_source_autoload_images_stay_fenced_until_replacement_migration() {
+    let f = fixture();
+    let path = f.root.path().join("zygisk");
+    fs::create_dir(&path).unwrap();
+    for abi in ["arm64-v8a", "armeabi-v7a"] {
+        fs::copy(
+            f.root.path().join(format!("payloads/zygisk/{abi}.so")),
+            path.join(format!("{abi}.so")),
+        )
+        .unwrap();
+    }
+    let source = ImageFence::inspect(f.root.path(), None, Abi::Arm64, f.uid).unwrap();
+    assert_eq!(source.files.len(), 16);
+    assert!(
+        f.inspect().is_err(),
+        "old source is never a valid new replacement"
+    );
+    source
+        .require_unchanged_owned(f.root.path(), f.uid)
+        .unwrap();
+    fs::write(path.join("armeabi-v7a.so"), b"changed old mapping source").unwrap();
+    assert!(
+        source
+            .require_unchanged_owned(f.root.path(), f.uid)
+            .is_err()
+    );
 }

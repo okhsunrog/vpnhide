@@ -42,8 +42,24 @@ pub fn bundle_files() -> io::Result<BTreeMap<String, Vec<u8>>> {
     }
     Ok(files)
 }
+/// Explicit old-layout fixture retained for migration/revocation regressions.
 pub fn write_bundle_tree(root: &Path) -> io::Result<()> {
-    for (name, bytes) in bundle_files()? {
+    write_files(root, bundle_files()?)
+}
+pub fn passive_bundle_files() -> io::Result<BTreeMap<String, Vec<u8>>> {
+    let mut files = bundle_files()?;
+    files.retain(|name, _| !name.starts_with("zygisk/"));
+    files.insert(
+        "module.prop".into(),
+        b"id=vpnhide_core\nvpnhideControl=2\n".to_vec(),
+    );
+    Ok(files)
+}
+pub fn write_passive_bundle_tree(root: &Path) -> io::Result<()> {
+    write_files(root, passive_bundle_files()?)
+}
+fn write_files(root: &Path, files: BTreeMap<String, Vec<u8>>) -> io::Result<()> {
+    for (name, bytes) in files {
         let path = root.join(name);
         fs::create_dir_all(
             path.parent()

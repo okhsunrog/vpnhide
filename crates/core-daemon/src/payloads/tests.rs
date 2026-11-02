@@ -407,3 +407,21 @@ fn candidate_specific_projections_preserve_distinct_hook_spaces_and_refuse_gaps(
         Err(Rejection::PolicyUnresolved)
     );
 }
+
+#[test]
+fn passive_core_catalog_keeps_both_abis_without_becoming_an_autoload_recipient() {
+    let root = tempfile::tempdir().unwrap();
+    vpnhide_artifact_model::fixtures::write_passive_bundle_tree(root.path()).unwrap();
+    let catalog = Catalog::open(root.path()).unwrap();
+    catalog.manifest.require_complete().unwrap();
+    assert_eq!(
+        catalog
+            .payloads
+            .iter()
+            .filter(|p| matches!(p.metadata.implementation, PayloadKind::Zygisk { .. }))
+            .count(),
+        2
+    );
+    assert!(std::fs::symlink_metadata(root.path().join("zygisk")).is_err());
+    assert!(crate::zygisk::ZygiskTarget::open(root.path()).is_err());
+}

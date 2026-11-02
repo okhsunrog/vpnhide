@@ -8,6 +8,7 @@ Implementation progress and verification belong in the corresponding tracked pla
 | --- | --- | --- |
 | [0001](0001-automatic-gki-kmi-selection.md) | Proposed | Automatic GKI/KMI selection from the unified Core payload catalog |
 | [0002](0002-autonomous-diagnostics.md) | Draft | Autonomous native and Java diagnostics without relying on a third-party VPN |
+| [0003](0003-conditional-zygisk-publication.md) | Accepted | Conditional Core-owned Zygisk discovery; passive ZIP pair and boot-bound transitions |
 
 Statuses:
 

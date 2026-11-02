@@ -1869,3 +1869,59 @@ The approved tooling replacements are now wired to their consumers; destructive
 cold rescue remains an unimplemented feature, not a successful offline reset.
 Continue the original maintenance/bootstrap, RFC1/RFC2, Stage4/7 and Kotlin domain
 work; these are not replaced by the tooling slice or hidden as device gates.
+
+## Accepted conditional Zygisk design and passive-package implementation
+
+The maintainer explicitly approved RFC0003, superseding the pending decision
+above. Deduplication is **only in CoreZIP**: one passive pair under
+`payloads/zygisk`; an ordinary verified installed copy in a Core-managed discovery
+projection is allowed. No hardlink/symlink/move work for installed size. The base
+transition is boot-bound/PendingRestart, with provider-specific certified hot
+refresh deferred. No real provider setting, phone install or reboot is authorized.
+The Library research report was read; its proposal-only baseline suggestion is
+superseded by this approval. Notification features remain discussion-only.
+
+Implemented first code slice: assembler no longer adds autoload mirrors or marks
+Core as a Zygisk activation recipient. Descriptor validation rejects any top-level
+Core discovery entry. Signed replacement ImageFence checks exactly the passive
+payload set and rejects even empty/dangling-symlink `zygisk` paths. This addresses
+the confirmed Magisk-global-Zygisk-off service-catalog coupling at the package
+boundary. Both ABI payload hashes/ELF checks remain, and tests verify the actual
+new archive has exactly two .so members and no autoload path. Historical golden
+bytes are preserved explicitly for old-layout migration/revocation tests; new
+replacement/signature fixtures use the passive layout.
+
+28 artifact tests,362 Core library tests,18 tooling unit tests,4 CLI tests and
+actual Java RSA/P256/P384 signing/verification passed, as did strict host and
+both Android ABI Clippy. Old-layout source autoload images remain hash/inode
+fenced during migration; they are never accepted as a new replacement.
+This is **not** the completed runtime projection: loader catalog/recipient identity
+split, durable manager-integrated staging/withdrawal, verified next-boot plan,
+PendingRestart RPC/FFI/UI/export and lifecycle/migration crash tests still require
+code. Current legacy/Core recipient code is not a production fallback for the new
+layout. Continue implementation; do not count missing projection code as a device
+gate or ship a claim that Zygisk is already operational on the new passive layout.
+
+## Approved follow-on queue (2026-11-02, not implemented by this entry)
+
+After the conditional Zygisk vertical, implement Core-owned active attention and
+update scheduling/dedup. A private explicit APK receiver is only a wake signal:
+fetch the bounded current attention set over authenticated RPC, then use Android
+NotificationManager. Native channels are Updates, ProtectionProblems and
+ActionRequired; no duplicate preference switches. Respect permission/channel
+denial, force-stop and post-unlock/boot grace; never popup or reboot automatically,
+never alert about an unused backend, and persist identifiers for cancellation,
+coalescing and recovery. Missing-Core bootstrap remains distinct from a second
+APK runtime owner. This feature was explicitly approved after the earlier
+proposal-only note; no notification code has been added yet.
+
+Also approved: repository documentation refactor and root `ROADMAP.md`, merging
+existing `docs/notes/ROADMAP.md` without dropping ideas. Separate current user help,
+current architecture, RFC proposals/accepted designs and historical archive.
+Roadmap tracks bounded features/status/next steps with RFC links, and separates
+implementation from device acceptance. Update the AGENTS documentation maintenance
+rule with the actual code/doc cutover. The current APK-shipped EN/RU/ZH install
+help still has obsolete separate-backend ZIP/manual-KMI guidance and requires
+urgent synchronized correction with stable article IDs/deep links and generated
+help README. These tasks do not authorize a release, new repository, production
+secret retrieval or device/provider operations.

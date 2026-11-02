@@ -18,7 +18,7 @@ fn existing_android_key_types_sign_exact_unified_package_for_rust() {
     let package = temp.path().join("core.zip");
     vpnhide_artifact_model::archive::write_archive(
         &package,
-        &vpnhide_artifact_model::fixtures::bundle_files().unwrap(),
+        &vpnhide_artifact_model::fixtures::passive_bundle_files().unwrap(),
     )
     .unwrap();
     for (index, algorithm) in ["RSA", "secp256r1", "secp384r1"].into_iter().enumerate() {
