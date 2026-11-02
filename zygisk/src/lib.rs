@@ -96,7 +96,7 @@ use log::{LevelFilter, debug, error, info};
 use vpnhide_protocol as protocol;
 use vpnhide_protocol::hook_ids::{Hook, ZYGISK_HOOK_MASK};
 use zygisk_api::api::ZygiskApi;
-use zygisk_api::api::v2::{AppSpecializeArgs, V2, ZygiskOption};
+use zygisk_api::api::v2::{AppSpecializeArgs, ServerSpecializeArgs, V2, ZygiskOption};
 use zygisk_api::jni::{JNIEnv, objects::JString};
 use zygisk_api::{ZygiskModule, register_companion, register_module};
 
@@ -292,9 +292,7 @@ impl ZygiskModule for VpnHide {
         // UID this child will become, and one UID covers every process of a
         // multi-process app — so no package/sub-process name matching needed.
         let Ok(uid) = u32::try_from(*args.uid) else {
-            self.target_hookmask.store(0, Ordering::Relaxed);
-            self.report_status.store(false, Ordering::Relaxed);
-            mark_cleanup(&mut api);
+            self.retire_specialization(|| mark_cleanup(&mut api));
             return;
         };
         // nice_name is still read, but only to recognise the VPN Hide app
@@ -322,9 +320,7 @@ impl ZygiskModule for VpnHide {
             self.report_status
                 .store(package.as_deref() == Some(APP_PACKAGE), Ordering::Relaxed);
         } else {
-            self.target_hookmask.store(0, Ordering::Relaxed);
-            self.report_status.store(false, Ordering::Relaxed);
-            mark_cleanup(&mut api);
+            self.retire_specialization(|| mark_cleanup(&mut api));
         }
     }
 
@@ -356,8 +352,24 @@ impl ZygiskModule for VpnHide {
         }
     }
 
-    // No pre_server_specialize override — the trait default is empty,
-    // which is what we want: system_server isn't in scope for this module.
+    fn pre_server_specialize<'a>(
+        &self,
+        mut api: ZygiskApi<'a, V2>,
+        _env: JNIEnv<'a>,
+        _args: &'a mut ServerSpecializeArgs<'_>,
+    ) {
+        // Native app hooks never run in system_server. Its Java hooks are
+        // owned by LSPosed; retaining this unrelated .so serves no purpose.
+        self.retire_specialization(|| mark_cleanup(&mut api));
+    }
+}
+
+impl VpnHide {
+    fn retire_specialization(&self, unload: impl FnOnce()) {
+        self.target_hookmask.store(0, Ordering::Relaxed);
+        self.report_status.store(false, Ordering::Relaxed);
+        unload();
+    }
 }
 
 fn write_status_file(report: &HookInstallReport) {
@@ -928,3 +940,21 @@ register_module!(VpnHide);
 // Empty companion — declared so we don't have to recompile the .so if we
 // ever want to add a root-privileged helper later.
 register_companion!(companion::entry);
+
+#[cfg(test)]
+mod retirement_tests {
+    use super::*;
+    #[test]
+    fn outside_app_scope_clears_hook_and_heartbeat_state_before_unload_request() {
+        let module = VpnHide::default();
+        module.target_hookmask.store(u32::MAX, Ordering::Relaxed);
+        module.report_status.store(true, Ordering::Relaxed);
+        let mut calls = 0;
+        module.retire_specialization(|| {
+            assert_eq!(module.target_hookmask.load(Ordering::Relaxed), 0);
+            assert!(!module.report_status.load(Ordering::Relaxed));
+            calls += 1;
+        });
+        assert_eq!(calls, 1);
+    }
+}

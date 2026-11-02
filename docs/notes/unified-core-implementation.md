@@ -1771,3 +1771,16 @@ release matrix or Android32 execution was established by this reset slice. Mixed
 64/32 Zygote loader bootstrap remains implementation work: an ordinary diagnostics
 Service does not force Zygote32, and 64-bit evidence cannot satisfy its ABI proof.
 ImageFence remains an unwired maintenance primitive, not a completed update flow.
+
+## Zygisk outside-app residency correction
+
+`pre_server_specialize` now explicitly clears app-hook/heartbeat intent and
+requests `DlCloseModuleLibrary`; the trait default did neither. Native app hooks
+remain outside system_server; LSPosed framework hooks and fixtures are separate.
+The same retirement helper handles non-target/invalid-UID app callbacks. Its
+behavior regression passes, as does strict Clippy for both Android ABIs. Actual
+provider dlclose remains device acceptance, not a claim based on source alone.
+The full host Zygisk suite has 50 passes and two existing safe-copy failures:
+this sandbox returns ENOSYS for self `process_vm_readv` (independently reproduced).
+Tests and production pointer-safety behavior were not weakened to manufacture a
+pass. APK/Core contracts and library publication layout are unchanged.
