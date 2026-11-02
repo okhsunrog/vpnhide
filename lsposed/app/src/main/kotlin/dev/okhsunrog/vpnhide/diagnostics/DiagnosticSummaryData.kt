@@ -117,35 +117,3 @@ internal data class DiagnosticSnapshotInfo(
     val deliveryIdentity: String? = null,
     val desiredDeliveryConfirmed: Boolean? = null,
 )
-
-internal fun diagnosticSummary(snapshot: DiagnosticSnapshot): DiagnosticSummaryInfo =
-    diagnosticSummary(snapshot.presentation, snapshot.observedAt).copy(
-        snapshot =
-            DiagnosticSnapshotInfo(
-                revision = snapshot.revision,
-                rootObservationId = snapshot.rootSnapshot?.observationId,
-                rootGeneration = snapshot.sources.root.generation,
-                rootCurrent = dev.okhsunrog.vpnhide.currentObservationValue(snapshot.sources.root) != null,
-                routingObservationId =
-                    snapshot.sources.routing.lastGood
-                        ?.request
-                        ?.id,
-                routingGeneration = snapshot.sources.routing.generation,
-                changeEpoch = snapshot.sources.impact.changeEpoch,
-                desiredRevision = snapshot.sources.config.desiredRevision,
-                deliveryIdentity =
-                    desiredDeliveryIdentity(
-                        snapshot.sources.config,
-                        snapshot.sources.inputs
-                            ?.selfPackage
-                            .orEmpty(),
-                    ).identity,
-                desiredDeliveryConfirmed =
-                    desiredDeliveryIdentity(
-                        snapshot.sources.config,
-                        snapshot.sources.inputs
-                            ?.selfPackage
-                            .orEmpty(),
-                    ).confirmed,
-            ),
-    )

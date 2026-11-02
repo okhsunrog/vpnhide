@@ -104,8 +104,7 @@ directions, since `internal` is module-wide and the compiler will not.
   required checks, attribution, completeness, verdict, cleanup and cache.
   Render `AutonomousDiagnosticSnapshot`; preserve historical evidence with its
   currentness and root-join qualifications. Missing proof is unverified, never
-  green. The old local DiagnosticDomain/coordinator is disconnected pending
-  retirement; do not wire it back or use foreign-VPN routing as a prerequisite.
+  green. The old local DiagnosticDomain/coordinator is removed; do not restore it or use foreign-VPN routing as a prerequisite.
 - **`RootSnapshotCache`** — the batched heavy root read (core's `RootSnapshot`
   probe). CoreSession owns current config, native selection and routing; do not
   derive a competing authority from a retained root snapshot. Need new detail on the Dashboard/Hiding path? Add a section to

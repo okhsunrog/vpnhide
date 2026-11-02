@@ -81,37 +81,6 @@ internal fun recommendExport(
     )
 }
 
-internal fun exportRecommendation(snapshot: DiagnosticSnapshot): ExportRecommendation {
-    val root = currentObservationValue(snapshot.sources.root)
-    val presentation = snapshot.presentation
-    val measurement = presentation.measurement
-    val layers = measurement?.context?.coverageLayers
-    val report =
-        if (exportMeasurementIsCurrent(presentation) && layers != null) {
-            buildDiagnosticReport(
-                DiagnosticGate.ROUTED,
-                presentation.measurementResults,
-                layers.backend,
-                layers.lsposedActive,
-                true,
-                layers.installedOptionalHooks,
-            )
-        } else {
-            null
-        }
-    val raw = root?.sections?.get("lsposed_state").orEmpty()
-    val bootId = root?.sections?.get("current_boot_id").orEmpty()
-    val meta = parseLsposedStateMetadata(raw)
-    val javaFailure =
-        lsposedHooksActiveThisBoot(raw, bootId) &&
-            (
-                !meta["install_failures"].isNullOrBlank() || !meta["broken_fields"].isNullOrBlank() ||
-                    meta.values.any { it.contains("matched=0 minApi=0") } || meta["cs_network"].orEmpty().contains("getAllNetworks=0")
-            )
-    val boot = root?.nativeBoot?.takeIf { it.isFreshFor(bootId) }?.outcome
-    return recommendExport(root?.core?.current == true, report, boot, javaFailure)
-}
-
 /** Recommendations consume the same accepted Core facts as UI/export/agent. */
 internal fun exportRecommendation(snapshot: AutonomousDiagnosticSnapshot): ExportRecommendation {
     val core = snapshot.sources.core

@@ -9,6 +9,7 @@ import dev.okhsunrog.vpnhide.ObservedValue
 import dev.okhsunrog.vpnhide.ReadReason
 import dev.okhsunrog.vpnhide.RootCanonicalRead
 import dev.okhsunrog.vpnhide.RootSnapshot
+import dev.okhsunrog.vpnhide.belongsTo
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -79,6 +80,16 @@ class AutonomousDiagnosticSnapshotTest {
 
     private fun observed(root: RootSnapshot) =
         ObservationState(lastGood = ObservedValue(root, ObservationRequest(root.observationId, 0, 0, ReadReason.Background), 0))
+
+    @Test
+    fun `Dashboard root projection requires both observation and generation`() {
+        val facts = dev.okhsunrog.vpnhide.RootProjection(2, 3, "facts")
+        val root = RootSnapshot(emptyMap(), observationId = 2, generation = 3)
+        assertTrue(facts.belongsTo(root))
+        assertFalse(facts.belongsTo(root.copy(observationId = 1)))
+        assertFalse(facts.belongsTo(root.copy(generation = 4)))
+        assertFalse(facts.belongsTo(null))
+    }
 
     @Test
     fun `new Core epoch cannot borrow old root facts or old worker run`() {

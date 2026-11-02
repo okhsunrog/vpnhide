@@ -1359,3 +1359,36 @@ provenance and current canonical source. ktlint, detekt, CPD and lintDebug passe
 not suppressed. No-root and module-scaffold checks passed. Read-only reviewer
 identified the agent metadata failure/statistics gaps; both were corrected and
 rechecked. Log: `/tmp/vpnhide-consumer-tests-final.log`.
+
+## Cloud continuation: retire main-app diagnostic execution
+
+Removed the unreachable AppDiagnosticRunIo, DiagnosticDomain, identified local
+run executor, snapshot owner and snapshot assembly, plus capture-to-legacy-selftest
+mapping. Removed the legacy-only export recommendation/snapshot summary overloads.
+The old report DTO/pure presentation compatibility helpers remain separately;
+there is no local coroutine executor or capture admission path behind them.
+
+Test migration/deletion ledger for this cut:
+
+- 35 tests of the retired executor/domain/capture mapping are removed with that
+  implementation, not weakened. Foreign-VPN eligibility/confirmation rules and
+  capture-owned ROUTED claims no longer describe the accepted product contract.
+- RootProjection's observation-ID plus generation regression is moved unchanged
+  in behavior to AutonomousDiagnosticSnapshotTest. New acceptance tests cover
+  superseded root checkpoints, reader cancellation, already-published source
+  acceptance, transport-record immutability and config/epoch joins.
+- Core autonomous coordinator tests own deadline/epoch/process-birth/replay fences,
+  failed dispatch settlement, cleanup holds, fingerprint invalidation and cache
+  no-restart. Diagnostic-model assessment tests retain partial leaks under
+  unavailable controls/cleanup and never shrink the supported required plan.
+- AutonomousDiagnosticsTest owns process-scope/coalesced explicit Retry and
+  zero-admission on startup/read/observation changes, with refusal not retried.
+  AutonomousExportTest/schema4 golden own retained-evidence provenance and null
+  legacy claims. Existing reducer/security/FFI/migration/probe behavior tests are
+  retained; no test target or quality rule was disabled.
+
+Retirement validation: 882 JVM tests passed (35 obsolete-owner tests removed,
+one root-projection regression moved); ktlint/detekt/CPD/lintDebug passed on the
+final cut. Verification log: `/tmp/vpnhide-retire-local-diagnostics-verified.log`.
+No user-visible behavior beyond the preceding consumer cutover; internal removal
+needs no additional changelog fragment. RPC19/journal11/kernel2 unchanged.

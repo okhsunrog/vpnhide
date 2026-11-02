@@ -1,5 +1,12 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
+/** Retained legacy report projection; no executor or admission path. */
+internal data class DiagnosticRunView(
+    val core: DiagnosticRunState = DiagnosticRunState(),
+    val activeResults: CheckResults? = null,
+    val attemptResults: Map<Long, CheckResults> = emptyMap(),
+)
+
 /**
  * One immutable projection of the diagnostic domain for every consumer
  * (screens, bridge, bundle): the shared eligibility decision, the active run,
