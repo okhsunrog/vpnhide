@@ -485,26 +485,30 @@ pub fn parse_import(raw: &str) -> io::Result<CanonicalConfig> {
 pub fn normalize_interchange(mut config: CanonicalConfig) -> CanonicalConfig {
     for app in config.apps.values_mut() {
         if let Some(policy) = &mut app.port_policy {
-            // Legacy app import treated unknown UI mode labels as Custom. The
-            // explicit rules remain authoritative; no preset is inferred.
-            if policy.mode != "preset" {
-                policy.mode = "custom".into();
-            }
-            policy.rules.sort_by_key(|rule| {
-                (
-                    rule.start,
-                    rule.end,
-                    match rule.protocol {
-                        PortProtocol::Both => 0,
-                        PortProtocol::Tcp => 1,
-                        PortProtocol::Udp => 2,
-                    },
-                )
-            });
-            policy.rules.dedup();
+            normalize_port_policy(policy);
         }
     }
     config
+}
+
+pub fn normalize_port_policy(policy: &mut PortPolicy) {
+    // Legacy app import treated unknown UI mode labels as Custom. The
+    // explicit rules remain authoritative; no preset is inferred.
+    if policy.mode != "preset" {
+        policy.mode = "custom".into();
+    }
+    policy.rules.sort_by_key(|rule| {
+        (
+            rule.start,
+            rule.end,
+            match rule.protocol {
+                PortProtocol::Both => 0,
+                PortProtocol::Tcp => 1,
+                PortProtocol::Udp => 2,
+            },
+        )
+    });
+    policy.rules.dedup();
 }
 
 #[cfg(test)]

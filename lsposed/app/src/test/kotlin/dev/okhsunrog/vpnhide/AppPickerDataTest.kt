@@ -8,7 +8,6 @@ import dev.okhsunrog.vpnhide.picker.autoHiddenPackagesNeedReconcile
 import dev.okhsunrog.vpnhide.picker.buildCanonicalConfigForAppPickerSave
 import dev.okhsunrog.vpnhide.picker.looksLikeVpnAppName
 import dev.okhsunrog.vpnhide.picker.manualHiddenPackages
-import dev.okhsunrog.vpnhide.picker.resolveHiddenPackages
 import dev.okhsunrog.vpnhide.picker.resolveNativeHookSelection
 import dev.okhsunrog.vpnhide.picker.updateManualHiddenPackages
 import org.junit.Assert.assertEquals
@@ -16,43 +15,6 @@ import org.junit.Test
 
 class AppPickerDataTest {
     private val self = "dev.okhsunrog.vpnhide"
-
-    @Test
-    fun `preserves existing hidden and always includes self`() {
-        assertEquals(
-            listOf("com.a", "com.b", self).sorted(),
-            resolveHiddenPackages(existing = setOf("com.b", "com.a"), selfPkg = self),
-        )
-    }
-
-    @Test
-    fun `empty existing still hides self`() {
-        assertEquals(listOf(self), resolveHiddenPackages(emptySet(), self))
-    }
-
-    @Test
-    fun `observer can stay hidden`() {
-        assertEquals(
-            listOf("com.keep", "com.x", self).sorted(),
-            resolveHiddenPackages(existing = setOf("com.x", "com.keep"), selfPkg = self),
-        )
-    }
-
-    @Test
-    fun `self stays hidden`() {
-        assertEquals(
-            listOf(self),
-            resolveHiddenPackages(existing = setOf(self), selfPkg = self),
-        )
-    }
-
-    @Test
-    fun `result is deduplicated and sorted`() {
-        assertEquals(
-            listOf("com.a", "com.z", self).sorted(),
-            resolveHiddenPackages(existing = setOf("com.z", "com.a", self), selfPkg = self),
-        )
-    }
 
     @Test
     fun `save preserves selected apps missing from current picker list`() {

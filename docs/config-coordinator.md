@@ -35,6 +35,15 @@ These calls perform no socket IO or effects. Core repeats validation and capacit
 admission against its fresh state before journaling or persistence. Save/Cancel
 and recovery of an uncertain submitted operation remain unchanged.
 
+Role-set reconstruction, picker Save projection and manual/automatic hidden-set
+reconciliation live in `core-rpc::config_selection`. Android supplies package
+signals and scan completeness; local FFI returns the candidate without a root
+request. Missing rows retain independent roles and overrides. A partial scan
+retains unseen auto-hidden members; observed packages are recomputed against the
+current rules. Re-enabling a role resets stale hook overrides, while roles that
+stay enabled retain their overrides. These projections preserve `debugSwitch`
+independently of effective capture logging.
+
 Editor ViewModels retain drafts through recreation. Acknowledgement removes only
 submitted revisions, preserving typing during Save. A draft registered after
 dispatch remains visible and is reported as an overlapping UI edit; it cannot

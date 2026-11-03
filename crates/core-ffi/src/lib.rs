@@ -12,6 +12,8 @@ pub use autonomous::*;
 mod native_lifecycle;
 pub use native_lifecycle::*;
 mod config_preview;
+mod selection_preview;
+pub use selection_preview::*;
 mod migration;
 pub use config_preview::*;
 mod policy;

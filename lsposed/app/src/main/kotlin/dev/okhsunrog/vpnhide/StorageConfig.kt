@@ -1,7 +1,9 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.picker.TargetsSnapshot
+import uniffi.vpnhide_core_ffi.CoreRoleSets
 import uniffi.vpnhide_core_ffi.encodeCanonicalInterchange
+import uniffi.vpnhide_core_ffi.previewRoleConfig
 import uniffi.vpnhide_core_ffi.previewSelfTarget
 
 internal fun nativeHookFamilyFor(backend: NativeBackendId?): NativeHookFamily =
@@ -32,36 +34,13 @@ internal fun buildCanonicalConfig(
     observerPkgs: Collection<String>,
     portsPkgs: Collection<String>,
     existing: CanonicalConfig? = null,
-): CanonicalConfig {
-    val java = javaPkgs.toSet()
-    val native = nativePkgs.toSet()
-    val hidden = hiddenPkgs.toSet()
-    val observers = observerPkgs.toSet()
-    val ports = portsPkgs.toSet()
-    val packages = (java + native + hidden + observers + ports).sorted()
-    val apps =
-        packages
-            .associateWith { pkg ->
-                val previous = existing?.apps?.get(pkg)
-                val previousNative = previous?.native
-                CanonicalApp(
-                    java = pkg in java,
-                    javaHooks = previous?.javaHooks?.takeIf { pkg in java && previous.java },
-                    native = if (pkg in native) previousNative?.takeIf { it.enabled } ?: NativeRole.All else NativeRole.Disabled,
-                    appHiding = pkg in observers,
-                    ports = pkg in ports,
-                    portPolicy = previous?.portPolicy?.takeIf { pkg in ports && previous.ports },
-                    hidden = pkg in hidden,
-                )
-            }.filterValues { it.hasAnyRole }
-    return CanonicalConfig(
-        version = 1,
-        debug = debug,
-        debugSwitch = debugSwitch ?: existing?.debugSwitch ?: debug,
-        apps = apps,
-        settings = existing?.settings ?: CanonicalSettings(),
-    )
-}
+): CanonicalConfig =
+    previewRoleConfig(
+        debug,
+        debugSwitch,
+        CoreRoleSets(javaPkgs.toList(), nativePkgs.toList(), hiddenPkgs.toList(), observerPkgs.toList(), portsPkgs.toList()),
+        existing?.toCore(),
+    ).toCanonical()
 
 internal fun buildCanonicalConfigFromTargetsSnapshot(
     snapshot: TargetsSnapshot,

@@ -40,6 +40,7 @@ use std::time::Duration;
 pub mod canonical;
 mod config;
 pub mod config_edit;
+pub mod config_selection;
 mod diag;
 mod edit;
 mod logcat;

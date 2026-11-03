@@ -126,7 +126,11 @@ directions, since `internal` is module-wide and the compiler will not.
   schema-validation policy. Explicit same-value intent and UI draft protection
   remain app responsibilities; preview does not replace Core admission.
 - **`CanonicalConfigData` / `StorageConfig`** — shared canonical JSON models/parsing,
-  app-side config builders and migration helpers. The app never writes the file
+  local FFI adapters for `core-rpc::config_selection` role builders, picker Save
+  and manual/auto-hidden reconciliation, plus migration adapters. Preserve partial
+  inventory and debug-intent semantics; do not recreate their Kotlin policy.
+  The hook's direct read parser stays isolated from new app-only FFI calls.
+  The app never writes the file
   itself: core does, atomically, for each accepted edit. The canonical JSON is the persistent
   target config; legacy `targets.txt` / UID files are migration inputs or
   derived runtime state, not app-owned user config.

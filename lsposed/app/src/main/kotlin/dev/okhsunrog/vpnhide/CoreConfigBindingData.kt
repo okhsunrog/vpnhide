@@ -47,7 +47,7 @@ internal fun CoreCanonicalConfig.toCanonical(): CanonicalConfig =
         ),
     )
 
-private fun CanonicalApp.toCore(): CoreAppConfig =
+internal fun CanonicalApp.toCore(): CoreAppConfig =
     CoreAppConfig(
         java,
         javaHooks,
