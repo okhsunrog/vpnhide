@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fs;
 use std::io::{ErrorKind, Write};
-use std::os::raw::{c_int, c_long};
+use std::os::raw::c_long;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
@@ -97,10 +97,7 @@ const SUPERCALL_KPM_INFO: i64 = 0x1032;
 
 unsafe extern "C" {
     fn syscall(num: c_long, ...) -> c_long;
-    fn flock(fd: c_int, operation: c_int) -> c_int;
 }
-
-const LOCK_EX: c_int = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PmReadyWait {

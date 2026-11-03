@@ -380,7 +380,7 @@ impl PackageStaging {
             file,
         })
     }
-    fn lease(&self) -> Result<crate::file_lock::FileLock, PackageError> {
+    fn lease(&self) -> Result<vpnhide_bounded_process::FileLock, PackageError> {
         let file = openat(
             &self.directory,
             "staging.lock",
@@ -391,7 +391,7 @@ impl PackageStaging {
         if !meta.is_file() || meta.nlink() != 1 {
             return Err(PackageError::UnsafeStorage);
         }
-        crate::file_lock::FileLock::exclusive(file).map_err(|error| {
+        vpnhide_bounded_process::FileLock::exclusive(file).map_err(|error| {
             if error.kind() == io::ErrorKind::WouldBlock {
                 PackageError::Busy
             } else {

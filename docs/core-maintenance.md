@@ -80,10 +80,12 @@ package without resetting the visible floor. Only bounded root-owned inert
 temporary files are recovered under the lease.
 
 Floor, staging and daemon instance exclusion share a scoped nonblocking file-lock
-guard. Explicit release in the owning process prevents inherited pre-exec
+guard from `bounded-process`. KPM observation/delivery uses the same guard,
+preserving its existing blocking/nonblocking admission modes. Explicit release in the owning process prevents inherited pre-exec
 descriptors from extending a finished scope; dropping a child's copy cannot unlock
 its live parent. This preserves exclusion and never removes the lock inode.
-See [the fork-lifetime regressions](archive/2026-11-03-maintenance-lock-lifetime.md).
+See the [maintenance fork regressions](archive/2026-11-03-maintenance-lock-lifetime.md)
+and [KPM lifetime correction](archive/2026-11-03-kpm-lock-lifetime.md).
 
 ## Durable command and manager dispatch
 

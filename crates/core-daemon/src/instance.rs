@@ -8,7 +8,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 pub struct InstanceGuard {
-    _locks: Vec<crate::file_lock::FileLock>,
+    _locks: Vec<vpnhide_bounded_process::FileLock>,
 }
 
 fn lock_path(path: &Path) -> PathBuf {
@@ -47,7 +47,7 @@ impl InstanceGuard {
             }
             // SAFETY: this process owns the open descriptor. Nonblocking admission
             // never waits behind a second daemon and never deletes an owner's inode.
-            let lock = crate::file_lock::FileLock::exclusive(file).map_err(|error| {
+            let lock = vpnhide_bounded_process::FileLock::exclusive(file).map_err(|error| {
                 io::Error::new(
                     error.kind(),
                     format!("core state already owned ({}): {error}", path.display()),

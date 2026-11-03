@@ -22,7 +22,7 @@ pub struct FloorStore {
 }
 pub struct FloorLease<'a> {
     store: &'a FloorStore,
-    _lock: crate::file_lock::FileLock,
+    _lock: vpnhide_bounded_process::FileLock,
 }
 impl FloorStore {
     pub fn open(persistent: &Path) -> Result<Self, PackageError> {
@@ -64,7 +64,7 @@ impl FloorStore {
         if !metadata.is_file() || metadata.nlink() != 1 {
             return Err(PackageError::UnsafeStorage);
         }
-        let lock = crate::file_lock::FileLock::exclusive(file).map_err(|error| {
+        let lock = vpnhide_bounded_process::FileLock::exclusive(file).map_err(|error| {
             if error.kind() == io::ErrorKind::WouldBlock {
                 PackageError::Busy
             } else {

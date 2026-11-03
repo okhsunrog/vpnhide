@@ -7,6 +7,7 @@ They are not the current work index or authority to implement a reopened design.
 - [KPM NULL-ifconf qualification](2026-11-03-kpm-ifconf-qualification.md)
 - [Controlled interface-path lookup qualification](2026-11-03-native-filesystem-fixture-qualification.md)
 - [Capture logging limits across suspend](2026-11-03-capture-boot-clock-qualification.md)
+- [KPM lock lifetime and shared owner](2026-11-03-kpm-lock-lifetime.md)
 - [Maintenance lock lifetime under fork](2026-11-03-maintenance-lock-lifetime.md)
 - [Shared snapshot codec and validation](2026-11-03-shared-probe-frames.md)
 - [GKI modpost qualification experiment](2026-11-03-gki-modpost-qualification.md)

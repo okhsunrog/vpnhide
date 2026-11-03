@@ -3,6 +3,9 @@
 //! output-reader threads. The group leader is not reaped until its group is
 //! terminated, so a group signal never targets a recycled PID.
 
+mod file_lock;
+pub use file_lock::FileLock;
+
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;

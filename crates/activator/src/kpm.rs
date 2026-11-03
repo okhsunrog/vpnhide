@@ -1,7 +1,6 @@
 use std::ffi::CString;
 use std::fs::{self, OpenOptions};
 use std::io;
-use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_long, c_void};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -18,9 +17,9 @@ use vpnhide_protocol::{KPM_ARGS_LEN, Kind, TELEMETRY_VERSION, parse_config, peek
 
 use crate::{
     APATCH_DIR, APATCH_TRUSTED_SU_KEY, CHILD_COMMAND_TIMEOUT, KPM_CTL_LOCK, KPM_NAME,
-    KPM_TRUNCATION_MARKER, LOCK_EX, Result, SUPERCALL_HELLO, SUPERCALL_HELLO_MAGIC,
-    SUPERCALL_KPM_CONTROL, SUPERCALL_KPM_INFO, SUPERCALL_KPM_LIST, SUPERCALL_KPM_LOAD,
-    SUPERKEY_FILE, flock, output_with_timeout, syscall,
+    KPM_TRUNCATION_MARKER, Result, SUPERCALL_HELLO, SUPERCALL_HELLO_MAGIC, SUPERCALL_KPM_CONTROL,
+    SUPERCALL_KPM_INFO, SUPERCALL_KPM_LIST, SUPERCALL_KPM_LOAD, SUPERKEY_FILE, output_with_timeout,
+    syscall,
 };
 
 // A non-persistent key belongs to this core process. It is never included in config,
@@ -174,7 +173,7 @@ impl Drop for LocalKpmGuard {
 }
 
 struct KpmCtlLock {
-    _file: fs::File,
+    _file: vpnhide_bounded_process::FileLock,
     _local: LocalKpmGuard,
 }
 
@@ -203,12 +202,13 @@ impl KpmCtlLock {
             .truncate(false)
             .open(path)?;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-        // LOCK_NB is 4 on the supported Linux/Android targets. Core reports busy
-        // rather than blocking its mutation owner behind a legacy process.
-        let flags = LOCK_EX | if nonblocking { 4 } else { 0 };
-        if unsafe { flock(file.as_raw_fd(), flags) } != 0 {
-            return Err(io::Error::last_os_error().into());
-        }
+        // Logical scope ends even if a concurrent fork inherited this file
+        // description before CLOEXEC; the local gate releases only afterwards.
+        let file = if nonblocking {
+            vpnhide_bounded_process::FileLock::exclusive(file)?
+        } else {
+            vpnhide_bounded_process::FileLock::exclusive_blocking(file)?
+        };
         Ok(Self {
             _file: file,
             _local: local,
@@ -1275,6 +1275,45 @@ mod identity_tests {
     }
 
     #[test]
+    fn released_local_observation_does_not_keep_its_flock_in_a_pre_exec_child() {
+        use super::KpmCtlLock;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "vpnhide-kpm-inherited-{}-{nonce}",
+            std::process::id()
+        ));
+        let owner = KpmCtlLock::acquire_at(&path, true).unwrap();
+        // SAFETY: the child only pauses until killed; it runs no Rust code or
+        // unrelated destructors after fork in this multithreaded host test.
+        let child = unsafe { libc::fork() };
+        assert!(child >= 0);
+        if child == 0 {
+            loop {
+                unsafe { libc::pause() };
+            }
+        }
+        drop(owner);
+        let replacement = KpmCtlLock::acquire_delivery(&path);
+        unsafe {
+            libc::kill(child, libc::SIGKILL);
+            while libc::waitpid(child, std::ptr::null_mut(), 0) < 0 {
+                if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+                    break;
+                }
+            }
+        }
+        assert!(
+            replacement.is_ok(),
+            "released observation still owns the file lock: {:?}",
+            replacement.err()
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn delivery_waits_for_local_observation_and_dispatches_once() {
         use super::{CoreKpm, KpmClient};
         use std::os::unix::fs::PermissionsExt;
@@ -1335,12 +1374,10 @@ esac
         assert!(!root.join("dispatched").exists());
         std::fs::write(root.join("release"), "").unwrap();
         assert!(reader.join().unwrap().unwrap().is_some());
-        assert!(
-            result
-                .recv_timeout(std::time::Duration::from_secs(2))
-                .unwrap()
-                .is_ok()
-        );
+        let delivered = result
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert!(delivered.is_ok(), "delivery failed: {delivered:?}");
         writer.join().unwrap();
         assert_eq!(
             std::fs::read_to_string(root.join("dispatched")).unwrap(),

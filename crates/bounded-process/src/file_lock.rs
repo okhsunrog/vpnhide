@@ -1,7 +1,7 @@
-//! Nonblocking exclusion owned by a Rust scope, not by inherited pre-exec FDs.
+//! File exclusion owned by a Rust scope, not by inherited pre-exec FDs.
 use std::{fs::File, io, os::fd::AsRawFd};
 
-pub(crate) struct FileLock {
+pub struct FileLock {
     file: File,
     owner: libc::pid_t,
 }
@@ -9,7 +9,16 @@ impl FileLock {
     /// Callers open an independent description and validate its inode/owner
     /// before admission. The guard never deletes or replaces the lock inode.
     pub fn exclusive(file: File) -> io::Result<Self> {
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        Self::acquire(file, true)
+    }
+    /// Preserve an explicitly blocking caller's existing cross-process wait.
+    /// Prefer `exclusive` for interactive admission; neither method retries an effect.
+    pub fn exclusive_blocking(file: File) -> io::Result<Self> {
+        Self::acquire(file, false)
+    }
+    fn acquire(file: File, nonblocking: bool) -> io::Result<Self> {
+        let flags = libc::LOCK_EX | if nonblocking { libc::LOCK_NB } else { 0 };
+        if unsafe { libc::flock(file.as_raw_fd(), flags) } != 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(Self {
