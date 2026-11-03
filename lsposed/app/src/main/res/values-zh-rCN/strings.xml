@@ -588,4 +588,11 @@
     <string name="native_status_bundled">包含在 Core 中</string>
     <string name="native_status_builtin">内核内置</string>
     <string name="native_status_legacy">独立模块</string>
+    <string name="core_maintenance_title">Core 更新</string>
+    <string name="core_maintenance_choose">选择 Core 更新 ZIP</string>
+    <string name="core_maintenance_pending_restart">更新已准备好。请在方便时重启手机。</string>
+    <string name="core_maintenance_verified">更新后的 Core 正在运行。</string>
+    <string name="core_maintenance_failed">更新被拒绝，未重新运行安装程序。</string>
+    <string name="core_maintenance_unknown">无法确认更新。请在重试前检查 Core 状态。</string>
+    <string name="core_maintenance_refresh">检查更新状态</string>
 </resources>

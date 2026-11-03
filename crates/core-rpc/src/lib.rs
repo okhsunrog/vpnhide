@@ -45,6 +45,8 @@ pub mod config_selection;
 mod diag;
 mod edit;
 mod logcat;
+mod maintenance;
+pub use maintenance::*;
 mod native_status;
 pub mod port_policy;
 pub use native_status::*;
@@ -123,6 +125,10 @@ pub struct OperationId(pub u64);
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CoreCommand {
+    StageCoreReplacement {
+        base: BaseRef,
+        request: CoreReplacementRequest,
+    },
     Edit {
         base: BaseRef,
         edit: ConfigEdit,
@@ -225,6 +231,8 @@ pub struct Published {
 /// and are joined with these facts at its observation boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct StateSnapshot {
+    #[serde(default)]
+    pub maintenance: Option<CoreMaintenanceStatus>,
     #[serde(default)]
     pub native_view: NativeReadModel,
     #[serde(default)]
@@ -566,6 +574,7 @@ pub enum ConfigPhase {
     Cleanup,
     Native,
     Ports,
+    Maintenance,
 }
 
 /// One phase of an operation as the core executed it.
@@ -930,6 +939,7 @@ mod tests {
                     epoch: u64::MAX,
                     revision: 7,
                     snapshot: StateSnapshot {
+                        maintenance: None,
                         zygisk_lifecycle: None,
                         zygisk_revocation: None,
                         autonomous_diagnostics: None,

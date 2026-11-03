@@ -450,6 +450,9 @@ impl RealPhaseRunner {
 impl PhaseRunner for RealPhaseRunner {
     fn run(&self, phase: ConfigPhase, candidate: &CanonicalConfig) -> PhaseOutcome {
         match phase {
+            // Replacement runs only through its authenticated, source-bound
+            // executor, never through a canonical edit's generic phase runner.
+            ConfigPhase::Maintenance => PhaseOutcome::FailedKnown,
             ConfigPhase::Persist => match &self.config_path {
                 Some(path) => {
                     if self.reset_config {

@@ -31,7 +31,8 @@ vpnhide_build_contract = { path = "../build-contract" }
 [dependencies]
 vpnhide_maintenance_model = { path = "../maintenance-model" }
 vpnhide_build_contract = { path = "../build-contract" }
-vpnhide_artifact_model = { path = "../artifact-model" }
+vpnhide_artifact_model = { path = "../artifact-model", features = ["archives"] }
+vpnhide_bounded_process = { path = "../bounded-process" }
 vpnhide_package_trust = { path = "../package-trust" }
 vpnhide_native_policy = { path = "../native-policy" }
 vpnhide_migration_policy = { path = "../migration-policy" }

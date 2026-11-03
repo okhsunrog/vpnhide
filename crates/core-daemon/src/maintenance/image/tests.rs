@@ -152,6 +152,10 @@ fn arm32_post_customize_image_uses_its_own_signed_daemon_and_running_inode() {
     let path = f.root.path().join("vpnhide-core");
     fs::write(&path, &files["bin/arm/vpnhide-core"]).unwrap();
     let fence = ImageFence::inspect(f.root.path(), Some(&f.descriptor), Abi::Arm32, f.uid).unwrap();
+    assert_eq!(
+        fence,
+        ImageFence::inspect_replacement(f.root.path(), &f.descriptor, f.uid).unwrap()
+    );
     fence.require_unchanged_owned(f.root.path(), f.uid).unwrap();
     fence
         .require_running_owned(&File::open(path).unwrap(), f.uid)

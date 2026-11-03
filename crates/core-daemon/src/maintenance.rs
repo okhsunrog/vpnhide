@@ -15,7 +15,10 @@ use vpnhide_core_rpc::{CanonicalConfig, OperationId};
 use vpnhide_migration_policy::{LegacyCandidate, SourceRole};
 
 pub mod image;
+pub mod legacy_modules;
+pub mod manager;
 pub mod package;
+pub mod replacement;
 
 const MAX_SOURCE_BYTES: u64 = 64 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

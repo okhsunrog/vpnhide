@@ -28,7 +28,10 @@ impl FloorStore {
     pub fn open(persistent: &Path) -> Result<Self, PackageError> {
         Self::open_owned(persistent, 0)
     }
-    pub(super) fn open_owned(persistent: &Path, uid: u32) -> Result<Self, PackageError> {
+    pub(in crate::maintenance) fn open_owned(
+        persistent: &Path,
+        uid: u32,
+    ) -> Result<Self, PackageError> {
         let directory = directory(persistent)?;
         private(&directory, uid)?;
         Ok(Self {

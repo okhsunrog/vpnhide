@@ -27,6 +27,7 @@ use crate::config_file;
 use crate::journal::{self, Journal, JournalEntry};
 use crate::operation::{self, PhaseHook, PlanKind, RealPhaseRunner};
 use crate::publisher::Publisher;
+mod core_maintenance;
 mod revocation;
 mod root_probe_admission;
 mod self_target;
@@ -122,6 +123,7 @@ pub struct CoreState {
     work_rpc: Arc<tokio::sync::Semaphore>,
     status_rpc: Arc<tokio::sync::Semaphore>,
     root_rpc: root_probe_admission::RootProbeAdmission,
+    replacement_preparing: Arc<std::sync::atomic::AtomicBool>,
     recovery_rpc: Arc<tokio::sync::Semaphore>,
     live_leases: Mutex<std::collections::HashMap<DebugLeaseId, LiveLease>>,
     /// Where the durable canonical config lives. `None` = no persistence (host tests); a
@@ -277,8 +279,9 @@ impl CoreState {
         command: CoreCommand,
     ) -> Result<Accepted, SubmitError> {
         let maintenance = self.prepare_maintenance(op, &command)?;
+        let replacement = self.prepare_replacement(op, &command, None)?;
         self.call_writer(move |state| {
-            state.execute_command_admitted(op, command, None, maintenance)
+            state.execute_command_prepared(op, command, None, maintenance, replacement)
         })?
     }
 
@@ -439,6 +442,11 @@ impl CoreState {
             enabled,
         };
         let (base, edit, mut spec) = match command {
+            CoreCommand::StageCoreReplacement { .. } => {
+                return Err(SubmitError::Rejected {
+                    reason: "replacement_preparation_required".into(),
+                });
+            }
             CoreCommand::PrepareSelfTargets { base } => {
                 return self.execute_self_targets(op, base, maintenance, false, admitted);
             }
@@ -659,6 +667,11 @@ impl CoreState {
     }
     fn publish_store(&self, store: &ConfigStore) {
         self.publisher.update(|snapshot| {
+            snapshot.maintenance = store
+                .journal
+                .replacement
+                .as_ref()
+                .map(|work| work.status.clone());
             crate::native_status::publish_journal(&mut snapshot.native_view, &store.journal);
             let revocation = store
                 .journal
@@ -698,8 +711,13 @@ impl CoreState {
                 .filter(|entry| entry.record.settled.is_none())
                 .map(|entry| entry.record.op)
                 .collect();
-            snapshot.mutation_held =
-                snapshot.storage_fault.is_some() || store.journal.has_unknown();
+            snapshot.mutation_held = snapshot.storage_fault.is_some()
+                || store.journal.has_unknown()
+                || store
+                    .journal
+                    .replacement
+                    .as_ref()
+                    .is_some_and(|work| work.blocks_runtime());
             snapshot.held_resources = store.journal.held_resources();
             for entry in &store.journal.operations {
                 if entry.is_revocation_only_repair() {
@@ -1112,6 +1130,7 @@ impl CoreState {
             work_rpc: Arc::new(tokio::sync::Semaphore::new(6)),
             status_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
             root_rpc: root_probe_admission::RootProbeAdmission::default(),
+            replacement_preparing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             recovery_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
             live_leases: Mutex::new(Default::default()),
             config_path: None,
@@ -1293,6 +1312,7 @@ impl CoreState {
             work_rpc: Arc::new(tokio::sync::Semaphore::new(6)),
             status_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
             root_rpc: root_probe_admission::RootProbeAdmission::default(),
+            replacement_preparing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             recovery_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
             live_leases: Mutex::new(Default::default()),
             config_path: Some(path),
@@ -1430,6 +1450,10 @@ impl CoreState {
         };
         if self.snapshot().startup_error.is_some() || self.snapshot().storage_fault.is_some() {
             blocked("native startup refused while durable storage is unavailable".into());
+            return;
+        }
+        if let Err(reason) = self.reconcile_core_replacement(&mut store) {
+            blocked(reason);
             return;
         }
         let boot_id = crate::native_boot::read_boot_id(&env.boot_id_path);
@@ -1865,6 +1889,14 @@ impl CoreState {
             });
         }
         config_edit::validate_edit(edit).map_err(|reason| SubmitError::Rejected { reason })?;
+        if store
+            .journal
+            .replacement
+            .as_ref()
+            .is_some_and(|work| work.blocks_runtime())
+        {
+            return Err(SubmitError::Busy);
+        }
         let repair = matches!(edit, ConfigEdit::RepairActivation);
         if repair
             && spec.intent == journal::CommandIntent::Edit
@@ -1873,6 +1905,17 @@ impl CoreState {
             && store.journal.revocation_uncertain()
         {
             return self.execute_revocation_repair(op, base, spec.admitted.take(), store);
+        }
+        if matches!(
+            spec.intent,
+            journal::CommandIntent::FullReset | journal::CommandIntent::CleanupLegacy
+        ) && store
+            .journal
+            .replacement
+            .as_ref()
+            .is_some_and(|work| work.retained())
+        {
+            return Err(SubmitError::Busy);
         }
         let held_persist = store.journal.expired_holds.contains(&ConfigPhase::Persist)
             || store
@@ -2305,8 +2348,13 @@ impl CoreState {
             snapshot
                 .operations_in_flight
                 .retain(|running| *running != op);
-            snapshot.mutation_held =
-                snapshot.storage_fault.is_some() || store.journal.has_unknown();
+            snapshot.mutation_held = snapshot.storage_fault.is_some()
+                || store.journal.has_unknown()
+                || store
+                    .journal
+                    .replacement
+                    .as_ref()
+                    .is_some_and(|work| work.blocks_runtime());
         });
         let native_ok = outcome
             .phases
@@ -2364,6 +2412,7 @@ impl PhaseHook for FenceOnlyHook<'_> {
 
 fn phase_intent_point(phase: ConfigPhase) -> &'static str {
     match phase {
+        ConfigPhase::Maintenance => "maintenance-intent",
         ConfigPhase::Persist => "persist-intent",
         ConfigPhase::Native => "native-intent",
         ConfigPhase::Ports => "ports-intent",
@@ -2374,6 +2423,7 @@ fn phase_intent_point(phase: ConfigPhase) -> &'static str {
 
 fn phase_delay_point(phase: ConfigPhase) -> &'static str {
     match phase {
+        ConfigPhase::Maintenance => "maintenance",
         ConfigPhase::Persist => "persist",
         ConfigPhase::Native => "native",
         ConfigPhase::Ports => "ports",
@@ -2917,6 +2967,7 @@ impl VpnhideCore for CoreServer {
             .map_err(|_| SubmitError::Busy)?;
         let cancelled = CancellationToken::new();
         let _cancel = crate::command_engine::CancelPreparation(cancelled.clone());
+        let caller = self.peer.map(|p| p.uid);
         let state = self.state;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
@@ -2926,12 +2977,15 @@ impl VpnhideCore for CoreServer {
             }
             let maintenance =
                 state.prepare_maintenance_before(op, &command, ctx.deadline, &cancelled)?;
+            let replacement = state.prepare_replacement(op, &command, caller)?;
             if cancelled.is_cancelled() || std::time::Instant::now() >= ctx.deadline {
                 return Err(SubmitError::Busy);
             }
             let ticket =
                 crate::command_engine::AdmissionTicket::after_preparation(ctx.deadline, cancelled);
-            state.engine.submit(op, command, ticket, maintenance)
+            state
+                .engine
+                .submit(op, command, ticket, maintenance, replacement)
         })
         .await
         .unwrap_or(Err(SubmitError::Unavailable))

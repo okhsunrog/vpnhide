@@ -160,6 +160,9 @@ pub struct PendingPersist {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandIntent {
+    StageCoreReplacement {
+        request_sha256: String,
+    },
     Edit,
     SetSuperkey {
         remember: bool,
@@ -375,6 +378,8 @@ pub struct NativeQuarantine {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
     #[serde(default)]
+    pub replacement: Option<crate::maintenance::replacement::ReplacementWork>,
+    #[serde(default)]
     pub zygisk_authority: Option<ZygiskAuthorityRecord>,
     /// Last exact grant observed on disk before admitting a replacement. Failed
     /// publication cannot erase the evidence required to revoke the old grant.
@@ -433,6 +438,7 @@ pub struct Journal {
 impl Default for Journal {
     fn default() -> Self {
         Journal {
+            replacement: None,
             version: JOURNAL_VERSION,
             zygisk_authority: None,
             prior_zygisk_authority: None,
@@ -680,6 +686,13 @@ impl Journal {
         if self.native_lifecycle_uncertain() {
             held.push(ConfigPhase::Native);
         }
+        if self
+            .replacement
+            .as_ref()
+            .is_some_and(|work| work.blocks_runtime())
+        {
+            held.push(ConfigPhase::Maintenance);
+        }
         held.sort_by_key(|phase| *phase as u8);
         held.dedup();
         held
@@ -700,6 +713,7 @@ impl Journal {
     /// Drop old settled/superseded receipts and advance bounded identity/conflict floors.
     pub fn prune(&mut self) {
         let retain = self.retain_settled;
+        let replacement_op = self.replacement.as_ref().map(|w| w.status.operation);
         let revocation_op = self
             .zygisk_revocation
             .as_ref()
@@ -711,6 +725,7 @@ impl Journal {
             .enumerate()
             .filter(|(_, e)| {
                 e.record.settled.is_some()
+                    && Some(e.record.op) != replacement_op
                     && Some(e.record.op) != self.debug_restore_op
                     && !(Some(e.record.op) == revocation_op && e.is_revocation_only_repair())
             })
@@ -758,6 +773,9 @@ impl Journal {
     /// Effects are never re-dispatched here; [`crate::recovery`] may resolve Unknown
     /// from durable evidence afterward.
     pub fn fence_unresolved(&mut self) {
+        if let Some(work) = self.replacement.as_mut() {
+            work.fence_restart();
+        }
         if let Some(record) = &self.zygisk_revocation
             && record.state == revocation::RevocationState::Confirmed
             && let Some(operation) = record.operation
@@ -830,6 +848,25 @@ pub fn read(path: &Path) -> io::Result<Journal> {
                 journal.version, JOURNAL_VERSION
             ),
         ));
+    }
+    if let Some(work) = &journal.replacement {
+        let valid_entry = journal.get(work.status.operation).is_some_and(|entry| {
+            entry.command
+                == Some(CommandIntent::StageCoreReplacement {
+                    request_sha256: work.request_hash(),
+                })
+                && entry.record.phases.len() == 1
+                && entry.record.phases[0].phase == ConfigPhase::Maintenance
+                && entry.candidate.is_none()
+                && entry.native_intent.is_none()
+                && entry.maintenance.is_none()
+        });
+        if journal.version < 13 || !work.valid(journal.issued_through) || !valid_entry {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid Core replacement identity",
+            ));
+        }
     }
     let invalid_startup = journal
         .native_startup
@@ -1194,6 +1231,26 @@ mod tests {
     use super::*;
     use vpnhide_core_rpc::{CanonicalConfig, ConfigToggle};
 
+    #[test]
+    fn prior_schemas_keep_operation_counters_and_expired_holds() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("journal.json");
+        for version in 1..JOURNAL_VERSION {
+            let old = Journal {
+                version,
+                issued_through: 99,
+                expired_through: 80,
+                expired_holds: vec![ConfigPhase::Native, ConfigPhase::Ports],
+                ..Default::default()
+            };
+            write_atomic(&path, &old).unwrap();
+            let new = read(&path).unwrap();
+            assert_eq!(new.version, JOURNAL_VERSION);
+            assert_eq!(new.issued_through, 99);
+            assert_eq!(new.expired_through, 80);
+            assert_eq!(new.expired_holds, old.expired_holds);
+        }
+    }
     #[test]
     fn startup_schema_upgrade_preserves_hold_and_rejects_corrupt_intent() {
         use crate::native_boot::prepared::{PayloadIdentity, TransitionAction, TransitionIntent};

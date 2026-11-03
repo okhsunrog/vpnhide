@@ -64,6 +64,13 @@ class CoreStateBindingContractTest {
         )
     private val publication =
         CorePublication(
+            maintenance =
+                uniffi.vpnhide_core_ffi.CoreMaintenanceStatus(
+                    operation = 8uL,
+                    targetCommit = "a".repeat(40),
+                    stage = uniffi.vpnhide_core_ffi.CoreMaintenanceStage.PENDING_RESTART,
+                    failure = null,
+                ),
             attachmentEvidence = CoreAttachmentEvidence(false, false, true, true),
             zygiskLifecycle = null,
             zygiskRevocation = null,
@@ -105,6 +112,9 @@ class CoreStateBindingContractTest {
         assertTrue(bound.mutationHeld)
         assertEquals(setOf(ConfigPhase.Native), bound.heldResources)
         assertEquals(listOf(CoreApplyIdentity(ConfigPhase.Native, 4, 8, PhaseOutcome.Unknown)), bound.applyEvidence)
+        assertEquals(publication.maintenance, bound.maintenance)
+        requireNotNull(publication.maintenance).stage = uniffi.vpnhide_core_ffi.CoreMaintenanceStage.VERIFIED
+        assertEquals(uniffi.vpnhide_core_ffi.CoreMaintenanceStage.PENDING_RESTART, bound.maintenance?.stage)
         assertEquals(publication.attachmentEvidence, bound.attachmentEvidence)
         publication.attachmentEvidence.kernelLeak = false
         assertTrue(requireNotNull(bound.attachmentEvidence).kernelLeak)

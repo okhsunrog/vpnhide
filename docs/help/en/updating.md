@@ -47,3 +47,17 @@ A reboot cannot replace an old Core package that was never updated.
 
 A self-built Built-in integration is kernel code: replacing the APK or Core ZIP
 does not replace that integration.
+
+## Updating through the app
+
+With a current compatible Core connection and an authenticated target embedded
+in the APK, the Dashboard offers **Choose Core update ZIP**. Select the matching
+full Core ZIP. Core checks the signature, exact package and staged result before
+reporting that a restart is needed. You decide when to reboot; the app never
+reboots the phone automatically. A prepared update is not yet the running Core.
+If confirmation is lost, check the same update's status instead of starting
+another installation. Unconfigured developer builds do not offer this action.
+
+Without Core or with incompatible APK/Core RPC versions, use the root manager's
+Modules screen as described above; the app has no su installer. The unified
+missing-Core bootstrap/handoff is still being implemented.

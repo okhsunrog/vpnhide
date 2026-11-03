@@ -1,9 +1,13 @@
-# Authenticated Core replacement preparation
+# Authenticated Core replacement
 
-This describes implemented preparation, not a completed install/update flow.
+Core now admits explicit replacement commands on its durable command writer.
+This covers updating an existing complete Core installation; missing-Core
+bootstrap and manager/SAF handoff for incompatible RPC versions remain separate
+work.
 Compatibility versions are owned by [build-contract](../crates/build-contract/src/lib.rs)
 and the shared protocol crate. APK/Core IPC and journal compatibility do not
-require rebuilding an otherwise compatible user builtin kernel. No device manager operation or boot write is performed by these APIs.
+require rebuilding an otherwise compatible user builtin kernel. The executor can stage an update through a qualified manager; it never reboots
+or writes a boot image.
 
 The existing app socket authenticates its peer UID and directory ownership. It
 does not verify APK signing certificates. An app-supplied ZIP hash or an unsigned
@@ -54,8 +58,10 @@ if the app source has subsequently changed or disappeared.
 An exclusive file lease serializes preparation across independent instances.
 Only private inert `copy-<operation>` leftovers are recovered under that lease;
 final packages are retained for the durable executor. At most two bounded final
-packages are admitted, each at most256MiB. A full store returns a distinct refusal
-and does not silently garbage-collect another operation's package. Unknown files,
+packages are admitted, each at most256MiB. With no retained replacement and an
+exclusive preparation permit, authenticated preparation releases only known inert
+prior packages, retaining the accepted floor package and incoming target. An
+active operation's package cannot be pruned. A full store otherwise refuses. Unknown files,
 exposed directories, damaged stored packages and uncertain storage stay errors.
 
 `package::FloorStore` now retains accepted sequence/hash state in the private
@@ -73,28 +79,77 @@ Post-rename sync failure is explicitly uncertain and can reconfirm the same
 package without resetting the visible floor. Only bounded root-owned inert
 temporary files are recovered under the lease.
 
-This component has no service/command admission caller yet. The common executor
-must invoke acceptance after durable user-command admission and before manager
-dispatch; it must separately retain active work and verify the complete staged
-replacement. A prepared token or retained floor alone never authorizes executing
-an installer or declaring the new image active.
+## Durable command and manager dispatch
 
-Still to implement: expose this preparation through the common durable
-maintenance plan, wire floor acceptance and retain active work outside receipt
-pruning, manager capability/dispatch/readback, positively identified obsolete
-companion retirement, reboot verification before native startup, app progress and
-rootless bootstrap/SAF/manager handoff. These are cloud implementation tasks.
-Actual manager/SELinux/reboot acceptance, production CI signing and a distributable
-same-commit final bundle are distinct external or build gates; passing these
-host preparation tests does not close them.
+`StageCoreReplacement` carries a bounded signed envelope and expected target,
+not a client-selected path, URL, executable or manager. Preparation runs outside
+the writer: publisher authentication, anti-rollback, private-copy/full-ZIP
+validation, the actual live/running image fence, manager contract and positively
+identified legacy inventory. The prepared token retains those exact inputs.
+
+The writer syncs accepted work before acknowledging the operation, accepts the
+private package floor, then syncs dispatch intent before spawning the retained
+manager ELF. A disconnected caller does not cancel accepted work. The same
+operation ID deduplicates; no error/timeout/unknown dispatch is automatically
+replayed. `replacement` is retained independently of receipt pruning, while the
+last replacement receipt is pinned. FullReset/Cleanup refuse retained replacement
+work. Unverified generations hold ordinary config/runtime Repair writes as well;
+status reads remain available, so Repair cannot bypass the generation gate.
+
+Manager discovery uses fixed root-owned paths, ELF identity, bounded version/help
+queries and, for KernelSU/APatch, actual module-list evidence. Multiple distinct
+managers or effective custom metamodule install/uninstall scripts refuse
+preparation. The platform `/data` ancestor has Android's system ownership and
+mode ([AOSP init](https://github.com/aosp-mirror/platform_system_core/blob/android-16.0.0_r1/rootdir/init.rc#L594)); the privileged `/data/adb` boundary and executable
+ancestors remain root-owned and non-writable. Both the original discovery alias
+and retained resolved executable are rechecked before effects. Commands use a cleared environment, explicit `BOOTMODE=true`, a
+retained executable and the private package FD. There is no shell or su executor
+in the APK/Core adapter. Manager install execution is bounded to120seconds with
+64KiB output; read-only queries use3seconds. Neither exit0 nor installer output
+establishes a staged image.
+
+After dispatch, Core verifies the full staged image and signed daemon identity
+for the actual installed ARM ABI, rechecks the live/executing image and prepared
+manager/legacy sources, journals retirement intent, then creates only the fixed
+legacy modules' disable/remove markers in both live and staged locations. The
+legacy module ID and author plus a complete retained file/tree fence are required.
+Unknown or changed modules refuse. Old code is not deleted before replacement
+readiness; markers do not unload existing hooks. PendingRestart confirms staging,
+not running protection, and never triggers a reboot.
+
+Before native startup, read-only reconciliation verifies boot identity and the
+actual `/proc/self/exe` inode. In the same boot, PendingRestart can retain the
+proven old runtime. On a later boot, the compiled trust pin authenticates the
+retained target again, the accepted floor must match, and the active signed image
+must match its staged content and executing inode. Pre-boot legacy retirement
+must have been recorded (or the prepared inventory must have been empty), with
+positive current absence/retirement readback. Missing/wrong proof blocks native
+startup rather than selecting another backend. A pre-dispatch crash can release
+its hold only after unchanged live/running/legacy and absent-staging proof.
+Later proof releases held resources without rewriting a historical Unknown
+receipt. No manager retry or reboot occurs during reconciliation.
+
+The APK exposes a document chooser only when it has an authenticated embedded
+Core target and a current compatible session. Its bounded SAF adapter copies
+exactly the target size; Core repeats authentication and checks the real bytes.
+Typed progress distinguishes preparing, PendingRestart, Verified, known refusal
+and Unknown; loss of current state withdraws running-generation confirmation.
+Save/Cancel and config drafts are unchanged. Unsigned/unconfigured developer
+builds remain usable but do not expose privileged replacement authority.
+
+Remaining code: missing-Core rootless bootstrap/manager handoff, automated
+artifact retrieval/update scheduling, and richer actionable manager refusals.
+Actual manager/fork/SELinux/reboot acceptance, production CI signing and the
+final same-commit full bundle remain separate gates. Host tests use independent
+synthetic payloads and test-only publisher identities; they do not install an
+Android manager or establish phone acceptance.
 
 Manager readback must not use active module.prop as installed generation proof.
 Upstream installers update that file while staging new code. Pin the original
 live executable/catalog, explicitly request BOOTMODE staging, reject hot-install
 and effective third-party metamodule installers, and independently verify the
 staged daemon/catalog before legacy removals. Magisk's global remove-modules CLI
-must never be used for per-module cleanup. Source pins and adapter details will
-be recorded with the implementation, rather than assuming all forks match.
+must never be used for per-module cleanup. These adapter contracts do not certify arbitrary forks.
 
 Reference sources checked for that staging boundary are
 [KernelSU module dispatch](https://github.com/tiann/KernelSU/blob/28db74f6f4692e97006ce9ebd8b19b9cc614b5b7/userspace/ksud/src/module.rs),
@@ -104,7 +159,7 @@ and [Magisk's installer functions](https://github.com/topjohnwu/Magisk/blob/33bf
 All choose `modules_update` through `BOOTMODE` and update live module metadata
 before the code swap. KernelSU also has an explicit hot-install dispatch and
 effective metamodule installer selection. These source observations are inputs
-to the pending adapter implementation, not device/fork qualification or proof
+to the bounded adapter implementation, not device/fork qualification or proof
 that an exit code confirms a staged/running replacement.
 
 
@@ -124,8 +179,8 @@ A verified image retains this layout requirement on subsequent unchanged-image
 checks, while historical source inspection remains available for migration.
 New signed replacements must have no main-Core autoload directory; old-source
 mirror files remain fenced for migration. Final Zygisk placement/activation is
-under renewed review in RFC0003. Common durable maintenance/manager/reboot
-orchestration is still pending.
+under renewed review in RFC0003. The replacement executor uses these checks; missing-Core bootstrap remains
+separate. No backend publication or automatic fallback policy is introduced.
 
 New GKI payload admission also checks the exact ELF's normal module-version
 records: `module_layout` and every imported symbol must have a CRC. Trusted

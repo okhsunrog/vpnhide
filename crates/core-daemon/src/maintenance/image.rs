@@ -139,7 +139,12 @@ fn entry_exists(directory: &File, name: &std::ffi::CStr) -> io::Result<bool> {
         Err(error)
     }
 }
-fn read_file(file: &File, uid: u32, limit: u64, deadline: Instant) -> io::Result<ImageFile> {
+pub(super) fn read_file(
+    file: &File,
+    uid: u32,
+    limit: u64,
+    deadline: Instant,
+) -> io::Result<ImageFile> {
     let before = file.metadata()?;
     if !before.is_file()
         || before.uid() != uid
@@ -203,6 +208,47 @@ fn read_file(file: &File, uid: u32, limit: u64, deadline: Instant) -> io::Result
     })
 }
 impl ImageFence {
+    pub(crate) fn verified_layout(&self) -> bool {
+        self.verified_layout
+    }
+    pub(crate) fn same_content(&self, other: &Self) -> bool {
+        self.files.len() == other.files.len()
+            && self.files.iter().all(|(name, file)| {
+                other
+                    .files
+                    .get(name)
+                    .is_some_and(|v| v.identity == file.identity && v.mode == file.mode)
+            })
+    }
+    /// Managers choose the installed userspace ABI. Qualify the real daemon
+    /// against either signed identity rather than confusing the old Core's
+    /// binary architecture with the device kernel or the next daemon ABI.
+    pub(super) fn inspect_replacement(
+        root: &Path,
+        descriptor: &VerifiedDescriptor,
+        uid: u32,
+    ) -> io::Result<Self> {
+        let directory = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(root)?;
+        let actual = read_file(
+            &open_beneath(&directory, "vpnhide-core")?,
+            uid,
+            128 * 1024 * 1024,
+            Instant::now() + IMAGE_BUDGET,
+        )?;
+        let runtime = &descriptor.descriptor().runtime;
+        let abi = match (
+            actual.identity == runtime.daemon_arm64,
+            actual.identity == runtime.daemon_arm,
+        ) {
+            (true, false) => Abi::Arm64,
+            (false, true) => Abi::Arm32,
+            _ => return Err(invalid()),
+        };
+        Self::inspect(root, Some(descriptor), abi, uid)
+    }
     pub fn capture_active(root: &Path) -> io::Result<Self> {
         // Without a replacement descriptor, inspection hashes the actual
         // running ABI's daemon bytes; the ABI selector is unused in this case.
@@ -218,7 +264,7 @@ impl ImageFence {
     pub fn require_unchanged(&self, root: &Path) -> io::Result<()> {
         self.require_unchanged_owned(root, 0)
     }
-    fn require_unchanged_owned(&self, root: &Path, uid: u32) -> io::Result<()> {
+    pub(super) fn require_unchanged_owned(&self, root: &Path, uid: u32) -> io::Result<()> {
         if self != &Self::inspect_layout(root, None, Abi::Arm64, uid, self.verified_layout)? {
             return Err(invalid());
         }
@@ -229,7 +275,7 @@ impl ImageFence {
     pub fn require_running(&self, running: &File) -> io::Result<()> {
         self.require_running_owned(running, 0)
     }
-    fn require_running_owned(&self, running: &File, uid: u32) -> io::Result<()> {
+    pub(super) fn require_running_owned(&self, running: &File, uid: u32) -> io::Result<()> {
         let expected = self.files.get("vpnhide-core").ok_or_else(invalid)?;
         let actual = read_file(
             running,
@@ -242,7 +288,7 @@ impl ImageFence {
         }
         Ok(())
     }
-    fn inspect(
+    pub(super) fn inspect(
         root: &Path,
         descriptor: Option<&VerifiedDescriptor>,
         abi: Abi,

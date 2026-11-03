@@ -37,6 +37,31 @@ fn complete_manifest_roundtrip_and_pinned_bytes() {
 }
 
 #[test]
+fn rejecting_a_nonregular_member_does_not_open_the_fifo() {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("fifo");
+    let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    let raw = unsafe { libc::inotify_init1(libc::IN_CLOEXEC | libc::IN_NONBLOCK) };
+    assert!(raw >= 0);
+    let notify = unsafe { File::from_raw_fd(raw) };
+    assert!(
+        unsafe { libc::inotify_add_watch(notify.as_raw_fd(), name.as_ptr(), libc::IN_OPEN) } >= 0
+    );
+    assert!(open_beneath(&File::open(root.path()).unwrap(), "fifo").is_err());
+    let mut bytes = [0u8; 256];
+    assert_eq!(
+        unsafe { libc::read(notify.as_raw_fd(), bytes.as_mut_ptr().cast(), bytes.len()) },
+        -1
+    );
+    assert_eq!(
+        std::io::Error::last_os_error().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}
+
+#[test]
 fn catalog_rechecks_advertised_capability_against_the_exact_hashed_elf() {
     let root = fixture();
     let mut manifest = manifest();

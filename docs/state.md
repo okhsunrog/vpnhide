@@ -128,9 +128,10 @@ Mode `0700`, root-only. Journal, ownership markers, `core.log`, plus:
 
 | File | Format | Writer | Reader | Lifetime |
 |---|---|---|---|---|
-| `operations.json` | journal schema 12: issued-ID counter, expiry floor, retained receipts, revision/write-set evidence, held resources, native startup/load/preflight budgets, Zygisk exposure, debug leases and logging restoration | core writer queue, atomically with directory fsync | startup recovery and receipt queries; schemas 1–11 are migrated, corrupt/unsupported state refuses mutation | preserved by FullReset; 64 terminal receipts plus active/restoration records; expired Unknown receipts retain compact held-resource/Persist evidence |
+| `operations.json` | journal schema 13: issued-ID counter, expiry floor, retained receipts, revision/write-set evidence, held resources, native startup/load/preflight budgets, retained Core replacement work/dispatch intent, Zygisk exposure, debug leases and logging restoration | core writer queue, atomically with directory fsync | startup recovery and receipt queries; schemas 1–12 are migrated, corrupt/unsupported state refuses mutation | preserved by FullReset; 64 terminal receipts plus active/restoration records; expired Unknown receipts retain compact held-resource/Persist evidence |
 | `operations.json.lock` | permanent empty regular inode, mode `0600`, exclusive flock | core lifetime owner | another core refuses ownership before load/boot/bind | preserved by FullReset; never unlink a live lockfile |
-| `maintenance-floor.json` | private schema1 accepted replacement sequence/hash, at most1KiB | maintenance floor component, atomic file/parent sync; service admission integration still pending | package preparation under its lease; malformed/unsafe state refuses rather than becoming zero | outside receipt pruning and replaceable modules; preserve across reset/update |
+| `maintenance-packages/<sha256>.zip`, `copy-<operation>`, `staging.lock` | private authenticated ZIP cache (at most2 final packages, each256MiB), bounded inert temporary copies, permanent flock inode | Core replacement preparation outside writer; exclusive floor/staging leases and per-instance preparation permit | durable replacement executor through retained read-only FD; full ZIP and actual-byte checks | active/accepted package retained; only known inert prior ZIPs released with no retained work; no journal or user-config deletion |
+| `maintenance-floor.json` | private schema1 accepted replacement sequence/hash, at most1KiB | replacement command writer after durable admission and before dispatch, atomic file/parent sync | package preparation under its lease; malformed/unsafe state refuses rather than becoming zero | outside receipt pruning and replaceable modules; preserve across reset/update |
 | `maintenance-floor.lock` / `maintenance-floor.next` | private regular flock inode / bounded inert interrupted write | maintenance floor component | same component; unsafe leftovers refuse | lock inode persists; only safe regular temporary files are recovered under the lease |
 | `supervisor.lock` | permanent root-only regular inode and exclusive flock | service supervisor | duplicate service invocation refuses | supervisor lifetime; inode persists |
 | `supervisor_status` | running/restarting/stopped status and retry delay | service supervisor | diagnostics/manual inspection | overwritten as worker lifecycle changes |
@@ -447,3 +448,9 @@ Journal schema12 stores each source identity/hash, plan and cleanup report befor
 claiming completion; it reads schemas1–11 without resetting native/preflight budgets,
 Zygisk exposure or holds. Interrupted cleanup stays Unknown and is never replayed.
 FullReset preserves this Core state/retention directory alongside the journal.
+
+The APK replacement document adapter writes only its app-private
+`files/core-maintenance/<signed-hash>.zip`, using a bounded temporary copy and
+atomic rename. Accepted or definitively refused submissions release this input;
+unknown submissions retain it and query the same operation ID. Core executes only
+its independently verified private copy, never this app-writable source path.

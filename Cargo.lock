@@ -1823,6 +1823,7 @@ dependencies = [
  "vpnhide_diagnostic_model",
  "vpnhide_migration_policy",
  "vpnhide_native_policy",
+ "vpnhide_package_trust",
  "vpnhide_protocol",
 ]
 

@@ -10,6 +10,7 @@ import uniffi.vpnhide_core_ffi.CoreOperationRecord as NativeOperationRecord
 internal fun CorePublication.toState(): CoreStateView =
     CoreStateView(
         attachmentEvidence = attachmentEvidence.copy(),
+        maintenance = maintenance?.copy(),
         epoch = epoch.toLong(),
         configRevision = configRevision.toLong(),
         canonical =
@@ -58,6 +59,7 @@ internal fun CoreConfigPhase.toPhase(): ConfigPhase =
         CoreConfigPhase.CLEANUP -> ConfigPhase.Cleanup
         CoreConfigPhase.NATIVE -> ConfigPhase.Native
         CoreConfigPhase.PORTS -> ConfigPhase.Ports
+        CoreConfigPhase.MAINTENANCE -> ConfigPhase.Maintenance
     }
 
 internal fun CorePhaseOutcome.toOutcome(): PhaseOutcome =

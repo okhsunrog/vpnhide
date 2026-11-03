@@ -172,8 +172,11 @@ pub(crate) fn open_beneath(root: &File, path: &str) -> io::Result<File> {
         }
         let name = CString::new(*part).map_err(invalid)?;
         let directory = index + 1 != parts.len();
-        let flags = libc::O_RDONLY
-            | libc::O_CLOEXEC
+        let flags = (if directory {
+            libc::O_RDONLY
+        } else {
+            libc::O_PATH
+        }) | libc::O_CLOEXEC
             | libc::O_NOFOLLOW
             | libc::O_NONBLOCK
             | if directory { libc::O_DIRECTORY } else { 0 };
@@ -186,6 +189,14 @@ pub(crate) fn open_beneath(root: &File, path: &str) -> io::Result<File> {
         dir = unsafe { File::from_raw_fd(fd) };
         if !directory && !dir.metadata()?.is_file() {
             return Err(invalid("not a regular file"));
+        }
+        if !directory {
+            // Pin/type-check before opening: O_NONBLOCK avoids FIFO waits but
+            // cannot prevent a device driver's open side effects.
+            dir = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_CLOEXEC | libc::O_NONBLOCK)
+                .open(format!("/proc/self/fd/{}", dir.as_raw_fd()))?;
         }
     }
     Ok(dir)

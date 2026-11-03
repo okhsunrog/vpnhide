@@ -968,6 +968,7 @@ pub enum CoreConfigPhase {
     Cleanup,
     Native,
     Ports,
+    Maintenance,
 }
 impl From<rpc::ConfigPhase> for CoreConfigPhase {
     fn from(value: rpc::ConfigPhase) -> Self {
@@ -977,6 +978,7 @@ impl From<rpc::ConfigPhase> for CoreConfigPhase {
             rpc::ConfigPhase::Cleanup => Self::Cleanup,
             rpc::ConfigPhase::Native => Self::Native,
             rpc::ConfigPhase::Ports => Self::Ports,
+            rpc::ConfigPhase::Maintenance => Self::Maintenance,
         }
     }
 }
@@ -988,6 +990,7 @@ impl From<CoreConfigPhase> for rpc::ConfigPhase {
             CoreConfigPhase::Cleanup => Self::Cleanup,
             CoreConfigPhase::Native => Self::Native,
             CoreConfigPhase::Ports => Self::Ports,
+            CoreConfigPhase::Maintenance => Self::Maintenance,
         }
     }
 }

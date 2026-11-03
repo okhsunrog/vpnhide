@@ -616,4 +616,11 @@
     <string name="native_status_bundled">Included in Core</string>
     <string name="native_status_builtin">Built into the kernel</string>
     <string name="native_status_legacy">Standalone module</string>
+    <string name="core_maintenance_title">Core update</string>
+    <string name="core_maintenance_choose">Choose Core update ZIP</string>
+    <string name="core_maintenance_pending_restart">Update prepared. Restart your phone when convenient.</string>
+    <string name="core_maintenance_verified">The updated Core is running.</string>
+    <string name="core_maintenance_failed">The update was refused. No installer retry was started.</string>
+    <string name="core_maintenance_unknown">The update could not be confirmed. Check Core status before trying again.</string>
+    <string name="core_maintenance_refresh">Check update status</string>
 </resources>

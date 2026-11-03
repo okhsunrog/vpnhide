@@ -434,3 +434,50 @@ fn vpnhide_package_trust_runtime() -> vpnhide_package_trust::RuntimeIdentity {
         module_prop: item,
     }
 }
+
+#[test]
+fn quiescent_cache_keeps_accepted_and_incoming_packages_across_three_updates() {
+    let f = fixture_payload(1001, b"first");
+    let uid = unsafe { libc::geteuid() };
+    let persistent = f.temp.path().join("persistent");
+    let floor = FloorStore::open_owned(&persistent, uid).unwrap();
+    let lease = floor.lock().unwrap();
+    let first = f.stage.copy_verified(&f.verified, 1).unwrap();
+    lease.accept_prepared(&first).unwrap();
+    let next = fixture_payload(1002, b"second");
+    let third = fixture_payload(1003, b"third");
+    for (op, other) in [(2, &next), (3, &third)] {
+        let d = other.verified.descriptor();
+        fs::copy(
+            other.source(),
+            f.temp.path().join(format!(
+                "app/files/core-maintenance/{}.zip",
+                d.package_sha256
+            )),
+        )
+        .unwrap();
+        let keep = std::collections::BTreeSet::from([
+            lease.read().unwrap().package_sha256.unwrap(),
+            d.package_sha256.clone(),
+        ]);
+        f.stage.release_inert(&keep, &lease).unwrap();
+        let package = f.stage.copy_verified(&other.verified, op).unwrap();
+        lease.accept_prepared(&package).unwrap();
+    }
+    assert_eq!(f.count_files(), 2);
+    assert!(!f.final_file().exists());
+    // Retained descriptors do not become different bytes when their inert name
+    // is later released. No manager can be replayed from this unit token.
+    assert_eq!(
+        std::fs::read(format!("/proc/self/fd/{}", first.file.as_raw_fd())).unwrap(),
+        b"first"
+    );
+    let unexpected = persistent.join("maintenance-packages/unknown.zip");
+    fs::write(&unexpected, b"do not delete").unwrap();
+    assert!(
+        f.stage
+            .release_inert(&std::collections::BTreeSet::new(), &lease)
+            .is_err()
+    );
+    assert_eq!(fs::read(unexpected).unwrap(), b"do not delete");
+}

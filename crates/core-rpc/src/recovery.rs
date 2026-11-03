@@ -23,7 +23,10 @@ pub fn permits_held(action: RecoveryAction, held: &[ConfigPhase]) -> bool {
 /// explicit user repair, it must not resolve/retry a held effect. Native delivery
 /// also depends on credentials; every delivery depends on known canonical intent.
 pub fn permits_boot_phase(phase: ConfigPhase, held: &[ConfigPhase]) -> bool {
-    if held.contains(&ConfigPhase::Persist) || held.contains(&phase) {
+    if held.contains(&ConfigPhase::Maintenance)
+        || held.contains(&ConfigPhase::Persist)
+        || held.contains(&phase)
+    {
         return false;
     }
     match phase {
@@ -31,7 +34,7 @@ pub fn permits_boot_phase(phase: ConfigPhase, held: &[ConfigPhase]) -> bool {
         ConfigPhase::Ports => true,
         // Persist is a no-op in a repair without runtime writers.
         ConfigPhase::Persist => true,
-        ConfigPhase::Secret | ConfigPhase::Cleanup => false,
+        ConfigPhase::Secret | ConfigPhase::Cleanup | ConfigPhase::Maintenance => false,
     }
 }
 
@@ -44,6 +47,26 @@ pub fn refusal(state: &StateSnapshot, action: RecoveryAction) -> Option<&'static
     }
     if !state.operations_in_flight.is_empty() {
         return Some("operation_in_flight");
+    }
+    if state.maintenance.as_ref().is_some_and(|m| {
+        !matches!(
+            m.stage,
+            crate::CoreMaintenanceStage::PendingRestart
+                | crate::CoreMaintenanceStage::Verified
+                | crate::CoreMaintenanceStage::FailedKnown
+        )
+    }) {
+        return Some("maintenance_active");
+    }
+    if matches!(action, RecoveryAction::FullReset | RecoveryAction::Cleanup)
+        && state.maintenance.as_ref().is_some_and(|m| {
+            !matches!(
+                m.stage,
+                crate::CoreMaintenanceStage::Verified | crate::CoreMaintenanceStage::FailedKnown
+            )
+        })
+    {
+        return Some("maintenance_active");
     }
     if !permits_held(action, &state.held_resources) {
         return Some("persist_uncertain");

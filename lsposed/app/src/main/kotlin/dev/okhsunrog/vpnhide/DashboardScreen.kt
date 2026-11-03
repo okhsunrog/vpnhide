@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.okhsunrog.vpnhide.diagnostics.retryDiagnosticsAndDashboard
+import dev.okhsunrog.vpnhide.maintenance.CoreMaintenanceCard
 import dev.okhsunrog.vpnhide.migration.LegacyImportPrompt
 import dev.okhsunrog.vpnhide.settings.LocalSettingsInteractor
 import dev.okhsunrog.vpnhide.settings.LocalSettingsState
@@ -144,6 +145,7 @@ fun DashboardScreen(
             retryDiagnosticsAndDashboard(context, selfNeedsRestart)
         }
         Spacer(Modifier.height(12.dp))
+        CoreMaintenanceCard()
         NativeCoreStatusCard(
             display.diagnostics.sources.core
                 .nativeStatusSnapshot(),

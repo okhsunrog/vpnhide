@@ -17,7 +17,7 @@ manifest, seven ko candidates, KPM and one passive Zygisk ABI pair. The current
 package cutover has no main-Core `zygisk/` discovery directory; it is not a
 completed Zygisk runtime. Final publication/transition policy is
 [reopened](rfcs/0003-conditional-zygisk-publication.md); no managed projection,
-automatic next-boot preparation or new PendingRestart workflow is implemented.
+automatic backend next-boot preparation or backend-transition PendingRestart workflow is implemented. Core-package update PendingRestart is a separate maintenance receipt.
 
 ## Service startup
 
@@ -46,8 +46,11 @@ update the live `module.prop` while staging; pin executable/catalog identities a
 verify staged bytes independently. Interrupted/unknown effects keep durable holds.
 Do not remove old modules before the verified replacement is ready.
 
-The common repair/install/update/bootstrap executor is still incomplete. Current
-package authentication/staging/image fences do not constitute that executor.
+The existing-Core replacement command now uses the durable writer, bounded
+manager dispatch, staged readback, guarded legacy retirement and post-boot
+running-image verification. PendingRestart confirms only the prepared package;
+there is no automatic reboot. Missing-Core/incompatible-RPC bootstrap/manager
+handoff remains incomplete. See [maintenance](core-maintenance.md).
 Compatible client/UI-only APK changes need not imply a Core reinstall; actual
 Java hook, runtime and contract changes have separate lifecycle requirements.
 Reboot counts and new backend hints remain under review, not a blanket policy.

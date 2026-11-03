@@ -38,7 +38,7 @@ async fn cancelled_and_expired_queued_commands_never_execute() {
     let task = tokio::task::spawn_blocking(move || {
         worker_state
             .engine
-            .submit(id, CoreCommand::CleanupLegacy, worker_ticket, None)
+            .submit(id, CoreCommand::CleanupLegacy, worker_ticket, None, None)
     });
     assert_eq!(task.await.unwrap(), Err(SubmitError::Busy));
     // Exercise actual handler drop, not just the ticket's cancellation method.
@@ -179,6 +179,7 @@ fn cancellation_after_writer_start_cannot_revoke_admission() {
             },
             ticket.clone(),
             None,
+            None,
         )
         .unwrap();
     ticket.cancel();
@@ -245,6 +246,7 @@ fn preparation_time_does_not_consume_queue_budget_and_cancellation_still_fences_
                 }
             },
             ticket,
+            None,
             None
         ),
         Ok(Accepted { op: id })
@@ -276,6 +278,7 @@ fn preparation_time_does_not_consume_queue_budget_and_cancellation_still_fences_
                     }
                 },
                 ticket,
+                None,
                 None
             ),
             Err(SubmitError::Busy)

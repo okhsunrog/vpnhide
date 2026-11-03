@@ -502,5 +502,7 @@ dependencies {
 // Executable local-policy FFI contracts use the same host library as binding generation.
 tasks.withType<Test>().configureEach {
     dependsOn(buildCoreFfiHost)
+    // Local Rust policy changes must invalidate cached JVM/FFI results too.
+    inputs.file(repoDir.resolve("target/debug/$hostLibName")).withPathSensitivity(PathSensitivity.NONE)
     systemProperty("jna.library.path", repoDir.resolve("target/debug").absolutePath)
 }

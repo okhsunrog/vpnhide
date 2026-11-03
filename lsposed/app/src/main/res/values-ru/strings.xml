@@ -600,4 +600,11 @@
     <string name="native_status_bundled">В составе Core</string>
     <string name="native_status_builtin">Встроен в ядро</string>
     <string name="native_status_legacy">Отдельный модуль</string>
+    <string name="core_maintenance_title">Обновление Core</string>
+    <string name="core_maintenance_choose">Выбрать ZIP обновления Core</string>
+    <string name="core_maintenance_pending_restart">Обновление подготовлено. Перезагрузите телефон, когда будет удобно.</string>
+    <string name="core_maintenance_verified">Обновлённый Core запущен.</string>
+    <string name="core_maintenance_failed">Обновление отклонено. Повторная установка не запускалась.</string>
+    <string name="core_maintenance_unknown">Не удалось подтвердить обновление. Перед повторной попыткой проверьте состояние Core.</string>
+    <string name="core_maintenance_refresh">Проверить состояние обновления</string>
 </resources>

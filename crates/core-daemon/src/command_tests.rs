@@ -699,6 +699,7 @@ fn reader_and_receipts_remain_available_while_the_bounded_writer_is_busy() {
                 std::time::Instant::now() + std::time::Duration::from_secs(1)
             ),
             None,
+            None,
         ),
         Err(SubmitError::Busy)
     );

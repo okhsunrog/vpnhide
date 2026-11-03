@@ -56,12 +56,27 @@ pub struct PackageStaging {
 #[derive(Debug)]
 pub struct PreparedPackage {
     persistent: (u64, u64),
-    descriptor: Descriptor,
+    verified: VerifiedDescriptor,
     file: File,
 }
 impl PreparedPackage {
     pub fn descriptor(&self) -> &Descriptor {
-        &self.descriptor
+        self.verified.descriptor()
+    }
+    pub(crate) fn verified(&self) -> &VerifiedDescriptor {
+        &self.verified
+    }
+    pub fn verify_bundle(&self) -> Result<(), PackageError> {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_CLOEXEC)
+            .open(format!("/proc/self/fd/{}", self.file.as_raw_fd()))?;
+        let mut bytes = Vec::new();
+        (&mut file)
+            .take(vpnhide_package_trust::MAX_PACKAGE_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        vpnhide_artifact_model::archive::verify_package(&bytes, self.descriptor())?;
+        Ok(())
     }
     pub fn file(&self) -> &File {
         &self.file
@@ -69,7 +84,9 @@ impl PreparedPackage {
     fn verify_private(&self, uid: u32) -> Result<(), PackageError> {
         private(&self.file, uid)?;
         let before = self.file.metadata()?;
-        if !before.is_file() || before.nlink() != 1 || before.len() != self.descriptor.package_bytes
+        if !before.is_file()
+            || before.nlink() != 1
+            || before.len() != self.descriptor().package_bytes
         {
             return Err(PackageError::UnsafeStorage);
         }
@@ -80,8 +97,8 @@ impl PreparedPackage {
             .custom_flags(libc::O_CLOEXEC)
             .open(format!("/proc/self/fd/{}", self.file.as_raw_fd()))?;
         vpnhide_package_trust::FileIdentity {
-            bytes: self.descriptor.package_bytes,
-            sha256: self.descriptor.package_sha256.clone(),
+            bytes: self.descriptor().package_bytes,
+            sha256: self.descriptor().package_sha256.clone(),
         }
         .verify(input)?;
         let after = self.file.metadata()?;
@@ -140,7 +157,7 @@ impl PackageStaging {
     pub fn open(persistent: &Path, app: &Path, expected_uid: u32) -> Result<Self, PackageError> {
         Self::open_owned(persistent, app, expected_uid, 0)
     }
-    fn open_owned(
+    pub(super) fn open_owned(
         persistent: &Path,
         app: &Path,
         expected_uid: u32,
@@ -180,6 +197,15 @@ impl PackageStaging {
         floor: &FloorLease<'_>,
         operation: u64,
     ) -> Result<PreparedPackage, PackageError> {
+        let verified = self.authenticate(envelope, target, floor)?;
+        self.copy_verified(&verified, operation)
+    }
+    fn authenticate(
+        &self,
+        envelope: &[u8],
+        target: &Target,
+        floor: &FloorLease<'_>,
+    ) -> Result<VerifiedDescriptor, PackageError> {
         let (trust, sequence) = TrustStore::compiled_install_authority()?;
         let verified = trust.authenticate(envelope)?;
         if !floor.matches(&self.persistent)? {
@@ -187,9 +213,64 @@ impl PackageStaging {
         }
         verified.admit(target, &floor.read()?)?;
         verified.require_build_at_least(sequence.get())?;
+        Ok(verified)
+    }
+    /// The controller has no retained replacement and owns its exclusive
+    /// preparation permit. Only then may it release inert prior package files.
+    pub(super) fn prepare_replacement(
+        &self,
+        envelope: &[u8],
+        target: &Target,
+        floor: &FloorLease<'_>,
+        operation: u64,
+        _permit: &super::replacement::PreparationPermit,
+    ) -> Result<PreparedPackage, PackageError> {
+        let verified = self.authenticate(envelope, target, floor)?;
+        let mut keep =
+            std::collections::BTreeSet::from([verified.descriptor().package_sha256.clone()]);
+        if let Some(hash) = floor.read()?.package_sha256 {
+            keep.insert(hash);
+        }
+        self.release_inert(&keep, floor)?;
         self.copy_verified(&verified, operation)
     }
-    fn copy_verified(
+    fn release_inert(
+        &self,
+        keep: &std::collections::BTreeSet<String>,
+        floor: &FloorLease<'_>,
+    ) -> Result<(), PackageError> {
+        if !floor.matches(&self.persistent)? {
+            return Err(PackageError::UnsafeStorage);
+        }
+        private(&self.directory, self.root_uid)?;
+        let _lease = self.lease()?;
+        self.recover_temporary()?;
+        for entry in std::fs::read_dir(format!("/proc/self/fd/{}", self.directory.as_raw_fd()))? {
+            let name = entry?
+                .file_name()
+                .into_string()
+                .map_err(|_| PackageError::UnsafeStorage)?;
+            let Some(hash) = name.strip_suffix(".zip") else {
+                continue;
+            };
+            if keep.contains(hash) {
+                continue;
+            }
+            let file = openat(&self.directory, &name, libc::O_PATH)?;
+            private(&file, self.root_uid)?;
+            let m = file.metadata()?;
+            if !m.is_file() || m.nlink() != 1 {
+                return Err(PackageError::UnsafeStorage);
+            }
+            let name = CString::new(name).map_err(io::Error::other)?;
+            if unsafe { libc::unlinkat(self.directory.as_raw_fd(), name.as_ptr(), 0) } < 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+        }
+        self.directory.sync_all()?;
+        Ok(())
+    }
+    pub(super) fn copy_verified(
         &self,
         verified: &VerifiedDescriptor,
         operation: u64,
@@ -295,7 +376,7 @@ impl PackageStaging {
                 let meta = self.persistent.metadata()?;
                 (meta.dev(), meta.ino())
             },
-            descriptor: d.clone(),
+            verified: verified.clone(),
             file,
         })
     }

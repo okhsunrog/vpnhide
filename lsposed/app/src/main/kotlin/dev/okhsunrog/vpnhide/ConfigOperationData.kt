@@ -1,7 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 /** Evidence reported by core; the app never dispatches these phases. */
-internal enum class ConfigPhase { Persist, Secret, Cleanup, Native, Ports }
+internal enum class ConfigPhase { Persist, Secret, Cleanup, Native, Ports, Maintenance }
 
 internal enum class PhaseOutcome { NotAttempted, Running, Confirmed, FailedKnown, Unknown }
 

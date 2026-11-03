@@ -382,6 +382,11 @@ fn descriptor_binds_exact_package_runtime_and_typed_compatibility() {
     b.build().unwrap();
     let p = b.path("unified.zip");
     let d = descriptor(&p, COMMIT, 1001).unwrap();
+    let bytes = fs::read(&p).unwrap();
+    verify_package(&bytes, &d).unwrap();
+    let mut forged = d.clone();
+    forged.runtime.service.sha256 = "0".repeat(64);
+    assert!(verify_package(&bytes, &forged).is_err());
     assert_eq!(d.package_bytes, fs::metadata(&p).unwrap().len());
     assert_eq!(
         d.package_sha256,

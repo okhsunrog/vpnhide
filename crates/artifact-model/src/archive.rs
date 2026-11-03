@@ -404,12 +404,22 @@ pub fn descriptor(
     commit: &str,
     sequence: u64,
 ) -> io::Result<crate::package::Descriptor> {
+    let package = read_regular(path, MAX_BUNDLE_BYTES)?;
+    inspect_package(&package, commit, sequence)
+}
+
+/// The same actual-byte inspection serves the publisher and the privileged
+/// reader. This does not authenticate either the archive or its metadata.
+pub fn inspect_package(
+    package: &[u8],
+    commit: &str,
+    sequence: u64,
+) -> io::Result<crate::package::Descriptor> {
     use crate::package::{Descriptor, RuntimeIdentity};
     if !exact_commit(commit) || sequence == 0 {
         return Err(invalid("invalid source or build sequence"));
     }
-    let package = read_regular(path, MAX_BUNDLE_BYTES)?;
-    let files = read_archive_bytes(&package, 128)?;
+    let files = read_archive_bytes(package, 128)?;
     let manifest: Manifest = metadata(&files, "payloads/manifest.json")?;
     manifest.require_complete()?;
     crate::core_layout::CoreLayout::Bundle(&manifest).require_files(files.keys())?;
@@ -506,7 +516,7 @@ pub fn descriptor(
         module_id: "vpnhide_core".into(),
         source_commit: commit.into(),
         build_sequence: sequence,
-        package_sha256: format!("{:x}", Sha256::digest(&package)),
+        package_sha256: format!("{:x}", Sha256::digest(package)),
         package_bytes: package.len() as u64,
         rpc: vpnhide_build_contract::RPC_VERSION,
         journal_min: vpnhide_build_contract::JOURNAL_MIN_READ,
@@ -523,6 +533,24 @@ pub fn descriptor(
     };
     result.validate().map_err(invalid)?;
     Ok(result)
+}
+
+/// Verify a publisher-authenticated descriptor against the complete real ZIP,
+/// including the permitted namespace, provenance and all payload bytes. RPC and
+/// journal ranges are signed compiler declarations, not deducible from ELF;
+/// installation admission checks those declarations separately.
+pub fn verify_package(package: &[u8], signed: &crate::package::Descriptor) -> io::Result<()> {
+    signed.validate().map_err(invalid)?;
+    let mut actual = inspect_package(package, &signed.source_commit, signed.build_sequence)?;
+    actual.rpc = signed.rpc;
+    actual.journal_min = signed.journal_min;
+    actual.journal_max = signed.journal_max;
+    if &actual != signed {
+        return Err(invalid(
+            "authenticated descriptor differs from actual package",
+        ));
+    }
+    Ok(())
 }
 
 pub fn stamp(
