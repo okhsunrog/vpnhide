@@ -5,7 +5,7 @@ How to build vpnhide from source.
 ## Prerequisites
 
 - **JDK 17 or later** — what the CI image installs (`openjdk-17-jdk-headless`); local builds with JDK 21 also work. The `lsposed/app` Gradle build sets `sourceCompatibility = 17` and `jvmTarget = "17"`.
-- **Android SDK** — install `platforms;android-35`, `build-tools;35.0.0`, `platform-tools` (via Android Studio or `cmdline-tools`). Export `ANDROID_HOME`.
+- **Android SDK** — install `platforms;android-37`, compatible build tools (the CI image includes `build-tools;36.0.0`) and `platform-tools`. Export `ANDROID_HOME`. The app currently compiles against API37, targets API36 and supports API28+; see `lsposed/app/build.gradle.kts`.
 - **Android NDK r28 or later** — export `ANDROID_NDK_HOME` (or drop it in `$ANDROID_HOME/ndk/<version>/`, the scripts auto-detect). The `lsposed/app` `buildAppNative` task reads `ANDROID_NDK_HOME` (falling back to `ANDROID_NDK_ROOT`, then the SDK-managed `ndk/<version>`) and passes it to cargo-ndk. r27c builds compile, but the resulting cdylibs trigger an Android 16 KiB-page-size compatibility warning at app start on Pixel 8 Pro / future hardware (`сегмент LOAD не выровнен`); the architecture defaults differ (ARMv7 can still use 4 KiB). Core, the APK FFI and Zygisk explicitly pass the shared `build-contract::ANDROID_MAX_PAGE_SIZE` linker contract for both ARM ABIs. Verify actual LOAD alignment and offset/address congruence; compilation alone is insufficient.
 - **Rust 1.99.1**, pinned by `rust-toolchain.toml` for every workspace member,
   including Zygisk. The pin installs rustfmt, Clippy and ARM64/ARMv7/x86_64
@@ -69,18 +69,19 @@ keytool -genkey -v -keystore ~/vpnhide.jks \
 
 ## Build each module
 
-### core module (required)
+### Core daemon base (internal assembly input)
 
 ```sh
 python3 core/build.py
-# → core/target/vpnhide-core.zip
+# → core/target/vpnhide-core.zip (daemon-only base, not the installable bundle)
 ```
 
-`vpnhide_core` is required by 2.0: it is the only writer of the canonical config,
-`/proc/vpnhide_ctl`, Zygisk `targets.txt` and the Ports rules. The kmod / KPM /
-Zygisk zips are artifact-only and need it installed.
+The complete `vpnhide_core` package is required by 2.0. Core owns canonical config,
+backend selection/delivery and Ports. This producer builds only the two daemon
+ABIs and module scaffold. Assemble the verified payload bundle below before
+installation; a successful base build does not close that gate.
 
-### zygisk module
+### Zygisk payload producer (internal)
 
 ```sh
 cd zygisk && ./build.py
@@ -88,6 +89,7 @@ cd zygisk && ./build.py
 ```
 
 The script auto-detects the NDK from `$ANDROID_NDK_HOME` or `~/Android/Sdk/ndk/*`.
+This ZIP supplies both ABIs to Core assembly. It is not a separate user install.
 
 ### lsposed APK
 
@@ -117,10 +119,13 @@ shrunk it.
 ```sh
 ./kmod/build.py --kmi android14-6.1   # one variant
 ./kmod/build.py --all                  # every supported GKI
-# → vpnhide-kmod-<kmi>.zip at the repo root
+# → internal vpnhide-kmod-<kmi>.zip producer archives at the repo root
 ```
 
 The script auto-spawns the `ghcr.io/ylarod/ddk-min:<kmi>-<TAG>` container via Docker or podman (same image CI uses; Docker is preferred when both are installed). For local kernel-source builds via `direnv` and the GKI matrix details, see [kmod/BUILDING.md](../kmod/BUILDING.md).
+One variant is useful for kernel engineering tests; complete Core assembly
+requires the entire manifest-derived KMI catalog. Users do not choose or flash
+one of these archives.
 
 ### KPM backend
 
@@ -130,9 +135,36 @@ The script auto-spawns the `ghcr.io/ylarod/ddk-min:<kmi>-<TAG>` container via Do
 ```
 
 The script builds `vpnhide.kpm` against the pinned KernelPatch submodule,
-stages `kmod/kpm/module/` (no scripts: core loads the KPM), and packages the
-flashable zip. For runtime requirements and safety notes, see
+stages `kmod/kpm/module/` and packages an internal producer archive. Producer
+archives may contain manager installer shims; runtime loading belongs to Core.
+KPM requires an actually compatible KernelPatch runtime. Provisioning that engine
+is a separate operation; installing Core does not silently patch a boot image.
+For runtime requirements and safety notes, see
 [kmod/kpm/README.md](../kmod/kpm/README.md).
+
+### Assemble the complete Core package
+
+Build the Core base, all KMI producers, KPM and both Zygisk ABIs from the same
+clean commit. Use the shared Rust host tool, as the `core` CI job does:
+
+```sh
+mkdir -p .artifacts/core-inputs .artifacts/dist
+cp core/target/vpnhide-core.zip .artifacts/core-inputs/vpnhide-core-base.zip
+cp vpnhide-kmod-*.zip vpnhide-kpm.zip zygisk/target/vpnhide-zygisk.zip .artifacts/core-inputs/
+tools/vpnhide-tooling bundle assemble --inputs .artifacts/core-inputs \
+  --output .artifacts/dist/vpnhide-core.zip --commit "$(git rev-parse HEAD)"
+```
+
+The tool checks exact source provenance, bytes/hashes, ELF contracts and complete
+payload coverage. Dirty or mixed-commit inputs are refused. The output contains
+one passive Zygisk ABI pair; backend producer ZIPs are not public installation
+choices. Keep these assembly inputs out of the source tree's tracked files.
+
+Package assembly is distinct from authenticated maintenance distribution. CI
+signs the exact completed package descriptor with the existing Android key and
+embeds the target in the matching APK. Local assembly alone is not a signed
+update target. See [Core maintenance](core-maintenance.md) and the
+[roadmap](../ROADMAP.md) for unfinished orchestration and acceptance gates.
 
 ## Install on device
 
@@ -140,15 +172,8 @@ flashable zip. For runtime requirements and safety notes, see
 # APK
 adb install --user 0 -r lsposed/app/build/outputs/apk/release/app-release.apk
 
-# Core module (required): build with `python3 core/build.py`.
-adb push core/target/vpnhide-core.zip /sdcard/Download/
-# Native backend: push exactly one of these, then install via the Magisk,
-# KernelSU, KernelSU-Next, or APatch manager path appropriate for the backend.
-adb push zygisk/target/vpnhide-zygisk.zip /sdcard/Download/
-adb push vpnhide-kmod-<kmi>.zip /sdcard/Download/
-# The KPM zip additionally needs a KernelPatch runtime (built into APatch;
-# KernelSU-Next/Magisk add it via KPatch-Next) — see kmod/kpm/README.md.
-adb push vpnhide-kpm.zip /sdcard/Download/
+# Stage only the verified complete Core ZIP, then install it with the root manager.
+adb push .artifacts/dist/vpnhide-core.zip /sdcard/Download/
 ```
 
 Install the picker APK only for the main Android user (user 0). Plain `adb install`
@@ -157,15 +182,27 @@ manages targets in every profile; extra picker copies share the same canonical
 configuration and can race each other's saves. Verify per-user installation state
 with `adb shell dumpsys package dev.okhsunrog.vpnhide` after installing.
 
-After flashing core or a native backend, reboot the device. Do not keep multiple
-native backends installed unless you are explicitly testing conflict handling:
-core picks exactly one per boot and, with more than one candidate (an installed
-kmod/KPM/Zygisk module, the built-in driver, or a live hand-loaded backend), it
-loads none of them. Uninstall the 1.x Ports and Built-in modules
-(`vpnhide_ports`, `vpnhide_builtin`) if present. The built-in backend has no
-module to flash: integrate the driver into a kernel tree with
-`builtin/scripts/integrate.py`, build and boot that kernel, and core adopts it
-(see [builtin/README.md](../builtin/README.md)).
+For Core replacement validation, use the manager's normal staged installation
+and verify the actual running daemon after a user-chosen reboot. A changed
+module.prop alone is not running-generation proof. An APK-only update that stays
+compatible and changes no resident hook code does not itself require a device
+reboot. Resident LSPosed/Zygisk changes can require a process/lifecycle boundary;
+follow the reported state rather than assuming new APK bytes replaced live hooks.
+Never reboot automatically.
+
+Bundled alternatives are passive payloads, not conflicting installed backends.
+Legacy or independently loaded runtimes still require recovery checks: do not
+blindly load a second backend or remove old modules/state before the replacement
+is prepared and verified. Preserve canonical config, journal and legacy sources;
+follow [migration](migration.md), [maintenance](core-maintenance.md) and actual
+reported readiness. The full maintenance executor/UI is still incomplete.
+
+The built-in backend has no module ZIP: integrate the driver into a kernel tree
+with `builtin/scripts/integrate.py` and build that kernel (see
+[builtin/README.md](../builtin/README.md)). An APK/Core RPC or journal version
+change alone does not require rebuilding a compatible builtin kernel. The new
+backend lifecycle/selection policy remains under review in
+[RFC0005](rfcs/0005-unified-backend-lifecycle-policy.md).
 
 ## CI lints (run before pushing)
 
