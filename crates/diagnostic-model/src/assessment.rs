@@ -182,6 +182,19 @@ impl DiagnosticRun {
                 }
             }
         }
+        if let Some(proc_interfaces) = &self.proc_interfaces {
+            if proc_interfaces.complete() {
+                proven.insert(ProcInterfaces);
+            }
+            if !proc_interfaces.leaked.is_empty() {
+                leaked.insert(ProcInterfaces);
+            }
+            for control in &proc_interfaces.controls {
+                if !native_controls.contains(control) {
+                    native_controls.push(*control);
+                }
+            }
+        }
         if let Some(binding) = &self.binding {
             if binding.complete() {
                 proven.insert(RequiredCheck::BindToDevice);
@@ -229,6 +242,7 @@ mod tests {
     use crate::{DiagnosticFingerprint, framework::ScopedFrameworkResult};
     fn run(native: ScopedNativeResult) -> DiagnosticRun {
         DiagnosticRun {
+            proc_interfaces: None,
             addresses: None,
             binding: None,
             session: 1,
@@ -355,6 +369,38 @@ mod tests {
         assert!(run.assessment().unverified.len() >= 14);
     }
     #[test]
+    fn proc_group_needs_every_surface_and_read_actor_and_retains_leaks() {
+        let mut run = run(ScopedNativeResult::Proven { checks: vec![] });
+        run.record_proc_interfaces(crate::ScopedProcInterfaceResult {
+            proven: crate::ProcInterfaceCheck::required(),
+            ..Default::default()
+        });
+        assert!(
+            run.assessment()
+                .proven
+                .contains(&RequiredCheck::ProcInterfaces)
+        );
+        let checks = run.proc_interfaces.as_mut().unwrap();
+        let missing = checks.proven.pop().unwrap();
+        assert!(
+            run.assessment()
+                .unverified
+                .contains(&RequiredCheck::ProcInterfaces)
+        );
+        run.proc_interfaces.as_mut().unwrap().leaked.push(missing);
+        assert!(
+            run.assessment()
+                .leaked
+                .contains(&RequiredCheck::ProcInterfaces)
+        );
+        assert!(
+            !run.assessment()
+                .proven
+                .contains(&RequiredCheck::ProcInterfaces)
+        );
+    }
+
+    #[test]
     fn address_groups_require_all_families_and_both_real_syscall_actors() {
         let mut run = run(ScopedNativeResult::Proven {
             checks: vec![
@@ -385,7 +431,7 @@ mod tests {
             .proven
             .retain(|c| c.vector != crate::AddressVector::GetifaddrsIpv6);
         addresses.leaked.push(crate::AddressCheck {
-            actor: crate::AddressActor::Syscall,
+            actor: crate::NativeReadActor::Syscall,
             vector: crate::AddressVector::IoctlAddress,
         });
         run.record_addresses(addresses);

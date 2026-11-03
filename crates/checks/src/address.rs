@@ -7,8 +7,8 @@ use std::{
     os::fd::{AsRawFd, FromRawFd, OwnedFd},
 };
 use vpnhide_diagnostic_model::{
-    AddressActor, AddressActorMeasurement, AddressIoctl, AddressIoctlObservation,
-    AddressMeasurement, IfconfObservation, MAX_ADDRESSES, ObservedAddress, ProbeError, Sample,
+    AddressActorMeasurement, AddressIoctl, AddressIoctlObservation, AddressMeasurement,
+    IfconfObservation, MAX_ADDRESSES, NativeReadActor, ObservedAddress, ProbeError, Sample,
 };
 
 fn error() -> ProbeError {
@@ -25,12 +25,12 @@ fn sample<T>(value: Result<T, ProbeError>) -> Sample<T> {
         Err(e) => Sample::Error(e),
     }
 }
-fn socket(actor: AddressActor) -> Result<OwnedFd, ProbeError> {
+fn socket(actor: NativeReadActor) -> Result<OwnedFd, ProbeError> {
     let kind = libc::SOCK_DGRAM | libc::SOCK_CLOEXEC;
     let fd = unsafe {
         match actor {
-            AddressActor::Libc => libc::socket(libc::AF_INET, kind, 0) as libc::c_long,
-            AddressActor::Syscall => libc::syscall(libc::SYS_socket, libc::AF_INET, kind, 0),
+            NativeReadActor::Libc => libc::socket(libc::AF_INET, kind, 0) as libc::c_long,
+            NativeReadActor::Syscall => libc::syscall(libc::SYS_socket, libc::AF_INET, kind, 0),
         }
     };
     if fd < 0 {
@@ -40,15 +40,15 @@ fn socket(actor: AddressActor) -> Result<OwnedFd, ProbeError> {
     Ok(unsafe { OwnedFd::from_raw_fd(fd as libc::c_int) })
 }
 fn ioctl(
-    actor: AddressActor,
+    actor: NativeReadActor,
     fd: i32,
     command: libc::c_ulong,
     request: *mut libc::c_void,
 ) -> Result<(), ProbeError> {
     let result = unsafe {
         match actor {
-            AddressActor::Libc => libc::ioctl(fd, command as _, request) as libc::c_long,
-            AddressActor::Syscall => libc::syscall(libc::SYS_ioctl, fd, command, request),
+            NativeReadActor::Libc => libc::ioctl(fd, command as _, request) as libc::c_long,
+            NativeReadActor::Syscall => libc::syscall(libc::SYS_ioctl, fd, command, request),
         }
     };
     if result < 0 {
@@ -86,7 +86,7 @@ fn ipv4(address: libc::sockaddr) -> Result<Vec<u8>, ProbeError> {
 fn ioctl_address(
     name: &str,
     kind: AddressIoctl,
-    actor: AddressActor,
+    actor: NativeReadActor,
 ) -> Result<Vec<u8>, ProbeError> {
     let mut req = request(name)?;
     let fd = socket(actor)?;
@@ -112,7 +112,7 @@ fn name(bytes: &[libc::c_char]) -> Result<String, ProbeError> {
         .ok_or(ProbeError::Malformed)?;
     Ok(crate::netlink_wire::interface_name(&bytes[..length + 1])?.into())
 }
-fn ifconf_size(fd: &OwnedFd, actor: AddressActor) -> Result<u32, ProbeError> {
+fn ifconf_size(fd: &OwnedFd, actor: NativeReadActor) -> Result<u32, ProbeError> {
     let mut req: libc::ifconf = unsafe { zeroed() };
     ioctl(
         actor,
@@ -122,7 +122,7 @@ fn ifconf_size(fd: &OwnedFd, actor: AddressActor) -> Result<u32, ProbeError> {
     )?;
     u32::try_from(req.ifc_len).map_err(|_| ProbeError::Malformed)
 }
-fn ifconf(actor: AddressActor) -> Result<IfconfObservation, ProbeError> {
+fn ifconf(actor: NativeReadActor) -> Result<IfconfObservation, ProbeError> {
     let fd = socket(actor)?;
     let record_bytes = size_of::<libc::ifreq>();
     let before = ifconf_size(&fd, actor)?;
@@ -354,7 +354,7 @@ impl AddressDump {
         })
     }
 }
-fn netlink(actor: AddressActor) -> Result<Vec<ObservedAddress>, ProbeError> {
+fn netlink(actor: NativeReadActor) -> Result<Vec<ObservedAddress>, ProbeError> {
     let mut dump = AddressDump::default();
     crate::netlink_read::dump(crate::netlink_read::DumpKind::Addresses, actor, |bytes| {
         dump.consume(bytes)
@@ -364,7 +364,7 @@ fn netlink(actor: AddressActor) -> Result<Vec<ObservedAddress>, ProbeError> {
 
 pub fn observe(name: &str) -> AddressMeasurement {
     AddressMeasurement {
-        actors: AddressActor::ALL
+        actors: NativeReadActor::ALL
             .into_iter()
             .map(|actor| AddressActorMeasurement {
                 actor,

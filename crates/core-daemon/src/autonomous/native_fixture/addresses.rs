@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 use vpnhide_diagnostic_model::{
-    AddressActor, NativeFixtureSpec, NativeMeasurement, ProbeError, Sample, fixture_addresses,
+    NativeFixtureSpec, NativeMeasurement, NativeReadActor, ProbeError, Sample, fixture_addresses,
 };
 
 fn request(spec: &NativeFixtureSpec, ipv6: bool, sequence: u32) -> Vec<u8> {
@@ -59,7 +59,7 @@ pub(super) fn install(
     let baseline = &observations
         .actors
         .iter()
-        .find(|v| v.actor == AddressActor::Syscall)
+        .find(|v| v.actor == NativeReadActor::Syscall)
         .ok_or(ProbeError::Unsupported)?
         .netlink;
     let entries = match baseline {
@@ -78,7 +78,7 @@ pub(super) fn install(
     }
     // Descriptor lifetime owns both addresses, including an uncertain ACK. A
     // failed later family leaves an explicitly partial stimulus for evaluation.
-    let fd = vpnhide_checks::netlink_read::bound_socket(AddressActor::Syscall)?;
+    let fd = vpnhide_checks::netlink_read::bound_socket(NativeReadActor::Syscall)?;
     for (ipv6, sequence) in [(false, 1), (true, 2)] {
         if vpnhide_checks::fixture::index(&spec.interface.name) != Ok(spec.interface.index) {
             return Err(ProbeError::Malformed);
@@ -106,7 +106,7 @@ pub(super) fn install(
         }
         let reply = vpnhide_checks::netlink_read::receive(
             &fd,
-            AddressActor::Syscall,
+            NativeReadActor::Syscall,
             Instant::now() + Duration::from_secs(1),
         )?;
         vpnhide_checks::netlink_wire::acknowledgement(&reply, &bytes)?;

@@ -11,8 +11,11 @@ macro_rules! enum_map {
         impl From<$name> for model::$source { fn from(v: $name) -> Self { match v { $($name::$variant => Self::$variant),+ } } }
     }
 }
+enum_map!(CoreNativeReadActor, NativeReadActor, Libc, Syscall);
 mod address;
 pub use address::*;
+mod proc_interfaces;
+pub use proc_interfaces::*;
 enum_map!(
     CoreRequiredCheck,
     RequiredCheck,
@@ -258,6 +261,7 @@ impl From<model::ScopedBindResult> for CoreScopedBindResult {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreNativeMeasurement {
+    pub proc_interfaces: Option<CoreProcInterfaceMeasurement>,
     pub addresses: Option<CoreAddressMeasurement>,
     pub binding: Option<CoreBindMeasurement>,
     pub flags: CoreNumberSample,
@@ -270,6 +274,7 @@ pub struct CoreNativeMeasurement {
 impl From<model::NativeMeasurement> for CoreNativeMeasurement {
     fn from(v: model::NativeMeasurement) -> Self {
         Self {
+            proc_interfaces: v.proc_interfaces.map(Into::into),
             addresses: v.addresses.map(Into::into),
             binding: v.binding.map(Into::into),
             flags: v.flags.into(),
@@ -284,6 +289,7 @@ impl From<model::NativeMeasurement> for CoreNativeMeasurement {
 impl From<CoreNativeMeasurement> for model::NativeMeasurement {
     fn from(v: CoreNativeMeasurement) -> Self {
         Self {
+            proc_interfaces: v.proc_interfaces.map(Into::into),
             addresses: v.addresses.map(Into::into),
             binding: v.binding.map(Into::into),
             flags: v.flags.into(),
@@ -421,6 +427,7 @@ pub struct CoreDiagnosticRun {
     pub stale: bool,
     pub binding: Option<CoreScopedBindResult>,
     pub addresses: Option<CoreScopedAddressResult>,
+    pub proc_interfaces: Option<CoreScopedProcInterfaceResult>,
 }
 impl From<model::DiagnosticRun> for CoreDiagnosticRun {
     fn from(v: model::DiagnosticRun) -> Self {
@@ -443,6 +450,7 @@ impl From<model::DiagnosticRun> for CoreDiagnosticRun {
             },
         };
         Self {
+            proc_interfaces: v.proc_interfaces.map(Into::into),
             addresses: v.addresses.map(Into::into),
             session: v.session,
             core_epoch: v.fingerprint.core_epoch,

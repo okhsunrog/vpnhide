@@ -135,11 +135,12 @@ Everything below is a `state.json` field unless noted.
 ### 2.1 Schema versions
 
 `state.json → schema` says which shape the bundle was written in. **This doc
-describes schema 6.** One number covers the whole bundle; there is no per-object
+describes schema 7.** One number covers the whole bundle; there is no per-object
 version.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
+| 7 | main (unreleased) | `run.procInterfaces` retains per-surface libc/direct-syscall proof, leaks and controls for `/proc/net/dev` and `/proc/net/if_inet6`. A denied read is unverified; proc leaks remain distinct from proven address ioctls/netlink. |
 | 6 | main (unreleased) | Autonomous run exports keep separate address actor/vector proof, leaks and controls. Interface-only getifaddrs evidence no longer proves IPv4/IPv6 address coverage; grouped address requirements retain missing families and syscall actors as unverified. This is scoped evidence, not whole-device acceptance. |
 | 5 | main (unreleased) | Core-owned `nativeStatus` records chosen/bundled provenance, attempts, delivery, observed runtime, desired hook coverage and setup separately. Old Kotlin backend priority/classifiers and VPN-dependent report/gate owners are removed. Dashboard omits native install recommendation/partial-hook/installed-optional projections; statistics carry source identity/currentness. Legacy nullable output slots stay null. |
 | 4 | main (unreleased) | Dashboard, Diagnostics, agent and captures consume retained autonomous Core evidence. `autonomousDiagnostics` identifies the accepted Core/config/root sources, required/proven/leaked/unverified vectors, controls, cleanup and reuse blockers. Legacy gate/report/diagnostics/verdict fields remain nullable for old readers; new captures do not fabricate an app-process self-test. |
@@ -195,6 +196,11 @@ interface-only result in `run.native`. Missing families, permission failures or
 unstable size baselines remain unverified. See [diagnostics](diagnostics.md) for
 the owned stimulus and ordinary-object/cleanup requirements.
 
+Schema7 adds `run.procInterfaces` with the same three list fields. Names pair the
+read actor and `device_stats` or `ipv6_addresses` surface. Both surfaces and actors
+are required for the grouped proc-interface proof. A controlled proc leak remains
+visible alongside proven address checks; permission denial never becomes proof.
+
 `rootJoined` and the `rootSource*` fields distinguish retained heavy root
 metadata from the live Core publication. An unjoined export keeps installation
 facts and raw forensic sections, withdraws runtime active/checkable claims and
@@ -232,7 +238,7 @@ renders*, so the bundle can't disagree with what the user saw on screen.
 
 | Field | Meaning |
 |---|---|
-| `schema` | Bundle schema version — **this doc describes 6** (§2.1). |
+| `schema` | Bundle schema version — **this doc describes 7** (§2.1). |
 | `autonomousDiagnostics` | Retained Core-owned run and assessment with explicit currentness, source identities and root join (§2.2). |
 | `generatedAt` | ISO-8601 capture time. |
 | `captureKind` | `debug` / `full_system_logcat` / `kernel_images` (§1). |

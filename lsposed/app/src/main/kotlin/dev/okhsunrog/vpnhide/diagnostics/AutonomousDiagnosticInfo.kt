@@ -5,6 +5,7 @@ import uniffi.vpnhide_core_ffi.CoreAddressCheck
 import uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment
 import uniffi.vpnhide_core_ffi.CoreDiagnosticRun
 import uniffi.vpnhide_core_ffi.CoreFrameworkAttribution
+import uniffi.vpnhide_core_ffi.CoreProcInterfaceCheck
 import java.util.Locale
 
 /** Exported evidence is retained Core publication data, not a post-baseline suite. */
@@ -47,17 +48,20 @@ internal data class AutonomousRunInfo(
     val stale: Boolean,
     val frameworkAttribution: AutonomousFrameworkAttributionInfo?,
     val binding: AutonomousBindInfo? = null,
-    val addresses: AutonomousAddressInfo? = null,
+    val addresses: AutonomousNativeReadInfo? = null,
+    val procInterfaces: AutonomousNativeReadInfo? = null,
 )
 
 @Serializable
-internal data class AutonomousAddressInfo(
+internal data class AutonomousNativeReadInfo(
     val provenChecks: List<String>,
     val leakedChecks: List<String>,
     val controls: List<String>,
 )
 
 private fun CoreAddressCheck.infoName(): String = "${actor.name.lowercase(Locale.ROOT)}.${vector.name.lowercase(Locale.ROOT)}"
+
+private fun CoreProcInterfaceCheck.infoName(): String = "${actor.name.lowercase(Locale.ROOT)}.${surface.name.lowercase(Locale.ROOT)}"
 
 @Serializable
 internal data class AutonomousBindInfo(
@@ -115,7 +119,14 @@ internal fun CoreDiagnosticRun.toDiagnosticInfo(): AutonomousRunInfo =
             )
         },
         addresses?.let { result ->
-            AutonomousAddressInfo(
+            AutonomousNativeReadInfo(
+                result.proven.map { it.infoName() },
+                result.leaked.map { it.infoName() },
+                result.controls.map { it.name.lowercase(Locale.ROOT) },
+            )
+        },
+        procInterfaces?.let { result ->
+            AutonomousNativeReadInfo(
                 result.proven.map { it.infoName() },
                 result.leaked.map { it.infoName() },
                 result.controls.map { it.name.lowercase(Locale.ROOT) },

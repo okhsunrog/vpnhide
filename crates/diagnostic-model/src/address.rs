@@ -1,6 +1,6 @@
 //! Address-vector controls. Interface enumeration alone cannot establish IPv4/
 //! IPv6 or ioctl address coverage. Native RAW is an explicit root differential.
-use crate::{ControlFailure, NativeFixtureSpec, ProbeError, Sample};
+use crate::{ControlFailure, NativeFixtureSpec, NativeReadActor, ProbeError, Sample};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -52,31 +52,21 @@ impl AddressVector {
     ];
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AddressActor {
-    Libc,
-    Syscall,
-}
-impl AddressActor {
-    pub const ALL: [Self; 2] = [Self::Libc, Self::Syscall];
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AddressCheck {
-    pub actor: AddressActor,
+    pub actor: NativeReadActor,
     pub vector: AddressVector,
 }
 impl AddressCheck {
     pub fn required() -> Vec<Self> {
-        AddressActor::ALL
+        NativeReadActor::ALL
             .into_iter()
             .flat_map(|actor| {
                 AddressVector::ALL
                     .into_iter()
                     .filter(move |v| {
-                        actor == AddressActor::Libc
+                        actor == NativeReadActor::Libc
                             || !matches!(
                                 v,
                                 AddressVector::GetifaddrsIpv4 | AddressVector::GetifaddrsIpv6
@@ -149,7 +139,7 @@ impl IfconfObservation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AddressActorMeasurement {
-    pub actor: AddressActor,
+    pub actor: NativeReadActor,
     pub ioctls: Vec<AddressIoctlObservation>,
     pub ifconf: Sample<IfconfObservation>,
     pub netlink: Sample<Vec<ObservedAddress>>,
@@ -179,7 +169,7 @@ pub struct AddressMeasurement {
 impl AddressMeasurement {
     pub fn bounded(&self) -> bool {
         let mut actors = BTreeSet::new();
-        self.actors.len() <= AddressActor::ALL.len()
+        self.actors.len() <= NativeReadActor::ALL.len()
             && self
                 .actors
                 .iter()
@@ -265,7 +255,7 @@ fn ordinary(entries: &[ObservedAddress], family: usize) -> BTreeSet<&ObservedAdd
 fn ifconf_size(
     result: &mut ScopedAddressResult,
     spec: &NativeFixtureSpec,
-    actor: AddressActor,
+    actor: NativeReadActor,
     samples: [Option<&IfconfObservation>; 5],
 ) {
     let [Some(n), Some(s), Some(w), Some(e), Some(c)] = samples else {
@@ -363,7 +353,7 @@ fn lists(
 fn evaluate_actor(
     result: &mut ScopedAddressResult,
     spec: &NativeFixtureSpec,
-    actor: AddressActor,
+    actor: NativeReadActor,
     samples: [&AddressActorMeasurement; 5],
 ) {
     let [negative, start, worker, end, cleanup] = samples;
@@ -474,7 +464,7 @@ pub fn evaluate_address_fixture(
         result.problem(ControlFailure::InvalidSpec);
         return result;
     }
-    for actor in AddressActor::ALL {
+    for actor in NativeReadActor::ALL {
         let [Some(n), Some(s), Some(w), Some(e), Some(c)] = [negative, start, worker, end, cleanup]
             .map(|m| m.actors.iter().find(|v| v.actor == actor))
         else {
@@ -491,7 +481,7 @@ pub fn evaluate_address_fixture(
             &mut result,
             spec,
             AddressCheck {
-                actor: AddressActor::Libc,
+                actor: NativeReadActor::Libc,
                 vector,
             },
             family,

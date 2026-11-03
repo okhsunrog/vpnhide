@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{NativeFixtureSpec, NativeMeasurement, ScopedNativeResult};
 
-pub const DIAGNOSTIC_CONTRACT: u32 = 4;
+pub const DIAGNOSTIC_CONTRACT: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -153,6 +153,8 @@ pub enum DiagnosticOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticRun {
     #[serde(default)]
+    pub proc_interfaces: Option<crate::ScopedProcInterfaceResult>,
+    #[serde(default)]
     pub addresses: Option<crate::ScopedAddressResult>,
     #[serde(default)]
     pub binding: Option<crate::ScopedBindResult>,
@@ -176,6 +178,10 @@ impl DiagnosticRun {
     }
     pub fn record_addresses(&mut self, addresses: crate::ScopedAddressResult) {
         self.addresses = Some(addresses);
+        self.refresh_missing();
+    }
+    pub fn record_proc_interfaces(&mut self, result: crate::ScopedProcInterfaceResult) {
+        self.proc_interfaces = Some(result);
         self.refresh_missing();
     }
     pub fn record_binding(&mut self, binding: crate::ScopedBindResult) {
@@ -202,6 +208,7 @@ mod tests {
     #[test]
     fn four_native_successes_never_replace_the_supported_contract() {
         let mut run = DiagnosticRun {
+            proc_interfaces: None,
             addresses: None,
             binding: None,
             session: 1,

@@ -9,12 +9,25 @@ mod address;
 pub use address::*;
 mod assessment;
 pub use assessment::*;
+mod proc_interfaces;
+pub use proc_interfaces::*;
 pub mod framework;
 pub mod framework_legacy;
 mod run;
 pub use run::*;
 
 pub const MAX_INTERFACES: usize = 256;
+
+/// Independent userspace-library and kernel-syscall read paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeReadActor {
+    Libc,
+    Syscall,
+}
+impl NativeReadActor {
+    pub const ALL: [Self; 2] = [Self::Libc, Self::Syscall];
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -127,6 +140,8 @@ impl NativeFixtureSpec {
 #[serde(deny_unknown_fields)]
 pub struct NativeMeasurement {
     #[serde(default)]
+    pub proc_interfaces: Option<ProcInterfaceMeasurement>,
+    #[serde(default)]
     pub addresses: Option<AddressMeasurement>,
     #[serde(default)]
     pub binding: Option<BindMeasurement>,
@@ -140,9 +155,13 @@ pub struct NativeMeasurement {
 
 impl NativeMeasurement {
     pub fn bounded(&self) -> bool {
-        self.addresses
+        self.proc_interfaces
             .as_ref()
-            .is_none_or(AddressMeasurement::bounded)
+            .is_none_or(ProcInterfaceMeasurement::bounded)
+            && self
+                .addresses
+                .as_ref()
+                .is_none_or(AddressMeasurement::bounded)
             && self.binding.as_ref().is_none_or(BindMeasurement::bounded)
             && [&self.ifaddrs, &self.links].into_iter().all(|sample| {
                 sample.value().is_none_or(|entries| {
@@ -401,6 +420,7 @@ mod tests {
             entries.push(spec.interface.into());
         }
         NativeMeasurement {
+            proc_interfaces: None,
             addresses: None,
             binding: None,
             flags: if visible {

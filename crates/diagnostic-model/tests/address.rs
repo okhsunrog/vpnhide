@@ -48,7 +48,7 @@ fn measurement(visible: bool) -> AddressMeasurement {
     }
     AddressMeasurement {
         ifaddrs: Sample::Value(addresses.clone()),
-        actors: AddressActor::ALL
+        actors: NativeReadActor::ALL
             .into_iter()
             .map(|actor| {
                 let mut entries = vec![entry(false, 4, false)];
@@ -92,7 +92,7 @@ fn measurement(visible: bool) -> AddressMeasurement {
             .collect(),
     }
 }
-fn check(actor: AddressActor, vector: AddressVector) -> AddressCheck {
+fn check(actor: NativeReadActor, vector: AddressVector) -> AddressCheck {
     AddressCheck { actor, vector }
 }
 
@@ -129,7 +129,7 @@ fn raw_and_protected_observations_require_both_syscall_actors_and_address_famili
         partial
             .leaked
             .iter()
-            .all(|c| c.actor == AddressActor::Syscall)
+            .all(|c| c.actor == NativeReadActor::Syscall)
     );
     assert!(!partial.complete());
 }
@@ -198,8 +198,8 @@ fn null_ifconf_size_is_independent_of_filtered_data_and_uses_the_worker_abi() {
     assert_eq!(
         result.leaked,
         vec![
-            check(AddressActor::Libc, AddressVector::IfconfSize),
-            check(AddressActor::Syscall, AddressVector::IfconfSize)
+            check(NativeReadActor::Libc, AddressVector::IfconfSize),
+            check(NativeReadActor::Syscall, AddressVector::IfconfSize)
         ]
     );
     assert_eq!(result.proven.len(), 16);
@@ -217,12 +217,12 @@ fn null_ifconf_size_is_independent_of_filtered_data_and_uses_the_worker_abi() {
     assert!(
         !changed
             .proven
-            .contains(&check(AddressActor::Libc, AddressVector::IfconfSize))
+            .contains(&check(NativeReadActor::Libc, AddressVector::IfconfSize))
     );
     assert!(
         !changed
             .leaked
-            .contains(&check(AddressActor::Libc, AddressVector::IfconfSize))
+            .contains(&check(NativeReadActor::Libc, AddressVector::IfconfSize))
     );
 }
 
@@ -247,7 +247,7 @@ fn cleanup_failure_and_lost_ordinary_objects_preserve_observed_leaks() {
     assert!(
         !changed
             .proven
-            .contains(&check(AddressActor::Libc, AddressVector::GetifaddrsIpv6))
+            .contains(&check(NativeReadActor::Libc, AddressVector::GetifaddrsIpv6))
     );
 }
 
@@ -261,7 +261,7 @@ fn permission_failure_duplicate_actors_and_malformed_records_never_pass() {
     assert!(
         !result
             .proven
-            .contains(&check(AddressActor::Libc, AddressVector::IoctlAddress))
+            .contains(&check(NativeReadActor::Libc, AddressVector::IoctlAddress))
     );
     denied.actors.push(denied.actors[0].clone());
     assert!(!denied.bounded());

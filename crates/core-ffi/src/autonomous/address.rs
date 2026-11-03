@@ -1,6 +1,5 @@
 //! Generated observation records only. Core evaluates every required actor.
 use super::*;
-enum_map!(CoreAddressActor, AddressActor, Libc, Syscall);
 enum_map!(
     CoreAddressIoctl,
     AddressIoctl,
@@ -26,7 +25,7 @@ enum_map!(
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreAddressCheck {
-    pub actor: CoreAddressActor,
+    pub actor: CoreNativeReadActor,
     pub vector: CoreAddressVector,
 }
 impl From<model::AddressCheck> for CoreAddressCheck {
@@ -197,7 +196,7 @@ impl From<CoreIfconfSample> for model::Sample<model::IfconfObservation> {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreAddressActorMeasurement {
-    pub actor: CoreAddressActor,
+    pub actor: CoreNativeReadActor,
     pub ioctls: Vec<CoreAddressIoctlObservation>,
     pub ifconf: CoreIfconfSample,
     pub netlink: CoreAddressesSample,

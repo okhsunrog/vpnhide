@@ -12,7 +12,7 @@ use std::time::Duration;
 use vpnhide_core_daemon::autonomous::native_fixture::TunFixture;
 use vpnhide_diagnostic_model::{
     AddressCheck, BindActor, ControlFailure, NativeFixtureSpec, NativeMeasurement,
-    ScopedNativeResult, cleanup_confirmed,
+    ProcInterfaceCheck, ScopedNativeResult, cleanup_confirmed,
 };
 
 fn main() {
@@ -156,6 +156,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "FIXTURE_ADDRESS_RESULT={}",
         serde_json::to_string(&done.addresses)?
     );
+    println!(
+        "FIXTURE_PROC_RESULT={}",
+        serde_json::to_string(&done.proc_interfaces)?
+    );
+    // Current kernel backends do not filter these seq files. This independently
+    // tests leak detection; it is not a claim that the product hides procfs.
+    let proc_expected = done.proc_interfaces.proven.is_empty()
+        && done.proc_interfaces.controls.is_empty()
+        && ProcInterfaceCheck::required()
+            .iter()
+            .all(|c| done.proc_interfaces.leaked.contains(c));
     let addresses_expected = if protected {
         done.addresses.complete()
     } else {
@@ -177,7 +188,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         matches!(&done.result, ScopedNativeResult::Leaked { checks, incomplete } if checks.len() == 4 && incomplete.is_empty())
     };
-    if !expected || !bind_expected || !addresses_expected || routes()? != before {
+    if !expected || !bind_expected || !addresses_expected || !proc_expected || routes()? != before {
         return Err("native differential/control/cleanup assertion failed".into());
     }
     let duplicated = TunFixture::create(0x0123_4567_89ac)?;
@@ -195,6 +206,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || !AddressCheck::required()
             .iter()
             .all(|v| incomplete.addresses.leaked.contains(v))
+        || !incomplete.proc_interfaces.proven.is_empty()
+        || !incomplete
+            .proc_interfaces
+            .controls
+            .contains(&ControlFailure::CleanupUnconfirmed)
+        || incomplete.proc_interfaces.leaked.len() != 4
     {
         return Err("last-dup control falsely confirmed cleanup".into());
     }
@@ -241,6 +258,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .controls
             .contains(&ControlFailure::MissingPositiveControl)
         || !cleanup_confirmed(&partial_spec, &completed.cleanup)
+        || completed.proc_interfaces.leaked.len() != 2
+        || !completed.proc_interfaces.proven.is_empty()
+        || !completed
+            .proc_interfaces
+            .controls
+            .contains(&ControlFailure::MissingPositiveControl)
         || routes()? != before
     {
         return Err("partial address setup leaked resources or falsely proved coverage".into());

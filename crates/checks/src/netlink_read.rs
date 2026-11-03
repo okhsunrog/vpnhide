@@ -6,7 +6,7 @@ use std::{
     os::fd::{AsRawFd, FromRawFd, OwnedFd},
     time::{Duration, Instant},
 };
-use vpnhide_diagnostic_model::{AddressActor, ProbeError};
+use vpnhide_diagnostic_model::{NativeReadActor, ProbeError};
 
 fn error() -> ProbeError {
     ProbeError::Errno(
@@ -17,14 +17,14 @@ fn error() -> ProbeError {
     )
 }
 
-pub fn bound_socket(actor: AddressActor) -> Result<OwnedFd, ProbeError> {
+pub fn bound_socket(actor: NativeReadActor) -> Result<OwnedFd, ProbeError> {
     let kind = libc::SOCK_RAW | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC;
     let raw = unsafe {
         match actor {
-            AddressActor::Libc => {
+            NativeReadActor::Libc => {
                 libc::socket(libc::AF_NETLINK, kind, libc::NETLINK_ROUTE) as libc::c_long
             }
-            AddressActor::Syscall => libc::syscall(
+            NativeReadActor::Syscall => libc::syscall(
                 libc::SYS_socket,
                 libc::AF_NETLINK,
                 kind,
@@ -42,8 +42,10 @@ pub fn bound_socket(actor: AddressActor) -> Result<OwnedFd, ProbeError> {
     let size = size_of::<libc::sockaddr_nl>() as libc::socklen_t;
     let result = unsafe {
         match actor {
-            AddressActor::Libc => libc::bind(fd.as_raw_fd(), pointer, size) as libc::c_long,
-            AddressActor::Syscall => libc::syscall(libc::SYS_bind, fd.as_raw_fd(), pointer, size),
+            NativeReadActor::Libc => libc::bind(fd.as_raw_fd(), pointer, size) as libc::c_long,
+            NativeReadActor::Syscall => {
+                libc::syscall(libc::SYS_bind, fd.as_raw_fd(), pointer, size)
+            }
         }
     };
     if result != 0 {
@@ -54,7 +56,7 @@ pub fn bound_socket(actor: AddressActor) -> Result<OwnedFd, ProbeError> {
 
 pub fn receive(
     fd: &OwnedFd,
-    actor: AddressActor,
+    actor: NativeReadActor,
     deadline: Instant,
 ) -> Result<Vec<u8>, ProbeError> {
     let mut bytes = vec![0; 64 * 1024];
@@ -90,10 +92,10 @@ pub fn receive(
         message.msg_iovlen = 1;
         let size = unsafe {
             match actor {
-                AddressActor::Libc => {
+                NativeReadActor::Libc => {
                     libc::recvmsg(fd.as_raw_fd(), &mut message, 0) as libc::c_long
                 }
-                AddressActor::Syscall => {
+                NativeReadActor::Syscall => {
                     libc::syscall(libc::SYS_recvmsg, fd.as_raw_fd(), &mut message, 0)
                 }
             }
@@ -130,7 +132,7 @@ pub enum DumpKind {
 }
 pub fn dump(
     kind: DumpKind,
-    actor: AddressActor,
+    actor: NativeReadActor,
     mut consume: impl FnMut(&[u8]) -> Result<bool, ProbeError>,
 ) -> Result<(), ProbeError> {
     let fd = bound_socket(actor)?;
@@ -149,7 +151,7 @@ pub fn dump(
     let destination = (&address as *const libc::sockaddr_nl).cast::<libc::sockaddr>();
     let sent = unsafe {
         match actor {
-            AddressActor::Libc => libc::sendto(
+            NativeReadActor::Libc => libc::sendto(
                 fd.as_raw_fd(),
                 request.as_ptr().cast(),
                 request.len(),
@@ -157,7 +159,7 @@ pub fn dump(
                 destination,
                 size_of::<libc::sockaddr_nl>() as _,
             ) as libc::c_long,
-            AddressActor::Syscall => libc::syscall(
+            NativeReadActor::Syscall => libc::syscall(
                 libc::SYS_sendto,
                 fd.as_raw_fd(),
                 request.as_ptr(),

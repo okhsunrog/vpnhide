@@ -213,11 +213,13 @@ fn worker_identity(
     })
 }
 struct NativeEvidence {
+    proc_interfaces: ScopedProcInterfaceResult,
     addresses: ScopedAddressResult,
     native: ScopedNativeResult,
     binding: ScopedBindResult,
 }
 struct MeasurementFailure {
+    proc_interfaces: Option<Box<ScopedProcInterfaceResult>>,
     addresses: Option<Box<ScopedAddressResult>>,
     binding: Option<Box<ScopedBindResult>>,
     detail: String,
@@ -305,6 +307,7 @@ impl Coordinator {
         inner.retry_at = None;
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
         let run = DiagnosticRun {
+            proc_interfaces: None,
             addresses: None,
             binding: None,
             session: inner.next,
@@ -353,6 +356,7 @@ impl Coordinator {
         let result = match &worker_lease {
             Ok(_) => self.measure(&state, session),
             Err(detail) => Err(MeasurementFailure {
+                proc_interfaces: None,
                 addresses: None,
                 binding: None,
                 detail: detail.clone(),
@@ -394,11 +398,13 @@ impl Coordinator {
         };
         match result {
             Ok(evidence) => {
+                run.record_proc_interfaces(evidence.proc_interfaces);
                 run.record_addresses(evidence.addresses);
                 run.record_native(evidence.native);
                 run.record_binding(evidence.binding);
             }
             Err(failure) => {
+                run.proc_interfaces = failure.proc_interfaces.map(|v| *v);
                 run.addresses = failure.addresses.map(|v| *v);
                 run.binding = failure.binding.map(|v| *v);
                 run.outcome = DiagnosticOutcome::Infrastructure {
@@ -441,6 +447,7 @@ impl Coordinator {
                 }
             }
             MeasurementFailure {
+                proc_interfaces: None,
                 addresses: None,
                 binding: None,
                 detail: format!("native fixture unavailable: {}", failure.error),
@@ -507,6 +514,7 @@ impl Coordinator {
             }
         })();
         let unavailable = NativeMeasurement {
+            proc_interfaces: None,
             addresses: None,
             binding: None,
             flags: Sample::Error(ProbeError::Timeout),
@@ -529,11 +537,13 @@ impl Coordinator {
         }
         match report {
             Ok(_) if cleaned => Ok(NativeEvidence {
+                proc_interfaces: completion.proc_interfaces,
                 addresses: completion.addresses,
                 native: completion.result,
                 binding: completion.binding,
             }),
             Ok(_) => Err(MeasurementFailure {
+                proc_interfaces: Some(Box::new(completion.proc_interfaces)),
                 addresses: Some(Box::new(completion.addresses)),
                 binding: Some(Box::new(completion.binding)),
                 detail: "native fixture cleanup unconfirmed; diagnostic admission held".into(),
@@ -541,6 +551,7 @@ impl Coordinator {
                 cleanup_confirmed: Some(false),
             }),
             Err(detail) => Err(MeasurementFailure {
+                proc_interfaces: Some(Box::new(completion.proc_interfaces)),
                 addresses: Some(Box::new(completion.addresses)),
                 binding: Some(Box::new(completion.binding)),
                 detail,
@@ -905,6 +916,7 @@ mod tests {
         coordinator.configure(PathBuf::from("/nonexistent-app"));
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            proc_interfaces: None,
             addresses: None,
             binding: None,
             session: 3,
@@ -933,6 +945,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            proc_interfaces: None,
             addresses: None,
             binding: None,
             session: 3,
@@ -967,6 +980,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let run = DiagnosticRun {
+            proc_interfaces: None,
             addresses: None,
             binding: None,
             session: 9,

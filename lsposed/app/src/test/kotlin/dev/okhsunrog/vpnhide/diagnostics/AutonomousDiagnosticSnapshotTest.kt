@@ -58,6 +58,7 @@ class AutonomousDiagnosticSnapshotTest {
             stale = false,
             binding = null,
             addresses = null,
+            procInterfaces = null,
         )
 
     private fun update(

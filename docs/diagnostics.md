@@ -69,6 +69,16 @@ proof cannot establish IPv4/IPv6 coverage. Core requires all eighteen address
 subchecks before reporting complete scoped address coverage; this is not a full
 suite PASS. Cleanup and ordinary loopback controls remain mandatory.
 
+The `ProcInterfaces` group has four required subchecks: `/proc/net/dev` and
+`/proc/net/if_inet6`, each through libc and direct openat/read syscalls. Readers
+parse bounded real records; missing or denied files do not prove hiding. Exact
+owned names/IPv6 addresses are attributed through negative/start/worker/end/
+cleanup observations and loopback controls. Traffic counters are not identity
+and need not remain constant. The current `.ko` QEMU test positively observes
+all four leaks, even though address ioctls/netlink hide successfully. These are
+retained leaks, not a missing-stimulus result or an automatic fallback trigger.
+This group does not qualify proc routes, sysfs/proc-sys, TCP sockets or Ports.
+
 Routes/rules, remaining proc/sys stimuli and framework active/
 default/callback/PendingIntent controls still need implementation or expansion.
 Android bionic, SELinux, Java callback isolation and old game-process coverage need
@@ -91,7 +101,7 @@ filesystem state. Setup readiness is not a diagnostic result. A receipt whose
 preparation failed cannot reuse an older delivery at the same revision. Observed
 runtime alone cannot borrow an old bundled payload hash or global Zygisk coverage.
 
-Schema6 exports both read models, per-actor address evidence and source identities. Historical gate/report/
+Schema7 exports both read models, per-actor address/proc evidence and source identities. Historical gate/report/
 verdict fields are null; their old Kotlin domain owners are removed. Capture time
 is not measurement time. Manual `NetworkViewCapture`, hook counter baselines,
 unsigned delta/reset handling and root forensic sections remain available for

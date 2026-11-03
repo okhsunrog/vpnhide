@@ -735,6 +735,7 @@ mod tests {
         fn autonomous_arguments_results_and_refusals() {
             use vpnhide_diagnostic_model::*;
             let measurement = NativeMeasurement {
+                proc_interfaces: None,
                 addresses: None,
                 binding: None,
                 flags: Sample::Error(ProbeError::Errno(19)),
@@ -827,6 +828,7 @@ mod tests {
                 },
             ] {
                 let run = DiagnosticRun {
+                    proc_interfaces: None,
                     addresses: None,
                     binding: None,
                     session: u64::MAX,

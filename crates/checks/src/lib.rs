@@ -5,6 +5,7 @@ mod generated;
 pub mod netlink_read;
 pub mod netlink_wire;
 pub mod observation;
+pub mod proc_interfaces;
 
 use std::ffi::CStr;
 use std::fs;

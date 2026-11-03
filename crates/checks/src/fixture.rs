@@ -194,7 +194,7 @@ fn links() -> Result<Vec<ObservedInterface>, ProbeError> {
     let mut dump = LinkDump::default();
     crate::netlink_read::dump(
         crate::netlink_read::DumpKind::Links,
-        vpnhide_diagnostic_model::AddressActor::Libc,
+        vpnhide_diagnostic_model::NativeReadActor::Libc,
         |batch| dump.consume(batch),
     )?;
     Ok(dump
@@ -214,6 +214,7 @@ pub fn observe(name: &str) -> NativeMeasurement {
         Err(e) => Sample::Error(e),
     };
     NativeMeasurement {
+        proc_interfaces: Some(crate::proc_interfaces::observe()),
         addresses: Some(crate::address::observe(name)),
         binding: Some(crate::binding::observe(name)),
         flags: interface_ioctl(name, false),
