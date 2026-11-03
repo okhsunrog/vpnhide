@@ -21,7 +21,8 @@ stimulus, a protected observation, attribution and ordinary-object preservation
 controls. Empty enumerations and clean Java replies alone cannot prove hiding.
 A leak remains evidence under incomplete controls, worker death or cleanup failure.
 After a vector's negative/start controls qualify the worker's observed leak,
-an unavailable end/cleanup read or missing later component cannot erase it.
+an unavailable or malformed end/cleanup read, or a missing later component,
+cannot erase it.
 Those failures are recorded independently and withhold successful proof. Initial
 RAW/worker data must still be available and valid; missing stimulus is not a leak.
 

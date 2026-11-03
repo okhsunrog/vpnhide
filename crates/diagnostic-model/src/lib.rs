@@ -324,7 +324,7 @@ pub fn evaluate_native_fixture(
         observed_leaks: Vec::new(),
     };
     if !spec.valid()
-        || [negative, root_start, worker, root_end, cleanup]
+        || [negative, root_start, worker]
             .into_iter()
             .any(|o| !o.bounded())
     {
@@ -388,6 +388,14 @@ pub fn evaluate_native_fixture(
         } else {
             problem(ControlFailure::ProbeUnavailable);
         }
+    }
+    if [root_end, cleanup].into_iter().any(|o| !o.bounded()) {
+        // A malformed later control withholds proof, but cannot erase an exact
+        // worker leak already qualified by bounded negative/start controls.
+        return ScopedNativeResult::Unverified {
+            reason: ControlFailure::InvalidSpec,
+            observed_leaks: leaked,
+        };
     }
     if !positive(spec, root_end) {
         return ScopedNativeResult::Unverified {
@@ -548,6 +556,41 @@ mod tests {
         assert!(
             matches!(evaluate_native_fixture(&spec, &absent, &positive, &positive, &positive, &positive), ScopedNativeResult::Leaked { checks, incomplete } if checks.len() == 4 && incomplete == vec![ControlFailure::CleanupUnconfirmed])
         );
+    }
+
+    #[test]
+    fn malformed_late_controls_cannot_erase_qualified_interface_leaks() {
+        let (spec, absent, positive) = (spec(), measure(false), measure(true));
+        for phase in [3, 4] {
+            let mut phases = [
+                absent.clone(),
+                positive.clone(),
+                positive.clone(),
+                positive.clone(),
+                absent.clone(),
+            ];
+            phases[phase].links = Sample::Value(vec![
+                spec.ordinary.interface.clone().into(),
+                spec.ordinary.interface.clone().into(),
+            ]);
+            assert!(!phases[phase].bounded());
+            let result = evaluate_native_fixture(
+                &spec, &phases[0], &phases[1], &phases[2], &phases[3], &phases[4],
+            );
+            assert_eq!(
+                result,
+                ScopedNativeResult::Unverified {
+                    reason: ControlFailure::InvalidSpec,
+                    observed_leaks: vec![
+                        NativeCheck::IoctlFlags,
+                        NativeCheck::IoctlMtu,
+                        NativeCheck::Getifaddrs,
+                        NativeCheck::NetlinkGetlink,
+                    ],
+                },
+                "lost qualified leaks in phase {phase}"
+            );
+        }
     }
 
     #[test]
