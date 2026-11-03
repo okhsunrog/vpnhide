@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import uniffi.vpnhide_core_ffi.coreRequiredRootSnapshotSections
 
 class RootSnapshotCacheTest {
     @Test
@@ -64,7 +65,7 @@ class RootSnapshotCacheTest {
     @Test
     fun `parser recovers content glued onto the end marker without a trailing newline`() {
         // A file emitted without a trailing newline (e.g. a hand-edited config
-        // cat'd by the snapshot script) puts its last line and the END marker on
+        // read by the snapshot probe) puts its last line and the END marker on
         // the same line. The section must still parse, not be dropped as unclosed.
         val raw =
             "__VPNHIDE_ROOT_SECTION_BEGIN__:canonical_config\n" +
@@ -89,7 +90,7 @@ class RootSnapshotCacheTest {
 
     @Test
     fun `snapshot validation rejects missing sections`() {
-        val sections = REQUIRED_ROOT_SNAPSHOT_SECTIONS.associateWith { "" } - "kmod_prop"
+        val sections = coreRequiredRootSnapshotSections().associateWith { "" } - "kmod_prop"
         var thrown: RootSnapshotException? = null
 
         try {
@@ -101,14 +102,12 @@ class RootSnapshotCacheTest {
         assertTrue(thrown?.message?.contains("kmod_prop") == true)
     }
 
-    // Anti-drift guard: the detectors and the debug export read sections by name from
-    // this one snapshot. Core's `root_snapshot_emits_every_section_the_app_requires` test
-    // runs the Rust probe and checks its output against REQUIRED_ROOT_SNAPSHOT_SECTIONS;
-    // here, pin that the probe still reports the shell identity the honest-render gate needs.
     @Test
-    fun `the snapshot probe reports the probe identity for the honest-render gate`() {
-        val source = coreProbeSource("root_snapshot.rs")
-        assertTrue(source.contains("\"snapshot_shell_uid\""))
-        assertTrue("captures the effective uid", source.contains("sys::uid()"))
+    fun `complete required keys cannot mask invalid framing names`() {
+        val sections = coreRequiredRootSnapshotSections().associateWith { "" } + ("x".repeat(10_000) to "")
+        val error = runCatching { validateRootSnapshotSections(sections) }.exceptionOrNull()
+        assertTrue(error is RootSnapshotException)
+        assertEquals(SelfTargetFailureKind.IncompleteData, (error as RootSnapshotException).kind)
+        assertTrue(error.message.orEmpty().contains("NAME_TOO_LONG"))
     }
 }

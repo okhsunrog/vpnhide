@@ -376,6 +376,15 @@ owner still quarantines a genuinely overdue worker and rejects its late result;
 no replacement runs until that worker returns. Filesystem IO is not forcibly
 interruptible; physical permits continue to bound lingering work.
 
+Root/debug snapshot framing, required root sections and their bounds now have one
+portable owner in `core-rpc::probe_frames`. Core's collector reuses its prefixes
+and output cap; APK adapters call its typed local FFI decoder/validator. Root
+discards incomplete/mismatched sections and requires the full shared section set.
+Debug forensics retain partial text and separate framing/parent-probe errors.
+Kotlin records StartupTrace timings and renders errors; the old Kotlin frame
+parser and source-text guards are removed. Actual producer tests and an independent
+required-key fixture retain the contract. Reading a snapshot admits no diagnostic run.
+
 ### IPC startup configuration
 
 `EndpointConfig` validates endpoint settings before CLI durable-state initialization.

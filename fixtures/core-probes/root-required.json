@@ -1,0 +1,10 @@
+[
+  "kmod_prop", "zygisk_prop", "kpm_prop", "core_prop",
+  "kmod_module_dir", "zygisk_module_dir", "kpm_module_dir", "core_module_dir",
+  "kmod_artifact_state", "kpm_artifact_state", "zygisk_artifact_state",
+  "kmod_disabled", "kpm_disabled", "zygisk_disabled", "core_disabled",
+  "kmod_pending_update", "kpm_pending_update", "zygisk_pending_update", "core_pending_update",
+  "canonical_config", "superkey_saved", "current_boot_id", "zygisk_status", "kernel_release",
+  "kmod_state", "kpm_state", "lsposed_state", "getenforce", "kpatch_runtime",
+  "pm_packages", "pm_users", "snapshot_shell_uid", "proc_exists", "ports_chain", "lsposed_framework"
+]

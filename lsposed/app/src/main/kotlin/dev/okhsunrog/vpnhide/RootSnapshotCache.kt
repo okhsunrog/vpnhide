@@ -3,6 +3,9 @@ package dev.okhsunrog.vpnhide
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.startup.StartupTrace
 import kotlinx.coroutines.flow.StateFlow
+import uniffi.vpnhide_core_ffi.CoreProbeFrameKind
+import uniffi.vpnhide_core_ffi.coreParseProbeSections
+import uniffi.vpnhide_core_ffi.coreValidateRootSnapshotSections
 import java.util.concurrent.CopyOnWriteArrayList
 import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
@@ -23,49 +26,6 @@ internal class RootSnapshotException(
     message: String,
     val kind: SelfTargetFailureKind = SelfTargetFailureKind.IncompleteData,
 ) : RuntimeException(message)
-
-private const val ROOT_SNAPSHOT_BEGIN_PREFIX = "__VPNHIDE_ROOT_SECTION_BEGIN__:"
-private const val ROOT_SNAPSHOT_END_PREFIX = "__VPNHIDE_ROOT_SECTION_END__:"
-private const val ROOT_TIMING_PREFIX = "__VPNHIDE_ROOT_TIMING__:"
-
-internal val REQUIRED_ROOT_SNAPSHOT_SECTIONS =
-    setOf(
-        "kmod_prop",
-        "zygisk_prop",
-        "kpm_prop",
-        "core_prop",
-        "kmod_module_dir",
-        "zygisk_module_dir",
-        "kpm_module_dir",
-        "core_module_dir",
-        "kmod_artifact_state",
-        "kpm_artifact_state",
-        "zygisk_artifact_state",
-        "kmod_disabled",
-        "kpm_disabled",
-        "zygisk_disabled",
-        "core_disabled",
-        "kmod_pending_update",
-        "kpm_pending_update",
-        "zygisk_pending_update",
-        "core_pending_update",
-        "canonical_config",
-        "superkey_saved",
-        "current_boot_id",
-        "zygisk_status",
-        "kernel_release",
-        "kmod_state",
-        "kpm_state",
-        "lsposed_state",
-        "getenforce",
-        "kpatch_runtime",
-        "pm_packages",
-        "pm_users",
-        "snapshot_shell_uid",
-        "proc_exists",
-        "ports_chain",
-        "lsposed_framework",
-    )
 
 /**
  * Single in-process source for root-owned/system state. Dashboard and
@@ -139,7 +99,9 @@ internal fun loadRootShellSnapshot(recordMetric: (String, Long) -> Unit = Startu
 }
 
 internal fun validateRootSnapshotSections(sections: Map<String, String>) {
-    val missing = REQUIRED_ROOT_SNAPSHOT_SECTIONS.filterNot(sections::containsKey)
+    val validation = coreValidateRootSnapshotSections(sections.keys.toList())
+    validation.error?.let { throw RootSnapshotException("root snapshot framing invalid: ${it.name}") }
+    val missing = validation.missing
     if (missing.isNotEmpty()) {
         throw RootSnapshotException("root snapshot incomplete, missing sections: ${missing.joinToString()}")
     }
@@ -148,30 +110,12 @@ internal fun validateRootSnapshotSections(sections: Map<String, String>) {
 internal fun parseRootShellSnapshot(
     raw: String,
     recordMetric: (String, Long) -> Unit = StartupTrace::metric,
-): Map<String, String> =
-    parseFramedSections(
-        raw = raw,
-        beginPrefix = ROOT_SNAPSHOT_BEGIN_PREFIX,
-        endPrefix = ROOT_SNAPSHOT_END_PREFIX,
-        policy =
-            FramedSectionParsePolicy(
-                preserveIncomplete = false,
-                discardOnMismatchedEnd = true,
-                trimSectionEnd = false,
-            ),
-        consumeLine = { line ->
-            if (!line.startsWith(ROOT_TIMING_PREFIX)) {
-                false
-            } else {
-                val (name, duration) =
-                    line.removePrefix(ROOT_TIMING_PREFIX).split("=", limit = 2).let {
-                        it.firstOrNull()?.trim().orEmpty() to it.getOrNull(1)?.trim()?.toLongOrNull()
-                    }
-                if (name.isNotEmpty() && duration != null) recordMetric("root_shell_$name", duration)
-                true
-            }
-        },
-    ).complete
+): Map<String, String> {
+    val parsed = coreParseProbeSections(CoreProbeFrameKind.ROOT, raw)
+    parsed.error?.let { throw RootSnapshotException("root snapshot framing invalid: ${it.name}") }
+    parsed.timings.forEach { recordMetric("root_shell_${it.name}", it.durationMs) }
+    return parsed.complete.associate { it.name to it.body }
+}
 
 /** Seeded startup reads and new probes join through this same typed provenance boundary. */
 internal fun joinRootSnapshot(

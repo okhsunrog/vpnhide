@@ -46,6 +46,7 @@ mod diag;
 mod edit;
 mod logcat;
 mod maintenance;
+pub mod probe_frames;
 pub use maintenance::*;
 mod native_status;
 pub mod port_policy;

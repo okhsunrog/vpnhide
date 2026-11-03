@@ -161,6 +161,20 @@ fn hook_counters_use_debug_framing_and_mark_missing_nodes() {
     let out = debug_snapshot::hook_counters(&paths);
     let s = sections(&out.buf, prefixes::DEBUG_BEGIN, prefixes::DEBUG_END);
     assert_eq!(
+        s.keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        [
+            "current_boot_id",
+            "kmod_state",
+            "kpm_state",
+            "lsposed_state",
+            "zygisk_status"
+        ]
+        .into_iter()
+        .collect()
+    );
+    assert_eq!(
         s["kmod_state"],
         format!("(missing: {})", paths.proc_ctl.display())
     );
@@ -168,6 +182,30 @@ fn hook_counters_use_debug_framing_and_mark_missing_nodes() {
         s["kpm_state"].ends_with("[exit=127]"),
         "{:?}",
         s["kpm_state"]
+    );
+}
+
+#[test]
+fn production_observation_paths_keep_the_os_contract_and_persistent_native_state() {
+    let paths = Paths::default();
+    assert_eq!(paths.proc_ctl, Path::new("/proc/vpnhide_ctl"));
+    assert_eq!(paths.proc_diag, Path::new("/proc/vpnhide_diag"));
+    assert_eq!(
+        paths.lsposed_state,
+        Path::new("/data/system/vpnhide_lsposed_state")
+    );
+    assert_eq!(
+        paths.zygisk_status,
+        Path::new("/data/user/0/dev.okhsunrog.vpnhide/files/vpnhide_zygisk_active")
+    );
+    assert_eq!(
+        paths.core_native_boot,
+        Path::new("/data/adb/vpnhide/core/native_boot.json")
+    );
+    assert!(
+        !paths
+            .core_native_boot
+            .starts_with(paths.module("vpnhide_core"))
     );
 }
 
@@ -274,18 +312,7 @@ fn ls_line_shows_mode_owner_and_path() {
 /// is actually emitted (a missing one makes the whole snapshot fail validation).
 #[test]
 fn root_snapshot_emits_every_section_the_app_requires() {
-    let kotlin = fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/RootSnapshotCache.kt"
-    ))
-    .unwrap();
-    let block = kotlin
-        .split("REQUIRED_ROOT_SNAPSHOT_SECTIONS =")
-        .nth(1)
-        .and_then(|rest| rest.split(')').next())
-        .unwrap();
-    let required: Vec<&str> = block.split('"').skip(1).step_by(2).collect();
-    assert!(required.len() > 30, "{required:?}");
+    let required = vpnhide_core_rpc::probe_frames::REQUIRED_ROOT_SNAPSHOT_SECTIONS;
     let dir = tempfile::tempdir().unwrap();
     let out = root_snapshot::collect(&tree(dir.path()), true);
     let s = sections(&out.buf, prefixes::ROOT_BEGIN, prefixes::ROOT_END);

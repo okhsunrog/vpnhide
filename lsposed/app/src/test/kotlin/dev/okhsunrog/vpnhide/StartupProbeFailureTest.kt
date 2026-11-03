@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import uniffi.vpnhide_core_ffi.coreRequiredRootSnapshotSections
 
 /** Which gate a failed startup root snapshot opens ([startupProbeFailure]). */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -117,7 +118,7 @@ internal class StartupProbeFailureTest {
                         org.junit.Assert.assertTrue(probe.packages)
                         calls++
                         val raw =
-                            REQUIRED_ROOT_SNAPSHOT_SECTIONS.joinToString("\n") { section ->
+                            coreRequiredRootSnapshotSections().joinToString("\n") { section ->
                                 "__VPNHIDE_ROOT_SECTION_BEGIN__:$section\n" +
                                     (if (section == "pm_packages") packages else "") +
                                     "\n__VPNHIDE_ROOT_SECTION_END__:$section"

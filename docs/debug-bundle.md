@@ -161,6 +161,13 @@ wins name collisions. These are Rust collectors and fixed direct-exec commands,
 not an app shell or arbitrary root command endpoint. Forensics off yields an empty
 map. Framing, absent files, command exits and truncation markers are evidence.
 
+Root/debug framing is decoded by the shared Rust contract through local typed FFI.
+Input bytes, stored names, section and timing counts are bounded. Forensic partial
+bodies remain available with `debug_snapshot_truncated`; a framing bound failure
+uses `debug_snapshot_error` and retains a separate parent-probe failure when both
+occur. Root snapshot validation refuses malformed bounds/missing required sections.
+These reads do not run a suite or prove protection.
+
 | Group | Useful entries |
 | --- | --- |
 | Core/ownership | `core_prop`, `core_module_state`, `core_boot_status`, `core_log`, `core_native_boot` |

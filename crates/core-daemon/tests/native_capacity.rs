@@ -212,15 +212,22 @@ async fn repair_of_an_over_capacity_config_reports_it_and_writes_nothing() {
     assert_eq!(native.outcome, PhaseOutcome::FailedKnown);
     assert_eq!(fs::read_to_string(&h.ctl).unwrap(), BUILTIN_STATUS);
 
-    let boot = h
-        .client
-        .current()
-        .await
-        .unwrap()
-        .snapshot
-        .backend
-        .boot
-        .expect("typed boot status");
+    // The durable receipt can be read before the separate native read-model
+    // publication completes. Require the typed refusal, not incidental timing
+    // between two RPCs. Never retry the mutation or accept another outcome.
+    let boot = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(boot) = h.client.current().await.unwrap().snapshot.backend.boot
+                && matches!(&boot.outcome, NativeBootOutcome::CapacityExceeded { .. })
+            {
+                break boot;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("capacity refusal published after terminal receipt");
+    assert_eq!(fs::read_to_string(&h.ctl).unwrap(), BUILTIN_STATUS);
     let NativeBootOutcome::CapacityExceeded { backend, report } = boot.outcome else {
         panic!("expected CapacityExceeded, got {:?}", boot.outcome);
     };

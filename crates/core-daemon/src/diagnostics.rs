@@ -1,4 +1,4 @@
-//! `collect_diagnostics`: the fixed set of root probes the app may ask for (protocol v5).
+//! `collect_diagnostics`: the fixed set of root probes the app may ask for.
 //!
 //! The app runs no root process. Every root read it needs is a [`DiagnosticProbe`]; each maps
 //! to a `vpnhide-core probe …|observe …` child (Rust, see `device_probes`), a fixed `logcat -d`
@@ -28,7 +28,7 @@ use vpnhide_core_rpc::{
 /// Inline output cap per probe; larger output goes to a file in the export dir.
 pub const INLINE_MAX: usize = 64 * 1024;
 /// Hard cap on any probe's captured stdout.
-pub const OUTPUT_MAX: usize = 32 * 1024 * 1024;
+pub const OUTPUT_MAX: usize = vpnhide_core_rpc::probe_frames::MAX_OUTPUT_BYTES;
 /// Total inline bytes per report, well inside the 1 MiB frame.
 const REPORT_INLINE_BUDGET: usize = 640 * 1024;
 const MAX_PROBES: usize = 32;
@@ -37,18 +37,9 @@ const REQUEST_OUTPUT_MAX: usize = 64 * 1024 * 1024;
 /// The export subdir (inside the app data dir) core writes probe files to.
 pub const EXPORT_DIR_NAME: &str = "vpnhide-core-export";
 
-/// Section framing the app's parsers expect (`RootSnapshotCache` / `DebugShellSnapshot` /
-/// `PackageInventoryData`). Shared fixture: `fixtures/core-probes/prefixes.json`.
-pub mod prefixes {
-    pub const ROOT_BEGIN: &str = "__VPNHIDE_ROOT_SECTION_BEGIN__:";
-    pub const ROOT_END: &str = "__VPNHIDE_ROOT_SECTION_END__:";
-    pub const ROOT_TIMING: &str = "__VPNHIDE_ROOT_TIMING__:";
-    pub const DEBUG_BEGIN: &str = "__VPNHIDE_DEBUG_SECTION_BEGIN__:";
-    pub const DEBUG_END: &str = "__VPNHIDE_DEBUG_SECTION_END__:";
-    pub const PM_USERS_STATUS: &str = "__VPNHIDE_PM_USERS_STATUS__:";
-    pub const PM_USER_BEGIN: &str = "__VPNHIDE_PM_USER_BEGIN__:";
-    pub const PM_USER_END: &str = "__VPNHIDE_PM_USER_END__:";
-}
+/// Portable section framing, shared with the APK's local Rust snapshot decoder.
+/// Independent fixture: `fixtures/core-probes/prefixes.json`.
+pub use vpnhide_core_rpc::probe_frames::prefixes;
 
 /// The app's own log tags (`LogTags`) plus the native components', for `LogcatAppTags`.
 const APP_LOG_TAGS: &[&str] = &[
