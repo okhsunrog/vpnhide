@@ -17,6 +17,12 @@ Kernel backends are arm64-only. On a device without a compatible kernel backend,
 [Zygisk](zygisk-install.md) is a fallback with reduced coverage. KernelSU does not
 by itself supply the Zygisk implementation needed by that backend.
 
+**Prefer a compatible kernel backend.** Zygisk hooks run inside app processes;
+banking, anti-fraud and other protected apps may detect the provider or injected
+code and refuse to work. Zygisk is a fallback with reduced coverage, not the
+recommended starting point. A kernel backend does not guarantee invisibility or
+hide an installed Zygisk provider or root. Direct syscalls can bypass libc hooks.
+
 ## What to install
 
 Start with [First install](first-install.md), then [read how Core selects a native backend](choosing-native.md).

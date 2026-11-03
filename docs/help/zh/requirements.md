@@ -16,6 +16,11 @@ VPN Hide 的核心模块需要 **root**（应用本身不需要 Root 授权）�
 内核后端仅支持 arm64。没有兼容内核后端时，[Zygisk](zygisk-install.md)是覆盖较少的
 后备选择。KernelSU 本身不提供此后端所需的 Zygisk 实现。
 
+**优先使用兼容的内核后端。** Zygisk 钩子运行在应用进程内；银行、反欺诈及其他受保护应用
+可能检测到提供程序或注入代码并拒绝运行。Zygisk 是覆盖较少的后备方案，不是推荐的起点。
+内核后端也不保证不可检测，更不会隐藏已安装的 Zygisk 提供程序或 root。
+直接系统调用可以绕过 libc 钩子。
+
 ## 安装什么
 
 从[首次安装](first-install.md)和[了解 Core 如何选择 Native 后端](choosing-native.md)开始。

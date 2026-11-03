@@ -5,6 +5,12 @@ Core contains the native alternatives and Ports. Java/Apps coverage also needs
 LSPosed or a compatible implementation. Check
 [Requirements and compatibility](requirements.md).
 
+**Prefer a compatible kernel backend.** Zygisk hooks run inside app processes;
+banking, anti-fraud and other protected apps may detect the provider or injected
+code and refuse to work. Zygisk is a fallback with reduced coverage, not the
+recommended starting point. A kernel backend does not guarantee invisibility or
+hide an installed Zygisk provider or root. Direct syscalls can bypass libc hooks.
+
 ## Steps
 
 1. **Install the app** from the paired distribution.

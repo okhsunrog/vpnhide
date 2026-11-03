@@ -29,16 +29,16 @@ Existing modules like [NoVPNDetect](https://bitbucket.org/yuri-project/novpndete
 
 vpnhide solves both problems with a layered architecture:
 
-**Layer 1 — Java API (lsposed module):** hooks `system_server`, not the target app. `NetworkCapabilities`, `NetworkInfo`, and `LinkProperties` are filtered at the Binder level *before* data reaches the app's process. The app receives clean data over IPC — no injection into its process, nothing for anti-tamper to detect. The same module also hides selected apps from observer apps at the `PackageManager` level (the **Apps** role).
+**Layer 1 — Java API (lsposed module):** hooks `system_server`, not the target app. `NetworkCapabilities`, `NetworkInfo`, and `LinkProperties` are filtered at the Binder level *before* data reaches the app's process. The app receives clean data over IPC — this layer installs no hooks inside that process. The same module also hides selected apps from observer apps at the `PackageManager` level (the **Apps** role).
 
 **Layer 2 — Native (kmod, built-in, KPM, or Zygisk):** covers native detection paths. Exactly one native backend should be active:
-- **kmod** (recommended for supported GKI kernels) — kernel-level `kprobe`/`kretprobe` hooks. Filters `ioctl`, `getifaddrs`/netlink interface, address, route, and policy-rule dumps, and rejects `SO_BINDTODEVICE` / `SO_BINDTOIFINDEX` for hidden interfaces before socket state changes. Zero footprint in the target process: no library injection, nothing to detect.
+- **kmod** (recommended for supported GKI kernels) — kernel-level `kprobe`/`kretprobe` hooks. Filters `ioctl`, `getifaddrs`/netlink interface, address, route, and policy-rule dumps, and rejects `SO_BINDTODEVICE` / `SO_BINDTOIFINDEX` for hidden interfaces before socket state changes. This backend does not inject a library into the target process.
 - **KPM** — a KernelPatch Module implementing the same 11 logical kernel hooks without a GKI-variant-specific `.ko`. Useful for old/non-GKI 4.14 / 4.19 / 5.4 kernels and cases where the `.ko` cannot load. Requires a KernelPatch runtime: APatch or [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest).
-- **Zygisk** — fallback when a kernel-level backend is not possible. Its `libc.so` inline hooks include best-effort `setsockopt` filtering, run inside the target process, and can be bypassed by direct syscalls, so banking and anti-fraud apps may detect it. For those apps, leave Native off and rely on the Java layer.
+- **Zygisk** — fallback when a compatible kernel backend is unavailable. Its `libc.so` inline hooks run inside app processes and direct syscalls can bypass them. Banking, anti-fraud and other protected apps may detect the provider or injected code and refuse to work. Prefer a compatible kernel backend; choosing it does not hide an installed Zygisk provider or root.
 
 **Layer 3 — Ports (part of the core module):** blocks selected apps from reaching `127.0.0.1` / `::1` (via iptables), so they can't detect a locally bound VPN / proxy daemon by its open port (the **Ports** role). The core module applies these rules; there is no separate Ports module in 2.0.
 
-The target app's process is completely untouched when using LSPosed + a kernel-level Native backend (kmod or KPM) — no Xposed, no inline hooks, no modified memory regions. Because of that, vpnhide works with banking and government apps that actively detect and block Xposed-based modules.
+The Java layer and kernel backend avoid app-process inline hooks by these components. Apps may still detect root, a Zygisk provider or other modifications. No backend guarantees compatibility with every banking, government or other protected app.
 
 ## What vpnhide hides
 

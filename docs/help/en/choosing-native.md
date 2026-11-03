@@ -5,6 +5,12 @@ syscalls, netlink and `/proc/net`. Install the app and the **full `vpnhide-core.
 from the same build**. Core includes the backend payloads and selects a compatible
 implementation automatically.
 
+**Prefer a compatible kernel backend.** Zygisk hooks run inside app processes;
+banking, anti-fraud and other protected apps may detect the provider or injected
+code and refuse to work. Zygisk is a fallback with reduced coverage, not the
+recommended starting point. A kernel backend does not guarantee invisibility or
+hide an installed Zygisk provider or root. Direct syscalls can bypass libc hooks.
+
 ## The choices
 
 - **Built-in:** Core uses a compatible VPN Hide driver already integrated into

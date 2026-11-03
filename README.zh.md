@@ -31,16 +31,16 @@
 
 vpnhide 用分层架构同时解决这两个问题：
 
-**第 1 层 —— Java API（lsposed 模块）：** 挂钩的是 `system_server`，而非目标应用。`NetworkCapabilities`、`NetworkInfo` 和 `LinkProperties` 在 Binder 层、在数据到达应用进程*之前*就被过滤。应用通过 IPC 收到干净的数据 —— 没有注入其进程，防篡改无从检测。同一模块还在 `PackageManager` 层对观察者应用隐藏选定应用（**Apps** 角色）。
+**第 1 层 —— Java API（lsposed 模块）：** 挂钩的是 `system_server`，而非目标应用。`NetworkCapabilities`、`NetworkInfo` 和 `LinkProperties` 在 Binder 层、在数据到达应用进程*之前*就被过滤。应用通过 IPC 收到干净的数据 —— 该层不会在目标进程内安装钩子。同一模块还在 `PackageManager` 层对观察者应用隐藏选定应用（**Apps** 角色）。
 
 **第 2 层 —— 原生（kmod、内核内置、KPM 或 Zygisk）：** 覆盖原生检测路径。同一时间应恰好有一个原生后端处于活动状态：
 - **kmod**（推荐用于受支持的 GKI 内核）—— 内核级 `kprobe`/`kretprobe` 钩子。过滤 `ioctl`、`getifaddrs`/netlink 的接口、地址、路由和策略规则转储，并在套接字状态改变前对隐藏接口拒绝 `SO_BINDTODEVICE` / `SO_BINDTOIFINDEX`。在目标进程中零足迹：无库注入，无可检测之物。
 - **KPM** —— 一个 KernelPatch 模块，实现与之相同的 11 个逻辑内核钩子，无需针对特定 GKI 变体的 `.ko`。适用于旧的/非 GKI 的 4.14 / 4.19 / 5.4 内核，以及 `.ko` 无法加载的情况。需要 KernelPatch 运行时：APatch 或 [KPatch-Next-Module](https://github.com/KernelSU-Next/KPatch-Next-Module/releases/latest)。
-- **Zygisk** —— 当无法使用内核级后端时的回退方案。它的 `libc.so` 内联钩子包含尽力而为的 `setsockopt` 过滤，运行在目标进程内部，可被直接系统调用绕过，因此银行和反欺诈应用可能会检测到它。对于这类应用，请关闭原生并依赖 Java 层。
+- **Zygisk** —— 兼容内核后端不可用时的后备方案。它的 `libc.so` 内联钩子运行在应用进程内，直接系统调用可以绕过。银行、反欺诈及其他受保护应用可能检测到提供程序或注入代码并拒绝运行。优先使用兼容内核后端；选择它不会隐藏已安装的 Zygisk 提供程序或 root。
 
 **第 3 层 —— Ports（核心模块的一部分）：** 阻止选定应用访问 `127.0.0.1` / `::1`（通过 iptables），使其无法通过本地绑定的 VPN / 代理守护进程的开放端口来检测它们（**Ports** 角色）。这些规则由核心模块应用；2.0 中没有单独的 Ports 模块。
 
-使用 LSPosed + 内核级原生后端（kmod 或 KPM）时，目标应用的进程完全不受触碰 —— 没有 Xposed，没有内联钩子，没有被修改的内存区域。正因如此，vpnhide 能与主动检测并封锁基于 Xposed 模块的银行和政务类应用协同工作。
+Java 层与内核后端不会自行在目标进程内安装内联钩子。应用仍可能检测到 root、Zygisk 提供程序或其他修改。任何后端都不保证兼容所有银行、政务或其他受保护应用。
 
 ## vpnhide 隐藏什么
 

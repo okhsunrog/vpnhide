@@ -79,6 +79,13 @@ work. Partial useful coverage, total failure and uncertain load require separate
 decisions. Preserve current no-effect-only bounded fallback and exposure guards
 until that review concludes.
 
+A separate explicit Zygisk consent state is new review input after RFC0005's
+publication. Unknown/Allowed/Denied, publication before consent and denial behavior
+are proposals, not implemented or accepted defaults. An installed provider must
+not be presented as evidence of such consent. Current warning documentation must
+explain detection/compatibility risk and prefer compatible kernel protection
+without claiming that an unimplemented consent flow already protects users.
+
 ## Final build and acceptance gates
 
 | Gate | What is established | What remains |

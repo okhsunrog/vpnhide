@@ -6,9 +6,13 @@ ABI payloads are included once in the full Core ZIP. Use
 
 ## What to expect
 
-Direct syscalls can bypass these hooks, and apps may detect modifications inside
-their own process. Use Core's reported coverage when deciding which roles to
-configure. Java/LSPosed provides a separate layer.
+**Prefer a compatible kernel backend.** Zygisk hooks run inside app processes;
+banking, anti-fraud and other protected apps may detect the provider or injected
+code and refuse to work. Zygisk is a fallback with reduced coverage, not the
+recommended starting point. A kernel backend does not guarantee invisibility or
+hide an installed Zygisk provider or root. Direct syscalls can bypass libc hooks.
+
+Java/LSPosed covers a separate layer; consult Core's recorded scope and missing evidence.
 
 ## Requirements
 
