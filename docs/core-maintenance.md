@@ -58,8 +58,29 @@ packages are admitted, each at most256MiB. A full store returns a distinct refus
 and does not silently garbage-collect another operation's package. Unknown files,
 exposed directories, damaged stored packages and uncertain storage stay errors.
 
+`package::FloorStore` now retains accepted sequence/hash state in the private
+journal parent, outside both replaceable code and pruned receipts. Preparation
+requires its exclusive lease and reads the real floor rather than accepting a
+caller-supplied zero. Copying a package remains inert: it does not advance the
+floor. A separate acceptance API takes the private-copy token for the same
+persistent directory and rechecks its ownership, identity, length and actual hash
+without changing the retained reader's offset. A changed private copy cannot
+advance the floor. The shared trust policy refuses lower sequences and a
+different package at an equal sequence. Malformed state, exposed ownership/modes,
+symlinks, special files and hardlinks fail closed; absence alone is initial zero.
+Atomic acceptance syncs the temporary file, renames and syncs the parent.
+Post-rename sync failure is explicitly uncertain and can reconfirm the same
+package without resetting the visible floor. Only bounded root-owned inert
+temporary files are recovered under the lease.
+
+This component has no service/command admission caller yet. The common executor
+must invoke acceptance after durable user-command admission and before manager
+dispatch; it must separately retain active work and verify the complete staged
+replacement. A prepared token or retained floor alone never authorizes executing
+an installer or declaring the new image active.
+
 Still to implement: expose this preparation through the common durable
-maintenance plan, retain its accepted floor and active work outside receipt
+maintenance plan, wire floor acceptance and retain active work outside receipt
 pruning, manager capability/dispatch/readback, positively identified obsolete
 companion retirement, reboot verification before native startup, app progress and
 rootless bootstrap/SAF/manager handoff. These are cloud implementation tasks.

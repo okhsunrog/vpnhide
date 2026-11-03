@@ -122,6 +122,7 @@ impl VerifiedDescriptor {
         }
     }
     pub fn admit(&self, target: &Target, floor: &AcceptedFloor) -> Result<(), TrustError> {
+        floor.validate()?;
         let d = &self.0;
         if d.source_commit != target.source_commit || d.package_sha256 != target.package_sha256 {
             return Err(TrustError::WrongTarget);
@@ -132,12 +133,10 @@ impl VerifiedDescriptor {
         }
         // Equal sequence is idempotent only for the exact previously accepted
         // package. A rerun cannot silently replace bytes at the same generation.
-        if d.build_sequence < floor.build_sequence
-            || (d.build_sequence == floor.build_sequence
-                && floor.package_sha256.as_deref() != Some(&d.package_sha256))
-        {
-            return Err(TrustError::Rollback);
-        }
+        floor.require_successor(&AcceptedFloor {
+            build_sequence: d.build_sequence,
+            package_sha256: Some(d.package_sha256.clone()),
+        })?;
         Ok(())
     }
     pub fn verify_package(&self, input: impl Read) -> Result<(), TrustError> {
@@ -160,6 +159,25 @@ pub struct Target {
 pub struct AcceptedFloor {
     pub build_sequence: u64,
     pub package_sha256: Option<String>,
+}
+impl AcceptedFloor {
+    pub fn validate(&self) -> Result<(), TrustError> {
+        match (self.build_sequence, self.package_sha256.as_deref()) {
+            (0, None) => Ok(()),
+            (sequence, Some(hash)) if sequence > 0 && hex_digest(hash, 64) => Ok(()),
+            _ => Err(TrustError::Malformed),
+        }
+    }
+    pub fn require_successor(&self, next: &Self) -> Result<(), TrustError> {
+        self.validate()?;
+        next.validate()?;
+        if next.build_sequence < self.build_sequence
+            || (next.build_sequence == self.build_sequence && next != self)
+        {
+            return Err(TrustError::Rollback);
+        }
+        Ok(())
+    }
 }
 fn hex_digest(text: &str, len: usize) -> bool {
     text.len() == len

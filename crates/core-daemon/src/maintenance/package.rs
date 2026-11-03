@@ -14,6 +14,8 @@ use std::{
 use vpnhide_package_trust::{
     AcceptedFloor, Descriptor, Target, TrustError, TrustStore, VerifiedDescriptor,
 };
+mod floor;
+pub use floor::{FloorLease, FloorStore};
 
 #[derive(Debug)]
 pub enum PackageError {
@@ -23,6 +25,7 @@ pub enum PackageError {
     SourceChanged,
     Busy,
     StorageFull,
+    FloorDurabilityUnknown(io::Error),
 }
 impl std::fmt::Display for PackageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -42,6 +45,7 @@ impl From<TrustError> for PackageError {
 }
 
 pub struct PackageStaging {
+    persistent: File,
     directory: File,
     app: File,
     app_uid: u32,
@@ -51,6 +55,7 @@ pub struct PackageStaging {
 /// Callers must journal intent before handing a path to a manager adapter.
 #[derive(Debug)]
 pub struct PreparedPackage {
+    persistent: (u64, u64),
     descriptor: Descriptor,
     file: File,
 }
@@ -60,6 +65,44 @@ impl PreparedPackage {
     }
     pub fn file(&self) -> &File {
         &self.file
+    }
+    fn verify_private(&self, uid: u32) -> Result<(), PackageError> {
+        private(&self.file, uid)?;
+        let before = self.file.metadata()?;
+        if !before.is_file() || before.nlink() != 1 || before.len() != self.descriptor.package_bytes
+        {
+            return Err(PackageError::UnsafeStorage);
+        }
+        // Reopen the pinned inode with an independent offset. Cloning the file
+        // would share its cursor with a future manager reader.
+        let input = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_CLOEXEC)
+            .open(format!("/proc/self/fd/{}", self.file.as_raw_fd()))?;
+        vpnhide_package_trust::FileIdentity {
+            bytes: self.descriptor.package_bytes,
+            sha256: self.descriptor.package_sha256.clone(),
+        }
+        .verify(input)?;
+        let after = self.file.metadata()?;
+        let identity = |m: &std::fs::Metadata| {
+            (
+                m.dev(),
+                m.ino(),
+                m.len(),
+                m.uid(),
+                m.mode(),
+                m.nlink(),
+                m.mtime(),
+                m.mtime_nsec(),
+                m.ctime(),
+                m.ctime_nsec(),
+            )
+        };
+        if identity(&before) != identity(&after) {
+            return Err(PackageError::SourceChanged);
+        }
+        Ok(())
     }
 }
 fn directory(path: &Path) -> io::Result<File> {
@@ -123,6 +166,7 @@ impl PackageStaging {
             return Err(PackageError::UnsafeStorage);
         }
         Ok(Self {
+            persistent: parent,
             directory: staged_dir,
             app,
             app_uid: expected_uid,
@@ -133,12 +177,15 @@ impl PackageStaging {
         &self,
         envelope: &[u8],
         target: &Target,
-        floor: &AcceptedFloor,
+        floor: &FloorLease<'_>,
         operation: u64,
     ) -> Result<PreparedPackage, PackageError> {
         let (trust, sequence) = TrustStore::compiled_install_authority()?;
         let verified = trust.authenticate(envelope)?;
-        verified.admit(target, floor)?;
+        if !floor.matches(&self.persistent)? {
+            return Err(PackageError::UnsafeStorage);
+        }
+        verified.admit(target, &floor.read()?)?;
         verified.require_build_at_least(sequence.get())?;
         self.copy_verified(&verified, operation)
     }
@@ -244,6 +291,10 @@ impl PackageStaging {
         verified.verify_package(&mut file)?;
         file.rewind()?;
         Ok(PreparedPackage {
+            persistent: {
+                let meta = self.persistent.metadata()?;
+                (meta.dev(), meta.ino())
+            },
             descriptor: d.clone(),
             file,
         })

@@ -16,6 +16,12 @@ struct Fixture {
     verified: VerifiedDescriptor,
 }
 fn fixture() -> Fixture {
+    fixture_at(1001)
+}
+fn fixture_at(sequence: u64) -> Fixture {
+    fixture_payload(sequence, b"package")
+}
+fn fixture_payload(sequence: u64, payload: &[u8]) -> Fixture {
     let temp = tempfile::tempdir().unwrap();
     let persistent = temp.path().join("persistent");
     let app = temp.path().join("app");
@@ -39,9 +45,9 @@ fn fixture() -> Fixture {
         schema: 2,
         module_id: "vpnhide_core".into(),
         source_commit: "a".repeat(40),
-        build_sequence: 1001,
-        package_sha256: format!("{:x}", Sha256::digest(b"package")),
-        package_bytes: 7,
+        build_sequence: sequence,
+        package_sha256: format!("{:x}", Sha256::digest(payload)),
+        package_bytes: payload.len() as u64,
         rpc: 22,
         journal_min: 1,
         journal_max: 11,
@@ -66,7 +72,7 @@ fn fixture() -> Fixture {
             "files/core-maintenance/{}.zip",
             verified.descriptor().package_sha256
         )),
-        b"package",
+        payload,
     )
     .unwrap();
     Fixture {
@@ -110,6 +116,188 @@ fn authenticated_copy_is_private_idempotent_and_independent_of_app_mutation() {
         prepared.file.metadata().unwrap().ino()
     );
     assert_eq!(f.count_files(), 1);
+}
+
+#[test]
+fn accepted_floor_survives_reopen_and_serializes_independent_instances() {
+    let f = fixture();
+    let persistent = f.temp.path().join("persistent");
+    let uid = unsafe { libc::geteuid() };
+    let store = FloorStore::open_owned(&persistent, uid).unwrap();
+    let second = FloorStore::open_owned(&persistent, uid).unwrap();
+    let lease = store.lock().unwrap();
+    assert_eq!(lease.read().unwrap(), AcceptedFloor::default());
+    assert!(matches!(second.lock(), Err(PackageError::Busy)));
+    let prepared = f.stage.copy_verified(&f.verified, 1).unwrap();
+    assert_eq!(lease.read().unwrap(), AcceptedFloor::default()); // preparation is inert
+    let mut reader = prepared.file();
+    reader.seek(std::io::SeekFrom::Start(2)).unwrap();
+    lease.accept_prepared(&prepared).unwrap();
+    assert_eq!(reader.stream_position().unwrap(), 2);
+    lease.accept_prepared(&prepared).unwrap();
+    drop(lease);
+    drop(store);
+    let lease = second.lock().unwrap();
+    assert_eq!(
+        lease.read().unwrap(),
+        AcceptedFloor {
+            build_sequence: 1001,
+            package_sha256: Some(f.verified.descriptor().package_sha256.clone()),
+        }
+    );
+    assert_eq!(
+        fs::metadata(persistent.join("maintenance-floor.json"))
+            .unwrap()
+            .mode()
+            & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn changed_private_package_cannot_advance_accepted_floor() {
+    let f = fixture();
+    let store = FloorStore::open_owned(&f.temp.path().join("persistent"), unsafe {
+        libc::geteuid()
+    })
+    .unwrap();
+    let lease = store.lock().unwrap();
+    let prepared = f.stage.copy_verified(&f.verified, 1).unwrap();
+    fs::write(f.final_file(), b"changed").unwrap(); // same length, different bytes
+    assert!(lease.accept_prepared(&prepared).is_err());
+    assert_eq!(lease.read().unwrap(), AcceptedFloor::default());
+}
+
+#[test]
+fn higher_floor_refuses_older_package_and_cross_directory_tokens() {
+    let f = fixture();
+    let high = fixture_at(1002);
+    let uid = unsafe { libc::geteuid() };
+    let store = FloorStore::open_owned(&f.temp.path().join("persistent"), uid).unwrap();
+    let lease = store.lock().unwrap();
+    let foreign = high.stage.copy_verified(&high.verified, 1).unwrap();
+    assert!(matches!(
+        lease.accept_prepared(&foreign),
+        Err(PackageError::UnsafeStorage)
+    ));
+    let prepared_high = f.stage.copy_verified(&high.verified, 2).unwrap();
+    lease.accept_prepared(&prepared_high).unwrap();
+    let prepared_old = f.stage.copy_verified(&f.verified, 3).unwrap();
+    assert!(matches!(
+        lease.accept_prepared(&prepared_old),
+        Err(PackageError::Trust(TrustError::Rollback))
+    ));
+    assert_eq!(lease.read().unwrap().build_sequence, 1002);
+}
+
+#[test]
+fn equal_sequence_cannot_change_the_authenticated_package_hash() {
+    let f = fixture();
+    let collision = fixture_payload(1001, b"different package");
+    let store = FloorStore::open_owned(&f.temp.path().join("persistent"), unsafe {
+        libc::geteuid()
+    })
+    .unwrap();
+    let lease = store.lock().unwrap();
+    let first = f.stage.copy_verified(&f.verified, 1).unwrap();
+    lease.accept_prepared(&first).unwrap();
+    fs::write(
+        f.temp.path().join(format!(
+            "app/files/core-maintenance/{}.zip",
+            collision.verified.descriptor().package_sha256
+        )),
+        b"different package",
+    )
+    .unwrap();
+    let conflicting = f.stage.copy_verified(&collision.verified, 2).unwrap();
+    assert!(matches!(
+        lease.accept_prepared(&conflicting),
+        Err(PackageError::Trust(TrustError::Rollback))
+    ));
+    assert_eq!(
+        lease.read().unwrap().package_sha256,
+        Some(f.verified.descriptor().package_sha256.clone())
+    );
+}
+
+#[test]
+fn exposing_the_parent_after_lock_never_turns_absence_into_an_empty_floor() {
+    let f = fixture();
+    let persistent = f.temp.path().join("persistent");
+    let store = FloorStore::open_owned(&persistent, unsafe { libc::geteuid() }).unwrap();
+    let lease = store.lock().unwrap();
+    fs::set_permissions(&persistent, fs::Permissions::from_mode(0o777)).unwrap();
+    assert!(matches!(lease.read(), Err(PackageError::UnsafeStorage)));
+    fs::set_permissions(&persistent, fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+#[test]
+fn floor_corruption_symlinks_fifos_and_bad_modes_never_become_zero() {
+    let f = fixture();
+    let persistent = f.temp.path().join("persistent");
+    let path = persistent.join("maintenance-floor.json");
+    let store = FloorStore::open_owned(&persistent, unsafe { libc::geteuid() }).unwrap();
+    let lease = store.lock().unwrap();
+    for text in [
+        "",
+        "{",
+        r#"{"schema":2,"floor":{"build_sequence":0,"package_sha256":null}}"#,
+        r#"{"schema":1,"floor":{"build_sequence":9,"package_sha256":null}}"#,
+    ] {
+        fs::write(&path, text).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(lease.read().is_err());
+    }
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(matches!(lease.read(), Err(PackageError::UnsafeStorage)));
+    fs::remove_file(&path).unwrap();
+    symlink(f.source(), &path).unwrap();
+    assert!(lease.read().is_err());
+    fs::remove_file(&path).unwrap();
+    let cpath = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(cpath.as_ptr(), 0o600) }, 0);
+    assert!(matches!(lease.read(), Err(PackageError::UnsafeStorage)));
+    fs::remove_file(&path).unwrap();
+    assert_eq!(lease.read().unwrap(), AcceptedFloor::default());
+}
+
+#[test]
+fn incomplete_floor_copy_is_inert_and_only_a_safe_regular_temporary_is_recovered() {
+    let f = fixture();
+    let persistent = f.temp.path().join("persistent");
+    let next = persistent.join("maintenance-floor.next");
+    let store = FloorStore::open_owned(&persistent, unsafe { libc::geteuid() }).unwrap();
+    let lease = store.lock().unwrap();
+    fs::write(&next, b"partial").unwrap();
+    fs::set_permissions(&next, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(lease.read().unwrap(), AcceptedFloor::default());
+    let prepared = f.stage.copy_verified(&f.verified, 1).unwrap();
+    lease.accept_prepared(&prepared).unwrap();
+    assert!(!next.exists());
+    let high = fixture_at(1002);
+    let prepared = f.stage.copy_verified(&high.verified, 2).unwrap();
+    symlink(f.source(), &next).unwrap();
+    assert!(lease.accept_prepared(&prepared).is_err());
+    assert_eq!(lease.read().unwrap().build_sequence, 1001);
+}
+
+#[test]
+fn post_rename_floor_sync_failure_remains_uncertain_and_reconfirms_same_package() {
+    let f = fixture();
+    let store = FloorStore::open_owned(&f.temp.path().join("persistent"), unsafe {
+        libc::geteuid()
+    })
+    .unwrap();
+    let lease = store.lock().unwrap();
+    let prepared = f.stage.copy_verified(&f.verified, 1).unwrap();
+    store.fail_next_sync();
+    assert!(matches!(
+        lease.accept_prepared(&prepared),
+        Err(PackageError::FloorDurabilityUnknown(_))
+    ));
+    assert_eq!(lease.read().unwrap().build_sequence, 1001);
+    lease.accept_prepared(&prepared).unwrap();
+    assert_eq!(lease.read().unwrap().build_sequence, 1001);
 }
 #[test]
 fn tampered_or_oversized_source_never_enters_private_packages() {

@@ -147,6 +147,35 @@ fn admission_refuses_replay_wrong_target_and_incompatible_journal_rpc() {
         );
     }
 }
+
+#[test]
+fn malformed_floor_cannot_disable_anti_rollback_admission() {
+    let (trust, pair, d) = fixture();
+    let verified = trust.authenticate(&envelope(&pair, &d)).unwrap();
+    for floor in [
+        AcceptedFloor {
+            build_sequence: 0,
+            package_sha256: Some(d.package_sha256.clone()),
+        },
+        AcceptedFloor {
+            build_sequence: 1,
+            package_sha256: None,
+        },
+        AcceptedFloor {
+            build_sequence: 1,
+            package_sha256: Some("bad".into()),
+        },
+        AcceptedFloor {
+            build_sequence: 1,
+            package_sha256: Some("A".repeat(64)),
+        },
+    ] {
+        assert_eq!(
+            verified.admit(&target(&d), &floor),
+            Err(TrustError::Malformed)
+        );
+    }
+}
 #[test]
 fn bounded_strict_parse_and_signed_invalid_metadata_fail_closed() {
     let (trust, pair, d) = fixture();
