@@ -23,6 +23,11 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Emit native diagnostic constants from their portable protocol owner.
+    DiagnosticRawHeader {
+        #[arg(long)]
+        output: PathBuf,
+    },
     DdkModpost(ddk::Args),
     DeviceReset(device_reset::Args),
     Qemu(qemu::QemuArgs),
@@ -116,6 +121,10 @@ fn read_payload(path: &Path) -> io::Result<Vec<u8>> {
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = match Cli::parse().command {
+        Command::DiagnosticRawHeader { output } => {
+            std::fs::write(output, vpnhide_protocol::diagnostic_raw::c_header())?;
+            return Ok(());
+        }
         Command::DdkModpost(args) => serde_json::to_value(ddk::run(args)?)?,
         Command::DeviceReset(args) => return device_reset::run(args).map_err(Into::into),
         Command::Qemu(args) => return qemu::run(args).map_err(Into::into),

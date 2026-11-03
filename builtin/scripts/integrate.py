@@ -104,6 +104,9 @@ def driver_sources(repo: Path) -> dict[str, Path]:
             "security/vpnhide/generated/hook_ids.h": repo / "kmod/generated/hook_ids.h",
         }
     )
+    for name in ["vpnhide_diag_scope.h", "vpnhide_diag_wire.h", "vpnhide_diag_proc.h"]:
+        result[f"security/vpnhide/shared/{name}"] = repo / f"kmod/shared/{name}"
+    result["security/vpnhide/generated/diagnostic_raw.h"] = repo / "kmod/generated/diagnostic_raw.h"
     for source in result.values():
         regular_file(repo, str(source.relative_to(repo)))
     return result

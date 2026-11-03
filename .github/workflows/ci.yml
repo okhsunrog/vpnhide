@@ -431,6 +431,8 @@ jobs:
           /tmp/test_vpnhide_logic
           gcc -O2 -Wall -Wextra -Werror -I.. -o /tmp/test_protocol test_protocol.c
           /tmp/test_protocol protocol_vectors.tsv
+          gcc -O2 -Wall -Wextra -Werror -o /tmp/test_vpnhide_diag_scope test_vpnhide_diag_scope.c
+          /tmp/test_vpnhide_diag_scope
 
   # Rust workspace: format, clippy for every target, tests.
   rust:

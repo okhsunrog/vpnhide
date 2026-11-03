@@ -212,6 +212,25 @@ shows up instead of being hidden by a corrected copy of the logic.
 
 The debug bundle cats it verbatim into a `kmod_diag` section. No UI surface.
 
+### `/proc/vpnhide_diag_raw`
+
+Optional `.ko`/builtin private wire1 endpoint, root-owned mode0600. It is absent
+from loader preflight. Only current root credentials may arm/activate/revoke or
+read status, even on a passed descriptor. An app collector only self-registers
+an already armed UID/TID/nonce through the existing socket ioctl path; it cannot
+open this node or enable RAW itself. The kernel retains that thread's PID object,
+not a lookup of a reusable numeric PID. Other threads and applications retain
+normal policy. One scope/reference is retained at most; a read, revoke or next
+arm reclaims an expired reference.
+
+The successful arm FD owns its nonce. Final release attempts matching revocation;
+brief control contention returns BUSY rather than spinning, with fixed
+CLOCK_BOOTTIME expiry as the crash bound. A Root controller must observe matching
+released status before issuing a protected measurement: close or elapsed userspace
+time alone is not a revocation receipt. Production Android coordination is still
+being implemented; the current caller is the explicit Linux fixture oracle.
+KPM has no such node. See [diagnostics](diagnostics.md).
+
 ### KPM Supercall Channel
 
 No file or proc node. Core sends the same `vpnhide 2 config` text

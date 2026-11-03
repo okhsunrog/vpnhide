@@ -32,6 +32,7 @@
 #include "vpnhide_internal.h"
 #include "generated/iface_lists.h"
 #include "shared/vpnhide_logic.h"
+#include "shared/vpnhide_diag_proc.h"
 
 #define is_vpn_ifname(name) vpnhide_iface_is_vpn(name)
 
@@ -140,13 +141,19 @@ static u32 target_mask(void)
 	return mask;
 }
 
+void vpnhide_diagnostic_register(const char *input_name)
+{
+	vpnhide_diag_register_name(&vpnhide_diag_state, &vpnhide_diag_callbacks,
+				   (const unsigned char *)input_name);
+}
+
 /* True if `hook_id` is enabled for the calling UID (per-hook gate, §4.3).
  * Fast path: if no target enables this hook, skip the per-uid lock+search. */
 bool vpnhide_hook_active(enum vpnhide_hook_id hook_id)
 {
 	u32 bit = vpnhide_hook_bit(hook_id);
 
-	if (!(READ_ONCE(active_hook_mask) & bit))
+	if (!(READ_ONCE(active_hook_mask) & bit) || vpnhide_diag_raw_current())
 		return false;
 	return (target_mask() & bit) != 0;
 }
@@ -511,6 +518,8 @@ static const struct file_operations vpnhide_diag_fops = {
 
 static int __init vpnhide_init(void)
 {
+	int error;
+
 	/* 0600: root-only. The config snapshot is written here by service.sh
 	 * and the VPN Hide app (both root). Apps must not see the control
 	 * channel. Until a config is written, active_hook_mask stays 0 and
@@ -525,6 +534,12 @@ static int __init vpnhide_init(void)
 	if (!proc_create_single("vpnhide_diag", 0400, NULL, vpnhide_diag_show))
 		pr_warn(MODNAME
 			": proc_create_single(vpnhide_diag) failed — diagnostics unavailable\n");
+
+	error = vpnhide_diag_raw_init(VPNHIDE_BACKEND_BUILTIN, get_task_pid,
+				      put_pid, pid_vnr, ktime_get_with_offset);
+	if (error)
+		pr_warn(MODNAME ": diagnostic RAW capability unavailable: %d\n",
+			error);
 
 	pr_info(MODNAME
 		": in-tree backend ready — write a config snapshot to /proc/vpnhide_ctl\n");

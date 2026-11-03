@@ -111,6 +111,11 @@ union vpnhide_bind_snapshot {
 
 #ifdef CONFIG_VPNHIDE
 
+/* Observe the input-only nonce on an ordinary SIOCGIFNAME. This only captures
+ * the current thread identity after a root arm; activation is separate.
+ */
+void vpnhide_diagnostic_register(const char *input_name);
+
 /*
  * True if `ifname` names a VPN interface that must be hidden from the calling
  * UID for `hook_id`. Used by the per-interface ioctl sites (dev_ifsioc /
@@ -179,6 +184,11 @@ bool vpnhide_hide_rt6(struct rt6_info *rt,
 bool vpnhide_hide_fib_rule(const struct fib_rule *rule); /* fib_nl_fill_rule */
 
 #else /* !CONFIG_VPNHIDE */
+
+static inline void vpnhide_diagnostic_register(const char *input_name)
+{
+	(void)input_name;
+}
 
 static inline bool vpnhide_should_hide_ifname(const char *ifname, int hook_id)
 {

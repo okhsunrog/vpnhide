@@ -11,6 +11,7 @@
 
 use core::iter;
 
+pub mod diagnostic_raw;
 pub mod generated;
 pub mod telemetry;
 pub use telemetry::parse_stats;

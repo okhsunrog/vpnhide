@@ -15,6 +15,9 @@ use vpnhide_diagnostic_model::{
     ProcInterfaceCheck, ScopedNativeResult, cleanup_confirmed,
 };
 
+#[path = "fixture-oracle/raw_control.rs"]
+mod raw_control;
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("FIXTURE_ORACLE=FAIL {error}");
@@ -51,6 +54,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("not an explicitly enabled QEMU oracle boot".into());
     }
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if let [mode, name] = args.as_slice()
+        && mode == "raw-thread-worker"
+    {
+        return raw_control::worker(name);
+    }
     if let [mode, name] = args.as_slice()
         && mode == "worker"
     {
@@ -123,6 +131,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "FIXTURE_ROOT_START={}",
         serde_json::to_string(&fixture.root_start)?
     );
+    if protected {
+        raw_control::verify(&fixture.spec)?;
+    }
     let mut command = Command::new(std::env::current_exe()?);
     command
         .args(["worker", fixture.spec.interface.name.as_str()])

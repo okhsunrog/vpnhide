@@ -11,3 +11,4 @@ libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 vpnhide_diagnostic_model = { path = "../diagnostic-model" }
+vpnhide_protocol = { path = "../protocol" }

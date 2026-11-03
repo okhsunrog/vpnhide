@@ -725,3 +725,28 @@ compatibility remains explicit; Core recipients never fall back to `targets.txt`
 The reader/publisher boundary is implemented, but production lifecycle wiring and
 autoload remain disabled pending journaled transition checks. An authorization
 only governs new process launches; it does not remove hooks from existing processes.
+
+
+### Private diagnostic-thread RAW wire (provider implemented; Android flow incomplete)
+
+`vpnhide_protocol::diagnostic_raw` owns this separate version1 protocol, limits
+and generated C header. The `.ko`/builtin root-only `/proc/vpnhide_diag_raw` accepts
+one bounded `v1 arm <tid> <uid> <16-lowercase-hex-nonce> <duration-ms>`,
+`v1 activate <nonce>` or `v1 revoke <nonce>` command, with a terminating newline.
+Its status starts `vpnhide diagnostic-raw 1`, followed by exactly one each of
+`backend`, `max_ms`, `phase`, `tid`, `uid`, `nonce`, `remaining_ms`. Live phases
+require positive remaining time; released status retains only the last nonce.
+Malformed/unknown/oversized frames, wrong provider identity and BUSY are not
+inactive proof. Native helpers must be available in the actual running kernel;
+package provenance alone does not authorize sending a command.
+
+A 16-byte input name on loopback `SIOCGIFNAME` carries the little-endian nonce,
+seven-byte registration marker and final NUL. The ioctl's ordinary result stays
+unchanged. Kernel current UID/TID must match the arm; the first retained PID
+identity cannot be replaced by a reused numeric TID. Root must independently
+revalidate the admitted Android process/thread before activating it. The fixed
+CLOCK_BOOTTIME lease is at most 5000ms; idempotent requests never extend it.
+Revoke/released readback precedes protected observation. This capability does not
+alter the frozen control2/telemetry1 or the persistent journal schema. KPM/Zygisk
+adapters and the production Android handshake/assessment integration remain code
+work; the Linux oracle is not that acceptance.

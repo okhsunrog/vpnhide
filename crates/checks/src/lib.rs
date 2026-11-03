@@ -1220,3 +1220,5 @@ mod bind_readback_regressions {
         );
     }
 }
+
+pub mod diagnostic_raw;

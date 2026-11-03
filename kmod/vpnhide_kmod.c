@@ -76,6 +76,7 @@
 #include "generated/iface_lists.h"
 #include "generated/hook_ids.h"
 #include "shared/vpnhide_logic.h"
+#include "shared/vpnhide_diag_proc.h"
 
 #ifndef CONFIG_ARM64
 #error "vpnhide_kmod currently supports only arm64 (handlers read regs->regs[N] directly)"
@@ -259,7 +260,7 @@ static bool hook_active(enum vpnhide_hook_id hook_id)
 {
 	u32 bit = vpnhide_hook_bit(hook_id);
 
-	if (!(READ_ONCE(active_hook_mask) & bit))
+	if (!(READ_ONCE(active_hook_mask) & bit) || vpnhide_diag_raw_current())
 		return false;
 	return (target_mask() & bit) != 0;
 }
@@ -538,6 +539,15 @@ static int dev_ioctl_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 
 	data->cmd = (unsigned int)regs->regs[1];
 	data->kifr = (struct ifreq *)regs->regs[2];
+	if (data->cmd == SIOCGIFNAME && data->kifr) {
+		unsigned char name[IFNAMSIZ];
+
+		if (copy_from_kernel_nofault(name, data->kifr->ifr_name,
+					     sizeof(name)) == 0)
+			vpnhide_diag_register_name(&vpnhide_diag_state,
+						   &vpnhide_diag_callbacks,
+						   name);
+	}
 	data->active = hook_active(VPNHIDE_HOOK_DEV_IOCTL);
 
 	vpnhide_dbg("dev_ioctl_entry: uid=%u target=%d cmd=0x%x\n",
@@ -2692,6 +2702,21 @@ static int __init vpnhide_init_impl(void)
 		resolved_dev_get_by_index_rcu =
 			(dev_get_by_index_rcu_fn)resolve_kernel_symbol(
 				"dev_get_by_index_rcu");
+
+	/* Optional diagnostic scope. Dynamically resolve helpers: their absence on
+	 * a trimmed KMI must not prevent the protection backend from loading.
+	 * The preflight-only early return above never publishes this endpoint.
+	 */
+	ret = vpnhide_diag_raw_init(
+		VPNHIDE_BACKEND_KMOD,
+		(vpnhide_diag_getpid_fn)resolve_kernel_symbol("get_task_pid"),
+		(vpnhide_diag_putpid_fn)resolve_kernel_symbol("put_pid"),
+		(vpnhide_diag_pidnr_fn)resolve_kernel_symbol("pid_vnr"),
+		(vpnhide_diag_clock_fn)resolve_kernel_symbol(
+			"ktime_get_with_offset"));
+	if (ret)
+		pr_warn(MODNAME ": diagnostic RAW capability unavailable: %d\n",
+			ret);
 
 	/* Activate execution redirection last. No fallible initialization may run
 	 * after module text becomes reachable outside the kprobe handler. The module

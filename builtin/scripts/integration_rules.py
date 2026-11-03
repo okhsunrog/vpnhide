@@ -24,6 +24,7 @@ EDITS: dict[str, dict[str, list[tuple[str, str]]]] = {
                 "\tifr->ifr_name[IFNAMSIZ-1] = 0;\n"
                 "\treturn netdev_get_name(net, ifr->ifr_name, ifr->ifr_ifindex);\n}",
                 "\tint ret;\n\n"
+                "\tvpnhide_diagnostic_register(ifr->ifr_name);\n"
                 "\tifr->ifr_name[IFNAMSIZ-1] = 0;\n"
                 "\tret = netdev_get_name(net, ifr->ifr_name, ifr->ifr_ifindex);\n"
                 "\tif (ret == 0 &&\n"
@@ -651,6 +652,7 @@ _414["net/core/dev_ioctl.c"][1] = (
     "\terror = netdev_get_name(net, ifr.ifr_name, ifr.ifr_ifindex);\n"
     "\tif (error)\n"
     "\t\treturn error;\n",
+    "\tvpnhide_diagnostic_register(ifr.ifr_name);\n"
     "\terror = netdev_get_name(net, ifr.ifr_name, ifr.ifr_ifindex);\n"
     "\tif (error)\n"
     "\t\treturn error;\n\n"

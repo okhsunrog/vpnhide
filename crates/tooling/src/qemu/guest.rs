@@ -340,6 +340,7 @@ fn preflight(plan: &Plan, report: &mut Report) -> io::Result<()> {
         [
             "/proc/vpnhide_ctl",
             "/proc/vpnhide_diag",
+            vpnhide_protocol::diagnostic_raw::NODE,
             "/sys/module/vpnhide_kmod",
         ]
         .iter()

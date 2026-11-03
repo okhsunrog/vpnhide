@@ -1762,6 +1762,7 @@ dependencies = [
  "serde",
  "serde_json",
  "vpnhide_diagnostic_model",
+ "vpnhide_protocol",
 ]
 
 [[package]]

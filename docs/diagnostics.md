@@ -42,6 +42,28 @@ establish its same-process RAW visibility or complete native attribution. Curren
 scoped native results and their qualifications must not be presented as a full
 suite PASS. Adding more collectors does not close this missing grant mechanism.
 
+The `.ko` and builtin now have a private diagnostic-thread RAW provider (wire1).
+Root arms an expected UID/TID and nonce; the actual collector self-registers its
+retained kernel PID identity through an ordinary loopback `SIOCGIFNAME`, then
+root activates that same identity. Registration alone grants no RAW. Other
+threads of the same UID remain protected. The fixed five-second CLOCK_BOOTTIME
+lease cannot be renewed by replay; matching revoke, owner FD release and expiry
+restore protection. The separate root-only proc endpoint and ioctl handshake do
+not change control2/telemetry1 or require broader app SELinux proc access.
+Absent kernel helpers leave this optional capability unavailable without changing
+backend health or triggering fallback.
+
+The Root lease/controller and unprivileged collector adapter are exercised by the
+explicit Linux fixture oracle, including real same-thread RAW/protected results,
+same-UID thread isolation, ordinary loopback preservation, active-owner close and
+TTL expiry. This is provider qualification, **not** the production Android flow:
+the genuine worker still needs its admitted-thread RPC handshake, PID/user/net
+namespace and birth revalidation, paired measurements and assessment integration.
+KPM and Zygisk RAW provider adapters also remain implementation work. Builtin
+source export and compilation are separate from an actual builtin boot; Linux
+`.ko` results cannot be borrowed as builtin or Android acceptance.
+
+
 Required/proven/leaked/unverified, infrastructure failures and cleanup are separate.
 A worker's fresh result does not prove that already-running games consumed a new
 Zygisk generation. Cache identity includes policy, runtime/platform evidence and
