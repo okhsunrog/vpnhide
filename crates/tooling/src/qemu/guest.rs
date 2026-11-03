@@ -647,6 +647,9 @@ pub fn run() -> io::Result<()> {
             return Ok(());
         }
         if matches!(plan.mode, Mode::FixtureRaw | Mode::FixtureProtected) {
+            // Isolated guest reference objects, never production fixture effects.
+            checked("ip", &["link", "set", "lo", "up"])?;
+            checked("ip", &["addr", "replace", "127.0.0.1/8", "dev", "lo"])?;
             if plan.mode == Mode::FixtureProtected {
                 load(&plan, &mut report)?;
             }

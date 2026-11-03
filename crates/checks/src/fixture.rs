@@ -6,7 +6,6 @@ use std::ffi::CString;
 use std::io;
 use std::mem::zeroed;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::time::{Duration, Instant};
 use vpnhide_diagnostic_model::{
     IfaddrMetadata, MAX_INTERFACES, NativeMeasurement, ObservedInterface, ProbeError, Sample,
 };
@@ -146,208 +145,67 @@ fn ifaddrs() -> Result<Vec<ObservedInterface>, ProbeError> {
     Ok(entries.into_values().collect())
 }
 
-fn u16_at(bytes: &[u8], offset: usize) -> Option<u16> {
-    Some(u16::from_ne_bytes(
-        bytes.get(offset..offset + 2)?.try_into().ok()?,
-    ))
-}
-fn u32_at(bytes: &[u8], offset: usize) -> Option<u32> {
-    Some(u32::from_ne_bytes(
-        bytes.get(offset..offset + 4)?.try_into().ok()?,
-    ))
-}
-
-#[derive(Default)]
 struct LinkDump {
     entries: std::collections::BTreeMap<u32, String>,
-    done: bool,
+    wire: crate::netlink_wire::Dump,
 }
-
+impl Default for LinkDump {
+    fn default() -> Self {
+        Self {
+            entries: Default::default(),
+            wire: crate::netlink_wire::Dump::new(1, 16),
+        }
+    }
+}
 impl LinkDump {
     fn consume(&mut self, batch: &[u8]) -> Result<bool, ProbeError> {
-        if self.done || batch.is_empty() {
-            return Err(ProbeError::Malformed);
-        }
-        let mut offset = 0;
-        while offset < batch.len() {
-            let size = u32_at(batch, offset).ok_or(ProbeError::Malformed)? as usize;
-            if size < 16 || size > batch.len() - offset || u32_at(batch, offset + 8) != Some(1) {
+        let entries = &mut self.entries;
+        self.wire.consume(batch, |body| {
+            if body.len() < 16 {
                 return Err(ProbeError::Malformed);
             }
-            let aligned = (size + 3) & !3;
-            if aligned > batch.len() - offset {
+            let index = crate::netlink_wire::u32_at(body, 4)?;
+            if index == 0 || index > i32::MAX as u32 {
                 return Err(ProbeError::Malformed);
             }
-            let frame = &batch[offset..offset + size];
-            if u16_at(frame, 6).ok_or(ProbeError::Malformed)? & 0x10 != 0 {
+            let mut name = None;
+            for attr in crate::netlink_wire::attributes(&body[16..])? {
+                if attr.kind == 3 {
+                    if name.is_some() {
+                        return Err(ProbeError::Malformed);
+                    }
+                    name = Some(crate::netlink_wire::interface_name(attr.value)?.to_owned());
+                }
+            }
+            let name = name.ok_or(ProbeError::Malformed)?;
+            if entries.contains_key(&index) || entries.values().any(|n| *n == name) {
                 return Err(ProbeError::Malformed);
             }
-            match u16_at(frame, 4).ok_or(ProbeError::Malformed)? {
-                3 => {
-                    if !matches!(size, 16 | 20)
-                        || (size == 20 && u32_at(frame, 16) != Some(0))
-                        || offset + aligned != batch.len()
-                    {
-                        return Err(ProbeError::Malformed);
-                    }
-                    self.done = true;
-                }
-                2 => {
-                    return Err(ProbeError::Errno(
-                        u32_at(frame, 16)
-                            .map(|v| i32::from_ne_bytes(v.to_ne_bytes()).saturating_neg())
-                            .filter(|e| *e > 0)
-                            .unwrap_or(libc::EIO),
-                    ));
-                }
-                16 => {
-                    let index = u32_at(frame, 20)
-                        .filter(|i| *i > 0 && *i <= i32::MAX as u32)
-                        .ok_or(ProbeError::Malformed)?;
-                    let mut at = 32;
-                    let mut name = None;
-                    while at < frame.len() {
-                        let length = u16_at(frame, at).ok_or(ProbeError::Malformed)? as usize;
-                        if length < 4 || length > frame.len() - at {
-                            return Err(ProbeError::Malformed);
-                        }
-                        if u16_at(frame, at + 2) == Some(3) {
-                            if name.is_some() {
-                                return Err(ProbeError::Malformed);
-                            }
-                            let value = &frame[at + 4..at + length];
-                            let end = value
-                                .iter()
-                                .position(|b| *b == 0)
-                                .filter(|p| *p > 0 && *p < libc::IFNAMSIZ)
-                                .ok_or(ProbeError::Malformed)?;
-                            if end + 1 != value.len() {
-                                return Err(ProbeError::Malformed);
-                            }
-                            name = Some(
-                                std::str::from_utf8(&value[..end])
-                                    .map_err(|_| ProbeError::Malformed)?
-                                    .to_owned(),
-                            );
-                        }
-                        at += (length + 3) & !3;
-                    }
-                    if at != frame.len() {
-                        return Err(ProbeError::Malformed);
-                    }
-                    let name = name.ok_or(ProbeError::Malformed)?;
-                    if self.entries.contains_key(&index)
-                        || self.entries.values().any(|n| *n == name)
-                    {
-                        return Err(ProbeError::Malformed);
-                    }
-                    self.entries.insert(index, name);
-                    if self.entries.len() > MAX_INTERFACES {
-                        return Err(ProbeError::TooLarge);
-                    }
-                }
-                _ => return Err(ProbeError::Malformed),
+            entries.insert(index, name);
+            if entries.len() > MAX_INTERFACES {
+                return Err(ProbeError::TooLarge);
             }
-            offset += aligned;
-        }
-        Ok(self.done)
+            Ok(())
+        })
     }
 }
 
 fn links() -> Result<Vec<ObservedInterface>, ProbeError> {
-    let fd = socket(
-        libc::AF_NETLINK,
-        libc::SOCK_RAW | libc::SOCK_NONBLOCK,
-        libc::NETLINK_ROUTE,
-    )?;
-    let mut address: libc::sockaddr_nl = unsafe { zeroed() };
-    address.nl_family = libc::AF_NETLINK as libc::sa_family_t;
-    if unsafe {
-        libc::bind(
-            fd.as_raw_fd(),
-            (&address as *const libc::sockaddr_nl).cast(),
-            size_of::<libc::sockaddr_nl>() as _,
-        )
-    } != 0
-    {
-        return Err(errno());
-    }
-    let mut request = [0u8; 32];
-    request[..4].copy_from_slice(&32u32.to_ne_bytes());
-    request[4..6].copy_from_slice(&18u16.to_ne_bytes());
-    request[6..8].copy_from_slice(&0x301u16.to_ne_bytes());
-    request[8..12].copy_from_slice(&1u32.to_ne_bytes());
-    if unsafe {
-        libc::sendto(
-            fd.as_raw_fd(),
-            request.as_ptr().cast(),
-            request.len(),
-            0,
-            (&address as *const libc::sockaddr_nl).cast(),
-            size_of::<libc::sockaddr_nl>() as _,
-        )
-    } != request.len() as isize
-    {
-        return Err(errno());
-    }
-    let deadline = Instant::now() + Duration::from_secs(1);
     let mut dump = LinkDump::default();
-    let mut total = 0usize;
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        let remaining = deadline
-            .checked_duration_since(Instant::now())
-            .ok_or(ProbeError::Timeout)?;
-        let mut poll = libc::pollfd {
-            fd: fd.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        let ready =
-            unsafe { libc::poll(&mut poll, 1, remaining.as_millis().clamp(1, 1000) as i32) };
-        if ready < 0 {
-            return Err(errno());
-        }
-        if ready == 0 {
-            return Err(ProbeError::Timeout);
-        }
-        let mut sender: libc::sockaddr_nl = unsafe { zeroed() };
-        let mut iov = libc::iovec {
-            iov_base: buffer.as_mut_ptr().cast(),
-            iov_len: buffer.len(),
-        };
-        let mut message: libc::msghdr = unsafe { zeroed() };
-        message.msg_name = (&mut sender as *mut libc::sockaddr_nl).cast();
-        message.msg_namelen = size_of::<libc::sockaddr_nl>() as _;
-        message.msg_iov = &mut iov;
-        message.msg_iovlen = 1;
-        let size = unsafe { libc::recvmsg(fd.as_raw_fd(), &mut message, 0) };
-        if size < 0 {
-            return Err(errno());
-        }
-        if sender.nl_pid != 0
-            || sender.nl_family != libc::AF_NETLINK as libc::sa_family_t
-            || message.msg_namelen as usize != size_of::<libc::sockaddr_nl>()
-            || message.msg_flags & libc::MSG_TRUNC != 0
-        {
-            return Err(ProbeError::Malformed);
-        }
-        total += size as usize;
-        if total > 1024 * 1024 {
-            return Err(ProbeError::TooLarge);
-        }
-        if dump.consume(&buffer[..size as usize])? {
-            return Ok(dump
-                .entries
-                .into_iter()
-                .map(|(index, name)| ObservedInterface {
-                    name,
-                    index: Some(index),
-                    ifaddrs: None,
-                })
-                .collect());
-        }
-    }
+    crate::netlink_read::dump(
+        crate::netlink_read::DumpKind::Links,
+        vpnhide_diagnostic_model::AddressActor::Libc,
+        |batch| dump.consume(batch),
+    )?;
+    Ok(dump
+        .entries
+        .into_iter()
+        .map(|(index, name)| ObservedInterface {
+            name,
+            index: Some(index),
+            ifaddrs: None,
+        })
+        .collect())
 }
 
 pub fn observe(name: &str) -> NativeMeasurement {
@@ -356,6 +214,7 @@ pub fn observe(name: &str) -> NativeMeasurement {
         Err(e) => Sample::Error(e),
     };
     NativeMeasurement {
+        addresses: Some(crate::address::observe(name)),
         binding: Some(crate::binding::observe(name)),
         flags: interface_ioctl(name, false),
         mtu: interface_ioctl(name, true),

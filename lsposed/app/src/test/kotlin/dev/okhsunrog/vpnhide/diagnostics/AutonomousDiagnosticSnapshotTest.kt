@@ -57,6 +57,7 @@ class AutonomousDiagnosticSnapshotTest {
             framework = null,
             stale = false,
             binding = null,
+            addresses = null,
         )
 
     private fun update(

@@ -1,5 +1,5 @@
-//! Real nonpersistent, exclusively created TUN. It remains DOWN: no addresses,
-//! routes, policy rules or packet IO are installed. Close owns cleanup; never
+//! Real nonpersistent, exclusively created TUN. It remains DOWN, with bounded
+//! owned addresses and no prefix routes, policy rules or packet IO. Close owns cleanup; never
 //! delete a possibly-replaced interface by its pathname/name.
 
 use std::fs::{File, OpenOptions};
@@ -15,6 +15,7 @@ use vpnhide_diagnostic_model::{
 };
 
 const FIXTURE_MTU: i32 = 1543;
+mod addresses;
 const TUNSETIFF: u32 = 0x4004_54ca;
 const TUN_FLAGS: u16 = 0x0001 | 0x1000 | 0x8000; // TUN | NO_PI | TUN_EXCL
 
@@ -84,6 +85,14 @@ struct SetupOwnership {
     created: bool,
     spec: Option<NativeFixtureSpec>,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SetupFault {
+    None,
+    #[cfg(feature = "fixture-oracle")]
+    AfterAllocation,
+    #[cfg(feature = "fixture-oracle")]
+    AfterIpv4,
+}
 pub struct FixtureCreateFailure {
     pub error: io::Error,
     pub resource_created: bool,
@@ -91,6 +100,7 @@ pub struct FixtureCreateFailure {
 }
 
 pub struct TunFixture {
+    pub address_setup: Result<(), ProbeError>,
     tun: Option<File>,
     pub spec: NativeFixtureSpec,
     pub negative: NativeMeasurement,
@@ -98,6 +108,7 @@ pub struct TunFixture {
 }
 
 pub struct NativeCompletion {
+    pub addresses: vpnhide_diagnostic_model::ScopedAddressResult,
     pub root_end: NativeMeasurement,
     pub cleanup: NativeMeasurement,
     pub result: ScopedNativeResult,
@@ -109,14 +120,14 @@ impl TunFixture {
         Self::create_detailed(session).map_err(|failure| failure.error)
     }
     pub fn create_detailed(session: u64) -> Result<Self, FixtureCreateFailure> {
-        Self::create_detailed_inner(session, false)
+        Self::create_detailed_inner(session, SetupFault::None)
     }
     fn create_detailed_inner(
         session: u64,
-        inject_failure: bool,
+        fault: SetupFault,
     ) -> Result<Self, FixtureCreateFailure> {
         let mut ownership = SetupOwnership::default();
-        Self::create_owned(session, &mut ownership, inject_failure).map_err(|error| {
+        Self::create_owned(session, &mut ownership, fault).map_err(|error| {
             let cleanup = ownership.spec.map(|spec| {
                 let observed = fixture::observe(&spec.interface.name);
                 let cleaned = vpnhide_diagnostic_model::cleanup_confirmed(&spec, &observed);
@@ -131,15 +142,19 @@ impl TunFixture {
     }
     #[cfg(feature = "fixture-oracle")]
     pub fn failed_setup_for_oracle(session: u64) -> FixtureCreateFailure {
-        match Self::create_detailed_inner(session, true) {
+        match Self::create_detailed_inner(session, SetupFault::AfterAllocation) {
             Err(failure) => failure,
             Ok(_) => panic!("setup fault did not fire"),
         }
     }
+    #[cfg(feature = "fixture-oracle")]
+    pub fn partial_address_setup_for_oracle(session: u64) -> io::Result<Self> {
+        Self::create_detailed_inner(session, SetupFault::AfterIpv4).map_err(|v| v.error)
+    }
     fn create_owned(
         session: u64,
         ownership: &mut SetupOwnership,
-        inject_failure: bool,
+        fault: SetupFault,
     ) -> io::Result<Self> {
         let name = fixture_name(session)?;
         let negative = fixture::observe(&name);
@@ -193,7 +208,8 @@ impl TunFixture {
             mtu: FIXTURE_MTU as u32,
             ordinary: ordinary.clone(),
         });
-        if inject_failure {
+        #[cfg(feature = "fixture-oracle")]
+        if fault == SetupFault::AfterAllocation {
             return Err(invalid("injected post-allocation setup failure"));
         }
         let actual_name: Vec<_> = allocation
@@ -217,6 +233,11 @@ impl TunFixture {
         }
         let index = fixture::index(&name)
             .map_err(|e| invalid(format!("fixture index unavailable: {e:?}")))?;
+        let address_setup = addresses::install(
+            ownership.spec.as_ref().expect("allocated identity"),
+            &negative,
+            fault,
+        );
         let root_start = fixture::observe(&name);
         let spec = NativeFixtureSpec {
             session,
@@ -243,6 +264,7 @@ impl TunFixture {
             )));
         }
         Ok(Self {
+            address_setup,
             tun: Some(tun),
             spec,
             negative,
@@ -273,6 +295,23 @@ impl TunFixture {
             &cleanup,
         );
         NativeCompletion {
+            addresses: match [
+                &self.negative,
+                &self.root_start,
+                worker,
+                &root_end,
+                &cleanup,
+            ]
+            .map(|m| m.addresses.as_ref())
+            {
+                [Some(n), Some(s), Some(w), Some(e), Some(c)] => {
+                    vpnhide_diagnostic_model::evaluate_address_fixture(&self.spec, n, s, w, e, c)
+                }
+                _ => vpnhide_diagnostic_model::ScopedAddressResult {
+                    controls: vec![vpnhide_diagnostic_model::ControlFailure::ProbeUnavailable],
+                    ..Default::default()
+                },
+            },
             root_end,
             cleanup,
             result,

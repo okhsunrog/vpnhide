@@ -49,6 +49,17 @@ fn native(check: NativeCheck) -> RequiredCheck {
         NativeCheck::NetlinkGetlink => RequiredCheck::NetlinkLinks,
     }
 }
+fn address(check: crate::AddressCheck) -> RequiredCheck {
+    match check.vector {
+        crate::AddressVector::GetifaddrsIpv4 | crate::AddressVector::GetifaddrsIpv6 => {
+            RequiredCheck::Getifaddrs
+        }
+        crate::AddressVector::NetlinkIpv4 | crate::AddressVector::NetlinkIpv6 => {
+            RequiredCheck::NetlinkAddresses
+        }
+        _ => RequiredCheck::IoctlAddresses,
+    }
+}
 pub(crate) fn framework_checks(
     checks: &[FrameworkCheck],
     require_both_legacy: bool,
@@ -130,10 +141,15 @@ impl DiagnosticRun {
         let mut proven = BTreeSet::new();
         let mut leaked = BTreeSet::new();
         let mut native_controls = Vec::new();
+        let interface_getifaddrs = matches!(result, Some(ScopedNativeResult::Proven { checks }) if checks.contains(&NativeCheck::Getifaddrs));
         match result {
-            Some(ScopedNativeResult::Proven { checks }) => {
-                proven.extend(checks.iter().copied().map(native))
-            }
+            Some(ScopedNativeResult::Proven { checks }) => proven.extend(
+                checks
+                    .iter()
+                    .copied()
+                    .filter(|c| *c != NativeCheck::Getifaddrs)
+                    .map(native),
+            ),
             Some(ScopedNativeResult::Leaked { checks, incomplete }) => {
                 leaked.extend(checks.iter().copied().map(native));
                 native_controls.extend(incomplete);
@@ -146,6 +162,25 @@ impl DiagnosticRun {
                 native_controls.push(*reason);
             }
             None => {}
+        }
+        if let Some(addresses) = &self.addresses {
+            let required_checks = crate::AddressCheck::required();
+            for group in [IoctlAddresses, NetlinkAddresses, Getifaddrs] {
+                if (group != Getifaddrs || interface_getifaddrs)
+                    && required_checks
+                        .iter()
+                        .filter(|c| address(**c) == group)
+                        .all(|c| addresses.proven.contains(c))
+                {
+                    proven.insert(group);
+                }
+            }
+            leaked.extend(addresses.leaked.iter().copied().map(address));
+            for control in &addresses.controls {
+                if !native_controls.contains(control) {
+                    native_controls.push(*control);
+                }
+            }
         }
         if let Some(binding) = &self.binding {
             if binding.complete() {
@@ -194,6 +229,7 @@ mod tests {
     use crate::{DiagnosticFingerprint, framework::ScopedFrameworkResult};
     fn run(native: ScopedNativeResult) -> DiagnosticRun {
         DiagnosticRun {
+            addresses: None,
             binding: None,
             session: 1,
             fingerprint: DiagnosticFingerprint {
@@ -270,8 +306,9 @@ mod tests {
         });
         let a = run.assessment();
         assert_eq!(a.phase, AssessmentPhase::Incomplete);
-        assert_eq!(a.proven.len(), 7);
-        assert_eq!(a.unverified.len(), 12);
+        assert_eq!(a.proven.len(), 6);
+        assert_eq!(a.unverified.len(), 13);
+        assert!(a.unverified.contains(&RequiredCheck::Getifaddrs));
         assert!(
             a.reuse_blockers
                 .contains(&ReuseBlocker::LoadedGenerationsIncomplete)
@@ -298,7 +335,7 @@ mod tests {
             controls: vec![ControlFailure::OrdinaryObjectsChanged],
         });
         let assessment = run.assessment();
-        assert_eq!(assessment.proven.len(), 4);
+        assert_eq!(assessment.proven.len(), 3);
         assert_eq!(assessment.leaked, vec![RequiredCheck::BindToDevice]);
         assert!(
             assessment
@@ -316,5 +353,46 @@ mod tests {
                 .contains(&RequiredCheck::BindToDevice)
         );
         assert!(run.assessment().unverified.len() >= 14);
+    }
+    #[test]
+    fn address_groups_require_all_families_and_both_real_syscall_actors() {
+        let mut run = run(ScopedNativeResult::Proven {
+            checks: vec![
+                NativeCheck::IoctlFlags,
+                NativeCheck::IoctlMtu,
+                NativeCheck::Getifaddrs,
+                NativeCheck::NetlinkGetlink,
+            ],
+        });
+        assert!(
+            run.assessment()
+                .unverified
+                .contains(&RequiredCheck::Getifaddrs)
+        );
+        run.record_addresses(crate::ScopedAddressResult {
+            proven: crate::AddressCheck::required(),
+            ..Default::default()
+        });
+        for group in [
+            RequiredCheck::IoctlAddresses,
+            RequiredCheck::NetlinkAddresses,
+            RequiredCheck::Getifaddrs,
+        ] {
+            assert!(run.assessment().proven.contains(&group));
+        }
+        let mut addresses = run.addresses.take().unwrap();
+        addresses
+            .proven
+            .retain(|c| c.vector != crate::AddressVector::GetifaddrsIpv6);
+        addresses.leaked.push(crate::AddressCheck {
+            actor: crate::AddressActor::Syscall,
+            vector: crate::AddressVector::IoctlAddress,
+        });
+        run.record_addresses(addresses);
+        let result = run.assessment();
+        assert!(result.unverified.contains(&RequiredCheck::Getifaddrs));
+        assert!(result.leaked.contains(&RequiredCheck::IoctlAddresses));
+        assert!(!result.proven.contains(&RequiredCheck::IoctlAddresses));
+        assert!(result.proven.contains(&RequiredCheck::NetlinkAddresses));
     }
 }

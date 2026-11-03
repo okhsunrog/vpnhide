@@ -213,10 +213,12 @@ fn worker_identity(
     })
 }
 struct NativeEvidence {
+    addresses: ScopedAddressResult,
     native: ScopedNativeResult,
     binding: ScopedBindResult,
 }
 struct MeasurementFailure {
+    addresses: Option<Box<ScopedAddressResult>>,
     binding: Option<Box<ScopedBindResult>>,
     detail: String,
     native: Option<ScopedNativeResult>,
@@ -303,6 +305,7 @@ impl Coordinator {
         inner.retry_at = None;
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
         let run = DiagnosticRun {
+            addresses: None,
             binding: None,
             session: inner.next,
             fingerprint,
@@ -350,6 +353,7 @@ impl Coordinator {
         let result = match &worker_lease {
             Ok(_) => self.measure(&state, session),
             Err(detail) => Err(MeasurementFailure {
+                addresses: None,
                 binding: None,
                 detail: detail.clone(),
                 native: None,
@@ -390,10 +394,12 @@ impl Coordinator {
         };
         match result {
             Ok(evidence) => {
+                run.record_addresses(evidence.addresses);
                 run.record_native(evidence.native);
                 run.record_binding(evidence.binding);
             }
             Err(failure) => {
+                run.addresses = failure.addresses.map(|v| *v);
                 run.binding = failure.binding.map(|v| *v);
                 run.outcome = DiagnosticOutcome::Infrastructure {
                     detail: failure.detail,
@@ -435,6 +441,7 @@ impl Coordinator {
                 }
             }
             MeasurementFailure {
+                addresses: None,
                 binding: None,
                 detail: format!("native fixture unavailable: {}", failure.error),
                 native: None,
@@ -500,6 +507,7 @@ impl Coordinator {
             }
         })();
         let unavailable = NativeMeasurement {
+            addresses: None,
             binding: None,
             flags: Sample::Error(ProbeError::Timeout),
             mtu: Sample::Error(ProbeError::Timeout),
@@ -521,16 +529,19 @@ impl Coordinator {
         }
         match report {
             Ok(_) if cleaned => Ok(NativeEvidence {
+                addresses: completion.addresses,
                 native: completion.result,
                 binding: completion.binding,
             }),
             Ok(_) => Err(MeasurementFailure {
+                addresses: Some(Box::new(completion.addresses)),
                 binding: Some(Box::new(completion.binding)),
                 detail: "native fixture cleanup unconfirmed; diagnostic admission held".into(),
                 native: Some(completion.result),
                 cleanup_confirmed: Some(false),
             }),
             Err(detail) => Err(MeasurementFailure {
+                addresses: Some(Box::new(completion.addresses)),
                 binding: Some(Box::new(completion.binding)),
                 detail,
                 native: Some(completion.result),
@@ -894,6 +905,7 @@ mod tests {
         coordinator.configure(PathBuf::from("/nonexistent-app"));
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            addresses: None,
             binding: None,
             session: 3,
             framework: None,
@@ -921,6 +933,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            addresses: None,
             binding: None,
             session: 3,
             framework: None,
@@ -954,6 +967,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let run = DiagnosticRun {
+            addresses: None,
             binding: None,
             session: 9,
             fingerprint: fingerprint(&state, &snapshot),

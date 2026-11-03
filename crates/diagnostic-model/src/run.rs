@@ -2,9 +2,9 @@
 //! subset; absent stimulus/observations never remove a required check.
 use serde::{Deserialize, Serialize};
 
-use crate::{NativeCheck, NativeFixtureSpec, NativeMeasurement, ScopedNativeResult};
+use crate::{NativeFixtureSpec, NativeMeasurement, ScopedNativeResult};
 
-pub const DIAGNOSTIC_CONTRACT: u32 = 3;
+pub const DIAGNOSTIC_CONTRACT: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -153,6 +153,8 @@ pub enum DiagnosticOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticRun {
     #[serde(default)]
+    pub addresses: Option<crate::ScopedAddressResult>,
+    #[serde(default)]
     pub binding: Option<crate::ScopedBindResult>,
     pub session: u64,
     pub fingerprint: DiagnosticFingerprint,
@@ -162,56 +164,45 @@ pub struct DiagnosticRun {
     pub stale: bool,
 }
 impl DiagnosticRun {
-    pub fn record_binding(&mut self, binding: crate::ScopedBindResult) {
-        if binding.complete()
-            && let DiagnosticOutcome::Incomplete { missing, .. } = &mut self.outcome
-        {
-            missing.retain(|v| *v != RequiredCheck::BindToDevice);
+    fn refresh_missing(&mut self) {
+        let assessment = self.assessment();
+        if let DiagnosticOutcome::Incomplete { missing, .. } = &mut self.outcome {
+            *missing = assessment
+                .required
+                .into_iter()
+                .filter(|r| !assessment.proven.contains(r))
+                .collect();
         }
+    }
+    pub fn record_addresses(&mut self, addresses: crate::ScopedAddressResult) {
+        self.addresses = Some(addresses);
+        self.refresh_missing();
+    }
+    pub fn record_binding(&mut self, binding: crate::ScopedBindResult) {
         self.binding = Some(binding);
+        self.refresh_missing();
     }
     pub fn record_framework(&mut self, framework: crate::framework::ScopedFrameworkResult) {
-        if let DiagnosticOutcome::Incomplete { missing, .. } = &mut self.outcome {
-            let proven = crate::assessment::framework_checks(&framework.proven, true);
-            missing.retain(|required| !proven.contains(required));
-        }
         self.framework = Some(framework);
+        self.refresh_missing();
     }
     pub fn record_native(&mut self, native: ScopedNativeResult) {
-        let proven = match &native {
-            ScopedNativeResult::Proven { checks } => checks.as_slice(),
-            _ => &[],
+        self.outcome = DiagnosticOutcome::Incomplete {
+            native,
+            missing: Vec::new(),
         };
-        let missing = self
-            .plan
-            .required
-            .iter()
-            .copied()
-            .filter(|required| {
-                !proven.iter().any(|v| {
-                    matches!(
-                        (required, v),
-                        (RequiredCheck::IoctlFlags, NativeCheck::IoctlFlags)
-                            | (RequiredCheck::IoctlMtu, NativeCheck::IoctlMtu)
-                            | (RequiredCheck::Getifaddrs, NativeCheck::Getifaddrs)
-                            | (RequiredCheck::NetlinkLinks, NativeCheck::NetlinkGetlink)
-                    )
-                })
-            })
-            .collect();
-        self.outcome = DiagnosticOutcome::Incomplete { native, missing };
-        if let Some(binding) = self.binding.take() {
-            self.record_binding(binding);
-        }
+        self.refresh_missing();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NativeCheck;
     #[test]
     fn four_native_successes_never_replace_the_supported_contract() {
         let mut run = DiagnosticRun {
+            addresses: None,
             binding: None,
             session: 1,
             framework: None,
@@ -240,7 +231,8 @@ mod tests {
         let DiagnosticOutcome::Incomplete { missing, .. } = run.outcome else {
             panic!("partial run");
         };
-        assert_eq!(missing.len(), 18);
+        assert_eq!(missing.len(), 19);
+        assert!(missing.contains(&RequiredCheck::Getifaddrs));
         assert!(missing.contains(&RequiredCheck::FrameworkCallbacks));
         assert!(missing.contains(&RequiredCheck::BindToDevice));
         assert!(missing.contains(&RequiredCheck::Filesystem));

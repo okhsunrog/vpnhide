@@ -58,7 +58,18 @@ readback and ordinary loopback controls. Permission errors and missing readback
 remain unverified; a setter error cannot erase an observed binding leak. The
 worker must share the fixture network namespace.
 
-Addresses, routes/rules, remaining proc/sys stimuli and framework active/
+Address observations distinguish libc from direct syscall ioctl/netlink actors.
+The owned DOWN TUN receives exclusive benchmark IPv4 /32 and private IPv6 /128
+addresses with NOPREFIXROUTE (and IPv6 NODAD); setup never raises the link or
+changes ordinary interfaces. Address availability is verified independently for
+each family. Unsupported/failed setup leaves the corresponding checks unverified.
+SIOCGIFCONF NULL-buffer size and data are separate checks, qualified by complete
+stable RAW lists and the worker's actual ifreq size. Interface-only getifaddrs
+proof cannot establish IPv4/IPv6 coverage. Core requires all eighteen address
+subchecks before reporting complete scoped address coverage; this is not a full
+suite PASS. Cleanup and ordinary loopback controls remain mandatory.
+
+Routes/rules, remaining proc/sys stimuli and framework active/
 default/callback/PendingIntent controls still need implementation or expansion.
 Android bionic, SELinux, Java callback isolation and old game-process coverage need
 real device acceptance. QEMU/static libc evidence does not replace those gates.
@@ -80,7 +91,7 @@ filesystem state. Setup readiness is not a diagnostic result. A receipt whose
 preparation failed cannot reuse an older delivery at the same revision. Observed
 runtime alone cannot borrow an old bundled payload hash or global Zygisk coverage.
 
-Schema5 exports both read models and source identities. Historical gate/report/
+Schema6 exports both read models, per-actor address evidence and source identities. Historical gate/report/
 verdict fields are null; their old Kotlin domain owners are removed. Capture time
 is not measurement time. Manual `NetworkViewCapture`, hook counter baselines,
 unsigned delta/reset handling and root forensic sections remain available for

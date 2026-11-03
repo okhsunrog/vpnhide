@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use vpnhide_core_daemon::autonomous::native_fixture::TunFixture;
 use vpnhide_diagnostic_model::{
-    BindActor, ControlFailure, NativeFixtureSpec, NativeMeasurement, ScopedNativeResult,
-    cleanup_confirmed,
+    AddressCheck, BindActor, ControlFailure, NativeFixtureSpec, NativeMeasurement,
+    ScopedNativeResult, cleanup_confirmed,
 };
 
 fn main() {
@@ -105,6 +105,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 uid: 10000,
                 hookmask: vpnhide_protocol::hook_ids::Hook::DevIoctl.bit()
                     | vpnhide_protocol::hook_ids::Hook::RtnlFillIfinfo.bit()
+                    | vpnhide_protocol::hook_ids::Hook::InetFillIfaddr.bit()
+                    | vpnhide_protocol::hook_ids::Hook::Inet6FillIfaddr.bit()
+                    | vpnhide_protocol::hook_ids::Hook::SockIoctl.bit()
                     | vpnhide_protocol::hook_ids::Hook::SocketBindInterface.bit(),
             }],
         );
@@ -115,9 +118,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let before = routes()?;
     let fixture = TunFixture::create(0x0123_4567_89ab)?;
     println!("FIXTURE_SPEC={}", serde_json::to_string(&fixture.spec)?);
-    if routes()? != before {
-        return Err("DOWN fixture changed address/route controls".into());
-    }
+    println!("FIXTURE_ADDRESS_SETUP={:?}", fixture.address_setup);
+    println!(
+        "FIXTURE_ROOT_START={}",
+        serde_json::to_string(&fixture.root_start)?
+    );
     let mut command = Command::new(std::env::current_exe()?);
     command
         .args(["worker", fixture.spec.interface.name.as_str()])
@@ -147,6 +152,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "FIXTURE_BIND_RESULT={}",
         serde_json::to_string(&done.binding)?
     );
+    println!(
+        "FIXTURE_ADDRESS_RESULT={}",
+        serde_json::to_string(&done.addresses)?
+    );
+    let addresses_expected = if protected {
+        done.addresses.complete()
+    } else {
+        done.addresses.controls.is_empty()
+            && AddressCheck::required()
+                .iter()
+                .all(|v| done.addresses.leaked.contains(v))
+    };
     let bind_expected = if protected {
         done.binding.complete()
     } else {
@@ -160,7 +177,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         matches!(&done.result, ScopedNativeResult::Leaked { checks, incomplete } if checks.len() == 4 && incomplete.is_empty())
     };
-    if !expected || !bind_expected || routes()? != before {
+    if !expected || !bind_expected || !addresses_expected || routes()? != before {
         return Err("native differential/control/cleanup assertion failed".into());
     }
     let duplicated = TunFixture::create(0x0123_4567_89ac)?;
@@ -170,6 +187,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let incomplete = duplicated.finish(&raw);
     if cleanup_confirmed(&spec, &incomplete.cleanup)
         || !matches!(incomplete.result, ScopedNativeResult::Leaked { incomplete, .. } if incomplete.contains(&ControlFailure::CleanupUnconfirmed))
+        || !incomplete.addresses.proven.is_empty()
+        || !incomplete
+            .addresses
+            .controls
+            .contains(&ControlFailure::CleanupUnconfirmed)
+        || !AddressCheck::required()
+            .iter()
+            .all(|v| incomplete.addresses.leaked.contains(v))
     {
         return Err("last-dup control falsely confirmed cleanup".into());
     }
@@ -201,6 +226,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("partial-setup cleanup was not positively confirmed".into());
     }
     println!("FIXTURE_SETUP_FAILURE_CONTROL=PASS");
+    let partial = TunFixture::partial_address_setup_for_oracle(0x0123_4567_89af)?;
+    if partial.address_setup.is_ok() {
+        return Err("partial address fault did not fire".into());
+    }
+    let partial_spec = partial.spec.clone();
+    let raw = vpnhide_checks::fixture::observe(&partial_spec.interface.name);
+    let completed = partial.finish(&raw);
+    if completed.addresses.complete()
+        || completed.addresses.leaked.is_empty()
+        || !completed.addresses.proven.is_empty()
+        || !completed
+            .addresses
+            .controls
+            .contains(&ControlFailure::MissingPositiveControl)
+        || !cleanup_confirmed(&partial_spec, &completed.cleanup)
+        || routes()? != before
+    {
+        return Err("partial address setup leaked resources or falsely proved coverage".into());
+    }
+    println!("FIXTURE_PARTIAL_ADDRESS_CONTROL=PASS");
     println!(
         "FIXTURE_ORACLE=PASS mode={} down=1 routes_unchanged=1",
         if protected { "protected" } else { "raw" }

@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation on `main`, app/core RPC24 and journal12 (reads1–11). The backend
+Current implementation on `main`, app/core RPC25 and journal12 (reads1–11). The backend
 control-v2 / telemetry-v1 wire is a separate boundary. This document describes
 the implemented ownership and execution contract.
 
@@ -399,7 +399,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC24; journal12 reads schemas1–11. These
+The current paired APK/Core contract is RPC25; journal12 reads schemas1–11. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -501,7 +501,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. Current RPC24 requires a paired new APK/Core; journal12 and the frozen
+forensics remain. Current RPC25 requires a paired new APK/Core; journal12 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 

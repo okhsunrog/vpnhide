@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
 import kotlinx.serialization.Serializable
+import uniffi.vpnhide_core_ffi.CoreAddressCheck
 import uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment
 import uniffi.vpnhide_core_ffi.CoreDiagnosticRun
 import uniffi.vpnhide_core_ffi.CoreFrameworkAttribution
@@ -46,7 +47,17 @@ internal data class AutonomousRunInfo(
     val stale: Boolean,
     val frameworkAttribution: AutonomousFrameworkAttributionInfo?,
     val binding: AutonomousBindInfo? = null,
+    val addresses: AutonomousAddressInfo? = null,
 )
+
+@Serializable
+internal data class AutonomousAddressInfo(
+    val provenChecks: List<String>,
+    val leakedChecks: List<String>,
+    val controls: List<String>,
+)
+
+private fun CoreAddressCheck.infoName(): String = "${actor.name.lowercase(Locale.ROOT)}.${vector.name.lowercase(Locale.ROOT)}"
 
 @Serializable
 internal data class AutonomousBindInfo(
@@ -100,6 +111,13 @@ internal fun CoreDiagnosticRun.toDiagnosticInfo(): AutonomousRunInfo =
             AutonomousBindInfo(
                 result.proven.map { it.name.lowercase(Locale.ROOT) },
                 result.leaked.map { it.name.lowercase(Locale.ROOT) },
+                result.controls.map { it.name.lowercase(Locale.ROOT) },
+            )
+        },
+        addresses?.let { result ->
+            AutonomousAddressInfo(
+                result.proven.map { it.infoName() },
+                result.leaked.map { it.infoName() },
                 result.controls.map { it.name.lowercase(Locale.ROOT) },
             )
         },

@@ -1,5 +1,5 @@
 {
-    "schema": 5,
+    "schema": 6,
     "generatedAt": "2026-08-22T12:00:00+0300",
     "captureKind": "debug",
     "app": {
@@ -139,7 +139,8 @@
                 "hookSourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                 "sourceProfileSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
             },
-            "binding": null
+            "binding": null,
+            "addresses": null
         },
         "assessment": {
             "phase": "incomplete",
@@ -334,7 +335,8 @@
                         "hookSourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                         "sourceProfileSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
                     },
-                    "binding": null
+                    "binding": null,
+                    "addresses": null
                 },
                 "assessment": {
                     "phase": "incomplete",
@@ -453,7 +455,8 @@
                     "hookSourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                     "sourceProfileSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
                 },
-                "binding": null
+                "binding": null,
+                "addresses": null
             },
             "assessment": {
                 "phase": "incomplete",

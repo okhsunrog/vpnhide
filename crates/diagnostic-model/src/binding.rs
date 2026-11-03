@@ -239,6 +239,7 @@ mod tests {
             interfaces.push(spec.interface.clone().into());
         }
         NativeMeasurement {
+            addresses: None,
             binding: Some(BindMeasurement {
                 libc_fixture: target.clone(),
                 libc_ordinary: bound("lo"),

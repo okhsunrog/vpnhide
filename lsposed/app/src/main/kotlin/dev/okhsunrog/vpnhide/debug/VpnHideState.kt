@@ -29,13 +29,10 @@ import kotlinx.serialization.json.JsonElement
 /**
  * The one canonical, fully-serializable app-state snapshot.
  *
- * This is the whole point of the debug pipeline: the exact domain objects the UI
- * renders (the [DiagnosticReport], the per-module [ModuleState]s, the active
- * backend) are @Serializable, so the debug dump is `Json.encodeToString(state)` —
- * complete by construction, never a hand-written text projection that drifts out
- * of sync with what the app shows. Everything a bug report needs travels in one
- * object: the derived state, the raw shell sections it was derived from, the
- * captured logs, and the root-shell self-diagnosis.
+ * Retained Core diagnostic evidence, native state, presentation and optional
+ * forensic attachments share one serializable snapshot. Capturing it does not
+ * admit a diagnostic run. Capture time and each source's measurement identity
+ * remain separate; legacy nullable output slots do not recreate removed owners.
  *
  * Nothing machine-parses this format but an operator (or an AI) reading a bug
  * report, so the shape may change freely — but a bundle can arrive months late,
@@ -54,7 +51,7 @@ import kotlinx.serialization.json.JsonElement
  *    names, which also made them unmovable between packages.
  * 1: initial.
  */
-internal const val VPNHIDE_STATE_SCHEMA: Int = 5
+internal const val VPNHIDE_STATE_SCHEMA: Int = 6
 
 /**
  * What to include in a captured [VpnHideState]. The ONE source of truth for the
@@ -88,22 +85,13 @@ internal data class VpnHideState(
     val app: AppInfo,
     val device: DeviceInfo,
     val selfNeedsRestart: Boolean,
-    // The measured diagnostics run. Null when the capture did not run checks
-    // (e.g. the full-logcat recorder just bundles state, no probe run).
+    // Legacy compatibility slots, always null for current Core-backed captures.
     val gate: JsonElement?,
-    // The identified diagnostic run this capture took its evidence from. Null when
-    // the capture ran no suite, or when no run was admitted at all (the reason is
-    // then in [errors]). Lets a bundle be matched against the run's own attempt.
     val selfTestRunId: Long? = null,
-    // The shared diagnostic presentation at assembly time: eligibility, active run,
-    // latest attempt, latest complete measurement with its applicability and
-    // evidence sufficiency — the same projection the screens render, so a bundle
-    // or an agent read cannot disagree with the UI. Null for the logcat recorder.
     val diagnostics: JsonElement? = null,
     val nativeStatus: dev.okhsunrog.vpnhide.NativeStatusSnapshot? = null,
     val autonomousDiagnostics: dev.okhsunrog.vpnhide.diagnostics.AutonomousDiagnosticInfo? = null,
-    // Verdicts are gate-checked getters on the report (not stored fields), so they
-    // would not otherwise serialize — surface them explicitly, computed once here.
+    // Legacy compatibility slots; current assessment belongs to autonomousDiagnostics.
     val nativeVerdict: JsonElement?,
     val javaVerdict: JsonElement?,
     val report: JsonElement?,

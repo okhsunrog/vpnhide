@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 mod binding;
 pub use binding::*;
+mod address;
+pub use address::*;
 mod assessment;
 pub use assessment::*;
 pub mod framework;
@@ -125,6 +127,8 @@ impl NativeFixtureSpec {
 #[serde(deny_unknown_fields)]
 pub struct NativeMeasurement {
     #[serde(default)]
+    pub addresses: Option<AddressMeasurement>,
+    #[serde(default)]
     pub binding: Option<BindMeasurement>,
     pub flags: Sample<u32>,
     pub mtu: Sample<u32>,
@@ -136,7 +140,10 @@ pub struct NativeMeasurement {
 
 impl NativeMeasurement {
     pub fn bounded(&self) -> bool {
-        self.binding.as_ref().is_none_or(BindMeasurement::bounded)
+        self.addresses
+            .as_ref()
+            .is_none_or(AddressMeasurement::bounded)
+            && self.binding.as_ref().is_none_or(BindMeasurement::bounded)
             && [&self.ifaddrs, &self.links].into_iter().all(|sample| {
                 sample.value().is_none_or(|entries| {
                     entries.len() <= MAX_INTERFACES
@@ -394,6 +401,7 @@ mod tests {
             entries.push(spec.interface.into());
         }
         NativeMeasurement {
+            addresses: None,
             binding: None,
             flags: if visible {
                 Sample::Value(spec.flags)

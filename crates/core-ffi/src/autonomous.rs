@@ -11,6 +11,8 @@ macro_rules! enum_map {
         impl From<$name> for model::$source { fn from(v: $name) -> Self { match v { $($name::$variant => Self::$variant),+ } } }
     }
 }
+mod address;
+pub use address::*;
 enum_map!(
     CoreRequiredCheck,
     RequiredCheck,
@@ -256,6 +258,7 @@ impl From<model::ScopedBindResult> for CoreScopedBindResult {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreNativeMeasurement {
+    pub addresses: Option<CoreAddressMeasurement>,
     pub binding: Option<CoreBindMeasurement>,
     pub flags: CoreNumberSample,
     pub mtu: CoreNumberSample,
@@ -267,6 +270,7 @@ pub struct CoreNativeMeasurement {
 impl From<model::NativeMeasurement> for CoreNativeMeasurement {
     fn from(v: model::NativeMeasurement) -> Self {
         Self {
+            addresses: v.addresses.map(Into::into),
             binding: v.binding.map(Into::into),
             flags: v.flags.into(),
             mtu: v.mtu.into(),
@@ -280,6 +284,7 @@ impl From<model::NativeMeasurement> for CoreNativeMeasurement {
 impl From<CoreNativeMeasurement> for model::NativeMeasurement {
     fn from(v: CoreNativeMeasurement) -> Self {
         Self {
+            addresses: v.addresses.map(Into::into),
             binding: v.binding.map(Into::into),
             flags: v.flags.into(),
             mtu: v.mtu.into(),
@@ -415,6 +420,7 @@ pub struct CoreDiagnosticRun {
     pub framework: Option<crate::CoreScopedFrameworkResult>,
     pub stale: bool,
     pub binding: Option<CoreScopedBindResult>,
+    pub addresses: Option<CoreScopedAddressResult>,
 }
 impl From<model::DiagnosticRun> for CoreDiagnosticRun {
     fn from(v: model::DiagnosticRun) -> Self {
@@ -437,6 +443,7 @@ impl From<model::DiagnosticRun> for CoreDiagnosticRun {
             },
         };
         Self {
+            addresses: v.addresses.map(Into::into),
             session: v.session,
             core_epoch: v.fingerprint.core_epoch,
             boot_id: v.fingerprint.boot_id,

@@ -1,6 +1,9 @@
+pub mod address;
 pub mod binding;
 pub mod fixture;
 mod generated;
+pub mod netlink_read;
+pub mod netlink_wire;
 pub mod observation;
 
 use std::ffi::CStr;

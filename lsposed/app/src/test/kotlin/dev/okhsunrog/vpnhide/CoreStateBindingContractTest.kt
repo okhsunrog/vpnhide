@@ -46,6 +46,7 @@ class CoreStateBindingContractTest {
             null,
             false,
             null,
+            null,
         )
     private val assessment =
         CoreDiagnosticAssessment(
@@ -126,5 +127,16 @@ class CoreStateBindingContractTest {
         assertEquals(listOf("libc"), info.binding?.provenActors)
         assertEquals(listOf("syscall"), info.binding?.leakedActors)
         assertEquals(listOf("probe_unavailable"), info.binding?.controls)
+    }
+
+    @Test
+    fun `address export keeps actor vector and control evidence detached`() {
+        val check = CoreAddressCheck(CoreAddressActor.SYSCALL, CoreAddressVector.IOCTL_ADDRESS)
+        val result = CoreScopedAddressResult(emptyList(), listOf(check), listOf(CoreControlFailure.CLEANUP_UNCONFIRMED))
+        val info = run.copy(addresses = result).toDiagnosticInfo()
+        check.vector = CoreAddressVector.NETLINK_IPV6
+        result.leaked = emptyList()
+        assertEquals(listOf("syscall.ioctl_address"), info.addresses?.leakedChecks)
+        assertEquals(listOf("cleanup_unconfirmed"), info.addresses?.controls)
     }
 }
