@@ -33,3 +33,4 @@ device test. Code links use retained repository snapshots where available.
 - [Diagnostic worker ABI launcher source review](2026-11-03-diagnostic-worker-abi-launch.md): instrumentation restarts the target package; not a mixed-ABI implementation or device proof.
 - [Suspend-aware diagnostic deadline qualification](2026-11-03-diagnostic-deadline-qualification.md): Core boot-time authority, retained evidence and inherited framework expiration.
 - [KPM RAW lifecycle source review](2026-11-03-kpm-raw-lifecycle-review.md): disabled quarantined prototype; unresolved runtime control/unload lifetime, not device acceptance.
+- [Clean `21cd31ee` bundle and unsigned APK](2026-11-03-clean-bundle-21cd31ee.md): seven fresh qualified KMI payloads, both Core/Zygisk ABIs, full assembly, R8 and scoped startup regression; no production signing or device acceptance.
