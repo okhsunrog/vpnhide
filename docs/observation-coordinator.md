@@ -186,3 +186,26 @@ The previous Core routing/UID observer contract is preserved only in the
 [dated archive](archive/2026-11-02-core-2.0-observations.md). Its VPN-session poller,
 route/rule listeners and APK split-tunnel eligibility are removed production
 paths. They must not be reintroduced as a diagnostic prerequisite.
+
+## Package inventory format owner
+
+`native-policy::package_inventory` parses both PackageManager package-row forms,
+normalizes UID lists, merges repeated per-profile observations and interprets the
+Core producer's per-user BEGIN/END/status markers. Core's `PackageUidMap` and the
+APK's local typed FFI use the same row/UID-map grammar. Core emits marker constants
+from that portable owner. Kotlin retains profile names/kinds for presentation,
+Android PackageManager acquisition/backstop rows, localization and cache wiring;
+it no longer parses package rows, unions text UID lists or interprets scan markers.
+
+A matching BEGIN/exit-0 END, even for an empty profile, is successful. An
+unmatched END or a later truncated retry cannot inherit an earlier success. Readable rows survive failed or
+truncated profile scans with incomplete status; the APK backstop cannot establish
+missing root coverage. Unframed comma-separated rows are partitioned by each UID's
+actual user instead of copying every UID into every inferred profile. UIDs must fit
+Android's nonnegative signed 32-bit range, including platform AIDs; invalid numbers
+are never wrapped into Kotlin `Int`. Inputs over the shared 32 MiB observation bound
+fail explicitly at the local FFI boundary. Core's compatibility map wrapper returns
+no UIDs on a rejected oversized input; bounded PackageManager acquisition and
+fresh Core admission remain authoritative, independently of display scan markers.
+This is a format ownership slice, not completion of all inventory reconciliation
+scheduling, export/agent orchestration or a genuine secondary-ABI worker launcher.

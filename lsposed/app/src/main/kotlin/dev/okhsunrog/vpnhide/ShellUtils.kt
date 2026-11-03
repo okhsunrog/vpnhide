@@ -5,8 +5,8 @@ import dev.okhsunrog.vpnhide.core.CoreProbeResult
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.generated.IfaceLists
-import dev.okhsunrog.vpnhide.picker.parsePackageUidLine
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
+import uniffi.vpnhide_core_ffi.coreParsePackageUidMap
 import java.io.File
 import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
@@ -74,14 +74,7 @@ internal fun parseKeyValueLines(raw: String): Map<String, String> =
  * and `-f` path-prefixed forms are accepted. Repeated per-user rows and
  * comma-separated `--user all` rows are unioned.
  */
-internal fun parsePackageUidMap(raw: String): Map<String, List<Int>> {
-    val out = LinkedHashMap<String, MutableSet<Int>>()
-    raw.lineSequence().forEach { line ->
-        val parsed = parsePackageUidLine(line) ?: return@forEach
-        out.getOrPut(parsed.packageName) { linkedSetOf() }.addAll(parsed.uids)
-    }
-    return out.mapValues { (_, uids) -> uids.sorted() }
-}
+internal fun parsePackageUidMap(raw: String): Map<String, List<Int>> = coreParsePackageUidMap(raw)
 
 internal fun parseVpnIfaceStates(raw: String): List<Pair<String, String>> =
     raw

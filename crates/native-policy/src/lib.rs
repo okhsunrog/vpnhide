@@ -1,5 +1,7 @@
-//! Pure native policy. No filesystem, PackageManager, transport, loaders or root effects.
+//! Pure native policy and inventory formats. No filesystem, PackageManager calls,
+//! transport, loaders or root effects.
 //! Core resolves an inventory; both admission and local UI preview use these rules.
+pub mod package_inventory;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use vpnhide_protocol::hook_ids::{
@@ -10,7 +12,7 @@ use vpnhide_protocol::{Target, format_config};
 mod tests;
 pub const FILESYSTEM_FEATURE: &str = Hook::FilesystemIfacePaths.name();
 const APP_PACKAGE: &str = "dev.okhsunrog.vpnhide";
-const PER_USER_RANGE: u32 = 100_000;
+const PER_USER_RANGE: u32 = package_inventory::UIDS_PER_USER;
 fn is_app_uid(uid: u32) -> bool {
     uid % PER_USER_RANGE >= 10_000
 }

@@ -1,9 +1,6 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.picker.BackstopPackage
-import dev.okhsunrog.vpnhide.picker.PM_USERS_STATUS_PREFIX
-import dev.okhsunrog.vpnhide.picker.PM_USER_BEGIN_PREFIX
-import dev.okhsunrog.vpnhide.picker.PM_USER_END_PREFIX
 import dev.okhsunrog.vpnhide.picker.PackageInventoryEntry
 import dev.okhsunrog.vpnhide.picker.mergeUser0Backstop
 import dev.okhsunrog.vpnhide.picker.parsePackageInventory
@@ -12,6 +9,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+
+// Independent producer fixtures, deliberately not generated from the codec constants.
+private const val PM_USERS_STATUS_PREFIX = "__VPNHIDE_PM_USERS_STATUS__:"
+private const val PM_USER_BEGIN_PREFIX = "__VPNHIDE_PM_USER_BEGIN__:"
+private const val PM_USER_END_PREFIX = "__VPNHIDE_PM_USER_END__:"
 
 class PackageInventoryDataTest {
     @Test
@@ -137,6 +139,23 @@ class PackageInventoryDataTest {
             )
 
         assertEquals(listOf(10123, 1010123), parsed["com.example"])
+    }
+
+    @Test
+    fun `unframed comma separated UIDs stay in their actual Android profiles`() {
+        val inventory = parsePackageInventory("package:com.example uid:10123,1010123,10123", "")
+        assertEquals(mapOf(0 to listOf(10123), 10 to listOf(1010123)), inventory.packages.getValue("com.example").uidsByUser)
+        assertFalse(inventory.complete)
+        assertTrue(inventory.partial)
+    }
+
+    @Test
+    fun `shared UID codec retains spaced APK paths and never wraps oversized or negative UIDs`() {
+        val raw = "package:/data/app/a b/base.apk=com.example uid:10123, -1,2147483648,2147483647,4294967295"
+        val inventory = parsePackageInventory(raw, "")
+        assertEquals("/data/app/a b/base.apk", inventory.packages.getValue("com.example").apkPath)
+        assertEquals(listOf(10123, Int.MAX_VALUE), parsePackageUidMap(raw)["com.example"])
+        assertEquals(listOf(10123, Int.MAX_VALUE), inventory.packages.getValue("com.example").uids)
     }
 
     @Test

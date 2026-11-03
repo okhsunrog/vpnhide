@@ -1,11 +1,7 @@
 package dev.okhsunrog.vpnhide.picker
 
 import dev.okhsunrog.vpnhide.RootSnapshotException
-
-internal const val PM_USERS_STATUS_PREFIX = "__VPNHIDE_PM_USERS_STATUS__:"
-internal const val PM_USER_BEGIN_PREFIX = "__VPNHIDE_PM_USER_BEGIN__:"
-internal const val PM_USER_END_PREFIX = "__VPNHIDE_PM_USER_END__:"
-private const val PACKAGE_UIDS_PER_USER = 100_000
+import uniffi.vpnhide_core_ffi.coreParsePackageInventory
 
 internal data class PackageInventoryEntry(
     val apkPath: String?,
@@ -54,96 +50,18 @@ internal data class PackageInventory(
     }
 }
 
-internal data class ParsedPackageUidLine(
-    val packageName: String,
-    val apkPath: String?,
-    val uids: List<Int>,
-)
-
-/**
- * Parse either supported PackageManager row:
- *
- * - `package:com.example uid:10123`
- * - `package:/data/app/.../base.apk=com.example uid:10123`
- */
-internal fun parsePackageUidLine(line: String): ParsedPackageUidLine? {
-    val trimmed = line.trim()
-    if (!trimmed.startsWith("package:")) return null
-    val body = trimmed.removePrefix("package:")
-    val uidMarker = body.lastIndexOf(" uid:")
-    if (uidMarker <= 0) return null
-    val packageToken = body.substring(0, uidMarker).trim()
-    val uidToken = body.substring(uidMarker + " uid:".length).trim()
-    val separator = packageToken.lastIndexOf('=')
-    val packageName = packageToken.substring(separator + 1).trim()
-    if (packageName.isEmpty()) return null
-    val apkPath =
-        packageToken
-            .takeIf { separator > 0 }
-            ?.substring(0, separator)
-            ?.trim()
-            ?.takeIf(String::isNotEmpty)
-    val uids =
-        uidToken
-            .split(',')
-            .mapNotNull { it.trim().toIntOrNull() }
-            .distinct()
-            .sorted()
-    if (uids.isEmpty()) return null
-    return ParsedPackageUidLine(packageName, apkPath, uids)
-}
-
+/** Local typed Rust codec; Android profile names/kinds remain presentation data. */
 internal fun parsePackageInventory(
     packagesRaw: String,
     usersRaw: String,
 ): PackageInventory {
     val profiles = parseUserProfiles(usersRaw)
-    val userListStatuses = parseUserListStatuses(usersRaw)
-    val packageStatuses = linkedMapOf<Int, Int>()
-    val packages = linkedMapOf<String, MutablePackageInventoryEntry>()
-    var currentUserId: Int? = null
-
-    packagesRaw.lineSequence().forEach { line ->
-        when {
-            line.startsWith(PM_USER_BEGIN_PREFIX) -> {
-                currentUserId = line.removePrefix(PM_USER_BEGIN_PREFIX).trim().toIntOrNull()
-            }
-
-            line.startsWith(PM_USER_END_PREFIX) -> {
-                val fields = line.removePrefix(PM_USER_END_PREFIX).split(':', limit = 2)
-                val userId = fields.getOrNull(0)?.toIntOrNull()
-                val status = fields.getOrNull(1)?.toIntOrNull()
-                if (userId != null && status != null) packageStatuses[userId] = status
-                currentUserId = null
-            }
-
-            else -> {
-                val parsed = parsePackageUidLine(line) ?: return@forEach
-                val entry = packages.getOrPut(parsed.packageName) { MutablePackageInventoryEntry() }
-                if (entry.apkPath == null) entry.apkPath = parsed.apkPath
-                val userIds = currentUserId?.let(::listOf) ?: parsed.uids.map { it / PACKAGE_UIDS_PER_USER }
-                userIds.forEach { userId ->
-                    entry.uidsByUser.getOrPut(userId) { linkedSetOf() }.addAll(parsed.uids)
-                }
-            }
-        }
-    }
-
-    val expectedUserIds = profiles.keys
-    // A profile is failed only when its scan did not succeed: a non-zero
-    // `pm list packages` exit, or no END marker at all (a truncated scan →
-    // status is null → null != 0). An exit-0 scan that returned no packages is
-    // a *success* — the profile is legitimately empty (seen on a Motorola
-    // vendor profile: user 10 running, exit 0, zero packages). Treating
-    // empty-but-successful as a failure used to block the whole app list with
-    // "couldn't read all profiles".
-    val failedUserIds = expectedUserIds.filterTo(sortedSetOf()) { packageStatuses[it] != 0 }
-    val userListComplete = userListStatuses.any { it == 0 } && expectedUserIds.isNotEmpty()
+    val parsed = coreParsePackageInventory(packagesRaw, usersRaw, profiles.keys.toList())
     return PackageInventory(
-        packages = packages.mapValues { (_, entry) -> entry.freeze() },
+        packages = parsed.packages.mapValues { (_, entry) -> PackageInventoryEntry(entry.apkPath, entry.uidsByUser) },
         profiles = profiles,
-        failedUserIds = failedUserIds,
-        userListComplete = userListComplete,
+        failedUserIds = parsed.failedUserIds.toSet(),
+        userListComplete = parsed.userListComplete,
     )
 }
 
@@ -204,22 +122,3 @@ internal fun mergeUser0Backstop(
     }
     return merged
 }
-
-private data class MutablePackageInventoryEntry(
-    var apkPath: String? = null,
-    val uidsByUser: MutableMap<Int, MutableSet<Int>> = linkedMapOf(),
-) {
-    fun freeze(): PackageInventoryEntry =
-        PackageInventoryEntry(
-            apkPath = apkPath,
-            uidsByUser = uidsByUser.mapValues { (_, uids) -> uids.sorted() },
-        )
-}
-
-private fun parseUserListStatuses(raw: String): List<Int> =
-    raw
-        .lineSequence()
-        .mapNotNull { line ->
-            if (!line.startsWith(PM_USERS_STATUS_PREFIX)) return@mapNotNull null
-            line.substringAfterLast(':').trim().toIntOrNull()
-        }.toList()

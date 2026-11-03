@@ -12,9 +12,9 @@ pub mod prefixes {
     pub const ROOT_TIMING: &str = "__VPNHIDE_ROOT_TIMING__:";
     pub const DEBUG_BEGIN: &str = "__VPNHIDE_DEBUG_SECTION_BEGIN__:";
     pub const DEBUG_END: &str = "__VPNHIDE_DEBUG_SECTION_END__:";
-    pub const PM_USERS_STATUS: &str = "__VPNHIDE_PM_USERS_STATUS__:";
-    pub const PM_USER_BEGIN: &str = "__VPNHIDE_PM_USER_BEGIN__:";
-    pub const PM_USER_END: &str = "__VPNHIDE_PM_USER_END__:";
+    pub use vpnhide_native_policy::package_inventory::{
+        PM_USER_BEGIN, PM_USER_END, PM_USERS_STATUS,
+    };
 }
 
 pub const REQUIRED_ROOT_SNAPSHOT_SECTIONS: &[&str] = &[

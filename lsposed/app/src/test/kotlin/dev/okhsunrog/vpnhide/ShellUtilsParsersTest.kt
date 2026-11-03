@@ -21,28 +21,6 @@ class ShellUtilsParsersTest {
     }
 
     @Test
-    fun `parsePackageUidMap reads single-profile uid`() {
-        val map = parsePackageUidMap("package:com.example uid:10123")
-        assertEquals(listOf(10123), map["com.example"])
-    }
-
-    @Test
-    fun `parsePackageUidMap splits comma-separated multi-profile uids`() {
-        val map = parsePackageUidMap("package:com.example uid:10123,1010123")
-        assertEquals(listOf(10123, 1010123), map["com.example"])
-    }
-
-    @Test
-    fun `parsePackageUidMap unions repeated lines for the same package`() {
-        val raw =
-            """
-            package:com.example uid:10123
-            package:com.example uid:1010123
-            """.trimIndent()
-        assertEquals(listOf(10123, 1010123), parsePackageUidMap(raw)["com.example"])
-    }
-
-    @Test
     fun `parsePackageUidMap drops non-integer uids and non-package lines`() {
         val raw =
             """

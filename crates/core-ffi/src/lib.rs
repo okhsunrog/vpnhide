@@ -5,6 +5,8 @@ use vpnhide_core_client::CoreClient;
 use vpnhide_core_rpc as rpc;
 uniffi::setup_scaffolding!();
 mod api;
+mod package_inventory;
+pub use package_inventory::*;
 mod probe_frames;
 pub use probe_frames::*;
 mod maintenance;

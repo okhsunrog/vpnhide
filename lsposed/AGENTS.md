@@ -108,7 +108,9 @@ directions, since `internal` is module-wide and the compiler will not.
 - **`ShellUtils`** — startup readiness and a fixed Core self-target request; no
   app-derived bootstrap replacement or legacy-import orchestrator. Also the parsers
   `parseConfigLines`, `parseKeyValueLines`, `parsePackageUidMap` (no shell
-  despite the name). **Never write another `pm list`
+  despite the name). Package rows, UID union and per-user scan status now delegate
+  to `native-policy::package_inventory` through local typed FFI; profile display
+  names/kinds and in-process Android acquisition remain adapters. **Never write another `pm list`
   or `key=value` parser** — there used to be four; there is now one of each.
 - **`ConfigChannels`** — the automatic hidden-package refresh. Startup reads core
   state without forcing `RepairActivation`; repair stays an explicit command. Delivery to the native backend and Ports is core's

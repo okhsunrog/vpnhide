@@ -61,6 +61,19 @@ fn parses_pm_package_uids_for_all_profiles() {
 }
 
 #[test]
+fn shared_package_rows_do_not_wrap_android_uids_or_split_apk_paths_at_spaces() {
+    let map = parse_pm_packages(
+        "package:/data/app/a b/base.apk=com.example uid:10123, -1, 1010123,2147483648,4294967295",
+    );
+    assert_eq!(map.uids_for("com.example"), &[10123, 1010123]);
+    assert!(
+        parse_pm_packages("package:com.example uid:-1,2147483648")
+            .packages()
+            .is_empty()
+    );
+}
+
+#[test]
 fn parses_android_user_ids_without_treating_names_as_syntax() {
     let users = parse_pm_user_ids(
         "Users:\n\

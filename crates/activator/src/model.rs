@@ -226,35 +226,12 @@ impl PackageUidMap {
 }
 
 pub fn parse_pm_packages(output: &str) -> PackageUidMap {
-    let mut packages = BTreeMap::<String, Vec<u32>>::new();
-    for line in output.lines() {
-        let mut pkg: Option<&str> = None;
-        let mut uid_csv: Option<&str> = None;
-        for token in line.split_whitespace() {
-            if let Some(rest) = token.strip_prefix("package:") {
-                pkg = Some(rest);
-            } else if let Some(rest) = token.strip_prefix("uid:") {
-                uid_csv = Some(rest);
-            }
-        }
-        let (Some(pkg_token), Some(uid_csv)) = (pkg, uid_csv) else {
-            continue;
-        };
-        let pkg = pkg_token
-            .rsplit_once('=')
-            .map_or(pkg_token, |(_, package)| package);
-        let uids = uid_csv
-            .split(',')
-            .filter_map(|s| s.parse::<u32>().ok())
-            .collect::<Vec<_>>();
-        if !uids.is_empty() {
-            let existing = packages.entry(pkg.to_owned()).or_default();
-            existing.extend(uids);
-            existing.sort_unstable();
-            existing.dedup();
-        }
+    PackageUidMap {
+        // A rejected oversized observation cannot authorize any UID. Production
+        // readiness validates the required own-package and per-profile coverage.
+        packages: vpnhide_native_policy::package_inventory::parse_uid_map(output)
+            .unwrap_or_default(),
     }
-    PackageUidMap { packages }
 }
 
 pub fn parse_pm_user_ids(output: &str) -> Vec<u32> {

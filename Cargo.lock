@@ -1837,6 +1837,7 @@ dependencies = [
  "tarpc",
  "vpnhide_build_contract",
  "vpnhide_diagnostic_model",
+ "vpnhide_native_policy",
 ]
 
 [[package]]

@@ -9,6 +9,7 @@ They are not the current work index or authority to implement a reopened design.
 - [Capture logging limits across suspend](2026-11-03-capture-boot-clock-qualification.md)
 - [KPM lock lifetime and shared owner](2026-11-03-kpm-lock-lifetime.md)
 - [Maintenance lock lifetime under fork](2026-11-03-maintenance-lock-lifetime.md)
+- [Shared PackageManager package/UID codec](2026-11-03-package-inventory-codec.md)
 - [Shared snapshot codec and validation](2026-11-03-shared-probe-frames.md)
 - [GKI modpost qualification experiment](2026-11-03-gki-modpost-qualification.md)
 - [Current roadmap](../../ROADMAP.md)

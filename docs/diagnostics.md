@@ -171,6 +171,21 @@ The [roadmap](../ROADMAP.md) separates these
 open code tasks from device/signing/publication requirements. See
 [RFC2](rfcs/0002-autonomous-diagnostics.md) for the full contract.
 
+## Worker ABI coverage
+
+The genuine `:diagnostics` Service currently starts with the APK's selected ABI.
+On a mixed-ABI device, it does **not** independently request a Zygote32 worker.
+A safe secondary32-bit launcher is still unimplemented code, in addition to the
+later device acceptance. ARMv7 compilation, ELF qualification, a static Linux
+compat process or a successful ARM64 worker does not fill that gap. ABI-specific
+loader image proof remains required; the implementation does not borrow one
+ABI's evidence for the other or turn an unavailable worker into PASS.
+
+The reviewed `am instrument --abi` candidate was rejected because its target
+package restart would interrupt the running APK and unsaved drafts. Root
+`app_process` with setuid is not a genuine worker substitute. No helper-APK install
+flow is assumed or added. See the [launcher source review](archive/2026-11-03-diagnostic-worker-abi-launch.md).
+
 ## Read models and captures
 
 `AutonomousDiagnosticSnapshotOwner` combines accepted Core/config/root identities
