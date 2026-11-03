@@ -17,6 +17,8 @@ use vpnhide_diagnostic_model::{
 
 #[path = "fixture-oracle/raw_control.rs"]
 mod raw_control;
+#[path = "fixture-oracle/route_control.rs"]
+mod route_control;
 
 fn main() {
     if let Err(error) = run() {
@@ -59,18 +61,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         return raw_control::worker(name);
     }
+    if args.as_slice() == ["route-worker"] {
+        if unsafe { libc::geteuid() } != 10000 {
+            return Err("route worker is not oracle app UID".into());
+        }
+        no_tun_descriptors()?;
+        println!(
+            "{}",
+            serde_json::to_string(&vpnhide_checks::route::observe())?
+        );
+        return Ok(());
+    }
     if let [mode, name] = args.as_slice()
         && mode == "worker"
     {
         if unsafe { libc::geteuid() } != 10000 || name.len() != 15 || !name.starts_with("tun") {
             return Err("invalid native oracle child".into());
         }
-        for entry in std::fs::read_dir("/proc/self/fd")? {
-            let metadata = std::fs::metadata(entry?.path())?;
-            if metadata.file_type().is_char_device() && metadata.rdev() == 0x0ac8 {
-                return Err("TUN descriptor leaked across worker exec".into());
-            }
-        }
+        no_tun_descriptors()?;
         println!(
             "{}",
             serde_json::to_string(&vpnhide_checks::fixture::observe(name))?
@@ -79,6 +87,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if unsafe { libc::geteuid() } != 0 {
         return Err("native oracle parent is not root".into());
+    }
+    if args.as_slice() == ["route-crash-owner"] {
+        let fixture =
+            vpnhide_core_daemon::autonomous::route_fixture::RouteFixture::create(0x0123_4567_89b2)?;
+        println!("{}", serde_json::to_string(&fixture.spec)?);
+        io::stdout().flush()?;
+        // Actual process-exit cleanup; Rust owners are intentionally not dropped.
+        unsafe { libc::_exit(0) };
     }
     if args.as_slice() == ["crash-owner"] {
         let fixture = TunFixture::create(0x0123_4567_89ad)?;
@@ -117,7 +133,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     | vpnhide_protocol::hook_ids::Hook::Inet6FillIfaddr.bit()
                     | vpnhide_protocol::hook_ids::Hook::SockIoctl.bit()
                     | vpnhide_protocol::hook_ids::Hook::SocketBindInterface.bit()
-                    | vpnhide_protocol::hook_ids::Hook::FilesystemIfacePaths.bit(),
+                    | vpnhide_protocol::hook_ids::Hook::FilesystemIfacePaths.bit()
+                    | vpnhide_protocol::hook_ids::Hook::FibRouteSeqShow.bit()
+                    | vpnhide_protocol::hook_ids::Hook::Ipv6RouteSeqShow.bit()
+                    | vpnhide_protocol::hook_ids::Hook::FibDumpInfo.bit()
+                    | vpnhide_protocol::hook_ids::Hook::Rt6FillNode.bit(),
             }],
         );
         vpnhide_core_daemon::activation::deliver_native(control, backend, &wire)?;
@@ -326,9 +346,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("partial address setup leaked resources or falsely proved coverage".into());
     }
     println!("FIXTURE_PARTIAL_ADDRESS_CONTROL=PASS");
+    route_control::verify(protected)?;
+    if routes()? != before {
+        return Err("route prototype did not restore initial proc observations".into());
+    }
+
     println!(
-        "FIXTURE_ORACLE=PASS mode={} down=1 routes_unchanged=1",
+        "FIXTURE_ORACLE=PASS mode={} interface_fixture_down=1 route_fixture_up_pair=1 routes_restored=1",
         if protected { "protected" } else { "raw" }
     );
+    Ok(())
+}
+
+fn no_tun_descriptors() -> io::Result<()> {
+    for entry in std::fs::read_dir("/proc/self/fd")? {
+        let metadata = std::fs::metadata(entry?.path())?;
+        if metadata.file_type().is_char_device() && metadata.rdev() == 0x0ac8 {
+            return Err(io::Error::other("TUN descriptor leaked across worker exec"));
+        }
+    }
     Ok(())
 }

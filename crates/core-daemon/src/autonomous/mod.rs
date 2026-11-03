@@ -2,6 +2,8 @@
 //! scoped result until the complete supported diagnostic plan is measured.
 
 pub mod native_fixture;
+#[cfg(feature = "fixture-oracle")]
+pub mod route_fixture;
 
 pub mod coordinator;
 

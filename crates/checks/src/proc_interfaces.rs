@@ -1,81 +1,18 @@
 //! Closed-set proc interface reads. No writes, child processes or VPN gating.
-use std::{
-    collections::BTreeSet,
-    ffi::CStr,
-    io,
-    os::fd::{AsRawFd, FromRawFd, OwnedFd},
-    time::{Duration, Instant},
-};
+use crate::proc_read::{ProcFile, read};
+use std::collections::BTreeSet;
 use vpnhide_diagnostic_model::{
     MAX_ADDRESSES, MAX_INTERFACES, NativeReadActor, ObservedAddress, ProbeError,
     ProcInterfaceActorMeasurement, ProcInterfaceMeasurement, Sample,
 };
 
-fn error() -> ProbeError {
-    ProbeError::Errno(
-        io::Error::last_os_error()
-            .raw_os_error()
-            .filter(|e| *e > 0)
-            .unwrap_or(libc::EIO),
-    )
-}
 fn sample<T>(value: Result<T, ProbeError>) -> Sample<T> {
     match value {
         Ok(v) => Sample::Value(v),
         Err(e) => Sample::Error(e),
     }
 }
-fn read(path: &'static CStr, actor: NativeReadActor) -> Result<Vec<u8>, ProbeError> {
-    let flags = libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NONBLOCK;
-    let raw = unsafe {
-        match actor {
-            NativeReadActor::Libc => libc::open(path.as_ptr(), flags) as libc::c_long,
-            NativeReadActor::Syscall => {
-                libc::syscall(libc::SYS_openat, libc::AT_FDCWD, path.as_ptr(), flags, 0)
-            }
-        }
-    };
-    if raw < 0 {
-        return Err(error());
-    }
-    let fd = unsafe { OwnedFd::from_raw_fd(raw as libc::c_int) };
-    let deadline = Instant::now() + Duration::from_secs(1);
-    let mut bytes = Vec::new();
-    let mut buffer = [0u8; 4096];
-    for _ in 0..128 {
-        if Instant::now() >= deadline {
-            return Err(ProbeError::Timeout);
-        }
-        let size = unsafe {
-            match actor {
-                NativeReadActor::Libc => {
-                    libc::read(fd.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len())
-                        as libc::c_long
-                }
-                NativeReadActor::Syscall => libc::syscall(
-                    libc::SYS_read,
-                    fd.as_raw_fd(),
-                    buffer.as_mut_ptr(),
-                    buffer.len(),
-                ),
-            }
-        };
-        if size < 0 {
-            if io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
-                continue;
-            }
-            return Err(error());
-        }
-        if size == 0 {
-            return Ok(bytes);
-        }
-        if size as usize > buffer.len() || bytes.len() + size as usize > 256 * 1024 {
-            return Err(ProbeError::TooLarge);
-        }
-        bytes.extend_from_slice(&buffer[..size as usize]);
-    }
-    Err(ProbeError::TooLarge)
-}
+
 fn label(value: &str) -> Result<String, ProbeError> {
     if value.is_empty()
         || value.len() > 15
@@ -163,8 +100,8 @@ pub fn observe() -> ProcInterfaceMeasurement {
             .into_iter()
             .map(|actor| ProcInterfaceActorMeasurement {
                 actor,
-                devices: sample(read(c"/proc/net/dev", actor).and_then(|b| devices(&b))),
-                ipv6: sample(read(c"/proc/net/if_inet6", actor).and_then(|b| ipv6(&b))),
+                devices: sample(read(ProcFile::InterfaceStats, actor).and_then(|b| devices(&b))),
+                ipv6: sample(read(ProcFile::Ipv6Addresses, actor).and_then(|b| ipv6(&b))),
             })
             .collect(),
     }

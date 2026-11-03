@@ -163,7 +163,15 @@ remain unverified. Actual bionic, SELinux and secondary32-bit Android worker
 execution remain separate gates; both compiled ABIs alone establish neither.
 See [the scoped Linux qualification](archive/2026-11-03-native-filesystem-fixture-qualification.md).
 
-Routes/rules, remaining proc/socket stimuli and framework active/
+An [engineering owned-UP route prototype](archive/2026-11-03-native-route-prototype.md)
+now positively qualifies eight libc/syscall netlink/proc IPv4/IPv6 vectors on the
+reference Linux6.1 with RAW/protected, ordinary and lifecycle controls. It preserves
+the primary DOWN fixture and is gated out of Core/APK production builds. Its
+resource admission/recovery, genuine-worker report and FFI/export wiring remain
+code work; current production route checks remain unverified. No required check
+was removed or inferred from installed hooks.
+
+Rules, remaining route forms, proc/socket stimuli and framework active/
 default/callback/PendingIntent controls still need implementation or expansion.
 Android bionic, SELinux, Java callback isolation and old game-process coverage need
 real device acceptance. QEMU/static libc evidence does not replace those gates.

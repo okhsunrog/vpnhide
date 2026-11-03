@@ -9,6 +9,8 @@ mod address;
 pub use address::*;
 mod assessment;
 pub use assessment::*;
+mod route;
+pub use route::*;
 mod proc_interfaces;
 pub use proc_interfaces::*;
 mod sys_interfaces;

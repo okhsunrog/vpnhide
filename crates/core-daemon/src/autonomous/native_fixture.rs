@@ -107,6 +107,20 @@ pub struct TunFixture {
     pub root_start: NativeMeasurement,
 }
 
+/// Engineering-only consuming transition: a DOWN fixture cannot be assessed
+/// through TunFixture after its descriptor moves into this distinct UP owner.
+#[cfg(feature = "fixture-oracle")]
+pub struct OracleUpTun {
+    _file: File,
+    pub interface: InterfaceId,
+}
+#[cfg(feature = "fixture-oracle")]
+impl OracleUpTun {
+    pub fn duplicate_for_oracle(&self) -> io::Result<File> {
+        self._file.try_clone()
+    }
+}
+
 pub struct NativeCompletion {
     pub filesystem: vpnhide_diagnostic_model::ScopedFilesystemResult,
     pub sys_interfaces: vpnhide_diagnostic_model::ScopedSysInterfaceResult,
@@ -369,6 +383,59 @@ impl TunFixture {
             result,
             binding,
         }
+    }
+
+    #[cfg(feature = "fixture-oracle")]
+    pub fn into_up_for_oracle(mut self, ordinary: bool) -> io::Result<OracleUpTun> {
+        let file = self
+            .tun
+            .take()
+            .ok_or_else(|| invalid("fixture already closed"))?;
+        let mut interface = self.spec.interface.clone();
+        if fixture::index(&interface.name).ok() != Some(interface.index) {
+            return Err(invalid("fixture identity changed before UP transition"));
+        }
+        let raw = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0) };
+        if raw < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let control = unsafe { OwnedFd::from_raw_fd(raw) };
+        if ordinary {
+            let name = format!("vhr{}", &interface.name[3..]);
+            let mut rename = request(&interface.name);
+            let mut target = [0 as libc::c_char; libc::IFNAMSIZ];
+            for (byte, value) in target.iter_mut().zip(name.bytes()) {
+                *byte = value as libc::c_char;
+            }
+            rename.ifr_ifru.ifru_newname = target;
+            if unsafe { libc::ioctl(control.as_raw_fd(), libc::SIOCSIFNAME as _, &mut rename) } != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            interface.name = name;
+        }
+        if fixture::index(&interface.name).ok() != Some(interface.index) {
+            return Err(invalid("fixture rename identity changed"));
+        }
+        let mut flags = request(&interface.name);
+        if unsafe { libc::ioctl(control.as_raw_fd(), libc::SIOCGIFFLAGS as _, &mut flags) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        flags.ifr_ifru.ifru_flags = unsafe { flags.ifr_ifru.ifru_flags } | libc::IFF_UP as i16;
+        if unsafe { libc::ioctl(control.as_raw_fd(), libc::SIOCSIFFLAGS as _, &mut flags) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if fixture::index(&interface.name).ok() != Some(interface.index)
+            || fixture::interface_ioctl(&interface.name, false)
+                .value()
+                .is_none_or(|v| v & libc::IFF_UP as u32 == 0)
+        {
+            return Err(invalid("UP fixture readback failed"));
+        }
+        Ok(OracleUpTun {
+            _file: file,
+            interface,
+        })
     }
 
     #[cfg(feature = "fixture-oracle")]

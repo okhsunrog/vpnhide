@@ -129,6 +129,8 @@ pub fn receive(
 pub enum DumpKind {
     Links,
     Addresses,
+    RoutesIpv4,
+    RoutesIpv6,
 }
 pub fn dump(
     kind: DumpKind,
@@ -138,9 +140,11 @@ pub fn dump(
     let fd = bound_socket(actor)?;
     let mut address: libc::sockaddr_nl = unsafe { zeroed() };
     address.nl_family = libc::AF_NETLINK as _;
-    let (request_kind, payload_length) = match kind {
-        DumpKind::Links => (18u16, 16),
-        DumpKind::Addresses => (22u16, 8),
+    let (request_kind, payload_length, family) = match kind {
+        DumpKind::Links => (18u16, 16, 0),
+        DumpKind::Addresses => (22u16, 8, 0),
+        DumpKind::RoutesIpv4 => (26u16, 12, libc::AF_INET as u8),
+        DumpKind::RoutesIpv6 => (26u16, 12, libc::AF_INET6 as u8),
     };
     let mut request = vec![0u8; 16 + payload_length];
     let length = request.len();
@@ -148,6 +152,7 @@ pub fn dump(
     request[4..6].copy_from_slice(&request_kind.to_ne_bytes());
     request[6..8].copy_from_slice(&0x301u16.to_ne_bytes());
     request[8..12].copy_from_slice(&1u32.to_ne_bytes());
+    request[16] = family;
     let destination = (&address as *const libc::sockaddr_nl).cast::<libc::sockaddr>();
     let sent = unsafe {
         match actor {

@@ -5,6 +5,7 @@ unapproved ideas. Their old status, commands, UI and test counts are historical.
 They are not the current work index or authority to implement a reopened design.
 
 - [KPM NULL-ifconf qualification](2026-11-03-kpm-ifconf-qualification.md)
+- [Owned UP route prototype](2026-11-03-native-route-prototype.md)
 - [Controlled interface-path lookup qualification](2026-11-03-native-filesystem-fixture-qualification.md)
 - [Capture logging limits across suspend](2026-11-03-capture-boot-clock-qualification.md)
 - [KPM lock lifetime and shared owner](2026-11-03-kpm-lock-lifetime.md)

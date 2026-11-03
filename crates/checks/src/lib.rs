@@ -9,6 +9,8 @@ mod generated;
 pub mod netlink_read;
 pub mod netlink_wire;
 pub mod proc_interfaces;
+mod proc_read;
+pub mod route;
 pub mod sys_interfaces;
 
 /// The shared generated VPN-interface vocabulary; not diagnostic success evidence.

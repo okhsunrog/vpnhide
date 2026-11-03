@@ -4,7 +4,9 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use vpnhide_core_daemon::autonomous::native_raw::RawLease;
-use vpnhide_diagnostic_model::{NativeFixtureSpec, NativeMeasurement, ProbeError, Sample};
+use vpnhide_diagnostic_model::{
+    NativeFixtureSpec, NativeMeasurement, ProbeError, RouteMeasurement, Sample,
+};
 
 fn line(reader: &mut impl BufRead) -> io::Result<String> {
     let mut text = String::new();
@@ -88,6 +90,7 @@ pub fn worker(name: &str) -> Result<(), Box<dyn std::error::Error>> {
                 vpnhide_checks::fixture::interface_ioctl(&name, true),
                 vpnhide_checks::sys_interfaces::observe(),
                 vpnhide_checks::filesystem::observe(&name),
+                vpnhide_checks::route::observe(),
             )
         }
     })
@@ -103,6 +106,11 @@ pub fn worker(name: &str) -> Result<(), Box<dyn std::error::Error>> {
         &mut writer,
         &serde_json::to_string(&vpnhide_checks::fixture::observe(&name))?,
     )?;
+    say(
+        &mut writer,
+        &serde_json::to_string(&vpnhide_checks::route::observe())?,
+    )?;
+    say(&mut writer, &serde_json::to_string(&ordinary_thread.3)?)?;
     require(
         line(&mut reader)? == "protected",
         "expected confirmed revoke",
@@ -110,6 +118,10 @@ pub fn worker(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     say(
         &mut writer,
         &serde_json::to_string(&vpnhide_checks::fixture::observe(&name))?,
+    )?;
+    say(
+        &mut writer,
+        &serde_json::to_string(&vpnhide_checks::route::observe())?,
     )?;
     for phase in ["closed", "expired"] {
         let next_nonce: u64 = line(&mut reader)?.parse()?;
@@ -130,7 +142,12 @@ impl Drop for ChildGuard {
         let _ = self.0.wait();
     }
 }
-pub fn verify(spec: &NativeFixtureSpec) -> Result<(), Box<dyn std::error::Error>> {
+pub struct RawRoutePair {
+    pub raw: RouteMeasurement,
+    pub protected: RouteMeasurement,
+    pub other_thread: RouteMeasurement,
+}
+pub fn verify(spec: &NativeFixtureSpec) -> Result<RawRoutePair, Box<dyn std::error::Error>> {
     let mut command = Command::new(std::env::current_exe()?);
     command
         .args(["raw-thread-worker", spec.interface.name.as_str()])
@@ -153,7 +170,7 @@ pub fn verify(spec: &NativeFixtureSpec) -> Result<(), Box<dyn std::error::Error>
     let mut writer = child.0.stdin.take().ok_or("child stdin")?;
     let mut reader = BufReader::new(child.0.stdout.take().ok_or("child stdout")?);
     let tid: u32 = line(&mut reader)?.parse()?;
-    let nonce = 0x0123456789abcdef;
+    let nonce = 0x0123456789abcdefu64 ^ (u64::from(tid) << 16);
     let status =
         vpnhide_core_daemon::activation::read_status(std::path::Path::new("/proc/vpnhide_ctl"))?;
     let mut lease = RawLease::arm(status.backend, tid, 10000, nonce)?;
@@ -162,9 +179,12 @@ pub fn verify(spec: &NativeFixtureSpec) -> Result<(), Box<dyn std::error::Error>
     lease.activate()?;
     say(&mut writer, "raw")?;
     let raw: NativeMeasurement = serde_json::from_str(&line(&mut reader)?)?;
+    let raw_routes: RouteMeasurement = serde_json::from_str(&line(&mut reader)?)?;
+    let other_thread: RouteMeasurement = serde_json::from_str(&line(&mut reader)?)?;
     require(lease.finish()?, "RAW expired before measurement completed")?;
     say(&mut writer, "protected")?;
     let protected: NativeMeasurement = serde_json::from_str(&line(&mut reader)?)?;
+    let protected_routes: RouteMeasurement = serde_json::from_str(&line(&mut reader)?)?;
     require(
         raw.filesystem.as_ref().is_some_and(|v| lookups(v, true))
             && protected
@@ -250,5 +270,9 @@ pub fn verify(spec: &NativeFixtureSpec) -> Result<(), Box<dyn std::error::Error>
     println!(
         "RAW_THREAD_ORACLE=PASS same_thread_raw=1 same_uid_other_thread_protected=1 revoke=1 ordinary_preserved=1 active_close=1 ttl_expiry=1 no_nonce_replay=1"
     );
-    Ok(())
+    Ok(RawRoutePair {
+        raw: raw_routes,
+        protected: protected_routes,
+        other_thread,
+    })
 }
