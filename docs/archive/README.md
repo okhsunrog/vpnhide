@@ -35,3 +35,4 @@ device test. Code links use retained repository snapshots where available.
 - [KPM RAW lifecycle source review](2026-11-03-kpm-raw-lifecycle-review.md): disabled quarantined prototype; unresolved runtime control/unload lifetime, not device acceptance.
 - [Clean `21cd31ee` bundle and unsigned APK](2026-11-03-clean-bundle-21cd31ee.md): seven fresh qualified KMI payloads, both Core/Zygisk ABIs, full assembly, R8 and scoped startup regression; no production signing or device acceptance.
 - [Controlled interface-directory qualification](2026-11-03-native-directory-fixture-qualification.md): six libc/direct-getdents64 sysfs/proc-sys controls, real RAW/protected QEMU and retained evidence; stat/access/open and Android acceptance remain separate.
+- [Historical mixed bundle guide](2026-11-03-debug-bundle-legacy-reference.md): source-pinned old report/gate/verdict instructions for historical bundles; the current guide uses retained Core evidence.

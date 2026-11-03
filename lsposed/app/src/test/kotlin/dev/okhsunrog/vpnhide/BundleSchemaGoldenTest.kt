@@ -35,10 +35,9 @@ import java.io.File
  * classes currently say.
  *
  * So the shape is frozen here. When this test fails, the change is real: refresh
- * the golden with `-DupdateGolden=true`, and if the change removes/renames a
- * field or alters its meaning, bump [VPNHIDE_STATE_SCHEMA] and add a row to the
- * history table in docs/debug-bundle.md. A pure addition needs no bump — only
- * the refreshed golden.
+ * the golden with `UPDATE_GOLDEN=1`, bump [VPNHIDE_STATE_SCHEMA] for the exported
+ * serializable model change and add a row to the history table in
+ * docs/debug-bundle.md, following the module's AGENTS.md contract.
  */
 class BundleSchemaGoldenTest {
     private val golden = File("src/test/resources/bundle/state_golden.json")

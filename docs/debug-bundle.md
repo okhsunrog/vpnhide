@@ -1,154 +1,48 @@
 # Reading a VPN Hide debug bundle
 
-How to open, navigate, and diagnose from the diagnostic archive the app produces
-(`vpnhide_debug_*.zip`, `vpnhide_logcat_*.zip`, `vpnhide_kernel_images_*.zip`).
-Written for humans **and** AI agents triaging a bug report. If you only remember
-one thing: **`state.json` is the whole report**, everything else in the zip is a
-heavy attachment beside it.
-
-Source of truth for this format (read these if the doc drifts):
-- [`VpnHideState.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/VpnHideState.kt) — the top-level `@Serializable` model + `buildVpnHideState` (what every field means / where it comes from).
-- [`AutonomousDiagnosticInfo.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/AutonomousDiagnosticInfo.kt) — retained Core run/assessment and typed address/binding evidence.
-- [`diagnostic-model`](../crates/diagnostic-model/src/lib.rs) — required plans, controls and assessment; the APK does not own a competing verdict.
-- [`DebugShellSnapshot.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/DebugShellSnapshot.kt) — raw `sections` from bounded Core probes.
-- [`DebugExport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/DebugExport.kt) / [`KernelImageExport.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/KernelImageExport.kt) — zip packaging.
-
-Related: [diagnostics.md](diagnostics.md) (how the checks/verdicts are computed and
-rendered), [state.md](state.md) (every path/proc entry the sections read),
-[protocol.md](protocol.md) (the `/proc/vpnhide_ctl` wire in `kmod_state`).
-
-Binary-attachment recommendations have one portable Rust owner,
-[`core-rpc::attachment_policy`](../crates/core-rpc/src/attachment_policy.rs).
-The local FFI publication derives bounded evidence from the same typed Core boot,
-selected backend and retained assessment. Kotlin supplies currentness of its
-accepted observation/config join, renders localized reasons and retains optional
-overrides only in the open sheet. It does not classify serialized check names or
-loader text. Stale/unjoined diagnostic leaks cannot recommend attachments; current
-boot compatibility evidence can still recommend a kernel image without admitting
-a new diagnostic run. Advice neither authorizes collection nor changes the backend.
-Capture sessions, attachment collection and ZIP orchestration still have APK
-owners and remain separate migration work.
-
----
+Start with `state.json` inside the exported ZIP. This guide describes the current
+schema9, paired APK/Core RPC29 and diagnostic contract8. Historical captures use
+[the versioned reference](archive/2026-11-03-debug-bundle-legacy-reference.md).
+Current exports do not require a foreign VPN or split-tunnel membership, and
+collecting a file does not admit a diagnostic run.
 
 ## 1. What's in the zip
 
-Every export is a `.zip` (forums/messengers accept `.zip`, reject bare `.json`;
-JSON also compresses ~10×). Three capture kinds, told apart by
-`state.json → captureKind`:
+| `captureKind` | Contents and owner |
+| --- | --- |
+| `debug` | `state.json`, collection status, optional Java files and kernel images. APK adapters currently orchestrate capture and packaging; Core performs privileged acquisition. |
+| `full_system_logcat` | `state.json` and `logcat_full.txt`. Core owns the bounded recording process, lease, durable session, stop and delivery/ACK lifecycle. |
+| `kernel_images` | `state.json`, manifest and partition/image entries from the explicit kernel-image acquisition. This is separate from normal state reads. |
 
-| `captureKind` | Zip entries | What triggered it |
-|---|---|---|
-| `debug` | `state.json` (+ optional `manifest.txt`, `kernel_partitions.txt`, `images/*.img.gz`) | Diagnostics → **Собрать отладочный лог** ("Collect debug log"). The main one. |
-| `full_system_logcat` | `logcat_full.txt` + `state.json` | The full-system logcat recorder (Start/Stop). No checks run → `report`/`gate` are null; the payload is the raw log. |
-| `kernel_images` | `manifest.txt` + `kernel_partitions.txt` + `images/*.img.gz` + `state.json` | The "Образ ядра" (kernel image) option — for boot/kernel-load bugs. |
-
-`state.json` is present in **all** of them and is where you start.
-
-How `logcat_full.txt` is captured: the app cannot read other apps' logs and
-runs no root process, so core records it (RPC 11, core-daemon `logcat_session`):
-
-- **Start** (`start_logcat_recording(session)`): core spawns one
-  `logcat -b all -v threadtime -T <start − 1 s>` child, by direct exec with no
-  shell. Its stdout is piped through core into a core-owned file,
-  `/data/adb/vpnhide/core/logcat/session-<id>.log` (0600). One session at a time:
-  Start with the running id is a no-op, and any other id gets `Busy`.
-- **Limits core enforces itself:** 64 MiB and 30 minutes. At either limit core
-  kills the child and marks the session `AutoStopped` (`size_cap` /
-  `duration_cap`). `logcat_exited` means logcat quit by itself. At the byte cap
-  core stops rather than rotating: the file stays one unbroken stretch from the
-  app's start marker, and `truncated` says the rest is missing. The app shows
-  why the recording ended. The caps bound the session even if the app dies.
-- **Debug logging:** Start takes a generic core-owned lease on `debug`.
-  Core records the previous `debug` and `debugSwitch` in the operation journal,
-  then writes `debug = true` as its own journaled config edit (the same write
-  path as any edit, so the kernel module, Zygisk and Ports see it). While the
-  session records, core keeps `debug` true on every edit it admits, and the
-  published state carries `debug_lease: true` so the app's candidates agree.
-  When the session ends, however it ends (Stop, any auto-stop, discard, or the
-  next core start after a crash or reboot), core puts it back by one rule:
-  - if `debugSwitch` (the user's explicit choice) still has its value from the
-    start, `debug` returns to its value from the start (`restored`);
-  - if the user changed `debugSwitch` during the session, `debug` follows the
-    switch (`user_choice`), so a restore never undoes an explicit change.
-
-  Forensic ZIP capture uses the same lease owner, renewing while alive; releasing
-  one capture does not disable logging beneath another. After the final release
-  or expiry, core journals one restoration command. A blocked/uncertain restore
-  remains `pending` with its operation ID and is never blindly replayed. It lives
-  independently of the recorder file, so ack, discard or a new Start cannot erase
-  it. With no config at Start, the session records without a lease (`debug: null`).
-- **Core death:** the child has `PR_SET_PDEATHSIG(SIGKILL)` and dies with core.
-  A clean shutdown stops it first. Core keeps one session record,
-  `logcat/session.json`. At start, core ends a session that was still recording
-  as `AutoStopped(core_restarted)` (its duration comes from the file's last
-  write), restores the debug lease, and keeps the recording so the app can still
-  save it. Anything else in `logcat/` is removed, and so is a session that was
-  already delivered.
-- **Stop** (`stop_logcat_recording(session)`): core kills the child, waits for
-  the file to flush, and copies it into the app's `vpnhide-core-export/` dir as
-  `logcat-session-<id>.txt` (app-owned, 0600). This is the same route large probe
-  output takes, so nothing goes inline over the 1 MiB frame. A repeated Stop
-  returns the same status, and hands the file over again if the app already
-  removed its copy.
-- **Delivery (v9):** the session stays `delivered: false` until the app
-  acknowledges it (`ack_logcat_recording(session)`), which it does only after
-  the ZIP is written. Ack marks the session delivered and deletes core's file
-  and the export copy. It is idempotent: a repeated ack returns the same status,
-  and a Stop after an ack answers without a file. A lost ack reply only means the
-  recording is offered again. `discard_logcat_recording(session)` stops the
-  session if it still records, restores the lease and deletes everything; an
-  unknown or already discarded id is a no-op. Only the latest session is kept,
-  so a new Start replaces an undelivered one.
-- **App side:** while recording, the app asks only for the session's size and
-  state (`logcat_recording_status`, every 2 s), never for log lines. When core
-  reports an auto-stop, the app collects the file at once. After an app restart,
-  the Diagnostics card adopts a session core is still recording, so Stop can
-  collect it. If core holds a finished recording that was never delivered (the
-  app was killed while collecting, or the session auto-stopped or ended in a core
-  restart while the app was gone), Diagnostics offers to save it as a ZIP or to
-  discard it.
-
-`state.json → sections.logcat_recording` records the session id, duration,
-`rawLogBytes`, `truncated`, `autoStopped`, `coreLimits`, `debugLease`, and
-whether the session was adopted after an app restart or saved later.
-`selfNeedsRestart` is the collecting app process's own view at collect time;
-it is app state, not core's. For a recording saved after an app restart, it
-describes the new process. `debugCapture` comes from core's lease: `forced`
-means core turned debug logging on, and `restoreExit` is `0` once core restored
-it, `-1` while the restore is pending, and `null` while the lease is still held
-(as it is in the Stop reply).
-
-### Open it
+`collection-plan.txt`, `java/collection.txt` and optional `kernel/collection.txt`
+explain requested/skipped/failed attachments. Java evidence can include
+`java-manifest.json`; inspect its per-file freshness and omissions. A failed
+optional attachment can leave a useful baseline archive. File creation alone is
+not diagnostic success.
 
 ```sh
-unzip -o vpnhide_debug_*.zip -d bundle
-cd bundle
-# top-level shape
-jq 'to_entries | map({key, t: (.value|type)})' state.json
-# or, no jq:
-python3 -c "import json;d=json.load(open('state.json'));[print(k, type(v).__name__) for k,v in d.items()]"
+unzip -l vpnhide_debug_example.zip
+unzip -p vpnhide_debug_example.zip state.json > state.json
+jq '{schema, generatedAt, captureKind, captureOptions, errors}' state.json
 ```
 
-Everything below is a `state.json` field unless noted.
+## 2. The 30-second triage
 
----
-
-## 2. The 30-second triage (read in this order)
-
-1. **`captureKind`, `app.version`, `device`, `schema`** — what am I even looking at? (model, Android release, ABI, app+backend version, and which bundle format — §2.1 if it isn't the one this doc describes).
-2. **Schema 4: `autonomousDiagnostics`** — read availability/current, Core source identity and assessment first (§2.2). For schemas 1–3, **`gate`** — was the run *measurable*? Only `ROUTED` yields real verdicts. `VPN_OFF` / `SELF_NOT_ROUTED` / `NEEDS_RESTART` mean "we deliberately measured nothing" — a clean-looking report there is **not** evidence of health. (See §4.)
-3. **`nativeVerdict` / `javaVerdict`** — `Ok` / `Partial` / `Broken` / `null`. `null` = gated (see #2) or not measured.
-4. **`rootShell`** — did the snapshot shell actually have root? If `uid != 0` or `runtimeCheckable=false`, "inactive"/"not verified" readings are unreliable, not facts. (See §6 — this is the #1 misread.)
-5. **`activeBackend` + `kmodLoadStatus`** — which backend is in charge, did it load this boot, any `brokenReason`.
-6. **`errors`** — non-fatal capture failures. If it lists `snapshot truncated at: <section>`, every section at/after that one is missing or partial (see §8).
-7. Then drill into the raw `sections` and logs for the specific symptom (§5, §7, §9 playbooks).
+1. Read `schema`, `app`, `device`, `captureOptions` and `errors`.
+2. Read `autonomousDiagnostics.availability`, `current`, source identities and
+   `rootJoined`. Capture time is not measurement time.
+3. Read `autonomousDiagnostics.assessment`: required, proven, leaked, unverified,
+   controls, reuse blockers and infrastructure/cleanup facts.
+4. Read `nativeStatus`: selection, attempts, delivery, observed runtime and setup
+   are separate. Neither an installed module nor a setup-ready state proves hiding.
+5. Inspect the relevant retained run evidence, then raw `sections`, logs and
+   counters. A manual process observation cannot refresh an older game process.
 
 ### 2.1 Schema versions
 
-`state.json → schema` says which shape the bundle was written in. **This doc
-describes schema 9.** One number covers the whole bundle; there is no per-object
-version.
+One schema number covers the exported document. The golden serialization test
+pins shape and stable discriminators. RPC, diagnostic, private journal and kernel
+wire versions are separate boundaries.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
@@ -165,9 +59,8 @@ version.
 Rules for changing it (enforced by `BundleSchemaGoldenTest`, which pins the
 serialized shape against `app/src/test/resources/bundle/state_golden.json`):
 
-- A field removed, renamed, or given a new meaning → **bump** `VPNHIDE_STATE_SCHEMA`
-  and add a row above.
-- A field added → no bump; a reader of an older bundle just finds it missing.
+- An exported serializable model change → **bump** `VPNHIDE_STATE_SCHEMA`
+  and add a row above, preserving the previous schema's documented meaning.
 - Either way the golden file has to be refreshed
   (`UPDATE_GOLDEN=1 ./gradlew :app:testDebugUnitTest --tests '*BundleSchemaGoldenTest*'`),
   so no shape change reaches a release unnoticed.
@@ -178,553 +71,198 @@ you.
 
 ---
 
-### 2.2 Autonomous evidence (schema 4)
 
-Opening a screen, agent state read, debug export or logcat collection does not
-launch a diagnostic suite. `autonomousDiagnostics.provenance` is
-`retained_core_publication`: capture time is not the measurement time. Explicit
-Retry requests a Core-owned run; the Core publication stream remains its only
-result source. Existing logcat/debug-lease ownership is unchanged.
+### 2.2 Autonomous evidence
 
-`availability`, `current`, `sourceEpoch`, `sourceSequence`,
-`connectionGeneration` and `sourceConfigRevision` qualify the report. Historical
-run evidence remains visible during a disconnect, unjoined configuration or
-stale fingerprint, but cannot establish current protection. Run identity includes
-boot, policy/runtime/platform/loaded-generation fingerprints and framework
-worker attribution. Incomplete process generations remain an explicit reuse
-blocker; a new worker does not prove old game processes updated their hooks.
+`autonomousDiagnostics` is one accepted Core/config/root publication. It records
+Core epoch, config revision, publication sequence, connection generation, root
+observation/generation and join/currentness qualifications. A retained report can
+remain useful while stale or disconnected; its freshness must not be inferred
+from `generatedAt`, a new root read or unrelated publication sequence changes.
 
-The assessment is evaluated by Core: `required` comes from the supported product
-contract and enabled features, and is partitioned into `proven`, `leaked` and
-`unverified`. Controls, infrastructure detail and cleanup are separate. Leaks
-remain evidence even when other vectors or controls are unverified. Current
-partial implementation has no full-success assessment. Neither a clean Java
-response nor an empty native enumeration proves a vector without RAW stimulus
-and preservation controls.
+`run` carries session, diagnostic contract, fingerprint, loaded-generation and
+platform evidence, stale state and optional framework attribution. The assessment
+reports scope honestly; current code has no whole-suite success variant.
 
-Schema6 adds `run.addresses` with separate `provenChecks`, `leakedChecks` and
-`controls`. Check names include the actor (`libc` or `syscall`) and vector;
-getifaddrs has only a libc actor, while direct netlink is an independent control.
-IPv4/IPv6 address and ioctl/NULL-buffer evidence must not be inferred from the
-interface-only result in `run.native`. Missing families, permission failures or
-unstable size baselines remain unverified. See [diagnostics](diagnostics.md) for
-the owned stimulus and ordinary-object/cleanup requirements.
+| Evidence | Meaning and limits |
+| --- | --- |
+| `run.nativeRaw` | Full shared receipt: exact worker thread/process identity, paired or failed interval and retained observations. Root visibility cannot substitute for same-worker RAW visibility. |
+| `run.binding` | Separate libc/syscall actors, setter/readback and ordinary controls. A setter error cannot erase a positively observed binding leak. |
+| `run.addresses` | Per-actor/per-vector IPv4/IPv6 and NULL-buffer controls. Interface-only getifaddrs proof cannot establish address coverage. |
+| `run.procInterfaces` | `/proc/net/dev` and `/proc/net/if_inet6` through both read actors. Current reference `.ko` QEMU still exposes all four leaks. |
+| `run.sysInterfaces` | Six optional sysfs/proc-sys directory checks. Separate from the still-incomplete stat/access/open group. |
+| `run.frameworkAttribution` | Worker and system_server process births, boot, hook-source and fixture-profile identity. A fresh worker does not prove old target processes updated. |
 
-Schema8 adds `run.nativeRaw`, emitted by the shared Rust receipt codec. Its
-`state` is `unsupported_backend`, `capability_absent`, `failed` or `paired`.
-Every receipt retains the admitted thread identity. A failed receipt keeps its
-stage and any completed RAW `sample`; that observation
-is not a protected leak or proof. `paired` confirms the scope interval and
-revocation, not a positive stimulus or protection PASS. Receipts identify UID/PID/TID and both
-process/thread birth ticks, with the original bounded RAW sample. Native scoped
-results require both root controls and same-worker RAW stimulus; absent RAW
-withholds native proven groups without erasing qualified protected leaks.
+Unavailable stimulus, empty denied APIs, a clean Java answer or an installed-hook
+mask cannot remove required checks. Qualified leaks survive later control/cleanup
+failures; successful proof requires all corresponding controls. Required plans
+come from the supported contract and enabled features. See
+[diagnostics](diagnostics.md) for implementation and remaining code/device gates.
 
-Schema7 adds `run.procInterfaces` with the same three list fields. Names pair the
-read actor and `device_stats` or `ipv6_addresses` surface. Both surfaces and actors
-are required for the grouped proc-interface proof. A controlled proc leak remains
-visible alongside proven address checks; permission denial never becomes proof.
+```sh
+jq '.autonomousDiagnostics | {availability, current, rootJoined, run, assessment}' state.json
+jq '.autonomousDiagnostics.assessment | {required, proven, leaked, unverified,
+    nativeControls, frameworkControls, reuseBlockers, cleanupConfirmed}' state.json
+```
 
-`rootJoined` and the `rootSource*` fields distinguish retained heavy root
-metadata from the live Core publication. An unjoined export keeps installation
-facts and raw forensic sections, withdraws runtime active/checkable claims and
-omits the derived Dashboard. Its canonical config comes only from the accepted
-current Core publication, never from an app draft or a raw snapshot fallback.
-Legacy `gate`, `report`, `diagnostics`, `selfTestRunId`, `nativeVerdict` and
-`javaVerdict` are null in new Core-backed captures. The same rule applies to
-`beforeCapture`; exports preserve cached evidence rather than claiming a new
-post-logging baseline. Sections below describing those legacy fields apply to
-schemas 1–3 or explicitly legacy data.
+### Native setup and statistics
 
-### Native setup and statistics (schema 5)
+`nativeStatus` retains Core currentness/source identity and its typed model:
+selected implementation/provenance, attempts, delivery receipt, applied identity,
+observed runtime, required/installed/missing hooks, setup and filesystem state.
+These facts must stay distinct. Legacy module directories in `backends` are
+inventory evidence; bundled alternatives are not independently active modules.
+`activeBackend` is a Core-derived display projection, not an APK priority selector.
 
-`nativeStatus` is the accepted Core RPC21 read model, with its epoch, sequence,
-connection generation, config revision and currentness. `model` separates chosen,
-applied and observed backend, implementation source/hash, attempts, delivery,
-required/installed/missing hooks, filesystem state and setup health. Setup readiness
-never replaces autonomous diagnostic proof. `processCoverageComplete` is false
-until real loaded-process evidence proves it. Bundled alternatives are not legacy
-installation conflicts. A missing receipt/provenance is unknown, never guessed
-from module directories or historical telemetry. Same-revision failed Repair
-cannot revive an older delivery confirmation.
+`statistics` is a point-in-time counter snapshot with source qualifications.
+Unsigned counts can exceed signed `Long`; decimal strings retain their bits.
+Capture/agent deltas and forensic reports use the shared Rust numeric comparator.
+A decrease is discontinuous, not proof of a specific restart or inferred wrap.
+Capture baseline/source attribution and remaining orchestration still need work.
 
-Counter captures retain each raw family's identity and unsigned baselines. Live
-statistics qualify current rows against Core epoch/config/connection plus the
-native boot, implementation, delivery and runtime identity. LSPosed also requires
-its current-boot metadata; disconnect and source mismatches withdraw active marks.
+## 3. Top-level state fields
 
----
+| Field | How to read it |
+| --- | --- |
+| `generatedAt`, `captureKind`, `app`, `device` | Capture metadata; not measurement freshness or backend admission. |
+| `autonomousDiagnostics`, `nativeStatus` | Accepted retained evidence and native setup/read model, with independent sources. |
+| `dashboard`, `beforeCapture` | Presentation and earlier accepted process state. Earlier and later observations need not be the same snapshot. |
+| `config` | Accepted desired canonical policy when available. Persistence, delivery and observed behavior remain separate. |
+| `backends`, `ports`, `activeBackend` | Inventory/observation and display projections. Unjoined runtime data is not certified current. |
+| `statistics`, `hookReport` | Counters and manual forensic interval; neither admits or completes a suite. |
+| `sections`, logs, `lsposedConfigDb` | Optional raw forensics. Capture options and errors explain omissions. |
+| `networkView` | Manual public Android observations of the collecting app process. It cannot promote retained Core evidence. |
+| `debugCapture` | Bounded debug-logging lease/acquisition/restoration evidence. User debug intent is separate. |
+| `errors`, `captureOptions`, `rootShell` | Collection limits, selected content and root-read qualifications. |
 
-## 3. Top-level `state.json` fields
-
-Derived (typed) fields first — these are the *same domain objects the app UI
-renders*, so the bundle can't disagree with what the user saw on screen.
-
-| Field | Meaning |
-|---|---|
-| `schema` | Bundle schema version — **this doc describes 7** (§2.1). |
-| `autonomousDiagnostics` | Retained Core-owned run and assessment with explicit currentness, source identities and root join (§2.2). |
-| `generatedAt` | ISO-8601 capture time. |
-| `captureKind` | `debug` / `full_system_logcat` / `kernel_images` (§1). |
-| `app` | `{packageName, version}` — `version` is `"1.2.5 (10205)"` (name + versionCode). |
-| `device` | `{manufacturer, model, androidRelease, sdk, abis}`. |
-| `selfNeedsRestart` | The picker app added itself as a target but its own hooks aren't applied to this process yet → checks can't measure; user must reboot. |
-| `gate` | `DiagnosticGate` — see §4. `null` for logcat/kernel captures (no check run), and for a debug capture whose run did not complete (the reason is in `errors`). Only a completed run reports `ROUTED`. In an agent-bridge read (`captureKind: agent_bridge`) the gate follows the tiles as the Dashboard shows them: a current blocking condition (VPN off, self not routed, restart pending) is its gate and `report` is null, otherwise the latest complete measurement the app retains is `ROUTED` with its `report`, else `null`; `dashboard.protection` carries the same overlay, and `diagnostics` (same presentation value) says whether that measurement still applies. |
-| `selfTestRunId` | The identified diagnostic run this capture took its evidence from, for matching the bundle against that run's own attempt. `null` when the capture ran no suite, or when no run was admitted at all (`errors` says which). |
-| `diagnostics` | The shared diagnostic presentation at assembly time, computed from the same immutable domain packet the Dashboard hero and Diagnostics screen consume: `eligibility` (Initializing / Checking / RestartApp / RestartDevice / Applying / ApplicationUnknown / ApplicationFailed / Unknown / VpnOff / SelfExcluded / Eligible), `activeRunId` + `activeStage` for a run in flight, `lastAttempt` (`runId`, `outcome` NotStarted / Completed / Interrupted / Failed, `failure`, blocking `eligibility`), `measurement` (the latest complete run: `runId`, `startedAt`/`endedAt` epoch ms, `completed`, `interrupted`, root `observationId`), `applicability` (Absent / Changed / Unverified / MatchesLastObservation: whether that measurement still applies to the current VPN, routing and configuration), `evidence` (owned-scope counts and a conclusion: OwnedLeak / Insufficient / Partial / NoObservedLeak) and `currentSuccess`, the only positive claim. `probeUnavailable` is a property of the app process rather than of any measurement: the probe helper of an earlier run never returned, the probe resource stays quarantined, and no new run can start until it does — so a stale `measurement` next to it is not a stale screen, it is the newest one the app was able to take. `null` for the logcat recorder. Read this before `report`: a `ROUTED` report whose `diagnostics.applicability` is `Changed` describes an earlier state. `lastKnownRouting` (VpnOff / Excluded / Routed, `null` when the app never got a routing fact) is the last routing fact the app had, kept even while that fact is being re-read — so `eligibility: Checking` next to `lastKnownRouting: VpnOff` means "the VPN was off and we are re-reading", not "we know nothing". `routingRead` is present only while such a re-read is owed or in flight: `reason` (Background = our own process invalidated it, Transition = a VPN/network callback said it may have changed, Explicit = the user asked) and `pendingMs`, how long it had been owed **at the diagnostic snapshot publication** (a monotonic age, not a timestamp; a large value means the re-read was stuck, not that the bundle is old). |
-| `nativeVerdict` / `javaVerdict` | `Ok`/`Partial`/`Broken`, or `null` if not a measured (`ROUTED`) run. |
-| `report` | The full `DiagnosticReport` (§4). `null` when no checks ran. |
-| `backends` | Per-module state for `kmod` / `builtin` / `kpm` / `zygisk` (installed? active? version? `brokenReason`? `pendingReboot`?). |
-| `activeBackend` | The **one** native backend in charge (`id` + `state`). Priority kmod > builtin > KPM > zygisk; a live `/proc/vpnhide_ctl` decides between the two kernel backends by the `backend` id it reports. |
-| `ports` | The Ports (localhost port blocker) `ModuleState`. Ports is part of the core module in 2.0: installed = `vpnhide_core` is, active = the `vpnhide_out` chains are present and jumped to (`ports_chain`). |
-| `kmodLoadStatus` | Boot-time `.ko` load result (uname, kprobes/kretprobes ok, insmod exit, dmesg tail, `filesystemHiding`). The richest single "did the kernel module come up" field. |
-| `dashboard` | Dashboard derived from the capture root snapshot and one saved diagnostic presentation, shared with `diagnostics`. File exports and agent bridge use the same builder. A failed dashboard assembly leaves this null, appends a reason to `errors`, and preserves the rest of the archive. |
-| `beforeCapture` | Optional available process state before enabling capture logging or starting checks: observation time, diagnostic summary, retained Dashboard protection/messages, pending operation IDs, recovery flag and last operation phases/failure. No fresh root read or diagnostic run is requested. It may be absent or use retained screen values; it is the state available at collection start, not proof of what the user previously saw. |
-| `config` | The canonical desired-state config as structured JSON (`/data/system/vpnhide_config.json`) — answers "is app X even a target, with which roles". |
-| `statistics` | Point-in-time hook-counter totals (per-uid/per-method hit counts). Always present in a debug export, even without forensics. |
-| `rootShell` | Snapshot-shell self-diagnosis (§6). The "not verified vs inactive" discriminator. |
-| `sections` | The raw shell-probe map — ground truth the typed fields were derived from + all forensic captures. **Empty unless forensics was on** (§5). |
-| `dmesg` / `logcat` | Kernel ring buffer / app-tag logcat captured during the run (forensics only). |
-| `bootLsposedLogcat` | Best-effort boot-time LSPosed/Vector lines from the current ring buffer (may have rotated away). |
-| `lsposedConfigDb` | LSPosed module enable state + scope for this app. |
-| `hookReport` | Native hook install mask + counter deltas across the forced check run (§7). |
-| `networkView` | The framework network model as this uid sees it after Binder — handles, per-handle capabilities/link properties/`NetworkInfo`, legacy type answers, every callback delivered during a 2 s window (default, listen-without-NOT_VPN, VPN listen, PendingIntent) and the consistency `invariants` over all of it ([lsposed-hook-debugging.md §9](lsposed-hook-debugging.md)). Forensics only; `null` when it could not be taken (reason in `errors`). |
-| `debugCapture` | Whether debug logging was force-enabled for this capture (`forced`) and the toggle exit codes. For `full_system_logcat` it is core's lease (§1): `detail` is `core lease, restore=<held/pending/restored/user_choice>`; `null` when core recorded without a lease. |
-| `captureOptions` | `{forensics, appList}` — self-documents what was included. |
-| `errors` | Non-fatal capture failures (a probe that threw, a truncated section). Partial data is flagged here, never silently dropped. |
-
-In schema 3, `diagnostics.measurement` carries the run's captured
-`desiredRevision`, `deliveryIdentity` and `desiredDeliveryConfirmed`;
-`diagnostics.snapshot` carries those fields for the current accepted config and
-delivery evidence. Their vintages may differ. These identities remain separate
-from run times and routing identity. Unknown delivery keeps observed results useful,
-but cannot establish current success. The app also joins root and config state
-only after the coordinator has accepted the root snapshot's core epoch, config
-revision and publication sequence; last-good data never fills that join silently.
-
----
+`gate`, `selfTestRunId`, `diagnostics`, `report`, `nativeVerdict`, `javaVerdict` and
+`kmodLoadStatus` are historical compatibility slots, null in current captures.
+Their presence in the JSON is not a surviving VPN readiness gate or verdict owner.
 
 ## 4. The diagnostic report — is the VPN actually hidden?
 
-`report` contains the measured per-vector results. Dashboard, Diagnostics and
-this bundle use the shared diagnostic presentation to decide whether those
-results apply now; `diagnostics.currentSuccess` is the current positive claim.
-These report/classifier names describe schemas1–3 and their historical code;
-those Kotlin owners and the main-process suite are removed in RPC21/schema5.
-Current runs and assessments are computed in `crates/diagnostic-model` and
-`crates/core-daemon/src/autonomous`; the APK renders retained evidence.
+Read `autonomousDiagnostics.assessment` and its provenance. `leaked` records
+qualified observations; `unverified` and control failures identify missing proof.
+`proven` applies only to its required controlled group. It is not a general promise
+about every process, API, old game instance or vendor kernel.
 
-### `gate` gates everything
+Do not ask the user to enable a foreign VPN or route this APK through one to make
+Dashboard/diagnostics ready. Do not interpret a successful export, hidden directory,
+worker completion or setup-ready backend as whole protection PASS. The retired
+uncontrolled `probe checks` classifier is no longer a supported native verdict path.
 
-`report.gate` (and top-level `gate`) is one of, most-blocking first:
+## 5. The sections map — raw observations
 
-| Gate | Meaning | Verdicts? |
-|---|---|---|
-| `NEEDS_RESTART` | This app was just added as a target; its hooks aren't live in this process yet. | none |
-| `VPN_OFF` | No VPN interface up — nothing to hide. | none |
-| `SELF_NOT_ROUTED` | VPN up, but this app is split-tunnelled **out** of it, so it can't observe the tunnel. | none |
-| `ROUTED` | Measured. **Only here are `nativeVerdict`/`javaVerdict` meaningful.** | yes |
+`sections` merges fixed Core root/forensic probes; the authoritative root snapshot
+wins name collisions. These are Rust collectors and fixed direct-exec commands,
+not an app shell or arbitrary root command endpoint. Forensics off yields an empty
+map. Framing, absent files, command exits and truncation markers are evidence.
 
-A bundle with `gate != ROUTED` and null verdicts is **not** a problem by itself —
-it means the capture was taken when nothing could be measured. If a user reports
-"diagnostics look empty", check the gate first; the fix is usually "turn the VPN
-on / route this app through it, then recapture."
+| Group | Useful entries |
+| --- | --- |
+| Core/ownership | `core_prop`, `core_module_state`, `core_boot_status`, `core_log`, `core_native_boot` |
+| Kernel backend | `kmod_prop`, `kmod_state`, `kmod_diag`, `proc_modules`, `kprobes`, `kernel_symbols`, `kernel_config` |
+| KPM/Zygisk | `kpm_state`, `kpatch_runtime`, `zygisk_status`, associated module/artifact metadata |
+| Ports | `ports_state`, `ports_chain`, typed Core per-family apply evidence |
+| Java layer | `lsposed_state`, `lsposed_framework`, `lsposed_files`, boot logcat and hook report |
+| Configuration | `canonical_config` and scoped legacy inventory. Migration preserves original sources; old files alone do not prove a pending import. |
+| Network forensics | `network_addr`, `network_routes`, `network_rules`, `network_operstate`, `connectivity_dump`, `proc_net_*` |
+| Root/package inventory | `snapshot_shell_uid`, `app_scan_diagnostics`, and explicitly included `pm_packages`/`pm_users` |
 
-### Layers, status, checks
-
-`report.native` and `report.java` are each a `LayerReport`:
-
-- `status.kind`:
-  - `active {hidden, leaks}` — measured. `hidden` = vectors the backend provably hid (root differential); `leaks` = owned vectors that still leaked.
-  - `inactive` — installed but not loaded this boot (reboot/toggle needed).
-  - `absent` — no module for this layer.
-  - `unverified` — installed but the shell couldn't confirm liveness (see §6) → rendered "not verified", never a false "inactive".
-- `unownedLeaks` (native only) — leaks on vectors this backend doesn't own; a warning, not counted against the verdict.
-- `checks[]` — one `DiagnosticCheck` per vector: `{id, label, layer, outcome, appDetail, groundTruthDetail, expectedHooks, owned}`.
-
-**`Verdict`** (only when `ROUTED`): `Ok` = nothing owned leaks · `Partial` = hides
-some but an owned vector still leaks · `Broken` = active yet hid nothing while
-leaking (loaded but dead).
-
-**`CheckOutcome.kind`** per check:
-
-| `kind` | Meaning |
-|---|---|
-| `leak` | App saw VPN-shaped data on this vector — a real leak. |
-| `hidden_backend` | App saw nothing, root did → the active backend hid it. The good case. |
-| `hidden_selinux` | The app's probe was EACCES-blocked by SELinux, not a backend hook. Inconclusive for backend health. |
-| `nothing_to_leak` | Nothing VPN-shaped for anyone (root saw nothing either). |
-| `not_measured` | Probe produced no usable observation (`reason`: no network permission / no ground truth). |
-
-To list every leaking vector fast:
+Builtin telemetry uses `kmod_state` with backend identity4; a historical
+`vpnhide_builtin` directory is not a separate current builtin runtime. Read the
+current [state map](state.md) and collector source for exact paths and lifetimes.
 
 ```sh
-jq -r '.report | (.native,.java) | .checks[] | select(.outcome.kind=="leak")
-       | "\(.layer) \(.id) \(.label): \(.appDetail)"' state.json
-```
-
----
-
-## 5. The `sections` map — raw ground truth
-
-`sections` is a `name → text` map of raw root-shell probe output. It is the
-evidence the typed fields were derived from. **Only populated when forensics is
-on** (always enabled for explicit diagnostic exports); a lean agent state response has
-`sections: {}`. Two collectors are merged into it — the authoritative root
-snapshot (used to derive the typed state) plus the forensic batch (network,
-proc/net, kernel symbols, inventory) — with the root snapshot winning on key
-collisions.
-
-Each entry is framed in the batch script by `emit_cmd`/`emit_file`/`emit_eval`;
-a missing file shows `(missing: <path>)`, a failed command shows its stderr
-inline (the script never aborts on one probe). *Every section name below maps 1:1
-to an `emit_*` line in
-[`DebugShellSnapshot.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/DebugShellSnapshot.kt)
-— open it to see the exact command; the `$UPPER_CASE` paths resolve in
-[`ConfigChannels.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/ConfigChannels.kt).*
-
-### By purpose
-
-**Environment / kernel**
-- `uname`, `proc_version`, `proc_cmdline` (bootloader args; serialno/MACs redacted), `getprop_selected` (fingerprints, verified-boot, slot), `kernel_release`.
-- `kernel_config` — the KPROBES/MODULES/SELINUX/NETFILTER config flags that gate whether a backend can even work.
-- `selinux`, `getenforce` — enforcing? security contexts on `/data/adb`, `/proc/net`, `/sys/class/net`.
-- `root_manager` — Magisk/KSU/APatch presence + versions + `/data/adb` perms.
-
-**Native kernel backend (.ko)**
-- Built-in (`CONFIG_VPNHIDE=y`) has no module and no own section in 2.0: core adopts it when `/proc/vpnhide_ctl` reports backend `0x4`, and its live telemetry is `kmod_state`; counters/status are attributed only to Built-in. A `vpnhide_builtin` dir in `module_inventory` is an obsolete 1.x companion that must be uninstalled (the root snapshot's `obsolete_modules` lists it and the Dashboard shows an error).
-- `kmod_prop`, `kmod_module_state` (file flags, `.ko` sha256, staged-for-reboot state), `kmod_state` (**live `/proc/vpnhide_ctl`** telemetry: installed-hook mask, per-uid counters — see [protocol.md](protocol.md)).
-- `proc_modules` (is `vpnhide*` in `/proc/modules`), `kprobes` (`/sys/kernel/debug/kprobes/list` for our symbols), `kernel_symbols` (kallsyms presence of each hooked function — key for "symbol missing on trimmed OEM KMI").
-
-**kmod backend (diagnostic)** — `kmod_diag`, the verbatim `/proc/vpnhide_diag` dump: per-probe registration, kretprobe `nmissed` counters, active vs installed hook masks, and the live `is_vpn_ifname()` verdict per netdev ([state.md](state.md)). Absent unless the `.ko` is loaded. This is where a "the module broke my network" report gets answered — a false-positive interface match is visible here and nowhere else.
-
-**Core** — `core_prop`, `core_module_state`, `core_boot_status` (the last boot pass report), `core_log`, and `core_native_boot`: core's persisted once-per-boot `NativeBootStatus` JSON (`/data/adb/vpnhide/core/native_boot.json`). It names the installed, live and staged native backends, the outcome (`Selected` / `Conflict` / `LoadFailed` with insmod exit, stderr and the matching `dmesg_tail` / `AwaitingAuthentication` / ...), the kmod's kprobes facts, what happened to Zygisk's targets, the last Ports apply, and `obsolete_modules`: the installed 1.x `vpnhide_ports` / `vpnhide_builtin` modules core found at its scan. Core also writes a line about them to `core_log`, so the evidence exists even if the app was never opened. `CapacityExceeded` means a Repair or boot delivery found more target UIDs than the backend holds and sent nothing. It replaces the 1.x per-backend `load_status` / `load_dmesg` files and the Ports `load_status` / `load_log`; the app reads the same status over RPC.
-
-**KPM backend** — `kpm_prop`, `kpm_module_state`, `kpm_state` (core's KPM ctl0 `status` read), `kpatch_runtime` (APatch/KPatch presence, `kpatch hello`/`kpm list`).
-
-**Zygisk backend** — `zygisk_prop`, `zygisk_module_state`, `zygisk_status`, `zygisk_runtime`.
-
-**Ports (localhost blocker)** — applied by core (no separate module in 2.0): `ports_state` (**live `iptables`/`ip6tables` `vpnhide_out` chain** dump); the last apply's per-family result and log tail are the `ports` field of `core_native_boot`.
-
-**LSPosed / Java layer** — `lsposed_state`, `lsposed_framework` (which framework: LSPosed/Vector), `lsposed_files` (config DB perms).
-
-**Config / targets** — `canonical_config` (the desired-state JSON, mirrored into top-level `config`). `legacy_kmod_targets` / `legacy_kpm_targets` / `legacy_zygisk_targets` / `legacy_lsposed_targets` / `legacy_ports_observers` / `legacy_hidden_pkgs` / `legacy_observer_uids` — the pre-1.0 config files ([state.md §1](state.md)). Non-empty only on an install that upgraded across 1.2.0 without importing yet: the import deletes them, so a bundle showing both these and a populated `canonical_config` means the user was offered the merge/replace banner and hasn't answered.
-
-**App enumeration** — `app_scan_diagnostics` (privacy-safe: per-user exit code + package counts + first stderr line, **no names/paths** — diagnoses "couldn't read all profiles" / the ARG_MAX overflow). `pm_users` / `pm_packages` carry the real names/paths and are **redacted out unless `appList` was opted in** (§10).
-
-**Network (forensic)** — `network_addr` (`ip -d addr`), `network_operstate`, `network_routes` (`ip route show table all`), `network_rules` (`ip rule`), `network_sockets` (listening localhost sockets), `connectivity_dump` (`dumpsys connectivity`, VPN/tun/agent lines), `proc_net_route` / `proc_net_ipv6_route` / `proc_net_if_inet6` / `proc_net_tcp[6]` / `proc_net_udp[6]` / `proc_net_dev` / `proc_net_fib_trie`.
-
-**Module presence flags** (one-liners, from the root snapshot) — `*_module_dir`, `*_artifact_state`, `*_disabled`, `*_pending_update`, `superkey_saved`, `proc_exists` (does `/proc/vpnhide_ctl` exist), `ports_chain` (does the iptables chain exist), `snapshot_shell_uid` (backs `rootShell`, §6), `module_inventory` (dump of every relevant `/data/adb/modules[_update]/*`), `obsolete_modules` (installed 1.x `vpnhide_ports` / `vpnhide_builtin`).
-
-### Fast lookups
-
-```sh
-# dump one section
 jq -r '.sections.core_native_boot' state.json
-# list section names + sizes
-jq -r '.sections | to_entries | map("\(.key)\t\(.value|length)")[]' state.json
-# grep across all sections at once
-jq -r '.sections | to_entries[] | "== \(.key) ==\n\(.value)"' state.json | grep -n -i tun0
+jq -r '.sections | to_entries[] | "\(.key)\t\(.value|length)"' state.json
+jq -r '.sections.proc_net_dev' state.json
 ```
 
----
+## 6. rootShell — the reading you must not misread
 
-## 6. `rootShell` — the reading you must not misread
-
-The single most common misdiagnosis is treating an "inactive"/"not verified"
-module as *proven off*. `/proc/vpnhide_ctl` is `0600` and the iptables chain
-needs root; if the snapshot shell wasn't uid 0, a negative liveness read is
-**meaningless**, not a fact.
-
-```json
-"rootShell": { "uid": 0, "idLine": "...context=u:r:ksu:s0", "context": "u:r:ksu:s0",
-               "errnoCtl": "ok", "runtimeCheckable": true }
-```
-
-- `uid != 0` **or** `runtimeCheckable=false` → treat every "inactive"/"absent"
-  runtime reading with suspicion; the layer status will correctly say
-  `unverified` rather than `inactive`. Cross-check `errnoCtl` (`eacces` = perms,
-  `enoent` = genuinely not present).
-- `uid == 0`, `errnoCtl=ok`, `runtimeCheckable=true` → liveness readings are
-  trustworthy; an "inactive" here is real.
-
----
+`rootShell.shellUid` and `runtimeCheckable` qualify the captured root read. A
+non-root/unavailable observation cannot establish a backend is inactive. UID0
+alone does not prove every required capability or SELinux permission. Use actual
+probe exits, typed Core readiness and `errors`; never mask a failed root snapshot
+as an empty successful state.
 
 ## 7. Logs and hook counters
 
-- **`dmesg`** — captured after a `dmesg -c` clear at run start, so it's mostly
-  *this run's* kernel output. During a debug export the app **force-enables
-  kernel debug** (`debugCapture.forced`), so `vpnhide:` trace lines
-  (`sk_setsockopt_entry … action=…`, `dev_ioctl_entry …`, `config applied …
-  debug=1`) appear here — invaluable for "is a hook firing / denying". Note the
-  ring buffer is finite; on a chatty device early-boot lines may have rotated.
-- **`logcat`** — only VPN Hide's own tags (`VPNHideTest`, `VpnHide-*`,
-  `vpnhide*`, `shadowhook_tag`, …). The app's per-check PASS/FAIL lines land here.
-- **`bootLsposedLogcat`** — best-effort boot-time LSPosed/Vector attach lines
-  (`cs_*` telemetry, hook install). May be empty if the buffer rotated. See
-  [lsposed-hook-debugging.md](lsposed-hook-debugging.md).
-- **`hookReport`** — installed-hook mask + per-counter deltas measured across the
-  forced check run (the SOCKET_BIND_INTERFACE deny-count etc.) — tells a dead
-  redirect from a working one.
+`dmesg`, app-tag logcat, boot LSPosed logcat, hook telemetry and `hookReport` answer
+different questions. A hit counter shows the hook ran; it does not by itself prove
+correct filtering. Installed masks and misses are installation evidence, not the
+required diagnostic plan. For Java attachment details see
+[LSPosed hook debugging](lsposed-hook-debugging.md).
 
----
+Core owns the full-system logcat process, caps of 64 MiB and 30 minutes, private file,
+restoration and durable undelivered state. The APK asks Start/Stop, saves the copy
+and acknowledges or explicitly discards it. App death does not leave an unlimited
+recording. Do not introduce a second recorder while migrating export orchestration.
 
-## 8. `errors` and truncation — trust but verify completeness
+## 8. Errors and truncation
 
-`errors` lists non-fatal failures; the document always serializes, partial data
-is flagged rather than lost. Common entries:
-
-- `debug shell exit=<n>` — the batched root script returned non-zero (often just
-  one probe failing; not necessarily fatal).
-- `snapshot truncated at: <section>` — the batch overran the 60s su timeout. The
-  named section is cut mid-output (its body ends with a `(TRUNCATED: …)` marker),
-  and **every section that would come after it is absent**. `sections` also gets
-  a `debug_snapshot_truncated: <section>` marker.
-
-The section order in [`DebugShellSnapshot.kt`](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/DebugShellSnapshot.kt)
-is the emit order — if truncation hit `app_scan_diagnostics`, the `network_*` /
-`proc_net_*` sections after it won't be present. Don't read "section missing" as
-"feature absent" without checking `errors` / `debug_snapshot_truncated` first.
-
----
+Read all `errors`, per-section exit/truncation markers and collection manifests.
+Missing optional artifacts need not destroy a useful baseline archive. Conversely,
+an archive being written does not establish all requested evidence was collected.
+Late failures do not erase retained native leaks. Disconnected or unjoined data
+keeps its qualifications rather than borrowing a newer observation's identity.
 
 ## 9. Diagnostic playbooks
 
-**"Kernel module won't load / backend inactive"**
-1. `kmodLoadStatus` — `loaded`, `insmodExit`, `insmodStderr`, `unameR`,
-   `kprobes`/`kretprobes`, `dmesgTail` (look for `Unknown symbol` / `register_kretprobe failed`).
-2. `sections.core_native_boot` — core's outcome for this boot; a `LoadFailed` carries the insmod exit, stderr and `dmesg_tail`, a `Conflict` lists every installed/live backend.
-3. `sections.kernel_symbols` — is a hooked symbol missing from kallsyms (trimmed OEM KMI)?
-4. `sections.kernel_config` — `CONFIG_KPROBES`/`KRETPROBES`/`MODULES` present?
-5. `backends.kmod.brokenReason`, `pendingReboot`; `rootShell` (is "inactive" even trustworthy — §6).
+- **Backend not ready:** inspect typed native selection, attempt and delivery;
+  then boot status, loader stderr, symbols/config and actual runtime. Diagnose
+  uncertainty separately from a confirmed no-effect failure; do not blindly reload.
+- **Detection/leak:** inspect retained required/leaked/unverified groups and RAW,
+  ordinary/end/cleanup controls. Correlate the source, actor, fixture and process
+  generation before looking at forensic proc/net or Java observations.
+- **Broken connectivity:** inspect ordinary interface/route preservation, Ports
+  rules, hook actions and desired roles. A diagnostic failure does not authorize
+  an automatic backend switch or change network routing.
+- **Package/profile inventory:** inspect `app_scan_diagnostics` and per-user exits.
+  Incomplete inventory is not an empty installed-app set.
+- **Ports:** distinguish IPv4/IPv6 apply receipts, actual `ports_state` and desired
+  observers/policy. One family's success cannot certify the other.
+- **Java attachment:** inspect current-boot LSPosed telemetry, hook-source identity,
+  fixture attribution and loaded-process coverage. A worker PASS cannot update
+  an already-running target process.
 
-**"A vector leaks / VPN detectable"**
-1. Confirm `gate == ROUTED` (else not measured — §4).
-2. `report.native.checks[] where outcome.kind == leak` → the vector + `expectedHooks` + `owned`.
-3. `hidden_selinux` outcomes are inconclusive, not wins.
-4. `dmesg` (debug on) — is the expected hook firing for the vector's syscall?
-5. Cross-check the raw section for that vector (e.g. `proc_net_route`, `network_addr`).
+## 10. Privacy and content options
 
-**"No network at all / DNS broken with the module"**
-1. `network_operstate` + `network_addr` + `proc_net_dev` — which interfaces exist; any physical/default iface being hidden?
-2. `dmesg` (debug on) — hook actions; `sk_setsockopt_entry action=deny`, and `active_hook_mask`.
-3. `ports_state` — is the iptables `vpnhide_out` chain over-broad?
-4. `report`/`gate`, `statistics` (per-hook hit counts).
-
-**"App list won't load / demands unlock profile"**
-1. `sections.app_scan_diagnostics` — per-user `exit`, `package_lines`, `with_uid`, `with_path`, `stderr` (which user fails and how).
-2. `device` (MIUI/HyperOS?), `errors` (ARG_MAX-era failures).
-
-**"Ports / localhost blocking wrong"** — `ports`, `core_native_boot` (`ports`:
-the last apply), `ports_state` (live chain), `config` (which apps have the
-`ports` role).
-
-**"Java/LSPosed hooks not attaching"** — `report.java`, `lsposedConfigDb`,
-`sections.lsposed_state`, `bootLsposedLogcat`, `hookReport`; see
-[lsposed-hook-debugging.md](lsposed-hook-debugging.md).
-
----
-
-## 10. Privacy / redaction (what's deliberately omitted)
-
-- Explicit diagnostic exports include `pm_packages` and `pm_users` (installed-app
-  paths, UIDs and profile names); `captureOptions.appList=true`. Agent state
-  requests can still omit inventory. `app_scan_diagnostics` contains counts only.
-- `proc_cmdline` has `androidboot.serialno` / `wifi_macaddr` / `btmacaddr`
-  scrubbed.
-- `networkView` records transport-info objects by class name only (never the
-  `WifiInfo` SSID/BSSID); link addresses, DNS and routes are kept, like the
-  network sections.
-- A lean (non-forensics) agent state response carries **no `sections` and no logs** — just the
-  typed state. Check `captureOptions.forensics` before concluding "the section
-  isn't there."
-
----
+`forensics=false` omits raw sections and expensive forensic payloads. `appList`
+only affects forensic `pm_packages`/`pm_users`; defaults are off for lean agent
+reads, while explicit debug-export selection can include them. Redaction removes
+those two sections, not every identifying value: canonical selections, logs,
+Java artifacts and network addresses can still identify the environment. Inspect
+selected attachments before sharing. Core credentials are not app-selected probe
+arguments; no generic root path/command is accepted.
 
 ## 11. Kernel image bundle
 
-When the kernel-image option is on, the zip also carries the boot-chain
-partitions for offline inspection (unpacking the `.ko`'s target kernel, checking
-KMI, etc.):
+Kernel images are separate explicit attachments. Inspect the acquisition manifest,
+partition identity, byte/hash results and compression/packaging failures. An image
+export is not boot-patch authorization, AVB/slot verification or permission to
+write/reboot. No update or notification automatically flashes an image.
 
-- `manifest.txt` — `schema`, `slot_suffix`, which partitions were `included` /
-  `skipped`, and per-partition `present`/`path`/`size_bytes`/`dd` stats +
-  sha256 of the gzipped image.
-- `kernel_partitions.txt` — richer per-partition metadata (real block device,
-  symlink target, verified-boot state, sha256 of the raw partition).
-- `images/*.img.gz` — the gzipped partition images themselves (`boot_a`,
-  `init_boot_a`, `vendor_boot_a`, `vendor_kernel_boot_a`, …). Large.
+## 12. Code map
 
----
+| Owner | Source |
+| --- | --- |
+| JSON model, schema and redaction | [VpnHideState.kt](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/VpnHideState.kt), serialization golden test |
+| Accepted diagnostic publication/export | [AutonomousDiagnosticInfo.kt](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/diagnostics/AutonomousDiagnosticInfo.kt), Core autonomous coordinator and [diagnostic-model](../crates/diagnostic-model/src/lib.rs) |
+| Privileged observations and safe file handoff | [device_probes](../crates/core-daemon/src/device_probes), [diagnostics.rs](../crates/core-daemon/src/diagnostics.rs), [export.rs](../crates/core-daemon/src/export.rs) |
+| Current capture/ZIP adapters | [DebugExport.kt](../lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/debug/DebugExport.kt), Java/kernel attachment adapters |
+| Core recording lifecycle | [logcat_session.rs](../crates/core-daemon/src/logcat_session.rs) |
+| Unprivileged native observations | [checks](../crates/checks/src/lib.rs); collectors return typed observations, not Pass/Fail verdicts |
 
-## 12. Code map — where each part is produced
+<a id="automatic-attachment-planning-rpc-13"></a>
 
-Which source file to open to understand (and trace the origin of) each part of
-the bundle. All paths are under
-`lsposed/app/src/main/kotlin/dev/okhsunrog/vpnhide/` unless noted.
+## Automatic attachment planning
 
-| Bundle area | Produced / derived in | Read it to understand |
-|---|---|---|
-| The whole `state.json` model + how a capture is folded together | `VpnHideState.kt` (`buildVpnHideState`) | every field's meaning, provenance, and the redaction rules |
-| Zip packaging, forensics/appList gating, dmesg/logcat capture | `DebugExport.kt` (`exportDebug`/`buildDebugState`) | how the bundle is assembled and what "forensics" actually turns on |
-| `autonomousDiagnostics` | `AutonomousDiagnosticSnapshot.kt` / Core autonomous coordinator and diagnostic-model | retained evidence, source identity and assessment |
-
-
-| Native check specs (ids, `expectedHooks`, coverage) | `NativeChecks.kt` (`NATIVE_CHECKS`) | what each `report.native.checks[].id` probes and which hooks own it |
-| Running native/framework fixtures | Core autonomous coordinator, `FrameworkFixtureWorker.kt`, production `hook/FrameworkFixture*` | bounded stimuli, real Android observations and Core-owned verdicts |
-| `backends`, `activeBackend` | `NativeBackendData.kt` | legacy installation metadata and Core-chosen export identity; never a Kotlin priority selector |
-| `ports`, `nativeStatus` | `DashboardData.kt`, `NativeStatusData.kt`, Core native read projection | Ports observation and chosen/delivery/observed/setup evidence; old `kmodLoadStatus` slot is null |
-| Filesystem setup | Core native read projection / `FilesystemHidingData.kt` wording adapter | desired policy and observed setup independent of diagnostic proof |
-| `statistics` (per-uid / per-method counters) | `StatisticsData.kt` (`buildStatisticsState`) | how the hook-counter totals are built |
-| `hookReport` | `HookDiagnostics.kt` | installed-hook mask + counter deltas across the run |
-| `networkView` (post-Binder network model + invariants) | `NetworkViewCapture.kt` (capture) + `NetworkViewData.kt` (shape, invariants) | what a target uid actually receives and which consistency rule a leak breaks; `NetworkViewProbeMain.kt` runs the same capture as any uid via `scripts/network-view-probe.py` |
-| `rootShell` (not-verified vs inactive) | `VpnHideState.kt` (`RootShellDiag`) ← `snapshot_shell_uid` probe | why a negative liveness read may be untrustworthy |
-| The raw `sections` batch — every probe + its exact shell command + emit order | `DebugShellSnapshot.kt` | what each section literally runs (and the truncation model) |
-| The path constants in those commands (`$PROC_CTL`, `$KMOD_MODULE_DIR`, …) | `ConfigChannels.kt` | which files/procs each section reads (also [state.md](state.md)) |
-| The authoritative root snapshot behind the typed fields | `RootSnapshotCache.kt` | which sections are root-authoritative (win key collisions) |
-| Kernel-image bundle (`manifest.txt`, `kernel_partitions.txt`, `images/`) | `KernelImageExport.kt` | how partitions are dumped, gzipped, hashed |
-| `sections.kmod_state` = the live `/proc/vpnhide_ctl` wire | `kmod/vpnhide_kmod.c` (`ctl_seq_show`) + [protocol.md](protocol.md) | the telemetry wire (status + per-uid stats) the section dumps |
-
-Rule of thumb: a **typed** top-level field → find where it's *derived*
-(`*Data.kt` / `DiagnosticReport.kt`); a **raw `sections` entry** → find the
-`emit_*` line in `DebugShellSnapshot.kt` for the exact command, then
-`ConfigChannels.kt` / [state.md](state.md) for what that path is.
-
----
-
-## Quick reference — "where does X live?"
-
-| Question | Look at |
-|---|---|
-| Which backend is active? | `activeBackend.id`, `backends` |
-| Did the `.ko` load this boot? | `kmodLoadStatus`, `sections.core_native_boot` |
-| Is the VPN actually hidden? | `report` + `nativeVerdict`/`javaVerdict` (requires `gate==ROUTED`) |
-| Which vector leaks? | `report.*.checks[] .outcome.kind=="leak"` |
-| Is a hook firing? | `dmesg` (`vpnhide:` traces), `hookReport`, `sections.kmod_state` |
-| Is a kallsyms symbol missing? | `sections.kernel_symbols` |
-| Is an app a target, with which roles? | `config.apps` |
-| Live iptables chain? | `sections.ports_state` |
-| Interfaces on the device? | `sections.network_operstate`, `sections.network_addr` |
-| Can I trust an "inactive" reading? | `rootShell` (§6) |
-| Was the capture even measurable? | `gate` (§4) |
-| Is anything missing/cut off? | `errors`, `sections.debug_snapshot_truncated` |
-| What was included in this capture? | `captureOptions`, `captureKind` |
-
-### Export feedback and stable issue reasons
-
-The Collect sheet shows complete, partial and failed outcomes. Partial archives
-remain available for Save/Share; the section failures are shown alongside the
-result. A failed export retains its reason and can be retried.
-
-Each `dashboard.messages` entry keeps its existing severity, localized text,
-action, download artifact and help article, and adds `reason` and
-`presentationLanguage`. `reason.kind` is an explicit stable snake_case identifier;
-`reason.parameters` is a map of named string values (versions, components, counts,
-details; list-valued parameters use comma-separated stable package/hook names).
-The same `DashboardIssue` that produces the UI message produces its reason. No
-export-specific detection rules exist. For example `module_version_mismatch`
-carries `component`, `moduleVersion` and `appVersion` regardless of RU/EN wording.
-
-New reason identifiers and optional parameters are additive. Do not rename a
-published identifier, repurpose a parameter or infer it from localized text;
-changes of meaning follow the existing schema-bump rule. These fields and
-`beforeCapture` are additive within schema 2 and are covered by the bundle golden.
-
-### Diagnostic snapshot provenance
-
-`diagnostics.snapshot` is additive within schema 2. It records the process-local
-`revision`, retained `rootObservationId`, `rootGeneration`, `rootCurrent`,
-`routingObservationId`, `routingGeneration` and config-impact `changeEpoch`.
-`rootCurrent: false` means retained root data cannot certify current success.
-The measurement's own observation ID remains separate: it identifies the world
-in which the probes actually ran.
-
-A debug capture preserves its own identified run and raw probe results. After
-its root refresh it obtains one accepted domain packet for both the dashboard
-and diagnostic summary. That summary can describe newer knowledge (or a later
-run), so inspect run IDs and applicability before interpreting historical probe
-results. A VPN/config change during capture must not promote old evidence to a
-current success. `beforeCapture` similarly uses one Dashboard publication.
-
-
-## Automatic attachment planning (RPC 13)
-
-The existing Collect diagnostics sheet has one collect/save/share flow. Extended
-forensics and the installed-app inventory are always included in explicit debug
-exports; this does not turn on persistent debug logging. The existing scoped
-capture lease/restoration remains in place. Agent `getState` options and ordinary
-Dashboard observations do not trigger framework copies.
-
-Only two optional attachments exist: kernel images and Java framework binaries.
-Recommendations and short reasons are visible in the sheet. A collapsed Additional
-settings section contains the two overrides and reset-to-recommendations. Overrides
-belong to that open sheet, survive incoming observations, and disappear on reopen.
-No extra baseline controls or explanatory baseline row are shown.
-
-The planner uses current complete, applicable measurements and fresh boot state:
-
-- Owned native leaks with Kmod/Builtin/KPM select kernel images. Zygisk or unowned
-  leaks do not. Known kernel incompatibility, missing kprobe support, unknown
-  symbols and invalid module format can also select them.
-- Java leaks or current-boot installation/missing-method evidence select framework
-  files. Missing/stale telemetry alone is not proof that a framework dump helps.
-- Missing core, incomplete/stale checks, backend conflicts, missing artifacts,
-  capacity limits, authentication and signature-policy refusals do not themselves
-  select kernel images. Baseline evidence still records the situation.
-
-Every explicit debug ZIP contains `collection-plan.txt` and `java/collection.txt`: the frozen selection,
-recommendation reasons, manual overrides and collection outcome. The lightweight
-`java/java-manifest.json` is requested even when framework binaries are not selected.
-It records telemetry freshness/missing producer, bounded hook report, ROM properties,
-file origins, sizes, SHA-256, DEX presence and individual skip/error reasons. Absence
-of this manifest is reported in collection.txt; ordinary state.json is preserved.
-After collection, the sheet reports actual image/framework counts and Java skips.
-The state.json schema is unchanged; this is an additive archive attachment contract.
-
-Hook installation appends bounded `java_*` metadata to the existing LSPosed state
-writer (not to a competing log). It includes process identity, live classes and
-superclasses, declaring classes, method signatures, classloader evidence and
-registration failures/counts, including PackageVisibility. Existing hook counters
-remain the execution evidence. No call arguments, Binder payloads or app-private
-files are captured. ClassLoader.toString origins are best-effort: unavailable or
-missing origins do not justify arbitrary reflection into ART internals.
-
-Root selects at most 12 regular containers / 96 MiB total / 64 MiB each. It uses
-bounded known-target origin hints, framework.jar and services.jar fallbacks and
-known Connectivity JARs on active Connectivity/Tethering APEX mounts. Allowed roots
-are system/system_ext/product/vendor framework directories and APEX javalib only.
-Both original and resolved paths are validated; sources are root-owned, not
-writable by group/others, and opened through pinned no-follow descriptors. Special
-files, hardlinks and escapes are rejected. ZIP directories are inspected without
-inflation; DEX-absent, malformed and unsupported ZIP64 containers are labelled.
-There is no universal OAT/VDEX reconstruction, third-party APK dump or upload.
-
-The child has a 25-second cooperative deadline and a 30-second outer kill budget.
-Private staging is cleaned on success/failure; publication failures roll back
-already handed-off files. Core staging plus app handoff is bounded to about 192 MiB
-per framework collection, plus bounded metadata (two diagnostic batches may run).
-App packaging streams data, uses a private temporary ZIP and atomic replacement,
-and removes Java handoff copies after success/cancellation/failure. Packaging has
-an input/output bound of 128 MiB normally or 2200 MiB when the existing kernel
-images are selected, and a 180-second cooperative deadline. Kernel source limits
-remain 512 MiB per selected partition. Text entries are capped at 16 MiB. Optional
-Java packaging errors retry the archive without those binaries and explain why.
-Large exports still need free storage for source copies and the final archive.
-
-Framework/vendor files can be proprietary; review the bundle before publicly
-sharing it. Manifest facts do not prove a hook executes: compare registration with
-counters and the measured app view. RPC 13 requires a matching APK/core pair and
-rebooting system_server to run updated LSPosed instrumentation. Device acceptance
-must verify real APEX/classloader origins, SELinux reads, missing-core fallback,
-manual overrides and real archive size/time on the target ROM.
-
-### Core component status (additive schema 3 field)
-
-`dashboard.core` records the same component health shown on the Dashboard:
-`health`, bounded failure `detail`, `installedVersion` (last observed module.prop,
-not the running daemon version), `portsTargets` (current desired entries) and
-`ports` (current-revision delivery: Unknown/Disabled/Applied/Pending/Failed/Held).
-The old `ports` ModuleState still records root-observed chain presence for
-troubleshooting; it is no longer the source of Core health or the x/3 count.
-Core status follows the live session even when root-derived facts are retained.
-Connection/operational readiness is separate from VPN-hiding test results.
+[Shared Rust attachment policy](../crates/core-rpc/src/attachment_policy.rs) uses
+bounded typed Core boot, implementation and accepted assessment inputs. The local
+FFI adapter supplies one projection to APK consumers; Kotlin keeps source joins,
+localization and the open sheet's explicit overrides. Unjoined/stale leaks cannot
+recommend attachments, and recommendations neither collect them nor authorize
+backend/boot changes. Capture/export/agent orchestration remains incomplete;
+current APK packaging is not presented as a completed Core-owned session.

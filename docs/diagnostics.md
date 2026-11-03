@@ -13,6 +13,13 @@ classification, route/rule listener, Kotlin gate and main-process JNI suite are
 removed. Real Connectivity APIs inside the diagnostic worker, system-server
 fixtures, production hooks and explicitly requested manual forensics remain.
 
+The former uncontrolled Rust `run_all_json`/`CheckStatus` suite, observation-v1
+JSON wrapper and manual `probe checks` entry are also removed. No APK, export or
+current RPC consumer required that root-only fallback. Collectors now return
+bounded typed observations; only the shared diagnostic model evaluates evidence.
+The generated interface vocabulary and independent malformed-netlink/readback
+controls remain. An obsolete CLI request is refused before daemon/socket setup.
+
 ## Evidence and ownership
 
 The required plan comes from the supported contract and enabled features, not

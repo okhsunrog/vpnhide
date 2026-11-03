@@ -40,8 +40,8 @@ import kotlinx.serialization.json.JsonElement
  * written against travels with it.
  *
  * The number below is the ONE version of the whole bundle (there is no separate
- * per-object version). Bump it when a field is removed, renamed, or changes
- * meaning; a pure addition needs no bump. Either way `BundleSchemaGoldenTest`
+ * per-object version). Bump it when an exported serializable model changes.
+ * `BundleSchemaGoldenTest`
  * fails until the golden file is updated, so no shape change ships unnoticed.
  * Every version gets a row in the history table in docs/debug-bundle.md — the
  * number is only worth carrying if it can be looked up.
@@ -123,8 +123,8 @@ internal data class VpnHideState(
     val logcat: String,
     val bootLsposedLogcat: String,
     val lsposedConfigDb: String,
-    // Hook install/counter diagnostics (installed-hook mask, counter deltas across
-    // the forced check run). Null for captures that don't take a counter baseline.
+    // Hook installation/counter forensics over the capture interval. Collection
+    // does not admit a diagnostic run. Null when no baseline was captured.
     val hookReport: String?,
     // The framework network model as this (target) uid sees it after Binder —
     // handles, per-handle facts, legacy answers, callback deliveries — and the
@@ -242,11 +242,9 @@ internal fun redactSections(sections: Map<String, String>): Map<String, String> 
  * export path did. [shellSnapshot] contributes forensic-only sections (network,
  * proc/net, kernel symbols). Both section maps are preserved verbatim.
  *
- * Pure and non-suspending: every input is captured by the caller. [gate] +
- * [checkResults] are non-null only for a real diagnostics run (the debug export);
- * the logcat/kernel captures pass null and carry no [report]. [selfTestRunId]
- * identifies the run those two came from, and is recorded even when the run was
- * blocked, interrupted or failed and therefore contributed no report.
+ * Pure and non-suspending: every input is captured by the caller. Retained Core
+ * evidence keeps its own source/run identity; collecting or packaging this state
+ * does not run checks. Historical report/gate/verdict slots remain null.
  */
 @Suppress("LongParameterList", "LongMethod")
 internal fun buildVpnHideState(

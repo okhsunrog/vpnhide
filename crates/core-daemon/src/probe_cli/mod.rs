@@ -5,7 +5,6 @@
 //! sections retain the formats shared with the app (`fixtures/core-probes`).
 
 pub(crate) mod observations;
-mod probe;
 
 /// Dispatch a probe subcommand. `None` when `args` is not one (the caller runs the daemon).
 pub fn run(args: &[String]) -> Option<i32> {
@@ -26,14 +25,13 @@ pub fn run(args: &[String]) -> Option<i32> {
         {
             vpnhide_activator::kpm_inventory::child(next == "next")
         }
-        [command, mode] if command == "probe" && mode == "checks" => probe::checks(&[]),
         [command, mode] if command == "observe" && mode == "kpm-state" => observations::kpm_state(),
         [command, mode, rest @ ..] if command == "probe" && is_device_probe(mode) => {
             device_probe(mode, rest)
         }
         [command, ..] if command == "probe" || command == "observe" => {
             eprintln!(
-                "usage: vpnhide-core probe checks | probe root-snapshot [--packages] | probe debug-snapshot | probe hook-counters | probe kernel-partitions | probe kernel-images <dir> | probe java-hooks <dir> [--files] | probe lsposed-db <dir> | probe logcat-lsposed | observe kpm-state"
+                "usage: vpnhide-core probe root-snapshot [--packages] | probe debug-snapshot | probe hook-counters | probe kernel-partitions | probe kernel-images <dir> | probe java-hooks <dir> [--files] | probe lsposed-db <dir> | probe logcat-lsposed | observe kpm-state"
             );
             2
         }

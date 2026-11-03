@@ -49,6 +49,26 @@ fn unexpected_probe_arguments_are_refused() {
     assert_eq!(probe(&["kernel-images"]).0, 2);
 }
 
+#[test]
+fn retired_uncontrolled_check_suite_is_refused_without_binding_a_socket_or_emitting_pass() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut command = common::core_command();
+    command
+        .current_dir(directory.path())
+        .args(["probe", "checks"]);
+    let output = vpnhide_activator::capture_command(
+        &mut command,
+        None,
+        std::time::Duration::from_secs(3),
+        64 * 1024,
+    )
+    .unwrap();
+    assert!(!output.timed_out && !output.truncated);
+    assert_eq!(output.output.status.code(), Some(2));
+    assert!(output.output.stdout.is_empty());
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+}
+
 fn probe_with_inputs(input: &[u8]) -> std::process::Output {
     let mut command = common::core_command();
     command.args(["probe", "hook-counters", "--kpm-state-stdin"]);
