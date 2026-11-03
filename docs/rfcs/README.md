@@ -36,3 +36,10 @@ RFC0005 proposes a coherent replacement for RFC0003's strict default. Publishing
 it does not resolve the reopened decision or lift the pause on new activation
 policy. The agreed requirements and remaining proposed details are distinguished
 inside the document.
+
+The 3 November maintainer amendment excludes Zygisk from Auto, automatic
+fallback and standby publication. Only explicit informed “Use Zygisk” selection
+permits preparation; prior consent/use never licenses later automatic reentry.
+There is no offer for sufficient working kernel protection. RFC0005 and RFC0003
+record this requirement and legacy retirement limits. The flow is not implemented;
+the broader policy pause remains in force.

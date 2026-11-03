@@ -79,12 +79,17 @@ work. Partial useful coverage, total failure and uncertain load require separate
 decisions. Preserve current no-effect-only bounded fallback and exposure guards
 until that review concludes.
 
-A separate explicit Zygisk consent state is new review input after RFC0005's
-publication. Unknown/Allowed/Denied, publication before consent and denial behavior
-are proposals, not implemented or accepted defaults. An installed provider must
-not be presented as evidence of such consent. Current warning documentation must
-explain detection/compatibility risk and prefer compatible kernel protection
-without claiming that an unimplemented consent flow already protects users.
+Zygisk is now explicitly **excluded from Auto, automatic fallback and standby**,
+recorded in RFC0005's 3 November amendment. Only a current informed “Use Zygisk”
+backend choice permits discovery preparation and grants; prior consent/use,
+provider presence and imports are not an Auto license. Returning to Auto never
+permits silent reentry. Sufficient working kernel protection produces no offer;
+a justified last-resort offer is deduplicated and declined offers do not nag.
+Advanced settings allow reconsideration/revocation with the injection/detection
+warning. Existing cached images/hooks need separate retirement. This is a
+confirmed product requirement, **not implemented code** or permission to lift the
+broader policy pause. No automatic reboot, unsafe live Kmod↔KPM handoff, or silent
+KPM provisioning follows from kernel-only Auto.
 
 ## Final build and acceptance gates
 

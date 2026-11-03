@@ -21,6 +21,24 @@ avoiding unnecessary repeated reboots. A remembered successful backend is a
 proposal, not authorization or proof of current applicability. Mapping and
 installed hooks remain separate; safe coexistence cannot be assumed.
 
+## Confirmed explicit-selection amendment (3 November 2026)
+
+Zygisk is excluded from Auto, automatic fallback and standby publication. It is a
+last resort requiring an explicit informed “Use Zygisk” backend choice **before
+discovery publication** and grants. Earlier consent/use, provider presence and
+imports do not authorize Auto; returning to Auto never permits silent reentry.
+Do not offer it while sufficient kernel protection works. A justified last-resort
+offer is deduplicated; declined offers do not nag. Advanced settings permit a new
+choice or revocation, with an app-process injection/detection warning including
+games and banking apps. No choice implies immediate activation or automatic
+reboot. Old resident/cached images and hooks need separate safe retirement, not
+an instant-absence claim or permission to preserve standby.
+
+This confirmed requirement overrides automatic/standby publication readings of
+the preserved proposal below. [RFC0005](0005-unified-backend-lifecycle-policy.md)
+records revised scenarios. The broader implementation pause remains in force;
+this explicit-choice flow and projection executor are not implemented.
+
 ## Reopened review notes
 
 The following are proposals, not approval to implement new transition policy:

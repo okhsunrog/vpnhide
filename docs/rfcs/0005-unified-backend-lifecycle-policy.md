@@ -5,7 +5,23 @@ Research baseline: `5a14350b988d6a7e37635f324eb517dcf30a838f`, 2 November 2026.\
 Scope: Core-owned backend selection, health, bounded recovery, Zygisk discovery, maintenance, migration, and user attention.\
 Document identity: RFC 0005, a consolidated proposal filed for review.
 
-This RFC defines one policy for a user who wants protection to work without learning the differences between a built-in driver, a kernel module, KPM, and Zygisk. **Auto is the default: Core chooses and safely recovers the implementation, including when protection is only partial. Manual is an advanced override: Core uses the explicitly requested backend, permits a safe partial result, and never silently substitutes another backend. Neither mode bypasses compatibility, authenticity, ownership, or nonoverlap rules.**
+**Maintainer decision amendment (3 November 2026):** Zygisk is an explicitly
+selected last resort, excluded from Auto and automatic fallback. The consent requirements below are settled product
+requirements; the broader transition policy remains under review and its
+implementation pause remains in force. This amendment supersedes the original
+proposal wherever it permitted standby publication or automatic Zygisk fallback,
+even after a previous consent. It does not
+claim that the consent flow has been implemented.
+
+**Further simplification under discussion:** remove the automatic kernel fallback
+chain as well, use one advanced backend choice (`Auto` for kernel selection or an
+explicit family), and report a selected kernel's failure/partial result rather
+than trying other families. This has not yet been accepted. The kernel recovery
+algorithm and budgets below remain review proposals, not settled behavior or
+implementation authority. Existing durable unknown-effect and ownership guards
+remain necessary regardless of that product decision.
+
+This RFC defines one policy for a user who wants protection to work without learning the differences between a built-in driver, a kernel module, KPM, and Zygisk. **Auto is the default: Core chooses and safely recovers a kernel implementation, including when protection is only partial. Zygisk requires a separate explicit informed selection and never belongs to the automatic fallback chain. Manual is an advanced override: Core uses the explicitly requested backend, permits a safe partial result, and never silently substitutes another backend. Neither mode bypasses compatibility, authenticity, ownership, or nonoverlap rules.**
 
 The design preserves a working backend during long uptime, prepares changes before an already-needed reboot, and treats a reboot as a user action rather than an automatic recovery primitive. It does not promise that every fallback is immediate or that every update needs a reboot. It distinguishes a passive Zygisk mapping from permission to install hooks, and distinguishes a successful load from demonstrated protection.
 
@@ -15,9 +31,10 @@ The request to write or commit this RFC does not authorize its implementation, a
 
 ### Agreed requirements
 
-- Auto makes ordinary recovery decisions, including partial coverage, without asking “KPM or Zygisk?”. Manual selects one backend with no hidden fallback; safe partial protection is allowed.
+- Auto makes ordinary kernel recovery decisions, including partial coverage, without asking routine backend-choice questions. It excludes Zygisk and never prepares Zygisk standby. Manual selects one backend with no hidden fallback; safe partial protection is allowed.
 - Core owns all domain policy and durable state: selection, health interpretation, recovery, maintenance, migration, update scheduling and attention. APK/Kotlin renders typed state and submits intent; it is not a second policy engine.
 - Users install one Core ZIP containing one passive Zygisk ABI pair. Archive deduplication permits a verified ordinary installed discovery copy. Main Core has no top-level `zygisk/`; its owned projection has no separate activator, daemon, selector, update channel or user ZIP.
+- Zygisk discovery publication and hook authorization require an explicit “Use Zygisk” backend selection with an injection/detection warning. Consent is bound to that selection, never a persistent license for Auto. No standby publication. A sufficient working kernel route needs no offer. Provider presence, imports and old use are not consent; returning to Auto prohibits silent Zygisk reentry.
 - Neither mode bypasses authenticity, compatibility, authentication, capacity, ownership, holds or nonoverlap. Unknown effects are not a safe failed attempt.
 - Core never automatically reboots, restarts Zygote/provider, kills shared companions, invokes unsafe global refresh, or reenables user-disabled components.
 - Auto can prepare authorized safe fallback. Significant root/kernel provisioning, boot-image patching/flashing and installing a runtime require separate plan-bound consent. Preparation is not permission to execute those actions.
@@ -26,13 +43,13 @@ The request to write or commit this RFC does not authorize its implementation, a
 
 ### Proposed details
 
-The feature-based algorithm, finite recovery budgets, sticky publication default, first-install prepublication, schema/state names, manager/bootstrap adapters and implementation phases below require acceptance. This draft is not approval to implement them. Section 15 gives recommended resolutions rather than putting routine backend choices back to users.
+The feature-based algorithm, finite recovery budgets, explicit-Zygisk staging/retirement lifecycle, schema/state names, manager/bootstrap adapters and implementation phases below require acceptance. No proposed detail can bypass the consent requirement. This draft is not approval to implement them. Section 15 gives recommended resolutions rather than putting routine backend choices back to users.
 
 ### Existing RFCs
 
 [RFC 0001](0001-automatic-gki-kmi-selection.md) supplies GKI/KMI and bounded safe preflight evidence; no guessing or repeated real `.ko` loads. [RFC 0002](0002-autonomous-diagnostics.md) supplies reproducible behavioral evidence; unimplemented checks remain unverified. [RFC 0003](0003-conditional-zygisk-publication.md) supplies passive packaging, Core-owned discovery and durable/provider boundaries.
 
-**RFC 0003 needs revision before adopting this default.** Its present requirement to exclude discovery before a kernel boot is stronger than this proposal. Passive publication/mapping may coexist with kernel protection when no current-boot Zygisk production grant could have been consumed. Possible hook consumption still blocks switching. Strict zero-mapping is a separate property. Preserve existing conservative guards until the replacement proof model and old-state migration are reviewed; do not silently reinterpret the accepted RFC. [Pinned RFC 0003][rfc3]
+**The maintainer amendment removes automatic/standby Zygisk publication.** RFC0003 remains reopened for the detailed implementation and lifecycle proof. Auto must not create/retain discovery as a reserve. Cached images or old hooks after explicit Zygisk use are a retirement problem, not authorization to reactivate it. Passive mapping does not itself prove hook consumption; possible consumption still blocks switching. Preserve conservative guards until the replacement proof model and old-state migration are reviewed. [Pinned RFC 0003][rfc3]
 
 ## 2. What the baseline actually implements
 
@@ -69,6 +86,7 @@ Keep these dimensions separate:
 |---|---|
 | Desired protection | Canonical features, targets, profiles and scopes |
 | Requested mode/backend | Auto or an explicit Manual family |
+| Explicit Zygisk choice | Informed current selection, with durable offer/decline state; never Auto eligibility or inferred historical consent |
 | Recommended backend | Core's permissible recommendation, not an effect |
 | Effective backend | Reconciled actual owner in this boot, possibly still different from a pending request |
 | Next-boot intent | Exact staged target/discovery and prerequisites for a future verified boundary |
@@ -128,11 +146,11 @@ For identical facts, policy and journal state, the reducer produces the same pla
 
 1. Reconcile existing work/owner first; an APK open or daemon restart is not a clean slate.
 2. Keep a healthy sufficient effective backend. A higher-priority newcomer is a recommendation, not a disruptive promotion.
-3. At a clean selection boundary, retain baseline order Builtin, Kmod, authenticated ready KPM, Zygisk. A still-valid prepared recovery target takes precedence only within its bounded episode.
-4. Last success may reuse compatible preparation/discovery but cannot replace current eligibility or authority.
+3. At a clean Auto selection boundary, consider Builtin, Kmod and authenticated ready KPM only. A still-valid prepared recovery target takes precedence only within its bounded episode.
+4. Last success may reuse compatible kernel preparation but cannot replace eligibility or authority, infer Zygisk consent, or retain Zygisk standby.
 5. Missing optional capability needs no recovery; infrastructure/stale evidence needs observability repair.
 6. Required gaps or attributable leaks trigger one supported, reasoned same-owner repair, then evaluation of a justified alternative if needed.
-7. Core chooses and prepares the next safe action. If a clean boot is needed, stage now and ask only for that action, not “KPM or Zygisk?”.
+7. Core chooses and prepares the next safe kernel action. If a clean boot is needed, stage now and ask only for that action. When no suitable kernel recovery remains, report the limitation; optionally offer explicit Zygisk use with its warning, without preparing it in advance.
 8. Verify actual results. Incomplete evidence does not cause repeated switches to chase green status.
 
 An untried candidate can be a justified bounded experiment without being a proven improvement. Never load it alongside a live owner just to collect comparison evidence.
@@ -149,7 +167,14 @@ Examples: partial kernel route coverage can justify an alternative that closes t
 
 Without useful protection and with known-clear ownership, Auto may traverse eligible candidates after exact durable no-effect rejection. A resident partial/full owner instead requires planned replacement.
 
-**Zygisk is the principal generic fallback from a failed kernel route**, only when it can address the affected requirements, actual provider/ABI evidence is sufficient, and ownership can safely transfer. It cannot replace every kernel feature or displace a demonstrably more suitable ready candidate merely because it is the fallback.
+**Zygisk is excluded from Auto and automatic fallback.** If no suitable kernel
+route or safe recovery can provide the selected requirements, retain useful safe
+protection or report the problem. A last-resort offer may explain Zygisk's limits
+and injection/detection risk. Only explicit “Use Zygisk” selection permits its
+preparation, after compatibility, provider/ABI and ownership checks. This is a
+user-requested transition, not another candidate in the automatic chain. Previous
+consent/use never permits Auto to switch to it later; returning to Auto withdraws
+future discovery/authority through the safe retirement lifecycle. No standby.
 
 Ready authenticated KPM can be a planned replacement for Kmod when justified. **Active Kmod → KPM is not same-boot generic fallback:** require retirement or a next-boot plan that prevents old autoload. Provisioning absent KPM infrastructure still needs separate consent.
 
@@ -159,7 +184,7 @@ Builtin persists in the same kernel across reboot. A supported disable/quiescenc
 
 A **recovery episode** is durable work for a specific affected requirement set and material environment/candidate identity. It survives daemon restart, APK reinstall/reconnect, ordinary reboot and receipt compaction. It stores the reason, candidate decisions, evidence, attempted identities, budgets, planned boundary and terminal outcome.
 
-Recommended initial limits, all **proposed policy constants**:
+Recommended initial limits for automatic kernel recovery, all **proposed policy constants**. None authorize a Zygisk attempt or standby:
 
 | Budget | Proposed limit | Meaning |
 |---|---:|---|
@@ -168,7 +193,7 @@ Recommended initial limits, all **proposed policy constants**:
 | Automatically prepared boot-bound transition | 1 per episode | At most one recovery reboot request for a selected alternative; additional recovery requires a new explicit action or material change |
 | Diagnostic infrastructure retry | At most 3 per diagnostic fingerprint | Separate observability budget, with backoff and verified cleanup; does not grant backend trials |
 
-Cold-start traversal and health recovery are distinct: the existing clean-start path can assess the four backend families and attempt each at most once per boot, continuing only on no-effect proof. A health-recovery episode has the two-alternative limit above across boots. If an activation belongs to both contexts, record it once and enforce both budgets; do not nest loops that multiply attempts. The existing per-boot loader budget and payload quarantine remain independently enforced. No episode budget can authorize an attempt that the native journal refuses. Eligibility-only rejections do not spend a real-load attempt; dispatched attempts with unknown results do spend it and enter a hold.
+Cold-start traversal and health recovery are distinct: the existing clean-start path can assess the three kernel backend families and attempt each at most once per boot, continuing only on no-effect proof. A health-recovery episode has the two-alternative limit above across boots. If an activation belongs to both contexts, record it once and enforce both budgets; do not nest loops that multiply attempts. The existing per-boot loader budget and payload quarantine remain independently enforced. No episode budget can authorize an attempt that the native journal refuses. Eligibility-only rejections do not spend a real-load attempt; dispatched attempts with unknown results do spend it and enter a hold.
 
 After a trial yields useful safe but partial protection or incomplete diagnostics, retain that result and publish its actual limitations. Do not switch back and forth merely because proof remains incomplete. If it yields a known worse or unavailable result and no safe automatic action remains, prepare a clearly described recovery option such as restoring the last compatible working configuration; do not execute an unbounded rollback/reboot cycle.
 
@@ -181,6 +206,7 @@ An episode can end as recovered, retained-partial, unverified-with-no-further-sa
 Manual exposes `Builtin`, `Kmod`, `Kpm`, or `Zygisk` in advanced settings, with actual availability and limitations. It is not a force-load option.
 
 - The selected family is the only activation target. There is no hidden fallback to another backend.
+- Manual Zygisk requires an explicit informed “Use Zygisk” confirmation before publication. The confirmed current selection permits preparation, not an immediate load or bypass of retirement. It is not a lasting Auto permission.
 - A safe partial result can remain effective with named missing required features. Core does not secretly edit the desired policy to make it complete.
 - An unavailable, incompatible, unauthenticated or unsafe selection remains unavailable/blocked, with a real next action if one exists.
 - Selecting a different family while another remains resident records a **requested** backend and transition plan. It does not relabel the old backend as the new effective one, unload it unsafely, or pretend its effects vanished.
@@ -201,6 +227,8 @@ No intermediate “Prefer” mode is proposed initially. It adds ambiguous prece
 | Confirmed leak in another layer | Recover that layer | Same | Correct attribution |
 | Missing/invalid diagnostics | Retry evidence within budget | Same | No backend blacklist |
 | Known no-effect load failure | Next eligible candidate within budgets | Stop selected attempt | Durable exact no-effect proof |
+| No suitable kernel recovery; Zygisk could help | Report problem and optionally offer once; no Zygisk preparation | Explicit “Use Zygisk” confirmation required | Current informed selection before provider-visible preparation |
+| Zygisk offer declined, or prior use followed by Auto | Kernel-only recovery; no repeat nag or silent reentry | A new explicit Zygisk choice can be made in advanced settings | Historical consent is not a fallback license |
 | Unknown load or old owner | Hold and reconcile | Same | Never fallback on timeout alone |
 | Current Zygisk grant may have been consumed | Keep/recover or stage kernel for next boot | Requested kernel stays pending | Revoke is not retirement |
 | New boot; only verified passive Zygisk image, no possible grant consumption | Kernel may be selected first | Honor selected compatible target | Fresh-boot fail-closed grant and clean legacy ownership |
@@ -221,19 +249,57 @@ The projection has no independent service/activator/policy/updater/download or u
 
 Projection absent on disk (input to a future scan), provider catalog excluding a generation (a proven acceptance/barrier), not mapped, and not authorized to install hooks are four different states. Disk absence does not prevent an existing catalog from offering its retained image. A callback runs after mapping. Unlink does not revoke cached FD/memfd. Grant revocation does not remove installed hooks. A late maps snapshot cannot prove “never mapped this boot.”
 
-**Recommended default:** keep healthy effective protection; retain compatible discovery after successful Zygisk use or when justified by a prepared next-boot fallback; after clean kernel selection, withdraw unneeded discovery at the next natural reboot. Do not demand an immediate second boot for mapping-only cleanup. Passive mapping can consequently persist for two weeks; measure its resource/detection cost rather than calling it free.
+**Explicit selection is a prerequisite to discovery itself.** Auto never creates
+or retains a projection for Zygisk standby, including after previous consent/use.
+Unknown or declined choice forbids new publication and production grants. Passive
+bytes inside the Core ZIP/private payload catalog are not discovery. Provider
+presence, old use, import and a previous successful backend are not authorization.
 
-For first install or known material Core/kernel/provider change, recommend pre-staging compatible discovery alongside Core when fallback may be needed and a supported manager/provider contract exists. This grants no hooks, does not enable a disabled provider and is not proof of health. A verified kernel-only plan can omit it. Unannounced OTA can still leave discovery absent; late kernel failure may then need one extra boot.
+Offer Zygisk only as a last resort when no suitable kernel route/recovery can
+provide the selected required features. Do not offer it while sufficient kernel
+protection works. Before “Use Zygisk” confirmation explain that it injects into
+application processes and apps checking their own process, including games and
+banking apps, may detect the intervention or react to it. Do not promise kernel
+invisibility or attribute an observed ban without evidence. Provider presence
+does not waive the warning.
+
+Persist a declined offer without repeated prompts. Advanced settings permit
+explicit reconsideration or revocation. The current informed Zygisk selection
+permits preparation when safe, not immediate activation, provider enable, unrelated
+provisioning, or a persistent Auto permission. Returning to Auto stops new Zygisk
+grants and withdraws future discovery through the safe lifecycle; there is no
+silent reentry. First selection after provider scan can legitimately require an
+extra discovery boot. Explain that cost; never reboot automatically.
+
+First install, known material Core/kernel/provider changes and updates may stage
+Zygisk discovery only as part of an explicitly selected Zygisk plan. No automatic
+fallback prepublication, sticky standby or provider-visible reserve is permitted.
+While Zygisk remains explicitly selected, preserve its verified compatible
+projection through a coordinated update; historical use alone cannot preserve it.
+
+Cached images and existing hooks may remain after withdrawal until their actual
+retirement boundary. Do not require an immediate reboot solely to clean passive
+mapping, claim instant absence, or turn residual availability into permission.
+In v1 migration no explicit v2 choice is inferred even if old hooks are resident:
+report and retire them separately. Kmod remains the preferred simple kernel route
+where suitable; avoiding Zygisk never authorizes silent KPM runtime installation,
+kernel patching or flashing.
 
 ### Fresh boot versus live handoff
 
-After a genuine reboot, verified v2 payloads reject stale grants by boot identity, including before Core/PackageManager is ready. With legacy writers retired and no new production grant that could have been consumed, Core may select kernel even if sticky Zygisk is passively mapped. Cleanup waits for the next natural boot.
+After a genuine reboot, verified v2 payloads reject stale grants by boot identity, including before Core/PackageManager is ready. With legacy writers retired and no new production grant that could have been consumed, Core may select kernel even if a residual previously selected Zygisk image is passively mapped. Cleanup waits for the next natural boot.
 
 In the same boot after possible Zygisk hook consumption, kernel activation remains forbidden under the generic contract. Revocation, missing heartbeat or no targets file does not prove retirement. Old v1 code may ignore the v2 grant protocol and needs separate retirement/migration. Do not weaken the current exposure guard until these proof boundaries are established. [Journal][journal]
 
 ### Strict zero-mapping
 
-Strict absence is a stronger alternative, not the proposed default or an initial general UI switch. It needs proven pre-scan/pre-map exclusion across ABIs, unexpected reboot and Core-disabled cases. Without addressed provider support, the system cannot both wait for late kernel selection, guarantee no mapping when kernel succeeds, and activate previously undiscovered Zygisk immediately when it fails. Strict absence accepts an extra fallback boot; unsupported ordering must remain a stated limitation, not a second activator.
+No new Zygisk publication in Auto or before explicit selection is mandatory.
+Never-mapped proof is stronger than this policy: cached old images, legacy code,
+provider snapshots and earlier consumers need actual retirement evidence across
+ABIs and Core-disabled cases. Waiting for explicit selection after provider scan
+can require an extra boot; that is an accepted cost of keeping Zygisk out of the
+automatic reserve. Unsupported ordering is a limitation, not a reason to add an
+activator or publish standby. No general strict-zero toggle is proposed.
 
 ### Provider baseline
 
@@ -270,6 +336,7 @@ Same-owner `RepairingCurrent` can lead to verification. `Held`, `AwaitingConsent
 | Clear-owner alternative | Journal exact attempt before dispatch; verify or hold/no-effect reject |
 | Discovery/ownership boundary needed | Prepare complete target; not active |
 | Significant provisioning needed | Await specific consent; no patch/flash |
+| Zygisk not explicitly selected | No discovery/grant effect; retain kernel result/problem or declined offer |
 | Manager accepts staging | Verify actual staged identities; await user/natural boundary |
 | New boot observed | Verify boot, active image, slot, owner and still-valid plan before admission |
 | Wrong generation/disabled manager | Hold/action-required; do not reinstall blindly |
@@ -293,11 +360,19 @@ Illustrative canonical extension, not a frozen schema version:
 
 Manual target is exactly `builtin`, `kmod`, `kpm` or `zygisk`; mode/target changes are atomic and expected-revision-bound. Feature requirements stay in canonical protection config. No default UI knobs for weights, retry budgets, provider commands, “Prefer,” untested strict-zero or a second fallback switch. Provisioning consent is a separate plan-bound record, never `allowDangerousOperations`.
 
+An explicit Zygisk selection must include informed confirmation in the same
+revision-bound intent. Separate durable offer/decline state suppresses repeated
+prompts; its schema remains proposed. There is no `allowZygiskFallback` flag.
+Old schema/import starts without a confirmed choice. Returning to Auto removes
+Zygisk eligibility even after earlier consent; a new explicit selection is needed
+for later use. Read models separate choice, discovery, mapping and hook retirement.
+Revocation never erases exposure evidence or resets budgets.
+
 One coherent read snapshot exposes:
 
 ```text
 config_revision, core_epoch, publication_revision
-requested_mode/backend, desired_requirements
+requested_mode/backend, desired_requirements, explicit_zygisk_choice/offer_state
  effective_backend/generation/scope, layered_health, validity
  recommended_backend/reason, recovery_episode/budgets/operation
  next_boot_intent/required_action
@@ -330,27 +405,28 @@ Counts below are planning targets under the stated conditions, not device test r
 
 | Scenario | Required preparation and behavior | Reboot expectation |
 |---|---|---|
-| Fresh manager install, supported kernel route | Stage Core and any justified fallback before first scan; validate actual runtime after boot | Normally one manager-install reboot; do not promise zero without a specific contract |
-| Fresh install requiring Zygisk | Stage complete owned projection with Core; verify provider/ABI and new-boot grants | One boot if coordinated staging is supported; missing first discovery can require a second |
-| Fresh install with strict unknown-OFF | Do not publish until late kernel failure is known | May require install boot plus activation boot; explicit strict-policy cost, not general default |
+| Fresh manager install, supported kernel route | Stage Core without Zygisk discovery or an offer while the kernel route suffices; validate actual runtime after boot | Normally one manager-install reboot; do not promise zero without a specific contract |
+| Fresh install requiring Zygisk | Obtain explicit informed “Use Zygisk” selection before staging the complete owned projection with Core; verify provider/ABI and new-boot grants | One boot if coordinated staging is supported; missing first discovery can require a second |
+| Fresh install, no explicit Zygisk choice or offer declined | No Zygisk publication/standby; offer once only when justified and not declined | First later selection may need an activation boot; explicit-choice cost, not an optional strict mode |
 | v1 builtin → v2 | Preserve config; retire positively owned old writers; stage Core; adopt compatible builtin after clean boundary | Target one migration reboot. Same kernel still contains builtin; RPC changes do not mandate rebuilding it |
 | v1 Kmod → v2 | Do not hot-displace loaded ko; stage replacement and owned autoload retirement together | Target one clean migration boot; uncertain ownership blocks rather than justifies another load |
 | v1 KPM → v2 | Account for APatch/manual autoload, credentials and ownership; preserve foreign provisioning | Target one boot when a complete supported plan exists; foreign ownership may need explicit resolution |
-| v1 Zygisk → v2 | Stage new projection and retire owned old discovery before the same boot; old hooks remain until boundary | Target one boot, not removal boot followed by a new publication boot |
+| v1 Zygisk → v2 | Infer no v2 choice; retire old discovery/hooks separately; stage new projection only with explicit informed Zygisk selection | Target one boot, not removal boot followed by a new publication boot |
 | Compatible v2 APK-only patch/minor | Reconnect to unchanged compatible Core; preserve config/journal/backend | Zero device reboot for Core/backend |
 | APK updates loaded LSPosed Java hook code | Observe actual framework/process loaded-code identity; package install alone may leave old code | A framework/process boundary, often a reboot, may still be needed; do not add a separate unchanged-Core reboot |
 | APK and Core RPC are incompatible | Prepare a coordinated compatible target and truthful temporary compatibility state | Usually one planned Core boundary, not separate APK and Core boots |
-| Core or backend payload update | Verify and stage complete target, discovery and legacy retirement before user reboot | Target one coordinated boot; zero extra solely for late discovery preparation |
+| Core or backend payload update | Verify and stage complete target and legacy retirement before user reboot; discovery only while Zygisk remains explicitly selected | Target one coordinated boot; zero extra solely for late discovery preparation |
 | Core update, selected payload bytes unchanged | Preserve valid compatible payload evidence but verify actual daemon/manager lifecycle | May still need one Core manager boot; unchanged payload is not proof of safe hot daemon replacement |
-| Known OTA/kernel change | Pre-stage justified fallback before the already-required reboot when possible | Zero extra if plan and compatibility assumptions hold |
-| Unannounced OTA; kernel no longer eligible; no Zygisk catalog entry | Stage fallback after observing new environment | One extra discovery boot can be unavoidable; provider/ABI support still must work |
-| Previous boot used Zygisk; new boot has suitable kernel | Before any new production grant, reconcile clean legacy ownership and select kernel | Zero extra for kernel activation; passive cleanup waits for a natural boot |
+| Known OTA/kernel change | Prepare compatible kernel plan; stage Zygisk only if explicitly selected, never as automatic fallback | Zero extra if plan and compatibility assumptions hold |
+| Unannounced OTA; kernel no longer eligible; no Zygisk catalog entry | Report kernel problem; optionally offer explicit Zygisk use once; stage nothing until selected | One extra discovery boot can be unavoidable; provider/ABI support still must work |
+| Previous boot used Zygisk; new boot has suitable kernel | Before any new production grant, reconcile clean legacy ownership and select kernel; old use does not authorize discovery or grants | Zero extra for kernel activation; passive cleanup waits for a natural boot |
 | Zygisk active in current uptime; better Kmod/KPM appears | Keep sufficient protection; stage a future safe transition | No immediate reboot for mere recommendation; at least the required clean boundary for actual handoff |
-| Kernel attempt has exact no-effect proof; Zygisk already accepted | Admit bounded fallback, then establish fresh target/process coverage | Potentially zero additional boot; not applicable to active/unknown kernel effects |
+| Kernel attempt has exact no-effect proof; residual Zygisk catalog entry exists | Auto stays kernel-only; only a new explicit informed Zygisk selection can prepare/activate it | Potentially zero additional boot; not applicable to active/unknown kernel effects |
 | Active kernel becomes partial/unhealthy | Same-owner repair or planned replacement, not blind loader fallback | Zero for supported repair; replacement may require a boot or separate provisioning |
 | Active Kmod → KPM | Stage one owner at next boot; prohibit old Kmod autoload from racing the new owner | Normally one planned boot; not a live replacement promise |
 | Builtin → different backend on same kernel | Need explicit supported quiescence/disable contract or authorized kernel change | No generic reboot count; rebooting the same builtin kernel is not removal |
 | Zygisk authority revoked; kernel requested in same boot | Keep possible consumption recorded | Current generic contract requires a clean reboot; revocation alone is insufficient |
+| Consent revoked with cached/legacy images or old hooks | Stop new grants; withdraw owned future discovery and report retained consumers | Existing effects retire at their real boundary; no instant absence claim |
 | Only passive discovery cleanup remains | Stage withdrawal without changing active kernel effects | Zero mandatory reboot now |
 | Core crash/restart, same generation | Reconcile journal and exact live identity | Usually zero; ambiguous prior load may require explicit recovery |
 | Rollback after failed update | Validate signed compatible target, schema and rollback floor; account for newer cached payload | Often one recovery boot; unsupported downgrade may require external recovery, not journal deletion |
@@ -360,7 +436,7 @@ The goal “one migration/update reboot” depends on a complete pre-boundary pl
 
 ## 11. User experience and notifications
 
-Lead with effective protection and the actual next action; technical backend choice belongs in advanced Manual/diagnostics. Distinguish “partially protected,” “could not verify,” “recovery prepared; restart to apply,” and “update prepared.” A sufficient current owner plus a better recommendation is not urgent failure. A selected required gap is not merely an optional improvement. Unused backend failure and inert-library cleanup do not produce protection alarms.
+Lead with effective protection and the actual next action; technical backend choice belongs in advanced Manual/diagnostics. Distinguish “partially protected,” “could not verify,” “recovery prepared; restart to apply,” and “update prepared.” A sufficient current owner plus a better recommendation is not urgent failure. A selected required gap is not merely an optional improvement. Unused backend failure and inert-library cleanup do not produce protection alarms. Zygisk consent is a deliberate last-resort decision with the injection/detection warning, not a routine backend-choice prompt. Persist a declined offer without nagging; advanced settings permit reconsideration/revocation.
 
 The approved bridge is **Core attention reducer → private explicit root/Core wake hint → fresh bounded authenticated RPC snapshot → APK NotificationManager**. The hint contains no authoritative condition or privileged command. Review the actual receiver permission/manifest/root-dispatch admission; neither an exported receiver nor an assumed `exported=false` delivery path is sufficient proof.
 
@@ -379,8 +455,8 @@ Move approved update-check scheduling/deduplication from the baseline daily APK 
 | Partial means total failure, or partial is always retained without recovery | Both discard necessary distinctions; Auto must preserve usefulness and attempt justified bounded recovery |
 | Hook-count/one-score ranking | Kernel/libc/API scopes are semantically different |
 | Switch after every diagnostic failure | Infrastructure, stale and non-Native failures are not replacement evidence |
-| Always publish forever | Unnecessary mapping surface for kernel-only users; sticky preparation is narrower |
-| Strict absence on every uncertain boot | Stronger property but extra fallback boot and ordering requirements; not convenience default |
+| Always publish or pre-stage as reserve | Violates explicit-choice-only policy even after historical consent/use or provider installation |
+| Treat an old Allowed flag as Auto eligibility | Consent to explicit Zygisk use is not permission for later automatic fallback |
 | Late unlink or tiny always-loaded stub | Cannot undo first mapping or cached images; stub still maps |
 | Global rearm/provider/Zygote restart | Shared side effects, missing addressed guarantees; Magisk catalog survives Zygote restart |
 | Separate user ZIP/activator | Splits policy ownership and lifecycle |
@@ -388,13 +464,15 @@ Move approved update-check scheduling/deduplication from the baseline daily APK 
 | Only `lastBackend` persistence | Loses evidence, pending intent, uncertainty and budgets |
 | Two boots for every patch/minor | Unnecessary for APK-only and properly coordinated updates |
 
-The choice is consistent: preserve sufficient protection, recover within bounds, prepare useful discovery and defer mapping-only cleanup—not alternating strict-zero and always-published promises.
+The policy preserves sufficient kernel protection and bounded recovery. Zygisk discovery requires the current explicit informed selection, with no standby or automatic fallback. Actual retirement of cached images/hooks remains a separate lifecycle requirement.
 
 ## 13. Verification and acceptance
 
 ### Host and model tests
 
 Table-test optional versus selected-required gaps, known/unknown partial hooks, semantic/raw-syscall differences, incomparable coverage, Native versus Java/Apps/Ports leaks, empty RAW and stale/infrastructure evidence. Verify stickiness, cold-start order, recovery target, Manual no-fallback, requested/effective divergence and no effects from reads.
+
+Test Auto never publishes standby or grants Zygisk, including after prior consent/use and after a return from explicit Zygisk to Auto. Test no choice/declined offers across first install, import, v1 migration, OTA and crash. Working kernel produces no offer; justified offers are deduplicated and declines never nag. Only current explicit informed selection permits preparation, not immediate activation; revocation retains exposure and no selection triggers an automatic reboot.
 
 Test finite budgets across crash/reboot/pruning; mode toggle, boot ID and diagnostic noise cannot reset them. Check exact no-effect versus unknown results, passive mapping versus grant consumption, fresh-boot kernel admission versus same-boot denial, Kmod→KPM planning and builtin persistence. Validate both ABIs, forged/mixed images, identity/symlink races, stale grants/ACK, disabled owner and unsupported adapters.
 
@@ -408,7 +486,7 @@ Cover first install, every v1 backend, old mirror layout, APK-only update, chang
 
 Use separately authorized recoverable lab devices, pinned manager/provider binaries/configuration. Observe actual accepted/retained bytes per ABI, first app/Zygote/system_server/companion/child-zygote mappings, grants and old consumers, secondary ABI and foreign-module continuity. Late maps absence is not never-mapped proof; one 64-bit worker is not all-process proof.
 
-Receiver admission and current-boot grant-boundary evidence are mandatory engineering acceptance criteria, not product choices delegated to users. Require paired protocol/manifest tests and conservative old-state migration; missing callbacks never prove safety. Test long-lived games, unexpected reboot after sticky publication, provider crash/safe mode, disabled Core, and notification denial/force-stop/unlock. Measure passive mapping PSS/private-dirty/startup cost. Research restarts/global commands are not production recovery. Missing, unobservable, unsupported, stale and not-run outcomes never become PASS. Host success is not Android acceptance.
+Receiver admission and current-boot grant-boundary evidence are mandatory engineering acceptance criteria, not product choices delegated to users. Require paired protocol/manifest tests and conservative old-state migration; missing callbacks never prove safety. Test long-lived games, unexpected reboot after explicit Zygisk publication/withdrawal, provider crash/safe mode, disabled Core, and notification denial/force-stop/unlock. Measure passive mapping PSS/private-dirty/startup cost. Research restarts/global commands are not production recovery. Missing, unobservable, unsupported, stale and not-run outcomes never become PASS. Host success is not Android acceptance.
 
 ## 14. Phased implementation proposal
 
@@ -427,11 +505,11 @@ Missing implementation is not a device-only gate; passing host tests cannot cert
 
 Resolve these once in architecture review, not at each Auto failure:
 
-1. **Sticky and selective first-install/material-change prepublication?** Recommend yes where supported, accepting passive mapping until natural boot; no initial general strict-zero toggle.
+1. **Explicit-selection lifecycle?** Certify preparation/withdrawal and retained-consumer proof across managers. No automatic Zygisk fallback or standby, including after prior consent, is a settled requirement rather than an open option.
 2. **Recovery budgets?** Recommend one same-owner repair, two alternative attempts and one automatic boot-bound transition per durable episode; diagnostic retries separate.
 3. **Initial manager/bootstrap support matrix?** Certify concrete atomic staging/readback contracts; unsupported combinations stay explicit, not a second activator.
 4. **Incomparable semantic coverage?** Retain useful safe current protection and disclose gaps until a reviewed semantic priority exists; no default-user backend comparison.
-Auto versus Manual, no hidden Manual fallback, mandatory safety, no autonomous reboot and separate provisioning consent are settled requirements, not open questions.
+Auto versus Manual, no hidden Manual fallback, mandatory safety, no autonomous reboot, separate provisioning consent and explicit informed Zygisk selection before discovery, and exclusion of Zygisk from Auto/standby are settled requirements, not open questions. The broader policy implementation pause remains in force.
 
 ## Source notes
 
