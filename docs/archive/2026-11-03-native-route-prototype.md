@@ -92,3 +92,21 @@ Evidence is retained in `vpnhide-build-evidence/rfc2/native-route-scope/` separa
 from the earlier full-table prototype. This follow-up changes only the local model
 and engineering worker; production RPC/schema versions and its missing-route status
 remain unchanged.
+
+## Cleanup ownership follow-up
+
+The engineering owner now captures a known boot UUID and the current thread's
+network-namespace identity before allocation. Cleanup retains actual ifindices and
+both names around the ordinary-interface rename. Detailed setup failures retain
+created/unknown ownership plus independent readback, rather than discarding that
+information into an error string. Unknown identities and namespace/boot changes
+withhold cleanup; the code never deletes a possibly replaced object by name.
+
+Three targeted ownership/request tests, strict host/all-target and both Android
+ARM library Clippy checks passed. RAW `52d7291cc44cf9863e5152fb700dcf499b8d6c893d296979cac8402c223f42d8`
+and protected `6561f3d6243be53941e8d1ca301e3267330c3183d06fa2a295ab995506c4014a`
+passed all eight route vectors and lifecycle controls without skips. Evidence is
+retained separately under `vpnhide-build-evidence/rfc2/native-route-ownership/`.
+The run-coordinator/worker wire is still not connected; this remains a gated
+engineering fixture. No new backend-policy implementation, phone change or public
+release is included in this ownership correction.

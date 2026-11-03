@@ -95,7 +95,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if args.as_slice() == ["route-crash-owner"] {
         let fixture =
             vpnhide_core_daemon::autonomous::route_fixture::RouteFixture::create(0x0123_4567_89b2)?;
-        println!("{}", serde_json::to_string(&fixture.spec)?);
+        println!("{}", serde_json::to_string(&fixture.cleanup_plan())?);
         io::stdout().flush()?;
         // Actual process-exit cleanup; Rust owners are intentionally not dropped.
         unsafe { libc::_exit(0) };

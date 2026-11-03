@@ -121,6 +121,7 @@ pub fn verify(protected: bool) -> Result<(), Box<dyn std::error::Error>> {
 fn lifecycle_controls() -> Result<(), Box<dyn std::error::Error>> {
     use vpnhide_core_daemon::autonomous::route_fixture::observe_cleanup;
     let fixture = RouteFixture::create(0x0123_4567_89b1)?;
+    let plan = fixture.cleanup_plan();
     let spec = fixture.spec.clone();
     let last = fixture.duplicate_for_oracle(false)?;
     let closed = fixture.close_for_oracle();
@@ -128,7 +129,7 @@ fn lifecycle_controls() -> Result<(), Box<dyn std::error::Error>> {
         return Err("duplicated route FD falsely reports cleanup".into());
     }
     drop(last);
-    let (cleanup, clean) = observe_cleanup(&spec);
+    let (cleanup, clean) = observe_cleanup(&plan);
     if !clean || !spec.negative(&cleanup) {
         return Err("last route FD failed to remove owned objects".into());
     }
@@ -139,15 +140,16 @@ fn lifecycle_controls() -> Result<(), Box<dyn std::error::Error>> {
     if !output.status.success() {
         return Err("crash route owner did not reach _exit".into());
     }
-    let spec: vpnhide_diagnostic_model::RouteFixtureSpec = serde_json::from_slice(&output.stdout)?;
-    let (cleanup, clean) = observe_cleanup(&spec);
-    if !spec.valid() || !clean || !spec.negative(&cleanup) {
+    let plan: vpnhide_core_daemon::autonomous::route_fixture::RouteCleanupPlan =
+        serde_json::from_slice(&output.stdout)?;
+    let (cleanup, clean) = observe_cleanup(&plan);
+    if !plan.valid() || !clean || !plan.spec.negative(&cleanup) {
         return Err("process-exit route cleanup failed".into());
     }
     println!("ROUTE_CRASH_CONTROL=PASS");
-    let spec = RouteFixture::failed_setup_for_oracle(0x0123_4567_89b3)?;
-    let (cleanup, clean) = observe_cleanup(&spec);
-    if !spec.valid() || !clean || !spec.negative(&cleanup) {
+    let plan = RouteFixture::failed_setup_for_oracle(0x0123_4567_89b3)?;
+    let (cleanup, clean) = observe_cleanup(&plan);
+    if !plan.valid() || !clean || !plan.spec.negative(&cleanup) {
         return Err("partial route setup cleanup failed".into());
     }
     println!("ROUTE_SETUP_FAILURE_CONTROL=PASS");
