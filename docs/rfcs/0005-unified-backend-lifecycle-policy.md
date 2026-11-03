@@ -1,8 +1,8 @@
 # RFC 0005: Unified backend selection and lifecycle policy
 
-Status: **Proposed — awaiting maintainer review. Not implementation approval.**  
-Research baseline: `5a14350b988d6a7e37635f324eb517dcf30a838f`, 2 November 2026.  
-Scope: Core-owned backend selection, health, bounded recovery, Zygisk discovery, maintenance, migration, and user attention.  
+Status: **Proposed — awaiting maintainer review. Not implementation approval.**\
+Research baseline: `5a14350b988d6a7e37635f324eb517dcf30a838f`, 2 November 2026.\
+Scope: Core-owned backend selection, health, bounded recovery, Zygisk discovery, maintenance, migration, and user attention.\
 Document identity: RFC 0005, a consolidated proposal filed for review.
 
 This RFC defines one policy for a user who wants protection to work without learning the differences between a built-in driver, a kernel module, KPM, and Zygisk. **Auto is the default: Core chooses and safely recovers the implementation, including when protection is only partial. Manual is an advanced override: Core uses the explicitly requested backend, permits a safe partial result, and never silently substitutes another backend. Neither mode bypasses compatibility, authenticity, ownership, or nonoverlap rules.**
