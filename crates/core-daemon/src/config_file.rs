@@ -5,37 +5,24 @@
 //! and LSPosed reads it directly (no RPC — it hooks in `system_server`). So this module is
 //! the disk codec between that on-disk JSON and core's clean [`CanonicalConfig`].
 //!
-//! # The on-disk format is polymorphic; the model is not
+//! Schema-1 normalization and strict import parsing live in the shared
+//! `core-rpc::canonical` codec, also exposed to the APK through typed local UniFFI.
+//! This module owns filesystem reads, atomic replacement, reader metadata and
+//! post-rename uncertainty; it is not a second format implementation.
 //!
-//! The legacy format the app writes today (`StorageConfig.kt`) encodes some fields several
-//! ways: `java` is a bool *or* a hook-name array; `native` is a bool, an array, *or* an
-//! object; `hidden` is written only when true; `portPolicy` only when `ports`. That is a
-//! wire-encoding concern, not a data concern — the normalized [`CanonicalConfig`] carries
-//! the same information (`java: bool` + `java_hooks: Option`, `native: {enabled,kernel,
-//! zygisk}`). This module is a faithful port of `parseCanonicalConfig` /
-//! `canonicalConfigJson`, so a file written by the old app reads identically, and a file
-//! core writes is read identically by LSPosed and the activator (which must not change).
-//!
-//! The activator's own `CanonicalConfig` (`crates/activator/model.rs`) is a **lossy,
-//! deserialize-only** read model (it collapses `java` to a bool it never uses); it cannot
-//! be reused here, where the round-trip must lose nothing.
-//!
-//! The path is a parameter, so the dev sandbox core points at an isolated file and never
-//! touches the real `/data/system/vpnhide_config.json`.
+//! The path is injectable for isolated tests; production uses the fixed canonical
+//! location. The tolerant Kotlin system_server hook reader remains a scoped
+//! read-only compatibility adapter; it cannot validate imports or authorize writes.
 
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-#[cfg(test)]
-use serde_json::json;
 use vpnhide_core_rpc::CanonicalConfig;
-#[cfg(test)]
-use vpnhide_core_rpc::{AppConfig, NativeRole, PortPolicy, PortProtocol, PortRule, Settings};
 
-mod codec;
-pub use codec::{parse_status, to_json_string};
+pub use codec::{ConfigLoad, parse_status, to_json_string};
+use vpnhide_core_rpc::canonical as codec;
 
 /// The production path of the durable canonical config.
 pub const DEFAULT_CONFIG_PATH: &str = "/data/system/vpnhide_config.json";
@@ -50,19 +37,6 @@ pub fn config_path_from_env() -> PathBuf {
         Ok(p) if !p.is_empty() => PathBuf::from(p),
         _ => PathBuf::from(DEFAULT_CONFIG_PATH),
     }
-}
-
-/// Outcome of loading the durable canonical config. Absent, present, and
-/// unsupported schema are **distinct** — never collapse unsupported/invalid into
-/// an empty default config (core-2.0 §4 / exclusive-ownership gate).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConfigLoad {
-    /// File missing (or empty import input). An existing blank file is an error.
-    Absent,
-    /// Parsed `version: 1` config.
-    Present(CanonicalConfig),
-    /// File exists with a schema version this build must not interpret.
-    UnsupportedVersion { version: u32 },
 }
 
 /// Read with full Absent / Present / Unsupported distinction.
@@ -120,9 +94,7 @@ fn write_atomic_with_sync(
     metadata: impl FnOnce(&fs::File) -> io::Result<()>,
     sync_directory: impl FnOnce(&Path) -> io::Result<()>,
 ) -> io::Result<()> {
-    let value = codec::to_disk(config);
-    let mut text = serde_json::to_string_pretty(&value)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let mut text = codec::to_pretty_json_string(config);
     text.push('\n');
 
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -203,9 +175,18 @@ fn set_reader_metadata(file: &fs::File) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::codec::{app_from_disk, from_disk, to_disk};
     use super::*;
-    use std::collections::{BTreeMap, BTreeSet};
+
+    fn fixture_config() -> CanonicalConfig {
+        match parse_status(include_str!(
+            "../../../fixtures/migrations/canonical-v1.json"
+        ))
+        .unwrap()
+        {
+            ConfigLoad::Present(config) => config,
+            _ => panic!("fixture missing"),
+        }
+    }
 
     #[test]
     fn shared_v1_fixture_normalizes_once_and_survives_atomic_roundtrip() {
@@ -224,108 +205,11 @@ mod tests {
         );
     }
 
-    fn app(f: impl FnOnce(&mut AppConfig)) -> AppConfig {
-        let mut a = AppConfig::default();
-        f(&mut a);
-        a
-    }
-
-    fn set(items: &[&str]) -> BTreeSet<String> {
-        items.iter().map(|s| s.to_string()).collect()
-    }
-
-    /// native=all (enabled, no per-hook overrides).
-    fn native_all() -> NativeRole {
-        NativeRole {
-            enabled: true,
-            kernel: None,
-            zygisk: None,
-        }
-    }
-
-    /// A config exercising every polymorphic shape and conditional field.
-    fn rich() -> CanonicalConfig {
-        let mut apps = BTreeMap::new();
-        // java=all, native=all
-        apps.insert(
-            "com.a".into(),
-            app(|a| {
-                a.java = true;
-                a.native = native_all();
-            }),
-        );
-        // java per-hook list, native per-hook object with both families
-        apps.insert(
-            "com.b".into(),
-            app(|a| {
-                a.java = true;
-                a.java_hooks = Some(vec!["hookX".into(), "hookY".into()]);
-                a.native = NativeRole {
-                    enabled: true,
-                    kernel: Some(vec!["k1".into()]),
-                    zygisk: Some(vec!["z1".into(), "z2".into()]),
-                };
-            }),
-        );
-        // hidden only, app_hiding
-        apps.insert(
-            "com.c".into(),
-            app(|a| {
-                a.hidden = true;
-                a.app_hiding = true;
-            }),
-        );
-        // ports with a policy (single-port rule + range rule)
-        apps.insert(
-            "com.d".into(),
-            app(|a| {
-                a.ports = true;
-                a.port_policy = Some(PortPolicy {
-                    mode: "custom".into(),
-                    preset: Some("torrents".into()),
-                    rules: vec![
-                        PortRule {
-                            protocol: PortProtocol::Tcp,
-                            start: 443,
-                            end: 443,
-                        },
-                        PortRule {
-                            protocol: PortProtocol::Both,
-                            start: 6881,
-                            end: 6889,
-                        },
-                    ],
-                });
-            }),
-        );
-        CanonicalConfig {
-            version: 1,
-            debug: true,
-            debug_switch: false,
-            apps,
-            settings: Settings {
-                remember_superkey: true,
-                optional_features: set(&["filesystem_iface_paths"]),
-                auto_hide_vpn_services: false,
-                auto_hide_vpn_name: true,
-                auto_hide_excluded_packages: set(&["com.x"]),
-                auto_hidden_packages: set(&["com.y", "com.z"]),
-            },
-        }
-    }
-
-    #[test]
-    fn round_trips_through_disk() {
-        let cfg = rich();
-        let back = from_disk(&to_disk(&cfg)).expect("some");
-        assert_eq!(back, cfg);
-    }
-
     #[test]
     fn write_then_read_file_round_trips() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("vpnhide_config.json");
-        let cfg = rich();
+        let cfg = fixture_config();
         write_atomic(&path, &cfg).unwrap();
         // Mode is 0640 and the temp file is gone.
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
@@ -340,7 +224,7 @@ mod tests {
         let path = dir.path().join("vpnhide_config.json");
         let previous = CanonicalConfig::default();
         write_atomic(&path, &previous).unwrap();
-        let error = write_atomic_with_metadata(&path, &rich(), |_| {
+        let error = write_atomic_with_metadata(&path, &fixture_config(), |_| {
             Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "reader label denied",
@@ -357,7 +241,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
         write_atomic(&path, &CanonicalConfig::default()).unwrap();
-        let candidate = rich();
+        let candidate = fixture_config();
         let error = write_atomic_with_sync(&path, &candidate, set_reader_metadata, |_| {
             Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -376,99 +260,9 @@ mod tests {
         let victim = dir.path().join("other-file");
         fs::write(&victim, "untouched").unwrap();
         std::os::unix::fs::symlink(&victim, path.with_extension("json.tmp")).unwrap();
-        assert!(write_atomic(&path, &rich()).is_err());
+        assert!(write_atomic(&path, &fixture_config()).is_err());
         assert_eq!(fs::read_to_string(victim).unwrap(), "untouched");
         assert!(!path.exists());
-    }
-
-    #[test]
-    fn encodes_the_polymorphic_and_conditional_shapes() {
-        let v = to_disk(&rich());
-        let apps = v["apps"].as_object().unwrap();
-        // java: bool true (com.a) vs hook array (com.b)
-        assert_eq!(apps["com.a"]["java"], json!(true));
-        assert_eq!(apps["com.b"]["java"], json!(["hookX", "hookY"]));
-        // native: bool true (com.a) vs object (com.b)
-        assert_eq!(apps["com.a"]["native"], json!(true));
-        assert_eq!(
-            apps["com.b"]["native"],
-            json!({"enabled": true, "kernel": ["k1"], "zygisk": ["z1", "z2"]})
-        );
-        // hidden written only when true; com.a has no hidden key, com.c does
-        assert!(apps["com.a"].get("hidden").is_none());
-        assert_eq!(apps["com.c"]["hidden"], json!(true));
-        // portPolicy present only under ports; single-port rule omits `end`
-        assert!(apps["com.a"].get("portPolicy").is_none());
-        let rules = apps["com.d"]["portPolicy"]["rules"].as_array().unwrap();
-        assert!(rules[0].get("end").is_none()); // 443..443
-        assert_eq!(rules[1]["end"], json!(6889)); // range keeps end
-    }
-
-    #[test]
-    fn reads_a_legacy_app_written_file() {
-        // Shaped exactly like StorageConfig.kt's canonicalConfigJson output.
-        let raw = r#"{
-          "version": 1,
-          "debug": false,
-          "debugSwitch": true,
-          "apps": {
-            "com.bool": { "java": false, "native": true, "appHiding": false, "ports": false },
-            "com.arr": { "java": ["h1"], "native": ["k1", "k2"], "appHiding": true, "ports": false },
-            "com.norole": { "java": false, "native": false, "appHiding": false, "ports": false }
-          },
-          "settings": {
-            "rememberSuperkey": false,
-            "optionalFeatures": [],
-            "autoHideVpnServices": true,
-            "autoHideVpnName": false,
-            "autoHideExcludedPackages": [],
-            "autoHiddenPackages": []
-          }
-        }"#;
-        let cfg = from_disk(&serde_json::from_str(raw).unwrap()).expect("some");
-        assert!(cfg.debug_switch); // explicit, not defaulted from debug
-        // no-role app dropped
-        assert!(!cfg.apps.contains_key("com.norole"));
-        // bool native -> enabled, no overrides
-        assert_eq!(cfg.apps["com.bool"].native, native_all());
-        // array java -> java=true + hooks; array native -> kernel overrides
-        assert_eq!(
-            cfg.apps["com.arr"].java_hooks.as_deref(),
-            Some(&["h1".to_string()][..])
-        );
-        assert_eq!(
-            cfg.apps["com.arr"].native.kernel.as_deref(),
-            Some(&["k1".to_string(), "k2".to_string()][..])
-        );
-    }
-
-    #[test]
-    fn debug_switch_defaults_to_debug_when_absent() {
-        let raw = r#"{"version":1,"debug":true,"apps":{},"settings":{}}"#;
-        let cfg = from_disk(&serde_json::from_str(raw).unwrap()).unwrap();
-        assert!(cfg.debug_switch, "debugSwitch absent must inherit debug");
-    }
-
-    #[test]
-    fn disabled_native_object_drops_overrides() {
-        let raw = r#"{"native":{"enabled":false,"kernel":["k1"]},"appHiding":true}"#;
-        let a = app_from_disk(&serde_json::from_str(raw).unwrap());
-        assert_eq!(a.native, NativeRole::default());
-    }
-
-    #[test]
-    fn malformed_port_rule_disables_ports() {
-        // start out of range -> whole policy dropped -> ports disabled (present-but-bad).
-        let raw = r#"{"ports":true,"portPolicy":{"mode":"custom","rules":[{"start":70000}]}}"#;
-        let a = app_from_disk(&serde_json::from_str(raw).unwrap());
-        assert!(!a.ports);
-        assert!(a.port_policy.is_none());
-    }
-
-    #[test]
-    fn newer_version_is_refused() {
-        let raw = r#"{"version":2,"apps":{},"settings":{}}"#;
-        assert_eq!(from_disk(&serde_json::from_str(raw).unwrap()), None);
     }
 
     #[test]

@@ -104,6 +104,7 @@ import dev.okhsunrog.vpnhide.help.HelpScreen
 import dev.okhsunrog.vpnhide.migration.LegacyImportPrompt
 import dev.okhsunrog.vpnhide.migration.parseImportedCanonicalConfig
 import dev.okhsunrog.vpnhide.migration.parseLegacyConfigCandidate
+import dev.okhsunrog.vpnhide.migration.readCanonicalImportText
 import dev.okhsunrog.vpnhide.migration.toPrompt
 import dev.okhsunrog.vpnhide.next
 import dev.okhsunrog.vpnhide.picker.AppListCache
@@ -1019,8 +1020,7 @@ private suspend fun importConfigFromUri(
         runCatching {
             context.contentResolver
                 .openInputStream(uri)
-                ?.bufferedReader(StandardCharsets.UTF_8)
-                ?.use { it.readText() }
+                ?.use(::readCanonicalImportText)
         }.getOrNull() ?: return ConfigImportResult.InvalidJson
     val canonical = parseImportedCanonicalConfig(raw, context.packageName) ?: return ConfigImportResult.InvalidJson
     val result =

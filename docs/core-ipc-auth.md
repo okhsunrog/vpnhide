@@ -61,7 +61,7 @@ Other read/write errors propagate. Peer authorization remains required in every 
 | Bound | Value |
 |-------|--------|
 | Max frame | `MAX_FRAME_BYTES` = 1 MiB (`LengthDelimitedCodec`) |
-| Resulting canonical config | 512 KiB each for disk and normalized RPC JSON (`config_edit::validate_candidate`; app additionally checks disk size) |
+| Resulting canonical config | 512 KiB each for disk and normalized RPC JSON (shared `core-rpc::canonical::MAX_CONFIG_BYTES`; Core checks both encodings, APK imports/SAF and intent preview consume the shared limit) |
 | Concurrent connections | `MAX_CONCURRENT_CONNECTIONS` = 8 |
 | State long-poll | `STATE_HOLD` / `STATE_POLL_DEADLINE` |
 | Writer queue | 16 tasks; overload returns Busy |

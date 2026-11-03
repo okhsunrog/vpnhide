@@ -37,6 +37,7 @@
 
 use std::time::Duration;
 
+pub mod canonical;
 mod config;
 mod diag;
 mod edit;

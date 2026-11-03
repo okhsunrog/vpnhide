@@ -248,7 +248,7 @@ ROM parsing or hook coverage; these still require device validation.
 ## Review hardening and migration boundary
 
 Canonical file IO is separated from the pure schema-1 adapter in
-`crates/core-daemon/src/config_file/codec.rs`. Present invalid fields, overflowing
+`crates/core-rpc/src/canonical.rs`, also used by the APK import bridge. Present invalid fields, overflowing
 versions and blank files fail startup without replacing their contents. Schema 1
 is still the live LSPosed interchange contract, so it is retained deliberately.
 The typed engine does not interpret polymorphic disk roles.

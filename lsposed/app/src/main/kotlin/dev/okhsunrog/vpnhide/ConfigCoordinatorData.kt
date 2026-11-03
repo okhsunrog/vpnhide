@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 import uniffi.vpnhide_core_ffi.CoreRecoveryAccess
+import uniffi.vpnhide_core_ffi.canonicalConfigMaxBytes
 
 internal enum class ConfigCoordinatorMode { Initializing, Open, Missing, Invalid, Unavailable, Paused }
 
@@ -28,7 +29,7 @@ internal data class ConfigCoordinatorView(
     val rechecking: Boolean = false,
 )
 
-internal const val MAX_CORE_CONFIG_BYTES = 512 * 1024
+internal val MAX_CORE_CONFIG_BYTES: Int = canonicalConfigMaxBytes().toInt()
 
 internal data class PreparedConfigIntent(
     val candidate: CanonicalConfig,

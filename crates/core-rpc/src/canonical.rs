@@ -1,12 +1,25 @@
 //! Pure adapter for canonical disk/interchange schema 1. This is also the current
 //! LSPosed format, not a second runtime configuration model. All normalization is
 //! confined here; the privileged engine operates on typed CanonicalConfig.
-use super::ConfigLoad;
+use crate::{AppConfig, CanonicalConfig, NativeRole, PortPolicy, PortProtocol, PortRule, Settings};
 use serde_json::{Map, Value, json};
 use std::io;
-use vpnhide_core_rpc::{
-    AppConfig, CanonicalConfig, NativeRole, PortPolicy, PortProtocol, PortRule, Settings,
-};
+/// Shared maximum for canonical text/import and normalized RPC config bytes.
+pub const MAX_CONFIG_BYTES: usize = 512 * 1024;
+
+/// Outcome of loading the durable canonical config. Absent, present, and
+/// unsupported schema are **distinct** — never collapse unsupported/invalid into
+/// an empty default config (core-2.0 §4 / exclusive-ownership gate).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigLoad {
+    /// File missing (or empty import input). An existing blank file is an error.
+    Absent,
+    /// Parsed `version: 1` config.
+    Present(CanonicalConfig),
+    /// File exists with a schema version this build must not interpret.
+    UnsupportedVersion { version: u32 },
+}
+
 /// Decode on-disk canonical JSON text with the same Absent / Present / Unsupported
 /// distinction as `config_file::read_status`. The app and LSPosed still use this
 /// disk interchange format; normalization stays outside the command engine.
@@ -115,7 +128,7 @@ fn validate_disk_shape(root: &Value) -> io::Result<u32> {
 }
 
 /// Serialize the config to the on-disk JSON string (the polymorphic legacy format), the same
-/// text [`write_atomic`] persists. Core hands this to the activator projection, which parses
+/// text the privileged atomic writer persists. Core hands this to the activator projection, which parses
 /// exactly this shape (§4: core absorbs the activator, so it feeds it the durable canon).
 pub fn to_json_string(config: &CanonicalConfig) -> String {
     // to_disk builds a finite, well-formed Value, so serialization cannot fail.
@@ -124,7 +137,7 @@ pub fn to_json_string(config: &CanonicalConfig) -> String {
 
 // ---- disk JSON -> model (port of parseCanonicalConfig) ----------------------------------
 
-pub(super) fn from_disk(root: &Value) -> Option<CanonicalConfig> {
+fn from_disk(root: &Value) -> Option<CanonicalConfig> {
     let version = root.get("version").and_then(Value::as_u64).unwrap_or(1) as u32;
     // A newer schema than this build understands: refuse rather than misread it.
     if version > 1 {
@@ -165,7 +178,7 @@ pub(super) fn from_disk(root: &Value) -> Option<CanonicalConfig> {
     })
 }
 
-pub(super) fn app_from_disk(value: &Value) -> AppConfig {
+fn app_from_disk(value: &Value) -> AppConfig {
     let (java, java_hooks) = hook_role(value.get("java"));
 
     let ports_requested = value.get("ports").and_then(Value::as_bool).unwrap_or(false);
@@ -295,7 +308,7 @@ fn port_rule_from_disk(obj: &Map<String, Value>) -> Option<PortRule> {
 
 // ---- model -> disk JSON (port of canonicalConfigJson) -----------------------------------
 
-pub(super) fn to_disk(config: &CanonicalConfig) -> Value {
+fn to_disk(config: &CanonicalConfig) -> Value {
     let mut apps = Map::new();
     for (pkg, app) in &config.apps {
         if has_any_role(app) {
@@ -438,3 +451,30 @@ fn string_set_at(v: Option<&Value>, key: &str) -> std::collections::BTreeSet<Str
 fn sorted_array(set: &std::collections::BTreeSet<String>) -> Value {
     Value::Array(set.iter().map(|s| Value::String(s.clone())).collect())
 }
+
+/// Pretty disk encoding shares the same normalization as compact exports.
+pub fn to_pretty_json_string(config: &CanonicalConfig) -> String {
+    serde_json::to_string_pretty(&to_disk(config)).expect("config serializes")
+}
+
+/// Import accepts only the supported schema; damaged/future/absent input never
+/// becomes an empty replacement. The caller adds self policy through its shared
+/// migration policy and still commits via Core's ordinary validated command.
+pub fn parse_import(raw: &str) -> io::Result<CanonicalConfig> {
+    if raw.len() > MAX_CONFIG_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "config import exceeds limit",
+        ));
+    }
+    match parse_status(raw)? {
+        ConfigLoad::Present(config) if config.version == 1 => Ok(config),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unsupported or absent config import",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests;

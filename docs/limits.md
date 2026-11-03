@@ -177,7 +177,7 @@ Generated UniFFI types carry requests; there is no serialized-text request facad
 |---|---|---|
 | One RPC frame (either direction) | 1 MiB | `MAX_FRAME_BYTES`, `crates/core-rpc/src/lib.rs` |
 | Concurrent socket connections | 8 | `MAX_CONCURRENT_CONNECTIONS`, same file |
-| Resulting canonical config | 512 KiB in each of disk JSON and normalized RPC JSON | daemon admission and startup, `config_edit::validate_candidate` |
+| Resulting canonical config | 512 KiB in each of disk JSON and normalized RPC JSON | shared `core-rpc::canonical::MAX_CONFIG_BYTES`, daemon admission/startup, local import/SAF and APK intent preview |
 | Atomic field batch | 4096 edits; no nested batch/import/repair | `MAX_BATCH_EDITS`, core-rpc; daemon admission |
 | RPC handlers | 16 tracked requests / 32 driver futures per connection; 128 / 256 globally at 8 connections | core-daemon `server` |
 | Physical blocking RPC workers | 6 ordinary + 2 recovery + 2 recording status; permits held until physical return | core-daemon `server` |
