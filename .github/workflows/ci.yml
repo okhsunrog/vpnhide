@@ -198,9 +198,11 @@ jobs:
         env:
           REPO: ${{ github.repository }}
         run: |
-          echo "image=ghcr.io/${REPO,,}/ci:latest" >> "$GITHUB_OUTPUT"
-          echo "ddkqemu=ghcr.io/${REPO,,}/ddk-qemu" >> "$GITHUB_OUTPUT"
-          echo "kpmlegacy=ghcr.io/${REPO,,}/kpm-qemu-legacy:aosp-20260918" >> "$GITHUB_OUTPUT"
+          {
+            echo "image=ghcr.io/${REPO,,}/ci:latest"
+            echo "ddkqemu=ghcr.io/${REPO,,}/ddk-qemu"
+            echo "kpmlegacy=ghcr.io/${REPO,,}/kpm-qemu-legacy:aosp-20260918"
+          } >> "$GITHUB_OUTPUT"
 
   # Build native probes from the PR checkout once, then feed those exact
   # binaries to every QEMU job. The long-lived QEMU images also carry fallback
@@ -413,6 +415,10 @@ jobs:
         run: |
           gcc -O2 -Wall -Wextra -Werror -Wno-unused-parameter -o /tmp/test_socket_bind_index kmod/test_socket_bind_index.c
           /tmp/test_socket_bind_index
+      - name: KPM NULL-ifconf count regression test (host build)
+        run: |
+          gcc -O2 -Wall -Wextra -Werror -Wno-unused-parameter -o /tmp/test_ifconf_count kmod/test_ifconf_count.c
+          timeout 10s /tmp/test_ifconf_count
       - name: kmod closed init result contract (host build)
         run: |
           gcc -O2 -Wall -Wextra -Werror -o /tmp/test_init_contract kmod/test_init_contract.c
@@ -592,7 +598,7 @@ jobs:
         # against the GKI kdir mismatches and panics on some KMIs (e.g. 6.12).
         # run.sh boots the baked kernel (VPNHIDE_QEMU_IMAGE/ROOTFS from ENV).
         run: |
-          CLANG_BIN="$(ls -d /opt/ddk/clang/*/bin | head -1)"
+          CLANG_BIN="$(printf '%s\n' /opt/ddk/clang/*/bin | head -1)"
           make -C kmod KERNEL_SRC="$VPNHIDE_QEMU_KSRC" CLANG_DIR="$CLANG_BIN"
           VPNHIDE_QEMU_KO="$PWD/kmod/vpnhide_kmod.ko" kmod/test/run.sh "$KMI"
           VPNHIDE_QEMU_KO="$PWD/kmod/vpnhide_kmod.ko" VPNHIDE_QEMU_NATIVE_FIXTURE_MODE=raw kmod/test/run.sh "$KMI"
@@ -663,7 +669,7 @@ jobs:
           VPNHIDE_BIND_REQUIRED: "1"
           VPNHIDE_IOC_REQUIRED: "1"
         run: |
-          CLANG_BIN="$(ls -d /opt/ddk/clang/*/bin | head -1)"
+          CLANG_BIN="$(printf '%s\n' /opt/ddk/clang/*/bin | head -1)"
           make -C kmod kpm CLANG_DIR="$CLANG_BIN"
           kmod/test/run-kpm.sh "$KMI"
 
@@ -833,7 +839,7 @@ jobs:
         # image carries it, and covers the PR until then.
         run: |
           set -euo pipefail
-          CLANG_BIN="$(ls -d /opt/ddk/clang/*/bin | head -1)"
+          CLANG_BIN="$(printf '%s\n' /opt/ddk/clang/*/bin | head -1)"
           export PATH="$CLANG_BIN:$PATH"
           KSRC="$VPNHIDE_QEMU_KSRC"
           uv run --python 3.12 builtin/scripts/integrate.py apply --kernel "$KSRC" --kmi "$KMI" --output /tmp/vpnhide-review

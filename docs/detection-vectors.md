@@ -202,10 +202,16 @@ kernel's original result are overwritten.
   with the compat `ifconf` layout. Deferred (low priority) — see
   [ROADMAP.md](../ROADMAP.md).
 
-The KPM backend's `filter_ifconf` compacts the fill the same way the `.ko` does,
-but does not yet reduce the `ifc_req == NULL` size query (it would need raw netdev
-walking by per-kver offset rather than the `.ko`'s rcu helpers); the size-query
-subcase is therefore `.ko`-only for now and remains a known KPM gap.
+KPM also reduces the native ARM64 `ifc_req == NULL` size query. Its bounded,
+read-only walker uses the ioctl socket's namespace under RTNL and no-fault reads.
+Qualified layout candidates must validate object owners, list links and the
+complete original kernel count; missing helpers, malformed objects, count changes
+or ambiguous layouts leave the response unchanged. The filled-buffer compactor
+uses the same interface-label predicate. The mandatory QEMU `ifconf_probe` checks
+size, fill, stale tail and ordinary-address preservation in separate RAW and
+protected boots. See the [qualification record](archive/2026-11-03-kpm-ifconf-qualification.md)
+for exact reference kernels and the rejected helper-hook experiment. Vendor
+layouts and genuine 32-bit compat callers are not inferred from these results.
 
 ### 3B. Route table — "is the default route a tunnel?"
 
@@ -410,8 +416,9 @@ detectors actually probe:
 - **Filesystem hiding is optional in both kernel backends.** It must be selected
   before reboot so the hot VFS probes are absent entirely on default boots.
   Zygisk does not cover the sysfs/proc-sys interface-node vectors.
-- **KPM SIOCGIFCONF size-query gap:** KPM compacts the returned ifreq array but
-  does not yet reduce the `ifc_req == NULL` size query the `.ko` handles (3A).
+- **KPM SIOCGIFCONF qualification:** native ARM64 NULL-query projection requires
+  a uniquely validated reference layout and helpers (3A). Unknown vendor layouts
+  and 32-bit compat enumeration remain unverified.
 - **Single-lookup route** (`rt_fill_info`) is intentionally unhooked — no stable
   static-function ABI; low value under split tunnel. See
   [ROADMAP.md](../ROADMAP.md).

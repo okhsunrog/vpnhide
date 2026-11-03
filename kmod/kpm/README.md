@@ -47,6 +47,25 @@ kmod/
 | Filtering algorithms | ✅ `shared/vpnhide_logic.h` | seq-buffer compaction, UID parse — freestanding, included by both backends |
 | Hook glue / struct access / control | ❌ per-backend | incompatible include worlds (`<linux/*.h>` vs KernelPatch `-nostdinc`) |
 
+Native ARM64 SIOCGIFCONF NULL queries use `ifconf_count.h`: a bounded RTNL walk
+of the **socket's** namespace through no-fault reads. The walker checks linked-list
+backlinks, address/device ownership, terminated labels and equality with the
+original kernel count before changing the returned length. Two validated layouts
+are still ambiguous and refuse a rewrite. This matters for Android 12/13 5.10,
+whose `net_device.ip_ptr` differs within the same Linux minor family. Missing
+helpers or an unrecognized vendor layout leave the original response intact;
+they do not prove concealment. The existing filled-buffer compactor remains
+required. Hooking a symbol named `inet_gifconf` was insufficient on the tested
+5.10 Full LTO kernel and is not used by this implementation.
+
+The [dated qualification record](../../docs/archive/2026-11-03-kpm-ifconf-qualification.md)
+lists the independently derived offsets and RAW/protected evidence. Reproduce
+modern layout facts with `test/abi/ifconf-offsets.c` against actual prepared
+kernel headers/configuration. `test_ifconf_count.c` executes the production walker
+over independent golden memory fixtures, including faults, cycles, mismatched
+counts, a different socket namespace and ambiguous candidates. These checks do
+not qualify Android process/SELinux behavior or 32-bit compat SIOCGIFCONF.
+
 The implementation relies on four design rules:
 
 1. **One source + a runtime `kver` offset table** (`kver_offsets.h`) produces

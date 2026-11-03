@@ -115,6 +115,87 @@ struct vpnhide_vfs_offsets {
 	unsigned int path_dentry;
 };
 
+/* NULL SIOCGIFCONF count walk. Layouts are independently derived from prepared
+ * reference headers/configurations or the actual reference Image instructions;
+ * do not extrapolate a missing family. A symbol alone does not prove live use.
+ */
+struct vpnhide_ifconf_offsets {
+	unsigned int net_dev_base_head;
+	unsigned int netdev_dev_list;
+	unsigned int netdev_ip_ptr;
+	unsigned int in_device_ifa_list;
+	unsigned int in_ifaddr_next;
+	unsigned int in_ifaddr_label;
+	unsigned int sock_from_file_args;
+};
+/* Exact reference configurations, not a claim about every vendor layout.
+ * android12/13-5.10 differ even within one Linux minor family. All candidates
+ * must validate the actual socket namespace, object owners and kernel count;
+ * more than one matching layout is ambiguous and cannot authorize a rewrite.
+ */
+/* Legacy reference Images: derived from the actual dev_ioctl/dev_ifconf and
+ * inet_gifconf machine code; see the dated qualification record. */
+static const struct vpnhide_ifconf_offsets vpnhide_ifconf_off_4_4[] = {
+	{ 272, 80, 696, 16, 16, 72, 2 },
+};
+static const struct vpnhide_ifconf_offsets vpnhide_ifconf_off_4_9[] = {
+	{ 288, 80, 720, 16, 16, 72, 2 },
+};
+static const struct vpnhide_ifconf_offsets vpnhide_ifconf_off_4_14[] = {
+	{ 272, 80, 704, 16, 16, 72, 2 },
+};
+static const struct vpnhide_ifconf_offsets vpnhide_ifconf_off_4_19[] = {
+	{ 272, 80, 696, 16, 16, 76, 2 },
+};
+static const struct vpnhide_ifconf_offsets vpnhide_ifconf_off_5_4[] = {
+	{ 144, 80, 720, 16, 16, 76, 2 },
+};
+static const struct vpnhide_ifconf_offsets vpnhide_ifconf_off_5_10[] = {
+	{ 144, 72, 720, 16, 16, 76, 2 }, /* android12 */
+	{ 144, 72, 728, 16, 16, 76, 2 }, /* android13 */
+};
+static const struct vpnhide_ifconf_offsets vpnhide_ifconf_off_5_15[] = {
+	{ 144, 64, 744, 16, 16, 76, 1 }, /* android13 + android14 */
+};
+static const struct vpnhide_ifconf_offsets vpnhide_ifconf_off_6_1[] = {
+	{ 144, 64, 720, 16, 16, 76, 1 },
+};
+static const struct vpnhide_ifconf_offsets vpnhide_ifconf_off_6_6[] = {
+	{ 144, 64, 728, 16, 16, 76, 1 },
+};
+static const struct vpnhide_ifconf_offsets vpnhide_ifconf_off_6_12[] = {
+	{ 144, 352, 968, 16, 16, 76, 1 },
+};
+static inline const struct vpnhide_ifconf_offsets *
+vpnhide_select_ifconf_offsets(unsigned int kver, unsigned int *count)
+{
+	*count = 1;
+	if (VPNHIDE_KVER_FAMILY(kver, 4, 4))
+		return vpnhide_ifconf_off_4_4;
+	if (VPNHIDE_KVER_FAMILY(kver, 4, 9))
+		return vpnhide_ifconf_off_4_9;
+	if (VPNHIDE_KVER_FAMILY(kver, 4, 14))
+		return vpnhide_ifconf_off_4_14;
+	if (VPNHIDE_KVER_FAMILY(kver, 4, 19))
+		return vpnhide_ifconf_off_4_19;
+	if (VPNHIDE_KVER_FAMILY(kver, 5, 4))
+		return vpnhide_ifconf_off_5_4;
+	if (VPNHIDE_KVER_FAMILY(kver, 5, 10)) {
+		*count = 2;
+		return vpnhide_ifconf_off_5_10;
+	}
+	if (VPNHIDE_KVER_FAMILY(kver, 5, 15))
+		return vpnhide_ifconf_off_5_15;
+	if (VPNHIDE_KVER_FAMILY(kver, 6, 1))
+		return vpnhide_ifconf_off_6_1;
+	if (VPNHIDE_KVER_FAMILY(kver, 6, 6))
+		return vpnhide_ifconf_off_6_6;
+	if (VPNHIDE_KVER_FAMILY(kver, 6, 12))
+		return vpnhide_ifconf_off_6_12;
+	*count = 0;
+	return 0;
+}
+
 static const struct vpnhide_vfs_offsets vpnhide_vfs_off_through_6_1 = {
 	.file_f_path = 16,
 	.path_dentry = 8,

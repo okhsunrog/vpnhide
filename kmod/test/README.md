@@ -108,6 +108,13 @@ size-query and stale-tail probe, and `VPNHIDE_BIND_BIN` /
 `VPNHIDE_BIND_REQUIRED=1` provide the equivalent control for the state-aware
 socket-bind probe.
 
+KPM full reports retain the independent fill/tail row and also require
+`ifconf_probe` for the complete NULL-size/fill/tail pair (36 rows). A clean filled
+buffer with the original unfiltered size cannot pass the latter. CI requires the
+actual bionic probe. The [KPM qualification record](../../docs/archive/2026-11-03-kpm-ifconf-qualification.md)
+lists all reference profiles and distinguishes platform-covered/not-applicable
+legacy bind cases from backend proof.
+
 Requirements: `docker` (for build-kernel.sh), `qemu-system-aarch64`, `cpio`,
 `curl`.
 

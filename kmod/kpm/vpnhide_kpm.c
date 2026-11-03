@@ -951,8 +951,9 @@ static void dev_ioctl_after(hook_fargs5_t *fargs, void *udata)
 
 #define VPNHIDE_SIOCGIFCONF 0x8912
 #define VPNHIDE_IFREQ_SZ 40 /* sizeof(struct ifreq) on arm64 */
+#include "ifconf_count.h"
 
-static int filter_ifconf(void *uifc)
+static int filter_ifconf(void *uifc, void *file)
 {
 	char e[VPNHIDE_IFREQ_SZ];
 	char zero[VPNHIDE_IFREQ_SZ] = { 0 };
@@ -973,8 +974,15 @@ static int filter_ifconf(void *uifc)
 	req = (char *)(unsigned long)(((uint64_t)req_hi << 32) | req_lo);
 	if (rc_len || rc_lo || rc_hi)
 		return 0;
-	if (!req || len <= 0)
+	if (len <= 0)
 		return 0;
+	if (!req) {
+		int projected;
+		if (!ifconf_project_length(file, len, &projected) ||
+		    _copy_to_user(uifc, &projected, sizeof(projected)))
+			return 0;
+		return 1;
+	}
 
 	n = len / VPNHIDE_IFREQ_SZ;
 	for (i = 0; i < n; i++) {
@@ -1016,9 +1024,11 @@ static void sock_ioctl_before(hook_fargs3_t *fargs, void *udata)
 	unsigned long cmd = (unsigned long)fargs->arg1;
 
 	fargs->local.data0 = 0;
+	fargs->local.data1 = 0;
 	if (cmd != VPNHIDE_SIOCGIFCONF || !hook_active(VPNHIDE_HOOK_SOCK_IOCTL))
 		return;
 	fargs->local.data0 = fargs->arg2;
+	fargs->local.data1 = fargs->arg0;
 }
 
 static void sock_ioctl_after(hook_fargs3_t *fargs, void *udata)
@@ -1027,7 +1037,7 @@ static void sock_ioctl_after(hook_fargs3_t *fargs, void *udata)
 
 	if ((long)fargs->ret != 0 || !argp)
 		return;
-	if (filter_ifconf(argp))
+	if (filter_ifconf(argp, (void *)fargs->local.data1))
 		record_hook_hit(VPNHIDE_HOOK_SOCK_IOCTL);
 }
 
@@ -1957,6 +1967,7 @@ static long vpnhide_kpm_init(const char *args, const char *event,
 		logki(MODNAME ": symbol resolution failed\n");
 		return -1;
 	}
+	resolve_ifconf_count_symbols();
 
 	/* Production passes the same boot-only switch as the .ko module parameter.
 	 * The headless QEMU harness may instead supply its initial control-v2

@@ -184,6 +184,9 @@ impl Plan {
             .into(),
             !self.probes.ifconf.present,
         );
+        if self.backend == Backend::Kpm {
+            result.insert("ifconf_probe".into(), !self.probes.ifconf.present);
+        }
         if self.backend != Backend::Kpm {
             result.insert("filesystem_stats".into(), false);
             result.insert("permanent_module".into(), false);
@@ -519,9 +522,9 @@ pub fn ifconf(fields: &BTreeMap<String, i64>) -> Option<Ifconf> {
 pub fn ifconf_pair(name: &str, raw: Option<Ifconf>, protected: Option<Ifconf>) -> ResultRow {
     classify_ifconf(name, raw, protected, true)
 }
-/// The existing KPM contract covers compaction, stale tail and ordinary-object
-/// preservation. Its separately documented NULL size-query gap remains open;
-/// this narrow vector must never be presented as full SIOCGIFCONF coverage.
+/// Compaction, stale tail and ordinary-object preservation, independently of
+/// the full size/fill check. This row cannot prove NULL-query concealment;
+/// the required `ifconf_probe` row checks that separate behavior.
 pub fn ifconf_tail(raw: Option<Ifconf>, protected: Option<Ifconf>) -> ResultRow {
     classify_ifconf("ifconf_tail", raw, protected, false)
 }
@@ -536,7 +539,7 @@ fn classify_ifconf(
         if size_query {
             "size/fill/tail"
         } else {
-            "fill/tail only; size query NOT covered (known KPM gap)"
+            "fill/tail only; size query NOT covered by this row"
         }
     );
     let (Some(r), Some(t)) = (raw, protected) else {
@@ -611,7 +614,7 @@ mod tests {
         assert_eq!(p.expected().unwrap().len(), 38);
         let mut k = p.clone();
         k.backend = Backend::Kpm;
-        assert_eq!(k.expected().unwrap().len(), 35);
+        assert_eq!(k.expected().unwrap().len(), 36);
         let mut required = p.clone();
         required.probes.gai.required = true;
         assert!(required.expected().is_err());
@@ -869,10 +872,17 @@ pub fn compare_kpm(plan: &Plan, raw: &PhaseReport, target: &PhaseReport) -> io::
                     report.rows.push(count(n, m, val(&r, k), val(&t, k)));
                 }
             }
-            "ifconf" => report.rows.push(ifconf_tail(
-                r.as_ref().and_then(ifconf),
-                t.as_ref().and_then(ifconf),
-            )),
+            "ifconf" => {
+                report.rows.push(ifconf_tail(
+                    r.as_ref().and_then(ifconf),
+                    t.as_ref().and_then(ifconf),
+                ));
+                report.rows.push(ifconf_pair(
+                    "ifconf_probe",
+                    r.as_ref().and_then(ifconf),
+                    t.as_ref().and_then(ifconf),
+                ));
+            }
             "ioctl" => {
                 for (n, k) in [
                     ("ioctl_hwaddr", "HWADDR_ERRNO"),
@@ -968,7 +978,7 @@ mod phase_tests {
     #[test]
     fn kpm_needs_distinct_complete_immutable_boots_and_positive_baselines() {
         let (plan, raw, target) = fixture();
-        assert_eq!(compare_kpm(&plan, &raw, &target).unwrap().rows.len(), 35);
+        assert_eq!(compare_kpm(&plan, &raw, &target).unwrap().rows.len(), 36);
         let mut bad = target.clone();
         bad.boot = raw.boot.clone();
         assert!(compare_kpm(&plan, &raw, &bad).is_err());
@@ -991,5 +1001,37 @@ mod phase_tests {
         plan.backend = Backend::Kmod;
         plan.probes.compat.present = true;
         assert!(plan.validate().is_err());
+    }
+
+    #[test]
+    fn kpm_full_report_rejects_unfiltered_null_query_even_with_clean_fill_and_tail() {
+        let (mut plan, mut raw, mut target) = fixture();
+        plan.probes.ifconf = Probe {
+            present: true,
+            required: true,
+        };
+        raw.plan.probes = plan.probes;
+        target.plan.probes = plan.probes;
+        let fields = |size, fill, vpn| {
+            Some(vec![
+                ("IFCONF_SIZE".into(), size),
+                ("IFCONF_FILL".into(), fill),
+                ("IFCONF_FILL_VPN".into(), vpn),
+                ("IFCONF_TAIL".into(), 0),
+                ("IFCONF_TAIL_VPN".into(), 0),
+            ])
+        };
+        raw.fields = vec![("ifconf".into(), fields(3, 3, 1))];
+        target.fields = vec![("ifconf".into(), fields(2, 2, 0))];
+        let report = compare_kpm(&plan, &raw, &target).unwrap();
+        assert_eq!(report.rows.len(), 36);
+        assert!(
+            report
+                .rows
+                .iter()
+                .any(|r| r.vector == "ifconf_probe" && r.verdict == Verdict::Pass)
+        );
+        target.fields = vec![("ifconf".into(), fields(3, 2, 0))];
+        assert!(compare_kpm(&plan, &raw, &target).is_err());
     }
 }

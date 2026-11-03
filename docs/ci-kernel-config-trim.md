@@ -134,3 +134,8 @@ which stay), `HID` (held up by `BT_HIDP` and a screenful of `=y` leaf drivers on
   `kmod/test/run.sh` (37 vectors), `kmod/test/run-kpm.sh` (35 vectors, the
   backend with the hardcoded offsets) and `builtin/test/run.sh` (38 vectors).
   No failures, no panics.
+
+Those counts describe the original trim qualification. Later KPM NULL-query
+coverage adds a required size/fill row: the [2026-11-03 qualification](archive/2026-11-03-kpm-ifconf-qualification.md)
+records 36 accepted rows on all seven GKI and five legacy reference Images,
+including the distinction between backend proof and legacy platform coverage.
