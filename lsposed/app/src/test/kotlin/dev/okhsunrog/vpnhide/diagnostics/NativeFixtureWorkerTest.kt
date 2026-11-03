@@ -27,6 +27,7 @@ class NativeFixtureWorkerTest {
             ordinaryMtu = CoreNumberSample.Value(65536u),
             binding = null,
             addresses = null,
+            filesystem = null,
             sysInterfaces = null,
             procInterfaces = null,
         )

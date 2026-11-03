@@ -108,6 +108,7 @@ pub struct TunFixture {
 }
 
 pub struct NativeCompletion {
+    pub filesystem: vpnhide_diagnostic_model::ScopedFilesystemResult,
     pub sys_interfaces: vpnhide_diagnostic_model::ScopedSysInterfaceResult,
     pub proc_interfaces: vpnhide_diagnostic_model::ScopedProcInterfaceResult,
     pub addresses: vpnhide_diagnostic_model::ScopedAddressResult,
@@ -294,6 +295,7 @@ impl TunFixture {
             app_raw,
         );
         NativeCompletion {
+            filesystem: result.filesystem,
             sys_interfaces: result.sys_interfaces,
             proc_interfaces: result.proc_interfaces,
             addresses: result.addresses,
@@ -339,6 +341,10 @@ impl TunFixture {
             &cleanup,
         ];
         NativeCompletion {
+            filesystem: vpnhide_diagnostic_model::evaluate_filesystem_fixture(
+                &self.spec,
+                measurements.map(|m| m.filesystem.as_ref()),
+            ),
             sys_interfaces: vpnhide_diagnostic_model::evaluate_sys_interface_fixture(
                 &self.spec,
                 [

@@ -34,6 +34,7 @@ class CoreStateBindingContractTest {
         CoreDiagnosticRun(
             null,
             null,
+            null,
             1uL,
             7uL,
             "boot",
@@ -188,5 +189,26 @@ class CoreStateBindingContractTest {
         result.leaked = emptyList()
         assertEquals(listOf("syscall.proc_ipv6_conf"), info.sysInterfaces?.leakedChecks)
         assertEquals(listOf("cleanup_unconfirmed"), info.sysInterfaces?.controls)
+    }
+
+    @Test
+    fun `lookup export preserves actor operation and incomplete controls without inferring pass`() {
+        val check =
+            uniffi.vpnhide_core_ffi.CoreFilesystemCheck(
+                CoreNativeReadActor.SYSCALL,
+                uniffi.vpnhide_core_ffi.CoreSysInterfaceSurface.PROC_IPV6_CONF,
+                uniffi.vpnhide_core_ffi.CoreFilesystemVector.STAT,
+            )
+        val result =
+            uniffi.vpnhide_core_ffi.CoreScopedFilesystemResult(
+                emptyList(),
+                listOf(check),
+                listOf(CoreControlFailure.PROBE_UNAVAILABLE),
+            )
+        val info = run.copy(filesystem = result).toDiagnosticInfo()
+        check.vector = uniffi.vpnhide_core_ffi.CoreFilesystemVector.ACCESS
+        result.leaked = emptyList()
+        assertEquals(listOf("syscall.proc_ipv6_conf.stat"), info.filesystem?.leakedChecks)
+        assertEquals(listOf("probe_unavailable"), info.filesystem?.controls)
     }
 }

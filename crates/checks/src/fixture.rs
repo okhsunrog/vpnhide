@@ -214,6 +214,7 @@ pub fn observe(name: &str) -> NativeMeasurement {
         Err(e) => Sample::Error(e),
     };
     NativeMeasurement {
+        filesystem: Some(crate::filesystem::observe(name)),
         sys_interfaces: Some(crate::sys_interfaces::observe()),
         proc_interfaces: Some(crate::proc_interfaces::observe()),
         addresses: Some(crate::address::observe(name)),

@@ -45,6 +45,20 @@ fn directories(
                     })
             })
 }
+fn lookups(value: &vpnhide_diagnostic_model::FilesystemMeasurement, present: bool) -> bool {
+    value.bounded()
+        && vpnhide_diagnostic_model::FilesystemCheck::required()
+            .iter()
+            .all(|check| {
+                value
+                    .entries
+                    .iter()
+                    .find(|e| e.check == *check)
+                    .is_some_and(|e| {
+                        e.fixture == Sample::Value(present) && e.ordinary == Sample::Value(true)
+                    })
+            })
+}
 pub fn worker(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     require(unsafe { libc::geteuid() } == 10000, "not oracle app UID")?;
     require(name.len() == 15 && name.starts_with("tun"), "bad fixture")?;
@@ -73,6 +87,7 @@ pub fn worker(name: &str) -> Result<(), Box<dyn std::error::Error>> {
             (
                 vpnhide_checks::fixture::interface_ioctl(&name, true),
                 vpnhide_checks::sys_interfaces::observe(),
+                vpnhide_checks::filesystem::observe(&name),
             )
         }
     })
@@ -80,7 +95,8 @@ pub fn worker(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     .map_err(|_| "ordinary thread failed")?;
     require(
         ordinary_thread.0 == Sample::Error(ProbeError::Errno(libc::ENODEV))
-            && directories(&ordinary_thread.1, &name, false),
+            && directories(&ordinary_thread.1, &name, false)
+            && lookups(&ordinary_thread.2, false),
         "RAW escaped to another thread of the same UID",
     )?;
     say(
@@ -149,6 +165,18 @@ pub fn verify(spec: &NativeFixtureSpec) -> Result<(), Box<dyn std::error::Error>
     require(lease.finish()?, "RAW expired before measurement completed")?;
     say(&mut writer, "protected")?;
     let protected: NativeMeasurement = serde_json::from_str(&line(&mut reader)?)?;
+    require(
+        raw.filesystem.as_ref().is_some_and(|v| lookups(v, true))
+            && protected
+                .filesystem
+                .as_ref()
+                .is_some_and(|v| lookups(v, false)),
+        "lookup RAW/protected/ordinary controls failed",
+    )?;
+    println!(
+        "RAW_THREAD_FILESYSTEM_OBSERVATIONS={}",
+        serde_json::json!({"raw":raw.filesystem,"protected":protected.filesystem})
+    );
     require(
         raw.sys_interfaces
             .as_ref()

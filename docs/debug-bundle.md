@@ -1,7 +1,7 @@
 # Reading a VPN Hide debug bundle
 
 Start with `state.json` inside the exported ZIP. This guide describes the current
-schema9, paired APK/Core RPC29 and diagnostic contract8. Historical captures use
+schema10, paired APK/Core RPC30 and diagnostic contract9. Historical captures use
 [the versioned reference](archive/2026-11-03-debug-bundle-legacy-reference.md).
 Current exports do not require a foreign VPN or split-tunnel membership, and
 collecting a file does not admit a diagnostic run.
@@ -46,6 +46,7 @@ wire versions are separate boundaries.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
+| 10 | main (unreleased) | `run.filesystem` preserves eighteen separate libc/direct-syscall stat/access/open-directory checks for sysfs and both proc-sys families, plus matching RAW observations. Denied/unsupported lookups remain unverified; late control failures retain qualified leaks. Directory enumeration remains separate. |
 | 9 | main (unreleased) | `run.sysInterfaces` retains separate libc/direct-getdents64 directory proof, leaks and controls for sysfs and both proc-sys families. All six require positive same-worker RAW and ordinary-object controls; this does not complete stat/access/open or promote a denied read to proof. Shared RAW receipts retain the corresponding actual observations. |
 | 8 | main (unreleased) | Native proof requires a correlated app RAW interval and confirmed revocation; privileged root controls alone remain unverified. `run.nativeRaw` preserves the full shared Rust receipt, including failed-scope observations and exact thread identity. Native evidence is retained before framework collection, so worker death cannot erase an already reported leak. |
 | 7 | main (unreleased) | `run.procInterfaces` retains per-surface libc/direct-syscall proof, leaks and controls for `/proc/net/dev` and `/proc/net/if_inet6`. A denied read is unverified; proc leaks remain distinct from proven address ioctls/netlink. |
@@ -90,7 +91,8 @@ reports scope honestly; current code has no whole-suite success variant.
 | `run.binding` | Separate libc/syscall actors, setter/readback and ordinary controls. A setter error cannot erase a positively observed binding leak. |
 | `run.addresses` | Per-actor/per-vector IPv4/IPv6 and NULL-buffer controls. Interface-only getifaddrs proof cannot establish address coverage. |
 | `run.procInterfaces` | `/proc/net/dev` and `/proc/net/if_inet6` through both read actors. Current reference `.ko` QEMU still exposes all four leaks. |
-| `run.sysInterfaces` | Six optional sysfs/proc-sys directory checks. Separate from the still-incomplete stat/access/open group. |
+| `run.filesystem` | Eighteen optional path-lookup checks, with actor, surface, operation, proof, leaks and controls. `ENOENT` is absence; permission denial and unsupported syscalls are errors. |
+| `run.sysInterfaces` | Six optional sysfs/proc-sys directory checks. Separate from the stat/access/open group. |
 | `run.frameworkAttribution` | Worker and system_server process births, boot, hook-source and fixture-profile identity. A fresh worker does not prove old target processes updated. |
 
 Unavailable stimulus, empty denied APIs, a clean Java answer or an installed-hook

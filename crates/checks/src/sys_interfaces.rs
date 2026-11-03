@@ -11,7 +11,7 @@ use vpnhide_diagnostic_model::{
     SysInterfaceMeasurement, SysInterfaceObservation, SysInterfaceSurface,
 };
 
-fn path(surface: SysInterfaceSurface) -> &'static CStr {
+pub(crate) fn path(surface: SysInterfaceSurface) -> &'static CStr {
     match surface {
         SysInterfaceSurface::SysClassNet => c"/sys/class/net",
         SysInterfaceSurface::ProcIpv4Conf => c"/proc/sys/net/ipv4/conf",

@@ -211,6 +211,7 @@ fn worker_identity(
     })
 }
 struct NativeEvidence {
+    filesystem: vpnhide_diagnostic_model::ScopedFilesystemResult,
     sys_interfaces: vpnhide_diagnostic_model::ScopedSysInterfaceResult,
     proc_interfaces: ScopedProcInterfaceResult,
     addresses: ScopedAddressResult,
@@ -218,6 +219,7 @@ struct NativeEvidence {
     binding: ScopedBindResult,
 }
 struct MeasurementFailure {
+    filesystem: Option<Box<vpnhide_diagnostic_model::ScopedFilesystemResult>>,
     sys_interfaces: Option<Box<vpnhide_diagnostic_model::ScopedSysInterfaceResult>>,
     proc_interfaces: Option<Box<ScopedProcInterfaceResult>>,
     addresses: Option<Box<ScopedAddressResult>>,
@@ -309,6 +311,7 @@ impl Coordinator {
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
         let run = DiagnosticRun {
             native_raw: None,
+            filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,
@@ -361,6 +364,7 @@ impl Coordinator {
         let result = match &worker_lease {
             Ok(_) => self.measure(&state, session),
             Err(detail) => Err(MeasurementFailure {
+                filesystem: None,
                 sys_interfaces: None,
                 proc_interfaces: None,
                 addresses: None,
@@ -410,6 +414,7 @@ impl Coordinator {
         run.native_raw = raw_receipt;
         match result {
             Ok(evidence) => {
+                run.record_filesystem(evidence.filesystem);
                 run.record_sys_interfaces(evidence.sys_interfaces);
                 run.record_proc_interfaces(evidence.proc_interfaces);
                 run.record_addresses(evidence.addresses);
@@ -417,6 +422,7 @@ impl Coordinator {
                 run.record_binding(evidence.binding);
             }
             Err(failure) => {
+                run.filesystem = failure.filesystem.map(|v| *v);
                 run.sys_interfaces = failure.sys_interfaces.map(|v| *v);
                 run.proc_interfaces = failure.proc_interfaces.map(|v| *v);
                 run.addresses = failure.addresses.map(|v| *v);
@@ -461,6 +467,7 @@ impl Coordinator {
                 }
             }
             MeasurementFailure {
+                filesystem: None,
                 sys_interfaces: None,
                 proc_interfaces: None,
                 addresses: None,
@@ -579,6 +586,7 @@ impl Coordinator {
         }
         match report {
             Ok(_) if cleaned => Ok(NativeEvidence {
+                filesystem: completion.filesystem,
                 sys_interfaces: completion.sys_interfaces,
                 proc_interfaces: completion.proc_interfaces,
                 addresses: completion.addresses,
@@ -586,6 +594,7 @@ impl Coordinator {
                 binding: completion.binding,
             }),
             Ok(_) => Err(MeasurementFailure {
+                filesystem: Some(Box::new(completion.filesystem)),
                 sys_interfaces: Some(Box::new(completion.sys_interfaces)),
                 proc_interfaces: Some(Box::new(completion.proc_interfaces)),
                 addresses: Some(Box::new(completion.addresses)),
@@ -595,6 +604,7 @@ impl Coordinator {
                 cleanup_confirmed: Some(false),
             }),
             Err(detail) => Err(MeasurementFailure {
+                filesystem: Some(Box::new(completion.filesystem)),
                 sys_interfaces: Some(Box::new(completion.sys_interfaces)),
                 proc_interfaces: Some(Box::new(completion.proc_interfaces)),
                 addresses: Some(Box::new(completion.addresses)),
@@ -1122,6 +1132,7 @@ mod tests {
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
             native_raw: None,
+            filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,
@@ -1153,6 +1164,7 @@ mod tests {
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
             native_raw: None,
+            filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,
@@ -1190,6 +1202,7 @@ mod tests {
         let snapshot = state.snapshot();
         let run = DiagnosticRun {
             native_raw: None,
+            filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,

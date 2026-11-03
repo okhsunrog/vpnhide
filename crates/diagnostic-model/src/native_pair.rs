@@ -3,6 +3,7 @@
 use crate::*;
 
 pub struct PairedNativeResult {
+    pub filesystem: ScopedFilesystemResult,
     pub sys_interfaces: ScopedSysInterfaceResult,
     pub native: ScopedNativeResult,
     pub addresses: ScopedAddressResult,
@@ -134,6 +135,16 @@ pub fn evaluate_paired_native_fixture(
         &app_sys.leaked,
         &app_sys.controls,
     );
+    let mut filesystem = evaluate_filesystem_fixture(spec, samples.map(|m| m.filesystem.as_ref()));
+    let app_fs = evaluate_filesystem_fixture(spec, app_samples.map(|m| m.filesystem.as_ref()));
+    merge(
+        &mut filesystem.proven,
+        &mut filesystem.leaked,
+        &mut filesystem.controls,
+        &app_fs.proven,
+        &app_fs.leaked,
+        &app_fs.controls,
+    );
     let mut binding = evaluate_bind_fixture(spec, negative, root_start, worker, root_end, cleanup);
     let app_binding = evaluate_bind_fixture(spec, negative, raw, worker, root_end, cleanup);
     merge(
@@ -145,6 +156,7 @@ pub fn evaluate_paired_native_fixture(
         &app_binding.controls,
     );
     PairedNativeResult {
+        filesystem,
         sys_interfaces,
         native,
         addresses,
@@ -186,6 +198,7 @@ pub(crate) mod tests {
             ifaddrs: None,
         };
         let negative = NativeMeasurement {
+            filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,

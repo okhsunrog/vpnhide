@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use vpnhide_core_daemon::autonomous::native_fixture::TunFixture;
 use vpnhide_diagnostic_model::{
-    AddressCheck, BindActor, ControlFailure, NativeFixtureSpec, NativeMeasurement,
+    AddressCheck, BindActor, ControlFailure, FilesystemCheck, NativeFixtureSpec, NativeMeasurement,
     ProcInterfaceCheck, ScopedNativeResult, SysInterfaceCheck, cleanup_confirmed,
 };
 
@@ -185,6 +185,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .iter()
                 .all(|c| done.sys_interfaces.leaked.contains(c))
     };
+    println!(
+        "FIXTURE_FILESYSTEM_RESULT={}",
+        serde_json::to_string(&done.filesystem)?
+    );
+    let filesystem_expected = if protected {
+        done.filesystem.complete()
+    } else {
+        done.filesystem.controls.is_empty()
+            && done.filesystem.proven.is_empty()
+            && FilesystemCheck::required()
+                .iter()
+                .all(|c| done.filesystem.leaked.contains(c))
+    };
     // Current kernel backends do not filter these seq files. This independently
     // tests leak detection; it is not a claim that the product hides procfs.
     let proc_expected = done.proc_interfaces.proven.is_empty()
@@ -218,6 +231,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || !addresses_expected
         || !proc_expected
         || !sys_expected
+        || !filesystem_expected
         || routes()? != before
     {
         return Err("native differential/control/cleanup assertion failed".into());
@@ -247,6 +261,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || !incomplete.sys_interfaces.proven.is_empty()
         || !incomplete
             .sys_interfaces
+            .controls
+            .contains(&ControlFailure::CleanupUnconfirmed)
+        || incomplete.filesystem.leaked.len() != 18
+        || !incomplete.filesystem.proven.is_empty()
+        || !incomplete
+            .filesystem
             .controls
             .contains(&ControlFailure::CleanupUnconfirmed)
     {

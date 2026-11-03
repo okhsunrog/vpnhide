@@ -3,6 +3,7 @@
 pub mod address;
 pub mod binding;
 pub mod diagnostic_raw;
+pub mod filesystem;
 pub mod fixture;
 mod generated;
 pub mod netlink_read;

@@ -1,6 +1,6 @@
 //! Portable build compatibility values. These are distinct from the frozen
 //! backend control/telemetry wire in vpnhide_protocol. No runtime dependencies.
-pub const RPC_VERSION: u32 = 29;
+pub const RPC_VERSION: u32 = 30;
 pub const JOURNAL_VERSION: u32 = 13;
 pub const JOURNAL_MIN_READ: u32 = 1;
 

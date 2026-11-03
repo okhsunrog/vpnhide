@@ -1,5 +1,5 @@
 {
-    "schema": 9,
+    "schema": 10,
     "generatedAt": "2026-08-22T12:00:00+0300",
     "captureKind": "debug",
     "app": {
@@ -143,7 +143,8 @@
             "addresses": null,
             "procInterfaces": null,
             "nativeRaw": null,
-            "sysInterfaces": null
+            "sysInterfaces": null,
+            "filesystem": null
         },
         "assessment": {
             "phase": "incomplete",
@@ -342,7 +343,8 @@
                     "addresses": null,
                     "procInterfaces": null,
                     "nativeRaw": null,
-                    "sysInterfaces": null
+                    "sysInterfaces": null,
+                    "filesystem": null
                 },
                 "assessment": {
                     "phase": "incomplete",
@@ -465,7 +467,8 @@
                 "addresses": null,
                 "procInterfaces": null,
                 "nativeRaw": null,
-                "sysInterfaces": null
+                "sysInterfaces": null,
+                "filesystem": null
             },
             "assessment": {
                 "phase": "incomplete",

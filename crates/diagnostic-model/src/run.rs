@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{NativeFixtureSpec, NativeMeasurement, ScopedNativeResult};
 
-pub const DIAGNOSTIC_CONTRACT: u32 = 8;
+pub const DIAGNOSTIC_CONTRACT: u32 = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -153,6 +153,8 @@ pub enum DiagnosticOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticRun {
     #[serde(default)]
+    pub filesystem: Option<crate::ScopedFilesystemResult>,
+    #[serde(default)]
     pub sys_interfaces: Option<crate::ScopedSysInterfaceResult>,
     #[serde(default)]
     pub native_raw: Option<crate::NativeRawReceipt>,
@@ -170,6 +172,10 @@ pub struct DiagnosticRun {
     pub stale: bool,
 }
 impl DiagnosticRun {
+    pub fn record_filesystem(&mut self, result: crate::ScopedFilesystemResult) {
+        self.filesystem = Some(result);
+        self.refresh_missing();
+    }
     pub fn record_sys_interfaces(&mut self, result: crate::ScopedSysInterfaceResult) {
         self.sys_interfaces = Some(result);
         self.refresh_missing();
@@ -247,6 +253,7 @@ mod tests {
     fn four_native_successes_never_replace_the_supported_contract() {
         let mut run = DiagnosticRun {
             native_raw: Some(crate::assessment::tests::paired_receipt()),
+            filesystem: None,
             sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,

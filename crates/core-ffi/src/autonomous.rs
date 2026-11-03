@@ -20,6 +20,8 @@ mod proc_interfaces;
 pub use proc_interfaces::*;
 mod sys_interfaces;
 pub use sys_interfaces::*;
+mod filesystem;
+pub use filesystem::*;
 enum_map!(
     CoreRequiredCheck,
     RequiredCheck,
@@ -265,6 +267,7 @@ impl From<model::ScopedBindResult> for CoreScopedBindResult {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreNativeMeasurement {
+    pub filesystem: Option<CoreFilesystemMeasurement>,
     pub sys_interfaces: Option<CoreSysInterfaceMeasurement>,
     pub proc_interfaces: Option<CoreProcInterfaceMeasurement>,
     pub addresses: Option<CoreAddressMeasurement>,
@@ -279,6 +282,7 @@ pub struct CoreNativeMeasurement {
 impl From<model::NativeMeasurement> for CoreNativeMeasurement {
     fn from(v: model::NativeMeasurement) -> Self {
         Self {
+            filesystem: v.filesystem.map(Into::into),
             sys_interfaces: v.sys_interfaces.map(Into::into),
             proc_interfaces: v.proc_interfaces.map(Into::into),
             addresses: v.addresses.map(Into::into),
@@ -295,6 +299,7 @@ impl From<model::NativeMeasurement> for CoreNativeMeasurement {
 impl From<CoreNativeMeasurement> for model::NativeMeasurement {
     fn from(v: CoreNativeMeasurement) -> Self {
         Self {
+            filesystem: v.filesystem.map(Into::into),
             sys_interfaces: v.sys_interfaces.map(Into::into),
             proc_interfaces: v.proc_interfaces.map(Into::into),
             addresses: v.addresses.map(Into::into),
@@ -419,6 +424,7 @@ impl From<model::DiagnosticAssessment> for CoreDiagnosticAssessment {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreDiagnosticRun {
+    pub filesystem: Option<CoreScopedFilesystemResult>,
     pub sys_interfaces: Option<CoreScopedSysInterfaceResult>,
     pub native_raw: Option<CoreNativeRawReceipt>,
     pub session: u64,
@@ -460,6 +466,7 @@ impl From<model::DiagnosticRun> for CoreDiagnosticRun {
         };
         Self {
             native_raw: v.native_raw.map(Into::into),
+            filesystem: v.filesystem.map(Into::into),
             sys_interfaces: v.sys_interfaces.map(Into::into),
             proc_interfaces: v.proc_interfaces.map(Into::into),
             addresses: v.addresses.map(Into::into),

@@ -23,7 +23,7 @@ controls remain. An obsolete CLI request is refused before daemon/socket setup.
 ## Evidence and ownership
 
 The required plan comes from the supported contract and enabled features, not
-from the installed hook mask. Diagnostic contract8 requires SysInterfaces and
+from the installed hook mask. Diagnostic contract9 requires SysInterfaces and
 Filesystem only when the desired `filesystem_iface_paths` feature is enabled,
 matching RFC0002's optional-filesystem scope. Default route/proc-interface and
 framework requirements remain. Previous or truncated plans cannot be reused as
@@ -147,9 +147,23 @@ all six negative/RAW/protected/end/cleanup controls, including same-worker RAW,
 before reporting scoped directory coverage. Missing IPv6, denied sysfs/proc-sys,
 empty lists and lost cleanup remain unverified; qualified leaks survive late
 failures. This evidence is ignored when the optional feature is not requested.
-It does not complete the separate `Filesystem` stat/access/open requirement.
+The separate optional `Filesystem` group now observes eighteen path-lookup
+checks: libc and direct syscalls × these three parent directories × stat,
+access and open-directory. Each exact owned fixture path needs negative, positive
+RAW, protected, end and cleanup controls; ordinary `lo` paths stay visible.
+A successful lookup reveals the path. Only `ENOENT` means absence; denial,
+unsupported syscall or missing positive stimulus cannot prove hiding. Qualified
+worker leaks survive failed ordinary/end/cleanup controls, which independently
+withhold successful proof. Root and same-worker RAW proof intersect as for the
+other native groups. These lookups cannot substitute for directory enumeration.
 
-Routes/rules, remaining filesystem stimuli and framework active/
+Direct stat uses Linux statx's fixed 256-byte UAPI output buffer, without guessed
+ARM32 stat/stat64 layouts or private offsets. Older kernels that return `ENOSYS`
+remain unverified. Actual bionic, SELinux and secondary32-bit Android worker
+execution remain separate gates; both compiled ABIs alone establish neither.
+See [the scoped Linux qualification](archive/2026-11-03-native-filesystem-fixture-qualification.md).
+
+Routes/rules, remaining proc/socket stimuli and framework active/
 default/callback/PendingIntent controls still need implementation or expansion.
 Android bionic, SELinux, Java callback isolation and old game-process coverage need
 real device acceptance. QEMU/static libc evidence does not replace those gates.
