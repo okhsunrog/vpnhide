@@ -3,3 +3,6 @@
 pub const RPC_VERSION: u32 = 23;
 pub const JOURNAL_VERSION: u32 = 11;
 pub const JOURNAL_MIN_READ: u32 = 1;
+
+/// Shared Android ELF LOAD alignment for both app ABIs and the Core executable.
+pub const ANDROID_MAX_PAGE_SIZE: u32 = 16_384;

@@ -50,7 +50,7 @@ Historical evidence: [archive](docs/archive/README.md).
 | Host tooling boundaries and approved 13-file port | Replacement cutover implemented | Shared Rust ELF/bundle/signing/distribution/update-feed/reset/QEMU owners and callers replaced the approved Python/Shell logic. Real bionic probes and minimal bootstrap remain. Destructive cold rescue is still unimplemented; no offline journal wipe. [Tooling record](docs/archive/2026-11-02-host-tooling-audit.md). |
 | Core attention and Android notifications | Approved design; not implemented | Core active attention/update scheduling and durable dedup; explicit private wake → bounded RPC → native channels. Respect denial, force-stop and boot/unlock grace. Missing-Core bootstrap is separate. [RFC0004](docs/rfcs/0004-core-attention-notifications.md). |
 | Documentation ownership | Current/archive cutover implemented | Current localized help/contracts, decision metadata and dated evidence have separate homes. Maintain source-linked statuses, localized shipped instructions and link/anchor checks with each change. |
-| Rust 1.99.1 migration | Implemented | Keep strict lint checks and both Android ABIs; no global Clippy relaxation. |
+| Rust 1.99.1 migration | Implemented | Keep strict lint checks and both Android ABIs; no global Clippy relaxation. Core/FFI/Zygisk now share explicit Android 16 KiB linking; six actual ABI images passed LOAD alignment/congruence checks. Real device acceptance remains separate. |
 
 ## Zygisk lifecycle review boundary
 

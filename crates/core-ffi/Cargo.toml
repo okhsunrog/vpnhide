@@ -23,6 +23,9 @@ required-features = ["bindgen"]
 [features]
 bindgen = ["uniffi/cli"]
 
+[build-dependencies]
+vpnhide_build_contract = { path = "../build-contract" }
+
 [dependencies]
 vpnhide_migration_policy = { path = "../migration-policy" }
 vpnhide_diagnostic_model = { path = "../diagnostic-model" }

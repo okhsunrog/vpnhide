@@ -84,7 +84,10 @@ fn main() {
     // 4 KiB default would otherwise produce a startup warning, and on
     // future Androids may become a hard load failure.
     // See: <https://developer.android.com/guide/practices/page-sizes>
-    println!("cargo:rustc-link-arg=-Wl,-z,max-page-size=16384");
+    println!(
+        "cargo:rustc-link-arg=-Wl,-z,max-page-size={}",
+        vpnhide_build_contract::ANDROID_MAX_PAGE_SIZE
+    );
 
     // shadowhook's inline-patching code emits a libcall to `__clear_cache`
     // (I-cache flush after rewriting instructions). Rust's own

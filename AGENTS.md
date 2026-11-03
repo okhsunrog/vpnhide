@@ -113,7 +113,7 @@ Single-command builds for both CI and local — the same scripts run in both pla
 - **core** (required `vpnhide_core` module): `python3 core/build.py` — cargo-ndk build of the `vpnhide-core` daemon (arm64 + armv7), packaged as `core/target/vpnhide-core.zip`; same script in CI.
 - **lsposed APK**: `cd lsposed && ./gradlew :app:assembleRelease`.
 
-The Zygisk build (`zygisk/build.rs`) passes `-Wl,-z, max-page-size=16384`. Preserve it and verify ELF segment alignment for both Zygisk and the Core FFI APK library on 16 KiB-page Android devices.
+Android linker alignment is owned by `build-contract::ANDROID_MAX_PAGE_SIZE`. Core, the APK FFI and Zygisk build scripts consume it for both ARM ABIs. Preserve that contract and verify all actual ELF LOAD alignments and offset/address congruence after building; ARMv7 toolchain defaults can remain 4 KiB. Host builds do not receive the Android linker argument. ELF qualification is not Android device acceptance.
 
 ## Reading device diagnostics from logcat
 

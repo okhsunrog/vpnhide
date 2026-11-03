@@ -25,6 +25,9 @@ required-features = ["fixture-oracle"]
 [features]
 fixture-oracle = []
 
+[build-dependencies]
+vpnhide_build_contract = { path = "../build-contract" }
+
 [dependencies]
 vpnhide_maintenance_model = { path = "../maintenance-model" }
 vpnhide_build_contract = { path = "../build-contract" }

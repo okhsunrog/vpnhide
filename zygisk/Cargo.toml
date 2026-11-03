@@ -39,6 +39,7 @@ log-trace = ["log/release_max_level_trace"]
 
 [build-dependencies]
 cmake = "0.1.58"
+vpnhide_build_contract = { path = "../crates/build-contract" }
 
 [dev-dependencies]
 tempfile = "3"
