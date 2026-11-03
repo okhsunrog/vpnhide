@@ -231,3 +231,73 @@ fn absent_core_has_a_typed_unavailable_error() {
         Err(CoreError::Unavailable { generation: 1, .. })
     ));
 }
+
+#[test]
+fn imported_port_rules_replace_through_real_writer_without_losing_protocol_ranges() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("core.sock");
+    let path = dir.path().join("config.json");
+    let _core = spawn_core(&socket, &path, 91);
+    let session = CoreSession::new(socket.display().to_string());
+    let raw = include_str!("../../../fixtures/migrations/canonical-port-rule-order.json");
+    let imported = parse_canonical_import(raw.into(), "dev.test.self".into()).unwrap();
+    let expected = vec![
+        CorePortRule {
+            protocol: CorePortProtocol::Tcp,
+            start: 443,
+            end: 445,
+        },
+        CorePortRule {
+            protocol: CorePortProtocol::Udp,
+            start: 443,
+            end: 445,
+        },
+        CorePortRule {
+            protocol: CorePortProtocol::Tcp,
+            start: 8080,
+            end: 8080,
+        },
+    ];
+    assert_eq!(
+        imported.apps["com.bank"]
+            .port_policy
+            .as_ref()
+            .unwrap()
+            .rules,
+        expected
+    );
+    rt.block_on(async {
+        let initial = session.read_state().await.unwrap();
+        let op = session.allocate_operation_id().await.unwrap();
+        accepted(
+            session
+                .submit_edit(
+                    op,
+                    initial.state.config_revision,
+                    CoreEdit::Replace {
+                        config: imported.clone(),
+                    },
+                )
+                .await
+                .unwrap(),
+        );
+        let (record, state) = common::settled(&session, op).await;
+        assert_eq!(record.settled, Some(CorePhaseOutcome::Confirmed));
+        assert_eq!(state.state.config_revision, 1);
+        assert_eq!(state.state.config, Some(imported.clone()));
+        let persisted: CoreCanonicalConfig = vpnhide_core_daemon::config_file::read(&path)
+            .unwrap()
+            .unwrap()
+            .into();
+        assert_eq!(persisted, imported);
+        assert_eq!(
+            persisted.apps["com.bank"]
+                .port_policy
+                .as_ref()
+                .unwrap()
+                .rules,
+            expected
+        );
+    });
+}

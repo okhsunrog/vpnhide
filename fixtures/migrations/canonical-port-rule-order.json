@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "apps": {
+    "com.bank": {
+      "java": true,
+      "ports": true,
+      "portPolicy": {
+        "mode": "custom",
+        "rules": [
+          { "protocol": "tcp", "start": 8080 },
+          { "protocol": "udp", "start": 443, "end": 445 },
+          { "protocol": "tcp", "start": 443, "end": 445 },
+          { "protocol": "udp", "start": 443, "end": 445 }
+        ]
+      }
+    }
+  }
+}

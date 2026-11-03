@@ -42,4 +42,31 @@ class CanonicalImportDataTest {
         assertEquals(imported, parseCanonicalConfig(canonicalConfigJson(imported)))
         assertNull(parseImportedCanonicalConfig("""{"apps":{"com.bank":{"ports":true,"portPolicy":{"rules":[]}}}}""", "dev.test.self"))
     }
+
+    @Test
+    fun `import prepares the real Replace intent and preserves ranges with different protocols`() {
+        val raw = javaClass.getResource("/canonical-port-rule-order.json")!!.readText()
+        val imported = parseImportedCanonicalConfig(raw, "dev.test.self")!!
+        val expected =
+            listOf(
+                PortRule(PortProtocol.Tcp, 443, 445),
+                PortRule(PortProtocol.Udp, 443, 445),
+                PortRule(PortProtocol.Tcp, 8080),
+            )
+        assertEquals(
+            expected,
+            imported.apps
+                .getValue("com.bank")
+                .portPolicy!!
+                .rules,
+        )
+        val prepared =
+            prepareConfigIntent(
+                RootCanonicalRead.Missing,
+                CanonicalMutation(listOf(CanonicalEdit.Replace(imported)), bootstrap = true),
+            ) as ConfigIntentPreparation.Prepared
+        assertEquals(imported, prepared.intent.candidate)
+        val submission = coreEdit(prepared.intent.edits) as uniffi.vpnhide_core_ffi.CoreEdit.Replace
+        assertEquals(imported, submission.config.toCanonical())
+    }
 }
