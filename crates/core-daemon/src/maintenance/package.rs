@@ -380,7 +380,7 @@ impl PackageStaging {
             file,
         })
     }
-    fn lease(&self) -> Result<File, PackageError> {
+    fn lease(&self) -> Result<crate::file_lock::FileLock, PackageError> {
         let file = openat(
             &self.directory,
             "staging.lock",
@@ -391,15 +391,13 @@ impl PackageStaging {
         if !meta.is_file() || meta.nlink() != 1 {
             return Err(PackageError::UnsafeStorage);
         }
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } < 0 {
-            let error = io::Error::last_os_error();
-            return Err(if error.kind() == io::ErrorKind::WouldBlock {
+        crate::file_lock::FileLock::exclusive(file).map_err(|error| {
+            if error.kind() == io::ErrorKind::WouldBlock {
                 PackageError::Busy
             } else {
                 error.into()
-            });
-        }
-        Ok(file)
+            }
+        })
     }
     /// Only interrupted inert copies are recovered here. The durable executor
     /// must release a plan before its final package can be pruned.

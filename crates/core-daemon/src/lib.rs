@@ -17,6 +17,7 @@ pub mod device_probes;
 pub mod diagnostics;
 pub mod effects;
 mod export;
+mod file_lock;
 pub mod instance;
 pub mod ipc_config;
 pub mod journal;

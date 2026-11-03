@@ -101,6 +101,57 @@ impl Fixture {
             .count()
     }
 }
+
+// A Command child inherits open descriptions before CLOEXEC runs. Keep that
+// window open deterministically; the child only uses async-signal-safe syscalls.
+fn release_with_inherited_descriptor<T, R>(owner: T, replacement: impl FnOnce() -> R) -> R {
+    let child = unsafe { libc::fork() };
+    assert!(child >= 0);
+    if child == 0 {
+        loop {
+            unsafe { libc::pause() };
+        }
+    }
+    drop(owner);
+    let result = replacement();
+    unsafe {
+        libc::kill(child, libc::SIGKILL);
+        while libc::waitpid(child, std::ptr::null_mut(), 0) < 0 {
+            if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+                break;
+            }
+        }
+    }
+    result
+}
+
+#[test]
+fn accepted_floor_owner_release_is_not_extended_by_inherited_descriptors() {
+    let f = fixture();
+    let store = FloorStore::open_owned(&f.temp.path().join("persistent"), unsafe {
+        libc::geteuid()
+    })
+    .unwrap();
+    let lease = store.lock().unwrap();
+    assert!(matches!(store.lock(), Err(PackageError::Busy)));
+    let replacement = release_with_inherited_descriptor(lease, || store.lock());
+    assert!(
+        replacement.is_ok(),
+        "inherited floor descriptor retained released authority"
+    );
+}
+
+#[test]
+fn staging_owner_release_is_not_extended_by_inherited_descriptors() {
+    let f = fixture();
+    let lease = f.stage.lease().unwrap();
+    assert!(matches!(f.stage.lease(), Err(PackageError::Busy)));
+    let replacement = release_with_inherited_descriptor(lease, || f.stage.lease());
+    assert!(
+        replacement.is_ok(),
+        "inherited staging descriptor retained a released owner"
+    );
+}
 #[test]
 fn authenticated_copy_is_private_idempotent_and_independent_of_app_mutation() {
     let f = fixture();

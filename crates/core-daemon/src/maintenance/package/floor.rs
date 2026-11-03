@@ -22,7 +22,7 @@ pub struct FloorStore {
 }
 pub struct FloorLease<'a> {
     store: &'a FloorStore,
-    _lock: File,
+    _lock: crate::file_lock::FileLock,
 }
 impl FloorStore {
     pub fn open(persistent: &Path) -> Result<Self, PackageError> {
@@ -64,17 +64,16 @@ impl FloorStore {
         if !metadata.is_file() || metadata.nlink() != 1 {
             return Err(PackageError::UnsafeStorage);
         }
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } < 0 {
-            let error = io::Error::last_os_error();
-            return Err(if error.kind() == io::ErrorKind::WouldBlock {
+        let lock = crate::file_lock::FileLock::exclusive(file).map_err(|error| {
+            if error.kind() == io::ErrorKind::WouldBlock {
                 PackageError::Busy
             } else {
                 error.into()
-            });
-        }
+            }
+        })?;
         Ok(FloorLease {
             store: self,
-            _lock: file,
+            _lock: lock,
         })
     }
     fn sync(&self) -> io::Result<()> {

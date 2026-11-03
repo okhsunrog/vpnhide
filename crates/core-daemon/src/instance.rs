@@ -2,25 +2,13 @@
 //! from atomically replaced JSON, and are acquired before reads, boot or socket bind.
 
 use std::collections::BTreeSet;
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io;
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 pub struct InstanceGuard {
-    _locks: Vec<File>,
-}
-
-impl Drop for InstanceGuard {
-    fn drop(&mut self) {
-        // fork() briefly shares the open-file description until exec closes it.
-        // Explicit unlock makes ownership end with this guard, even if a child
-        // still has an inherited descriptor during that window.
-        for file in &self._locks {
-            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
-        }
-    }
+    _locks: Vec<crate::file_lock::FileLock>,
 }
 
 fn lock_path(path: &Path) -> PathBuf {
@@ -59,14 +47,13 @@ impl InstanceGuard {
             }
             // SAFETY: this process owns the open descriptor. Nonblocking admission
             // never waits behind a second daemon and never deletes an owner's inode.
-            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-                let error = io::Error::last_os_error();
-                return Err(io::Error::new(
+            let lock = crate::file_lock::FileLock::exclusive(file).map_err(|error| {
+                io::Error::new(
                     error.kind(),
                     format!("core state already owned ({}): {error}", path.display()),
-                ));
-            }
-            locks.push(file);
+                )
+            })?;
+            locks.push(lock);
         }
         Ok(Self { _locks: locks })
     }
