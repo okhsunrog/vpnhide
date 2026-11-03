@@ -190,6 +190,9 @@ impl ImageFence {
         // catalog never enters backend selection or becomes active evidence.
         let catalog = Catalog::open_pinned_before(&dir, Some(deadline))?;
         catalog.manifest.require_complete()?;
+        if descriptor.is_some() {
+            catalog.require_gki_versions(Some(deadline))?;
+        }
         let mut paths = BTreeMap::<String, Option<FileIdentity>>::new();
         paths.insert(
             "vpnhide-core".into(),

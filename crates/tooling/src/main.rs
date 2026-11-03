@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use vpnhide_artifact_model::{MAX_PAYLOAD_BYTES, elf};
+mod ddk;
 mod device_reset;
 mod qemu;
 mod signing;
@@ -22,6 +23,7 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    DdkModpost(ddk::Args),
     DeviceReset(device_reset::Args),
     Qemu(qemu::QemuArgs),
     Distribution {
@@ -86,6 +88,7 @@ enum ElfAction {
     Inspect { input: PathBuf },
     Compare { left: PathBuf, right: PathBuf },
     RequireContract { input: PathBuf },
+    RequireGkiContract { input: PathBuf },
 }
 fn read_payload(path: &Path) -> io::Result<Vec<u8>> {
     if path.as_os_str() == "-" {
@@ -113,6 +116,7 @@ fn read_payload(path: &Path) -> io::Result<Vec<u8>> {
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = match Cli::parse().command {
+        Command::DdkModpost(args) => serde_json::to_value(ddk::run(args)?)?,
         Command::DeviceReset(args) => return device_reset::run(args).map_err(Into::into),
         Command::Qemu(args) => return qemu::run(args).map_err(Into::into),
         Command::Distribution { action } => {
@@ -191,8 +195,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &elf::inspect(&read_payload(&left)?)?,
                 &elf::inspect(&read_payload(&right)?)?,
             ))?,
-            ElfAction::RequireContract { input } => {
-                let result = elf::inspect(&read_payload(&input)?)?;
+            ElfAction::RequireContract { ref input }
+            | ElfAction::RequireGkiContract { ref input } => {
+                let bytes = read_payload(input)?;
+                let result = if matches!(action, ElfAction::RequireGkiContract { .. }) {
+                    elf::inspect_gki(&bytes)?
+                } else {
+                    elf::inspect(&bytes)?
+                };
                 if result.preflight_protocol != Some(1) || result.init_contract != Some(1) {
                     return Err(io::Error::other(
                         "payload lacks the verified current preflight/closed-init capability",

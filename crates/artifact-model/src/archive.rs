@@ -355,7 +355,7 @@ fn assemble_with_budget(
         let bytes = artifact.member(&source, machine)?;
         let (preflight_protocol, init_contract) =
             if matches!(implementation, PayloadKind::Kmod { .. }) {
-                let caps = elf::capabilities(&bytes)?;
+                let caps = elf::inspect_gki(&bytes)?;
                 if caps.preflight_protocol != Some(1) || caps.init_contract != Some(1) {
                     return Err(invalid(
                         "kmod lacks verified preflight and closed init contract",
@@ -464,7 +464,7 @@ pub fn descriptor(
             return Err(invalid("payload provenance or bytes differ"));
         }
         if matches!(payload.implementation, PayloadKind::Kmod { .. }) {
-            let caps = elf::capabilities(bytes)?;
+            let caps = elf::inspect_gki(bytes)?;
             if payload.preflight_protocol != Some(1)
                 || payload.init_contract != Some(1)
                 || caps.preflight_protocol != payload.preflight_protocol

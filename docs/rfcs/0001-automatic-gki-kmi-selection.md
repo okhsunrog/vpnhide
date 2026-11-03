@@ -7,6 +7,12 @@
 > in [ROADMAP](../../ROADMAP.md). Zygisk lifecycle policy is separately reopened
 > under RFC0003; this decision does not resolve that review.
 
+> Build evidence update (3 November 2026): the pinned DDK export/CRC bypass was
+> corrected in a private host checker. All seven engineering payloads now have
+> complete loader version records; both same-LTS pairs differ in 18 common CRCs.
+> See [the dated qualification evidence](../archive/2026-11-03-gki-modpost-qualification.md).
+> This does not enable production preflight or prove private ABI/device acceptance.
+
 **Идентификатор:** `RFC-AUTO-GKI-KMOD-001`  
 **Статус:** Proposed / требует реализации и проверки на устройствах  
 **Дата:** 2026-11-02  

@@ -1,5 +1,6 @@
 //! Independent synthetic inputs, not production payload builders. Golden bytes
 //! originate from the former separately implemented Python test producer.
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs::{self, OpenOptions},
@@ -52,6 +53,35 @@ pub fn passive_bundle_files() -> io::Result<BTreeMap<String, Vec<u8>>> {
     files.insert(
         "module.prop".into(),
         b"id=vpnhide_core\nvpnhideControl=2\n".to_vec(),
+    );
+    // Keep the historical golden unchanged. New replacement fixtures carry an
+    // independently encoded versioned GKI contract instead of its old payloads.
+    let mut manifest: serde_json::Value = serde_json::from_slice(&files["payloads/manifest.json"])?;
+    let mut provenance: serde_json::Value =
+        serde_json::from_slice(&files["bundle-provenance.json"])?;
+    for payload in manifest["payloads"].as_array_mut().unwrap() {
+        if payload["implementation"]["kind"] != "kmod" {
+            continue;
+        }
+        let kmi = payload["implementation"]["kmi"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let bytes = gki_contract_payload(true);
+        let sha256 = format!("{:x}", Sha256::digest(&bytes));
+        payload["bytes"] = bytes.len().into();
+        payload["sha256"] = sha256.clone().into();
+        provenance["inputs"][format!("kmod:{kmi}")]["files"]["vpnhide_kmod.ko"] =
+            serde_json::json!({"bytes":bytes.len(),"sha256":sha256});
+        files.insert(format!("payloads/kmod/{kmi}/vpnhide_kmod.ko"), bytes);
+    }
+    files.insert(
+        "payloads/manifest.json".into(),
+        serde_json::to_vec(&manifest)?,
+    );
+    files.insert(
+        "bundle-provenance.json".into(),
+        serde_json::to_vec(&provenance)?,
     );
     Ok(files)
 }
@@ -151,6 +181,33 @@ pub fn relocatable(modinfo: &[u8], extra: &[Section]) -> Vec<u8> {
     bytes
 }
 pub fn init_contract_payload(preflight: bool) -> Vec<u8> {
+    init_contract_with_versions(preflight, None)
+}
+
+pub fn gki_contract_payload(preflight: bool) -> Vec<u8> {
+    gki_contract_with_versions(
+        preflight,
+        &[
+            ("module_layout", 0x12345678),
+            ("param_ops_bool", 0x87654321),
+            ("param_ops_uint", 0x00000000),
+        ],
+    )
+}
+
+pub fn gki_contract_with_versions(preflight: bool, records: &[(&str, u32)]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for (name, crc) in records {
+        assert!(name.len() < 56);
+        let mut row = [0; 64];
+        row[..8].copy_from_slice(&u64::from(*crc).to_le_bytes());
+        row[8..8 + name.len()].copy_from_slice(name.as_bytes());
+        bytes.extend_from_slice(&row);
+    }
+    init_contract_with_versions(preflight, Some(bytes))
+}
+
+fn init_contract_with_versions(preflight: bool, versions: Option<Vec<u8>>) -> Vec<u8> {
     let mut metadata=b"vpnhide_init_contract=1\0parmtype=preflight_only:bool\0parmtype=filesystem_hiding:bool\0parmtype=probe_mask:uint\0".to_vec();
     if preflight {
         metadata.extend_from_slice(b"vpnhide_preflight=1\0");
@@ -240,11 +297,13 @@ pub fn init_contract_payload(preflight: bool) -> Vec<u8> {
     extra[4].flags = 2;
     extra[5].flags = 3;
     extra[6].flags = 3;
+    if let Some(versions) = versions {
+        extra.push(Section::new("__versions", versions, 1));
+    }
     relocatable(&metadata, &extra)
 }
 
 use crate::manifest::*;
-use sha2::{Digest, Sha256};
 fn payload(implementation: PayloadKind) -> Payload {
     Payload {
         implementation,

@@ -51,6 +51,7 @@ from build_lib import (  # type: ignore[import-not-found]
     make_zip,
     stamp,
     supported_kmis,
+    tooling_command,
     version_sort_key,
 )
 
@@ -104,10 +105,29 @@ def native_build_one(
     if clang_dir:
         env["CLANG_DIR"] = clang_dir
 
+    # Rebuild the normal host checker outside the DDK tree. Some pinned DDKs
+    # disable export resolution and silently produce empty __versions sections.
+    # The Rust adapter owns qualification; the real ELF is checked after Kbuild.
+    modpost = kmod_dir / "target" / "qualified-modpost" / kmi / "modpost"
+    subprocess.run(
+        [*tooling_command(), "ddk-modpost", "--kdir", kdir, "--output", str(modpost)],
+        env=env,
+        check=True,
+    )
+
     # `make strip` does the actual kernel-module build. Let make decide
     # whether anything needs rebuilding — its dependency tracking covers
     # all sources, headers, and the kernel .config, not just our .c file.
-    subprocess.run(["make", "-C", str(kmod_dir), "strip"], env=env, check=True)
+    subprocess.run(
+        ["make", "-C", str(kmod_dir), "strip", f"VPNHIDE_MODPOST={modpost}"],
+        env=env,
+        check=True,
+    )
+    subprocess.run(
+        [*tooling_command(), "elf", "require-gki-contract", str(kmod_dir / KMOD_KO)],
+        env=env,
+        check=True,
+    )
 
     # Stage the module skeleton from kmod/module/, drop the freshly built
     # .ko in, patch module.prop with the real build version + gkiVariant

@@ -23,8 +23,28 @@ fn identity(path: &Path) -> FileIdentity {
     }
 }
 fn fixture() -> Fixture {
+    fixture_with_gki_versions(true)
+}
+fn fixture_with_gki_versions(versioned: bool) -> Fixture {
     let root = tempfile::tempdir().unwrap();
     vpnhide_artifact_model::fixtures::write_passive_bundle_tree(root.path()).unwrap();
+    if !versioned {
+        let path = root.path().join("payloads/manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        for payload in manifest["payloads"].as_array_mut().unwrap() {
+            if payload["implementation"]["kind"] != "kmod" {
+                continue;
+            }
+            let bytes = vpnhide_artifact_model::fixtures::init_contract_payload(true);
+            payload["bytes"] = bytes.len().into();
+            payload["sha256"] = format!("{:x}", Sha256::digest(&bytes)).into();
+            let kind: vpnhide_artifact_model::manifest::PayloadKind =
+                serde_json::from_value(payload["implementation"].clone()).unwrap();
+            fs::write(root.path().join(kind.relative_path().unwrap()), bytes).unwrap();
+        }
+        fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    }
     let runtime = RuntimeIdentity {
         daemon_arm64: identity(&root.path().join("bin/arm64/vpnhide-core")),
         daemon_arm: identity(&root.path().join("bin/arm/vpnhide-core")),
@@ -91,6 +111,16 @@ fn fixture() -> Fixture {
         descriptor,
         uid: unsafe { libc::geteuid() },
     }
+}
+#[test]
+fn signed_hash_valid_unversioned_gki_refuses_replacement_but_old_source_remains_fenced() {
+    let f = fixture_with_gki_versions(false);
+    let source = ImageFence::inspect(f.root.path(), None, Abi::Arm64, f.uid).unwrap();
+    source
+        .require_unchanged_owned(f.root.path(), f.uid)
+        .unwrap();
+    let error = f.inspect().expect_err("unqualified replacement admitted");
+    assert!(error.to_string().contains("CRC"), "{error}");
 }
 impl Fixture {
     fn inspect(&self) -> io::Result<ImageFence> {

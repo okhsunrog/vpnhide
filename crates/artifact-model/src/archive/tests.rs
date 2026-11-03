@@ -1,5 +1,5 @@
 use super::*;
-use crate::fixtures::{init_contract_payload, relocatable};
+use crate::fixtures::{gki_contract_payload, init_contract_payload, relocatable};
 use serde_json::{Value, json};
 use zip::ZipArchive;
 
@@ -101,7 +101,7 @@ impl Bundle {
             producer(
                 &result.path(&format!("vpnhide-kmod-{kmi}.zip")),
                 &format!("kmod:{kmi}"),
-                &[("vpnhide_kmod.ko", init_contract_payload(true))],
+                &[("vpnhide_kmod.ko", gki_contract_payload(true))],
                 json!({}),
             );
         }
@@ -168,7 +168,11 @@ fn complete_bundle_retains_one_passive_pair_and_keeps_core_out_of_zygisk_catalog
     crate::fixtures::write_bundle_tree(golden.path()).unwrap();
     for p in &m.payloads {
         let path = p.implementation.relative_path().unwrap();
-        assert_eq!(files[&path], fs::read(golden.path().join(path)).unwrap());
+        if matches!(p.implementation, PayloadKind::Kmod { .. }) {
+            assert_eq!(files[&path], gki_contract_payload(true));
+        } else {
+            assert_eq!(files[&path], fs::read(golden.path().join(path)).unwrap());
+        }
         assert_eq!(p.control_version, 2);
         assert_eq!(p.source_commit, COMMIT);
         if matches!(p.implementation, PayloadKind::Kmod { .. }) {
@@ -266,6 +270,8 @@ fn legacy_and_forged_capabilities_preserve_previous_bundle() {
         relocatable(b"license=GPL\0", &[]),
         relocatable(b"vpnhide_preflight=1\0", &[]),
         init_contract_payload(false),
+        init_contract_payload(true), // Valid capability markers, missing loader CRCs.
+        gki_contract_payload(false), // Complete CRCs cannot supply a preflight marker.
     ] {
         producer(
             &b.path(&format!("vpnhide-kmod-{}.zip", KMIS[0])),

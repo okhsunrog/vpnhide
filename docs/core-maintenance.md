@@ -86,3 +86,13 @@ New signed replacements must have no main-Core autoload directory; old-source
 mirror files remain fenced for migration. Final Zygisk placement/activation is
 under renewed review in RFC0003. Common durable maintenance/manager/reboot
 orchestration is still pending.
+
+New GKI payload admission also checks the exact ELF's normal module-version
+records: `module_layout` and every imported symbol must have a CRC. Trusted
+signatures/hashes and declared init capabilities cannot substitute for those
+records. The kernel loader still validates their values; this is not private ABI
+proof. Historical source fencing deliberately accepts older catalogs so an
+unqualified old generation can be retired safely rather than blocking recovery.
+The [build qualification](../kmod/BUILDING.md#export-and-loader-version-qualification)
+uses the same portable Rust inspector; generic non-MODVERSIONS test kernels have
+a separate scope and cannot qualify a new GKI replacement.

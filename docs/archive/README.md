@@ -4,6 +4,7 @@ These dated documents preserve implementation history, audits, experiments and
 unapproved ideas. Their old status, commands, UI and test counts are historical.
 They are not the current work index or authority to implement a reopened design.
 
+- [GKI modpost qualification experiment](2026-11-03-gki-modpost-qualification.md)
 - [Current roadmap](../../ROADMAP.md)
 - [Current contracts](../README.md)
 - [RFC decisions](../rfcs/README.md)

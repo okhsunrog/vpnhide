@@ -458,6 +458,25 @@ pub fn inspect(data: &[u8]) -> io::Result<KmodInspection> {
             || !content(&sections, "__version_ext_crcs")?.is_empty(),
     })
 }
+/// GKI distribution payloads must retain normal loader version checking. This
+/// checks the exact ELF, not a producer label; values are still checked against
+/// the running kernel by its loader. It does not prove private structure ABI.
+/// Generic non-MODVERSIONS QEMU/experimental modules use `inspect` instead.
+pub fn inspect_gki(data: &[u8]) -> io::Result<KmodInspection> {
+    let inspected = inspect(data)?;
+    if inspected.extended_versions {
+        return Err(invalid("unsupported extended GKI modversion contract"));
+    }
+    if !inspected.versions.contains_key("module_layout")
+        || inspected
+            .imports
+            .iter()
+            .any(|name| !inspected.versions.contains_key(name))
+    {
+        return Err(invalid("GKI payload lacks complete loader symbol CRCs"));
+    }
+    Ok(inspected)
+}
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct KmodComparison {
     pub left_sha256: String,
@@ -516,6 +535,33 @@ pub fn compare(left: &KmodInspection, right: &KmodInspection) -> KmodComparison 
 pub(super) mod tests {
     use super::*;
     use crate::fixtures::{Section as RawSection, init_contract_payload, relocatable};
+
+    #[test]
+    fn gki_requires_every_import_and_module_layout_crc_without_guessing_values() {
+        use crate::fixtures::{gki_contract_payload, gki_contract_with_versions};
+        let valid = gki_contract_payload(true);
+        assert_eq!(
+            inspect_gki(&valid).unwrap().versions["param_ops_uint"],
+            "00000000"
+        );
+        let legacy = init_contract_payload(true);
+        assert!(inspect(&legacy).is_ok());
+        assert!(inspect_gki(&legacy).is_err());
+        for records in [
+            vec![],
+            vec![("module_layout", 1)],
+            vec![("param_ops_bool", 2), ("param_ops_uint", 3)],
+            vec![("module_layout", 1), ("param_ops_bool", 2)],
+            vec![
+                ("module_layout", 1),
+                ("param_ops_bool", 2),
+                ("param_ops_uint", 3),
+                ("module_layout", 4),
+            ],
+        ] {
+            assert!(inspect_gki(&gki_contract_with_versions(true, &records)).is_err());
+        }
+    }
 
     #[test]
     fn legacy_and_arbitrary_text_are_not_capability_evidence() {

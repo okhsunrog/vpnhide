@@ -397,6 +397,9 @@ fn verified_catalog(root: &Path) -> Result<Catalog, String> {
         return Err("active Core module identity/eligibility invalid".into());
     }
     let catalog = Catalog::open_pinned(&directory).map_err(|e| format!("active catalog: {e}"))?;
+    catalog
+        .require_gki_versions(None)
+        .map_err(|e| format!("active GKI payload: {e}"))?;
     use std::os::unix::fs::MetadataExt;
     let current = OpenOptions::new()
         .read(true)
@@ -417,6 +420,29 @@ mod tests {
     use crate::payloads::{Abi, KMIS, Payload, PayloadKind, selection::Ownership};
     use std::io::{Seek, SeekFrom};
     use vpnhide_core_rpc::{AppConfig, NativeRole};
+
+    #[test]
+    fn production_catalog_rejects_hash_valid_gki_without_loader_crcs() {
+        let (_temp, _env, root, _config, _packages, _capabilities) = fixture();
+        assert!(verified_catalog(&root).is_ok());
+        let manifest_path = root.join("payloads/manifest.json");
+        let mut manifest: Manifest =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        let payload = &mut manifest.payloads[0];
+        let bytes = vpnhide_artifact_model::fixtures::init_contract_payload(true);
+        fs::write(
+            root.join(payload.implementation.relative_path().unwrap()),
+            &bytes,
+        )
+        .unwrap();
+        payload.sha256 = format!("{:x}", Sha256::digest(&bytes));
+        payload.bytes = bytes.len() as u64;
+        fs::write(manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        // Historical readers still retain/fence these exact bytes. They cannot
+        // become a production activation catalog, even without a capability claim.
+        assert!(Catalog::open(&root).is_ok());
+        assert!(verified_catalog(&root).unwrap_err().contains("CRCs"));
+    }
 
     fn fixture() -> (
         tempfile::TempDir,
@@ -443,13 +469,18 @@ mod tests {
             .map(|kind| {
                 let path = root.join(kind.relative_path().unwrap());
                 fs::create_dir_all(path.parent().unwrap()).unwrap();
-                fs::write(path, b"payload").unwrap();
+                let bytes = if matches!(kind, PayloadKind::Kmod { .. }) {
+                    vpnhide_artifact_model::fixtures::gki_contract_payload(true)
+                } else {
+                    b"payload".to_vec()
+                };
+                fs::write(path, &bytes).unwrap();
                 Payload {
                     implementation: kind,
                     version: "test".into(),
                     source_commit: "a".repeat(40),
-                    sha256: format!("{:x}", Sha256::digest(b"payload")),
-                    bytes: 7,
+                    sha256: format!("{:x}", Sha256::digest(&bytes)),
+                    bytes: bytes.len() as u64,
                     control_version: 2,
                     preflight_protocol: None,
                     init_contract: None,
@@ -559,7 +590,10 @@ mod tests {
         staged.seek(SeekFrom::Start(0)).unwrap();
         let mut bytes = Vec::new();
         staged.read_to_end(&mut bytes).unwrap();
-        assert_eq!(bytes, b"payload");
+        assert_eq!(
+            bytes,
+            vpnhide_artifact_model::fixtures::gki_contract_payload(true)
+        );
         assert!(restore_environment(env, Some(&prepared.intent)).is_err());
     }
 

@@ -1,5 +1,31 @@
 obj-m += vpnhide_kmod.o
 
+# Kbuild includes the external module Makefile in its modpost stage. Replace
+# only the checker executable here, preserving this kernel's own recursive
+# MODPOST flags (including $@, symbol inputs and later += additions). Passing
+# MODPOST on make's command line would silently discard those flags.
+ifdef VPNHIDE_MODPOST
+ifdef modpost-args
+# Newer Kbuild keeps flags separately. Its executable assignment may precede
+# or follow this include; accept only those known executable-only definitions.
+ifneq ($(strip $(value MODPOST)),)
+ifneq ($(strip $(value MODPOST)),scripts/mod/modpost)
+ifneq ($(strip $(value MODPOST)),$$(objtree)/scripts/mod/modpost)
+$(error Unsupported Kbuild MODPOST executable)
+endif
+endif
+endif
+override MODPOST = $(VPNHIDE_MODPOST)
+else
+ifdef MODPOST
+ifneq ($(firstword $(value MODPOST)),scripts/mod/modpost)
+$(error Unsupported Kbuild MODPOST command)
+endif
+$(eval MODPOST = $(subst scripts/mod/modpost,$(VPNHIDE_MODPOST),$(value MODPOST)))
+endif
+endif
+endif
+
 ifeq ($(KERNELRELEASE),)
 
 # Default target stays the LKM (.ko) build, even though `kpm` is defined first.

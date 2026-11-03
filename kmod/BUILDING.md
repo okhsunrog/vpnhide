@@ -15,6 +15,27 @@ The script auto-detects whether to build natively (you're already inside the DDK
 
 Requires `docker` or `podman` and the pinned Rust toolchain for shared artifact validation/provenance. The wrapper prepares a static Linux `vpnhide-tooling` executor and mounts it into the minimal DDK image. CI supplies the same-checkout prebuilt executor through `VPNHIDE_TOOLING`; a direct minimal-container invocation must supply it too. See [shared host tooling](../docs/development.md#shared-host-tooling).
 
+### Export and loader-version qualification
+
+The build recompiles the kernel's host `modpost` checker in the owned
+`kmod/target/qualified-modpost/` directory. A host C compiler and prepared kernel
+host headers are required (the pinned DDK images provide them). Some DDK sources
+comment out export resolution and CRC ownership. The shared Rust adapter restores
+only those two recognized statements in a private source copy; an unrecognized
+checker fails. It does not modify the installed DDK, manufacture CRCs or bypass
+the kernel loader. Kernel-owned modpost flags and `Module.symvers` inputs remain
+intact, including recursive configuration and output-target expansion.
+
+Before packaging, `vpnhide-tooling elf require-gki-contract` checks the actual
+ELF for the hash-bound init/preflight contract and normal CRC records for every
+import plus `module_layout`. Assembly, descriptor creation and Core's new
+activation/replacement admission independently enforce GKI CRC completeness.
+Old source generations remain readable and fenced for migration/retirement.
+Generic `CONFIG_MODVERSIONS=n` QEMU experiments use the separate inspection path;
+they do not qualify a production GKI payload. Complete records are necessary,
+not proof of a matching device kernel or private structure ABI. Production
+experimental KMI admission remains disabled pending its separate evidence gates.
+
 ### Identifying the source-build KMI
 
 ```bash
@@ -47,13 +68,15 @@ You can also drop a `kmod/.env` file with `KDIR=` / `KERNEL_SRC=` / `CLANG_DIR=`
 
 ## Install and test
 
-```bash
-adb push vpnhide-kmod-<kmi>.zip /sdcard/Download/
-# Install via KernelSU-Next manager -> Modules -> Install from storage
-# Reboot
-```
+The component ZIP is an internal assembly input, not a standalone installable
+backend. Test isolated kernel behavior with the bounded [QEMU harness](test/README.md).
+For separately authorized Android acceptance, assemble the complete same-commit
+Core bundle and use the supported root manager to install it with its matching
+APK. Core selects and owns the backend. Verify the actual effective state after
+the required lifecycle boundary; a successful build or staged ZIP is not proof
+of a running module.
 
-Verify after reboot:
+Read-only developer observations can include:
 
 ```bash
 adb shell "su -c 'lsmod | grep vpnhide'"

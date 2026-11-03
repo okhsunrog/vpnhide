@@ -38,6 +38,35 @@ pub struct Catalog {
 }
 
 impl Catalog {
+    /// Qualification is separate from historical catalog reading: old source
+    /// generations must remain readable/fenced for replacement and revocation.
+    /// New activation/replacement checks exact descriptor bytes again, without
+    /// changing offsets or trusting a manifest's capability claim.
+    pub(crate) fn require_gki_versions(
+        &self,
+        deadline: Option<std::time::Instant>,
+    ) -> io::Result<()> {
+        use std::os::unix::fs::FileExt;
+        for payload in &self.payloads {
+            if !matches!(payload.metadata.implementation, PayloadKind::Kmod { .. }) {
+                continue;
+            }
+            check_deadline(deadline)?;
+            if payload.file.metadata()?.len() != payload.metadata.bytes {
+                return Err(invalid("GKI payload size changed during qualification"));
+            }
+            let mut bytes = vec![0; usize::try_from(payload.metadata.bytes).map_err(invalid)?];
+            payload.file.read_exact_at(&mut bytes, 0)?;
+            check_deadline(deadline)?;
+            if payload.file.metadata()?.len() != payload.metadata.bytes
+                || format!("{:x}", Sha256::digest(&bytes)) != payload.metadata.sha256
+            {
+                return Err(invalid("GKI payload changed during qualification"));
+            }
+            elf::inspect_gki(&bytes)?;
+        }
+        Ok(())
+    }
     /// `root` must be the trusted active module directory, never modules_update.
     /// Every component beneath this pinned directory is opened without symlink following.
     /// This verifies packaging integrity, not publisher authenticity or runtime eligibility.

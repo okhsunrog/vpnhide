@@ -53,10 +53,7 @@ fn basename_assembly_output_succeeds_and_failed_replacement_keeps_previous_bytes
             r,
             &format!("vpnhide-kmod-{kmi}.zip"),
             &format!("kmod:{kmi}"),
-            vec![(
-                "vpnhide_kmod.ko",
-                golden[&format!("payloads/kmod/{kmi}/vpnhide_kmod.ko")].clone(),
-            )],
+            vec![("vpnhide_kmod.ko", fixtures::gki_contract_payload(true))],
         );
     }
     producer(
