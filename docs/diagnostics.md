@@ -33,7 +33,12 @@ RAW/worker data must still be available and valid; missing stimulus is not a lea
 The real `:diagnostics` Android worker is a Zygote-created app process. Core
 orchestrates its bounded execution; Kotlin reports bounded observations rather
 than declaring PASS. Native fixtures are owned TUN resources with session/boot/
-identity and deadline cleanup. Framework fixtures exercise actual public APIs,
+identity and deadline cleanup. Core run admission, worker phases, reports and
+completion use CLOCK_BOOTTIME, including time spent suspended. Active Condvar
+waits recheck this clock at most every 250 ms of awake time so resuming does not
+restart a full monotonic timeout. An expired run cleans its owned fixtures and
+retains accepted observations; no timer claims cleanup can execute while the CPU
+is asleep. Clock failures deny further worker authority. Framework envelopes inherit the original run expiration; beginning Java collection never renews it. Framework fixtures exercise actual public APIs,
 Binder, source transformations and production normalization. Framework RAW grants
 are scoped to the exact test process and never turn off protection for the whole UID.
 Native collection now uses one dedicated Android collector thread. Core authenticates
@@ -61,7 +66,11 @@ isolation, ordinary loopback preservation, final owner close and TTL expiry.
 The Android worker handshake and assessment consumers are implemented and have
 host/JVM/cross-build coverage; genuine Android bionic/SELinux/background execution
 still needs device acceptance. KPM and Zygisk RAW provider adapters remain code
-work. Builtin source export/compilation is separate from a builtin boot; Linux
+work. A second-ABI worker launcher also remains code work: an ordinary
+Service uses the package's selected ABI. AOSP's `instrument --abi` force-stops the
+target package before creating its requested process; `--no-restart` only attaches
+to an existing main process. Neither is a safe background launcher for this APK.
+See the [source review](archive/2026-11-03-diagnostic-worker-abi-launch.md). Builtin source export/compilation is separate from a builtin boot; Linux
 `.ko` evidence cannot be borrowed as builtin or Android acceptance.
 
 Native observations are delivered to Core **before** framework collection, with a

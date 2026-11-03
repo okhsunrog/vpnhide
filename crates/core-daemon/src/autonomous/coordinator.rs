@@ -1,5 +1,6 @@
 //! One Core-owned bounded run. No network/VPN prerequisite, app-supplied root
 //! path, shell command, per-open restart, or inference from worker-owned PASS.
+use super::boot_time::{BootDeadline, BootInstant};
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -29,7 +30,7 @@ struct WorkerIdentity {
 }
 struct Active {
     session: u64,
-    deadline: Instant,
+    deadline: BootDeadline,
     task: Option<DiagnosticWorkerTask>,
     worker: Option<WorkerIdentity>,
     report: Option<NativeMeasurement>,
@@ -47,7 +48,7 @@ struct Inner {
     cancelled: bool,
     last_completed: Option<DiagnosticRun>,
     attempts: u8,
-    retry_at: Option<Instant>,
+    retry_at: Option<BootDeadline>,
     pending_cleanup: Option<NativeFixtureSpec>,
     unidentified_cleanup: bool,
     pending_framework: Option<Arc<Mutex<FrameworkRun>>>,
@@ -77,18 +78,11 @@ impl Default for Coordinator {
 }
 
 fn boot_ticks() -> Result<u64, String> {
-    let mut time: libc::timespec = unsafe { std::mem::zeroed() };
     let frequency = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    if frequency <= 0 || unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut time) } != 0 {
-        return Err("worker birth clock unavailable".into());
-    }
-    let seconds = u64::try_from(time.tv_sec).map_err(|_| "invalid boot clock")?;
-    let nanos = u64::try_from(time.tv_nsec).map_err(|_| "invalid boot clock")?;
-    let frequency = frequency as u64;
-    seconds
-        .checked_mul(frequency)
-        .and_then(|v| v.checked_add(nanos * frequency / 1_000_000_000))
-        .ok_or("boot clock overflow".into())
+    let frequency = u64::try_from(frequency).map_err(|_| "worker birth clock unavailable")?;
+    BootInstant::now()
+        .and_then(|now| now.ticks(frequency))
+        .map_err(|error| error.to_string())
 }
 
 fn hash(bytes: impl AsRef<[u8]>) -> String {
@@ -307,6 +301,7 @@ impl Coordinator {
         {
             inner.attempts = 0;
         }
+        let deadline = BootDeadline::from_now(DEADLINE).map_err(|_| DiagnosticError::Disabled)?;
         inner.attempts = inner.attempts.saturating_add(1);
         inner.retry_at = None;
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
@@ -324,7 +319,7 @@ impl Coordinator {
         };
         inner.active = Some(Active {
             session: run.session,
-            deadline: Instant::now() + DEADLINE,
+            deadline,
             task: None,
             worker: None,
             report: None,
@@ -403,7 +398,7 @@ impl Coordinator {
                 .is_some_and(|(result, clean)| *clean && !result.controls.is_empty());
         if retryable && inner.attempts < 3 {
             inner.retry_at =
-                Some(Instant::now() + Duration::from_secs(30 * u64::from(inner.attempts)));
+                BootDeadline::from_now(Duration::from_secs(30 * u64::from(inner.attempts))).ok();
         }
         let Some(run) = inner.last.as_mut() else {
             return;
@@ -495,6 +490,14 @@ impl Coordinator {
                     .as_mut()
                     .filter(|a| a.session == session)
                     .ok_or("diagnostic session expired")?;
+                if active
+                    .deadline
+                    .expired(BootInstant::now().map_err(|e| e.to_string())?)
+                {
+                    return Err(
+                        "Android diagnostic worker deadline exceeded before dispatch".into(),
+                    );
+                }
                 active.minimum_birth_ticks = Some(minimum_birth_ticks);
                 active.task = Some(DiagnosticWorkerTask {
                     session,
@@ -519,7 +522,10 @@ impl Coordinator {
                         .clone()
                         .ok_or("native worker finished without observation".into());
                 }
-                let Some(remaining) = active.deadline.checked_duration_since(Instant::now()) else {
+                let Some(remaining) = active
+                    .deadline
+                    .wait_slice(BootInstant::now().map_err(|e| e.to_string())?)
+                else {
                     return Err("Android diagnostic worker deadline exceeded".into());
                 };
                 inner = self
@@ -656,7 +662,8 @@ impl Coordinator {
                     if inner.cancelled {
                         return;
                     }
-                    let force = inner.retry_at.is_some_and(|t| t <= Instant::now());
+                    let force = BootInstant::now()
+                        .is_ok_and(|now| inner.retry_at.is_some_and(|t| t.expired(now)));
                     drop(inner);
                     let Some(state) = weak.upgrade() else {
                         return;
@@ -679,7 +686,10 @@ impl Coordinator {
         let Some(active) = inner.active.as_mut() else {
             return Ok(None);
         };
-        active.claim(identity, Instant::now())
+        active.claim(
+            identity,
+            BootInstant::now().map_err(|_| DiagnosticError::Expired)?,
+        )
     }
 
     pub fn framework_step(
@@ -699,7 +709,10 @@ impl Coordinator {
             }
             let active = inner.active.as_mut().ok_or(DiagnosticError::StaleSession)?;
             let task = active.task.as_ref().ok_or(DiagnosticError::StaleSession)?;
-            if active.deadline <= Instant::now() {
+            if active
+                .deadline
+                .expired(BootInstant::now().map_err(|_| DiagnosticError::Expired)?)
+            {
                 return Err(DiagnosticError::Expired);
             }
             if active.worker != Some(identity) {
@@ -719,16 +732,14 @@ impl Coordinator {
                     return Err(DiagnosticError::StaleSession);
                 }
                 active.framework = Some(Arc::new(Mutex::new(FrameworkRun::new(
-                    task.session,
-                    task.core_epoch,
+                    task,
                     (
                         identity.uid,
                         identity.process.pid,
                         identity.process.start_ticks,
                     ),
-                    task.fixture.interface.name.clone(),
-                    task.fixture.mtu,
                     request.hook_sha256.clone(),
+                    active.deadline,
                 )?)));
             }
             active
@@ -766,7 +777,12 @@ impl Coordinator {
         if thread != exchange.identity() {
             return Err(DiagnosticError::WrongProcess);
         }
-        active.accept(identity, epoch, report, Instant::now())?;
+        active.accept(
+            identity,
+            epoch,
+            report,
+            BootInstant::now().map_err(|_| DiagnosticError::Expired)?,
+        )?;
         self.changed.notify_all();
         Ok(())
     }
@@ -778,10 +794,10 @@ impl Active {
         worker: WorkerIdentity,
         session: u64,
         epoch: u64,
-        now: Instant,
+        now: BootInstant,
         authenticate_thread: impl FnOnce(DiagnosticThreadIdentity) -> Result<(), DiagnosticError>,
     ) -> Result<(), DiagnosticError> {
-        if self.deadline <= now {
+        if self.deadline.expired(now) {
             return Err(DiagnosticError::Expired);
         }
         if self.worker != Some(worker) {
@@ -807,9 +823,9 @@ impl Active {
     fn claim(
         &mut self,
         identity: WorkerIdentity,
-        now: Instant,
+        now: BootInstant,
     ) -> Result<Option<DiagnosticWorkerTask>, DiagnosticError> {
-        if self.deadline <= now {
+        if self.deadline.expired(now) {
             return Err(DiagnosticError::Expired);
         }
         if self
@@ -831,9 +847,9 @@ impl Active {
         identity: WorkerIdentity,
         epoch: u64,
         report: DiagnosticWorkerReport,
-        now: Instant,
+        now: BootInstant,
     ) -> Result<(), DiagnosticError> {
-        if self.deadline <= now {
+        if self.deadline.expired(now) {
             return Err(DiagnosticError::Expired);
         }
         if self.session != report.session || epoch != report.core_epoch {
@@ -910,10 +926,10 @@ mod tests {
     }
     #[test]
     fn claim_deadline_epoch_pid_reuse_and_report_replay_are_fenced() {
-        let now = Instant::now();
+        let now = BootInstant::at(100);
         let mut active = Active {
             session: 7,
-            deadline: now + DEADLINE,
+            deadline: now.after(DEADLINE).unwrap(),
             task: None,
             worker: None,
             report: None,
@@ -949,7 +965,7 @@ mod tests {
             Err(DiagnosticError::WrongProcess)
         );
         assert_eq!(
-            active.accept(identity(30), 9, report(), now + DEADLINE),
+            active.accept(identity(30), 9, report(), BootInstant::at(120)),
             Err(DiagnosticError::Expired)
         );
         assert!(active.report.is_none());
@@ -984,7 +1000,7 @@ mod tests {
     #[test]
     fn accepted_native_observation_survives_later_worker_death_and_cannot_finish_without_revalidation()
      {
-        let now = Instant::now();
+        let now = BootInstant::at(100);
         let thread = DiagnosticThreadIdentity {
             uid: 10123,
             pid: 456,
@@ -994,7 +1010,7 @@ mod tests {
         };
         let mut active = Active {
             session: 7,
-            deadline: now + DEADLINE,
+            deadline: now.after(DEADLINE).unwrap(),
             task: Some(task()),
             worker: Some(identity(30)),
             report: None,
@@ -1024,9 +1040,29 @@ mod tests {
         );
         assert!(!active.finished);
         assert_eq!(
-            active.finish(identity(30), 7, 9, now + DEADLINE, |_| Ok(())),
+            active.finish(identity(30), 7, 9, BootInstant::at(120), |_| Ok(())),
             Err(DiagnosticError::Expired)
         );
+        assert_eq!(active.report, Some(expected.clone()));
+        // The Android process can suspend without CLOCK_MONOTONIC advancing.
+        // A later boot-time sample expires every admission while retaining the
+        // observation accepted before suspension for cleanup/attribution.
+        let resumed = BootInstant::at(300);
+        assert_eq!(
+            active.claim(identity(30), resumed),
+            Err(DiagnosticError::Expired)
+        );
+        assert_eq!(
+            active.accept(identity(30), 9, report(), resumed),
+            Err(DiagnosticError::Expired)
+        );
+        assert_eq!(
+            active.finish(identity(30), 7, 9, resumed, |_| panic!(
+                "expired authority must not authenticate/finish"
+            )),
+            Err(DiagnosticError::Expired)
+        );
+        assert!(!active.finished);
         assert_eq!(active.report, Some(expected));
         active
             .finish(identity(30), 7, 9, now, |actual| {

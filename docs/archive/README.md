@@ -29,3 +29,6 @@ They are not the current work index or authority to implement a reopened design.
 Archive dates identify the documentation reorganization. Original source pins and
 assessment dates remain in the documents; an archive date does not claim a fresh
 device test. Code links use retained repository snapshots where available.
+
+- [Diagnostic worker ABI launcher source review](2026-11-03-diagnostic-worker-abi-launch.md): instrumentation restarts the target package; not a mixed-ABI implementation or device proof.
+- [Suspend-aware diagnostic deadline qualification](2026-11-03-diagnostic-deadline-qualification.md): Core boot-time authority, retained evidence and inherited framework expiration.

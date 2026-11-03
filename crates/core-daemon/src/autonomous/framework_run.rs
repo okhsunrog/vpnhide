@@ -1,13 +1,16 @@
 //! Core owns source authorization, phase ordering, attribution, evidence and cleanup.
-use super::framework_fixture::FrameworkStore;
+use super::{
+    boot_time::{BootDeadline, BootInstant},
+    framework_fixture::FrameworkStore,
+};
 use std::os::unix::fs::MetadataExt;
 use std::{
     fs,
     io::{self, Read},
     path::Path,
-    time::{Duration, Instant},
+    time::Duration,
 };
-use vpnhide_diagnostic_model::{DiagnosticError, framework::*};
+use vpnhide_diagnostic_model::{DiagnosticError, DiagnosticWorkerTask, framework::*};
 use vpnhide_loader_ipc::image;
 
 pub(super) struct FrameworkRun {
@@ -21,11 +24,7 @@ fn failed(_: impl std::fmt::Display) -> DiagnosticError {
     DiagnosticError::Disabled
 }
 fn boot_ms() -> io::Result<u64> {
-    let mut t: libc::timespec = unsafe { std::mem::zeroed() };
-    if unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut t) } != 0 || t.tv_sec < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(t.tv_sec as u64 * 1000 + t.tv_nsec as u64 / 1_000_000)
+    BootInstant::now()?.millis()
 }
 fn system_server(ack: &FrameworkAcknowledgement) -> bool {
     let root = Path::new("/proc");
@@ -47,13 +46,14 @@ impl FrameworkRun {
             .map_err(failed)
     }
     pub fn new(
-        session: u64,
-        epoch: u64,
+        task: &DiagnosticWorkerTask,
         worker: (u32, u32, u64),
-        interface: String,
-        mtu: u32,
         hash: String,
+        deadline: BootDeadline,
     ) -> Result<Self, DiagnosticError> {
+        if deadline.expired(BootInstant::now().map_err(failed)?) {
+            return Err(DiagnosticError::Expired);
+        }
         let mut entropy = [0u8; 32];
         fs::File::open("/dev/urandom")
             .and_then(|mut f| f.read_exact(&mut entropy))
@@ -63,8 +63,8 @@ impl FrameworkRun {
             u32::from_le_bytes(entropy[..4].try_into().expect("four bytes")) & 0x3fff_ffff;
         let envelope = FrameworkEnvelope {
             version: FRAMEWORK_PROTOCOL,
-            session,
-            core_epoch: epoch,
+            session: task.session,
+            core_epoch: task.core_epoch,
             boot_id: image::bounded_text(Path::new(crate::native_boot::BOOT_ID_PATH), 128)
                 .map_err(failed)?
                 .trim()
@@ -74,23 +74,23 @@ impl FrameworkRun {
             worker_uid: worker.0,
             worker_pid: worker.1,
             worker_start_ticks: worker.2,
-            expires_boot_ms: boot_ms()
-                .map_err(failed)?
-                .checked_add(20_000)
-                .ok_or(DiagnosticError::Expired)?,
+            expires_boot_ms: deadline.expires_millis().map_err(failed)?,
             generation: 0,
             phase: FrameworkPhase::Prepared,
             fixture: FrameworkFixtureSpec {
                 vpn_net_id: 0x4000_0000 + (random_id & !1),
                 ordinary_net_id: 0x4000_0001 + (random_id & !1),
-                interface_name: interface,
-                mtu,
-                ordinary_interface_name: format!("ipsec{:010x}", session & 0xff_ffff_ffff),
+                interface_name: task.fixture.interface.name.clone(),
+                mtu: task.fixture.mtu,
+                ordinary_interface_name: format!("ipsec{:010x}", task.session & 0xff_ffff_ffff),
                 ordinary_mtu: 1519,
             },
         };
         if !envelope.valid() {
             return Err(DiagnosticError::Malformed);
+        }
+        if deadline.expired(BootInstant::now().map_err(failed)?) {
+            return Err(DiagnosticError::Expired);
         }
         Ok(Self {
             envelope,
@@ -105,7 +105,7 @@ impl FrameworkRun {
         store: &FrameworkStore,
         validate: fn(&FrameworkAcknowledgement) -> bool,
     ) -> Result<FrameworkAcknowledgement, DiagnosticError> {
-        let until = Instant::now() + Duration::from_millis(800);
+        let until = BootDeadline::from_now(Duration::from_millis(800)).map_err(failed)?;
         loop {
             if boot_ms().map_err(failed)? >= self.envelope.expires_boot_ms {
                 return Err(DiagnosticError::Expired);
@@ -125,9 +125,12 @@ impl FrameworkRun {
                 }) {
                     return Err(DiagnosticError::StaleSession);
                 }
+                if boot_ms().map_err(failed)? >= self.envelope.expires_boot_ms {
+                    return Err(DiagnosticError::Expired);
+                }
                 return Ok(ack);
             }
-            if Instant::now() >= until {
+            if until.expired(BootInstant::now().map_err(failed)?) {
                 return Err(DiagnosticError::Disabled);
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -152,6 +155,9 @@ impl FrameworkRun {
             } else {
                 Err(DiagnosticError::Expired)
             };
+        }
+        if boot_ms().map_err(failed)? >= self.envelope.expires_boot_ms {
+            return Err(DiagnosticError::Expired);
         }
         if request.session != self.envelope.session
             || request.core_epoch != self.envelope.core_epoch
@@ -262,6 +268,7 @@ mod tests {
         Arc,
         atomic::{AtomicBool, Ordering},
     };
+    use std::time::Instant;
     fn run() -> FrameworkRun {
         let mut envelope: FrameworkEnvelope = serde_json::from_str(include_str!(
             "../../../../fixtures/diagnostics/framework-envelope.json"
@@ -314,6 +321,57 @@ mod tests {
             properties_filtered: false,
             legacy: Default::default(),
         }
+    }
+    #[test]
+    fn framework_inherits_run_deadline_and_expired_phase_cannot_publish() {
+        use vpnhide_diagnostic_model::{InterfaceId, NativeFixtureSpec, OrdinaryControl};
+        let template = run().envelope;
+        let task = DiagnosticWorkerTask {
+            session: template.session,
+            core_epoch: template.core_epoch,
+            fixture: NativeFixtureSpec {
+                session: template.session,
+                interface: InterfaceId {
+                    name: template.fixture.interface_name,
+                    index: 42,
+                },
+                flags: 16,
+                mtu: template.fixture.mtu,
+                ordinary: OrdinaryControl {
+                    interface: InterfaceId {
+                        name: "lo".into(),
+                        index: 1,
+                    },
+                    flags: 73,
+                    mtu: 65536,
+                },
+            },
+        };
+        let deadline = BootDeadline::from_now(Duration::from_secs(5)).unwrap();
+        let mut run = FrameworkRun::new(&task, (10123, 456, 30), "a".repeat(64), deadline).unwrap();
+        assert_eq!(
+            run.envelope.expires_boot_ms,
+            deadline.expires_millis().unwrap()
+        );
+        let expired = BootInstant::at(0).after(Duration::ZERO).unwrap();
+        assert!(matches!(
+            FrameworkRun::new(&task, (10123, 456, 30), "a".repeat(64), expired),
+            Err(DiagnosticError::Expired)
+        ));
+        run.envelope.expires_boot_ms = boot_ms().unwrap().saturating_sub(1);
+        let directory = tempfile::tempdir().unwrap();
+        let owner = unsafe { libc::geteuid() };
+        let store = FrameworkStore::open(directory.path(), owner, owner).unwrap();
+        assert_eq!(
+            run.step_with(
+                request(&run, FrameworkWorkerPhase::Prepared),
+                &store,
+                |_| panic!("expired run cannot reach ACK authentication")
+            ),
+            Err(DiagnosticError::Expired)
+        );
+        assert_eq!(store.current().unwrap(), None);
+        assert!(run.phases.is_empty());
     }
     #[test]
     fn real_channel_phase_order_lost_reply_retry_and_cleanup_are_bounded_and_exact() {

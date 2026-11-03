@@ -1,9 +1,10 @@
 //! Fixed Android service adapter. Only the dedicated worker is stopped; the UI
 //! package is never force-stopped and an arbitrary PID is never signalled.
+use super::boot_time::{BootDeadline, BootInstant};
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use vpnhide_loader_ipc::{WORKER_PROCESS, image};
 
 static OWNER: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -76,9 +77,9 @@ pub fn prepare_fresh(app_dir: &Path) -> Result<(), String> {
         // AOSP returns nonzero even for its "Service stopped" branch. Command
         // status is not exit evidence: observe actual dedicated-process absence.
         let stopped = run(&["activity", "stop-service", "--user", "0", "-n", COMPONENT]);
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = BootDeadline::from_now(Duration::from_secs(2)).map_err(|e| e.to_string())?;
         while existing(app_dir)? {
-            if Instant::now() >= deadline {
+            if deadline.expired(BootInstant::now().map_err(|e| e.to_string())?) {
                 return Err(format!(
                     "previous dedicated diagnostic process did not exit: {stopped:?}"
                 ));

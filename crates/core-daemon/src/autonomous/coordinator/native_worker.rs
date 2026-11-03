@@ -63,13 +63,19 @@ impl Coordinator {
             return Err(DiagnosticError::Expired);
         }
         let active = inner.active.as_mut().ok_or(DiagnosticError::StaleSession)?;
-        active.finish(worker, session, epoch, Instant::now(), |expected| {
-            let current = thread_identity(Path::new("/proc"), worker, expected.tid)?;
-            if current != expected {
-                return Err(DiagnosticError::WrongProcess);
-            }
-            Ok(())
-        })?;
+        active.finish(
+            worker,
+            session,
+            epoch,
+            BootInstant::now().map_err(|_| DiagnosticError::Expired)?,
+            |expected| {
+                let current = thread_identity(Path::new("/proc"), worker, expected.tid)?;
+                if current != expected {
+                    return Err(DiagnosticError::WrongProcess);
+                }
+                Ok(())
+            },
+        )?;
         self.changed.notify_all();
         Ok(())
     }
@@ -91,7 +97,10 @@ impl Coordinator {
         }
         let active = inner.active.as_mut().ok_or(DiagnosticError::StaleSession)?;
         let task = active.task.as_ref().ok_or(DiagnosticError::StaleSession)?;
-        if active.deadline <= Instant::now() {
+        if active
+            .deadline
+            .expired(BootInstant::now().map_err(|_| DiagnosticError::Expired)?)
+        {
             return Err(DiagnosticError::Expired);
         }
         if active.worker != Some(worker) {
