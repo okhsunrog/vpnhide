@@ -265,6 +265,35 @@ mod tests {
         }
     }
     #[test]
+    fn previous_or_truncated_optional_plan_cannot_be_reused_as_current_proof() {
+        let mut evidence = run(ScopedNativeResult::Proven { checks: vec![] });
+        evidence.plan.contract = 5;
+        evidence.plan.required.push(RequiredCheck::SysInterfaces);
+        assert!(
+            evidence
+                .assessment()
+                .reuse_blockers
+                .contains(&ReuseBlocker::UnsupportedPlan)
+        );
+        evidence.plan = DiagnosticPlan::supported(true, false, false);
+        evidence
+            .plan
+            .required
+            .retain(|c| *c != RequiredCheck::SysInterfaces);
+        let assessment = evidence.assessment();
+        assert!(
+            assessment
+                .reuse_blockers
+                .contains(&ReuseBlocker::UnsupportedPlan)
+        );
+        assert!(assessment.required.contains(&RequiredCheck::SysInterfaces));
+        assert!(
+            assessment
+                .unverified
+                .contains(&RequiredCheck::SysInterfaces)
+        );
+    }
+    #[test]
     fn nested_leaks_survive_infrastructure_cleanup_failures_and_staleness() {
         for native in [
             ScopedNativeResult::Leaked {
@@ -321,7 +350,8 @@ mod tests {
         let a = run.assessment();
         assert_eq!(a.phase, AssessmentPhase::Incomplete);
         assert_eq!(a.proven.len(), 6);
-        assert_eq!(a.unverified.len(), 13);
+        assert_eq!(a.unverified.len(), 12);
+        assert!(!a.required.contains(&RequiredCheck::SysInterfaces));
         assert!(a.unverified.contains(&RequiredCheck::Getifaddrs));
         assert!(
             a.reuse_blockers
@@ -330,7 +360,7 @@ mod tests {
         assert!(!a.reuse_blockers.contains(&ReuseBlocker::ConditionsChanged));
         run.plan.required.clear();
         let a = run.assessment();
-        assert_eq!(a.required.len(), 19);
+        assert_eq!(a.required.len(), 18);
         assert!(a.reuse_blockers.contains(&ReuseBlocker::UnsupportedPlan));
     }
     #[test]

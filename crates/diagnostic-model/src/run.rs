@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{NativeFixtureSpec, NativeMeasurement, ScopedNativeResult};
 
-pub const DIAGNOSTIC_CONTRACT: u32 = 5;
+pub const DIAGNOSTIC_CONTRACT: u32 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -55,7 +55,6 @@ impl DiagnosticPlan {
             NetlinkRules,
             ProcRoutes,
             ProcInterfaces,
-            SysInterfaces,
             FrameworkNetworks,
             FrameworkDefaultNetwork,
             FrameworkCapabilities,
@@ -65,6 +64,7 @@ impl DiagnosticPlan {
             FrameworkPendingIntent,
         ];
         if filesystem {
+            required.push(SysInterfaces);
             required.push(Filesystem);
         }
         if packages {
@@ -205,6 +205,36 @@ impl DiagnosticRun {
 mod tests {
     use super::*;
     use crate::NativeCheck;
+    #[test]
+    fn optional_filesystem_plan_depends_on_desired_feature_not_available_stimuli() {
+        use RequiredCheck::*;
+        for packages in [false, true] {
+            for ports in [false, true] {
+                let plain = DiagnosticPlan::supported(false, packages, ports);
+                let filesystem = DiagnosticPlan::supported(true, packages, ports);
+                assert!(!plain.required.contains(&SysInterfaces));
+                assert!(!plain.required.contains(&Filesystem));
+                assert!(filesystem.required.contains(&SysInterfaces));
+                assert!(filesystem.required.contains(&Filesystem));
+                for check in [
+                    NetlinkRoutes,
+                    NetlinkRules,
+                    ProcRoutes,
+                    ProcInterfaces,
+                    FrameworkCallbacks,
+                    FrameworkPendingIntent,
+                ] {
+                    assert!(plain.required.contains(&check));
+                    assert!(filesystem.required.contains(&check));
+                }
+                assert_eq!(plain.required.contains(&PackageVisibility), packages);
+                assert_eq!(plain.required.contains(&Ports), ports);
+                let mut extra = filesystem.required.clone();
+                extra.retain(|c| !matches!(c, SysInterfaces | Filesystem));
+                assert_eq!(extra, plain.required);
+            }
+        }
+    }
     #[test]
     fn four_native_successes_never_replace_the_supported_contract() {
         let mut run = DiagnosticRun {

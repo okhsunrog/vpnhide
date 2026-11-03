@@ -16,8 +16,12 @@ fixtures, production hooks and explicitly requested manual forensics remain.
 ## Evidence and ownership
 
 The required plan comes from the supported contract and enabled features, not
-from the installed hook mask. Every required vector must have positive RAW
-stimulus, a protected observation, attribution and ordinary-object preservation
+from the installed hook mask. Diagnostic contract6 requires SysInterfaces and
+Filesystem only when the desired `filesystem_iface_paths` feature is enabled,
+matching RFC0002's optional-filesystem scope. Default route/proc-interface and
+framework requirements remain. Previous or truncated plans cannot be reused as
+current proof; the plan is not narrowed to successfully observed stimuli. Every
+required vector must have positive RAW stimulus, a protected observation, attribution and ordinary-object preservation
 controls. Empty enumerations and clean Java replies alone cannot prove hiding.
 A leak remains evidence under incomplete controls, worker death or cleanup failure.
 After a vector's negative/start controls qualify the worker's observed leak,
@@ -30,8 +34,13 @@ The real `:diagnostics` Android worker is a Zygote-created app process. Core
 orchestrates its bounded execution; Kotlin reports bounded observations rather
 than declaring PASS. Native fixtures are owned TUN resources with session/boot/
 identity and deadline cleanup. Framework fixtures exercise actual public APIs,
-Binder, source transformations and production normalization. RAW grants are
-scoped to the exact test process and never turn off protection for the whole UID.
+Binder, source transformations and production normalization. Framework RAW grants
+are scoped to the exact test process and never turn off protection for the whole UID. Native fixtures currently use privileged root
+negative/start/end/cleanup controls and one protected app-worker sample. A native
+RAW grant for that exact worker process remains code work; root controls do not
+establish its same-process RAW visibility or complete native attribution. Current
+scoped native results and their qualifications must not be presented as a full
+suite PASS. Adding more collectors does not close this missing grant mechanism.
 
 Required/proven/leaked/unverified, infrastructure failures and cleanup are separate.
 A worker's fresh result does not prove that already-running games consumed a new
