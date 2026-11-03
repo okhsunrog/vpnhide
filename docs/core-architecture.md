@@ -64,6 +64,14 @@ observations and progress. Observations therefore do not create editor conflicts
 Heavy root snapshots provide explicit inventory/counters/forensic details; config,
 boot selection and runtime read models come from the shared typed publication.
 
+Standalone read-only root snapshots have one active and one pending admission
+slot, separate from forensic exports. A competing normal startup/inventory read
+waits within its RPC deadline and the shared snapshot runtime cap, preserving its
+exact `packages` request. Cancellation before execution prevents a late child;
+after execution starts, actual completion owns the permit. Overflow, expiry and
+real probe failures remain failures. This does not retry destructive diagnostic
+batches or manufacture startup readiness.
+
 Root and config inputs join only after the app coordinator accepted at least the
 root snapshot's core sequence, with matching core epoch and config revision. A
 new epoch reusing a config revision cannot silently borrow old config provenance.

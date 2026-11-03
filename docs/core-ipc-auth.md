@@ -69,7 +69,7 @@ Other read/write errors propagate. Peer authorization remains required in every 
 | Physical RPC blocking workers | 6 ordinary + 2 recovery + 2 recording-status; permits survive waiter cancellation |
 | Held state polls | 2 per connection; extra polls return current publication |
 | RPC writer queue wait | 2 seconds before start; expired/cancelled commands cannot execute later |
-| Diagnostic collections | 2 forensic + 1 reserved standalone RootSnapshot; at most 32 probes and 4 workers each |
+| Diagnostic collections | 2 forensic; standalone read-only RootSnapshot has 1 active + 1 pending request. Pending admission respects its RPC deadline and the shared snapshot runtime cap. At most 32 probes and 4 workers per collection. |
 
 ## APK connection and save path
 

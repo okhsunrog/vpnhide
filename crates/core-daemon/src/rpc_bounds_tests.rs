@@ -1,6 +1,9 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+#[path = "root_probe_tests.rs"]
+mod root_probe_tests;
+
 fn test_state() -> Arc<CoreState> {
     CoreState::new(Publisher::new(42, Default::default()))
 }

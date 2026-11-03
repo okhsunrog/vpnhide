@@ -28,6 +28,7 @@ use crate::journal::{self, Journal, JournalEntry};
 use crate::operation::{self, PhaseHook, PlanKind, RealPhaseRunner};
 use crate::publisher::Publisher;
 mod revocation;
+mod root_probe_admission;
 mod self_target;
 
 #[cfg(test)]
@@ -120,7 +121,7 @@ pub struct CoreState {
     heavy_rpc: Arc<tokio::sync::Semaphore>,
     work_rpc: Arc<tokio::sync::Semaphore>,
     status_rpc: Arc<tokio::sync::Semaphore>,
-    root_rpc: Arc<tokio::sync::Semaphore>,
+    root_rpc: root_probe_admission::RootProbeAdmission,
     recovery_rpc: Arc<tokio::sync::Semaphore>,
     live_leases: Mutex<std::collections::HashMap<DebugLeaseId, LiveLease>>,
     /// Where the durable canonical config lives. `None` = no persistence (host tests); a
@@ -1110,7 +1111,7 @@ impl CoreState {
             heavy_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
             work_rpc: Arc::new(tokio::sync::Semaphore::new(6)),
             status_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
-            root_rpc: Arc::new(tokio::sync::Semaphore::new(1)),
+            root_rpc: root_probe_admission::RootProbeAdmission::default(),
             recovery_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
             live_leases: Mutex::new(Default::default()),
             config_path: None,
@@ -1291,7 +1292,7 @@ impl CoreState {
             heavy_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
             work_rpc: Arc::new(tokio::sync::Semaphore::new(6)),
             status_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
-            root_rpc: Arc::new(tokio::sync::Semaphore::new(1)),
+            root_rpc: root_probe_admission::RootProbeAdmission::default(),
             recovery_rpc: Arc::new(tokio::sync::Semaphore::new(2)),
             live_leases: Mutex::new(Default::default()),
             config_path: Some(path),
@@ -2984,21 +2985,21 @@ impl VpnhideCore for CoreServer {
 
     async fn collect_diagnostics(
         self,
-        _ctx: Context,
+        ctx: Context,
         request: DiagnosticsRequest,
     ) -> DiagnosticsReport {
         let state = self.state.clone();
         // Dashboard/inventory never waits for a forensic export to release a slot.
-        let pool = if matches!(
+        let snapshot = matches!(
             request.probes.as_slice(),
             [vpnhide_core_rpc::DiagnosticProbe::RootSnapshot { .. }]
-        ) && !request.clear_dmesg
-        {
-            &state.root_rpc
+        ) && !request.clear_dmesg;
+        let permit = if snapshot {
+            state.root_rpc.acquire(ctx.deadline).await
         } else {
-            &state.heavy_rpc
+            state.heavy_rpc.clone().try_acquire_owned().ok()
         };
-        let Ok(permit) = pool.clone().try_acquire_owned() else {
+        let Some(permit) = permit else {
             return DiagnosticsReport {
                 outputs: request
                     .probes
@@ -3016,8 +3017,20 @@ impl VpnhideCore for CoreServer {
                 dmesg_cleared: false,
             };
         };
+        // Only standalone read-only snapshots may wait here. A cancelled or
+        // expired request must not start a child later from the blocking queue;
+        // once the child starts its real completion still owns the permit.
+        let cancellation = snapshot.then(CancellationToken::new);
+        let _cancel = cancellation
+            .as_ref()
+            .map(|token| token.clone().drop_guard());
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
+            if cancellation.as_ref().is_some_and(|token| {
+                token.is_cancelled() || std::time::Instant::now() >= ctx.deadline
+            }) {
+                return DiagnosticsReport::default();
+            }
             let _queue_budget = crate::command_engine::RpcQueueBudget::enter();
             state.collect_diagnostics(&request)
         })

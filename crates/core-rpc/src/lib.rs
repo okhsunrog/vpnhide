@@ -104,6 +104,9 @@ pub const LOGCAT_STOP_DEADLINE: Duration = Duration::from_secs(60);
 
 /// Core's own cap on any single probe's runtime.
 pub const PROBE_MAX_RUNTIME: Duration = Duration::from_secs(180);
+/// One fixed root snapshot's execution cap, also bounding pending snapshot
+/// admission behind the currently running read. This does not apply to exports.
+pub const ROOT_SNAPSHOT_MAX_RUNTIME: Duration = Duration::from_secs(35);
 
 /// A durable monotonic identity allocated by core before command submission.
 /// Receipts deduplicate exact non-secret requests while retained; expired identities

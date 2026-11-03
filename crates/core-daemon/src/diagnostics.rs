@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use vpnhide_core_rpc::{
     DiagnosticProbe, DiagnosticsReport, DiagnosticsRequest, PROBE_MAX_RUNTIME, ProbeOutput,
+    ROOT_SNAPSHOT_MAX_RUNTIME,
 };
 
 /// Inline output cap per probe; larger output goes to a file in the export dir.
@@ -251,7 +252,7 @@ fn run_probe(
             if *packages {
                 args.push("--packages");
             }
-            core(&args, Duration::from_secs(35))
+            core(&args, ROOT_SNAPSHOT_MAX_RUNTIME)
         }
         DiagnosticProbe::DebugSnapshot => {
             core(&["probe", "debug-snapshot"], Duration::from_secs(125))
