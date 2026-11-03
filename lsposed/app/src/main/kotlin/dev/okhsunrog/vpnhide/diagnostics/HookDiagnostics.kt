@@ -15,6 +15,8 @@ import dev.okhsunrog.vpnhide.statistics.formatStatCount
 import dev.okhsunrog.vpnhide.statistics.parseCounterState
 import dev.okhsunrog.vpnhide.statistics.parseProtocolStatusBlock
 import dev.okhsunrog.vpnhide.statusError
+import uniffi.vpnhide_core_ffi.CoreCounterChange
+import uniffi.vpnhide_core_ffi.telemetryCounterChange
 
 private data class CounterKey(
     val backend: HookIds.Backend,
@@ -216,18 +218,20 @@ internal fun counterDeltaText(
     current: Long,
     baseline: Long?,
     hasBaseline: Boolean,
-): String = if (!hasBaseline) "n/a" else unsignedDeltaText(current.toULong(), baseline?.toULong())
+): String = renderCounterChange(telemetryCounterChange(current.toULong(), baseline?.toULong(), hasBaseline))
 
 /** "reset" when the counter ran backwards (device/backend reset), else "+delta"
  * unsigned. A null [baseline] means the row is new since the baseline → "+current". */
 private fun unsignedDeltaText(
     current: ULong,
     baseline: ULong?,
-): String =
-    when {
-        baseline == null -> "+${formatStatCount(current)}"
-        current < baseline -> "reset"
-        else -> "+${formatStatCount(current - baseline)}"
+): String = renderCounterChange(telemetryCounterChange(current, baseline, captured = true))
+
+private fun renderCounterChange(change: CoreCounterChange): String =
+    when (change) {
+        is CoreCounterChange.Count -> "+${formatStatCount(change.count)}"
+        CoreCounterChange.Reset -> "reset"
+        CoreCounterChange.Unavailable -> "n/a"
     }
 
 private fun Map<CounterKey, Long>.unsignedSumForHook(hook: HookIds.Hook): ULong =

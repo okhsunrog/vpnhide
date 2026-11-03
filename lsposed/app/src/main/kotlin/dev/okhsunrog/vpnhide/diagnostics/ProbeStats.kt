@@ -5,6 +5,9 @@ import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.picker.AppSummary
 import dev.okhsunrog.vpnhide.statistics.BackendStatistics
 import dev.okhsunrog.vpnhide.statistics.StatisticsState
+import uniffi.vpnhide_core_ffi.CoreCounterChange
+import uniffi.vpnhide_core_ffi.CoreCounterSample
+import uniffi.vpnhide_core_ffi.telemetryCounterChanges
 
 // Where a detection method lives — used to group methods on the per-app card and
 // to explain (native syscall/libc vs Java API vs package enumeration) at a
@@ -113,8 +116,8 @@ internal data class AppProbeStats(
 // per-method breakdown. Hooks map to methods; an unknown hook id still counts
 // toward the app total but has no method bucket. Sorted by total, descending.
 //
-// [selfPackage] (VPN Hide's own package) is excluded: the app's cold-start
-// diagnostic check suite probes every vector against itself, which would
+// [selfPackage] (VPN Hide's own package) is excluded: the autonomous
+// diagnostic worker probes its own UID, which would
 // otherwise dominate the list as self-noise rather than a real prober.
 internal fun buildAppProbeStats(
     state: StatisticsState,
@@ -178,8 +181,8 @@ internal fun snapshotCounters(state: StatisticsState): Map<Pair<Long, Long>, Lon
 
 internal data class CaptureDiff(
     val apps: List<AppProbeStats>,
-    // A counter dropped below its baseline — the backend restarted (reboot /
-    // system_server restart / Zygisk re-inject). The caller should re-baseline.
+    // A counter decreased in unsigned order: this interval is discontinuous.
+    // Re-baseline without claiming a specific restart or guessing wraparound.
     val backendReset: Boolean,
 )
 
@@ -198,29 +201,30 @@ internal fun diffCapture(
     current: StatisticsState,
     selfPackage: String? = null,
 ): CaptureDiff {
-    var reset = false
+    // Each backend has its own bounded wire document; combining them before
+    // the local FFI call could reject two individually valid full documents.
+    val compared =
+        current.backends.flatMap { backend ->
+            backend.rows.zip(
+                telemetryCounterChanges(
+                    backend.rows.map { row ->
+                        CoreCounterSample(current = row.count.toULong(), baseline = baseline[row.uid to row.hookId]?.toULong())
+                    },
+                    captured = true,
+                ),
+            )
+        }
     val deltaRows =
-        current.backends
-            .flatMap { it.rows }
-            .mapNotNull { row ->
-                val base = baseline[row.uid to row.hookId] ?: 0L
-                val delta = row.count - base
-                when {
-                    delta < 0L -> {
-                        reset = true
-                        null
-                    }
-
-                    delta == 0L -> {
-                        null
-                    }
-
-                    else -> {
-                        row.copy(count = delta)
-                    }
-                }
+        compared.mapNotNull { (row, change) ->
+            when (change) {
+                is CoreCounterChange.Count -> row.copy(count = change.count.toLong()).takeIf { change.count != 0uL }
+                CoreCounterChange.Reset, CoreCounterChange.Unavailable -> null
             }
+        }
     val synthetic =
         StatisticsState(backends = listOf(BackendStatistics(backend = HookIds.Backend.LSPOSED, status = null, rows = deltaRows)))
-    return CaptureDiff(apps = buildAppProbeStats(synthetic, selfPackage), backendReset = reset)
+    return CaptureDiff(
+        apps = buildAppProbeStats(synthetic, selfPackage),
+        backendReset = compared.any { it.second == CoreCounterChange.Reset },
+    )
 }

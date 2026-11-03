@@ -3,6 +3,28 @@ use crate::{StatEntry, TELEMETRY_VERSION};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 pub const MAX_TELEMETRY_BYTES: usize = 1024 * 1024;
+pub const MAX_STATS_CELLS: usize = 16_384;
+
+/// Counter bits are unsigned on the wire. A decrease means a reset/unknown
+/// interval, never an inferred wraparound. Missing baseline and an explicitly
+/// captured empty baseline have different meanings. This is numeric evidence,
+/// not proof that two snapshots share a backend/process generation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CounterChange {
+    Unavailable,
+    Reset,
+    Count(u64),
+}
+
+pub fn counter_change(current: u64, baseline: Option<u64>, captured: bool) -> CounterChange {
+    if !captured {
+        return CounterChange::Unavailable;
+    }
+    match baseline {
+        Some(baseline) if current < baseline => CounterChange::Reset,
+        baseline => CounterChange::Count(current - baseline.unwrap_or(0)),
+    }
+}
 
 /// LSPosed's extensible metadata is display evidence, not a hook grant.
 pub fn metadata(raw: &str) -> BTreeMap<String, String> {
@@ -125,7 +147,7 @@ pub fn parse_stats(bytes: &[u8]) -> Option<Vec<StatEntry>> {
             let (hook, count) = word.split_once(':')?;
             let hook_id = u32::try_from(hex(hook)?).ok()?;
             let count = hex(count)?;
-            if count == 0 || !seen.insert((uid, hook_id)) || rows.len() >= 16384 {
+            if count == 0 || !seen.insert((uid, hook_id)) || rows.len() >= MAX_STATS_CELLS {
                 return None;
             }
             rows.push(StatEntry {
@@ -144,6 +166,26 @@ pub fn parse_stats(bytes: &[u8]) -> Option<Vec<StatEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn counter_intervals_use_unsigned_order_and_never_guess_a_wrap() {
+        for (current, baseline, expected) in [
+            (0, None, CounterChange::Count(0)),
+            (5, None, CounterChange::Count(5)),
+            (10, Some(3), CounterChange::Count(7)),
+            (9, Some(9), CounterChange::Count(0)),
+            (2, Some(9), CounterChange::Reset),
+            (u64::MAX, Some(0), CounterChange::Count(u64::MAX)),
+            (1 << 63, Some((1 << 63) - 1), CounterChange::Count(1)),
+            ((1 << 63) + 1, Some(1 << 63), CounterChange::Count(1)),
+            (0, Some(u64::MAX), CounterChange::Reset),
+        ] {
+            assert_eq!(counter_change(current, baseline, true), expected);
+            assert_eq!(
+                counter_change(current, baseline, false),
+                CounterChange::Unavailable
+            );
+        }
+    }
     #[test]
     fn metadata_preserves_value_spaces_and_last_duplicate() {
         assert_eq!(

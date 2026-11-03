@@ -4,6 +4,7 @@ import dev.okhsunrog.vpnhide.diagnostics.AppProbeStats
 import dev.okhsunrog.vpnhide.diagnostics.DetectionMethod
 import dev.okhsunrog.vpnhide.diagnostics.MethodSurface
 import dev.okhsunrog.vpnhide.diagnostics.buildAppProbeStats
+import dev.okhsunrog.vpnhide.diagnostics.counterDeltaText
 import dev.okhsunrog.vpnhide.diagnostics.diffCapture
 import dev.okhsunrog.vpnhide.diagnostics.resolveAppSummary
 import dev.okhsunrog.vpnhide.diagnostics.snapshotCounters
@@ -158,6 +159,41 @@ class ProbeStatsTest {
 
         assertEquals(true, diff.backendReset)
         assertEquals(emptyList<AppProbeStats>(), diff.apps)
+    }
+
+    @Test
+    fun `capture and forensic deltas preserve unsigned counts and do not invent wraparound traffic`() {
+        val hook = HookIds.Hook.LSPOSED_NETWORK_CAPABILITIES
+        val key = 10100L to hook.id.toLong()
+
+        fun current(count: Long) = StatisticsState(listOf(backend(HookIds.Backend.LSPOSED, listOf(row(10100, hook, count)))))
+
+        val large = diffCapture(mapOf(key to 0L), current(-1L))
+        assertEquals(false, large.backendReset)
+        assertEquals(ULong.MAX_VALUE, large.apps.single().total)
+        assertEquals("+18,446,744,073,709,551,615", counterDeltaText(-1L, 0L, hasBaseline = true))
+        // An explicitly captured empty baseline also admits a new unsigned row.
+        assertEquals(ULong.MAX_VALUE, diffCapture(emptyMap(), current(-1L)).apps.single().total)
+
+        val reset = diffCapture(mapOf(key to -1L), current(0L))
+        assertEquals(true, reset.backendReset)
+        assertEquals(emptyList<AppProbeStats>(), reset.apps)
+        assertEquals("reset", counterDeltaText(0L, -1L, hasBaseline = true))
+
+        val crossed = diffCapture(mapOf(key to Long.MAX_VALUE), current(Long.MIN_VALUE))
+        assertEquals(false, crossed.backendReset)
+        assertEquals(1uL, crossed.apps.single().total)
+    }
+
+    @Test
+    fun `capture batches keep independent backend document bounds`() {
+        val native = (1L..8193L).map { row(it, HookIds.Hook.DEV_IOCTL, 1) }
+        val java = (1L..8193L).map { row(it, HookIds.Hook.LSPOSED_NETWORK_CAPABILITIES, 2) }
+        val current = StatisticsState(listOf(backend(HookIds.Backend.KMOD, native), backend(HookIds.Backend.LSPOSED, java)))
+        val diff = diffCapture(emptyMap(), current)
+        assertEquals(false, diff.backendReset)
+        assertEquals(8193, diff.apps.size)
+        assertEquals(setOf(3uL), diff.apps.map { it.total }.toSet())
     }
 
     private fun appStats(

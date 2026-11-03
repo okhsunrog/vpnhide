@@ -159,3 +159,12 @@ verdict fields are null; their old Kotlin domain owners are removed. Capture tim
 is not measurement time. Manual `NetworkViewCapture`, hook counter baselines,
 unsigned delta/reset handling and root forensic sections remain available for
 investigation. See [debug bundles](debug-bundle.md).
+Numeric counter differences have one owner in `protocol::telemetry::counter_change`.
+The UI/agent capture uses a bounded local FFI batch per backend document; forensic text renders the
+same typed Unavailable/Reset/Count result. A captured empty baseline admits new
+rows, while an absent baseline remains unavailable. Counts retain all unsigned
+64 bits: crossing the signed `Long` boundary is not a reset, and a decrease is
+never guessed to be wraparound traffic. A discontinuity requests re-baselining;
+it does not prove a particular process/backend restart or authorize fallback.
+Snapshot generation/source attribution and remaining capture/export orchestration
+are separate work; this numeric comparison does not certify either.

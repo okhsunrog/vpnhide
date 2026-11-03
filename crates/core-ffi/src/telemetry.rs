@@ -1,5 +1,58 @@
 //! Local, unprivileged app telemetry readers over the shared wire grammar.
 use vpnhide_protocol as protocol;
+
+#[derive(Clone, Copy, uniffi::Record)]
+pub struct CoreCounterSample {
+    pub current: u64,
+    pub baseline: Option<u64>,
+}
+#[derive(Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CoreCounterChange {
+    Unavailable,
+    Reset,
+    Count { count: u64 },
+}
+impl From<protocol::telemetry::CounterChange> for CoreCounterChange {
+    fn from(value: protocol::telemetry::CounterChange) -> Self {
+        match value {
+            protocol::telemetry::CounterChange::Unavailable => Self::Unavailable,
+            protocol::telemetry::CounterChange::Reset => Self::Reset,
+            protocol::telemetry::CounterChange::Count(count) => Self::Count { count },
+        }
+    }
+}
+#[derive(Debug, uniffi::Error)]
+pub enum CoreCounterError {
+    TooManySamples,
+}
+impl std::fmt::Display for CoreCounterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("counter sample batch exceeds the shared telemetry bound")
+    }
+}
+impl std::error::Error for CoreCounterError {}
+#[uniffi::export]
+pub fn telemetry_counter_change(
+    current: u64,
+    baseline: Option<u64>,
+    captured: bool,
+) -> CoreCounterChange {
+    protocol::telemetry::counter_change(current, baseline, captured).into()
+}
+/// One local FFI call for a capture batch, without a per-row RPC or grant.
+#[uniffi::export]
+pub fn telemetry_counter_changes(
+    samples: Vec<CoreCounterSample>,
+    captured: bool,
+) -> Result<Vec<CoreCounterChange>, CoreCounterError> {
+    if samples.len() > protocol::telemetry::MAX_STATS_CELLS {
+        return Err(CoreCounterError::TooManySamples);
+    }
+    Ok(samples
+        .into_iter()
+        .map(|sample| telemetry_counter_change(sample.current, sample.baseline, captured))
+        .collect())
+}
 #[uniffi::export]
 pub fn protocol_metadata(raw: String) -> std::collections::HashMap<String, String> {
     protocol::telemetry::metadata(&raw).into_iter().collect()
@@ -91,6 +144,52 @@ pub fn protocol_extract_block(raw: String, kind: CoreProtocolKind) -> Option<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scalar_and_batch_preserve_unsigned_bits_and_the_explicit_baseline_state() {
+        let input = vec![
+            CoreCounterSample {
+                current: u64::MAX,
+                baseline: Some(0),
+            },
+            CoreCounterSample {
+                current: 0,
+                baseline: Some(u64::MAX),
+            },
+            CoreCounterSample {
+                current: 7,
+                baseline: None,
+            },
+        ];
+        assert_eq!(
+            telemetry_counter_changes(input.clone(), true).unwrap(),
+            vec![
+                CoreCounterChange::Count { count: u64::MAX },
+                CoreCounterChange::Reset,
+                CoreCounterChange::Count { count: 7 },
+            ]
+        );
+        assert_eq!(
+            telemetry_counter_changes(input, false).unwrap(),
+            vec![
+                CoreCounterChange::Unavailable,
+                CoreCounterChange::Unavailable,
+                CoreCounterChange::Unavailable,
+            ]
+        );
+        assert!(matches!(
+            telemetry_counter_changes(
+                vec![
+                    CoreCounterSample {
+                        current: 0,
+                        baseline: None
+                    };
+                    protocol::telemetry::MAX_STATS_CELLS + 1
+                ],
+                true
+            ),
+            Err(CoreCounterError::TooManySamples)
+        ));
+    }
     #[test]
     fn typed_display_does_not_erase_missing_fields_or_unsigned_counter_bits() {
         let missing = protocol_status_fields("vpnhide 1 status\nhooks 0x1\n".into()).unwrap();
