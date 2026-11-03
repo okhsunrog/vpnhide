@@ -60,7 +60,7 @@ internal object AgentControlDispatcher {
                 name = "getState",
                 description =
                     "The one canonical read for debugging: live dashboard (hero/messages) + the full " +
-                        "diagnostics report (gate, per-layer verdict, per-check outcome + root ground truth) + " +
+                        "retained Core diagnostic evidence (required/proven/leaked/unverified checks and controls) + " +
                         "per-module liveness + rootShell self-diagnosis + the canonical config + a hook-counter " +
                         "snapshot. forensics=true also embeds dmesg, boot logcat, lsposed config, the hook report " +
                         "and every raw shell section. appList=true additionally keeps the installed-app / profile " +

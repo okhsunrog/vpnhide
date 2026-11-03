@@ -53,7 +53,7 @@ internal data class DiagnosticFileEntry(
  * lightweight Java evidence; [attachKernelImage] and [attachJavaFiles] control
  * the two optional binary attachments.
  *
- * The outcome is explicit: a bundle whose self-test could not measure is still
+ * The outcome is explicit: a bundle with incomplete retained Core evidence is still
  * [DebugExportOutcome.Written], carrying the reason. [DebugExportOutcome.Failed]
  * means collection or packaging itself threw and no file exists.
  */
