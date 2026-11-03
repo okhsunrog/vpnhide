@@ -252,6 +252,99 @@ fn cleanup_failure_and_lost_ordinary_objects_preserve_observed_leaks() {
 }
 
 #[test]
+fn unavailable_end_or_cleanup_keeps_all_qualified_address_leaks_without_proof() {
+    let (n, p) = (measurement(false), measurement(true));
+    for missing_actors in [false, true] {
+        for (lost_end, lost_cleanup) in [(true, false), (false, true), (true, true)] {
+            let mut end = p.clone();
+            let mut cleanup = n.clone();
+            for (lost, m, error) in [
+                (lost_end, &mut end, ProbeError::Timeout),
+                (lost_cleanup, &mut cleanup, ProbeError::Errno(13)),
+            ] {
+                if lost {
+                    m.ifaddrs = Sample::Error(error.clone());
+                    if missing_actors {
+                        m.actors.clear();
+                    } else {
+                        for a in &mut m.actors {
+                            for i in &mut a.ioctls {
+                                i.fixture = Sample::Error(error.clone());
+                                i.ordinary = Sample::Error(error.clone());
+                            }
+                            a.netlink = Sample::Error(error.clone());
+                            a.ifconf = Sample::Error(error.clone());
+                        }
+                    }
+                }
+            }
+            let leaked = evaluate_address_fixture(&spec(), &n, &p, &p, &end, &cleanup);
+            assert_eq!(leaked.leaked.len(), 18);
+            assert!(leaked.proven.is_empty());
+            assert!(leaked.controls.contains(&ControlFailure::ProbeUnavailable));
+            if lost_end {
+                assert!(leaked.controls.contains(&ControlFailure::FixtureChanged));
+            }
+            if lost_cleanup {
+                assert!(
+                    leaked
+                        .controls
+                        .contains(&ControlFailure::CleanupUnconfirmed)
+                );
+            }
+            let hidden = evaluate_address_fixture(&spec(), &n, &p, &n, &end, &cleanup);
+            assert!(hidden.proven.is_empty() && hidden.leaked.is_empty());
+        }
+    }
+}
+#[test]
+fn null_buffer_size_mismatch_survives_unavailable_end_and_cleanup() {
+    let (n, p) = (measurement(false), measurement(true));
+    let mut worker = n.clone();
+    for a in &mut worker.actors {
+        if let Sample::Value(v) = &mut a.ifconf {
+            v.size_before = 80;
+            v.size_after = 80;
+        }
+    }
+    let mut unavailable = n.clone();
+    unavailable.ifaddrs = Sample::Error(ProbeError::Timeout);
+    unavailable.actors.clear();
+    let result = evaluate_address_fixture(&spec(), &n, &p, &worker, &unavailable, &unavailable);
+    assert_eq!(
+        result.leaked,
+        vec![
+            check(NativeReadActor::Libc, AddressVector::IfconfSize),
+            check(NativeReadActor::Syscall, AddressVector::IfconfSize)
+        ]
+    );
+    assert!(result.proven.is_empty());
+    assert!(result.controls.contains(&ControlFailure::ProbeUnavailable));
+    assert!(
+        result
+            .controls
+            .contains(&ControlFailure::CleanupUnconfirmed)
+    );
+}
+
+#[test]
+fn missing_later_component_preserves_qualified_address_evidence_in_core_projection() {
+    let mut n = NativeMeasurement::unavailable(ProbeError::Unsupported);
+    let mut p = n.clone();
+    n.addresses = Some(measurement(false));
+    p.addresses = Some(measurement(true));
+    let missing = NativeMeasurement::unavailable(ProbeError::Timeout);
+    let result = evaluate_native_address_fixture(&spec(), [&n, &p, &p, &missing, &missing]);
+    assert_eq!(result.leaked.len(), 18);
+    assert!(result.proven.is_empty());
+    assert!(
+        result
+            .controls
+            .contains(&ControlFailure::CleanupUnconfirmed)
+    );
+}
+
+#[test]
 fn permission_failure_duplicate_actors_and_malformed_records_never_pass() {
     let (n, p) = (measurement(false), measurement(true));
     let mut denied = n.clone();

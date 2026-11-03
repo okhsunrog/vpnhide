@@ -303,27 +303,14 @@ impl TunFixture {
             &cleanup,
         ];
         NativeCompletion {
-            proc_interfaces: match measurements.map(|m| m.proc_interfaces.as_ref()) {
-                [Some(n), Some(s), Some(w), Some(e), Some(c)] => {
-                    vpnhide_diagnostic_model::evaluate_proc_interface_fixture(
-                        &self.spec,
-                        [n, s, w, e, c],
-                    )
-                }
-                _ => vpnhide_diagnostic_model::ScopedProcInterfaceResult {
-                    controls: vec![vpnhide_diagnostic_model::ControlFailure::ProbeUnavailable],
-                    ..Default::default()
-                },
-            },
-            addresses: match measurements.map(|m| m.addresses.as_ref()) {
-                [Some(n), Some(s), Some(w), Some(e), Some(c)] => {
-                    vpnhide_diagnostic_model::evaluate_address_fixture(&self.spec, n, s, w, e, c)
-                }
-                _ => vpnhide_diagnostic_model::ScopedAddressResult {
-                    controls: vec![vpnhide_diagnostic_model::ControlFailure::ProbeUnavailable],
-                    ..Default::default()
-                },
-            },
+            proc_interfaces: vpnhide_diagnostic_model::evaluate_native_proc_interface_fixture(
+                &self.spec,
+                measurements,
+            ),
+            addresses: vpnhide_diagnostic_model::evaluate_native_address_fixture(
+                &self.spec,
+                measurements,
+            ),
             root_end,
             cleanup,
             result,

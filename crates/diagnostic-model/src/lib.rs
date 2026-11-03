@@ -154,6 +154,19 @@ pub struct NativeMeasurement {
 }
 
 impl NativeMeasurement {
+    pub fn unavailable(error: ProbeError) -> Self {
+        Self {
+            proc_interfaces: None,
+            addresses: None,
+            binding: None,
+            flags: Sample::Error(error.clone()),
+            mtu: Sample::Error(error.clone()),
+            ifaddrs: Sample::Error(error.clone()),
+            links: Sample::Error(error.clone()),
+            ordinary_flags: Sample::Error(error.clone()),
+            ordinary_mtu: Sample::Error(error),
+        }
+    }
     pub fn bounded(&self) -> bool {
         self.proc_interfaces
             .as_ref()
@@ -201,6 +214,23 @@ pub enum ControlFailure {
     OrdinaryObjectsChanged,
     ProbeUnavailable,
     CleanupUnconfirmed,
+}
+
+/// Later observations qualify proof, never erase an earlier qualified leak.
+/// Unavailable data and the affected control remain separate failure facts.
+pub(crate) fn later_control_failures<T>(
+    sample: Option<T>,
+    failure: ControlFailure,
+    valid: impl FnOnce(&T) -> bool,
+) -> impl Iterator<Item = ControlFailure> {
+    let unavailable = sample.is_none();
+    let invalid = sample.as_ref().is_none_or(|value| !valid(value));
+    [
+        unavailable.then_some(ControlFailure::ProbeUnavailable),
+        invalid.then_some(failure),
+    ]
+    .into_iter()
+    .flatten()
 }
 
 /// A scoped interface-only result. This cannot establish the whole required

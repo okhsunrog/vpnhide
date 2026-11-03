@@ -513,17 +513,7 @@ impl Coordinator {
                     .0;
             }
         })();
-        let unavailable = NativeMeasurement {
-            proc_interfaces: None,
-            addresses: None,
-            binding: None,
-            flags: Sample::Error(ProbeError::Timeout),
-            mtu: Sample::Error(ProbeError::Timeout),
-            ifaddrs: Sample::Error(ProbeError::Timeout),
-            links: Sample::Error(ProbeError::Timeout),
-            ordinary_flags: Sample::Error(ProbeError::Timeout),
-            ordinary_mtu: Sample::Error(ProbeError::Timeout),
-        };
+        let unavailable = NativeMeasurement::unavailable(ProbeError::Timeout);
         // All paths close AND read back cleanup before releasing the run slot.
         // Synthetic unavailable samples cannot establish hiding success.
         let spec = fixture.spec.clone();

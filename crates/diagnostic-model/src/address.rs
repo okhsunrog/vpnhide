@@ -258,7 +258,7 @@ fn ifconf_size(
     actor: NativeReadActor,
     samples: [Option<&IfconfObservation>; 5],
 ) {
-    let [Some(n), Some(s), Some(w), Some(e), Some(c)] = samples else {
+    let [Some(n), Some(s), Some(w), e, c] = samples else {
         result.problem(ControlFailure::ProbeUnavailable);
         return;
     };
@@ -269,42 +269,53 @@ fn ifconf_size(
             .cloned()
             .collect::<BTreeSet<_>>()
     };
-    // Scalar counts have no literal fixture marker: require stable complete RAW
-    // lists on both sides, not only a loopback control or a nonzero byte count.
-    if ![n, s, e].iter().all(|v| v.consistent()) || w.size_before != w.size_after {
+    // Qualify the observed discrepancy from complete negative/start RAW lists
+    // and stable worker queries. Later failures withhold proof, not that evidence.
+    if ![n, s].iter().all(|v| v.consistent()) || w.size_before != w.size_after {
         result.problem(ControlFailure::ProbeUnavailable);
         return;
     }
     if n.entries.iter().any(|a| marker(spec, a, 4))
         || !positive(spec, &s.entries, 4)
-        || !positive(spec, &e.entries, 4)
         || ordinary(&n.entries, 4).is_empty()
         || without_fixture(&n.entries) != without_fixture(&s.entries)
-        || without_fixture(&n.entries) != without_fixture(&e.entries)
         || ordinary(&w.entries, 4) != ordinary(&n.entries, 4)
     {
         result.problem(ControlFailure::FixtureChanged);
         return;
     }
-    let cleaned = c.consistent()
-        && !c.entries.iter().any(|a| marker(spec, a, 4))
-        && without_fixture(&n.entries) == without_fixture(&c.entries);
-    if !cleaned {
-        result.problem(ControlFailure::CleanupUnconfirmed);
-    }
     let visible_other =
         w.entries.iter().filter(|a| !marker(spec, a, 4)).count() as u32 * w.record_bytes;
-    if w.size_before > visible_other {
+    let leaked = w.size_before > visible_other;
+    if leaked {
         result.leaked.push(AddressCheck {
             actor,
             vector: AddressVector::IfconfSize,
         });
-    } else if w.size_before == visible_other && cleaned {
+    }
+    let mut controlled = true;
+    for failure in crate::later_control_failures(e, ControlFailure::FixtureChanged, |e| {
+        e.consistent()
+            && positive(spec, &e.entries, 4)
+            && without_fixture(&n.entries) == without_fixture(&e.entries)
+    }) {
+        result.problem(failure);
+        controlled = false;
+    }
+    for failure in crate::later_control_failures(c, ControlFailure::CleanupUnconfirmed, |c| {
+        c.consistent()
+            && !c.entries.iter().any(|a| marker(spec, a, 4))
+            && without_fixture(&n.entries) == without_fixture(&c.entries)
+    }) {
+        result.problem(failure);
+        controlled = false;
+    }
+    if !leaked && w.size_before == visible_other && controlled {
         result.proven.push(AddressCheck {
             actor,
             vector: AddressVector::IfconfSize,
         });
-    } else {
+    } else if w.size_before < visible_other {
         result.problem(ControlFailure::ProbeUnavailable);
     }
 }
@@ -316,7 +327,7 @@ fn lists(
     family: usize,
     samples: [Option<&[ObservedAddress]>; 5],
 ) {
-    let [Some(n), Some(s), Some(w), Some(e), Some(c)] = samples else {
+    let [Some(n), Some(s), Some(w), e, c] = samples else {
         result.problem(ControlFailure::ProbeUnavailable);
         return;
     };
@@ -337,12 +348,16 @@ fn lists(
         result.problem(ControlFailure::OrdinaryObjectsChanged);
         controlled = false;
     }
-    if !positive(spec, e, family) || ordinary(e, family) != ordinary(s, family) {
-        result.problem(ControlFailure::FixtureChanged);
+    for failure in crate::later_control_failures(e, ControlFailure::FixtureChanged, |e| {
+        positive(spec, e, family) && ordinary(e, family) == ordinary(s, family)
+    }) {
+        result.problem(failure);
         controlled = false;
     }
-    if c.iter().any(|a| marker(spec, a, family)) || ordinary(c, family) != ordinary(n, family) {
-        result.problem(ControlFailure::CleanupUnconfirmed);
+    for failure in crate::later_control_failures(c, ControlFailure::CleanupUnconfirmed, |c| {
+        !c.iter().any(|a| marker(spec, a, family)) && ordinary(c, family) == ordinary(n, family)
+    }) {
+        result.problem(failure);
         controlled = false;
     }
     if !leaked && controlled {
@@ -354,13 +369,12 @@ fn evaluate_actor(
     result: &mut ScopedAddressResult,
     spec: &NativeFixtureSpec,
     actor: NativeReadActor,
-    samples: [&AddressActorMeasurement; 5],
+    samples: [Option<&AddressActorMeasurement>; 5],
 ) {
-    let [negative, start, worker, end, cleanup] = samples;
     for kind in AddressIoctl::ALL {
-        let observations = [negative, start, worker, end, cleanup]
-            .map(|m| m.ioctls.iter().find(|o| o.kind == kind));
-        let [Some(n), Some(s), Some(w), Some(e), Some(c)] = observations else {
+        let observations =
+            samples.map(|m| m.and_then(|m| m.ioctls.iter().find(|o| o.kind == kind)));
+        let [Some(n), Some(s), Some(w), e, c] = observations else {
             result.problem(ControlFailure::ProbeUnavailable);
             continue;
         };
@@ -397,12 +411,16 @@ fn evaluate_actor(
             result.problem(ControlFailure::OrdinaryObjectsChanged);
             controlled = false;
         }
-        if e.fixture != s.fixture || e.ordinary != s.ordinary {
-            result.problem(ControlFailure::FixtureChanged);
+        for failure in crate::later_control_failures(e, ControlFailure::FixtureChanged, |e| {
+            e.fixture == s.fixture && e.ordinary == s.ordinary
+        }) {
+            result.problem(failure);
             controlled = false;
         }
-        if !absent(&c.fixture) || c.ordinary != n.ordinary {
-            result.problem(ControlFailure::CleanupUnconfirmed);
+        for failure in crate::later_control_failures(c, ControlFailure::CleanupUnconfirmed, |c| {
+            absent(&c.fixture) && c.ordinary == n.ordinary
+        }) {
+            result.problem(failure);
             controlled = false;
         }
         if !leaked && !absent(&w.fixture) {
@@ -425,7 +443,7 @@ fn evaluate_actor(
             spec,
             AddressCheck { actor, vector },
             family,
-            [negative, start, worker, end, cleanup].map(|m| m.netlink.value().map(Vec::as_slice)),
+            samples.map(|m| m.and_then(|m| m.netlink.value().map(Vec::as_slice))),
         );
     }
     lists(
@@ -436,14 +454,13 @@ fn evaluate_actor(
             vector: AddressVector::IfconfData,
         },
         4,
-        [negative, start, worker, end, cleanup]
-            .map(|m| m.ifconf.value().map(|v| v.entries.as_slice())),
+        samples.map(|m| m.and_then(|m| m.ifconf.value().map(|v| v.entries.as_slice()))),
     );
     ifconf_size(
         result,
         spec,
         actor,
-        [negative, start, worker, end, cleanup].map(|m| m.ifconf.value()),
+        samples.map(|m| m.and_then(|m| m.ifconf.value())),
     );
 }
 
@@ -456,22 +473,21 @@ pub fn evaluate_address_fixture(
     cleanup: &AddressMeasurement,
 ) -> ScopedAddressResult {
     let mut result = ScopedAddressResult::default();
-    if !spec.valid()
-        || [negative, start, worker, end, cleanup]
-            .iter()
-            .any(|m| !m.bounded())
-    {
+    if !spec.valid() || [negative, start, worker].iter().any(|m| !m.bounded()) {
         result.problem(ControlFailure::InvalidSpec);
         return result;
     }
+    let samples = [negative, start, worker, end, cleanup].map(|m| m.bounded().then_some(m));
+    if samples.iter().any(Option::is_none) {
+        result.problem(ControlFailure::InvalidSpec);
+    }
     for actor in NativeReadActor::ALL {
-        let [Some(n), Some(s), Some(w), Some(e), Some(c)] = [negative, start, worker, end, cleanup]
-            .map(|m| m.actors.iter().find(|v| v.actor == actor))
-        else {
-            result.problem(ControlFailure::ProbeUnavailable);
-            continue;
-        };
-        evaluate_actor(&mut result, spec, actor, [n, s, w, e, c]);
+        evaluate_actor(
+            &mut result,
+            spec,
+            actor,
+            samples.map(|m| m.and_then(|m| m.actors.iter().find(|v| v.actor == actor))),
+        );
     }
     for (family, vector) in [
         (4, AddressVector::GetifaddrsIpv4),
@@ -485,8 +501,34 @@ pub fn evaluate_address_fixture(
                 vector,
             },
             family,
-            [negative, start, worker, end, cleanup].map(|m| m.ifaddrs.value().map(Vec::as_slice)),
+            samples.map(|m| m.and_then(|m| m.ifaddrs.value().map(Vec::as_slice))),
         );
     }
     result
+}
+
+/// Core's optional component projection keeps qualified first observations even
+/// when a later collection could not return this component at all.
+pub fn evaluate_native_address_fixture(
+    spec: &NativeFixtureSpec,
+    samples: [&crate::NativeMeasurement; 5],
+) -> ScopedAddressResult {
+    let [Some(n), Some(s), Some(w), e, c] = samples.map(|m| m.addresses.as_ref()) else {
+        return ScopedAddressResult {
+            controls: vec![ControlFailure::ProbeUnavailable],
+            ..Default::default()
+        };
+    };
+    let unavailable = AddressMeasurement {
+        actors: vec![],
+        ifaddrs: Sample::Error(ProbeError::Unsupported),
+    };
+    evaluate_address_fixture(
+        spec,
+        n,
+        s,
+        w,
+        e.unwrap_or(&unavailable),
+        c.unwrap_or(&unavailable),
+    )
 }

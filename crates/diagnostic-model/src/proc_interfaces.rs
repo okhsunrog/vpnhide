@@ -106,7 +106,7 @@ fn controlled<T: PartialEq>(
     positive: impl Fn(&T) -> bool,
     ordinary: impl Fn(&T) -> bool,
 ) {
-    let [Some(n), Some(s), Some(w), Some(e), Some(c)] = samples else {
+    let [Some(n), Some(s), Some(w), e, c] = samples else {
         result.problem(ControlFailure::ProbeUnavailable);
         return;
     };
@@ -127,12 +127,16 @@ fn controlled<T: PartialEq>(
         result.problem(ControlFailure::OrdinaryObjectsChanged);
         valid = false;
     }
-    if !positive(&e) || !ordinary(&e) {
-        result.problem(ControlFailure::FixtureChanged);
+    for failure in crate::later_control_failures(e, ControlFailure::FixtureChanged, |e| {
+        positive(e) && ordinary(e)
+    }) {
+        result.problem(failure);
         valid = false;
     }
-    if has_fixture(&c) || !ordinary(&c) {
-        result.problem(ControlFailure::CleanupUnconfirmed);
+    for failure in crate::later_control_failures(c, ControlFailure::CleanupUnconfirmed, |c| {
+        !has_fixture(c) && ordinary(c)
+    }) {
+        result.problem(failure);
         valid = false;
     }
     if valid && !leaked {
@@ -145,18 +149,17 @@ pub fn evaluate_proc_interface_fixture(
     samples: [&ProcInterfaceMeasurement; 5],
 ) -> ScopedProcInterfaceResult {
     let mut result = ScopedProcInterfaceResult::default();
-    if !spec.valid() || samples.iter().any(|m| !m.bounded()) {
+    if !spec.valid() || samples[..3].iter().any(|m| !m.bounded()) {
         result.problem(ControlFailure::InvalidSpec);
         return result;
     }
+    let samples = samples.map(|m| m.bounded().then_some(m));
+    if samples.iter().any(Option::is_none) {
+        result.problem(ControlFailure::InvalidSpec);
+    }
     for actor in NativeReadActor::ALL {
-        let [Some(n), Some(s), Some(w), Some(e), Some(c)] =
-            samples.map(|m| m.actors.iter().find(|a| a.actor == actor))
-        else {
-            result.problem(ControlFailure::ProbeUnavailable);
-            continue;
-        };
-        let measurements = [n, s, w, e, c];
+        let measurements =
+            samples.map(|m| m.and_then(|m| m.actors.iter().find(|a| a.actor == actor)));
         let has_name = |entries: &&Vec<String>| entries.contains(&spec.interface.name);
         controlled(
             &mut result,
@@ -164,7 +167,7 @@ pub fn evaluate_proc_interface_fixture(
                 actor,
                 surface: ProcInterfaceSurface::DeviceStats,
             },
-            measurements.map(|m| m.devices.value()),
+            measurements.map(|m| m.and_then(|m| m.devices.value())),
             has_name,
             has_name,
             |v| v.iter().any(|n| n == "lo"),
@@ -183,7 +186,7 @@ pub fn evaluate_proc_interface_fixture(
                 actor,
                 surface: ProcInterfaceSurface::Ipv6Addresses,
             },
-            measurements.map(|m| m.ipv6.value()),
+            measurements.map(|m| m.and_then(|m| m.ipv6.value())),
             marker,
             |v| {
                 v.iter().any(|a| {
@@ -203,4 +206,27 @@ pub fn evaluate_proc_interface_fixture(
         );
     }
     result
+}
+
+pub fn evaluate_native_proc_interface_fixture(
+    spec: &NativeFixtureSpec,
+    samples: [&crate::NativeMeasurement; 5],
+) -> ScopedProcInterfaceResult {
+    let [Some(n), Some(s), Some(w), e, c] = samples.map(|m| m.proc_interfaces.as_ref()) else {
+        return ScopedProcInterfaceResult {
+            controls: vec![ControlFailure::ProbeUnavailable],
+            ..Default::default()
+        };
+    };
+    let unavailable = ProcInterfaceMeasurement { actors: vec![] };
+    evaluate_proc_interface_fixture(
+        spec,
+        [
+            n,
+            s,
+            w,
+            e.unwrap_or(&unavailable),
+            c.unwrap_or(&unavailable),
+        ],
+    )
 }

@@ -127,6 +127,76 @@ fn leaks_survive_scrubbed_identity_later_fixture_change_and_cleanup_failure() {
     );
 }
 #[test]
+fn unavailable_end_or_cleanup_retains_qualified_worker_leaks_and_blocks_proof() {
+    let (n, p) = (measured(false), measured(true));
+    for (lost_end, lost_cleanup) in [(true, false), (false, true), (true, true)] {
+        let mut end = p.clone();
+        let mut cleanup = n.clone();
+        for (lost, m, error) in [
+            (lost_end, &mut end, ProbeError::Timeout),
+            (lost_cleanup, &mut cleanup, ProbeError::Errno(13)),
+        ] {
+            if lost {
+                for a in &mut m.actors {
+                    a.devices = Sample::Error(error.clone());
+                    a.ipv6 = Sample::Error(error.clone());
+                }
+            }
+        }
+        let observed = evaluate_proc_interface_fixture(&spec(), [&n, &p, &p, &end, &cleanup]);
+        assert_eq!(observed.leaked.len(), 4);
+        assert!(observed.proven.is_empty());
+        assert!(
+            observed
+                .controls
+                .contains(&ControlFailure::ProbeUnavailable)
+        );
+        if lost_end {
+            assert!(observed.controls.contains(&ControlFailure::FixtureChanged));
+        }
+        if lost_cleanup {
+            assert!(
+                observed
+                    .controls
+                    .contains(&ControlFailure::CleanupUnconfirmed)
+            );
+        }
+        let hidden = evaluate_proc_interface_fixture(&spec(), [&n, &p, &n, &end, &cleanup]);
+        assert!(hidden.proven.is_empty() && hidden.leaked.is_empty());
+    }
+}
+#[test]
+fn missing_later_actor_records_cannot_erase_prior_proc_leaks() {
+    let (n, p) = (measured(false), measured(true));
+    let unavailable = ProcInterfaceMeasurement { actors: vec![] };
+    let result = evaluate_proc_interface_fixture(&spec(), [&n, &p, &p, &unavailable, &unavailable]);
+    assert_eq!(result.leaked.len(), 4);
+    assert!(result.proven.is_empty());
+    assert!(
+        result
+            .controls
+            .contains(&ControlFailure::CleanupUnconfirmed)
+    );
+}
+
+#[test]
+fn missing_later_component_preserves_qualified_proc_evidence_in_core_projection() {
+    let mut n = NativeMeasurement::unavailable(ProbeError::Unsupported);
+    let mut p = n.clone();
+    n.proc_interfaces = Some(measured(false));
+    p.proc_interfaces = Some(measured(true));
+    let missing = NativeMeasurement::unavailable(ProbeError::Timeout);
+    let result = evaluate_native_proc_interface_fixture(&spec(), [&n, &p, &p, &missing, &missing]);
+    assert_eq!(result.leaked.len(), 4);
+    assert!(result.proven.is_empty());
+    assert!(
+        result
+            .controls
+            .contains(&ControlFailure::CleanupUnconfirmed)
+    );
+}
+
+#[test]
 fn duplicate_actors_and_invalid_records_never_make_complete_coverage() {
     let (n, p) = (measured(false), measured(true));
     let mut bad = n.clone();
