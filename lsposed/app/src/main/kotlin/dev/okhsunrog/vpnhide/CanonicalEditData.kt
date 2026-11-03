@@ -1,17 +1,13 @@
 package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.core.CoreRootEffect
+import uniffi.vpnhide_core_ffi.canonicalEditPaths
+import uniffi.vpnhide_core_ffi.canonicalFieldDiff
+import uniffi.vpnhide_core_ffi.canonicalSetValue
+import uniffi.vpnhide_core_ffi.canonicalToggleValue
+import uniffi.vpnhide_core_ffi.previewCanonicalEdit
 
-internal enum class CanonicalToggle(
-    val path: List<String>,
-) {
-    Filesystem(listOf("settings", "optionalFeatures")),
-    Debug(listOf("debug")),
-    DebugSwitch(listOf("debugSwitch")),
-    RememberSuperkey(listOf("settings", "rememberSuperkey")),
-    AutoHideServices(listOf("settings", "autoHideVpnServices")),
-    AutoHideName(listOf("settings", "autoHideVpnName")),
-}
+internal enum class CanonicalToggle { Filesystem, Debug, DebugSwitch, RememberSuperkey, AutoHideServices, AutoHideName }
 
 internal enum class CanonicalAppField { Java, Native, AppHiding, Ports, Hidden }
 
@@ -46,146 +42,26 @@ internal sealed interface CanonicalEdit {
 internal fun canonicalToggle(
     config: CanonicalConfig,
     field: CanonicalToggle,
-): Boolean =
-    when (field) {
-        CanonicalToggle.Filesystem -> OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS in config.settings.optionalFeatures
-        CanonicalToggle.Debug -> config.debug
-        CanonicalToggle.DebugSwitch -> config.debugSwitch
-        CanonicalToggle.RememberSuperkey -> config.settings.rememberSuperkey
-        CanonicalToggle.AutoHideServices -> config.settings.autoHideVpnServices
-        CanonicalToggle.AutoHideName -> config.settings.autoHideVpnName
-    }
+): Boolean = canonicalToggleValue(config.toCore(), field.toCore())
 
 internal fun canonicalSet(
     config: CanonicalConfig,
     field: CanonicalSetField,
-): Set<String> =
-    when (field) {
-        CanonicalSetField.OptionalFeatures -> config.settings.optionalFeatures
-        CanonicalSetField.AutoHideExcludedPackages -> config.settings.autoHideExcludedPackages
-        CanonicalSetField.AutoHiddenPackages -> config.settings.autoHiddenPackages
-    }
+): Set<String> = canonicalSetValue(config.toCore(), field.toCore()).toSet()
 
-/** Turn an editor's before/after pair into field edits; never submit its full old snapshot as a write. */
+/** Shared field diff; only Core may admit effects against the current revision. */
 internal fun canonicalEdits(
     base: CanonicalConfig,
     desired: CanonicalConfig,
-): List<CanonicalEdit> =
-    buildList {
-        val next = canonicalConfigSnapshot(desired)
-        CanonicalToggle.entries.filter { it != CanonicalToggle.Filesystem }.forEach {
-            if (canonicalToggle(base, it) !=
-                canonicalToggle(next, it)
-            ) {
-                add(CanonicalEdit.Toggle(it, canonicalToggle(next, it)))
-            }
-        }
-        CanonicalSetField.entries.forEach {
-            if (canonicalSet(base, it) !=
-                canonicalSet(next, it)
-            ) {
-                add(CanonicalEdit.SettingSet(it, canonicalSet(next, it)))
-            }
-        }
-        (base.apps.keys + next.apps.keys).forEach { pkg ->
-            val previous = base.apps[pkg] ?: CanonicalApp()
-            val app = next.apps[pkg] ?: CanonicalApp()
-            CanonicalAppField.entries.forEach { field ->
-                if (mergeCanonicalApp(previous, app, field) != previous) add(CanonicalEdit.App(pkg, field, app))
-            }
-        }
-    }
+): List<CanonicalEdit> = canonicalFieldDiff(base.toCore(), desired.toCore()).map { it.toCanonicalEdit() }
 
 internal fun canonicalEditFields(edit: CanonicalEdit): Set<ConfigField> =
-    when (edit) {
-        is CanonicalEdit.Toggle -> setOf(ConfigField(edit.field.path))
-        is CanonicalEdit.SettingSet -> setOf(ConfigField(listOf("settings", edit.field.name.replaceFirstChar(Char::lowercase))))
-        is CanonicalEdit.App -> setOf(ConfigField(listOf("apps", edit.pkg, edit.field.name.replaceFirstChar(Char::lowercase))))
-        is CanonicalEdit.RemoveApp -> setOf(ConfigField(listOf("apps", edit.pkg)))
-        is CanonicalEdit.Replace -> setOf("apps", "settings", "debug", "debugSwitch").mapTo(linkedSetOf()) { ConfigField(listOf(it)) }
-    }
+    canonicalEditPaths(coreEdit(listOf(edit))).mapTo(linkedSetOf()) { ConfigField(it) }
 
 internal fun applyCanonicalEdit(
     config: CanonicalConfig,
     edit: CanonicalEdit,
-): CanonicalConfig =
-    when (edit) {
-        is CanonicalEdit.Toggle -> {
-            when (edit.field) {
-                CanonicalToggle.Filesystem -> {
-                    config.copy(
-                        settings =
-                            config.settings.copy(
-                                optionalFeatures =
-                                    if (edit.enabled) {
-                                        config.settings.optionalFeatures +
-                                            OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS
-                                    } else {
-                                        config.settings.optionalFeatures - OPTIONAL_FEATURE_FILESYSTEM_IFACE_PATHS
-                                    },
-                            ),
-                    )
-                }
-
-                CanonicalToggle.Debug -> {
-                    config.copy(debug = edit.enabled)
-                }
-
-                CanonicalToggle.DebugSwitch -> {
-                    config.copy(debugSwitch = edit.enabled)
-                }
-
-                CanonicalToggle.RememberSuperkey -> {
-                    config.copy(settings = config.settings.copy(rememberSuperkey = edit.enabled))
-                }
-
-                CanonicalToggle.AutoHideServices -> {
-                    config.copy(settings = config.settings.copy(autoHideVpnServices = edit.enabled))
-                }
-
-                CanonicalToggle.AutoHideName -> {
-                    config.copy(settings = config.settings.copy(autoHideVpnName = edit.enabled))
-                }
-            }
-        }
-
-        is CanonicalEdit.SettingSet -> {
-            config.copy(
-                settings =
-                    when (edit.field) {
-                        CanonicalSetField.OptionalFeatures -> config.settings.copy(optionalFeatures = edit.values.toSet())
-                        CanonicalSetField.AutoHideExcludedPackages -> config.settings.copy(autoHideExcludedPackages = edit.values.toSet())
-                        CanonicalSetField.AutoHiddenPackages -> config.settings.copy(autoHiddenPackages = edit.values.toSet())
-                    },
-            )
-        }
-
-        is CanonicalEdit.App -> {
-            val app = mergeCanonicalApp(config.apps[edit.pkg] ?: CanonicalApp(), edit.value, edit.field)
-            config.copy(apps = if (app.hasAnyRole) config.apps + (edit.pkg to app) else config.apps - edit.pkg)
-        }
-
-        is CanonicalEdit.RemoveApp -> {
-            config.copy(apps = config.apps - edit.pkg)
-        }
-
-        is CanonicalEdit.Replace -> {
-            canonicalConfigSnapshot(edit.config)
-        }
-    }
-
-private fun mergeCanonicalApp(
-    base: CanonicalApp,
-    next: CanonicalApp,
-    field: CanonicalAppField,
-): CanonicalApp =
-    when (field) {
-        CanonicalAppField.Java -> base.copy(java = next.java, javaHooks = next.javaHooks?.toList())
-        CanonicalAppField.Native -> base.copy(native = next.native)
-        CanonicalAppField.AppHiding -> base.copy(appHiding = next.appHiding)
-        CanonicalAppField.Ports -> base.copy(ports = next.ports, portPolicy = next.portPolicy)
-        CanonicalAppField.Hidden -> base.copy(hidden = next.hidden)
-    }
+): CanonicalConfig = previewCanonicalEdit(config.toCore(), coreEdit(listOf(edit))).toCanonical()
 
 /** Effect input, deliberately not a data class: secret effects must not appear in toString/state. */
 internal class CanonicalMutation(

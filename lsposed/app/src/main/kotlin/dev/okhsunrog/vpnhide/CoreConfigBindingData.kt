@@ -120,7 +120,7 @@ private fun coreFieldEdit(edit: CanonicalEdit): CoreFieldEdit =
         is CanonicalEdit.Replace -> error("Replace cannot be included in a field batch")
     }
 
-private fun CanonicalToggle.toCore(): CoreConfigToggle =
+internal fun CanonicalToggle.toCore(): CoreConfigToggle =
     when (this) {
         CanonicalToggle.Filesystem -> CoreConfigToggle.FILESYSTEM
         CanonicalToggle.Debug -> CoreConfigToggle.DEBUG
@@ -130,18 +130,53 @@ private fun CanonicalToggle.toCore(): CoreConfigToggle =
         CanonicalToggle.AutoHideName -> CoreConfigToggle.AUTO_HIDE_NAME
     }
 
-private fun CanonicalSetField.toCore(): CoreConfigSetField =
+internal fun CanonicalSetField.toCore(): CoreConfigSetField =
     when (this) {
         CanonicalSetField.OptionalFeatures -> CoreConfigSetField.OPTIONAL_FEATURES
         CanonicalSetField.AutoHideExcludedPackages -> CoreConfigSetField.AUTO_HIDE_EXCLUDED_PACKAGES
         CanonicalSetField.AutoHiddenPackages -> CoreConfigSetField.AUTO_HIDDEN_PACKAGES
     }
 
-private fun CanonicalAppField.toCore(): CoreConfigAppField =
+internal fun CanonicalAppField.toCore(): CoreConfigAppField =
     when (this) {
         CanonicalAppField.Java -> CoreConfigAppField.JAVA
         CanonicalAppField.Native -> CoreConfigAppField.NATIVE
         CanonicalAppField.AppHiding -> CoreConfigAppField.APP_HIDING
         CanonicalAppField.Ports -> CoreConfigAppField.PORTS
         CanonicalAppField.Hidden -> CoreConfigAppField.HIDDEN
+    }
+
+/** Generated field records map to UI draft vocabulary without interpreting the edit. */
+internal fun CoreFieldEdit.toCanonicalEdit(): CanonicalEdit =
+    when (this) {
+        is CoreFieldEdit.Toggle -> CanonicalEdit.Toggle(field.toCanonical(), enabled)
+        is CoreFieldEdit.SettingSet -> CanonicalEdit.SettingSet(field.toCanonical(), values.toSet())
+        is CoreFieldEdit.App -> CanonicalEdit.App(pkg, field.toCanonical(), value.toCanonical())
+        is CoreFieldEdit.RemoveApp -> CanonicalEdit.RemoveApp(pkg)
+    }
+
+private fun CoreConfigToggle.toCanonical(): CanonicalToggle =
+    when (this) {
+        CoreConfigToggle.FILESYSTEM -> CanonicalToggle.Filesystem
+        CoreConfigToggle.DEBUG -> CanonicalToggle.Debug
+        CoreConfigToggle.DEBUG_SWITCH -> CanonicalToggle.DebugSwitch
+        CoreConfigToggle.REMEMBER_SUPERKEY -> CanonicalToggle.RememberSuperkey
+        CoreConfigToggle.AUTO_HIDE_SERVICES -> CanonicalToggle.AutoHideServices
+        CoreConfigToggle.AUTO_HIDE_NAME -> CanonicalToggle.AutoHideName
+    }
+
+private fun CoreConfigSetField.toCanonical(): CanonicalSetField =
+    when (this) {
+        CoreConfigSetField.OPTIONAL_FEATURES -> CanonicalSetField.OptionalFeatures
+        CoreConfigSetField.AUTO_HIDE_EXCLUDED_PACKAGES -> CanonicalSetField.AutoHideExcludedPackages
+        CoreConfigSetField.AUTO_HIDDEN_PACKAGES -> CanonicalSetField.AutoHiddenPackages
+    }
+
+private fun CoreConfigAppField.toCanonical(): CanonicalAppField =
+    when (this) {
+        CoreConfigAppField.JAVA -> CanonicalAppField.Java
+        CoreConfigAppField.NATIVE -> CanonicalAppField.Native
+        CoreConfigAppField.APP_HIDING -> CanonicalAppField.AppHiding
+        CoreConfigAppField.PORTS -> CanonicalAppField.Ports
+        CoreConfigAppField.HIDDEN -> CanonicalAppField.Hidden
     }

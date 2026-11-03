@@ -25,7 +25,10 @@ refusals, receipts, leases, diagnostics and recording sessions. There is no JSON
 request/reply facade at this boundary. The APK does not link the daemon, activator
 or root probes. The unprivileged `native-policy` crate owns native mask/UID
 projection and limits; both activator and local generated UniFFI picker preview
-call it. Core supplies the accepted inventory and selected-backend observation.
+call it. `core-rpc::config_edit` similarly owns the pure canonical reducer,
+field diff/write paths, conflict schema and candidate validation. Generated local
+FFI previews reuse it; Kotlin retains UI drafts rather than a parallel reducer.
+Core supplies the accepted inventory and selected-backend observation.
 A local preview is not an admission receipt; Save and Agent mutations are checked
 again against fresh Core inventory before any effect. JSON remains a storage/import/export format, diagnostic payload
 content, private typed Rust probe inputs and tarpc's internal UDS serialization.

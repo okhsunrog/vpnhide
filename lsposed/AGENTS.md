@@ -120,6 +120,11 @@ directions, since `internal` is module-wide and the compiler will not.
   use typed Batch, full Replace is import/bootstrap only. Preserve core phase
   evidence. Unknown submission recovery queries the same core-issued op ID; compound commands
   must never be blindly replayed. See `docs/core-architecture.md`.
+- **`CanonicalEditData`** — UI intent/draft adapters delegate pure reduction,
+  field diffs, write paths and validation to `core-rpc::config_edit` through
+  local generated UniFFI. Reuse this owner; do not restore Kotlin merge/diff or
+  schema-validation policy. Explicit same-value intent and UI draft protection
+  remain app responsibilities; preview does not replace Core admission.
 - **`CanonicalConfigData` / `StorageConfig`** — shared canonical JSON models/parsing,
   app-side config builders and migration helpers. The app never writes the file
   itself: core does, atomically, for each accepted edit. The canonical JSON is the persistent

@@ -1,6 +1,7 @@
 package dev.okhsunrog.vpnhide
 
 import uniffi.vpnhide_core_ffi.CoreRecoveryAccess
+import uniffi.vpnhide_core_ffi.canonicalCandidateValid
 import uniffi.vpnhide_core_ffi.canonicalConfigMaxBytes
 
 internal enum class ConfigCoordinatorMode { Initializing, Open, Missing, Invalid, Unavailable, Paused }
@@ -63,8 +64,7 @@ internal fun prepareConfigIntent(
             }
     return runCatching {
         val candidate = applyCanonicalMutation(base, mutation)
-        require(parseCanonicalConfig(canonicalConfigJson(candidate)) == candidate)
-        require(canonicalConfigJson(candidate).toByteArray(Charsets.UTF_8).size <= MAX_CORE_CONFIG_BYTES)
+        require(canonicalCandidateValid(candidate.toCore()))
         require(mutation.coupledEffects.all { it.valid })
         val edits = configIntentEdits(base, candidate, mutation, read == RootCanonicalRead.Missing)
         ConfigIntentPreparation.Prepared(PreparedConfigIntent(candidate, edits, mutation.writes + edits.flatMap(::canonicalEditFields)))

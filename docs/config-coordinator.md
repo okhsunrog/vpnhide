@@ -27,7 +27,13 @@ The coordinator distinguishes its local action ID from the durable core-issued
 operation ID. One `CoreCommand` carries the operation ID and base config revision.
 Core merges unrelated changes against fresh state and refuses stale overlapping
 fields. Kotlin never sends a screen snapshot as an ordinary full replacement.
-App validation improves feedback; core independently validates admission.
+The pure reducer, field diff/write paths and candidate validation live in
+`core-rpc::config_edit`. Local generated UniFFI calls use that implementation for
+draft preparation; Kotlin only maps UI records and retains draft/intent state.
+Explicit same-value writes remain intent even when the field diff is empty.
+These calls perform no socket IO or effects. Core repeats validation and capacity
+admission against its fresh state before journaling or persistence. Save/Cancel
+and recovery of an uncertain submitted operation remain unchanged.
 
 Editor ViewModels retain drafts through recreation. Acknowledgement removes only
 submitted revisions, preserving typing during Save. A draft registered after
