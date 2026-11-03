@@ -15,6 +15,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -25,6 +27,8 @@ import uniffi.vpnhide_core_ffi.CoreAttachmentEvidence
 import uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment
 import uniffi.vpnhide_core_ffi.CoreDiagnosticOutcome
 import uniffi.vpnhide_core_ffi.CoreDiagnosticRun
+import uniffi.vpnhide_core_ffi.CoreDiagnosticThreadIdentity
+import uniffi.vpnhide_core_ffi.CoreNativeRawReceipt
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class AutonomousDiagnosticSnapshotTest {
@@ -44,6 +48,7 @@ class AutonomousDiagnosticSnapshotTest {
 
     private fun run(epoch: Long) =
         CoreDiagnosticRun(
+            nativeRaw = null,
             session = 1uL,
             coreEpoch = epoch.toULong(),
             bootId = "boot",
@@ -288,5 +293,22 @@ class AutonomousDiagnosticSnapshotTest {
         assertTrue(advice.kernel)
         assertFalse(advice.java)
         assertEquals(ExportReason.KERNEL_COMPATIBILITY, advice.kernelReason)
+    }
+
+    @Test
+    fun `forensic export preserves the Core raw receipt and exact thread identity`() {
+        val source =
+            run(7).copy(
+                nativeRaw =
+                    CoreNativeRawReceipt.CapabilityAbsent(
+                        CoreDiagnosticThreadIdentity(10000u, 42u, 100uL, 43u, 101uL),
+                    ),
+            )
+        val raw = requireNotNull(source.toDiagnosticInfo().nativeRaw).jsonObject
+        assertEquals("capability_absent", raw.getValue("state").jsonPrimitive.content)
+        val identity = raw.getValue("identity").jsonObject
+        assertEquals("43", identity.getValue("tid").jsonPrimitive.content)
+        assertEquals("101", identity.getValue("thread_start_ticks").jsonPrimitive.content)
+        assertEquals("10000", identity.getValue("uid").jsonPrimitive.content)
     }
 }

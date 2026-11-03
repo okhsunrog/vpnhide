@@ -16,7 +16,7 @@ fixtures, production hooks and explicitly requested manual forensics remain.
 ## Evidence and ownership
 
 The required plan comes from the supported contract and enabled features, not
-from the installed hook mask. Diagnostic contract6 requires SysInterfaces and
+from the installed hook mask. Diagnostic contract7 requires SysInterfaces and
 Filesystem only when the desired `filesystem_iface_paths` feature is enabled,
 matching RFC0002's optional-filesystem scope. Default route/proc-interface and
 framework requirements remain. Previous or truncated plans cannot be reused as
@@ -35,12 +35,14 @@ orchestrates its bounded execution; Kotlin reports bounded observations rather
 than declaring PASS. Native fixtures are owned TUN resources with session/boot/
 identity and deadline cleanup. Framework fixtures exercise actual public APIs,
 Binder, source transformations and production normalization. Framework RAW grants
-are scoped to the exact test process and never turn off protection for the whole UID. Native fixtures currently use privileged root
-negative/start/end/cleanup controls and one protected app-worker sample. A native
-RAW grant for that exact worker process remains code work; root controls do not
-establish its same-process RAW visibility or complete native attribution. Current
-scoped native results and their qualifications must not be presented as a full
-suite PASS. Adding more collectors does not close this missing grant mechanism.
+are scoped to the exact test process and never turn off protection for the whole UID.
+Native collection now uses one dedicated Android collector thread. Core authenticates
+its genuine Zygote process and revalidates thread membership/birth plus PID, user
+and network namespaces at each phase. Root controls and same-worker RAW/protected
+observations are evaluated together; root visibility alone cannot prove the app's
+RAW visibility. An absent/unsupported grant withholds native proof while retaining
+qualified protected leaks. Unknown activation/revocation never authorizes a
+protected sample. No classifier or grant decision lives in Kotlin.
 
 The `.ko` and builtin now have a private diagnostic-thread RAW provider (wire1).
 Root arms an expected UID/TID and nonce; the actual collector self-registers its
@@ -53,16 +55,22 @@ not change control2/telemetry1 or require broader app SELinux proc access.
 Absent kernel helpers leave this optional capability unavailable without changing
 backend health or triggering fallback.
 
-The Root lease/controller and unprivileged collector adapter are exercised by the
-explicit Linux fixture oracle, including real same-thread RAW/protected results,
-same-UID thread isolation, ordinary loopback preservation, active-owner close and
-TTL expiry. This is provider qualification, **not** the production Android flow:
-the genuine worker still needs its admitted-thread RPC handshake, PID/user/net
-namespace and birth revalidation, paired measurements and assessment integration.
-KPM and Zygisk RAW provider adapters also remain implementation work. Builtin
-source export and compilation are separate from an actual builtin boot; Linux
-`.ko` results cannot be borrowed as builtin or Android acceptance.
+The Root lease/controller and unprivileged collector adapter have Linux fixture
+oracle coverage for real same-thread RAW/protected results, same-UID thread
+isolation, ordinary loopback preservation, final owner close and TTL expiry.
+The Android worker handshake and assessment consumers are implemented and have
+host/JVM/cross-build coverage; genuine Android bionic/SELinux/background execution
+still needs device acceptance. KPM and Zygisk RAW provider adapters remain code
+work. Builtin source export/compilation is separate from a builtin boot; Linux
+`.ko` evidence cannot be borrowed as builtin or Android acceptance.
 
+Native observations are delivered to Core **before** framework collection, with a
+separate worker-completion ACK. Java failure, worker death or a later deadline
+cannot erase an already accepted native observation. Core retains scope receipts
+and failed RAW samples separately, and emits the same assessment to every read
+consumer. The old root-only native finish entry point exists only in the explicit
+fixture-oracle build, not as a production fallback. Opening the app still never
+admits a suite.
 
 Required/proven/leaked/unverified, infrastructure failures and cleanup are separate.
 A worker's fresh result does not prove that already-running games consumed a new
@@ -82,7 +90,7 @@ generation or previously running app processes have consumed it.
 
 ## Implemented scope and remaining implementation
 
-The base required plan has nineteen vectors. Native interface-only TUN stimuli
+The base required plan has eighteen vectors. Native interface-only TUN stimuli
 and attributed framework capability/link plus two legacy NetworkInfo scenarios
 have executable cloud coverage. Legacy TYPE_VPN and enumeration require separate
 controls and per-invocation CLOCK_BOOTTIME windows; ordinary duplicates and each
@@ -137,7 +145,7 @@ filesystem state. Setup readiness is not a diagnostic result. A receipt whose
 preparation failed cannot reuse an older delivery at the same revision. Observed
 runtime alone cannot borrow an old bundled payload hash or global Zygisk coverage.
 
-Schema7 exports both read models, per-actor address/proc evidence and source identities. Historical gate/report/
+Schema8 exports both read models, per-actor address/proc evidence, the full retained RAW receipt and source identities. Historical gate/report/
 verdict fields are null; their old Kotlin domain owners are removed. Capture time
 is not measurement time. Manual `NetworkViewCapture`, hook counter baselines,
 unsigned delta/reset handling and root forensic sections remain available for

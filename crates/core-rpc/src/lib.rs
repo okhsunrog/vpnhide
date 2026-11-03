@@ -68,6 +68,7 @@ pub use logcat::{
 pub mod recovery;
 pub use vpnhide_diagnostic_model::{
     DiagnosticError, DiagnosticRun, DiagnosticWorkerReport, DiagnosticWorkerTask,
+    NativeWorkerInstruction, NativeWorkerRequest,
 };
 
 pub use vpnhide_diagnostic_model::framework::{FrameworkWorkerRequest, FrameworkWorkerTask};
@@ -673,6 +674,11 @@ pub trait VpnhideCore {
     async fn framework_worker_step(
         request: FrameworkWorkerRequest,
     ) -> Result<Option<FrameworkWorkerTask>, DiagnosticError>;
+    async fn native_worker_step(
+        request: NativeWorkerRequest,
+    ) -> Result<NativeWorkerInstruction, DiagnosticError>;
+    async fn finish_diagnostic_worker(session: u64, core_epoch: u64)
+    -> Result<(), DiagnosticError>;
     async fn join_diagnostic_worker() -> Result<Option<DiagnosticWorkerTask>, DiagnosticError>;
     async fn report_diagnostic_worker(
         report: DiagnosticWorkerReport,
@@ -842,6 +848,7 @@ mod tests {
                 },
             ] {
                 let run = DiagnosticRun {
+                    native_raw: None,
                     proc_interfaces: None,
                     addresses: None,
                     binding: None,

@@ -11,7 +11,7 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
 use vpnhide_checks::fixture;
 use vpnhide_diagnostic_model::{
     InterfaceId, NativeFixtureSpec, NativeMeasurement, OrdinaryControl, ProbeError, Sample,
-    ScopedNativeResult, evaluate_native_fixture,
+    ScopedNativeResult,
 };
 
 const FIXTURE_MTU: i32 = 1543;
@@ -273,13 +273,47 @@ impl TunFixture {
         })
     }
 
-    /// Always close before evaluating. A failed/unknown report cannot keep a
-    /// native fixture alive or silently claim that cleanup succeeded.
-    pub fn finish(mut self, worker: &NativeMeasurement) -> NativeCompletion {
+    /// Production path: a root-only positive control cannot substitute for the
+    /// admitted collector's positively observed RAW visibility.
+    pub fn finish_paired(
+        mut self,
+        worker: &NativeMeasurement,
+        app_raw: Option<&NativeMeasurement>,
+    ) -> NativeCompletion {
+        let (root_end, cleanup) = self.measure_cleanup();
+        let result = vpnhide_diagnostic_model::evaluate_paired_native_fixture(
+            &self.spec,
+            [
+                &self.negative,
+                &self.root_start,
+                worker,
+                &root_end,
+                &cleanup,
+            ],
+            app_raw,
+        );
+        NativeCompletion {
+            proc_interfaces: result.proc_interfaces,
+            addresses: result.addresses,
+            result: result.native,
+            binding: result.binding,
+            root_end,
+            cleanup,
+        }
+    }
+    fn measure_cleanup(&mut self) -> (NativeMeasurement, NativeMeasurement) {
         let root_end = fixture::observe(&self.spec.interface.name);
         drop(self.tun.take());
         let cleanup = fixture::observe(&self.spec.interface.name);
-        let result = evaluate_native_fixture(
+        (root_end, cleanup)
+    }
+
+    /// Always close before evaluating. A failed/unknown report cannot keep a
+    /// native fixture alive or silently claim that cleanup succeeded.
+    #[cfg(feature = "fixture-oracle")]
+    pub fn finish(mut self, worker: &NativeMeasurement) -> NativeCompletion {
+        let (root_end, cleanup) = self.measure_cleanup();
+        let result = vpnhide_diagnostic_model::evaluate_native_fixture(
             &self.spec,
             &self.negative,
             &self.root_start,

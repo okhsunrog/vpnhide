@@ -633,3 +633,9 @@ mod tests {
         );
     }
 }
+
+mod native_raw;
+pub use native_raw::*;
+
+mod native_pair;
+pub use native_pair::*;

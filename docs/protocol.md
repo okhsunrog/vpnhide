@@ -727,7 +727,7 @@ autoload remain disabled pending journaled transition checks. An authorization
 only governs new process launches; it does not remove hooks from existing processes.
 
 
-### Private diagnostic-thread RAW wire (provider implemented; Android flow incomplete)
+### Private diagnostic-thread RAW wire
 
 `vpnhide_protocol::diagnostic_raw` owns this separate version1 protocol, limits
 and generated C header. The `.ko`/builtin root-only `/proc/vpnhide_diag_raw` accepts
@@ -748,5 +748,6 @@ revalidate the admitted Android process/thread before activating it. The fixed
 CLOCK_BOOTTIME lease is at most 5000ms; idempotent requests never extend it.
 Revoke/released readback precedes protected observation. This capability does not
 alter the frozen control2/telemetry1 or the persistent journal schema. KPM/Zygisk
-adapters and the production Android handshake/assessment integration remain code
-work; the Linux oracle is not that acceptance.
+adapters remain code work. The Android thread handshake and paired assessment
+are implemented under RPC28/diagnostic contract7; actual Android acceptance
+is separate from the Linux oracle.

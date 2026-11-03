@@ -15,6 +15,8 @@ use super::native_fixture::TunFixture;
 use crate::{CoreState, auth::PeerCred};
 use vpnhide_diagnostic_model::framework::{FrameworkWorkerRequest, FrameworkWorkerTask};
 
+mod native_worker;
+
 const WORKER: &str = vpnhide_loader_ipc::WORKER_PROCESS;
 const DEADLINE: Duration = Duration::from_secs(20);
 
@@ -31,6 +33,8 @@ struct Active {
     task: Option<DiagnosticWorkerTask>,
     worker: Option<WorkerIdentity>,
     report: Option<NativeMeasurement>,
+    native: Option<super::native_exchange::NativeExchange>,
+    finished: bool,
     minimum_birth_ticks: Option<u64>,
     framework: Option<Arc<Mutex<FrameworkRun>>>,
 }
@@ -307,6 +311,7 @@ impl Coordinator {
         inner.retry_at = None;
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
         let run = DiagnosticRun {
+            native_raw: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,
@@ -323,6 +328,8 @@ impl Coordinator {
             task: None,
             worker: None,
             report: None,
+            native: None,
+            finished: false,
             minimum_birth_ticks: None,
             framework: None,
         });
@@ -384,6 +391,11 @@ impl Coordinator {
         if inner.active.as_ref().is_none_or(|a| a.session != session) {
             return;
         }
+        let raw_receipt = inner
+            .active
+            .as_ref()
+            .and_then(|a| a.native.as_ref())
+            .map(|n| n.receipt());
         inner.active = None;
         let retryable = matches!(&result, Err(failure) if failure.cleanup_confirmed == Some(true))
             || framework
@@ -396,6 +408,7 @@ impl Coordinator {
         let Some(run) = inner.last.as_mut() else {
             return;
         };
+        run.native_raw = raw_receipt;
         match result {
             Ok(evidence) => {
                 run.record_proc_interfaces(evidence.proc_interfaces);
@@ -500,8 +513,11 @@ impl Coordinator {
                     .as_mut()
                     .filter(|a| a.session == session)
                     .ok_or("diagnostic session expired")?;
-                if let Some(report) = active.report.take() {
-                    return Ok(report);
+                if active.finished {
+                    return active
+                        .report
+                        .clone()
+                        .ok_or("native worker finished without observation".into());
                 }
                 let Some(remaining) = active.deadline.checked_duration_since(Instant::now()) else {
                     return Err("Android diagnostic worker deadline exceeded".into());
@@ -517,7 +533,30 @@ impl Coordinator {
         // All paths close AND read back cleanup before releasing the run slot.
         // Synthetic unavailable samples cannot establish hiding success.
         let spec = fixture.spec.clone();
-        let completion = fixture.finish(report.as_ref().unwrap_or(&unavailable));
+        let raw_receipt = self
+            .inner
+            .lock()
+            .expect("diagnostic coordinator")
+            .active
+            .as_ref()
+            .filter(|a| a.session == session)
+            .and_then(|a| a.native.as_ref())
+            .map(|n| n.receipt());
+        let app_raw = raw_receipt.as_ref().and_then(|r| r.qualified_sample());
+        let early_report = self
+            .inner
+            .lock()
+            .expect("diagnostic coordinator")
+            .active
+            .as_ref()
+            .filter(|a| a.session == session)
+            .and_then(|a| a.report.clone());
+        let protected = report
+            .as_ref()
+            .ok()
+            .or(early_report.as_ref())
+            .unwrap_or(&unavailable);
+        let completion = fixture.finish_paired(protected, app_raw);
         let cleaned = cleanup_confirmed(&spec, &completion.cleanup);
         if !cleaned {
             self.inner
@@ -668,7 +707,8 @@ impl Coordinator {
             }
             if task.session != request.session
                 || task.core_epoch != request.core_epoch
-                || active.report.is_some()
+                || active.finished
+                || active.report.is_none()
             {
                 return Err(DiagnosticError::StaleSession);
             }
@@ -716,6 +756,16 @@ impl Coordinator {
             .fingerprint
             .core_epoch;
         let active = inner.active.as_mut().ok_or(DiagnosticError::StaleSession)?;
+        let exchange = active
+            .native
+            .as_ref()
+            .filter(|n| n.protected_ready())
+            .ok_or(DiagnosticError::StaleSession)?;
+        let thread =
+            native_worker::thread_identity(Path::new("/proc"), identity, exchange.identity().tid)?;
+        if thread != exchange.identity() {
+            return Err(DiagnosticError::WrongProcess);
+        }
         active.accept(identity, epoch, report, Instant::now())?;
         self.changed.notify_all();
         Ok(())
@@ -723,6 +773,37 @@ impl Coordinator {
 }
 
 impl Active {
+    fn finish(
+        &mut self,
+        worker: WorkerIdentity,
+        session: u64,
+        epoch: u64,
+        now: Instant,
+        authenticate_thread: impl FnOnce(DiagnosticThreadIdentity) -> Result<(), DiagnosticError>,
+    ) -> Result<(), DiagnosticError> {
+        if self.deadline <= now {
+            return Err(DiagnosticError::Expired);
+        }
+        if self.worker != Some(worker) {
+            return Err(DiagnosticError::WrongProcess);
+        }
+        let task = self.task.as_ref().ok_or(DiagnosticError::StaleSession)?;
+        if task.session != session
+            || task.core_epoch != epoch
+            || self.finished
+            || self.report.is_none()
+        {
+            return Err(DiagnosticError::StaleSession);
+        }
+        let native = self
+            .native
+            .as_ref()
+            .filter(|n| n.protected_ready())
+            .ok_or(DiagnosticError::StaleSession)?;
+        authenticate_thread(native.identity())?;
+        self.finished = true;
+        Ok(())
+    }
     fn claim(
         &mut self,
         identity: WorkerIdentity,
@@ -764,9 +845,14 @@ impl Active {
         if self.report.is_some() {
             return Err(DiagnosticError::StaleSession);
         }
+        if !self.native.as_ref().is_some_and(|n| n.protected_ready()) {
+            return Err(DiagnosticError::StaleSession);
+        }
         if !report.native.bounded() {
             return Err(DiagnosticError::Malformed);
         }
+        // Delivery is intentionally separate from worker completion. A later
+        // Java failure/death must retain this already accepted measurement.
         self.report = Some(report.native);
         Ok(())
     }
@@ -831,6 +917,8 @@ mod tests {
             task: None,
             worker: None,
             report: None,
+            native: None,
+            finished: false,
             minimum_birth_ticks: Some(25),
             framework: None,
         };
@@ -865,9 +953,90 @@ mod tests {
             Err(DiagnosticError::Expired)
         );
         assert!(active.report.is_none());
+        assert_eq!(
+            active.accept(identity(30), 9, report(), now),
+            Err(DiagnosticError::StaleSession)
+        );
+        active.native = Some(super::super::native_exchange::NativeExchange::unsupported(
+            DiagnosticThreadIdentity {
+                uid: 10123,
+                pid: 456,
+                process_start_ticks: 30,
+                tid: 457,
+                thread_start_ticks: 31,
+            },
+            NativeRawReceipt::UnsupportedBackend {
+                identity: DiagnosticThreadIdentity {
+                    uid: 10123,
+                    pid: 456,
+                    process_start_ticks: 30,
+                    tid: 457,
+                    thread_start_ticks: 31,
+                },
+            },
+        ));
         assert_eq!(active.accept(identity(30), 9, report(), now), Ok(()));
         assert_eq!(
             active.accept(identity(30), 9, report(), now),
+            Err(DiagnosticError::StaleSession)
+        );
+    }
+    #[test]
+    fn accepted_native_observation_survives_later_worker_death_and_cannot_finish_without_revalidation()
+     {
+        let now = Instant::now();
+        let thread = DiagnosticThreadIdentity {
+            uid: 10123,
+            pid: 456,
+            process_start_ticks: 30,
+            tid: 457,
+            thread_start_ticks: 31,
+        };
+        let mut active = Active {
+            session: 7,
+            deadline: now + DEADLINE,
+            task: Some(task()),
+            worker: Some(identity(30)),
+            report: None,
+            native: Some(super::super::native_exchange::NativeExchange::unsupported(
+                thread,
+                NativeRawReceipt::UnsupportedBackend { identity: thread },
+            )),
+            finished: false,
+            minimum_birth_ticks: Some(25),
+            framework: None,
+        };
+        assert_eq!(
+            active.finish(identity(30), 7, 9, now, |_| Ok(())),
+            Err(DiagnosticError::StaleSession)
+        );
+        let observation = report();
+        let expected = observation.native.clone();
+        active.accept(identity(30), 9, observation, now).unwrap();
+        assert!(!active.finished);
+        assert_eq!(active.report, Some(expected.clone()));
+        // Java collection may still be running or the process may have died.
+        assert_eq!(
+            active.finish(identity(30), 7, 9, now, |_| Err(
+                DiagnosticError::WrongProcess
+            )),
+            Err(DiagnosticError::WrongProcess)
+        );
+        assert!(!active.finished);
+        assert_eq!(
+            active.finish(identity(30), 7, 9, now + DEADLINE, |_| Ok(())),
+            Err(DiagnosticError::Expired)
+        );
+        assert_eq!(active.report, Some(expected));
+        active
+            .finish(identity(30), 7, 9, now, |actual| {
+                assert_eq!(actual, thread);
+                Ok(())
+            })
+            .unwrap();
+        assert!(active.finished);
+        assert_eq!(
+            active.finish(identity(30), 7, 9, now, |_| Ok(())),
             Err(DiagnosticError::StaleSession)
         );
     }
@@ -906,6 +1075,7 @@ mod tests {
         coordinator.configure(PathBuf::from("/nonexistent-app"));
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            native_raw: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,
@@ -935,6 +1105,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
+            native_raw: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,
@@ -970,6 +1141,7 @@ mod tests {
         let state = state();
         let snapshot = state.snapshot();
         let run = DiagnosticRun {
+            native_raw: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,

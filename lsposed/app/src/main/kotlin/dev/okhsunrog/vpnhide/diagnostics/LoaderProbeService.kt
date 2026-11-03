@@ -10,8 +10,8 @@ import android.os.PowerManager
 import android.os.Process
 import dev.okhsunrog.vpnhide.core.CorePaths
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import uniffi.vpnhide_core_ffi.CoreDiagnosticException
@@ -19,12 +19,19 @@ import uniffi.vpnhide_core_ffi.CoreDiagnosticWorkerTask
 import uniffi.vpnhide_core_ffi.CoreException
 import uniffi.vpnhide_core_ffi.CoreSession
 import uniffi.vpnhide_core_ffi.observeDiagnosticFixture
+import uniffi.vpnhide_core_ffi.registerDiagnosticRaw
+import java.util.concurrent.Executors
 
 /** A genuine Zygote app process. Core observes its specialization independently;
  * this service cannot manufacture loader or hook-health evidence.
  */
 class LoaderProbeService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val collector =
+        Executors
+            .newSingleThreadExecutor { task ->
+                Thread(task, "vpnhide-diagnostic-collector")
+            }.asCoroutineDispatcher()
+    private val scope = CoroutineScope(SupervisorJob() + collector)
     private val handler = Handler(Looper.getMainLooper())
     private val finish =
         Runnable {
@@ -72,12 +79,20 @@ class LoaderProbeService : Service() {
         val wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VPNHide:Diagnostics")
         try {
             wakeLock.acquire(DEADLINE_MS)
-            val observations = observeDiagnosticFixture(task)
+            val tid = Process.myTid().toUInt()
+            val observations =
+                measureNativeFixture(
+                    step = { phase -> core.nativeWorkerStep(task, tid, phase) },
+                    register = ::registerDiagnosticRaw,
+                    observe = { observeDiagnosticFixture(task) },
+                )
             try {
+                // Retain native evidence BEFORE Java work: process death during
+                // framework observations must not erase an already measured leak.
+                core.reportDiagnosticWorker(task, observations)
                 measureFrameworkFixture(this, core, task)
             } finally {
-                // Framework errors cannot erase native observations.
-                core.reportDiagnosticWorker(task, observations)
+                core.finishDiagnosticWorker(task)
             }
         } finally {
             if (wakeLock.isHeld) wakeLock.release()
@@ -94,6 +109,7 @@ class LoaderProbeService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(finish)
         scope.cancel()
+        collector.close()
         super.onDestroy()
         // Core stops this service before a fresh diagnostic authorization is consumed.
         // A cached process would keep the previous Zygisk policy generation.

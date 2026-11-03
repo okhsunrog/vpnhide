@@ -2872,6 +2872,60 @@ impl VpnhideCore for CoreServer {
         .await
         .unwrap_or(Err(vpnhide_core_rpc::DiagnosticError::Disabled))
     }
+    async fn native_worker_step(
+        self,
+        _ctx: Context,
+        request: vpnhide_core_rpc::NativeWorkerRequest,
+    ) -> Result<vpnhide_core_rpc::NativeWorkerInstruction, vpnhide_core_rpc::DiagnosticError> {
+        let peer = self
+            .peer
+            .ok_or(vpnhide_core_rpc::DiagnosticError::WrongProcess)?;
+        let permit = self
+            .state
+            .work_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| vpnhide_core_rpc::DiagnosticError::Busy)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let backend = match self.state.snapshot().backend.applied {
+                Some(vpnhide_core_rpc::NativeBackend::Kmod) => {
+                    Some(vpnhide_protocol::hook_ids::Backend::Kmod as u32)
+                }
+                Some(vpnhide_core_rpc::NativeBackend::Builtin) => {
+                    Some(vpnhide_protocol::hook_ids::Backend::Builtin as u32)
+                }
+                _ => None,
+            };
+            self.state.diagnostics.native_step(peer, backend, request)
+        })
+        .await
+        .unwrap_or(Err(vpnhide_core_rpc::DiagnosticError::Disabled))
+    }
+    async fn finish_diagnostic_worker(
+        self,
+        _ctx: Context,
+        session: u64,
+        core_epoch: u64,
+    ) -> Result<(), vpnhide_core_rpc::DiagnosticError> {
+        let peer = self
+            .peer
+            .ok_or(vpnhide_core_rpc::DiagnosticError::WrongProcess)?;
+        let permit = self
+            .state
+            .work_rpc
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| vpnhide_core_rpc::DiagnosticError::Busy)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            self.state
+                .diagnostics
+                .finish_worker(peer, session, core_epoch)
+        })
+        .await
+        .unwrap_or(Err(vpnhide_core_rpc::DiagnosticError::Disabled))
+    }
     async fn join_diagnostic_worker(
         self,
         _ctx: Context,

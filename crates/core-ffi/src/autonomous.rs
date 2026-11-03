@@ -12,6 +12,8 @@ macro_rules! enum_map {
     }
 }
 enum_map!(CoreNativeReadActor, NativeReadActor, Libc, Syscall);
+mod native_raw;
+pub use native_raw::*;
 mod address;
 pub use address::*;
 mod proc_interfaces;
@@ -412,6 +414,7 @@ impl From<model::DiagnosticAssessment> for CoreDiagnosticAssessment {
 }
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CoreDiagnosticRun {
+    pub native_raw: Option<CoreNativeRawReceipt>,
     pub session: u64,
     pub core_epoch: u64,
     pub boot_id: String,
@@ -450,6 +453,7 @@ impl From<model::DiagnosticRun> for CoreDiagnosticRun {
             },
         };
         Self {
+            native_raw: v.native_raw.map(Into::into),
             proc_interfaces: v.proc_interfaces.map(Into::into),
             addresses: v.addresses.map(Into::into),
             session: v.session,

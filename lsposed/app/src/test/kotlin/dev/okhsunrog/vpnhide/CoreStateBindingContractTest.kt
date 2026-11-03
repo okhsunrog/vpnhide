@@ -32,6 +32,7 @@ class CoreStateBindingContractTest {
     private val recovery = CoreRecoveryAccess("held", null, null, null, "running hooks")
     private val run =
         CoreDiagnosticRun(
+            null,
             1uL,
             7uL,
             "boot",

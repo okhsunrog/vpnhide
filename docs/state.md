@@ -227,8 +227,9 @@ The successful arm FD owns its nonce. Final release attempts matching revocation
 brief control contention returns BUSY rather than spinning, with fixed
 CLOCK_BOOTTIME expiry as the crash bound. A Root controller must observe matching
 released status before issuing a protected measurement: close or elapsed userspace
-time alone is not a revocation receipt. Production Android coordination is still
-being implemented; the current caller is the explicit Linux fixture oracle.
+time alone is not a revocation receipt. Core now coordinates the genuine Android worker through an admitted-thread
+handshake and confirms release before protected collection; Linux qualification
+and real Android acceptance remain distinct.
 KPM has no such node. See [diagnostics](diagnostics.md).
 
 ### KPM Supercall Channel

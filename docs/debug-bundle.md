@@ -147,11 +147,12 @@ Everything below is a `state.json` field unless noted.
 ### 2.1 Schema versions
 
 `state.json → schema` says which shape the bundle was written in. **This doc
-describes schema 7.** One number covers the whole bundle; there is no per-object
+describes schema 8.** One number covers the whole bundle; there is no per-object
 version.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
+| 8 | main (unreleased) | Native proof requires a correlated app RAW interval and confirmed revocation; privileged root controls alone remain unverified. `run.nativeRaw` preserves the full shared Rust receipt, including failed-scope observations and exact thread identity. Native evidence is retained before framework collection, so worker death cannot erase an already reported leak. |
 | 7 | main (unreleased) | `run.procInterfaces` retains per-surface libc/direct-syscall proof, leaks and controls for `/proc/net/dev` and `/proc/net/if_inet6`. A denied read is unverified; proc leaks remain distinct from proven address ioctls/netlink. |
 | 6 | main (unreleased) | Autonomous run exports keep separate address actor/vector proof, leaks and controls. Interface-only getifaddrs evidence no longer proves IPv4/IPv6 address coverage; grouped address requirements retain missing families and syscall actors as unverified. This is scoped evidence, not whole-device acceptance. |
 | 5 | main (unreleased) | Core-owned `nativeStatus` records chosen/bundled provenance, attempts, delivery, observed runtime, desired hook coverage and setup separately. Old Kotlin backend priority/classifiers and VPN-dependent report/gate owners are removed. Dashboard omits native install recommendation/partial-hook/installed-optional projections; statistics carry source identity/currentness. Legacy nullable output slots stay null. |
@@ -207,6 +208,16 @@ IPv4/IPv6 address and ioctl/NULL-buffer evidence must not be inferred from the
 interface-only result in `run.native`. Missing families, permission failures or
 unstable size baselines remain unverified. See [diagnostics](diagnostics.md) for
 the owned stimulus and ordinary-object/cleanup requirements.
+
+Schema8 adds `run.nativeRaw`, emitted by the shared Rust receipt codec. Its
+`state` is `unsupported_backend`, `capability_absent`, `failed` or `paired`.
+Every receipt retains the admitted thread identity. A failed receipt keeps its
+stage and any completed RAW `sample`; that observation
+is not a protected leak or proof. `paired` confirms the scope interval and
+revocation, not a positive stimulus or protection PASS. Receipts identify UID/PID/TID and both
+process/thread birth ticks, with the original bounded RAW sample. Native scoped
+results require both root controls and same-worker RAW stimulus; absent RAW
+withholds native proven groups without erasing qualified protected leaks.
 
 Schema7 adds `run.procInterfaces` with the same three list fields. Names pair the
 read actor and `device_stats` or `ipv6_addresses` surface. Both surfaces and actors

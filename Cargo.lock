@@ -1813,6 +1813,7 @@ dependencies = [
 name = "vpnhide_core_ffi"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
  "tempfile",
  "tokio",
  "uniffi",

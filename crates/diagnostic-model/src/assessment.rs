@@ -208,6 +208,22 @@ impl DiagnosticRun {
                 }
             }
         }
+        // Root-only controls cannot establish the admitted app's RAW visibility.
+        // Native results are paired with that sample by Core's shared evaluators;
+        // retain qualified root-controlled leaks even if the RAW scope is absent.
+        if self
+            .native_raw
+            .as_ref()
+            .and_then(|r| r.qualified_sample())
+            .is_none()
+        {
+            proven.clear();
+            if phase != AssessmentPhase::Running
+                && !native_controls.contains(&ControlFailure::MissingPositiveControl)
+            {
+                native_controls.push(ControlFailure::MissingPositiveControl);
+            }
+        }
         let framework_controls = if let Some(result) = &self.framework {
             proven.extend(framework_checks(&result.proven, true));
             leaked.extend(framework_checks(&result.leaked, false));
@@ -237,11 +253,33 @@ impl DiagnosticRun {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{DiagnosticFingerprint, framework::ScopedFrameworkResult};
+    fn thread_identity() -> crate::DiagnosticThreadIdentity {
+        crate::DiagnosticThreadIdentity {
+            uid: 10000,
+            pid: 42,
+            process_start_ticks: 100,
+            tid: 43,
+            thread_start_ticks: 101,
+        }
+    }
+    pub(crate) fn paired_receipt() -> crate::NativeRawReceipt {
+        crate::NativeRawReceipt::Paired {
+            identity: crate::DiagnosticThreadIdentity {
+                uid: 10000,
+                pid: 42,
+                process_start_ticks: 100,
+                tid: 43,
+                thread_start_ticks: 101,
+            },
+            sample: crate::native_pair::tests::fixture().2,
+        }
+    }
     fn run(native: ScopedNativeResult) -> DiagnosticRun {
         DiagnosticRun {
+            native_raw: Some(paired_receipt()),
             proc_interfaces: None,
             addresses: None,
             binding: None,
@@ -265,9 +303,42 @@ mod tests {
         }
     }
     #[test]
+    fn root_only_or_failed_raw_receipts_withhold_native_proof_without_erasing_leaks() {
+        for receipt in [
+            None,
+            Some(crate::NativeRawReceipt::UnsupportedBackend {
+                identity: thread_identity(),
+            }),
+            Some(crate::NativeRawReceipt::Failed {
+                identity: thread_identity(),
+                stage: crate::NativeRawStage::Revocation,
+                sample: Some(crate::native_pair::tests::fixture().2),
+            }),
+        ] {
+            let mut r = run(ScopedNativeResult::Proven {
+                checks: vec![NativeCheck::IoctlFlags],
+            });
+            r.native_raw = receipt;
+            assert!(r.assessment().proven.is_empty());
+            assert!(
+                r.assessment()
+                    .unverified
+                    .contains(&RequiredCheck::IoctlFlags)
+            );
+            r.outcome = DiagnosticOutcome::Incomplete {
+                native: ScopedNativeResult::Leaked {
+                    checks: vec![NativeCheck::IoctlFlags],
+                    incomplete: vec![],
+                },
+                missing: vec![],
+            };
+            assert!(r.assessment().leaked.contains(&RequiredCheck::IoctlFlags));
+        }
+    }
+    #[test]
     fn previous_or_truncated_optional_plan_cannot_be_reused_as_current_proof() {
         let mut evidence = run(ScopedNativeResult::Proven { checks: vec![] });
-        evidence.plan.contract = 5;
+        evidence.plan.contract = DIAGNOSTIC_CONTRACT - 1;
         evidence.plan.required.push(RequiredCheck::SysInterfaces);
         assert!(
             evidence

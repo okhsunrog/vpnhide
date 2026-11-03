@@ -1,11 +1,14 @@
 package dev.okhsunrog.vpnhide.diagnostics
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import uniffi.vpnhide_core_ffi.CoreAddressCheck
 import uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment
 import uniffi.vpnhide_core_ffi.CoreDiagnosticRun
 import uniffi.vpnhide_core_ffi.CoreFrameworkAttribution
 import uniffi.vpnhide_core_ffi.CoreProcInterfaceCheck
+import uniffi.vpnhide_core_ffi.nativeRawReceiptJson
 import java.util.Locale
 
 /** Exported evidence is retained Core publication data, not a post-baseline suite. */
@@ -50,6 +53,7 @@ internal data class AutonomousRunInfo(
     val binding: AutonomousBindInfo? = null,
     val addresses: AutonomousNativeReadInfo? = null,
     val procInterfaces: AutonomousNativeReadInfo? = null,
+    val nativeRaw: JsonElement? = null,
 )
 
 @Serializable
@@ -132,6 +136,7 @@ internal fun CoreDiagnosticRun.toDiagnosticInfo(): AutonomousRunInfo =
                 result.controls.map { it.name.lowercase(Locale.ROOT) },
             )
         },
+        nativeRaw?.let { Json.parseToJsonElement(nativeRawReceiptJson(it)) },
     )
 
 private fun CoreFrameworkAttribution.toDiagnosticInfo(): AutonomousFrameworkAttributionInfo =

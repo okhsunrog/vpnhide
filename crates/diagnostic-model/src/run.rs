@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{NativeFixtureSpec, NativeMeasurement, ScopedNativeResult};
 
-pub const DIAGNOSTIC_CONTRACT: u32 = 6;
+pub const DIAGNOSTIC_CONTRACT: u32 = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -153,6 +153,8 @@ pub enum DiagnosticOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiagnosticRun {
     #[serde(default)]
+    pub native_raw: Option<crate::NativeRawReceipt>,
+    #[serde(default)]
     pub proc_interfaces: Option<crate::ScopedProcInterfaceResult>,
     #[serde(default)]
     pub addresses: Option<crate::ScopedAddressResult>,
@@ -238,6 +240,7 @@ mod tests {
     #[test]
     fn four_native_successes_never_replace_the_supported_contract() {
         let mut run = DiagnosticRun {
+            native_raw: Some(crate::assessment::tests::paired_receipt()),
             proc_interfaces: None,
             addresses: None,
             binding: None,

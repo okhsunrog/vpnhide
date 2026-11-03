@@ -171,6 +171,16 @@ impl CoreClient {
         ) -> Result<Option<FrameworkWorkerTask>, DiagnosticError>,
         CALL_DEADLINE
     );
+    call!(
+        native_worker_step(
+            request: NativeWorkerRequest,
+        ) -> Result<NativeWorkerInstruction, DiagnosticError>,
+        CALL_DEADLINE
+    );
+    call!(
+        finish_diagnostic_worker(session: u64, core_epoch: u64) -> Result<(), DiagnosticError>,
+        CALL_DEADLINE
+    );
     call!(join_diagnostic_worker() -> Result<Option<DiagnosticWorkerTask>, DiagnosticError>, CALL_DEADLINE);
     call!(
         report_diagnostic_worker(report: DiagnosticWorkerReport) -> Result<(), DiagnosticError>,
