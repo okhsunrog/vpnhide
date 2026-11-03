@@ -356,6 +356,12 @@ All inputs must be complete, clean and built from that exact commit. A daemon
 base alone is not installable. Existing Android keystore operations use
 `tools/vpnhide-tooling signer public` / `sign`; the Java provider stays unchanged.
 
+Producer provenance checks the complete Git worktree, including untracked source
+inputs and modified/untracked submodule content. Ignored build caches do not make
+a clean checkout dirty. A failed, timed-out or truncated Git observation cannot
+produce clean identity. Version-label formatting is not source qualification;
+assembly independently rejects dirty producer metadata and checks exact bytes.
+
 ## Resumable development reset
 
 `scripts/clean-device.sh` now prints an offline plan by default. To request a

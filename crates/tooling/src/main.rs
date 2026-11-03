@@ -166,9 +166,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     String::from_utf8(captured.output.stdout).map_err(io::Error::other)
                 }
                 let commit = git(&repo, &["rev-parse", "HEAD"])?;
-                let dirty = !git(&repo, &["status", "--porcelain", "--untracked-files=no"])?
-                    .trim()
-                    .is_empty();
+                let dirty = !git(
+                    &repo,
+                    &[
+                        "status",
+                        "--porcelain",
+                        "--untracked-files=normal",
+                        "--ignore-submodules=none",
+                    ],
+                )?
+                .trim()
+                .is_empty();
                 vpnhide_artifact_model::archive::stamp(
                     &staging,
                     &component,

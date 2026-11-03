@@ -184,3 +184,68 @@ fn device_reset_default_is_an_offline_plan_without_adb_or_receipt_writes() {
     assert!(!no_target.status.success());
     assert_eq!(fs::read_dir(r).unwrap().count(), 0);
 }
+
+#[test]
+fn producer_provenance_tracks_untracked_source_but_not_ignored_build_cache() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    let staging = root.path().join("staging");
+    fs::create_dir(&repo).unwrap();
+    fs::create_dir(&staging).unwrap();
+    fs::write(staging.join("payload"), b"exact bytes").unwrap();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .current_dir(&repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    };
+    git(&["init", "--quiet"]);
+    fs::write(repo.join(".gitignore"), b"cache/\n").unwrap();
+    fs::write(repo.join("source.rs"), b"committed source\n").unwrap();
+    git(&["add", ".gitignore", "source.rs"]);
+    git(&[
+        "-c",
+        "user.name=okhsunrog",
+        "-c",
+        "user.email=me@okhsunrog.dev",
+        "commit",
+        "--no-gpg-sign",
+        "--quiet",
+        "-m",
+        "fixture",
+    ]);
+    let stamp = || {
+        let output = tool(
+            root.path(),
+            &[
+                "bundle",
+                "stamp",
+                "--staging",
+                staging.to_str().unwrap(),
+                "--repo",
+                repo.to_str().unwrap(),
+                "--component",
+                "test",
+                "--version",
+                "test",
+            ],
+        );
+        assert!(output.status.success(), "{output:?}");
+        let p: serde_json::Value =
+            serde_json::from_slice(&fs::read(staging.join("build-provenance.json")).unwrap())
+                .unwrap();
+        p["dirty"].as_bool().unwrap()
+    };
+    assert!(!stamp());
+    fs::create_dir(repo.join("cache")).unwrap();
+    fs::write(repo.join("cache/generated"), b"ignored bytes").unwrap();
+    assert!(!stamp());
+    fs::write(repo.join("build.rs"), b"untracked build input\n").unwrap();
+    assert!(stamp(), "untracked compiler input was labelled clean");
+    fs::remove_file(repo.join("build.rs")).unwrap();
+    assert!(!stamp());
+    fs::write(repo.join("source.rs"), b"changed source\n").unwrap();
+    assert!(stamp());
+}
