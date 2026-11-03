@@ -61,15 +61,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         return raw_control::worker(name);
     }
-    if args.as_slice() == ["route-worker"] {
+    if let [mode, raw_spec] = args.as_slice()
+        && mode == "route-worker"
+    {
         if unsafe { libc::geteuid() } != 10000 {
             return Err("route worker is not oracle app UID".into());
         }
+        let spec: vpnhide_diagnostic_model::RouteFixtureSpec = serde_json::from_str(raw_spec)?;
+        if !spec.valid() {
+            return Err("invalid Core-issued route fixture".into());
+        }
         no_tun_descriptors()?;
-        println!(
-            "{}",
-            serde_json::to_string(&vpnhide_checks::route::observe())?
-        );
+        let observed = vpnhide_checks::route::observe();
+        println!("{}", serde_json::to_string(&observed.scoped(&spec))?);
         return Ok(());
     }
     if let [mode, name] = args.as_slice()

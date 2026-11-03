@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 pub const MAX_ROUTES: usize = 2048;
+/// Outbound observations describe only Core-issued objects, without rewriting
+/// their fields. Reserve room for the other native vectors in the 1 MiB RPC.
+pub const MAX_SCOPED_ROUTES: usize = 16;
+pub const SCOPED_ROUTE_JSON_BUDGET: usize = 128 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RouteSurface {
@@ -104,6 +108,45 @@ pub struct RouteMeasurement {
     pub observations: Vec<RouteObservation>,
 }
 impl RouteMeasurement {
+    /// Local transport projection, never a cleaned network API response or
+    /// verdict. Every exposure tag is retained; failures and overflow remain
+    /// explicit. Production worker wiring must opt into the Core-issued spec.
+    pub fn scoped(&self, spec: &RouteFixtureSpec) -> Self {
+        if !spec.valid() || !self.bounded() {
+            return Self {
+                observations: RouteCheck::required()
+                    .into_iter()
+                    .map(|check| RouteObservation {
+                        check,
+                        routes: Vec::new(),
+                        error: Some(ProbeError::Malformed),
+                    })
+                    .collect(),
+            };
+        }
+        Self {
+            observations: self
+                .observations
+                .iter()
+                .map(|value| {
+                    let mut rows = value.routes.iter().filter(|row| {
+                        spec.exposes(row, false, value.check.surface)
+                            || spec.exposes(row, true, value.check.surface)
+                    });
+                    let routes = rows.by_ref().take(MAX_SCOPED_ROUTES).cloned().collect();
+                    let overflow = rows.next().is_some();
+                    RouteObservation {
+                        check: value.check,
+                        routes,
+                        error: value
+                            .error
+                            .clone()
+                            .or(overflow.then_some(ProbeError::TooLarge)),
+                    }
+                })
+                .collect(),
+        }
+    }
     pub fn bounded(&self) -> bool {
         let mut seen = BTreeSet::new();
         self.observations.len() <= RouteCheck::required().len()
@@ -572,5 +615,72 @@ mod fixture_tests {
                 .controls
                 .contains(&crate::ControlFailure::MissingPositiveControl)
         );
+    }
+    #[test]
+    fn transport_projection_keeps_scrubbed_identity_leaks_and_late_errors() {
+        let mut source = rows(1);
+        for value in &mut source.observations {
+            value.routes[0].destination.fill(0); // interface identity still leaks
+            let mut unrelated = value.routes[1].clone();
+            unrelated.output_index = Some(19);
+            unrelated.output_name = Some("eth0".into());
+            unrelated.destination.fill(17);
+            value.routes.push(unrelated);
+            value.error = Some(ProbeError::Timeout);
+        }
+        let projected = source.scoped(&spec());
+        for value in &projected.observations {
+            assert_eq!(value.routes.len(), 2);
+            assert_eq!(
+                value.routes[0].destination,
+                vec![0; value.check.surface.address_bytes()]
+            );
+            assert_eq!(value.error, Some(ProbeError::Timeout));
+        }
+        let negative = rows(0);
+        let start = rows(1);
+        let result = evaluate_route_fixture(
+            &spec(),
+            [Some(&negative), Some(&start), Some(&projected), None, None],
+            false,
+        );
+        assert_eq!(result.leaked.len(), 8);
+        assert!(result.proven.is_empty());
+    }
+    #[test]
+    fn maximum_scoped_route_payload_has_an_explicit_transport_reservation() {
+        let mut spec = spec();
+        spec.vpn.index = i32::MAX as u32;
+        spec.ordinary.index = i32::MAX as u32 - 1;
+        let mut source = rows(1);
+        for value in &mut source.observations {
+            let length = value.check.surface.address_bytes();
+            let mut row = value.routes[0].clone();
+            row.destination = vec![255; length];
+            row.source = Some(vec![255; length]);
+            row.source_prefix = (length * 8) as u8;
+            row.output_index = Some(spec.vpn.index);
+            row.output_name = Some("\"".repeat(15));
+            row.table = Some(u32::MAX);
+            row.protocol = Some(u8::MAX);
+            row.scope = Some(u8::MAX);
+            row.kind = Some(u8::MAX);
+            row.metric = u32::MAX;
+            row.gateway = Some(vec![255; length]);
+            row.flags = u32::MAX;
+            value.routes = vec![row; MAX_SCOPED_ROUTES + 1];
+        }
+        assert!(source.bounded());
+        let bounded = source.scoped(&spec);
+        assert!(bounded.bounded());
+        assert!(
+            bounded
+                .observations
+                .iter()
+                .all(|v| v.routes.len() == MAX_SCOPED_ROUTES
+                    && v.error == Some(ProbeError::TooLarge))
+        );
+        assert!(serde_json::to_vec(&bounded).unwrap().len() < SCOPED_ROUTE_JSON_BUDGET);
+        assert!(bounded.observations.iter().all(|v| v.error.is_some()));
     }
 }

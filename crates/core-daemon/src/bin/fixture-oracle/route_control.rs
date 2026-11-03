@@ -27,7 +27,9 @@ pub fn verify(protected: bool) -> Result<(), Box<dyn std::error::Error>> {
         None
     };
     let mut command = Command::new(std::env::current_exe()?);
-    command.arg("route-worker").stderr(Stdio::inherit());
+    command
+        .args(["route-worker", &serde_json::to_string(&fixture.spec)?])
+        .stderr(Stdio::inherit());
     // SAFETY: isolated Linux oracle child only; this is not Android admission.
     unsafe {
         command.pre_exec(|| {
@@ -44,6 +46,9 @@ pub fn verify(protected: bool) -> Result<(), Box<dyn std::error::Error>> {
     let output = vpnhide_activator::output_with_timeout(&mut command, Duration::from_secs(5))?;
     if !output.status.success() {
         return Err("route worker failed".into());
+    }
+    if output.stdout.len() > vpnhide_diagnostic_model::SCOPED_ROUTE_JSON_BUDGET {
+        return Err("scoped route worker exceeded its transport reservation".into());
     }
     let worker: RouteMeasurement = serde_json::from_slice(&output.stdout)?;
     println!("ROUTE_WORKER={}", serde_json::to_string(&worker)?);

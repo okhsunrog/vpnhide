@@ -72,3 +72,23 @@ This does not qualify Android bionic/SELinux, a genuine secondary 32-bit Zygote
 worker, KPM/Zygisk RAW transport, arbitrary vendor kernels or old game-process hook
 generations. Those are distinct code and acceptance items. No phone, production
 key, release, provider setting or boot write was used; backend policy stays paused.
+
+## Transport follow-up
+
+The worker RPC frame limit is 1 MiB; full routing tables are not appended to the
+production native packet. The engineering route worker now accepts the issued
+spec and returns original matching records, retaining all three exposure tags and
+any earlier read error. This is report projection after actual API reads, not a
+replacement network response. At most sixteen matching rows per vector reserve
+less than 128 KiB for this component, verified with maximum-sized valid fields.
+Overflow remains explicit with retained rows, so it cannot prove absence. The
+full production native-report/publication budget and route wire/resource admission
+still need integration.
+
+The projected-report RAW/protected rerun retains the same eight-vector and lifecycle
+results, without skips: RAW `f8db8f9ebbe6c648b0465e73ee6643cdd6047d133c251f256610cb89d39e6228`,
+protected `16306503e5c511ca345ed4ac103988f457ea690ab7e45c53b5beb7dfd98a4022`.
+Evidence is retained in `vpnhide-build-evidence/rfc2/native-route-scope/` separately
+from the earlier full-table prototype. This follow-up changes only the local model
+and engineering worker; production RPC/schema versions and its missing-route status
+remain unchanged.
