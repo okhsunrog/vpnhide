@@ -543,11 +543,9 @@
     <string name="debug_export_java_desc">Relevant system JAR/APK files only, up to 96 MiB. Skips and limits are recorded in the archive.</string>
     <string name="export_reason_core">not recommended — core is unavailable; collect the baseline report first.</string>
     <string name="export_reason_incomplete">not recommended yet — no current complete checks; baseline evidence is included.</string>
-    <string name="export_reason_none">not recommended — no matching failure was found.</string>
     <string name="export_reason_kernel_hooks">recommended — checks found a leak in a vector owned by the kernel backend.</string>
     <string name="export_reason_kernel_compat">recommended — kernel compatibility or missing hook support needs investigation.</string>
     <string name="export_reason_java_hooks">recommended — current Java checks found a leak.</string>
-    <string name="export_reason_java_attach">recommended — this boot reports missing methods or hook installation errors.</string>
     <string name="export_reason_configuration">not recommended — resolve backend configuration or authentication first; logs are included.</string>
     <string name="debug_export_actual">Collected: %1$d kernel images, %2$d framework files. Java files skipped: %3$d. Collection reports in the archive explain missing items.</string>
     <string name="core_health_connecting">Checking connection…</string>

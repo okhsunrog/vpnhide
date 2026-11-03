@@ -37,6 +37,7 @@
 
 use std::time::Duration;
 
+pub mod attachment_policy;
 pub mod canonical;
 mod config;
 pub mod config_edit;

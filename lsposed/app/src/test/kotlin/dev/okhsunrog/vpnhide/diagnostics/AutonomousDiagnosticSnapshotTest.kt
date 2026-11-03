@@ -21,6 +21,7 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import uniffi.vpnhide_core_ffi.CoreAssessmentPhase
+import uniffi.vpnhide_core_ffi.CoreAttachmentEvidence
 import uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment
 import uniffi.vpnhide_core_ffi.CoreDiagnosticOutcome
 import uniffi.vpnhide_core_ffi.CoreDiagnosticRun
@@ -251,4 +252,41 @@ class AutonomousDiagnosticSnapshotTest {
             assertSame(published, accepted.rootSnapshot)
             assertTrue(accepted.rootJoined)
         }
+
+    @Test
+    fun `export adapter uses typed Rust advice and withholds unjoined diagnostic evidence`() {
+        val initial = update()
+        val core = initial.copy(state = initial.state?.copy(attachmentEvidence = CoreAttachmentEvidence(false, false, true, true)))
+        val sources = AutonomousDiagnosticSources(core, ObservationState(), config(core))
+        val advice = exportRecommendation(autonomousDiagnosticSnapshot(sources, 1, 0))
+        assertTrue(advice.kernel && advice.java)
+        assertEquals(ExportReason.KERNEL_HOOKS, advice.kernelReason)
+        assertEquals(ExportReason.JAVA_HOOKS, advice.javaReason)
+        val unjoined = autonomousDiagnosticSnapshot(sources.copy(config = config(core).copy(desiredRevision = 2)), 2, 0)
+        val withheld = exportRecommendation(unjoined)
+        assertFalse(withheld.kernel || withheld.java)
+        val disconnected = autonomousDiagnosticSnapshot(sources.copy(core = core.copy(current = false)), 3, 0)
+        assertEquals(ExportReason.CORE_UNAVAILABLE, exportRecommendation(disconnected).kernelReason)
+        assertEquals(false to true, ExportOverrides(kernel = false).resolve(advice))
+    }
+
+    @Test
+    fun `export adapter keeps boot compatibility advice without launching a diagnostic run`() {
+        val initial = update()
+        val core =
+            initial.copy(
+                state =
+                    initial.state?.copy(
+                        autonomousDiagnostics = null,
+                        attachmentEvidence = CoreAttachmentEvidence(false, true, false, false),
+                    ),
+            )
+        val sources = AutonomousDiagnosticSources(core, ObservationState(), config(core))
+        val snapshot = autonomousDiagnosticSnapshot(sources, 1, 0)
+        assertFalse(snapshot.current)
+        val advice = exportRecommendation(snapshot)
+        assertTrue(advice.kernel)
+        assertFalse(advice.java)
+        assertEquals(ExportReason.KERNEL_COMPATIBILITY, advice.kernelReason)
+    }
 }

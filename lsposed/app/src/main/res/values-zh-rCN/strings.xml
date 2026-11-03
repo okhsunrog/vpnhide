@@ -515,11 +515,9 @@
     <string name="debug_export_java_desc">仅收集相关系统 JAR/APK，最多 96 MiB。跳过项和限制会记录在归档中。</string>
     <string name="export_reason_core">不建议包含：core 不可用，请先收集基础报告。</string>
     <string name="export_reason_incomplete">暂不建议包含：缺少当前完整检查，将包含基础信息。</string>
-    <string name="export_reason_none">不建议包含：未发现相关故障。</string>
     <string name="export_reason_kernel_hooks">建议包含：检查发现内核后端负责的检测项存在泄漏。</string>
     <string name="export_reason_kernel_compat">建议包含：需要调查内核兼容性或钩子支持。</string>
     <string name="export_reason_java_hooks">建议包含：当前 Java 检查发现泄漏。</string>
-    <string name="export_reason_java_attach">建议包含：本次启动报告了方法缺失或钩子安装错误。</string>
     <string name="export_reason_configuration">不建议包含：应先检查后端配置或授权；日志已包含。</string>
     <string name="debug_export_actual">已收集：%1$d 个内核镜像、%2$d 个框架文件。跳过 %3$d 个 Java 文件。归档中的收集报告说明了缺失项。</string>
     <string name="core_health_connecting">正在检查连接…</string>

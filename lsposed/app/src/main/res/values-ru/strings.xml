@@ -527,11 +527,9 @@
     <string name="debug_export_java_desc">Только связанные системные JAR/APK, до 96 МиБ. Пропуски и ограничения отражаются в архиве.</string>
     <string name="export_reason_core">не рекомендуются — core недоступен; сначала нужен основной отчёт.</string>
     <string name="export_reason_incomplete">пока не рекомендуются — нет актуальных полных проверок; основной отчёт будет включён.</string>
-    <string name="export_reason_none">не рекомендуются — соответствующий сбой не обнаружен.</string>
     <string name="export_reason_kernel_hooks">рекомендуются — проверка обнаружила утечку в зоне ответственности бэкенда ядра.</string>
     <string name="export_reason_kernel_compat">рекомендуются — нужно проверить совместимость ядра или поддержку хуков.</string>
     <string name="export_reason_java_hooks">рекомендуются — актуальные Java-проверки обнаружили утечку.</string>
-    <string name="export_reason_java_attach">рекомендуются — в этой загрузке обнаружены отсутствующие методы или ошибки установки хуков.</string>
     <string name="export_reason_configuration">не рекомендуются — сначала нужно разобраться с настройкой бэкендов или авторизацией; логи включены.</string>
     <string name="debug_export_actual">Собрано: образы ядра — %1$d, файлы фреймворка — %2$d. Пропущено Java-файлов: %3$d. Причины отсутствующих данных указаны в отчётах внутри архива.</string>
     <string name="core_health_connecting">Проверяем соединение…</string>

@@ -35,6 +35,7 @@ pub struct StateReply {
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CorePublication {
+    pub attachment_evidence: crate::CoreAttachmentEvidence,
     pub zygisk_lifecycle: Option<crate::CoreZygiskLifecycle>,
     pub zygisk_revocation: Option<crate::CoreZygiskRevocationStatus>,
     pub autonomous_diagnostics: Option<crate::CoreDiagnosticRun>,
@@ -64,6 +65,8 @@ impl From<ClientReply<rpc::Published>> for StateReply {
             snapshot,
         } = reply.value;
         let recovery = CoreRecoveryAccess::from(&snapshot);
+        let attachment_evidence =
+            rpc::attachment_policy::AttachmentEvidence::from(&snapshot).into();
         let rpc::StateSnapshot {
             native_view,
             zygisk_lifecycle,
@@ -86,6 +89,7 @@ impl From<ClientReply<rpc::Published>> for StateReply {
         Self {
             connection_generation: reply.generation,
             state: CorePublication {
+                attachment_evidence,
                 zygisk_lifecycle: zygisk_lifecycle.map(Into::into),
                 zygisk_revocation: zygisk_revocation.map(Into::into),
                 autonomous_diagnostics: autonomous_diagnostics.map(Into::into),

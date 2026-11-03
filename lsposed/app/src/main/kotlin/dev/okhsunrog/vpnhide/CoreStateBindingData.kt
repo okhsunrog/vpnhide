@@ -9,6 +9,7 @@ import uniffi.vpnhide_core_ffi.CoreOperationRecord as NativeOperationRecord
 
 internal fun CorePublication.toState(): CoreStateView =
     CoreStateView(
+        attachmentEvidence = attachmentEvidence.copy(),
         epoch = epoch.toLong(),
         configRevision = configRevision.toLong(),
         canonical =

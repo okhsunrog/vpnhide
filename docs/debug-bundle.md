@@ -17,6 +17,18 @@ Related: [diagnostics.md](diagnostics.md) (how the checks/verdicts are computed 
 rendered), [state.md](state.md) (every path/proc entry the sections read),
 [protocol.md](protocol.md) (the `/proc/vpnhide_ctl` wire in `kmod_state`).
 
+Binary-attachment recommendations have one portable Rust owner,
+[`core-rpc::attachment_policy`](../crates/core-rpc/src/attachment_policy.rs).
+The local FFI publication derives bounded evidence from the same typed Core boot,
+selected backend and retained assessment. Kotlin supplies currentness of its
+accepted observation/config join, renders localized reasons and retains optional
+overrides only in the open sheet. It does not classify serialized check names or
+loader text. Stale/unjoined diagnostic leaks cannot recommend attachments; current
+boot compatibility evidence can still recommend a kernel image without admitting
+a new diagnostic run. Advice neither authorizes collection nor changes the backend.
+Capture sessions, attachment collection and ZIP orchestration still have APK
+owners and remain separate migration work.
+
 ---
 
 ## 1. What's in the zip

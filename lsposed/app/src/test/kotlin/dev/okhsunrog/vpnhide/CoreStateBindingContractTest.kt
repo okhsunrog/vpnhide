@@ -64,6 +64,7 @@ class CoreStateBindingContractTest {
         )
     private val publication =
         CorePublication(
+            attachmentEvidence = CoreAttachmentEvidence(false, false, true, true),
             zygiskLifecycle = null,
             zygiskRevocation = null,
             autonomousDiagnostics = run,
@@ -104,6 +105,9 @@ class CoreStateBindingContractTest {
         assertTrue(bound.mutationHeld)
         assertEquals(setOf(ConfigPhase.Native), bound.heldResources)
         assertEquals(listOf(CoreApplyIdentity(ConfigPhase.Native, 4, 8, PhaseOutcome.Unknown)), bound.applyEvidence)
+        assertEquals(publication.attachmentEvidence, bound.attachmentEvidence)
+        publication.attachmentEvidence.kernelLeak = false
+        assertTrue(requireNotNull(bound.attachmentEvidence).kernelLeak)
         assertEquals(recovery, bound.recovery)
         assertEquals(run, bound.autonomousDiagnostics)
         assertEquals(assessment, bound.autonomousAssessment)
