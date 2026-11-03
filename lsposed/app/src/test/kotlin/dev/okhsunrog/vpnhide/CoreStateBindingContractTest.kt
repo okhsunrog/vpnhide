@@ -33,6 +33,7 @@ class CoreStateBindingContractTest {
     private val run =
         CoreDiagnosticRun(
             null,
+            null,
             1uL,
             7uL,
             "boot",
@@ -167,5 +168,25 @@ class CoreStateBindingContractTest {
         assertEquals(listOf("syscall.ipv6_addresses"), info.procInterfaces?.leakedChecks)
         assertEquals(listOf("probe_unavailable"), info.procInterfaces?.controls)
         assertEquals(emptyList<String>(), info.procInterfaces?.provenChecks)
+    }
+
+    @Test
+    fun `directory export preserves independent actor source and cleanup failure`() {
+        val check =
+            uniffi.vpnhide_core_ffi.CoreSysInterfaceCheck(
+                CoreNativeReadActor.SYSCALL,
+                uniffi.vpnhide_core_ffi.CoreSysInterfaceSurface.PROC_IPV6_CONF,
+            )
+        val result =
+            uniffi.vpnhide_core_ffi.CoreScopedSysInterfaceResult(
+                emptyList(),
+                listOf(check),
+                listOf(CoreControlFailure.CLEANUP_UNCONFIRMED),
+            )
+        val info = run.copy(sysInterfaces = result).toDiagnosticInfo()
+        check.surface = uniffi.vpnhide_core_ffi.CoreSysInterfaceSurface.SYS_CLASS_NET
+        result.leaked = emptyList()
+        assertEquals(listOf("syscall.proc_ipv6_conf"), info.sysInterfaces?.leakedChecks)
+        assertEquals(listOf("cleanup_unconfirmed"), info.sysInterfaces?.controls)
     }
 }

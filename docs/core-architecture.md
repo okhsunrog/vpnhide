@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation on `main`, app/core RPC28 and journal13 (reads1–12). The backend
+Current implementation on `main`, app/core RPC29 and journal13 (reads1–12). The backend
 control-v2 / telemetry-v1 wire is a separate boundary. This document describes
 the implemented ownership and execution contract.
 
@@ -407,7 +407,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC28; journal13 reads schemas1–12. These
+The current paired APK/Core contract is RPC29; journal13 reads schemas1–12. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -509,7 +509,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. Current RPC28 requires a paired new APK/Core; journal13 and the frozen
+forensics remain. Current RPC29 requires a paired new APK/Core; journal13 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 
@@ -549,8 +549,9 @@ an empty successful bootstrap. Private journal12 reads1–11; older writers must
 refuse the newer schema without removing it. Kernel control2/telemetry1 is unchanged.
 
 <a id="explicit-existing-core-replacement-rpc27--journal13"></a>
+<a id="explicit-existing-core-replacement-rpc28--journal13"></a>
 
-## Explicit existing-Core replacement (RPC28 / journal13)
+## Explicit existing-Core replacement (RPC29 / journal13)
 
 The existing command writer now admits `StageCoreReplacement`. Authenticated
 preparation runs outside that writer; accepted work and dispatch intent are

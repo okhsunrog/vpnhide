@@ -3,6 +3,7 @@
 use crate::*;
 
 pub struct PairedNativeResult {
+    pub sys_interfaces: ScopedSysInterfaceResult,
     pub native: ScopedNativeResult,
     pub addresses: ScopedAddressResult,
     pub binding: ScopedBindResult,
@@ -121,6 +122,18 @@ pub fn evaluate_paired_native_fixture(
         &app_proc.leaked,
         &app_proc.controls,
     );
+    let mut sys_interfaces =
+        evaluate_sys_interface_fixture(spec, samples.map(|m| m.sys_interfaces.as_ref()));
+    let app_sys =
+        evaluate_sys_interface_fixture(spec, app_samples.map(|m| m.sys_interfaces.as_ref()));
+    merge(
+        &mut sys_interfaces.proven,
+        &mut sys_interfaces.leaked,
+        &mut sys_interfaces.controls,
+        &app_sys.proven,
+        &app_sys.leaked,
+        &app_sys.controls,
+    );
     let mut binding = evaluate_bind_fixture(spec, negative, root_start, worker, root_end, cleanup);
     let app_binding = evaluate_bind_fixture(spec, negative, raw, worker, root_end, cleanup);
     merge(
@@ -132,6 +145,7 @@ pub fn evaluate_paired_native_fixture(
         &app_binding.controls,
     );
     PairedNativeResult {
+        sys_interfaces,
         native,
         addresses,
         binding,
@@ -172,6 +186,7 @@ pub(crate) mod tests {
             ifaddrs: None,
         };
         let negative = NativeMeasurement {
+            sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,

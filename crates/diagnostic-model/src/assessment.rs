@@ -195,6 +195,23 @@ impl DiagnosticRun {
                 }
             }
         }
+        // Optional directory concealment is evaluated only when requested.
+        // This does not establish the separate stat/access/open Filesystem group.
+        if self.plan.required.contains(&SysInterfaces)
+            && let Some(sys) = &self.sys_interfaces
+        {
+            if sys.complete() {
+                proven.insert(SysInterfaces);
+            }
+            if !sys.leaked.is_empty() {
+                leaked.insert(SysInterfaces);
+            }
+            for control in &sys.controls {
+                if !native_controls.contains(control) {
+                    native_controls.push(*control);
+                }
+            }
+        }
         if let Some(binding) = &self.binding {
             if binding.complete() {
                 proven.insert(RequiredCheck::BindToDevice);
@@ -280,6 +297,7 @@ pub(crate) mod tests {
     fn run(native: ScopedNativeResult) -> DiagnosticRun {
         DiagnosticRun {
             native_raw: Some(paired_receipt()),
+            sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,
@@ -301,6 +319,52 @@ pub(crate) mod tests {
                 missing: vec![],
             },
         }
+    }
+    #[test]
+    fn directory_evidence_requires_enabled_feature_and_cannot_complete_stat_access_open() {
+        let mut run = run(ScopedNativeResult::Proven { checks: vec![] });
+        run.sys_interfaces = Some(crate::ScopedSysInterfaceResult {
+            proven: crate::SysInterfaceCheck::required(),
+            ..Default::default()
+        });
+        assert!(
+            !run.assessment()
+                .proven
+                .contains(&RequiredCheck::SysInterfaces)
+        );
+        run.plan = DiagnosticPlan::supported(true, false, false);
+        assert!(
+            run.assessment()
+                .proven
+                .contains(&RequiredCheck::SysInterfaces)
+        );
+        assert!(
+            run.assessment()
+                .unverified
+                .contains(&RequiredCheck::Filesystem)
+        );
+        run.native_raw = None;
+        assert!(
+            !run.assessment()
+                .proven
+                .contains(&RequiredCheck::SysInterfaces)
+        );
+        run.sys_interfaces
+            .as_mut()
+            .unwrap()
+            .leaked
+            .push(crate::SysInterfaceCheck::required()[0]);
+        assert!(
+            run.assessment()
+                .leaked
+                .contains(&RequiredCheck::SysInterfaces)
+        );
+        run.plan = DiagnosticPlan::supported(false, false, false);
+        assert!(
+            !run.assessment()
+                .leaked
+                .contains(&RequiredCheck::SysInterfaces)
+        );
     }
     #[test]
     fn root_only_or_failed_raw_receipts_withhold_native_proof_without_erasing_leaks() {

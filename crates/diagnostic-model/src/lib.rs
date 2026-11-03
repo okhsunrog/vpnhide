@@ -11,6 +11,8 @@ mod assessment;
 pub use assessment::*;
 mod proc_interfaces;
 pub use proc_interfaces::*;
+mod sys_interfaces;
+pub use sys_interfaces::*;
 pub mod framework;
 pub mod framework_legacy;
 mod run;
@@ -140,6 +142,8 @@ impl NativeFixtureSpec {
 #[serde(deny_unknown_fields)]
 pub struct NativeMeasurement {
     #[serde(default)]
+    pub sys_interfaces: Option<SysInterfaceMeasurement>,
+    #[serde(default)]
     pub proc_interfaces: Option<ProcInterfaceMeasurement>,
     #[serde(default)]
     pub addresses: Option<AddressMeasurement>,
@@ -156,6 +160,7 @@ pub struct NativeMeasurement {
 impl NativeMeasurement {
     pub fn unavailable(error: ProbeError) -> Self {
         Self {
+            sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,
@@ -168,9 +173,13 @@ impl NativeMeasurement {
         }
     }
     pub fn bounded(&self) -> bool {
-        self.proc_interfaces
+        self.sys_interfaces
             .as_ref()
-            .is_none_or(ProcInterfaceMeasurement::bounded)
+            .is_none_or(SysInterfaceMeasurement::bounded)
+            && self
+                .proc_interfaces
+                .as_ref()
+                .is_none_or(ProcInterfaceMeasurement::bounded)
             && self
                 .addresses
                 .as_ref()
@@ -458,6 +467,7 @@ mod tests {
             entries.push(spec.interface.into());
         }
         NativeMeasurement {
+            sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,

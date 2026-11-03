@@ -25,6 +25,26 @@ fn require(condition: bool, message: &str) -> io::Result<()> {
         Err(io::Error::other(message))
     }
 }
+fn directories(
+    value: &vpnhide_diagnostic_model::SysInterfaceMeasurement,
+    name: &str,
+    present: bool,
+) -> bool {
+    value.bounded()
+        && vpnhide_diagnostic_model::SysInterfaceCheck::required()
+            .iter()
+            .all(|check| {
+                value
+                    .entries
+                    .iter()
+                    .find(|e| e.check == *check)
+                    .and_then(|e| e.names.value())
+                    .is_some_and(|names| {
+                        names.iter().any(|n| n == name) == present
+                            && names.iter().any(|n| n == "lo")
+                    })
+            })
+}
 pub fn worker(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     require(unsafe { libc::geteuid() } == 10000, "not oracle app UID")?;
     require(name.len() == 15 && name.starts_with("tun"), "bad fixture")?;
@@ -49,12 +69,18 @@ pub fn worker(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let name = name.to_owned();
     let ordinary_thread = std::thread::spawn({
         let name = name.clone();
-        move || vpnhide_checks::fixture::interface_ioctl(&name, true)
+        move || {
+            (
+                vpnhide_checks::fixture::interface_ioctl(&name, true),
+                vpnhide_checks::sys_interfaces::observe(),
+            )
+        }
     })
     .join()
     .map_err(|_| "ordinary thread failed")?;
     require(
-        ordinary_thread == Sample::Error(ProbeError::Errno(libc::ENODEV)),
+        ordinary_thread.0 == Sample::Error(ProbeError::Errno(libc::ENODEV))
+            && directories(&ordinary_thread.1, &name, false),
         "RAW escaped to another thread of the same UID",
     )?;
     say(
@@ -123,6 +149,20 @@ pub fn verify(spec: &NativeFixtureSpec) -> Result<(), Box<dyn std::error::Error>
     require(lease.finish()?, "RAW expired before measurement completed")?;
     say(&mut writer, "protected")?;
     let protected: NativeMeasurement = serde_json::from_str(&line(&mut reader)?)?;
+    require(
+        raw.sys_interfaces
+            .as_ref()
+            .is_some_and(|v| directories(v, &spec.interface.name, true))
+            && protected
+                .sys_interfaces
+                .as_ref()
+                .is_some_and(|v| directories(v, &spec.interface.name, false)),
+        "directory RAW/protected/ordinary controls failed",
+    )?;
+    println!(
+        "RAW_THREAD_SYS_OBSERVATIONS={}",
+        serde_json::json!({"raw":raw.sys_interfaces,"protected":protected.sys_interfaces})
+    );
     require(
         raw.flags == Sample::Value(spec.flags) && raw.mtu == Sample::Value(spec.mtu),
         "app RAW fixture stimulus missing",

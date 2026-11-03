@@ -147,11 +147,12 @@ Everything below is a `state.json` field unless noted.
 ### 2.1 Schema versions
 
 `state.json → schema` says which shape the bundle was written in. **This doc
-describes schema 8.** One number covers the whole bundle; there is no per-object
+describes schema 9.** One number covers the whole bundle; there is no per-object
 version.
 
 | Schema | Shipped in | What changed |
 |---|---|---|
+| 9 | main (unreleased) | `run.sysInterfaces` retains separate libc/direct-getdents64 directory proof, leaks and controls for sysfs and both proc-sys families. All six require positive same-worker RAW and ordinary-object controls; this does not complete stat/access/open or promote a denied read to proof. Shared RAW receipts retain the corresponding actual observations. |
 | 8 | main (unreleased) | Native proof requires a correlated app RAW interval and confirmed revocation; privileged root controls alone remain unverified. `run.nativeRaw` preserves the full shared Rust receipt, including failed-scope observations and exact thread identity. Native evidence is retained before framework collection, so worker death cannot erase an already reported leak. |
 | 7 | main (unreleased) | `run.procInterfaces` retains per-surface libc/direct-syscall proof, leaks and controls for `/proc/net/dev` and `/proc/net/if_inet6`. A denied read is unverified; proc leaks remain distinct from proven address ioctls/netlink. |
 | 6 | main (unreleased) | Autonomous run exports keep separate address actor/vector proof, leaks and controls. Interface-only getifaddrs evidence no longer proves IPv4/IPv6 address coverage; grouped address requirements retain missing families and syscall actors as unverified. This is scoped evidence, not whole-device acceptance. |

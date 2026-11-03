@@ -8,6 +8,7 @@ import uniffi.vpnhide_core_ffi.CoreDiagnosticAssessment
 import uniffi.vpnhide_core_ffi.CoreDiagnosticRun
 import uniffi.vpnhide_core_ffi.CoreFrameworkAttribution
 import uniffi.vpnhide_core_ffi.CoreProcInterfaceCheck
+import uniffi.vpnhide_core_ffi.CoreSysInterfaceCheck
 import uniffi.vpnhide_core_ffi.nativeRawReceiptJson
 import java.util.Locale
 
@@ -54,6 +55,7 @@ internal data class AutonomousRunInfo(
     val addresses: AutonomousNativeReadInfo? = null,
     val procInterfaces: AutonomousNativeReadInfo? = null,
     val nativeRaw: JsonElement? = null,
+    val sysInterfaces: AutonomousNativeReadInfo? = null,
 )
 
 @Serializable
@@ -66,6 +68,8 @@ internal data class AutonomousNativeReadInfo(
 private fun CoreAddressCheck.infoName(): String = "${actor.name.lowercase(Locale.ROOT)}.${vector.name.lowercase(Locale.ROOT)}"
 
 private fun CoreProcInterfaceCheck.infoName(): String = "${actor.name.lowercase(Locale.ROOT)}.${surface.name.lowercase(Locale.ROOT)}"
+
+private fun CoreSysInterfaceCheck.infoName(): String = "${actor.name.lowercase(Locale.ROOT)}.${surface.name.lowercase(Locale.ROOT)}"
 
 @Serializable
 internal data class AutonomousBindInfo(
@@ -137,6 +141,13 @@ internal fun CoreDiagnosticRun.toDiagnosticInfo(): AutonomousRunInfo =
             )
         },
         nativeRaw?.let { Json.parseToJsonElement(nativeRawReceiptJson(it)) },
+        sysInterfaces?.let { result ->
+            AutonomousNativeReadInfo(
+                result.proven.map { it.infoName() },
+                result.leaked.map { it.infoName() },
+                result.controls.map { it.name.lowercase(Locale.ROOT) },
+            )
+        },
     )
 
 private fun CoreFrameworkAttribution.toDiagnosticInfo(): AutonomousFrameworkAttributionInfo =

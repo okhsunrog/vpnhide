@@ -16,7 +16,7 @@ fixtures, production hooks and explicitly requested manual forensics remain.
 ## Evidence and ownership
 
 The required plan comes from the supported contract and enabled features, not
-from the installed hook mask. Diagnostic contract7 requires SysInterfaces and
+from the installed hook mask. Diagnostic contract8 requires SysInterfaces and
 Filesystem only when the desired `filesystem_iface_paths` feature is enabled,
 matching RFC0002's optional-filesystem scope. Default route/proc-interface and
 framework requirements remain. Previous or truncated plans cannot be reused as
@@ -132,7 +132,17 @@ all four leaks, even though address ioctls/netlink hide successfully. These are
 retained leaks, not a missing-stimulus result or an automatic fallback trigger.
 This group does not qualify proc routes, sysfs/proc-sys, TCP sockets or Ports.
 
-Routes/rules, remaining proc/sys stimuli and framework active/
+The optional `SysInterfaces` group independently enumerates `/sys/class/net`,
+`/proc/sys/net/ipv4/conf` and `/proc/sys/net/ipv6/conf` through libc
+`opendir/readdir` and direct `openat/getdents64`. The existing owned DOWN TUN
+supplies the positive names; ordinary `lo` must remain visible. Core requires
+all six negative/RAW/protected/end/cleanup controls, including same-worker RAW,
+before reporting scoped directory coverage. Missing IPv6, denied sysfs/proc-sys,
+empty lists and lost cleanup remain unverified; qualified leaks survive late
+failures. This evidence is ignored when the optional feature is not requested.
+It does not complete the separate `Filesystem` stat/access/open requirement.
+
+Routes/rules, remaining filesystem stimuli and framework active/
 default/callback/PendingIntent controls still need implementation or expansion.
 Android bionic, SELinux, Java callback isolation and old game-process coverage need
 real device acceptance. QEMU/static libc evidence does not replace those gates.

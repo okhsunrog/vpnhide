@@ -64,6 +64,7 @@ class AutonomousDiagnosticSnapshotTest {
             stale = false,
             binding = null,
             addresses = null,
+            sysInterfaces = null,
             procInterfaces = null,
         )
 

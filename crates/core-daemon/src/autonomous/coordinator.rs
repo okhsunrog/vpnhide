@@ -211,12 +211,14 @@ fn worker_identity(
     })
 }
 struct NativeEvidence {
+    sys_interfaces: vpnhide_diagnostic_model::ScopedSysInterfaceResult,
     proc_interfaces: ScopedProcInterfaceResult,
     addresses: ScopedAddressResult,
     native: ScopedNativeResult,
     binding: ScopedBindResult,
 }
 struct MeasurementFailure {
+    sys_interfaces: Option<Box<vpnhide_diagnostic_model::ScopedSysInterfaceResult>>,
     proc_interfaces: Option<Box<ScopedProcInterfaceResult>>,
     addresses: Option<Box<ScopedAddressResult>>,
     binding: Option<Box<ScopedBindResult>>,
@@ -307,6 +309,7 @@ impl Coordinator {
         inner.next = inner.next.checked_add(1).ok_or(DiagnosticError::Expired)?;
         let run = DiagnosticRun {
             native_raw: None,
+            sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,
@@ -358,6 +361,7 @@ impl Coordinator {
         let result = match &worker_lease {
             Ok(_) => self.measure(&state, session),
             Err(detail) => Err(MeasurementFailure {
+                sys_interfaces: None,
                 proc_interfaces: None,
                 addresses: None,
                 binding: None,
@@ -406,12 +410,14 @@ impl Coordinator {
         run.native_raw = raw_receipt;
         match result {
             Ok(evidence) => {
+                run.record_sys_interfaces(evidence.sys_interfaces);
                 run.record_proc_interfaces(evidence.proc_interfaces);
                 run.record_addresses(evidence.addresses);
                 run.record_native(evidence.native);
                 run.record_binding(evidence.binding);
             }
             Err(failure) => {
+                run.sys_interfaces = failure.sys_interfaces.map(|v| *v);
                 run.proc_interfaces = failure.proc_interfaces.map(|v| *v);
                 run.addresses = failure.addresses.map(|v| *v);
                 run.binding = failure.binding.map(|v| *v);
@@ -455,6 +461,7 @@ impl Coordinator {
                 }
             }
             MeasurementFailure {
+                sys_interfaces: None,
                 proc_interfaces: None,
                 addresses: None,
                 binding: None,
@@ -572,12 +579,14 @@ impl Coordinator {
         }
         match report {
             Ok(_) if cleaned => Ok(NativeEvidence {
+                sys_interfaces: completion.sys_interfaces,
                 proc_interfaces: completion.proc_interfaces,
                 addresses: completion.addresses,
                 native: completion.result,
                 binding: completion.binding,
             }),
             Ok(_) => Err(MeasurementFailure {
+                sys_interfaces: Some(Box::new(completion.sys_interfaces)),
                 proc_interfaces: Some(Box::new(completion.proc_interfaces)),
                 addresses: Some(Box::new(completion.addresses)),
                 binding: Some(Box::new(completion.binding)),
@@ -586,6 +595,7 @@ impl Coordinator {
                 cleanup_confirmed: Some(false),
             }),
             Err(detail) => Err(MeasurementFailure {
+                sys_interfaces: Some(Box::new(completion.sys_interfaces)),
                 proc_interfaces: Some(Box::new(completion.proc_interfaces)),
                 addresses: Some(Box::new(completion.addresses)),
                 binding: Some(Box::new(completion.binding)),
@@ -1112,6 +1122,7 @@ mod tests {
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
             native_raw: None,
+            sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,
@@ -1142,6 +1153,7 @@ mod tests {
         let snapshot = state.snapshot();
         let last = DiagnosticRun {
             native_raw: None,
+            sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,
@@ -1178,6 +1190,7 @@ mod tests {
         let snapshot = state.snapshot();
         let run = DiagnosticRun {
             native_raw: None,
+            sys_interfaces: None,
             proc_interfaces: None,
             addresses: None,
             binding: None,

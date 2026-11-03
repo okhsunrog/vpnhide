@@ -12,7 +12,7 @@ use std::time::Duration;
 use vpnhide_core_daemon::autonomous::native_fixture::TunFixture;
 use vpnhide_diagnostic_model::{
     AddressCheck, BindActor, ControlFailure, NativeFixtureSpec, NativeMeasurement,
-    ProcInterfaceCheck, ScopedNativeResult, cleanup_confirmed,
+    ProcInterfaceCheck, ScopedNativeResult, SysInterfaceCheck, cleanup_confirmed,
 };
 
 #[path = "fixture-oracle/raw_control.rs"]
@@ -116,7 +116,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     | vpnhide_protocol::hook_ids::Hook::InetFillIfaddr.bit()
                     | vpnhide_protocol::hook_ids::Hook::Inet6FillIfaddr.bit()
                     | vpnhide_protocol::hook_ids::Hook::SockIoctl.bit()
-                    | vpnhide_protocol::hook_ids::Hook::SocketBindInterface.bit(),
+                    | vpnhide_protocol::hook_ids::Hook::SocketBindInterface.bit()
+                    | vpnhide_protocol::hook_ids::Hook::FilesystemIfacePaths.bit(),
             }],
         );
         vpnhide_core_daemon::activation::deliver_native(control, backend, &wire)?;
@@ -171,6 +172,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "FIXTURE_PROC_RESULT={}",
         serde_json::to_string(&done.proc_interfaces)?
     );
+    println!(
+        "FIXTURE_SYS_RESULT={}",
+        serde_json::to_string(&done.sys_interfaces)?
+    );
+    let sys_expected = if protected {
+        done.sys_interfaces.complete()
+    } else {
+        done.sys_interfaces.controls.is_empty()
+            && done.sys_interfaces.proven.is_empty()
+            && SysInterfaceCheck::required()
+                .iter()
+                .all(|c| done.sys_interfaces.leaked.contains(c))
+    };
     // Current kernel backends do not filter these seq files. This independently
     // tests leak detection; it is not a claim that the product hides procfs.
     let proc_expected = done.proc_interfaces.proven.is_empty()
@@ -199,7 +213,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         matches!(&done.result, ScopedNativeResult::Leaked { checks, incomplete } if checks.len() == 4 && incomplete.is_empty())
     };
-    if !expected || !bind_expected || !addresses_expected || !proc_expected || routes()? != before {
+    if !expected
+        || !bind_expected
+        || !addresses_expected
+        || !proc_expected
+        || !sys_expected
+        || routes()? != before
+    {
         return Err("native differential/control/cleanup assertion failed".into());
     }
     let duplicated = TunFixture::create(0x0123_4567_89ac)?;
@@ -223,6 +243,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .controls
             .contains(&ControlFailure::CleanupUnconfirmed)
         || incomplete.proc_interfaces.leaked.len() != 4
+        || incomplete.sys_interfaces.leaked.len() != 6
+        || !incomplete.sys_interfaces.proven.is_empty()
+        || !incomplete
+            .sys_interfaces
+            .controls
+            .contains(&ControlFailure::CleanupUnconfirmed)
     {
         return Err("last-dup control falsely confirmed cleanup".into());
     }
