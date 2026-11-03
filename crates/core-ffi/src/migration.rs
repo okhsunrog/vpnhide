@@ -111,6 +111,23 @@ pub fn canonical_config_max_bytes() -> u64 {
     vpnhide_core_rpc::canonical::MAX_CONFIG_BYTES as u64
 }
 
+/// Pure APK interchange encoding; the root writer retains its faithful codec.
+#[uniffi::export]
+pub fn encode_canonical_interchange(config: CoreCanonicalConfig) -> String {
+    let normalized = vpnhide_core_rpc::canonical::normalize_interchange(config.into());
+    // Exports must fit the same byte budget as imports; extra pretty-print
+    // whitespace must not make an admitted configuration impossible to reimport.
+    vpnhide_core_rpc::canonical::to_json_string(&normalized)
+}
+
+#[uniffi::export]
+pub fn preview_self_target(
+    config: CoreCanonicalConfig,
+    self_package: String,
+) -> CoreCanonicalConfig {
+    policy::with_self_target(config.into(), &self_package).into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,5 +152,18 @@ mod tests {
             canonical_config_max_bytes() as usize,
             vpnhide_core_rpc::canonical::MAX_CONFIG_BYTES
         );
+    }
+    #[test]
+    fn maximum_size_interchange_export_can_be_reimported_without_whitespace_overhead() {
+        use vpnhide_core_rpc::{CanonicalConfig, canonical};
+        let mut config = CanonicalConfig::default();
+        let baseline = canonical::to_json_string(&config).len();
+        config
+            .settings
+            .auto_hide_excluded_packages
+            .insert("x".repeat(canonical::MAX_CONFIG_BYTES - baseline - 2));
+        let exported = encode_canonical_interchange(config.clone().into());
+        assert_eq!(exported.len(), canonical::MAX_CONFIG_BYTES);
+        assert_eq!(canonical::parse_import(&exported).unwrap(), config);
     }
 }

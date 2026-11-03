@@ -2,6 +2,7 @@ package dev.okhsunrog.vpnhide
 
 import dev.okhsunrog.vpnhide.migration.parseImportedCanonicalConfig
 import dev.okhsunrog.vpnhide.picker.TargetsSnapshot
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -247,7 +248,7 @@ class StorageConfigTest {
             assertFalse(app.ports)
             assertEquals(null, app.portPolicy)
             assertTrue(app.native.enabled)
-            assertFalse(canonicalConfigJson(cfg).contains("\"ports\": true"))
+            assertFalse(JSONObject(canonicalConfigJson(cfg)).getJSONObject("apps").getJSONObject("com.bank").getBoolean("ports"))
         }
     }
 
@@ -427,8 +428,8 @@ class StorageConfigTest {
         val cfg = CanonicalConfig(debug = true, debugSwitch = false)
         val json = canonicalConfigJson(cfg)
 
-        assertTrue(json.contains("\"debug\": true"))
-        assertTrue(json.contains("\"debugSwitch\": false"))
+        assertTrue(JSONObject(json).getBoolean("debug"))
+        assertFalse(JSONObject(json).getBoolean("debugSwitch"))
         assertEquals(cfg, requireNotNull(parseCanonicalConfig(json)))
     }
 

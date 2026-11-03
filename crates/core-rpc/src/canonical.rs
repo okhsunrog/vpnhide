@@ -259,6 +259,9 @@ fn port_policy_from_disk(value: Option<&Value>) -> Option<PortPolicy> {
     // Best-effort: one malformed rule drops the whole policy (→ ports disabled), never
     // unwinds the whole config.
     let rules_json = obj.get("rules")?.as_array()?;
+    if rules_json.is_empty() {
+        return None;
+    }
     let mut rules = Vec::with_capacity(rules_json.len());
     for r in rules_json {
         rules.push(port_rule_from_disk(r.as_object()?)?);
@@ -468,12 +471,40 @@ pub fn parse_import(raw: &str) -> io::Result<CanonicalConfig> {
         ));
     }
     match parse_status(raw)? {
-        ConfigLoad::Present(config) if config.version == 1 => Ok(config),
+        ConfigLoad::Present(config) if config.version == 1 => Ok(normalize_interchange(config)),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "unsupported or absent config import",
         )),
     }
+}
+
+/// Schema-1 app interchange historically presents port rules as an ordered set.
+/// Keep this import/export normalization separate from faithful typed/disk
+/// serialization, which cannot silently rewrite an already committed value.
+pub fn normalize_interchange(mut config: CanonicalConfig) -> CanonicalConfig {
+    for app in config.apps.values_mut() {
+        if let Some(policy) = &mut app.port_policy {
+            // Legacy app import treated unknown UI mode labels as Custom. The
+            // explicit rules remain authoritative; no preset is inferred.
+            if policy.mode != "preset" {
+                policy.mode = "custom".into();
+            }
+            policy.rules.sort_by_key(|rule| {
+                (
+                    rule.start,
+                    rule.end,
+                    match rule.protocol {
+                        PortProtocol::Both => 0,
+                        PortProtocol::Tcp => 1,
+                        PortProtocol::Udp => 2,
+                    },
+                )
+            });
+            policy.rules.dedup();
+        }
+    }
+    config
 }
 
 #[cfg(test)]

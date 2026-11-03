@@ -251,7 +251,9 @@ Canonical file IO is separated from the pure schema-1 adapter in
 `crates/core-rpc/src/canonical.rs`, also used by the APK import bridge. Present invalid fields, overflowing
 versions and blank files fail startup without replacing their contents. Schema 1
 is still the live LSPosed interchange contract, so it is retained deliberately.
-The typed engine does not interpret polymorphic disk roles.
+The typed engine does not interpret polymorphic disk roles. APK interchange
+encoding and self-target previews call the same local Rust owners, without RPC
+or effects; the hand-written Kotlin encoder and self-role transformer are removed.
 
 App import adapters live together in `migration/`: pre-1.0 component lists and
 observer UID mapping, and strict schema-1 JSON import for 1.x/current backups.

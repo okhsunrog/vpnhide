@@ -27,4 +27,19 @@ class CanonicalImportDataTest {
         assertNull(readCanonicalImportText(oversized))
         assertEquals(limit * 2 - 1, oversized.available())
     }
+
+    @Test
+    fun `shared import normalizes duplicate port rules before the coordinator roundtrip`() {
+        val raw = """{"apps":{"com.bank":{"ports":true,"portPolicy":{"rules":[{"start":8080},{"start":443},{"start":8080}]}}}}"""
+        val imported = parseImportedCanonicalConfig(raw, "dev.test.self")!!
+        assertEquals(
+            listOf(PortRule(start = 443), PortRule(start = 8080)),
+            imported.apps
+                .getValue("com.bank")
+                .portPolicy!!
+                .rules,
+        )
+        assertEquals(imported, parseCanonicalConfig(canonicalConfigJson(imported)))
+        assertNull(parseImportedCanonicalConfig("""{"apps":{"com.bank":{"ports":true,"portPolicy":{"rules":[]}}}}""", "dev.test.self"))
+    }
 }

@@ -219,3 +219,34 @@ fn supported_import_retains_polymorphic_roles_and_optional_hook_families() {
     assert!(app.native.zygisk.is_none());
     assert_eq!(parse_import(&to_json_string(&config)).unwrap(), config);
 }
+
+#[test]
+fn strict_import_keeps_legacy_rule_normalization_for_ui_roundtrip() {
+    let imported = parse_import(r#"{"apps":{"com.bank":{"ports":true,"portPolicy":{"mode":"custom","rules":[{"start":8080,"protocol":"tcp"},{"start":443},{"start":8080,"protocol":"tcp"}]}}}}"#).unwrap();
+    let rules = &imported.apps["com.bank"]
+        .port_policy
+        .as_ref()
+        .unwrap()
+        .rules;
+    assert_eq!(rules.len(), 2);
+    assert_eq!(rules[0].start, 443);
+    assert_eq!(rules[1].start, 8080);
+}
+
+#[test]
+fn empty_explicit_port_policy_is_invalid_not_an_implicit_all_ports_policy() {
+    let raw = r#"{"apps":{"com.bank":{"ports":true,"portPolicy":{"rules":[]}}}}"#;
+    assert!(parse_status(raw).is_err());
+    assert!(parse_import(raw).is_err());
+}
+
+#[test]
+fn legacy_unknown_ui_mode_normalizes_to_custom_without_inventing_preset_rules() {
+    let raw = r#"{"apps":{"com.bank":{"ports":true,"portPolicy":{"mode":"legacy-label","preset":"unknown","rules":[{"start":443}]}}}}"#;
+    let imported = parse_import(raw).unwrap();
+    let policy = imported.apps["com.bank"].port_policy.as_ref().unwrap();
+    assert_eq!(policy.mode, "custom");
+    assert_eq!(policy.preset.as_deref(), Some("unknown"));
+    assert_eq!(policy.rules.len(), 1);
+    assert_eq!(policy.rules[0].start, 443);
+}

@@ -14,7 +14,12 @@ because intermediate releases have existed for a long time.
   imports through typed local UniFFI; `migration/CanonicalImportData.kt` only maps
   the result and bounds SAF bytes using the shared Core limit. The codec accepts
   schema 1 boolean/list/native-object roles and rejects unknown versions and
-  malformed present fields. No filesystem effects occur during parsing.
+  malformed present fields, including an empty explicit port policy. Legacy app
+  import/export normalize port-rule order/duplicates and UI mode labels through
+  the shared Rust codec, keeping the coordinator roundtrip stable. Export is
+  compact so formatting cannot make an admitted backup exceed the import limit.
+  Self-target preview uses `migration-policy::with_self_target`; the APK has no
+  duplicate self-role rule. No filesystem effects occur during parsing.
 - `core-rpc/src/canonical.rs` is the single pure disk/import adapter. Schema 1 is
   also the current 2.x LSPosed contract; persistence remains in `config_file.rs`.
   The command engine consumes normalized typed config, not legacy formats.
