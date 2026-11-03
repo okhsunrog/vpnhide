@@ -7,6 +7,12 @@ remains required; final placement and activation policy are under review. The
 package-only implementation already committed is preserved, not declared a
 completed Zygisk runtime. See [the current roadmap](../../ROADMAP.md).
 
+[RFC0005](0005-unified-backend-lifecycle-policy.md) now presents the consolidated
+Auto/Manual, partial-health, recovery and lifecycle proposal. It proposes replacing
+this RFC's strict pre-scan exclusion default; it is **Proposed**, not accepted or
+implemented. This RFC remains reopened and the implementation pause remains in
+force. Preserve existing exposure/no-effect guards until a replacement is approved.
+
 The sections below preserve the previously approved proposal and its constraints;
 they are not authority to continue the paused activation redesign. Review covers
 fresh install,1.x migration,APK-only and Core patch/minor updates,kernel changes,

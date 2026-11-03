@@ -20,7 +20,9 @@ Historical evidence: [archive](docs/archive/README.md).
 - **Zygisk lifecycle policy is reopened.** ZIP deduplication remains required.
   The package-only passive-pair cutover has landed; no managed projection or new
   boot-bound activation policy has been implemented. Do not ship this as a
-  completed Zygisk runtime. See [RFC0003](docs/rfcs/0003-conditional-zygisk-publication.md).
+  completed Zygisk runtime. The consolidated [RFC0005](docs/rfcs/0005-unified-backend-lifecycle-policy.md)
+  is Proposed and awaits review; [RFC0003](docs/rfcs/0003-conditional-zygisk-publication.md)
+  remains reopened.
 - Continue independent diagnostics, maintenance, Kotlin ownership, provisioning
   and verification work while that lifecycle review proceeds. Do not implement
   the unapproved backend-hint/sticky/prestage/Auto/Manual policy proposals.
@@ -51,6 +53,12 @@ Historical evidence: [archive](docs/archive/README.md).
 | Rust 1.99.1 migration | Implemented | Keep strict lint checks and both Android ABIs; no global Clippy relaxation. |
 
 ## Zygisk lifecycle review boundary
+
+[Consolidated RFC0005](docs/rfcs/0005-unified-backend-lifecycle-policy.md) is now
+published in English for review: Auto/Manual, feature-granular partial health,
+finite recovery, provider/discovery boundaries and the migration/update matrix.
+Publication is not implementation approval. It proposes superseding RFC0003's
+strict default; current code and safety guards remain unchanged.
 
 [The preserved proposal](docs/rfcs/0003-conditional-zygisk-publication.md) is reopened,
 not authority to continue a new activation policy. Review fresh install,1.x→2.x,

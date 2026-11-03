@@ -10,6 +10,7 @@ Implementation progress and verification belong in the corresponding tracked pla
 | [0002](0002-autonomous-diagnostics.md) | Accepted for implementation | Autonomous native and Java diagnostics without relying on a third-party VPN |
 | [0003](0003-conditional-zygisk-publication.md) | Reopened | Zygisk lifecycle review; ZIP dedup retained, activation policy paused |
 | [0004](0004-core-attention-notifications.md) | Accepted for implementation | Core active attention,update scheduling and native Android notification channels |
+| [0005](0005-unified-backend-lifecycle-policy.md) | Proposed — awaiting review | Consolidated Auto/Manual, feature-granular health, bounded recovery and backend/discovery lifecycle |
 
 Statuses:
 
@@ -30,3 +31,8 @@ Later maintainer approval authorizes implementing RFC0001 and RFC0002 in this
 cycle; their separate kernel/device evidence gates remain mandatory. Neither
 acceptance nor this index enables experimental production admission. RFC0003's
 newer pause overrides its earlier implementation approval.
+
+RFC0005 proposes a coherent replacement for RFC0003's strict default. Publishing
+it does not resolve the reopened decision or lift the pause on new activation
+policy. The agreed requirements and remaining proposed details are distinguished
+inside the document.
