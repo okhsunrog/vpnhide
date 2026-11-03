@@ -290,23 +290,14 @@ fn port_rule_from_disk(obj: &Map<String, Value>) -> Option<PortRule> {
         Some(v) => v.as_u64()?,
         None => start,
     };
-    if start == 0 || start > u16::MAX as u64 || end < start || end > u16::MAX as u64 {
-        return None;
-    }
-    let protocol = match obj
-        .get("protocol")
-        .and_then(Value::as_str)
-        .unwrap_or("both")
-    {
-        "tcp" => PortProtocol::Tcp,
-        "udp" => PortProtocol::Udp,
-        _ => PortProtocol::Both,
-    };
-    Some(PortRule {
-        protocol,
-        start: start as u16,
-        end: end as u16,
-    })
+    crate::port_policy::rule(
+        obj.get("protocol")
+            .and_then(Value::as_str)
+            .unwrap_or("both"),
+        i64::try_from(start).ok()?,
+        i64::try_from(end).ok()?,
+    )
+    .ok()
 }
 
 // ---- model -> disk JSON (port of canonicalConfigJson) -----------------------------------
@@ -497,18 +488,7 @@ pub fn normalize_port_policy(policy: &mut PortPolicy) {
     if policy.mode != "preset" {
         policy.mode = "custom".into();
     }
-    policy.rules.sort_by_key(|rule| {
-        (
-            rule.start,
-            rule.end,
-            match rule.protocol {
-                PortProtocol::Both => 0,
-                PortProtocol::Tcp => 1,
-                PortProtocol::Udp => 2,
-            },
-        )
-    });
-    policy.rules.dedup();
+    crate::port_policy::normalize_rules(&mut policy.rules);
 }
 
 #[cfg(test)]

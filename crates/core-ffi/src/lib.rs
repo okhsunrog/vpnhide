@@ -7,6 +7,8 @@ uniffi::setup_scaffolding!();
 mod api;
 mod attachment_policy;
 pub use attachment_policy::*;
+mod port_policy;
+pub use port_policy::*;
 mod framework;
 pub use framework::*;
 mod autonomous;

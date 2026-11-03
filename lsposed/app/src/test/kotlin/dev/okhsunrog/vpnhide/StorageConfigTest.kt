@@ -180,7 +180,7 @@ class StorageConfigTest {
     }
 
     @Test
-    fun `canonical config parses custom ports policy`() {
+    fun `tolerant hook config reader preserves stored port policy order`() {
         val cfg =
             requireNotNull(
                 parseCanonicalConfig(
@@ -189,6 +189,7 @@ class StorageConfigTest {
                       "version": 1,
                       "apps": {
                         "com.bank": {
+                          "java": true,
                           "ports": true,
                           "portPolicy": {
                             "mode": "custom",
@@ -204,13 +205,15 @@ class StorageConfigTest {
                 ),
             )
 
+        assertTrue(cfg.apps.getValue("com.bank").java)
+        assertTrue(cfg.apps.getValue("com.bank").ports)
         assertEquals(
             PortPolicy(
                 mode = PortPolicyMode.Custom,
                 rules =
                     listOf(
-                        PortRule(start = 1080),
                         PortRule(protocol = PortProtocol.Tcp, start = 7890, end = 7892),
+                        PortRule(start = 1080),
                     ),
             ),
             cfg.apps.getValue("com.bank").portPolicy,

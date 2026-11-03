@@ -44,6 +44,15 @@ current rules. Re-enabling a role resets stale hook overrides, while roles that
 stay enabled retain their overrides. These projections preserve `debugSwitch`
 independently of effective capture logging.
 
+Ports rules, preset materialization and agent policy intents share
+`core-rpc::port_policy`. The disk codec uses the same checked range parser and
+normalizer; UI/agent adapters call it through local typed FFI. Normalization
+removes only exact duplicates, preserving equal TCP/UDP ranges. Preset identifiers
+in stored config do not regenerate or replace its explicit rules. All/Preset
+agent intents ignore unrelated custom-rule arguments as before. These previews
+perform no RPC or effects; the writer independently rejects invalid candidates.
+The editor retains its text drafts, formatting and confirmation UI.
+
 Editor ViewModels retain drafts through recreation. Acknowledgement removes only
 submitted revisions, preserving typing during Save. A draft registered after
 dispatch remains visible and is reported as an overlapping UI edit; it cannot

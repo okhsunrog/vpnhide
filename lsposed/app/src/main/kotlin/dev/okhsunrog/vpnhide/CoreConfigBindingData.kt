@@ -8,10 +8,6 @@ import uniffi.vpnhide_core_ffi.CoreConfigToggle
 import uniffi.vpnhide_core_ffi.CoreEdit
 import uniffi.vpnhide_core_ffi.CoreFieldEdit
 import uniffi.vpnhide_core_ffi.CoreNativeRole
-import uniffi.vpnhide_core_ffi.CorePortPolicy
-import uniffi.vpnhide_core_ffi.CorePortPolicyMode
-import uniffi.vpnhide_core_ffi.CorePortProtocol
-import uniffi.vpnhide_core_ffi.CorePortRule
 import uniffi.vpnhide_core_ffi.CoreSettings
 
 /** The hook's file model crosses the app boundary as generated records, with no JSON control codec. */
@@ -54,16 +50,7 @@ internal fun CanonicalApp.toCore(): CoreAppConfig =
         CoreNativeRole(native.enabled, native.overrides.kernel, native.overrides.zygisk),
         appHiding,
         ports,
-        portPolicy?.let { policy ->
-            CorePortPolicy(
-                when (policy.mode) {
-                    PortPolicyMode.Preset -> CorePortPolicyMode.Preset
-                    PortPolicyMode.Custom -> CorePortPolicyMode.Custom
-                },
-                policy.preset,
-                policy.rules.map { CorePortRule(it.protocol.toCore(), it.start.toUShort(), it.end.toUShort()) },
-            )
-        },
+        portPolicy?.toCore(),
         hidden,
     )
 
@@ -74,33 +61,9 @@ private fun CoreAppConfig.toCanonical(): CanonicalApp =
         NativeRole(native.enabled, NativeHookOverrides(native.kernel, native.zygisk)),
         appHiding,
         ports,
-        portPolicy?.let { policy ->
-            PortPolicy(
-                when (policy.mode) {
-                    CorePortPolicyMode.Preset -> PortPolicyMode.Preset
-                    CorePortPolicyMode.Custom -> PortPolicyMode.Custom
-                    is CorePortPolicyMode.Unknown -> error("Unsupported port policy mode")
-                },
-                policy.preset,
-                policy.rules.map { PortRule(it.protocol.toCanonical(), it.start.toInt(), it.end.toInt()) },
-            )
-        },
+        portPolicy?.toCanonical(),
         hidden,
     )
-
-private fun PortProtocol.toCore(): CorePortProtocol =
-    when (this) {
-        PortProtocol.Both -> CorePortProtocol.BOTH
-        PortProtocol.Tcp -> CorePortProtocol.TCP
-        PortProtocol.Udp -> CorePortProtocol.UDP
-    }
-
-private fun CorePortProtocol.toCanonical(): PortProtocol =
-    when (this) {
-        CorePortProtocol.BOTH -> PortProtocol.Both
-        CorePortProtocol.TCP -> PortProtocol.Tcp
-        CorePortProtocol.UDP -> PortProtocol.Udp
-    }
 
 internal fun coreEdit(edits: List<CanonicalEdit>): CoreEdit {
     val replacement = edits.filterIsInstance<CanonicalEdit.Replace>().singleOrNull()

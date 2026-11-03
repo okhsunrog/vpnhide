@@ -24,6 +24,14 @@ because intermediate releases have existed for a long time.
   also the current 2.x LSPosed contract; persistence remains in `config_file.rs`.
   The command engine consumes normalized typed config, not legacy formats.
 
+The direct `system_server` reader remains a deliberately tolerant Kotlin adapter,
+separate from strict import and app mutation policy. It preserves explicit Ports
+wire order and never materializes presets or calls the app FFI. Ports/native
+fields do not participate in Java hook policy. A bad Ports rule cannot discard
+an otherwise usable Java target. An isolated-classloader behavior test executes
+this reader with UniFFI/JNA classes unavailable; no native-class request occurs.
+App catalog loading is lazy so constructing shared reader models cannot load JNI.
+
 Both import routes use ordinary typed core commands and the same candidate
 validator. Persist precedes cleanup. A failed write leaves source files untouched;
 uncertain effects are recovered by operation ID, never blindly repeated. Once a

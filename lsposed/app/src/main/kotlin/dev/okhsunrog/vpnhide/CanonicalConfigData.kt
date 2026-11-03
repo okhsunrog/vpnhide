@@ -191,17 +191,17 @@ private fun parsePortPolicy(obj: JSONObject?): PortPolicy? {
                 val ruleObj = requireNotNull(rulesJson.optJSONObject(idx)) { "Port rule must be an object" }
                 parsePortRule(ruleObj)
             }
-        normalizePortPolicy(
-            PortPolicy(
-                mode = PortPolicyMode.fromJson(obj.optString("mode", PortPolicyMode.Custom.jsonName)),
-                preset =
-                    if (obj.has("preset") && !obj.isNull("preset")) {
-                        obj.optString("preset").takeIf { it.isNotBlank() }
-                    } else {
-                        null
-                    },
-                rules = rules,
-            ),
+        // This tolerant hook reader preserves stored explicit rules. Core owns
+        // normalization; Java policy does not consume Ports or call the app FFI.
+        PortPolicy(
+            mode = PortPolicyMode.fromJson(obj.optString("mode", PortPolicyMode.Custom.jsonName)),
+            preset =
+                if (obj.has("preset") && !obj.isNull("preset")) {
+                    obj.optString("preset").takeIf { it.isNotBlank() }
+                } else {
+                    null
+                },
+            rules = rules,
         )
     }.getOrNull()
 }

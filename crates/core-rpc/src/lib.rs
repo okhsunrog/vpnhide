@@ -46,6 +46,7 @@ mod diag;
 mod edit;
 mod logcat;
 mod native_status;
+pub mod port_policy;
 pub use native_status::*;
 mod native_lifecycle;
 pub use native_lifecycle::*;

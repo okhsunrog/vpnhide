@@ -301,3 +301,103 @@ fn imported_port_rules_replace_through_real_writer_without_losing_protocol_range
         );
     });
 }
+
+#[test]
+fn agent_port_intent_persists_through_the_writer_and_forged_invalid_ranges_are_refused() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("core.sock");
+    let path = dir.path().join("config.json");
+    let _core = spawn_core(&socket, &path, 92);
+    let session = CoreSession::new(socket.display().to_string());
+    let intent = |protocol: &str, start, end| CorePortRuleIntent {
+        protocol: protocol.into(),
+        start,
+        end,
+    };
+    let policy = parse_agent_port_policy(
+        "custom".into(),
+        None,
+        vec![
+            intent("UDP", 443, 445),
+            intent("tcp", 443, 445),
+            intent("udp", 443, 445),
+        ],
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        policy.rules,
+        [
+            CorePortRule {
+                protocol: CorePortProtocol::Tcp,
+                start: 443,
+                end: 445
+            },
+            CorePortRule {
+                protocol: CorePortProtocol::Udp,
+                start: 443,
+                end: 445
+            },
+        ]
+    );
+    let mut config = default_config();
+    let mut app: CoreAppConfig = vpnhide_core_rpc::AppConfig::default().into();
+    app.ports = true;
+    app.port_policy = Some(policy);
+    config.apps.insert("com.bank".into(), app);
+    rt.block_on(async {
+        let op = session.allocate_operation_id().await.unwrap();
+        accepted(
+            session
+                .submit_edit(
+                    op,
+                    0,
+                    CoreEdit::Replace {
+                        config: config.clone(),
+                    },
+                )
+                .await
+                .unwrap(),
+        );
+        let (record, state) = common::settled(&session, op).await;
+        assert_eq!(record.settled, Some(CorePhaseOutcome::Confirmed));
+        assert_eq!(state.state.config, Some(config.clone()));
+        assert!(matches!(
+            parse_agent_port_policy("custom".into(), None, vec![intent("tcp", -1, 80)]),
+            Err(CoreError::InvalidInput { .. })
+        ));
+        // Root independently checks even a caller bypassing the preview adapter.
+        let mut forged = config.clone();
+        forged
+            .apps
+            .get_mut("com.bank")
+            .unwrap()
+            .port_policy
+            .as_mut()
+            .unwrap()
+            .rules[0]
+            .start = 0;
+        let second = session.allocate_operation_id().await.unwrap();
+        assert!(matches!(
+            session
+                .submit_edit(
+                    second,
+                    state.state.config_revision,
+                    CoreEdit::Replace { config: forged }
+                )
+                .await
+                .unwrap(),
+            SubmitReply::Refused { .. }
+        ));
+        let persisted: CoreCanonicalConfig = vpnhide_core_daemon::config_file::read(&path)
+            .unwrap()
+            .unwrap()
+            .into();
+        assert_eq!(persisted, config);
+        assert_eq!(
+            session.read_state().await.unwrap().state.config_revision,
+            state.state.config_revision
+        );
+    });
+}

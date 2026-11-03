@@ -64,43 +64,10 @@ internal data class EditablePortRule(
 
 internal const val PORT_PRESET_COMMON_PROXY = "common_proxy"
 
-internal val PortPolicyPresets: List<PortPolicyPreset> =
-    listOf(
-        PortPolicyPreset(
-            id = PORT_PRESET_COMMON_PROXY,
-            rules =
-                normalizedPortRules(
-                    listOf(
-                        PortRule(start = 1080),
-                        PortRule(start = 7890, end = 7892),
-                        PortRule(start = 8080),
-                        PortRule(start = 8888),
-                        PortRule(start = 9050),
-                        PortRule(start = 9090),
-                        PortRule(start = 9150),
-                        PortRule(start = 10808),
-                    ),
-                ),
-        ),
-    )
+// Lazy so loading the shared hook-reader models cannot initialize the app FFI.
+internal val PortPolicyPresets: List<PortPolicyPreset> by lazy(::loadPortPolicyPresets)
 
 internal fun portPreset(id: String?): PortPolicyPreset? = PortPolicyPresets.firstOrNull { it.id == id }
-
-internal fun portPolicyForPreset(id: String): PortPolicy? =
-    portPreset(id)?.let { preset ->
-        PortPolicy(
-            mode = PortPolicyMode.Preset,
-            preset = preset.id,
-            rules = preset.rules,
-        )
-    }
-
-internal fun normalizePortPolicy(policy: PortPolicy?): PortPolicy? = policy?.copy(rules = normalizedPortRules(policy.rules))
-
-internal fun normalizedPortRules(rules: List<PortRule>): List<PortRule> =
-    rules
-        .distinct()
-        .sortedWith(compareBy<PortRule> { it.start }.thenBy { it.end }.thenBy { it.protocol.ordinal })
 
 internal fun PortPolicy?.toUiMode(): PortPolicyUiMode =
     when {
