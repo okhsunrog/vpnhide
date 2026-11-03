@@ -23,34 +23,6 @@ internal object LsposedStateMetadata {
     const val INSTALL_FAILURES = "install_failures"
 }
 
-internal fun parseLsposedStateMetadata(raw: String): Map<String, String> =
-    raw
-        .lineSequence()
-        .map { it.trim() }
-        .filter { it.startsWith("meta ") }
-        .mapNotNull { line ->
-            val parts = line.split(' ', limit = 3)
-            val key = parts.getOrNull(1)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val value = parts.getOrNull(2).orEmpty()
-            key to value
-        }.toMap()
-
-/**
- * Are the LSPosed hooks live *this boot*? True when the state file reports the
- * LSPosed backend and its stamped boot_id matches the current one — the same test
- * [resolveLsposedState] applies for [LsposedState.Active]. Extracted so the
- * dashboard and the debug export derive "Java layer active" from one place.
- */
-internal fun lsposedHooksActiveThisBoot(
-    stateRaw: String,
-    currentBootId: String,
-): Boolean {
-    val hookBootId = parseLsposedStateMetadata(stateRaw)[LsposedStateMetadata.BOOT_ID]
-    return Protocol.parseStatus(stateRaw)?.backendId == HookIds.Backend.LSPOSED &&
-        hookBootId != null &&
-        hookBootId == currentBootId.trim()
-}
-
 internal fun formatLsposedState(
     status: Protocol.Status,
     metadata: Map<String, String>,

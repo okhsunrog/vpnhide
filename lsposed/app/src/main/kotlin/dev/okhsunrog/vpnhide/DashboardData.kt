@@ -552,7 +552,7 @@ private fun deriveLsposedFacts(
     VpnHideLog.i(
         TAG,
         "lsposed: $state (hookBootId=${hookProps["boot_id"]} currentBootId=${currentBootId.trim()} " +
-            "status=${Protocol.parseStatus(lsposedStateRaw)} framework=$framework " +
+            "status=${ProtocolReader.parseStatus(lsposedStateRaw)} framework=$framework " +
             "hooksActive=$hooksActiveThisBoot config=$config)",
     )
     return LsposedFacts(

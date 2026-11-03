@@ -5,6 +5,8 @@ use vpnhide_core_client::CoreClient;
 use vpnhide_core_rpc as rpc;
 uniffi::setup_scaffolding!();
 mod api;
+mod telemetry;
+pub use telemetry::*;
 mod attachment_policy;
 pub use attachment_policy::*;
 mod port_policy;

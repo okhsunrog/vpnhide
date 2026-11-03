@@ -8,10 +8,22 @@ import java.io.File
 
 /**
  * Runs the language-independent golden vectors (kmod/shared/protocol_vectors.tsv)
- * against the Kotlin [Protocol] — the same file the C and Rust ports run, so a
- * divergence on any covered corner fails here (docs/protocol.md §8 Layer 1).
+ * through the real Rust/JNI [ProtocolReader] and the independent LSPosed
+ * [Protocol] producer. C and Rust run the same pinned vectors (§8 Layer 1).
  */
 class ProtocolTest {
+    @Test
+    fun `native reader preserves unsigned widths and absent fields through generated bindings`() {
+        val row = requireNotNull(ProtocolReader.parseStats("vpnhide 1 stats\n0xffffffff 0xff:0xffffffffffffffff\n")).single()
+        assertEquals(0xffffffffL, row.uid)
+        assertEquals(255L, row.hookId)
+        assertEquals(-1L, row.count)
+        val fields = requireNotNull(ProtocolReader.parseStatusFields("vpnhide 1 status\nhooks 0x1\n"))
+        assertEquals(null, fields.backend)
+        assertEquals(1L, fields.hooks)
+        assertEquals(null, fields.complete())
+    }
+
     private fun vectorsFile(): File {
         var dir: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
         repeat(8) {
@@ -78,7 +90,7 @@ class ProtocolTest {
         expect: String,
     ) {
         val got =
-            when (Protocol.peekKind(decode(input))) {
+            when (ProtocolReader.peekKind(decode(input))) {
                 Protocol.Kind.CONFIG -> "CONFIG"
                 Protocol.Kind.STATS -> "STATS"
                 Protocol.Kind.STATUS -> "STATUS"
@@ -145,7 +157,7 @@ class ProtocolTest {
                 }
 
                 "status_fields" -> {
-                    val parsed = Protocol.parseStatusFields(decode(f[1]))
+                    val parsed = ProtocolReader.parseStatusFields(decode(f[1]))
                     val actual =
                         parsed?.let { listOf(it.backend, it.kver, it.hooks, it.error).joinToString(",") { v -> v?.toString(16) ?: "?" } }
                             ?: "INVALID"

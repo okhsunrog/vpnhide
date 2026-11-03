@@ -27,6 +27,7 @@ bindgen = ["uniffi/cli"]
 vpnhide_build_contract = { path = "../build-contract" }
 
 [dependencies]
+vpnhide_protocol = { path = "../protocol" }
 vpnhide_migration_policy = { path = "../migration-policy" }
 vpnhide_diagnostic_model = { path = "../diagnostic-model" }
 vpnhide_checks = { path = "../checks" }

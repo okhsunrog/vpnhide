@@ -70,11 +70,16 @@ only in telemetry v1: its configuration input belongs to the storage contract.
 | C | `.ko` + KPM | parse control config; emit telemetry. Freestanding core in `kmod/shared/vpnhide_logic.h`. |
 | Rust | `crates/protocol` + `crates/activator` (linked into core) | format control snapshots, validate native telemetry, and implement KPM framing. |
 | Rust | Zygisk cdylib | parse its control profile from `targets.txt`. |
-| Kotlin | app | parse telemetry for dashboard, diagnostics, and statistics. |
+| Rust | `crates/protocol` through app-local `core-ffi` | read telemetry/header/block fields for dashboard, diagnostics and statistics; Kotlin only maps typed records. No RPC. |
 | Kotlin | LSPosed hook | emit telemetry-shaped status/stats from `system_server`; config comes from canonical JSON. |
 
-Parser parity across C, Rust, and Kotlin is held by golden vectors and
-differential testing (§8), not by shared runtime code.
+Control parser parity across freestanding C and Rust is held by golden vectors
+and differential testing (§8). APK telemetry readers share Rust's wire grammar;
+the independent Kotlin LSPosed producer keeps golden emission tests and runs
+without loading app-native/JNA classes. The tolerant display reader preserves
+full unsigned counters, skips malformed individual cells and never qualifies a
+complete capture. The separate strict kernel-test reader continues to reject
+truncated or duplicate captures. All app-local reads are bounded to 1 MiB.
 
 ---
 
@@ -621,8 +626,8 @@ catching what the previous misses.
 - **Layer 4 — version fuse.** `version` in the header turns any drift that slips
   all tests into a loud refusal rather than a silent misparse (§3).
 
-The `status_fields` vectors exercise the Rust/Kotlin status consumers; C emits
-status and checks its existing emission vectors. Both consumers preserve missing
+The `status_fields` vectors exercise the Rust consumer directly and through actual
+APK JNI bindings; C emits status and checks its existing emission vectors. Readers preserve missing
 fields separately from zero. Display callers may supply defaults, but kernel
 ownership checks require a complete status: an absent backend must never become
 backend zero (kmod). Backend identities come from the generated registry enum;

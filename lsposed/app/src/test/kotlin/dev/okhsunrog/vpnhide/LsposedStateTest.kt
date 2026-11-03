@@ -49,7 +49,7 @@ class LsposedStateTest {
                     HookIds.StatusError.OK.code
                         .toLong(),
             ),
-            Protocol.parseStatus(text),
+            ProtocolReader.parseStatus(text),
         )
         assertEquals(
             mapOf(

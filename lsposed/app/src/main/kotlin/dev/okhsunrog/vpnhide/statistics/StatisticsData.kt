@@ -2,8 +2,10 @@ package dev.okhsunrog.vpnhide.statistics
 
 import dev.okhsunrog.vpnhide.NativeBackendId
 import dev.okhsunrog.vpnhide.Protocol
+import dev.okhsunrog.vpnhide.ProtocolReader
 import dev.okhsunrog.vpnhide.RootSnapshot
 import dev.okhsunrog.vpnhide.backendId
+import dev.okhsunrog.vpnhide.extractTelemetryBlock
 import dev.okhsunrog.vpnhide.generated.HookIds
 import dev.okhsunrog.vpnhide.indicatesActive
 import dev.okhsunrog.vpnhide.nativeStatusSnapshot
@@ -50,7 +52,6 @@ internal data class StatisticsRow(
     val count: Long,
 )
 
-private val PROTOCOL_KINDS = setOf("config", "stats", "status")
 private val HOOKS_BY_ID = HookIds.Hook.entries.associateBy { it.id.toLong() }
 private const val KPM_TRUNCATION_MARKER = "# vpnhide truncated"
 
@@ -91,25 +92,15 @@ internal fun parseCounterState(sections: Map<String, String>): StatisticsState {
 }
 
 internal fun parseProtocolStatusBlock(raw: String): Protocol.Status? =
-    extractProtocolBlock(raw, Protocol.Kind.STATUS)?.let(Protocol::parseStatus)
+    extractProtocolBlock(raw, Protocol.Kind.STATUS)?.let(ProtocolReader::parseStatus)
 
 internal fun parseProtocolStatsBlock(raw: String): List<Protocol.StatEntry> =
-    extractProtocolBlock(raw, Protocol.Kind.STATS)?.let(Protocol::parseStats).orEmpty()
+    extractProtocolBlock(raw, Protocol.Kind.STATS)?.let(ProtocolReader::parseStats).orEmpty()
 
 internal fun extractProtocolBlock(
     raw: String,
     kind: Protocol.Kind,
-): String? {
-    val lines = raw.split('\n').map { it.removeSuffix("\r") }
-    val start = lines.indexOfFirst { protocolKindOfLine(it) == kind }
-    if (start < 0) return null
-    val end =
-        lines
-            .drop(start + 1)
-            .indexOfFirst { protocolKindOfLine(it) != null }
-            .let { if (it < 0) lines.size else start + 1 + it }
-    return lines.subList(start, end).joinToString("\n")
-}
+): String? = extractTelemetryBlock(raw, kind)
 
 internal fun formatStatCount(count: ULong): String =
     count
@@ -171,20 +162,6 @@ private fun uidPackages(raw: String): Map<Long, List<String>> {
         }
     }
     return byUid.mapValues { (_, packages) -> packages.distinct().sorted() }
-}
-
-private fun protocolKindOfLine(line: String): Protocol.Kind? {
-    val trimmed = line.trim()
-    if (trimmed.isEmpty() || trimmed.startsWith("#")) return null
-    val tokens = trimmed.split(' ', '\t').filter { it.isNotEmpty() }
-    if (tokens.size < 3 || tokens[0] != "vpnhide") return null
-    if (tokens[1].toIntOrNull() == null || tokens[2] !in PROTOCOL_KINDS) return null
-    return when (tokens[2]) {
-        "config" -> Protocol.Kind.CONFIG
-        "stats" -> Protocol.Kind.STATS
-        "status" -> Protocol.Kind.STATUS
-        else -> null
-    }
 }
 
 /** Historical counter identity stays with its own proc snapshot. */

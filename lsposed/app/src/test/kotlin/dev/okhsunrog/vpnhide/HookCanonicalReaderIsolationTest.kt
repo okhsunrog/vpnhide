@@ -55,6 +55,26 @@ class HookCanonicalReaderIsolationTest {
             val bad = requireNotNull(apps["com.bad"])
             assertTrue(bad.javaClass.getMethod("getJava").invoke(bad) as Boolean)
             assertFalse(bad.javaClass.getMethod("getPorts").invoke(bad) as Boolean)
+            val protocol = Class.forName("dev.okhsunrog.vpnhide.Protocol", true, loader)
+            val producer = protocol.getField("INSTANCE").get(null)
+            val statusType = Class.forName("dev.okhsunrog.vpnhide.Protocol\$Status", true, loader)
+            val status =
+                statusType
+                    .getConstructor(java.lang.Long.TYPE, java.lang.Long.TYPE, java.lang.Long.TYPE, java.lang.Long.TYPE)
+                    .newInstance(3L, 0L, 1L, 0L)
+            assertEquals(
+                "vpnhide 1 status\nbackend 0x3\nkver 0x0\nhooks 0x1\nerror 0x0\n",
+                protocol.getMethod("formatStatus", statusType).invoke(producer, status),
+            )
+            val statType = Class.forName("dev.okhsunrog.vpnhide.Protocol\$StatEntry", true, loader)
+            val stat =
+                statType
+                    .getConstructor(java.lang.Long.TYPE, java.lang.Long.TYPE, java.lang.Long.TYPE)
+                    .newInstance(10123L, 1L, -1L)
+            assertEquals(
+                "vpnhide 1 stats\n0x278b 0x1:0xffffffffffffffff\n",
+                protocol.getMethod("formatStats", List::class.java).invoke(producer, listOf(stat)),
+            )
             assertEquals(0, nativeClassRequests)
         }
     }
