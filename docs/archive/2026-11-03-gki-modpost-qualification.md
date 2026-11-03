@@ -80,3 +80,17 @@ still fencing the old source. Strict host all-target/all-feature Clippy and
 ARM64/ARMv7 Core all-target Clippy passed, as did Rust formatting, the pinned
 Python lint/format checks and producer adapter regression. These are scoped
 cloud results, not the final startup regression or a production-signed APK.
+
+## Clean post-commit rebuild
+
+The separate clean checkout of `12c78631aad9205458609a4885dcebbb143082e6`
+subsequently rebuilt both Core and Zygisk ABIs, KPM and all seven qualified KMI
+payloads. Every producer reports that exact commit and `dirty=false`. Assembly
+passed with 20 entries, 10 payloads, exactly one passive Zygisk pair and no main
+Core discovery directory. Full ZIP: 4,306,807 bytes, SHA256
+`39f93785b531085053290db5f3769b000df2c67c61ae9d58559494d43286e04e`.
+Actual native raw/compressed entry inventory and retained logs are in
+`/workspace/vpnhide-build-evidence/arm-release-12c78631`.
+This supersedes the earlier build/provenance gate for that source checkpoint,
+not production signing, device acceptance or a final rebuild after subsequent
+implementation work. No production key or device was used.
