@@ -2,6 +2,7 @@
 //! No root daemon, Android orchestration or publisher-label trust.
 #[cfg(feature = "archives")]
 pub mod archive;
+pub mod core_layout;
 #[cfg(feature = "archives")]
 pub mod distribution;
 pub mod elf;

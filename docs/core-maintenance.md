@@ -75,6 +75,17 @@ staged daemon/catalog before legacy removals. Magisk's global remove-modules CLI
 must never be used for per-module cleanup. Source pins and adapter details will
 be recorded with the implementation, rather than assuming all forks match.
 
+Reference sources checked for that staging boundary are
+[KernelSU module dispatch](https://github.com/tiann/KernelSU/blob/28db74f6f4692e97006ce9ebd8b19b9cc614b5b7/userspace/ksud/src/module.rs),
+its [installer](https://github.com/tiann/KernelSU/blob/28db74f6f4692e97006ce9ebd8b19b9cc614b5b7/userspace/ksud/src/installer.sh),
+[APatch's installer](https://github.com/bmax121/APatch/blob/e8e4651c16fb5075882a25813c8732285fdb3505/apd/assets/installer.sh),
+and [Magisk's installer functions](https://github.com/topjohnwu/Magisk/blob/33bfff7ce750c27f157ddb4580e36bf842d6d95b/scripts/util_functions.sh).
+All choose `modules_update` through `BOOTMODE` and update live module metadata
+before the code swap. KernelSU also has an explicit hot-install dispatch and
+effective metamodule installer selection. These source observations are inputs
+to the pending adapter implementation, not device/fork qualification or proof
+that an exit code confirms a staged/running replacement.
+
 
 The shared Rust host tooling now forms descriptor schema2 from the exact final
 package bytes and typed compatibility constants. It includes service, sepolicy
@@ -82,6 +93,14 @@ and module.prop identities. Core's post-customize image fence checks the selecte
 ABI daemon, manifest, complete passive payloads and execution identity;
 manager staging markers cannot be accepted as a running replacement. Schema1
 install descriptors are rejected without changing the public trust-store format.
+The portable `artifact-model::core_layout` owns the permitted Core producer,
+final ZIP and installed-file namespaces. Assembly, descriptor creation and staged
+image verification refuse extra boot scripts, mount trees and payload members.
+Device inspection walks retained directory descriptors, bounds entries/deadline,
+and refuses symlinks, special files and writable/unowned members. Known installer
+metadata may remain; an empty regular `update` marker is inert staging metadata.
+A verified image retains this layout requirement on subsequent unchanged-image
+checks, while historical source inspection remains available for migration.
 New signed replacements must have no main-Core autoload directory; old-source
 mirror files remain fenced for migration. Final Zygisk placement/activation is
 under renewed review in RFC0003. Common durable maintenance/manager/reboot

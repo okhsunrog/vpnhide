@@ -15,6 +15,85 @@ use std::{
 use vpnhide_package_trust::{FileIdentity, VerifiedDescriptor};
 
 const IMAGE_BUDGET: Duration = Duration::from_secs(30);
+
+/// Enumerate beneath the retained directory, never a manager-selected pathname.
+/// Exact files and their derived directory prefixes bound the traversal; no
+/// unknown subtree (including an empty one) or symlink can become executable
+/// manager input alongside the signed runtime members.
+fn require_layout(
+    directory: &File,
+    allowed: &std::collections::BTreeSet<String>,
+    uid: u32,
+    deadline: Instant,
+) -> io::Result<()> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    let mut pending = vec![(directory.try_clone()?, String::new())];
+    let directories = allowed
+        .iter()
+        .flat_map(|file| file.match_indices('/').map(|(at, _)| file[..at].to_owned()))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut remaining = allowed.len() + directories.len();
+    while let Some((dir, parent)) = pending.pop() {
+        // /proc/self/fd opens this pinned directory, not its possibly replaced
+        // filesystem name. This is also the private-package enumerator's model.
+        for entry in std::fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))? {
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "Core layout inspection deadline",
+                ));
+            }
+            remaining = remaining.checked_sub(1).ok_or_else(invalid)?;
+            let name = entry?.file_name().into_string().map_err(|_| invalid())?;
+            let path = if parent.is_empty() {
+                name.clone()
+            } else {
+                format!("{parent}/{name}")
+            };
+            let is_directory = directories.contains(&path);
+            if !is_directory && !allowed.contains(&path) {
+                return Err(invalid());
+            }
+            let name = std::ffi::CString::new(name).map_err(|_| invalid())?;
+            // Pin metadata without opening a device driver or waiting for a
+            // FIFO writer. O_PATH directories also support descriptor-relative
+            // traversal; symlinks remain symlinks and fail the type checks.
+            let fd = unsafe {
+                libc::openat(
+                    dir.as_raw_fd(),
+                    name.as_ptr(),
+                    libc::O_PATH
+                        | libc::O_CLOEXEC
+                        | libc::O_NOFOLLOW
+                        | if is_directory { libc::O_DIRECTORY } else { 0 },
+                )
+            };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let file = unsafe { File::from_raw_fd(fd) };
+            let meta = file.metadata()?;
+            if meta.uid() != uid || meta.mode() & 0o022 != 0 {
+                return Err(invalid());
+            }
+            if is_directory {
+                if !meta.is_dir() {
+                    return Err(invalid());
+                }
+                pending.push((file, path));
+            } else if !meta.is_file()
+                || meta.nlink() != 1
+                || (path == "update" && meta.len() != 0)
+                || (!matches!(path.as_str(), "vpnhide-core")
+                    && !path.starts_with("payloads/")
+                    && meta.len() > 64 * 1024)
+            {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImageFile {
@@ -30,6 +109,8 @@ pub struct ImageFile {
 pub struct ImageFence {
     pub root: (u64, u64),
     pub files: BTreeMap<String, ImageFile>,
+    #[serde(default)]
+    verified_layout: bool,
 }
 fn invalid() -> io::Error {
     io::Error::new(
@@ -138,7 +219,7 @@ impl ImageFence {
         self.require_unchanged_owned(root, 0)
     }
     fn require_unchanged_owned(&self, root: &Path, uid: u32) -> io::Result<()> {
-        if self != &Self::inspect(root, None, Abi::Arm64, uid)? {
+        if self != &Self::inspect_layout(root, None, Abi::Arm64, uid, self.verified_layout)? {
             return Err(invalid());
         }
         Ok(())
@@ -166,6 +247,15 @@ impl ImageFence {
         descriptor: Option<&VerifiedDescriptor>,
         abi: Abi,
         uid: u32,
+    ) -> io::Result<Self> {
+        Self::inspect_layout(root, descriptor, abi, uid, descriptor.is_some())
+    }
+    fn inspect_layout(
+        root: &Path,
+        descriptor: Option<&VerifiedDescriptor>,
+        abi: Abi,
+        uid: u32,
+        verified_layout: bool,
     ) -> io::Result<Self> {
         let deadline = Instant::now() + IMAGE_BUDGET;
         let dir = OpenOptions::new()
@@ -258,6 +348,15 @@ impl ImageFence {
         {
             return Err(invalid());
         }
+        if verified_layout {
+            require_layout(
+                &dir,
+                &vpnhide_artifact_model::core_layout::CoreLayout::Installed(&catalog.manifest)
+                    .allowed_files()?,
+                uid,
+                deadline,
+            )?;
+        }
         let current = std::fs::symlink_metadata(root)?;
         if current.file_type().is_symlink()
             || (current.dev(), current.ino()) != catalog.root_identity
@@ -269,6 +368,7 @@ impl ImageFence {
         Ok(Self {
             root: catalog.root_identity,
             files,
+            verified_layout,
         })
     }
 }

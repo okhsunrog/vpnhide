@@ -206,6 +206,50 @@ fn every_missing_component_preserves_previous_output() {
         fs::rename(saved, source).unwrap();
     }
 }
+
+#[test]
+fn descriptor_refuses_additional_execution_or_payload_members() {
+    let b = Bundle::new();
+    b.build().unwrap();
+    let output = b.path("unified.zip");
+    let original = read_archive(&output, 128).unwrap();
+    for name in [
+        "post-fs-data.sh",
+        "action.sh",
+        "system.prop",
+        "system/bin/extra-daemon",
+        "payloads/extra-library.so",
+    ] {
+        let mut files = original.clone();
+        files.insert(name.into(), b"unexpected entry\n".to_vec());
+        write_archive(&output, &files).unwrap();
+        assert!(
+            descriptor(&output, COMMIT, 1001).is_err(),
+            "accepted {name}"
+        );
+    }
+}
+
+#[test]
+fn producer_cannot_add_another_boot_path_and_failed_assembly_preserves_previous_output() {
+    let b = Bundle::new();
+    b.build().unwrap();
+    let output = b.path("unified.zip");
+    let previous = fs::read(&output).unwrap();
+    let mut original = read_archive(&b.path("vpnhide-core-base.zip"), 64).unwrap();
+    original.remove(PROVENANCE);
+    for name in ["post-fs-data.sh", "system.prop", "system/bin/extra-daemon"] {
+        let mut members = original.clone();
+        members.insert(name.into(), b"unapproved execution input".to_vec());
+        let members = members
+            .iter()
+            .map(|(name, bytes)| (name.as_str(), bytes.clone()))
+            .collect::<Vec<_>>();
+        b.core(&members);
+        assert!(b.build().is_err(), "accepted producer member {name}");
+        assert_eq!(fs::read(&output).unwrap(), previous);
+    }
+}
 #[test]
 fn aggregate_retained_input_budget_is_shared_and_preserves_previous_output() {
     let b = Bundle::new();

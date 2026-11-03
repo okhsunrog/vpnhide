@@ -244,6 +244,77 @@ fn disabled_removed_or_hot_install_staging_is_not_a_ready_replacement() {
 }
 
 #[test]
+fn unexpected_manager_entrypoints_cannot_be_a_verified_replacement() {
+    for member in [
+        "post-fs-data.sh",
+        "post-mount.sh",
+        "boot-completed.sh",
+        "uninstall.sh",
+        "action.sh",
+        "system.prop",
+        "system/bin/extra-daemon",
+        "payloads/extra-library.so",
+    ] {
+        let f = fixture();
+        let fence = f.inspect().unwrap();
+        let path = f.root.path().join(member);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, b"unexpected manager execution input\n").unwrap();
+        assert!(f.inspect().is_err(), "unexpected member accepted: {member}");
+        assert!(fence.require_unchanged_owned(f.root.path(), f.uid).is_err());
+        // Historical sources may need retiring despite extra old entrypoints.
+        assert!(ImageFence::inspect(f.root.path(), None, Abi::Arm64, f.uid).is_ok());
+    }
+}
+
+#[test]
+fn permitted_installer_metadata_and_empty_update_survive_but_special_entries_refuse() {
+    let f = fixture();
+    for member in [
+        "META-INF/com/google/android/update-binary",
+        "META-INF/com/google/android/updater-script",
+        "customize.sh",
+    ] {
+        let path = f.root.path().join(member);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, b"inert installer metadata\n").unwrap();
+    }
+    let marker = f.root.path().join("update");
+    fs::write(&marker, b"").unwrap();
+    let fence = f.inspect().unwrap();
+    fence.require_unchanged_owned(f.root.path(), f.uid).unwrap();
+    fs::write(&marker, b"not an empty staging marker").unwrap();
+    assert!(f.inspect().is_err());
+    fs::remove_file(&marker).unwrap();
+    symlink("/dev/null", &marker).unwrap();
+    assert!(f.inspect().is_err());
+    fs::remove_file(marker).unwrap();
+    let path = f
+        .root
+        .path()
+        .join("META-INF/com/google/android/update-binary");
+    fs::remove_file(&path).unwrap();
+    let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    assert!(
+        f.inspect().is_err(),
+        "a FIFO must refuse without waiting for a writer"
+    );
+}
+
+#[test]
+fn empty_unknown_directory_and_known_directory_symlink_cannot_hide_outside_layout() {
+    let f = fixture();
+    let extra = f.root.path().join("system");
+    fs::create_dir(&extra).unwrap();
+    assert!(f.inspect().is_err());
+    fs::remove_dir(extra).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    symlink(outside.path(), f.root.path().join("META-INF")).unwrap();
+    assert!(f.inspect().is_err());
+}
+
+#[test]
 fn old_source_autoload_images_stay_fenced_until_replacement_migration() {
     let f = fixture();
     let path = f.root.path().join("zygisk");

@@ -289,13 +289,11 @@ fn assemble_with_budget(
         artifacts.insert(component, artifact);
     }
     let core = &artifacts["core"];
+    crate::core_layout::CoreLayout::Producer.require_files(core.files.keys())?;
     core.member("bin/arm64/vpnhide-core", 183)?;
     core.member("bin/arm/vpnhide-core", 40)?;
     let mut files = BTreeMap::new();
     for (name, bytes) in &core.files {
-        if name == "zygisk" || name.starts_with("zygisk/") || name.starts_with("payloads/") {
-            return Err(invalid("base Core contains payloads"));
-        }
         if name != PROVENANCE {
             files.insert(name.clone(), bytes.clone());
         }
@@ -395,6 +393,7 @@ fn assemble_with_budget(
         })
         .map_err(invalid)?,
     );
+    crate::core_layout::CoreLayout::Bundle(&manifest).require_files(files.keys())?;
     write_archive(output, &files)
 }
 
@@ -411,16 +410,9 @@ pub fn descriptor(
     }
     let package = read_regular(path, MAX_BUNDLE_BYTES)?;
     let files = read_archive_bytes(&package, 128)?;
-    if files
-        .keys()
-        .any(|name| name == "zygisk" || name.starts_with("zygisk/"))
-    {
-        return Err(invalid(
-            "Core package must not publish Zygisk discovery entries",
-        ));
-    }
     let manifest: Manifest = metadata(&files, "payloads/manifest.json")?;
     manifest.require_complete()?;
+    crate::core_layout::CoreLayout::Bundle(&manifest).require_files(files.keys())?;
     let provenance: BundleProvenance = metadata(&files, "bundle-provenance.json")?;
     let expected: std::collections::BTreeSet<_> =
         ["core".to_string(), "kpm".into(), "zygisk".into()]
