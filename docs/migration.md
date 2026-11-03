@@ -45,5 +45,10 @@ Core derives it from its captured sources. Replace refuses empty or incomplete
 input; bootstrap refuses an existing user-configured setup. Merge may preserve
 partial/unresolved sources for a later complete reconciliation. Ordinary schema-1
 file imports continue to use the strict canonical codec and `Import` command.
+The separate `PrepareSelfTargets` command also runs during production boot. It
+preserves existing configured choices; when no user choices exist it requires
+complete legacy observations and merges them before adding the managed target.
+It never retires legacy files. An APK Retry supplies neither replacement config
+nor a legacy candidate, and an uncertain result is recovered by operation query.
 The compatibility `Import(cleanup_legacy=true)` path also independently checks
 Core-read source coverage; caller eligibility alone cannot delete anything.

@@ -194,6 +194,9 @@ pub enum CoreCommand {
         mode: CoreLegacyImportMode,
     },
     CleanupLegacy,
+    PrepareSelfTargets {
+        base_revision: u64,
+    },
     FullReset,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -261,6 +264,11 @@ impl From<CoreCommand> for rpc::CoreCommand {
                 mode: mode.into(),
             },
             CoreCommand::CleanupLegacy => Self::CleanupLegacy,
+            CoreCommand::PrepareSelfTargets { base_revision } => Self::PrepareSelfTargets {
+                base: rpc::BaseRef {
+                    revision: base_revision,
+                },
+            },
             CoreCommand::FullReset => Self::FullReset,
         }
     }

@@ -227,6 +227,13 @@ impl Coordinator {
     pub fn configure(&self, app_dir: PathBuf) {
         self.inner.lock().expect("diagnostic coordinator").app_dir = Some(app_dir);
     }
+    pub(crate) fn configured(&self) -> bool {
+        self.inner
+            .lock()
+            .expect("diagnostic coordinator")
+            .app_dir
+            .is_some()
+    }
     pub fn cancel(&self) {
         self.inner.lock().expect("diagnostic coordinator").cancelled = true;
         self.changed.notify_all();
@@ -243,6 +250,12 @@ impl Coordinator {
             || snapshot.mutation_held
             || !snapshot.operations_in_flight.is_empty()
             || snapshot.config.is_none()
+            || snapshot.config.as_ref().is_some_and(|config| {
+                vpnhide_migration_policy::with_self_target(
+                    config.clone(),
+                    vpnhide_migration_policy::APP_PACKAGE,
+                ) != *config
+            })
             || snapshot.backend.applied.is_none()
             || snapshot.backend.applied != snapshot.backend.selected
         {
@@ -850,7 +863,10 @@ mod tests {
         CoreState::new(Publisher::new(
             9,
             StateSnapshot {
-                config: Some(CanonicalConfig::default()),
+                config: Some(vpnhide_migration_policy::with_self_target(
+                    CanonicalConfig::default(),
+                    vpnhide_migration_policy::APP_PACKAGE,
+                )),
                 backend: NativeBackendStatus {
                     selected: Some(NativeBackend::Builtin),
                     applied: Some(NativeBackend::Builtin),
@@ -859,6 +875,17 @@ mod tests {
                 ..Default::default()
             },
         ))
+    }
+    #[test]
+    fn unprepared_managed_target_cannot_admit_a_false_clean_run() {
+        let state = state();
+        state
+            .publisher
+            .update(|snapshot| snapshot.config = Some(CanonicalConfig::default()));
+        let coordinator = Arc::new(Coordinator::default());
+        coordinator.configure(PathBuf::from("/nonexistent-app"));
+        assert_eq!(coordinator.request(state, true), Err(DiagnosticError::Busy));
+        assert!(coordinator.inner.lock().unwrap().active.is_none());
     }
     #[test]
     fn incomplete_identity_retains_only_stale_evidence_and_reads_do_not_restart_work() {

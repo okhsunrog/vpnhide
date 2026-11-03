@@ -105,7 +105,8 @@ directions, since `internal` is module-wide and the compiler will not.
   a new core probe, never a shell line. Do not add serialized JSON control codecs:
   config, commands, publications, refusals and receipts cross UniFFI as generated
   records/enums; raw text belongs to import/export and forensic probe payloads.
-- **`ShellUtils`** — startup self-target preparation and the parsers
+- **`ShellUtils`** — startup readiness and a fixed Core self-target request; no
+  app-derived bootstrap replacement or legacy-import orchestrator. Also the parsers
   `parseConfigLines`, `parseKeyValueLines`, `parsePackageUidMap` (no shell
   despite the name). **Never write another `pm list`
   or `key=value` parser** — there used to be four; there is now one of each.

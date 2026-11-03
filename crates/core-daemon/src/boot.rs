@@ -78,6 +78,17 @@ pub fn run_boot_with_native(
 ) -> BootApplyReport {
     crate::alog::info("boot: waiting for PackageManager before native selection");
     vpnhide_activator::wait_for_package_manager();
+    if let Err(error) = state.prepare_boot_self_targets() {
+        let report = BootApplyReport {
+            status: BootApplyStatus::Refused {
+                reason: format!("{error:?}"),
+            },
+            op: None,
+            detail: "Core self-target preparation did not confirm; no backend was started".into(),
+        };
+        report.write_status_file(&default_boot_status_path());
+        return report;
+    }
     if let Some((env, epoch)) = native {
         if state.loader().enabled()
             && let Err(reason) = state.loader().probe_worker()

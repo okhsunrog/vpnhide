@@ -524,7 +524,7 @@ mod tests {
         let upgraded = journal::read(&path).unwrap();
         assert_eq!(upgraded.zygisk_authority, journal.zygisk_authority);
         assert!(upgraded.zygisk_revocation.is_none());
-        old["version"] = 12.into();
+        old["version"] = (vpnhide_build_contract::JOURNAL_VERSION + 1).into();
         let bytes = serde_json::to_vec(&old).unwrap();
         fs::write(&path, &bytes).unwrap();
         assert!(journal::read(&path).is_err());

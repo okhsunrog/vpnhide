@@ -403,7 +403,7 @@ mod tests {
             value.as_object_mut().unwrap().remove("kmod_preflights");
             std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
             let migrated = super::super::read(&path).unwrap();
-            assert_eq!(migrated.version, 11);
+            assert_eq!(migrated.version, vpnhide_build_contract::JOURNAL_VERSION);
             assert_eq!(migrated.native_startup, original.native_startup);
             assert_eq!(migrated.native_load_budget, original.native_load_budget);
             assert_eq!(migrated.native_quarantine, original.native_quarantine);

@@ -34,6 +34,16 @@ Zygisk generation. Cache identity includes policy, runtime/platform evidence and
 loaded-generation coverage. Missing required proof remains unverified. The
 current partial implementation has no full-success assessment variant.
 
+Core prepares its managed diagnostic target during production boot, after PM
+readiness and before backend policy is frozen, without waiting for the APK to
+open. Preparation uses the durable writer and source-checked legacy bootstrap;
+it does not delete old sources. An incomplete/malformed source cannot be silently
+replaced by empty config. The APK startup adapter may request the same fixed
+`PrepareSelfTargets` command for recovery; it supplies no replacement config and
+queries the same operation after an uncertain reply. Diagnostic admission remains
+blocked until managed target intent is present. This does not prove the LSPosed
+generation or previously running app processes have consumed it.
+
 ## Implemented scope and remaining implementation
 
 The base required plan has nineteen vectors. Native interface-only TUN stimuli

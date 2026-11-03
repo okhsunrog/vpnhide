@@ -21,7 +21,7 @@ import uniffi.vpnhide_core_ffi.LogcatReply
 import java.io.File
 import uniffi.vpnhide_core_ffi.CoreDiagnosticProbe as CoreProbe
 
-/** A fixed root effect core applies (`core-rpc` `RootEffect`). */
+/** Fixed Core commands requested by Android adapters; no caller-selected paths or shell. */
 internal sealed class CoreRootEffect {
     /** Core's input rule for this effect (core-daemon `effects::apply`), checked before dispatch. */
     open val valid: Boolean get() = true
@@ -51,6 +51,8 @@ internal sealed class CoreRootEffect {
     ) : CoreRootEffect()
 
     data object DeleteLegacyConfig : CoreRootEffect()
+
+    data object PrepareSelfTargets : CoreRootEffect()
 
     data object FullReset : CoreRootEffect()
 }

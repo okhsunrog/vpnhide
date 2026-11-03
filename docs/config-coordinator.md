@@ -57,6 +57,14 @@ maps describe these receipts and never dispatch a second sequence of effects.
 SuperKey changes, import plus legacy cleanup and FullReset are single durable core
 commands. Secret values are not stored in the command journal.
 
+`PrepareSelfTargets` is a fixed Core-derived command shared by production boot
+and APK startup recovery. It preserves existing user choices, requires complete
+legacy observations for first bootstrap, and does not clean up legacy sources.
+The app registers broad draft protection but sends no canonical replacement.
+An uncertain preparation has the same operation-query semantics as other commands.
+Its original base revision fences a concurrent reset/replacement; it is never
+rebased after reading legacy inputs.
+
 A lost submission response is recovered by querying the same operation ID, even
 when publication advanced past its in-flight state before the app observed it.
 No automatic resubmission under a fresh ID is permitted. Unavailable readback does

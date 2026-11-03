@@ -172,6 +172,7 @@ pub enum CommandIntent {
         mode: vpnhide_core_rpc::LegacyImportMode,
     },
     CleanupLegacy,
+    PrepareSelfTargets,
     FullReset,
 }
 
@@ -1213,7 +1214,7 @@ mod tests {
         };
         write_atomic(&path, &journal).unwrap();
         let migrated = read(&path).unwrap();
-        assert_eq!(migrated.version, 11);
+        assert_eq!(migrated.version, vpnhide_build_contract::JOURNAL_VERSION);
         assert!(migrated.native_startup_uncertain());
         assert_eq!(migrated.native_startup, journal.native_startup);
         journal.version = 4;
@@ -1260,7 +1261,7 @@ mod tests {
             );
         }
         journal = original;
-        journal.version = 12;
+        journal.version = vpnhide_build_contract::JOURNAL_VERSION + 1;
         write_atomic(&path, &journal).unwrap();
         assert!(read(&path).is_err(), "never reset unknown schema");
     }
@@ -1502,7 +1503,10 @@ mod tests {
         });
         journal.upsert(entry);
         write_atomic(&path, &journal).unwrap();
-        assert_eq!(read(&path).unwrap().version, 11);
+        assert_eq!(
+            read(&path).unwrap().version,
+            vpnhide_build_contract::JOURNAL_VERSION
+        );
         journal
             .get_mut(OperationId(7))
             .unwrap()

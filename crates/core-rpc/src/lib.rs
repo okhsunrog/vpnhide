@@ -140,6 +140,11 @@ pub enum CoreCommand {
         mode: LegacyImportMode,
     },
     CleanupLegacy,
+    /// Prepare the managed diagnostic target against fresh Core state. Legacy
+    /// sources, when needed for first bootstrap, are read and preserved by Core.
+    PrepareSelfTargets {
+        base: BaseRef,
+    },
     FullReset,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1255,6 +1260,7 @@ mod tests {
                     mode: LegacyImportMode::Bootstrap,
                 },
                 CoreCommand::CleanupLegacy,
+                CoreCommand::PrepareSelfTargets { base },
                 CoreCommand::FullReset,
             ] {
                 assert_eq!(survives("CoreCommand", &command), command);

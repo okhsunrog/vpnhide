@@ -1,6 +1,6 @@
 # Core architecture
 
-Current implementation on `main`, app/core RPC23 and journal11 (reads1–10). The backend
+Current implementation on `main`, app/core RPC24 and journal12 (reads1–11). The backend
 control-v2 / telemetry-v1 wire is a separate boundary. This document describes
 the implemented ownership and execution contract.
 
@@ -106,7 +106,7 @@ claim that no write occurred. The private journal records commands, phase intent
 actual commit revisions, write sets and exact Native dispatch evidence. Secrets
 and secret-derived verifiers never enter it. Bundled startup binds the exact
 manifest digest, source commit, payload and projected wire policy. Journal schema
-11 reads/migrates schemas 1 through 10; blank, malformed or unsupported present
+12 reads/migrates schemas 1 through 11; blank, malformed or unsupported present
 journals refuse mutations.
 
 Same-ID duplicate commands query the retained result; different commands refuse.
@@ -399,7 +399,7 @@ receipts; revoking the file cannot prove old hooks disappeared. Startup refuses 
 kernel backend transition in that boot, including explicit repair, until a reboot.
 
 
-The current paired APK/Core contract is RPC23; journal11 reads schemas1–10. These
+The current paired APK/Core contract is RPC24; journal12 reads schemas1–11. These
 versions are independent of kernel control2/telemetry1 and do not require a
 compatible builtin kernel to be rebuilt. Bundled Zygisk selection uses Authorized;
 publication and sampled current/stale/unattributed process consumption are separate
@@ -501,7 +501,7 @@ Zygisk authorization cannot claim global process coverage.
 The foreign-VPN observer, UID-in-tunnel probe and routing RPC/FFI field are removed.
 Dashboard/diagnostics consume Core evidence independently of external VPN presence
 and split-tunnel membership. Real fixture/hook API observations and manual network
-forensics remain. RPC23 requires a paired new APK/Core; journal11 and the frozen
+forensics remain. Current RPC24 requires a paired new APK/Core; journal12 and the frozen
 kernel control2/telemetry1 are independent, so a compatible builtin kernel does not
 need rebuilding merely because the app protocol changed.
 
@@ -512,3 +512,30 @@ canonical commit. It cannot reinterpret a confirmed edit as reset success. The
 native client checks boot identity and server peer UID before mutation; the host
 persists intent before dispatch and recovers unknown outcomes by receipt only.
 This adds no offline writer and does not change journal11 or kernel control2.
+
+
+## Autonomous managed target preparation (RPC24 / journal12)
+
+Production boot configures the Android worker endpoint, waits for PackageManager
+outside the writer, then performs `PrepareSelfTargets` before freezing backend
+policy. Core derives the managed Java/native/hidden roles using the shared policy
+and persists through the existing operation journal. Boot preparation dispatches
+Persist only; the existing boot Native/Ports passes deliver that config. Preparing
+from an APK opened during deferred startup likewise cannot start another backend
+activation path.
+
+When no user choices exist, fixed legacy observations must be complete before
+bootstrap can merge them. Existing choices and debug intent are preserved. This
+operation never deletes legacy sources; their explicit maintenance path remains.
+A configured host/dev socket without the Android worker endpoint does not create
+Android user config. Diagnostic admission refuses an unprepared managed target.
+
+The APK retains the shared startup snapshot/readiness and main-process restart
+presentation, but no longer derives or writes a startup replacement. If preparation
+is still required, it submits the fixed typed command through its coordinator;
+unknown outcomes use the same durable operation ID. Retained commands never replay
+preparation after a later reset. The original base revision survives source capture
+and queuing; a concurrent FullReset or overlapping replacement fences admission,
+while unrelated fresh field edits retain normal merge semantics. Persist holds and source corruption cannot become
+an empty successful bootstrap. Private journal12 reads1–11; older writers must
+refuse the newer schema without removing it. Kernel control2/telemetry1 is unchanged.

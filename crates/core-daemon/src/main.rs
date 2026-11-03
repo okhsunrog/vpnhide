@@ -326,9 +326,8 @@ async fn run(path: &str) {
         state.native_boot_status().map(|s| s.outcome),
     );
 
-    // The root observation loop feeds real VPN-presence into the published state. Failing to
-    // open netlink is non-fatal: withdraw current evidence and retry the source while
-    // keeping the socket available for commands and explicit diagnostics.
+    // Observe backend identity and loader evidence independently of foreign VPN
+    // presence. Serving and retained diagnostics remain available during refresh.
     let observer_task = tokio::spawn(vpnhide_core_daemon::observer::supervise(state.clone()));
 
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())

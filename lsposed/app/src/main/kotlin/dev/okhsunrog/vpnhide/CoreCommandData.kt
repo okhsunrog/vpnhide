@@ -32,6 +32,11 @@ internal fun coreCommand(
             CoreCommand.MigrateLegacy(revision, effect.mode)
         }
 
+        CoreRootEffect.PrepareSelfTargets -> {
+            require(mutation.edits.isEmpty())
+            CoreCommand.PrepareSelfTargets(revision)
+        }
+
         CoreRootEffect.DeleteLegacyConfig -> {
             if (intent.edits.isEmpty()) CoreCommand.CleanupLegacy else CoreCommand.Import(revision, intent.candidate.toCore(), true)
         }

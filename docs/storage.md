@@ -132,9 +132,9 @@ The role/hidden-set transformation is shared Rust
 `core-rpc::config_selection`, called locally through generated UniFFI by the
 Android inventory adapter. A partial profile scan preserves unseen automatic
 members instead of treating absent observations as uninstall evidence. Kotlin
-does not maintain a second role reconstruction or auto-hidden policy. The app
-still schedules reconciliation from Android observations; moving autonomous
-boot preparation into Core remains separate unfinished work.
+does not maintain a second role reconstruction or auto-hidden policy. Production
+boot also prepares the managed diagnostic target in Core before backend policy
+is frozen. Android observation/reconciliation scheduling remains an app adapter.
 
 `debugSwitch` is the user intent stored by the app toggle; `debug` is the
 effective in-runtime value. On a capture path, `debug` may temporarily become

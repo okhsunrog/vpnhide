@@ -28,6 +28,7 @@ use crate::journal::{self, Journal, JournalEntry};
 use crate::operation::{self, PhaseHook, PlanKind, RealPhaseRunner};
 use crate::publisher::Publisher;
 mod revocation;
+mod self_target;
 
 #[cfg(test)]
 #[path = "command_tests.rs"]
@@ -300,15 +301,33 @@ impl CoreState {
         deadline: std::time::Instant,
         cancelled: &CancellationToken,
     ) -> Result<Option<crate::maintenance::PreparedMaintenance>, SubmitError> {
-        if matches!(command, CoreCommand::MigrateLegacy { .. })
-            && self
-                .engine
-                .store
-                .lock()
-                .expect("config mutex")
-                .journal
-                .get(op)
-                .is_some()
+        if matches!(
+            command,
+            CoreCommand::MigrateLegacy { .. } | CoreCommand::PrepareSelfTargets { .. }
+        ) && self
+            .engine
+            .store
+            .lock()
+            .expect("config mutex")
+            .journal
+            .get(op)
+            .is_some()
+        {
+            return Ok(None);
+        }
+        if let CoreCommand::PrepareSelfTargets { base } = command
+            && base.revision > self.config_revision()
+        {
+            // A future client base cannot become valid merely because a reset
+            // finishes while source capture is outside the writer.
+            return Err(SubmitError::Conflict {
+                field: "future self-target base".into(),
+            });
+        }
+        if matches!(command, CoreCommand::PrepareSelfTargets { .. })
+            && self.snapshot().config.as_ref().is_some_and(|c| {
+                vpnhide_migration_policy::has_user_apps(c, vpnhide_migration_policy::APP_PACKAGE)
+            })
         {
             return Ok(None);
         }
@@ -317,7 +336,8 @@ impl CoreState {
                 cleanup_legacy: true,
                 ..
             }
-            | CoreCommand::MigrateLegacy { .. } => false,
+            | CoreCommand::MigrateLegacy { .. }
+            | CoreCommand::PrepareSelfTargets { .. } => false,
             CoreCommand::CleanupLegacy => true,
             _ => return Ok(None),
         };
@@ -418,6 +438,9 @@ impl CoreState {
             enabled,
         };
         let (base, edit, mut spec) = match command {
+            CoreCommand::PrepareSelfTargets { base } => {
+                return self.execute_self_targets(op, base, maintenance, false, admitted);
+            }
             CoreCommand::Edit { base, edit } => (base, edit, CommandSpec::default()),
             CoreCommand::SetSuperkey {
                 base,

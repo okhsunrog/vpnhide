@@ -5,11 +5,6 @@ import dev.okhsunrog.vpnhide.core.CoreProbeResult
 import dev.okhsunrog.vpnhide.core.CoreRoot
 import dev.okhsunrog.vpnhide.core.CoreRootEffect
 import dev.okhsunrog.vpnhide.generated.IfaceLists
-import dev.okhsunrog.vpnhide.migration.LegacyConfigCandidate
-import dev.okhsunrog.vpnhide.migration.LegacyImportMode
-import dev.okhsunrog.vpnhide.migration.applyLegacyImport
-import dev.okhsunrog.vpnhide.migration.hasUserConfiguredApps
-import dev.okhsunrog.vpnhide.migration.parseLegacyConfigCandidate
 import dev.okhsunrog.vpnhide.picker.parsePackageUidLine
 import dev.okhsunrog.vpnhide.picker.parseTargetsSnapshot
 import java.io.File
@@ -183,9 +178,9 @@ internal fun cleanupStaleZygiskStatus(
 }
 
 /**
- * Ensure the VPN Hide app itself is in the canonical target config.
- * Returns true if self had to be added to any list (= hooks may not be
- * applied to the current process, restart needed for zygisk).
+ * Observe Core's managed target preparation, requesting its fixed command when
+ * still needed. Core owns boot bootstrap, legacy inputs and durable outcomes.
+ * A changed managed role conservatively retains the current-process restart hint.
  * Called once at app startup; result is shared with all screens.
  */
 internal suspend fun ensureSelfInTargets(selfPkg: String): SelfTargetPreparation {
@@ -194,31 +189,35 @@ internal suspend fun ensureSelfInTargets(selfPkg: String): SelfTargetPreparation
         val failure = loadFailure ?: (SelfTargetFailureKind.Unknown to "snapshot load failed")
         return selfTargetPreparationFailure(failure.first, failure.second)
     }
-    val update = buildCanonicalSelfUpdate(sections, selfPkg)
-    if (update.writeRequired &&
-        CanonicalConfigRepository.state.value.mode in setOf(ConfigCoordinatorMode.Open, ConfigCoordinatorMode.Missing)
-    ) {
-        writeStartupCanonical(selfPkg, update.legacyImported)?.let {
-            return selfTargetPreparationFailure(SelfTargetFailureKind.ConfigWriteFailed, it)
+    val targets = parseTargetsSnapshot(joinRootSnapshot(sections, CoreSessions.updates.value))
+    val before = targets.canonicalConfig
+    val needsPreparation = before == null || canonicalConfigWithSelfTarget(before, selfPkg) != before
+    if (needsPreparation) {
+        val result =
+            CanonicalConfigRepository.commit(
+                CanonicalMutation(
+                    emptyList(),
+                    bootstrap = true,
+                    source = OperationSource.System,
+                    coupledEffects = listOf(CoreRootEffect.PrepareSelfTargets),
+                    protectAllDrafts = true,
+                ),
+            )
+        if (!result.succeeded) {
+            return selfTargetPreparationFailure(
+                SelfTargetFailureKind.ConfigWriteFailed,
+                "Core self-target preparation: ${result.output.trim()}",
+            )
         }
     }
     val currentBootId = sections["current_boot_id"]?.trim()?.takeIf { it.isNotBlank() }
-    VpnHideLog.d(TAG, "ensureSelfInTargets: done, selfNeedsRestart=${update.selfNeedsRestart}")
+    VpnHideLog.d(TAG, "ensureSelfInTargets: done, selfNeedsRestart=$needsPreparation")
     return SelfTargetPreparation(
         rootAvailable = true,
-        selfNeedsRestart = update.selfNeedsRestart,
+        selfNeedsRestart = needsPreparation,
         currentBootId = currentBootId,
     )
 }
-
-private data class CanonicalSelfUpdate(
-    val canonical: CanonicalConfig,
-    val selfNeedsRestart: Boolean,
-    val writeRequired: Boolean,
-    /** Non-null when [canonical] already carries a silently imported pre-1.0
-     *  config, so the same write must retire the legacy files. */
-    val legacyImported: LegacyConfigCandidate? = null,
-)
 
 /**
  * Why the startup root snapshot did not come back, or null when it did. Core not
@@ -270,73 +269,6 @@ internal suspend fun loadStartupRootSections(
         val rootFailure = (e as? ObservationReadException)?.cause as? RootSnapshotException ?: e as? RootSnapshotException
         null to ((rootFailure?.kind ?: SelfTargetFailureKind.Unknown) to (e.message ?: "snapshot read failed"))
     }
-
-private fun buildCanonicalSelfUpdate(
-    sections: Map<String, String>,
-    selfPkg: String,
-): CanonicalSelfUpdate {
-    val targets = parseTargetsSnapshot(joinRootSnapshot(sections, CoreSessions.updates.value))
-    val baseCanonical = targets.canonicalConfig ?: CanonicalConfig()
-    // Nothing configured yet + a pre-1.0 config still on disk: fold it in without
-    // asking, the way 1.0.0 did. There is no user choice to conflict with, and
-    // the alternative — a device that upgraded from 0.7.x showing an empty list —
-    // reads as "the update wiped my settings". A config that DOES carry roles is
-    // left alone here; the Dashboard offers merge/replace/skip instead.
-    val legacy =
-        parseLegacyConfigCandidate(sections, targets.packageUids, targets.nativeInventoryComplete)
-            ?.takeIf { !hasUserConfiguredApps(baseCanonical, selfPkg) }
-    val imported =
-        legacy?.let { applyLegacyImport(baseCanonical, it, LegacyImportMode.Merge, selfPkg) }
-            ?: baseCanonical
-    if (legacy != null) {
-        VpnHideLog.i(
-            TAG,
-            "ensureSelfInTargets: importing pre-1.0 config (${legacy.roles.size} packages, " +
-                "${legacy.unresolvedObserverUids} unresolved observer uids)",
-        )
-    }
-    val previousSelf = baseCanonical.apps[selfPkg]
-    val selfNeedsRestart =
-        previousSelf == null ||
-            !previousSelf.java ||
-            previousSelf.javaHooks != null ||
-            previousSelf.native != NativeRole.All
-    val updatedCanonical = canonicalConfigWithSelfTarget(imported, selfPkg)
-    return CanonicalSelfUpdate(
-        canonical = updatedCanonical,
-        selfNeedsRestart = selfNeedsRestart,
-        writeRequired = targets.canonicalConfig == null || updatedCanonical != baseCanonical || legacy != null,
-        legacyImported = legacy,
-    )
-}
-
-private suspend fun writeStartupCanonical(
-    selfPkg: String,
-    legacyImported: LegacyConfigCandidate?,
-): String? {
-    val result =
-        CanonicalConfigRepository.commit(
-            CanonicalMutation(
-                emptyList(),
-                bootstrap = true,
-                source = OperationSource.System,
-                transform = { fresh -> canonicalConfigWithSelfTarget(fresh, selfPkg) },
-                cleanup = true,
-                coupledEffects =
-                    if (legacyImported != null) {
-                        listOf(CoreRootEffect.MigrateLegacy(uniffi.vpnhide_core_ffi.CoreLegacyImportMode.BOOTSTRAP))
-                    } else {
-                        emptyList()
-                    },
-            ),
-        )
-    if (result.succeeded) return null
-    VpnHideLog.w(
-        TAG,
-        "ensureSelfInTargets: canonical write failed (exit=${result.exitCode}): ${result.output.trim()}",
-    )
-    return "canonical write exit=${result.exitCode}"
-}
 
 private fun selfTargetPreparationFailure(
     kind: SelfTargetFailureKind,
